@@ -10,14 +10,34 @@ import type { SpecialRequest, VehicleType } from '@veo/shared-types';
 
 export const OFFER_BOARD_STORE = Symbol('OFFER_BOARD_STORE');
 
-/** Estados del board (ADR 010 §3.2). OPEN es el único en el que se aceptan/colectan ofertas. */
-export type BoardStatus = 'OPEN' | 'CLOSED_MATCHED' | 'EXPIRED' | 'CANCELLED';
+/**
+ * Estados del board (ADR 010 §3.2). OPEN es el único en el que se aceptan/colectan ofertas.
+ * `as const` (no enum, no literal suelto): un único origen del valor + el tipo derivado homónimo.
+ */
+export const BoardStatus = {
+  OPEN: 'OPEN',
+  CLOSED_MATCHED: 'CLOSED_MATCHED',
+  EXPIRED: 'EXPIRED',
+  CANCELLED: 'CANCELLED',
+} as const;
+export type BoardStatus = (typeof BoardStatus)[keyof typeof BoardStatus];
 
 /** Estados de una oferta de conductor (ADR 010 §3.3). */
-export type OfferStatus = 'PENDING' | 'ACCEPTED' | 'LAPSED' | 'WITHDRAWN' | 'STALE';
+export const OfferStatus = {
+  PENDING: 'PENDING',
+  ACCEPTED: 'ACCEPTED',
+  LAPSED: 'LAPSED',
+  WITHDRAWN: 'WITHDRAWN',
+  STALE: 'STALE',
+} as const;
+export type OfferStatus = (typeof OfferStatus)[keyof typeof OfferStatus];
 
 /** Tipo de respuesta del conductor: acepta el precio del bid, o contraoferta uno mayor. */
-export type OfferKind = 'ACCEPT_PRICE' | 'COUNTER';
+export const OfferKind = {
+  ACCEPT_PRICE: 'ACCEPT_PRICE',
+  COUNTER: 'COUNTER',
+} as const;
+export type OfferKind = (typeof OfferKind)[keyof typeof OfferKind];
 
 /**
  * Resultado del intento ATÓMICO de reclamar el board para una aceptación (compare-and-set).
@@ -109,11 +129,12 @@ export interface Offer {
 }
 
 /**
- * Estado del board tal como lo VE el pasajero en `GET /bids/:tripId/offers`. Suma `'GONE'` a los estados
+ * Estado del board tal como lo VE el pasajero en `GET /bids/:tripId/offers`. Suma `GONE` a los estados
  * del board: la key ya NO existe en Redis (expiró por TTL) — el pasajero distingue "puja evaporada" de
  * "puja viva sin ofertas". Los demás valores son los `BoardStatus` reales.
  */
-export type ClientBoardStatus = BoardStatus | 'GONE';
+export const ClientBoardStatus = { ...BoardStatus, GONE: 'GONE' } as const;
+export type ClientBoardStatus = (typeof ClientBoardStatus)[keyof typeof ClientBoardStatus];
 
 /**
  * FIX contrato — respuesta de `GET /bids/:tripId/offers`: el ESTADO del board + las ofertas. El cliente

@@ -45,8 +45,8 @@
  */
 import type Redis from 'ioredis';
 import { VehicleType } from '@veo/shared-types';
+import { BoardStatus } from './offer-board.port';
 import type {
-  BoardStatus,
   ClaimResult,
   ExpireResult,
   Offer,
@@ -253,7 +253,7 @@ export class RedisOfferBoardStore implements OfferBoardStore {
   async saveBoard(board: OfferBoard, ttlSeconds: number): Promise<void> {
     const pipeline = this.redis.multi();
     pipeline.set(this.boardKey(board.tripId), JSON.stringify(board), 'EX', ttlSeconds);
-    if (board.status === 'OPEN') {
+    if (board.status === BoardStatus.OPEN) {
       // H8 — el board entra al ZSET scoreado por su vencimiento → el barrido lo lee por rango DUE.
       pipeline.zadd(EXPIRY_ZSET, board.expiresAt, board.tripId);
       // A3/H11 — y al índice inverso celda→board (ZSET scoreado por expiresAt, espejo de board:expiry),
@@ -289,7 +289,7 @@ export class RedisOfferBoardStore implements OfferBoardStore {
     // H8 — re-indexa por vencimiento (ZADD score=expiresAt) si vuelve a OPEN; ZREM si se cerró.
     // A3/H11 — y el índice de celda (ZSET score=expiresAt): ZADD si OPEN, ZREM si se cerró (p.ej.
     // cancelBoard → CANCELLED).
-    if (status === 'OPEN') {
+    if (status === BoardStatus.OPEN) {
       pipeline.zadd(EXPIRY_ZSET, board.expiresAt, tripId);
       pipeline.zadd(this.cellKey(board.originCell), board.expiresAt, tripId);
     } else {
@@ -349,7 +349,7 @@ export class RedisOfferBoardStore implements OfferBoardStore {
     for (const raw of raws) {
       if (!raw) continue;
       const board = RedisOfferBoardStore.parseBoard(raw);
-      if (board.status === 'OPEN') boards.push(board);
+      if (board.status === BoardStatus.OPEN) boards.push(board);
     }
     return boards;
   }
@@ -408,7 +408,8 @@ export class RedisOfferBoardStore implements OfferBoardStore {
       CELL_PREFIX,
     )) as string;
     if (res === '') return { claimed: false, status: null };
-    if (res === 'CLAIMED') return { claimed: true, status: 'CLOSED_MATCHED' };
+    // 'CLAIMED' es el sentinel que DEVUELVE el Lua (no un BoardStatus): se compara crudo a propósito.
+    if (res === 'CLAIMED') return { claimed: true, status: BoardStatus.CLOSED_MATCHED };
     return { claimed: false, status: res as BoardStatus };
   }
 
@@ -444,7 +445,7 @@ export class RedisOfferBoardStore implements OfferBoardStore {
       }
       const board = RedisOfferBoardStore.parseBoard(raw);
       // Solo los CLOSED_MATCHED sin la marca necesitan reconciliación (un revert ya los sacó del zset).
-      if (board.status === 'CLOSED_MATCHED' && board.matchEmitted !== true) boards.push(board);
+      if (board.status === BoardStatus.CLOSED_MATCHED && board.matchEmitted !== true) boards.push(board);
     }
     return boards;
   }

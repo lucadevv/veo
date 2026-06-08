@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsPositive, IsString, Max } from 'class-validator';
 import { BID_MAX_CENTS } from '@veo/utils';
+import { OfferKind, OfferStatus, ClientBoardStatus } from '../offer-board.port';
 
 /**
  * Cuerpo del submit de una oferta del conductor sobre una puja OPEN.
@@ -11,9 +12,9 @@ import { BID_MAX_CENTS } from '@veo/utils';
  * boundary). El controller IGNORA cualquier driverId que llegue en el body.
  */
 export class SubmitOfferDto {
-  @ApiProperty({ enum: ['ACCEPT_PRICE', 'COUNTER'] })
-  @IsEnum(['ACCEPT_PRICE', 'COUNTER'] as const)
-  kind!: 'ACCEPT_PRICE' | 'COUNTER';
+  @ApiProperty({ enum: OfferKind })
+  @IsEnum(OfferKind)
+  kind!: OfferKind;
 
   @ApiProperty({ example: 700, description: 'ACCEPT_PRICE == bid; COUNTER > bid (céntimos PEN).' })
   @IsInt()
@@ -39,20 +40,20 @@ export class OfferDto {
   tripId!: string;
   @ApiProperty()
   driverId!: string;
-  @ApiProperty({ enum: ['ACCEPT_PRICE', 'COUNTER'] })
-  kind!: string;
+  @ApiProperty({ enum: OfferKind })
+  kind!: OfferKind;
   @ApiProperty()
   priceCents!: number;
   @ApiProperty()
   etaSeconds!: number;
-  @ApiProperty({ enum: ['PENDING', 'ACCEPTED', 'LAPSED', 'WITHDRAWN', 'STALE'] })
-  status!: string;
+  @ApiProperty({ enum: OfferStatus })
+  status!: OfferStatus;
 }
 
 /** Estado del board del lado del pasajero (suma 'GONE' = la key ya no existe en Redis, expiró por TTL). */
 export class OffersBoardDto {
-  @ApiProperty({ enum: ['OPEN', 'CANCELLED', 'EXPIRED', 'CLOSED_MATCHED', 'GONE'] })
-  status!: 'OPEN' | 'CANCELLED' | 'EXPIRED' | 'CLOSED_MATCHED' | 'GONE';
+  @ApiProperty({ enum: ClientBoardStatus })
+  status!: ClientBoardStatus;
 
   @ApiProperty({
     nullable: true,

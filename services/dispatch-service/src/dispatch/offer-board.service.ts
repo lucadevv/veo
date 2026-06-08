@@ -40,10 +40,13 @@ import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
 import {
   OFFER_BOARD_STORE,
+  BoardStatus,
+  OfferStatus,
+  OfferKind,
+  ClientBoardStatus,
   type Offer,
   type OfferBoard,
   type OfferBoardStore,
-  type OfferKind,
   type OffersView,
 } from './offer-board.port';
 import { EligibilityGate } from './eligibility.gate';
@@ -123,7 +126,7 @@ export class OfferBoardService {
       // A3 — celda H3 del origen calculada UNA vez acá: alimenta el índice inverso `board:cell:<cell>`
       // que `listOpenBidsNear` consulta por k-ring (en vez de cargar TODOS los boards y filtrar en Node).
       originCell: toH3(bid.origin, DISPATCH_H3_RESOLUTION),
-      status: 'OPEN',
+      status: BoardStatus.OPEN,
       expiresAt,
       // H13 — sella el ciclo de negociación en el board; se estampa en offer_accepted al aceptar.
       negotiationSeq: bid.negotiationSeq,
@@ -164,7 +167,7 @@ export class OfferBoardService {
       // A3 — re-deriva la celda del origen resuelto (reusa la del board previo si existía, o la del evento).
       originCell: existing?.originCell ?? toH3(origin, DISPATCH_H3_RESOLUTION),
       bidCents: reassign.bidCents,
-      status: 'OPEN',
+      status: BoardStatus.OPEN,
       // Ventana fresca de 60s (default ratificado §9) al MISMO bid (la subida va por rebid → bid_posted).
       expiresAt: Date.now() + 60_000,
       // H13 — el seq SIEMPRE viene del EVENTO (el nuevo ciclo de la reasignación), NUNCA del board previo:
@@ -245,20 +248,20 @@ export class OfferBoardService {
   async submitOffer(input: SubmitOfferInput): Promise<Offer> {
     const board = await this.store.getBoard(input.tripId);
     if (!board) throw new NotFoundError('Puja no encontrada', { tripId: input.tripId });
-    if (board.status !== 'OPEN') {
+    if (board.status !== BoardStatus.OPEN) {
       throw new ConflictError('La puja ya no está abierta', { status: board.status });
     }
 
     // Capa 3 (service): re-valida elegibilidad contra identity + vehículo. NO basta presencia GPS.
     await this.eligibility.assertEligibleToOffer(input.driverId, board.vehicleType);
 
-    if (input.kind === 'ACCEPT_PRICE' && input.priceCents !== board.bidCents) {
+    if (input.kind === OfferKind.ACCEPT_PRICE && input.priceCents !== board.bidCents) {
       throw new ValidationError('ACCEPT_PRICE debe igualar el bid', {
         bidCents: board.bidCents,
         priceCents: input.priceCents,
       });
     }
-    if (input.kind === 'COUNTER' && input.priceCents <= board.bidCents) {
+    if (input.kind === OfferKind.COUNTER && input.priceCents <= board.bidCents) {
       throw new ValidationError('COUNTER debe ser mayor al bid', {
         bidCents: board.bidCents,
         priceCents: input.priceCents,
@@ -266,7 +269,7 @@ export class OfferBoardService {
     }
     // Techo de la contraoferta (gate de dominio): un COUNTER pasa a ser el fareCents del viaje si el
     // pasajero lo acepta, así que tampoco puede superar el techo (anti-abuso/anti-overflow int4).
-    if (input.kind === 'COUNTER' && input.priceCents > this.bidMaxCents) {
+    if (input.kind === OfferKind.COUNTER && input.priceCents > this.bidMaxCents) {
       throw new ValidationError('COUNTER supera el techo permitido', {
         priceCents: input.priceCents,
         maxCents: this.bidMaxCents,
@@ -289,7 +292,7 @@ export class OfferBoardService {
       kind: input.kind,
       priceCents: input.priceCents,
       etaSeconds,
-      status: 'PENDING',
+      status: OfferStatus.PENDING,
       updatedAt: Date.now(),
     };
     const ttl = Math.max(1, Math.ceil((board.expiresAt - Date.now()) / 1000)) +
@@ -336,7 +339,7 @@ export class OfferBoardService {
     // Doble-tap idempotente del MISMO conductor ya ACEPTADO: cortocircuita ANTES de re-validar.
     // Un conductor que ya quedó asignado a ESTE viaje no necesita seguir AVAILABLE para que el
     // segundo tap del pasajero sea un no-op (si no, una identity flap convertiría el doble-tap en error).
-    if (board.status === 'CLOSED_MATCHED' && chosen.status === 'ACCEPTED') {
+    if (board.status === BoardStatus.CLOSED_MATCHED && chosen.status === OfferStatus.ACCEPTED) {
       return chosen;
     }
 
@@ -345,7 +348,7 @@ export class OfferBoardService {
     // puede aceptar — su precio ya no es vinculante. Rechazamos con 409 distinguible para que la UI
     // refresque la lista y el pasajero elija OTRA. Va DESPUÉS del corto-circuito idempotente (un doble-tap
     // del ya-ACCEPTED no llega acá) y ANTES de la re-validación/claim atómico (no tocamos H1/H3).
-    if (chosen.status !== 'PENDING') {
+    if (chosen.status !== OfferStatus.PENDING) {
       this.logger.log(
         `accept rechazado trip=${tripId} driver=${driverId}: oferta ${chosen.status} (no PENDING)`,
       );
@@ -366,7 +369,7 @@ export class OfferBoardService {
     // (`offer_price_stale`) para que la UI refresque y el pasajero elija otra. Va tras el guard PENDING y
     // ANTES del claim atómico (no toca H1/H3).
     const priceValid =
-      chosen.kind === 'ACCEPT_PRICE'
+      chosen.kind === OfferKind.ACCEPT_PRICE
         ? chosen.priceCents === board.bidCents
         : board.bidCents < chosen.priceCents && chosen.priceCents <= this.bidMaxCents;
     if (!priceValid) {
@@ -394,7 +397,7 @@ export class OfferBoardService {
       // suspendido NO puede colarse por un snapshot stale de hasta `ELIGIBILITY_CACHE_TTL_MS` al match.
       await this.eligibility.assertEligibleToOffer(driverId, board.vehicleType, true);
     } catch {
-      await this.store.setOfferStatus(tripId, driverId, 'STALE');
+      await this.store.setOfferStatus(tripId, driverId, OfferStatus.STALE);
       // BE-3 — la oferta dejó de ser válida con el board OPEN: avisamos al pasajero para que la QUITE al
       // instante (el board sigue abierto para elegir otra). Idempotente por (trip,driver); best-effort: un
       // fallo del emit no debe tapar el ConflictError que el pasajero necesita ver.
@@ -525,7 +528,7 @@ export class OfferBoardService {
     domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'published' });
     domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     this.logger.log(`board trip=${tripId} CLOSED_MATCHED → driver=${driverId}`);
-    return { ...chosen, status: 'ACCEPTED' };
+    return { ...chosen, status: OfferStatus.ACCEPTED };
   }
 
   /**
@@ -537,7 +540,7 @@ export class OfferBoardService {
    */
   async listOffers(tripId: string): Promise<Offer[]> {
     const offers = await this.store.listOffers(tripId);
-    return offers.filter((o) => o.status === 'PENDING');
+    return offers.filter((o) => o.status === OfferStatus.PENDING);
   }
 
   /**
@@ -555,12 +558,12 @@ export class OfferBoardService {
     const board = await this.store.getBoard(tripId);
     if (!board) {
       // La key del board ya no existe en Redis (TTL): la puja se evaporó. GONE + sin ofertas.
-      return { board: { status: 'GONE', expiresAt: null }, offers: [] };
+      return { board: { status: ClientBoardStatus.GONE, expiresAt: null }, offers: [] };
     }
     // Solo un board OPEN expone ofertas elegibles; cualquier otro estado → [] (no zombies).
     const offers =
-      board.status === 'OPEN'
-        ? (await this.store.listOffers(tripId)).filter((o) => o.status === 'PENDING')
+      board.status === BoardStatus.OPEN
+        ? (await this.store.listOffers(tripId)).filter((o) => o.status === OfferStatus.PENDING)
         : [];
     return { board: { status: board.status, expiresAt: board.expiresAt }, offers };
   }
@@ -589,7 +592,7 @@ export class OfferBoardService {
     const now = Date.now();
     const candidates = await this.store.boardsInCells(cells);
     return candidates.filter(
-      (b) => b.status === 'OPEN' && b.expiresAt > now && b.vehicleType === loc.vehicleType,
+      (b) => b.status === BoardStatus.OPEN && b.expiresAt > now && b.vehicleType === loc.vehicleType,
     );
   }
 
