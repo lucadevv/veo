@@ -2,6 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -20,7 +21,7 @@ export const envSchema = z.object({
   KAFKA_CONSUMER_GROUP: z.string().default('share-service'),
 
   // Secreto para firmar los enlaces de seguimiento (HMAC). KMS/Secrets Manager en prod.
-  SHARE_LINK_SECRET: z.string().default('dev-share-link-secret-change-me'),
+  SHARE_LINK_SECRET: secret('dev-share-link-secret-change-me'),
   // TTL del enlace de seguimiento (por defecto 2h tras crearlo, configurable).
   SHARE_LINK_TTL_SECONDS: z.coerce.number().default(7_200),
   // Usos máximos por defecto de un enlace (la página familia se refresca varias veces).
@@ -41,7 +42,7 @@ export const envSchema = z.object({
   VEO_SMS_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
 
   // Secreto de identidad interna que el BFF propaga a los servicios
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 

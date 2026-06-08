@@ -3,6 +3,7 @@
  * notification-service: motor propio de notificaciones (cola, dedup, retry) + canales tras puertos.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
 
 export const envSchema = z.object({
@@ -21,7 +22,7 @@ export const envSchema = z.object({
   KAFKA_BROKERS: z.string().default('localhost:9094'),
 
   // Secreto para verificar la identidad interna que el BFF propaga (InternalIdentityGuard)
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Locale por defecto del dominio (Lima/Perú)
   DEFAULT_LOCALE: z.string().default('es-PE'),
@@ -79,7 +80,7 @@ export const envSchema = z.object({
   SMTP_FROM: z.string().default('VEO <no-reply@veo.pe>'),
 
   // ---- WEBHOOK: HTTP firmado (HMAC-SHA256) ----
-  WEBHOOK_SIGNING_SECRET: z.string().default('dev-webhook-secret-change-me'),
+  WEBHOOK_SIGNING_SECRET: secret('dev-webhook-secret-change-me'),
   WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
   /// Destino de alertas hacia la central de monitoreo (pánico / pagos críticos).
   CENTRAL_ALERT_WEBHOOK_URL: z.string().optional(),

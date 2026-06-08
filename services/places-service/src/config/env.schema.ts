@@ -2,6 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -22,7 +23,7 @@ export const envSchema = z.object({
   MAX_PLACE_LABEL_LENGTH: z.coerce.number().int().min(1).default(40),
 
   // Secreto de identidad interna que el BFF propaga a los servicios (HMAC)
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 

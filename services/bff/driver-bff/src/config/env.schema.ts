@@ -3,6 +3,7 @@
  * el proceso no arranca. Sin valores hardcodeados: defaults solo para desarrollo local.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -20,7 +21,7 @@ export const envSchema = z.object({
 
   // Secreto HMAC para firmar la identidad interna que se propaga aguas abajo.
   // Debe coincidir con el de los microservicios (InternalIdentityGuard).
-  VEO_INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  VEO_INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Redis (rate limiting por IP+usuario+ruta).
   REDIS_URL: z.string().default('redis://localhost:6379'),

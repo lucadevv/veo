@@ -2,6 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -28,13 +29,13 @@ export const envSchema = z.object({
   REFRESH_TTL_SECONDS: z.coerce.number().default(2_592_000), // 30d
 
   // Secreto para firmar la identidad interna que el BFF propaga a servicios
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Salt para hash de DNI (PII; nunca el DNI en claro)
-  DNI_HASH_SALT: z.string().default('dev-dni-salt-change-me'),
+  DNI_HASH_SALT: secret('dev-dni-salt-change-me'),
 
   // Clave para cifrar el secreto TOTP de operadores en reposo (KMS en prod)
-  TOTP_ENC_KEY: z.string().default('dev-totp-enc-key-change-me'),
+  TOTP_ENC_KEY: secret('dev-totp-enc-key-change-me'),
 
   // Días de gracia antes del tombstone por derecho al olvido (BR-S06)
   DELETION_GRACE_DAYS: z.coerce.number().default(30),

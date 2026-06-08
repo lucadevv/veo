@@ -2,6 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -22,7 +23,7 @@ export const envSchema = z.object({
     .transform((v) => v === 'true'),
 
   // Secreto para verificar la identidad interna firmada que propaga el BFF (POST /audit síncrono).
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // gRPC (registro/verificación síncrona desde otros servicios).
   GRPC_URL: z.string().default('0.0.0.0:50059'),

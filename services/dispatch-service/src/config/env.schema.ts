@@ -2,7 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { BID_MAX_CENTS } from '@veo/utils';
+import { BID_MAX_CENTS, secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -20,7 +20,7 @@ export const envSchema = z.object({
   KAFKA_BROKERS: z.string().default('localhost:9094'),
 
   // Secreto para verificar la identidad interna firmada que el BFF propaga a servicios.
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // gRPC (lectura síncrona desde otros servicios: trip-service consulta el match).
   GRPC_URL: z.string().default('0.0.0.0:50053'),

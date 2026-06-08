@@ -4,6 +4,7 @@
  * firmada (HMAC) aguas abajo y habla con los microservicios vía gRPC (lecturas) y REST interno (comandos).
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -18,13 +19,13 @@ export const envSchema = z.object({
   VEO_JWT_AUDIENCE: z.string().default('veo-app'),
 
   // Secreto HMAC para firmar la identidad interna que el BFF propaga a los servicios.
-  VEO_INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  VEO_INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Secreto HMAC COMPARTIDO de la firma del request de pánico (BR-S04). El cliente lo obtiene vía
   // POST /auth/panic-key (JWT) y firma el cuerpo del POST /panic; panic-service lo verifica con el
   // MISMO secreto. Modelo actual: secreto compartido del servicio (no per-user). El default DEBE
   // coincidir con el de panic-service para que dev funcione end-to-end.
-  PANIC_HMAC_SECRET: z.string().default('dev-panic-hmac-secret-change-me'),
+  PANIC_HMAC_SECRET: secret('dev-panic-hmac-secret-change-me'),
 
   // ── Infraestructura ──
   REDIS_URL: z.string().default('redis://localhost:6379'),

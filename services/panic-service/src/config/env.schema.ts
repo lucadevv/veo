@@ -2,6 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
+import { secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -19,11 +20,11 @@ export const envSchema = z.object({
   KAFKA_BROKERS: z.string().default('localhost:9094'),
 
   // Secreto de identidad interna que el BFF propaga a los servicios (HMAC del header).
-  INTERNAL_IDENTITY_SECRET: z.string().default('dev-internal-secret-change-me'),
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Secreto HMAC de la firma del request de pánico (BR-S04). En prod viene de Secrets Manager.
   // El cliente firma el cuerpo del POST /panic; el servicio rechaza firmas inválidas.
-  PANIC_HMAC_SECRET: z.string().default('dev-panic-hmac-secret-change-me'),
+  PANIC_HMAC_SECRET: secret('dev-panic-hmac-secret-change-me'),
 
   // ── Evidencia S3 (Object Lock / WORM). Self-hosted: MinIO en dev. ──
   // 'live' usa el cliente S3 real contra el endpoint; 'sandbox' no toca red (tests/CI offline).
