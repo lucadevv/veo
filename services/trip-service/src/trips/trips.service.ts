@@ -45,6 +45,7 @@ import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitTripRequested, emitBidPosted } from './trip-events';
+import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import type { Env } from '../config/env.schema';
 import type {
@@ -160,12 +161,16 @@ export class TripsService {
    */
   private readonly redis: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'> | null;
 
+  /** Registry de estrategias por modo de despacho (open/closed). Self-default sin DI para tests legacy. */
+  private readonly dispatchModes: DispatchModeRegistry;
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
     @Optional() modeResolver?: PricingScheduleService,
     @Optional() @Inject(REDIS) redis?: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'>,
+    @Optional() dispatchModes?: DispatchModeRegistry,
   ) {
     this.bidFloorCents = config?.get('BID_FLOOR_CENTS') ?? DEFAULT_BID_FLOOR_CENTS;
     this.bidMaxCents = config?.get('BID_MAX_CENTS') ?? DEFAULT_BID_MAX_CENTS;
@@ -173,6 +178,7 @@ export class TripsService {
     this.maxReassign = config?.get('TRIP_MAX_REASSIGN') ?? DEFAULT_MAX_REASSIGN;
     this.modeResolver = modeResolver ?? null;
     this.redis = redis ?? null;
+    this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
   }
 
   /**
@@ -364,14 +370,13 @@ export class TripsService {
           vehicleType,
           waypoints: waypoints.length,
         });
-      } else if (isBid) {
-        // PUJA (ADR 010 §2): el bid abre la negociación. Emitimos trip.bid_posted → dispatch abre el
-        // OfferBoard y hace broadcast a conductores elegibles. REEMPLAZA a trip.requested en el camino
-        // de puja: NO emitimos trip.requested aquí para no disparar el auto-offer secuencial legacy.
-        await emitBidPosted(tx, created, origin, this.bidWindowSec);
       } else {
-        // Compat: sin bid → flujo previo (tarifa por ruta) que dispara el matching legacy.
-        await emitTripRequested(tx, created, origin, destination);
+        // Apertura del despacho según el modo CONGELADO (Strategy, open/closed): PUJA → trip.bid_posted
+        // (abre el OfferBoard); FIXED → trip.requested (matching secuencial). Un modo sin strategy falla
+        // FUERTE (forMode lanza), no cae silenciosamente en la rama PUJA.
+        await this.dispatchModes.forMode(mode).openDispatch(tx, created, origin, destination, {
+          scheduled: false,
+        });
       }
       return created;
     });

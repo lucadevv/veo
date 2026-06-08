@@ -5,6 +5,7 @@ import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { TripWatchdogService } from './trip-watchdog.service';
+import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
@@ -19,6 +20,7 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     TripQueryService,
     ScheduledTripService,
     TripWatchdogService,
+    DispatchModeRegistry,
     DispatchConsumer,
     PujaConsumer,
     UserDeletedConsumer,

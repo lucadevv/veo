@@ -9,27 +9,28 @@ import { ConfigService } from '@nestjs/config';
 import { NotFoundError, ConflictError, type LatLon } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
-import { PricingMode, TripStatus } from '@veo/shared-types';
+import { TripStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { toTripView } from './trip-view.mapper';
-import { PRODUCER, recordTripEvent, emitTripRequested, emitBidPosted } from './trip-events';
+import { PRODUCER, recordTripEvent } from './trip-events';
+import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { assertTransition } from './domain/trip-state-machine';
 import type { Trip } from '../generated/prisma';
 import type { TripView } from './dto/trip.dto';
 import type { Env } from '../config/env.schema';
 
-const DEFAULT_BID_WINDOW_SEC = 60; // ventana de puja (§9.1)
-
 @Injectable()
 export class ScheduledTripService {
   private readonly logger = new Logger(ScheduledTripService.name);
-  private readonly bidWindowSec: number;
+  /** Registry de estrategias por modo (open/closed). Self-default sin DI para tests legacy. */
+  private readonly dispatchModes: DispatchModeRegistry;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() config?: ConfigService<Env, true>,
+    @Optional() dispatchModes?: DispatchModeRegistry,
   ) {
-    this.bidWindowSec = config?.get('BID_WINDOW_SEC') ?? DEFAULT_BID_WINDOW_SEC;
+    this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
   }
 
   /**
@@ -55,16 +56,13 @@ export class ScheduledTripService {
       if (updated.count === 0) return; // otro tick ganó la carrera
       const activated: Trip = { ...trip, status: TripStatus.REQUESTED };
       // ADR 011 §1.2/§4 · resolve-once: la activación respeta el modo CONGELADO del viaje (resuelto al
-      // CREAR la reserva), NO re-resuelve de la config admin actual. PUJA → abre el OfferBoard
-      // (trip.bid_posted); FIXED → matching secuencial de tarifa fija (trip.requested). (Antes la
-      // activación caía SIEMPRE a trip.requested; ADR 011 lo corrige a respetar el dispatchMode.)
-      if (trip.dispatchMode === PricingMode.PUJA) {
-        // #1 — scheduled=true: el pasajero no está en la app; notification-service le manda el push
-        // con deep-link al board (sin esto, el board se llenaba de ofertas que nadie veía y expiraba).
-        await emitBidPosted(tx, activated, origin, this.bidWindowSec, true);
-      } else {
-        await emitTripRequested(tx, activated, origin, destination);
-      }
+      // CREAR la reserva), NO re-resuelve de la config admin actual. La apertura por modo va por el
+      // Strategy (open/closed): PUJA → trip.bid_posted (scheduled=true, el pasajero no está en la app →
+      // push con deep-link al board); FIXED → trip.requested. Un modo sin strategy falla FUERTE (forMode
+      // lanza), no cae silenciosamente en la rama PUJA (antes era un `if FIXED else PUJA` binario).
+      await this.dispatchModes
+        .forMode(trip.dispatchMode)
+        .openDispatch(tx, activated, origin, destination, { scheduled: true });
     });
     this.logger.log(`Viaje programado ${id} activado → REQUESTED (modo ${trip.dispatchMode})`);
   }
