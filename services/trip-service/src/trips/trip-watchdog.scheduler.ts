@@ -10,7 +10,7 @@
  *
  * Espeja el patrón de `scheduled-trips.scheduler.ts` (mismo idiom @Cron, mismo wiring de módulo, la
  * transición + outbox van en la misma transacción vía TripsService). Cada barrido es IDEMPOTENTE
- * (guard de carrera por viaje en TripsService.sweepStalledTrip) y ACOTADO (lote por tick), por lo
+ * (guard de carrera por viaje en TripWatchdogService.sweepStalledTrip) y ACOTADO (lote por tick), por lo
  * que solapamientos de ticks o réplicas no producen doble transición ni doble evento.
  *
  * Model-agnóstico A PROPÓSITO: NO consume dispatch.timeout (esa ruta se rehará en el rediseño de
@@ -21,7 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { Env } from '../config/env.schema';
 import type { WatchdogThresholds } from './domain/watchdog';
-import { TripsService } from './trips.service';
+import { TripWatchdogService } from './trip-watchdog.service';
 
 /** Tope de viajes barridos por tick para acotar la carga (el resto cae en el siguiente tick). */
 const MAX_PER_TICK = 200;
@@ -37,7 +37,7 @@ export class TripWatchdogScheduler {
   private readonly thresholds: WatchdogThresholds;
 
   constructor(
-    private readonly trips: TripsService,
+    private readonly watchdog: TripWatchdogService,
     config: ConfigService<Env, true>,
   ) {
     this.thresholds = {
@@ -62,14 +62,14 @@ export class TripWatchdogScheduler {
         this.thresholds.inProgressMs,
       );
       const staleBefore = new Date(now.getTime() - smallest);
-      const candidates = await this.trips.findStalledCandidates(staleBefore, MAX_PER_TICK);
+      const candidates = await this.watchdog.findStalledCandidates(staleBefore, MAX_PER_TICK);
       if (candidates.length === 0) return;
 
       let expired = 0;
       let failed = 0;
       for (const c of candidates) {
         try {
-          const target = await this.trips.sweepStalledTrip(c.id, this.thresholds, now);
+          const target = await this.watchdog.sweepStalledTrip(c.id, this.thresholds, now);
           if (target === 'EXPIRED') expired++;
           else if (target === 'FAILED') failed++;
         } catch (err) {

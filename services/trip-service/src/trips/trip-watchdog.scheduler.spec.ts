@@ -7,12 +7,12 @@
  *  - Viaje fresco → intacto (no se transiciona ni se emite evento).
  *  - Viaje ya terminal → ignorado (ni siquiera es candidato; idempotente).
  *
- * Sin Nest DI: TripsService real sobre un Prisma falso en memoria (estilo trips.service.spec.ts),
+ * Sin Nest DI: TripWatchdogService real sobre un Prisma falso en memoria (estilo trips.service.spec.ts),
  * y el scheduler accionado con un ConfigService falso. El reloj se controla por inyección de `now`.
  */
 import { describe, it, expect } from 'vitest';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
-import { TripsService } from './trips.service';
+import { TripWatchdogService } from './trip-watchdog.service';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
 import {
   resolveStalledTarget,
@@ -170,8 +170,6 @@ const fakeConfig = {
   },
 };
 
-const maps = { route: async () => ({ distanceMeters: 0, durationSeconds: 0, polyline: '' }) };
-
 function mins(n: number): Date {
   return new Date(NOW.getTime() - n * 60 * 1000);
 }
@@ -214,7 +212,7 @@ describe('watchdog · resolveStalledTarget (dominio puro)', () => {
 
 function makeScheduler(trips: Trip[]) {
   const prisma = makePrisma(trips);
-  const svc = new TripsService(prisma as never, maps as never);
+  const svc = new TripWatchdogService(prisma as never);
   const scheduler = new TripWatchdogScheduler(svc, fakeConfig as never);
   return { prisma, svc, scheduler };
 }

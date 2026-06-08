@@ -4,6 +4,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
+import { TripWatchdogService } from './trip-watchdog.service';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
@@ -17,6 +18,7 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     TripsService,
     TripQueryService,
     ScheduledTripService,
+    TripWatchdogService,
     DispatchConsumer,
     PujaConsumer,
     UserDeletedConsumer,
