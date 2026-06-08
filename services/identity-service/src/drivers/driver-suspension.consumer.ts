@@ -1,14 +1,13 @@
 /**
  * Consumidor Kafka de identity para la suspensión de conductores (cierre del lazo de cumplimiento).
- *  - `fleet.driver.suspended` → fleet-service suspende al conductor cuando un documento crítico vence;
+ *  - `fleet.driver_suspended` → fleet-service suspende al conductor cuando un documento crítico vence;
  *    identity escribe `Driver.suspendedAt`, que es lo que el gate de inicio de turno (startShift) lee
  *    para BLOQUEAR el turno (BR-I02). Sin este consumidor la suspensión por documento vencido era
  *    código muerto: nadie escribía `suspendedAt`.
  *
- * Nota de validación: `fleet.driver.suspended` (con puntos) NO está registrado en EVENT_SCHEMAS
- * —el registro lo indexa como `fleet.driver_suspended` (guion bajo)— por lo que el KafkaEventConsumer
- * NO valida el payload por nosotros (schemaForEvent devuelve undefined). Validamos aquí con el zod
- * `fleetDriverSuspended` exportado por @veo/events para no procesar payloads corruptos.
+ * El eventType casa con EVENT_SCHEMAS (`fleet.driver_suspended`, guion bajo) → el KafkaEventConsumer YA
+ * valida el payload por nosotros; igual revalidamos acá con el zod `fleetDriverSuspended` (defensa en
+ * profundidad) para extraer los campos tipados.
  */
 import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -17,7 +16,7 @@ import { DriversService } from './drivers.service';
 import type { Env } from '../config/env.schema';
 
 /** eventType en el wire que emite fleet-service (ver services/fleet-service/src/events/fleet-events.ts). */
-const DRIVER_SUSPENDED = 'fleet.driver.suspended';
+const DRIVER_SUSPENDED = 'fleet.driver_suspended';
 
 @Injectable()
 export class DriverSuspensionConsumer implements OnModuleInit, OnModuleDestroy {

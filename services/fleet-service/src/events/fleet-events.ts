@@ -1,21 +1,22 @@
 /**
  * Eventos de dominio de fleet-service (FOUNDATION §6).
  *
- * ⚠ Estos eventType AÚN NO están registrados en `@veo/events` (EVENT_SCHEMAS). Se publican vía
- * outbox: el producer sólo valida payloads de eventos registrados, así que estos viajan tal cual.
- * Quedan documentados en `docs/events.md` y reportados al orquestador para su registro formal
- * (topic Kafka = dominio antes del primer punto → "fleet").
+ * Convención de naming: `dominio.snake_case` (UN punto; el topic Kafka = dominio antes del punto → "fleet").
+ * Estos eventType están registrados en `@veo/events` (EVENT_SCHEMAS) con guion bajo, así que el producer
+ * VALIDA el payload al publicar y los consumidores (identity, admin-bff) casan por el MISMO string.
+ * (Antes usaban puntos `fleet.driver.suspended` y NO casaban con el registro → admin-bff nunca recibía la
+ * suspensión y los eventos viajaban sin validar. Alineado al guion bajo.)
  */
 import { createEnvelope, type EventEnvelope } from '@veo/events';
 
 export const FLEET_PRODUCER = 'fleet-service';
 
 export const FleetEventType = {
-  DOCUMENT_EXPIRING: 'fleet.document.expiring',
-  DOCUMENT_EXPIRED: 'fleet.document.expired',
-  DRIVER_SUSPENDED: 'fleet.driver.suspended',
-  VEHICLE_SUSPENDED: 'fleet.vehicle.suspended',
-  VEHICLE_REGISTERED: 'fleet.vehicle.registered',
+  DOCUMENT_EXPIRING: 'fleet.document_expiring',
+  DOCUMENT_EXPIRED: 'fleet.document_expired',
+  DRIVER_SUSPENDED: 'fleet.driver_suspended',
+  VEHICLE_SUSPENDED: 'fleet.vehicle_suspended',
+  VEHICLE_REGISTERED: 'fleet.vehicle_registered',
 } as const;
 export type FleetEventType = (typeof FleetEventType)[keyof typeof FleetEventType];
 

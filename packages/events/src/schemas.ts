@@ -480,6 +480,8 @@ export const fleetDocumentExpiring = z.object({
   documentType: z.string(),
   expiresAt: z.string(),
   daysRemaining: z.number().int(),
+  /** Hito de alerta alcanzado (30/15/7/1). */
+  milestone: z.number().int(),
 });
 export const fleetDocumentExpired = z.object({
   documentId: z.string(),
@@ -487,9 +489,17 @@ export const fleetDocumentExpired = z.object({
   ownerId: z.string(),
   documentType: z.string(),
   expiresAt: z.string(),
+  critical: z.boolean(),
 });
-export const fleetDriverSuspended = z.object({ driverId: z.string(), reason: z.string(), documentId: z.string().optional(), suspendedAt: z.string() });
+export const fleetDriverSuspended = z.object({ driverId: z.string(), reason: z.string(), documentId: z.string().optional(), documentType: z.string().optional(), suspendedAt: z.string() });
 export const fleetVehicleSuspended = z.object({ vehicleId: z.string(), reason: z.string(), suspendedAt: z.string() });
+export const fleetVehicleRegistered = z.object({
+  vehicleId: z.string(),
+  driverId: z.string(),
+  plate: z.string(),
+  vehicleType: z.enum(['CAR', 'MOTO']),
+  registeredAt: z.string(),
+});
 
 /** Registro central: eventType → schema del payload. */
 export const EVENT_SCHEMAS = {
@@ -558,6 +568,7 @@ export const EVENT_SCHEMAS = {
   'fleet.document_expired': fleetDocumentExpired,
   'fleet.driver_suspended': fleetDriverSuspended,
   'fleet.vehicle_suspended': fleetVehicleSuspended,
+  'fleet.vehicle_registered': fleetVehicleRegistered,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EventType = keyof typeof EVENT_SCHEMAS;
