@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
+import { TripQueryService } from './trip-query.service';
 import { KycRequiredError } from './trips.errors';
 import {
   AcceptTripDto,
@@ -37,7 +38,10 @@ import {
 @UseGuards(InternalIdentityGuard)
 @Controller('trips')
 export class TripsController {
-  constructor(private readonly trips: TripsService) {}
+  constructor(
+    private readonly trips: TripsService,
+    private readonly query: TripQueryService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Crear y cotizar un viaje (→ REQUESTED). Idempotente vía Idempotency-Key.' })
@@ -60,19 +64,19 @@ export class TripsController {
   @Get('scheduled')
   @ApiOperation({ summary: 'Listar los viajes PROGRAMADOS de un pasajero (Ola 2B, estado SCHEDULED)' })
   listScheduled(@Query() query: ScheduledListQueryDto) {
-    return this.trips.listScheduled(query.passengerId);
+    return this.query.listScheduled(query.passengerId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un viaje por id' })
   get(@Param('id') id: string) {
-    return this.trips.getTrip(id);
+    return this.query.getTrip(id);
   }
 
   @Get(':id/state')
   @ApiOperation({ summary: 'Obtener solo el estado del viaje (BR-T02)' })
   state(@Param('id') id: string) {
-    return this.trips.getTripState(id);
+    return this.query.getTripState(id);
   }
 
   @Post(':id/assign')

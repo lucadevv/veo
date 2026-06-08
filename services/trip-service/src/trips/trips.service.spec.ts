@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '@veo/utils';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
 import { TripsService } from './trips.service';
+import { TripQueryService } from './trip-query.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
 
@@ -407,7 +408,7 @@ describe('TripsService · BR-T02 guardas de transición', () => {
 
   it('getTrip inexistente → NotFoundError', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     await expect(svc.getTrip('nope')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
@@ -723,7 +724,7 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
 
   it('S1: getTrip también expone el dispatchMode congelado del viaje', async () => {
     const prisma = makePrisma(buildTrip({ dispatchMode: 'FIXED' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     const view = await svc.getTrip('trip-1');
     expect(view.dispatchMode).toBe('FIXED');
   });

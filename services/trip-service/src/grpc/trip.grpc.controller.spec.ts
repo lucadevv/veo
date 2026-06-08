@@ -9,6 +9,7 @@ import { TripGrpcController } from './trip.grpc.controller';
 import { Prisma, type Trip } from '../generated/prisma';
 import type { PrismaService } from '../infra/prisma.service';
 import type { TripsService } from '../trips/trips.service';
+import type { TripQueryService } from '../trips/trip-query.service';
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   const now = new Date('2026-06-06T12:00:00.000Z');
@@ -66,7 +67,8 @@ function makeController(trip: Trip | null): TripGrpcController {
     read: { trip: { findUnique: async () => trip, findFirst: async () => trip } },
   } as unknown as PrismaService;
   const trips = {} as unknown as TripsService;
-  return new TripGrpcController(prisma, trips);
+  const query = {} as unknown as TripQueryService;
+  return new TripGrpcController(prisma, trips, query);
 }
 
 describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () => {

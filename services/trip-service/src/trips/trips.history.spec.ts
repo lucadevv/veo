@@ -1,10 +1,10 @@
 /**
- * TripsService.listPassengerTrips — paginación keyset del historial: orden DESC, página + nextCursor
+ * TripQueryService.listPassengerTrips — paginación keyset del historial: orden DESC, página + nextCursor
  * (peek), continuación por cursor, y aislamiento por pasajero (solo SUS viajes; anti-IDOR estructural:
  * el `where` SIEMPRE lleva el passengerId, así un viaje ajeno nunca puede colarse).
  */
 import { describe, it, expect } from 'vitest';
-import { TripsService } from './trips.service';
+import { TripQueryService } from './trip-query.service';
 import { decodeCursor } from './domain/history';
 import type { Trip } from '../generated/prisma';
 
@@ -93,16 +93,14 @@ function makePrisma(rows: Trip[]) {
   return { read: { trip: { findMany } } } as never;
 }
 
-const maps = {} as never;
-
-describe('TripsService.listPassengerTrips · historial keyset', () => {
+describe('TripQueryService.listPassengerTrips · historial keyset', () => {
   it('ordena por requestedAt DESC (los más recientes primero)', async () => {
     const rows = [
       trip('a', 'pax-1', '2026-06-01T10:00:00.000Z'),
       trip('b', 'pax-1', '2026-06-03T10:00:00.000Z'),
       trip('c', 'pax-1', '2026-06-02T10:00:00.000Z'),
     ];
-    const svc = new TripsService(makePrisma(rows), maps);
+    const svc = new TripQueryService(makePrisma(rows));
     const page = await svc.listPassengerTrips('pax-1');
     expect(page.items.map((i) => i.id)).toEqual(['b', 'c', 'a']);
     expect(page.nextCursor).toBeNull(); // 3 ≤ limit → no hay más
@@ -112,7 +110,7 @@ describe('TripsService.listPassengerTrips · historial keyset', () => {
     const rows = Array.from({ length: 5 }, (_, i) =>
       trip(`t${i}`, 'pax-1', `2026-06-0${i + 1}T10:00:00.000Z`),
     );
-    const svc = new TripsService(makePrisma(rows), maps);
+    const svc = new TripQueryService(makePrisma(rows));
 
     const page1 = await svc.listPassengerTrips('pax-1', undefined, 2);
     expect(page1.items.map((i) => i.id)).toEqual(['t4', 't3']); // 06-05, 06-04
@@ -138,7 +136,7 @@ describe('TripsService.listPassengerTrips · historial keyset', () => {
       trip('other-1', 'pax-2', '2026-06-03T10:00:00.000Z'),
       trip('mine-2', 'pax-1', '2026-06-01T10:00:00.000Z'),
     ];
-    const svc = new TripsService(makePrisma(rows), maps);
+    const svc = new TripQueryService(makePrisma(rows));
     const page = await svc.listPassengerTrips('pax-1');
     expect(page.items.map((i) => i.id)).toEqual(['mine-1', 'mine-2']);
     expect(page.items.every((i) => i.id.startsWith('mine'))).toBe(true);
@@ -154,7 +152,7 @@ describe('TripsService.listPassengerTrips · historial keyset', () => {
         cancelledAt: new Date('2026-06-01T10:05:00.000Z'),
       }),
     ];
-    const svc = new TripsService(makePrisma(rows), maps);
+    const svc = new TripQueryService(makePrisma(rows));
     const page = await svc.listPassengerTrips('pax-1');
     expect(page.items.map((i) => i.status)).toEqual([
       'COMPLETED',

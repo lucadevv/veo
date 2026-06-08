@@ -10,6 +10,7 @@ import { TripStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { LIVE_STATES } from '../trips/domain/trip-state-machine';
 import { TripsService } from '../trips/trips.service';
+import { TripQueryService } from '../trips/trip-query.service';
 import type { TripView } from '../trips/dto/trip.dto';
 import type { Trip } from '../generated/prisma';
 
@@ -133,6 +134,7 @@ export class TripGrpcController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
+    private readonly query: TripQueryService,
   ) {}
 
   @GrpcMethod('TripService', 'GetTrip')
@@ -295,7 +297,7 @@ export class TripGrpcController {
     cursor,
     limit,
   }: ListPassengerTripsRequest): Promise<PassengerTripsReply> {
-    const page = await this.trips.listPassengerTrips(passengerId, cursor || undefined, limit || undefined);
+    const page = await this.query.listPassengerTrips(passengerId, cursor || undefined, limit || undefined);
     return {
       items: page.items.map((it) => ({
         id: it.id,

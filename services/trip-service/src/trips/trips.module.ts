@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MapsModule } from '../ports/maps/maps.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { TripsService } from './trips.service';
+import { TripQueryService } from './trip-query.service';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
@@ -13,6 +14,7 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
   imports: [MapsModule, PricingModule],
   providers: [
     TripsService,
+    TripQueryService,
     DispatchConsumer,
     PujaConsumer,
     UserDeletedConsumer,
@@ -20,6 +22,6 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     TripWatchdogScheduler,
   ],
   controllers: [TripsController],
-  exports: [TripsService],
+  exports: [TripsService, TripQueryService],
 })
 export class TripsModule {}

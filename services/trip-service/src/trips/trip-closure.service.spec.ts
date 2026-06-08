@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { ConflictError, NotFoundError } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
 import { TripsService } from './trips.service';
+import { TripQueryService } from './trip-query.service';
 import { Prisma, type Trip } from '../generated/prisma';
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
@@ -129,10 +130,10 @@ function makePrisma(initial: Trip | Trip[] | null) {
 
 const maps = {} as never;
 
-describe('TripsService.getPendingSettlement', () => {
+describe('TripQueryService.getPendingSettlement', () => {
   it('devuelve el COMPLETED MÁS VIEJO sin cerrar del pasajero', async () => {
     const prisma = makePrisma(buildTrip());
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     const view = await svc.getPendingSettlement('pax-1');
     expect(view?.id).toBe('trip-1');
     expect(view?.status).toBe(TripStatus.COMPLETED);
@@ -151,26 +152,26 @@ describe('TripsService.getPendingSettlement', () => {
       completedAt: new Date('2026-06-06T15:00:00.000Z'),
     });
     const prisma = makePrisma([nuevo, viejo]); // orden de inserción invertido a propósito
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     const view = await svc.getPendingSettlement('pax-1');
     expect(view?.id).toBe('trip-viejo');
   });
 
   it('null si el viaje ya está cerrado (passengerClosedAt seteado)', async () => {
     const prisma = makePrisma(buildTrip({ passengerClosedAt: new Date() }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 
   it('null si no hay viaje del pasajero', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 
   it('null si el COMPLETED es de OTRO pasajero (no se filtra)', async () => {
     const prisma = makePrisma(buildTrip({ passengerId: 'otro' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripQueryService(prisma as never);
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 });

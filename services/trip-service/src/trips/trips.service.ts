@@ -48,14 +48,6 @@ import {
 import { calculateFare } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
-import {
-  clampLimit,
-  decodeCursor,
-  encodeCursor,
-  historyWhere,
-  tripToHistoryItem,
-  type TripHistoryPage,
-} from './domain/history';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitTripRequested, emitBidPosted } from './trip-events';
@@ -392,90 +384,7 @@ export class TripsService {
     return toTripView(trip);
   }
 
-  // ───────────────────────────── Lectura ─────────────────────────────
-
-  async getTrip(id: string): Promise<TripView> {
-    return toTripView(await this.mustFind(id));
-  }
-
-  async getTripState(id: string): Promise<{ id: string; status: TripStatus }> {
-    const trip = await this.prisma.read.trip.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
-    if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
-    return { id: trip.id, status: trip.status };
-  }
-
-  /**
-   * GET /trips/scheduled?passengerId= — viajes PROGRAMADOS aún no activados de un pasajero (Ola 2B).
-   * Orden ascendente por hora programada (los más próximos primero).
-   */
-  async listScheduled(passengerId: string): Promise<TripView[]> {
-    const trips = await this.prisma.read.trip.findMany({
-      where: { passengerId, status: TripStatus.SCHEDULED },
-      orderBy: { scheduledFor: 'asc' },
-    });
-    return trips.map((t) => toTripView(t));
-  }
-
-  /**
-   * Historial REAL del pasajero (servidor, no MMKV local): SUS viajes ordenados por requestedAt DESC,
-   * id DESC, paginados por CURSOR (keyset). Es la fuente de verdad de los ESTADOS reales (COMPLETED /
-   * CANCELLED_* / EXPIRED), que la lista local de la app no tiene. El passengerId lo fija el BFF desde
-   * el JWT (anti-IDOR): este método NUNCA recibe el id del cliente.
-   *
-   * Paginación keyset (no offset): pedimos `take = limit + 1` para SABER si hay siguiente página sin un
-   * COUNT extra. Si vinieron limit+1 filas, la última sobra (es el "peek"): la usamos para construir el
-   * nextCursor y la recortamos. Si vinieron ≤ limit, no hay más (nextCursor = null).
-   *
-   * Anti-N+1: el item NO trae el nombre del conductor (solo driverId). La card muestra tier+ruta+monto+
-   * estado; el nombre lo resuelve el DETALLE (GetTrip) on-demand al abrir el viaje.
-   */
-  async listPassengerTrips(
-    passengerId: string,
-    rawCursor?: string,
-    rawLimit?: number,
-  ): Promise<TripHistoryPage> {
-    const limit = clampLimit(rawLimit);
-    const cursor = decodeCursor(rawCursor);
-    const rows = await this.prisma.read.trip.findMany({
-      where: historyWhere(passengerId, cursor),
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1, // peek: 1 fila extra para saber si hay siguiente página sin COUNT
-    });
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    const last = page[page.length - 1];
-    const nextCursor =
-      hasMore && last
-        ? encodeCursor({ requestedAt: last.requestedAt.toISOString(), id: last.id })
-        : null;
-    return { items: page.map((t) => tripToHistoryItem(t)), nextCursor };
-  }
-
   // ───────────────────────────── Cierre post-viaje (re-entrada) ─────────────────────────────
-
-  /**
-   * Pending settlement: el viaje MÁS VIEJO del pasajero con status=COMPLETED y passengerClosedAt=null
-   * (orden completedAt ASC), o null si no hay ninguno. Es la fuente de verdad para RE-OFRECER el
-   * cierre post-viaje (recibo + confirmar efectivo + rating) tras un reload de la app: COMPLETED es
-   * TERMINAL y queda FUERA de LIVE_STATES, así que GetActiveTrip no lo devuelve y el pasajero perdería
-   * el cierre. Acá NO mutamos nada (lectura): el cierre lo sella `closeByPassenger`. El passengerId lo
-   * fija el BFF desde la identidad autenticada (el cliente nunca lo provee).
-   *
-   * ORDEN FIFO (asc, el más VIEJO primero) y NO desc: si quedan varios COMPLETED sin cerrar (p.ej. la app
-   * se cerró antes de confirmar un efectivo y luego se pidió otro viaje), drenamos en cascada del más
-   * antiguo al más nuevo. Con desc, la plata pendiente de un efectivo VIEJO quedaba enterrada bajo viajes
-   * nuevos y nunca se confirmaba; con asc cada cierre destapa el siguiente más viejo hasta vaciar la cola.
-   */
-  async getPendingSettlement(passengerId: string): Promise<TripView | null> {
-    const trip = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: TripStatus.COMPLETED, passengerClosedAt: null },
-      orderBy: { completedAt: 'asc' },
-    });
-    return trip ? toTripView(trip) : null;
-  }
 
   /**
    * Cierre post-viaje por el pasajero (re-entrada): sella passengerClosedAt=now() sobre SU viaje
