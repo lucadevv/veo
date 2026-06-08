@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // Resuelve los tipos por plataforma igual que Metro (`foo.native.ts` antes que `foo.ts`). Sin
+    // esto, `tsc` toma el barrel web de `@rnmapbox/maps` (sin ShapeSource/LineLayer y con props
+    // distintos en Camera/MarkerView) en vez del barrel nativo que la app usa en runtime.
+    "moduleSuffixes": [".native", ".ios", ".android", ""],
+    "jsx": "react-native",
+    "allowJs": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["react-native", "jest"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "ios/Pods", "android/build", "e2e"]
+}

@@ -1,0 +1,106 @@
+// share-service · esquema Postgres (schema lógico "share")
+// FOUNDATION §8. Dueño de: contactos de confianza (BR-I06), enlaces de seguimiento firmados (BR-S05)
+// y la página pública "familia". NO accede a tablas de otros servicios: la info del viaje llega por
+// eventos (read-model TripSnapshot) o por gRPC. PII mínima; el token del enlace nunca se guarda en claro.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["share"]
+}
+
+/// Contacto de confianza de un usuario (máximo 3, BR-I06). Requiere OTP verificado por SMS.
+model TrustedContact {
+  id             String      @id @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  phone          String
+  email          String?
+  name           String
+  relationship   String
+  /// Marca de verificación OTP del teléfono del contacto. Null = pendiente.
+  otpVerifiedAt  DateTime?   @map("otp_verified_at") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  lastModifiedAt DateTime    @default(now()) @updatedAt @map("last_modified_at") @db.Timestamptz
+
+  shareLinks ShareLink[]
+
+  @@index([userId])
+  @@unique([userId, phone])
+  @@map("trusted_contacts")
+  @@schema("share")
+}
+
+/// Enlace de seguimiento firmado (HMAC) con expiración y límite de usos. Solo se guarda el hash del token.
+model ShareLink {
+  id        String          @id @db.Uuid
+  tripId    String          @map("trip_id") @db.Uuid
+  contactId String?         @map("contact_id") @db.Uuid
+  contact   TrustedContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  /// sha256 del token opaco entregado al usuario (nunca el token en claro).
+  tokenHash String          @unique @map("token_hash")
+  /// Idempotencia: misma dedupKey no genera otro enlace/SMS (redelivery Kafka at-least-once).
+  /// Índice único parcial sobre no nulos (los enlaces sin dedupKey no compiten).
+  dedupKey  String?         @unique @map("dedup_key")
+  expiresAt DateTime        @map("expires_at") @db.Timestamptz
+  maxUses   Int             @default(500) @map("max_uses")
+  usedCount Int             @default(0) @map("used_count")
+  revokedAt DateTime?       @map("revoked_at") @db.Timestamptz
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  views ShareView[]
+
+  @@index([tripId])
+  @@map("share_links")
+  @@schema("share")
+}
+
+/// Auditoría de cada apertura de la página pública de seguimiento.
+model ShareView {
+  id       String    @id @db.Uuid
+  shareId  String    @map("share_id") @db.Uuid
+  share    ShareLink @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  viewedAt DateTime  @default(now()) @map("viewed_at") @db.Timestamptz
+  ip       String?
+
+  @@index([shareId])
+  @@map("share_views")
+  @@schema("share")
+}
+
+/// Read-model del viaje, alimentado SOLO por eventos consumidos (trip.started, panic.triggered).
+/// Permite que la página pública muestre estado y ubicación aproximada sin tocar otros servicios.
+model TripSnapshot {
+  tripId         String    @id @map("trip_id") @db.Uuid
+  status         String    @default("UNKNOWN")
+  driverId       String?   @map("driver_id") @db.Uuid
+  passengerId    String?   @map("passenger_id") @db.Uuid
+  startedAt      DateTime? @map("started_at") @db.Timestamptz
+  /// Última ubicación aproximada conocida (de panic.triggered u otros eventos de geo).
+  lastLat        Float?    @map("last_lat")
+  lastLon        Float?    @map("last_lon")
+  lastLocationAt DateTime? @map("last_location_at") @db.Timestamptz
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("trip_snapshots")
+  @@schema("share")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio; el relay lo drena a Kafka.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("share")
+}

@@ -1,0 +1,50 @@
+/* Tokens semánticos OKLCH compartidos: deben importarse antes de las capas de Tailwind. */
+@import '@veo/shared-config/tailwind/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink antialiased;
+    min-height: 100dvh;
+  }
+
+  /* Foco visible y consistente en todo lo interactivo (DESIGN §0.4). */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@layer utilities {
+  /* Números tabulares para ETA, horas y placas. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+#
+# boot-passenger-stack.sh · Arranque reusable del stack backend del PASAJERO (dev local).
+#
+# Levanta places(3013), identity(3091), trip(3002), dispatch(3003), fleet(3012),
+# payment(3005 + gRPC 50055), rating(3010 + gRPC 50060) y public-bff(4001) desde sus
+# `dist/main.js`, con el env de cada uno cargado desde `env/dev.env` (tracked) +
+# `env/dev.secret.env` (GITIGNORED).
+#
+# RAÍZ DEL PROBLEMA QUE RESUELVE: identity, si no recibe JWT_PRIVATE_KEY_PEM, genera un keypair
+# EFÍMERO en cada arranque; el public-bff, sin VEO_JWT_PUBLIC_PEM, genera OTRO. identity firma con
+# uno y el BFF valida con otro → 401. Aquí el keypair ES256 (EC P-256) es PERSISTENTE y compartido:
+#   - privada PKCS#8  → identity (JWT_PRIVATE_KEY_PEM)
+#   - pública  SPKI   → public-bff (VEO_JWT_PUBLIC_PEM)
+# Vive en dev-stack/secrets/*.pem (gitignored) y se inyecta vía los dev.secret.env. Si no existe, se
+# genera una vez y se reusa siempre (idempotente). Lo mismo el INTERNAL_IDENTITY_SECRET (HMAC) que
+# comparten identity + places + bff.
+#
+# Idempotente: si un puerto ya está ocupado, lo reporta y NO duplica el proceso.
+#
+# Uso:
+#   dev-stack/boot-passenger-stack.sh            # arranca lo que falte y espera health
+#   dev-stack/boot-passenger-stack.sh stop       # mata los procesos que arrancó (por PID file)
+#   dev-stack/boot-passenger-stack.sh restart     # stop + start
+#   dev-stack/boot-passenger-stack.sh status      # estado de puertos/health
+#
+set -euo pipefail
+
+# ── Paths ──────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SECRETS_DIR="$SCRIPT_DIR/secrets"
+LOGS_DIR="$SCRIPT_DIR/logs"
+PIDS_DIR="$SCRIPT_DIR/.pids"
+JWT_PRIV_PEM="$SECRETS_DIR/jwt-es256-private.pkcs8.pem"
+JWT_PUB_PEM="$SECRETS_DIR/jwt-es256-public.spki.pem"
+INTERNAL_SECRET_FILE="$SECRETS_DIR/internal-identity-secret.txt"
+# Token PÚBLICO de Mapbox (pk) para el modo VEO_MAPS_MODE=mapbox del BFF. Persistente (gitignored).
+MAPBOX_TOKEN_FILE="$SECRETS_DIR/mapbox-access-token.txt"
+# Credenciales ProntoPaga (VEO_PAYMENT_MODE=prontopaga). Persistentes (gitignored). En dev se siembran
+# con las de PRUEBA PÚBLICAS del sandbox (docs.prontopaga.com/docs/first-steps); en prod se pegan las reales.
+PRONTOPAGA_SECRET_FILE="$SECRETS_DIR/prontopaga-secret-key.txt"
+PRONTOPAGA_TOKEN_FILE="$SECRETS_DIR/prontopaga-api-token.txt"
+# Defaults de PRUEBA PÚBLICOS (no son secretos reales): se siembran si los files no existen.
+PRONTOPAGA_SECRET_DEFAULT="01JNH2SBC5Z2CM1PWQXM2C1XK9"
+PRONTOPAGA_TOKEN_DEFAULT="caff446438560a48438e0b49e5a6a0870ac5624b9f9ce1577858595d1a8ba1ec"
+
+IDENTITY_DIR="$ROOT_DIR/services/identity-service"
+PLACES_DIR="$ROOT_DIR/services/places-service"
+TRIP_DIR="$ROOT_DIR/services/trip-service"
+DISPATCH_DIR="$ROOT_DIR/services/dispatch-service"
+FLEET_DIR="$ROOT_DIR/services/fleet-service"
+PAYMENT_DIR="$ROOT_DIR/services/payment-service"
+RATING_DIR="$ROOT_DIR/services/rating-service"
+NOTIFICATION_DIR="$ROOT_DIR/services/notification-service"
+BFF_DIR="$ROOT_DIR/services/bff/public-bff"
+
+# Credenciales de PUSH: viven en el config/ del WORKSPACE (hermano de veo-platform, gitignored).
+#   - APNs .p8 (riel directo opcional): config/app-ios/AuthKey_<KeyId>.p8
+#   - FCM service-account JSON (riel default): cualquier *.json en config/firebase/ (Firebase lo nombra
+#     veo-drive-firebase-adminsdk-*.json). Tomamos el primero que exista (glob robusto, no hardcode).
+# Si el JSON de FCM existe, el notification arranca en VEO_PUSH_MODE=live; si no, sandbox (loguea).
+WORKSPACE_CONFIG_DIR="$ROOT_DIR/../config"
+APNS_P8_FILE="$WORKSPACE_CONFIG_DIR/app-ios/AuthKey_TGZXNZ7CU8.p8"
+FCM_SA_JSON_FILE=""
+for _sa in "$WORKSPACE_CONFIG_DIR"/firebase/*.json; do
+  [[ -s "$_sa" ]] && { FCM_SA_JSON_FILE="$_sa"; break; }
+done
+
+mkdir -p "$SECRETS_DIR" "$LOGS_DIR" "$PIDS_DIR"
+
+c_green() { printf '\033[32m%s\033[0m\n' "$*"; }
+c_red()   { printf '\033[31m%s\033[0m\n' "$*"; }
+c_blue()  { printf '\033[36m%s\033[0m\n' "$*"; }
+log()     { printf '  %s\n' "$*"; }
+
+# ── 1. Keypair JWT ES256 (EC P-256) PERSISTENTE + HMAC interno ───────────────
+ensure_secrets() {
+  c_blue "[secrets] keypair JWT ES256 (EC P-256) + HMAC interno"
+  if [[ -s "$JWT_PRIV_PEM" && -s "$JWT_PUB_PEM" ]]; then
+    log "keypair existente, reuso: $JWT_PRIV_PEM"
+  else
+    log "generando keypair persistente…"
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$JWT_PRIV_PEM" 2>/dev/null
+    openssl pkey -in "$JWT_PRIV_PEM" -pubout -out "$JWT_PUB_PEM" 2>/dev/null
+    chmod 600 "$JWT_PRIV_PEM"
+    log "keypair generado: $JWT_PRIV_PEM (+ .spki público)"
+  fi
+  if [[ -s "$INTERNAL_SECRET_FILE" ]]; then
+    log "INTERNAL_IDENTITY_SECRET existente, reuso"
+  else
+    openssl rand -hex 32 > "$INTERNAL_SECRET_FILE"
+    chmod 600 "$INTERNAL_SECRET_FILE"
+    log "INTERNAL_IDENTITY_SECRET generado"
+  fi
+
+  # Token Mapbox (pk) para VEO_MAPS_MODE=mapbox del BFF. Vive SOLO en este archivo gitignored
+  # (NUNCA hardcodeado en el script tracked). Si falta, pegá tu pk en $MAPBOX_TOKEN_FILE;
+  # sin él el BFF degrada honestamente al motor local de geocoding.
+  if [[ ! -s "$MAPBOX_TOKEN_FILE" ]]; then
+    : > "$MAPBOX_TOKEN_FILE"
+    chmod 600 "$MAPBOX_TOKEN_FILE"
+    log "FALTA el pk de Mapbox → pegalo en $MAPBOX_TOKEN_FILE (mientras, el BFF usa el geocoder local)"
+  else
+    log "MAPBOX_ACCESS_TOKEN existente, reuso"
+  fi
+
+  # Credenciales ProntoPaga: si faltan, sembrar las de PRUEBA PÚBLICAS del sandbox (dev). En prod
+  # se reemplaza el contenido de estos files por las reales (gitignored, NUNCA en el script tracked).
+  if [[ ! -s "$PRONTOPAGA_SECRET_FILE" ]]; then
+    printf '%s' "$PRONTOPAGA_SECRET_DEFAULT" > "$PRONTOPAGA_SECRET_FILE"; chmod 600 "$PRONTOPAGA_SECRET_FILE"
+    log "PRONTOPAGA_SECRET_KEY sembrada con la de prueba PÚBLICA (cambiá $PRONTOPAGA_SECRET_FILE en prod)"
+  else
+    log "PRONTOPAGA_SECRET_KEY existente, reuso"
+  fi
+  if [[ ! -s "$PRONTOPAGA_TOKEN_FILE" ]]; then
+    printf '%s' "$PRONTOPAGA_TOKEN_DEFAULT" > "$PRONTOPAGA_TOKEN_FILE"; chmod 600 "$PRONTOPAGA_TOKEN_FILE"
+    log "PRONTOPAGA_API_TOKEN sembrado con el de prueba PÚBLICO (cambiá $PRONTOPAGA_TOKEN_FILE en prod)"
+  else
+    log "PRONTOPAGA_API_TOKEN existente, reuso"
+  fi
+
+  local priv pub secret mapbox_token pp_secret pp_token
+  priv="$(cat "$JWT_PRIV_PEM")"
+  pub="$(cat "$JWT_PUB_PEM")"
+  secret="$(cat "$INTERNAL_SECRET_FILE")"
+  mapbox_token="$(cat "$MAPBOX_TOKEN_FILE")"
+  pp_secret="$(cat "$PRONTOPAGA_SECRET_FILE")"
+  pp_token="$(cat "$PRONTOPAGA_TOKEN_FILE")"
+
+  # Regenera SIEMPRE los dev.secret.env a partir de la fuente canónica (mantiene todo en sync).
+  {
+    printf '# identity-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# Keypair JWT ES256 PERSISTENTE: privada PKCS#8. Pareja en public-bff (VEO_JWT_PUBLIC_PEM=SPKI).\n'
+    printf 'JWT_PRIVATE_KEY_PEM="%s"\n' "$priv"
+    printf 'JWT_PUBLIC_KEY_PEM="%s"\n' "$pub"
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$IDENTITY_DIR/env/dev.secret.env"
+
+  {
+    printf '# public-bff · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# Solo clave PÚBLICA (SPKI) para VALIDAR el JWT. MISMO par que identity.\n'
+    printf 'VEO_JWT_PUBLIC_PEM="%s"\n' "$pub"
+    printf 'VEO_INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+    printf '# Token PÚBLICO de Mapbox (pk). Requerido por VEO_MAPS_MODE=mapbox (server-side, sin SDK).\n'
+    printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$mapbox_token"
+  } > "$BFF_DIR/env/dev.secret.env"
+
+  {
+    printf '# places-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al de identity + public-bff (HMAC identidad interna).\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$PLACES_DIR/env/dev.secret.env"
+
+  {
+    printf '# trip-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: trip-service EXIGE el kycVerified firmado por el BFF.\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$TRIP_DIR/env/dev.secret.env"
+
+  {
+    printf '# dispatch-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto (HMAC identidad interna).\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$DISPATCH_DIR/env/dev.secret.env"
+
+  {
+    printf '# fleet-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto (el bff lo consulta por gRPC con identidad firmada).\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$FLEET_DIR/env/dev.secret.env"
+
+  {
+    printf '# payment-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff cobra/confirma con identidad firmada.\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+    printf '# ProntoPaga (VEO_PAYMENT_MODE=prontopaga): credenciales de prueba PÚBLICAS del sandbox.\n'
+    printf '# secretKey firma el body (HMAC-SHA256); apiToken es el Bearer estático. En prod: reemplazar.\n'
+    printf 'PRONTOPAGA_SECRET_KEY=%s\n' "$pp_secret"
+    printf 'PRONTOPAGA_API_TOKEN=%s\n' "$pp_token"
+  } > "$PAYMENT_DIR/env/dev.secret.env"
+
+  {
+    printf '# rating-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff envía calificaciones con identidad firmada.\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+  } > "$RATING_DIR/env/dev.secret.env"
+
+  # notification-service: HMAC interno (el bff registra el device-token con identidad firmada) + credenciales
+  # de PUSH leídas del config/ del workspace (gitignored). El .p8 (APNs directo, opcional) y la RUTA del
+  # service-account JSON de FCM (riel default). Si el JSON no existe, no se escribe la ruta y el push queda
+  # en sandbox (degradación honesta, decidido en cmd_start).
+  {
+    printf '# notification-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
+    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff proxea POST /devices con identidad firmada.\n'
+    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
+    if [[ -s "$APNS_P8_FILE" ]]; then
+      printf '# APNs .p8 (riel iOS DIRECTO soberano; solo se usa con PUSH_IOS_TRANSPORT=apns).\n'
+      printf 'APNS_KEY_P8="%s"\n' "$(cat "$APNS_P8_FILE")"
+    fi
+    if [[ -s "$FCM_SA_JSON_FILE" ]]; then
+      printf '# FCM service-account JSON (riel default). GoogleAuth lo lee de GOOGLE_APPLICATION_CREDENTIALS.\n'
+      printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$FCM_SA_JSON_FILE"
+    fi
+  } > "$NOTIFICATION_DIR/env/dev.secret.env"
+
+  c_green "[secrets] OK · keypair + HMAC sincronizados en los 9 dev.secret.env"
+}
+
+# ── Helpers de puerto / proceso ──────────────────────────────────────────────
+port_in_use() { lsof -ti "tcp:$1" -sTCP:LISTEN >/dev/null 2>&1; }
+pid_on_port() { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null | head -1; }
+
+# Carga env/dev.env + env/dev.secret.env de un servicio en el entorno actual y lo exporta.
+# `set -a` exporta toda var asignada; soporta valores multilínea entre comillas (los PEM).
+load_env() {
+  local svc_dir="$1"
+  set -a
+  # shellcheck disable=SC1090
+  [[ -f "$svc_dir/env/dev.env" ]] && source "$svc_dir/env/dev.env"
+  # shellcheck disable=SC1090
+  [[ -f "$svc_dir/env/dev.secret.env" ]] && source "$svc_dir/env/dev.secret.env"
+  set +a
+}
+
+# start_service <nombre> <dir> <http_port> [extra_env_kv...]
+# Arranca node dist/main.js en background con el env del servicio cargado en un subshell aislado.
+start_service() {
+  local name="$1" dir="$2" http_port="$3"; shift 3
+  local logf="$LOGS_DIR/$name.log"
+  local pidf="$PIDS_DIR/$name.pid"
+
+  if port_in_use "$http_port"; then
+    c_blue "[$name] puerto $http_port YA ocupado (pid $(pid_on_port "$http_port")) — no arranco de nuevo (idempotente)"
+    return 0
+  fi
+  if [[ ! -f "$dir/dist/main.js" ]]; then
+    c_red "[$name] FALTA $dir/dist/main.js — construí el servicio antes de bootear"
+    return 1
+  fi
+
+  c_blue "[$name] arrancando (HTTP :$http_port) → log: $logf"
+  (
+    cd "$dir"
+    load_env "$dir"
+    # Overrides explícitos pasados por argumento (kv 'VAR=value').
+    for kv in "$@"; do export "${kv?}"; done
+    exec node dist/main.js
+  ) >"$logf" 2>&1 &
+  echo $! > "$pidf"
+  log "pid $(cat "$pidf")"
+}
+
+# wait_health <nombre> <url> [timeout_s]
+wait_health() {
+  local name="$1" url="$2" timeout="${3:-40}" i=0
+  printf '  [%s] esperando health %s ' "$name" "$url"
+  while (( i < timeout )); do
+    if curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+      c_green "OK"
+      return 0
+    fi
+    printf '.'
+    sleep 1
+    ((i++))
+  done
+  c_red "TIMEOUT (${timeout}s) — revisá $LOGS_DIR/$name.log"
+  return 1
+}
+
+cmd_start() {
+  c_blue "== boot-passenger-stack :: START =="
+  ensure_secrets
+
+  # Orden: places + identity + trip + dispatch (downstream) → bff (los agrega).
+  start_service "places"   "$PLACES_DIR"   3013
+  start_service "identity" "$IDENTITY_DIR" 3091
+  start_service "trip"     "$TRIP_DIR"     3002
+  start_service "dispatch" "$DISPATCH_DIR" 3003
+  start_service "fleet"    "$FLEET_DIR"    3012
+  start_service "payment"  "$PAYMENT_DIR"  3005
+  start_service "rating"   "$RATING_DIR"   3010
+
+  # notification: PUSH en 'live' SOLO si está el service-account JSON de FCM; si no, 'sandbox' (loguea).
+  # Así el registro del device-token funciona siempre; el ENVÍO real se habilita al caer el JSON (sin tocar código).
+  local push_mode="sandbox"
+  if [[ -s "$FCM_SA_JSON_FILE" ]]; then
+    push_mode="live"
+    log "[notification] FCM service-account presente → VEO_PUSH_MODE=live"
+  else
+    c_blue "[notification] falta $FCM_SA_JSON_FILE → VEO_PUSH_MODE=sandbox (registro OK; el envío real espera el JSON)"
+  fi
+  # Seed IDEMPOTENTE de plantillas (upsert por key). El engine renderiza el push/SMS/email desde la
+  # tabla `templates`; sin seed, TODO push falla con "Plantilla no encontrada". Best-effort: si falla,
+  # avisa pero no aborta el boot. Solo corre si el servicio se va a levantar (puerto libre).
+  if ! port_in_use 3008; then
+    c_blue "[notification] seed de plantillas (idempotente)…"
+    ( cd "$NOTIFICATION_DIR" && load_env "$NOTIFICATION_DIR" && pnpm -s db:seed ) >/dev/null 2>&1 \
+      && log "[notification] plantillas seedeadas" \
+      || c_red "[notification] seed de plantillas falló — los push no renderizarán (revisá Postgres)"
+  fi
+  start_service "notification" "$NOTIFICATION_DIR" 3008 "VEO_PUSH_MODE=$push_mode"
+
+  start_service "bff"      "$BFF_DIR"      4001
+
+  echo
+  wait_health "identity" "http://localhost:3091/health" 45
+  # places ahora excluye health del prefijo (/health, como trip/dispatch/identity/payment/rating).
+  wait_health "places"   "http://localhost:3013/health" 45
+  # trip/dispatch/fleet montan health en /health (FUERA del prefijo /api/v1, como el bff).
+  wait_health "trip"     "http://localhost:3002/health" 45
+  wait_health "dispatch" "http://localhost:3003/health" 45
+  # fleet ahora excluye health del prefijo (/health, como trip/dispatch/identity/payment/rating).
+  wait_health "fleet"    "http://localhost:3012/health" 45
+  # payment y rating excluyen health del prefijo (/health, como trip/dispatch/identity).
+  wait_health "payment"  "http://localhost:3005/health"        45
+  wait_health "rating"   "http://localhost:3010/health"        45
+  # notification monta health en /health (excluido del prefijo /api/v1, uniforme con el resto).
+  wait_health "notification" "http://localhost:3008/health"    45
+  # identity ahora monta health en /health (FUERA del prefijo /api/v1, como trip/dispatch/bff), por lo
+  # que el readiness del BFF (que prueba el downstream identity en /health sin prefijo) ya da 200.
+  # Igual esperamos el LIVENESS del BFF (/health/live) para confirmar que el proceso está ARRIBA.
+  wait_health "bff"      "http://localhost:4001/health/live"   45
+
+  echo
+  c_green "== stack del pasajero ARRIBA =="
+  log "identity : http://localhost:3091  (gRPC 50051)  · docs /docs"
+  log "places   : http://localhost:3013  (gRPC 50063)  · docs /docs"
+  log "payment  : http://localhost:3005  (gRPC 50055)  · health /health   · cobro trip.completed (sandbox)"
+  log "rating   : http://localhost:3010  (gRPC 50060)  · health /health"
+  log "notif    : http://localhost:3008  · health /health   · push FCM (device-token registry)"
+  log "bff      : http://localhost:4001  · docs /docs   · health /health"
+  log "logs     : $LOGS_DIR/{identity,places,bff,payment,rating}.log"
+  log "código de verificación de correo (sandbox) → $LOGS_DIR/identity.log"
+}
+
+cmd_stop() {
+  c_blue "== boot-passenger-stack :: STOP =="
+  for name in bff notification rating payment fleet dispatch trip identity places; do
+    local pidf="$PIDS_DIR/$name.pid"
+    if [[ -f "$pidf" ]]; then
+      local pid; pid="$(cat "$pidf")"
+      if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null && log "[$name] matado (pid $pid)"
+      else
+        log "[$name] pid $pid ya no corre"
+      fi
+      rm -f "$pidf"
+    else
+      log "[$name] sin pid file (no lo arranqué yo)"
+    fi
+  done
+}
+
+cmd_status() {
+  c_blue "== boot-passenger-stack :: STATUS =="
+  for entry in "identity:3091:http://localhost:3091/health" \
+               "places:3013:http://localhost:3013/health" \
+               "payment:3005:http://localhost:3005/health" \
+               "rating:3010:http://localhost:3010/health" \
+               "notification:3008:http://localhost:3008/health" \
+               "bff:4001:http://localhost:4001/health/live"; do
+    IFS=: read -r name port url <<<"$entry"
+    url="${entry#*:*:}"
+    if port_in_use "$port"; then
+      if curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+        c_green "[$name] :$port UP + health OK"
+      else
+        c_red "[$name] :$port ocupado pero health NO responde"
+      fi
+    else
+      log "[$name] :$port libre (apagado)"
+    fi
+  done
+}
+
+case "${1:-start}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop; cmd_start ;;
+  status)  cmd_status ;;
+  *) c_red "uso: $0 [start|stop|restart|status]"; exit 1 ;;
+esac

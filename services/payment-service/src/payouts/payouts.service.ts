@@ -1,0 +1,180 @@
+/**
+ * PayoutsService — liquidación semanal por conductor (BR-P05).
+ * Cron lunes: agrega los cobros capturados de la semana previa, aplica mínimo liquidable y
+ * retención (HELD) si el conductor está en review (señal driver.flagged). Publica payout.processed.
+ */
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
+import type Redis from 'ioredis';
+import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
+import { ForbiddenError, uuidv7 } from '@veo/utils';
+import type { AuthenticatedUser } from '@veo/auth';
+import { PrismaService } from '../infra/prisma.service';
+import { REDIS } from '../infra/redis';
+import { aggregatePayouts, periodLabel, type DriverEarningRow } from './payout.policy';
+import type { Env } from '../config/env.schema';
+
+const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
+const CRON_LOCK_KEY = 'veo:payment:lock:weekly-payouts';
+const CRON_LOCK_TTL_SECONDS = 600;
+const STEPUP_MAX_AGE_SECONDS = 300;
+
+export interface PayoutRunSummary {
+  periodStart: string;
+  periodEnd: string;
+  processed: number;
+  held: number;
+  totalAmountCents: number;
+}
+
+@Injectable()
+export class PayoutsService {
+  private readonly logger = new Logger(PayoutsService.name);
+  private readonly minCents: number;
+  private readonly stepUpCents: number;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(REDIS) private readonly redis: Redis,
+    config: ConfigService<Env, true>,
+  ) {
+    this.minCents = config.getOrThrow<number>('PAYOUT_MIN_CENTS');
+    this.stepUpCents = config.getOrThrow<number>('PAYOUT_STEPUP_CENTS');
+  }
+
+  /** Cron semanal: lunes 06:00 (hora del servidor). Liquida la semana previa [lun, lun). */
+  @Cron('0 6 * * 1')
+  async weeklyCron(): Promise<void> {
+    // Lock distribuido: solo una instancia corre el cron.
+    const acquired = await this.redis.set(CRON_LOCK_KEY, '1', 'EX', CRON_LOCK_TTL_SECONDS, 'NX');
+    if (acquired !== 'OK') return;
+    const { start, end } = previousWeek(new Date());
+    try {
+      const summary = await this.runPayouts(start, end);
+      this.logger.log(`Payouts semanales: ${summary.processed} pagados, ${summary.held} retenidos`);
+    } catch (err) {
+      this.logger.error({ err }, 'Cron de payouts falló');
+    }
+  }
+
+  /**
+   * Corre la liquidación para un período. Idempotente por conductor+período (UNIQUE).
+   * Si el operador la dispara manualmente y el total supera S/5000, exige step-up MFA fresco (BR-S07).
+   */
+  async runPayouts(start: Date, end: Date, operator?: AuthenticatedUser): Promise<PayoutRunSummary> {
+    const rows = await this.collectEarnings(start, end);
+    const aggregated = aggregatePayouts(rows, this.minCents);
+    const projectedTotal = aggregated.reduce((sum, p) => sum + p.amountCents, 0);
+
+    if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
+      throw new ForbiddenError(
+        `Liquidación por ${projectedTotal} céntimos supera S/5000: requiere verificación MFA fresca (step-up)`,
+      );
+    }
+
+    const label = periodLabel(start, end);
+    let processed = 0;
+    let held = 0;
+    let totalAmountCents = 0;
+
+    for (const agg of aggregated) {
+      const existing = await this.prisma.read.payout.findUnique({
+        where: { driverId_periodStart_periodEnd: { driverId: agg.driverId, periodStart: start, periodEnd: end } },
+      });
+      if (existing) continue; // idempotencia: ya liquidado este período.
+
+      const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
+      await this.prisma.write.$transaction(async (tx) => {
+        const payout = await tx.payout.create({
+          data: {
+            id: uuidv7(),
+            driverId: agg.driverId,
+            periodStart: start,
+            periodEnd: end,
+            grossCents: agg.grossCents,
+            commissionCents: agg.commissionCents,
+            amountCents: agg.amountCents,
+            status: flagged ? 'HELD' : 'PROCESSED',
+            heldReason: flagged ? 'driver_in_review' : null,
+            processedAt: flagged ? null : new Date(),
+          },
+        });
+        if (!flagged) {
+          const envelope = createEnvelope({
+            eventType: 'payout.processed',
+            producer: 'payment-service',
+            payload: {
+              payoutId: payout.id,
+              driverId: payout.driverId,
+              amountCents: payout.amountCents,
+              period: label,
+            },
+          });
+          await enqueueOutbox(tx, envelope, payout.id);
+        }
+      });
+
+      if (flagged) {
+        held += 1;
+      } else {
+        processed += 1;
+        totalAmountCents += agg.amountCents;
+      }
+    }
+
+    return { periodStart: start.toISOString(), periodEnd: end.toISOString(), processed, held, totalAmountCents };
+  }
+
+  listByDriver(driverId: string): Promise<unknown[]> {
+    return this.prisma.read.payout.findMany({
+      where: { driverId },
+      orderBy: { periodStart: 'desc' },
+    });
+  }
+
+  /** Retención de payouts del conductor en review (consumido desde driver.flagged). */
+  async holdDriver(driverId: string): Promise<void> {
+    await this.redis.sadd(FLAGGED_DRIVERS_KEY, driverId);
+  }
+
+  private async collectEarnings(start: Date, end: Date): Promise<DriverEarningRow[]> {
+    const payments = await this.prisma.read.payment.findMany({
+      where: {
+        status: 'CAPTURED',
+        driverId: { not: null },
+        capturedAt: { gte: start, lt: end },
+      },
+      select: { driverId: true, grossCents: true, commissionCents: true, tipCents: true },
+    });
+    return payments
+      .filter((p): p is { driverId: string; grossCents: number; commissionCents: number; tipCents: number } =>
+        p.driverId !== null,
+      )
+      .map((p) => ({
+        driverId: p.driverId,
+        grossCents: p.grossCents,
+        commissionCents: p.commissionCents,
+        tipCents: p.tipCents,
+      }));
+  }
+
+  private hasFreshMfa(user: AuthenticatedUser): boolean {
+    if (!user.mfaVerifiedAt) return false;
+    const ageSeconds = Math.floor(Date.now() / 1000) - user.mfaVerifiedAt;
+    return ageSeconds <= STEPUP_MAX_AGE_SECONDS;
+  }
+}
+
+/** Semana previa [lunes 00:00, lunes 00:00) respecto a `now` (UTC). */
+export function previousWeek(now: Date): { start: Date; end: Date } {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay(); // 0=domingo..6=sábado
+  const daysSinceMonday = (dow + 6) % 7;
+  const thisMonday = new Date(d);
+  thisMonday.setUTCDate(d.getUTCDate() - daysSinceMonday);
+  const lastMonday = new Date(thisMonday);
+  lastMonday.setUTCDate(thisMonday.getUTCDate() - 7);
+  return { start: lastMonday, end: thisMonday };
+}

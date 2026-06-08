@@ -1,0 +1,133 @@
+/**
+ * Entidades del dominio de registro (alta de socio conductor). Sin dependencias de UI ni de la
+ * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
+ * global de la solicitud que conmuta la navegación.
+ */
+import type {
+  AddDocumentRequest,
+  DriverBiometricEnrollRequest,
+  DriverBiometricEnrollResult,
+  DriverDocument,
+  DriverDocumentSimpleStatus,
+  DriverOnboardRequest,
+  DriverPersonalData,
+  DriverPersonalDataRequest,
+  DriverVehicleView,
+  RegisterVehicleRequest,
+} from '@veo/api-client';
+
+/**
+ * Re-exporta los contratos del cliente de API que consumen las capas data/presentation del alta,
+ * para que dependan del dominio y no del paquete directamente.
+ *  - `RegistrationDocumentRequest` (= addDocumentRequest): body de `POST /drivers/me/documents`.
+ *  - `RegistrationDocumentView` (= driverDocument): documento real con `simpleStatus` para los chips.
+ *  - `LicenseOnboardInput` (= driverOnboardRequest): alta de licencia.
+ *  - `BiometricEnrollInput`/`Result`: enrolamiento del rostro de referencia (base64).
+ *  - `PersonalDataInput`/`PersonalDataView` (= driverPersonalData[Request]): `PATCH /drivers/me/personal`.
+ *  - `VehicleRegisterInput`/`VehicleView` (= registerVehicleRequest / driverVehicleView): `/drivers/vehicles`.
+ */
+export type RegistrationDocumentRequest = AddDocumentRequest;
+export type RegistrationDocumentView = DriverDocument;
+export type RegistrationDocumentServerStatus = DriverDocumentSimpleStatus;
+export type LicenseOnboardInput = DriverOnboardRequest;
+export type BiometricEnrollInput = DriverBiometricEnrollRequest;
+export type BiometricEnrollResult = DriverBiometricEnrollResult;
+export type PersonalDataInput = DriverPersonalDataRequest;
+export type PersonalDataView = DriverPersonalData;
+export type VehicleRegisterInput = RegisterVehicleRequest;
+export type VehicleView = DriverVehicleView;
+
+/** Tipo de vehículo declarado por el conductor en el alta. */
+export type VehicleType = 'MOTO' | 'CAR';
+
+/** Paso 1: datos personales tal como aparecen en el DNI. */
+export interface PersonalData {
+  fullName: string;
+  /** DNI peruano (8 dígitos; el formateo con espacios es solo de presentación). */
+  dni: string;
+  /** Fecha de nacimiento en formato DD/MM/AAAA (validación fina la hará el backend). */
+  birthdate: string;
+}
+
+/** Paso 2: datos del vehículo. */
+export interface VehicleData {
+  type: VehicleType;
+  plate: string;
+  brand: string;
+  year: string;
+  model: string;
+}
+
+/** Documentos requeridos en el alta (paso 3). */
+export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION';
+
+/**
+ * Mapea el tipo del wizard al `type` que espera el backend (`addDocumentRequest.type` /
+ * `driverDocument.type`, catálogo de fleet). La licencia se registra como `LICENSE_A1`.
+ */
+export function registrationDocTypeToBackend(type: RegistrationDocumentType): string {
+  switch (type) {
+    case 'LICENSE':
+      return 'LICENSE_A1';
+    case 'SOAT':
+      return 'SOAT';
+    case 'VEHICLE_REGISTRATION':
+      return 'VEHICLE_REGISTRATION';
+    default:
+      return type;
+  }
+}
+
+/** Estado de carga de un documento del alta. */
+export type DocumentUploadStatus = 'pending' | 'uploaded';
+
+export interface RegistrationDocument {
+  type: RegistrationDocumentType;
+  status: DocumentUploadStatus;
+}
+
+/**
+ * Captura facial del alta (KYC). Referencia OPACA emitida por el proveedor de captura/backend; la
+ * app nunca manipula la imagen cruda (regla de privacidad: el rostro solo verifica identidad).
+ */
+export interface FaceCapture {
+  /** Referencia opaca de la sesión de captura (liveness + match). */
+  ref: string;
+  /** Score informativo [0..1] para la UI. */
+  score: number;
+  /** Marca de tiempo ISO de la captura. */
+  capturedAt: string;
+  /**
+   * Foto de referencia en base64 (sin prefijo data:) para `POST /drivers/biometric/enroll`. Solo la
+   * emite un proveedor de captura REAL; el stub la deja `undefined` (no hay imagen cruda en demo).
+   */
+  photoBase64?: string;
+}
+
+/**
+ * Estado global del registro del conductor. Conmuta la navegación raíz:
+ *  - `not_started` / `in_progress` → wizard de 4 pasos
+ *  - `in_review` → pantalla "Estamos revisando tus datos"
+ *  - `approved` → app operativa (tabs)
+ *  - `rejected` → wizard para corregir (reservado; el backend definirá el detalle)
+ */
+export type RegistrationStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'in_review'
+  | 'approved'
+  | 'rejected';
+
+/** Borrador completo del registro que se envía al backend al finalizar el wizard. */
+export interface RegistrationDraft {
+  personal: PersonalData;
+  vehicle: VehicleData;
+  documents: RegistrationDocument[];
+  /** Referencia de la captura facial (null mientras no se complete el paso 4). */
+  faceCaptureRef: string | null;
+}
+
+/** Resultado del envío del alta (lo que el backend responde sobre el estado de la solicitud). */
+export interface RegistrationSubmissionResult {
+  status: RegistrationStatus;
+}

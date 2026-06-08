@@ -1,0 +1,7 @@
+# Patch de replicas y resources para el entorno staging
+# En prod aumentar, en dev reducir
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: PLACEHOLDER }
+spec:
+  replicas: 2

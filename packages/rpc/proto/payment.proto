@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package veo.payment.v1;
+
+service PaymentService {
+  rpc GetPayment (GetPaymentRequest) returns (PaymentReply);
+  // Cobro canónico de un viaje, por trip_id (re-entrada del recibo). Resuelve el Payment del cobro
+  // determinista del viaje (dedup_key 'trip-completed:{tripId}'). found=false si el viaje no tiene cobro.
+  rpc GetPaymentByTrip (GetPaymentByTripRequest) returns (PaymentReply);
+}
+
+message GetPaymentRequest {
+  string id = 1;
+}
+
+message GetPaymentByTripRequest {
+  string trip_id = 1;
+}
+
+message PaymentReply {
+  string id = 1;
+  string trip_id = 2;
+  string method = 3;
+  string status = 4;
+  int32 amount_cents = 5;
+  int32 gross_cents = 6;
+  int32 commission_cents = 7;
+  int32 fee_cents = 8;
+  string external_ref = 9;
+  bool found = 10;
+  int32 tip_cents = 11;
+  // Checkout asíncrono (ProntoPaga): presentes cuando el cobro espera pago fuera de banda
+  // (Yape deepLink, QR, PagoEfectivo CIP). "" / 0 cuando no aplica (proto3 sin presence explícita).
+  // El recibo (by-trip) los expone como nullable. PENDING hasta que el webhook capture.
+  string external_uid = 12;
+  string checkout_url = 13;
+  string qr_code = 14;          // data-URI (data:image/png;base64,...)
+  string deep_link = 15;
+  string cip = 16;
+  string checkout_expires_at = 17;  // ISO-8601; "" si no aplica
+  // Razón ESTRUCTURADA del fallo del cobro (Payment.failureReason). Presente cuando el cobro cayó a DEBT
+  // (p.ej. `method_unavailable:PAGOEFECTIVO` = el método no está habilitado en el comercio; o el motivo
+  // del riel: declined, yape_insufficient_funds…). "" cuando no hubo fallo (proto3 sin presence). El BFF
+  // la re-mapea a null y la app la muestra honesta por-método ("PagoEfectivo no está disponible ahora").
+  string failure_reason = 18;
+}

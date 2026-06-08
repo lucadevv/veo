@@ -1,0 +1,9 @@
+{
+  "options": {
+    "paths": { "root": "/data", "mbtiles": "", "styles": "styles", "fonts": "fonts", "sprites": "sprites" }
+  },
+  "styles": {
+    "veo-dark": { "style": "veo-dark/style.json" }
+  },
+  "data": { "region": { "mbtiles": "region.mbtiles" } }
+}

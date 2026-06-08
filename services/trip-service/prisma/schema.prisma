@@ -1,0 +1,277 @@
+// trip-service · esquema Postgres (schema lógico "trip")
+// FOUNDATION §8. Dueño del ciclo de vida del viaje: máquina de estados (BR-T02),
+// tarifa inmutable (BR-T01/T05), cancelación (BR-T03) y modo niño (BR-T07).
+// La identidad del pasajero/conductor vive en identity-service; el vehículo en fleet-service.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["trip"]
+}
+
+/// Estados del viaje (BR-T02). Coincide con TripStatus de @veo/shared-types.
+enum TripStatus {
+  /// Viaje programado (Ola 2B): scheduledFor futuro; el scheduler lo activa a REQUESTED a la hora.
+  SCHEDULED
+  REQUESTED
+  ASSIGNED
+  ACCEPTED
+  ARRIVING
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+
+  /// PUJA / reasignación (ADR 010 §3.1, decisión #4): el conductor canceló tras aceptar (pre-recojo)
+  /// y el viaje re-abre la puja en vez de quedar abandonado. NO terminal: → ASSIGNED | EXPIRED |
+  /// CANCELLED_BY_PASSENGER. Cierra el catastrófico #4 (pasajero abandonado tras cancel del conductor).
+  REASSIGNING
+
+  CANCELLED_BY_PASSENGER
+  CANCELLED_BY_DRIVER
+  EXPIRED
+  FAILED
+
+  @@schema("trip")
+}
+
+/// Método de pago elegido por el pasajero. Coincide con PaymentMethod de @veo/shared-types.
+enum PaymentMethod {
+  YAPE
+  PLIN
+  CASH
+  CARD
+  /// PagoEfectivo (ProntoPaga): el pasajero recibe un CIP y paga en efectivo. Cobro asíncrono por
+  /// webhook. Se persiste en el trip al crearlo; el cobro real lo gestiona payment-service.
+  PAGOEFECTIVO
+
+  @@schema("trip")
+}
+
+/// Quién canceló el viaje (BR-T03). SYSTEM cubre expiración/fallo automático.
+enum CancelledBy {
+  PASSENGER
+  DRIVER
+  SYSTEM
+
+  @@schema("trip")
+}
+
+/// Modo de despacho/pricing del viaje (ADR 011). Coincide con PricingMode de @veo/shared-types.
+/// PUJA = "proponé tu precio" (ADR 010); FIXED = tarifa fija calculada estilo Uber (BR-T05). Se
+/// CONGELA por viaje en Trip.dispatchMode (regla de oro resolve-once-persist-forever): reasignación y
+/// activación de programados leen ESTE modo del viaje, NUNCA re-resuelven de la config admin actual.
+enum PricingMode {
+  PUJA
+  FIXED
+
+  @@schema("trip")
+}
+
+/// Tipo de vehículo solicitado (Ola 2B · tier moto-taxi). Coincide con VehicleType de
+/// @veo/shared-types. Se deriva de la categoría elegida (MOTO ⇒ vehicleType MOTO) y se propaga
+/// a dispatch para filtrar el matching por tipo de vehículo del conductor. Default CAR.
+enum VehicleType {
+  CAR
+  MOTO
+
+  @@schema("trip")
+}
+
+/// Solicitudes especiales del pasajero al conductor (BE-2). El conductor las VE antes de aceptar
+/// (viajan en trip.bid_posted → board → vista de puja del conductor). "Parada" NO va acá: es un waypoint.
+enum SpecialRequest {
+  PET
+  LUGGAGE
+  CHILD_SEAT
+
+  @@schema("trip")
+}
+
+/// Viaje: agregado raíz del dominio. La tarifa se fija en REQUESTED y es inmutable (BR-T01)
+/// salvo cambio de destino explícito aprobado por el pasajero.
+model Trip {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  passengerId String  @map("passenger_id") @db.Uuid
+  driverId    String? @map("driver_id") @db.Uuid
+  vehicleId   String? @map("vehicle_id") @db.Uuid
+
+  /// Origen/destino como lat/lon (geography reservado para una iteración con PostGIS).
+  originLat   Float @map("origin_lat")
+  originLon   Float @map("origin_lon")
+  destLat     Float @map("dest_lat")
+  destLon     Float @map("dest_lon")
+
+  /// Paradas intermedias ORDENADAS (Ola 2B · waypoints), array JSON de {lat,lon} (máx 3). Entre
+  /// origen y destino; la ruta y la tarifa (BR-T05) las incluyen. Null/[] = viaje directo.
+  waypoints   Json?   @map("waypoints")
+
+  /// Hora programada del viaje (Ola 2B · viajes programados). Si está presente el viaje nace en
+  /// estado SCHEDULED y el scheduler lo activa (→ REQUESTED) restando el lead time. Null = inmediato.
+  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz
+  /// Marca de cuándo el scheduler activó el viaje programado (idempotencia del cron). Null si aún no.
+  activatedAt  DateTime? @map("activated_at") @db.Timestamptz
+
+  /// Tipo de vehículo solicitado (Ola 2B · moto-taxi). Se propaga a dispatch para filtrar el
+  /// matching: un viaje MOTO solo se ofrece a conductores con vehículo MOTO. Default CAR.
+  vehicleType VehicleType @default(CAR) @map("vehicle_type")
+
+  /// Modo de despacho/pricing CONGELADO del viaje (ADR 011 · resolve-once-persist-forever). Se resuelve
+  /// UNA vez en createTrip y NO cambia el resto de la vida del viaje: reasignación y activación de
+  /// programados leen este modo, nunca re-resuelven de la config admin actual. Default FIXED: las filas
+  /// LEGACY son todas precio-fijo (el flujo previo sin puja). M1 lo persiste desde la rama isBid actual
+  /// (isBid ⇒ PUJA, si no ⇒ FIXED); M3 cambia la derivación por el ModeResolver pero sigue persistiendo aquí.
+  dispatchMode PricingMode @default(FIXED) @map("dispatch_mode")
+
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz
+  assignedAt  DateTime? @map("assigned_at") @db.Timestamptz
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz
+  arrivingAt  DateTime? @map("arriving_at") @db.Timestamptz
+  arrivedAt   DateTime? @map("arrived_at") @db.Timestamptz
+  startedAt   DateTime? @map("started_at") @db.Timestamptz
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz
+
+  /// Re-entrada del cierre post-viaje. Marca de cuándo el PASAJERO dio por cerrado el post-viaje
+  /// (recibo + confirmar efectivo + rating). COMPLETED sigue siendo TERMINAL (BR-T02 no cambia): este
+  /// campo NO es un estado, es un flag de UX. El "pending settlement" del pasajero = su ÚLTIMO viaje
+  /// COMPLETED con passengerClosedAt = null; al cerrarlo se sella aquí (idempotente) y deja de aparecer.
+  /// Null = aún no cerrado (la app debe re-ofrecer el cierre tras un reload). Filas LEGACY quedan null.
+  passengerClosedAt DateTime? @map("passenger_closed_at") @db.Timestamptz
+
+  /// Tarifa total en céntimos PEN (BR-T05). Inmutable salvo cambio de destino (BR-T01).
+  fareCents       Int           @map("fare_cents")
+
+  /// PUJA (ADR 010 §4 · N7): precio ACORDADO al aceptar la oferta, escrito UNA SOLA VEZ por
+  /// `applyAgreedFare`. Sirve de guard idempotente-por-EVENTO (no por valor): una redelivery
+  /// at-least-once del `dispatch.offer_accepted` tras un `changeDestination` (que recalculó
+  /// `fareCents`) NO puede revertir la tarifa, porque el agreed-fare ya quedó aplicado. Null = la
+  /// puja aún no acordó precio (viaje legacy sin bid, o `offer_accepted` todavía no consumido).
+  agreedFareCents Int?          @map("agreed_fare_cents")
+  currency        String        @default("PEN")
+  surgeMultiplier Decimal       @default(1.0) @map("surge_multiplier") @db.Decimal(3, 2)
+  distanceMeters  Int           @map("distance_meters")
+  durationSeconds Int           @map("duration_seconds")
+  paymentMethod   PaymentMethod @map("payment_method")
+  status          TripStatus    @default(REQUESTED)
+  routePolyline   String?       @map("route_polyline")
+
+  /// Categoría/opción de tarifa elegida por el pasajero en la cotización (quoteOption.id,
+  /// p.ej. veo_economico|veo_confort|veo_xl). El multiplicador por categoría lo aplica la
+  /// PREVISUALIZACIÓN en public-bff (maps/fare.ts); aquí solo se PERSISTE la elección: la tarifa
+  /// firme (fareCents) sigue la fórmula base BR-T05 y no se recalcula por categoría (BR-T05/BR-T01).
+  category        String?       @map("category")
+
+  /// Modo niño (BR-T07): solo se guarda el hash bcrypt del código, nunca el código en claro.
+  childMode     Boolean @default(false) @map("child_mode")
+  childCodeHash String? @map("child_code_hash")
+
+  /// Código de promoción elegido al pedir el viaje (Ola 2A). Se PERSISTE y se propaga en
+  /// trip.completed para que payment-service lo canjee al cobrar (el descuento reduce SOLO lo que
+  /// paga el pasajero; comisión y propina intactas). Null si no se aplicó promo.
+  promoCode     String? @map("promo_code")
+
+  /// Solicitudes especiales del pasajero (mascota/equipaje/silla de niño, BE-2). El conductor las ve
+  /// antes de aceptar. Vacío = ninguna. "Parada" no va acá (es un waypoint del trayecto).
+  specialRequests SpecialRequest[] @default([]) @map("special_requests")
+
+  cancelledBy        CancelledBy? @map("cancelled_by")
+  cancellationReason String?      @map("cancellation_reason")
+  /// Penalización de cancelación en céntimos PEN (BR-T03).
+  penaltyCents       Int          @default(0) @map("penalty_cents")
+
+  /// Veces que el viaje se RE-ASIGNÓ tras una cancelación del conductor post-accept (ADR 010 #4).
+  /// Tope (env TRIP_MAX_REASSIGN, default 3): superado el tope NO se re-puja más — el viaje cae a un
+  /// terminal HONESTO (FAILED) y se notifica al pasajero (callejón sin salida con razón, no bucle infinito).
+  reassignCount      Int          @default(0) @map("reassign_count")
+
+  /// H13 · sello MONOTÓNICO del ciclo de negociación. A DIFERENCIA de `reassignCount` (que rebid resetea
+  /// a 0), este NUNCA decrece: se incrementa cada vez que la negociación ABRE o RE-ABRE (createTrip-puja=1,
+  /// rebid=+1, reassignAfterDriverCancel=+1). Viaja en trip.bid_posted/trip.reassigning, dispatch lo
+  /// estampa en dispatch.offer_accepted, y applyAgreedFare lo exige en el `where` atómico: una redelivery
+  /// Kafka STALE de un offer_accepted de un ciclo VIEJO (seq menor) NO matchea la fila vigente → no-op,
+  /// y no escribe la tarifa rancia del conductor del ciclo anterior. Viajes legacy sin puja quedan en 0.
+  negotiationSeq     Int          @default(0) @map("negotiation_seq")
+
+  /// Clave de idempotencia de creación (header Idempotency-Key del BFF).
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  events TripEvent[]
+
+  /// Historial del pasajero (hot-path): SUS viajes ordenados por requestedAt DESC con tie-break por id
+  /// DESC para la paginación keyset (cursor). Postgres escanea el btree HACIA ATRÁS para el DESC, así que
+  /// un único índice ascendente sirve a ambos sentidos. Incluye `id` para que el comparador keyset
+  /// (requestedAt, id) < (cursorReqAt, cursorId) quede 100% cubierto por el índice (sin sort ni filtro
+  /// residual). Reemplaza al índice previo [passengerId, requestedAt] (prefijo, lo subsume).
+  @@index([passengerId, requestedAt, id])
+  @@index([driverId, status])
+  @@index([status])
+  /// Re-entrada del cierre: pending settlement = COMPLETED MÁS VIEJO del pasajero sin cerrar, orden FIFO
+  /// (completedAt asc). Índice compuesto que cubre el filtro (passengerId, status) y el orden (completedAt).
+  /// Candidato a índice PARCIAL `WHERE passenger_closed_at IS NULL` si el volumen lo pide (la cola de
+  /// pendientes es chica frente al histórico de COMPLETED); Prisma no modela índices parciales, habría que
+  /// agregarlo a mano en una migración SQL.
+  @@index([passengerId, status, completedAt])
+  /// El scheduler escanea viajes SCHEDULED con scheduledFor vencido (lead time): índice compuesto.
+  @@index([status, scheduledFor])
+  @@map("trips")
+  @@schema("trip")
+}
+
+/// Bitácora append-only de eventos de dominio del viaje (event sourcing ligero / auditoría).
+model TripEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId     String   @map("trip_id") @db.Uuid
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  eventType  String   @map("event_type")
+  payload    Json
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  @@index([tripId, occurredAt])
+  @@map("trip_events")
+  @@schema("trip")
+}
+
+/// Schedule de modo de pricing (ADR 011 · Tier 1 GLOBAL). SINGLETON: una sola fila de config (id fijo)
+/// que el ModeResolver lee para resolver PUJA|FIXED por horario. Reemplazo WHOLESALE en el PUT del admin
+/// (se sobrescribe `rules`+`defaultMode` enteros, se bumpea `version`). El schedule lo OWNE trip-service
+/// (admin-bff es stateless): co-locar acá evita un hop de red por cada createTrip (§3 ADR 011). Sin fila →
+/// el resolver degrada honestamente a defaultMode=PUJA con rules=[] (decisión §8.2). `rules` es un array
+/// JSON de { dayMask:1..127 (Lun=1..Dom=64), startMinute:0..1439, endMinute:0..1439, mode:PUJA|FIXED } en
+/// hora LOCAL de Lima (UTC-5, sin DST); la PRIMERA regla que matchea (día, minuto) gana.
+model PricingModeSchedule {
+  /// Singleton: una única fila de config global (Tier 1). Valor fijo 'GLOBAL'.
+  id          String      @id
+  /// Modo aplicado cuando ninguna regla matchea (§8.2 default = PUJA).
+  defaultMode PricingMode @default(PUJA) @map("default_mode")
+  /// Reglas horarias { dayMask, startMinute, endMinute, mode } evaluadas en orden; la primera que matchea gana.
+  rules       Json        @default("[]")
+  /// Versión MONOTÓNICA del schedule (se bumpea en cada PUT; viaja en pricing.mode_schedule_updated).
+  version     Int         @default(0)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("pricing_mode_schedule")
+  @@schema("trip")
+}
+
+/// Outbox (FOUNDATION §6). El insert ocurre en la MISMA transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("trip")
+}

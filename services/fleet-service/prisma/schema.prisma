@@ -1,0 +1,153 @@
+// fleet-service · esquema Postgres (schema lógico "fleet")
+// FOUNDATION §8. Dueño de: vehículos, documentos con vencimiento (Licencia A1, SOAT,
+// Tarjeta de propiedad, Antecedentes, ITV) e inspecciones técnicas trimestrales.
+// La identidad del conductor/pasajero vive en identity-service (referenciada por id, sin FK cross-schema).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["fleet"]
+}
+
+/// Tipo de documento de flota (BR-I04). Críticos: LICENSE_A1, SOAT, PROPERTY_CARD.
+enum FleetDocumentType {
+  LICENSE_A1
+  SOAT
+  PROPERTY_CARD
+  BACKGROUND_CHECK
+  ITV
+
+  @@schema("fleet")
+}
+
+/// Estado del documento. PENDING_REVIEW/REJECTED son manuales; VALID/EXPIRING_SOON/EXPIRED
+/// se derivan del vencimiento (cron BR-I04).
+enum FleetDocumentStatus {
+  PENDING_REVIEW
+  VALID
+  EXPIRING_SOON
+  EXPIRED
+  REJECTED
+
+  @@schema("fleet")
+}
+
+/// Dueño del documento: un conductor (driverId de identity) o un vehículo (id de fleet).
+enum FleetOwnerType {
+  DRIVER
+  VEHICLE
+
+  @@schema("fleet")
+}
+
+/// Estado documental agregado del vehículo (deriva de SOAT/ITV + seguro). BR-D04.
+enum VehicleDocStatus {
+  VALID
+  EXPIRING_SOON
+  EXPIRED
+
+  @@schema("fleet")
+}
+
+/// Tipo de vehículo (Ola 2B · tier moto-taxi). Coincide con VehicleType de @veo/shared-types.
+/// CAR = automóvil estándar (default histórico); MOTO = mototaxi. dispatch filtra el matching por
+/// este tipo (un viaje MOTO solo se ofrece a conductores con vehículo MOTO).
+enum VehicleType {
+  CAR
+  MOTO
+
+  @@schema("fleet")
+}
+
+/// Vehículo de la flota (BR-D04: año >= 2017; SOAT e ITV vigentes; inspección trimestral).
+model Vehicle {
+  id                 String           @id @db.Uuid
+  plate              String           @unique
+  make               String
+  model              String
+  year               Int
+  color              String
+  /// Ola 2B · tier moto-taxi: tipo de vehículo. Default CAR (compatibilidad con la flota existente).
+  vehicleType        VehicleType      @default(CAR) @map("vehicle_type")
+  fleetId            String?          @map("fleet_id")
+  /// Conductor que registró el vehículo en el onboarding self-service.
+  /// IMPORTANTE: `driver_id` es el **User.id** de identity-service (el `userId` del token propagado),
+  /// NO el id de perfil `Driver` de identity. fleet no conoce identity, así que guarda el sujeto de la
+  /// identidad propagada (User.id) tal cual; no traduce a id de perfil Driver. No confundir al operar.
+  /// Null para la flota cargada por el operador. Sin FK cross-schema (la identidad vive en identity).
+  driverId           String?          @map("driver_id") @db.Uuid
+  docStatus          VehicleDocStatus @default(VALID) @map("doc_status")
+  insuranceExpiresAt DateTime?        @map("insurance_expires_at") @db.Timestamptz
+  active             Boolean          @default(true)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  inspections Inspection[]
+
+  @@index([fleetId])
+  @@index([driverId])
+  @@index([docStatus])
+  @@map("vehicles")
+  @@schema("fleet")
+}
+
+/// Documento de conductor o vehículo con vencimiento (BR-I04).
+model FleetDocument {
+  id              String              @id @db.Uuid
+  ownerType       FleetOwnerType      @map("owner_type")
+  ownerId         String              @map("owner_id")
+  type            FleetDocumentType
+  documentNumber  String              @map("document_number")
+  issuedAt        DateTime?           @map("issued_at") @db.Timestamptz
+  expiresAt       DateTime?           @map("expires_at") @db.Timestamptz
+  fileS3Key       String?             @map("file_s3_key")
+  status          FleetDocumentStatus @default(PENDING_REVIEW)
+  /// Último hito de alerta (en días) ya emitido para no duplicar (30/15/7/1). BR-I04.
+  lastAlertedDays Int?                @map("last_alerted_days")
+  verifiedAt      DateTime?           @map("verified_at") @db.Timestamptz
+  verifiedBy      String?             @map("verified_by") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([ownerType, ownerId])
+  @@index([status, expiresAt])
+  @@map("fleet_documents")
+  @@schema("fleet")
+}
+
+/// Inspección técnica del vehículo (BR-D04: trimestral, nextDueAt = inspectedAt + 3 meses).
+model Inspection {
+  id          String   @id @db.Uuid
+  vehicleId   String   @map("vehicle_id") @db.Uuid
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  inspectorId String   @map("inspector_id") @db.Uuid
+  inspectedAt DateTime @map("inspected_at") @db.Timestamptz
+  passed      Boolean
+  notes       String?
+  nextDueAt   DateTime @map("next_due_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([vehicleId, inspectedAt])
+  @@map("inspections")
+  @@schema("fleet")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("fleet")
+}

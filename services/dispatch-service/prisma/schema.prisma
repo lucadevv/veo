@@ -1,0 +1,104 @@
+// dispatch-service · esquema Postgres (schema lógico "dispatch")
+// FOUNDATION §8. Dueño de: matching geoespacial (BR-T06), surge pricing y prioridad de pánico.
+// El "hot index" de ubicación de conductores NO vive aquí: vive en Redis (baja latencia, TTL).
+// Postgres guarda solo lo durable/auditable: ofertas (matches), zonas surge, proyección de stats y outbox.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["dispatch"]
+}
+
+/// Resultado de una oferta de viaje a un conductor (BR-T06).
+enum DispatchOutcome {
+  OFFERED
+  ACCEPTED
+  REJECTED
+  TIMEOUT
+
+  @@schema("dispatch")
+}
+
+/// Cada oferta secuencial emitida durante el matching de un viaje. Auditable.
+model DispatchMatch {
+  id              String          @id @db.Uuid
+  tripId          String          @map("trip_id") @db.Uuid
+  driverId        String          @map("driver_id") @db.Uuid
+  /// Score de ranking del algoritmo (BR-T06). Mayor = mejor candidato.
+  score           Decimal         @db.Decimal(12, 6)
+  /// Nº de oferta dentro del viaje (1 = primer candidato).
+  attempt         Int
+  /// Multiplier surge aplicado al momento de la oferta (1.0 = sin surge). Lo usa trip-service en la tarifa.
+  surgeMultiplier Decimal         @default(1.0) @map("surge_multiplier") @db.Decimal(3, 2)
+  outcome         DispatchOutcome @default(OFFERED)
+  offeredAt       DateTime        @default(now()) @map("offered_at") @db.Timestamptz
+  respondedAt     DateTime?       @map("responded_at") @db.Timestamptz
+
+  @@index([tripId])
+  @@index([driverId])
+  @@index([tripId, outcome])
+  @@map("dispatch_matches")
+  @@schema("dispatch")
+}
+
+/// Zona de surge: conjunto de celdas H3 (o bbox) donde el precio sube si demanda/oferta supera el umbral.
+model SurgeZone {
+  id                    String   @id @db.Uuid
+  name                  String
+  /// Celdas H3 (res 9) que componen la zona. Membresía exacta por celda.
+  cells                 Json     @default("[]")
+  /// Bounding box alternativo/complementario (cuando no se enumeran celdas).
+  minLat                Float?   @map("min_lat")
+  maxLat                Float?   @map("max_lat")
+  minLon                Float?   @map("min_lon")
+  maxLon                Float?   @map("max_lon")
+  /// Umbral demanda/oferta a partir del cual se activa el multiplier.
+  demandSupplyThreshold Decimal  @map("demand_supply_threshold") @db.Decimal(6, 2)
+  /// Multiplier aplicado cuando se supera el umbral (1.2 – 2.0).
+  multiplier            Decimal  @db.Decimal(3, 2)
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([active])
+  @@map("surge_zones")
+  @@schema("dispatch")
+}
+
+/// Proyección local de métricas del conductor para el scoring (BR-T06).
+/// Decisión: poblada por eventos (rating.created / driver.flagged / trip.completed / trip.cancelled),
+/// NUNCA por join cross-servicio. Evita acoplar dispatch a la BD de identity/rating y mantiene baja latencia.
+model DriverStats {
+  driverId       String    @id @map("driver_id") @db.Uuid
+  /// Rating promedio (1..5). Se actualiza con rating.created (media móvil) o driver.flagged (valor directo).
+  avgRating      Decimal   @default(5.0) @map("avg_rating") @db.Decimal(3, 2)
+  ratingCount    Int       @default(0) @map("rating_count")
+  completedTrips Int       @default(0) @map("completed_trips")
+  cancelledTrips Int       @default(0) @map("cancelled_trips")
+  /// Último viaje completado (para el término de inactividad del score).
+  lastTripAt     DateTime? @map("last_trip_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("driver_stats")
+  @@schema("dispatch")
+}
+
+/// Outbox (FOUNDATION §6). Insertado en la MISMA transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("dispatch")
+}

@@ -1,0 +1,464 @@
+{
+  "app": {
+    "name": "VEO Conductor"
+  },
+  "common": {
+    "accept": "Aceptar",
+    "reject": "Rechazar",
+    "cancel": "Cancelar",
+    "retry": "Reintentar",
+    "continue": "Continuar",
+    "back": "Atrás",
+    "close": "Cerrar",
+    "confirm": "Confirmar",
+    "loading": "Cargando…",
+    "save": "Guardar"
+  },
+  "errors": {
+    "generic": "Algo salió mal",
+    "genericDescription": "No pudimos completar la acción. Vuelve a intentarlo.",
+    "network": "Sin conexión",
+    "networkDescription": "Revisa tu conexión a internet e inténtalo de nuevo."
+  },
+  "auth": {
+    "title": "Inicia sesión",
+    "subtitle": "Ingresa con tu número de conductor registrado.",
+    "phoneLabel": "Número de teléfono",
+    "phoneHelper": "Formato Perú, ej. +51987654321",
+    "requestOtp": "Enviar código",
+    "codeLabel": "Código de verificación",
+    "codeHelper": "Te enviamos un SMS con un código de 6 dígitos",
+    "verify": "Verificar e ingresar",
+    "changeNumber": "Cambiar número",
+    "otpSent": "Código enviado a {{phone}}",
+    "invalidPhone": "Ingresa un teléfono peruano válido",
+    "invalidCode": "El código debe tener 6 dígitos",
+    "sessionExpired": "Tu sesión expiró. Vuelve a ingresar para continuar.",
+    "biometricRelogin": "Entrar con Face ID o huella",
+    "profileLoadFailed": "No pudimos cargar tu perfil de conductor.",
+    "tagline": "Maneja. Gana. Protegido.",
+    "loginTitle": "Ingresa a\nVEO Conductores",
+    "loginSubtitle": "Tu cuenta de socio conductor",
+    "faceIdTitle": "Ingresar con Face ID",
+    "faceIdBody": "Accede de forma rápida y segura",
+    "useCodeInstead": "Usar código en su lugar",
+    "phoneDivider": "O ingresa tu número de celular",
+    "phonePlaceholder": "987 654 321",
+    "loginHelper": "Te enviaremos un código de verificación para iniciar sesión."
+  },
+  "onboarding": {
+    "skip": "Saltar",
+    "next": "Siguiente",
+    "start": "Empezar",
+    "earningsLabel": "Ganancias de hoy (ejemplo)",
+    "earningsValue": "S/ 142.50",
+    "slides": {
+      "earnings": {
+        "title": "Tú decides cuándo manejar",
+        "body": "Gana por viaje con tarifas claras y retira tus ganancias cuando quieras."
+      },
+      "protected": {
+        "title": "Manejas protegido",
+        "body": "Verificación de identidad, soporte y viajes monitoreados para tu tranquilidad."
+      }
+    },
+    "pagination": "Diapositiva {{current}} de {{total}}"
+  },
+  "registration": {
+    "country": "Perú",
+    "stepOf": "Paso {{current}} de {{total}}",
+    "progressLabel": "Progreso del registro: paso {{current}} de {{total}}",
+    "back": "Volver al paso anterior",
+    "personal": {
+      "title": "Tus datos personales",
+      "subtitle": "Como aparecen en tu DNI.",
+      "nameLabel": "Nombre completo",
+      "namePlaceholder": "Ej. Carlos Quispe Mamani",
+      "dniLabel": "DNI",
+      "dniPlaceholder": "70 123 456",
+      "birthdateLabel": "Fecha de nacimiento",
+      "birthdatePlaceholder": "DD / MM / AAAA",
+      "errors": {
+        "name_required": "Ingresa tu nombre completo",
+        "name_too_long": "El nombre es demasiado largo (máx. 120 caracteres)",
+        "dni_invalid": "El DNI debe tener exactamente 8 dígitos",
+        "birthdate_required": "Ingresa tu fecha de nacimiento",
+        "birthdate_invalid": "Usa el formato DD/MM/AAAA con una fecha válida",
+        "birthdate_future": "La fecha de nacimiento no puede ser futura"
+      }
+    },
+    "vehicle": {
+      "title": "Tu vehículo",
+      "subtitle": "Elige el tipo y completa los datos.",
+      "registeredSubtitle": "Tu vehículo está registrado y en revisión.",
+      "register": "Registrar vehículo",
+      "docStatusLabel": "Documentación: {{status}}",
+      "typeMoto": "Moto",
+      "typeCar": "Auto",
+      "typeAccessibility": "Tipo de vehículo: {{type}}",
+      "plateLabel": "Placa",
+      "platePlaceholder": "ABC-123",
+      "brandLabel": "Marca",
+      "brandPlaceholder": "Honda",
+      "yearLabel": "Año",
+      "yearPlaceholder": "2021",
+      "modelLabel": "Modelo",
+      "modelPlaceholder": "CB 190R",
+      "errors": {
+        "plate_required": "Ingresa la placa",
+        "plate_invalid": "Placa inválida (formato ABC-123)",
+        "make_required": "Ingresa la marca",
+        "make_too_long": "La marca es demasiado larga (máx. 60 caracteres)",
+        "model_required": "Ingresa el modelo",
+        "model_too_long": "El modelo es demasiado largo (máx. 60 caracteres)",
+        "year_invalid": "Ingresa un año válido (desde 2005)"
+      },
+      "status": {
+        "PENDING_REVIEW": "En revisión",
+        "PENDING": "Pendiente",
+        "ACTIVE": "Activo",
+        "APPROVED": "Aprobado",
+        "VALID": "Vigente",
+        "EXPIRING_SOON": "Por vencer",
+        "REJECTED": "Rechazado",
+        "EXPIRED": "Vencido"
+      }
+    },
+    "documents": {
+      "title": "Sube tus documentos",
+      "subtitle": "Fotos claras y legibles.",
+      "license": "Licencia de conducir",
+      "soat": "SOAT vigente",
+      "property": "Tarjeta de propiedad",
+      "uploaded": "Subido",
+      "pending": "Pendiente",
+      "formats": "Formatos aceptados: JPG, PNG o PDF. Tamaño máx. 10 MB.",
+      "uploadAccessibility": "Subir {{document}}",
+      "numberLabel": "Número del documento",
+      "numberRequired": "Ingresa el número del documento",
+      "expiryLabel": "Fecha de vencimiento",
+      "expiryHelper": "Formato AAAA-MM-DD, ej. 2026-12-31",
+      "expiryInvalid": "Usa el formato AAAA-MM-DD",
+      "expiryRequired": "Ingresa la fecha de vencimiento",
+      "save": "Guardar",
+      "reviewNote": "El documento quedará en revisión. La carga del archivo se habilitará en una próxima actualización."
+    },
+    "kyc": {
+      "title": "Verifica tu identidad",
+      "subtitle": "Centra tu rostro en el círculo.",
+      "previewSubtitle": "Revisa tu foto. ¿Se ve bien?",
+      "goodLight": "Buena luz",
+      "lookAhead": "Mira al\nfrente",
+      "privacy": "Tu rostro se usa solo para verificar que eres tú.",
+      "takePhoto": "Tomar foto",
+      "capturing": "Procesando…",
+      "retake": "Volver a tomar",
+      "confirm": "Confirmar",
+      "captured": "Rostro capturado",
+      "unavailableTitle": "Cámara no disponible",
+      "unavailableBody": "Activa el permiso de cámara para verificar tu identidad. Revísalo en los ajustes del sistema e inténtalo de nuevo."
+    },
+    "review": {
+      "title": "Estamos revisando\ntus datos",
+      "subtitle": "Verificamos tus documentos y tu identidad. Te avisaremos en 24 a 48 horas.",
+      "personal": "Datos personales",
+      "vehicle": "Vehículo",
+      "documents": "Documentos",
+      "facial": "Verificación facial",
+      "inReview": "En revisión",
+      "understood": "Entendido",
+      "contactSupport": "Contactar a soporte"
+    }
+  },
+  "shift": {
+    "dashboardTitle": "Panel",
+    "statusLabel": "Estado del turno",
+    "status": {
+      "offline": "Fuera de turno",
+      "available": "En línea",
+      "onBreak": "En pausa",
+      "onTrip": "En viaje",
+      "unknown": "Desconocido"
+    },
+    "goOnline": "Iniciar turno",
+    "endShift": "Finalizar turno",
+    "pause": "Tomar pausa",
+    "resume": "Reanudar turno",
+    "kpisTitle": "Resumen",
+    "kpisUnavailable": "El detalle por día aún no está disponible desde el servidor.",
+    "netTotal": "Neto acumulado",
+    "pendingNet": "Por liquidar",
+    "viewEarnings": "Ver ganancias",
+    "viewProfile": "Mi perfil",
+    "offlineHint": "Inicia tu turno para recibir viajes.",
+    "endConfirmTitle": "¿Finalizar el turno?",
+    "endConfirmBody": "Dejarás de recibir viajes hasta iniciar un nuevo turno.",
+    "startTitle": "Iniciar turno",
+    "biometricTitle": "Verificación de identidad",
+    "biometricBody": "Por seguridad, debes verificar tu rostro (prueba de vida) antes de iniciar el turno.",
+    "biometricStart": "Verificar mi rostro",
+    "biometricCapturing": "Verificando…",
+    "biometricSuccess": "Identidad verificada (score {{score}}). Iniciando turno…",
+    "biometricUnavailableTitle": "Cámara no disponible",
+    "biometricUnavailableBody": "La verificación facial se habilita en una actualización próxima de la app.",
+    "biometricBackendTitle": "Verificación no disponible",
+    "biometricBackendBody": "El servicio de verificación facial no está disponible por ahora. Inténtalo más tarde o contacta a la central.",
+    "biometricFailedTitle": "No pudimos verificarte",
+    "biometricRejectedBody": "No reconocimos tu rostro o la prueba de vida no pasó. Vuelve a intentarlo con buena luz.",
+    "blockedTitle": "Verificación bloqueada",
+    "blockedBody": "Por seguridad, intenta de nuevo en 1 hora o contacta a la central.",
+    "enrollTitle": "Registrar rostro",
+    "enrollHeading": "Registra tu rostro",
+    "enrollBody": "Aún no tienes un rostro registrado. Captura una foto para poder verificarte al iniciar turno.",
+    "enrollStart": "Tomar foto",
+    "enrollCapturing": "Registrando…",
+    "enrollSuccess": "Rostro registrado. Ya puedes iniciar turno.",
+    "enrollFailedTitle": "No pudimos registrar tu rostro",
+    "enrollAction": "Registrar mi rostro",
+    "vehicleType": {
+      "label": "Vehículo activo",
+      "car": "Auto",
+      "moto": "Moto"
+    }
+  },
+  "trips": {
+    "incomingTitle": "Viaje entrante",
+    "scheduledBadge": "Reservado",
+    "incomingExpires": "Vence en {{seconds}} s",
+    "incomingExpired": "La oferta venció",
+    "estimatedFare": "Tarifa estimada",
+    "distance": "Distancia",
+    "duration": "Duración",
+    "minutes": "{{value}} min",
+    "kilometers": "{{value}} km",
+    "childMode": "Modo niño activado",
+    "childModeHint": "Verifica el código con el adulto responsable. Nunca lo veas tú.",
+    "childCodeLabel": "Código del modo niño",
+    "childCodeHelper": "Pídelo al adulto responsable (4 a 6 dígitos)",
+    "accept": "Aceptar viaje",
+    "reject": "Rechazar",
+    "activeTitle": "Viaje en curso",
+    "confirmingAssignment": "Confirmando asignación…",
+    "status": {
+      "scheduled": "Reservado",
+      "assigned": "Asignado",
+      "accepted": "Aceptado",
+      "arriving": "En camino al recojo",
+      "arrived": "En el punto de recojo",
+      "inProgress": "Viaje en marcha",
+      "completed": "Completado",
+      "cancelled": "Cancelado",
+      "unknown": "—"
+    },
+    "actions": {
+      "arriving": "Voy en camino",
+      "arrived": "He llegado",
+      "start": "Iniciar viaje",
+      "complete": "Completar viaje",
+      "cancel": "Cancelar viaje"
+    },
+    "payment": "Pago",
+    "fare": "Tarifa",
+    "cancelConfirmTitle": "¿Cancelar el viaje?",
+    "cancelConfirmBody": "Puede aplicar una penalización según las reglas de la operación.",
+    "cancelReasonLabel": "Motivo (opcional)",
+    "geoUnavailable": "El servidor del conductor aún no entrega las coordenadas de recojo/destino.",
+    "historyTitle": "Historial",
+    "historyUnavailable": "El historial de viajes aún no está disponible desde el servidor.",
+    "completedTitle": "Viaje completado",
+    "completedBody": "El viaje finalizó correctamente."
+  },
+  "navigation": {
+    "stepsTitle": "Indicaciones",
+    "stepsToggle": "Mostrar u ocultar los {{count}} pasos de la ruta",
+    "stepsSummary_one": "{{count}} paso · {{km}} km",
+    "stepsSummary_other": "{{count}} pasos · {{km}} km",
+    "stepsEmpty": "El servidor aún no entrega los pasos de esta ruta.",
+    "routeUnavailable": "No pudimos cargar la ruta. Usa Waze o Google Maps para guiarte.",
+    "openWaze": "Abrir en Waze",
+    "openGoogleMaps": "Google Maps"
+  },
+  "chat": {
+    "title": "Chat con el pasajero",
+    "open": "Abrir chat",
+    "openWithBadge": "Abrir chat con el pasajero",
+    "send": "Enviar mensaje",
+    "inputPlaceholder": "Escribe un mensaje…",
+    "inputDisabled": "El chat se cerró al finalizar el viaje",
+    "emptyTitle": "Aún no hay mensajes",
+    "emptyBody": "Coordina el recojo con el pasajero. Usa las respuestas rápidas para no escribir mientras manejas.",
+    "inactiveTitle": "Chat cerrado",
+    "inactiveBody": "El viaje terminó. Ya no puedes enviar mensajes al pasajero.",
+    "templates": {
+      "arriving": "Estoy llegando",
+      "arrived": "Llegué",
+      "waiting": "Te espero en la puerta"
+    }
+  },
+  "earnings": {
+    "title": "Ganancias",
+    "tabSummary": "Resumen",
+    "tabBreakdown": "Desglose",
+    "netTotal": "Neto total",
+    "grossTotal": "Bruto total",
+    "commission": "Comisión",
+    "paidNet": "Liquidado",
+    "pendingNet": "Pendiente",
+    "net": "Neto",
+    "gross": "Bruto",
+    "tips": "Propinas",
+    "periodToday": "Hoy",
+    "periodWeek": "Esta semana",
+    "tripCount_one": "{{count}} viaje",
+    "tripCount_other": "{{count}} viajes",
+    "payoutsTitle": "Liquidaciones",
+    "payoutsEmpty": "Aún no tienes liquidaciones.",
+    "payoutPeriod": "{{start}} – {{end}}",
+    "payoutStatus": {
+      "pending": "Pendiente",
+      "paid": "Pagado",
+      "held": "Retenido",
+      "processing": "Procesando"
+    }
+  },
+  "profile": {
+    "title": "Mi perfil",
+    "phone": "Teléfono",
+    "rating": "Calificación",
+    "ratingValue": "{{value}} ★",
+    "ratingCount": "{{count}} viajes (30 días)",
+    "kyc": "Verificación (KYC)",
+    "backgroundCheck": "Antecedentes",
+    "currentStatus": "Estado actual",
+    "documentsTitle": "Documentos",
+    "documentValid": "Vigente",
+    "documentInvalid": "Requiere atención",
+    "complianceOk": "Documentación al día",
+    "complianceMissing": "Faltan documentos: {{items}}",
+    "logout": "Cerrar sesión",
+    "logoutConfirmTitle": "¿Cerrar sesión?",
+    "logoutConfirmBody": "Tendrás que volver a ingresar con tu número."
+  },
+  "documents": {
+    "title": "Documentos",
+    "addAction": "Registrar documento",
+    "empty": "Aún no has registrado documentos. Mantén tu licencia, SOAT y demás al día para operar.",
+    "allValid": "Tus documentos están al día.",
+    "attention_one": "{{count}} documento requiere tu atención.",
+    "attention_other": "{{count}} documentos requieren tu atención.",
+    "expiresOn": "Vence el {{date}}",
+    "noExpiry": "Sin fecha de vencimiento",
+    "status": {
+      "vigente": "Vigente",
+      "por_vencer": "Por vencer",
+      "vencido": "Vencido",
+      "en_revision": "En revisión",
+      "rechazado": "Rechazado"
+    },
+    "type": {
+      "LICENSE_A1": "Licencia A1",
+      "SOAT": "SOAT",
+      "VEHICLE_REGISTRATION": "Tarjeta de propiedad",
+      "ITV": "Revisión técnica (ITV)",
+      "CRIMINAL_RECORD": "Antecedentes"
+    },
+    "form": {
+      "title": "Registrar documento",
+      "typeLabel": "Tipo de documento",
+      "numberLabel": "Número del documento",
+      "numberRequired": "Ingresa el número del documento",
+      "expiryLabel": "Fecha de vencimiento",
+      "expiryHelper": "Formato AAAA-MM-DD, ej. 2026-12-31 (opcional)",
+      "expiryInvalid": "Usa el formato AAAA-MM-DD",
+      "submit": "Guardar",
+      "reviewNote": "El documento quedará en revisión. La carga del archivo se habilitará en una próxima actualización."
+    }
+  },
+  "ops": {
+    "demand": {
+      "toggle": "Zonas de demanda",
+      "legendTitle": "Demanda",
+      "legendLow": "Baja",
+      "legendMedium": "Media",
+      "legendHigh": "Alta",
+      "empty": "Sin demanda destacada cerca de ti ahora mismo.",
+      "unavailable": "No pudimos cargar las zonas de demanda. Inténtalo de nuevo."
+    },
+    "incentives": {
+      "title": "Incentivos",
+      "intro": "Completa metas y aprovecha las horas pico para ganar más.",
+      "activeCount_one": "{{count}} incentivo activo",
+      "activeCount_other": "{{count}} incentivos activos",
+      "emptyTitle": "Sin incentivos por ahora",
+      "emptyBody": "Cuando haya metas o bonos disponibles, aparecerán aquí.",
+      "stateActive": "Activo",
+      "stateCompleted": "Cumplido",
+      "stateExpired": "Vencido",
+      "multiplierLabel": "Multiplicador de ganancias",
+      "tripsProgress": "{{done}} / {{total}} viajes",
+      "tripsRemaining_one": "Te falta {{count}} viaje",
+      "tripsRemaining_other": "Te faltan {{count}} viajes",
+      "goalReached": "¡Meta cumplida! El bono se acreditará a tus ganancias.",
+      "expiresOn": "Vigente hasta el {{date}}"
+    }
+  },
+  "support": {
+    "title": "Ayuda",
+    "heroTitle": "¿Necesitas ayuda?",
+    "heroBody": "Reporta un problema y la central te responderá lo antes posible.",
+    "reportProblem": "Reportar un problema",
+    "faqTitle": "Preguntas frecuentes",
+    "myTickets": "Mis tickets",
+    "ticketsEmpty": "Aún no has reportado ningún problema.",
+    "category": {
+      "TRIP": "Viajes",
+      "PAYMENT": "Pagos",
+      "ACCOUNT": "Mi cuenta",
+      "SAFETY": "Seguridad",
+      "DRIVER": "Conductor",
+      "OTHER": "Otro"
+    },
+    "status": {
+      "OPEN": "Abierto",
+      "IN_PROGRESS": "En gestión",
+      "RESOLVED": "Resuelto"
+    },
+    "faq": {
+      "shiftStart": {
+        "q": "¿Cómo inicio mi turno?",
+        "a": "Desde Inicio, elige tu vehículo y toca \"Conéctate\". Por seguridad, deberás verificar tu rostro (prueba de vida) antes de empezar a recibir viajes."
+      },
+      "payouts": {
+        "q": "¿Cuándo y cómo recibo mis pagos?",
+        "a": "Tus ganancias se liquidan por periodos. Revisa el detalle y el estado de cada liquidación en la pestaña Ganancias. Los pagos pueden tardar según el banco."
+      },
+      "documents": {
+        "q": "¿Qué documentos debo mantener al día?",
+        "a": "Licencia, SOAT, tarjeta de propiedad, revisión técnica y antecedentes. Si alguno vence o queda en revisión, podrías no recibir viajes hasta regularizarlo. Gestiónalos en Documentos."
+      },
+      "incentives": {
+        "q": "¿Cómo funcionan los incentivos?",
+        "a": "En Incentivos verás metas de viajes (bono al completarlas) y horas pico (multiplicador de ganancias). Sigue tu progreso y la vigencia de cada uno."
+      },
+      "safety": {
+        "q": "¿Qué hago ante una emergencia durante un viaje?",
+        "a": "Tu seguridad es primero. Detente en un lugar seguro y contacta a la central. Si reportas un problema, elige la categoría Seguridad para priorizar tu caso."
+      }
+    },
+    "form": {
+      "title": "Reportar un problema",
+      "categoryLabel": "Categoría",
+      "subjectLabel": "Asunto",
+      "bodyLabel": "Cuéntanos qué pasó",
+      "bodyHelper": "Incluye detalles que ayuden a resolver tu caso.",
+      "attachTrip": "Adjuntar el viaje actual",
+      "attachTripOn": "Se incluirá el identificador del viaje para dar contexto.",
+      "attachTripOff": "Toca para adjuntar el viaje a tu reporte.",
+      "subjectTooShort": "El asunto es muy corto",
+      "subjectTooLong": "El asunto es muy largo",
+      "bodyTooShort": "Describe el problema con un poco más de detalle",
+      "bodyTooLong": "El mensaje es demasiado largo",
+      "submit": "Enviar"
+    }
+  }
+}

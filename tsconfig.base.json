@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "alwaysStrict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": false,
+
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "incremental": true,
+    "tsBuildInfoFile": "${configDir}/dist/tsconfig.tsbuildinfo",
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@veo/shared-types": ["packages/shared-types/src"],
+      "@veo/shared-types/*": ["packages/shared-types/src/*"],
+      "@veo/utils": ["packages/utils/src"],
+      "@veo/utils/*": ["packages/utils/src/*"],
+      "@veo/auth": ["packages/auth/src"],
+      "@veo/auth/*": ["packages/auth/src/*"],
+      "@veo/events": ["packages/events/src"],
+      "@veo/events/*": ["packages/events/src/*"],
+      "@veo/observability": ["packages/observability/src"],
+      "@veo/observability/*": ["packages/observability/src/*"],
+      "@veo/database": ["packages/database/src"],
+      "@veo/database/*": ["packages/database/src/*"],
+      "@veo/maps": ["packages/maps/src"],
+      "@veo/maps/*": ["packages/maps/src/*"],
+      "@veo/api-client": ["packages/api-client/src"],
+      "@veo/api-client/*": ["packages/api-client/src/*"],
+      "@veo/ui-kit": ["packages/ui-kit/src"],
+      "@veo/rpc": ["packages/rpc/src"],
+      "@veo/rpc/*": ["packages/rpc/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "build", ".next", "coverage"]
+}

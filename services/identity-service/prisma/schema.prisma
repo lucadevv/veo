@@ -1,0 +1,300 @@
+// identity-service · esquema Postgres (schema lógico "identity")
+// FOUNDATION §8. Dueño de: identidad de personas (pasajeros, conductores), auth y operadores admin.
+// Veículos y documentos viven en fleet-service. Contactos de confianza en share-service.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity"]
+}
+
+enum UserType {
+  PASSENGER
+  DRIVER
+
+  @@schema("identity")
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+
+  @@schema("identity")
+}
+
+enum DriverStatus {
+  OFFLINE
+  AVAILABLE
+  ASSIGNED
+  ON_TRIP
+  ON_BREAK
+  SUSPENDED
+
+  @@schema("identity")
+}
+
+enum BackgroundCheckStatus {
+  PENDING
+  CLEARED
+  REJECTED
+
+  @@schema("identity")
+}
+
+enum BiometricCheckType {
+  SHIFT_START
+  REVERIFY
+  ONBOARDING
+
+  @@schema("identity")
+}
+
+enum AdminStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+
+  @@schema("identity")
+}
+
+/// Método de autenticación soberano de un usuario (ADR-012). Un User puede tener varios
+/// (teléfono+OTP, correo+contraseña, Google OAuth) vinculados a la misma identidad.
+enum AuthMethodType {
+  PHONE_OTP
+  EMAIL_PASSWORD
+  GOOGLE_OAUTH
+  APPLE_OAUTH
+
+  @@schema("identity")
+}
+
+/// Tipo de documento de identidad del pasajero (Perú · ProntoPaga). Vive en el PERFIL para
+/// soportar la afiliación Yape de UN TAP (patrón PedidosYa): el documento se guarda una vez y el
+/// BFF lo reutiliza sin pedirlo en cada checkout. DN = DNI (8 díg) · CE = carné de extranjería
+/// (9-12 díg) · PP = pasaporte (6-12 alfanum).
+enum DocumentType {
+  DN
+  CE
+  PP
+
+  @@schema("identity")
+}
+
+/// Estado de un vínculo de referido (Ola 2A).
+enum ReferralStatus {
+  PENDING // vinculado, recompensa aún no otorgada
+  REWARDED // referido cumplió la condición (1er viaje) → recompensa otorgada
+
+  @@schema("identity")
+}
+
+/// Identidad base de un usuario de las apps (pasajero o conductor).
+model User {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Teléfono (login por OTP). Nullable porque un usuario puede registrarse SOLO por
+  /// correo+contraseña o Google (ADR-012). Sigue siendo @unique (Postgres permite múltiples NULL).
+  phone     String?    @unique
+  email     String?
+  /// Nombre visible del usuario (pasajero). Opcional; se valida 1–80 chars en el borde (DTO).
+  name      String?    @map("name")
+  type      UserType
+  photoUrl  String?    @map("photo_url")
+  /// Hash del DNI (nunca el DNI en claro — Ley 29733, decisión "solo hash").
+  dniHash   String?    @map("dni_hash")
+  /// Documento de identidad del PASAJERO para pagos (ProntoPaga · Yape On File). Vive en el perfil
+  /// (no en el checkout): se carga UNA vez y el BFF lo reutiliza para afiliar Yape en UN TAP. Nullable
+  /// hasta que el usuario lo registra. Es SU dato (owner-only por JWT); la UI decide cómo enmascararlo.
+  documentType DocumentType? @map("document_type")
+  /// Número del documento (forma según documentType: DN=8 díg · CE 9-12 díg · PP 6-12 alfanum).
+  document     String?       @map("document")
+  kycStatus KycStatus  @default(PENDING) @map("kyc_status")
+  /// Embedding facial de referencia (ArcFace, 512-d) capturado al verificar KYC del pasajero.
+  /// Vacío = pasajero NO verificado biométricamente.
+  faceEmbedding Float[] @default([]) @map("face_embedding")
+  /// Momento en que el pasajero pasó el liveness y quedó VERIFIED. Null = no verificado.
+  kycVerifiedAt DateTime? @map("kyc_verified_at") @db.Timestamptz
+  /// Código de referido único del usuario (Ola 2A). Se genera perezosamente la 1ª vez que se consulta.
+  referralCode String?    @unique @map("referral_code")
+  /// Crédito acumulado por referidos completados (céntimos PEN), modelado como recompensa simple.
+  referralRewardCents Int  @default(0) @map("referral_reward_cents")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  /// Solicitud de borrado (BR-S06): inicia la gracia de 30 días antes del tombstone.
+  deletionRequestedAt DateTime? @map("deletion_requested_at") @db.Timestamptz
+  /// Tombstone (BR-S06 derecho al olvido).
+  deletedAt DateTime?  @map("deleted_at") @db.Timestamptz
+
+  driver           Driver?
+  biometricChecks  BiometricCheck[]
+  authMethods      AuthMethod[]
+
+  @@index([kycStatus])
+  @@map("users")
+  @@schema("identity")
+}
+
+/// Credencial por método de autenticación (ADR-012 §2). El dominio de auth depende de esta tabla
+/// para multi-método + account-linking. Tokens efímeros (verificación correo, reset) van en Redis.
+model AuthMethod {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          AuthMethodType
+  // EMAIL_PASSWORD: correo verificado antes de operar (Ley 29733) + hash argon2id.
+  email         String?
+  passwordHash  String?        @map("password_hash")
+  emailVerified Boolean        @default(false) @map("email_verified")
+  // OAUTH (Google): `sub` del IdP, verificado server-side.
+  oauthSubject  String?        @map("oauth_subject")
+  // Estado general del método (PHONE_OTP/EMAIL verificado, OAuth vinculado).
+  verified      Boolean        @default(false)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([userId, type])
+  @@unique([type, email])
+  @@unique([type, oauthSubject])
+  @@map("auth_methods")
+  @@schema("identity")
+}
+
+/// Perfil específico del conductor (extiende User). Vehículo/documentos → fleet-service.
+model Driver {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String                @unique @map("user_id") @db.Uuid
+  user                  User                  @relation(fields: [userId], references: [id])
+  licenseNumber         String?               @map("license_number")
+  licenseExpiresAt      DateTime?             @map("license_expires_at") @db.Timestamptz
+  /// Datos personales del conductor (BR-I04 cumplimiento). Opcionales hasta que el conductor los registra.
+  legalName             String?               @map("legal_name")
+  /// DNI peruano (8 dígitos). Se valida en el borde (DTO). Nota: se persiste para cumplimiento del conductor.
+  documentId            String?               @map("document_id")
+  birthDate             DateTime?             @map("birth_date") @db.Date
+  currentStatus         DriverStatus          @default(OFFLINE) @map("current_status")
+  averageRating         Decimal               @default(5.0) @map("average_rating") @db.Decimal(3, 2)
+  totalTrips            Int                   @default(0) @map("total_trips")
+  backgroundCheckStatus BackgroundCheckStatus @default(PENDING) @map("background_check_status")
+  /// Última verificación biométrica exitosa que habilitó turno.
+  lastVerifiedAt        DateTime?             @map("last_verified_at") @db.Timestamptz
+  /// Embedding facial de referencia (ArcFace, 512-d) capturado en el enrolamiento (BR-I02).
+  /// Vacío = conductor NO enrolado biométricamente (no puede iniciar turno en modo live).
+  faceEmbedding         Float[]               @map("face_embedding")
+  /// Momento del enrolamiento facial. Null = no enrolado.
+  faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
+  suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([currentStatus])
+  @@map("drivers")
+  @@schema("identity")
+}
+
+/// Operador del panel admin (no es usuario de las apps). Email+password(argon2id)+TOTP.
+model AdminUser {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  /// Roles RBAC (AdminRole[] de @veo/shared-types) serializados.
+  roles        String[]
+  /// Secreto TOTP cifrado (KMS en prod). Null hasta enrolar.
+  totpSecretEnc String? @map("totp_secret_enc")
+  totpEnrolled Boolean  @default(false) @map("totp_enrolled")
+  /// Auto-registro → PENDING; un ADMIN aprueba y asigna roles → ACTIVE.
+  status       AdminStatus @default(PENDING)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@map("admin_users")
+  @@schema("identity")
+}
+
+/// Registro de cada intento de verificación biométrica (auditable).
+model BiometricCheck {
+  id        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  user      User               @relation(fields: [userId], references: [id])
+  type      BiometricCheckType
+  /// Score 0..100 del match/liveness devuelto por biometric-service.
+  score     Int
+  passed    Boolean
+  /// Referencia opcional a la captura cifrada (S3, gestionada por media-service).
+  captureRef String?           @map("capture_ref")
+  geoLat    Float?             @map("geo_lat")
+  geoLon    Float?             @map("geo_lon")
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId, createdAt])
+  @@map("biometric_checks")
+  @@schema("identity")
+}
+
+/// Vínculo referidor↔referido (Ola 2A). Un usuario puede ser referido UNA sola vez
+/// (`referredUserId` UNIQUE). La recompensa se otorga al completar la condición (1er viaje del
+/// referido); modelada como crédito en céntimos sobre el referidor (`User.referralRewardCents`).
+model Referral {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referrerUserId  String         @map("referrer_user_id") @db.Uuid
+  referredUserId  String         @unique @map("referred_user_id") @db.Uuid
+  /// Código de referido usado (snapshot del referralCode del referidor).
+  code            String
+  status          ReferralStatus @default(PENDING)
+  /// Recompensa otorgada al referidor cuando se cumple la condición (céntimos PEN). 0 hasta otorgar.
+  rewardCents     Int            @default(0) @map("reward_cents")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  rewardedAt      DateTime?      @map("rewarded_at") @db.Timestamptz
+
+  @@index([referrerUserId])
+  @@map("referrals")
+  @@schema("identity")
+}
+
+/// Consentimientos Ley 29733 (APPEND-ONLY). Un row por cada evento de aceptación del pasajero.
+/// Registro inmutable: NUNCA se actualiza ni se borra; cada cambio de preferencia es un row nuevo.
+/// El estado vigente de un usuario es el row más reciente por `acceptedAt`.
+model Consent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  /// Tratamiento de datos personales (base legal del servicio). Obligatorio para operar.
+  dataProcessing Boolean  @map("data_processing")
+  /// Cámara en vivo del habitáculo durante el viaje (diferenciador de seguridad).
+  inCabinCamera  Boolean  @map("in_cabin_camera")
+  /// Compartir ubicación con contactos de confianza / familia.
+  location       Boolean
+  /// Comunicaciones de marketing/promociones (opt-in, Ley 29733). Default false: nadie recibe promos sin aceptar.
+  marketing      Boolean  @default(false)
+  /// Versión de la política de privacidad aceptada (ej. "2026-05-01").
+  policyVersion  String   @map("policy_version")
+  /// Momento de la aceptación. Inmutable; ordena el historial.
+  acceptedAt     DateTime @default(now()) @map("accepted_at") @db.Timestamptz
+  /// IP de origen de la aceptación (evidencia de consentimiento). Null si no se pudo determinar.
+  ip             String?
+
+  @@index([userId, acceptedAt])
+  @@map("consents")
+  @@schema("identity")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("identity")
+}

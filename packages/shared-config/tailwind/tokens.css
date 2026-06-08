@@ -1,0 +1,101 @@
+/**
+ * VEO · Design tokens (OKLCH). Importar UNA vez en el globals.css de cada app web
+ * antes de las capas de Tailwind:  @import "@veo/shared-config/tailwind/tokens.css";
+ *
+ * Estrategia de color: Restrained (neutros tintados + 1 acento cian ≤10%). Marca = navy.
+ * No invertir para dark: variantes tonales desaturadas. Contraste verificado AA.
+ */
+
+:root {
+  /* Superficies (off-white casi neutro, leve tinte navy; NO crema) */
+  --bg: oklch(0.985 0.003 255);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.965 0.005 255);
+
+  /* Tinta / texto */
+  --ink: oklch(0.26 0.03 264);
+  --ink-muted: oklch(0.47 0.02 264);
+  --ink-subtle: oklch(0.6 0.015 264);
+
+  /* Bordes */
+  --border: oklch(0.9 0.008 264);
+  --border-strong: oklch(0.82 0.012 264);
+
+  /* Marca (navy) + acento (cian) */
+  --brand: oklch(0.32 0.08 264);
+  --brand-hover: oklch(0.28 0.085 264);
+  --on-brand: oklch(0.99 0.005 255);
+  --accent: oklch(0.6 0.12 230);
+  --accent-hover: oklch(0.54 0.13 230);
+  --on-accent: oklch(0.99 0.01 230);
+
+  /* Estado */
+  --success: oklch(0.62 0.14 162);
+  --on-success: oklch(0.99 0.01 162);
+  --warn: oklch(0.72 0.15 75);
+  --on-warn: oklch(0.26 0.05 75);
+  --danger: oklch(0.58 0.2 22);
+  --danger-hover: oklch(0.52 0.21 22);
+  --on-danger: oklch(0.99 0.01 22);
+
+  /* Foco */
+  --focus: oklch(0.6 0.12 230);
+
+  /* Radios y sombras */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --shadow-1: 0 1px 2px oklch(0.26 0.03 264 / 0.06), 0 1px 1px oklch(0.26 0.03 264 / 0.04);
+  --shadow-2: 0 4px 8px oklch(0.26 0.03 264 / 0.08);
+  --shadow-3: 0 8px 24px oklch(0.26 0.03 264 / 0.12);
+
+  /* Curvas de easing (emil-design-eng) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dark {
+  --bg: oklch(0.21 0.025 264);
+  --surface: oklch(0.25 0.03 264);
+  --surface-2: oklch(0.29 0.032 264);
+
+  --ink: oklch(0.96 0.006 255);
+  --ink-muted: oklch(0.78 0.012 264);
+  --ink-subtle: oklch(0.64 0.015 264);
+
+  --border: oklch(0.36 0.02 264);
+  --border-strong: oklch(0.46 0.025 264);
+
+  --brand: oklch(0.7 0.1 230);
+  --brand-hover: oklch(0.76 0.1 230);
+  --on-brand: oklch(0.18 0.03 264);
+  --accent: oklch(0.74 0.12 220);
+  --accent-hover: oklch(0.8 0.12 220);
+  --on-accent: oklch(0.18 0.03 264);
+
+  --success: oklch(0.72 0.14 162);
+  --on-success: oklch(0.18 0.03 162);
+  --warn: oklch(0.8 0.14 75);
+  --on-warn: oklch(0.2 0.04 75);
+  --danger: oklch(0.68 0.18 22);
+  --danger-hover: oklch(0.74 0.18 22);
+  --on-danger: oklch(0.16 0.03 22);
+
+  --focus: oklch(0.74 0.12 220);
+
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-2: 0 4px 8px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 8px 24px oklch(0 0 0 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

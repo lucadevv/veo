@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package veo.share.v1;
+
+service ShareService {
+  rpc GetTrustedContacts (GetTrustedContactsRequest) returns (TrustedContactsReply);
+}
+
+message GetTrustedContactsRequest {
+  string user_id = 1;
+}
+
+message TrustedContact {
+  string id = 1;
+  string user_id = 2;
+  string phone = 3;
+  string name = 4;
+  string relationship = 5;
+  bool otp_verified = 6;
+}
+
+message TrustedContactsReply {
+  repeated TrustedContact contacts = 1;
+}

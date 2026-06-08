@@ -1,0 +1,148 @@
+/**
+ * Sesión/onboarding del conductor. Todos los endpoints exigen JWT de tipo 'driver'.
+ */
+import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
+import type {
+  DriverBiometricChallenge,
+  DriverBiometricEnrollResult,
+  DriverBiometricVerifyResult,
+  DriverDocument,
+  DriverShiftStartResult,
+  DriverShiftStateView,
+  DriverShiftStatusResult,
+} from '@veo/api-client';
+import { DriverApi } from '../common/driver-api.decorator';
+import { DriversService } from './drivers.service';
+import {
+  AddDocumentDto,
+  EnrollFaceDto,
+  OnboardDto,
+  RegisterVehicleDto,
+  StartShiftDto,
+  UpdateDriverPersonalDto,
+  VerifyBiometricDto,
+  type DriverPersonalData,
+  type DriverProfileView,
+  type DriverVehicleView,
+} from './dto/drivers.dto';
+
+@ApiTags('drivers')
+@DriverApi()
+@Controller('drivers')
+export class DriversController {
+  constructor(private readonly drivers: DriversService) {}
+
+  @Get('me')
+  @ApiOperation({ summary: 'Perfil del conductor + rating + estado de cumplimiento de documentos' })
+  me(@CurrentUser() user: AuthenticatedUser): Promise<DriverProfileView> {
+    return this.drivers.getMe(user);
+  }
+
+  @Get('me/documents')
+  @ApiOperation({ summary: 'Documentos del conductor con estado y vencimiento (BR-I04)' })
+  documents(@CurrentUser() user: AuthenticatedUser): Promise<DriverDocument[]> {
+    return this.drivers.getDocuments(user);
+  }
+
+  @Post('me/documents')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Registrar/actualizar un documento del conductor (queda PENDING_REVIEW). BR-I04',
+  })
+  addDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: AddDocumentDto,
+  ): Promise<DriverDocument> {
+    return this.drivers.addDocument(user, dto);
+  }
+
+  @Post('onboard')
+  @ApiOperation({ summary: 'Onboarding del conductor (licencia) → PENDING de aprobación' })
+  onboard(@CurrentUser() user: AuthenticatedUser, @Body() dto: OnboardDto): Promise<unknown> {
+    return this.drivers.onboard(user, dto);
+  }
+
+  @Patch('me/personal')
+  @ApiOperation({ summary: 'Actualizar datos personales del conductor (nombre legal, DNI, nacimiento)' })
+  updatePersonal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateDriverPersonalDto,
+  ): Promise<DriverPersonalData> {
+    return this.drivers.updatePersonal(user, dto);
+  }
+
+  @Post('vehicles')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Registrar el vehículo del conductor (queda pendiente de verificación)' })
+  registerVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RegisterVehicleDto,
+  ): Promise<DriverVehicleView> {
+    return this.drivers.registerVehicle(user, dto);
+  }
+
+  @Get('vehicles')
+  @ApiOperation({ summary: 'Listar los vehículos del conductor autenticado (rehidratación)' })
+  vehicles(@CurrentUser() user: AuthenticatedUser): Promise<DriverVehicleView[]> {
+    return this.drivers.getVehicles(user);
+  }
+
+  @Get('shift/state')
+  @ApiOperation({ summary: 'Estado actual del turno del conductor (currentStatus)' })
+  shiftState(@CurrentUser() user: AuthenticatedUser): Promise<DriverShiftStateView> {
+    return this.drivers.getShiftState(user);
+  }
+
+  @Post('biometric/enroll')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor (BR-I02)' })
+  enrollFace(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: EnrollFaceDto,
+  ): Promise<DriverBiometricEnrollResult> {
+    return this.drivers.enrollFace(user, dto);
+  }
+
+  @Post('shift/biometric/challenge')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Emitir reto de liveness para iniciar turno (BR-I02)' })
+  biometricChallenge(@CurrentUser() user: AuthenticatedUser): Promise<DriverBiometricChallenge> {
+    return this.drivers.biometricChallenge(user);
+  }
+
+  @Post('shift/biometric/verify')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Verificar liveness+match y obtener sessionRef de turno (BR-I02)' })
+  verifyBiometric(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: VerifyBiometricDto,
+  ): Promise<DriverBiometricVerifyResult> {
+    return this.drivers.verifyBiometric(user, dto);
+  }
+
+  @Post('shift/start')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Iniciar turno con verificación biométrica (BR-I02)' })
+  startShift(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StartShiftDto,
+  ): Promise<DriverShiftStartResult> {
+    return this.drivers.startShift(user, dto);
+  }
+
+  @Post('shift/end')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Finalizar turno (OFFLINE)' })
+  endShift(@CurrentUser() user: AuthenticatedUser): Promise<DriverShiftStatusResult> {
+    return this.drivers.endShift(user);
+  }
+
+  @Post('shift/pause')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Pausar turno (ON_BREAK)' })
+  pauseShift(@CurrentUser() user: AuthenticatedUser): Promise<DriverShiftStatusResult> {
+    return this.drivers.pauseShift(user);
+  }
+}

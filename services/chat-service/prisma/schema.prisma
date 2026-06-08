@@ -1,0 +1,53 @@
+// chat-service · esquema Postgres (schema lógico "chat")
+// FOUNDATION §8. Dueño de: mensajería in-app conductor↔pasajero durante un viaje activo (Ola 2A).
+// Persistencia simple; la entrega en tiempo real la hacen los BFFs reutilizando su Socket.IO.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["chat"]
+}
+
+enum SenderRole {
+  PASSENGER
+  DRIVER
+
+  @@schema("chat")
+}
+
+/// Mensaje de chat de un viaje. Solo entre las dos partes del viaje y mientras está activo
+/// (la validación de membresía/estado la hacen los BFFs antes de persistir/leer).
+model Message {
+  id         String     @id @db.Uuid
+  tripId     String     @map("trip_id") @db.Uuid
+  senderId   String     @map("sender_id") @db.Uuid
+  senderRole SenderRole @map("sender_role")
+  body       String
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tripId, createdAt])
+  @@map("messages")
+  @@schema("chat")
+}
+
+/// Outbox (FOUNDATION §6). El mensaje y el evento chat.message_sent se escriben en la MISMA
+/// transacción; un relay lo publica a Kafka. Ambos BFFs consumen el evento y lo emiten en su
+/// Socket.IO (público `/passenger`, conductor `/driver`) a la sala del viaje → entrega en tiempo real.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("chat")
+}

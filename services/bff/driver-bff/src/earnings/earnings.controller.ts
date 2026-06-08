@@ -1,0 +1,36 @@
+/**
+ * Ganancias del conductor. JWT de tipo 'driver'. Siempre filtradas al conductor autenticado.
+ */
+import { Controller, Get } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
+import type { DriverEarningsSummary, DriverPayoutView, EarningsSummary } from '@veo/api-client';
+import { DriverApi } from '../common/driver-api.decorator';
+import { EarningsService } from './earnings.service';
+
+@ApiTags('earnings')
+@DriverApi()
+@Controller('earnings')
+export class EarningsController {
+  constructor(private readonly earnings: EarningsService) {}
+
+  @Get('summary')
+  @ApiOperation({ summary: 'Resumen de ganancias del conductor (agregado de sus payouts)' })
+  summary(@CurrentUser() user: AuthenticatedUser): Promise<EarningsSummary> {
+    return this.earnings.summary(user);
+  }
+
+  @Get('breakdown')
+  @ApiOperation({
+    summary: 'Desglose de ganancias hoy/semana (bruto, comisión, propinas, neto, nº viajes) (BR-P05)',
+  })
+  breakdown(@CurrentUser() user: AuthenticatedUser): Promise<DriverEarningsSummary> {
+    return this.earnings.breakdown(user);
+  }
+
+  @Get('payouts')
+  @ApiOperation({ summary: 'Lista de payouts (liquidaciones) del conductor autenticado' })
+  payouts(@CurrentUser() user: AuthenticatedUser): Promise<DriverPayoutView[]> {
+    return this.earnings.listPayouts(user);
+  }
+}

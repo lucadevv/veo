@@ -1,0 +1,78 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+# @react-native-firebase: los pods Swift de Firebase requieren module maps de
+# GoogleUtilities para poder enlazarse como librerías estáticas (sin use_frameworks!).
+$RNFirebaseAsStaticFramework = true
+
+# ─── Mapbox (@rnmapbox/maps · Lote 0+1) ──────────────────────────────────────────────────────────
+# Fijamos la versión del Mapbox Maps SDK iOS al default soportado por @rnmapbox/maps@10.2.1
+# (línea 10.16.*). Mantener este pin alineado al actualizar @rnmapbox/maps.
+$RNMapboxMapsVersion = '~> 10.16.0'
+#
+# ⚠️ TOKEN DE DESCARGA (sk.) — REQUERIDO PARA `pod install` EN iOS, AÚN NO DISPONIBLE.
+# El SDK nativo de Mapbox iOS se baja del Maven/Cocoapods de Mapbox bajo autenticación: hace falta
+# un SECRET access token con scope `DOWNLOADS:READ` (empieza con `sk.`). NO va en el repo ni en el
+# binario: se configura como credencial de máquina/CI en `~/.netrc` (ver `ios/install-mapbox.md`):
+#
+#     machine api.mapbox.com
+#       login mapbox
+#       password sk.<DOWNLOADS_READ_TOKEN_AQUI>
+#
+# Sin ese `~/.netrc`, `pod install` fallará al resolver `MapboxMaps`. El token PÚBLICO (pk.) de
+# runtime es distinto y vive en `env/dev.secret.env` (lo consume `Mapbox.setAccessToken`).
+
+target 'VEODriver' do
+  config = use_native_modules!
+
+  # Habilita module maps en las dependencias de Firebase que no los definen.
+  pod 'GoogleUtilities', :modular_headers => true
+  pod 'FirebaseCoreInternal', :modular_headers => true
+  pod 'FirebaseCore', :modular_headers => true
+  pod 'FirebaseInstallations', :modular_headers => true
+  pod 'GoogleDataTransport', :modular_headers => true
+  pod 'nanopb', :modular_headers => true
+
+  # @rnmapbox/maps: hook previo a la instalación (configura el podspec de MapboxMaps). Debe ir antes
+  # de `use_react_native!` para que CocoaPods resuelva la dependencia nativa de Mapbox.
+  pre_install do |installer|
+    $RNMapboxMaps.pre_install(installer) if defined?($RNMapboxMaps)
+  end
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  target 'VEODriverTests' do
+    inherit! :complete
+    # Pods for testing
+  end
+
+  post_install do |installer|
+    # @rnmapbox/maps: hook posterior a la instalación (parchea los targets de Pods para MapboxMaps).
+    $RNMapboxMaps.post_install(installer) if defined?($RNMapboxMaps)
+
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+  end
+end

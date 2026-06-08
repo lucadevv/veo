@@ -1,0 +1,63 @@
+import { describe, it, expect } from 'vitest';
+import { ConfigService } from '@nestjs/config';
+import { RateLimitError, UnauthorizedError, ConflictError } from '@veo/utils';
+import { OtpService } from './otp.service';
+import type { Env } from '../config/env.schema';
+
+function fakeRedis() {
+  const m = new Map<string, string>();
+  return {
+    async get(k: string) {
+      return m.get(k) ?? null;
+    },
+    async set(k: string, v: string) {
+      m.set(k, v);
+      return 'OK';
+    },
+    async del(k: string) {
+      return m.delete(k) ? 1 : 0;
+    },
+    async ttl() {
+      return 300;
+    },
+  };
+}
+
+const config = new ConfigService<Env, true>({ OTP_TTL_SECONDS: 300, OTP_MAX_ATTEMPTS: 3 });
+
+describe('OtpService', () => {
+  it('emite y verifica un OTP correcto (y lo consume)', async () => {
+    const redis = fakeRedis();
+    const otp = new OtpService(redis as never, config);
+    const code = await otp.issue('+51987654321', 1000);
+    expect(code).toMatch(/^\d{6}$/);
+    await expect(otp.verify('+51987654321', code)).resolves.toBeUndefined();
+    // consumido → segundo intento falla
+    await expect(otp.verify('+51987654321', code)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('rechaza código incorrecto', async () => {
+    const redis = fakeRedis();
+    const otp = new OtpService(redis as never, config);
+    await otp.issue('+51987654321', 1000);
+    await expect(otp.verify('+51987654321', '000000')).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('aplica cooldown de reenvío', async () => {
+    const redis = fakeRedis();
+    const otp = new OtpService(redis as never, config);
+    await otp.issue('+51987654321', 1000);
+    await expect(otp.issue('+51987654321', 1000 + 5_000)).rejects.toBeInstanceOf(RateLimitError);
+  });
+
+  it('bloquea tras agotar intentos', async () => {
+    const redis = fakeRedis();
+    const otp = new OtpService(redis as never, config);
+    await otp.issue('+51987654321', 1000);
+    await expect(otp.verify('+51987654321', '111111')).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(otp.verify('+51987654321', '222222')).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(otp.verify('+51987654321', '333333')).rejects.toBeInstanceOf(UnauthorizedError);
+    // 4º intento: contador alcanzó el máximo → ConflictError
+    await expect(otp.verify('+51987654321', '444444')).rejects.toBeInstanceOf(ConflictError);
+  });
+});

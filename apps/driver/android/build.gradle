@@ -1,0 +1,52 @@
+buildscript {
+    ext {
+        buildToolsVersion = "34.0.0"
+        minSdkVersion = 26
+        compileSdkVersion = 34
+        targetSdkVersion = 34
+        ndkVersion = "26.1.10909125"
+        kotlinVersion = "1.9.24"
+        // @rnmapbox/maps@10.2.1 → Mapbox Maps SDK Android línea 10.16.*. Mantener alineado al
+        // actualizar @rnmapbox/maps. (En Android NO hace falta token de descarga: Mapbox levantó
+        // el requisito de auth en el repo de releases, por eso no se configura MAPBOX_DOWNLOADS_TOKEN.)
+        RNMapboxMapsVersion = '10.16.6'
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Procesa google-services.json para @react-native-firebase.
+        classpath("com.google.gms:google-services:4.4.2")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// Repositorios extra requeridos por módulos nativos de la flota VEO.
+allprojects {
+    repositories {
+        // react-native-background-geolocation (Transistor Software) y su transitiva
+        // background-fetch alojan sus AAR (tslocationmanager / tsbackgroundfetch) en /libs.
+        // Se referencian por ruta de archivo porque background-fetch no es un subproyecto
+        // autoenlazado (es dependencia transitiva, no directa).
+        def bgGeoLibs = file("$rootDir/../node_modules/react-native-background-geolocation/android/libs")
+        if (bgGeoLibs.exists()) {
+            maven { url bgGeoLibs }
+        }
+        def bgFetchLibs = file("$rootDir/../node_modules/react-native-background-fetch/android/libs")
+        if (bgFetchLibs.exists()) {
+            maven { url bgFetchLibs }
+        }
+        // Espejo de Huawei usado por dependencias de geolocalización en background.
+        maven { url 'https://developer.huawei.com/repo/' }
+
+        // @rnmapbox/maps (Lote 0+1): repo Maven oficial de Mapbox para el Maps SDK Android.
+        // Mapbox eliminó el requisito de autenticación en el repo de releases, así que NO se
+        // necesita credentials { username/password } ni MAPBOX_DOWNLOADS_TOKEN (a diferencia de iOS).
+        maven { url 'https://api.mapbox.com/downloads/v2/releases/maven' }
+    }
+}

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package veo.identity.v1;
+
+// Contrato gRPC que identity-service expone a otros servicios (trip, dispatch, panic, etc.).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
+service IdentityService {
+  rpc GetUser (GetByIdRequest) returns (UserReply);
+  rpc GetDriver (GetByIdRequest) returns (DriverReply);
+  rpc GetDriverByUser (GetByIdRequest) returns (DriverReply);
+}
+
+message GetByIdRequest {
+  string id = 1;
+}
+
+message UserReply {
+  string id = 1;
+  string phone = 2;
+  string type = 3;
+  string kyc_status = 4;
+  bool deleted = 5;
+  bool found = 6;
+  // Nombre visible del usuario. Opcional ("" si no fue registrado). Añadido sin romper compatibilidad.
+  string name = 7;
+}
+
+message DriverReply {
+  string id = 1;
+  string user_id = 2;
+  string current_status = 3;
+  string background_check_status = 4;
+  double average_rating = 5;
+  bool found = 6;
+  // ISO-8601 del momento de suspensión del conductor; "" si NO está suspendido. Añadido sin romper
+  // compatibilidad (campo 7). Lo consume dispatch para el gate de elegibilidad de la PUJA (ADR 010 §6,
+  // cierre estructural del catastrófico #9): un conductor suspendido no puede ofertar.
+  string suspended_at = 7;
+  // BE-1b · nombre visible del conductor (de User.name vía la relación driver→user). "" si no registrado.
+  // Lo consume el public-bff para enriquecer la card de la oferta de la puja con el nombre del conductor.
+  string name = 8;
+}

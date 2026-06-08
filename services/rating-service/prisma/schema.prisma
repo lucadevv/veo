@@ -1,0 +1,70 @@
+// rating-service · esquema Postgres (schema lógico "rating")
+// FOUNDATION §8. Dueño de: calificaciones post-viaje (1-5), agregados con promedio rolling 30d
+// y flags de revisión/suspensión (BR-D01 conductor, BR-I05 pasajero).
+// La identidad de personas (conductores/pasajeros) vive en identity-service; aquí solo se referencian por id.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["rating"]
+}
+
+/// Rol del sujeto calificado. Define qué umbrales de flag aplican (BR-D01 vs BR-I05).
+enum SubjectRole {
+  DRIVER
+  PASSENGER
+
+  @@schema("rating")
+}
+
+/// Una calificación post-viaje. Un único rating por viaje (UNIQUE trip_id).
+/// `raterId` califica a `ratedId`; `stars` 1..5 (CHECK en migración).
+model Rating {
+  id        String   @id @db.Uuid
+  tripId    String   @unique @map("trip_id") @db.Uuid
+  raterId   String   @map("rater_id") @db.Uuid
+  ratedId   String   @map("rated_id") @db.Uuid
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([ratedId, createdAt])
+  @@map("ratings")
+  @@schema("rating")
+}
+
+/// Agregado por sujeto: promedio rolling de 30 días, conteo y estado de flag.
+/// Recalculado al crear cada rating y por el cron diario (ventana deslizante).
+model RatingAggregate {
+  subjectId      String      @id @map("subject_id") @db.Uuid
+  role           SubjectRole
+  rollingAvg30d  Decimal     @default(0) @map("rolling_avg_30d") @db.Decimal(3, 2)
+  count30d       Int         @default(0) @map("count_30d")
+  flagged        Boolean     @default(false)
+  flagReason     String?     @map("flag_reason")
+  lastComputedAt DateTime    @default(now()) @map("last_computed_at") @db.Timestamptz
+
+  @@index([role, flagged])
+  @@map("rating_aggregates")
+  @@schema("rating")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("rating")
+}

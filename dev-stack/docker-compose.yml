@@ -1,0 +1,259 @@
+# =============================================================
+# VEO · Stack de desarrollo local
+# Levanta toda la infra que los servicios necesitan para correr en local.
+# Uso:
+#   pnpm infra:up      (levantar)
+#   pnpm infra:down    (apagar)
+#   pnpm infra:reset   (apagar + borrar volúmenes)
+#   pnpm infra:logs    (logs en vivo)
+# =============================================================
+name: veo-dev
+
+services:
+  # === PostgreSQL 16 + PostGIS ===
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: veo-postgres
+    environment:
+      POSTGRES_USER: veo
+      POSTGRES_PASSWORD: veo_dev
+      POSTGRES_DB: veo
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports: ["5433:5432"]   # host 5433 → evita choque con otro Postgres local en 5432
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # === Redis 7 (cache + pub/sub + dispatch hot index) ===
+  redis:
+    image: redis:7-alpine
+    container_name: veo-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # === ClickHouse (analytics, GPS history) ===
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.9-alpine
+    container_name: veo-clickhouse
+    environment:
+      CLICKHOUSE_DB: veo_analytics
+      CLICKHOUSE_USER: veo
+      CLICKHOUSE_PASSWORD: veo_dev
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+
+  # === Kafka (KRaft mode, sin zookeeper) · imagen oficial Apache ===
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: veo-kafka
+    environment:
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9094:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: veo-kafka-ui
+    depends_on: [kafka]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports: ["8088:8080"]
+
+  # === MinIO (S3 local) ===
+  minio:
+    image: minio/minio:latest
+    container_name: veo-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: veo_dev
+      MINIO_ROOT_PASSWORD: veo_dev_secret
+    ports:
+      - "9002:9000"   # S3 API (host 9002 → MinIO 9000; evita choque con ClickHouse Native 9000)
+      - "9001:9001"   # Console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # === Aprovisionamiento de buckets MinIO (sidecar one-shot) ===
+  # Crea el bucket de avatares y le da descarga ANÓNIMA SOLO en el prefijo avatars/, de modo que la
+  # `publicUrl` estable del avatar sea accesible sin firma mientras el resto del bucket queda privado.
+  # Idempotente: --ignore-existing + reaplicar la policy no falla en arranques sucesivos. Termina y
+  # queda Exited(0); no es un servicio permanente.
+  minio-provision:
+    image: minio/mc:latest
+    container_name: veo-minio-provision
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 veo_dev veo_dev_secret &&
+      mc mb --ignore-existing local/veo-avatars-dev &&
+      mc anonymous set download local/veo-avatars-dev/avatars &&
+      echo 'minio-provision: veo-avatars-dev listo (download anónimo en avatars/)'
+      "
+    restart: "no"
+
+  # === Mosquitto MQTT (driver GPS) ===
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: veo-mosquitto
+    ports:
+      - "1883:1883"
+      - "9883:9001"  # WebSocket
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  # === LiveKit (WebRTC SFU) ===
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: veo-livekit
+    command: --dev --bind 0.0.0.0
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret_change_in_production"
+    ports:
+      - "7880:7880"   # WS signaling
+      - "7881:7881"   # TURN/TLS
+      - "7882:7882/udp"  # ICE/UDP
+
+  # === Mailpit (SMTP catcher para email dev) ===
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: veo-mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # UI
+
+  # === Jaeger (tracing) ===
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: veo-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  # === Prometheus + Grafana ===
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: veo-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: veo-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: veo_dev
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    ports: ["3001:3000"]
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  # ===========================================================
+  # MAPAS OSM SOBERANOS · perfil "maps" (no se levantan por defecto)
+  #   Requieren datos preprocesados de un extracto OSM (ver maps/README.md):
+  #     pnpm --filter @veo/... no aplica; usar:  dev-stack/maps/prepare.sh
+  #   Arranque:  docker compose --profile maps up -d
+  # ===========================================================
+
+  # === tileserver-gl: tiles vectoriales MapLibre desde .mbtiles propio ===
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    container_name: veo-tileserver
+    profiles: ["maps"]
+    command: ["--config", "/data/config.json", "--port", "8080"]
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./maps/tiles:/data:ro
+
+  # === OSRM: ruteo (osrm-routed) desde región preprocesada (.osrm, algoritmo MLD) ===
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    container_name: veo-osrm
+    profiles: ["maps"]
+    platform: linux/amd64   # osrm-backend solo publica imagen amd64 (emulada en Apple Silicon)
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "8000", "/data/region.osrm"]
+    ports:
+      - "5005:5000"
+    volumes:
+      - ./maps/osrm:/data:ro
+
+  # === Nominatim: geocoding/reverse desde extracto .osm.pbf (auto-import al primer arranque) ===
+  nominatim:
+    image: mediagis/nominatim:4.4
+    container_name: veo-nominatim
+    profiles: ["maps"]
+    environment:
+      PBF_PATH: /nominatim/data/region.osm.pbf
+      IMPORT_WIKIPEDIA: "false"
+      NOMINATIM_PASSWORD: veo_dev
+    ports:
+      - "${NOMINATIM_PORT:-8081}:8080"   # default 8081 (contrato); override si el host lo tiene ocupado
+    volumes:
+      - ./maps/nominatim/data:/nominatim/data   # rw: el entrypoint mediagis hace chown -R sobre /nominatim
+      - nominatim-data:/var/lib/postgresql/14/main
+    shm_size: "1gb"
+
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  kafka-data:
+  minio-data:
+  mosquitto-data:
+  mosquitto-log:
+  prometheus-data:
+  grafana-data:
+  nominatim-data:
+
+networks:
+  default:
+    name: veo-dev

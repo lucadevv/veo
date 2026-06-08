@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package veo.panic.v1;
+
+service PanicService {
+  rpc GetPanic (GetPanicRequest) returns (PanicReply);
+}
+
+message GetPanicRequest {
+  string id = 1;
+}
+
+message PanicReply {
+  string id = 1;
+  string trip_id = 2;
+  string passenger_id = 3;
+  string status = 4;
+  double geo_lat = 5;
+  double geo_lon = 6;
+  string triggered_at = 7;
+  string acknowledged_at = 8;
+  string ack_by = 9;
+  bool found = 10;
+}

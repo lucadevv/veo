@@ -1,0 +1,155 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
+import { PaymentMethod } from '@veo/shared-types';
+
+export class ChargeDto {
+  @ApiProperty({ format: 'uuid', description: 'Viaje a cobrar' })
+  @IsUUID()
+  tripId!: string;
+
+  @ApiProperty({ description: 'Ticket bruto en céntimos PEN (incluye surge, excluye propina)' })
+  @IsInt()
+  @Min(0)
+  grossCents!: number;
+
+  @ApiPropertyOptional({ description: 'Propina en céntimos PEN (100% al conductor)', default: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  tipCents?: number;
+
+  @ApiProperty({ enum: PaymentMethod })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)' })
+  @IsOptional()
+  @IsString()
+  payerRef?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Conductor del viaje (para payouts)' })
+  @IsOptional()
+  @IsUUID()
+  driverId?: string;
+
+  @ApiProperty({ description: 'Clave de idempotencia (UUIDv7 o derivada). Reintentos con la misma key son idempotentes' })
+  @IsString()
+  dedupKey!: string;
+
+  @ApiPropertyOptional({ description: 'Código de promoción a aplicar (Ola 2A). Descuenta del total del pasajero' })
+  @IsOptional()
+  @IsString()
+  promoCode?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Pasajero que paga (requerido si se envía promoCode)' })
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
+}
+
+/**
+ * Cambio de MÉTODO de un pago no-capturado (POST /payments/:id/method). Solo métodos DIGITALES:
+ * CASH se rechaza en el servicio (422) porque el efectivo se salda por confirmación bilateral con el
+ * conductor presente (BR-P03), no aplica a un pendiente post-viaje. El `@IsEnum(PaymentMethod)` deja
+ * pasar CASH a nivel de sintaxis (es un método válido del enum); el guard de negocio lo bloquea en el
+ * servicio con un 422 honesto. No restringimos acá para no acoplar la validación HTTP a la regla de
+ * negocio (un 422 con mensaje claro es mejor UX que un 400 "valor no permitido en enum").
+ */
+export class ChangeMethodDto {
+  @ApiProperty({ enum: PaymentMethod, description: 'Nuevo método DIGITAL de liquidación del pago (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.' })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+}
+
+export class CashConfirmDto {
+  @ApiProperty({ enum: ['driver', 'passenger'], description: 'Quién confirma' })
+  @IsEnum({ driver: 'driver', passenger: 'passenger' })
+  party!: 'driver' | 'passenger';
+
+  @ApiPropertyOptional({
+    description: 'true = confirma (recibí/entregué); false = disputa (dispara ticket de soporte)',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmed?: boolean;
+}
+
+export class AddTipDto {
+  @ApiProperty({ description: 'Propina en céntimos PEN (100% al conductor, fuera de comisión)' })
+  @IsInt()
+  @Min(1)
+  tipCents!: number;
+
+  @ApiProperty({ description: 'Clave de idempotencia del incremento de propina (UUIDv7 o derivada)' })
+  @IsString()
+  dedupKey!: string;
+}
+
+export class EarningsQueryDto {
+  @ApiProperty({ format: 'uuid', description: 'Conductor cuyas ganancias se agregan' })
+  @IsUUID()
+  driverId!: string;
+
+  @ApiProperty({ description: 'Inicio de la ventana (ISO-8601, inclusivo)' })
+  @IsString()
+  from!: string;
+
+  @ApiProperty({ description: 'Fin de la ventana (ISO-8601, exclusivo)' })
+  @IsString()
+  to!: string;
+}
+
+export class RefundDto {
+  @ApiProperty({ description: 'Monto a reembolsar en céntimos PEN' })
+  @IsInt()
+  @Min(1)
+  amountCents!: number;
+
+  @ApiProperty({ description: 'Motivo del reembolso' })
+  @IsString()
+  reason!: string;
+}
+
+/**
+ * Clase de un ítem accionable del pasajero (BR-P02):
+ *  - `DEBT`: cobro en status=DEBT (los reintentos se agotaron). BLOQUEA pedir un viaje nuevo (gate).
+ *  - `PENDING_ACTION`: cobro en status=PENDING con un checkout vivo (ProntoPaga) esperando que el
+ *    usuario complete el pago (deepLink Yape / urlPay / QR / CIP). NO es deuda y NO bloquea el gate;
+ *    es un "pago por completar" que, si el usuario cerró el sheet, quedaba en un dead-end sin camino
+ *    de vuelta. Lo exponemos para que el home ofrezca "Continuar".
+ */
+export type DebtItemKind = 'DEBT' | 'PENDING_ACTION';
+
+/** Un ítem accionable del pasajero (cobro en DEBT o PENDING con checkout vivo). Céntimos PEN. */
+export interface DebtItem {
+  paymentId: string;
+  tripId: string;
+  amountCents: number;
+  /** Razón del fallo del cobro (failureReason): saldo insuficiente, declinado, etc. Vacío en PENDING_ACTION. */
+  reason: string;
+  createdAt: string;
+  /** DEBT (bloquea el gate) o PENDING_ACTION (pago por completar, NO bloquea). */
+  kind: DebtItemKind;
+}
+
+/**
+ * Resumen de ítems accionables del pasajero (BR-P02). `hasDebt` resume SOLO los DEBT (es lo que el
+ * gate de nuevos viajes consulta); `totalCents` también suma SOLO los DEBT (el monto que bloquea).
+ * `debts` incluye ambos kinds (DEBT primero, luego PENDING_ACTION), de más antiguo a más nuevo dentro
+ * de cada grupo, para que el home distinga "deuda" de "pago por completar".
+ */
+export interface DebtSummary {
+  hasDebt: boolean;
+  debts: DebtItem[];
+  /** Suma de las DEUDAS reales (kind=DEBT) en céntimos PEN. 0 si no hay deuda. Los PENDING_ACTION NO suman. */
+  totalCents: number;
+}

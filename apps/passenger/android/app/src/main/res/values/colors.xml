@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- VEO brand -->
+    <color name="veo_black">#FF000000</color>
+    <color name="veo_cyan">#FF00E5FF</color>
+    <color name="veo_white">#FFF4F6F8</color>
+
+    <!-- Adaptive launcher icon background (cyan) -->
+    <color name="ic_launcher_background">#FF00E5FF</color>
+
+    <!-- Splash background (black) -->
+    <color name="veo_splash_background">#FF000000</color>
+</resources>

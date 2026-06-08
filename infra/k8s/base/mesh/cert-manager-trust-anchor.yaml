@@ -1,0 +1,68 @@
+# Ancla de confianza (trust anchor) self-hosted para el mTLS de Linkerd,
+# emitida por cert-manager — CA propia, sin SaaS (regla de soberanía).
+#
+# Flujo: SelfSigned -> CA raíz VEO (trust anchor) -> Issuer de identidad de
+# Linkerd. Linkerd usa este Issuer para emitir/rotar certs de los proxies.
+# Requiere cert-manager instalado en el cluster (ver README.md).
+#
+# Estos objetos viven en el namespace de Linkerd (`linkerd`). NO se incluyen en
+# el kustomization de aplicación por defecto: se aplican una vez por cluster.
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: linkerd-selfsigned
+  namespace: linkerd
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: linkerd-trust-anchor
+  namespace: linkerd
+spec:
+  isCA: true
+  commonName: root.linkerd.cluster.local
+  secretName: linkerd-trust-anchor
+  duration: 87600h   # 10 años (CA raíz)
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: linkerd-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: linkerd-trust-anchor
+  namespace: linkerd
+spec:
+  ca:
+    secretName: linkerd-trust-anchor
+---
+# Certificado de identidad intermedio que Linkerd consume para firmar los certs
+# de los proxies. cert-manager lo rota automáticamente (duración corta).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: linkerd-identity-issuer
+  namespace: linkerd
+spec:
+  isCA: true
+  commonName: identity.linkerd.cluster.local
+  secretName: linkerd-identity-issuer
+  duration: 48h
+  renewBefore: 25h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - identity.linkerd.cluster.local
+  issuerRef:
+    name: linkerd-trust-anchor
+    kind: Issuer
+    group: cert-manager.io

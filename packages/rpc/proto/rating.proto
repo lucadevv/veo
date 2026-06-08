@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package veo.rating.v1;
+
+service RatingService {
+  rpc GetAggregate (GetAggregateRequest) returns (AggregateReply);
+}
+
+message GetAggregateRequest {
+  string subject_id = 1;
+}
+
+message AggregateReply {
+  string subject_id = 1;
+  string role = 2;
+  double rolling_avg30d = 3;
+  int32 count30d = 4;
+  bool flagged = 5;
+  string flag_reason = 6;
+  string last_computed_at = 7;
+  bool found = 8;
+}

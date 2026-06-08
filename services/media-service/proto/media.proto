@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package veo.media.v1;
+
+// Contrato gRPC que media-service expone a otros servicios (panic, audit, compliance).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
+// Nunca se exponen URLs de video por aquí: solo metadatos de segmentos (la URL firmada exige
+// la doble autorización del flujo BR-S02).
+service MediaService {
+  rpc GetSegments (GetSegmentsRequest) returns (SegmentsReply);
+}
+
+message GetSegmentsRequest {
+  string trip_id = 1;
+}
+
+message Segment {
+  string id = 1;
+  string trip_id = 2;
+  string started_at = 3;
+  string ended_at = 4;
+  string s3_key = 5;
+  int64 size_bytes = 6;
+  string codec = 7;
+  string retention_until = 8;
+  int32 accessed_count = 9;
+  bool has_panic = 10;
+  bool has_incident = 11;
+}
+
+message SegmentsReply {
+  repeated Segment segments = 1;
+}

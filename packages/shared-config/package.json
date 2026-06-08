@@ -1,0 +1,21 @@
+{
+  "name": "@veo/shared-config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuración compartida: eslint, prettier, tsconfig base, jest preset",
+  "exports": {
+    "./eslint": "./eslint/base.mjs",
+    "./eslint/node": "./eslint/node.mjs",
+    "./eslint/react-native": "./eslint/react-native.mjs",
+    "./eslint/nextjs": "./eslint/nextjs.mjs",
+    "./tsconfig/base": "./tsconfig/base.json",
+    "./tsconfig/nestjs": "./tsconfig/nestjs.json",
+    "./tsconfig/react-native": "./tsconfig/react-native.json",
+    "./tsconfig/nextjs": "./tsconfig/nextjs.json",
+    "./jest/node": "./jest/node.js",
+    "./jest/react-native": "./jest/react-native.js",
+    "./tailwind/preset.cjs": "./tailwind/preset.cjs",
+    "./tailwind/tokens.css": "./tailwind/tokens.css"
+  },
+  "files": ["eslint", "tsconfig", "jest", "prettier", "tailwind"]
+}

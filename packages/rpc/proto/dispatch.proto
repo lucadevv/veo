@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package veo.dispatch.v1;
+
+service DispatchService {
+  rpc GetMatch (GetMatchRequest) returns (MatchReply);
+  rpc GetSurge (GetSurgeRequest) returns (SurgeReply);
+  // Feed ANÓNIMO de conductores disponibles cerca de un punto (mapa del pasajero "buscando").
+  // No devuelve driverId/nombre: son autitos de ambiente, no identidades asignables.
+  rpc GetNearbyDrivers (GetNearbyDriversRequest) returns (NearbyDriversReply);
+}
+
+message GetMatchRequest {
+  string match_id = 1;
+}
+
+message MatchReply {
+  string id = 1;
+  string trip_id = 2;
+  string driver_id = 3;
+  double score = 4;
+  int32 attempt = 5;
+  double surge_multiplier = 6;
+  string outcome = 7;
+  string offered_at = 8;
+  string responded_at = 9;
+  bool found = 10;
+}
+
+message GetSurgeRequest {
+  double lat = 1;
+  double lon = 2;
+}
+
+message SurgeReply {
+  double multiplier = 1;
+  string zone_id = 2;
+  bool active = 3;
+}
+
+message GetNearbyDriversRequest {
+  double lat = 1;
+  double lon = 2;
+  // Opcional: si viene (p.ej. "CAR"/"MOTO") filtra por tipo; vacío = todos los tipos.
+  string vehicle_type = 3;
+}
+
+// Conductor cercano ANÓNIMO: SOLO posición + tipo, sin identidad (anti-rastreo).
+message NearbyDriver {
+  double lat = 1;
+  double lon = 2;
+  string vehicle_type = 3;
+}
+
+message NearbyDriversReply {
+  repeated NearbyDriver drivers = 1;
+}

@@ -1,0 +1,212 @@
+# Allowlist east-west sobre el default-deny global (networkpolicies/default-deny.yaml).
+#
+# MODELO: segmentación por la taxonomía de labels `tier` (bff / backend / frontend /
+# observability). Cada flujo legítimo se habilita EXPLÍCITAMENTE; lo no listado queda
+# denegado por el default-deny. Las NetworkPolicies son aditivas (unión de allows), y
+# como default-deny cubre Ingress Y Egress, cada flujo necesita su par (egress en el
+# origen + ingress en el destino).
+#
+# GRAFO (derivado del código: env.schema + gateways + @veo/events):
+#   ingress-controller        → BFFs (api.veo.pe) + frontends (admin/ver.veo.pe)
+#   frontends (Next.js SSR)   → su BFF (admin-web→admin-bff, family-web→public-bff)
+#   BFFs                      → microservicios (REST 30xx + gRPC 50xxx)
+#   dispatch → identity       → gRPC 50051 (re-valida elegibilidad del conductor por puja)
+#   identity → biometric      → REST 3013 (KYC/liveness)
+#   backend + bff             → datastores EXTERNOS (RDS 5432, ElastiCache 6379, MSK 9092/9094)
+#   {notif,pay,media,panic,audit} → internet TLS 443 (FCM/APNs, ProntoPaga, S3)
+#   notification              → SMPP 2775 (SMS operador PE)
+#   eventos servicio↔servicio → van por MSK (externo), NO pod-a-pod → cubierto por el egress a Kafka
+#
+# PRINCIPIO: la FUENTE siempre va restringida (least-privilege en el origen). Dentro del
+# flujo bff→backend los puertos de destino quedan abiertos para no acoplar la policy a la
+# lista de puertos por servicio (DRY + escalable: un servicio nuevo hereda por label).
+# Para el egress a internet (exfil = lo más sensible) la allowlist es por `app` explícita.
+#
+# NOTA (cluster real): las probes de kubelet (liveness/readiness) y los datastores/rieles
+# self-hosted que aún NO tienen manifest en k8s/base (OSRM, Nominatim, LiveKit, MinIO) se
+# validan/ajustan al desplegar; ver mesh/README.md "Pendientes que requieren cluster real".
+
+# ───────────────────────────── Ingress externo + frontends → BFF ─────────────────────────────
+---
+# Los BFFs reciben del ingress-controller (NGINX/ALB) y de los frontends SSR (proxy server-side).
+# Ajustar `ingress-nginx` al namespace real del controller en el cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-bff-ingress
+  labels: { tier: bff }
+spec:
+  podSelector: { matchLabels: { tier: bff } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+        - podSelector: { matchLabels: { tier: frontend } }
+---
+# Los frontends (admin-web, family-web) reciben del ingress-controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-ingress
+  labels: { tier: frontend }
+spec:
+  podSelector: { matchLabels: { tier: frontend } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+---
+# Egress de los frontends hacia su BFF (admin-web→admin-bff, family-web→public-bff).
+# El ruteo fino lo hace la app por URL; a nivel de red basta frontend→bff.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-egress-to-bff
+  labels: { tier: frontend }
+spec:
+  podSelector: { matchLabels: { tier: frontend } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { tier: bff } }
+
+# ───────────────────────────── BFF ↔ microservicios (REST + gRPC) ─────────────────────────────
+---
+# Egress de los BFFs hacia cualquier microservicio (REST 30xx + gRPC 50xxx). Puerto abierto
+# dentro del tier backend a propósito (ver PRINCIPIO en la cabecera).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-bff-egress-to-backend
+  labels: { tier: bff }
+spec:
+  podSelector: { matchLabels: { tier: bff } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { tier: backend } }
+---
+# Ingress de los microservicios SOLO desde los BFFs (cierra el movimiento lateral: ningún
+# pod arbitrario llega a un servicio). Los edges servicio→servicio se habilitan aparte.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-ingress-from-bff
+  labels: { tier: backend }
+spec:
+  podSelector: { matchLabels: { tier: backend } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { tier: bff } }
+
+# ───────────────────────────── Edges servicio→servicio (explícitos, least-privilege) ─────────────────────────────
+---
+# dispatch-service → identity-service (gRPC 50051): re-valida elegibilidad del conductor en el submit de la puja.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dispatch-egress-to-identity
+  labels: { app: dispatch-service }
+spec:
+  podSelector: { matchLabels: { app: dispatch-service } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: identity-service } }
+      ports: [{ protocol: TCP, port: 50051 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-identity-ingress-from-dispatch
+  labels: { app: identity-service }
+spec:
+  podSelector: { matchLabels: { app: identity-service } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: dispatch-service } }
+      ports: [{ protocol: TCP, port: 50051 }]
+---
+# identity-service → biometric-service (REST 3013): verificación KYC/liveness del conductor.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-identity-egress-to-biometric
+  labels: { app: identity-service }
+spec:
+  podSelector: { matchLabels: { app: identity-service } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: biometric-service } }
+      ports: [{ protocol: TCP, port: 3013 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-biometric-ingress-from-identity
+  labels: { app: biometric-service }
+spec:
+  podSelector: { matchLabels: { app: biometric-service } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: identity-service } }
+      ports: [{ protocol: TCP, port: 3013 }]
+
+# ───────────────────────────── Egress a datastores EXTERNOS (RDS / ElastiCache / MSK) ─────────────────────────────
+---
+# Postgres (RDS), Redis (ElastiCache) y Kafka (MSK) viven FUERA del cluster (sin pods aquí),
+# por eso el destino es `to: []` (cualquier IP) acotado por puerto. Aplica a backend + BFFs
+# (los BFFs usan Redis para rate-limit y Kafka como consumidores).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-datastores-egress
+  labels: { tier: backend }
+spec:
+  podSelector: { matchExpressions: [{ key: tier, operator: In, values: [backend, bff] }] }
+  policyTypes: [Egress]
+  egress:
+    - to: []
+      ports:
+        - { protocol: TCP, port: 5432 }   # Postgres (RDS)
+        - { protocol: TCP, port: 6379 }   # Redis (ElastiCache)
+        - { protocol: TCP, port: 9092 }   # Kafka (MSK, plaintext/IAM listener)
+        - { protocol: TCP, port: 9094 }   # Kafka (MSK, TLS listener)
+        - { protocol: TCP, port: 8123 }   # ClickHouse (analytics, admin-bff)
+
+# ───────────────────────────── Egress a internet (rieles externos · allowlist por app) ─────────────────────────────
+---
+# Solo los servicios que REALMENTE salen a internet (rieles inevitables, sin PII en payload):
+# notification (FCM/APNs), payment (ProntoPaga/Yape-Plin), media/panic/audit (S3). TLS 443.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-internet-tls
+  labels: { tier: backend }
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [notification-service, payment-service, media-service, panic-service, audit-service]
+  policyTypes: [Egress]
+  egress:
+    - to: []
+      ports: [{ protocol: TCP, port: 443 }]
+---
+# notification-service → SMPP 3.4 (SMS del operador PE). Puerto SMPP dedicado, no-TLS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-notification-egress-smpp
+  labels: { app: notification-service }
+spec:
+  podSelector: { matchLabels: { app: notification-service } }
+  policyTypes: [Egress]
+  egress:
+    - to: []
+      ports: [{ protocol: TCP, port: 2775 }]

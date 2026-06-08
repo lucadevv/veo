@@ -1,0 +1,416 @@
+// payment-service · esquema Postgres (schema lógico "payment")
+// FOUNDATION §8. Dueño de: cobros (Yape/Plin/efectivo/tarjeta), comisión de plataforma,
+// payouts a conductores, reembolsos, confirmaciones de efectivo y conciliación de extractos.
+// El dinero SIEMPRE en céntimos PEN (enteros). UUIDv7 generado en el dominio (no en DB).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["payment"]
+}
+
+enum PaymentMethod {
+  YAPE
+  PLIN
+  CASH
+  CARD
+  PAGOEFECTIVO
+
+  @@schema("payment")
+}
+
+/// Estado de una afiliación de wallet (Yape On File · ProntoPaga).
+///  PROCESS → creada, esperando que el cliente apruebe en su app (deepLink). 15 min de ventana.
+///  ACTIVE  → confirmada por webhook; habilita el cobro on-file (yape_cof_payment + walletUid).
+///  EXPIRED → el cliente no aprobó a tiempo (webhook expired).
+///  REVOKED → baja local (el cliente o soporte la dieron de baja). No se vuelve a usar para cobrar.
+enum AffiliationStatus {
+  PROCESS
+  ACTIVE
+  EXPIRED
+  REVOKED
+
+  @@schema("payment")
+}
+
+enum PaymentStatus {
+  PENDING
+  CAPTURED
+  FAILED
+  REFUNDED
+  DEBT
+
+  @@schema("payment")
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  HELD
+  FAILED
+
+  @@schema("payment")
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+
+  @@schema("payment")
+}
+
+/// Tipo de descuento de una promoción (Ola 2A).
+enum PromoKind {
+  PERCENTAGE // descuento porcentual sobre el bruto
+  FIXED // monto fijo de descuento en céntimos PEN
+
+  @@schema("payment")
+}
+
+/// Cobro de un viaje (BR-P01..P04). Idempotente por `dedupKey` (UNIQUE).
+/// grossCents = ticket bruto (incluye surge, EXCLUYE propinas) → base de la comisión (BR-P04).
+/// tipCents   = propina (100% al conductor, fuera de comisión).
+/// amountCents = total cobrado al pasajero = grossCents + tipCents.
+/// commissionCents = commission(grossCents, rate). feeCents = comisión visible al usuario.
+model Payment {
+  id              String        @id @db.Uuid
+  tripId          String        @map("trip_id") @db.Uuid
+  /// Conductor del viaje (para agregación de payouts). Puede faltar si el cobro nace del evento.
+  driverId        String?       @map("driver_id") @db.Uuid
+  /// Pasajero del viaje (lo trae el trip.completed que dispara el cobro). Se persiste para enriquecer
+  /// payment.captured / payment.refunded y que notification-service mande el push al pasajero
+  /// ("pago confirmado" / "te devolvimos") sin un join cross-servicio. Opcional (cobros legacy/sin id).
+  passengerId     String?       @map("passenger_id") @db.Uuid
+  /// Clave de idempotencia (UUIDv7 o derivada determinista del viaje). UNIQUE.
+  dedupKey        String        @unique @map("dedup_key")
+  amountCents     Int           @map("amount_cents")
+  grossCents      Int           @map("gross_cents")
+  /// Descuento de promoción aplicado al pasajero (céntimos). 0 si no hubo promo (Ola 2A).
+  /// amountCents = grossCents − discountCents + tipCents. La comisión se calcula SOBRE grossCents
+  /// (la plataforma asume el costo de la promo); la propina queda intacta.
+  discountCents   Int           @default(0) @map("discount_cents")
+  tipCents        Int           @default(0) @map("tip_cents")
+  commissionCents Int           @map("commission_cents")
+  feeCents        Int           @map("fee_cents")
+  currency        String        @default("PEN")
+  method          PaymentMethod
+  /// Referencia externa del riel de pago (id de transacción Yape/Plin). Null hasta confirmar.
+  externalRef     String?       @map("external_ref")
+  status          PaymentStatus @default(PENDING)
+  /// Intentos consumidos contra el gateway (BR-P02: máx 3 antes de DEBT).
+  retries         Int           @default(0)
+  /// Última razón de fallo (para soporte/observabilidad).
+  failureReason   String?       @map("failure_reason")
+  /// Referencia del pagador en el riel (teléfono/token Yape-Plin). PII mínima.
+  payerRef        String?       @map("payer_ref")
+  /// ── Checkout externo (ProntoPaga PENDING_EXTERNAL) ── El cobro quedó pendiente y el pasajero lo
+  /// completa FUERA (QR/deepLink/CIP) o el on-file confirma por webhook. El recibo (L2 by-trip) los expone.
+  /// uid de la transacción en ProntoPaga (correlación con el webhook). Distinto de externalRef hasta capturar.
+  externalUid     String?       @map("external_uid")
+  /// URL hospedada del proveedor para completar el pago (tarjeta/QR web).
+  checkoutUrl     String?       @map("checkout_url")
+  /// QR como data-URI PNG base64 para pintar en la app (Yape/Plin QR).
+  qrCode          String?       @map("qr_code")
+  /// Deep-link para abrir la app del wallet (Yape one-shot).
+  deepLink        String?       @map("deep_link")
+  /// Código CIP de PagoEfectivo (pago en agente/efectivo).
+  cip             String?       @map("cip")
+  /// Caducidad del checkout (si el proveedor la informa).
+  checkoutExpiresAt DateTime?   @map("checkout_expires_at") @db.Timestamptz
+  capturedAt      DateTime?     @map("captured_at") @db.Timestamptz
+  refundedAt      DateTime?     @map("refunded_at") @db.Timestamptz
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  refunds Refund[]
+  tips    TipAddition[]
+
+  @@index([status])
+  @@index([tripId])
+  @@index([driverId, status])
+  @@index([method, status, capturedAt])
+  /// DEBT gate: lista la deuda PENDIENTE de un pasajero (status=DEBT) en O(log n) sin escanear.
+  /// Sirve a GET /payments/debt (bloqueo de nuevos viajes) por [passengerId, status].
+  @@index([passengerId, status])
+  @@map("payments")
+  @@schema("payment")
+}
+
+/// Liquidación semanal por conductor (BR-P05). amountCents = neto a pagar (gross - comisión + propinas).
+model Payout {
+  id              String       @id @db.Uuid
+  driverId        String       @map("driver_id") @db.Uuid
+  periodStart     DateTime     @map("period_start") @db.Timestamptz
+  periodEnd       DateTime     @map("period_end") @db.Timestamptz
+  grossCents      Int          @map("gross_cents")
+  commissionCents Int          @map("commission_cents")
+  amountCents     Int          @map("amount_cents")
+  currency        String       @default("PEN")
+  status          PayoutStatus @default(PENDING)
+  processedAt     DateTime?    @map("processed_at") @db.Timestamptz
+  /// Motivo de retención si el conductor está en review (BR-P05, evento driver.flagged).
+  heldReason      String?      @map("held_reason")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// Un payout por conductor y período (idempotencia del cron semanal).
+  @@unique([driverId, periodStart, periodEnd])
+  @@index([status])
+  @@map("payouts")
+  @@schema("payment")
+}
+
+/// Solicitud de reembolso (BR-P06): ventana 7 días, aprobación manual L1/L2 (>S/30 requiere L2).
+model Refund {
+  id          String       @id @db.Uuid
+  paymentId   String       @map("payment_id") @db.Uuid
+  payment     Payment      @relation(fields: [paymentId], references: [id])
+  amountCents Int          @map("amount_cents")
+  requestedBy String       @map("requested_by")
+  approvedBy  String?      @map("approved_by")
+  status      RefundStatus @default(PENDING)
+  reason      String
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([paymentId])
+  @@index([status])
+  @@map("refunds")
+  @@schema("payment")
+}
+
+/// Propina añadida a un viaje ya cobrado (BR-P04: 100% al conductor, fuera de comisión).
+/// Idempotente por `dedupKey` (UNIQUE): reenviar la misma propina no la vuelve a sumar.
+/// Cada fila es un incremento atómico de `payment.tipCents` y `payment.amountCents`.
+model TipAddition {
+  id        String   @id @db.Uuid
+  paymentId String   @map("payment_id") @db.Uuid
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+  tripId    String   @map("trip_id") @db.Uuid
+  /// Clave de idempotencia del incremento. UNIQUE.
+  dedupKey  String   @unique @map("dedup_key")
+  tipCents  Int      @map("tip_cents")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([paymentId])
+  @@index([tripId])
+  @@map("tip_additions")
+  @@schema("payment")
+}
+
+/// Confirmación bilateral de pago en efectivo (BR-P03): conductor "recibí" + pasajero "entregué".
+model CashConfirmation {
+  id                 String   @id @db.Uuid
+  tripId             String   @unique @map("trip_id") @db.Uuid
+  driverConfirmed    Boolean  @default(false) @map("driver_confirmed")
+  passengerConfirmed Boolean  @default(false) @map("passenger_confirmed")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("cash_confirmations")
+  @@schema("payment")
+}
+
+/// Afiliación de wallet (Yape On File · ProntoPaga). UN registro vivo por (userId, provider, wallet).
+/// SEGURIDAD: `walletUid` es el secreto que habilita cobros server-initiated; vive SOLO server-side y
+/// NUNCA sale en DTOs (los getters del servicio lo excluyen). `phoneMasked`/`documentMasked` guardan PII
+/// enmascarada para mostrar (ej. "9****1234"). El deepLink (para aprobar la afiliación) SÍ va al cliente,
+/// pero es efímero y NO se persiste.
+model WalletAffiliation {
+  id             String            @id @db.Uuid
+  userId         String            @map("user_id") @db.Uuid
+  /// Proveedor del riel (por ahora solo PRONTOPAGA).
+  provider       String            @default("PRONTOPAGA")
+  /// Wallet afiliada (por ahora solo YAPE).
+  wallet         String            @default("YAPE")
+  /// Tipo de afiliación. RECURRENT implementado; ON_DEMAND fuera de alcance (L1).
+  type           String            @default("RECURRENT")
+  status         AffiliationStatus @default(PROCESS)
+  /// UID de la afiliación en el proveedor. SOLO server-side. Null hasta que el proveedor lo emita.
+  walletUid      String?           @map("wallet_uid")
+  /// Teléfono enmascarado (PII mínima para UI; nunca el número completo).
+  phoneMasked    String?           @map("phone_masked")
+  /// Documento enmascarado (PII mínima para UI).
+  documentMasked String?           @map("document_masked")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// Una sola afiliación por usuario + proveedor + wallet (re-afiliar reusa/actualiza la fila).
+  @@unique([userId, provider, wallet])
+  @@index([status])
+  @@index([walletUid])
+  @@map("wallet_affiliations")
+  @@schema("payment")
+}
+
+/// Corrida de conciliación contra extractos del gateway (BR-P07): cron diario 04:00.
+model ReconciliationRun {
+  id             String   @id @db.Uuid
+  ranAt          DateTime @default(now()) @map("ran_at") @db.Timestamptz
+  /// Discrepancia (0..1) entre lo capturado en DB y el extracto del gateway.
+  discrepancyPct Float    @map("discrepancy_pct")
+  alerted        Boolean  @default(false)
+  /// Detalle (conteos/sumas comparadas) para auditoría.
+  details        Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([ranAt])
+  @@map("reconciliation_runs")
+  @@schema("payment")
+}
+
+/// Catálogo de promociones/cupones (Ola 2A). `code` UNIQUE (normalizado a MAYÚSCULAS).
+/// El descuento reduce SOLO lo que paga el pasajero sobre el bruto (`grossCents`); la comisión de
+/// plataforma y la propina NO se ven afectadas (BR: la plataforma asume el costo de la promo).
+/// `discount(grossCents)`:
+///   PERCENTAGE → floor(grossCents * value / 100), topado por `maxDiscountCents` (si > 0)
+///   FIXED      → min(value, grossCents)  (value en céntimos)
+model Promotion {
+  id              String    @id @db.Uuid
+  code            String    @unique
+  kind            PromoKind
+  /// PERCENTAGE: 1..100 (porcentaje). FIXED: céntimos PEN de descuento.
+  value           Int
+  /// Tope de descuento en céntimos (solo PERCENTAGE). 0/null = sin tope.
+  maxDiscountCents Int?     @map("max_discount_cents")
+  /// Monto mínimo de bruto para aplicar (céntimos). 0 = sin mínimo.
+  minFareCents    Int       @default(0) @map("min_fare_cents")
+  /// Vigencia. `startsAt` null = ya vigente; `endsAt` null = sin caducidad.
+  startsAt        DateTime? @map("starts_at") @db.Timestamptz
+  endsAt          DateTime? @map("ends_at") @db.Timestamptz
+  /// Usos máximos totales (0 = ilimitado) y por usuario (>=1).
+  maxTotalUses    Int       @default(0) @map("max_total_uses")
+  maxUsesPerUser  Int       @default(1) @map("max_uses_per_user")
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  redemptions PromoRedemption[]
+
+  @@index([active])
+  @@map("promotions")
+  @@schema("payment")
+}
+
+/// Canje de una promoción por un usuario en un viaje (Ola 2A). Idempotente por `dedupKey` (UNIQUE).
+/// La unicidad (promotionId, userId, tripId) evita doble canje del mismo viaje; el límite por
+/// usuario/regla se valida contando redenciones del usuario sobre la promo.
+model PromoRedemption {
+  id            String    @id @db.Uuid
+  promotionId   String    @map("promotion_id") @db.Uuid
+  promotion     Promotion @relation(fields: [promotionId], references: [id])
+  code          String
+  userId        String    @map("user_id") @db.Uuid
+  tripId        String    @map("trip_id") @db.Uuid
+  discountCents Int       @map("discount_cents")
+  /// Clave de idempotencia del canje. UNIQUE.
+  dedupKey      String    @unique @map("dedup_key")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([promotionId, userId, tripId])
+  @@index([promotionId, userId])
+  @@index([tripId])
+  @@map("promo_redemptions")
+  @@schema("payment")
+}
+
+/// Tipo de incentivo al conductor (Ola 2C).
+enum IncentiveType {
+  META_VIAJES // completa N viajes en la ventana → bono fijo (rewardCents)
+  HORA_PICO //   multiplicador de ganancias en una franja horaria (multiplierBps)
+
+  @@schema("payment")
+}
+
+/// Catálogo de incentivos al conductor (Ola 2C). Vive en payment-service (mismo bounded context
+/// "dinero": el bono es un crédito en céntimos). La ventana [startsAt, endsAt] acota la vigencia.
+///  - META_VIAJES: `targetTrips` (>0) y `rewardCents` (>0). Al alcanzar la meta se otorga el bono.
+///  - HORA_PICO:   `multiplierBps` (>0; 12000 = +20% sobre 1.0) y `peakStartMinute`/`peakEndMinute`
+///                 (minutos desde medianoche, hora local) definen la franja activa del día.
+model Incentive {
+  id              String        @id @db.Uuid
+  type            IncentiveType
+  title           String
+  description     String
+  /// Viajes objetivo (META_VIAJES). 0 si no aplica.
+  targetTrips     Int           @default(0) @map("target_trips")
+  /// Bono en céntimos PEN al completar (META_VIAJES). 0 si no aplica.
+  rewardCents     Int           @default(0) @map("reward_cents")
+  /// Multiplicador de ganancias en puntos básicos de %·100 (HORA_PICO). 0 si no aplica.
+  multiplierBps   Int           @default(0) @map("multiplier_bps")
+  /// Franja horaria (minutos desde medianoche, hora local) para HORA_PICO. Null si no aplica.
+  peakStartMinute Int?          @map("peak_start_minute")
+  peakEndMinute   Int?          @map("peak_end_minute")
+  /// Vigencia. `startsAt` null = ya vigente; `endsAt` null = sin caducidad.
+  startsAt        DateTime?     @map("starts_at") @db.Timestamptz
+  endsAt          DateTime?     @map("ends_at") @db.Timestamptz
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  progress IncentiveProgress[]
+  credits  IncentiveTripCredit[]
+
+  @@index([active])
+  @@map("incentives")
+  @@schema("payment")
+}
+
+/// Progreso de UN conductor en UN incentivo (Ola 2C). Único por (incentiveId, driverId).
+/// `tripsCompleted` se incrementa al consumir `trip.completed`; al alcanzar la meta se marca
+/// `completedAt` y se otorga `rewardGrantedCents` (idempotente: solo una vez).
+model IncentiveProgress {
+  id                 String    @id @db.Uuid
+  incentiveId        String    @map("incentive_id") @db.Uuid
+  incentive          Incentive @relation(fields: [incentiveId], references: [id])
+  driverId           String    @map("driver_id") @db.Uuid
+  tripsCompleted     Int       @default(0) @map("trips_completed")
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz
+  rewardGrantedCents Int       @default(0) @map("reward_granted_cents")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([incentiveId, driverId])
+  @@index([driverId])
+  @@map("incentive_progress")
+  @@schema("payment")
+}
+
+/// Crédito de UN viaje a UN incentivo de UN conductor (Ola 2C). UNIQUE (incentiveId, driverId,
+/// tripId): garantiza que un `trip.completed` re-entregado NO cuente el viaje dos veces (idempotencia).
+model IncentiveTripCredit {
+  id          String    @id @db.Uuid
+  incentiveId String    @map("incentive_id") @db.Uuid
+  incentive   Incentive @relation(fields: [incentiveId], references: [id])
+  driverId    String    @map("driver_id") @db.Uuid
+  tripId      String    @map("trip_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([incentiveId, driverId, tripId])
+  @@index([driverId, tripId])
+  @@map("incentive_trip_credits")
+  @@schema("payment")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("payment")
+}

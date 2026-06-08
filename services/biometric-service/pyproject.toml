@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veo-biometric-service"
+version = "0.1.0"
+description = "VEO biometric-service — verificación facial self-hosted (FastAPI + ONNX)"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+plugins = []
+
+[[tool.mypy.overrides]]
+module = ["cv2.*", "onnxruntime.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+pythonVersion = "3.9"
+typeCheckingMode = "standard"
+reportMissingImports = false

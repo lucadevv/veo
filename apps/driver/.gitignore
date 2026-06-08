@@ -1,0 +1,42 @@
+node_modules/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore/release.keystore
+*.keystore
+*.jks
+
+# iOS
+ios/Pods/
+ios/build/
+ios/.xcode.env.local
+*.xcuserstate
+ios/*.xcworkspace/xcuserdata/
+
+# Firebase (mantener solo placeholders; las credenciales reales no se commitean)
+# android/app/google-services.json
+# ios/VEODriver/GoogleService-Info.plist
+
+.env
+.env.local
+
+# Secretos de entorno (tokens reales: Mapbox pk, etc.). Solo `.env.example` se commitea.
+env/*.secret.env
+
+# Mapbox iOS download token (sk.) — credencial de máquina/CI, nunca en el repo.
+.netrc
+
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Native build cache (RN)
+.cxx/
+android/app/.cxx/
+
+coverage/
+detox-artifacts/
+*.tsbuildinfo

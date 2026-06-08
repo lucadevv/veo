@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package veo.rating.v1;
+
+// Contrato gRPC que rating-service expone a otros servicios (lo usa dispatch para scoring).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
+service RatingService {
+  // Agregado de un sujeto: promedio rolling 30d, conteo y estado de flag.
+  rpc GetAggregate (GetAggregateRequest) returns (AggregateReply);
+}
+
+message GetAggregateRequest {
+  string subject_id = 1;
+}
+
+message AggregateReply {
+  string subject_id = 1;
+  string role = 2;            // DRIVER | PASSENGER
+  // Nota: se evita el patrón `_30d` (camelCase lo dejaría como `rollingAvg_30d`).
+  double rolling_avg30d = 3;
+  int32 count30d = 4;
+  bool flagged = 5;
+  string flag_reason = 6;     // "" si no está flagged
+  string last_computed_at = 7; // ISO-8601; "" si no hay agregado
+  bool found = 8;
+}

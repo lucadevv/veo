@@ -1,0 +1,87 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+# MapboxMaps 11.x requiere iOS 14.0+ y GoogleMLKit 7.x (detección facial KYC) requiere iOS 15.5+.
+# RN 0.75 fija min_ios_version_supported = '13.4'; elevamos al máximo de los tres (15.5).
+platform :ios, [min_ios_version_supported, '15.5'].max
+prepare_react_native_project!
+
+# Mapbox v11 distribuye XCFrameworks DINÁMICOS; sin `use_frameworks!` NO se embeben en el .app
+# (→ runtime "native code not available"). El ejemplo OFICIAL de @rnmapbox/maps usa linkage estático:
+# https://github.com/rnmapbox/maps/blob/main/example/ios/Podfile  (use_frameworks! :linkage => :static)
+linkage = (ENV['USE_FRAMEWORKS'] || 'static').to_sym
+Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+use_frameworks! :linkage => linkage
+
+# Firebase como framework ESTÁTICO (requerido al usar use_frameworks!): doc oficial RNFirebase.
+# https://github.com/invertase/react-native-firebase (Discussion #7011)
+$RNFirebaseAsStaticFramework = true
+
+# ─── Mapbox (@rnmapbox/maps · migración del mapa) ────────────────────────────────────────────────
+# SDK iOS = el DEFAULT de @rnmapbox/maps@10.2.1 (v11.15.2). Mapbox v11.8.0+ ELIMINÓ el requerimiento
+# del download token (sk): release notes v11.8.0 → "Configuring Mapbox's secret token is no longer
+# required when installing our SDKs". Por eso `pod install` funciona con SOLO el pk público — sin
+# `~/.netrc` ni sk. NO fijar una versión v10.x (esas SÍ pedían el sk de DOWNLOADS:READ).
+# El pk de runtime vive en `env/dev.secret.env` (lo consume `Mapbox.setAccessToken`).
+$RNMapboxMapsVersion = '~> 11.15.2'
+
+target 'VEO' do
+  config = use_native_modules!
+
+  # react-native-vision-camera-face-detector declara `GoogleMLKit/FaceDetection` SIN versión, y
+  # CocoaPods backtrackea hasta un MLKit ancestral (GoogleUtilities ~>7) que choca con Firebase 11.11
+  # (GoogleUtilities 8.1 / GTMSessionFetcher 3.5). Pineamos un MLKit MODERNO (7.x usa GoogleUtilities
+  # ~>8 + GTMSessionFetcher ~>3.3), coherente con el stack de Firebase.
+  pod 'GoogleMLKit/FaceDetection', '7.0.0'
+
+  # Con `use_frameworks! :linkage => :static` los pods se construyen como frameworks estáticos
+  # (ya proveen module maps), así que NO hacen falta los `:modular_headers` explícitos de Firebase
+  # ni `$RNFirebaseAsStaticFramework` se contradice — todo queda en linkage estático coherente.
+
+  # @rnmapbox/maps: hook previo a la instalación (configura el podspec de MapboxMaps). Debe ir antes
+  # de `use_react_native!` para que CocoaPods resuelva la dependencia nativa de Mapbox.
+  pre_install do |installer|
+    $RNMapboxMaps.pre_install(installer) if defined?($RNMapboxMaps)
+  end
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  target 'VEOTests' do
+    inherit! :complete
+    # Pods for testing
+  end
+
+  post_install do |installer|
+    # @rnmapbox/maps: hook posterior a la instalación (parchea los targets de Pods para MapboxMaps).
+    $RNMapboxMaps.post_install(installer) if defined?($RNMapboxMaps)
+
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # MapboxMaps 11.x exige iOS 14.0 y GoogleMLKit 7.x exige iOS 15.5. `react_native_post_install`
+    # resetea el IPHONEOS_DEPLOYMENT_TARGET de los pods a min_ios_version_supported (13.4 en RN 0.75),
+    # lo que rompe la compilación de MapboxMaps y MLKit. Elevamos a 15.5 cualquier target de Pods que
+    # haya quedado por debajo (debe ir DESPUÉS de react_native_post_install para no ser sobrescrito).
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_configuration|
+        current = build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || current.to_f < 15.5
+          build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+        end
+      end
+    end
+  end
+end

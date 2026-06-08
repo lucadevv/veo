@@ -1,0 +1,75 @@
+// audit-service · esquema Postgres (schema lógico "audit")
+// FOUNDATION §6 / Ley 29733. Dueño del registro de auditoría INMUTABLE y append-only.
+// Cada entrada encadena su hash con la anterior (hash chain) → tampering detectable.
+// La inmutabilidad se garantiza en código (sin UPDATE/DELETE) y a nivel de DB (triggers)
+// + réplica WORM a S3/MinIO con Object Lock (modo COMPLIANCE).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["audit"]
+}
+
+/// Entrada de auditoría. Append-only: nunca se actualiza ni borra (salvo el sello WORM
+/// `s3_object_key`, escrito una sola vez por el relay de réplica — ver triggers en la migración).
+model AuditLog {
+  /// PK UUIDv7 (ordenable por tiempo). Generada en la app con @veo/utils.
+  id          String   @id @db.Uuid
+  /// Orden monotónico de la cadena (fuente de verdad del orden, no depende de relojes).
+  seq         BigInt   @default(autoincrement())
+  /// Id del evento de origen (envelope.eventId si proviene de Kafka, o UUIDv7 nuevo si es síncrono).
+  /// Único → idempotencia: reprocesar el mismo evento no duplica la entrada.
+  eventId     String   @unique @map("event_id")
+  /// Quién ejecutó la acción (userId/adminId/'system' para eventos automáticos).
+  actorId     String   @map("actor_id")
+  /// Acción auditada. Para eventos de dominio = eventType (ej. 'panic.triggered').
+  action      String
+  /// Tipo de recurso afectado (ej. 'trip', 'payment', 'media', 'rbac', 'user').
+  resourceType String  @map("resource_type")
+  /// Id del recurso afectado.
+  resourceId  String   @map("resource_id")
+  /// IP de origen (vacío para eventos consumidos de Kafka).
+  ip          String
+  /// User-Agent de origen (o 'kafka:<topic>' para eventos consumidos).
+  userAgent   String   @map("user_agent")
+  /// Cuándo ocurrió el hecho auditado (envelope.occurredAt o ahora).
+  occurredAt  DateTime @map("occurred_at") @db.Timestamptz
+  /// Carga útil del hecho (payload del evento o detalle de la acción).
+  payload     Json
+  /// Hash de la entrada anterior (null = GENESIS, primera de la cadena).
+  prevHash    String?  @map("prev_hash")
+  /// Hash de esta entrada = chainHash(prevHash, serialize(content)). Único.
+  hash        String   @unique
+  /// Clave del objeto WORM replicado a S3/MinIO (Object Lock). Null hasta replicar.
+  s3ObjectKey String?  @map("s3_object_key")
+  /// Marca de inserción en la DB (distinto de occurredAt).
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([resourceType, resourceId])
+  @@index([actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([s3ObjectKey])
+  @@map("audit_log")
+  @@schema("audit")
+}
+
+/// Outbox (FOUNDATION §6). audit-service principalmente CONSUME, pero emite `audit.recorded`
+/// (señal tamper-evident de que una entrada fue registrada) en la misma tx que el append.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("audit")
+}

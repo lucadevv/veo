@@ -1,0 +1,36 @@
+{
+  "name": "@veo/maps",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fachada de mapas self-hosted (OSM): routing OSRM/Valhalla + geocoding Nominatim, con motor local propio y caché Redis. Soberanía §0.7 (sin Google Maps).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.2",
+    "rimraf": "^6.0.1"
+  },
+  "dependencies": {
+    "@veo/utils": "workspace:*"
+  }
+}

@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package veo.trip.v1;
+
+service TripService {
+  rpc GetTrip (GetByIdRequest) returns (TripReply);
+  rpc GetTripState (GetByIdRequest) returns (TripStateReply);
+  // Viaje ACTIVO (vivo) del pasajero, sin conocer el id (re-entrada al flujo unificado).
+  // Devuelve found=false si el pasajero no tiene ningún viaje en curso.
+  rpc GetActiveTrip (ActiveTripRequest) returns (TripReply);
+  // Pending settlement (re-entrada del cierre): viaje MÁS VIEJO COMPLETED del pasajero sin cerrar
+  // (passenger_closed_at = null), orden FIFO (completedAt asc). found=false si no hay ninguno. COMPLETED
+  // es terminal (fuera de LIVE_STATES) → GetActiveTrip no lo devuelve y el pasajero perdería el cierre
+  // tras un reload. FIFO drena en cascada del más antiguo: la plata de un efectivo viejo no queda enterrada.
+  rpc GetPendingSettlementTrip (PendingSettlementRequest) returns (TripReply);
+  // Cierre post-viaje por el pasajero: sella passenger_closed_at sobre SU viaje COMPLETED. Idempotente;
+  // NO toca la máquina de estados. Anti-enumeración: viaje ajeno/inexistente → found=false.
+  rpc CloseTripByPassenger (CloseTripRequest) returns (TripReply);
+  // Historial REAL del pasajero (servidor, no MMKV local): SUS viajes ordenados por requested_at DESC,
+  // id DESC (tie-break determinista para la paginación keyset). Paginado por CURSOR opaco (no offset):
+  // a escala el offset degrada (Postgres descarta N filas) y se desincroniza si entran viajes nuevos;
+  // el keyset (requested_at,id) es estable e indexado por @@index([passengerId, requestedAt, id]).
+  // El passenger_id viaja en el request pero lo FIJA el BFF desde el JWT (anti-IDOR): el cliente nunca
+  // lo provee. Devuelve los campos que la lista/detalle necesitan; el NOMBRE del conductor NO va acá
+  // (evita N+1 en la lista) — la card muestra tier+ruta+monto+estado y el detalle (GetTrip) resuelve el nombre.
+  rpc ListPassengerTrips (ListPassengerTripsRequest) returns (PassengerTripsReply);
+}
+
+// Historial paginado del pasajero. cursor='' = primera página. limit lo CLAMPea el servidor (1..MAX).
+message ListPassengerTripsRequest {
+  string passenger_id = 1;
+  // Cursor opaco devuelto por la página previa (next_cursor). '' = arrancar desde el más reciente.
+  string cursor = 2;
+  // Tamaño de página pedido; el servidor lo acota a [1, MAX_HISTORY_PAGE]. 0/ausente → default del servidor.
+  int32 limit = 3;
+}
+
+message PassengerTripsReply {
+  repeated TripHistoryItem items = 1;
+  // Cursor de la SIGUIENTE página; '' cuando no hay más (proto3 no tiene null → el BFF lo re-mapea a null).
+  string next_cursor = 2;
+}
+
+// Un viaje en el historial. Subconjunto de TripReply pensado para la CARD de la lista + alimentar el
+// detalle con el estado REAL. Sin nombre de conductor (anti-N+1): solo driver_id; la app lo resuelve
+// on-demand en el detalle (GetTrip). origin/destination como lat/lng (sin label: el geocoding inverso
+// es caro por-item; la app lo resuelve perezosamente si lo necesita).
+message TripHistoryItem {
+  string id = 1;
+  string status = 2;
+  double origin_lat = 3;
+  double origin_lng = 4;
+  double destination_lat = 5;
+  double destination_lng = 6;
+  int32 fare_cents = 7;
+  string currency = 8;
+  string payment_method = 9;
+  int32 distance_meters = 10;
+  int32 duration_seconds = 11;
+  // ISO-8601. requested_at SIEMPRE presente; completed_at/cancelled_at '' (proto3) si no aplican.
+  string requested_at = 12;
+  string completed_at = 13;
+  string cancelled_at = 14;
+  // '' si el viaje nunca tuvo conductor (EXPIRED/REQUESTED). La app resuelve el nombre en el detalle.
+  string driver_id = 15;
+  // Ola 2B · tier (CAR|MOTO) — la card muestra el tier sin un lookup extra.
+  string vehicle_type = 16;
+  // Categoría/opción elegida (quoteOption.id, p.ej. veo_economico); '' si no se eligió.
+  string category = 17;
+}
+
+message GetByIdRequest {
+  string id = 1;
+}
+
+message ActiveTripRequest {
+  string passenger_id = 1;
+}
+
+message PendingSettlementRequest {
+  string passenger_id = 1;
+}
+
+message CloseTripRequest {
+  string id = 1;
+  string passenger_id = 2;
+}
+
+message TripReply {
+  string id = 1;
+  string passenger_id = 2;
+  string driver_id = 3;
+  string vehicle_id = 4;
+  string status = 5;
+  int32 fare_cents = 6;
+  string currency = 7;
+  int32 distance_meters = 8;
+  int32 duration_seconds = 9;
+  string payment_method = 10;
+  bool child_mode = 11;
+  int32 penalty_cents = 12;
+  bool found = 13;
+  // Re-entrada del cierre post-viaje: ISO-8601 de cuándo el pasajero selló el cierre; '' si aún sin
+  // cerrar (proto3 no tiene null para string → '' = no cerrado). El BFF lo expone como nullable.
+  string passenger_closed_at = 14;
+  // Detalle de "Mis Viajes" (ENRIQUECIMIENTO): suelta la dependencia del snapshot MMKV local para la
+  // FECHA y el MAPA de ruta. Mismo shape/nombres que TripHistoryItem (origin_lat/lng) por consistencia.
+  // requested_at SIEMPRE presente; completed_at/cancelled_at '' (proto3) si no aplican (el BFF → null).
+  string requested_at = 15;
+  string completed_at = 16;
+  string cancelled_at = 17;
+  // Puntos del viaje (lat/lng; sin label: el schema solo persiste lat/lon, no la dirección).
+  double origin_lat = 18;
+  double origin_lng = 19;
+  double destination_lat = 20;
+  double destination_lng = 21;
+  // Ruta del viaje codificada (polyline). trip-service la PERSISTE (Trip.route_polyline). '' si el viaje
+  // no la tiene (proto3 → el BFF la re-mapea a null); la app degrada a línea recta origen→destino.
+  string route_polyline = 22;
+}
+
+message TripStateReply {
+  string id = 1;
+  string status = 2;
+  bool found = 3;
+}

@@ -1,0 +1,2 @@
+# Los modelos ONNX se descargan aquí con `python scripts/download_models.py`.
+# No se versionan (ver .gitignore).

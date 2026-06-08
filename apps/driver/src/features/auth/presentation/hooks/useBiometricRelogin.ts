@@ -1,0 +1,81 @@
+import {useCallback, useEffect, useState} from 'react';
+import {mobileRefreshResult} from '@veo/api-client';
+import {env} from '../../../../core/config/env';
+import {useDi, useRepositories} from '../../../../core/di/useDi';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {GetProfileUseCase, profileToSessionUser} from '../../../profile/domain';
+
+interface BiometricReloginState {
+  /** true si hay biometría disponible y un refresh token guardado (se puede ofrecer re-login). */
+  available: boolean;
+  isPending: boolean;
+  error: unknown;
+  /** Lanza la biometría, desbloquea el refresh token y restablece la sesión. */
+  relogin(): Promise<void>;
+}
+
+/**
+ * Re-login biométrico: desbloquea el refresh token guardado en Keychain/Keystore con Face ID/huella,
+ * refresca los tokens en el `driver-bff` y restablece la sesión sin reingresar el OTP.
+ *
+ * No es un mock: usa el almacén seguro real y el endpoint `/auth/refresh` real. Si la biometría se
+ * cancela o el refresh falla, deja al conductor en el flujo OTP normal.
+ */
+export function useBiometricRelogin(): BiometricReloginState {
+  const {localAuth} = useDi();
+  const {profile} = useRepositories();
+  const [available, setAvailable] = useState(false);
+  const [isPending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const supported = await localAuth.isAvailable();
+      const stored = supported && (await localAuth.hasStoredToken());
+      if (active) {
+        setAvailable(stored);
+      }
+    })().catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [localAuth]);
+
+  const relogin = useCallback(async () => {
+    setError(null);
+    setPending(true);
+    try {
+      const refreshToken = await localAuth.unlockRefreshToken();
+      if (!refreshToken) {
+        return; // Biometría cancelada/sin token: el conductor usa el OTP.
+      }
+
+      const response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+        body: JSON.stringify({refreshToken}),
+      });
+      if (!response.ok) {
+        throw new Error('No se pudo refrescar la sesión');
+      }
+      const parsed = mobileRefreshResult.safeParse(await response.json());
+      if (!parsed.success) {
+        throw new Error('Respuesta de refresh inválida');
+      }
+
+      const tokens = parsed.data;
+      useSessionStore.getState().setTokens(tokens);
+      const driverProfile = await new GetProfileUseCase(profile).execute();
+      useSessionStore.getState().setSession({tokens, user: profileToSessionUser(driverProfile)});
+      // Rota el token guardado al nuevo refresh token.
+      await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setPending(false);
+    }
+  }, [localAuth, profile]);
+
+  return {available, isPending, error, relogin};
+}

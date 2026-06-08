@@ -1,0 +1,706 @@
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { DocumentType } from '@veo/api-client';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import {
+  Avatar,
+  Banner,
+  BottomSheet,
+  Button,
+  Card,
+  ListItem,
+  SafeScreen,
+  StatusPill,
+  Switch,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { TOKENS } from '../../../../core/di/tokens';
+import { useDependency } from '../../../../core/di/useDependency';
+import { useSessionStore } from '../../../../core/session/sessionStore';
+import { useBiometricGateStore } from '../../../auth/presentation';
+import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
+import { formatShortDate } from '../../../../shared/utils/format';
+import { setPromotionsSubscription, unregisterMessaging } from '../../../../services/messaging';
+import { isKycVerified } from '../../../kyc/domain/entities';
+import type { RootStackParamList } from '../../../../navigation/types';
+import { DocumentField } from '../../../payments/presentation';
+import { isDocumentValid } from '../../../payments/domain/affiliationUsecases';
+import { maskDocument } from '../../../../shared/utils/format';
+import { EnterView } from '../components/motion';
+import { PhoneVerificationSheet } from '../components/PhoneVerificationSheet';
+import {
+  IconAccessibility,
+  IconCamera,
+  IconCard,
+  IconChild,
+  IconClock,
+  IconFaceScan,
+  IconGift,
+  IconHelp,
+  IconPin,
+  IconPower,
+  IconShare,
+  IconShield,
+  IconTrash,
+  IconUsers,
+} from '../components/icons';
+import { IconCheck, IconPencil } from '../../../auth/presentation/components/icons';
+
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Items del diseño cuyo destino aún no tiene pantalla con backend: degradación honesta. */
+type ComingSoon = 'cameraControl' | 'shareTrip' | 'accessibility';
+
+const COMING_SOON_COPY: Record<ComingSoon, string> = {
+  cameraControl: 'profile.comingSoonCameraControl',
+  shareTrip: 'profile.comingSoonShareTrip',
+  accessibility: 'profile.comingSoonAccessibility',
+};
+
+/** Un paso faltante de la franja de completitud (chip tappeable que abre el campo correspondiente). */
+type CompletionStep = 'name' | 'phone' | 'document';
+
+/**
+ * Perfil del pasajero (`GET /users/me`) rediseñado con voz de autor:
+ *
+ *  - CABECERA con descubribilidad real: botón "Editar perfil" EXPLÍCITO (ghost, visible). El nombre
+ *    faltante ES la invitación ("Agregá tu nombre" como CTA, no un misterio). Identidad confirmada =
+ *    check fino junto al nombre (microcopy), NO una pill gritona. El tap en la cabecera sigue abriendo
+ *    la edición (gesto pro), pero la affordance visible manda.
+ *  - FRANJA DE COMPLETITUD (guía, no castigo): si falta nombre/celular/documento, chips tappeables que
+ *    abren directo el campo/sheet correspondiente. Cuando está completo NO se muestra nada (el premio
+ *    es el silencio).
+ *  - VERIFICACIÓN con momento propio (sin verificar): card "Confirmá que sos vos" → KycCamera.
+ *  - Secciones Seguridad / Preferencias / Cuenta con ListItems del set de íconos.
+ *
+ * Edición vía `PATCH /users/me` (nombre obligatorio; correo/documento opcionales). Celular faltante →
+ * `PhoneVerificationSheet`. Derecho al olvido (`POST /users/me/deletion`) y logout.
+ */
+export function ProfileScreen(): React.JSX.Element {
+  const theme = useTheme();
+  const { t } = useTranslation();
+  const navigation = useNavigation<Nav>();
+
+  const getProfile = useDependency(TOKENS.getProfileUseCase);
+  const updateProfile = useDependency(TOKENS.updateProfileUseCase);
+  const requestDeletion = useDependency(TOKENS.requestAccountDeletionUseCase);
+  const logout = useDependency(TOKENS.logoutUseCase);
+  const history = useDependency(TOKENS.tripHistoryRepository);
+  const panicSecretStore = useDependency(TOKENS.panicSecretStore);
+  const getConsent = useDependency(TOKENS.getConsentUseCase);
+  const recordConsent = useDependency(TOKENS.recordConsentUseCase);
+
+  // Consentimiento VIGENTE (Ley 29733) → estado del toggle de promociones.
+  const consentQuery = useQuery({ queryKey: ['consent'], queryFn: () => getConsent.execute() });
+  // Feedback optimista: el Switch refleja el cambio al instante; si la mutación falla, revierte al refetch.
+  const [pendingMarketing, setPendingMarketing] = useState<boolean | null>(null);
+  const marketingOn = pendingMarketing ?? consentQuery.data?.marketing ?? false;
+
+  /**
+   * Cambiar el opt-in de marketing es append-only: re-registra el consent COMPLETO (preservando los
+   * otros flags vigentes) + suscribe/desuscribe del topic FCM `promos`. Best-effort en ambos lados.
+   */
+  const marketingMutation = useMutation({
+    mutationFn: async (next: boolean) => {
+      const c = consentQuery.data;
+      await recordConsent.execute({
+        dataProcessing: c?.dataProcessing ?? true,
+        inCabinCamera: c?.inCabinCamera ?? false,
+        location: c?.location ?? false,
+        marketing: next,
+      });
+      await setPromotionsSubscription(next);
+    },
+    onSettled: () => {
+      setPendingMarketing(null);
+      void consentQuery.refetch();
+    },
+  });
+
+  const onToggleMarketing = (next: boolean): void => {
+    setPendingMarketing(next);
+    marketingMutation.mutate(next);
+  };
+
+  const refreshToken = useSessionStore((s) => s.refreshToken);
+  const clearSession = useSessionStore((s) => s.clearSession);
+  const lockBiometricGate = useBiometricGateStore((s) => s.lock);
+
+  const profileQuery = useQuery({
+    queryKey: ['profile'],
+    queryFn: () => getProfile.execute(),
+  });
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [documentType, setDocumentType] = useState<DocumentType>('DN');
+  const [document, setDocument] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [comingSoon, setComingSoon] = useState<ComingSoon | null>(null);
+
+  const updateMutation = useMutation({
+    mutationFn: () => {
+      const trimmedName = name.trim();
+      const trimmedEmail = email.trim();
+      const trimmedDoc = document.trim();
+      // `updatePassengerProfile` acepta campos opcionales: enviamos solo los que aplican. El documento
+      // se persiste vía PATCH /users/me (queda disponible para la vinculación de Yape de UN TAP).
+      return updateProfile.execute({
+        name: trimmedName,
+        ...(trimmedEmail ? { email: trimmedEmail } : {}),
+        ...(trimmedDoc ? { documentType, document: trimmedDoc } : {}),
+      });
+    },
+    onSuccess: () => {
+      setEditOpen(false);
+      profileQuery.refetch();
+    },
+  });
+
+  const deletionMutation = useMutation({
+    mutationFn: () => requestDeletion.execute(),
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      // Baja del token de push y borrado del secreto HMAC antes de revocar la sesión (best-effort).
+      await unregisterMessaging();
+      await panicSecretStore.clearSecret();
+      await logout.execute(refreshToken);
+    },
+    onSuccess: () => {
+      history.clear();
+      // Re-arma el candado biométrico: el próximo acceso (incluso un re-login en el mismo proceso)
+      // exige re-autenticación local. Cierra el contrato del store (antes solo se armaba en frío).
+      lockBiometricGate();
+      clearSession();
+    },
+  });
+
+  if (profileQuery.isLoading) {
+    return (
+      <SafeScreen>
+        <LoadingState />
+      </SafeScreen>
+    );
+  }
+
+  if (profileQuery.isError || !profileQuery.data) {
+    return (
+      <SafeScreen>
+        <ErrorState onRetry={() => profileQuery.refetch()} />
+      </SafeScreen>
+    );
+  }
+
+  const profile = profileQuery.data;
+  const hasName = typeof profile.name === 'string' && profile.name.trim().length > 0;
+  // Nombre visible: el nombre real; si falta, el correo/teléfono como identificador temporal.
+  const displayName = hasName ? profile.name! : (profile.email ?? profile.phone ?? '');
+  // Línea de identidad ÚNICA bajo el nombre: teléfono o, si no hay, el correo.
+  const contact = profile.phone ?? profile.email ?? null;
+  const verified = isKycVerified(profile.kycStatus);
+  const trimmedName = name.trim();
+  const nameValid = trimmedName.length >= 2 && trimmedName.length <= 80;
+  const trimmedEmail = email.trim();
+  const emailValid = trimmedEmail.length === 0 || EMAIL_PATTERN.test(trimmedEmail);
+  const trimmedDoc = document.trim();
+  // Documento OPCIONAL: válido si está vacío (no se toca) o si pasa la validación local del tipo.
+  const documentValid = trimmedDoc.length === 0 || isDocumentValid(documentType, trimmedDoc);
+  const canSaveEdit = nameValid && emailValid && documentValid;
+  // Documento enmascarado para la cabecera (privacidad): "12345678" → "DNI ••••5678".
+  const maskedDocument = profile.document ? maskDocument(profile.document) : null;
+
+  // Pasos faltantes de la completitud (guía, no castigo). Cuando no falta nada → franja en silencio.
+  const missingSteps: CompletionStep[] = [];
+  if (!hasName) missingSteps.push('name');
+  if (!profile.phone) missingSteps.push('phone');
+  if (!profile.document) missingSteps.push('document');
+
+  const openEdit = (): void => {
+    setName(profile.name ?? '');
+    setEmail(profile.email ?? '');
+    setDocumentType(profile.documentType ?? 'DN');
+    setDocument(profile.document ?? '');
+    setTouched(false);
+    setEditOpen(true);
+  };
+
+  // Cada chip de la franja abre directo el lugar que resuelve ese dato (descubribilidad real).
+  const openStep = (step: CompletionStep): void => {
+    if (step === 'phone') {
+      setPhoneOpen(true);
+    } else {
+      // name / document viven en el mismo sheet de edición.
+      openEdit();
+    }
+  };
+
+  const stepLabel: Record<CompletionStep, string> = {
+    name: t('profile.completionChipName'),
+    phone: t('profile.completionChipPhone'),
+    document: t('profile.completionChipDocument'),
+  };
+
+  // Tamaño de glyph homogéneo para los leading de las filas (set `I` del diseño).
+  const glyph = 22;
+  const accent = theme.colors.accent;
+  const danger = theme.colors.danger;
+  const success = theme.colors.success;
+
+  const sectionLabel = (text: string): React.JSX.Element => (
+    <Text
+      variant="label"
+      color="inkMuted"
+      style={{ marginBottom: theme.spacing.sm, marginLeft: theme.spacing.xs }}
+    >
+      {text}
+    </Text>
+  );
+
+  return (
+    <SafeScreen padded={false}>
+      <ScrollView contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.lg }}>
+        {/* Header del hub */}
+        <Text variant="title1">{t('profile.title')}</Text>
+
+        {/* CABECERA · avatar (→ editar, gesto pro) + nombre/CTA + línea de identidad + Editar perfil. */}
+        <EnterView index={0}>
+          <View style={{ alignItems: 'center', gap: theme.spacing.sm }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.editProfile')}
+              onPress={openEdit}
+            >
+              <Avatar uri={profile.photoUrl ?? undefined} name={hasName ? displayName : undefined} size="xl" />
+            </Pressable>
+
+            {hasName ? (
+              <View style={styles.nameRow}>
+                <Text variant="title2">{displayName}</Text>
+                {/* Identidad confirmada = detalle fino junto al nombre (check sutil), no una pill. */}
+                {verified ? (
+                  <View
+                    style={[styles.verifiedTick, { backgroundColor: success }]}
+                    accessibilityLabel={t('profile.identityConfirmed')}
+                  >
+                    <IconCheck color={theme.colors.onSuccess} size={11} />
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              // El dato faltante ES la invitación: CTA explícito, no un misterio.
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('profile.addName')}
+                onPress={openEdit}
+                style={styles.addNameCta}
+              >
+                <Text variant="title3" color="accent">
+                  {t('profile.addName')}
+                </Text>
+              </Pressable>
+            )}
+
+            {contact ? (
+              <Text variant="subhead" color="inkMuted" tabular>
+                {contact}
+              </Text>
+            ) : null}
+            {maskedDocument ? (
+              <Text variant="footnote" color="inkSubtle" tabular>
+                {t(`profile.docType.${profile.documentType ?? 'DN'}`)} {maskedDocument}
+              </Text>
+            ) : null}
+            {verified && hasName ? (
+              <Text variant="footnote" color="inkSubtle">
+                {t('profile.identityConfirmed')}
+              </Text>
+            ) : null}
+
+            {/* Affordance VISIBLE de edición (ghost chico) — no escondida tras el avatar. */}
+            <Button
+              label={t('profile.editProfile')}
+              variant="ghost"
+              size="sm"
+              leftIcon={<IconPencil color={accent} size={16} />}
+              onPress={openEdit}
+            />
+          </View>
+        </EnterView>
+
+        {/* FRANJA DE COMPLETITUD · solo si falta algo (completo = silencio). Guía, no castigo. */}
+        {missingSteps.length > 0 ? (
+          <EnterView index={1}>
+            <Card variant="outlined" padding="md">
+              <View style={{ gap: theme.spacing.sm }}>
+                <View style={{ gap: 2 }}>
+                  <Text variant="headline">{t('profile.completionTitle')}</Text>
+                  <Text variant="footnote" color="inkMuted">
+                    {t('profile.completionSubtitle')}
+                  </Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {missingSteps.map((step) => (
+                    <Pressable
+                      key={step}
+                      accessibilityRole="button"
+                      accessibilityLabel={stepLabel[step]}
+                      onPress={() => openStep(step)}
+                      style={[
+                        styles.chip,
+                        { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated },
+                      ]}
+                    >
+                      <View style={[styles.chipDot, { backgroundColor: accent }]} />
+                      <Text variant="footnote" color="ink">
+                        {stepLabel[step]}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            </Card>
+          </EnterView>
+        ) : null}
+
+        {/* VERIFICACIÓN con voz propia · card de invitación SOLO si no está verificado. Sin verificar
+            no es un error: es un momento diseñado ("Confirmá que sos vos"). */}
+        {!verified ? (
+          <EnterView index={2}>
+            <Card variant="outlined" padding="md">
+              <View style={styles.verifyCard}>
+                <View style={[styles.verifyIconWrap, { backgroundColor: theme.colors.surfaceElevated }]}>
+                  <IconShield color={accent} size={22} />
+                </View>
+                <View style={styles.verifyCopy}>
+                  <Text variant="headline">{t('profile.verifyCardTitle')}</Text>
+                  <Text variant="footnote" color="inkMuted">
+                    {t('profile.verifyCardBody')}
+                  </Text>
+                </View>
+              </View>
+              <Button
+                label={t('profile.verifyCardCta')}
+                variant="accent"
+                fullWidth
+                size="sm"
+                onPress={() => navigation.navigate('KycCamera')}
+                style={{ marginTop: theme.spacing.sm }}
+              />
+            </Card>
+          </EnterView>
+        ) : null}
+
+        {/* Seguridad */}
+        <EnterView index={3}>
+          <View>
+            {sectionLabel(t('profile.sectionSecurity'))}
+            <Card variant="outlined" padding="sm">
+              <ListItem
+                title={t('profile.faceVerification')}
+                subtitle={t('profile.faceVerificationSub')}
+                leading={<IconFaceScan color={accent} size={glyph} />}
+                trailing={
+                  verified ? (
+                    <StatusPill label={t('profile.verifiedPill')} tone="success" dot />
+                  ) : undefined
+                }
+                chevron={!verified}
+                onPress={() => navigation.navigate('KycCamera')}
+              />
+              <ListItem
+                title={t('profile.trustedContacts')}
+                subtitle={t('profile.trustedContactsSub')}
+                leading={<IconUsers color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('TrustedContacts')}
+              />
+              <ListItem
+                title={t('profile.childMode')}
+                subtitle={t('profile.childModeSub')}
+                leading={<IconChild color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('ChildMode')}
+              />
+              <ListItem
+                title={t('profile.cameraControl')}
+                subtitle={t('profile.cameraControlSub')}
+                leading={<IconCamera color={accent} size={glyph} />}
+                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
+                onPress={() => setComingSoon('cameraControl')}
+              />
+              <ListItem
+                title={t('profile.shareTrip')}
+                leading={<IconShare color={accent} size={glyph} />}
+                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
+                onPress={() => setComingSoon('shareTrip')}
+              />
+            </Card>
+          </View>
+        </EnterView>
+
+        {/* Preferencias */}
+        <EnterView index={4}>
+          <View>
+            {sectionLabel(t('profile.sectionPreferences'))}
+            <Card variant="outlined" padding="sm">
+              <ListItem
+                title={t('profile.paymentMethods')}
+                leading={<IconCard color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('PaymentMethods')}
+              />
+              <ListItem
+                title={t('profile.savedPlaces')}
+                leading={<IconPin color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('SavedPlaces')}
+              />
+              <ListItem
+                title={t('profile.scheduledTrips')}
+                leading={<IconClock color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('ScheduledTrips')}
+              />
+              <ListItem
+                title={t('profile.referrals')}
+                leading={<IconGift color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('Referrals')}
+              />
+            </Card>
+          </View>
+        </EnterView>
+
+        {/* Promociones (opt-in marketing · Ley 29733 + topic FCM `promos`) */}
+        <EnterView index={5}>
+          <View>
+            {sectionLabel(t('profile.sectionPromotions'))}
+            <Card variant="outlined" padding="sm">
+              <ListItem
+                title={t('profile.promotions')}
+                subtitle={t('profile.promotionsSub')}
+                leading={<IconGift color={accent} size={glyph} />}
+                trailing={
+                  <Switch
+                    value={marketingOn}
+                    onValueChange={onToggleMarketing}
+                    disabled={consentQuery.isLoading || marketingMutation.isPending}
+                    accessibilityLabel={t('profile.promotions')}
+                  />
+                }
+              />
+            </Card>
+          </View>
+        </EnterView>
+
+        {/* Cuenta */}
+        <EnterView index={6}>
+          <View>
+            {sectionLabel(t('profile.sectionAccount'))}
+            <Card variant="outlined" padding="sm">
+              <ListItem
+                title={t('profile.accessibility')}
+                leading={<IconAccessibility color={accent} size={glyph} />}
+                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
+                onPress={() => setComingSoon('accessibility')}
+              />
+              <ListItem
+                title={t('profile.help')}
+                leading={<IconHelp color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('Help')}
+              />
+              <ListItem
+                title={t('profile.deletion')}
+                leading={<IconTrash color={danger} size={glyph} />}
+                chevron
+                onPress={() => setDeletionOpen(true)}
+              />
+              <ListItem
+                title={t('profile.logout')}
+                leading={<IconPower color={danger} size={glyph} />}
+                onPress={() => setLogoutOpen(true)}
+              />
+            </Card>
+          </View>
+        </EnterView>
+      </ScrollView>
+
+      {/* Editar perfil (botón explícito o tap en cabecera) */}
+      <BottomSheet
+        visible={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={t('profile.editTitle')}
+        footer={
+          <Button
+            label={t('actions.save')}
+            fullWidth
+            loading={updateMutation.isPending}
+            disabled={!canSaveEdit}
+            onPress={() => {
+              if (!canSaveEdit) {
+                setTouched(true);
+                return;
+              }
+              updateMutation.mutate();
+            }}
+          />
+        }
+      >
+        <View style={{ gap: theme.spacing.md }}>
+          {updateMutation.isError ? <Banner tone="danger" title={t('profile.saveError')} /> : null}
+          <TextField
+            label={t('profile.nameLabel')}
+            placeholder={t('profile.namePlaceholder')}
+            autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            value={name}
+            onChangeText={setName}
+            error={touched && !nameValid ? t('profile.invalidName') : undefined}
+          />
+          <TextField
+            label={t('profile.emailLabel')}
+            placeholder={t('profile.emailPlaceholder')}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
+            value={email}
+            onChangeText={setEmail}
+            error={touched && !emailValid ? t('profile.invalidEmail') : undefined}
+          />
+          {/* Documento de identidad (para la vinculación de Yape de UN TAP). Opcional: si lo cargás,
+              se persiste vía PATCH /users/me y vinculas Yape con un solo toque. */}
+          <DocumentField
+            documentType={documentType}
+            onChangeDocumentType={setDocumentType}
+            document={document}
+            onChangeDocument={setDocument}
+            error={touched && !documentValid ? t('profile.invalidDocument') : undefined}
+            note={t('profile.documentNote')}
+          />
+        </View>
+      </BottomSheet>
+
+      {/* Verificación de celular (altas por correo/Google/Apple sin teléfono). */}
+      <PhoneVerificationSheet visible={phoneOpen} onClose={() => setPhoneOpen(false)} />
+
+      {/* Derecho al olvido */}
+      <BottomSheet
+        visible={deletionOpen}
+        onClose={() => setDeletionOpen(false)}
+        title={t('profile.deletionTitle')}
+        footer={
+          deletionMutation.isSuccess ? (
+            <Button label={t('actions.close')} fullWidth onPress={() => setDeletionOpen(false)} />
+          ) : (
+            <Button
+              label={t('profile.requestDeletion')}
+              variant="danger"
+              fullWidth
+              loading={deletionMutation.isPending}
+              onPress={() => deletionMutation.mutate()}
+            />
+          )
+        }
+      >
+        <View style={{ gap: theme.spacing.md }}>
+          {deletionMutation.isSuccess ? (
+            <Banner
+              tone="success"
+              title={t('profile.deletionRequested')}
+              description={t('profile.graceUntil', {
+                date: formatShortDate(deletionMutation.data.graceUntil),
+              })}
+            />
+          ) : (
+            <Text variant="callout" color="inkMuted">
+              {t('profile.deletionBody')}
+            </Text>
+          )}
+          {deletionMutation.isError ? <Banner tone="danger" title={t('states.errorBody')} /> : null}
+        </View>
+      </BottomSheet>
+
+      {/* Cerrar sesión */}
+      <BottomSheet
+        visible={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        title={t('profile.logoutTitle')}
+        footer={
+          <View style={{ gap: theme.spacing.sm }}>
+            <Button
+              label={t('profile.logout')}
+              variant="danger"
+              fullWidth
+              loading={logoutMutation.isPending}
+              onPress={() => logoutMutation.mutate()}
+            />
+            <Button label={t('actions.cancel')} variant="ghost" fullWidth onPress={() => setLogoutOpen(false)} />
+          </View>
+        }
+      >
+        <Text variant="callout" color="inkMuted">
+          {t('profile.logoutBody')}
+        </Text>
+      </BottomSheet>
+
+      {/* Degradación honesta: items del diseño sin pantalla con backend todavía. */}
+      <BottomSheet
+        visible={comingSoon !== null}
+        onClose={() => setComingSoon(null)}
+        title={t('profile.comingSoonTitle')}
+        footer={<Button label={t('actions.close')} fullWidth onPress={() => setComingSoon(null)} />}
+      >
+        <Text variant="callout" color="inkMuted">
+          {comingSoon ? t(COMING_SOON_COPY[comingSoon]) : ''}
+        </Text>
+      </BottomSheet>
+    </SafeScreen>
+  );
+}
+
+const styles = StyleSheet.create({
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  verifiedTick: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addNameCta: { paddingVertical: 2 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipDot: { width: 6, height: 6, borderRadius: 3 },
+  verifyCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  verifyIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifyCopy: { flex: 1, gap: 2 },
+});

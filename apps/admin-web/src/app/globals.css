@@ -1,0 +1,85 @@
+/* Sistema de diseño compartido VEO (OKLCH). Debe ir ANTES de las capas de Tailwind. */
+@import "@veo/shared-config/tailwind/tokens.css";
+/* Estilos del mapa soberano (MapLibre GL, tiles OSM self-hosted). */
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Las fuentes self-hosted (next/font) inyectan --font-sans/--font-mono en <html>. */
+    -webkit-text-size-adjust: 100%;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg text-ink antialiased;
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
+  /* Foco visible y accesible en todo elemento interactivo. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px oklch(from var(--bg) l c h), 0 0 0 5px var(--focus);
+    border-radius: var(--radius-sm);
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  /* Números tabulares por defecto en datos densos. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Animaciones de entrada reutilizables (transform/opacity, ease-out). */
+  @keyframes veo-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes veo-scale-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes veo-slide-in-right {
+    from { opacity: 0; transform: translateX(12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes veo-pulse-danger {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  .animate-fade-in {
+    animation: veo-fade-in 180ms var(--ease-out) both;
+  }
+  .animate-scale-in {
+    animation: veo-scale-in 200ms var(--ease-out) both;
+  }
+  .animate-slide-in {
+    animation: veo-slide-in-right 220ms var(--ease-out) both;
+  }
+  .animate-pulse-danger {
+    animation: veo-pulse-danger 1.4s ease-in-out infinite;
+  }
+}
+
+/* MapLibre: integrar controles con el tema (tokens, no hex). */
+.maplibregl-ctrl-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+}
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--border);
+}
+.maplibregl-ctrl-attrib {
+  background: oklch(from var(--surface) l c h / 0.8);
+  color: var(--ink-muted);
+}

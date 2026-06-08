@@ -1,0 +1,35 @@
+{
+  "name": "@veo/web-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VEO Hub · Landing del ecosistema que enlaza las 4 apps (Pasajero, Conductor, Familia, Admin)",
+  "scripts": {
+    "dev": "next dev -p 5200",
+    "build": "next build",
+    "start": "next start -p 5200",
+    "lint": "eslint src --no-error-on-unmatched-pattern --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf .next .turbo node_modules"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "next": "14.2.14",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwind-merge": "^2.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.12.0",
+    "eslint-config-next": "14.2.14",
+    "postcss": "^8.4.47",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.2"
+  }
+}

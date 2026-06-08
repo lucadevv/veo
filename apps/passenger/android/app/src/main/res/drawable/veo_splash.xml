@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash de marca VEO: fondo negro + lockup blanco centrado. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/veo_splash_background" />
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/veo_splash_logo" />
+    </item>
+</layer-list>

@@ -1,0 +1,44 @@
+// places-service · esquema Postgres (schema lógico "places")
+// FOUNDATION §8. Dueño de: lugares guardados del pasajero (Casa/Trabajo/favoritos). Espeja el dominio
+// de la app (veo-passenger-app · features/places). NO accede a tablas de otros servicios: el userId
+// llega autenticado por el BFF (identidad interna firmada). Sin joins cross-servicio.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["places"]
+}
+
+/// Tipo de lugar guardado. HOME/WORK son únicos por usuario (upsert); FAVORITE admite varios.
+enum PlaceKind {
+  HOME
+  WORK
+  FAVORITE
+
+  @@schema("places")
+}
+
+/// Un lugar guardado del pasajero. Espeja `SavedPlace` de la app (lat/lng en vez de MapPoint).
+/// HOME/WORK únicos por usuario (índice único parcial creado en la migración); FAVORITE múltiples (máx 20,
+/// regla de negocio server-side). Orden de listado: HOME, WORK, luego FAVORITEs por createdAt desc.
+model SavedPlace {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  kind      PlaceKind
+  label     String
+  subtitle  String?
+  lat       Float
+  lng       Float
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("saved_places")
+  @@schema("places")
+}

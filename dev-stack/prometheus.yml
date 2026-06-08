@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Servicios NestJS exponen /metrics (vía @veo/observability)
+  - job_name: veo-services
+    static_configs:
+      - targets:
+          - "host.docker.internal:3001"  # identity
+          - "host.docker.internal:3002"  # trip
+          - "host.docker.internal:3003"  # dispatch
+          - "host.docker.internal:3004"  # tracking
+          - "host.docker.internal:3005"  # media
+          - "host.docker.internal:3006"  # payment
+          - "host.docker.internal:3007"  # panic
+          - "host.docker.internal:3008"  # notification
+          - "host.docker.internal:3009"  # audit
+          - "host.docker.internal:3010"  # rating
+          - "host.docker.internal:3011"  # share
+          - "host.docker.internal:4001"  # public-bff
+          - "host.docker.internal:4002"  # driver-bff
+          - "host.docker.internal:4003"  # admin-bff
+    metrics_path: /metrics

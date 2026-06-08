@@ -1,0 +1,56 @@
+import type { LucideIcon } from 'lucide-react';
+import {
+  Banknote,
+  Car,
+  MapPinned,
+  ScrollText,
+  ShieldAlert,
+  Truck,
+  Users,
+  Video,
+} from 'lucide-react';
+import type { Permission } from '@/lib/rbac';
+
+export interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  permission: Permission;
+  /** Coincidencia exacta (no por prefijo) para evitar marcar padres. */
+  exact?: boolean;
+}
+
+export interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+export const NAV: NavGroup[] = [
+  {
+    title: 'Operación',
+    items: [
+      { href: '/ops', label: 'En vivo', icon: MapPinned, permission: 'ops:view', exact: true },
+      { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
+      { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
+    ],
+  },
+  {
+    title: 'Seguridad',
+    items: [
+      { href: '/security/panics', label: 'Pánicos', icon: ShieldAlert, permission: 'panics:view' },
+      { href: '/media', label: 'Video', icon: Video, permission: 'media:view' },
+    ],
+  },
+  {
+    title: 'Flota',
+    items: [{ href: '/fleet', label: 'Vehículos y docs', icon: Truck, permission: 'fleet:view' }],
+  },
+  {
+    title: 'Finanzas',
+    items: [{ href: '/finance', label: 'Liquidaciones', icon: Banknote, permission: 'finance:view' }],
+  },
+  {
+    title: 'Cumplimiento',
+    items: [{ href: '/audit', label: 'Auditoría', icon: ScrollText, permission: 'audit:view' }],
+  },
+];

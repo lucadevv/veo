@@ -1,0 +1,2 @@
+# Logs de los procesos orquestados (servicios/BFFs) y del build del stack.
+.logs/

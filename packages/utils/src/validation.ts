@@ -1,0 +1,48 @@
+/**
+ * Helpers de validación con Zod + esquemas reutilizables del dominio peruano.
+ */
+import { z } from 'zod';
+import { ValidationError } from './errors.js';
+
+/** Parsea con Zod y, si falla, lanza ValidationError de dominio (no ZodError crudo). */
+export function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown, context?: string): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    throw new ValidationError(context ? `Validación falló: ${context}` : 'Validación falló', {
+      issues: result.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    });
+  }
+  return result.data;
+}
+
+/** Teléfono móvil peruano: +51 9XXXXXXXX (9 dígitos empezando en 9). Normaliza a +51XXXXXXXXX. */
+export const peruPhoneSchema = z
+  .string()
+  .trim()
+  .transform((v) => v.replace(/\D/g, ''))
+  .refine((d) => /^(51)?9\d{8}$/.test(d), 'Teléfono peruano inválido (formato +51 9XXXXXXXX)')
+  .transform((d) => `+51${d.slice(-9)}`);
+
+/** DNI peruano: 8 dígitos. */
+export const dniSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{8}$/, 'DNI inválido (8 dígitos)');
+
+/** Placa vehicular peruana: ABC-123 / A1B-234. */
+export const plateSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9]{3}-[A-Z0-9]{3}$/, 'Placa inválida (formato XXX-XXX)');
+
+export const geoPointSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+});
+
+/** Código de modo niño: 4 a 6 dígitos (BR-T07). El hash se guarda, nunca el código. */
+export const childCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4,6}$/, 'El código de modo niño debe tener 4 a 6 dígitos');

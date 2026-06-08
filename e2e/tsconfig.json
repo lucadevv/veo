@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // El e2e consume los servicios por HTTP/WS/Kafka/Redis: NO importa @veo/* del workspace,
+    // así que anulamos los paths del base (resolución pura por node_modules, como los servicios).
+    "paths": {},
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["golden-path/**/*.ts", "lib/**/*.ts", "*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

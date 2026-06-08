@@ -1,0 +1,10 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata: { name: veo, namespace: argocd }
+spec:
+  description: VEO Platform
+  sourceRepos: ["git@github.com:veo/*"]
+  destinations:
+    - { namespace: "veo-*", server: https://kubernetes.default.svc }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }

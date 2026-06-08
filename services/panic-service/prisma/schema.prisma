@@ -1,0 +1,67 @@
+// panic-service · esquema Postgres (schema lógico "panic")
+// FOUNDATION §8. Dueño del botón de pánico: idempotencia (BR-S04), publicación confiable
+// de panic.triggered/acknowledged vía outbox (BR-S05) y registro de evidencia (S3 Object Lock).
+// El fan-out real (SMS+link a contactos, push a central) lo ejecuta notification-service
+// consumiendo panic.triggered. media-service hace el force-start de grabación con las keys S3.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["panic"]
+}
+
+enum PanicStatus {
+  TRIGGERED
+  ACKNOWLEDGED
+  RESOLVED
+  FALSE_ALARM
+
+  @@schema("panic")
+}
+
+/// Evento de pánico (BR-S04/S05). `dedupKey` es UNIQUE: garantiza idempotencia ante el doble
+/// submit que provoca el cliente al pulsar el botón varias veces o reintentar por red inestable.
+model PanicEvent {
+  id             String      @id @db.Uuid
+  tripId         String      @map("trip_id") @db.Uuid
+  passengerId    String      @map("passenger_id") @db.Uuid
+  triggeredAt    DateTime    @default(now()) @map("triggered_at") @db.Timestamptz
+  geoLat         Float       @map("geo_lat")
+  geoLon         Float       @map("geo_lon")
+  /// Clave de idempotencia (UUIDv7) emitida por el cliente. UNIQUE → el doble submit es no-op.
+  dedupKey       String      @unique @map("dedup_key")
+  status         PanicStatus @default(TRIGGERED)
+  /// Keys S3 (Object Lock / WORM) reservadas para la evidencia de la grabación de media-service.
+  evidenceS3Keys String[]    @map("evidence_s3_keys")
+  acknowledgedAt DateTime?   @map("acknowledged_at") @db.Timestamptz
+  /// Operador (admin userId) que reconoció la alerta.
+  ackBy          String?     @map("ack_by") @db.Uuid
+  resolvedAt     DateTime?   @map("resolved_at") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([status, triggeredAt])
+  @@index([tripId])
+  @@map("panic_events")
+  @@schema("panic")
+}
+
+/// Outbox (FOUNDATION §6). El insert del evento ocurre en la MISMA transacción que la mutación
+/// de dominio; el relay lo publica a Kafka. Garantiza la publicación confiable de panic.triggered.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("panic")
+}

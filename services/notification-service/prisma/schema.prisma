@@ -1,0 +1,169 @@
+// notification-service · esquema Postgres (schema lógico "notification")
+// FOUNDATION §8. Dueño del motor propio de notificaciones: cola, dedup, retry, plantillas i18n.
+// Las direcciones de destino (token push / teléfono / email / url) viajan en `payload.to`;
+// nunca se accede a tablas de otros servicios (los destinatarios llegan por evento o comando).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["notification"]
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  WEBHOOK
+
+  @@schema("notification")
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+
+  @@schema("notification")
+}
+
+/// Plataforma del dispositivo para el envío de push (FCM/APNs).
+enum DevicePlatform {
+  ios
+  android
+
+  @@schema("notification")
+}
+
+/// Notificación encolada por el motor propio. Una fila = un intento de entrega por canal.
+model Notification {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recipientId   String              @map("recipient_id")
+  channel       NotificationChannel
+  /// Clave de la plantilla i18n a renderizar (FK lógica a templates.key).
+  template      String
+  /// Variables de render + dirección de destino (`payload.to`). Nunca PII innecesaria.
+  payload       Json
+  status        NotificationStatus  @default(PENDING)
+  /// Prioridad de drenado: mayor = más urgente. El pánico (Critical) NUNCA espera detrás de un broadcast
+  /// (Bulk). El worker ordena por (priority desc, nextAttemptAt asc) → SLA fan-out pánico p99 < 3s.
+  priority      Int                 @default(0)
+  /// Idempotencia: misma dedupKey no se reenvía (índice único parcial sobre no nulos).
+  dedupKey      String?             @unique @map("dedup_key")
+  attempts      Int                 @default(0)
+  maxAttempts   Int                 @map("max_attempts")
+  /// Próximo intento (backoff exponencial). El worker drena los vencidos.
+  nextAttemptAt DateTime?           @map("next_attempt_at") @db.Timestamptz
+  sentAt        DateTime?           @map("sent_at") @db.Timestamptz
+  deliveredAt   DateTime?           @map("delivered_at") @db.Timestamptz
+  failedReason  String?             @map("failed_reason")
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  /// Índice del worker: filtra PENDING vencidas y ordena por prioridad y luego antigüedad.
+  @@index([status, priority, nextAttemptAt])
+  @@index([recipientId, createdAt])
+  @@map("notifications")
+  @@schema("notification")
+}
+
+/// Token de push registrado por una app (passenger/driver). Una fila por dispositivo.
+/// El propietario (userId) llega por la identidad interna firmada del BFF; el token es único.
+model DeviceToken {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String         @map("user_id")
+  token     String         @unique
+  platform  DevicePlatform
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("device_tokens")
+  @@schema("notification")
+}
+
+/// Plantilla i18n (default Lima/Perú, locale es-PE). Body con placeholders {{var}}.
+model Template {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Clave de negocio única (p. ej. "panic.contact_alert", "trip.assigned").
+  key       String              @unique
+  channel   NotificationChannel
+  locale    String              @default("es-PE")
+  subject   String?
+  body      String
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("templates")
+  @@schema("notification")
+}
+
+/// Rol del autor de un ticket de soporte (Ola 2C). Lo fija el BFF desde la identidad firmada.
+enum SupportRole {
+  PASSENGER
+  DRIVER
+
+  @@schema("notification")
+}
+
+/// Categoría de un ticket de soporte (Ola 2C). Agrupa los tickets para el backstage.
+enum SupportCategory {
+  TRIP
+  PAYMENT
+  ACCOUNT
+  SAFETY
+  DRIVER
+  OTHER
+
+  @@schema("notification")
+}
+
+/// Estado del ciclo de vida de un ticket de soporte (Ola 2C).
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+
+  @@schema("notification")
+}
+
+/// Ticket del centro de ayuda/soporte (Ola 2C). Vive en notification-service (bounded context de
+/// comunicaciones con el usuario). `userId`/`role` los fija el BFF desde la identidad; la app solo
+/// envía categoría, asunto, cuerpo y opcionalmente el viaje relacionado. La FAQ es estática (app).
+model SupportTicket {
+  id        String          @id @db.Uuid
+  userId    String          @map("user_id") @db.Uuid
+  role      SupportRole
+  category  SupportCategory
+  subject   String
+  body      String
+  status    SupportStatus   @default(OPEN)
+  /// Viaje relacionado (opcional). FK lógica a trip-service (sin join cross-servicio).
+  tripId    String?         @map("trip_id") @db.Uuid
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("support_tickets")
+  @@schema("notification")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("notification")
+}

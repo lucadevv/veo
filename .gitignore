@@ -1,0 +1,116 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artifacts
+dist/
+build/
+out/
+.next/
+.turbo/
+*.tsbuildinfo
+coverage/
+
+# React Native / Mobile
+ios/Pods/
+ios/build/
+ios/Podfile.lock
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore/release.keystore
+*.keystore
+*.jks
+.expo/
+.expo-shared/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+# Convención por-entorno (playbook §4): config tracked, secretos gitignored
+*.secret.env
+!*.secret.env.example
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# Docker
+docker-compose.override.yml
+
+# Secrets
+*.pem
+*.key
+!*.example.key
+secrets/
+.secrets/
+
+# dev-stack: estado de runtime del boot-passenger-stack.sh (PIDs y logs de servicios locales)
+dev-stack/.pids/
+dev-stack/logs/
+
+# Test artifacts
+playwright-report/
+playwright/.cache/
+test-results/
+detox-artifacts/
+
+# dev-stack map data (generado/descargado por prepare.sh — multi-GB, NO commitear; se reconstruye)
+dev-stack/maps/data/
+dev-stack/maps/osrm/
+dev-stack/maps/nominatim/
+*.osm.pbf
+*.mbtiles
+# Tiles: ignoramos SOLO los binarios pesados (el mbtiles por *.mbtiles de arriba, fonts y sprites).
+# Los configs de TEXTO (config.json + el estilo veo-dark) SÍ se trackean para reconstruir el mapa
+# soberano en cualquier máquina (NO se ignora el dir `tiles/` entero — eso impedía re-incluir el estilo).
+dev-stack/maps/tiles/fonts/
+dev-stack/maps/tiles/sprites/
+*.sqlite
+
+# Native build cache (RN)
+.cxx/
+
+# Prisma client generado (regenerado por `prisma generate`; binarios de motor por-plataforma)
+**/generated/prisma/
+
+# Misc
+.cache/
+tmp/
+temp/
+*.tmp
+
+# Claves privadas Apple (APNs .p8, certs) — nunca al repo
+*.p8
+*.mobileprovision

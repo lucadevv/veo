@@ -1,0 +1,18 @@
+# Patch de inyección de Linkerd a nivel de pod template para TODOS los workloads
+# del overlay. Añade el sidecar linkerd-proxy que provee mTLS automático entre
+# servicios (identidades por ServiceAccount, certificados rotados cada 24h).
+#
+# Se aplica como `patches` con target kind:Deployment (igual que replicas.yaml).
+# Activarlo descomentando el patch en el kustomization del overlay correspondiente
+# (ver k8s/overlays/<env>/kustomization.yaml y k8s/base/mesh/README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PLACEHOLDER
+spec:
+  template:
+    metadata:
+      annotations:
+        linkerd.io/inject: enabled
+        # Solo permitir tráfico ya autenticado por el mesh hacia los proxies.
+        config.linkerd.io/proxy-require-identity-inbound-ports: ""

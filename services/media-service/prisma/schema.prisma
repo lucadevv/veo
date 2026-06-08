@@ -1,0 +1,93 @@
+// media-service · esquema Postgres (schema lógico "media")
+// FOUNDATION §8. Dueño de: segmentos de video de viajes (LiveKit→S3) y el ciclo de acceso
+// auditado a esos videos (doble autorización + watermark + retención legal).
+// BR-S01 (cámara/grabación), BR-S02 (acceso a video), BR-S03 (retención).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["media"]
+}
+
+/// Un segmento de grabación de un viaje (una room LiveKit grabada vía egress hacia S3).
+/// retentionUntil NULL = retención indefinida (viaje con pánico, hasta resolución — BR-S03).
+model MediaSegment {
+  id              String    @id @db.Uuid
+  tripId          String    @map("trip_id") @db.Uuid
+  startedAt       DateTime  @map("started_at") @db.Timestamptz
+  endedAt         DateTime? @map("ended_at") @db.Timestamptz
+  /// Clave del objeto en S3/MinIO (bucket de video). Vacía hasta que el egress confirma destino.
+  s3Key           String    @map("s3_key")
+  /// Tamaño del objeto archivado en bytes (int64; video puede superar 2 GB).
+  sizeBytes       BigInt    @default(0) @map("size_bytes")
+  codec           String    @default("h264")
+  /// Referencia a la clave KMS con la que se cifra el video en reposo (nunca la clave en claro).
+  encryptionKeyId String    @map("encryption_key_id")
+  /// Fecha límite de retención. NULL = indefinido (pánico). Pasado = elegible para barrido.
+  retentionUntil  DateTime? @map("retention_until") @db.Timestamptz
+  accessedCount   Int       @default(0) @map("accessed_count")
+  lastAccessedAt  DateTime? @map("last_accessed_at") @db.Timestamptz
+  /// Id del egress de LiveKit que produce este segmento (para detenerlo al finalizar el viaje).
+  egressId        String?   @map("egress_id")
+  /// Bandera de incidente (retención extendida a 180 días — BR-S03).
+  hasIncident     Boolean   @default(false) @map("has_incident")
+  /// Bandera de pánico (retención indefinida — BR-S03).
+  hasPanic        Boolean   @default(false) @map("has_panic")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  accessRequests  VideoAccessRequest[]
+
+  @@index([tripId])
+  @@index([retentionUntil])
+  @@map("media_segments")
+  @@schema("media")
+}
+
+/// Solicitud de acceso a un video (BR-S02). El operador la crea con un motivo (>20 chars); un
+/// COMPLIANCE_SUPERVISOR con MFA fresca la aprueba, generando una URL firmada (5 min) + watermark.
+model VideoAccessRequest {
+  id                 String    @id @db.Uuid
+  /// Segmento concreto al que se solicita acceso (opcional: se puede pedir por viaje completo).
+  segmentId          String?   @map("segment_id") @db.Uuid
+  segment            MediaSegment? @relation(fields: [segmentId], references: [id])
+  tripId             String    @map("trip_id") @db.Uuid
+  /// Operador que solicita el acceso (su id de usuario).
+  requestedBy        String    @map("requested_by") @db.Uuid
+  /// Email del operador solicitante — se incrusta como watermark dinámico en la visualización.
+  requestedByEmail   String    @map("requested_by_email")
+  /// Motivo de la solicitud. CHECK a nivel DB: longitud > 20 (BR-S02).
+  reason             String
+  /// Supervisor de cumplimiento que aprueba (su id de usuario).
+  approvedBy         String?   @map("approved_by") @db.Uuid
+  approvedAt         DateTime? @map("approved_at") @db.Timestamptz
+  signedUrlExpiresAt DateTime? @map("signed_url_expires_at") @db.Timestamptz
+  /// Watermark generado en la aprobación (email del operador + timestamp + id de solicitud).
+  watermark          String?
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tripId])
+  @@index([segmentId])
+  @@index([requestedBy])
+  @@map("video_access_requests")
+  @@schema("media")
+}
+
+/// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+  @@schema("media")
+}

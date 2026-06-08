@@ -1,0 +1,116 @@
+/**
+ * Controlador gRPC de payment (paquete veo.payment.v1.PaymentService).
+ * Lectura síncrona de un pago para otros servicios. Devuelve `found=false` en vez de lanzar.
+ */
+import { Controller } from '@nestjs/common';
+import { GrpcMethod } from '@nestjs/microservices';
+import { PrismaService } from '../infra/prisma.service';
+import { deriveTripChargeDedupKey } from '../payments/payment.policy';
+import type { Payment } from '../generated/prisma';
+
+interface GetPaymentRequest {
+  id: string;
+}
+
+interface GetPaymentByTripRequest {
+  tripId: string;
+}
+
+interface PaymentReply {
+  id: string;
+  tripId: string;
+  method: string;
+  status: string;
+  amountCents: number;
+  grossCents: number;
+  commissionCents: number;
+  feeCents: number;
+  tipCents: number;
+  externalRef: string;
+  found: boolean;
+  // Checkout asíncrono (ProntoPaga). "" cuando no aplica (proto3 string default).
+  externalUid: string;
+  checkoutUrl: string;
+  qrCode: string;
+  deepLink: string;
+  cip: string;
+  checkoutExpiresAt: string;
+  // Razón estructurada del fallo del cobro (failureReason del Payment). "" cuando no hubo fallo.
+  failureReason: string;
+}
+
+const EMPTY: PaymentReply = {
+  id: '',
+  tripId: '',
+  method: '',
+  status: '',
+  amountCents: 0,
+  grossCents: 0,
+  commissionCents: 0,
+  feeCents: 0,
+  tipCents: 0,
+  externalRef: '',
+  found: false,
+  externalUid: '',
+  checkoutUrl: '',
+  qrCode: '',
+  deepLink: '',
+  cip: '',
+  checkoutExpiresAt: '',
+  failureReason: '',
+};
+
+@Controller()
+export class PaymentGrpcController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  @GrpcMethod('PaymentService', 'GetPayment')
+  async getPayment({ id }: GetPaymentRequest): Promise<PaymentReply> {
+    const p = await this.prisma.read.payment.findUnique({ where: { id } });
+    if (!p) return EMPTY;
+    return this.toReply(p);
+  }
+
+  /**
+   * Cobro CANÓNICO de un viaje, por tripId (re-entrada del recibo). Resuelve por la dedupKey
+   * determinista del cobro del viaje (`trip-completed:{tripId}`, deriveTripChargeDedupKey) — la MISMA
+   * que el consumer de `trip.completed` y el cobro manual usan, así que apunta SIEMPRE al único Payment
+   * del cobro del viaje (UNIQUE), sin ambigüedad con otras filas que compartan tripId. found=false si el
+   * viaje aún no tiene cobro. El anti-IDOR (¿el viaje es del pasajero?) vive en el BFF, no acá.
+   */
+  @GrpcMethod('PaymentService', 'GetPaymentByTrip')
+  async getPaymentByTrip({ tripId }: GetPaymentByTripRequest): Promise<PaymentReply> {
+    const p = await this.prisma.read.payment.findUnique({
+      where: { dedupKey: deriveTripChargeDedupKey(tripId) },
+    });
+    if (!p) return EMPTY;
+    return this.toReply(p);
+  }
+
+  /** Mapea la fila Payment al contrato gRPC PaymentReply (found=true). */
+  private toReply(p: Payment): PaymentReply {
+    return {
+      id: p.id,
+      tripId: p.tripId,
+      method: p.method,
+      status: p.status,
+      amountCents: p.amountCents,
+      grossCents: p.grossCents,
+      commissionCents: p.commissionCents,
+      feeCents: p.feeCents,
+      tipCents: p.tipCents,
+      externalRef: p.externalRef ?? '',
+      found: true,
+      // Checkout asíncrono: proto3 no distingue null de "" → emitimos "" cuando la columna es null.
+      // El BFF las re-mapea a null en el PaymentView público (recibo).
+      externalUid: p.externalUid ?? '',
+      checkoutUrl: p.checkoutUrl ?? '',
+      qrCode: p.qrCode ?? '',
+      deepLink: p.deepLink ?? '',
+      cip: p.cip ?? '',
+      checkoutExpiresAt: p.checkoutExpiresAt ? p.checkoutExpiresAt.toISOString() : '',
+      // proto3 no distingue null de "": emitimos "" cuando no hubo fallo. El BFF la re-mapea a null.
+      failureReason: p.failureReason ?? '',
+    };
+  }
+}

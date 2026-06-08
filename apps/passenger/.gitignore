@@ -1,0 +1,41 @@
+node_modules/
+ios/Pods/
+ios/build/
+ios/Podfile.lock
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore/release.keystore
+*.keystore
+*.jks
+
+.env
+.env.local
+
+# Secretos de entorno (tokens reales: Mapbox pk, etc.). Solo `.env.example` se commitea.
+env/*.secret.env
+
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.expo/
+.expo-shared/
+
+coverage/
+detox-artifacts/
+*.tsbuildinfo
+
+# Native build cache + local Xcode env
+.cxx/
+android/app/.cxx/
+ios/.xcode.env.local
+
+# Xcode per-user data
+**/xcuserdata/
+
+# Claves privadas Apple (APNs .p8, certs) — nunca al repo
+*.p8
+*.mobileprovision
