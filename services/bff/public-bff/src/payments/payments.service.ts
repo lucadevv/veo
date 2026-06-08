@@ -92,6 +92,28 @@ export class PaymentsService {
   }
 
   async getPayment(user: AuthenticatedUser, id: string): Promise<PaymentView> {
+    // ANTI-IDOR/anti-enumeración OBLIGATORIO: el gRPC GetPayment es getter CRUDO por id (el contrato deja
+    // el ownership al BFF). Verificamos PRIMERO que el cobro es del pasajero autenticado leyéndolo por REST
+    // interno (trae passengerId); ajeno/inexistente → 404 (no 403, no filtra existencia). Mismo gate que
+    // retryCharge/changeMethod. Sin esto, cualquier id devolvía monto/método/externalRef de un pago ajeno.
+    let owner: { passengerId?: string | null };
+    try {
+      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, { identity: user });
+    } catch {
+      throw new NotFoundError('Pago no encontrado');
+    }
+    if (!owner.passengerId || owner.passengerId !== user.userId) {
+      throw new NotFoundError('Pago no encontrado');
+    }
+    return this.fetchPaymentView(user, id);
+  }
+
+  /**
+   * Resuelve el PaymentView por gRPC (GetPayment) SIN re-chequear ownership. Lo usan getPayment (que
+   * pone el gate anti-IDOR encima) y confirmCash (cuyo comando interno YA verificó al pasajero por la
+   * identidad firmada). NO exponer directo a una ruta sin gate previo.
+   */
+  private async fetchPaymentView(user: AuthenticatedUser, id: string): Promise<PaymentView> {
     const meta = internalGrpcMetadata(user, this.secret);
     const reply = await this.paymentGrpc.call<PaymentReply>('GetPayment', { id }, meta);
     return this.toPaymentView(reply);
@@ -160,7 +182,9 @@ export class PaymentsService {
       identity: user,
       body: { party: 'passenger', confirmed: dto.confirmed ?? true },
     });
-    return this.getPayment(user, id);
+    // El comando interno YA verificó al pasajero (identidad firmada) → fetchPaymentView sin re-chequear
+    // ownership (getPayment lo re-chequearía con un REST extra, redundante acá).
+    return this.fetchPaymentView(user, id);
   }
 
   /**

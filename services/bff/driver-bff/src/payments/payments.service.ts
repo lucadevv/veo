@@ -38,6 +38,22 @@ export class PaymentsService {
   ) {}
 
   async getPayment(id: string, identity: AuthenticatedUser): Promise<PaymentView> {
+    // ANTI-IDOR/anti-enumeración: el gRPC GetPayment es getter CRUDO por id (el contrato deja el ownership
+    // al BFF). Verificamos PRIMERO que el cobro es de ESTE conductor (driverId resuelto del perfil)
+    // leyéndolo por REST interno (trae driverId); ajeno/inexistente → 404 (no 403, no filtra existencia).
+    // Sin esto, cualquier id devolvía monto/método/externalRef de un pago ajeno.
+    const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
+    let owner: { driverId?: string | null };
+    try {
+      owner = await this.rest
+        .client('payment')
+        .get<{ driverId?: string | null }>(`/payments/${id}`, { identity: signedIdentity });
+    } catch {
+      throw new NotFoundError('Pago no encontrado');
+    }
+    if (!owner.driverId || owner.driverId !== driverId) {
+      throw new NotFoundError('Pago no encontrado');
+    }
     const payment = await this.grpc.call<PaymentReply>('payment', 'GetPayment', { id }, identity);
     if (!payment.found) throw new NotFoundError('Pago no encontrado');
     return toPaymentView(payment);
