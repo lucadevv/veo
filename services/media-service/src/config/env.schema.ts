@@ -28,7 +28,9 @@ export const envSchema = z.object({
   /// URL de señalización para clientes (ws://). Se usa como host http(s) para las APIs de servidor.
   LIVEKIT_URL: z.string().default('ws://localhost:7880'),
   LIVEKIT_API_KEY: z.string().default('devkey'),
-  LIVEKIT_API_SECRET: z.string().default('devsecret_change_in_production'),
+  // Secreto que FIRMA los tokens WebRTC de la cámara en vivo (seguridad core). Fail-fast en prod: no
+  // arrancar con el secreto de dev (forjable → cualquiera mintea acceso a la cámara del habitáculo).
+  LIVEKIT_API_SECRET: secret('devsecret_change_in_production'),
   /// TTL del token de cámara que se emite a passenger/driver.
   LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().default(3600),
 
@@ -37,7 +39,9 @@ export const envSchema = z.object({
   S3_ENDPOINT: z.string().default('http://localhost:9002'),
   S3_REGION: z.string().default('us-east-1'),
   S3_ACCESS_KEY: z.string().default('veo_dev'),
-  S3_SECRET_KEY: z.string().default('veo_dev_secret'),
+  // Credencial del storage soberano de VIDEO (Ley 29733). Fail-fast en prod: el video del habitáculo no
+  // puede guardarse con credenciales de dev conocidas.
+  S3_SECRET_KEY: secret('veo_dev_secret'),
   S3_BUCKET_VIDEO: z.string().default('veo-video-dev'),
   /// Bucket de avatares del pasajero/conductor. LECTURA PÚBLICA: la publicUrl es accesible sin firma.
   S3_BUCKET_AVATAR: z.string().default('veo-avatars-dev'),

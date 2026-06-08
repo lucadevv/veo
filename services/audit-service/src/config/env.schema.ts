@@ -38,7 +38,8 @@ export const envSchema = z.object({
   AUDIT_S3_REGION: z.string().default('us-east-1'),
   AUDIT_S3_BUCKET: z.string().default('veo-audit-log'),
   AUDIT_S3_ACCESS_KEY: z.string().default('veo_dev'),
-  AUDIT_S3_SECRET_KEY: z.string().default('veo_dev_secret'),
+  // Credencial del storage WORM inmutable del audit log (Ley 29733, Object Lock). Fail-fast en prod.
+  AUDIT_S3_SECRET_KEY: secret('veo_dev_secret'),
   AUDIT_S3_FORCE_PATH_STYLE: z
     .enum(['true', 'false'])
     .default('true')
