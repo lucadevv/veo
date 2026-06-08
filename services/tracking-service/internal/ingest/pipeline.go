@@ -28,9 +28,12 @@ type StatusReader interface {
 	Get(ctx context.Context, driverID string) (domain.PresenceStatus, error)
 }
 
-// GeoEvaluator evalúa transiciones de geofencing para un conductor.
+// GeoEvaluator evalúa transiciones de geofencing para un conductor y olvida su estado al quedar inactivo.
 type GeoEvaluator interface {
 	Evaluate(driverID string, p domain.Point) (geofence.Transition, error)
+	// Forget descarta el estado en memoria de un conductor (zonas/Lima) cuando deja de pingear: sin
+	// esto, los maps del detector crecen sin cota (un conductor que se desconecta nunca se limpiaba).
+	Forget(driverID string)
 }
 
 // Broadcaster reenvía actualizaciones a los suscriptores del tracking.
@@ -51,7 +54,8 @@ type Pipeline struct {
 
 	publishEvery time.Duration
 	mu           sync.Mutex
-	lastPublish  map[string]time.Time
+	lastPublish  map[string]time.Time // throttle de location_updated por driver
+	lastSeen     map[string]time.Time // último ping por driver, para evictar estado de inactivos (Reap)
 }
 
 // PipelineDeps agrupa las dependencias del pipeline.
@@ -80,6 +84,7 @@ func NewPipeline(d PipelineDeps) *Pipeline {
 		log:          d.Logger,
 		publishEvery: d.PublishEvery,
 		lastPublish:  make(map[string]time.Time),
+		lastSeen:     make(map[string]time.Time),
 	}
 }
 
@@ -94,6 +99,7 @@ func (p *Pipeline) Process(ctx context.Context, ping domain.Ping) error {
 		return nil
 	}
 	p.metrics.PingsTotal.Inc()
+	p.markSeen(ping.DriverID)
 
 	serverRecv := time.Now().UTC()
 	if ping.RecordedAt.IsZero() {
@@ -217,6 +223,38 @@ func (p *Pipeline) publishEvent(ctx context.Context, eventType, key string, payl
 		return
 	}
 	p.metrics.EventsPublished.WithLabelValues(eventType).Inc()
+}
+
+// markSeen registra el último ping de un conductor (para que Reap evicte a los inactivos).
+func (p *Pipeline) markSeen(driverID string) {
+	p.mu.Lock()
+	p.lastSeen[driverID] = time.Now()
+	p.mu.Unlock()
+}
+
+// Reap evicta el estado EN MEMORIA de los conductores que no pingean hace más de `staleAfter`: borra sus
+// entradas de los maps lastSeen/lastPublish y olvida su estado de geofence. Sin esto ambos maps crecían
+// sin cota (riesgo de OOM con miles de conductores rotando). La presencia Redis ya auto-expira por TTL;
+// esto limpia lo que vive en proceso. Devuelve cuántos conductores evictó. Lo invoca el Reaper (ticker).
+func (p *Pipeline) Reap(staleAfter time.Duration) int {
+	cutoff := time.Now().Add(-staleAfter)
+	p.mu.Lock()
+	var stale []string
+	for id, seen := range p.lastSeen {
+		if seen.Before(cutoff) {
+			stale = append(stale, id)
+		}
+	}
+	for _, id := range stale {
+		delete(p.lastSeen, id)
+		delete(p.lastPublish, id)
+	}
+	p.mu.Unlock()
+	// Forget fuera del lock del pipeline: el detector tiene su propio mutex (evita anidar locks).
+	for _, id := range stale {
+		p.geo.Forget(id)
+	}
+	return len(stale)
 }
 
 // shouldPublish aplica throttling por conductor para no saturar Kafka a 1 Hz × N drivers.

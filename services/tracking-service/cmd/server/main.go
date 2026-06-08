@@ -154,6 +154,9 @@ func run() error {
 		PublishEvery: cfg.LocationPublishInterval,
 	})
 
+	// --- Reaper: evicta el estado en memoria de conductores inactivos (anti-leak) ---
+	ingest.NewReaper(pipeline, cfg.ReapInterval, cfg.DriverStaleAfter, log).Start(rootCtx)
+
 	// --- MQTT (ingesta) ---
 	consumer := ingest.NewMQTTConsumer(ingest.MQTTConfig{
 		BrokerURL: cfg.MQTTBrokerURL,

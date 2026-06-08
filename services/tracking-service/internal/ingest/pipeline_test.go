@@ -86,6 +86,21 @@ func (f *fakePublisher) byType(t string) []captured {
 	return out
 }
 
+// fakeGeo registra las llamadas a Forget (para verificar el reaper) y no detecta transiciones.
+type fakeGeo struct {
+	mu        sync.Mutex
+	forgotten []string
+}
+
+func (f *fakeGeo) Evaluate(string, domain.Point) (geofence.Transition, error) {
+	return geofence.Transition{}, nil
+}
+func (f *fakeGeo) Forget(driverID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgotten = append(f.forgotten, driverID)
+}
+
 type fakeHub struct {
 	mu      sync.Mutex
 	updates []api.LocationUpdate
@@ -258,6 +273,53 @@ func TestPipelinePublishesZoneExitAndLeftArea(t *testing.T) {
 	}
 	if got := len(pub.byType(events.EventDriverLeftArea)); got != 1 {
 		t.Fatalf("se esperaba 1 left_operational_area, got %d", got)
+	}
+}
+
+// TestPipelineReapEvictsStaleDrivers verifica Lote 3: el estado en memoria (lastSeen/lastPublish +
+// geofence) de un conductor inactivo se evicta; el activo se mantiene. Sin esto, los maps crecían sin cota.
+func TestPipelineReapEvictsStaleDrivers(t *testing.T) {
+	geo := &fakeGeo{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p := NewPipeline(PipelineDeps{
+		Presence: &fakePresence{res: 9}, Status: fakeStatus{status: domain.StatusAvailable}, Geo: geo,
+		History: &fakeHistory{}, Publisher: &fakePublisher{}, Hub: &fakeHub{},
+		Metrics: obs.NewMetrics(prometheus.NewRegistry()), Logger: log,
+		PublishEvery: time.Hour, // para que shouldPublish pueble lastPublish
+	})
+	ctx := context.Background()
+	pingAt := func(id string) domain.Ping {
+		return domain.Ping{DriverID: id, Lat: -12.0464, Lon: -77.0428, RecordedAt: time.Now()}
+	}
+	if err := p.Process(ctx, pingAt("fresh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Process(ctx, pingAt("stale")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Envejecemos el lastSeen del "stale" (sin dormir el test).
+	p.mu.Lock()
+	p.lastSeen["stale"] = time.Now().Add(-time.Hour)
+	p.mu.Unlock()
+
+	if n := p.Reap(5 * time.Minute); n != 1 {
+		t.Fatalf("Reap evictó %d, want 1", n)
+	}
+	if len(geo.forgotten) != 1 || geo.forgotten[0] != "stale" {
+		t.Fatalf("geo.Forget = %v, want [stale]", geo.forgotten)
+	}
+
+	p.mu.Lock()
+	_, freshSeen := p.lastSeen["fresh"]
+	_, staleSeen := p.lastSeen["stale"]
+	_, stalePub := p.lastPublish["stale"]
+	p.mu.Unlock()
+	if !freshSeen {
+		t.Error("el conductor activo NO debía evictarse")
+	}
+	if staleSeen || stalePub {
+		t.Error("el conductor inactivo debía evictarse de lastSeen y lastPublish")
 	}
 }
 

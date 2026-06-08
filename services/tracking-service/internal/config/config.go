@@ -40,6 +40,10 @@ type Config struct {
 	StatusBusyTTL time.Duration // red de seguridad del status "busy" si se pierde el trip.completed
 	H3Resolution  int           // resolución del hot index (BR: r9)
 
+	// Reaper (anti-leak del estado en memoria)
+	ReapInterval     time.Duration // cada cuánto barre el estado en memoria de conductores inactivos
+	DriverStaleAfter time.Duration // inactividad (sin pings) tras la cual se evicta el estado del conductor
+
 	// Geofencing
 	ZonesPath string // ruta opcional a un JSON con zonas; vacío = solo Lima bbox
 
@@ -80,6 +84,8 @@ func Load() (Config, error) {
 		PresenceTTL:             envDuration("PRESENCE_TTL", 60*time.Second),
 		StatusBusyTTL:           envDuration("STATUS_BUSY_TTL", 4*time.Hour),
 		H3Resolution:            envInt("H3_RESOLUTION", 9),
+		ReapInterval:            envDuration("REAP_INTERVAL", 30*time.Second),
+		DriverStaleAfter:        envDuration("DRIVER_STALE_AFTER", 2*time.Minute),
 		LocationPublishInterval: envDuration("LOCATION_PUBLISH_INTERVAL", 1*time.Second),
 	}
 
