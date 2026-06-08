@@ -5,6 +5,7 @@ kind: Kustomization
 # dashboards (Grafana), trazas (OTel Collector -> Tempo) y logs (Loki + promtail).
 resources:
   - prometheus.yaml
+  - alertmanager.yaml
   - grafana.yaml
   - otel-collector.yaml
   - tempo.yaml
