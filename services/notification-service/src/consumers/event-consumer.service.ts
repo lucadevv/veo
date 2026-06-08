@@ -230,6 +230,25 @@ const paymentRefundedSchema = z.object({
   platform: z.enum(['android', 'ios']).optional(),
 });
 
+/** payment.cancellation_penalty_recorded (F2) → push al PASAJERO: "penalidad de S/X por cancelar". */
+const cancellationPenaltyRecordedSchema = z.object({
+  penaltyId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string().optional(),
+  penaltyCents: z.number().int(),
+  driverCompensationCents: z.number().int(),
+  platformCents: z.number().int(),
+});
+
+/**
+ * payment.cancellation_penalty_collected (F2.3) → push al PASAJERO ("pagaste tu penalidad, ya puedes
+ * pedir") y, si hubo conductor con compensación > 0, push al CONDUCTOR ("recibiste S/Y por la espera").
+ */
+const cancellationPenaltyCollectedSchema = cancellationPenaltyRecordedSchema.extend({
+  settlementPaymentId: z.string(),
+});
+
 /** payment.affiliation_activated / _expired → el destinatario (userId) viaja directo en el evento. */
 const affiliationActivatedSchema = z.object({
   affiliationId: z.string(),
@@ -353,6 +372,8 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       .on('payment.captured', (e) => this.onPaymentCaptured(e))
       .on('payment.cash_pending', (e) => this.onPaymentCashPending(e))
       .on('payment.refunded', (e) => this.onPaymentRefunded(e))
+      .on('payment.cancellation_penalty_recorded', (e) => this.onCancellationPenaltyRecorded(e))
+      .on('payment.cancellation_penalty_collected', (e) => this.onCancellationPenaltyCollected(e))
       .on('payment.affiliation_activated', (e) => this.onAffiliationActivated(e))
       .on('payment.affiliation_expired', (e) => this.onAffiliationExpired(e))
       .on('chat.message_sent', (e) => this.onChatMessageSent(e));
@@ -361,6 +382,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       'Consumidores activos: panic.triggered, trip.assigned, trip.accepted, trip.started, trip.arriving, ' +
         'trip.arrived, trip.bid_posted, trip.reassigning, trip.completed, trip.cancelled, trip.expired, ' +
         'trip.failed, payment.failed, payment.captured, payment.cash_pending, payment.refunded, ' +
+        'payment.cancellation_penalty_recorded, payment.cancellation_penalty_collected, ' +
         'payment.affiliation_activated, payment.affiliation_expired, chat.message_sent',
     );
   }
@@ -880,6 +902,92 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
           data: { tripId: p.tripId, paymentId: p.paymentId },
         },
       });
+    }
+  }
+
+  /**
+   * payment.cancellation_penalty_recorded (F2) → push al PASAJERO: "penalidad de S/X por cancelar".
+   * Poison-guard + dedup por penaltyId (una redelivery NO empuja dos veces).
+   */
+  private async onCancellationPenaltyRecorded(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = cancellationPenaltyRecordedSchema.safeParse(envelope.payload);
+    if (!parsed.success) return;
+    const p = parsed.data;
+    const targets = await this.safeResolveTargets('payment.cancellation_penalty_recorded', p.passengerId);
+    if (targets.length === 0) {
+      this.logger.warn(`penalidad ${p.penaltyId}: registrada sin token push del pasajero → push omitido`);
+      return;
+    }
+    for (const target of targets) {
+      await this.engine.enqueue({
+        recipientId: p.passengerId,
+        channel: NotificationChannel.PUSH,
+        template: TEMPLATE_KEYS.PAYMENT_PENALTY_RECORDED,
+        dedupKey: `penalty:${p.penaltyId}:recorded:push:${target.token}`,
+        payload: {
+          to: target.token,
+          platform: target.platform,
+          vars: { amount: formatSoles(p.penaltyCents) },
+          // Deep-link: la app abre el detalle de la penalidad para pagarla.
+          data: { tripId: p.tripId, penaltyId: p.penaltyId, screen: 'CancellationPenalty' },
+        },
+      });
+    }
+  }
+
+  /**
+   * payment.cancellation_penalty_collected (F2.3) → DOS destinatarios:
+   *  - PASAJERO: "pagaste tu penalidad, ya puedes pedir" (libera el gate en su cabeza).
+   *  - CONDUCTOR (si hubo y su compensación > 0): "recibiste S/Y por la espera".
+   * Cada push con su propio dedup (penaltyId + rol) → una redelivery no duplica ninguno.
+   */
+  private async onCancellationPenaltyCollected(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = cancellationPenaltyCollectedSchema.safeParse(envelope.payload);
+    if (!parsed.success) return;
+    const p = parsed.data;
+
+    const passengerTargets = await this.safeResolveTargets(
+      'payment.cancellation_penalty_collected',
+      p.passengerId,
+    );
+    if (passengerTargets.length === 0) {
+      this.logger.warn(`penalidad ${p.penaltyId}: saldada sin token push del pasajero → push omitido`);
+    }
+    for (const target of passengerTargets) {
+      await this.engine.enqueue({
+        recipientId: p.passengerId,
+        channel: NotificationChannel.PUSH,
+        template: TEMPLATE_KEYS.PAYMENT_PENALTY_COLLECTED,
+        dedupKey: `penalty:${p.penaltyId}:collected:passenger:push:${target.token}`,
+        payload: {
+          to: target.token,
+          platform: target.platform,
+          vars: { amount: formatSoles(p.penaltyCents) },
+          data: { tripId: p.tripId, penaltyId: p.penaltyId },
+        },
+      });
+    }
+
+    // Compensación al conductor: solo si esperó (driverId) y le toca algo del split (comp > 0).
+    if (p.driverId && p.driverCompensationCents > 0) {
+      const driverTargets = await this.safeResolveTargets(
+        'payment.cancellation_penalty_collected',
+        p.driverId,
+      );
+      for (const target of driverTargets) {
+        await this.engine.enqueue({
+          recipientId: p.driverId,
+          channel: NotificationChannel.PUSH,
+          template: TEMPLATE_KEYS.PAYMENT_PENALTY_DRIVER_COMP,
+          dedupKey: `penalty:${p.penaltyId}:collected:driver:push:${target.token}`,
+          payload: {
+            to: target.token,
+            platform: target.platform,
+            vars: { amount: formatSoles(p.driverCompensationCents) },
+            data: { tripId: p.tripId, penaltyId: p.penaltyId },
+          },
+        });
+      }
     }
   }
 

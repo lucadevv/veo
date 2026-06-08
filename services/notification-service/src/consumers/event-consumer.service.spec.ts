@@ -624,6 +624,91 @@ describe('EventConsumerService · payment.cash_pending → "confirma tu pago en 
   });
 });
 
+describe('EventConsumerService · penalidad de cancelación (F2 recorded / F2.3 collected)', () => {
+  const DRV = '33333333-3333-4333-8333-333333333333';
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a los dos eventos de penalidad', async () => {
+    await buildAndInit({});
+    expect(registered.has('payment.cancellation_penalty_recorded')).toBe(true);
+    expect(registered.has('payment.cancellation_penalty_collected')).toBe(true);
+  });
+
+  it('recorded → push PAYMENT_PENALTY_RECORDED al pasajero (monto en soles, deep-link a pagar)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-PEN', platform: 'android' }] });
+    await registered.get('payment.cancellation_penalty_recorded')!(
+      env('payment.cancellation_penalty_recorded', {
+        penaltyId: 'pen-1', tripId: 'trip-1', passengerId: PAX, driverId: DRV,
+        penaltyCents: 800, driverCompensationCents: 400, platformCents: 400,
+      }),
+    );
+    const rec = [...store.records.values()][0]!;
+    expect(rec.template).toBe(TEMPLATE_KEYS.PAYMENT_PENALTY_RECORDED);
+    expect(rec.recipientId).toBe(PAX);
+    expect(rec.payload.vars).toMatchObject({ amount: '8.00' });
+    expect(rec.payload.data).toMatchObject({ tripId: 'trip-1', penaltyId: 'pen-1', screen: 'CancellationPenalty' });
+  });
+
+  it('recorded sin token del pasajero → degrada (no encola)', async () => {
+    const { store } = await buildAndInit({});
+    await registered.get('payment.cancellation_penalty_recorded')!(
+      env('payment.cancellation_penalty_recorded', {
+        penaltyId: 'pen-1', tripId: 't', passengerId: PAX, penaltyCents: 800, driverCompensationCents: 0, platformCents: 800,
+      }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('collected → DOS pushes: pasajero ("ya puedes pedir") y conductor ("recibiste S/Y")', async () => {
+    const { store } = await buildAndInit({
+      [PAX]: [{ token: 'tok-PAX', platform: 'android' }],
+      [DRV]: [{ token: 'tok-DRV', platform: 'ios' }],
+    });
+    await registered.get('payment.cancellation_penalty_collected')!(
+      env('payment.cancellation_penalty_collected', {
+        penaltyId: 'pen-2', tripId: 'trip-2', passengerId: PAX, driverId: DRV,
+        penaltyCents: 800, driverCompensationCents: 400, platformCents: 400, settlementPaymentId: 'pay-x',
+      }),
+    );
+    const recs = [...store.records.values()];
+    expect(recs).toHaveLength(2);
+    const pax = recs.find((r) => r.recipientId === PAX)!;
+    const drv = recs.find((r) => r.recipientId === DRV)!;
+    expect(pax.template).toBe(TEMPLATE_KEYS.PAYMENT_PENALTY_COLLECTED);
+    expect(pax.payload.vars).toMatchObject({ amount: '8.00' }); // penaltyCents
+    expect(drv.template).toBe(TEMPLATE_KEYS.PAYMENT_PENALTY_DRIVER_COMP);
+    expect(drv.payload.vars).toMatchObject({ amount: '4.00' }); // driverCompensationCents
+  });
+
+  it('collected sin conductor → SOLO el push del pasajero', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-PAX', platform: 'android' }] });
+    await registered.get('payment.cancellation_penalty_collected')!(
+      env('payment.cancellation_penalty_collected', {
+        penaltyId: 'pen-3', tripId: 't', passengerId: PAX,
+        penaltyCents: 500, driverCompensationCents: 0, platformCents: 500, settlementPaymentId: 'pay-y',
+      }),
+    );
+    const recs = [...store.records.values()];
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.recipientId).toBe(PAX);
+    expect(recs[0]!.template).toBe(TEMPLATE_KEYS.PAYMENT_PENALTY_COLLECTED);
+  });
+
+  it('collected redelivery → no duplica ninguno de los dos pushes', async () => {
+    const { store } = await buildAndInit({
+      [PAX]: [{ token: 'tok-PAX', platform: 'android' }],
+      [DRV]: [{ token: 'tok-DRV', platform: 'ios' }],
+    });
+    const e = env('payment.cancellation_penalty_collected', {
+      penaltyId: 'pen-2', tripId: 'trip-2', passengerId: PAX, driverId: DRV,
+      penaltyCents: 800, driverCompensationCents: 400, platformCents: 400, settlementPaymentId: 'pay-x',
+    });
+    await registered.get('payment.cancellation_penalty_collected')!(e);
+    await registered.get('payment.cancellation_penalty_collected')!(e);
+    expect(store.records.size).toBe(2); // 1 pasajero + 1 conductor, sin duplicar
+  });
+});
+
 describe('EventConsumerService · afiliación Yape (userId directo)', () => {
   beforeEach(() => registered.clear());
 
