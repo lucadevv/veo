@@ -17,7 +17,8 @@ src/
   hot-index/                  Hot index Redis (ubicación + disponibilidad) y exclusión por pánico
                               - redis-hot-index.ts     (LUA atómico SREM+SADD para mover de celda)
                               - in-memory-hot-index.ts (doble en memoria, solo tests unit)
-  dispatch/                   Dominio: scoring (puro), matching (oferta/timeout/expansión),
+  dispatch/                   Dominio: scoring (puro), DriverPool (filtro de candidatos), matching
+                              event-driven (DispatchSession + offerNext + reconciler de timeout),
                               surge, proyección de stats, accept/reject, controller REST + DTOs
   messaging/                  Consumidores Kafka
   grpc/                       Controlador gRPC veo.dispatch.v1 (GetMatch, GetSurge)
@@ -31,16 +32,29 @@ src/
   + refresh de `loc`).
 - `dispatch:excluded:drivers` → SET de exclusión por pánico.
 
-### Algoritmo de matching (BR-T06)
+### Algoritmo de matching (BR-T06) — EVENT-DRIVEN, sin estado en proceso
 
-1. `h3(origin)` res 9; candidatos del **k-ring radio 1** (`neighbors(cell,1)`) desde Redis.
-2. Excluye conductores en pánico y ya ofertados.
+El matcher secuencial (modo FIXED) es **dirigido por estado en DB**, no por un await-loop con `Promise`/
+`setTimeout` en memoria. Eso lo hace **replica-safe**: cualquier réplica avanza/cierra el matching leyendo
+`DispatchSession` (process-manager durable, una fila por viaje) + las `DispatchMatch` del viaje.
+
+1. `h3(origin)` res 9; candidatos del **k-ring** desde Redis.
+2. `DriverPool.eligible(...)` filtra: del tipo de vehículo requerido, no excluidos por pánico, no ya
+   ofertados (única fuente de verdad — la comparte el broadcast de la PUJA).
 3. Scoring y orden descendente:
    `score = w_dist·(1/distM) + w_rating·avgRating + w_idle·(1/segDesdeUltimoViaje) − w_cancel·cancelRate`
    (pesos configurables por env).
-4. Oferta **secuencial** al top-1 con timeout (`DISPATCH_OFFER_TIMEOUT_MS`, 12s). Rechazo/expiración → siguiente.
-5. Tras `DISPATCH_REJECTS_BEFORE_EXPAND` (5) rechazos en radio 1 → expande al **k-ring radio 2**.
-6. Aceptación → `dispatch.match_found` (outbox, misma tx que `accept`). Agotados → `dispatch.timeout`.
+4. `trip.requested` → `startSession` (DispatchSession OPEN) + `offerNext`: oferta al top-1 (**una oferta a
+   la vez**). El desenlace NO se espera en proceso — avanza por ESTADO:
+   - `accept` (REST) → `DispatchMatch` ACCEPTED (CAS atómico) + `dispatch.match_found` (outbox, dedupKey
+     determinista `match_found:tripId:driverId`) + sesión MATCHED.
+   - `reject` (REST) → `DispatchMatch` REJECTED (CAS) + `offerNext` (siguiente candidato).
+   - **timeout** → un **reconciler durable** (`@Interval` 2s, espejo de `offer-board.scheduler`) reclama por
+     CAS las ofertas vencidas (`DISPATCH_OFFER_TIMEOUT_MS`, 12s) → TIMEOUT + `offerNext`. Reemplaza al
+     `setTimeout` en proceso; replica-safe por el CAS por-oferta (no se pierde en crash/repartition).
+   - `trip.cancelled` → sesión CANCELLED (el advance/reconciler dejan de ofertar).
+5. El advance **agota cada k-ring antes de expandir** (hasta `DISPATCH_MAX_K_RING`).
+6. Agotados los candidatos → sesión TIMED_OUT + `dispatch.timeout`.
 
 SLO objetivo p99 < 1.5s request→primera oferta: candidatos desde Redis; ETA (`@veo/maps`) por oferta
 (no bloquea el ranking).
@@ -94,11 +108,14 @@ DATABASE_URL="postgresql://veo:veo_dev@localhost:5433/veo" pnpm --filter @veo/di
 
 ```bash
 pnpm --filter @veo/dispatch-service typecheck
-pnpm --filter @veo/dispatch-service test            # unit (sin dependencias externas)
-RUN_INTEGRATION=1 pnpm --filter @veo/dispatch-service test   # + integración Redis real (testcontainers, requiere Docker)
+pnpm --filter @veo/dispatch-service test            # unit + e2e del matcher (Postgres efímero, requiere Docker)
+RUN_INTEGRATION=1 pnpm --filter @veo/dispatch-service test   # + integración Redis VIVO (REDIS_URL)
 ```
 
-- Unit: scoring (BR-T06), flujo de oferta (timeout + expansión k-ring), surge, exclusión por pánico.
-- Integración (gated): `RedisHotIndex` contra Redis real (LUA atómico, TTL, exclusión).
+- Unit: scoring (BR-T06), surge, exclusión por pánico, board PUJA.
+- e2e (`test/*.e2e.spec.ts`, Postgres real vía testcontainers): el matcher event-driven completo
+  (startSession/offerNext, accept/reject/cancel reactivos, reconciler de timeout, CAS multi-réplica).
+- Integración Redis (gated `RUN_INTEGRATION=1`, `*.int.spec.ts`): `RedisHotIndex`/`RedisOfferBoardStore`
+  contra un Redis vivo (LUA atómico, TTL, barrido de boards).
 
 Ver [`docs/events.md`](docs/events.md) para el contrato de eventos y las decisiones de arquitectura.
