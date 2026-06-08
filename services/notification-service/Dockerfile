@@ -16,6 +16,6 @@ COPY --from=builder /app/services/notification-service/proto ./proto
 COPY --from=builder /app/services/notification-service/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 EXPOSE 3008
-HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3008/api/v1/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3008/health || exit 1
 USER node
 CMD ["node", "dist/main.js"]

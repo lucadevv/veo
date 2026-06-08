@@ -15,6 +15,6 @@ COPY --from=builder /app/services/audit-service/dist ./dist
 COPY --from=builder /app/services/audit-service/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 EXPOSE 3009
-HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3009/healthz || exit 1
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3009/health || exit 1
 USER node
 CMD ["node", "dist/main.js"]
