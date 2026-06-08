@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
+import { EVENT_SCHEMAS } from '@veo/events';
 import type { MapsClient } from '@veo/maps';
 import { PrismaClient } from '../src/generated/prisma';
 import { TripsService } from '../src/trips/trips.service';
@@ -124,5 +125,79 @@ describe('Asignación de conductor · guard atómico CAS (D1: no doble-asignaci�
     expect(trip.status).toBe('ASSIGNED');
     expect(trip.driverId).toBe(driver);
     expect(await assignedEvents(tripId)).toHaveLength(1);
+  });
+});
+
+/** Inserta un viaje ACCEPTED (con conductor) en el modo dado. agreedFareCents seteado para verificar el reset H12. */
+async function seedAcceptedTrip(mode: 'PUJA' | 'FIXED'): Promise<string> {
+  const trip = await prisma.trip.create({
+    data: {
+      passengerId: uuidv7(),
+      driverId: uuidv7(),
+      originLat: -12.0464,
+      originLon: -77.0428,
+      destLat: -12.05,
+      destLon: -77.05,
+      fareCents: 1500,
+      distanceMeters: 4000,
+      durationSeconds: 600,
+      paymentMethod: 'CASH',
+      status: 'ACCEPTED',
+      dispatchMode: mode,
+      vehicleType: 'CAR',
+      negotiationSeq: 1,
+      agreedFareCents: 1500, // un agreed-fare vivo: el reassign PUJA debe RESETEARLO (H12)
+    },
+  });
+  return trip.id;
+}
+
+/**
+ * El camino de PLATA del reassign (cancel del conductor → Strategy.reassign) contra Postgres REAL. Cierra
+ * el hueco: el outbox `trip.reassigning` se valida contra su EVENT_SCHEMAS (lo que un prisma falso NO hace;
+ * un campo roto explotaría recién en el consumer de dispatch como poison, no acá).
+ */
+describe('Reassign tras cancel del conductor · Strategy por modo · Postgres real', () => {
+  it('PUJA · cancel(DRIVER) desde ACCEPTED → REASSIGNING + reset H12 + bump H13 + trip.reassigning VÁLIDO', async () => {
+    const tripId = await seedAcceptedTrip('PUJA');
+    const view = await service.cancel(tripId, { by: 'DRIVER' });
+    expect(view.status).toBe('REASSIGNING');
+
+    const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
+    expect(trip.driverId).toBeNull(); // conductor liberado
+    expect(trip.agreedFareCents).toBeNull(); // H12: guard reseteado (el re-match cobra el precio fresco)
+    expect(trip.negotiationSeq).toBe(2); // H13: ciclo bumpeado 1→2
+
+    // El payload REAL del outbox DEBE pasar el schema que el consumer de dispatch usa para parsear.
+    const events = await prisma.outboxEvent.findMany({
+      where: { aggregateId: tripId, eventType: 'trip.reassigning' },
+    });
+    expect(events).toHaveLength(1);
+    const payload = (events[0]!.envelope as { payload: unknown }).payload;
+    const parsed = EVENT_SCHEMAS['trip.reassigning'].parse(payload); // lanza si falta/sobra un campo
+    expect(parsed.negotiationSeq).toBe(2); // el seq enriquecido coincide con la fila
+  });
+
+  it('FIXED · cancel(DRIVER) desde ACCEPTED → REASSIGNING + re-emite trip.requested SIN tocar seq/agreedFare', async () => {
+    const tripId = await seedAcceptedTrip('FIXED');
+    const view = await service.cancel(tripId, { by: 'DRIVER' });
+    expect(view.status).toBe('REASSIGNING');
+
+    const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
+    expect(trip.driverId).toBeNull();
+    // FIXED NO toca los invariantes de puja (asimetría preservada contra Postgres real).
+    expect(trip.agreedFareCents).toBe(1500);
+    expect(trip.negotiationSeq).toBe(1);
+
+    // FIXED re-emite trip.requested (no trip.reassigning), y ese payload también pasa su schema.
+    const requested = await prisma.outboxEvent.findMany({
+      where: { aggregateId: tripId, eventType: 'trip.requested' },
+    });
+    expect(requested).toHaveLength(1);
+    expect(() => EVENT_SCHEMAS['trip.requested'].parse((requested[0]!.envelope as { payload: unknown }).payload)).not.toThrow();
+    const reassigning = await prisma.outboxEvent.findMany({
+      where: { aggregateId: tripId, eventType: 'trip.reassigning' },
+    });
+    expect(reassigning).toHaveLength(0); // FIXED NO emite trip.reassigning
   });
 });
