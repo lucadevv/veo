@@ -49,6 +49,7 @@ import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import type { Env } from '../config/env.schema';
 import type {
   AcceptTripDto,
+  ArrivedTripDto,
   ArrivingTripDto,
   AssignTripDto,
   CancelTripDto,
@@ -492,6 +493,13 @@ export class TripsService {
   /** POST /trips/:id/accept — el conductor acepta. Emite trip.accepted. */
   async acceptTrip(id: string, dto: AcceptTripDto): Promise<TripView> {
     const trip = await this.mustFind(id);
+    // A1 · ownership server-side (anti-IDOR, defensa en profundidad junto al gate del driver-bff): solo el
+    // conductor ASIGNADO avanza SU viaje. El driver-bff DERIVA el driverId del perfil y lo manda; lo
+    // verificamos acá. 404 (no 403) para no filtrar la existencia de un viaje ajeno. Condicional: callers
+    // legacy sin driverId siguen andando (mismo criterio que start/complete).
+    if (dto.driverId && trip.driverId !== dto.driverId) {
+      throw new NotFoundError('Viaje no encontrado', { id });
+    }
     assertTransition(trip.status, TripStatus.ACCEPTED);
     const etaSeconds = dto.etaSeconds ?? 300;
 
@@ -520,6 +528,10 @@ export class TripsService {
   /** POST /trips/:id/arriving — el conductor va en camino. Emite trip.arriving. */
   async arriving(id: string, dto: ArrivingTripDto): Promise<TripView> {
     const trip = await this.mustFind(id);
+    // A1 · ownership server-side (anti-IDOR): solo el conductor asignado avanza SU viaje (404 si no calza).
+    if (dto.driverId && trip.driverId !== dto.driverId) {
+      throw new NotFoundError('Viaje no encontrado', { id });
+    }
     assertTransition(trip.status, TripStatus.ARRIVING);
     const etaSeconds = dto.etaSeconds ?? 120;
     const at = new Date();
@@ -552,8 +564,12 @@ export class TripsService {
   }
 
   /** POST /trips/:id/arrived — el conductor llegó al punto de recojo. Emite trip.arrived. */
-  async arrived(id: string): Promise<TripView> {
+  async arrived(id: string, dto: ArrivedTripDto = {}): Promise<TripView> {
     const trip = await this.mustFind(id);
+    // A1 · ownership server-side (anti-IDOR): solo el conductor asignado avanza SU viaje (404 si no calza).
+    if (dto.driverId && trip.driverId !== dto.driverId) {
+      throw new NotFoundError('Viaje no encontrado', { id });
+    }
     assertTransition(trip.status, TripStatus.ARRIVED);
     const at = new Date();
 

@@ -96,16 +96,23 @@ export class TripsService {
     };
   }
 
-  accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
-    return this.trip().post(`/trips/${id}/accept`, { identity, body: dto });
+  // A1 · ownership server-side (anti-IDOR): las transiciones pre-recojo del conductor verifican que el
+  // viaje es de ESTE conductor ANTES de avanzar la máquina de estados (deriva el driverId del perfil y lo
+  // pasa al trip-service como 2da capa). Sin esto, un conductor con un tripId ajeno podía dispararle
+  // accept/arriving/arrived. Mismo patrón que start/complete/cancel.
+  async accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    return this.trip().post(`/trips/${id}/accept`, { identity, body: { ...dto, driverId } });
   }
 
-  arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
-    return this.trip().post(`/trips/${id}/arriving`, { identity, body: dto });
+  async arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    return this.trip().post(`/trips/${id}/arriving`, { identity, body: { ...dto, driverId } });
   }
 
-  arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
-    return this.trip().post(`/trips/${id}/arrived`, { identity, body: {} });
+  async arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    return this.trip().post(`/trips/${id}/arrived`, { identity, body: { driverId } });
   }
 
   /**

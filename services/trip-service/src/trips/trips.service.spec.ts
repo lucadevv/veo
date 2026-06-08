@@ -471,6 +471,40 @@ describe('TripsService.start · BR-T07 modo niño', () => {
   });
 });
 
+// A1 · anti-IDOR en las transiciones PRE-RECOJO del conductor (cierre del write-IDOR de auditoría): un
+// conductor con un tripId ajeno NO puede dispararle accept/arriving/arrived. El driver-bff deriva el
+// driverId del perfil y lo manda; trip-service lo verifica acá (404, no filtra existencia ajena).
+describe('TripsService · A1 anti-IDOR pre-recojo (accept/arriving/arrived)', () => {
+  it('acceptTrip con driverId AJENO → 404 (no avanza el viaje de otro conductor)', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.acceptTrip('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(NotFoundError);
+    expect(prisma._store?.status).toBe(TripStatus.ASSIGNED);
+    expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('acceptTrip con driverId PROPIO → ACCEPTED ok (contraste)', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
+    const svc = new TripsService(prisma as never, maps);
+    const view = await svc.acceptTrip('trip-1', { driverId: 'drv-1' });
+    expect(view.status).toBe(TripStatus.ACCEPTED);
+  });
+
+  it('arriving con driverId AJENO → 404', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1' }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.arriving('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(NotFoundError);
+    expect(prisma._store?.status).toBe(TripStatus.ACCEPTED);
+  });
+
+  it('arrived con driverId AJENO → 404', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.ARRIVING, driverId: 'drv-1' }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.arrived('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(NotFoundError);
+    expect(prisma._store?.status).toBe(TripStatus.ARRIVING);
+  });
+});
+
 describe('TripsService.start · B · lockout anti-brute-force del código de modo niño (Redis)', () => {
   function build(redis: ReturnType<typeof makeRedis>) {
     const prisma = makePrisma(

@@ -18,6 +18,7 @@ import { ScheduledTripService } from './scheduled-trip.service';
 import { KycRequiredError } from './trips.errors';
 import {
   AcceptTripDto,
+  ArrivedTripDto,
   ArrivingTripDto,
   AssignTripDto,
   CancelScheduledDto,
@@ -105,8 +106,8 @@ export class TripsController {
   @Post(':id/arrived')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor llegó al recojo (→ ARRIVED)' })
-  arrived(@Param('id') id: string) {
-    return this.trips.arrived(id);
+  arrived(@Param('id') id: string, @Body() dto: ArrivedTripDto) {
+    return this.trips.arrived(id, dto);
   }
 
   @Post(':id/start')
