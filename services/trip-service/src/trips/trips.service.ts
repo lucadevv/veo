@@ -58,6 +58,7 @@ import {
 } from './domain/history';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { toTripView, readWaypoints } from './trip-view.mapper';
+import { PRODUCER, recordTripEvent, emitTripRequested, emitBidPosted } from './trip-events';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import type { Env } from '../config/env.schema';
 import type {
@@ -73,7 +74,6 @@ import type {
 } from './dto/trip.dto';
 
 const BCRYPT_ROUNDS = 10;
-const PRODUCER = 'trip-service';
 
 /**
  * B · Lockout anti-brute-force del código de modo niño (BR-T07). Un código de 4-6 dígitos es
@@ -129,8 +129,6 @@ const FARE_APPLICABLE_STATES: readonly TripStatus[] = [
   TripStatus.ARRIVED,
   TripStatus.IN_PROGRESS,
 ];
-
-type TxClient = Prisma.TransactionClient;
 
 /**
  * Puerto del ModeResolver (ADR 011 §1.1) que createTrip consume para CONGELAR el modo del viaje. La
@@ -373,7 +371,7 @@ export class TripsService {
         // Programado: no entra a dispatch todavía. Solo registramos la reserva (el scheduler activa).
         // Nota: la activación programada usa el camino legacy trip.requested (la puja diferida es un
         // follow-up — ver REPORT). El precio ya quedó fijado (bid o tarifa por ruta) al crear.
-        await this.recordEvent(tx, created.id, 'trip.scheduled', {
+        await recordTripEvent(tx, created.id, 'trip.scheduled', {
           scheduledFor: scheduledFor.toISOString(),
           fareCents,
           vehicleType,
@@ -383,107 +381,15 @@ export class TripsService {
         // PUJA (ADR 010 §2): el bid abre la negociación. Emitimos trip.bid_posted → dispatch abre el
         // OfferBoard y hace broadcast a conductores elegibles. REEMPLAZA a trip.requested en el camino
         // de puja: NO emitimos trip.requested aquí para no disparar el auto-offer secuencial legacy.
-        await this.emitBidPosted(tx, created, origin);
+        await emitBidPosted(tx, created, origin, this.bidWindowSec);
       } else {
         // Compat: sin bid → flujo previo (tarifa por ruta) que dispara el matching legacy.
-        await this.emitTripRequested(tx, created, origin, destination);
+        await emitTripRequested(tx, created, origin, destination);
       }
       return created;
     });
 
     return toTripView(trip);
-  }
-
-  /**
-   * Inserta el evento de dominio + outbox trip.requested para que dispatch arranque el matching.
-   * Extraído para reutilizarlo desde createTrip (inmediato) y desde la activación del scheduler.
-   * `scheduled` marca el origen (reserva) para que dispatch pueda señalar "reservado" en la oferta.
-   */
-  private async emitTripRequested(
-    tx: TxClient,
-    trip: Trip,
-    origin: LatLon,
-    destination: LatLon,
-  ): Promise<void> {
-    const scheduled = trip.scheduledFor !== null;
-    await this.recordEvent(tx, trip.id, 'trip.requested', {
-      fareCents: trip.fareCents,
-      distanceMeters: trip.distanceMeters,
-      durationSeconds: trip.durationSeconds,
-      surge: Number(trip.surgeMultiplier.toString()),
-      category: trip.category,
-      vehicleType: trip.vehicleType,
-      scheduled,
-    });
-    await enqueueOutbox(
-      tx,
-      createEnvelope({
-        eventType: 'trip.requested',
-        producer: PRODUCER,
-        payload: {
-          tripId: trip.id,
-          passengerId: trip.passengerId,
-          origin,
-          destination,
-          fareCents: trip.fareCents,
-          childMode: trip.childMode,
-          // Ola 2B: dispatch filtra el matching por tipo de vehículo (MOTO solo a conductores MOTO).
-          vehicleType: trip.vehicleType,
-          // Ola 2B: si el viaje proviene de una reserva, dispatch puede incluirlo como "reservado".
-          scheduled,
-        },
-      }),
-      trip.id,
-    );
-  }
-
-  /**
-   * PUJA (ADR 010 §2/§4) · entrada a la negociación. Inserta el evento de dominio + outbox
-   * `trip.bid_posted` en la MISMA transacción de creación. dispatch abre el OfferBoard con este bid
-   * y hace broadcast a conductores elegibles (ventana de puja = BID_WINDOW_SEC). `bidCents` =
-   * `fareCents` del viaje (ya validado ≥ piso). REEMPLAZA a `trip.requested` en el camino de puja.
-   */
-  /**
-   * @param scheduled `true` SOLO cuando el bid nace de activar una reserva (cron → activateScheduledTrip):
-   *   el pasajero NO está en la app y notification-service le mandará un push con deep-link al board.
-   *   `false` en la puja inmediata y en el rebid (el pasajero ya está mirando el board).
-   */
-  private async emitBidPosted(
-    tx: TxClient,
-    trip: Trip,
-    origin: LatLon,
-    scheduled = false,
-  ): Promise<void> {
-    await this.recordEvent(tx, trip.id, 'trip.bid_posted', {
-      bidCents: trip.fareCents,
-      vehicleType: trip.vehicleType,
-      windowSec: this.bidWindowSec,
-      // H13 — sella el ciclo de negociación que abrió este bid (createTrip=1, rebid=trip.negotiationSeq+1).
-      negotiationSeq: trip.negotiationSeq,
-      scheduled,
-    });
-    await enqueueOutbox(
-      tx,
-      createEnvelope({
-        eventType: 'trip.bid_posted',
-        producer: PRODUCER,
-        payload: {
-          tripId: trip.id,
-          passengerId: trip.passengerId,
-          bidCents: trip.fareCents,
-          vehicleType: trip.vehicleType,
-          origin,
-          windowSec: this.bidWindowSec,
-          // H13 — dispatch persiste este seq en el board y lo estampa en dispatch.offer_accepted.
-          negotiationSeq: trip.negotiationSeq,
-          // BE-2 — el conductor las ve en su vista de puja (dispatch las guarda en el board).
-          specialRequests: trip.specialRequests,
-          // #1 — activación de reserva: notification-service pushea al pasajero (deep-link al board).
-          scheduled,
-        },
-      }),
-      trip.id,
-    );
   }
 
   // ───────────────────────────── Lectura ─────────────────────────────
@@ -631,9 +537,9 @@ export class TripsService {
       if (trip.dispatchMode === PricingMode.PUJA) {
         // #1 — scheduled=true: el pasajero no está en la app; notification-service le manda el push
         // con deep-link al board (sin esto, el board se llenaba de ofertas que nadie veía y expiraba).
-        await this.emitBidPosted(tx, activated, origin, true);
+        await emitBidPosted(tx, activated, origin, this.bidWindowSec, true);
       } else {
-        await this.emitTripRequested(tx, activated, origin, destination);
+        await emitTripRequested(tx, activated, origin, destination);
       }
     });
     this.logger.log(`Viaje programado ${id} activado → REQUESTED (modo ${trip.dispatchMode})`);
@@ -667,7 +573,7 @@ export class TripsService {
           penaltyCents: 0, // sin penalidad por cancelar una reserva con antelación
         },
       });
-      await this.recordEvent(tx, id, 'trip.cancelled', { by: 'PASSENGER', penaltyCents: 0, scheduled: true });
+      await recordTripEvent(tx, id, 'trip.cancelled', { by: 'PASSENGER', penaltyCents: 0, scheduled: true });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -765,7 +671,7 @@ export class TripsService {
         staleMinutes,
         at: now.toISOString(),
       };
-      await this.recordEvent(tx, id, eventType, payload);
+      await recordTripEvent(tx, id, eventType, payload);
       await enqueueOutbox(
         tx,
         createEnvelope({ eventType, producer: PRODUCER, payload }),
@@ -844,7 +750,7 @@ export class TripsService {
         throw new InvalidTripTransition(current.status, TripStatus.ASSIGNED);
       }
       const next = await tx.trip.findUniqueOrThrow({ where: { id } });
-      await this.recordEvent(tx, id, 'trip.assigned', { driverId, vehicleId });
+      await recordTripEvent(tx, id, 'trip.assigned', { driverId, vehicleId });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -870,7 +776,7 @@ export class TripsService {
         where: { id },
         data: { status: TripStatus.ACCEPTED, acceptedAt: new Date() },
       });
-      await this.recordEvent(tx, id, 'trip.accepted', { driverId: trip.driverId, etaSeconds });
+      await recordTripEvent(tx, id, 'trip.accepted', { driverId: trip.driverId, etaSeconds });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -899,7 +805,7 @@ export class TripsService {
         where: { id },
         data: { status: TripStatus.ARRIVING, arrivingAt: at },
       });
-      await this.recordEvent(tx, id, 'trip.arriving', { etaSeconds });
+      await recordTripEvent(tx, id, 'trip.arriving', { etaSeconds });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -932,7 +838,7 @@ export class TripsService {
         where: { id },
         data: { status: TripStatus.ARRIVED, arrivedAt: at },
       });
-      await this.recordEvent(tx, id, 'trip.arrived', {});
+      await recordTripEvent(tx, id, 'trip.arrived', {});
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -989,7 +895,7 @@ export class TripsService {
         // B · registra el intento fallido (atómico) y, si alcanza el tope, echa el candado de 15 min.
         await this.registerChildCodeFailure(id);
         await this.prisma.write.$transaction(async (tx) => {
-          await this.recordEvent(tx, id, 'trip.child_code_failed', { at: new Date().toISOString() });
+          await recordTripEvent(tx, id, 'trip.child_code_failed', { at: new Date().toISOString() });
           await enqueueOutbox(
             tx,
             createEnvelope({
@@ -1017,7 +923,7 @@ export class TripsService {
         where: { id },
         data: { status: TripStatus.IN_PROGRESS, startedAt },
       });
-      await this.recordEvent(tx, id, 'trip.started', { startedAt: startedAt.toISOString() });
+      await recordTripEvent(tx, id, 'trip.started', { startedAt: startedAt.toISOString() });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -1104,7 +1010,7 @@ export class TripsService {
         where: { id },
         data: { status: TripStatus.COMPLETED, completedAt },
       });
-      await this.recordEvent(tx, id, 'trip.completed', { fareCents: trip.fareCents });
+      await recordTripEvent(tx, id, 'trip.completed', { fareCents: trip.fareCents });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -1178,7 +1084,7 @@ export class TripsService {
           penaltyCents,
         },
       });
-      await this.recordEvent(tx, id, 'trip.cancelled', { by: dto.by, penaltyCents, reason: dto.reason });
+      await recordTripEvent(tx, id, 'trip.cancelled', { by: dto.by, penaltyCents, reason: dto.reason });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -1270,7 +1176,7 @@ export class TripsService {
           cancellationReason: reason ?? 'driver_cancelled',
         },
       });
-      await this.recordEvent(tx, trip.id, 'trip.reassigning', {
+      await recordTripEvent(tx, trip.id, 'trip.reassigning', {
         from: trip.status,
         previousDriverId: cancelledDriverId,
         reassignCount: nextReassignCount,
@@ -1338,7 +1244,7 @@ export class TripsService {
       // Re-despacho FIXED: el mismo evento que la creación de un viaje de tarifa fija (trip.requested),
       // para que dispatch re-arranque el matching secuencial. emitTripRequested lee origin/destination
       // del trip recién actualizado (status REASSIGNING, driverId null).
-      await this.emitTripRequested(tx, next, origin, destination);
+      await emitTripRequested(tx, next, origin, destination);
       return next;
     });
     this.logger.log(
@@ -1379,7 +1285,7 @@ export class TripsService {
         staleMinutes: 0,
         at: at.toISOString(),
       };
-      await this.recordEvent(tx, trip.id, 'trip.failed', {
+      await recordTripEvent(tx, trip.id, 'trip.failed', {
         ...payload,
         reason: 'max_reassign_exceeded',
         reassignCount,
@@ -1474,7 +1380,7 @@ export class TripsService {
         data: { fareCents: priceCents, agreedFareCents: priceCents },
       });
       if (result.count === 0) return false;
-      await this.recordEvent(tx, tripId, 'trip.fare_agreed', {
+      await recordTripEvent(tx, tripId, 'trip.fare_agreed', {
         previousFareCents: trip.fareCents,
         fareCents: priceCents,
       });
@@ -1530,7 +1436,7 @@ export class TripsService {
         staleMinutes: 0,
         at: at.toISOString(),
       };
-      await this.recordEvent(tx, tripId, 'trip.expired', { ...payload, reason });
+      await recordTripEvent(tx, tripId, 'trip.expired', { ...payload, reason });
       await enqueueOutbox(
         tx,
         createEnvelope({ eventType: 'trip.expired', producer: PRODUCER, payload }),
@@ -1587,7 +1493,7 @@ export class TripsService {
         },
       });
       if (result.count === 0) return; // otro actor ganó la carrera → no-op idempotente
-      await this.recordEvent(tx, tripId, 'trip.cancelled', {
+      await recordTripEvent(tx, tripId, 'trip.cancelled', {
         by: 'PASSENGER',
         penaltyCents: 0,
         reason: 'bid_cancelled',
@@ -1700,13 +1606,13 @@ export class TripsService {
         // H13 — espeja el incremento del updateMany para que emitBidPosted estampe el seq del nuevo ciclo.
         negotiationSeq: trip.negotiationSeq + 1,
       };
-      await this.recordEvent(tx, tripId, 'trip.rebid', {
+      await recordTripEvent(tx, tripId, 'trip.rebid', {
         from: fromStatus,
         previousBidCents: trip.fareCents,
         bidCents,
       });
       // Reusa el camino canónico de la puja: trip.bid_posted → dispatch abre un OfferBoard FRESCO al nuevo bid.
-      await this.emitBidPosted(tx, reactivated, origin);
+      await emitBidPosted(tx, reactivated, origin, this.bidWindowSec);
       return reactivated;
     });
 
@@ -1763,7 +1669,7 @@ export class TripsService {
           fareCents: fare.cents,
         },
       });
-      await this.recordEvent(tx, id, 'trip.destination_changed', {
+      await recordTripEvent(tx, id, 'trip.destination_changed', {
         destination,
         previousFareCents: trip.fareCents,
         fareCents: fare.cents,
@@ -1857,17 +1763,6 @@ export class TripsService {
   private estimateDriverEta(trip: Trip): Date | null {
     if (!trip.assignedAt) return null;
     return new Date(trip.assignedAt.getTime() + trip.durationSeconds * 1000);
-  }
-
-  private async recordEvent(
-    tx: TxClient,
-    tripId: string,
-    eventType: string,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    await tx.tripEvent.create({
-      data: { tripId, eventType, payload: payload as Prisma.InputJsonValue },
-    });
   }
 
 }
