@@ -143,6 +143,30 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
     await expect(svc.acknowledge(created.panicId, operatorId)).rejects.toThrow();
   });
 
+  it('ack CONCURRENTE de dos operadores: SOLO uno gana (CAS), el otro falla y el ackBy no se pisa', async () => {
+    const opA = uuidv7();
+    const opB = uuidv7();
+    const created = await svc.trigger(makeSignedInput());
+
+    // Dos operadores reconocen el MISMO pánico a la vez (sala de operaciones). El CAS (updateMany con
+    // status-guard) garantiza un único ganador: bajo READ COMMITTED, el 2º updateMany re-evalúa el WHERE
+    // tras soltarse el lock → status ya ACKNOWLEDGED → count=0 → error, sin clobbear el ackBy del 1º.
+    const results = await Promise.allSettled([
+      svc.acknowledge(created.panicId, opA),
+      svc.acknowledge(created.panicId, opB),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+    // El ackBy persistido es el del GANADOR (un operador válido, no corrupto) y hay UN solo evento.
+    const row = await client.panicEvent.findUniqueOrThrow({ where: { id: created.panicId } });
+    expect([opA, opB]).toContain(row.ackBy);
+    const events = await client.outboxEvent.findMany({
+      where: { aggregateId: created.panicId, eventType: 'panic.acknowledged' },
+    });
+    expect(events).toHaveLength(1);
+  });
+
   it('resolve cierra la alerta (FALSE_ALARM), publica panic.resolved y no se puede cerrar dos veces', async () => {
     const operatorId = uuidv7();
     const created = await svc.trigger(makeSignedInput());

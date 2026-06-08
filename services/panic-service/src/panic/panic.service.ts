@@ -151,20 +151,26 @@ export class PanicService {
   /** BR-S05 (ack): el operador reconoce la alerta → ACKNOWLEDGED + publica panic.acknowledged. */
   async acknowledge(panicId: string, operatorId: string): Promise<PanicEvent> {
     const start = process.hrtime.bigint();
+    const ackAt = new Date();
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
-      if (!current) throw new NotFoundError('Evento de pánico no encontrado');
-      if (current.status !== PanicStatus.TRIGGERED) {
+      // CAS atómico (status-guard en el WHERE, no en una lectura previa): SOLO esta llamada transiciona
+      // TRIGGERED→ACKNOWLEDGED. Dos operadores que reconocen el MISMO pánico a la vez: uno obtiene count=1,
+      // el otro count=0 → recibe el error claro SIN pisar el ackBy/acknowledgedAt del primero (antes el
+      // check-then-act dejaba que el 2º clobbeara la rendición de cuentas de quién atendió). Espeja el CAS
+      // de trip-service (updateMany where status).
+      const cas = await tx.panicEvent.updateMany({
+        where: { id: panicId, status: PanicStatus.TRIGGERED },
+        data: { status: PanicStatus.ACKNOWLEDGED, acknowledgedAt: ackAt, ackBy: operatorId },
+      });
+      if (cas.count === 0) {
+        const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
+        if (!current) throw new NotFoundError('Evento de pánico no encontrado');
         throw new InvalidStateError(
           `No se puede reconocer un pánico en estado ${current.status}`,
           { from: current.status },
         );
       }
-      const ackAt = new Date();
-      const row = await tx.panicEvent.update({
-        where: { id: panicId },
-        data: { status: PanicStatus.ACKNOWLEDGED, acknowledgedAt: ackAt, ackBy: operatorId },
-      });
+      const row = await tx.panicEvent.findUniqueOrThrow({ where: { id: panicId } });
       const payload: EventPayload<'panic.acknowledged'> = {
         panicId: row.id,
         operatorId,
@@ -194,19 +200,23 @@ export class PanicService {
     resolution: typeof PanicStatus.RESOLVED | typeof PanicStatus.FALSE_ALARM,
     operatorId: string,
   ): Promise<PanicEvent> {
+    const resolvedAt = new Date();
     return this.prisma.write.$transaction(async (tx) => {
-      const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
-      if (!current) throw new NotFoundError('Evento de pánico no encontrado');
-      if (current.status === PanicStatus.RESOLVED || current.status === PanicStatus.FALSE_ALARM) {
+      // CAS atómico (status-guard en el WHERE): solo transiciona si NO está YA cerrado. Dos cierres
+      // concurrentes: uno gana (count=1), el otro count=0 → error claro (ya cerrado) sin pisar el
+      // resolvedBy/resolvedAt del primero. Espeja el CAS de acknowledge / trip-service.
+      const cas = await tx.panicEvent.updateMany({
+        where: { id: panicId, status: { notIn: [PanicStatus.RESOLVED, PanicStatus.FALSE_ALARM] } },
+        data: { status: resolution, resolvedAt },
+      });
+      if (cas.count === 0) {
+        const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
+        if (!current) throw new NotFoundError('Evento de pánico no encontrado');
         throw new InvalidStateError(`El pánico ya está cerrado (${current.status})`, {
           from: current.status,
         });
       }
-      const resolvedAt = new Date();
-      const row = await tx.panicEvent.update({
-        where: { id: panicId },
-        data: { status: resolution, resolvedAt },
-      });
+      const row = await tx.panicEvent.findUniqueOrThrow({ where: { id: panicId } });
       const payload: EventPayload<'panic.resolved'> = {
         panicId: row.id,
         status: resolution,
