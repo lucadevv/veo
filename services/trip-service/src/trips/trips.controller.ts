@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
+import { ScheduledTripService } from './scheduled-trip.service';
 import { KycRequiredError } from './trips.errors';
 import {
   AcceptTripDto,
@@ -41,6 +42,7 @@ export class TripsController {
   constructor(
     private readonly trips: TripsService,
     private readonly query: TripQueryService,
+    private readonly scheduled: ScheduledTripService,
   ) {}
 
   @Post()
@@ -154,6 +156,6 @@ export class TripsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Cancelar un viaje PROGRAMADO antes de activarse (Ola 2B; sin penalidad)' })
   cancelSchedule(@Param('id') id: string, @Body() dto: CancelScheduledDto) {
-    return this.trips.cancelScheduledTrip(id, dto.passengerId);
+    return this.scheduled.cancelScheduledTrip(id, dto.passengerId);
   }
 }

@@ -4,6 +4,7 @@ import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '@
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
+import { ScheduledTripService } from './scheduled-trip.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
 
@@ -297,12 +298,12 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
   });
 });
 
-describe('TripsService · Ola 2B viajes programados (activación / cancelación)', () => {
+describe('ScheduledTripService · Ola 2B viajes programados (activación / cancelación)', () => {
   it('activateScheduledTrip · FIXED transiciona SCHEDULED → REQUESTED y emite trip.requested (ADR 011)', async () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new ScheduledTripService(prisma as never);
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
@@ -313,7 +314,7 @@ describe('TripsService · Ola 2B viajes programados (activación / cancelación)
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'PUJA' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new ScheduledTripService(prisma as never);
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
@@ -322,7 +323,7 @@ describe('TripsService · Ola 2B viajes programados (activación / cancelación)
 
   it('activateScheduledTrip es idempotente si ya no está SCHEDULED', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new ScheduledTripService(prisma as never);
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox).toHaveLength(0);
   });
@@ -331,7 +332,7 @@ describe('TripsService · Ola 2B viajes programados (activación / cancelación)
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), passengerId: 'pax-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new ScheduledTripService(prisma as never);
     const view = await svc.cancelScheduledTrip('trip-1', 'pax-1');
     expect(view.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(view.penaltyCents).toBe(0);
@@ -340,7 +341,7 @@ describe('TripsService · Ola 2B viajes programados (activación / cancelación)
 
   it('cancelScheduledTrip sobre un viaje ya activado → ConflictError', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED, passengerId: 'pax-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new ScheduledTripService(prisma as never);
     await expect(svc.cancelScheduledTrip('trip-1', 'pax-1')).rejects.toBeInstanceOf(ConflictError);
   });
 });

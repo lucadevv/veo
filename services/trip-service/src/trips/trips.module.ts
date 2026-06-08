@@ -3,6 +3,7 @@ import { MapsModule } from '../ports/maps/maps.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
+import { ScheduledTripService } from './scheduled-trip.service';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
@@ -15,6 +16,7 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
   providers: [
     TripsService,
     TripQueryService,
+    ScheduledTripService,
     DispatchConsumer,
     PujaConsumer,
     UserDeletedConsumer,
