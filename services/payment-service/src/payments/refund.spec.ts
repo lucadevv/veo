@@ -7,7 +7,7 @@
  * Prisma fake en memoria (sin red). No mockeamos DB en críticos: el doble es determinista y total.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ConfigService } from '@nestjs/config';
+import { type ConfigService } from '@nestjs/config';
 import { InvalidStateError } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
@@ -30,13 +30,26 @@ interface OutboxRow {
 function makeFakePrisma(payment: Record<string, unknown>) {
   const outbox: OutboxRow[] = [];
   const refunds: Record<string, unknown>[] = [];
+  const statusMatches = (filter: string | { in: string[] } | undefined): boolean => {
+    if (filter === undefined) return true;
+    return typeof filter === 'string'
+      ? payment.status === filter
+      : filter.in.includes(payment.status as string);
+  };
   const client = {
     payment: {
-      findFirst: async ({ where }: { where: { tripId: string; status: string } }) =>
-        payment.tripId === where.tripId && payment.status === where.status ? payment : null,
-      update: async ({ data }: { data: Record<string, unknown> }) => {
-        Object.assign(payment, data);
-        return payment;
+      findFirst: async ({ where }: { where: { tripId: string; status: string | { in: string[] } } }) =>
+        payment.tripId === where.tripId && statusMatches(where.status) ? payment : null,
+      // CAS del fix F1/F4: reclama SOLO si (status reembolsable Y refundedCents observado) siguen vigentes.
+      updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        const idOk = where.id === undefined || where.id === payment.id;
+        const stOk = statusMatches(where.status as string | { in: string[] } | undefined);
+        const refOk = where.refundedCents === undefined || where.refundedCents === payment.refundedCents;
+        if (idOk && stOk && refOk) {
+          Object.assign(payment, data);
+          return { count: 1 };
+        }
+        return { count: 0 };
       },
     },
     refund: {
@@ -85,6 +98,7 @@ function capturedPayment(over: Record<string, unknown> = {}): Record<string, unk
     status: 'CAPTURED',
     amountCents: 2000,
     grossCents: 2000,
+    refundedCents: 0,
     passengerId: PAX,
     capturedAt: new Date(),
     createdAt: new Date(),
@@ -105,9 +119,9 @@ describe('PaymentsService.refund · emite payment.refunded por outbox', () => {
     build(capturedPayment());
   });
 
-  it('reembolso válido → payment.refunded con amountCents y passengerId enriquecido', async () => {
+  it('reembolso parcial válido → payment.refunded con amountCents y passengerId enriquecido', async () => {
     const res = await payments.refund(TRIP, 500, 'cliente_insatisfecho', L2);
-    expect(res.status).toBe('REFUNDED');
+    expect(res.status).toBe('PARTIALLY_REFUNDED'); // 500 de 2000 → parcial (F4)
 
     const event = prisma._outbox.find((e) => e.eventType === 'payment.refunded');
     expect(event).toBeDefined();
@@ -120,8 +134,9 @@ describe('PaymentsService.refund · emite payment.refunded por outbox', () => {
     });
   });
 
-  it('marca el pago REFUNDED y crea la fila Refund', async () => {
-    await payments.refund(TRIP, 500, 'x', L2);
+  it('reembolso TOTAL → marca el pago REFUNDED y crea la fila Refund', async () => {
+    const res = await payments.refund(TRIP, 2000, 'x', L2); // monto completo → REFUNDED
+    expect(res.status).toBe('REFUNDED');
     expect(prisma._refunds).toHaveLength(1);
   });
 

@@ -44,6 +44,7 @@ enum PaymentStatus {
   CAPTURED
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
   DEBT
 
   @@schema("payment")
@@ -101,6 +102,9 @@ model Payment {
   tipCents        Int           @default(0) @map("tip_cents")
   commissionCents Int           @map("commission_cents")
   feeCents        Int           @map("fee_cents")
+  /// Acumulado reembolsado (céntimos) sobre amountCents (BR-P06). 0 = sin reembolso. Permite refunds
+  /// PARCIALES: status=PARTIALLY_REFUNDED mientras refundedCents < amountCents, REFUNDED al completarse.
+  refundedCents   Int           @default(0) @map("refunded_cents")
   currency        String        @default("PEN")
   method          PaymentMethod
   /// Referencia externa del riel de pago (id de transacción Yape/Plin). Null hasta confirmar.

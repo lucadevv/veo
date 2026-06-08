@@ -41,6 +41,7 @@ export const PaymentStatus = {
   CAPTURED: 'CAPTURED',
   FAILED: 'FAILED',
   REFUNDED: 'REFUNDED',
+  PARTIALLY_REFUNDED: 'PARTIALLY_REFUNDED',
   DEBT: 'DEBT',
 } as const;
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];

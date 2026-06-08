@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
+import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
 import { PromotionsService } from '../src/promotions/promotions.service';
@@ -199,5 +200,147 @@ describe('Transición a DEBT tras 3 fallos del riel (BR-P02)', () => {
     const envelope = failed[0]?.envelope as { payload?: { willRetry?: boolean; tripId?: string } };
     expect(envelope.payload?.willRetry).toBe(false);
     expect(envelope.payload?.tripId).toBe(tripId);
+  });
+});
+
+describe('Refund: status-guard transaccional (F1, idempotencia financiera #3)', () => {
+  it('el claim CAPTURED→REFUNDED es atómico: dos transacciones concurrentes → exactamente UNO gana (no doble plata)', async () => {
+    // Reproduce la carrera real de prod (2 requests / 2 pods leen el pago CAPTURED y ambos intentan
+    // reembolsar). El row-lock de Postgres serializa el `updateMany where status='CAPTURED'`: uno reclama
+    // (count=1), el otro re-evalúa el WHERE ya commiteado (REFUNDED) y obtiene count=0. Resultado SIEMPRE
+    // [0,1]. Con un `update` incondicional por id (el bug original) ambos contarían 1 → doble reembolso.
+    // DETERMINISTA — no depende del scheduling in-process (que serializa el read-then-act de refund()).
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const captured = await service.charge({
+      tripId,
+      grossCents: 2000,
+      method: 'YAPE',
+      payerRef: '51999333444',
+      dedupKey,
+    });
+    expect(captured.status).toBe('CAPTURED');
+
+    const claim = () =>
+      prisma.$transaction((tx) =>
+        tx.payment
+          .updateMany({
+            where: { id: captured.id, status: 'CAPTURED' },
+            data: { status: 'REFUNDED', refundedAt: new Date() },
+          })
+          .then((r) => r.count),
+      );
+    const counts = await Promise.all([claim(), claim()]);
+    expect([...counts].sort()).toEqual([0, 1]);
+
+    const final = await service.getPayment(captured.id);
+    expect(final.status).toBe('REFUNDED');
+  });
+
+  it('refund() rechaza un 2do reembolso del mismo cobro → 1 solo Refund + 1 solo evento payment.refunded', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const captured = await service.charge({
+      tripId,
+      grossCents: 2000,
+      method: 'YAPE',
+      payerRef: '51999555666',
+      dedupKey,
+    });
+    expect(captured.status).toBe('CAPTURED');
+    expect(captured.amountCents).toBe(2000); // ≤ umbral L2 (3000) → no exige rol L2
+
+    const operator = { userId: uuidv7(), roles: [] } as unknown as AuthenticatedUser;
+    const first = await service.refund(tripId, 2000, 'ok', operator);
+    expect(first.status).toBe('REFUNDED');
+
+    // 2do refund del mismo viaje: ya no hay CAPTURED → rechazado, sin crear otro Refund ni emitir otro evento.
+    await expect(service.refund(tripId, 2000, 'duplicado', operator)).rejects.toThrow();
+
+    const refunds = await prisma.refund.findMany({ where: { paymentId: captured.id } });
+    expect(refunds).toHaveLength(1);
+    const events = await prisma.outboxEvent.findMany({
+      where: { aggregateId: captured.id, eventType: 'payment.refunded' },
+    });
+    expect(events).toHaveLength(1);
+  });
+});
+
+describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su payout)', () => {
+  const operator = (): AuthenticatedUser =>
+    ({ userId: uuidv7(), roles: [] }) as unknown as AuthenticatedUser;
+
+  it('parcial → PARTIALLY_REFUNDED y acumula refundedCents; al completar el monto → REFUNDED', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const captured = await service.charge({
+      tripId,
+      grossCents: 3000,
+      method: 'YAPE',
+      payerRef: '51999777888',
+      dedupKey,
+    });
+    expect(captured.status).toBe('CAPTURED');
+    expect(captured.amountCents).toBe(3000);
+
+    // Parcial 1: 1000 de 3000 → PARTIALLY_REFUNDED, refundedCents=1000, refundedAt aún null.
+    const r1 = await service.refund(tripId, 1000, 'parcial-1', operator());
+    expect(r1.status).toBe('PARTIALLY_REFUNDED');
+    let p = await prisma.payment.findUnique({ where: { id: captured.id } });
+    expect(p?.status).toBe('PARTIALLY_REFUNDED');
+    expect(p?.refundedCents).toBe(1000);
+    expect(p?.refundedAt).toBeNull();
+
+    // Parcial 2: 2000 → completa 3000 → REFUNDED, refundedAt seteado.
+    const r2 = await service.refund(tripId, 2000, 'parcial-2', operator());
+    expect(r2.status).toBe('REFUNDED');
+    p = await prisma.payment.findUnique({ where: { id: captured.id } });
+    expect(p?.status).toBe('REFUNDED');
+    expect(p?.refundedCents).toBe(3000);
+    expect(p?.refundedAt).not.toBeNull();
+
+    // Dos Refund persistidos, dos eventos payment.refunded (uno por parcial).
+    const refunds = await prisma.refund.findMany({ where: { paymentId: captured.id } });
+    expect(refunds).toHaveLength(2);
+    const events = await prisma.outboxEvent.findMany({
+      where: { aggregateId: captured.id, eventType: 'payment.refunded' },
+    });
+    expect(events).toHaveLength(2);
+  });
+
+  it('rechaza un refund que excede el saldo reembolsable (amount − ya reembolsado)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const captured = await service.charge({
+      tripId,
+      grossCents: 2000,
+      method: 'YAPE',
+      payerRef: '51999111000',
+      dedupKey,
+    });
+    await service.refund(tripId, 1500, 'parcial', operator()); // saldo restante: 500
+    await expect(service.refund(tripId, 600, 'excede', operator())).rejects.toThrow(/excede el saldo/);
+    const p = await prisma.payment.findUnique({ where: { id: captured.id } });
+    expect(p?.refundedCents).toBe(1500); // el rechazado no movió el acumulador
+  });
+
+  it('un cobro PARTIALLY_REFUNDED SIGUE contando para el payout (mismo filtro que collectEarnings)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const captured = await service.charge({
+      tripId,
+      grossCents: 4000,
+      method: 'YAPE',
+      payerRef: '51999222111',
+      dedupKey,
+    });
+    await service.refund(tripId, 1000, 'goodwill', operator()); // parcial → PARTIALLY_REFUNDED
+
+    // Invariante del fix F4: collectEarnings filtra status IN (CAPTURED, PARTIALLY_REFUNDED).
+    const eligible = await prisma.payment.findMany({
+      where: { id: captured.id, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
+    });
+    expect(eligible).toHaveLength(1);
+    expect(eligible[0]?.grossCents).toBe(4000); // base de comisión del conductor intacta
   });
 });

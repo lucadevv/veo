@@ -851,13 +851,19 @@ export class PaymentsService {
     reason: string,
     operator: AuthenticatedUser,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId, status: 'CAPTURED' },
+      where: { tripId, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
       orderBy: { capturedAt: 'desc' },
     });
-    if (!payment) throw new NotFoundError('No hay un cobro capturado para reembolsar en este viaje');
-    if (amountCents > payment.amountCents) {
-      throw new InvalidStateError('El reembolso no puede exceder el monto cobrado');
+    if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
+    if (amountCents <= 0) throw new InvalidStateError('El reembolso debe ser un monto positivo');
+    // Valida contra el SALDO reembolsable (amount − ya reembolsado), no contra el bruto original.
+    const remainingCents = payment.amountCents - payment.refundedCents;
+    if (amountCents > remainingCents) {
+      throw new InvalidStateError(
+        `El reembolso (${amountCents}) excede el saldo reembolsable (${remainingCents})`,
+      );
     }
 
     const capturedAt = payment.capturedAt ?? payment.createdAt;
@@ -873,8 +879,32 @@ export class PaymentsService {
       throw new ForbiddenError('Un reembolso mayor a S/30 requiere aprobación de un operador L2');
     }
 
-    assertPaymentTransition(payment.status, 'REFUNDED');
+    const newRefundedCents = payment.refundedCents + amountCents;
+    const isFullyRefunded = newRefundedCents === payment.amountCents;
+    const newStatus = isFullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    assertPaymentTransition(payment.status, newStatus);
     return this.prisma.write.$transaction(async (tx) => {
+      // CAS TRANSACCIONAL (BR-P06, idempotencia financiera #3): reclama el cobro SOLO si sigue reembolsable
+      // Y `refundedCents` no cambió desde el read (optimistic lock). Cierra la carrera de refunds parciales/
+      // totales concurrentes — bajo READ COMMITTED el 2do bloquea en el row-lock; al re-evaluar el WHERE
+      // (refundedCents ya incrementado) obtiene count===0. Sin esto, dos refunds sumaban doble plata.
+      const claimed = await tx.payment.updateMany({
+        where: {
+          id: payment.id,
+          status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+          refundedCents: payment.refundedCents,
+        },
+        data: {
+          status: newStatus,
+          refundedCents: newRefundedCents,
+          refundedAt: isFullyRefunded ? new Date() : null,
+        },
+      });
+      if (claimed.count === 0) {
+        throw new InvalidStateError(
+          'El cobro cambió de estado o saldo por otra operación concurrente',
+        );
+      }
       const refund = await tx.refund.create({
         data: {
           id: uuidv7(),
@@ -885,10 +915,6 @@ export class PaymentsService {
           status: 'COMPLETED',
           reason,
         },
-      });
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'REFUNDED', refundedAt: new Date() },
       });
       // payment.refunded por OUTBOX (misma tx, idempotencia financiera BR-P06): el evento NO se emitía
       // y notification-service no podía avisar al pasajero. `amountCents` = lo reembolsado (no el bruto
@@ -906,7 +932,7 @@ export class PaymentsService {
         },
       });
       await enqueueOutbox(tx, envelope, payment.id);
-      return { refundId: refund.id, paymentId: payment.id, status: 'REFUNDED' };
+      return { refundId: refund.id, paymentId: payment.id, status: newStatus };
     });
   }
 

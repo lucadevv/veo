@@ -142,7 +142,10 @@ export class PayoutsService {
   private async collectEarnings(start: Date, end: Date): Promise<DriverEarningRow[]> {
     const payments = await this.prisma.read.payment.findMany({
       where: {
-        status: 'CAPTURED',
+        // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
+        // (sale de su comisión); el conductor prestó el servicio → mantiene su neto. Un cobro REFUNDED
+        // (total) sí queda fuera (viaje revertido → el conductor no cobra).
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
         driverId: { not: null },
         capturedAt: { gte: start, lt: end },
       },

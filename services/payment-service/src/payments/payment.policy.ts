@@ -71,7 +71,10 @@ const PAYMENT_TRANSITIONS: Readonly<Record<PaymentStatus, readonly PaymentStatus
   DEBT: ['CAPTURED', 'FAILED'],
   // Un cobro fallido (transitorio) puede reintentarse y capturarse, o caer en deuda.
   FAILED: ['CAPTURED', 'DEBT'],
-  CAPTURED: ['REFUNDED'],
+  // Un cobro capturado se reembolsa total (→REFUNDED) o parcial (→PARTIALLY_REFUNDED).
+  CAPTURED: ['REFUNDED', 'PARTIALLY_REFUNDED'],
+  // Un parcial admite más parciales (from===to) y completarse a total (→REFUNDED).
+  PARTIALLY_REFUNDED: ['REFUNDED'],
   REFUNDED: [],
 };
 
