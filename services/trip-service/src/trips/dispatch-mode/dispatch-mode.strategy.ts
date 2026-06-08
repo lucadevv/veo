@@ -59,4 +59,15 @@ export interface DispatchModeStrategy {
     destination: LatLon,
     ctx: DispatchOpenContext,
   ): Promise<void>;
+
+  /**
+   * Reasignación tras la cancelación del conductor post-accept (driver-cancel). Escribe el DELTA del modo
+   * en la TX del caller (el service ya hizo `assertTransition(REASSIGNING)` + el guard de tope→FAILED,
+   * ambos TRANSVERSALES) y emite el evento de re-despacho. Devuelve la fila actualizada.
+   *
+   *  - PUJA: re-abre el OfferBoard → REASSIGNING + driverId null + reset H12 (agreedFareCents=null) + bump
+   *    H13 (negotiationSeq+1) — TODO en el MISMO update (atómico) — + `trip.reassigning` ENRIQUECIDO.
+   *  - FIXED: REASSIGNING + driverId null + re-emite `trip.requested`; NO toca negotiationSeq/agreedFareCents.
+   */
+  reassign(tx: TxClient, trip: Trip, nextReassignCount: number, reason?: string): Promise<Trip>;
 }

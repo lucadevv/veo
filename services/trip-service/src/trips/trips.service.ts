@@ -44,7 +44,7 @@ import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { toTripView, readWaypoints } from './trip-view.mapper';
-import { PRODUCER, recordTripEvent, emitTripRequested, emitBidPosted } from './trip-events';
+import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import type { Env } from '../config/env.schema';
@@ -861,114 +861,18 @@ export class TripsService {
       return this.failAfterTooManyReassigns(trip, nextReassignCount);
     }
 
-    // ADR 011 §1.2/§4 · resolve-once: la reasignación respeta el modo CONGELADO del viaje, NO re-resuelve
-    // de la config admin actual (un flip de config a media-vida NO debe re-abrir una puja bajo política
-    // fija, ni al revés). FIXED → re-despacha el flujo de tarifa fija (trip.requested → matching
-    // secuencial). PUJA → re-abre el OfferBoard como hasta hoy.
-    if (trip.dispatchMode === PricingMode.FIXED) {
-      return this.reassignFixedTrip(trip, nextReassignCount, reason);
-    }
-
+    // ADR 011 §1.2/§4 · resolve-once: la reasignación respeta el modo CONGELADO del viaje (NO re-resuelve de
+    // la config admin). El DELTA por modo vive en el Strategy (open/closed): PUJA re-abre el OfferBoard
+    // (REASSIGNING + reset H12 agreedFareCents + bump H13 negotiationSeq + trip.reassigning enriquecido);
+    // FIXED re-emite trip.requested (sin tocar seq/agreedFare). assertTransition(REASSIGNING) y el guard de
+    // tope→FAILED son TRANSVERSALES (no por-modo) → quedan acá. forMode lanza si el modo no tiene strategy.
     assertTransition(trip.status, TripStatus.REASSIGNING);
-    const bidCents = trip.fareCents;
-    const cancelledDriverId = trip.driverId;
-    // H13 — re-abrir la negociación = NUEVO ciclo: incrementa el seq MONOTÓNICO (NUNCA resetea). El board
-    // re-abierto y su offer_accepted viajarán con este seq, y un offer_accepted STALE del ciclo anterior
-    // (seq menor) que se redelivere quedará bloqueado en applyAgreedFare (where no matchea → no-op).
-    const nextNegotiationSeq = trip.negotiationSeq + 1;
-
-    const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id: trip.id },
-        data: {
-          status: TripStatus.REASSIGNING,
-          // El conductor que canceló se desvincula: el re-match elegirá a otro. Sin penalización al
-          // pasajero (no canceló él); la penalización al conductor se modela en su propio dominio.
-          driverId: null,
-          // H12: re-abrir la negociación = NUEVA decisión de dinero. Reseteamos el guard once-ever de
-          // applyAgreedFare (agreedFareCents) para que el offer_accepted del re-match aplique el precio
-          // FRESCO en vez de ser bloqueado por el agreed-fare de la negociación anterior (conductor mal pagado).
-          agreedFareCents: null,
-          reassignCount: nextReassignCount,
-          // H13 — bump del sello de ciclo en la MISMA tx que el reset del agreedFareCents.
-          negotiationSeq: nextNegotiationSeq,
-          cancellationReason: reason ?? 'driver_cancelled',
-        },
-      });
-      await recordTripEvent(tx, trip.id, 'trip.reassigning', {
-        from: trip.status,
-        previousDriverId: cancelledDriverId,
-        reassignCount: nextReassignCount,
-        bidCents,
-        negotiationSeq: nextNegotiationSeq,
-        reason: 'driver_cancelled',
-      });
-      await enqueueOutbox(
-        tx,
-        createEnvelope({
-          eventType: 'trip.reassigning',
-          producer: PRODUCER,
-          payload: {
-            tripId: trip.id,
-            // El conductor que canceló: dispatch lo LIBERA del hot-index (vuelve a ser elegible).
-            driverId: cancelledDriverId ?? '',
-            passengerId: trip.passengerId,
-            vehicleType: trip.vehicleType,
-            origin: { lat: trip.originLat, lon: trip.originLon },
-            bidCents,
-            reason: 'driver_cancelled',
-            // H13 — dispatch persiste este seq en el board re-abierto y lo estampa en offer_accepted.
-            negotiationSeq: nextNegotiationSeq,
-          },
-        }),
-        trip.id,
-      );
-      return next;
-    });
-    this.logger.log(
-      `PUJA: viaje ${trip.id} ${trip.status} → REASSIGNING (conductor ${cancelledDriverId} canceló; ` +
-        `re-abre puja a ${bidCents}; reasignación ${nextReassignCount}/${this.maxReassign})`,
+    const updated = await this.prisma.write.$transaction((tx) =>
+      this.dispatchModes.forMode(trip.dispatchMode).reassign(tx, trip, nextReassignCount, reason),
     );
-    return toTripView(updated);
-  }
-
-  /**
-   * ADR 011 §1.2/§4 · reasignación de un viaje FIXED tras cancelación del conductor post-accept (espejo
-   * FIXED de reassignAfterDriverCancel). El viaje NO re-abre una puja (es precio fijo): pasa por
-   * REASSIGNING (estado de "buscando otro conductor", REASSIGNING → ASSIGNED es válido para el re-match)
-   * y re-emite `trip.requested` para re-disparar el matching SECUENCIAL de tarifa fija. El conductor que
-   * canceló se desvincula (driverId → null). La tarifa fija (fareCents) NO cambia (BR-T01 inmutable);
-   * NO se toca negotiationSeq/agreedFareCents (son del dominio puja, irrelevantes en FIXED).
-   */
-  private async reassignFixedTrip(
-    trip: Trip,
-    nextReassignCount: number,
-    reason?: string,
-  ): Promise<TripView> {
-    assertTransition(trip.status, TripStatus.REASSIGNING);
-    const cancelledDriverId = trip.driverId;
-    const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
-    const destination: LatLon = { lat: trip.destLat, lon: trip.destLon };
-
-    const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id: trip.id },
-        data: {
-          status: TripStatus.REASSIGNING,
-          driverId: null,
-          reassignCount: nextReassignCount,
-          cancellationReason: reason ?? 'driver_cancelled',
-        },
-      });
-      // Re-despacho FIXED: el mismo evento que la creación de un viaje de tarifa fija (trip.requested),
-      // para que dispatch re-arranque el matching secuencial. emitTripRequested lee origin/destination
-      // del trip recién actualizado (status REASSIGNING, driverId null).
-      await emitTripRequested(tx, next, origin, destination);
-      return next;
-    });
     this.logger.log(
-      `FIXED: viaje ${trip.id} ${trip.status} → REASSIGNING (conductor ${cancelledDriverId} canceló; ` +
-        `re-despacha tarifa fija ${trip.fareCents}; reasignación ${nextReassignCount}/${this.maxReassign})`,
+      `Viaje ${trip.id} ${trip.status} → REASSIGNING (modo ${trip.dispatchMode}; reasignación ` +
+        `${nextReassignCount}/${this.maxReassign})`,
     );
     return toTripView(updated);
   }

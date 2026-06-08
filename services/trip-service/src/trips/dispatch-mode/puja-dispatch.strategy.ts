@@ -3,8 +3,10 @@
  * broadcast a conductores elegibles (ventana = bidWindowSec). El bid del pasajero YA es el fareCents.
  */
 import { ValidationError, type LatLon } from '@veo/utils';
-import { PricingMode } from '@veo/shared-types';
-import { emitBidPosted } from '../trip-events';
+import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
+import { PricingMode, TripStatus } from '@veo/shared-types';
+import { emitBidPosted, recordTripEvent, PRODUCER } from '../trip-events';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
   DispatchModeStrategy,
@@ -57,5 +59,61 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
     // ctx.scheduled=true (activación de reserva): el pasajero no está en la app; notification-service le
     // manda el push con deep-link al board.
     await emitBidPosted(tx, trip, origin, this.bidWindowSec, ctx.scheduled);
+  }
+
+  /**
+   * PUJA · re-abre el OfferBoard tras el cancel del conductor. El bidCents es el del viaje (no sube solo;
+   * la subida es el rebid explícito del pasajero). H12+H13 van en el MISMO update (atómico): reset del
+   * guard once-ever de applyAgreedFare (agreedFareCents=null, si no el re-match cobraría el precio viejo) +
+   * bump del sello de ciclo monotónico (negotiationSeq+1, bloquea un offer_accepted STALE del ciclo viejo).
+   */
+  async reassign(tx: TxClient, trip: Trip, nextReassignCount: number, reason?: string): Promise<Trip> {
+    const bidCents = trip.fareCents;
+    const cancelledDriverId = trip.driverId;
+    const nextNegotiationSeq = trip.negotiationSeq + 1;
+
+    const next = await tx.trip.update({
+      where: { id: trip.id },
+      data: {
+        status: TripStatus.REASSIGNING,
+        // El conductor que canceló se desvincula: el re-match elegirá a otro. Sin penalización al pasajero.
+        driverId: null,
+        // H12 — reset del guard once-ever para que el offer_accepted del re-match aplique el precio FRESCO.
+        agreedFareCents: null,
+        reassignCount: nextReassignCount,
+        // H13 — bump del sello de ciclo en la MISMA tx que el reset del agreedFareCents (atómico).
+        negotiationSeq: nextNegotiationSeq,
+        cancellationReason: reason ?? 'driver_cancelled',
+      },
+    });
+    await recordTripEvent(tx, trip.id, 'trip.reassigning', {
+      from: trip.status,
+      previousDriverId: cancelledDriverId,
+      reassignCount: nextReassignCount,
+      bidCents,
+      negotiationSeq: nextNegotiationSeq,
+      reason: 'driver_cancelled',
+    });
+    await enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'trip.reassigning',
+        producer: PRODUCER,
+        payload: {
+          tripId: trip.id,
+          // El conductor que canceló: dispatch lo LIBERA del hot-index (vuelve a ser elegible).
+          driverId: cancelledDriverId ?? '',
+          passengerId: trip.passengerId,
+          vehicleType: trip.vehicleType,
+          origin: { lat: trip.originLat, lon: trip.originLon },
+          bidCents,
+          reason: 'driver_cancelled',
+          // H13 — dispatch persiste este seq en el board re-abierto y lo estampa en offer_accepted.
+          negotiationSeq: nextNegotiationSeq,
+        },
+      }),
+      trip.id,
+    );
+    return next;
   }
 }

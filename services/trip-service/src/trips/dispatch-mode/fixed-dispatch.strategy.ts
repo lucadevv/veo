@@ -4,7 +4,7 @@
  * `scheduled` de trip.scheduledFor (una reserva activada lo trae seteado), así que ctx.scheduled no aplica.
  */
 import type { LatLon } from '@veo/utils';
-import { PricingMode } from '@veo/shared-types';
+import { PricingMode, TripStatus } from '@veo/shared-types';
 import { emitTripRequested } from '../trip-events';
 import { calculateFare } from '../domain/fare';
 import type { Prisma, Trip } from '../../generated/prisma';
@@ -42,5 +42,26 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
     _ctx: DispatchOpenContext,
   ): Promise<void> {
     await emitTripRequested(tx, trip, origin, destination);
+  }
+
+  /**
+   * FIXED · re-despacha tras el cancel del conductor: REASSIGNING + libera al conductor + re-emite
+   * trip.requested (mismo evento que la creación FIXED) para re-arrancar el matching secuencial. La tarifa
+   * fija NO cambia (BR-T01 inmutable). NO toca negotiationSeq/agreedFareCents (dominio puja, irrelevantes).
+   */
+  async reassign(tx: TxClient, trip: Trip, nextReassignCount: number, reason?: string): Promise<Trip> {
+    const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
+    const destination: LatLon = { lat: trip.destLat, lon: trip.destLon };
+    const next = await tx.trip.update({
+      where: { id: trip.id },
+      data: {
+        status: TripStatus.REASSIGNING,
+        driverId: null,
+        reassignCount: nextReassignCount,
+        cancellationReason: reason ?? 'driver_cancelled',
+      },
+    });
+    await emitTripRequested(tx, next, origin, destination);
+    return next;
   }
 }

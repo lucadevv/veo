@@ -1075,6 +1075,11 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
     // La tarifa fija NO cambia (BR-T01 inmutable).
     expect(prisma._store?.fareCents).toBe(1500);
     expect(prisma._store?.reassignCount).toBe(1);
+    // ASIMETRÍA PUJA/FIXED: la reasignación FIXED NO toca los invariantes de negociación de la puja
+    // (no hay re-negociación). Blindaje pre-L3 (Strategy): si el refactor tocara seq/agreedFare en FIXED,
+    // esto lo caza. El fixture base trae negotiationSeq=1 y agreedFareCents=null.
+    expect(prisma._store?.negotiationSeq).toBe(1); // H13: el seq de ciclo NO se bumpea en FIXED
+    expect(prisma._store?.agreedFareCents).toBeNull(); // H12: el agreed-fare NO se toca en FIXED
   });
 
   it('PUJA · driver cancela post-accept → REASSIGNING + emite trip.reassigning (NO trip.requested)', async () => {
