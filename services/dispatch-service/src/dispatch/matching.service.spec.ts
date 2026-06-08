@@ -5,6 +5,8 @@ import { DispatchOutcome, VehicleType } from '@veo/shared-types';
 import { MatchingService } from './matching.service';
 import { DispatchScorer } from './scoring';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
+import { DriverPool } from './driver-pool';
+import type { MatchingSessionStore } from './matching-session.store';
 import type { DispatchOffer } from './offer-delivery.port';
 import type { Env } from '../config/env.schema';
 
@@ -67,10 +69,14 @@ function makeHarness() {
     DISPATCH_MAX_K_RING: 2,
   } as Partial<Env> as Env);
 
+  const driverPool = new DriverPool(hotIndex, exclusion);
+  // El flujo legacy (handleTripRequested/respond) NO usa la sesión; un stub alcanza para estos tests.
+  const sessions = {} as unknown as MatchingSessionStore;
   const matching = new MatchingService(
     prisma as never,
     hotIndex,
-    exclusion,
+    driverPool,
+    sessions,
     scorer,
     projection as never,
     surge as never,

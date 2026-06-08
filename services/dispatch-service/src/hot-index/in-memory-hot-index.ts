@@ -39,6 +39,12 @@ export class InMemoryHotIndex implements HotIndex {
     this.locations.set(driverId, { driverId, lat, lon, h3, vehicleType, updatedAt: Date.now() });
   }
 
+  /** Atajo de test: vacía el índice por completo (aislamiento entre casos). */
+  async clear(): Promise<void> {
+    this.locations.clear();
+    this.busy.clear();
+  }
+
   async markBusy(driverId: string): Promise<void> {
     this.busy.add(driverId);
   }

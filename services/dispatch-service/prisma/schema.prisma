@@ -25,6 +25,26 @@ enum DispatchOutcome {
   @@schema("dispatch")
 }
 
+/// Tipo de vehículo requerido por el viaje (Ola 2B · tier moto-taxi). Espeja @veo/shared-types VehicleType.
+enum VehicleType {
+  CAR
+  MOTO
+
+  @@schema("dispatch")
+}
+
+/// Estado del matching SECUENCIAL (FIXED) de un viaje (process-manager DURABLE). Reemplaza el estado en
+/// proceso (Map + Promise + timer) del matcher legacy: cualquier réplica avanza/cierra el matching leyendo
+/// esta fila + las DispatchMatch del viaje. OPEN es el único no-terminal.
+enum DispatchSessionStatus {
+  OPEN /// negociando: hay (o va a haber) una oferta en vuelo
+  MATCHED /// un conductor aceptó
+  TIMED_OUT /// se agotaron los candidatos sin aceptación
+  CANCELLED /// el viaje se canceló durante el matching
+
+  @@schema("dispatch")
+}
+
 /// Cada oferta secuencial emitida durante el matching de un viaje. Auditable.
 model DispatchMatch {
   id              String          @id @db.Uuid
@@ -44,6 +64,29 @@ model DispatchMatch {
   @@index([driverId])
   @@index([tripId, outcome])
   @@map("dispatch_matches")
+  @@schema("dispatch")
+}
+
+/// Sesión de matching secuencial de UN viaje (FIXED dispatch mode). Una por viaje (trip_id @id). Guarda
+/// lo que el "advance" (offerNext) necesita para ofertar al SIGUIENTE candidato desde cualquier réplica
+/// (sin el evento original): origen, tipo de vehículo y el k-ring actual. El set de "ya ofertados" NO se
+/// duplica acá: son las filas DispatchMatch del viaje. Los cierres (MATCHED/TIMED_OUT/CANCELLED) son CAS
+/// atómicos (updateMany con guard de status) → idempotentes y concurrencia-seguros.
+model DispatchSession {
+  tripId       String                @id @map("trip_id") @db.Uuid
+  status       DispatchSessionStatus @default(OPEN)
+  originLat    Float                 @map("origin_lat")
+  originLon    Float                 @map("origin_lon")
+  /// El advance re-rankea SOLO conductores de este tipo (un viaje MOTO no se ofrece a un CAR).
+  vehicleType  VehicleType           @default(CAR) @map("vehicle_type")
+  /// k-ring actual de la búsqueda (1..maxKRing): el advance expande cuando se agotan los cercanos.
+  currentKRing Int                   @default(1) @map("current_k_ring")
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// El reconciler/limpieza lista las sesiones OPEN; los cierres consultan por status.
+  @@index([status])
+  @@map("dispatch_sessions")
   @@schema("dispatch")
 }
 

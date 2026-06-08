@@ -28,8 +28,10 @@ import { DispatchOutcome, VehicleType } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry } from '../hot-index/hot-index.port';
+import { Prisma, DispatchSessionStatus } from '../generated/prisma';
+import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { DriverPool } from './driver-pool';
+import { MatchingSessionStore } from './matching-session.store';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { DISPATCH_SCORER } from './scorer.provider';
 import { DispatchScorer, type ScoreInput } from './scoring';
@@ -73,7 +75,8 @@ export class MatchingService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
-    @Inject(EXCLUSION_REGISTRY) private readonly exclusion: ExclusionRegistry,
+    private readonly driverPool: DriverPool,
+    private readonly sessions: MatchingSessionStore,
     @Inject(DISPATCH_SCORER) private readonly scorer: DispatchScorer,
     private readonly projection: DriverProjectionService,
     private readonly surge: SurgeService,
@@ -127,19 +130,125 @@ export class MatchingService {
     return { matched: false, attempts: attempted.size };
   }
 
+  // ──────────────── Matching EVENT-DRIVEN (D2.x · estado durable, sin Promise/timer) ────────────────
+
+  /**
+   * Inicia (o re-inicia, en un re-bid) la sesión de matching del viaje y dispara la PRIMERA oferta.
+   * Reemplaza al await-loop in-process: desde acá el matching avanza por ESTADO en DB (offerNext), no por
+   * un Promise/timer en memoria. Idempotente: una redelivery re-abre la sesión y vuelve a ofertar.
+   */
+  async startSession(trip: TripRequest): Promise<void> {
+    await this.sessions.start({
+      tripId: trip.tripId,
+      origin: trip.origin,
+      vehicleType: trip.requiredVehicleType ?? VehicleType.CAR,
+    });
+    await this.offerNext(trip.tripId);
+  }
+
+  /**
+   * Avanza el matching: oferta al SIGUIENTE candidato elegible, o cierra TIMED_OUT si se agotaron. STATELESS
+   * y replica-safe — lo invocan startSession, el reject del conductor (D2.2) y el reconciler (D2.3). Guardas:
+   * la sesión debe estar OPEN y NO debe haber una oferta en vuelo (una oferta a la vez).
+   */
+  async offerNext(tripId: string): Promise<void> {
+    const session = await this.sessions.get(tripId);
+    // `session?.status !== OPEN` cubre la inexistente (undefined) y la cerrada en una sola comparación.
+    if (session?.status !== DispatchSessionStatus.OPEN) return; // no-op
+
+    // Una oferta a la vez: si hay un OFFERED vivo no encimamos otra (la respuesta o el reconciler avanzan).
+    const inFlight = await this.prisma.read.dispatchMatch.count({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+    });
+    if (inFlight > 0) return;
+
+    // "Ya ofertados" = matches de ESTA ronda (offeredAt ≥ inicio de la sesión); un re-bid no los hereda.
+    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
+      where: { tripId, offeredAt: { gte: session.createdAt } },
+      select: { driverId: true },
+    });
+    const attempted = new Set(priorMatches.map((m) => m.driverId));
+
+    const origin: LatLon = { lat: session.originLat, lon: session.originLon };
+    const center = toH3(origin, DISPATCH_H3_RESOLUTION);
+    // Rankea desde el k-ring actual; si está agotado, expande (persistiendo el avance) y reintenta.
+    for (let k = session.currentKRing; k <= this.maxKRing; k++) {
+      const ranked = await this.rankCandidates(neighbors(center, k), origin, attempted, session.vehicleType);
+      const top = ranked[0];
+      if (!top) continue;
+      if (k !== session.currentKRing) await this.sessions.bumpKRing(tripId, k);
+      const surgeQuote = await this.surge.quote(origin);
+      await this.createAndDeliverOffer({
+        tripId,
+        candidate: top,
+        surgeMultiplier: surgeQuote.multiplier,
+        attempt: attempted.size + 1,
+        origin,
+      });
+      return;
+    }
+
+    // Sin candidatos hasta maxKRing → cierre honesto + dispatch.timeout (idempotente por el CAS del cierre).
+    if (await this.sessions.closeTimedOut(tripId)) {
+      await this.publishTimeout(tripId, attempted.size);
+    }
+  }
+
+  /**
+   * Persiste UNA oferta (DispatchMatch OFFERED) y la entrega al conductor. SIN Promise/timer en proceso:
+   * el desenlace (accept/reject/timeout) llega por ESTADO en DB (dispatch.service / el reconciler).
+   */
+  private async createAndDeliverOffer(args: {
+    tripId: string;
+    candidate: { driverId: string; score: number; location: LatLon };
+    surgeMultiplier: number;
+    attempt: number;
+    origin: LatLon;
+  }): Promise<void> {
+    const matchId = uuidv7();
+    await this.prisma.write.dispatchMatch.create({
+      data: {
+        id: matchId,
+        tripId: args.tripId,
+        driverId: args.candidate.driverId,
+        score: new Prisma.Decimal(args.candidate.score),
+        attempt: args.attempt,
+        surgeMultiplier: new Prisma.Decimal(args.surgeMultiplier),
+        outcome: DispatchOutcome.OFFERED,
+      },
+    });
+    let etaSeconds = 0;
+    try {
+      etaSeconds = await this.maps.eta(args.candidate.location, args.origin);
+    } catch (err) {
+      this.logger.warn(`ETA no disponible para match ${matchId}: ${String(err)}`);
+    }
+    const expiresAt = new Date(Date.now() + this.offerTimeoutMs).toISOString();
+    try {
+      await this.offerDelivery.deliver({
+        matchId,
+        tripId: args.tripId,
+        driverId: args.candidate.driverId,
+        etaSeconds,
+        attempt: args.attempt,
+        score: args.candidate.score,
+        surgeMultiplier: args.surgeMultiplier,
+        expiresAt,
+      });
+    } catch (err) {
+      this.logger.warn(`entrega de oferta falló (${matchId}): ${String(err)}`);
+    }
+  }
+
   private async rankCandidates(
     cells: string[],
     origin: LatLon,
     attempted: Set<string>,
     requiredVehicleType: VehicleType,
   ): Promise<{ driverId: string; score: number; location: LatLon }[]> {
-    const locations = await this.hotIndex.candidates(cells);
-    // Ola 2B · tier moto-taxi: solo conductores cuyo vehículo activo coincide con el requerido.
-    const matchingType = locations.filter((l) => l.vehicleType === requiredVehicleType);
-    const fresh = matchingType.filter((l) => !attempted.has(l.driverId));
-    const allowedIds = await this.exclusion.filter(fresh.map((l) => l.driverId));
-    const allowed = new Set(allowedIds);
-    const usable = fresh.filter((l) => allowed.has(l.driverId));
+    // Candidatos elegibles (disponibles + del tipo requerido + no excluidos por pánico + no ya ofertados).
+    // Filtrado centralizado en DriverPool (misma fuente que el broadcast de la PUJA).
+    const usable = await this.driverPool.eligible(cells, requiredVehicleType, { exclude: attempted });
     if (usable.length === 0) return [];
 
     const stats = await this.projection.getStats(usable.map((l) => l.driverId));

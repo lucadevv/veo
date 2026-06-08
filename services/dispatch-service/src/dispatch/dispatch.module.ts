@@ -6,6 +6,8 @@ import { DispatchController } from './dispatch.controller';
 import { OfferBoardController } from './offer-board.controller';
 import { DispatchService } from './dispatch.service';
 import { MatchingService } from './matching.service';
+import { DriverPool } from './driver-pool';
+import { MatchingSessionStore } from './matching-session.store';
 import { NearbyDriversService } from './nearby-drivers.service';
 import { SurgeService } from './surge.service';
 import { DriverProjectionService } from './driver-projection.service';
@@ -55,6 +57,8 @@ const eligibilityCacheTtlProvider: Provider = {
     eligibilityCacheTtlProvider,
     DriverProjectionService,
     SurgeService,
+    DriverPool,
+    MatchingSessionStore,
     MatchingService,
     NearbyDriversService,
     DispatchService,
