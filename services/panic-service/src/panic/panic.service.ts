@@ -182,21 +182,44 @@ export class PanicService {
     return updated;
   }
 
-  /** Cierre de la alerta por el operador: RESOLVED o FALSE_ALARM. */
+  /**
+   * Cierre de la alerta por el operador: RESOLVED o FALSE_ALARM. Publica `panic.resolved` (MISMA tx que
+   * el cambio de estado, vía outbox) para que el dashboard de operadores (admin-bff) y el audit conozcan
+   * el cierre — sin él, una alerta cerrada quedaba como dead-end: el estado cambiaba en la DB del
+   * panic-service pero el resto del sistema nunca se enteraba. La relectura del estado dentro de la tx
+   * (status-guard) hace el cierre idempotente y concurrencia-seguro (igual que `acknowledge`).
+   */
   async resolve(
     panicId: string,
     resolution: typeof PanicStatus.RESOLVED | typeof PanicStatus.FALSE_ALARM,
+    operatorId: string,
   ): Promise<PanicEvent> {
-    const current = await this.prisma.read.panicEvent.findUnique({ where: { id: panicId } });
-    if (!current) throw new NotFoundError('Evento de pánico no encontrado');
-    if (current.status === PanicStatus.RESOLVED || current.status === PanicStatus.FALSE_ALARM) {
-      throw new InvalidStateError(`El pánico ya está cerrado (${current.status})`, {
-        from: current.status,
+    return this.prisma.write.$transaction(async (tx) => {
+      const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
+      if (!current) throw new NotFoundError('Evento de pánico no encontrado');
+      if (current.status === PanicStatus.RESOLVED || current.status === PanicStatus.FALSE_ALARM) {
+        throw new InvalidStateError(`El pánico ya está cerrado (${current.status})`, {
+          from: current.status,
+        });
+      }
+      const resolvedAt = new Date();
+      const row = await tx.panicEvent.update({
+        where: { id: panicId },
+        data: { status: resolution, resolvedAt },
       });
-    }
-    return this.prisma.write.panicEvent.update({
-      where: { id: panicId },
-      data: { status: resolution, resolvedAt: new Date() },
+      const payload: EventPayload<'panic.resolved'> = {
+        panicId: row.id,
+        status: resolution,
+        resolvedBy: operatorId,
+        at: resolvedAt.toISOString(),
+      };
+      const envelope = createEnvelope({
+        eventType: 'panic.resolved',
+        producer: PRODUCER,
+        payload,
+      });
+      await enqueueOutbox(tx, envelope, row.id);
+      return row;
     });
   }
 

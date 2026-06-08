@@ -123,10 +123,11 @@ export class PanicController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Cerrar la alerta (RESOLVED | FALSE_ALARM)' })
   async resolve(
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolvePanicDto,
   ): Promise<PanicEntity> {
-    return this.toEntity(await this.panic.resolve(id, dto.resolution));
+    return this.toEntity(await this.panic.resolve(id, dto.resolution, user.userId));
   }
 
   @UseGuards(RolesGuard)

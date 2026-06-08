@@ -143,11 +143,28 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
     await expect(svc.acknowledge(created.panicId, operatorId)).rejects.toThrow();
   });
 
-  it('resolve cierra la alerta (FALSE_ALARM)', async () => {
+  it('resolve cierra la alerta (FALSE_ALARM), publica panic.resolved y no se puede cerrar dos veces', async () => {
+    const operatorId = uuidv7();
     const created = await svc.trigger(makeSignedInput());
-    const resolved = await svc.resolve(created.panicId, 'FALSE_ALARM');
+
+    const resolved = await svc.resolve(created.panicId, 'FALSE_ALARM', operatorId);
     expect(resolved.status).toBe('FALSE_ALARM');
     expect(resolved.resolvedAt).toBeInstanceOf(Date);
+
+    // Dominó: el cierre publica panic.resolved (admin-bff actualiza el dashboard; audit lo registra).
+    const events = await client.outboxEvent.findMany({
+      where: { aggregateId: created.panicId, eventType: 'panic.resolved' },
+    });
+    expect(events).toHaveLength(1);
+    const payload = (events[0]!.envelope as { payload: Record<string, unknown> }).payload;
+    expect(payload).toMatchObject({ panicId: created.panicId, status: 'FALSE_ALARM', resolvedBy: operatorId });
+
+    // Idempotencia/guard: un segundo cierre lanza y NO publica un segundo evento.
+    await expect(svc.resolve(created.panicId, 'RESOLVED', operatorId)).rejects.toThrow();
+    const after = await client.outboxEvent.findMany({
+      where: { aggregateId: created.panicId, eventType: 'panic.resolved' },
+    });
+    expect(after).toHaveLength(1);
   });
 
   it('anexa evidencia S3 sin duplicar keys', async () => {
