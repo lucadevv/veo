@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createEnvelope } from '@veo/events';
+import type * as VeoEvents from '@veo/events';
 import { PaymentEventConsumers } from './consumers';
 import type { PaymentsService } from '../payments/payments.service';
 import type { PayoutsService } from '../payouts/payouts.service';
@@ -29,7 +30,7 @@ class FakeConsumer {
 }
 
 vi.mock('@veo/events', async (orig) => {
-  const actual = await orig<typeof import('@veo/events')>();
+  const actual = await orig<typeof VeoEvents>();
   return {
     ...actual,
     createKafka: () => ({}),

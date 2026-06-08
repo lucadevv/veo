@@ -22,7 +22,7 @@ const REGISTRATION_PREF_KEY = 'pref.registration.v1';
  * profundidad por si la constante del feature divergiera en el futuro.
  */
 function resetRegistration(): void {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const {useRegistrationStore} =
     require('../../features/registration/presentation/state/registrationStore') as typeof import('../../features/registration/presentation/state/registrationStore');
   useRegistrationStore.getState().reset();

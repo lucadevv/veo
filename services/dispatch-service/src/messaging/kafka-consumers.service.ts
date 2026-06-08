@@ -149,7 +149,7 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
     // la partición de pánico de todos los demás viajes por un evento corrupto.
     if (!isUuid(p.tripId)) {
       this.logger.error(
-        `POISON panic.triggered: tripId no-UUID "${p.tripId}" (panicId=${p.panicId}, eventId=${env.eventId}); descartado sin reintento`,
+        `POISON panic.triggered: tripId no-UUID "${String(p.tripId)}" (panicId=${p.panicId}, eventId=${env.eventId}); descartado sin reintento`,
       );
       domainEventsTotal.inc({ event: 'panic.triggered', result: 'poison' });
       return;
@@ -191,7 +191,7 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
     // la partición y los viajes nuevos no abren board.
     if (!isUuid(p.tripId)) {
       this.logger.error(
-        `POISON trip.completed: tripId no-UUID "${p.tripId}" (eventId=${env.eventId}); descartado sin reintento`,
+        `POISON trip.completed: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
       domainEventsTotal.inc({ event: 'trip.completed', result: 'poison' });
       return;
@@ -227,7 +227,7 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
     // veneno → log ERROR + saltar (cancelBoard sobre un id basura es no-op inofensivo igualmente).
     if (!isUuid(p.tripId)) {
       this.logger.error(
-        `POISON trip.cancelled: tripId no-UUID "${p.tripId}" (eventId=${env.eventId}); descartado sin reintento`,
+        `POISON trip.cancelled: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
       domainEventsTotal.inc({ event: 'trip.cancelled', result: 'poison' });
       return;

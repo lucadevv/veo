@@ -1,6 +1,7 @@
+import type {
+  HttpClient} from '@veo/api-client';
 import {
   ApiError,
-  HttpClient,
   biometricChallenge,
   biometricVerifyResult,
   driverBiometricEnrollRequest,

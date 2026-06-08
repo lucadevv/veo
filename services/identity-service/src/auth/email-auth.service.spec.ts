@@ -316,9 +316,7 @@ describe('EmailAuthService.verifyEmail', () => {
     await svc.verifyEmail(EMAIL, '123456');
 
     expect(prisma.write.outboxEvent.create).toHaveBeenCalledOnce();
-    const calls = prisma.write.outboxEvent.create.mock.calls as unknown as Array<
-      [{ data: { aggregateId: string; eventType: string; envelope: { payload: Record<string, unknown> } } }]
-    >;
+    const calls = prisma.write.outboxEvent.create.mock.calls as unknown as [{ data: { aggregateId: string; eventType: string; envelope: { payload: Record<string, unknown> } } }][];
     const arg = calls[0]![0];
     expect(arg.data.eventType).toBe('user.email_verified');
     expect(arg.data.aggregateId).toBe(userId);

@@ -55,7 +55,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (asHttpErrorStatus(exception) !== undefined) {
       // body-parser / http-errors (p.ej. PayloadTooLargeError → 413): respetar su status,
       // no degradarlo a 500. El mensaje de estos errores es genérico y seguro de exponer.
-      status = asHttpErrorStatus(exception)!;
+      // La rama ya garantizó `!== undefined`; el `?? 500` es defensivo (TS no arrastra el narrowing
+      // de la llamada en la condición) y evita el non-null assertion.
+      status = asHttpErrorStatus(exception) ?? 500;
       code = `HTTP_${status}`;
       message = exception instanceof Error ? exception.message : 'Solicitud inválida';
     } else if (exception instanceof Error) {

@@ -13,7 +13,7 @@
  * Prisma fake en memoria (sin red): payment + cashConfirmation + outbox. No mockeamos un crítico parcialmente.
  */
 import { describe, it, expect } from 'vitest';
-import { ConfigService } from '@nestjs/config';
+import { type ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import { SandboxPaymentGateway } from '../ports/gateway/sandbox.gateway';
 import { deriveTripChargeDedupKey } from './payment.policy';

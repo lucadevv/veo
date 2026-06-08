@@ -50,6 +50,13 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
+      // Permitir acceso por corchetes a miembros private/protected (patrón legítimo para testear
+      // internals: `svc['privateMethod']()`). Sin esto, el --fix de dot-notation los pasa a punto y
+      // ROMPE el typecheck (el miembro es private). El stylisticTypeChecked lo activa por defecto.
+      '@typescript-eslint/dot-notation': [
+        'error',
+        { allowPrivateClassPropertyAccess: true, allowProtectedClassPropertyAccess: true },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'warn',
       // Implementar métodos de una interfaz async sin `await` es legítimo (NestJS, adapters, fakes).

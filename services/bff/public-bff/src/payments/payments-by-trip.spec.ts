@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
+import type Redis from 'ioredis';
 import { PaymentsService } from './payments.service';
 
 const SECRET = 'dev-internal-secret-change-me';
@@ -43,7 +44,7 @@ function makeService(opts: {
     call: vi.fn().mockResolvedValue(opts.payment ?? PAYMENT),
   } as unknown as GrpcServiceClient;
   const restStub = {} as unknown as InternalRestClient;
-  const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as import('ioredis').default;
+  const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
   const svc = new PaymentsService(paymentGrpc, tripGrpc, restStub, SECRET, redisStub);
   return { svc, tripGrpc, paymentGrpc };
 }
@@ -115,7 +116,7 @@ describe('PaymentsService.getPaymentByTrip', () => {
         return { tripId: 'trip-1', driverConfirmed: false, passengerConfirmed: true, status: 'PENDING' };
       }),
     } as unknown as InternalRestClient;
-    const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as import('ioredis').default;
+    const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
     const svc = new PaymentsService(paymentGrpc, tripGrpc, restStub, SECRET, redisStub);
 
     const view = await svc.confirmCash(user, 'pay-1', { confirmed: true });

@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { NotFoundError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
+import type Redis from 'ioredis';
 import { PaymentsService } from './payments.service';
 
 const SECRET = 'dev-internal-secret-change-me';
@@ -21,7 +22,7 @@ function makeService(rest: Partial<InternalRestClient>) {
     grpcStub,
     rest as InternalRestClient,
     SECRET,
-    redis as unknown as import('ioredis').default,
+    redis as unknown as Redis,
   );
   return { svc, redis };
 }

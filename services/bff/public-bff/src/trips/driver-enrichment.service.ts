@@ -75,7 +75,7 @@ export class DriverEnrichmentService {
     const active = vehicles?.vehicles?.find((v) => v.active) ?? vehicles?.vehicles?.[0] ?? null;
     return {
       // BE-1b — "" del proto (no registrado / found=false) se normaliza a null para degradar honesto.
-      driverName: driver?.name ? driver.name : null,
+      driverName: driver?.name?.length ? driver.name : null,
       rating,
       ratingCount: aggregate?.count30d ?? 0,
       vehicle: active

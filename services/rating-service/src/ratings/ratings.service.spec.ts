@@ -144,7 +144,7 @@ describe('RatingsService.create · flags (BR-D01)', () => {
 describe('RatingsService.findByTripForRater · MI rating (anti-IDOR)', () => {
   /** Prisma de lectura: captura el `where` de findFirst y devuelve la fila configurada (o null). */
   function makeReadPrisma(row: Record<string, unknown> | null) {
-    const calls: Array<{ where: Record<string, unknown> }> = [];
+    const calls: { where: Record<string, unknown> }[] = [];
     const prisma = {
       read: {
         rating: {

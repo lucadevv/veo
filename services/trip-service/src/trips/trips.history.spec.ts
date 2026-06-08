@@ -69,7 +69,7 @@ function makePrisma(rows: Trip[]) {
     where,
     take,
   }: {
-    where: { passengerId: string; OR?: Array<Record<string, unknown>> };
+    where: { passengerId: string; OR?: Record<string, unknown>[] };
     orderBy: unknown;
     take: number;
   }) => {

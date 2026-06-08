@@ -17,7 +17,7 @@ import type { ReplaceScheduleDto } from './dto/pricing.dto';
 export interface ModeScheduleView {
   version: number;
   defaultMode: PricingMode;
-  rules: Array<{ dayMask: number; startMinute: number; endMinute: number; mode: PricingMode }>;
+  rules: { dayMask: number; startMinute: number; endMinute: number; mode: PricingMode }[];
   updatedAt: string | null;
 }
 

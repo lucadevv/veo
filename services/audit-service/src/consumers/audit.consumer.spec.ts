@@ -39,7 +39,7 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
     ) {
       handlers.set(type, handler);
       return this;
-    } as KafkaEventConsumer['on']);
+    });
 
     recordFromEvent = vi.fn(async () => ({ created: true }));
     audit = { recordFromEvent } as unknown as AuditService;
@@ -66,7 +66,7 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
       payload: { userId: 'u-123', driverId: 'd-9', at: new Date().toISOString() },
     });
 
-    await handlers.get('user.deleted')!(envelope as EventEnvelope<unknown>);
+    await handlers.get('user.deleted')!(envelope);
 
     expect(recordFromEvent).toHaveBeenCalledTimes(1);
     const [recvEnvelope, topic, mapping] = recordFromEvent.mock.calls[0] as [
@@ -90,7 +90,7 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
       },
     });
 
-    await handlers.get('user.deletion_requested')!(envelope as EventEnvelope<unknown>);
+    await handlers.get('user.deletion_requested')!(envelope);
 
     const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
     expect(mapping).toEqual({ actorId: 'u-777', resourceType: 'user', resourceId: 'u-777' });

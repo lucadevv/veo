@@ -74,7 +74,7 @@ function generateRandomKeyHex(): string {
   }
 
   // Fallback NO-CSPRNG (documentado). Mezcla tiempo de alta resolución + Math.random().
-  // eslint-disable-next-line no-console
+   
   console.warn(
     '[secure-encryption-key] crypto.getRandomValues no disponible; usando fallback ' +
       'NO criptográfico para generar la clave. Instala react-native-get-random-values.',
@@ -140,7 +140,7 @@ export async function initSecureStorage(
   } catch (error) {
     // FALLBACK controlado: no crasheamos el arranque. El almacén sigue cifrado con la clave
     // de arranque (no ideal, pero funcional). Se loguea para visibilidad/telemetría.
-    // eslint-disable-next-line no-console
+     
     console.warn(
       '[secure-encryption-key] Keystore falló; el almacén seguro mantiene la clave de ' +
         'ARRANQUE (fallback degradado). Error:',

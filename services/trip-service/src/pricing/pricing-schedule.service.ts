@@ -86,7 +86,6 @@ export class PricingScheduleService {
   }): Promise<PersistedSchedule> {
     const current = await this.repo.find();
     const nextVersion = (current?.version ?? 0) + 1;
-    const updatedAtIso = new Date().toISOString();
     // Serializamos las reglas tal cual (ya validadas por el DTO) como JSON de la fila.
     const rulesJson = input.rules.map((r) => ({
       dayMask: r.dayMask,

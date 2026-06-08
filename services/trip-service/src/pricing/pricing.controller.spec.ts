@@ -7,7 +7,6 @@ import { describe, it, expect } from 'vitest';
 import { PricingMode } from '@veo/shared-types';
 import { PricingController } from './pricing.controller';
 import type { PricingScheduleService } from './pricing-schedule.service';
-import type { ResolveQueryDto } from './dto/resolve-query.dto';
 
 /** Doble del service que CAPTURA el instante con el que se lo invoca y devuelve un modo fijo. */
 function fakePricing(mode: PricingMode) {
@@ -29,7 +28,7 @@ describe('PricingController.resolve · S2 · `at` opcional', () => {
     const controller = new PricingController(svc);
     const at = '2026-06-01T22:00:00.000Z';
 
-    const out = await controller.resolve({ ...LIMA, at } as ResolveQueryDto);
+    const out = await controller.resolve({ ...LIMA, at });
 
     expect(out).toEqual({ mode: PricingMode.FIXED });
     expect(calls).toHaveLength(1);
@@ -41,7 +40,7 @@ describe('PricingController.resolve · S2 · `at` opcional', () => {
     const controller = new PricingController(svc);
     const before = Date.now();
 
-    const out = await controller.resolve({ ...LIMA } as ResolveQueryDto);
+    const out = await controller.resolve({ ...LIMA });
 
     expect(out).toEqual({ mode: PricingMode.PUJA });
     expect(calls[0]!.getTime()).toBeGreaterThanOrEqual(before - 1000);

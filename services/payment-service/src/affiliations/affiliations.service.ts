@@ -23,7 +23,6 @@ import {
   PAYMENT_GATEWAY,
   supportsYapeSubscription,
   type PaymentGateway,
-  type YapeSubscriber,
 } from '../ports/gateway/payment-gateway.port';
 import { maskDocument, maskPhone } from './masking';
 import type { AffiliationStatus, WalletAffiliation } from '../generated/prisma';
@@ -78,7 +77,7 @@ export class AffiliationsService {
     const existing = await this.prisma.read.walletAffiliation.findUnique({
       where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
     });
-    if (existing && existing.status === 'ACTIVE') {
+    if (existing?.status === 'ACTIVE') {
       // Ya afiliado: no re-afiliamos (no hay deepLink que abrir).
       this.logger.log(`Afiliación YA ACTIVE user=${userId} aff=${existing.id} (no-op)`);
       return { affiliationId: existing.id, status: existing.status };
@@ -306,7 +305,7 @@ export class AffiliationsService {
     const aff = await this.prisma.read.walletAffiliation.findUnique({
       where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
     });
-    if (!aff || aff.status !== 'ACTIVE' || !aff.walletUid) return null;
+    if (aff?.status !== 'ACTIVE' || !aff.walletUid) return null;
     return aff.walletUid;
   }
 

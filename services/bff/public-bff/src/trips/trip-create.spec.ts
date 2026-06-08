@@ -13,6 +13,7 @@ import { DebtPendingError } from '../payments/dto/payments.dto';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
 import type { CreateTripDto } from './dto/trip.dto';
 import type { LiveKitConfig } from '../share/livekit-token';
+import type Redis from 'ioredis';
 
 const SECRET = 'dev-internal-secret-change-me';
 const livekit: LiveKitConfig = {
@@ -32,7 +33,7 @@ function baseDto(overrides: Partial<CreateTripDto> = {}): CreateTripDto {
     destination: DESTINATION,
     paymentMethod: PaymentMethod.CASH,
     ...overrides,
-  } as CreateTripDto;
+  };
 }
 
 /**
@@ -41,10 +42,10 @@ function baseDto(overrides: Partial<CreateTripDto> = {}): CreateTripDto {
  * Por defecto SIN deuda, para que los tests de KYC/PUJA pasen el gate de deuda sin tocarlo.
  */
 function makeService(
-  kycStatus: string = 'VERIFIED',
+  kycStatus = 'VERIFIED',
   debt: {
     hasDebt: boolean;
-    debts?: Array<{ tripId: string; amountCents: number; kind?: 'DEBT' | 'PENDING_ACTION' }>;
+    debts?: { tripId: string; amountCents: number; kind?: 'DEBT' | 'PENDING_ACTION' }[];
     totalCents?: number;
   } = {
     hasDebt: false,
@@ -83,7 +84,7 @@ function makeService(
     restStub, // ratingRest (REST_RATING) — MI rating del enrich, no usado en createTrip
     livekit,
     SECRET,
-    redis as unknown as import('ioredis').default, // REDIS (cache KYC + deuda)
+    redis as unknown as Redis, // REDIS (cache KYC + deuda)
     {} as unknown as DriverEnrichmentService,
   );
   return { svc, post, debtGet, redis };
@@ -186,7 +187,7 @@ describe('TripsService.createTrip — gate de deuda (BR-P02)', () => {
 
   it('cache HIT "sin deuda" → NO reconsulta payment (hot-path)', async () => {
     const { svc, post, debtGet, redis } = makeService('VERIFIED', { hasDebt: false });
-    (redis.get as ReturnType<typeof vi.fn>).mockImplementation(async (key: string) =>
+    (redis.get).mockImplementation(async (key: string) =>
       key === 'debt:none:usr-1' ? '1' : null,
     );
     await svc.createTrip(user, baseDto(), 'idem-cache-hit');

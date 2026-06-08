@@ -1,4 +1,5 @@
-import {HttpClient, chatMessage, chatMessageList} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { chatMessage, chatMessageList} from '@veo/api-client';
 import type {ChatRepository, Message, SendMessageInput} from '../../domain';
 
 /** Implementación HTTP del `ChatRepository` contra el driver-bff. */

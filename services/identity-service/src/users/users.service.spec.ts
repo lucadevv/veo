@@ -84,7 +84,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
     const svc = new UsersService(prisma as never, config);
     const view = await svc.updateProfile('u1', { documentType: 'DN', document: '12345678' });
 
-    const data = update.mock.calls[0]![0].data as Record<string, unknown>;
+    const data = update.mock.calls[0]![0].data;
     expect(data.documentType).toBe('DN');
     expect(data.document).toBe('12345678');
     expect(view.document).toBe('12345678');
@@ -113,7 +113,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
     const { prisma, update } = makePrisma(baseUser({ documentType: 'CE', document: '123456789' }));
     const svc = new UsersService(prisma as never, config);
     await svc.updateProfile('u1', { name: 'Nuevo' });
-    const data = update.mock.calls[0]![0].data as Record<string, unknown>;
+    const data = update.mock.calls[0]![0].data;
     expect(data.documentType).toBe('CE');
     expect(data.document).toBe('123456789');
   });

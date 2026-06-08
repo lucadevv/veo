@@ -109,7 +109,7 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier {
    */
   buildSignedWebhook(fields: Record<string, string | number>): { body: string; status: ReturnType<typeof mapProntoPagaStatus> } {
     const secret = this.opts.webhookSecret ?? '';
-    const sign = signPayload(fields as SignablePayload, secret);
+    const sign = signPayload(fields, secret);
     return { body: JSON.stringify({ ...fields, sign }), status: mapProntoPagaStatus(String(fields.status ?? '')) };
   }
 }

@@ -1,4 +1,5 @@
-import {HttpClient, addDocumentRequest, driverDocument} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { addDocumentRequest, driverDocument} from '@veo/api-client';
 import {z} from 'zod';
 import type {
   DocumentsRepository,

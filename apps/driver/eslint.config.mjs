@@ -1,16 +1,12 @@
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+// ESLint flat config para el VEO Driver App (RN). Modelado en passenger: flat config puro con
+// typescript-eslint. NO usa el preset legacy `@react-native` vía FlatCompat — ese preset referencia
+// reglas removidas en typescript-eslint v8 (p.ej. `func-call-spacing`) y rompía el lint entero.
 import js from '@eslint/js';
-import {FlatCompat} from '@eslint/eslintrc';
+import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
+import globals from 'globals';
 
-const dirname = path.dirname(fileURLToPath(import.meta.url));
-const compat = new FlatCompat({
-  baseDirectory: dirname,
-  recommendedConfig: js.configs.recommended,
-  allConfig: js.configs.all,
-});
-
-export default [
+export default tseslint.config(
   {
     ignores: [
       'node_modules/**',
@@ -18,20 +14,51 @@ export default [
       'ios/**',
       'coverage/**',
       'detox-artifacts/**',
+      'dist/**',
+      '**/*.config.js',
+      '**/*.config.mjs',
       'babel.config.js',
       'metro.config.js',
       'jest.config.js',
       'jest.setup.js',
       '.detoxrc.js',
-      'eslint.config.mjs',
     ],
   },
-  // Reutiliza la config oficial de React Native (eslint 8) vía capa de compatibilidad.
-  ...compat.extends('@react-native'),
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
   {
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        ...globals.es2021,
+        __DEV__: 'readonly',
+      },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+    },
     rules: {
-      // El formateo se delega a prettier por separado; no bloquea el lint.
-      'prettier/prettier': 'off',
+      ...reactHooks.configs.recommended.rules,
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/consistent-type-imports': 'warn',
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
-];
+  {
+    // Tests: re-import dinámico para aislar módulos (require/typeof import) — idiomático en specs.
+    files: ['**/*.test.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/consistent-type-imports': 'off',
+    },
+  },
+);

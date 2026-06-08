@@ -12,7 +12,7 @@
  *  - changeMethod a un método no habilitado → DEBT method_unavailable:<NUEVO> (la app sugiere otro).
  */
 import { describe, it, expect } from 'vitest';
-import { ConfigService } from '@nestjs/config';
+import { type ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import type {
   PaymentGateway,

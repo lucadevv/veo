@@ -70,7 +70,7 @@ export class KycRequiredError extends DomainError {
 /** Resumen accionable que devuelve payment-service GET /payments/debt. */
 interface DebtSummaryReply {
   hasDebt: boolean;
-  debts: Array<{
+  debts: {
     paymentId: string;
     tripId: string;
     amountCents: number;
@@ -78,7 +78,7 @@ interface DebtSummaryReply {
     createdAt: string;
     /** DEBT bloquea el gate; PENDING_ACTION (pago por completar) NO. El gate SOLO mira los DEBT. */
     kind?: 'DEBT' | 'PENDING_ACTION';
-  }>;
+  }[];
   totalCents: number;
 }
 

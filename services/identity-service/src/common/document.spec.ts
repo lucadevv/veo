@@ -33,7 +33,7 @@ describe('isValidDocument · criterio per-tipo', () => {
     expect(isValidDocument('RUC', '12345678')).toBe(false);
     expect(isValidDocument(undefined, '12345678')).toBe(false);
     expect(isValidDocument('DN', undefined)).toBe(false);
-    expect(isValidDocument('DN', 12345678 as unknown)).toBe(false);
+    expect(isValidDocument('DN', 12345678)).toBe(false);
   });
 });
 

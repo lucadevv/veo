@@ -6,8 +6,8 @@
  *     (no-op), concurrencia (status-guard updateMany: solo un llamador gana), y estados inválidos.
  * Prisma fake en memoria (sin red): doble determinista y total (no mockeamos un crítico parcialmente).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
-import { ConfigService } from '@nestjs/config';
+import { describe, it, expect } from 'vitest';
+import { type ConfigService } from '@nestjs/config';
 import { InvalidStateError, NotFoundError } from '@veo/utils';
 import { PaymentsService } from './payments.service';
 import { SandboxPaymentGateway } from '../ports/gateway/sandbox.gateway';

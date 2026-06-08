@@ -102,7 +102,7 @@ export function normalizeWebhook(raw: Record<string, unknown>): WebhookResult {
   const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
   const uid = str(raw.uid) ?? str(raw.reference) ?? '';
   const order = str(raw.order);
-  const statusStr = String(raw.status ?? '');
+  const statusStr = str(raw.status) ?? '';
 
   // Un webhook de afiliación trae wallet_uid SIN un `order` de pago. Un cobro on-file rechazado por saldo
   // (YPTRX002) también incluye wallet_uid pero ES un pago (trae `order`=paymentId). Distinguimos por `order`:

@@ -1,4 +1,5 @@
-import {HttpClient, driverPublisherGrant} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { driverPublisherGrant} from '@veo/api-client';
 import {
   PublisherTokenUnavailableError,
   type PublisherCredentials,

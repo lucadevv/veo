@@ -73,7 +73,7 @@ export const DIGITAL_PAYMENT_METHODS = ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO'] 
  */
 export class ChangeMethodDto {
   @ApiProperty({ enum: DIGITAL_PAYMENT_METHODS, description: 'Nuevo método DIGITAL (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.' })
-  @IsIn(DIGITAL_PAYMENT_METHODS as unknown as string[])
+  @IsIn(DIGITAL_PAYMENT_METHODS)
   method!: (typeof DIGITAL_PAYMENT_METHODS)[number];
 }
 

@@ -21,7 +21,7 @@ const OPTS = {
   webhookBaseUrl: 'http://localhost:3005',
 };
 
-type Call = { url: string; method?: string; body: Record<string, unknown>; headers: Record<string, string> };
+interface Call { url: string; method?: string; body: Record<string, unknown>; headers: Record<string, string> }
 
 /**
  * Mock del ProntoPagaHttpClient: captura requests y devuelve un JSON fijo con status configurable.

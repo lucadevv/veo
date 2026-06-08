@@ -66,13 +66,13 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
  * y respeta `orderBy: { completedAt: asc | desc }` (FIFO del pending settlement). Acepta un solo viaje
  * o un array (los tests de cola pasan varios COMPLETED sin cerrar).
  */
-type FindFirstArgs = {
+interface FindFirstArgs {
   where?: { passengerId?: string; status?: TripStatus; passengerClosedAt?: null | Date };
   orderBy?: { completedAt?: 'asc' | 'desc' };
-};
+}
 
 function makePrisma(initial: Trip | Trip[] | null) {
-  let store: Trip[] = initial == null ? [] : Array.isArray(initial) ? [...initial] : [initial];
+  const store: Trip[] = initial == null ? [] : Array.isArray(initial) ? [...initial] : [initial];
   const matches = (t: Trip, where?: FindFirstArgs['where']): boolean => {
     if (!where) return true;
     if (where.passengerId !== undefined && t.passengerId !== where.passengerId) return false;

@@ -60,7 +60,7 @@ export class ReferralsConsumer implements OnModuleInit, OnModuleDestroy {
     // borde ANTES de tocar Prisma: passengerId no-UUID es VENENO → log ERROR + RETURN (el offset avanza).
     if (!isUuid(passengerId)) {
       this.logger.error(
-        `POISON trip.completed: passengerId no-UUID "${passengerId}" (eventId=${env.eventId}); descartado sin reintento`,
+        `POISON trip.completed: passengerId no-UUID "${String(passengerId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
       return;
     }

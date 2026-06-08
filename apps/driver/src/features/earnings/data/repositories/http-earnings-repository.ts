@@ -1,5 +1,6 @@
+import type {
+  HttpClient} from '@veo/api-client';
 import {
-  HttpClient,
   driverEarningsSummary,
   driverPayoutList,
   earningsSummary,

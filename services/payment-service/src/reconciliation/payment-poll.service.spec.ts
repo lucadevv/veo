@@ -37,7 +37,7 @@ function makeGateway(byUid: Record<string, PaymentStatusDetail>): PaymentGateway
       if (!d) throw new Error(`boom-${uid}`);
       return d;
     }),
-  } as unknown as PaymentGateway & { getPaymentStatus: (uid: string) => Promise<PaymentStatusDetail> };
+  };
 }
 
 const fakeConfig = (over: Record<string, unknown> = {}) =>
@@ -153,7 +153,7 @@ describe('PaymentPollService · activación', () => {
       const h = 1 as unknown as NodeJS.Timeout;
       handles.push(h);
       return h;
-    }) as typeof setInterval);
+    }));
     const svc = new PaymentPollService(
       makeFakePrisma([]),
       fakeRedis,

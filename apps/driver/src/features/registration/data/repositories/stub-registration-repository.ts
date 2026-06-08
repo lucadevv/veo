@@ -25,7 +25,7 @@ import type {
  * `RegistrationRepository`, no de esta clase.
  */
 export class StubRegistrationRepository implements RegistrationRepository {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async submit(_draft: RegistrationDraft): Promise<RegistrationSubmissionResult> {
     await delay(600);
     return {status: 'in_review'};
@@ -72,12 +72,12 @@ export class StubRegistrationRepository implements RegistrationRepository {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async onboardLicense(_input: LicenseOnboardInput): Promise<void> {
     await delay(400);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async enrollBiometric(_input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     await delay(500);
     return {enrolled: true, enrolledAt: new Date().toISOString()};

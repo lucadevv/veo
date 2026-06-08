@@ -1,5 +1,6 @@
+import type {
+  HttpClient} from '@veo/api-client';
 import {
-  HttpClient,
   addDocumentRequest,
   driverBiometricEnrollRequest,
   driverBiometricEnrollResult,
@@ -41,7 +42,7 @@ const driverDocumentList = z.array(driverDocument);
 export class HttpRegistrationRepository implements RegistrationRepository {
   constructor(private readonly http: HttpClient) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async submit(_draft: RegistrationDraft): Promise<RegistrationSubmissionResult> {
     // Los datos del alta ya se persistieron en cada paso (personal/vehículo/documentos/biometría) y
     // NO hay un endpoint "submit registration" único. Derivamos el estado real del servidor con la

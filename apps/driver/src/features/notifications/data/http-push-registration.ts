@@ -1,4 +1,5 @@
-import {HttpClient, registerDevice} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { registerDevice} from '@veo/api-client';
 import {
   PushRegistrationUnavailableError,
   type DeviceTokenRegistration,

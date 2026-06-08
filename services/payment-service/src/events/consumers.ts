@@ -65,7 +65,7 @@ export class PaymentEventConsumers implements OnModuleInit, OnModuleDestroy {
     // Guardamos el borde: tripId no-UUID es VENENO → log ERROR + RETURN (saltar, el offset avanza).
     if (!isUuid(tripId)) {
       this.logger.error(
-        `POISON trip.completed: tripId no-UUID "${tripId}" (eventId=${env.eventId}); descartado sin reintento`,
+        `POISON trip.completed: tripId no-UUID "${String(tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
       return;
     }

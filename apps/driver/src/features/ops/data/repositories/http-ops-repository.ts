@@ -1,4 +1,5 @@
-import {HttpClient, driverIncentiveList, heatmapView} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { driverIncentiveList, heatmapView} from '@veo/api-client';
 import type {
   DemandHeatmap,
   HeatmapQuery,

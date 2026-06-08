@@ -22,7 +22,7 @@ import {
 /** Forma del resumen accionable que devuelve payment-service GET /payments/debt. */
 interface DebtSummaryReply {
   hasDebt: boolean;
-  debts: Array<{
+  debts: {
     paymentId: string;
     tripId: string;
     amountCents: number;
@@ -30,7 +30,7 @@ interface DebtSummaryReply {
     createdAt: string;
     /** DEBT (bloquea el gate) o PENDING_ACTION (pago por completar). payment-service lo etiqueta. */
     kind?: 'DEBT' | 'PENDING_ACTION';
-  }>;
+  }[];
   totalCents: number;
 }
 

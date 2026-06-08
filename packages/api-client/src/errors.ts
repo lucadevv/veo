@@ -43,7 +43,7 @@ export class ApiError extends Error {
 export const GATEWAY_CAPABILITY_UNAVAILABLE_CODE = 'GATEWAY_CAPABILITY_UNAVAILABLE';
 
 /** Capacidades del gateway que pueden faltar en un comercio (las que la app distingue). */
-export type GatewayCapability = 'YAPE_ON_FILE' | string;
+export type GatewayCapability = 'YAPE_ON_FILE' | (string & {});
 
 /**
  * true si el error es una capacidad del proveedor NO habilitada para el comercio (422

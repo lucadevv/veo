@@ -6,7 +6,7 @@ import type { PaymentGateway, YapeSubscriber } from '../ports/gateway/payment-ga
 /** Fake Prisma en memoria para WalletAffiliation + outbox (no DB real; tests hermeticos). */
 function makeFakePrisma() {
   const rows = new Map<string, Record<string, unknown>>(); // key = id
-  const keyOf = (r: Record<string, unknown>) => `${r.userId}|${r.provider}|${r.wallet}`;
+  const keyOf = (r: Record<string, unknown>) => `${String(r.userId)}|${String(r.provider)}|${String(r.wallet)}`;
   const byUnique = (where: { userId: string; provider: string; wallet: string }) =>
     [...rows.values()].find((r) => keyOf(r) === `${where.userId}|${where.provider}|${where.wallet}`) ?? null;
 

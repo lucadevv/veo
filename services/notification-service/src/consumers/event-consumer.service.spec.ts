@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NotificationChannel } from '@veo/shared-types';
 import { createEnvelope, type EventEnvelope } from '@veo/events';
+import type * as VeoEvents from '@veo/events';
 import { NotificationEngine } from '../engine/notification.engine';
 import { RetryPolicy } from '../engine/retry.policy';
 import { TEMPLATE_KEYS } from '../engine/template.catalog';
@@ -28,7 +29,7 @@ type Handler = (envelope: EventEnvelope<unknown>) => Promise<void>;
 const registered = new Map<string, Handler>();
 
 vi.mock('@veo/events', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@veo/events')>();
+  const actual = await importOriginal<typeof VeoEvents>();
   class FakeConsumer {
     on(eventType: string, handler: Handler): this {
       registered.set(eventType, handler);

@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createEnvelope } from '@veo/events';
+import type * as VeoEvents from '@veo/events';
 import { VehicleType } from '@veo/shared-types';
 import { KafkaConsumersService } from './kafka-consumers.service';
 import type { DispatchService } from '../dispatch/dispatch.service';
@@ -28,7 +29,7 @@ class FakeConsumer {
 }
 
 vi.mock('@veo/events', async (orig) => {
-  const actual = await orig<typeof import('@veo/events')>();
+  const actual = await orig<typeof VeoEvents>();
   return {
     ...actual,
     createKafka: () => ({}),

@@ -240,7 +240,7 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
   }
   async submitOfferIfOpen(offer: Offer): Promise<boolean> {
     const b = this.boards.get(offer.tripId);
-    if (!b || b.status !== 'OPEN') return false;
+    if (b?.status !== 'OPEN') return false;
     const m = this.offers.get(offer.tripId) ?? new Map<string, Offer>();
     m.set(offer.driverId, { ...offer });
     this.offers.set(offer.tripId, m);
@@ -249,7 +249,7 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
   async cancelIfOpen(tripId: string): Promise<boolean> {
     const b = this.boards.get(tripId);
     // CAS OPEN→CANCELLED (espeja el Lua): no-op si no existe o ya cerró (nunca pisa CLOSED_MATCHED).
-    if (!b || b.status !== 'OPEN') return false;
+    if (b?.status !== 'OPEN') return false;
     b.status = 'CANCELLED';
     this.expiryZset.delete(tripId);
     this.cellRem(b.originCell, tripId);

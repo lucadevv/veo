@@ -1,4 +1,5 @@
-import {HttpClient, supportTicket, supportTicketList} from '@veo/api-client';
+import type {HttpClient} from '@veo/api-client';
+import { supportTicket, supportTicketList} from '@veo/api-client';
 import type {
   CreateTicketInput,
   SupportRepository,

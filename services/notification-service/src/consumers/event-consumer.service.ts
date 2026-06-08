@@ -321,7 +321,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     if (token) return [{ token, platform: platform ?? 'android' }];
     if (!userId) return [];
     if (!isUuid(userId)) {
-      this.logger.error(`POISON ${eventType}: userId no-UUID "${userId}"; push descartado sin reintento`);
+      this.logger.error(`POISON ${eventType}: userId no-UUID "${String(userId)}"; push descartado sin reintento`);
       return [];
     }
     try {
@@ -520,9 +520,10 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
    */
   private async onCompleted(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = tripCompletedSchema.safeParse(envelope.payload);
-    if (!parsed.success || !parsed.data.passengerId) return;
+    if (!parsed.success) return;
     const p = parsed.data;
-    const passengerId = p.passengerId!;
+    const { passengerId } = p;
+    if (!passengerId) return;
     const targets = await this.resolvePushTargets(passengerId, p.passengerPushToken, p.platform);
     if (targets.length === 0) {
       this.logger.warn(`trip ${p.tripId}: completado sin token push del pasajero → recibo omitido`);
@@ -741,7 +742,8 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`trip ${p.tripId}: llegó sin token push del pasajero → push omitido`);
       return;
     }
-    const hasWait = p.waitWindowSeconds !== undefined;
+    const { waitWindowSeconds } = p;
+    const hasWait = waitWindowSeconds !== undefined;
     for (const target of targets) {
       await this.engine.enqueue({
         recipientId: p.passengerId ?? p.tripId,
@@ -753,7 +755,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
           platform: target.platform,
           vars: {
             driverName: p.driverName ?? 'Tu conductor',
-            ...(hasWait ? { waitMinutes: Math.round(p.waitWindowSeconds! / 60) } : {}),
+            ...(waitWindowSeconds !== undefined ? { waitMinutes: Math.round(waitWindowSeconds / 60) } : {}),
           },
           data: { tripId: p.tripId, driverId: p.driverId, screen: 'TripActive' },
         },

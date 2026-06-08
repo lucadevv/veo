@@ -102,7 +102,9 @@ export class DispatchGrpcController {
   async getNearbyDrivers({ lat, lon, vehicleType }: GetNearbyDriversRequest): Promise<NearbyDriversReply> {
     // El service valida coords (dentro de Lima) y coacciona vehicleType al enum (inválido → todos):
     // el borde gRPC NO pasa por el ValidationPipe HTTP, así que la validación vive en el dominio.
-    const drivers = await this.nearby.nearby({ lat, lon }, vehicleType || undefined);
+    // proto3: un string no-seteado llega como '' (no undefined). Normalizamos ''/ausente → undefined
+    // ("tipo no especificado = todos"). `.length` evita el cambio a `??`, que NO cubriría el '' de proto3.
+    const drivers = await this.nearby.nearby({ lat, lon }, vehicleType?.length ? vehicleType : undefined);
     return { drivers: drivers.map((d) => ({ lat: d.lat, lon: d.lon, vehicleType: d.vehicleType })) };
   }
 }
