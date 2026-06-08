@@ -50,6 +50,10 @@ data:
       evaluation_interval: 30s
       external_labels:
         cluster: veo
+    # Reglas de SLO/alertas. Viven en el MISMO ConfigMap (montado en /etc/prometheus), no requieren
+    # prometheus-operator (este Prometheus es un StatefulSet vanilla que lee su config de aquí).
+    rule_files:
+      - /etc/prometheus/panic-slo.rules.yml
     scrape_configs:
       # Auto-descubrir pods anotados con prometheus.io/scrape=true.
       - job_name: kubernetes-pods
@@ -85,6 +89,38 @@ data:
       - job_name: otel-collector
         static_configs:
           - targets: ["otel-collector:8889"]
+  # ── SLO del PÁNICO (BR-S04, no-negociable VEO: p99 < 3s) ──────────────────────────────────────
+  # Recording del p99 del ack 202 de POST /panic + dos alertas: warning al SLO de servicio (<800ms)
+  # y critical al límite duro de seguridad (<3s). El histograma lo expone panic-service en /metrics
+  # (veo_panic_trigger_ack_duration_seconds). Sin Alertmanager las alertas son visibles en la UI de
+  # Prometheus (/alerts); el routing a un destino (Alertmanager) es un lote de infra aparte.
+  panic-slo.rules.yml: |
+    groups:
+      - name: panic-slo
+        rules:
+          # p99 fleet-wide del ack de pánico en ventana de 5m (agrega todas las réplicas por le).
+          - record: panic:ack_duration_seconds:p99_5m
+            expr: histogram_quantile(0.99, sum(rate(veo_panic_trigger_ack_duration_seconds_bucket[5m])) by (le))
+          # SLO de servicio: el ack del trigger debería responder <800ms p99 (BR-S04).
+          - alert: PanicAckSLOWarning
+            expr: panic:ack_duration_seconds:p99_5m > 0.8
+            for: 5m
+            labels:
+              severity: warning
+              domain: panic
+            annotations:
+              summary: "p99 del ack de pánico > 800ms (SLO BR-S04)"
+              description: "p99 del ack 202 de POST /panic = {{ $value | humanizeDuration }} en 5m (SLO < 800ms). El botón de pánico es el diferenciador de seguridad de VEO."
+          # Límite DURO no-negociable: el pánico debe acusar recibo en < 3s SIEMPRE.
+          - alert: PanicAckSLOCritical
+            expr: panic:ack_duration_seconds:p99_5m > 3
+            for: 1m
+            labels:
+              severity: critical
+              domain: panic
+            annotations:
+              summary: "p99 del ack de pánico > 3s (límite duro VEO)"
+              description: "p99 del ack de pánico = {{ $value | humanizeDuration }}, supera el límite no-negociable de 3s. Flujo de seguridad degradado."
 ---
 apiVersion: apps/v1
 kind: StatefulSet
