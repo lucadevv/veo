@@ -57,6 +57,7 @@ import {
   type TripHistoryPage,
 } from './domain/history';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
+import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import type { Env } from '../config/env.schema';
 import type {
@@ -70,12 +71,6 @@ import type {
   StartTripDto,
   TripView,
 } from './dto/trip.dto';
-
-/** Punto geográfico persistido como JSON en `waypoints`. */
-interface WaypointJson {
-  lat: number;
-  lon: number;
-}
 
 const BCRYPT_ROUNDS = 10;
 const PRODUCER = 'trip-service';
@@ -228,7 +223,7 @@ export class TripsService {
     // Idempotencia de creación: misma clave ⇒ mismo viaje (no se duplica).
     if (idempotencyKey) {
       const existing = await this.prisma.read.trip.findUnique({ where: { idempotencyKey } });
-      if (existing) return this.toView(existing);
+      if (existing) return toTripView(existing);
     }
 
     const origin = parseOrThrow(geoPointSchema, dto.origin, 'origin');
@@ -396,7 +391,7 @@ export class TripsService {
       return created;
     });
 
-    return this.toView(trip);
+    return toTripView(trip);
   }
 
   /**
@@ -494,7 +489,7 @@ export class TripsService {
   // ───────────────────────────── Lectura ─────────────────────────────
 
   async getTrip(id: string): Promise<TripView> {
-    return this.toView(await this.mustFind(id));
+    return toTripView(await this.mustFind(id));
   }
 
   async getTripState(id: string): Promise<{ id: string; status: TripStatus }> {
@@ -515,7 +510,7 @@ export class TripsService {
       where: { passengerId, status: TripStatus.SCHEDULED },
       orderBy: { scheduledFor: 'asc' },
     });
-    return trips.map((t) => this.toView(t));
+    return trips.map((t) => toTripView(t));
   }
 
   /**
@@ -573,7 +568,7 @@ export class TripsService {
       where: { passengerId, status: TripStatus.COMPLETED, passengerClosedAt: null },
       orderBy: { completedAt: 'asc' },
     });
-    return trip ? this.toView(trip) : null;
+    return trip ? toTripView(trip) : null;
   }
 
   /**
@@ -596,13 +591,13 @@ export class TripsService {
     }
     // Idempotente: ya cerrado → devolvemos la vista actual sin re-escribir (un reintento es ok, no error).
     if (trip.passengerClosedAt !== null) {
-      return this.toView(trip);
+      return toTripView(trip);
     }
     const updated = await this.prisma.write.trip.update({
       where: { id: tripId },
       data: { passengerClosedAt: new Date() },
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   // ───────────────────────────── Viajes programados (Ola 2B) ─────────────────────────────
@@ -684,7 +679,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -861,7 +856,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /** POST /trips/:id/accept — el conductor acepta. Emite trip.accepted. */
@@ -889,7 +884,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /** POST /trips/:id/arriving — el conductor va en camino. Emite trip.arriving. */
@@ -923,7 +918,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /** POST /trips/:id/arrived — el conductor llegó al punto de recojo. Emite trip.arrived. */
@@ -952,7 +947,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1040,7 +1035,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1133,7 +1128,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1208,7 +1203,7 @@ export class TripsService {
       );
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1309,7 +1304,7 @@ export class TripsService {
       `PUJA: viaje ${trip.id} ${trip.status} → REASSIGNING (conductor ${cancelledDriverId} canceló; ` +
         `re-abre puja a ${bidCents}; reasignación ${nextReassignCount}/${this.maxReassign})`,
     );
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1350,7 +1345,7 @@ export class TripsService {
       `FIXED: viaje ${trip.id} ${trip.status} → REASSIGNING (conductor ${cancelledDriverId} canceló; ` +
         `re-despacha tarifa fija ${trip.fareCents}; reasignación ${nextReassignCount}/${this.maxReassign})`,
     );
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1400,7 +1395,7 @@ export class TripsService {
       `PUJA: viaje ${trip.id} ${trip.status} → FAILED (tope de re-asignaciones ${reassignCount} > ` +
         `${this.maxReassign}; pasajero notificado, no más re-puja)`,
     );
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1718,14 +1713,14 @@ export class TripsService {
     if (updated === null) {
       // Doble-tap: releemos el viaje ya reactivado (idempotente, no re-emitimos eventos).
       this.logger.log(`PUJA: re-bid duplicado de viaje ${tripId} (ya reactivado); no-op idempotente`);
-      return this.toView(await this.mustFind(tripId));
+      return toTripView(await this.mustFind(tripId));
     }
 
     this.logger.log(
       `PUJA: viaje ${tripId} ${fromStatus} → REQUESTED (re-bid del pasajero: ${trip.fareCents} → ${bidCents}; ` +
         `board fresco, reassignCount reiniciado)`,
     );
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   /**
@@ -1746,7 +1741,7 @@ export class TripsService {
     const destination = parseOrThrow(geoPointSchema, dto.destination, 'destination');
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     // Conserva las paradas múltiples (Ola 2B) ya elegidas al recalcular la ruta por cambio de destino.
-    const waypoints = this.readWaypoints(trip);
+    const waypoints = readWaypoints(trip);
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = Number(trip.surgeMultiplier.toString());
     const fare = calculateFare({
@@ -1775,7 +1770,7 @@ export class TripsService {
       });
       return next;
     });
-    return this.toView(updated);
+    return toTripView(updated);
   }
 
   // ───────────────────────────── Derecho al olvido (Ley 29733) ─────────────────────────────
@@ -1864,13 +1859,6 @@ export class TripsService {
     return new Date(trip.assignedAt.getTime() + trip.durationSeconds * 1000);
   }
 
-  /** Lee las paradas múltiples (Ola 2B) persistidas como JSON; [] si el viaje es directo. */
-  private readWaypoints(trip: Trip): LatLon[] {
-    const raw = trip.waypoints;
-    if (!Array.isArray(raw)) return [];
-    return (raw as unknown as WaypointJson[]).map((w) => ({ lat: w.lat, lon: w.lon }));
-  }
-
   private async recordEvent(
     tx: TxClient,
     tripId: string,
@@ -1882,37 +1870,4 @@ export class TripsService {
     });
   }
 
-  private toView(trip: Trip): TripView {
-    return {
-      id: trip.id,
-      passengerId: trip.passengerId,
-      driverId: trip.driverId,
-      vehicleId: trip.vehicleId,
-      status: trip.status,
-      origin: { lat: trip.originLat, lon: trip.originLon },
-      destination: { lat: trip.destLat, lon: trip.destLon },
-      waypoints: this.readWaypoints(trip),
-      fareCents: trip.fareCents,
-      currency: trip.currency,
-      surgeMultiplier: Number(trip.surgeMultiplier.toString()),
-      distanceMeters: trip.distanceMeters,
-      durationSeconds: trip.durationSeconds,
-      paymentMethod: trip.paymentMethod,
-      routePolyline: trip.routePolyline,
-      category: trip.category,
-      vehicleType: trip.vehicleType,
-      // S1 (ADR 011) — el modo CONGELADO del viaje viaja en la vista: createTrip + GET trip lo exponen
-      // para que la app reconcilie contra lo que mostró el quote (un flip entre quote y create se detecta).
-      dispatchMode: trip.dispatchMode,
-      scheduledFor: trip.scheduledFor ? trip.scheduledFor.toISOString() : null,
-      childMode: trip.childMode,
-      specialRequests: trip.specialRequests,
-      penaltyCents: trip.penaltyCents,
-      requestedAt: trip.requestedAt.toISOString(),
-      completedAt: trip.completedAt ? trip.completedAt.toISOString() : null,
-      cancelledAt: trip.cancelledAt ? trip.cancelledAt.toISOString() : null,
-      // Re-entrada del cierre: marca de cuándo el pasajero cerró el post-viaje; null = aún sin cerrar.
-      passengerClosedAt: trip.passengerClosedAt ? trip.passengerClosedAt.toISOString() : null,
-    };
-  }
 }
