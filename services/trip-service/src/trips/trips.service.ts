@@ -275,44 +275,18 @@ export class TripsService {
     const now = new Date();
     const resolveAt = scheduledFor ?? now;
     const mode = await this.resolveDispatchMode(toZone(origin), resolveAt, dto.bidCents !== undefined);
-    const isBid = mode === PricingMode.PUJA;
-
-    // El modo elegido por el SERVIDOR decide cómo se fija la tarifa:
-    //  - PUJA (ADR 010 §2): REQUIERE el bid del pasajero (validado piso ≤ bid ≤ techo). Ese bid ES el
-    //    fareCents (no la tarifa por ruta); el surge solo SUGIERE (decisión #5), no se aplica al bid. Si
-    //    falta el bid → 400 "falta tu oferta" (el quote ya lo pidió; no asumimos un precio, §5).
-    //  - FIXED: IGNORA cualquier `dto.bidCents` que llegue (la app ya mostró tarifa fija vía el quote);
-    //    se calcula la tarifa firme por ruta (BR-T05).
-    let fareCents: number;
-    if (mode === PricingMode.PUJA) {
-      if (dto.bidCents === undefined) {
-        throw new ValidationError('falta tu oferta', { mode });
-      }
-      const floor = this.resolveBidFloorCents(origin);
-      if (dto.bidCents < floor) {
-        throw new ValidationError(
-          `El bid (${dto.bidCents}) es menor al piso de la zona (${floor}) (ADR 010 §9.3)`,
-          { bidCents: dto.bidCents, floorCents: floor },
-        );
-      }
-      // Techo del bid (gate AUTORITATIVO): un bid desbocado overflowea el int4 de fareCents y/o fluye
-      // al cobro como tarifa. Lo rechazamos acá (espeja el chequeo de piso), no solo en el DTO.
-      if (dto.bidCents > this.bidMaxCents) {
-        throw new ValidationError(
-          `El bid (${dto.bidCents}) supera el techo permitido (${this.bidMaxCents}) (ADR 010)`,
-          { bidCents: dto.bidCents, maxCents: this.bidMaxCents },
-        );
-      }
-      fareCents = dto.bidCents;
-    } else {
-      const fare = calculateFare({
-        distanceMeters: route.distanceMeters,
-        durationSeconds: route.durationSeconds,
-        surgeMultiplier: surge,
-        childMode: dto.childMode ?? false,
-      });
-      fareCents = fare.cents;
-    }
+    // El modo elegido por el SERVIDOR fija la tarifa + el seq de negociación vía Strategy (open/closed):
+    //  - PUJA (ADR 010 §2): valida el bid (piso ≤ bid ≤ techo) y el bid ES el fareCents; seq=1. Falta el
+    //    bid → 400 "falta tu oferta". El surge solo SUGIERE (decisión #5), no se aplica al bid.
+    //  - FIXED (BR-T05): IGNORA el bid, calcula la tarifa firme por ruta; seq=0.
+    // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
+    const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
+      bidCents: dto.bidCents,
+      floorCents: this.resolveBidFloorCents(origin),
+      route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
+      surge,
+      childMode: dto.childMode ?? false,
+    });
     const currency = 'PEN';
 
     // ADR 011 · el modo RESUELTO se CONGELA en la fila del viaje. Reasignación / activación de
@@ -353,10 +327,10 @@ export class TripsService {
           // BE-2 · solicitudes especiales (mascota/equipaje/silla). El conductor las ve antes de aceptar.
           specialRequests: dto.specialRequests ?? [],
           idempotencyKey: idempotencyKey ?? null,
-          // H13 — la puja abre el PRIMER ciclo de negociación (seq=1); el camino legacy sin bid queda en 0
+          // H13 — la puja abre el PRIMER ciclo de negociación (seq=1, lo fija el Strategy); FIXED queda en 0
           // (nunca emite offer_accepted → applyAgreedFare no aplica). El seq es monotónico: rebid y la
           // reasignación lo INCREMENTAN (nunca resetean, a diferencia de reassignCount).
-          negotiationSeq: isBid ? 1 : 0,
+          negotiationSeq,
         },
       });
 

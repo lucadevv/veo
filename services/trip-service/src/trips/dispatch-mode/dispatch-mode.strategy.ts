@@ -18,9 +18,35 @@ export interface DispatchOpenContext {
   scheduled: boolean;
 }
 
+/** Insumos para fijar la tarifa al crear el viaje (el modo usa los que necesita). */
+export interface DispatchCreationInput {
+  /** Oferta del pasajero (solo PUJA la usa; FIXED la ignora). */
+  bidCents?: number;
+  /** Piso del bid resuelto por zona (solo PUJA lo usa). */
+  floorCents: number;
+  /** Ruta para el cálculo de tarifa fija (solo FIXED la usa). */
+  route: { distanceMeters: number; durationSeconds: number };
+  surge: number;
+  childMode: boolean;
+}
+
+/** Resultado de fijar la creación: la tarifa firme + el seq inicial de negociación. */
+export interface DispatchCreation {
+  fareCents: number;
+  /** PUJA abre el 1er ciclo de negociación (1); FIXED no negocia (0). */
+  negotiationSeq: number;
+}
+
 export interface DispatchModeStrategy {
   /** El modo que esta estrategia atiende (clave del registry). */
   readonly mode: PricingMode;
+
+  /**
+   * Fija la TARIFA y el negotiationSeq inicial según el modo. PUJA: valida el bid (piso ≤ bid ≤ techo) y
+   * el bid ES el fareCents; FIXED: calcula la tarifa firme por ruta (calculateFare). Lanza ValidationError
+   * si el bid falta o está fuera de rango (PUJA). Es PURA (sin I/O): el caller arma el input.
+   */
+  resolveCreation(input: DispatchCreationInput): DispatchCreation;
 
   /**
    * Emite el evento de APERTURA del despacho en la transacción del caller (mismo outbox que la mutación

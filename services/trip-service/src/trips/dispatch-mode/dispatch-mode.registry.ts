@@ -8,6 +8,7 @@
  */
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BID_MAX_CENTS } from '@veo/utils';
 import { PricingMode } from '@veo/shared-types';
 import type { DispatchModeStrategy } from './dispatch-mode.strategy';
 import { PujaDispatchStrategy } from './puja-dispatch.strategy';
@@ -22,8 +23,9 @@ export class DispatchModeRegistry {
 
   constructor(@Optional() config?: ConfigService<Env, true>) {
     const bidWindowSec = config?.get('BID_WINDOW_SEC', { infer: true }) ?? DEFAULT_BID_WINDOW_SEC;
+    const bidMaxCents = config?.get('BID_MAX_CENTS', { infer: true }) ?? BID_MAX_CENTS;
     const all: DispatchModeStrategy[] = [
-      new PujaDispatchStrategy(bidWindowSec),
+      new PujaDispatchStrategy(bidWindowSec, bidMaxCents),
       new FixedDispatchStrategy(),
     ];
     this.strategies = new Map(all.map((s) => [s.mode, s]));
