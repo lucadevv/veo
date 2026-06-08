@@ -2,12 +2,10 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
 
 const projectRoot = __dirname;
-
-// Monorepo: los packages @veo/* viven en el repo hermano veo-platform y se
-// consumen vía `file:` (symlinks creados por pnpm). Metro necesita observar esas
-// carpetas y resolver sus node_modules.
-const veoPlatformRoot = path.resolve(projectRoot, '..', 'veo-platform');
-const veoPackages = path.resolve(veoPlatformRoot, 'packages');
+// Monorepo VEO: esta app vive en apps/passenger; los packages @veo/* viven en
+// <root>/packages y pnpm los enlaza (workspace:*) por symlink. Metro debe observar
+// el código fuente de esos packages y resolver el node_modules hoisted del root.
+const monorepoRoot = path.resolve(projectRoot, '..', '..');
 
 /**
  * Metro configuration
@@ -16,17 +14,24 @@ const veoPackages = path.resolve(veoPlatformRoot, 'packages');
  * @type {import('@react-native/metro-config').MetroConfig}
  */
 const config = {
-  // Carpetas extra que Metro debe observar fuera del root del proyecto.
-  watchFolders: [veoPackages, path.resolve(veoPlatformRoot, 'node_modules')],
+  // Carpetas extra que Metro observa fuera del proyecto: el código de los packages
+  // compartidos y el node_modules hoisted del monorepo (deps transitivas).
+  watchFolders: [
+    path.resolve(monorepoRoot, 'packages'),
+    path.resolve(monorepoRoot, 'node_modules'),
+  ],
   resolver: {
-    // Rutas de node_modules: primero las del proyecto, luego las del monorepo
-    // para resolver dependencias transitivas de los packages compartidos.
+    // Rutas de node_modules: primero el del proyecto, luego el del root (donde pnpm
+    // hoistea todas las deps por node-linker=hoisted).
     nodeModulesPaths: [
       path.resolve(projectRoot, 'node_modules'),
-      path.resolve(veoPlatformRoot, 'node_modules'),
+      path.resolve(monorepoRoot, 'node_modules'),
     ],
-    // pnpm usa symlinks; Metro 0.80+ los resuelve nativamente.
+    // pnpm enlaza los @veo/* vía symlinks; Metro 0.80+ los resuelve nativamente.
     unstable_enableSymlinks: true,
+    // Respeta el campo "exports": permite importar submódulos puros (p.ej.
+    // `@veo/utils/money`) sin arrastrar el barrel completo, que incluye módulos
+    // basados en `node:crypto` (ids/crypto) inexistentes en Hermes/React Native.
     unstable_enablePackageExports: true,
   },
 };

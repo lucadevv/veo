@@ -1,10 +1,5 @@
 packages:
   - "apps/*"
-  # Las apps móviles (React Native) NO entran al workspace pnpm del backend:
-  # tienen su propio pnpm-lock.yaml y toolchain (Metro/Pods/Gradle). Se integrarán
-  # al workspace unificado en un paso posterior (hoy usan deps `file:` a packages/).
-  - "!apps/passenger"
-  - "!apps/driver"
   - "services/*"
   - "services/bff/*"
   - "packages/*"

@@ -71,7 +71,7 @@ export class FallbackMapsClient implements MapsClient {
     try {
       return await this.primary.geocode(query);
     } catch (err) {
-      if (err instanceof ExternalServiceError) return this.fallback.geocode();
+      if (err instanceof ExternalServiceError) return this.fallback.geocode(query);
       throw err;
     }
   }
@@ -80,7 +80,7 @@ export class FallbackMapsClient implements MapsClient {
     try {
       return await this.primary.autocomplete(query, opts);
     } catch (err) {
-      if (err instanceof ExternalServiceError) return this.fallback.autocomplete();
+      if (err instanceof ExternalServiceError) return this.fallback.autocomplete(query, opts);
       throw err;
     }
   }
@@ -89,7 +89,7 @@ export class FallbackMapsClient implements MapsClient {
     try {
       return await this.primary.reverse(point);
     } catch (err) {
-      if (err instanceof ExternalServiceError) return this.fallback.reverse();
+      if (err instanceof ExternalServiceError) return this.fallback.reverse(point);
       throw err;
     }
   }
