@@ -1,20 +1,15 @@
 # VEO Infrastructure
 
-Infraestructura como código para VEO. Repo separado del código de aplicación por:
+Infraestructura como código para VEO. Vive en `infra/` del monorepo único `lucadevv/veo`. Aunque comparte repo con el código de aplicación, mantiene su propia gobernanza:
 
 - **Cadencia distinta**: cambios infra son semanales/mensuales vs deploys de app diarios
-- **Reviewers distintos**: SRE + Tech Lead aprueban cambios de Terraform; cualquier dev aprueba código
-- **Compliance**: cambios de IAM, KMS, RBAC quedan auditados en un repo dedicado
-- **State separado**: Terraform state no debe estar mezclado con código
+- **Reviewers distintos**: SRE + Tech Lead aprueban cambios de Terraform (vía CODEOWNERS sobre `infra/`)
+- **Compliance**: cambios de IAM, KMS, RBAC, NetworkPolicies requieren label `security-review`
+- **State separado**: Terraform state remoto (S3 + DynamoDB lock), nunca mezclado con código
 
-## Repos hermanos
+## Ubicación en el monorepo
 
-| Repo | Propósito |
-|---|---|
-| **veo-infra** (este) | Terraform + K8s + ArgoCD (producción) |
-| [veo-platform](../veo-platform) | Servicios backend + apps web + dev-stack docker-compose |
-| [veo-passenger-app](../veo-passenger-app) | App pasajero |
-| [veo-driver-app](../veo-driver-app) | App conductor |
+`infra/` contiene Terraform + K8s (Kustomize) + ArgoCD. El backend está en `services/`, las apps en `apps/`, los packages compartidos en `packages/`.
 
 ## Estructura
 
@@ -73,7 +68,7 @@ backend "s3" {
 
 ## Deploy de aplicaciones (GitOps via ArgoCD)
 
-Cuando un servicio publica nueva imagen Docker (desde CI de veo-platform), ArgoCD detecta y aplica:
+Cuando un servicio publica nueva imagen Docker (desde el CI del monorepo), ArgoCD detecta y aplica:
 
 ```bash
 # Manual sync (raro, solo prod):

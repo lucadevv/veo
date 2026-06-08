@@ -11,10 +11,10 @@
    - AWS SSO (cuenta `veo-dev` para todos; `staging` / `prod` solo SRE y Tech Lead)
    - Sentry, Grafana Cloud, Datadog (si aplica), PagerDuty
 
-3. Clona y arranca:
+3. Clona y arranca (monorepo único):
    ```bash
-   git clone git@github.com:veo/veo-platform.git
-   cd veo-platform
+   git clone git@github.com:lucadevv/veo.git
+   cd veo
    nvm use && corepack enable
    pnpm install
    cp .env.example .env

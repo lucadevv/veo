@@ -3,7 +3,7 @@ kind: AppProject
 metadata: { name: veo, namespace: argocd }
 spec:
   description: VEO Platform
-  sourceRepos: ["git@github.com:veo/*"]
+  sourceRepos: ["git@github.com:lucadevv/veo.git"]
   destinations:
     - { namespace: "veo-*", server: https://kubernetes.default.svc }
   clusterResourceWhitelist:

@@ -4,7 +4,7 @@ metadata: { name: veo-staging, namespace: argocd }
 spec:
   project: veo
   source:
-    repoURL: git@github.com:veo/veo-deploy.git
+    repoURL: git@github.com:lucadevv/veo.git
     targetRevision: main
     path: infra/k8s/overlays/staging
   destination: { server: https://kubernetes.default.svc, namespace: veo-staging }

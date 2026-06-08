@@ -6,7 +6,7 @@ metadata:
 spec:
   project: veo
   source:
-    repoURL: git@github.com:veo/veo-deploy.git
+    repoURL: git@github.com:lucadevv/veo.git
     targetRevision: main
     path: infra/k8s/overlays/prod
   destination:

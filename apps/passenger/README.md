@@ -2,14 +2,9 @@
 
 React Native (iOS + Android) para pasajeros · Mercado: Lima, Perú · Idioma: español peruano
 
-## Repos hermanos
+## Ubicación en el monorepo
 
-| Repo | Propósito |
-|---|---|
-| **veo-passenger-app** (este) | App pasajero iOS + Android |
-| [veo-driver-app](../veo-driver-app) | App conductor (Android) |
-| [veo-platform](../veo-platform) | Servicios backend + BFFs + admin-web + family-web + packages compartidos |
-| [veo-infra](../veo-infra) | Terraform + K8s + ArgoCD (producción) |
+Esta app vive en `apps/passenger/` del monorepo único [`lucadevv/veo`](../../README.md). El backend (`services/`), los packages `@veo/*` (`packages/`) y la infra (`infra/`) viven en el mismo repo. La app conductor está en `apps/driver/`.
 
 ## Prerequisitos
 
@@ -20,16 +15,14 @@ React Native (iOS + Android) para pasajeros · Mercado: Lima, Perú · Idioma: e
 ## Setup
 
 ```bash
-git clone git@github.com:veo/veo-passenger-app.git
-cd veo-passenger-app
-pnpm install
+# Desde la raíz del monorepo
+git clone git@github.com:lucadevv/veo.git && cd veo
+pnpm install                  # instala TODO el workspace (backend + apps)
+pnpm dev-stack:up && pnpm dev  # backend (en otra terminal)
+
+# Arrancar la app
+cd apps/passenger
 cp .env.example .env
-
-# Levantar el backend (repo hermano)
-cd ../veo-platform && pnpm dev-stack:up && pnpm dev
-
-# Volver y arrancar la app
-cd ../veo-passenger-app
 pnpm ios     # o pnpm android
 ```
 
@@ -42,15 +35,15 @@ pnpm ios     # o pnpm android
 | `WebRTC` | iOS + Android | `react-native-webrtc` oficial |
 | `BackgroundLocation` | iOS + Android | GPS durante viaje |
 
-## Packages compartidos (consumidos desde veo-platform)
+## Packages compartidos
 
-**Durante desarrollo** se consumen vía `file:` apuntando al repo hermano:
+Se consumen vía `workspace:*` desde `packages/` del monorepo (pnpm workspace, `node-linker=hoisted`). Metro los resuelve desde el código fuente:
 
 ```json
-"@veo/shared-types": "file:../veo-platform/packages/shared-types",
-"@veo/api-client":   "file:../veo-platform/packages/api-client",
-"@veo/utils":        "file:../veo-platform/packages/utils",
-"@veo/ui-kit":       "file:../veo-platform/packages/ui-kit"
+"@veo/shared-types": "workspace:*",
+"@veo/api-client":   "workspace:*",
+"@veo/utils":        "workspace:*",
+"@veo/ui-kit":       "workspace:*"
 ```
 
 Esto exige que veo-platform esté clonado como hermano. Ver [docs/shared-packages.md](./docs/shared-packages.md) para el setup completo.

@@ -5,18 +5,19 @@
 
 ## Proyecto
 
-**VEO** — Plataforma de movilidad segura en Lima, Perú. Tres productos: passenger app (RN), driver app (RN Android), admin dashboard (Next.js) + family-web (vista pública).
+**VEO** — Plataforma de movilidad segura en Lima, Perú. Productos: passenger app (RN), driver app (RN Android), admin dashboard (Next.js) + family-web (vista pública).
 
-**Estructura multi-repo (4 repos hermanos):**
+**Estructura: MONOREPO único** (`github.com/lucadevv/veo`). Consolidación de los 4 repos hermanos previos (`veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra`):
 
-| Repo | Qué vive ahí |
+| Carpeta | Qué vive ahí |
 |---|---|
-| `veo-platform` (este) | Backend (14 servicios) + admin-web + family-web + packages compartidos + dev-stack docker-compose |
-| `veo-passenger-app` | App pasajero React Native iOS+Android |
-| `veo-driver-app` | App conductor React Native Android |
-| `veo-infra` | Terraform + K8s + ArgoCD (producción) |
+| `apps/` | `passenger` + `driver` (React Native) · `admin-web` + `family-web` + `web-hub` (Next.js) |
+| `services/` | 14 microservicios (NestJS) + BFFs (`public`/`driver`/`admin`) |
+| `packages/` | código compartido `@veo/*` (tipos, auth, rpc, utils, ui-kit, observability…) |
+| `infra/` | Terraform + K8s (Kustomize) + ArgoCD |
+| `dev-stack/` · `docs/` · `e2e/` | orquestación local · documentación · pruebas end-to-end |
 
-Las apps móviles consumen `@veo/*` packages vía `file:../veo-platform/packages/*` en dev y vía GitHub Packages en CI/prod. Ver `docs/cross-repo-workflow.md`.
+Las apps móviles consumen `@veo/*` vía `workspace:*` (pnpm workspace, `node-linker=hoisted`). Build unificado: un solo `pnpm install`. Metro resuelve los packages desde `packages/`.
 
 **Diferenciador no negociable:** seguridad. Verificación biométrica del conductor en cada turno, cámara en vivo todo el viaje, pánico oculto con UI engañosa, compartir con familia sin app.
 

@@ -2,28 +2,21 @@
 
 React Native · **Android** prioritario (95% del mercado conductor en Lima) · iOS en Fase 3
 
-## Repos hermanos
+## Ubicación en el monorepo
 
-| Repo | Propósito |
-|---|---|
-| **veo-driver-app** (este) | App conductor Android |
-| [veo-passenger-app](../veo-passenger-app) | App pasajero iOS + Android |
-| [veo-platform](../veo-platform) | Servicios backend + BFFs + admin-web + family-web + packages compartidos |
-| [veo-infra](../veo-infra) | Terraform + K8s + ArgoCD (producción) |
+Esta app vive en `apps/driver/` del monorepo único [`lucadevv/veo`](../../README.md). El backend (`services/`), los packages `@veo/*` (`packages/`) y la infra (`infra/`) viven en el mismo repo. La app pasajero está en `apps/passenger/`.
 
 ## Setup
 
 ```bash
-git clone git@github.com:veo/veo-driver-app.git
-cd veo-driver-app
-pnpm install
+# Desde la raíz del monorepo
+git clone git@github.com:lucadevv/veo.git && cd veo
+pnpm install                  # instala TODO el workspace (backend + apps)
+pnpm dev-stack:up && pnpm dev  # backend (en otra terminal)
+
+# Arrancar la app
+cd apps/driver
 cp .env.example .env
-
-# Backend (repo hermano)
-cd ../veo-platform && pnpm dev-stack:up && pnpm dev
-
-# Volver y arrancar
-cd ../veo-driver-app
 pnpm android
 ```
 
@@ -59,7 +52,7 @@ pnpm android
 
 ## Packages compartidos
 
-Mismo patrón que passenger: `file:../veo-platform/packages/*` en dev, GitHub Packages en CI/prod.
+Mismo patrón que passenger: `@veo/*` vía `workspace:*` desde `packages/` del monorepo (pnpm workspace, `node-linker=hoisted`).
 
 ## Comandos
 

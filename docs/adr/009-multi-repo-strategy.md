@@ -1,6 +1,11 @@
 # ADR-009 · Estrategia multi-repo (split inicial)
 
-**Estado:** Aceptado · **Fecha:** 2026-05-27 · **Reemplaza:** decisión implícita previa de monorepo único
+**Estado:** ⚠️ **SUPERSEDED** (junio 2026 — revertido a monorepo único `lucadevv/veo`) · **Fecha:** 2026-05-27 · **Reemplaza:** decisión implícita previa de monorepo único
+
+> **Nota (junio 2026):** esta decisión fue revertida. Los 4 repos se consolidaron de nuevo en un
+> monorepo único (`lucadevv/veo`): un solo `pnpm install` con `node-linker=hoisted`, deps `workspace:*`,
+> y ArgoCD apunta al propio monorepo. El contexto de abajo se conserva como registro histórico de por
+> qué en su momento se evaluó el split. Ver `README.md` raíz y `docs/cross-repo-workflow.md`.
 
 ## Contexto
 
