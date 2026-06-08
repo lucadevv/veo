@@ -8,7 +8,7 @@
  *  4. Oferta SECUENCIAL al top-1 con timeout; si rechaza/expira, ofrece al siguiente.
  *  5. Si los primeros N (env, default 5) rechazan en radio 1 → expande a k-ring radio 2.
  *  6. Si alguien acepta → match_found (lo publica DispatchService.accept en la misma tx).
- *     Si se agotan candidatos → publica `dispatch.timeout`.
+ *     Si se agotan candidatos → publica `dispatch.no_offers` (reason `no_candidates`).
  *
  * SLO p99 < 1.5s request→primera oferta: los candidatos salen de Redis (no de Postgres) y el
  * cálculo de ETA con @veo/maps es por oferta (no bloquea el ranking).
@@ -129,9 +129,9 @@ export class MatchingService {
       return;
     }
 
-    // Sin candidatos hasta maxKRing → cierre honesto + dispatch.timeout (idempotente por el CAS del cierre).
+    // Sin candidatos hasta maxKRing → cierre honesto + dispatch.no_offers (idempotente por el CAS del cierre).
     if (await this.sessions.closeTimedOut(tripId)) {
-      await this.publishTimeout(tripId, attempted.size);
+      await this.publishNoCandidates(tripId, attempted.size);
     }
   }
 
@@ -248,11 +248,18 @@ export class MatchingService {
     }));
   }
 
-  private async publishTimeout(tripId: string, attemptedDrivers: number): Promise<void> {
+  /**
+   * El matcher secuencial (FIXED) agotó el k-ring sin candidatos → emite `dispatch.no_offers` (reason
+   * `no_candidates`), el EVENTO UNIFICADO de "sin conductor" que trip-service YA consume (puja.consumer →
+   * expireFromNoOffers → EXPIRED instantáneo). Reemplaza al viejo `dispatch.timeout` (que no tenía consumer
+   * → el FIXED solo cerraba por el watchdog en minutos). `attemptedDrivers` queda como label de métrica
+   * (cuántos conductores se intentaron antes de cerrar), no en el payload (no_offers solo lleva tripId+reason).
+   */
+  private async publishNoCandidates(tripId: string, attemptedDrivers: number): Promise<void> {
     const envelope = createEnvelope({
-      eventType: 'dispatch.timeout',
+      eventType: 'dispatch.no_offers',
       producer: 'dispatch-service',
-      payload: { tripId, attemptedDrivers },
+      payload: { tripId, reason: 'no_candidates' },
     });
     await this.prisma.write.$transaction(async (tx) => {
       await tx.outboxEvent.create({
@@ -263,6 +270,7 @@ export class MatchingService {
         },
       });
     });
-    domainEventsTotal.inc({ event: 'dispatch.timeout', result: 'published' });
+    domainEventsTotal.inc({ event: 'dispatch.no_offers', result: 'published' });
+    this.logger.log(`matcher FIXED sin candidatos para ${tripId} (intentados ${attemptedDrivers}) → no_offers`);
   }
 }

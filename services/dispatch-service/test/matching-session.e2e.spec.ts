@@ -3,7 +3,7 @@
  *
  * Ejercita el advance STATELESS (offerNext) sin estado en proceso: startSession crea la DispatchSession
  * y oferta al primer candidato; cada reject hace avanzar al siguiente; al agotarse cierra TIMED_OUT y
- * publica dispatch.timeout. "Una oferta a la vez" y los cierres CAS se verifican contra la DB de verdad.
+ * publica dispatch.no_offers. "Una oferta a la vez" y los cierres CAS se verifican contra la DB de verdad.
  * (Vive en test/ — excluido de tsc — porque usa testcontainers/import.meta, igual que los e2e de payment/trip.)
  */
 import { fileURLToPath } from 'node:url';
@@ -103,8 +103,8 @@ async function rejectInFlight(tripId: string): Promise<void> {
   });
 }
 
-async function timeoutEvents(tripId: string) {
-  return prisma.outboxEvent.findMany({ where: { aggregateId: tripId, eventType: 'dispatch.timeout' } });
+async function noOffersEvents(tripId: string) {
+  return prisma.outboxEvent.findMany({ where: { aggregateId: tripId, eventType: 'dispatch.no_offers' } });
 }
 
 describe('Matching secuencial event-driven (D2.1: DispatchSession + offerNext)', () => {
@@ -137,7 +137,7 @@ describe('Matching secuencial event-driven (D2.1: DispatchSession + offerNext)',
     expect(offeredCount).toBe(1);
   });
 
-  it('reject → offerNext oferta al SIGUIENTE candidato; exhaustión → TIMED_OUT + dispatch.timeout', async () => {
+  it('reject → offerNext oferta al SIGUIENTE candidato; exhaustión → TIMED_OUT + dispatch.no_offers', async () => {
     const tripId = uuidv7();
     const d1 = uuidv7();
     const d2 = uuidv7();
@@ -160,24 +160,24 @@ describe('Matching secuencial event-driven (D2.1: DispatchSession + offerNext)',
     await matching.offerNext(tripId);
     const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
     expect(session?.status).toBe(DispatchSessionStatus.TIMED_OUT);
-    expect(await timeoutEvents(tripId)).toHaveLength(1);
+    expect(await noOffersEvents(tripId)).toHaveLength(1);
   });
 
-  it('sin conductores disponibles → startSession cierra TIMED_OUT y publica dispatch.timeout', async () => {
+  it('sin conductores disponibles → startSession cierra TIMED_OUT y publica dispatch.no_offers', async () => {
     const tripId = uuidv7();
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
     const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
     expect(session?.status).toBe(DispatchSessionStatus.TIMED_OUT);
     expect(await prisma.dispatchMatch.count({ where: { tripId } })).toBe(0);
-    expect(await timeoutEvents(tripId)).toHaveLength(1);
+    expect(await noOffersEvents(tripId)).toHaveLength(1);
   });
 
   it('offerNext sobre una sesión ya cerrada (TIMED_OUT) es no-op', async () => {
     const tripId = uuidv7();
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR }); // → TIMED_OUT (sin drivers)
-    const before = await timeoutEvents(tripId);
+    const before = await noOffersEvents(tripId);
     await matching.offerNext(tripId); // no-op: sesión no-OPEN
-    expect(await timeoutEvents(tripId)).toHaveLength(before.length); // no re-publica
+    expect(await noOffersEvents(tripId)).toHaveLength(before.length); // no re-publica
     expect(await prisma.dispatchMatch.count({ where: { tripId } })).toBe(0);
   });
 });
@@ -296,7 +296,7 @@ describe('Reconciler de timeout durable (D2.3: sweepExpiredOffers, reemplaza el 
     expect(inFlight.driverId).not.toBe(first.driverId); // avanzó al segundo
   });
 
-  it('oferta vencida sin más candidatos → sweep cierra TIMED_OUT + dispatch.timeout', async () => {
+  it('oferta vencida sin más candidatos → sweep cierra TIMED_OUT + dispatch.no_offers', async () => {
     const tripId = uuidv7();
     await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
@@ -305,7 +305,7 @@ describe('Reconciler de timeout durable (D2.3: sweepExpiredOffers, reemplaza el 
     await matching.sweepExpiredOffers();
     const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
     expect(session?.status).toBe(DispatchSessionStatus.TIMED_OUT);
-    expect(await timeoutEvents(tripId)).toHaveLength(1);
+    expect(await noOffersEvents(tripId)).toHaveLength(1);
   });
 
   it('una oferta FRESCA (no vencida) no se barre', async () => {

@@ -144,7 +144,6 @@ export const tripPiiErased = z.object({
 
 /* ── dispatch ── (BR-T06) */
 export const dispatchMatchFound = z.object({ tripId: z.string(), driverId: z.string(), vehicleId: z.string().optional(), scoreMs: z.number() });
-export const dispatchTimeout = z.object({ tripId: z.string(), attemptedDrivers: z.number().int() });
 export const dispatchOffered = z.object({ tripId: z.string(), driverId: z.string(), matchId: z.string(), expiresAt: z.string() });
 
 /* ── PUJA / negociación (ADR 010 §4) ── (Lote A: contratos)
@@ -201,12 +200,15 @@ export const dispatchOfferAccepted = z.object({
   /// fila vigente → no-op (no escribe la tarifa rancia del conductor del ciclo anterior).
   negotiationSeq: z.number().int().positive(),
 });
-/// dispatch → trip. La puja cerró sin match → trip transiciona a EXPIRED (pantalla NoOffers, el pasajero
-/// re-puja más alto). `window_expired`: venció la ventana sin ofertas aceptadas. `all_lapsed`: todas las
-/// ofertas caducaron. Subsume el viejo `dispatch.timeout` (#5) con semántica clara para trip.
+/// dispatch → trip. dispatch NO encontró conductor → trip transiciona a EXPIRED (pantalla NoOffers, el
+/// pasajero re-puja/re-pide). EVENTO UNIFICADO de "sin conductor" para AMBOS modos (cierre instantáneo,
+/// no espera al watchdog). reasons: `window_expired` (PUJA: venció la ventana sin ofertas aceptadas),
+/// `all_lapsed` (PUJA: todas las ofertas caducaron), `no_candidates` (FIXED: el matcher secuencial agotó
+/// el k-ring sin candidatos). Reemplaza al viejo `dispatch.timeout` (que no tenía consumer → FIXED solo
+/// cerraba por el watchdog en minutos).
 export const dispatchNoOffers = z.object({
   tripId: z.string(),
-  reason: z.enum(['window_expired', 'all_lapsed']),
+  reason: z.enum(['window_expired', 'all_lapsed', 'no_candidates']),
 });
 /// dispatch → trip. El PASAJERO canceló la PUJA en curso (`POST /trips/:id/bid/cancel`): dispatch cerró el
 /// board (OPEN→CANCELLED) y emite este evento de CIERRE por outbox para que trip transicione el VIAJE a
@@ -517,7 +519,6 @@ export const EVENT_SCHEMAS = {
   'trip.reassigning': tripReassigning,
   'dispatch.match_found': dispatchMatchFound,
   'dispatch.offered': dispatchOffered,
-  'dispatch.timeout': dispatchTimeout,
   'dispatch.offer_made': dispatchOfferMade,
   'dispatch.offer_accepted': dispatchOfferAccepted,
   'dispatch.no_offers': dispatchNoOffers,
