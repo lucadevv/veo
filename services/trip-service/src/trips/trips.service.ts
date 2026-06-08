@@ -37,7 +37,7 @@ import {
   VehicleType as PrismaVehicleType,
   PricingMode as PrismaPricingMode,
 } from '../generated/prisma';
-import { assertTransition, InvalidTripTransition, LIVE_STATES } from './domain/trip-state-machine';
+import { assertTransition, InvalidTripTransition, LIVE_STATES, transitionSources } from './domain/trip-state-machine';
 import { ActiveTripExistsError } from './trips.errors';
 import {
   resolveStalledTarget,
@@ -828,14 +828,27 @@ export class TripsService {
   }
 
   private async assign(id: string, driverId: string, vehicleId: string | null): Promise<TripView> {
-    const trip = await this.mustFind(id);
-    assertTransition(trip.status, TripStatus.ASSIGNED);
-
+    // GUARD ATÓMICO (no check-then-act): el estado va en el WHERE del updateMany, así el viaje se mueve a
+    // ASSIGNED en el MISMO statement que valida que era asignable. Dos `dispatch.match_found` concurrentes
+    // con DISTINTO conductor (dos réplicas del trip-service) → solo UNO matchea un estado asignable y gana
+    // el claim; el otro ve count=0 → InvalidTripTransition (moot → assignFromDispatch lo ACK-ea). Antes era
+    // read → assertTransition(status leído) → update({where:{id}}) incondicional: dos asignaciones podían
+    // pisarse (last-write-wins = doble conductor a un pasajero). Hoy Kafka serializa por tripId (key del
+    // outbox), pero NO dependemos de ese supuesto: el viaje es la autoridad atómica de "quién quedó asignado".
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
+      const claim = await tx.trip.updateMany({
+        where: { id, status: { in: transitionSources(TripStatus.ASSIGNED) } },
         data: { status: TripStatus.ASSIGNED, driverId, vehicleId, assignedAt: new Date() },
       });
+      if (claim.count === 0) {
+        // No se movió: el viaje no existe, o no estaba en un estado asignable (ya ASSIGNED a otro,
+        // cancelado, etc.). Releemos para un error honesto con el `from` real.
+        const current = await tx.trip.findUnique({ where: { id } });
+        if (!current) throw new NotFoundError('Viaje no encontrado', { id });
+        // Estado no-asignable → InvalidTripTransition (permanente; assignFromDispatch lo trata como moot/ACK).
+        throw new InvalidTripTransition(current.status, TripStatus.ASSIGNED);
+      }
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await this.recordEvent(tx, id, 'trip.assigned', { driverId, vehicleId });
       await enqueueOutbox(
         tx,

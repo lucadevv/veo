@@ -130,6 +130,16 @@ export function canTransition(from: TripStatus, to: TripStatus): boolean {
   return TRIP_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * Estados DESDE los que `to` es alcanzable (inversa de la tabla). Pensado para guards CAS atómicos:
+ * `updateMany({ where: { id, status: { in: transitionSources(to) } }, ... })` mueve el estado en el
+ * MISMO statement que lo valida — sin check-then-act. Deriva de TRIP_TRANSITIONS (única fuente de
+ * verdad): si la tabla cambia, el guard la sigue. Determinista (orden de la tabla) para reproducibilidad.
+ */
+export function transitionSources(to: TripStatus): TripStatus[] {
+  return (Object.keys(TRIP_TRANSITIONS) as TripStatus[]).filter((from) => canTransition(from, to));
+}
+
 /** ¿Es terminal el estado? */
 export function isTerminal(status: TripStatus): boolean {
   return TERMINAL_STATES.has(status);

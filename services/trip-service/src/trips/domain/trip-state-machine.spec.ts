@@ -6,6 +6,7 @@ import {
   canTransition,
   isTerminal,
   InvalidTripTransition,
+  transitionSources,
   TRIP_TRANSITIONS,
   TERMINAL_STATES,
 } from './trip-state-machine';
@@ -127,5 +128,28 @@ describe('BR-T02 · máquina de estados — cobertura 100% del producto cartesia
         to: TripStatus.IN_PROGRESS,
       });
     }
+  });
+
+  // transitionSources(to) = la inversa de la tabla. Es el conjunto que alimenta el guard CAS atómico
+  // de assign() (WHERE status IN sources). DEBE coincidir, par a par, con canTransition(from, to).
+  describe('transitionSources (inversa de la tabla · guards CAS)', () => {
+    it('ASSIGNED es alcanzable SOLO desde REQUESTED y REASSIGNING', () => {
+      expect([...transitionSources(TripStatus.ASSIGNED)].sort()).toEqual(
+        [TripStatus.REQUESTED, TripStatus.REASSIGNING].sort(),
+      );
+    });
+
+    it('es consistente con canTransition para CADA destino (sin estados fantasma ni faltantes)', () => {
+      for (const to of ALL_STATES) {
+        const sources = new Set(transitionSources(to));
+        for (const from of ALL_STATES) {
+          expect(sources.has(from)).toBe(canTransition(from, to));
+        }
+      }
+    });
+
+    it('un destino inalcanzable (SCHEDULED, estado inicial) no tiene fuentes', () => {
+      expect(transitionSources(TripStatus.SCHEDULED)).toEqual([]);
+    });
   });
 });
