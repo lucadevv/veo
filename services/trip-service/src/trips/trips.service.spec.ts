@@ -121,6 +121,13 @@ function makePrisma(initial: Trip | null) {
         store = buildTrip({ ...(store ?? {}), ...data });
         return { count: 1 };
       },
+      // D1 (CAS atómico de assign): tras el updateMany guardado, el service relee el viaje DENTRO de la
+      // misma tx (findUnique para el estado observado; findUniqueOrThrow para devolver la fila ya escrita).
+      findUnique: async () => store,
+      findUniqueOrThrow: async () => {
+        if (!store) throw new Error('Trip no encontrado (mock findUniqueOrThrow)');
+        return store;
+      },
     },
     tripEvent: {
       create: async ({ data }: { data: { eventType: string; payload: unknown } }) => {
