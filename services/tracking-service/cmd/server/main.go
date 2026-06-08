@@ -75,6 +75,8 @@ func run() error {
 	rdb := redis.NewClient(redisOpts)
 	defer rdb.Close()
 	presenceStore := presence.New(rdb, cfg.PresenceTTL, cfg.H3Resolution)
+	// Estado operativo del conductor (busy/available) según el ciclo de vida del viaje (durable en Redis).
+	statusStore := presence.NewStatusStore(rdb, cfg.StatusBusyTTL)
 
 	// --- ClickHouse (histórico) ---
 	initCtx, cancelInit := context.WithTimeout(rootCtx, 15*time.Second)
@@ -114,6 +116,17 @@ func run() error {
 		}
 	}()
 
+	// --- Kafka consumer (ciclo de vida del viaje → status del conductor: cierra el doble-booking) ---
+	lifecycleConsumer := events.NewLifecycleConsumer(events.ConsumerConfig{
+		Brokers: cfg.KafkaBrokers,
+	}, statusStore, log)
+	lifecycleConsumer.Start(rootCtx)
+	defer func() {
+		if err := lifecycleConsumer.Close(); err != nil {
+			log.Warn("kafka: cierre del consumer de lifecycle con error", slog.Any("err", err))
+		}
+	}()
+
 	// --- Geofencing ---
 	zones, err := geofence.LoadZonesFromFile(cfg.ZonesPath)
 	if err != nil {
@@ -131,6 +144,7 @@ func run() error {
 	// --- Pipeline de ingesta ---
 	pipeline := ingest.NewPipeline(ingest.PipelineDeps{
 		Presence:     presenceStore,
+		Status:       statusStore,
 		Geo:          detector,
 		History:      historyStore,
 		Publisher:    producer,

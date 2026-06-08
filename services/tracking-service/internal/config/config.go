@@ -36,8 +36,9 @@ type Config struct {
 	ClickHousePassword string
 
 	// Presencia
-	PresenceTTL  time.Duration // TTL de driver:loc:{id}
-	H3Resolution int           // resolución del hot index (BR: r9)
+	PresenceTTL   time.Duration // TTL de driver:loc:{id}
+	StatusBusyTTL time.Duration // red de seguridad del status "busy" si se pierde el trip.completed
+	H3Resolution  int           // resolución del hot index (BR: r9)
 
 	// Geofencing
 	ZonesPath string // ruta opcional a un JSON con zonas; vacío = solo Lima bbox
@@ -77,6 +78,7 @@ func Load() (Config, error) {
 		LogLevel:                env("LOG_LEVEL", "info"),
 		ServiceName:             producerName,
 		PresenceTTL:             envDuration("PRESENCE_TTL", 60*time.Second),
+		StatusBusyTTL:           envDuration("STATUS_BUSY_TTL", 4*time.Hour),
 		H3Resolution:            envInt("H3_RESOLUTION", 9),
 		LocationPublishInterval: envDuration("LOCATION_PUBLISH_INTERVAL", 1*time.Second),
 	}

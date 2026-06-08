@@ -22,6 +22,12 @@ type PresenceUpdater interface {
 	Update(ctx context.Context, p domain.Ping, status domain.PresenceStatus) (string, error)
 }
 
+// StatusReader lee el estado operativo (de viaje) del conductor para alimentar la presencia: un
+// conductor en viaje es "busy" y NO debe entrar al hot index de dispatch. Lo mantiene el LifecycleConsumer.
+type StatusReader interface {
+	Get(ctx context.Context, driverID string) (domain.PresenceStatus, error)
+}
+
 // GeoEvaluator evalúa transiciones de geofencing para un conductor.
 type GeoEvaluator interface {
 	Evaluate(driverID string, p domain.Point) (geofence.Transition, error)
@@ -35,6 +41,7 @@ type Broadcaster interface {
 // Pipeline procesa cada ping de forma idempotente y resiliente (un fallo no aborta el resto).
 type Pipeline struct {
 	presence  PresenceUpdater
+	status    StatusReader
 	geo       GeoEvaluator
 	history   history.Store
 	publisher events.Publisher
@@ -50,6 +57,7 @@ type Pipeline struct {
 // PipelineDeps agrupa las dependencias del pipeline.
 type PipelineDeps struct {
 	Presence     PresenceUpdater
+	Status       StatusReader
 	Geo          GeoEvaluator
 	History      history.Store
 	Publisher    events.Publisher
@@ -63,6 +71,7 @@ type PipelineDeps struct {
 func NewPipeline(d PipelineDeps) *Pipeline {
 	return &Pipeline{
 		presence:     d.Presence,
+		status:       d.Status,
 		geo:          d.Geo,
 		history:      d.History,
 		publisher:    d.Publisher,
@@ -91,8 +100,20 @@ func (p *Pipeline) Process(ctx context.Context, ping domain.Ping) error {
 		ping.RecordedAt = serverRecv
 	}
 
-	// 1) Presencia + hot index H3 (alimenta a dispatch-service).
-	cell, err := p.presence.Update(ctx, ping, domain.StatusAvailable)
+	// 1) Presencia + hot index H3 (alimenta a dispatch-service). El status REAL viene del ciclo de vida
+	// del viaje (LifecycleConsumer): un conductor EN VIAJE es "busy" y presence.Update lo deja FUERA del
+	// hot index → dispatch no lo matchea (cierra el doble-booking). Degradación honesta: si el store de
+	// status falla, asumimos available (el matching sigue; un raro doble-ofrecimiento lo cubre el CAS de
+	// asignación del trip-service + el reject del conductor) en vez de vaciar el pool ante un blip de Redis.
+	status := domain.StatusAvailable
+	if s, serr := p.status.Get(ctx, ping.DriverID); serr != nil {
+		p.log.Warn("status: fallo al leer; asumo available",
+			slog.String("driver", obs.RedactDriverID(ping.DriverID)), slog.Any("err", serr))
+	} else {
+		status = s
+	}
+
+	cell, err := p.presence.Update(ctx, ping, status)
 	if err != nil {
 		p.log.Error("presencia: fallo al actualizar", slog.String("driver", obs.RedactDriverID(ping.DriverID)), slog.Any("err", err))
 		// Continuamos: la presencia es importante pero el histórico/eventos también.

@@ -13,7 +13,34 @@ const (
 	// EventUserDeleted lo emite identity-service tras la gracia de borrado (derecho al
 	// olvido, Ley 29733). Su topic es "user" (dominio antes del punto).
 	EventUserDeleted = "user.deleted"
+
+	// Ciclo de vida del viaje (topic "trip"), para reflejar el estado REAL del conductor en la
+	// presencia: un conductor en viaje NO está disponible para el matching de dispatch.
+	EventTripAssigned  = "trip.assigned"  // conductor asignado → ocupado
+	EventTripCompleted = "trip.completed" // viaje terminado → disponible
+	EventTripCancelled = "trip.cancelled" // viaje cancelado → disponible
 )
+
+// TripAssigned es el payload de trip.assigned (lo emite trip-service). Forma JSON: {tripId, driverId, vehicleId}.
+type TripAssigned struct {
+	TripID    string `json:"tripId"`
+	DriverID  string `json:"driverId"`
+	VehicleID string `json:"vehicleId,omitempty"`
+}
+
+// TripCompleted es el payload de trip.completed. `driverId` es opcional (compat N-2): sin él no hay
+// conductor que liberar.
+type TripCompleted struct {
+	TripID   string `json:"tripId"`
+	DriverID string `json:"driverId,omitempty"`
+}
+
+// TripCancelled es el payload de trip.cancelled. `driverId` enriquecido opcional (presente si había
+// conductor asignado).
+type TripCancelled struct {
+	TripID   string `json:"tripId"`
+	DriverID string `json:"driverId,omitempty"`
+}
 
 // UserDeleted es el payload de user.deleted.
 // Forma JSON: {userId, driverId?, at}. driverId presente solo si el usuario tenía

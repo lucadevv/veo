@@ -19,10 +19,27 @@ import (
 	"github.com/veo/tracking-service/internal/obs"
 )
 
-type fakePresence struct{ res int }
+type fakePresence struct {
+	res        int
+	lastStatus domain.PresenceStatus // último status recibido (para verificar E1)
+}
 
-func (f fakePresence) Update(_ context.Context, p domain.Ping, _ domain.PresenceStatus) (string, error) {
+func (f *fakePresence) Update(_ context.Context, p domain.Ping, status domain.PresenceStatus) (string, error) {
+	f.lastStatus = status
 	return geo.Cell(p.Point(), f.res)
+}
+
+// fakeStatus devuelve un status operativo fijo (default available).
+type fakeStatus struct {
+	status domain.PresenceStatus
+	err    error
+}
+
+func (f fakeStatus) Get(context.Context, string) (domain.PresenceStatus, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.status, nil
 }
 
 type fakeHistory struct {
@@ -97,7 +114,8 @@ func newPipeline(t *testing.T, publishEvery time.Duration) (*Pipeline, *fakeHist
 	hub := &fakeHub{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	p := NewPipeline(PipelineDeps{
-		Presence:     fakePresence{res: 9},
+		Presence:     &fakePresence{res: 9},
+		Status:       fakeStatus{status: domain.StatusAvailable},
 		Geo:          det,
 		History:      hist,
 		Publisher:    pub,
@@ -107,6 +125,44 @@ func newPipeline(t *testing.T, publishEvery time.Duration) (*Pipeline, *fakeHist
 		PublishEvery: publishEvery,
 	})
 	return p, hist, pub, hub
+}
+
+// TestPipelineUsesRealDriverStatus verifica E1: el status que la pipeline pasa a la presencia viene del
+// StatusReader (ciclo de vida del viaje), no hardcodeado. Un conductor en viaje → busy (fuera del hot index).
+func TestPipelineUsesRealDriverStatus(t *testing.T) {
+	det, err := geofence.NewDetector(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ping := domain.Ping{DriverID: "drv-1", Lat: -12.0464, Lon: -77.0428, RecordedAt: time.Now()}
+
+	tests := []struct {
+		name   string
+		status fakeStatus
+		want   domain.PresenceStatus
+	}{
+		{"conductor en viaje → busy", fakeStatus{status: domain.StatusBusy}, domain.StatusBusy},
+		{"sin viaje → available", fakeStatus{status: domain.StatusAvailable}, domain.StatusAvailable},
+		// Degradación honesta: si el store de status falla, la pipeline asume available (no vacía el pool).
+		{"store caído → available (degradación)", fakeStatus{err: context.DeadlineExceeded}, domain.StatusAvailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pres := &fakePresence{res: 9}
+			p := NewPipeline(PipelineDeps{
+				Presence: pres, Status: tt.status, Geo: det, History: &fakeHistory{},
+				Publisher: &fakePublisher{}, Hub: &fakeHub{},
+				Metrics: obs.NewMetrics(prometheus.NewRegistry()), Logger: log,
+			})
+			if err := p.Process(context.Background(), ping); err != nil {
+				t.Fatalf("Process: %v", err)
+			}
+			if pres.lastStatus != tt.want {
+				t.Errorf("status pasado a presence = %q, want %q", pres.lastStatus, tt.want)
+			}
+		})
+	}
 }
 
 func TestPipelineEmitsLocationAndPersists(t *testing.T) {
