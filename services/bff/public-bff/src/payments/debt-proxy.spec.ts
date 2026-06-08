@@ -68,6 +68,22 @@ describe('PaymentsService.getMyDebts (banner de la app)', () => {
     expect(out.debts[0]).toMatchObject({ paymentId: 'pa1', kind: 'PENDING_ACTION' });
   });
 
+  it('propaga una CANCELLATION_PENALTY (penaltyId, sin paymentId) y dispara hasDebt (F2)', async () => {
+    const get = vi.fn().mockResolvedValue({
+      hasDebt: true, // payment-service ya cuenta la penalidad PENDING como bloqueante
+      totalCents: 800,
+      debts: [
+        { penaltyId: 'pen-1', tripId: 'tc1', amountCents: 800, reason: 'no_show', createdAt: '2026-06-07T00:00:00Z', kind: 'CANCELLATION_PENALTY' },
+      ],
+    });
+    const { svc } = makeService({ get });
+    const out = await svc.getMyDebts(user);
+    expect(out.hasDebt).toBe(true);
+    expect(out.totalCents).toBe(800);
+    expect(out.debts[0]).toMatchObject({ penaltyId: 'pen-1', tripId: 'tc1', amountCents: 800, kind: 'CANCELLATION_PENALTY' });
+    expect(out.debts[0]?.paymentId).toBeUndefined();
+  });
+
   it('ítem sin kind (payment-service viejo) → se trata como DEBT (defensivo)', async () => {
     const get = vi.fn().mockResolvedValue({
       hasDebt: true,
@@ -136,6 +152,50 @@ describe('PaymentsService.retryCharge (saldar deuda · anti-IDOR)', () => {
     const { svc } = makeService({ get, post });
     await expect(svc.retryCharge(user, 'pay-nope')).rejects.toBeInstanceOf(NotFoundError);
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('PaymentsService.settlePenalty (pagar penalidad de cancelación · F2.3)', () => {
+  const SETTLEMENT_REPLY = {
+    id: 'pay-pen-1',
+    tripId: 'trip-cancelled',
+    method: 'YAPE',
+    status: 'CAPTURED',
+    amountCents: 800,
+    grossCents: 800,
+    tipCents: 0,
+    commissionCents: 0,
+    feeCents: 0,
+    externalRef: null,
+    externalUid: null,
+    checkoutUrl: null,
+    qrCode: null,
+    deepLink: null,
+    cip: null,
+    checkoutExpiresAt: null,
+  };
+
+  it('forward a payment-service con la identidad firmada (sin pre-check de ownership) e invalida el cache "sin deuda"', async () => {
+    const post = vi.fn().mockResolvedValue(SETTLEMENT_REPLY);
+    const { svc, redis } = makeService({ post });
+
+    const out = await svc.settlePenalty(user, 'pen-1', 'YAPE', '999111222');
+    // El anti-IDOR vive en payment-service (resuelve por passengerId firmado) → el BFF NO lee el Payment antes.
+    expect(post).toHaveBeenCalledWith('/payments/penalties/pen-1/settle', {
+      identity: user,
+      body: { method: 'YAPE', payerRef: '999111222' },
+    });
+    expect(out.id).toBe('pay-pen-1');
+    expect(out.status).toBe('CAPTURED');
+    // El estado de deuda cambió → invalida el cache del gate para que reconsulte.
+    expect(redis.del).toHaveBeenCalledWith('debt:none:usr-1');
+  });
+
+  it('propaga el error de payment-service (404 penalidad ajena/inexistente) sin invalidar a ciegas', async () => {
+    const post = vi.fn().mockRejectedValue(new NotFoundError('Penalidad no encontrada'));
+    const { svc, redis } = makeService({ post });
+    await expect(svc.settlePenalty(user, 'pen-ajena', 'YAPE')).rejects.toBeInstanceOf(NotFoundError);
+    expect(redis.del).not.toHaveBeenCalled();
   });
 });
 

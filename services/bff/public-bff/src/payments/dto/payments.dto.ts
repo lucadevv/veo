@@ -77,6 +77,22 @@ export class ChangeMethodDto {
   method!: (typeof DIGITAL_PAYMENT_METHODS)[number];
 }
 
+/**
+ * Pagar una penalidad de cancelación (F2.3). Se salda "como un DEBT" por el rail: SOLO métodos
+ * DIGITALES (CASH excluido — no hay conductor presente para la confirmación bilateral). `IsIn` digitales
+ * → 400 antes de tocar el servicio; payment-service además devuelve 422 para CASH (defensa en profundidad).
+ */
+export class SettlePenaltyDto {
+  @ApiProperty({ enum: DIGITAL_PAYMENT_METHODS, description: 'Método DIGITAL para pagar la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.' })
+  @IsIn(DIGITAL_PAYMENT_METHODS)
+  method!: (typeof DIGITAL_PAYMENT_METHODS)[number];
+
+  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape/Plin)' })
+  @IsOptional()
+  @IsString()
+  payerRef?: string;
+}
+
 export class CashConfirmDto {
   @ApiPropertyOptional({
     description: 'true = confirma recepción; false = disputa (abre ticket de soporte)',
@@ -122,21 +138,25 @@ export interface PaymentView {
 }
 
 /**
- * Clase de un ítem accionable: `DEBT` (cobro en DEBT — bloquea el gate y muestra "Resolver") o
- * `PENDING_ACTION` (cobro PENDING con checkout vivo — "pago por completar", NO bloquea, "Continuar").
+ * Clase de un ítem accionable: `DEBT` (cobro en DEBT — bloquea el gate y muestra "Resolver"),
+ * `PENDING_ACTION` (cobro PENDING con checkout vivo — "pago por completar", NO bloquea, "Continuar"),
+ * o `CANCELLATION_PENALTY` (penalidad de cancelación pendiente — bloquea el gate, muestra "Pagar").
  */
-export type DebtItemKindView = 'DEBT' | 'PENDING_ACTION';
+export type DebtItemKindView = 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
 
-/** Un ítem accionable del pasajero (cobro en DEBT o PENDING con checkout). Céntimos PEN. */
+/** Un ítem accionable del pasajero (cobro en DEBT/PENDING, o penalidad de cancelación). Céntimos PEN. */
 export interface DebtItemView {
-  paymentId: string;
+  /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY (usa `penaltyId`). */
+  paymentId?: string;
+  /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
+  penaltyId?: string;
   tripId: string;
   amountCents: number;
-  /** Razón del fallo del cobro (saldo insuficiente, declinado…). Vacío en PENDING_ACTION. */
+  /** Razón del fallo del cobro o motivo de la cancelación. Vacío en PENDING_ACTION. */
   reason: string;
-  /** Fecha de creación del cobro (ISO-8601). */
+  /** Fecha de creación del cobro/penalidad (ISO-8601). */
   createdAt: string;
-  /** DEBT (deuda, bloquea) o PENDING_ACTION (pago por completar, no bloquea). */
+  /** DEBT y CANCELLATION_PENALTY bloquean; PENDING_ACTION (pago por completar) NO. */
   kind: DebtItemKindView;
 }
 

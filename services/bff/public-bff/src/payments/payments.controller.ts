@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { PaymentsService } from './payments.service';
-import { CashConfirmDto, ChangeMethodDto, ChargeDto, type DebtView, type PaymentView } from './dto/payments.dto';
+import { CashConfirmDto, ChangeMethodDto, ChargeDto, SettlePenaltyDto, type DebtView, type PaymentView } from './dto/payments.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -63,6 +63,20 @@ export class PaymentsController {
     @Param('id') id: string,
   ): Promise<PaymentView> {
     return this.payments.retryCharge(user, id);
+  }
+
+  // ── Pagar una penalidad de cancelación (F2.3): la salda por el rail "como un DEBT". El passengerId
+  // sale de la identidad firmada → payment-service hace el anti-IDOR (404 si la penalidad es ajena).
+  // CASH→400 (DTO). Tras saldar, invalida el cache "sin deuda" del gate. ──
+  @Post('penalties/:id/settle')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Paga una penalidad de cancelación PENDING del pasajero por un método digital. 404 si no es suya; 409 si fue perdonada' })
+  settlePenalty(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SettlePenaltyDto,
+  ): Promise<PaymentView> {
+    return this.payments.settlePenalty(user, id, dto.method, dto.payerRef);
   }
 
   // ── Cambiar el método de un pago pendiente del pasajero (no pudo pagar el Yape → elige otro DIGITAL).

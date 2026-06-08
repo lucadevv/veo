@@ -45,7 +45,13 @@ function makeService(
   kycStatus = 'VERIFIED',
   debt: {
     hasDebt: boolean;
-    debts?: { tripId: string; amountCents: number; kind?: 'DEBT' | 'PENDING_ACTION' }[];
+    debts?: {
+      tripId: string;
+      amountCents: number;
+      kind?: 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
+      paymentId?: string;
+      penaltyId?: string;
+    }[];
     totalCents?: number;
   } = {
     hasDebt: false,
@@ -181,6 +187,39 @@ describe('TripsService.createTrip — gate de deuda (BR-P02)', () => {
       code: 'DEBT_PENDING',
       httpStatus: 403,
       details: { debtTotalCents: 2300, oldestTripId: 'trip-real-debt' },
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('penalidad de cancelación PENDING (sin ningún DEBT) → 403 con oldestTripId = el viaje de la penalidad (F2)', async () => {
+    // Bloqueo SOLO por CANCELLATION_PENALTY: hasDebt=true, cero DEBT. El detalle del 403 debe apuntar al
+    // viaje de la penalidad para que el banner haga deep-link (no quedar en null por filtrar solo DEBT).
+    const { svc, post } = makeService('VERIFIED', {
+      hasDebt: true,
+      totalCents: 800,
+      debts: [{ tripId: 'trip-cancelled', amountCents: 800, kind: 'CANCELLATION_PENALTY', penaltyId: 'pen-1' }],
+    });
+    await expect(svc.createTrip(user, baseDto(), 'idem-penalty')).rejects.toMatchObject({
+      code: 'DEBT_PENDING',
+      httpStatus: 403,
+      details: { debtTotalCents: 800, oldestTripId: 'trip-cancelled' },
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('DEBT + penalidad: oldestTripId prioriza el DEBT más antiguo (ambos bloquean)', async () => {
+    // payment-service ordena: [DEBT…, CANCELLATION_PENALTY…]. blocking[0] = el DEBT más antiguo.
+    const { svc, post } = makeService('VERIFIED', {
+      hasDebt: true,
+      totalCents: 1800,
+      debts: [
+        { tripId: 'trip-debt', amountCents: 1000, kind: 'DEBT' },
+        { tripId: 'trip-penalty', amountCents: 800, kind: 'CANCELLATION_PENALTY', penaltyId: 'pen-2' },
+      ],
+    });
+    await expect(svc.createTrip(user, baseDto(), 'idem-debt-plus-penalty')).rejects.toMatchObject({
+      code: 'DEBT_PENDING',
+      details: { debtTotalCents: 1800, oldestTripId: 'trip-debt' },
     });
     expect(post).not.toHaveBeenCalled();
   });

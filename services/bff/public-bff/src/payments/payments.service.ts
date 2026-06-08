@@ -23,13 +23,16 @@ import {
 interface DebtSummaryReply {
   hasDebt: boolean;
   debts: {
-    paymentId: string;
+    /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY. */
+    paymentId?: string;
+    /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
+    penaltyId?: string;
     tripId: string;
     amountCents: number;
     reason: string;
     createdAt: string;
-    /** DEBT (bloquea el gate) o PENDING_ACTION (pago por completar). payment-service lo etiqueta. */
-    kind?: 'DEBT' | 'PENDING_ACTION';
+    /** DEBT/CANCELLATION_PENALTY bloquean el gate; PENDING_ACTION (pago por completar) NO. */
+    kind?: 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
   }[];
   totalCents: number;
 }
@@ -171,6 +174,7 @@ export class PaymentsService {
       totalCents: summary.totalCents,
       debts: summary.debts.map((d) => ({
         paymentId: d.paymentId,
+        penaltyId: d.penaltyId,
         tripId: d.tripId,
         amountCents: d.amountCents,
         reason: d.reason,
@@ -211,6 +215,28 @@ export class PaymentsService {
       // best-effort.
     }
     return this.toPaymentView(updated);
+  }
+
+  /**
+   * F2.3 · Pagar una penalidad de cancelación: la salda "como un DEBT" por el rail. NO necesita el
+   * pre-check de ownership del BFF (a diferencia de retryCharge/changeMethod, que operan sobre un Payment
+   * por id): payment-service resuelve la penalidad por el `passengerId` FIRMADO de la identidad interna
+   * y devuelve 404 si la penalidad es ajena (anti-IDOR/anti-enumeración en la fuente). Tras saldar,
+   * invalidamos el cache "sin deuda" del gate (la penalidad pudo pasar a COLLECTED → el gate se libera).
+   * Devuelve el PaymentView del cobro de liquidación (sandbox→CAPTURED; prontopaga→PENDING con checkout).
+   */
+  async settlePenalty(user: AuthenticatedUser, penaltyId: string, method: string, payerRef?: string): Promise<PaymentView> {
+    const settlement = await this.paymentRest.post<PaymentReply>(`/payments/penalties/${penaltyId}/settle`, {
+      identity: user,
+      body: { method, payerRef },
+    });
+    // El estado de deuda cambió (penalidad bloqueante → potencialmente COLLECTED). El gate reconsulta.
+    try {
+      await this.redis.del(`debt:none:${user.userId}`);
+    } catch {
+      // best-effort.
+    }
+    return this.toPaymentView(settlement);
   }
 
   /**

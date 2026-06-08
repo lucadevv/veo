@@ -71,13 +71,16 @@ export class KycRequiredError extends DomainError {
 interface DebtSummaryReply {
   hasDebt: boolean;
   debts: {
-    paymentId: string;
+    /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY. */
+    paymentId?: string;
+    /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
+    penaltyId?: string;
     tripId: string;
     amountCents: number;
     reason: string;
     createdAt: string;
-    /** DEBT bloquea el gate; PENDING_ACTION (pago por completar) NO. El gate SOLO mira los DEBT. */
-    kind?: 'DEBT' | 'PENDING_ACTION';
+    /** DEBT y CANCELLATION_PENALTY bloquean el gate; PENDING_ACTION (pago por completar) NO. */
+    kind?: 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
   }[];
   totalCents: number;
 }
@@ -199,8 +202,12 @@ export class TripsService {
     // DEBT explícitamente (no del primer item, que podría ser un PENDING_ACTION si el orden cambiara).
     if (summary.hasDebt) {
       // CON deuda: NUNCA cachear. Bloqueo inmediato con el detalle para el banner de la app.
-      const realDebts = summary.debts.filter((d) => (d.kind ?? 'DEBT') === 'DEBT');
-      const oldestTripId = realDebts[0]?.tripId ?? null;
+      // BLOQUEAN tanto DEBT como CANCELLATION_PENALTY; solo PENDING_ACTION (pago por completar) NO.
+      // Derivamos el oldestTripId del primer ítem BLOQUEANTE (no del primer item, que podría ser un
+      // PENDING_ACTION si el orden cambiara) para que el banner haga deep-link al viaje ofensor —
+      // incluido el caso de bloqueo SOLO por penalidad, donde no hay ningún DEBT.
+      const blocking = summary.debts.filter((d) => (d.kind ?? 'DEBT') !== 'PENDING_ACTION');
+      const oldestTripId = blocking[0]?.tripId ?? null;
       throw new DebtPendingError(summary.totalCents, oldestTripId);
     }
     try {
