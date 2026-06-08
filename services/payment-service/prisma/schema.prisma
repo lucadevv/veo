@@ -151,6 +151,11 @@ model Payment {
   failureReason   String?       @map("failure_reason")
   /// Referencia del pagador en el riel (teléfono/token Yape-Plin). PII mínima.
   payerRef        String?       @map("payer_ref")
+  /// F2.3 · Si este Payment SALDA una penalidad de cancelación, su id (sino null). Un Payment de
+  /// liquidación lleva `driverId=NULL` (no es ganancia de viaje → no entra al payout por aquí; la
+  /// compensación del conductor entra vía `collectEarnings` sumando la penalidad COLLECTED). Al
+  /// capturarse, `captureSuccess` flippea la penalidad → COLLECTED en la misma transacción.
+  cancellationPenaltyId String? @map("cancellation_penalty_id") @db.Uuid
   /// ── Checkout externo (ProntoPaga PENDING_EXTERNAL) ── El cobro quedó pendiente y el pasajero lo
   /// completa FUERA (QR/deepLink/CIP) o el on-file confirma por webhook. El recibo (L2 by-trip) los expone.
   /// uid de la transacción en ProntoPaga (correlación con el webhook). Distinto de externalRef hasta capturar.
@@ -177,6 +182,8 @@ model Payment {
   @@index([tripId])
   @@index([driverId, status])
   @@index([method, status, capturedAt])
+  /// F2.3 · resolver el Payment de liquidación de una penalidad (idempotencia/conciliación).
+  @@index([cancellationPenaltyId])
   /// DEBT gate: lista la deuda PENDIENTE de un pasajero (status=DEBT) en O(log n) sin escanear.
   /// Sirve a GET /payments/debt (bloqueo de nuevos viajes) por [passengerId, status].
   @@index([passengerId, status])

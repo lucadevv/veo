@@ -10,7 +10,7 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { assertDriverOwnsResource } from '@veo/auth';
 import { PaymentsService } from './payments.service';
-import { AddTipDto, ChangeMethodDto, ChargeDto, CashConfirmDto, EarningsQueryDto, RefundDto } from './dto/payments.dto';
+import { AddTipDto, ChangeMethodDto, ChargeDto, CashConfirmDto, EarningsQueryDto, RefundDto, SettlePenaltyDto } from './dto/payments.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -91,6 +91,21 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Cambia el método de un pago no-capturado (PENDING/DEBT) entre métodos digitales y re-cobra. CASH→422; CAPTURED→409' })
   changeMethod(@Param('id') id: string, @Body() dto: ChangeMethodDto) {
     return this.payments.changeMethod(id, dto.method);
+  }
+
+  // ── Saldar una penalidad de cancelación (F2.3): el pasajero la paga por el rail, "como un DEBT". El
+  // passengerId sale SIEMPRE de la identidad firmada (CurrentUser) → anti-IDOR (la penalidad ajena → 404).
+  // Idempotente por la dedupKey del Payment de liquidación. Al capturarse, la penalidad pasa a COLLECTED. ──
+  @Post('penalties/:id/settle')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Saldar una penalidad de cancelación PENDING por el rail (método digital). CASH→422; WAIVED→409' })
+  settlePenalty(@Param('id') id: string, @Body() dto: SettlePenaltyDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.payments.settleCancellationPenalty({
+      penaltyId: id,
+      passengerId: user.userId,
+      method: dto.method,
+      payerRef: dto.payerRef,
+    });
   }
 
   // ── Reembolso (BR-P06): operadores de soporte. >S/30 requiere L2 (validado en el servicio). ──

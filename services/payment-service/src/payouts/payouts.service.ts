@@ -151,7 +151,7 @@ export class PayoutsService {
       },
       select: { driverId: true, grossCents: true, commissionCents: true, tipCents: true },
     });
-    return payments
+    const earningRows: DriverEarningRow[] = payments
       .filter((p): p is { driverId: string; grossCents: number; commissionCents: number; tipCents: number } =>
         p.driverId !== null,
       )
@@ -161,6 +161,32 @@ export class PayoutsService {
         commissionCents: p.commissionCents,
         tipCents: p.tipCents,
       }));
+
+    // F2.3 · Compensación por penalidades de cancelación SALDADAS en el período: el conductor que esperó
+    // cobra su parte del split cuando el pasajero paga. Se acredita NETA (sin comisión, no es bruto de
+    // viaje). La ventana es por `collectedAt` (cuándo se saldó), no por la cancelación. driverId not null
+    // y comp > 0 (una penalidad sin conductor va entera a la plataforma → no acredita a nadie).
+    const penalties = await this.prisma.read.cancellationPenalty.findMany({
+      where: {
+        status: 'COLLECTED',
+        driverId: { not: null },
+        collectedAt: { gte: start, lt: end },
+      },
+      select: { driverId: true, driverCompensationCents: true },
+    });
+    const compensationRows: DriverEarningRow[] = penalties
+      .filter((p): p is { driverId: string; driverCompensationCents: number } =>
+        p.driverId !== null && p.driverCompensationCents > 0,
+      )
+      .map((p) => ({
+        driverId: p.driverId,
+        grossCents: 0,
+        commissionCents: 0,
+        tipCents: 0,
+        compensationCents: p.driverCompensationCents,
+      }));
+
+    return [...earningRows, ...compensationRows];
   }
 
   private hasFreshMfa(user: AuthenticatedUser): boolean {

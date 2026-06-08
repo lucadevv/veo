@@ -7,6 +7,12 @@ export interface DriverEarningRow {
   grossCents: number;
   commissionCents: number;
   tipCents: number;
+  /**
+   * F2.3 · Compensación NETA al conductor fuera de la tarifa (penalidad de cancelación COLLECTED). No es
+   * bruto de viaje ni lleva comisión: entra DIRECTO al neto (como la propina), sin inflar `grossCents`.
+   * Ausente/0 en las filas de cobro normales.
+   */
+  compensationCents?: number;
 }
 
 export interface AggregatedPayout {
@@ -32,7 +38,8 @@ export function aggregatePayouts(rows: DriverEarningRow[], minCents: number): Ag
     };
     acc.grossCents += row.grossCents;
     acc.commissionCents += row.commissionCents;
-    acc.amountCents += row.grossCents - row.commissionCents + row.tipCents;
+    // Neto = (bruto − comisión) + propinas + compensación de penalidad (neta, sin comisión ni bruto).
+    acc.amountCents += row.grossCents - row.commissionCents + row.tipCents + (row.compensationCents ?? 0);
     byDriver.set(row.driverId, acc);
   }
   return [...byDriver.values()]

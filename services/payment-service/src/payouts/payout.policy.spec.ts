@@ -20,6 +20,24 @@ describe('aggregatePayouts (BR-P05)', () => {
     expect(result.map((p) => p.driverId)).toEqual(['ok']);
   });
 
+  it('F2.3 · la compensación de penalidad entra NETA al amount, sin inflar bruto ni comisión', () => {
+    const rows = [
+      { driverId: 'd1', grossCents: 2000, commissionCents: 400, tipCents: 0 }, // neto viaje 1600
+      { driverId: 'd1', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 400 }, // +400 neto
+    ];
+    const [p] = aggregatePayouts(rows, 0);
+    // grossCents/commissionCents = SOLO la tarifa; amountCents = 1600 + 400 (comp) = 2000.
+    expect(p).toEqual({ driverId: 'd1', grossCents: 2000, commissionCents: 400, amountCents: 2000 });
+  });
+
+  it('F2.3 · una compensación de penalidad sola puede alcanzar el mínimo liquidable por sí misma', () => {
+    const rows = [
+      { driverId: 'only-penalty', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 5000 },
+    ];
+    const [p] = aggregatePayouts(rows, 5000);
+    expect(p).toEqual({ driverId: 'only-penalty', grossCents: 0, commissionCents: 0, amountCents: 5000 });
+  });
+
   it('es determinista (ordenado por driverId)', () => {
     const rows = [
       { driverId: 'b', grossCents: 10000, commissionCents: 2000, tipCents: 0 },

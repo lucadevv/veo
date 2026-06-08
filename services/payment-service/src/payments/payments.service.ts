@@ -344,8 +344,49 @@ export class PaymentsService {
         },
       });
       await enqueueOutbox(tx, envelope, updated.id);
+      // F2.3 · si este Payment SALDA una penalidad de cancelación, flippearla → COLLECTED en la MISMA
+      // transacción de captura (vale tanto para el camino sync como para el webhook: ambos pasan por acá).
+      if (updated.cancellationPenaltyId) {
+        await this.collectPenaltyInTx(tx, updated.cancellationPenaltyId, updated.id);
+      }
       return updated;
     });
+  }
+
+  /**
+   * F2.3 · Marca COLLECTED la penalidad que saldó un Payment de liquidación, DENTRO de la transacción de
+   * captura. Idempotente y concurrencia-seguro por status-guard (updateMany where status=PENDING): una
+   * redelivery del webhook o una doble-captura NO emite un segundo evento ni re-acredita al conductor. Al
+   * flippear emite `payment.cancellation_penalty_collected` (libera el gate de deuda + alimenta el payout
+   * del conductor vía collectEarnings). Si la penalidad ya no está PENDING (COLLECTED/WAIVED) → no-op.
+   */
+  private async collectPenaltyInTx(
+    tx: Prisma.TransactionClient,
+    penaltyId: string,
+    settlementPaymentId: string,
+  ): Promise<void> {
+    const claimed = await tx.cancellationPenalty.updateMany({
+      where: { id: penaltyId, status: 'PENDING' },
+      data: { status: 'COLLECTED', collectedAt: new Date() },
+    });
+    if (claimed.count === 0) return; // ya COLLECTED/WAIVED → idempotente, sin segundo evento.
+    const penalty = await tx.cancellationPenalty.findUnique({ where: { id: penaltyId } });
+    if (!penalty) return;
+    const envelope = createEnvelope({
+      eventType: 'payment.cancellation_penalty_collected',
+      producer: 'payment-service',
+      payload: {
+        penaltyId: penalty.id,
+        tripId: penalty.tripId,
+        passengerId: penalty.passengerId,
+        driverId: penalty.driverId ?? undefined,
+        penaltyCents: penalty.penaltyCents,
+        driverCompensationCents: penalty.driverCompensationCents,
+        platformCents: penalty.platformCents,
+        settlementPaymentId,
+      },
+    });
+    await enqueueOutbox(tx, envelope, penalty.id);
   }
 
   private async markDebt(payment: Payment, reason: string): Promise<Payment> {
@@ -378,18 +419,20 @@ export class PaymentsService {
   }
 
   /**
-   * Ítems ACCIONABLES de un pasajero (BR-P02). Dos clases, en una sola respuesta:
+   * Ítems ACCIONABLES de un pasajero (BR-P02). Tres clases, en una sola respuesta:
    *  - kind=DEBT: cobros en status=DEBT (reintentos agotados). Alimentan el GATE de nuevos viajes del
-   *    BFF (`hasDebt`/`totalCents` resumen SOLO estos) y la franja "Resolver" del home.
+   *    BFF y la franja "Resolver" del home.
+   *  - kind=CANCELLATION_PENALTY: penalidades de cancelación en status=PENDING (F2). Son obligaciones
+   *    cobrables que BLOQUEAN el gate igual que la deuda (cuentan en `hasDebt`/`totalCents`).
    *  - kind=PENDING_ACTION: cobros en status=PENDING con un checkout VIVO (ProntoPaga) esperando que el
    *    usuario complete el pago (externalUid presente + al menos uno de checkoutUrl/deepLink/qrCode/cip).
    *    NO es deuda y NO bloquea el gate: es el "pago por completar" que, si el usuario cerraba el sheet,
    *    quedaba en un dead-end (un Payment vivo sin camino de vuelta). Lo exponemos para "Continuar".
    *
-   * Dos `findMany` por status exacto (cada uno cubierto por el índice [passengerId, status]); el filtro
+   * Tres `findMany` por status exacto (cada uno cubierto por su índice [passengerId, status]); el filtro
    * de "checkout vivo" sobre los PENDING se hace en memoria (subconjunto pequeño por pasajero). El
-   * passengerId SIEMPRE sale de la identidad firmada (InternalIdentityGuard), nunca de un parámetro
-   * del cliente (anti-IDOR). `hasDebt`/`totalCents` se calculan SOLO con los DEBT → el gate intacto.
+   * passengerId SIEMPRE sale de la identidad firmada (InternalIdentityGuard), nunca de un parámetro del
+   * cliente (anti-IDOR). `hasDebt`/`totalCents` resumen lo BLOQUEANTE (DEBT + CANCELLATION_PENALTY).
    */
   async getDebtForPassenger(passengerId: string): Promise<DebtSummary> {
     const debtRows = await this.prisma.read.payment.findMany({
@@ -439,11 +482,28 @@ export class PaymentsService {
         kind: 'PENDING_ACTION',
       }));
 
-    // hasDebt/totalCents SOLO sobre DEBT (lo que bloquea el gate). PENDING_ACTION va en la lista, no suma.
-    const totalCents = debtItems.reduce((acc, d) => acc + d.amountCents, 0);
+    // Penalidades de cancelación PENDING (F2): obligaciones cobrables que BLOQUEAN el gate igual que la deuda.
+    const penaltyRows = await this.prisma.read.cancellationPenalty.findMany({
+      where: { passengerId, status: 'PENDING' },
+      select: { id: true, tripId: true, penaltyCents: true, reason: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const penaltyItems: DebtItem[] = penaltyRows.map((r) => ({
+      penaltyId: r.id,
+      tripId: r.tripId,
+      amountCents: r.penaltyCents,
+      reason: r.reason ?? 'cancellation',
+      createdAt: r.createdAt.toISOString(),
+      kind: 'CANCELLATION_PENALTY',
+    }));
+
+    // hasDebt/totalCents = lo que BLOQUEA el gate: DEBT + penalidades de cancelación PENDING. Los
+    // PENDING_ACTION (pago por completar) van en la lista pero NO bloquean.
+    const blocking = [...debtItems, ...penaltyItems];
+    const totalCents = blocking.reduce((acc, d) => acc + d.amountCents, 0);
     return {
-      hasDebt: debtItems.length > 0,
-      debts: [...debtItems, ...pendingActionItems],
+      hasDebt: blocking.length > 0,
+      debts: [...blocking, ...pendingActionItems],
       totalCents,
     };
   }
@@ -1008,6 +1068,98 @@ export class PaymentsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * F2.3 · Saldar una penalidad de cancelación "como un DEBT": el pasajero la paga por el rail. Crea un
+   * Payment de LIQUIDACIÓN (dedupKey determinista `cancellation-penalty:${penaltyId}`, driverId=NULL,
+   * commission=0) y lo cobra por el MISMO camino que un viaje (processAggregatorCharge/processGatewayCharge).
+   * Al capturarse (sync o webhook), `captureSuccess` flippea la penalidad → COLLECTED y libera el gate.
+   * ANTI-IDOR: la penalidad debe pertenecer al pasajero autenticado (sino 404, anti-enumeración).
+   * Idempotente por la dedupKey del Payment (doble-tap / ya pagando → devuelve el mismo Payment).
+   */
+  async settleCancellationPenalty(input: {
+    penaltyId: string;
+    passengerId: string;
+    method: PaymentMethod;
+    payerRef?: string;
+    client?: ChargeInput['client'];
+  }): Promise<Payment> {
+    // El efectivo no aplica: la penalidad se paga digital (no hay conductor presente post-cancelación
+    // para la confirmación bilateral del efectivo).
+    if (input.method === 'CASH') {
+      throw new InvalidStateError('Una penalidad de cancelación se paga por un medio digital, no en efectivo');
+    }
+    if ((input.method === 'CARD' || input.method === 'PAGOEFECTIVO') && this.paymentMode !== 'prontopaga') {
+      throw new InvalidStateError(
+        `El cobro con ${input.method} requiere VEO_PAYMENT_MODE=prontopaga (no habilitado en modo ${this.paymentMode})`,
+      );
+    }
+
+    const penalty = await this.prisma.read.cancellationPenalty.findUnique({ where: { id: input.penaltyId } });
+    // Ajena o inexistente → 404 (no 403): no filtramos que exista para otro pasajero (anti-enumeración).
+    // `penalty?.passengerId !== <string>` cubre el null (undefined !== string) y la pertenencia en una.
+    if (penalty?.passengerId !== input.passengerId) {
+      throw new NotFoundError('Penalidad no encontrada');
+    }
+    if (penalty.status === 'WAIVED') {
+      throw new InvalidStateError('Esta penalidad fue perdonada; no hay nada que pagar');
+    }
+
+    // Idempotencia: una sola liquidación por penalidad (dedupKey @unique). Si ya existe el Payment de
+    // liquidación, devolverlo (ya se está pagando, o ya se pagó y la penalidad quedó COLLECTED).
+    const dedupKey = `cancellation-penalty:${penalty.id}`;
+    const existing = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
+    if (existing) return existing;
+
+    let payment: Payment;
+    try {
+      payment = await this.prisma.write.payment.create({
+        data: {
+          id: uuidv7(),
+          tripId: penalty.tripId,
+          // driverId NULL a propósito: la compensación del conductor NO entra por esta fila (sería doble
+          // pago), entra vía collectEarnings sumando la penalidad COLLECTED (F2.3b).
+          driverId: null,
+          passengerId: penalty.passengerId,
+          dedupKey,
+          amountCents: penalty.penaltyCents,
+          grossCents: penalty.penaltyCents,
+          // Una penalidad NO lleva comisión de plataforma: el split (driver/plataforma) ya vive en la
+          // penalidad. El Payment de liquidación solo mueve el dinero del pasajero por el rail.
+          commissionCents: 0,
+          feeCents: 0,
+          tipCents: 0,
+          method: input.method,
+          payerRef: input.payerRef ?? null,
+          cancellationPenaltyId: penalty.id,
+          status: 'PENDING',
+        },
+      });
+    } catch (err) {
+      // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola liquidación.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const dup = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
+        if (dup) return dup;
+        throw new ConflictError('Liquidación duplicada para la misma penalidad');
+      }
+      throw err;
+    }
+
+    // Cobro por el rail (espejo de charge): prontopaga es ASÍNCRONO (webhook captura → COLLECTED);
+    // sandbox/live (YAPE/PLIN) corre el riel con reintentos y captura sync → COLLECTED en captureSuccess.
+    if (this.paymentMode === 'prontopaga') {
+      return this.processAggregatorCharge(payment, {
+        tripId: penalty.tripId,
+        grossCents: penalty.penaltyCents,
+        method: input.method,
+        payerRef: input.payerRef,
+        dedupKey,
+        userId: penalty.passengerId,
+        client: input.client,
+      });
+    }
+    return this.processGatewayCharge(payment);
   }
 
   /** Cobro disparado por el evento trip.completed (BR-P01). dedupKey determinista por viaje. */

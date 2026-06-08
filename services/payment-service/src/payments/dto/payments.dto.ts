@@ -108,6 +108,22 @@ export class EarningsQueryDto {
   to!: string;
 }
 
+/**
+ * Saldar una penalidad de cancelación (F2.3): el pasajero la paga por el rail. Solo métodos DIGITALES;
+ * CASH se rechaza en el servicio (422) — no hay conductor presente para la confirmación bilateral. El
+ * `@IsEnum` deja pasar CASH a nivel sintáctico; el guard de negocio lo bloquea con un 422 honesto.
+ */
+export class SettlePenaltyDto {
+  @ApiProperty({ enum: PaymentMethod, description: 'Método DIGITAL de pago de la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.' })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)' })
+  @IsOptional()
+  @IsString()
+  payerRef?: string;
+}
+
 export class RefundDto {
   @ApiProperty({ description: 'Monto a reembolsar en céntimos PEN' })
   @IsInt()
@@ -127,17 +143,20 @@ export class RefundDto {
  *    es un "pago por completar" que, si el usuario cerró el sheet, quedaba en un dead-end sin camino
  *    de vuelta. Lo exponemos para que el home ofrezca "Continuar".
  */
-export type DebtItemKind = 'DEBT' | 'PENDING_ACTION';
+export type DebtItemKind = 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
 
-/** Un ítem accionable del pasajero (cobro en DEBT o PENDING con checkout vivo). Céntimos PEN. */
+/** Un ítem accionable del pasajero (cobro en DEBT/PENDING con checkout, o penalidad de cancelación). Céntimos PEN. */
 export interface DebtItem {
-  paymentId: string;
+  /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY (usa `penaltyId`). */
+  paymentId?: string;
+  /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
+  penaltyId?: string;
   tripId: string;
   amountCents: number;
-  /** Razón del fallo del cobro (failureReason): saldo insuficiente, declinado, etc. Vacío en PENDING_ACTION. */
+  /** Razón: failureReason del cobro, o el motivo de la cancelación. Vacío en PENDING_ACTION. */
   reason: string;
   createdAt: string;
-  /** DEBT (bloquea el gate) o PENDING_ACTION (pago por completar, NO bloquea). */
+  /** DEBT y CANCELLATION_PENALTY BLOQUEAN el gate; PENDING_ACTION (pago por completar) NO. */
   kind: DebtItemKind;
 }
 

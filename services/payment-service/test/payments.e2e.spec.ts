@@ -10,10 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
-import { uuidv7 } from '@veo/utils';
+import { uuidv7, NotFoundError, InvalidStateError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
+import type Redis from 'ioredis';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PayoutsService } from '../src/payouts/payouts.service';
 import { PromotionsService } from '../src/promotions/promotions.service';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
@@ -26,6 +28,7 @@ const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 let db: TestDatabase;
 let prisma: PrismaClient;
 let service: PaymentsService;
+let payouts: PayoutsService;
 
 beforeAll(async () => {
   db = await createTestDatabase({
@@ -44,6 +47,8 @@ beforeAll(async () => {
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
+    PAYOUT_MIN_CENTS: 1000,
+    PAYOUT_STEPUP_CENTS: 500000,
   });
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
@@ -52,6 +57,13 @@ beforeAll(async () => {
   // En modo sandbox no se consultan afiliaciones; un resolver no-op alcanza para la regresión.
   const affiliations = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
   service = new PaymentsService(prismaService, gateway, affiliations, promotions, config);
+  // PayoutsService con Redis falso (el set de flagged/lock no es el store del dinero; la DB sí es real).
+  const fakeRedis = {
+    sismember: async () => 0,
+    sadd: async () => 1,
+    set: async () => 'OK',
+  } as unknown as Redis;
+  payouts = new PayoutsService(prismaService, fakeRedis, config);
 }, 180_000);
 
 afterAll(async () => {
@@ -397,5 +409,172 @@ describe('CancellationPenalty (F2: penalidad de cancelación con split conductor
     expect(row?.driverCompensationCents).toBe(0);
     expect(row?.platformCents).toBe(400);
     expect(row?.driverId).toBeNull();
+  });
+
+  it('una penalidad PENDING BLOQUEA el gate de deuda: getDebtForPassenger → hasDebt + monto + kind (F2.2)', async () => {
+    const passengerId = uuidv7();
+    const tripId = uuidv7();
+
+    // Antes de la penalidad: el pasajero no tiene nada bloqueante.
+    const before = await service.getDebtForPassenger(passengerId);
+    expect(before.hasDebt).toBe(false);
+    expect(before.totalCents).toBe(0);
+
+    const res = await service.recordCancellationPenalty({
+      tripId,
+      passengerId,
+      driverId: uuidv7(),
+      penaltyCents: 800,
+      reason: 'no_show',
+    });
+
+    const after = await service.getDebtForPassenger(passengerId);
+    expect(after.hasDebt).toBe(true); // la penalidad bloquea el gate igual que una deuda
+    expect(after.totalCents).toBe(800); // y suma al monto bloqueante
+    const item = after.debts.find((d) => d.kind === 'CANCELLATION_PENALTY');
+    expect(item).toBeDefined();
+    expect(item?.penaltyId).toBe(res.penaltyId);
+    expect(item?.paymentId).toBeUndefined(); // una penalidad no es un Payment
+    expect(item?.tripId).toBe(tripId);
+    expect(item?.amountCents).toBe(800);
+  });
+
+  it('una penalidad COLLECTED/WAIVED ya NO bloquea (solo PENDING cuenta)', async () => {
+    const passengerId = uuidv7();
+    const tripId = uuidv7();
+    const res = await service.recordCancellationPenalty({ tripId, passengerId, penaltyCents: 500 });
+    // Saldada fuera de banda → el gate se libera.
+    await prisma.cancellationPenalty.update({
+      where: { id: res.penaltyId },
+      data: { status: 'COLLECTED', collectedAt: new Date() },
+    });
+    const after = await service.getDebtForPassenger(passengerId);
+    expect(after.hasDebt).toBe(false);
+    expect(after.debts.some((d) => d.kind === 'CANCELLATION_PENALTY')).toBe(false);
+  });
+});
+
+describe('Saldar penalidad de cancelación por el rail (F2.3: settle → COLLECTED + libera el gate)', () => {
+  it('saldar una penalidad PENDING captura el Payment de liquidación y la pasa a COLLECTED + libera el gate', async () => {
+    const passengerId = uuidv7();
+    const tripId = uuidv7();
+    const driverId = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId, passengerId, driverId, penaltyCents: 800 });
+
+    // Gate bloqueado antes de saldar.
+    expect((await service.getDebtForPassenger(passengerId)).hasDebt).toBe(true);
+
+    const payment = await service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' });
+
+    // El Payment de liquidación capturó (sandbox confirma) y NO lleva driverId (no entra al payout por aquí).
+    expect(payment.status).toBe('CAPTURED');
+    expect(payment.cancellationPenaltyId).toBe(rec.penaltyId);
+    expect(payment.driverId).toBeNull();
+    expect(payment.amountCents).toBe(800);
+    expect(payment.commissionCents).toBe(0);
+    expect(payment.dedupKey).toBe(`cancellation-penalty:${rec.penaltyId}`);
+
+    // La penalidad quedó COLLECTED con collectedAt.
+    const penalty = await prisma.cancellationPenalty.findUnique({ where: { id: rec.penaltyId } });
+    expect(penalty?.status).toBe('COLLECTED');
+    expect(penalty?.collectedAt).not.toBeNull();
+
+    // Gate liberado.
+    const after = await service.getDebtForPassenger(passengerId);
+    expect(after.hasDebt).toBe(false);
+
+    // Dominó: UN evento payment.cancellation_penalty_collected (notification + payout del conductor).
+    const collected = await prisma.outboxEvent.findMany({
+      where: { aggregateId: rec.penaltyId, eventType: 'payment.cancellation_penalty_collected' },
+    });
+    expect(collected).toHaveLength(1);
+    const payload = (collected[0]!.envelope as { payload: Record<string, unknown> }).payload;
+    expect(payload.settlementPaymentId).toBe(payment.id);
+    expect(payload.driverCompensationCents).toBe(400); // floor(0.5 × 800)
+  });
+
+  it('saldar dos veces (doble-tap) es idempotente: UN Payment de liquidación y UN solo evento collected', async () => {
+    const passengerId = uuidv7();
+    const tripId = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId, passengerId, penaltyCents: 600 });
+
+    const first = await service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' });
+    const second = await service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' });
+
+    expect(second.id).toBe(first.id); // devuelve el MISMO Payment de liquidación
+    const payments = await prisma.payment.findMany({ where: { cancellationPenaltyId: rec.penaltyId } });
+    expect(payments).toHaveLength(1);
+    const collected = await prisma.outboxEvent.findMany({
+      where: { aggregateId: rec.penaltyId, eventType: 'payment.cancellation_penalty_collected' },
+    });
+    expect(collected).toHaveLength(1); // captura idempotente → un solo evento
+  });
+
+  it('anti-IDOR: saldar una penalidad de OTRO pasajero → NotFoundError (anti-enumeración)', async () => {
+    const owner = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId: uuidv7(), passengerId: owner, penaltyCents: 500 });
+    await expect(
+      service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId: uuidv7(), method: 'YAPE' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    // No se creó ningún Payment de liquidación.
+    const payments = await prisma.payment.findMany({ where: { cancellationPenaltyId: rec.penaltyId } });
+    expect(payments).toHaveLength(0);
+  });
+
+  it('una penalidad WAIVED no se puede pagar → InvalidStateError', async () => {
+    const passengerId = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId: uuidv7(), passengerId, penaltyCents: 500 });
+    await prisma.cancellationPenalty.update({ where: { id: rec.penaltyId }, data: { status: 'WAIVED' } });
+    await expect(
+      service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' }),
+    ).rejects.toBeInstanceOf(InvalidStateError);
+  });
+
+  it('CASH no aplica a una penalidad → InvalidStateError (se paga digital)', async () => {
+    const passengerId = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId: uuidv7(), passengerId, penaltyCents: 500 });
+    await expect(
+      service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'CASH' }),
+    ).rejects.toBeInstanceOf(InvalidStateError);
+  });
+});
+
+describe('Compensación de penalidad al conductor en el payout (F2.3b: collectEarnings)', () => {
+  it('una penalidad COLLECTED acredita driverCompensationCents NETO al payout del conductor', async () => {
+    const driverId = uuidv7();
+    const passengerId = uuidv7();
+    const rec = await service.recordCancellationPenalty({
+      tripId: uuidv7(),
+      passengerId,
+      driverId,
+      penaltyCents: 8000, // comp = floor(0.5 × 8000) = 4000
+    });
+    await service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' });
+
+    // Ventana que cubre el collectedAt (~ahora). runPayouts agrega y crea el Payout del período.
+    const start = new Date(Date.now() - 3_600_000);
+    const end = new Date(Date.now() + 3_600_000);
+    await payouts.runPayouts(start, end);
+
+    const payout = await prisma.payout.findFirst({ where: { driverId } });
+    expect(payout).not.toBeNull();
+    // La compensación entra NETA: amount = 4000; el bruto/comisión quedan en 0 (no es tarifa de viaje).
+    expect(payout?.amountCents).toBe(4000);
+    expect(payout?.grossCents).toBe(0);
+    expect(payout?.commissionCents).toBe(0);
+    expect(payout?.status).toBe('PROCESSED');
+  });
+
+  it('una penalidad SIN conductor (driverCompensation 0) no crea payout para nadie', async () => {
+    const passengerId = uuidv7();
+    const rec = await service.recordCancellationPenalty({ tripId: uuidv7(), passengerId, penaltyCents: 6000 });
+    await service.settleCancellationPenalty({ penaltyId: rec.penaltyId, passengerId, method: 'YAPE' });
+
+    const penalty = await prisma.cancellationPenalty.findUnique({ where: { id: rec.penaltyId } });
+    expect(penalty?.driverId).toBeNull();
+    expect(penalty?.driverCompensationCents).toBe(0);
+    // El Payment de liquidación lleva driverId=NULL → tampoco entra como ganancia de viaje. Nada que pagar.
+    const settlement = await prisma.payment.findUnique({ where: { dedupKey: `cancellation-penalty:${rec.penaltyId}` } });
+    expect(settlement?.driverId).toBeNull();
   });
 });

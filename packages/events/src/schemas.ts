@@ -362,6 +362,20 @@ export const cancellationPenaltyRecorded = z.object({
   driverCompensationCents: z.number().int(),
   platformCents: z.number().int(),
 });
+/// Penalidad de cancelación SALDADA (F2.3): el pasajero la pagó por el rail (Payment de liquidación
+/// capturado). El gate de nuevos viajes se libera y `driverCompensationCents` entra al payout del
+/// conductor. notification avisa al pasajero ("pagaste la penalidad") y, si hubo conductor, su parte.
+export const cancellationPenaltyCollected = z.object({
+  penaltyId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string().optional(),
+  penaltyCents: z.number().int(),
+  driverCompensationCents: z.number().int(),
+  platformCents: z.number().int(),
+  /// id del Payment de liquidación que saldó la penalidad (para conciliación/auditoría).
+  settlementPaymentId: z.string(),
+});
 
 export const payoutProcessed = z.object({ payoutId: z.string(), driverId: z.string(), amountCents: z.number().int(), period: z.string() });
 
@@ -520,6 +534,7 @@ export const EVENT_SCHEMAS = {
   'payment.cash_pending': paymentCashPending,
   'payment.refunded': paymentRefunded,
   'payment.cancellation_penalty_recorded': cancellationPenaltyRecorded,
+  'payment.cancellation_penalty_collected': cancellationPenaltyCollected,
   'payment.affiliation_activated': paymentAffiliationActivated,
   'payment.affiliation_expired': paymentAffiliationExpired,
   'payout.processed': payoutProcessed,
