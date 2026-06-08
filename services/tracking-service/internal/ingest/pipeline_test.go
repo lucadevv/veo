@@ -218,6 +218,49 @@ func TestPipelineInvalidPingDropped(t *testing.T) {
 	}
 }
 
+// TestPipelinePublishesZoneExitAndLeftArea verifica Lote 2: antes el exit de zona y la salida de Lima se
+// detectaban pero NO se publicaban. Ahora emiten driver.exited_zone y driver.left_operational_area.
+func TestPipelinePublishesZoneExitAndLeftArea(t *testing.T) {
+	p, _, pub, _ := newPipeline(t, 0)
+	ctx := context.Background()
+	driver := "drv-1"
+	now := time.Now()
+	inCentro := domain.Ping{DriverID: driver, Lat: -12.0464, Lon: -77.0428, RecordedAt: now} // celda centro-lima
+	otherInLima := domain.Ping{DriverID: driver, Lat: -12.20, Lon: -76.95, RecordedAt: now}  // otra celda, sigue en Lima
+	outsideLima := domain.Ping{DriverID: driver, Lat: -13.5, Lon: -76.0, RecordedAt: now}    // Ica (fuera del bbox)
+
+	// Entra a centro-lima → entered_zone, sin salidas todavía.
+	if err := p.Process(ctx, inCentro); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(pub.byType(events.EventDriverExitedZone)); got != 0 {
+		t.Fatalf("no debía haber exited_zone aún, got %d", got)
+	}
+
+	// Sale de centro-lima (pero sigue en Lima) → exited_zone, sin left_operational_area.
+	if err := p.Process(ctx, otherInLima); err != nil {
+		t.Fatal(err)
+	}
+	exited := pub.byType(events.EventDriverExitedZone)
+	if len(exited) != 1 {
+		t.Fatalf("se esperaba 1 exited_zone, got %d", len(exited))
+	}
+	if pay, ok := exited[0].env.Payload.(events.DriverExitedZone); !ok || pay.ZoneID != "centro-lima" {
+		t.Fatalf("exited_zone payload inesperado: %+v", exited[0].env.Payload)
+	}
+	if got := len(pub.byType(events.EventDriverLeftArea)); got != 0 {
+		t.Fatalf("no debía salir de Lima todavía, got %d left_area", got)
+	}
+
+	// Sale de Lima Metropolitana → left_operational_area.
+	if err := p.Process(ctx, outsideLima); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(pub.byType(events.EventDriverLeftArea)); got != 1 {
+		t.Fatalf("se esperaba 1 left_operational_area, got %d", got)
+	}
+}
+
 func TestPipelineThrottlesLocation(t *testing.T) {
 	p, _, pub, _ := newPipeline(t, time.Hour)
 	ping := domain.Ping{DriverID: "drv-1", Lat: -12.0464, Lon: -77.0428, RecordedAt: time.Now()}

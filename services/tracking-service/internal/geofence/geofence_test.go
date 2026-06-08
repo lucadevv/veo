@@ -107,6 +107,32 @@ func TestEntryTransitionFiresOnce(t *testing.T) {
 	}
 }
 
+func TestExitTransitionFiresOnce(t *testing.T) {
+	d, err := NewDetector([]Zone{{ID: "miraflores", Polygon: mirafloresSquare}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := "drv-1"
+	outside := domain.Point{Lat: -12.20, Lon: -77.10}
+	inside := domain.Point{Lat: -12.12, Lon: -77.03}
+
+	// Entra (sin salida todavía).
+	tr, _ := d.Evaluate(driver, inside)
+	if len(tr.Exited) != 0 {
+		t.Fatalf("sin salida al entrar, got %+v", tr.Exited)
+	}
+	// Sale: UNA salida con la zona.
+	tr, _ = d.Evaluate(driver, outside)
+	if len(tr.Exited) != 1 || tr.Exited[0] != "miraflores" {
+		t.Fatalf("se esperaba 1 salida de miraflores, got %+v", tr.Exited)
+	}
+	// Sigue afuera: no se repite la salida.
+	tr, _ = d.Evaluate(driver, outside)
+	if len(tr.Exited) != 0 {
+		t.Fatalf("no debe repetirse la salida, got %+v", tr.Exited)
+	}
+}
+
 func TestLeftLimaTransition(t *testing.T) {
 	d, err := NewDetector(nil)
 	if err != nil {

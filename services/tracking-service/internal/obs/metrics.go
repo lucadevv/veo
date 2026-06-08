@@ -9,6 +9,7 @@ type Metrics struct {
 	PingsTotal         prometheus.Counter
 	PingsInvalidTotal  prometheus.Counter
 	GeofenceEntries    *prometheus.CounterVec
+	GeofenceExits      *prometheus.CounterVec
 	OutsideLimaTotal   prometheus.Counter
 	EventsPublished    *prometheus.CounterVec
 	EventsPublishError prometheus.Counter
@@ -31,6 +32,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		GeofenceEntries: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "tracking", Name: "geofence_entries_total",
 			Help: "Entradas de conductores en zonas (por zona).",
+		}, []string{"zone"}),
+		GeofenceExits: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "tracking", Name: "geofence_exits_total",
+			Help: "Salidas de conductores de zonas (por zona).",
 		}, []string{"zone"}),
 		OutsideLimaTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "tracking", Name: "outside_lima_total",
@@ -59,7 +64,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}),
 	}
 	reg.MustRegister(
-		m.PingsTotal, m.PingsInvalidTotal, m.GeofenceEntries, m.OutsideLimaTotal,
+		m.PingsTotal, m.PingsInvalidTotal, m.GeofenceEntries, m.GeofenceExits, m.OutsideLimaTotal,
 		m.EventsPublished, m.EventsPublishError, m.HistoryInsertError,
 		m.StreamSubscribers, m.IngestDuration,
 	)

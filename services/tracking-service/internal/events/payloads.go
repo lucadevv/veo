@@ -6,6 +6,10 @@ import "github.com/veo/tracking-service/internal/domain"
 const (
 	EventDriverLocationUpdated = "driver.location_updated"
 	EventDriverEnteredZone     = "driver.entered_zone"
+	EventDriverExitedZone      = "driver.exited_zone"
+	// EventDriverLeftArea: el conductor salió de Lima Metropolitana (área operativa, BR-D03). Antes solo
+	// se logueaba; ahora es un evento para que dispatch/ops reaccionen (no ofrecer viajes fuera del área).
+	EventDriverLeftArea = "driver.left_operational_area"
 )
 
 // Tipos de evento que consume tracking-service.
@@ -66,4 +70,19 @@ type DriverEnteredZone struct {
 	DriverID string `json:"driverId"`
 	ZoneID   string `json:"zoneId"`
 	At       string `json:"at"` // ISO-8601
+}
+
+// DriverExitedZone es el payload de driver.exited_zone. Misma forma que entered (simétrico).
+type DriverExitedZone struct {
+	DriverID string `json:"driverId"`
+	ZoneID   string `json:"zoneId"`
+	At       string `json:"at"` // ISO-8601
+}
+
+// DriverLeftArea es el payload de driver.left_operational_area (salió de Lima Metropolitana).
+// Forma JSON: {driverId, point:{lat,lon}, at}.
+type DriverLeftArea struct {
+	DriverID string       `json:"driverId"`
+	Point    domain.Point `json:"point"`
+	At       string       `json:"at"` // ISO-8601
 }

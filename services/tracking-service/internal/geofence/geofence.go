@@ -73,6 +73,7 @@ func pointInPolygon(p domain.Point, poly []domain.Point) bool {
 // Transition describe el resultado de evaluar un punto para un conductor.
 type Transition struct {
 	Entered  []string // IDs de zonas en las que el conductor acaba de entrar
+	Exited   []string // IDs de zonas de las que el conductor acaba de salir
 	InLima   bool     // el punto está dentro de Lima Metropolitana
 	LeftLima bool     // transición: estaba en Lima y ahora salió
 }
@@ -123,7 +124,7 @@ func (d *Detector) Evaluate(driverID string, p domain.Point) (Transition, error)
 		d.inside[driverID] = current
 	}
 
-	var entered []string
+	var entered, exited []string
 	for i := range d.zones {
 		z := &d.zones[i]
 		contains, err := z.Contains(p)
@@ -137,6 +138,7 @@ func (d *Detector) Evaluate(driverID string, p domain.Point) (Transition, error)
 			entered = append(entered, z.ID)
 		case !contains && was:
 			delete(current, z.ID)
+			exited = append(exited, z.ID)
 		}
 	}
 
@@ -146,6 +148,7 @@ func (d *Detector) Evaluate(driverID string, p domain.Point) (Transition, error)
 
 	return Transition{
 		Entered:  entered,
+		Exited:   exited,
 		InLima:   nowInLima,
 		LeftLima: seen && wasInLima && !nowInLima,
 	}, nil

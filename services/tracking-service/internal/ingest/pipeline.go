@@ -162,6 +162,21 @@ func (p *Pipeline) Process(ctx context.Context, ping domain.Ping) error {
 }
 
 func (p *Pipeline) handleGeofence(ctx context.Context, ping domain.Ping, t geofence.Transition) {
+	at := ping.RecordedAt.UTC().Format(time.RFC3339Nano)
+
+	for _, zoneID := range t.Entered {
+		p.metrics.GeofenceEntries.WithLabelValues(zoneID).Inc()
+		p.publishEvent(ctx, events.EventDriverEnteredZone, ping.DriverID,
+			events.DriverEnteredZone{DriverID: ping.DriverID, ZoneID: zoneID, At: at})
+	}
+	// SIMÉTRICO a las entradas: antes el exit se detectaba pero solo se borraba el estado, sin evento →
+	// ningún consumidor sabía que el conductor salió de la zona (gap de auditoría/operación, BR-D03).
+	for _, zoneID := range t.Exited {
+		p.metrics.GeofenceExits.WithLabelValues(zoneID).Inc()
+		p.publishEvent(ctx, events.EventDriverExitedZone, ping.DriverID,
+			events.DriverExitedZone{DriverID: ping.DriverID, ZoneID: zoneID, At: at})
+	}
+
 	if !t.InLima {
 		p.metrics.OutsideLimaTotal.Inc()
 		lat, lon := obs.CoarseGeo(ping.Lat, ping.Lon)
@@ -170,43 +185,38 @@ func (p *Pipeline) handleGeofence(ctx context.Context, ping domain.Ping, t geofe
 			slog.Float64("lat", lat), slog.Float64("lon", lon),
 		)
 	}
-	for _, zoneID := range t.Entered {
-		p.metrics.GeofenceEntries.WithLabelValues(zoneID).Inc()
-		env := events.NewEnvelope(events.NewEnvelopeInput{
-			EventType: events.EventDriverEnteredZone,
-			Producer:  config.ProducerName(),
-			Payload: events.DriverEnteredZone{
-				DriverID: ping.DriverID,
-				ZoneID:   zoneID,
-				At:       ping.RecordedAt.UTC().Format(time.RFC3339Nano),
-			},
-		})
-		if err := p.publisher.Publish(ctx, env, ping.DriverID); err != nil {
-			p.metrics.EventsPublishError.Inc()
-			p.log.Error("evento entered_zone no publicado", slog.Any("err", err))
-			continue
-		}
-		p.metrics.EventsPublished.WithLabelValues(events.EventDriverEnteredZone).Inc()
+	// Transición de SALIDA del área operativa (una sola vez al cruzar el borde, no en cada ping de afuera):
+	// antes solo se logueaba; ahora es un evento para que dispatch/ops reaccionen.
+	if t.LeftLima {
+		p.publishEvent(ctx, events.EventDriverLeftArea, ping.DriverID,
+			events.DriverLeftArea{DriverID: ping.DriverID, Point: ping.Point(), At: at})
 	}
 }
 
 func (p *Pipeline) publishLocation(ctx context.Context, ping domain.Ping, cell string) {
-	env := events.NewEnvelope(events.NewEnvelopeInput{
-		EventType: events.EventDriverLocationUpdated,
-		Producer:  config.ProducerName(),
-		Payload: events.DriverLocationUpdated{
+	p.publishEvent(ctx, events.EventDriverLocationUpdated, ping.DriverID,
+		events.DriverLocationUpdated{
 			DriverID: ping.DriverID,
 			Point:    ping.Point(),
 			H3:       cell,
 			At:       ping.RecordedAt.UTC().Format(time.RFC3339Nano),
-		},
+		})
+}
+
+// publishEvent arma el envelope, publica a Kafka (key = entidad raíz) y lleva las métricas, uniforme
+// para todos los eventos de dominio del pipeline. La key es el driverId (partición por conductor).
+func (p *Pipeline) publishEvent(ctx context.Context, eventType, key string, payload any) {
+	env := events.NewEnvelope(events.NewEnvelopeInput{
+		EventType: eventType,
+		Producer:  config.ProducerName(),
+		Payload:   payload,
 	})
-	if err := p.publisher.Publish(ctx, env, ping.DriverID); err != nil {
+	if err := p.publisher.Publish(ctx, env, key); err != nil {
 		p.metrics.EventsPublishError.Inc()
-		p.log.Error("evento location_updated no publicado", slog.Any("err", err))
+		p.log.Error("evento no publicado", slog.String("event", eventType), slog.Any("err", err))
 		return
 	}
-	p.metrics.EventsPublished.WithLabelValues(events.EventDriverLocationUpdated).Inc()
+	p.metrics.EventsPublished.WithLabelValues(eventType).Inc()
 }
 
 // shouldPublish aplica throttling por conductor para no saturar Kafka a 1 Hz × N drivers.
