@@ -96,3 +96,75 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
     expect(mapping).toEqual({ actorId: 'u-777', resourceType: 'user', resourceId: 'u-777' });
   });
 });
+
+describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 29733)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig());
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('registra TODAS las transiciones del ciclo de vida', () => {
+    for (const t of [
+      'trip.assigned', 'trip.accepted', 'trip.arriving', 'trip.arrived', 'trip.started',
+      'trip.completed', 'trip.cancelled', 'trip.expired', 'trip.failed', 'trip.child_code_failed',
+    ]) {
+      expect(handlers.has(t), `falta handler ${t}`).toBe(true);
+    }
+  });
+
+  it('NO audita trip.requested/bid_posted/reassigning (llevan geo → no van al WORM inmutable)', () => {
+    expect(handlers.has('trip.requested')).toBe(false);
+    expect(handlers.has('trip.bid_posted')).toBe(false);
+    expect(handlers.has('trip.reassigning')).toBe(false);
+  });
+
+  it('trip.started → actorId=driverId, resourceType=trip, resourceId=tripId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'trip.started',
+      producer: 'trip-service',
+      payload: { tripId: 't-1', driverId: 'drv-9', startedAt: new Date().toISOString() },
+    });
+    await handlers.get('trip.started')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'drv-9', resourceType: 'trip', resourceId: 't-1' });
+  });
+
+  it('trip.cancelled mapea el actorId según `by` (DRIVER→driverId, PASSENGER→passengerId, SYSTEM→system)', async () => {
+    const mk = (by: 'DRIVER' | 'PASSENGER' | 'SYSTEM', extra: Record<string, unknown>) =>
+      createEnvelope({
+        eventType: 'trip.cancelled',
+        producer: 'trip-service',
+        payload: { tripId: 't-1', by, penaltyCents: 0, ...extra },
+      });
+    await handlers.get('trip.cancelled')!(mk('DRIVER', { driverId: 'drv-1' }));
+    await handlers.get('trip.cancelled')!(mk('PASSENGER', { passengerId: 'pax-1' }));
+    await handlers.get('trip.cancelled')!(mk('SYSTEM', {}));
+    const actors = recordFromEvent.mock.calls.map((c) => (c[2] as EventAuditMapping).actorId);
+    expect(actors).toEqual(['drv-1', 'pax-1', 'system']);
+  });
+
+  it('trip.expired → actorId=system (cierre del watchdog)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'trip.expired',
+      producer: 'trip-service',
+      payload: { tripId: 't-1', passengerId: 'pax-1', fromStatus: 'REQUESTED', staleMinutes: 12, at: new Date().toISOString() },
+    });
+    await handlers.get('trip.expired')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping.actorId).toBe('system');
+  });
+});

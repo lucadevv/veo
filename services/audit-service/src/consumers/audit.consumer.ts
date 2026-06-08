@@ -8,6 +8,8 @@
  *  - Pánico:        panic.triggered, panic.acknowledged
  *  - Pagos:         payment.captured, payment.failed, payout.processed
  *  - Video/Media:   media.recording_started, media.archived
+ *  - Viaje (ciclo): trip.assigned/accepted/arriving/arrived/started/completed/cancelled/expired/failed
+ *                   + trip.child_code_failed (solo IDs+estado, sin geo → ver nota en registerHandlers)
  *
  * Contratos AÚN no disponibles en @veo/events (ver README · "contratos pendientes"):
  *  - Acceso a video por operador (p.ej. media.accessed) desde media-service.
@@ -134,6 +136,41 @@ export class AuditConsumer implements OnModuleInit, OnApplicationShutdown {
     this.register('media.archived', (p) => ({
       actorId: 'system',
       resourceType: 'media',
+      resourceId: p.tripId,
+    }));
+
+    // Viaje (ciclo de vida · trazabilidad forense, movilidad segura / Ley 29733): la cadena de custodia
+    // debe poder reconstruir QUÉ pasó en un viaje (quién lo aceptó/inició/completó/canceló y cuándo), no
+    // solo el pánico. Se auditan las TRANSICIONES de estado (resourceId=tripId, actorId=conductor en las
+    // que él ejecuta / `system` en las del watchdog / la parte que canceló en cancelled). Se EXCLUYEN a
+    // propósito trip.requested / trip.bid_posted / trip.reassigning: llevan geo (origin/destination) y el
+    // audit persiste el payload en WORM inmutable — la traza forense del viaje no necesita la ubicación.
+    this.register('trip.assigned', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.accepted', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.arriving', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.arrived', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.started', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.completed', (p) => ({
+      actorId: p.driverId ?? 'system',
+      resourceType: 'trip',
+      resourceId: p.tripId,
+    }));
+    this.register('trip.cancelled', (p) => ({
+      actorId:
+        p.by === 'DRIVER'
+          ? (p.driverId ?? 'driver')
+          : p.by === 'PASSENGER'
+            ? (p.passengerId ?? 'passenger')
+            : 'system',
+      resourceType: 'trip',
+      resourceId: p.tripId,
+    }));
+    this.register('trip.expired', (p) => ({ actorId: 'system', resourceType: 'trip', resourceId: p.tripId }));
+    this.register('trip.failed', (p) => ({ actorId: 'system', resourceType: 'trip', resourceId: p.tripId }));
+    // Seguridad: un código de modo niño fallido es un intento sospechoso → cadena de custodia (BR-T07).
+    this.register('trip.child_code_failed', (p) => ({
+      actorId: p.driverId ?? 'driver',
+      resourceType: 'trip',
       resourceId: p.tripId,
     }));
   }
