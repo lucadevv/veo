@@ -29,7 +29,6 @@ import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, DispatchSessionStatus } from '../generated/prisma';
-import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { DriverPool } from './driver-pool';
 import { MatchingSessionStore } from './matching-session.store';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -51,30 +50,14 @@ export interface TripRequest {
   requiredVehicleType?: VehicleType;
 }
 
-export interface MatchingResult {
-  matched: boolean;
-  driverId?: string;
-  attempts: number;
-}
-
-type ResponseOutcome = typeof DispatchOutcome.ACCEPTED | typeof DispatchOutcome.REJECTED | typeof DispatchOutcome.TIMEOUT;
-
-interface PendingOffer {
-  resolve: (outcome: ResponseOutcome) => void;
-  timer: NodeJS.Timeout;
-}
-
 @Injectable()
 export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
-  private readonly pending = new Map<string, PendingOffer>();
   private readonly offerTimeoutMs: number;
-  private readonly rejectsBeforeExpand: number;
   private readonly maxKRing: number;
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     private readonly driverPool: DriverPool,
     private readonly sessions: MatchingSessionStore,
     @Inject(DISPATCH_SCORER) private readonly scorer: DispatchScorer,
@@ -85,52 +68,10 @@ export class MatchingService {
     config: ConfigService<Env, true>,
   ) {
     this.offerTimeoutMs = config.getOrThrow<number>('DISPATCH_OFFER_TIMEOUT_MS');
-    this.rejectsBeforeExpand = config.getOrThrow<number>('DISPATCH_REJECTS_BEFORE_EXPAND');
     this.maxKRing = config.getOrThrow<number>('DISPATCH_MAX_K_RING');
   }
 
-  /** Orquesta el matching de un viaje. Devuelve si hubo match y a qué conductor. */
-  async handleTripRequested(trip: TripRequest): Promise<MatchingResult> {
-    const center = toH3(trip.origin, DISPATCH_H3_RESOLUTION);
-    const surgeQuote = await this.surge.quote(trip.origin);
-    const requiredVehicleType = trip.requiredVehicleType ?? VehicleType.CAR;
-    const attempted = new Set<string>();
-    let attempt = 0;
-
-    for (let k = 1; k <= this.maxKRing; k++) {
-      const ranked = await this.rankCandidates(
-        neighbors(center, k),
-        trip.origin,
-        attempted,
-        requiredVehicleType,
-      );
-      for (const candidate of ranked) {
-        // Tope de ofertas en radio 1 antes de expandir (BR-T06).
-        if (k === 1 && attempt >= this.rejectsBeforeExpand) break;
-        attempt++;
-        attempted.add(candidate.driverId);
-        const loc = candidate.location;
-        const outcome = await this.offerTo({
-          tripId: trip.tripId,
-          driverId: candidate.driverId,
-          attempt,
-          score: candidate.score,
-          surgeMultiplier: surgeQuote.multiplier,
-          location: loc,
-          origin: trip.origin,
-        });
-        if (outcome === DispatchOutcome.ACCEPTED) {
-          await this.hotIndex.markBusy(candidate.driverId);
-          return { matched: true, driverId: candidate.driverId, attempts: attempt };
-        }
-      }
-    }
-
-    await this.publishTimeout(trip.tripId, attempted.size);
-    return { matched: false, attempts: attempted.size };
-  }
-
-  // ──────────────── Matching EVENT-DRIVEN (D2.x · estado durable, sin Promise/timer) ────────────────
+  // ──────────────── Matching EVENT-DRIVEN (estado durable, sin Promise/timer en proceso) ────────────────
 
   /**
    * Inicia (o re-inicia, en un re-bid) la sesión de matching del viaje y dispara la PRIMERA oferta.
@@ -192,6 +133,43 @@ export class MatchingService {
     if (await this.sessions.closeTimedOut(tripId)) {
       await this.publishTimeout(tripId, attempted.size);
     }
+  }
+
+  /** Cierra la sesión del viaje como MATCHED (un conductor aceptó). Idempotente (CAS where status=OPEN). */
+  async markMatched(tripId: string): Promise<void> {
+    await this.sessions.closeMatched(tripId);
+  }
+
+  /** Cierra la sesión como CANCELLED (el viaje se canceló durante el matching). Idempotente (CAS). */
+  async cancelSession(tripId: string): Promise<void> {
+    await this.sessions.closeCancelled(tripId);
+  }
+
+  /**
+   * Barrido DURABLE de ofertas vencidas (D2.3): reemplaza al setTimeout en proceso. Para cada oferta
+   * OFFERED más vieja que el timeout, la reclama a TIMEOUT por CAS atómico (where outcome=OFFERED) y
+   * avanza el matching (offerNext). Replica-safe: el CAS garantiza que UNA sola réplica toma cada oferta
+   * (las demás ven count=0). Lo invoca el reconciler (@Interval). Devuelve cuántas avanzó.
+   */
+  async sweepExpiredOffers(limit = 100): Promise<number> {
+    const cutoff = new Date(Date.now() - this.offerTimeoutMs);
+    const expired = await this.prisma.read.dispatchMatch.findMany({
+      where: { outcome: DispatchOutcome.OFFERED, offeredAt: { lt: cutoff } },
+      select: { id: true, tripId: true },
+      orderBy: { offeredAt: 'asc' },
+      take: limit,
+    });
+    let advanced = 0;
+    for (const m of expired) {
+      const claimed = await this.prisma.write.dispatchMatch.updateMany({
+        where: { id: m.id, outcome: DispatchOutcome.OFFERED },
+        data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
+      });
+      if (claimed.count === 0) continue; // otra réplica (o un accept/reject) ya la tomó
+      await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez
+      advanced += 1;
+    }
+    return advanced;
   }
 
   /**
@@ -268,81 +246,6 @@ export class MatchingService {
       score: c.score,
       location: byId.get(c.driverId) ?? origin,
     }));
-  }
-
-  private async offerTo(args: {
-    tripId: string;
-    driverId: string;
-    attempt: number;
-    score: number;
-    surgeMultiplier: number;
-    location: LatLon;
-    origin: LatLon;
-  }): Promise<ResponseOutcome> {
-    const matchId = uuidv7();
-    await this.prisma.write.dispatchMatch.create({
-      data: {
-        id: matchId,
-        tripId: args.tripId,
-        driverId: args.driverId,
-        score: new Prisma.Decimal(args.score),
-        attempt: args.attempt,
-        surgeMultiplier: new Prisma.Decimal(args.surgeMultiplier),
-        outcome: DispatchOutcome.OFFERED,
-      },
-    });
-
-    // ETA self-hosted (@veo/maps, NO Google). Una llamada por oferta; no bloquea el ranking.
-    let etaSeconds = 0;
-    try {
-      etaSeconds = await this.maps.eta(args.location, args.origin);
-    } catch (err) {
-      this.logger.warn(`ETA no disponible para match ${matchId}: ${String(err)}`);
-    }
-
-    // El conductor debe responder antes de offeredAt + timeout; la app lo usa como cuenta atrás.
-    const expiresAt = new Date(Date.now() + this.offerTimeoutMs).toISOString();
-    const outcome = await new Promise<ResponseOutcome>((resolve) => {
-      const timer = setTimeout(() => {
-        if (!this.pending.delete(matchId)) return;
-        void this.expireOffer(matchId);
-        resolve(DispatchOutcome.TIMEOUT);
-      }, this.offerTimeoutMs);
-      this.pending.set(matchId, { resolve, timer });
-      void Promise.resolve(
-        this.offerDelivery.deliver({
-          matchId,
-          tripId: args.tripId,
-          driverId: args.driverId,
-          etaSeconds,
-          attempt: args.attempt,
-          score: args.score,
-          surgeMultiplier: args.surgeMultiplier,
-          expiresAt,
-        }),
-      ).catch((err) => this.logger.warn(`entrega de oferta falló (${matchId}): ${String(err)}`));
-    });
-    return outcome;
-  }
-
-  /** Resuelve una oferta pendiente (lo invoca DispatchService.accept/reject). */
-  respond(matchId: string, outcome: typeof DispatchOutcome.ACCEPTED | typeof DispatchOutcome.REJECTED): void {
-    const offer = this.pending.get(matchId);
-    if (!offer) return; // ya resuelta o expirada
-    clearTimeout(offer.timer);
-    this.pending.delete(matchId);
-    offer.resolve(outcome);
-  }
-
-  private async expireOffer(matchId: string): Promise<void> {
-    try {
-      await this.prisma.write.dispatchMatch.updateMany({
-        where: { id: matchId, outcome: DispatchOutcome.OFFERED },
-        data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
-      });
-    } catch (err) {
-      this.logger.warn(`no se pudo marcar TIMEOUT del match ${matchId}: ${String(err)}`);
-    }
   }
 
   private async publishTimeout(tripId: string, attemptedDrivers: number): Promise<void> {

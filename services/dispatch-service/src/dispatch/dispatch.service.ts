@@ -8,7 +8,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { uuidv7, ConflictError, NotFoundError, type LatLon } from '@veo/utils';
+import { ConflictError, NotFoundError, type LatLon } from '@veo/utils';
 import { DispatchOutcome, type VehicleType } from '@veo/shared-types';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
@@ -41,20 +41,23 @@ export class DispatchService {
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
       if (!match) throw new NotFoundError('Oferta no encontrada');
-      if (match.outcome !== DispatchOutcome.OFFERED) {
-        throw new ConflictError('La oferta ya fue respondida o expiró', { outcome: match.outcome });
-      }
       const respondedAt = new Date();
-      const updated = await tx.dispatchMatch.update({
-        where: { id: matchId },
+      // Guard ATÓMICO (no check-then-act): el outcome va en el WHERE. Dos accepts concurrentes del mismo
+      // match → solo UNO matchea OFFERED y gana; el otro ve count=0 → Conflict (idempotencia honesta).
+      const claimed = await tx.dispatchMatch.updateMany({
+        where: { id: matchId, outcome: DispatchOutcome.OFFERED },
         data: { outcome: DispatchOutcome.ACCEPTED, respondedAt },
       });
+      if (claimed.count === 0) {
+        throw new ConflictError('La oferta ya fue respondida o expiró', { outcome: match.outcome });
+      }
       const scoreMs = respondedAt.getTime() - match.offeredAt.getTime();
       const envelope = createEnvelope({
         eventType: 'dispatch.match_found',
         producer: 'dispatch-service',
         payload: { tripId: match.tripId, driverId: match.driverId, scoreMs },
-        dedupKey: uuidv7(),
+        // dedupKey DETERMINISTA (no uuidv7 aleatorio): un retry HTTP del accept NO duplica el match_found.
+        dedupKey: `match_found:${match.tripId}:${match.driverId}`,
       });
       await tx.outboxEvent.create({
         data: {
@@ -63,11 +66,12 @@ export class DispatchService {
           envelope: envelope as unknown as Prisma.InputJsonValue,
         },
       });
-      return DispatchService.toView(updated);
+      return DispatchService.toView({ ...match, outcome: DispatchOutcome.ACCEPTED, respondedAt });
     });
 
     await this.hotIndex.markBusy(view.driverId);
-    this.matching.respond(matchId, DispatchOutcome.ACCEPTED);
+    // Cierra la sesión de matching (MATCHED) → el advance/reconciler ya no la tocan. Antes: respond() in-process.
+    await this.matching.markMatched(view.tripId);
     domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     return view;
   }
@@ -76,17 +80,19 @@ export class DispatchService {
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
       if (!match) throw new NotFoundError('Oferta no encontrada');
-      if (match.outcome !== DispatchOutcome.OFFERED) {
+      const respondedAt = new Date();
+      const claimed = await tx.dispatchMatch.updateMany({
+        where: { id: matchId, outcome: DispatchOutcome.OFFERED },
+        data: { outcome: DispatchOutcome.REJECTED, respondedAt },
+      });
+      if (claimed.count === 0) {
         throw new ConflictError('La oferta ya fue respondida o expiró', { outcome: match.outcome });
       }
-      const updated = await tx.dispatchMatch.update({
-        where: { id: matchId },
-        data: { outcome: DispatchOutcome.REJECTED, respondedAt: new Date() },
-      });
-      return DispatchService.toView(updated);
+      return DispatchService.toView({ ...match, outcome: DispatchOutcome.REJECTED, respondedAt });
     });
 
-    this.matching.respond(matchId, DispatchOutcome.REJECTED);
+    // Avanza el matching al siguiente candidato por ESTADO (no por una señal in-process). Antes: respond().
+    await this.matching.offerNext(view.tripId);
     return view;
   }
 

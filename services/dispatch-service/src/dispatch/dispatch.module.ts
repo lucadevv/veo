@@ -20,6 +20,7 @@ import { OFFER_BOARD_STORE } from './offer-board.port';
 import { RedisOfferBoardStore } from './redis-offer-board.store';
 import { OfferBoardService } from './offer-board.service';
 import { OfferBoardScheduler } from './offer-board.scheduler';
+import { DispatchTimeoutReconciler } from './dispatch-timeout.reconciler';
 import { EligibilityGate, ELIGIBILITY_CACHE_TTL_MS } from './eligibility.gate';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
@@ -65,6 +66,7 @@ const eligibilityCacheTtlProvider: Provider = {
     EligibilityGate,
     OfferBoardService,
     OfferBoardScheduler,
+    DispatchTimeoutReconciler,
   ],
   exports: [
     DispatchService,

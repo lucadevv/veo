@@ -42,11 +42,9 @@ export const envSchema = z.object({
   DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(60),
 
   // ── Algoritmo de matching (BR-T06) ──
-  /// Segundos de espera de respuesta del conductor por oferta antes de pasar al siguiente.
+  /// Milisegundos de espera de respuesta del conductor por oferta antes de marcarla TIMEOUT y avanzar.
   DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
-  /// Nº de rechazos en el k-ring radio 1 antes de expandir a radio 2.
-  DISPATCH_REJECTS_BEFORE_EXPAND: z.coerce.number().default(5),
-  /// Radio máximo del k-ring al expandir la búsqueda.
+  /// Radio máximo del k-ring al expandir la búsqueda. El advance agota cada anillo antes de expandir.
   DISPATCH_MAX_K_RING: z.coerce.number().default(2),
 
   // PUJA (ADR 010 §6, A4): TTL (ms) del cache in-proc de elegibilidad del conductor. El gate hace un

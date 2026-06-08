@@ -14,6 +14,7 @@ import { uuidv7, toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
 import { VehicleType } from '@veo/shared-types';
 import { PrismaClient, DispatchOutcome, DispatchSessionStatus } from '../src/generated/prisma';
 import { MatchingService } from '../src/dispatch/matching.service';
+import { DispatchService } from '../src/dispatch/dispatch.service';
 import type { DispatchOffer } from '../src/dispatch/offer-delivery.port';
 import { MatchingSessionStore } from '../src/dispatch/matching-session.store';
 import { DriverPool } from '../src/dispatch/driver-pool';
@@ -29,6 +30,7 @@ const CENTER = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
 let db: TestDatabase;
 let prisma: PrismaClient;
 let matching: MatchingService;
+let dispatch: DispatchService;
 let hotIndex: InMemoryHotIndex;
 let offered: string[];
 
@@ -62,13 +64,11 @@ beforeAll(async () => {
   };
   const config = new ConfigService<Env, true>({
     DISPATCH_OFFER_TIMEOUT_MS: 12_000,
-    DISPATCH_REJECTS_BEFORE_EXPAND: 5,
     DISPATCH_MAX_K_RING: 2,
   } as Partial<Env> as Env);
 
   matching = new MatchingService(
     prismaService,
-    hotIndex,
     driverPool,
     sessions,
     scorer,
@@ -78,6 +78,8 @@ beforeAll(async () => {
     offerDelivery,
     config,
   );
+  // DispatchService (accept/reject del conductor) comparte el mismo matching + hot-index reales.
+  dispatch = new DispatchService(prismaService, hotIndex, exclusion, matching);
 }, 180_000);
 
 afterAll(async () => {
@@ -177,5 +179,152 @@ describe('Matching secuencial event-driven (D2.1: DispatchSession + offerNext)',
     await matching.offerNext(tripId); // no-op: sesión no-OPEN
     expect(await timeoutEvents(tripId)).toHaveLength(before.length); // no re-publica
     expect(await prisma.dispatchMatch.count({ where: { tripId } })).toBe(0);
+  });
+});
+
+describe('Respuesta reactiva del conductor (D2.2: accept/reject por ESTADO, sin respond() in-process)', () => {
+  async function matchFoundEvents(tripId: string) {
+    return prisma.outboxEvent.findMany({ where: { aggregateId: tripId, eventType: 'dispatch.match_found' } });
+  }
+
+  it('accept → match ACCEPTED, sesión MATCHED y UN match_found con dedupKey determinista', async () => {
+    const tripId = uuidv7();
+    const driver = uuidv7();
+    await hotIndex.seed(driver, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    const matchId = (await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } })).id;
+
+    const view = await dispatch.accept(matchId);
+    expect(view.outcome).toBe(DispatchOutcome.ACCEPTED);
+
+    const match = await prisma.dispatchMatch.findUniqueOrThrow({ where: { id: matchId } });
+    expect(match.outcome).toBe(DispatchOutcome.ACCEPTED);
+    const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
+    expect(session?.status).toBe(DispatchSessionStatus.MATCHED);
+
+    const events = await matchFoundEvents(tripId);
+    expect(events).toHaveLength(1);
+    const envelope = events[0]!.envelope as { dedupKey: string; payload: { driverId: string } };
+    expect(envelope.dedupKey).toBe(`match_found:${tripId}:${match.driverId}`);
+  });
+
+  it('accept dos veces (retry) → el segundo es Conflict y NO emite un segundo match_found', async () => {
+    const tripId = uuidv7();
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    const matchId = (await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } })).id;
+
+    await dispatch.accept(matchId);
+    await expect(dispatch.accept(matchId)).rejects.toThrow(); // ya no está OFFERED → Conflict
+    expect(await matchFoundEvents(tripId)).toHaveLength(1);
+  });
+
+  it('reject → match REJECTED, avanza al SIGUIENTE candidato y la sesión sigue OPEN', async () => {
+    const tripId = uuidv7();
+    const d1 = uuidv7();
+    const d2 = uuidv7();
+    await hotIndex.seed(d1, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await hotIndex.seed(d2, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    const firstMatch = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } });
+
+    const view = await dispatch.reject(firstMatch.id);
+    expect(view.outcome).toBe(DispatchOutcome.REJECTED);
+
+    // El reject disparó offerNext → hay un nuevo OFFERED al OTRO conductor.
+    const inFlight = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    expect(inFlight.driverId).not.toBe(firstMatch.driverId);
+    const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
+    expect(session?.status).toBe(DispatchSessionStatus.OPEN);
+    expect(await matchFoundEvents(tripId)).toHaveLength(0); // un reject no produce match
+  });
+
+  it('trip.cancelled → cancelSession cierra CANCELLED y offerNext deja de ofertar', async () => {
+    const tripId = uuidv7();
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+
+    await matching.cancelSession(tripId);
+    const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
+    expect(session?.status).toBe(DispatchSessionStatus.CANCELLED);
+
+    // Aún con un OFFERED vivo, marcar la respuesta y avanzar NO debe re-ofertar (sesión no-OPEN).
+    await prisma.dispatchMatch.updateMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+      data: { outcome: DispatchOutcome.REJECTED, respondedAt: new Date() },
+    });
+    await matching.offerNext(tripId);
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.OFFERED } })).toBe(0);
+  });
+});
+
+describe('Reconciler de timeout durable (D2.3: sweepExpiredOffers, reemplaza el setTimeout)', () => {
+  /**
+   * Simula el paso del tiempo: backdatea la sesión (inicio de ronda) Y su oferta OFFERED para que la
+   * oferta quede vencida (offeredAt > 12s atrás) pero SIGA siendo de la ronda actual (offeredAt ≥ createdAt).
+   * En producción createdAt y offeredAt envejecen juntos; el test comprime el tiempo manteniendo ese orden.
+   */
+  async function expireInFlight(tripId: string): Promise<void> {
+    await prisma.dispatchSession.update({
+      where: { tripId },
+      data: { createdAt: new Date(Date.now() - 60_000) },
+    });
+    await prisma.dispatchMatch.updateMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+      data: { offeredAt: new Date(Date.now() - 30_000) }, // vencida (>12s) pero ≥ createdAt (60s atrás)
+    });
+  }
+
+  it('oferta vencida con otro candidato → sweep la marca TIMEOUT y oferta al siguiente', async () => {
+    const tripId = uuidv7();
+    const d1 = uuidv7();
+    const d2 = uuidv7();
+    await hotIndex.seed(d1, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await hotIndex.seed(d2, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    const first = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } });
+    await expireInFlight(tripId);
+
+    const advanced = await matching.sweepExpiredOffers();
+    expect(advanced).toBe(1);
+
+    expect((await prisma.dispatchMatch.findUniqueOrThrow({ where: { id: first.id } })).outcome).toBe(
+      DispatchOutcome.TIMEOUT,
+    );
+    const inFlight = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    expect(inFlight.driverId).not.toBe(first.driverId); // avanzó al segundo
+  });
+
+  it('oferta vencida sin más candidatos → sweep cierra TIMED_OUT + dispatch.timeout', async () => {
+    const tripId = uuidv7();
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    await expireInFlight(tripId);
+
+    await matching.sweepExpiredOffers();
+    const session = await prisma.dispatchSession.findUnique({ where: { tripId } });
+    expect(session?.status).toBe(DispatchSessionStatus.TIMED_OUT);
+    expect(await timeoutEvents(tripId)).toHaveLength(1);
+  });
+
+  it('una oferta FRESCA (no vencida) no se barre', async () => {
+    const tripId = uuidv7();
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+
+    const advanced = await matching.sweepExpiredOffers();
+    expect(advanced).toBe(0);
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.OFFERED } })).toBe(1);
+  });
+
+  it('barrido doble (dos réplicas) reclama la oferta UNA sola vez (CAS)', async () => {
+    const tripId = uuidv7();
+    await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    await expireInFlight(tripId);
+
+    const [a, b] = await Promise.all([matching.sweepExpiredOffers(), matching.sweepExpiredOffers()]);
+    expect(a + b).toBe(1); // exactamente una réplica reclamó la oferta vencida
   });
 });

@@ -84,9 +84,11 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
     // Ola 2B: el matching filtra candidatos por tipo de vehículo (MOTO solo a conductores MOTO).
     // Default CAR para eventos previos a Ola 2B (compat).
     const requiredVehicleType = p.vehicleType ?? 'CAR';
-    // Lanza el matching sin bloquear el commit del consumidor (flujo de oferta de larga duración).
+    // Abre la sesión de matching (event-driven) y dispara la primera oferta. NO bloquea el commit del
+    // consumidor: el desenlace avanza por ESTADO en DB (offerNext desde el reject del conductor / el
+    // reconciler de timeout), no por un await-loop con estado en proceso.
     void this.matching
-      .handleTripRequested({ tripId: p.tripId, origin: p.origin, requiredVehicleType })
+      .startSession({ tripId: p.tripId, origin: p.origin, requiredVehicleType })
       .catch((err) => this.logger.error(`matching falló para trip ${p.tripId}: ${String(err)}`));
   }
 
@@ -233,6 +235,9 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.offerBoard.cancelBoard(p.tripId);
+    // FIXED: el viaje murió ⇒ cerrar la sesión de matching secuencial (CANCELLED) para que el advance/
+    // reconciler no sigan ofertando a un viaje cancelado. Idempotente (CAS); no-op si no había sesión (PUJA).
+    await this.matching.cancelSession(p.tripId);
     if (p.by !== 'DRIVER') {
       domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
       return;
