@@ -14,7 +14,9 @@ let cachedToken: string | null = null;
 
 const isFirebaseAvailable = (): boolean => {
   try {
-    // Carga diferida: si el módulo nativo no está enlazado, no rompe el arranque.
+    // Carga diferida: si el módulo nativo no está enlazado, no rompe el arranque. require (no import
+    // estático) a propósito, dentro del try/catch, para degradar si el nativo falta.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const firebase = require('@react-native-firebase/app').default;
     return firebase.apps.length > 0;
   } catch {
@@ -35,6 +37,7 @@ export const initMessaging = async (): Promise<string | null> => {
   }
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const messaging = require('@react-native-firebase/messaging').default;
     const authStatus = await messaging().requestPermission();
     const enabled =

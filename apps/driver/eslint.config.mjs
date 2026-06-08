@@ -54,11 +54,13 @@ export default tseslint.config(
     },
   },
   {
-    // Tests: re-import dinámico para aislar módulos (require/typeof import) — idiomático en specs.
+    // Tests: re-import dinámico para aislar módulos (require/typeof import) e `any` en los dobles de
+    // test (mocks de fetch/HTTP) — idiomático en specs. Misma convención que el config raíz del backend.
     files: ['**/*.test.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/consistent-type-imports': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
 );

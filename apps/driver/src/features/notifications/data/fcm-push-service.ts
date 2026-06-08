@@ -35,10 +35,14 @@ interface MessagingModule {
  */
 function loadMessaging(): MessagingModule | null {
   try {
+    // require lazy/opcional: el módulo nativo puede no estar presente (degradación honesta). Va dentro
+    // del try/catch a propósito; un import estático tiraría al CARGAR el módulo si el nativo falta.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const firebase = require('@react-native-firebase/app').default as {apps: unknown[]};
     if (firebase.apps.length === 0) {
       return null;
     }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('@react-native-firebase/messaging').default as MessagingModule;
   } catch {
     return null;
@@ -109,7 +113,7 @@ export class FcmPushService implements PushService {
           return;
         }
         if (__DEV__) {
-          console.log('[VEO] Push en foreground:', remoteMessage?.data);
+          console.warn('[VEO] Push en foreground:', remoteMessage?.data);
         }
       });
 
@@ -119,7 +123,7 @@ export class FcmPushService implements PushService {
           return;
         }
         if (__DEV__) {
-          console.log('[VEO] Push abrió la app:', remoteMessage?.data);
+          console.warn('[VEO] Push abrió la app:', remoteMessage?.data);
         }
       });
 
@@ -128,7 +132,7 @@ export class FcmPushService implements PushService {
         .getInitialNotification()
         .then((remoteMessage: PushMessage | null) => {
           if (remoteMessage && !isPanicMessage(remoteMessage) && __DEV__) {
-            console.log('[VEO] Push arrancó la app:', remoteMessage.data);
+            console.warn('[VEO] Push arrancó la app:', remoteMessage.data);
           }
         })
         .catch(() => undefined);

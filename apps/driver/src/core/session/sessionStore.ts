@@ -1,5 +1,7 @@
 import {create} from 'zustand';
 import type {MobileSessionUser} from '@veo/api-client';
+// Type-only (se borra en runtime → NO reintroduce el ciclo): tipa el require perezoso de resetRegistration.
+import type * as RegistrationStore from '../../features/registration/presentation/state/registrationStore';
 import {prefsStore, secureStore} from '../storage/mmkv';
 import {SecureKey} from '../storage/keys';
 
@@ -22,9 +24,10 @@ const REGISTRATION_PREF_KEY = 'pref.registration.v1';
  * profundidad por si la constante del feature divergiera en el futuro.
  */
 function resetRegistration(): void {
-   
+  // require lazy A PROPÓSITO (ver doc arriba): rompe el ciclo core↔feature en tiempo de módulo.
   const {useRegistrationStore} =
-    require('../../features/registration/presentation/state/registrationStore') as typeof import('../../features/registration/presentation/state/registrationStore');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../features/registration/presentation/state/registrationStore') as typeof RegistrationStore;
   useRegistrationStore.getState().reset();
   prefsStore.remove(REGISTRATION_PREF_KEY);
 }
