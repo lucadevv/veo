@@ -38,6 +38,9 @@ export const envSchema = z.object({
   REFUND_WINDOW_DAYS: z.coerce.number().int().min(0).default(7),
   /// Monto sobre el cual un reembolso requiere aprobación L2 (BR-P06). Default S/30 = 3000 céntimos.
   REFUND_L2_THRESHOLD_CENTS: z.coerce.number().int().min(0).default(3000),
+  /// Fracción de la penalidad de cancelación que va al CONDUCTOR como compensación (F2 · BR-T03). El
+  /// resto lo retiene la plataforma. Default 0.5 (50/50).
+  CANCELLATION_DRIVER_SHARE: z.coerce.number().min(0).max(1).default(0.5),
   /// Umbral de discrepancia de conciliación que dispara alerta a finanzas (BR-P07). Default 1%.
   RECONCILIATION_ALERT_PCT: z.coerce.number().min(0).max(1).default(0.01),
 

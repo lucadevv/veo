@@ -98,6 +98,7 @@ export class PaymentsService {
   private readonly defaultMethod: PaymentMethod;
   private readonly refundWindowDays: number;
   private readonly refundL2ThresholdCents: number;
+  private readonly cancellationDriverShare: number;
 
   private readonly paymentMode: 'live' | 'sandbox' | 'prontopaga';
 
@@ -115,6 +116,7 @@ export class PaymentsService {
     this.defaultMethod = config.getOrThrow<PaymentMethod>('DEFAULT_PAYMENT_METHOD');
     this.refundWindowDays = config.getOrThrow<number>('REFUND_WINDOW_DAYS');
     this.refundL2ThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
+    this.cancellationDriverShare = config.getOrThrow<number>('CANCELLATION_DRIVER_SHARE');
   }
 
   /**
@@ -934,6 +936,78 @@ export class PaymentsService {
       await enqueueOutbox(tx, envelope, payment.id);
       return { refundId: refund.id, paymentId: payment.id, status: newStatus };
     });
+  }
+
+  /**
+   * Registra la penalidad de cancelación del pasajero (F2 · BR-T03). trip-service emite `trip.cancelled`
+   * con `penaltyCents`; acá la guardamos como obligación PENDING con el split conductor/plataforma. El
+   * conductor (si esperó) cobra su parte en el payout al saldarse. Idempotente por `tripId` (@unique):
+   * un evento reprocesado devuelve la penalidad existente sin duplicar (ni doble evento).
+   */
+  async recordCancellationPenalty(input: {
+    tripId: string;
+    passengerId: string;
+    driverId?: string;
+    penaltyCents: number;
+    reason?: string;
+  }): Promise<{ penaltyId: string; status: string }> {
+    // Split: el conductor cobra su parte SOLO si hubo conductor (esperó). Sin conductor → todo plataforma.
+    const driverCompensationCents = input.driverId
+      ? Math.floor(input.penaltyCents * this.cancellationDriverShare)
+      : 0;
+    const platformCents = input.penaltyCents - driverCompensationCents;
+
+    // Idempotencia: una penalidad por viaje (trip_id @unique). Atajo si ya existe.
+    const existing = await this.prisma.read.cancellationPenalty.findUnique({
+      where: { tripId: input.tripId },
+    });
+    if (existing) {
+      return { penaltyId: existing.id, status: existing.status };
+    }
+
+    const id = uuidv7();
+    try {
+      return await this.prisma.write.$transaction(async (tx) => {
+        const penalty = await tx.cancellationPenalty.create({
+          data: {
+            id,
+            tripId: input.tripId,
+            passengerId: input.passengerId,
+            driverId: input.driverId,
+            penaltyCents: input.penaltyCents,
+            driverCompensationCents,
+            platformCents,
+            status: 'PENDING',
+            reason: input.reason,
+          },
+        });
+        // Dominó: notification avisa al pasajero ("te cobramos S/X por cancelar"). Misma tx (outbox).
+        const envelope = createEnvelope({
+          eventType: 'payment.cancellation_penalty_recorded',
+          producer: 'payment-service',
+          payload: {
+            penaltyId: penalty.id,
+            tripId: input.tripId,
+            passengerId: input.passengerId,
+            driverId: input.driverId,
+            penaltyCents: input.penaltyCents,
+            driverCompensationCents,
+            platformCents,
+          },
+        });
+        await enqueueOutbox(tx, envelope, penalty.id);
+        return { penaltyId: penalty.id, status: 'PENDING' };
+      });
+    } catch (err) {
+      // Carrera: otra réplica creó la penalidad entre el findUnique y el create (P2002 sobre trip_id).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const raced = await this.prisma.read.cancellationPenalty.findUnique({
+          where: { tripId: input.tripId },
+        });
+        if (raced) return { penaltyId: raced.id, status: raced.status };
+      }
+      throw err;
+    }
   }
 
   /** Cobro disparado por el evento trip.completed (BR-P01). dedupKey determinista por viaje. */

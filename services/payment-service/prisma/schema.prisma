@@ -69,6 +69,41 @@ enum RefundStatus {
   @@schema("payment")
 }
 
+/// Estado de una penalidad de cancelación (F2 · BR-T03).
+///  PENDING   → registrada, el pasajero la debe (bloquea nuevos viajes vía el gate).
+///  COLLECTED → saldada; la compensación del conductor entra a su payout.
+///  WAIVED    → perdonada por soporte (no se cobra).
+enum CancellationPenaltyStatus {
+  PENDING
+  COLLECTED
+  WAIVED
+
+  @@schema("payment")
+}
+
+/// Penalidad por cancelación del PASAJERO (F2). trip-service calcula `penaltyCents` y lo emite en
+/// `trip.cancelled`; payment-service lo registra acá como obligación cobrable, con el split
+/// conductor/plataforma. Idempotente por `tripId` (UNIQUE): un evento reprocesado no duplica.
+model CancellationPenalty {
+  id                      String                    @id @db.Uuid
+  tripId                  String                    @unique @map("trip_id") @db.Uuid
+  passengerId             String                    @map("passenger_id") @db.Uuid
+  driverId                String?                   @map("driver_id") @db.Uuid
+  penaltyCents            Int                       @map("penalty_cents")
+  /// Compensación al conductor que esperó (parte del split). Entra a su payout al saldarse.
+  driverCompensationCents Int                       @map("driver_compensation_cents")
+  /// Parte de la plataforma (penaltyCents − driverCompensationCents).
+  platformCents           Int                       @map("platform_cents")
+  status                  CancellationPenaltyStatus @default(PENDING)
+  reason                  String?
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz
+  collectedAt             DateTime?                 @map("collected_at") @db.Timestamptz
+
+  @@index([passengerId, status])
+  @@map("cancellation_penalties")
+  @@schema("payment")
+}
+
 /// Tipo de descuento de una promoción (Ola 2A).
 enum PromoKind {
   PERCENTAGE // descuento porcentual sobre el bruto

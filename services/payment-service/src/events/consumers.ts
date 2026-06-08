@@ -38,12 +38,13 @@ export class PaymentEventConsumers implements OnModuleInit, OnModuleDestroy {
     });
     this.consumer = new KafkaEventConsumer(kafka, 'payment-service');
     this.consumer.on('trip.completed', (env) => this.onTripCompleted(env));
+    this.consumer.on('trip.cancelled', (env) => this.onTripCancelled(env));
     this.consumer.on('driver.flagged', (env) => this.onDriverFlagged(env));
   }
 
   async onModuleInit(): Promise<void> {
     await this.consumer.start();
-    this.logger.log('Consumidores Kafka iniciados (trip.completed, driver.flagged)');
+    this.logger.log('Consumidores Kafka iniciados (trip.completed, trip.cancelled, driver.flagged)');
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -109,6 +110,53 @@ export class PaymentEventConsumers implements OnModuleInit, OnModuleDestroy {
       } catch (err) {
         this.logger.error({ err }, `Falló acreditar incentivos del viaje ${tripId}`);
       }
+    }
+  }
+
+  private async onTripCancelled(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['trip.cancelled'].safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn('trip.cancelled con payload inválido; descartado');
+      return;
+    }
+    const { tripId, penaltyCents, passengerId, driverId, reason } = parsed.data;
+    // Sin penalidad → nada que cobrar (canceló el conductor/sistema, o el pasajero dentro de la ventana gratis).
+    if (penaltyCents <= 0) return;
+    // Para atribuir/cobrar la penalidad necesitamos el pasajero (enriquecido, opcional). Sin él, no se registra.
+    if (!passengerId) {
+      this.logger.warn(
+        `trip.cancelled ${tripId} con penaltyCents=${penaltyCents} pero SIN passengerId; no se registra la penalidad`,
+      );
+      return;
+    }
+    // POISON (mismo razonamiento que trip.completed): trip_id/passenger_id son @db.Uuid; ids malformados
+    // → P2023 → loop infinito si se relanzan. Saltamos sin reintento.
+    if (!isUuid(tripId) || !isUuid(passengerId)) {
+      this.logger.error(
+        `POISON trip.cancelled: tripId/passengerId no-UUID (eventId=${env.eventId}); descartado sin reintento`,
+      );
+      return;
+    }
+    try {
+      const res = await this.payments.recordCancellationPenalty({
+        tripId,
+        passengerId,
+        // driverId enriquecido (opcional): si había conductor, cobra su parte del split; si no, todo plataforma.
+        driverId: driverId && isUuid(driverId) ? driverId : undefined,
+        penaltyCents,
+        reason,
+      });
+      this.logger.log(`Penalidad de cancelación del viaje ${tripId}: ${res.penaltyId} (${res.status})`);
+    } catch (err) {
+      if (isPermanentDataError(err)) {
+        this.logger.error(
+          { err },
+          `POISON trip.cancelled: error permanente al registrar la penalidad ${tripId} (eventId=${env.eventId}); descartado sin reintento`,
+        );
+        return;
+      }
+      this.logger.error({ err }, `Falló registrar la penalidad de cancelación del viaje ${tripId}`);
+      throw err; // transitorio → Kafka reintenta; recordCancellationPenalty es idempotente.
     }
   }
 

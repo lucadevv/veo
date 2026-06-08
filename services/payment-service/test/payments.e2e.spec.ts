@@ -43,6 +43,7 @@ beforeAll(async () => {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    CANCELLATION_DRIVER_SHARE: 0.5,
   });
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
@@ -342,5 +343,59 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
     });
     expect(eligible).toHaveLength(1);
     expect(eligible[0]?.grossCents).toBe(4000); // base de comisión del conductor intacta
+  });
+});
+
+describe('CancellationPenalty (F2: penalidad de cancelación con split conductor/plataforma)', () => {
+  it('registra PENDING con el split (driver 50% / plataforma 50%), emite evento + idempotente por tripId', async () => {
+    const tripId = uuidv7();
+    const passengerId = uuidv7();
+    const driverId = uuidv7();
+
+    const res = await service.recordCancellationPenalty({
+      tripId,
+      passengerId,
+      driverId,
+      penaltyCents: 600,
+      reason: 'no_show',
+    });
+    expect(res.status).toBe('PENDING');
+
+    const row = await prisma.cancellationPenalty.findUnique({ where: { tripId } });
+    expect(row?.status).toBe('PENDING');
+    expect(row?.penaltyCents).toBe(600);
+    expect(row?.driverCompensationCents).toBe(300); // floor(0.5 × 600)
+    expect(row?.platformCents).toBe(300);
+    expect(row?.driverId).toBe(driverId);
+
+    // Dominó: un solo evento payment.cancellation_penalty_recorded (notification avisa al pasajero).
+    const events = await prisma.outboxEvent.findMany({
+      where: { aggregateId: row!.id, eventType: 'payment.cancellation_penalty_recorded' },
+    });
+    expect(events).toHaveLength(1);
+
+    // Idempotente: reprocesar el MISMO evento (trip_id @unique) no duplica ni emite otro evento.
+    const again = await service.recordCancellationPenalty({ tripId, passengerId, driverId, penaltyCents: 600 });
+    expect(again.penaltyId).toBe(res.penaltyId);
+    const all = await prisma.cancellationPenalty.findMany({ where: { tripId } });
+    expect(all).toHaveLength(1);
+    const events2 = await prisma.outboxEvent.findMany({
+      where: { aggregateId: row!.id, eventType: 'payment.cancellation_penalty_recorded' },
+    });
+    expect(events2).toHaveLength(1);
+  });
+
+  it('sin conductor → la penalidad va ENTERA a la plataforma (driverCompensation 0)', async () => {
+    const tripId = uuidv7();
+    const res = await service.recordCancellationPenalty({
+      tripId,
+      passengerId: uuidv7(),
+      penaltyCents: 400,
+    });
+    expect(res.status).toBe('PENDING');
+    const row = await prisma.cancellationPenalty.findUnique({ where: { tripId } });
+    expect(row?.driverCompensationCents).toBe(0);
+    expect(row?.platformCents).toBe(400);
+    expect(row?.driverId).toBeNull();
   });
 });

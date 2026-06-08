@@ -95,6 +95,10 @@ export const tripCancelled = z.object({
   by: z.enum(['PASSENGER', 'DRIVER', 'SYSTEM']),
   reason: z.string().optional(),
   penaltyCents: z.number().int().default(0),
+  /// `driverId` ENRIQUECIDO (opcional, compat N-2): trip-service lo añade cuando había conductor asignado,
+  /// para que payment-service compense al conductor que esperó (split de la penalidad, F2). Ausente → la
+  /// penalidad va entera a la plataforma.
+  driverId: z.string().optional(),
   /// `passengerId` ENRIQUECIDO (opcional, compat N-2): trip-service lo añade al outbox para que
   /// notification-service confirme HONESTO al pasajero ("cancelaste tu viaje" si by=PASSENGER; "tu
   /// conductor canceló" si by=DRIVER pre-recojo). NO se solapa con trip.reassigning: el cancel del
@@ -346,6 +350,19 @@ export const paymentRefunded = z.object({
   /// que notification-service mande el push "te devolvimos S/X.XX" al pasajero. Ausente → omite el push.
   passengerId: z.string().optional(),
 });
+/// Penalidad de cancelación REGISTRADA (F2): el pasajero canceló y payment-service la guarda como
+/// obligación PENDING con el split conductor/plataforma. notification avisa al pasajero ("te cobramos
+/// S/X por cancelar"). El conductor cobra `driverCompensationCents` en su payout cuando se salda.
+export const cancellationPenaltyRecorded = z.object({
+  penaltyId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string().optional(),
+  penaltyCents: z.number().int(),
+  driverCompensationCents: z.number().int(),
+  platformCents: z.number().int(),
+});
+
 export const payoutProcessed = z.object({ payoutId: z.string(), driverId: z.string(), amountCents: z.number().int(), period: z.string() });
 
 /* ── afiliación de wallet / Yape On File (payment) ── (Ola pagos PE)
@@ -502,6 +519,7 @@ export const EVENT_SCHEMAS = {
   'payment.failed': paymentFailed,
   'payment.cash_pending': paymentCashPending,
   'payment.refunded': paymentRefunded,
+  'payment.cancellation_penalty_recorded': cancellationPenaltyRecorded,
   'payment.affiliation_activated': paymentAffiliationActivated,
   'payment.affiliation_expired': paymentAffiliationExpired,
   'payout.processed': payoutProcessed,

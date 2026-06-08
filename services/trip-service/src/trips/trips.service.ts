@@ -1180,7 +1180,16 @@ export class TripsService {
           // viaje" si by=PASSENGER; "tu conductor canceló" si by=DRIVER pre-recojo). El cancel del
           // conductor POST-accept va por la rama reassignAfterDriverCancel (emite trip.reassigning, no
           // trip.cancelled) → sin solapamiento de pushes.
-          payload: { tripId: id, by: dto.by, reason: dto.reason, penaltyCents, passengerId: trip.passengerId },
+          // driverId ENRIQUECIDO (F2): si había conductor asignado, payment-service le compensa su parte
+          // del split de la penalidad (esperó). Ausente → la penalidad va entera a la plataforma.
+          payload: {
+            tripId: id,
+            by: dto.by,
+            reason: dto.reason,
+            penaltyCents,
+            passengerId: trip.passengerId,
+            driverId: trip.driverId ?? undefined,
+          },
         }),
         id,
       );
