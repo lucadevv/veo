@@ -4,13 +4,8 @@
  */
 import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventProducer,
-  drainOutbox,
-  type OutboxStore,
-  type EventEnvelope,
-} from '@veo/events';
+import { createKafka, KafkaEventProducer, drainOutbox } from '@veo/events';
+import { PrismaOutboxStore } from '@veo/database';
 import { PrismaService } from './prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -18,7 +13,7 @@ import type { Env } from '../config/env.schema';
 export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OutboxRelay.name);
   private readonly producer: KafkaEventProducer;
-  private readonly store: OutboxStore;
+  private readonly store: PrismaOutboxStore;
   private timer?: NodeJS.Timeout;
   private running = false;
 
@@ -28,29 +23,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
     });
     this.producer = new KafkaEventProducer(kafka);
-    this.store = {
-      fetchUnpublished: async (limit) => {
-        const rows = await prisma.write.outboxEvent.findMany({
-          where: { publishedAt: null },
-          orderBy: { createdAt: 'asc' },
-          take: limit,
-        });
-        return rows.map((r) => ({
-          id: r.id,
-          aggregateId: r.aggregateId,
-          envelope: r.envelope as unknown as EventEnvelope<unknown>,
-          createdAt: r.createdAt,
-          publishedAt: r.publishedAt,
-        }));
-      },
-      markPublished: async (ids) => {
-        if (ids.length === 0) return;
-        await prisma.write.outboxEvent.updateMany({
-          where: { id: { in: ids } },
-          data: { publishedAt: new Date() },
-        });
-      },
-    };
+    this.store = new PrismaOutboxStore(prisma.write, 'dispatch');
   }
 
   async onModuleInit(): Promise<void> {

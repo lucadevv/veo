@@ -18,32 +18,26 @@ export interface OutboxRecord {
   publishedAt: Date | null;
 }
 
-/** Puerto que el relay usa para leer/marcar pendientes (lo implementa @veo/database por servicio). */
+/**
+ * Puerto que el relay usa para drenar pendientes (lo implementa @veo/database por servicio).
+ * `drainLocked` encapsula el lock multi-réplica + la transacción fetch→publish→mark, recibiendo el
+ * `publish` como callback (la publicación a Kafka vive en el relay; el lock/tx en la impl Prisma).
+ */
 export interface OutboxStore {
-  fetchUnpublished(limit: number): Promise<OutboxRecord[]>;
-  markPublished(ids: string[]): Promise<void>;
+  drainLocked(limit: number, publish: (record: OutboxRecord) => Promise<void>): Promise<number>;
 }
 
 /**
- * Relay del outbox: bucle que drena pendientes y los publica. Llamar en un intervalo
- * (ej. cada 500ms) o disparar tras cada commit. Idempotente: republicar es seguro (dedupKey).
+ * Relay del outbox: drena pendientes y los publica, SEGURO en multi-réplica (advisory lock por servicio
+ * dentro de la impl: solo una réplica drena a la vez). Llamar en un intervalo (ej. cada 500ms). Idempotente.
  */
 export async function drainOutbox(
   store: OutboxStore,
   producer: KafkaEventProducer,
   batchSize = 100,
 ): Promise<number> {
-  const pending = await store.fetchUnpublished(batchSize);
-  if (pending.length === 0) return 0;
-  const published: string[] = [];
-  for (const record of pending) {
+  return store.drainLocked(batchSize, (record) =>
     // El envelope se persistió genérico; en publicación T se resuelve por eventType del registro.
-    await producer.publish(
-      record.envelope as EventEnvelope<EventPayload<EventType>>,
-      record.aggregateId,
-    );
-    published.push(record.id);
-  }
-  await store.markPublished(published);
-  return published.length;
+    producer.publish(record.envelope as EventEnvelope<EventPayload<EventType>>, record.aggregateId),
+  );
 }

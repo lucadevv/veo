@@ -24,7 +24,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
     });
     this.producer = new KafkaEventProducer(kafka);
     // El store de outbox sobre el write client (la escritura de dominio pobló el outbox en la misma tx).
-    this.store = new PrismaOutboxStore(prisma.write.outboxEvent);
+    this.store = new PrismaOutboxStore(prisma.write, 'media');
   }
 
   async onModuleInit(): Promise<void> {

@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { ReadWriteClient, type PrismaLike } from './read-write.js';
-import { enqueueOutbox, PrismaOutboxStore, type OutboxDelegate } from './outbox.js';
+import {
+  enqueueOutbox,
+  PrismaOutboxStore,
+  outboxAdvisoryLockKey,
+  type OutboxDelegate,
+  type OutboxPrismaClient,
+} from './outbox.js';
 import { tombstone, deletedPlaceholder, type UpdatableDelegate } from './tombstone.js';
 import { createEnvelope } from '@veo/events';
 
@@ -59,25 +65,57 @@ describe('outbox', () => {
     expect((created[0] as { eventType: string }).eventType).toBe('trip.completed');
   });
 
-  it('PrismaOutboxStore drena pendientes y los marca publicados', async () => {
+  it('outboxAdvisoryLockKey es estable y distinto por schema', () => {
+    expect(outboxAdvisoryLockKey('panic')).toBe(outboxAdvisoryLockKey('panic'));
+    expect(outboxAdvisoryLockKey('panic')).not.toBe(outboxAdvisoryLockKey('payment'));
+    expect(outboxAdvisoryLockKey('panic') < 9223372036854775807n).toBe(true); // cabe en int8
+  });
+
+  it('drainLocked publica los pendientes y los marca (advisory lock adquirido)', async () => {
     const env = createEnvelope({ eventType: 'rating.created', producer: 'rating-service', payload: {} });
     let marked: string[] = [];
-    const delegate: OutboxDelegate = {
-      create: async () => null,
-      findMany: async () => [
-        { id: 'o1', aggregateId: 'd1', envelope: env, createdAt: new Date(), publishedAt: null },
-      ],
-      async updateMany(args) {
-        marked = args.where.id.in;
-        return null;
+    const published: string[] = [];
+    const fakePrisma = {
+      outboxEvent: {
+        create: async () => null,
+        findMany: async () => [
+          { id: 'o1', aggregateId: 'd1', envelope: env, createdAt: new Date(), publishedAt: null },
+        ],
+        updateMany: async (args: { where: { id: { in: string[] } } }) => {
+          marked = args.where.id.in;
+          return null;
+        },
       },
+      $queryRaw: async () => [{ locked: true }],
+      $transaction: async <R>(fn: (tx: unknown) => Promise<R>): Promise<R> => fn(fakePrisma),
     };
-    const store = new PrismaOutboxStore(delegate);
-    const pending = await store.fetchUnpublished(10);
-    expect(pending).toHaveLength(1);
-    expect(pending[0]!.aggregateId).toBe('d1');
-    await store.markPublished(pending.map((p) => p.id));
+    const store = new PrismaOutboxStore(fakePrisma as unknown as OutboxPrismaClient, 'rating');
+    const n = await store.drainLocked(10, async (r) => {
+      published.push(r.id);
+    });
+    expect(n).toBe(1);
+    expect(published).toEqual(['o1']);
     expect(marked).toEqual(['o1']);
+  });
+
+  it('drainLocked es no-op (sin leer ni marcar) si otra réplica tiene el advisory lock', async () => {
+    let findManyCalled = false;
+    const fakePrisma = {
+      outboxEvent: {
+        create: async () => null,
+        findMany: async () => {
+          findManyCalled = true;
+          return [];
+        },
+        updateMany: async () => null,
+      },
+      $queryRaw: async () => [{ locked: false }], // lock NO adquirido (otra réplica drena)
+      $transaction: async <R>(fn: (tx: unknown) => Promise<R>): Promise<R> => fn(fakePrisma),
+    };
+    const store = new PrismaOutboxStore(fakePrisma as unknown as OutboxPrismaClient, 'rating');
+    const n = await store.drainLocked(10, async () => undefined);
+    expect(n).toBe(0);
+    expect(findManyCalled).toBe(false);
   });
 });
 
