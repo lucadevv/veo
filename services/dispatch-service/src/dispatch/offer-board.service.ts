@@ -34,7 +34,8 @@ import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry } from '../hot-index/hot-index.port';
+import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { DriverPool } from './driver-pool';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
 import {
@@ -97,7 +98,7 @@ export class OfferBoardService {
     private readonly prisma: PrismaService,
     @Inject(OFFER_BOARD_STORE) private readonly store: OfferBoardStore,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
-    @Inject(EXCLUSION_REGISTRY) private readonly exclusion: ExclusionRegistry,
+    private readonly driverPool: DriverPool,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Inject(OFFER_DELIVERY) private readonly offerDelivery: OfferDelivery,
     private readonly eligibility: EligibilityGate,
@@ -195,11 +196,9 @@ export class OfferBoardService {
   private async broadcast(board: OfferBoard): Promise<void> {
     const center = toH3(board.origin, DISPATCH_H3_RESOLUTION);
     const cells = neighbors(center, this.broadcastKRing);
-    const locations = await this.hotIndex.candidates(cells);
-    const matchingType = locations.filter((l) => l.vehicleType === board.vehicleType);
-    const allowedIds = await this.exclusion.filter(matchingType.map((l) => l.driverId));
-    const allowed = new Set(allowedIds);
-    const candidates = matchingType.filter((l) => allowed.has(l.driverId));
+    // Candidatos elegibles (disponibles + del tipo del board + no excluidos por pánico). Filtrado
+    // centralizado en DriverPool (misma fuente que el matcher secuencial FIXED).
+    const candidates = await this.driverPool.eligible(cells, board.vehicleType);
 
     const expiresAtIso = new Date(board.expiresAt).toISOString();
     // A1 — UNA sola llamada de ETA en LOTE (OSRM `/table` / motor local mapeado) en vez de N×`eta`

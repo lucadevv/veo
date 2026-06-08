@@ -5,6 +5,7 @@ import { VehicleType } from '@veo/shared-types';
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
+import { DriverPool } from './driver-pool';
 import type {
   BoardStatus,
   ClaimResult,
@@ -369,11 +370,12 @@ function makeService(opts: {
 }): OfferBoardService {
   const config = new ConfigService<Env, true>({ DISPATCH_MAX_K_RING: 2 } as Partial<Env> as Env);
   const gate = opts.gate as unknown as EligibilityGate;
+  const driverPool = new DriverPool(opts.hotIndex, opts.exclusion);
   return new OfferBoardService(
     opts.outbox.prisma as never,
     opts.store,
     opts.hotIndex,
-    opts.exclusion,
+    driverPool,
     (opts.maps ?? new FakeMaps()) as never,
     opts.delivery,
     gate,
