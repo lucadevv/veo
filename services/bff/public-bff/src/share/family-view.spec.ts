@@ -87,15 +87,20 @@ describe('assembleMaskedPanicView (seguridad-crítica · pánico oculto)', () =>
 });
 
 describe('buildFamilyDriver', () => {
-  it('arma el conductor con rating 30d y datos del vehículo (sin PII en name)', () => {
+  it('arma el conductor con NOMBRE (de DriverReply.name), rating 30d y datos del vehículo', () => {
     const fam = buildFamilyDriver(driver, aggregate, vehicle);
     expect(fam).toEqual({
-      name: '',
+      // SEGURIDAD: la familia ve quién maneja (chequeo del conductor); el nombre viene de identity.
+      name: 'Khalid Ríos',
       rating: 4.9,
       vehiclePlate: 'XYZ-987',
       vehicleModel: 'Kia Rio',
       vehicleColor: 'Gris',
     });
+  });
+  it('name vacío si el conductor no tiene nombre (degrada honesto, sin romper el contrato)', () => {
+    const fam = buildFamilyDriver({ ...driver, name: '' }, aggregate, vehicle);
+    expect(fam?.name).toBe('');
   });
   it('null cuando no hay conductor ni vehículo', () => {
     expect(buildFamilyDriver(null, null, null)).toBeNull();

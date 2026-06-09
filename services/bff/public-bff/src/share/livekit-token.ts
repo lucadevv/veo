@@ -20,6 +20,17 @@ export function liveKitEnabled(cfg: LiveKitConfig): boolean {
   return cfg.apiKey.length > 0 && cfg.apiSecret.length > 0;
 }
 
+/**
+ * Nombre de la sala LiveKit del habitáculo de un viaje. CONTRATO CROSS-SERVICE: DEBE coincidir
+ * carácter a carácter con `roomNameForTrip` de media-service (`trip-${tripId}`), que es donde el
+ * conductor PUBLICA su cámara (y donde corre el egress de grabación). Antes acá se reusaba la sala
+ * de Socket.IO `familyRoom` (`trip:${tripId}`), un room DISTINTO → el viewer entraba a una sala vacía
+ * y no veía nada. No usar `familyRoom`/`passengerRoom` (esos son salas Socket.IO, otro espacio).
+ */
+export function liveKitRoomForTrip(tripId: string): string {
+  return `trip-${tripId}`;
+}
+
 function base64url(input: string | Buffer): string {
   return Buffer.from(input).toString('base64url');
 }

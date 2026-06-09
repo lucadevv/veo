@@ -42,9 +42,12 @@ function gatewayWithSockets(sockets: FakeSocket[]): OpsGateway {
 }
 
 describe('OpsGateway emisión', () => {
-  it('PRIORIDAD: panic:alert se difunde a TODOS ignorando watch', () => {
-    const gateway = gatewayWithSockets([]);
-    const server = (gateway as unknown as { server: { emit: ReturnType<typeof vi.fn> } }).server;
+  it('PRIORIDAD: panic:alert ignora el watch PERO respeta el rol (solo panics:view)', () => {
+    // COMPLIANCE_SUPERVISOR tiene panics:view; FINANCE tiene ops:view pero NO panics:view; anon no autenticado.
+    const viewer: FakeSocket = { data: { user: { roles: ['COMPLIANCE_SUPERVISOR'] }, watch: { tripId: 'otro' } }, emit: vi.fn() };
+    const finance: FakeSocket = { data: { user: { roles: ['FINANCE'] } }, emit: vi.fn() };
+    const anon: FakeSocket = { data: {}, emit: vi.fn() };
+    const gateway = gatewayWithSockets([viewer, finance, anon]);
     const msg: PanicAlertMsg = {
       panicId: 'pa1',
       tripId: 't1',
@@ -54,7 +57,11 @@ describe('OpsGateway emisión', () => {
       triggeredAt: '2026-05-29T00:00:00.000Z',
     };
     gateway.emitPanicAlert(msg);
-    expect(server.emit).toHaveBeenCalledWith('panic:alert', msg);
+    // El viewer lo recibe AUNQUE su watch mire otro viaje (la prioridad ignora el filtro geográfico)…
+    expect(viewer.emit).toHaveBeenCalledWith('panic:alert', msg);
+    // …pero FINANCE (sin panics:view) y el anónimo NO — antes el server.emit se los filtraba a todos (PII Ley 29733).
+    expect(finance.emit).not.toHaveBeenCalled();
+    expect(anon.emit).not.toHaveBeenCalled();
   });
 
   it('trip:update solo llega a sockets cuyo watch encaja', () => {
@@ -139,6 +146,14 @@ describe('OpsGateway handshake por ticket', () => {
       vi.fn().mockResolvedValue({ ...ticketUser, type: 'passenger' }),
     );
     const socket = handshakeSocket({ ticket: 'wrong-type' });
+    await gateway.handleConnection(socket as never);
+    expect(socket.data.user).toBeUndefined();
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rechaza un admin SIN rol de ops:view (ej. SUPPORT_L1) — la UI lo esconde, el socket también', async () => {
+    const gateway = gatewayWithTickets(vi.fn().mockResolvedValue({ ...ticketUser, roles: ['SUPPORT_L1'] }));
+    const socket = handshakeSocket({ ticket: 'support-l1' });
     await gateway.handleConnection(socket as never);
     expect(socket.data.user).toBeUndefined();
     expect(socket.disconnect).toHaveBeenCalledWith(true);

@@ -19,6 +19,11 @@ interface Payout {
   periodEnd: string;
 }
 
+interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 export interface RunPayoutsResult {
   periodStart: string;
   periodEnd: string;
@@ -34,9 +39,16 @@ export class FinanceService {
     private readonly audit: AuditRecorder,
   ) {}
 
-  async listPayouts(identity: AuthenticatedUser, driverId: string): Promise<PayoutView[]> {
-    const payouts = await this.rest.get<Payout[]>('/payouts', { identity, query: { driverId } });
-    return payouts.map(toPayoutView);
+  /** Listado admin de TODOS los payouts (paginado, por estado) → payoutView. payment-service gatea RBAC. */
+  async listPayouts(
+    identity: AuthenticatedUser,
+    query: { status?: string; cursor?: string; limit?: number },
+  ): Promise<Page<PayoutView>> {
+    const page = await this.rest.get<Page<Payout>>('/payouts/all', {
+      identity,
+      query: { status: query.status, cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toPayoutView), nextCursor: page.nextCursor };
   }
 
   async runPayouts(identity: AuthenticatedUser, dto: RunPayoutsDto): Promise<RunPayoutsResult> {

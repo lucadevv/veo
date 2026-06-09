@@ -1,7 +1,7 @@
 /**
  * Mappers OPS: registros del read-model / replies gRPC → vistas públicas de @veo/api-client.
  */
-import type { TripSummary, DriverSummary, TripStatus } from '@veo/api-client';
+import type { TripSummary, DriverSummary, DriverApproval, TripStatus } from '@veo/api-client';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
 
 export function tripRecordToSummary(r: TripRecord): TripSummary {
@@ -22,6 +22,20 @@ export function driverRecordToSummary(r: DriverRecord): DriverSummary {
     status: r.status,
     averageRating: r.averageRating,
     backgroundCheckStatus: r.backgroundCheckStatus,
+  };
+}
+
+/**
+ * Registro del read-model → vista de APROBACIÓN del contrato. fullName/phone no viven en el read-model
+ * (vienen de identity) → null honesto; el enriquecimiento por identity es follow-up. `submittedAt` se
+ * aproxima con `updatedAt` (última señal del registro). El contrato exige las claves presentes (nullable).
+ */
+export function driverRecordToApproval(r: DriverRecord): DriverApproval {
+  return {
+    ...driverRecordToSummary(r),
+    fullName: null,
+    phone: null,
+    submittedAt: r.updatedAt,
   };
 }
 

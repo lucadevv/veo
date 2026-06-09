@@ -1,9 +1,23 @@
 /** DTOs de finanzas (payouts y reembolsos). */
-import { IsInt, IsISO8601, IsOptional, IsString, Min, IsUUID, MinLength } from 'class-validator';
+import { IsInt, IsISO8601, IsOptional, IsString, Max, Min, IsUUID, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
 
+/** Listado admin de payouts: filtro por estado + paginación cursor (el estado lo valida payment-service). */
 export class PayoutsQueryDto {
-  @IsUUID()
-  driverId!: string;
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }
 
 export class RunPayoutsDto {

@@ -17,6 +17,9 @@ import type {
 
 export interface TripDriverView {
   id: string;
+  /** Nombre visible del conductor (de identity User.name); null si aún no lo tiene. SEGURIDAD: el
+   *  pasajero confirma a quién sube. Antes faltaba → la app mostraba "Conductor" genérico. */
+  name: string | null;
   status: string;
   backgroundCheckStatus: string;
   rating: number | null;
@@ -155,6 +158,8 @@ export function buildDriverView(
         : null;
   return {
     id: driver.id,
+    // El nombre viene de identity (DriverReply.name); '' (proto3 default) se normaliza a null.
+    name: driver.name && driver.name.length > 0 ? driver.name : null,
     status: driver.currentStatus,
     backgroundCheckStatus: driver.backgroundCheckStatus,
     rating,

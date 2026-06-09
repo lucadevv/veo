@@ -1,4 +1,5 @@
 import { IsEmail, IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { PaymentMethod } from '@veo/shared-types';
 import { DocumentType } from '../../payments/dto/affiliations.dto';
 
 export class UpdateProfileDto {
@@ -29,6 +30,14 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   document?: string;
+
+  /**
+   * Método de pago por defecto del pasajero (preferencia de UI: siembra el selector al pedir viaje).
+   * El identity-service es la fuente de verdad; el BFF solo proxya. Validado contra el enum compartido.
+   */
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  defaultPaymentMethod?: PaymentMethod;
 }
 
 /** Vista de perfil devuelta por identity-service. */
@@ -43,4 +52,6 @@ export interface UserProfile {
   /** Documento del pasajero (Yape On File); null si aún no lo cargó. */
   documentType: DocumentType | null;
   document: string | null;
+  /** Método de pago por defecto (preferencia de UI); null si nunca lo eligió. */
+  defaultPaymentMethod: PaymentMethod | null;
 }

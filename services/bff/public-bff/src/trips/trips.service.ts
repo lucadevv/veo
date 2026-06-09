@@ -27,6 +27,7 @@ import { REDIS } from '../infra/redis';
 import type {
   AggregateReply,
   DriverReply,
+  DriverVehiclesReply,
   PassengerTripsReply,
   PaymentReply,
   TripReply,
@@ -35,8 +36,7 @@ import type {
   VehicleReply,
 } from '../infra/grpc-types';
 import { DebtPendingError, type PaymentView } from '../payments/dto/payments.dto';
-import { familyRoom } from '../share/share.types';
-import { type LiveKitConfig, liveKitEnabled, mintViewerToken } from '../share/livekit-token';
+import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from '../share/livekit-token';
 import {
   buildTripDetail,
   buildTripHistoryPage,
@@ -335,20 +335,19 @@ export class TripsService {
     trip: TripReply,
     meta: ReturnType<typeof internalGrpcMetadata>,
   ): Promise<TripDetailView> {
-    const [driver, vehicle, aggregate, myRating] = await Promise.all([
-      trip.driverId
-        ? this.identityGrpc.call<DriverReply>('GetDriver', { id: trip.driverId }, meta).catch(() => null)
-        : Promise.resolve(null),
-      trip.vehicleId
-        ? this.fleetGrpc.call<VehicleReply>('GetVehicle', { id: trip.vehicleId }, meta).catch(() => null)
-        : Promise.resolve(null),
+    // El conductor se resuelve PRIMERO (no en el Promise.all): el fallback de vehículo por conductor
+    // necesita su `userId` (fleet indexa por User.id, no por Driver.id — ver resolveTripVehicle). 1 ida
+    // extra solo en el detalle (no es hot-path). Best-effort: si identity cae, driver=null y se degrada.
+    const driver = trip.driverId
+      ? await this.identityGrpc.call<DriverReply>('GetDriver', { id: trip.driverId }, meta).catch(() => null)
+      : null;
+    const [vehicle, aggregate, myRating] = await Promise.all([
+      this.resolveTripVehicle(trip, driver?.found ? driver.userId : undefined, meta),
       trip.driverId
         ? this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId: trip.driverId }, meta).catch(() => null)
         : Promise.resolve(null),
-      // MI rating de este viaje (REST firmado, filtrado por el rater = identidad). Best-effort en el
-      // mismo Promise.all que los otros 3: 1 call extra barata para que el detalle / la re-entrada del
-      // cierre traigan el estado del rating sin un GET aparte. 404 (sin rating) → null; cualquier otro
-      // fallo también → null (degradación grácil: la app cae al GET /ratings?tripId on-demand).
+      // MI rating de este viaje (REST firmado, filtrado por el rater = identidad). 404 (sin rating) → null;
+      // cualquier otro fallo también → null (degradación grácil: la app cae al GET /ratings?tripId on-demand).
       this.fetchMyRatingStars(user, trip.id),
     ]);
 
@@ -356,10 +355,37 @@ export class TripsService {
       trip,
       driver?.found ? driver : null,
       aggregate?.found ? aggregate : null,
-      vehicle?.found ? vehicle : null,
+      vehicle,
       0,
       myRating,
     );
+  }
+
+  /**
+   * Resuelve el vehículo del viaje (SEGURIDAD: placa/modelo/color para confirmar el auto). Best-effort:
+   *  1) Si el viaje tiene `vehicleId` persistido (asignación nueva) → ESE vehículo exacto por id (histórico
+   *     fiel, sin ambigüedad de ids).
+   *  2) Si no (viajes previos a la persistencia) → el vehículo ACTIVO del conductor. fleet indexa por
+   *     `User.id` (NO por Driver.id), así que el fallback usa el `userId` ya resuelto vía identity. Para
+   *     un viaje EN CURSO es el auto correcto; para uno viejo, el auto actual del conductor (honesto).
+   *     Si fleet cae o no hay vehículo → null (el detalle no se rompe).
+   */
+  private async resolveTripVehicle(
+    trip: TripReply,
+    driverUserId: string | undefined,
+    meta: ReturnType<typeof internalGrpcMetadata>,
+  ): Promise<VehicleReply | null> {
+    if (trip.vehicleId) {
+      const v = await this.fleetGrpc
+        .call<VehicleReply>('GetVehicle', { id: trip.vehicleId }, meta)
+        .catch(() => null);
+      return v?.found ? v : null;
+    }
+    if (!driverUserId) return null;
+    const reply = await this.fleetGrpc
+      .call<DriverVehiclesReply>('GetDriverVehicles', { id: driverUserId }, meta)
+      .catch(() => null);
+    return reply?.vehicles?.find((v) => v.active) ?? reply?.vehicles?.[0] ?? null;
   }
 
   /** Estrellas de MI rating de un viaje (REST firmado, rater=identidad), o null. Nunca lanza (best-effort). */
@@ -398,7 +424,7 @@ export class TripsService {
    * Token de video del habitáculo (LiveKit self-hosted) para el pasajero en SU viaje en curso.
    * - Si LiveKit no está configurado → 404 (la app degrada a "sin video").
    * - Solo autoriza si el viaje es del pasajero autenticado y está IN_PROGRESS.
-   * Devuelve un token viewer (solo suscripción) firmado para la sala `trip:<tripId>`.
+   * Devuelve un token viewer (solo suscripción) firmado para la sala `trip-<tripId>` (donde publica el conductor).
    */
   async videoGrant(user: AuthenticatedUser, tripId: string): Promise<TripVideoGrant> {
     if (!liveKitEnabled(this.livekit)) {
@@ -413,7 +439,7 @@ export class TripsService {
     if (trip.status !== 'IN_PROGRESS') {
       throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
     }
-    const room = familyRoom(tripId);
+    const room = liveKitRoomForTrip(tripId);
     const minted = mintViewerToken(this.livekit, {
       room,
       identityPrefix: `passenger-${user.userId}`,

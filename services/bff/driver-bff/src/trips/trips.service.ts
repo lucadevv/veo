@@ -55,6 +55,19 @@ export class TripsService {
   async getTrip(id: string, identity: AuthenticatedUser): Promise<TripView> {
     const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id }, identity);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
+    // A1 · ownership server-side (anti-IDOR): TripView lleva passengerId/paymentMethod/childMode (PII del
+    // viaje). Sin gate, cualquier conductor enumeraba datos de viajes ajenos por id. Deriva el driverId
+    // del perfil y exige que el viaje sea de ESTE conductor. 404 (no 403) para no filtrar su existencia.
+    // Seguro: la tarjeta de puja PRE-aceptación sale de dispatch (/bids/open); getTrip es POST-asignación.
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found || trip.driverId !== driver.id) {
+      throw new NotFoundError('Viaje no encontrado');
+    }
     return toTripView(trip);
   }
 
@@ -71,8 +84,11 @@ export class TripsService {
    * La ruta cubre recojo (origin) → paradas → destino.
    */
   async route(id: string, identity: AuthenticatedUser): Promise<TripRouteView> {
-    const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id }, identity);
-    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
+    // A1 · ownership server-side (anti-IDOR): la ruta expone origin/destino/paradas (PII de ubicación
+    // EXACTA) → verificamos que el viaje es de ESTE conductor ANTES de resolverla. Sin esto, cualquier
+    // conductor con un tripId ajeno leía el recojo/paradas/destino de un viaje que no es suyo (mismo
+    // patrón que accept/arriving/start/complete; faltaba SOLO acá).
+    await this.assertDriverTrip(id, identity);
 
     const resource = await this.rest
       .client('trip')
@@ -93,6 +109,10 @@ export class TripsService {
         maneuver: s.maneuver,
         geometryPolyline: s.geometryPolyline,
       })),
+      // Markers del mapa: recojo, destino y paradas (Ola 2B) — el recurso REST ya los trae.
+      origin: resource.origin,
+      destination: resource.destination,
+      waypoints: resource.waypoints ?? [],
     };
   }
 
@@ -102,17 +122,17 @@ export class TripsService {
   // accept/arriving/arrived. Mismo patrón que start/complete/cancel.
   async accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/accept`, { identity, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/accept`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
   }
 
   async arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arriving`, { identity, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/arriving`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
   }
 
   async arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arrived`, { identity, body: { driverId } });
+    return this.trip().post(`/trips/${id}/arrived`, { identity: { ...identity, driverId }, body: { driverId } });
   }
 
   /**
@@ -123,7 +143,7 @@ export class TripsService {
    */
   async start(id: string, dto: StartTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/start`, { identity, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/start`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
   }
 
   /** Verifica (gRPC) que el viaje está asignado a ESTE conductor y devuelve su driverId derivado. */
@@ -156,16 +176,24 @@ export class TripsService {
   async complete(id: string, dto: CompleteTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
     return this.trip().post(`/trips/${id}/complete`, {
-      identity,
+      identity: { ...identity, driverId },
       body: { cashCollected: dto.cashCollected, driverId },
     });
   }
 
-  /** El conductor cancela: `by` se fija a DRIVER (no se confía en el cliente). */
-  cancel(id: string, dto: CancelTripDto, identity: AuthenticatedUser): Promise<unknown> {
+  /**
+   * A1 · ownership server-side (anti-IDOR). ANTES de cancelar, deriva el driverId del perfil
+   * (GetDriverByUser → driver.id) y verifica que el viaje es de ESTE conductor (assertDriverTrip).
+   * Sin esto, un conductor con un tripId ajeno podía cancelar —o forzar la reasignación POST-accept—
+   * el viaje de otro (penalizándolo y dejando colgado al pasajero). `by` se fija a DRIVER (no se confía
+   * en el cliente) y el driverId DERIVADO viaja al trip-service en el body (2da capa de defensa allí),
+   * nunca uno del cliente. Mismo patrón que accept/arriving/arrived/start/complete.
+   */
+  async cancel(id: string, dto: CancelTripDto, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
     return this.trip().post(`/trips/${id}/cancel`, {
-      identity,
-      body: { by: 'DRIVER', reason: dto.reason },
+      identity: { ...identity, driverId },
+      body: { by: 'DRIVER', reason: dto.reason, driverId },
     });
   }
 

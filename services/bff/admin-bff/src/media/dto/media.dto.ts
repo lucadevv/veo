@@ -22,3 +22,15 @@ export class SegmentsQueryDto {
   @IsUUID()
   tripId!: string;
 }
+
+/** Acceso a la cámara EN VIVO (muro admin). Motivo obligatorio (auditado). La identidad del operador NO
+ *  se confía al cliente: la deriva el bff de la sesión autenticada. Doble-auth (Roles + MFA fresca) en el controller. */
+export class LiveAccessDto {
+  @IsUUID()
+  tripId!: string;
+
+  /** Motivo del visionado en vivo (> 20 caracteres), igual que las grabaciones. Queda en la pista de audit. */
+  @IsString()
+  @MinLength(21)
+  reason!: string;
+}

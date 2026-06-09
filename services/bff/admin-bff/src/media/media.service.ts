@@ -2,16 +2,31 @@
  * MediaService — acceso a video con doble-auth (BR-S07): un operador SOLICITA y otro APRUEBA con
  * step-up MFA fresco. La aprobación devuelve una URL firmada con watermark. Todo se audita.
  */
-import { Injectable, Inject } from '@nestjs/common';
-import { InternalRestClient } from '@veo/rpc';
+import { ForbiddenException, Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
-import { REST_MEDIA } from '../infra/tokens';
+import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
+import { grpcIdentityMeta } from '../infra/grpc-identity';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { RequestAccessDto } from './dto/media.dto';
+import type { Env } from '../config/env.schema';
+import type { LiveAccessDto, RequestAccessDto } from './dto/media.dto';
 
 interface AccessRequestReply {
   id: string;
   status: string;
+}
+/** Respuesta mínima de trip-service GetTrip que necesita el gate de la cámara en vivo. */
+interface TripStateReply {
+  status: string;
+  found: boolean;
+}
+/** Token de cámara EN VIVO (solo-suscripción) emitido por media-service para el muro del admin. */
+export interface LiveViewerToken {
+  roomName: string;
+  token: string;
+  url: string;
+  expiresInSeconds: number;
 }
 export interface ApprovedAccess {
   requestId: string;
@@ -35,10 +50,16 @@ export interface SegmentView {
 
 @Injectable()
 export class MediaService {
+  private readonly secret: string;
+
   constructor(
     @Inject(REST_MEDIA) private readonly rest: InternalRestClient,
+    @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     private readonly audit: AuditRecorder,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
 
   async requestAccess(identity: AuthenticatedUser, dto: RequestAccessDto): Promise<AccessRequestReply> {
     const res = await this.rest.post<AccessRequestReply>('/media/access', { identity, body: dto });
@@ -60,6 +81,37 @@ export class MediaService {
       payload: { segmentId: res.segmentId, expiresAt: res.expiresAt },
     });
     return res;
+  }
+
+  /**
+   * Muro de cámaras EN VIVO: emite un token solo-suscripción de la cabina de un viaje en curso.
+   * AUDITA ANTES de mintear (fail-closed estricto): si el audit falla, no se emite token — ningún
+   * visionado de vigilancia queda sin registro (Ley 29733). El motivo es obligatorio. La doble-auth
+   * (Roles + MFA fresca) la imponen los guards del controller (acá y en media-service).
+   */
+  async issueLiveToken(identity: AuthenticatedUser, dto: LiveAccessDto): Promise<LiveViewerToken> {
+    // AUTORIZA server-side ANTES de auditar/mintear: solo cabinas de viajes EN CURSO (mismo gate que el
+    // grant del pasajero/familia, public-bff). La UI solo lista IN_PROGRESS, pero eso es presentación —
+    // la autoridad es esta verificación (un admin no puede mintear un token para un viaje arbitrario por
+    // API directa). NO se bloquea el pánico: el admin/compliance es el RESPONDEDOR (el panel existe para eso),
+    // a diferencia de la familia (a quien sí se le oculta, por si un atacante mira el enlace).
+    const meta = grpcIdentityMeta(identity, this.secret);
+    const trip = await this.tripGrpc.call<TripStateReply>('GetTrip', { id: dto.tripId }, meta);
+    if (!trip.found) throw new NotFoundException('Viaje no encontrado');
+    if (trip.status !== 'IN_PROGRESS') {
+      throw new ForbiddenException('La cámara en vivo solo está disponible durante un viaje en curso');
+    }
+    await this.audit.record(identity, {
+      action: 'media.live_access',
+      resourceType: 'media_live',
+      resourceId: dto.tripId,
+      payload: { tripId: dto.tripId, reason: dto.reason },
+    });
+    // `name` = identidad visible del operador en la room (accountability), derivada de la sesión, no del cliente.
+    return this.rest.post<LiveViewerToken>(`/media/rooms/${dto.tripId}/viewer-token`, {
+      identity,
+      body: { name: `admin-${identity.userId}` },
+    });
   }
 
   async segments(identity: AuthenticatedUser, tripId: string): Promise<SegmentView[]> {

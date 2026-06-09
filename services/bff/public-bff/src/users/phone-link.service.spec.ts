@@ -35,6 +35,7 @@ describe('UsersService.verifyPhoneLink', () => {
       photoUrl: null,
       documentType: null,
       document: null,
+      defaultPaymentMethod: null,
     };
     const identity = { post: vi.fn().mockResolvedValue(profile) } as unknown as InternalRestClient;
     const media = {} as unknown as InternalRestClient;

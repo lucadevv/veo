@@ -5,20 +5,31 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { FleetDocumentView } from '@veo/api-client';
+import type {
+  ExpiringDocumentView,
+  FleetDocumentView,
+  InspectionView,
+  VehicleView,
+} from '@veo/api-client';
 import { FleetService } from './fleet.service';
 import {
   CreateVehicleDto,
   CreateDocumentDto,
   ReviewDocumentDto,
   CreateInspectionDto,
-  DocumentsQueryDto,
-  InspectionsQueryDto,
+  ListVehiclesQueryDto,
+  ListDocumentsQueryDto,
+  ListInspectionsQueryDto,
   ExpirationsQueryDto,
 } from './dto/fleet.dto';
 
+interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 @ApiTags('fleet')
-@Controller()
+@Controller('fleet')
 @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
 export class FleetController {
   constructor(private readonly fleet: FleetService) {}
@@ -27,6 +38,15 @@ export class FleetController {
   @ApiOperation({ summary: 'Registra un vehículo' })
   createVehicle(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateVehicleDto): Promise<unknown> {
     return this.fleet.createVehicle(user, dto);
+  }
+
+  @Get('vehicles')
+  @ApiOperation({ summary: 'Lista paginada de la flota (filtro: status)' })
+  listVehicles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListVehiclesQueryDto,
+  ): Promise<Page<VehicleView>> {
+    return this.fleet.listVehicles(user, query);
   }
 
   @Get('vehicles/:id')
@@ -44,13 +64,22 @@ export class FleetController {
     return this.fleet.createDocument(user, dto);
   }
 
+  @Get('documents/expiring')
+  @ApiOperation({ summary: 'Documentos próximos a vencer (ventana de días)' })
+  expirations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ExpirationsQueryDto,
+  ): Promise<ExpiringDocumentView[]> {
+    return this.fleet.expirations(user, query.days);
+  }
+
   @Get('documents')
-  @ApiOperation({ summary: 'Documentos de un titular (ownerId)' })
+  @ApiOperation({ summary: 'Lista paginada de documentos (filtros: status, ownerId)' })
   listDocuments(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() query: DocumentsQueryDto,
-  ): Promise<FleetDocumentView[]> {
-    return this.fleet.listDocuments(user, query.ownerId);
+    @Query() query: ListDocumentsQueryDto,
+  ): Promise<Page<FleetDocumentView>> {
+    return this.fleet.listDocuments(user, query);
   }
 
   @Post('documents/:id/review')
@@ -74,20 +103,11 @@ export class FleetController {
   }
 
   @Get('inspections')
-  @ApiOperation({ summary: 'Inspecciones de un vehículo' })
+  @ApiOperation({ summary: 'Lista paginada de inspecciones (filtro: vehicleId)' })
   listInspections(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() query: InspectionsQueryDto,
-  ): Promise<unknown> {
-    return this.fleet.listInspections(user, query.vehicleId);
-  }
-
-  @Get('compliance/expirations')
-  @ApiOperation({ summary: 'Documentos próximos a vencer (ventana de días)' })
-  expirations(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: ExpirationsQueryDto,
-  ): Promise<FleetDocumentView[]> {
-    return this.fleet.expirations(user, query.days);
+    @Query() query: ListInspectionsQueryDto,
+  ): Promise<Page<InspectionView>> {
+    return this.fleet.listInspections(user, query);
   }
 }

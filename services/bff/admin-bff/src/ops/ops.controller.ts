@@ -6,8 +6,8 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { TripSummary, DriverSummary } from '@veo/api-client';
-import { OpsService, type TripDetailView, type PendingDriver, type PendingOperator } from './ops.service';
+import type { TripSummary, DriverApproval, TripDetail } from '@veo/api-client';
+import { OpsService, type PendingDriver, type PendingOperator } from './ops.service';
 import type { Page } from '../read-model/read-model.service';
 import { ListTripsQueryDto, ListDriversQueryDto, ApproveOperatorDto } from './dto/ops.dto';
 
@@ -32,13 +32,13 @@ export class OpsController {
 
   @Get('trips/:id')
   @ApiOperation({ summary: 'Detalle agregado: trip + passenger + driver + payment + rating' })
-  tripDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetailView> {
+  tripDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetail> {
     return this.ops.tripDetail(user, id);
   }
 
   @Get('drivers')
   @ApiOperation({ summary: 'Listado de conductores (read-model)' })
-  listDrivers(@Query() query: ListDriversQueryDto): Promise<Page<DriverSummary>> {
+  listDrivers(@Query() query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
     return this.ops.listDrivers(query);
   }
 

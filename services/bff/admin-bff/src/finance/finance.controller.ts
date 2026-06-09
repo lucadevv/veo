@@ -16,9 +16,12 @@ export class FinanceController {
   constructor(private readonly finance: FinanceService) {}
 
   @Get('payouts')
-  @ApiOperation({ summary: 'Payouts de un conductor (driverId requerido)' })
-  payouts(@CurrentUser() user: AuthenticatedUser, @Query() query: PayoutsQueryDto): Promise<PayoutView[]> {
-    return this.finance.listPayouts(user, query.driverId);
+  @ApiOperation({ summary: 'Listado paginado de payouts (filtro por estado)' })
+  payouts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PayoutsQueryDto,
+  ): Promise<{ items: PayoutView[]; nextCursor: string | null }> {
+    return this.finance.listPayouts(user, query);
   }
 
   @Post('payouts/run')

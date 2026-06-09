@@ -48,7 +48,9 @@ describe('TripsService.videoGrant', () => {
     const svc = makeService({});
     const grant = await svc.videoGrant(user, 'trip-1');
     expect(grant.url).toBe(enabled.url);
-    expect(grant.roomName).toBe('trip:trip-1');
+    // DEBE ser la sala donde PUBLICA el conductor (media-service roomNameForTrip = `trip-${tripId}`),
+    // no la sala Socket.IO `trip:${tripId}`. Si divergen, el pasajero entra a una sala vacía (bug histórico).
+    expect(grant.roomName).toBe('trip-trip-1');
     expect(grant.token.split('.')).toHaveLength(3);
   });
 

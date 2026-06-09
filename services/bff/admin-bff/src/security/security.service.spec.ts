@@ -1,10 +1,30 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SecurityService } from './security.service';
-import type { InternalRestClient } from '@veo/rpc';
+import type { InternalRestClient, GrpcServiceClient } from '@veo/rpc';
+import type { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
+import type { Env } from '../config/env.schema';
 
 const identity: AuthenticatedUser = { userId: 'sec1', type: 'admin', roles: ['SUPPORT_L2'], sessionId: 's1' };
+const config = { get: () => 'internal-secret' } as unknown as ConfigService<Env, true>;
+
+/** identity gRPC que enriquece nombres: GetUser → pasajero, GetDriver → conductor. */
+const identityGrpc = {
+  call: vi.fn((method: string) =>
+    Promise.resolve(
+      method === 'GetUser'
+        ? { name: 'Ana Pérez', found: true }
+        : method === 'GetDriver'
+          ? { name: 'Khalid Ríos', found: true }
+          : {},
+    ),
+  ),
+} as unknown as GrpcServiceClient;
+/** trip gRPC que resuelve el driverId del viaje (PanicEntity no lo trae). */
+const tripGrpc = {
+  call: vi.fn(() => Promise.resolve({ driverId: 'drv-1', found: true })),
+} as unknown as GrpcServiceClient;
 
 const panicEntity = {
   id: 'pa1',
@@ -21,9 +41,11 @@ describe('SecurityService', () => {
   it('mapea PanicEntity → panicSummary (geoPoint → geo, acknowledgedAt nullable)', async () => {
     const rest = { get: vi.fn().mockResolvedValue([panicEntity]) } as unknown as InternalRestClient;
     const audit = { record: vi.fn() } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, audit);
-    const list = await svc.listPanics(identity, {});
-    expect(list[0]).toEqual({
+    const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
+    const page = await svc.listPanics(identity, {});
+    // El contrato admin es paginado: { items, nextCursor } (panic-service devuelve array → nextCursor null).
+    expect(page.nextCursor).toBeNull();
+    expect(page.items[0]).toEqual({
       id: 'pa1',
       tripId: 't1',
       passengerId: 'p1',
@@ -34,13 +56,29 @@ describe('SecurityService', () => {
     });
   });
 
-  it('ack registra auditoría', async () => {
-    const rest = { post: vi.fn().mockResolvedValue({ ...panicEntity, status: 'ACKNOWLEDGED', acknowledgedAt: 'x', ackBy: 'sec1' }) } as unknown as InternalRestClient;
+  it('ack registra auditoría y mapea al contrato panicDetail (ackBy → acknowledgedBy, evidence)', async () => {
+    const rest = {
+      post: vi.fn().mockResolvedValue({
+        ...panicEntity,
+        status: 'ACKNOWLEDGED',
+        acknowledgedAt: 'x',
+        ackBy: 'sec1',
+        evidenceS3Keys: ['panic/t1/clip.mp4'],
+      }),
+    } as unknown as InternalRestClient;
     const audit = { record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }) } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, audit);
+    const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
     const out = await svc.ack(identity, 'pa1');
     expect(out.status).toBe('ACKNOWLEDGED');
-    expect(out.ackBy).toBe('sec1');
+    expect(out.acknowledgedBy).toBe('sec1');
+    // ENRIQUECIDO: nombres reales de identity (security: quién está en peligro / quién maneja) + driverId del viaje.
+    expect(out.passengerName).toBe('Ana Pérez');
+    expect(out.driverId).toBe('drv-1');
+    expect(out.driverName).toBe('Khalid Ríos');
+    // evidence mapeado desde el S3 key.
+    expect(out.evidence).toEqual([
+      { id: 'panic/t1/clip.mp4', kind: 'video', label: 'clip.mp4', at: panicEntity.triggeredAt },
+    ]);
     expect(audit.record).toHaveBeenCalledOnce();
   });
 });

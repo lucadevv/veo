@@ -23,11 +23,20 @@ export class FallbackMapsClient implements MapsClient {
     this.fallback = new LocalMapsEngine();
   }
 
-  async route(origin: LatLon, destination: LatLon): Promise<RouteResult> {
+  async route(
+    origin: LatLon,
+    destination: LatLon,
+    waypoints: readonly LatLon[] = [],
+  ): Promise<RouteResult> {
     try {
-      return await this.primary.route(origin, destination);
+      // BUG FIX: esta fachada declaraba `route(origin, destination)` SIN waypoints → el 3er argumento
+      // (las paradas) que le pasa maps.service/trips.service se DESCARTABA → la ruta y la tarifa NO
+      // cambiaban al agregar una parada en la app (OSRM caído → cae al fallback, que también las perdía).
+      return await this.primary.route(origin, destination, waypoints);
     } catch (err) {
-      if (err instanceof ExternalServiceError) return this.fallback.route(origin, destination);
+      if (err instanceof ExternalServiceError) {
+        return this.fallback.route(origin, destination, waypoints);
+      }
       throw err;
     }
   }

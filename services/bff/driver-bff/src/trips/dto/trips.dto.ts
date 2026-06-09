@@ -85,4 +85,8 @@ export interface TripRouteView {
   distanceMeters: number;
   durationSeconds: number;
   steps: RouteStepView[];
+  /** Recojo, destino y paradas intermedias (Ola 2B) para los markers del mapa del conductor. */
+  origin: { lat: number; lon: number };
+  destination: { lat: number; lon: number };
+  waypoints: { lat: number; lon: number }[];
 }

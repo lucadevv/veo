@@ -20,6 +20,7 @@ import {
 } from '@nestjs/websockets';
 import { Namespace, Socket, type DefaultEventsMap } from 'socket.io';
 import { JWT_SERVICE, type JwtService, type AuthenticatedUser } from '@veo/auth';
+import { AdminRole } from '@veo/shared-types';
 import {
   OPS_NAMESPACE,
   type OpsServerToClient,
@@ -29,6 +30,31 @@ import {
   type PanicAlertMsg,
 } from '@veo/api-client';
 import { WsTicketService } from './ws-ticket.service';
+
+/**
+ * Gating por ROL del monitor /ops (la UI esconde, pero el socket NO autoriza solo — defensa server-side).
+ * Espejo EXACTO del rbac del admin-web: `ops:view` para conectarse, `panics:view` para recibir pánicos.
+ * SUPPORT_L1 no tiene ninguno; FINANCE tiene ops:view pero NO panics:view.
+ */
+const OPS_VIEW_ROLES: readonly AdminRole[] = [
+  AdminRole.SUPPORT_L2,
+  AdminRole.DISPATCHER,
+  AdminRole.COMPLIANCE_SUPERVISOR,
+  AdminRole.FINANCE,
+  AdminRole.ADMIN,
+  AdminRole.SUPERADMIN,
+];
+const PANIC_VIEW_ROLES: readonly AdminRole[] = [
+  AdminRole.SUPPORT_L2,
+  AdminRole.DISPATCHER,
+  AdminRole.COMPLIANCE_SUPERVISOR,
+  AdminRole.ADMIN,
+  AdminRole.SUPERADMIN,
+];
+
+function hasAnyRole(user: AuthenticatedUser, allowed: readonly AdminRole[]): boolean {
+  return user.roles.some((role) => allowed.includes(role));
+}
 
 export interface OpsWatch {
   bbox?: [number, number, number, number];
@@ -67,10 +93,22 @@ export class OpsGateway implements OnGatewayConnection {
   }
 
   /**
+   * Autentica el handshake Y gatea por ROL: además de exigir type='admin', el usuario debe tener
+   * un rol con `ops:view`. Sin esto, un SUPPORT_L1 (que la UI no deja entrar) igual abriría el socket
+   * por `curl`/cliente directo y recibiría tráfico de operación. La UI refleja; el socket autoriza.
+   */
+  private async authenticate(socket: OpsSocket): Promise<AuthenticatedUser | null> {
+    const user = await this.resolveIdentity(socket);
+    if (!user) return null;
+    if (!hasAnyRole(user, OPS_VIEW_ROLES)) return null; // gate de rol server-side (no solo la UI)
+    return user;
+  }
+
+  /**
    * Resuelve la identidad del handshake. Prioriza el ticket efímero (consumo único en Redis);
    * si no hay ticket, cae al Bearer JWT. En ambos casos exige una identidad de tipo 'admin'.
    */
-  private async authenticate(socket: OpsSocket): Promise<AuthenticatedUser | null> {
+  private async resolveIdentity(socket: OpsSocket): Promise<AuthenticatedUser | null> {
     const ticket = this.extractTicket(socket);
     if (ticket) {
       const ticketUser = await this.wsTickets.consume(ticket);
@@ -102,13 +140,24 @@ export class OpsGateway implements OnGatewayConnection {
     socket.data.watch = { bbox: msg?.bbox, tripId: msg?.tripId };
   }
 
-  /** Difusión prioritaria de alerta de pánico: a TODOS, ignorando watch. */
+  /**
+   * Difusión prioritaria de alerta de pánico: ignora el filtro `watch` (un incidente no se pierde por
+   * estar mirando otra zona), pero RESPETA el rol — solo a sockets con `panics:view` (no FINANCE/SUPPORT_L1).
+   * Antes era `server.emit` a TODOS: un rol sin permiso recibía la alerta + PII (Ley 29733).
+   */
   emitPanicAlert(msg: PanicAlertMsg): void {
-    this.server.emit('panic:alert', msg);
+    for (const socket of this.panicViewers()) socket.emit('panic:alert', msg);
   }
 
   emitPanicUpdate(msg: { panicId: string; status: string; at: string }): void {
-    this.server.emit('panic:update', msg);
+    for (const socket of this.panicViewers()) socket.emit('panic:update', msg);
+  }
+
+  /** Sockets autenticados cuyo usuario tiene `panics:view` (los únicos que pueden recibir pánicos). */
+  private *panicViewers(): Generator<OpsSocket> {
+    for (const socket of this.authenticatedSockets()) {
+      if (socket.data.user && hasAnyRole(socket.data.user, PANIC_VIEW_ROLES)) yield socket;
+    }
   }
 
   /** Actualización de viaje: respeta el filtro watch de cada socket. */

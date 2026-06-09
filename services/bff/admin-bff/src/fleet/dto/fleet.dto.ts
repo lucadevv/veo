@@ -11,7 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FleetDocumentType } from '@veo/shared-types';
+import { FleetDocumentType, FleetDocumentStatus } from '@veo/shared-types';
 
 export class CreateVehicleDto {
   @IsString()
@@ -95,14 +95,42 @@ export class CreateInspectionDto {
   notes?: string;
 }
 
-export class DocumentsQueryDto {
+/** Paginación cursor común a las listas de flota (cursor = id uuidv7 de la última fila previa). */
+class PaginatedQueryDto {
+  @IsOptional()
   @IsString()
-  ownerId!: string;
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }
 
-export class InspectionsQueryDto {
+export class ListVehiclesQueryDto extends PaginatedQueryDto {
+  /** Estado documental del vehículo (VehicleDocStatus). Opcional. */
+  @IsOptional()
+  @IsString()
+  status?: string;
+}
+
+export class ListDocumentsQueryDto extends PaginatedQueryDto {
+  /** Estado del documento. Validado contra el enum real: un valor inválido falla 400 (no filtra a vacío). */
+  @IsOptional()
+  @IsIn(Object.values(FleetDocumentStatus))
+  status?: FleetDocumentStatus;
+
+  @IsOptional()
+  @IsString()
+  ownerId?: string;
+}
+
+export class ListInspectionsQueryDto extends PaginatedQueryDto {
+  @IsOptional()
   @IsUUID()
-  vehicleId!: string;
+  vehicleId?: string;
 }
 
 export class ExpirationsQueryDto {

@@ -58,10 +58,19 @@ export class DriverEnrichmentService {
 
   private async fetchInfo(driverId: string, meta: Record<string, string>): Promise<OfferDriverInfo> {
     // Tolerante a fallos: cada downstream que falle deja su campo en null (la lista de ofertas no rompe).
-    const [driver, aggregate, vehicles] = await Promise.all([
-      this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta).catch(() => null),
+    // El conductor se resuelve PRIMERO: fleet indexa los vehículos por `User.id` (NO por `Driver.id`, que
+    // es lo que trae la oferta), así que el vehículo se busca con el `userId` resuelto vía identity. Sin
+    // este mapeo, GetDriverVehicles devolvía vacío SIEMPRE (el auto nunca salía en la puja — bug latente).
+    const driver = await this.identityGrpc
+      .call<DriverReply>('GetDriver', { id: driverId }, meta)
+      .catch(() => null);
+    const [aggregate, vehicles] = await Promise.all([
       this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId: driverId }, meta).catch(() => null),
-      this.fleetGrpc.call<DriverVehiclesReply>('GetDriverVehicles', { id: driverId }, meta).catch(() => null),
+      driver?.found && driver.userId
+        ? this.fleetGrpc
+            .call<DriverVehiclesReply>('GetDriverVehicles', { id: driver.userId }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     // Rating: el rolling 30d si hay viajes calificados; si no, el promedio histórico del driver.

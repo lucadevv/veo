@@ -5,9 +5,14 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { PanicSummary } from '@veo/api-client';
-import { SecurityService, type PanicDetailView } from './security.service';
+import type { PanicSummary, PanicDetail } from '@veo/api-client';
+import { SecurityService } from './security.service';
 import { ListPanicsQueryDto, ResolvePanicDto, PanicEvidenceDto } from './dto/panic.dto';
+
+interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
 
 @ApiTags('security')
 @Controller('security')
@@ -23,20 +28,20 @@ export class SecurityController {
 
   @Get('panics')
   @ApiOperation({ summary: 'Listado de incidentes de pánico (filtro por estado)' })
-  list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListPanicsQueryDto): Promise<PanicSummary[]> {
+  list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListPanicsQueryDto): Promise<Page<PanicSummary>> {
     return this.security.listPanics(user, query);
   }
 
   @Get('panics/:id')
   @ApiOperation({ summary: 'Detalle de un incidente de pánico' })
-  detail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetailView> {
+  detail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetail> {
     return this.security.getPanic(user, id);
   }
 
   @Post('panics/:id/ack')
   @HttpCode(200)
   @ApiOperation({ summary: 'Acusa recibo de un incidente (operador de seguridad)' })
-  ack(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetailView> {
+  ack(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetail> {
     return this.security.ack(user, id);
   }
 
@@ -48,7 +53,7 @@ export class SecurityController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: ResolvePanicDto,
-  ): Promise<PanicDetailView> {
+  ): Promise<PanicDetail> {
     return this.security.resolve(user, id, dto);
   }
 

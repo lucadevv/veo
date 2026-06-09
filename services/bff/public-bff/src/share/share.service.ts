@@ -18,8 +18,7 @@ import {
   REST_SHARE,
   REST_TRIP,
 } from '../infra/downstream.tokens';
-import { familyRoom } from './share.types';
-import { type LiveKitConfig, liveKitEnabled, mintViewerToken } from './livekit-token';
+import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from './livekit-token';
 import { ANONYMOUS_IDENTITY, internalGrpcMetadata } from '../infra/internal-identity';
 import type { AggregateReply, DriverReply, VehicleReply } from '../infra/grpc-types';
 import { RealtimeStateService } from '../realtime/realtime-state.service';
@@ -179,7 +178,7 @@ export class ShareService {
       throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
     }
 
-    const room = familyRoom(downstream.tripId);
+    const room = liveKitRoomForTrip(downstream.tripId);
     const minted = mintViewerToken(this.livekit, {
       room,
       identityPrefix: `family-${downstream.shareId}`,

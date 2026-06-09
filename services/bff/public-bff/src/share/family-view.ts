@@ -61,9 +61,11 @@ export interface FamilyDriverView {
 }
 
 /**
- * Vista de conductor para la familia.
- * HUECO @veo/rpc: el proto/GetDriver no expone un nombre público, así que `name` va vacío
- * (el contrato familyDriver lo exige como string no-null). Ver reporte: añadir `displayName`.
+ * Vista de conductor para la familia. El nombre viene de `DriverReply.name` (identity, vía la relación
+ * driver→user). Para la familia es SEGURIDAD mostrar quién maneja (mismo chequeo que ve el pasajero): el
+ * pasajero compartió el viaje justamente para que su familia verifique al conductor. `''` (default proto3,
+ * o conductor sin nombre) se normaliza a cadena vacía — el contrato exige string no-null; la UI degrada a
+ * "Conductor" honesto si llega vacío.
  */
 export function buildFamilyDriver(
   driver: DriverReply | null,
@@ -78,7 +80,7 @@ export function buildFamilyDriver(
         ? driver.averageRating
         : null;
   return {
-    name: '',
+    name: driver?.name?.trim() ?? '',
     rating,
     vehiclePlate: vehicle?.plate ?? null,
     vehicleModel: vehicle ? `${vehicle.make} ${vehicle.model}`.trim() : null,

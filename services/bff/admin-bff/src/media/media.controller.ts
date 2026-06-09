@@ -6,8 +6,8 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { MediaService, type ApprovedAccess, type SegmentView } from './media.service';
-import { RequestAccessDto, SegmentsQueryDto } from './dto/media.dto';
+import { MediaService, type ApprovedAccess, type LiveViewerToken, type SegmentView } from './media.service';
+import { LiveAccessDto, RequestAccessDto, SegmentsQueryDto } from './dto/media.dto';
 
 @ApiTags('media')
 @Controller('media')
@@ -30,6 +30,17 @@ export class MediaController {
   @ApiOperation({ summary: 'Aprueba el acceso (requiere MFA fresca); devuelve URL firmada + watermark' })
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<ApprovedAccess> {
     return this.media.approveAccess(user, id);
+  }
+
+  @Post('live/token')
+  @HttpCode(200)
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Token de cámara EN VIVO de un viaje (muro admin; doble-auth: rol + MFA fresca)' })
+  liveToken(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LiveAccessDto,
+  ): Promise<LiveViewerToken> {
+    return this.media.issueLiveToken(user, dto);
   }
 
   @Get('segments')

@@ -5,7 +5,12 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
-import type { FleetDocumentView } from '@veo/api-client';
+import type {
+  ExpiringDocumentView,
+  FleetDocumentView,
+  InspectionView,
+  VehicleView,
+} from '@veo/api-client';
 import { REST_FLEET } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type {
@@ -13,7 +18,16 @@ import type {
   CreateDocumentDto,
   ReviewDocumentDto,
   CreateInspectionDto,
+  ListVehiclesQueryDto,
+  ListDocumentsQueryDto,
+  ListInspectionsQueryDto,
 } from './dto/fleet.dto';
+
+/** Página con cursor que devuelve fleet-service; misma forma que `paginated()` del contrato admin-web. */
+interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
 
 interface Vehicle {
   id: string;
@@ -24,6 +38,7 @@ interface Vehicle {
   color: string;
   docStatus: string;
   active: boolean;
+  driverId: string | null;
 }
 interface FleetDocument {
   id: string;
@@ -36,6 +51,7 @@ interface FleetDocument {
 interface Inspection {
   id: string;
   vehicleId: string;
+  inspectorId: string;
   passed: boolean;
   inspectedAt: string;
 }
@@ -62,6 +78,33 @@ export class FleetService {
     return this.rest.get<Vehicle>(`/vehicles/${id}`, { identity });
   }
 
+  /** Lista paginada de la flota (admin). Proxy a fleet-service + proyección a vehicleView del contrato. */
+  async listVehicles(identity: AuthenticatedUser, query: ListVehiclesQueryDto): Promise<Page<VehicleView>> {
+    const page = await this.rest.get<Page<Vehicle>>('/vehicles', {
+      identity,
+      query: { docStatus: query.status, cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toVehicleView), nextCursor: page.nextCursor };
+  }
+
+  /** Lista paginada de documentos (admin), filtrable por estado. Proyección a fleetDocumentView. */
+  async listDocuments(identity: AuthenticatedUser, query: ListDocumentsQueryDto): Promise<Page<FleetDocumentView>> {
+    const page = await this.rest.get<Page<FleetDocument>>('/documents', {
+      identity,
+      query: { status: query.status, ownerId: query.ownerId, cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toFleetDocumentView), nextCursor: page.nextCursor };
+  }
+
+  /** Lista paginada de inspecciones (admin), filtro opcional por vehículo. Proyección a inspectionView. */
+  async listInspections(identity: AuthenticatedUser, query: ListInspectionsQueryDto): Promise<Page<InspectionView>> {
+    const page = await this.rest.get<Page<Inspection>>('/inspections', {
+      identity,
+      query: { vehicleId: query.vehicleId, cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toInspectionView), nextCursor: page.nextCursor };
+  }
+
   async createDocument(identity: AuthenticatedUser, dto: CreateDocumentDto): Promise<FleetDocumentView> {
     const doc = await this.rest.post<FleetDocument>('/documents', { identity, body: dto });
     await this.audit.record(identity, {
@@ -71,11 +114,6 @@ export class FleetService {
       payload: { ownerType: dto.ownerType, ownerId: dto.ownerId, type: dto.type },
     });
     return toFleetDocumentView(doc);
-  }
-
-  async listDocuments(identity: AuthenticatedUser, ownerId: string): Promise<FleetDocumentView[]> {
-    const docs = await this.rest.get<FleetDocument[]>('/documents', { identity, query: { ownerId } });
-    return docs.map(toFleetDocumentView);
   }
 
   async reviewDocument(
@@ -107,16 +145,12 @@ export class FleetService {
     return ins;
   }
 
-  listInspections(identity: AuthenticatedUser, vehicleId: string): Promise<Inspection[]> {
-    return this.rest.get<Inspection[]>('/inspections', { identity, query: { vehicleId } });
-  }
-
-  async expirations(identity: AuthenticatedUser, days?: number): Promise<FleetDocumentView[]> {
+  async expirations(identity: AuthenticatedUser, days?: number): Promise<ExpiringDocumentView[]> {
     const docs = await this.rest.get<FleetDocument[]>('/fleet/expirations', {
       identity,
       query: { days },
     });
-    return docs.map(toFleetDocumentView);
+    return docs.map(toExpiringDocumentView).filter((d): d is ExpiringDocumentView => d !== null);
   }
 }
 
@@ -128,5 +162,47 @@ function toFleetDocumentView(d: FleetDocument): FleetDocumentView {
     type: d.type,
     status: d.status,
     expiresAt: d.expiresAt ?? null,
+  };
+}
+
+function toVehicleView(v: Vehicle): VehicleView {
+  return {
+    id: v.id,
+    plate: v.plate,
+    brand: v.make,
+    model: v.model,
+    year: v.year,
+    color: v.color,
+    status: v.docStatus,
+    driverId: v.driverId ?? null,
+  };
+}
+
+function toInspectionView(i: Inspection): InspectionView {
+  // fleet-service solo registra inspecciones ya realizadas → status COMPLETED; el veredicto va en `result`.
+  return {
+    id: i.id,
+    vehicleId: i.vehicleId,
+    status: 'COMPLETED',
+    inspectedAt: i.inspectedAt,
+    scheduledAt: null,
+    inspector: i.inspectorId,
+    result: i.passed ? 'PASSED' : 'FAILED',
+  };
+}
+
+/** Proyecta a expiringDocumentView calculando los días hasta el vencimiento. Descarta docs sin expiresAt. */
+function toExpiringDocumentView(d: FleetDocument): ExpiringDocumentView | null {
+  if (!d.expiresAt) return null;
+  const msPerDay = 86_400_000;
+  const daysUntilExpiry = Math.floor((new Date(d.expiresAt).getTime() - Date.now()) / msPerDay);
+  return {
+    id: d.id,
+    ownerType: d.ownerType,
+    ownerId: d.ownerId,
+    type: d.type,
+    status: d.status,
+    expiresAt: d.expiresAt,
+    daysUntilExpiry,
   };
 }
