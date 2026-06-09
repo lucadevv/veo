@@ -10,6 +10,7 @@ import { ConflictError, NotFoundError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, type DocumentType } from '../generated/prisma';
 import { maskDocument } from '../common/document';
+import type { PaymentMethod } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
 
 export interface ProfileView {
@@ -24,6 +25,8 @@ export interface ProfileView {
   documentType: DocumentType | null;
   /** Número de documento del pasajero; null si aún no lo cargó. Es SU dato → se devuelve completo. */
   document: string | null;
+  /** Método de pago por defecto (preferencia de UI); null si nunca lo eligió. Validado al escribir. */
+  defaultPaymentMethod: PaymentMethod | null;
   deletionRequestedAt: Date | null;
 }
 
@@ -53,6 +56,7 @@ export class UsersService {
       name?: string;
       documentType?: DocumentType;
       document?: string;
+      defaultPaymentMethod?: PaymentMethod;
     },
   ): Promise<ProfileView> {
     const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
@@ -72,6 +76,7 @@ export class UsersService {
         name: data.name ?? user.name,
         documentType: nextDocumentType,
         document: nextDocument,
+        defaultPaymentMethod: data.defaultPaymentMethod ?? user.defaultPaymentMethod,
       },
     });
 
@@ -127,6 +132,7 @@ export class UsersService {
     photoUrl: string | null;
     documentType: DocumentType | null;
     document: string | null;
+    defaultPaymentMethod: string | null;
     deletionRequestedAt: Date | null;
   }): ProfileView {
     return {
@@ -139,6 +145,8 @@ export class UsersService {
       photoUrl: user.photoUrl,
       documentType: user.documentType,
       document: user.document,
+      // El borde DTO valida @IsEnum(PaymentMethod) al escribir → el valor guardado es siempre válido.
+      defaultPaymentMethod: user.defaultPaymentMethod as PaymentMethod | null,
       deletionRequestedAt: user.deletionRequestedAt,
     };
   }

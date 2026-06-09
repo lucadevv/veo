@@ -116,6 +116,10 @@ model User {
   documentType DocumentType? @map("document_type")
   /// Número del documento (forma según documentType: DN=8 díg · CE 9-12 díg · PP 6-12 alfanum).
   document     String?       @map("document")
+  /// Método de pago POR DEFECTO del pasajero (preferencia de UI, no transacción): siembra el selector
+  /// al pedir viaje. String (validado contra el enum PaymentMethod de @veo/shared-types en el borde DTO,
+  /// no enum de DB para no acoplar el schema). Nullable = nunca lo eligió → la app cae a su default local.
+  defaultPaymentMethod String? @map("default_payment_method")
   kycStatus KycStatus  @default(PENDING) @map("kyc_status")
   /// Embedding facial de referencia (ArcFace, 512-d) capturado al verificar KYC del pasajero.
   /// Vacío = pasajero NO verificado biométricamente.

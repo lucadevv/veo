@@ -141,7 +141,7 @@ export class DriversController {
 
   // ── Operador (RBAC) ──
   @UseGuards(RolesGuard)
-  @Roles(AdminRole.DISPATCHER, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('pending-approval')
   @ApiOperation({ summary: 'Listar conductores pendientes de aprobación' })
   listPending() {
@@ -149,7 +149,7 @@ export class DriversController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(AdminRole.DISPATCHER, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/approve')
   @HttpCode(200)
   @ApiOperation({ summary: 'Aprobar antecedentes del conductor (KYC VERIFIED)' })
@@ -158,7 +158,7 @@ export class DriversController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(AdminRole.DISPATCHER, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/reject')
   @HttpCode(204)
   @ApiOperation({ summary: 'Rechazar conductor' })

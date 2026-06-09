@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Patch, Post, UseGuards } from 
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsEmail, IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import { PaymentMethod } from '@veo/shared-types';
 import { DOCUMENT_TYPES, IsValidDocument, type DocumentTypeValue } from '../common/document';
 import { UsersService, type ProfileView } from './users.service';
 import { PhoneLinkService } from './phone-link.service';
@@ -40,6 +41,15 @@ class UpdateProfileDto {
   @IsOptional()
   @IsValidDocument()
   document?: string;
+
+  /**
+   * Método de pago por defecto del pasajero (preferencia de UI: siembra el selector al pedir viaje).
+   * Validado contra el enum compartido PaymentMethod (YAPE|PLIN|CASH|CARD|PAGOEFECTIVO). Opcional: si
+   * no viene, no se toca.
+   */
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  defaultPaymentMethod?: PaymentMethod;
 }
 
 @ApiTags('users')
