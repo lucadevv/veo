@@ -4,7 +4,8 @@ import { authedBffFetch } from '@/lib/server/bff';
 export const dynamic = 'force-dynamic';
 
 interface Ctx {
-  params: { path: string[] };
+  // Next 15: los `params` de route handlers son asíncronos (Promise).
+  params: Promise<{ path: string[] }>;
 }
 
 /**
@@ -14,7 +15,8 @@ interface Ctx {
  */
 async function proxy(req: Request, ctx: Ctx): Promise<Response> {
   const url = new URL(req.url);
-  const path = '/' + ctx.params.path.map(encodeURIComponent).join('/');
+  const { path: segments } = await ctx.params;
+  const path = '/' + segments.map(encodeURIComponent).join('/');
 
   const headers: Record<string, string> = {};
   const contentType = req.headers.get('content-type');

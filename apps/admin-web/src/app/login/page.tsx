@@ -6,10 +6,11 @@ import { LoginForm } from '@/components/auth/login-form';
 export const dynamic = 'force-dynamic';
 
 interface LoginPageProps {
-  searchParams: { next?: string };
+  searchParams: Promise<{ next?: string }>;
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+export default async function LoginPage(props: LoginPageProps) {
+  const searchParams = await props.searchParams;
   // Si ya hay sesión válida, no mostrar login.
   const session = await getSession();
   const next = sanitizeNext(searchParams.next);

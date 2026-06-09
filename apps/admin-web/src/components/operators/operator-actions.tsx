@@ -24,7 +24,7 @@ import {
  * (rol raíz, se otorga solo en bootstrap, no auto-servicio). El admin-bff revalida @Roles(ADMIN,SUPERADMIN)
  * server-side; esta lista es solo la UI (que nunca autoriza, solo refleja — MENTORIA capa UI).
  */
-const ASSIGNABLE_ROLES: ReadonlyArray<{ value: AdminRoleValue; label: string }> = [
+const ASSIGNABLE_ROLES: readonly { value: AdminRoleValue; label: string }[] = [
   { value: 'SUPPORT_L1', label: 'Soporte N1' },
   { value: 'SUPPORT_L2', label: 'Soporte N2' },
   { value: 'DISPATCHER', label: 'Despachador' },
@@ -114,7 +114,7 @@ export function OperatorActions({ operator }: { operator: PendingOperator }) {
             <Button variant="secondary" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button variant="primary" onClick={handleApprove} disabled={pending || roles.size === 0}>
+            <Button variant="primary" onClick={() => void handleApprove()} disabled={pending || roles.size === 0}>
               Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
             </Button>
           </DialogFooter>

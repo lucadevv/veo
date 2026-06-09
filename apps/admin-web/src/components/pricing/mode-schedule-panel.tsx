@@ -11,7 +11,7 @@ import { useSession } from '@/lib/session-context';
 import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
-const MODES: ReadonlyArray<{ value: PricingMode; icon: LucideIcon }> = [
+const MODES: readonly { value: PricingMode; icon: LucideIcon }[] = [
   { value: 'PUJA', icon: Gavel },
   { value: 'FIXED', icon: Tag },
 ];

@@ -1,4 +1,5 @@
-'use client';
+'use client';;
+import { use } from "react";
 
 import { BellRing, CheckCircle2, FileText } from 'lucide-react';
 import { usePanic, usePanicAction } from '@/lib/api/queries';
@@ -15,7 +16,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 
-export default function PanicDetailPage({ params }: { params: { id: string } }) {
+export default function PanicDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const { id } = params;
   const user = useSession();
   const { toast } = useToast();

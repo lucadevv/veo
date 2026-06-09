@@ -14,10 +14,11 @@ export const metadata: Metadata = {
 };
 
 interface TrackingPageProps {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }
 
-export default async function TrackingPage({ params }: TrackingPageProps) {
+export default async function TrackingPage(props: TrackingPageProps) {
+  const params = await props.params;
   const state = await fetchShareState(params.token);
 
   switch (state.kind) {

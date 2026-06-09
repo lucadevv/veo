@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, use } from 'react';
 import { useTrip } from '@/lib/api/queries';
 import type { TripDetail } from '@/lib/api/schemas';
 import { dateTime, duration, money } from '@/lib/formatters';
@@ -11,7 +11,8 @@ import { ErrorState } from '@/components/ui/states';
 import { TripStatusBadge } from '@/components/trips/status-badge';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 
-export default function TripDetailPage({ params }: { params: { id: string } }) {
+export default function TripDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const { id } = params;
   const query = useTrip(id);
   const trip = query.data;

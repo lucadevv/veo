@@ -21,7 +21,7 @@ export function modeDescription(mode: PricingMode): string {
  * Bits del bitmask de días del schedule (Lun=1 … Dom=64). Orden de visualización empieza en Lunes,
  * coherente con la semana laboral peruana.
  */
-const DAY_BITS: ReadonlyArray<{ bit: number; short: string }> = [
+const DAY_BITS: readonly { bit: number; short: string }[] = [
   { bit: 1, short: 'Lun' },
   { bit: 2, short: 'Mar' },
   { bit: 4, short: 'Mié' },
