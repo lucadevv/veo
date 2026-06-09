@@ -42,6 +42,21 @@ export interface TemplateSeed {
   body: string;
 }
 
+/**
+ * Categoría de BANDEJA (define ícono/tono en la app). Es semántica PÚBLICA y estable: las keys
+ * internas de plantilla (`trip.accepted`, etc.) NO se filtran al cliente — solo su categoría.
+ */
+export type InboxCategory = 'trip' | 'safety' | 'payment' | 'promo' | 'general';
+
+/** Deriva la categoría de bandeja a partir de la FAMILIA de la key (prefijo), no de la key exacta. */
+export function categoryForTemplate(key: string): InboxCategory {
+  if (key.startsWith('trip.') || key.startsWith('chat.')) return 'trip';
+  if (key.startsWith('panic.') || key.startsWith('contact.')) return 'safety';
+  if (key.startsWith('payment.')) return 'payment';
+  if (key.startsWith('promo.')) return 'promo';
+  return 'general';
+}
+
 const LOCALE = 'es-PE';
 
 export const DEFAULT_TEMPLATES: TemplateSeed[] = [

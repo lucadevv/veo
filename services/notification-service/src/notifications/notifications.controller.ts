@@ -11,7 +11,11 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { InternalIdentityGuard } from '@veo/auth';
 import { NotificationsService } from './notifications.service';
-import { CreateNotificationDto, NotificationView } from './dto/notification.dto';
+import {
+  CreateNotificationDto,
+  InboxNotificationView,
+  NotificationView,
+} from './dto/notification.dto';
 
 @ApiTags('notifications')
 @ApiBearerAuth()
@@ -25,6 +29,18 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Encolar una notificación (motor propio: dedup + retry + routing)' })
   enqueue(@Body() dto: CreateNotificationDto): Promise<NotificationView> {
     return this.notifications.enqueue(dto);
+  }
+
+  // IMPORTANTE: 'inbox' va ANTES de ':id' — si no, la ruta param `:id` capturaría "inbox".
+  @Get('inbox')
+  @ApiOperation({ summary: 'Bandeja in-app del usuario (PUSH renderizado: título + cuerpo)' })
+  @ApiQuery({ name: 'recipientId', required: true })
+  @ApiQuery({ name: 'limit', required: false })
+  listInbox(
+    @Query('recipientId') recipientId: string,
+    @Query('limit') limit?: string,
+  ): Promise<InboxNotificationView[]> {
+    return this.notifications.listInbox(recipientId, limit ? Number(limit) : undefined);
   }
 
   @Get(':id')

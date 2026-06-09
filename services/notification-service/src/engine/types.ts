@@ -60,6 +60,8 @@ export interface NotificationStore {
   create(input: CreateNotificationInput): Promise<NotificationRecord>;
   findById(id: string): Promise<NotificationRecord | null>;
   findByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]>;
+  /** Bandeja in-app: solo canal PUSH, más recientes primero. */
+  findInboxByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]>;
   findDue(now: Date, limit: number): Promise<NotificationRecord[]>;
   /** Riel ACEPTÓ el mensaje (honesto: SENT, NO DELIVERED) + outbox notification.sent. */
   markSent(id: string, args: { to: string; channel: NotificationChannel; attempts: number }): Promise<void>;

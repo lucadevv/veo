@@ -74,6 +74,11 @@ class InMemoryStore implements NotificationStore {
   async findByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]> {
     return [...this.records.values()].filter((r) => r.recipientId === recipientId).slice(0, limit);
   }
+  async findInboxByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]> {
+    return [...this.records.values()]
+      .filter((r) => r.recipientId === recipientId && r.channel === 'PUSH')
+      .slice(0, limit);
+  }
   async findDue(now: Date, limit: number): Promise<NotificationRecord[]> {
     return [...this.records.values()]
       .filter((r) => r.status === 'PENDING' && r.nextAttemptAt !== null && r.nextAttemptAt <= now)

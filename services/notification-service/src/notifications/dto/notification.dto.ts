@@ -11,6 +11,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { NotificationChannel, NotificationStatus } from '@veo/shared-types';
+import type { InboxCategory } from '../../engine/template.catalog';
 
 export class CreateNotificationDto {
   @ApiProperty({ description: 'Id del destinatario (usuario, operador o "central").' })
@@ -73,4 +74,21 @@ export class NotificationView {
   @ApiProperty() createdAt!: string;
   @ApiPropertyOptional({ description: 'true si se devolvió una notificación existente por dedup.' })
   deduped?: boolean;
+}
+
+/**
+ * Vista de BANDEJA in-app: la notificación PUSH ya RENDERIZADA (título + cuerpo del template i18n)
+ * y categorizada. A diferencia de NotificationView (operacional: status/attempts/template-key), esta
+ * es la que ve el USUARIO. Sin estado leído/no-leído por ahora (MVP cronológico).
+ */
+export class InboxNotificationView {
+  @ApiProperty() id!: string;
+  @ApiProperty({ description: 'Categoría para ícono/tono en la app.', example: 'trip' })
+  category!: InboxCategory;
+  @ApiProperty({ description: 'Título renderizado.', example: 'Tu conductor confirmó' })
+  title!: string;
+  @ApiProperty({ description: 'Cuerpo renderizado.' })
+  body!: string;
+  @ApiProperty({ description: 'ISO-8601 de emisión.' })
+  createdAt!: string;
 }

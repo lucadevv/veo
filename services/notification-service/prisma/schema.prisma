@@ -68,6 +68,9 @@ model Notification {
   /// Índice del worker: filtra PENDING vencidas y ordena por prioridad y luego antigüedad.
   @@index([status, priority, nextAttemptAt])
   @@index([recipientId, createdAt])
+  /// Bandeja in-app (findInboxByRecipient): filtra recipient + channel=PUSH y ordena por createdAt DESC.
+  /// El índice de 3 columnas sirve el WHERE+ORDER sin sort en memoria (el de 2 cols no cubre `channel`).
+  @@index([recipientId, channel, createdAt])
   @@map("notifications")
   @@schema("notification")
 }

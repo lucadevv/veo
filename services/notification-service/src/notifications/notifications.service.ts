@@ -6,8 +6,14 @@ import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '@veo/utils';
 import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationRepository } from '../engine/notification.repository';
+import { TemplateService } from '../engine/template.service';
+import { categoryForTemplate } from '../engine/template.catalog';
 import type { NotificationRecord } from '../engine/types';
-import type { CreateNotificationDto, NotificationView } from './dto/notification.dto';
+import type {
+  CreateNotificationDto,
+  InboxNotificationView,
+  NotificationView,
+} from './dto/notification.dto';
 
 function toView(rec: NotificationRecord, deduped?: boolean): NotificationView {
   return {
@@ -33,6 +39,7 @@ export class NotificationsService {
   constructor(
     private readonly engine: NotificationEngine,
     private readonly repo: NotificationRepository,
+    private readonly templates: TemplateService,
   ) {}
 
   async enqueue(dto: CreateNotificationDto): Promise<NotificationView> {
@@ -57,5 +64,24 @@ export class NotificationsService {
   async listByRecipient(recipientId: string, limit = 50): Promise<NotificationView[]> {
     const rows = await this.repo.findByRecipient(recipientId, Math.min(Math.max(limit, 1), 200));
     return rows.map((r) => toView(r));
+  }
+
+  /**
+   * BANDEJA in-app del usuario: notificaciones PUSH ya renderizadas (título + cuerpo del template)
+   * y categorizadas. Carga las plantillas en UNA query (sin N+1) y arma la vista que ve el usuario.
+   */
+  async listInbox(recipientId: string, limit = 30): Promise<InboxNotificationView[]> {
+    const rows = await this.repo.findInboxByRecipient(recipientId, Math.min(Math.max(limit, 1), 100));
+    const tpls = await this.templates.loadTemplatesByKeys(rows.map((r) => r.template));
+    return rows.map((rec) => {
+      const { title, body } = this.templates.renderInbox(rec, tpls.get(rec.template));
+      return {
+        id: rec.id,
+        category: categoryForTemplate(rec.template),
+        title,
+        body,
+        createdAt: rec.createdAt.toISOString(),
+      };
+    });
   }
 }

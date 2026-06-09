@@ -63,6 +63,6 @@ const engineProvider: Provider = {
     engineProvider,
     NotificationWorker,
   ],
-  exports: [NotificationEngine, NotificationRepository],
+  exports: [NotificationEngine, NotificationRepository, TemplateService],
 })
 export class EngineModule {}

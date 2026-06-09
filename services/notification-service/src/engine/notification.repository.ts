@@ -72,6 +72,20 @@ export class NotificationRepository implements NotificationStore {
     return rows.map(toRecord);
   }
 
+  /**
+   * Bandeja in-app: solo canal PUSH (los avisos que el usuario ve EN la app). SMS (OTP/pánico a
+   * contactos) y WEBHOOK (central) NO pertenecen a la bandeja del pasajero. Filtra en la query —
+   * no trae lo que va a descartar. Servido por @@index([recipientId, createdAt]).
+   */
+  async findInboxByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]> {
+    const rows = await this.prisma.read.notification.findMany({
+      where: { recipientId, channel: NotificationChannel.PUSH },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return rows.map(toRecord);
+  }
+
   async findDue(now: Date, limit: number): Promise<NotificationRecord[]> {
     const rows = await this.prisma.write.notification.findMany({
       where: { status: NotificationStatus.PENDING, nextAttemptAt: { lte: now } },
