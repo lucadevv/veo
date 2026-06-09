@@ -15,7 +15,9 @@ export function DocumentActions({ doc }: { doc: FleetDocumentView }) {
   const { toast } = useToast();
   const review = useDocumentReview();
 
-  if (!can(user, 'fleet:review') || doc.status.toUpperCase() !== 'PENDING') {
+  // Solo se revisa lo que está PENDING_REVIEW. `doc.status` es el enum tipado del contrato
+  // (fleetDocumentStatus): el literal se chequea contra el union → un typo es error de compilación.
+  if (!can(user, 'fleet:review') || doc.status !== 'PENDING_REVIEW') {
     return <span className="text-xs text-ink-subtle">—</span>;
   }
 
@@ -44,13 +46,11 @@ export function DocumentActions({ doc }: { doc: FleetDocumentView }) {
           </Button>
         }
         title="Rechazar documento"
-        description="Indica el motivo del rechazo."
+        description="El documento quedará rechazado. La acción queda auditada."
         confirmLabel="Rechazar"
         variant="danger"
-        withReason
-        reasonLabel="Motivo"
-        onConfirm={async (reason) => {
-          await review.mutateAsync({ id: doc.id, decision: 'reject', reason });
+        onConfirm={async () => {
+          await review.mutateAsync({ id: doc.id, decision: 'reject' });
           toast({ tone: 'success', title: 'Documento rechazado' });
         }}
       />

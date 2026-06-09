@@ -2,16 +2,18 @@
 
 import { useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { useDrivers } from '@/lib/api/queries';
-import type { DriverApproval } from '@/lib/api/schemas';
+import { useDrivers, useDriversPending } from '@/lib/api/queries';
+import type { DriverApproval, PendingDriver } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
 import { ErrorState } from '@/components/ui/states';
+import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DriverActions } from '@/components/drivers/driver-actions';
+import { PendingDriverActions } from '@/components/drivers/pending-driver-actions';
 
+/** Columnas de la flota verificada (ACTIVE/ALL · read-model). Sin acciones: aprobar/rechazar es del tab Pendientes. */
 const columns: ColumnDef<DriverApproval, unknown>[] = [
   {
     accessorKey: 'fullName',
@@ -28,11 +30,7 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
     header: 'Teléfono',
     cell: ({ row }) => <span className="tabular text-ink-muted">{row.original.phone ?? '—'}</span>,
   },
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
-  },
+  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
   {
     accessorKey: 'averageRating',
     header: 'Rating',
@@ -50,22 +48,42 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
   {
     accessorKey: 'submittedAt',
     header: 'Enviado',
+    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.submittedAt)}</span>,
+  },
+];
+
+/** Columnas de la COLA de pendientes de aprobación (identity pending-approval). */
+const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
+  {
+    accessorKey: 'id',
+    header: 'Conductor',
     cell: ({ row }) => (
-      <span className="text-ink-muted">{dateTime(row.original.submittedAt)}</span>
+      <div className="flex flex-col">
+        <span className="font-mono text-xs text-ink">{row.original.id.slice(0, 8)}</span>
+        <span className="font-mono text-xs text-ink-muted">usuario {row.original.userId.slice(0, 8)}</span>
+      </div>
     ),
+  },
+  {
+    accessorKey: 'licenseNumber',
+    header: 'Licencia',
+    cell: ({ row }) => <span className="tabular text-ink-muted">{row.original.licenseNumber ?? '—'}</span>,
   },
   {
     id: 'actions',
     header: 'Acciones',
     enableSorting: false,
-    cell: ({ row }) => <DriverActions driver={row.original} />,
+    cell: ({ row }) => <PendingDriverActions driver={row.original} />,
   },
 ];
 
 export default function DriversPage() {
   const [tab, setTab] = useState('PENDING');
-  const query = useDrivers(tab);
-  const rows = query.data?.items ?? [];
+  // La cola de pendientes viene de identity (pending-approval), NO del read-model (que solo tiene ACTIVE/SUSPENDED).
+  const pending = useDriversPending();
+  // El read-model sirve la flota verificada (ACTIVE) y el listado completo (ALL), paginado por cursor.
+  const fleet = useDrivers(tab === 'PENDING' ? 'ACTIVE' : tab);
+  const fleetRows = fleet.data?.pages.flatMap((p) => p.items) ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -81,20 +99,45 @@ export default function DriversPage() {
             <TabsTrigger value="ACTIVE">Activos</TabsTrigger>
             <TabsTrigger value="ALL">Todos</TabsTrigger>
           </TabsList>
-          <TabsContent value={tab}>
-            {query.isError ? (
-              <ErrorState onRetry={() => void query.refetch()} />
+
+          <TabsContent value="PENDING">
+            {pending.isError ? (
+              <ErrorState onRetry={() => void pending.refetch()} />
             ) : (
               <DataTable
-                caption="Listado de conductores"
-                columns={columns}
-                data={rows}
-                loading={query.isLoading}
-                emptyTitle="Sin conductores"
-                emptyDescription="No hay conductores en esta vista."
+                caption="Conductores pendientes de aprobación"
+                columns={pendingColumns}
+                data={pending.data ?? []}
+                loading={pending.isLoading}
+                emptyTitle="Sin conductores pendientes"
+                emptyDescription="No hay altas de conductores esperando aprobación de antecedentes."
               />
             )}
           </TabsContent>
+
+          {(['ACTIVE', 'ALL'] as const).map((value) => (
+            <TabsContent key={value} value={value}>
+              {fleet.isError ? (
+                <ErrorState onRetry={() => void fleet.refetch()} />
+              ) : (
+                <>
+                  <DataTable
+                    caption="Listado de conductores"
+                    columns={columns}
+                    data={fleetRows}
+                    loading={fleet.isLoading}
+                    emptyTitle="Sin conductores"
+                    emptyDescription="No hay conductores en esta vista."
+                  />
+                  <LoadMore
+                    hasNextPage={!!fleet.hasNextPage}
+                    isFetching={fleet.isFetchingNextPage}
+                    onLoadMore={() => void fleet.fetchNextPage()}
+                  />
+                </>
+              )}
+            </TabsContent>
+          ))}
         </Tabs>
       </div>
     </div>

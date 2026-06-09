@@ -12,8 +12,9 @@ import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
 import { EmptyState, ErrorState } from '@/components/ui/states';
+import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PayoutActions } from '@/components/finance/payout-actions';
+import { RunPayoutsButton } from '@/components/finance/payout-actions';
 import { RefundDialog } from '@/components/finance/refund-dialog';
 
 const columns: ColumnDef<PayoutView, unknown>[] = [
@@ -30,7 +31,6 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
     cell: ({ row }) => <span className="tabular font-medium text-ink">{money(row.original.amountCents)}</span>,
   },
   { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
-  { id: 'actions', header: 'Acciones', enableSorting: false, cell: ({ row }) => <PayoutActions payout={row.original} /> },
 ];
 
 export default function FinancePage() {
@@ -58,26 +58,38 @@ export default function FinancePage() {
         title="Liquidaciones"
         description="Pagos a conductores y reembolsos a pasajeros."
         breadcrumbs={[{ label: 'Finanzas' }]}
-        actions={can(user, 'finance:refund') ? <RefundDialog /> : null}
+        actions={
+          <div className="flex items-center gap-2">
+            {can(user, 'finance:payout') ? <RunPayoutsButton /> : null}
+            {can(user, 'finance:refund') ? <RefundDialog /> : null}
+          </div>
+        }
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         <Tabs value={tab} onValueChange={setTab} className="pt-4">
           <TabsList>
             <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
-            <TabsTrigger value="PAID">Pagadas</TabsTrigger>
+            <TabsTrigger value="PROCESSED">Procesadas</TabsTrigger>
             <TabsTrigger value="ALL">Todas</TabsTrigger>
           </TabsList>
           <TabsContent value={tab}>
             {query.isError ? (
               <ErrorState onRetry={() => void query.refetch()} />
             ) : (
-              <DataTable
-                caption="Liquidaciones"
-                columns={columns}
-                data={query.data?.items ?? []}
-                loading={query.isLoading}
-                emptyTitle="Sin liquidaciones"
-              />
+              <>
+                <DataTable
+                  caption="Liquidaciones"
+                  columns={columns}
+                  data={query.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={query.isLoading}
+                  emptyTitle="Sin liquidaciones"
+                />
+                <LoadMore
+                  hasNextPage={!!query.hasNextPage}
+                  isFetching={query.isFetchingNextPage}
+                  onLoadMore={() => void query.fetchNextPage()}
+                />
+              </>
             )}
           </TabsContent>
         </Tabs>

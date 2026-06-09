@@ -2,20 +2,24 @@
 
 import { Check, X } from 'lucide-react';
 import { useDriverDecision } from '@/lib/api/queries';
-import type { DriverApproval } from '@/lib/api/schemas';
+import type { PendingDriver } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
-/** Acciones de aprobación/rechazo de conductor (gated por permiso drivers:approve). */
-export function DriverActions({ driver }: { driver: DriverApproval }) {
+/**
+ * Aprobar/rechazar un conductor de la COLA REAL de pendientes (identity pending-approval). El conductor ya
+ * ES pendiente (viene de esa cola), por eso las acciones se muestran sin chequear estado — gated por
+ * `drivers:approve`. El admin-bff revalida @Roles(COMPLIANCE_SUPERVISOR/ADMIN/SUPERADMIN): la UI no autoriza.
+ */
+export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
   const user = useSession();
   const { toast } = useToast();
   const decision = useDriverDecision();
 
-  if (!can(user, 'drivers:approve') || driver.status.toUpperCase() !== 'PENDING') {
+  if (!can(user, 'drivers:approve')) {
     return <span className="text-xs text-ink-subtle">—</span>;
   }
 
@@ -29,13 +33,14 @@ export function DriverActions({ driver }: { driver: DriverApproval }) {
           </Button>
         }
         title="Aprobar conductor"
-        description={`Confirmas que ${driver.fullName ?? driver.id.slice(0, 8)} cumple los requisitos para operar.`}
+        description={`Confirmas que el conductor ${driver.id.slice(0, 8)} cumple los requisitos (antecedentes) para operar.`}
         confirmLabel="Aprobar"
         onConfirm={async () => {
           await decision.mutateAsync({ id: driver.id, decision: 'approve' });
           toast({ tone: 'success', title: 'Conductor aprobado' });
         }}
       />
+      {/* El rechazo NO lleva motivo: identity-service no lo persiste (degradación honesta, no campo falso). */}
       <ConfirmDialog
         trigger={
           <Button size="sm" variant="secondary">
@@ -44,13 +49,11 @@ export function DriverActions({ driver }: { driver: DriverApproval }) {
           </Button>
         }
         title="Rechazar conductor"
-        description="Indica el motivo del rechazo. El conductor será notificado."
+        description={`Se rechazará al conductor ${driver.id.slice(0, 8)}. La acción queda auditada.`}
         confirmLabel="Rechazar"
         variant="danger"
-        withReason
-        reasonLabel="Motivo del rechazo"
-        onConfirm={async (reason) => {
-          await decision.mutateAsync({ id: driver.id, decision: 'reject', reason });
+        onConfirm={async () => {
+          await decision.mutateAsync({ id: driver.id, decision: 'reject' });
           toast({ tone: 'success', title: 'Conductor rechazado' });
         }}
       />

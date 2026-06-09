@@ -12,15 +12,27 @@ import {
   analyticsOverview,
   auditChainVerification,
   auditEntryView,
+  type CreateDocumentRequest,
+  type CreateInspectionRequest,
+  type CreateVehicleRequest,
   driverApproval,
   expiringDocumentView,
   fleetDocumentView,
   inspectionView,
+  type LiveAccessRequest,
+  liveViewerToken,
   mediaAccessRequestView,
+  modeScheduleView,
+  operatorApproval,
   paginated,
+  pendingDriver,
+  pendingOperator,
   panicDetail,
+  type AdminRoleValue,
+  type ReplaceScheduleRequest,
   panicSummary,
   payoutView,
+  runPayoutsResult,
   signedMedia,
   tripDetail,
   tripSummary,
@@ -34,6 +46,8 @@ export const qk = {
   trips: (f: TripFilters) => ['trips', f] as const,
   trip: (id: string) => ['trip', id] as const,
   drivers: (status: string) => ['drivers', status] as const,
+  driversPending: ['drivers-pending'] as const,
+  operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
   vehicles: ['vehicles'] as const,
@@ -43,6 +57,7 @@ export const qk = {
   payouts: (status: string) => ['payouts', status] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
+  modeSchedule: ['mode-schedule'] as const,
 };
 
 const REALTIME_REFETCH = 15_000;
@@ -78,7 +93,7 @@ export function useTrips(filters: TripFilters) {
     queryKey: qk.trips(filters),
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
-      apiClient().get('/trips', {
+      apiClient().get('/ops/trips', {
         schema: tripPage,
         signal,
         query: cleanQuery({
@@ -95,7 +110,7 @@ export function useTrips(filters: TripFilters) {
 export function useTrip(id: string) {
   return useQuery({
     queryKey: qk.trip(id),
-    queryFn: ({ signal }) => apiClient().get(`/trips/${id}`, { schema: tripDetail, signal }),
+    queryFn: ({ signal }) => apiClient().get(`/ops/trips/${id}`, { schema: tripDetail, signal }),
     enabled: id.length > 0,
   });
 }
@@ -104,10 +119,16 @@ export function useTrip(id: string) {
 const driverPage = paginated(driverApproval);
 
 export function useDrivers(status: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.drivers(status),
-    queryFn: ({ signal }) =>
-      apiClient().get('/drivers', { schema: driverPage, signal, query: cleanQuery({ status }) }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/ops/drivers', {
+        schema: driverPage,
+        signal,
+        query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
@@ -115,12 +136,52 @@ export function useDriverDecision() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { id: string; decision: 'approve' | 'reject'; reason?: string }) =>
-      apiClient().post(`/drivers/${input.id}/${input.decision}`, {
+      // Sin schema: la respuesta del approve (id+estado) no se renderiza; el éxito refetchea la lista.
+      // Aprobar/rechazar devuelven formas distintas (200 {id,backgroundCheckStatus} / 204 vacío); no parseamos.
+      apiClient().post(`/ops/drivers/${input.id}/${input.decision}`, {
         body: input.reason ? { reason: input.reason } : undefined,
-        schema: driverApproval,
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['drivers'] });
+      void qc.invalidateQueries({ queryKey: qk.driversPending });
+    },
+  });
+}
+
+/** Cola REAL de conductores pendientes de aprobación de antecedentes (identity pending-approval, NO el read-model). */
+export function useDriversPending() {
+  return useQuery({
+    queryKey: qk.driversPending,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/drivers/pending', { schema: z.array(pendingDriver), signal }),
+  });
+}
+
+/* ── Operadores del panel (alta + asignación de roles · solo ADMIN/SUPERADMIN) ── */
+const pendingOperatorList = z.array(pendingOperator);
+
+export function useOperators() {
+  return useQuery({
+    queryKey: qk.operators,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/operators/pending', { schema: pendingOperatorList, signal }),
+  });
+}
+
+export function useOperatorDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    // Aprobar exige los roles a asignar (RBAC); rechazar no lleva cuerpo. El admin-bff revalida
+    // `@Roles(ADMIN, SUPERADMIN)` server-side: la UI solo refleja el permiso, nunca autoriza.
+    mutationFn: (input: { id: string; decision: 'approve'; roles: AdminRoleValue[] } | { id: string; decision: 'reject' }) =>
+      input.decision === 'approve'
+        ? apiClient().post(`/ops/operators/${input.id}/approve`, {
+            body: { roles: input.roles },
+            schema: operatorApproval,
+          })
+        : apiClient().post(`/ops/operators/${input.id}/reject`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.operators });
     },
   });
 }
@@ -132,7 +193,7 @@ export function usePanics(status: string) {
   return useQuery({
     queryKey: qk.panics(status),
     queryFn: ({ signal }) =>
-      apiClient().get('/panics', { schema: panicPage, signal, query: cleanQuery({ status }) }),
+      apiClient().get('/security/panics', { schema: panicPage, signal, query: cleanQuery({ status }) }),
     refetchInterval: REALTIME_REFETCH,
   });
 }
@@ -140,7 +201,7 @@ export function usePanics(status: string) {
 export function usePanic(id: string) {
   return useQuery({
     queryKey: qk.panic(id),
-    queryFn: ({ signal }) => apiClient().get(`/panics/${id}`, { schema: panicDetail, signal }),
+    queryFn: ({ signal }) => apiClient().get(`/security/panics/${id}`, { schema: panicDetail, signal }),
     enabled: id.length > 0,
   });
 }
@@ -149,7 +210,7 @@ export function usePanicAction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { id: string; action: 'ack' | 'resolve'; notes?: string }) =>
-      apiClient().post(`/panics/${input.id}/${input.action}`, {
+      apiClient().post(`/security/panics/${input.id}/${input.action}`, {
         body: input.notes ? { notes: input.notes } : undefined,
         schema: panicDetail,
       }),
@@ -163,31 +224,48 @@ export function usePanicAction() {
 /* ── Flota ── */
 const documentPage = paginated(fleetDocumentView);
 
+const vehiclePage = paginated(vehicleView);
+const inspectionPage = paginated(inspectionView);
+
 export function useFleetDocuments(status: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.documents(status),
-    queryFn: ({ signal }) =>
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
       apiClient().get('/fleet/documents', {
         schema: documentPage,
         signal,
-        query: cleanQuery({ status }),
+        query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
       }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
 export function useVehicles() {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.vehicles,
-    queryFn: ({ signal }) =>
-      apiClient().get('/fleet/vehicles', { schema: paginated(vehicleView), signal }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/fleet/vehicles', {
+        schema: vehiclePage,
+        signal,
+        query: cleanQuery({ cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
 export function useInspections() {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.inspections,
-    queryFn: ({ signal }) =>
-      apiClient().get('/fleet/inspections', { schema: paginated(inspectionView), signal }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/fleet/inspections', {
+        schema: inspectionPage,
+        signal,
+        query: cleanQuery({ cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
@@ -205,9 +283,11 @@ export function useExpiringDocuments() {
 export function useDocumentReview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; decision: 'approve' | 'reject'; reason?: string }) =>
-      apiClient().post(`/fleet/documents/${input.id}/${input.decision}`, {
-        body: input.reason ? { reason: input.reason } : undefined,
+    // El bff espera `POST /fleet/documents/:id/review` con `{ decision: 'VALID' | 'REJECTED' }`.
+    // La UI habla en approve/reject; acá se traduce al contrato del servidor (que revalida).
+    mutationFn: (input: { id: string; decision: 'approve' | 'reject' }) =>
+      apiClient().post(`/fleet/documents/${input.id}/review`, {
+        body: { decision: input.decision === 'approve' ? 'VALID' : 'REJECTED' },
         schema: fleetDocumentView,
       }),
     onSuccess: () => {
@@ -217,23 +297,69 @@ export function useDocumentReview() {
   });
 }
 
+/** Alta de vehículo (operador). El bff/fleet-service revalidan BR-D04 (año mínimo, placa única). */
+export function useCreateVehicle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateVehicleRequest) => apiClient().post('/fleet/vehicles', { body: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.vehicles });
+    },
+  });
+}
+
+/** Alta de documento (conductor/vehículo). Entra PENDING_REVIEW. */
+export function useCreateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateDocumentRequest) =>
+      apiClient().post('/fleet/documents', { body: input, schema: fleetDocumentView }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['fleet-documents'] });
+      void qc.invalidateQueries({ queryKey: qk.expiring });
+    },
+  });
+}
+
+/** Registro de una inspección técnica (ITV) ya realizada. */
+export function useCreateInspection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateInspectionRequest) => apiClient().post('/fleet/inspections', { body: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.inspections });
+    },
+  });
+}
+
 /* ── Finanzas ── */
 const payoutPage = paginated(payoutView);
 
 export function usePayouts(status: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.payouts(status),
-    queryFn: ({ signal }) =>
-      apiClient().get('/payouts', { schema: payoutPage, signal, query: cleanQuery({ status }) }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/finance/payouts', {
+        schema: payoutPage,
+        signal,
+        query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
+/**
+ * Ejecuta el BATCH de liquidaciones del periodo (no es por-payout: el backend liquida toda la semana).
+ * Idempotente por Idempotency-Key. >S/5000 exige step-up MFA (lo valida payment-service). FINANCE.
+ */
 export function useRunPayout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; idempotencyKey: string }) =>
-      apiClient().post(`/payouts/${input.id}/run`, {
-        schema: payoutView,
+    mutationFn: (input: { idempotencyKey: string; periodStart?: string; periodEnd?: string }) =>
+      apiClient().post('/finance/payouts/run', {
+        body: { periodStart: input.periodStart, periodEnd: input.periodEnd },
+        schema: runPayoutsResult,
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {
@@ -246,12 +372,35 @@ export function useRefund() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { tripId: string; amountCents: number; reason: string; idempotencyKey: string }) =>
-      apiClient().post('/payments/refunds', {
-        body: { tripId: input.tripId, amountCents: input.amountCents, reason: input.reason },
+      // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason}.
+      apiClient().post(`/finance/refunds/${input.tripId}`, {
+        body: { amountCents: input.amountCents, reason: input.reason },
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['payouts'] });
+    },
+  });
+}
+
+/* ── Pricing: modo de despacho PUJA↔FIJO (schedule global · ADR 011 · ADMIN/SUPERADMIN/FINANCE) ── */
+export function useModeSchedule() {
+  return useQuery({
+    queryKey: qk.modeSchedule,
+    queryFn: ({ signal }) =>
+      apiClient().get('/pricing/mode-schedule', { schema: modeScheduleView, signal }),
+  });
+}
+
+export function useReplaceSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    // PUT reemplaza el schedule wholesale (default + reglas). El admin-bff revalida
+    // `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma server-side: la UI solo refleja.
+    mutationFn: (input: ReplaceScheduleRequest) =>
+      apiClient().put('/pricing/mode-schedule', { body: input, schema: modeScheduleView }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.modeSchedule });
     },
   });
 }
@@ -298,6 +447,18 @@ export function useDecideMedia() {
   });
 }
 
+/**
+ * Token de cámara EN VIVO para el muro del admin (token LiveKit solo-suscripción de una cabina en curso).
+ * El endpoint exige step-up MFA fresco + rol (doble-auth como las grabaciones); el StepUpDialog asegura la
+ * MFA ANTES de llamar. Cada apertura se audita server-side con el motivo (Ley 29733). No se cachea: es efímero.
+ */
+export function useLiveCameraToken() {
+  return useMutation({
+    mutationFn: (input: LiveAccessRequest) =>
+      apiClient().post('/media/live/token', { body: input, schema: liveViewerToken }),
+  });
+}
+
 /** Obtiene la URL firmada del video (requiere MFA fresco; el bff la valida). */
 export function useSignedMedia() {
   return useMutation({
@@ -325,6 +486,7 @@ export function useAudit(query: string) {
 
 export function useVerifyAuditChain() {
   return useMutation({
-    mutationFn: () => apiClient().post('/audit/verify', { schema: auditChainVerification }),
+    // El admin-bff expone la verificación como GET /audit/verify (lectura idempotente de la hash-chain).
+    mutationFn: () => apiClient().get('/audit/verify', { schema: auditChainVerification }),
   });
 }

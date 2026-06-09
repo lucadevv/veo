@@ -15,17 +15,23 @@ export type Permission =
   | 'trips:view'
   | 'drivers:view'
   | 'drivers:approve'
+  | 'operators:view'
+  | 'operators:approve'
   | 'panics:view'
   | 'panics:ack'
   | 'panics:resolve'
   | 'fleet:view'
   | 'fleet:review'
+  | 'fleet:manage'
   | 'finance:view'
   | 'finance:payout'
   | 'finance:refund'
   | 'media:view'
   | 'media:request'
   | 'media:approve'
+  | 'live:view'
+  | 'pricing:view'
+  | 'pricing:manage'
   | 'audit:view'
   | 'audit:verify';
 
@@ -51,6 +57,9 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'drivers:view': [SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // ops.controller drivers/:id/approve|reject.
   'drivers:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // ops.controller operators/pending + operators/:id/approve|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
+  'operators:view': [ADMIN, SUPERADMIN],
+  'operators:approve': [ADMIN, SUPERADMIN],
   // security.controller (clase): listar/ver/acusar pánicos (ack hereda los roles de la clase).
   'panics:view': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'panics:ack': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
@@ -59,6 +68,8 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   // fleet.controller (clase): vehículos/documentos/inspecciones/vencimientos (review hereda la clase).
   'fleet:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'fleet:review': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // fleet.controller (clase) POST vehicles/documents/inspections: alta de flota. Mismos roles que review.
+  'fleet:manage': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // finance.controller (clase): listado de payouts y reembolsos (refund hereda la clase).
   'finance:view': [FINANCE, ADMIN, SUPERADMIN],
   'finance:refund': [FINANCE, ADMIN, SUPERADMIN],
@@ -68,6 +79,13 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'media:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'media:request': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'media:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // media.controller POST live/token: muro de cámaras EN VIVO. Doble-auth (rol + step-up MFA fresca).
+  // Mismos roles que el acceso a grabaciones; la MFA fresca la exige el StepUpDialog + el guard del bff.
+  'live:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // pricing.controller (clase): ver el schedule de modo PUJA↔FIJO. Decisión comercial/financiera.
+  'pricing:view': [FINANCE, ADMIN, SUPERADMIN],
+  // pricing.controller PUT mode-schedule: reemplazar el schedule (mutación global). Mismos roles.
+  'pricing:manage': [FINANCE, ADMIN, SUPERADMIN],
   // audit.controller (clase): listado y verificación de la hash-chain.
   'audit:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'audit:verify': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],

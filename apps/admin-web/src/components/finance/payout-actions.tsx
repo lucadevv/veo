@@ -2,38 +2,38 @@
 
 import { PlayCircle } from 'lucide-react';
 import { useRunPayout } from '@/lib/api/queries';
-import type { PayoutView } from '@/lib/api/schemas';
 import { money } from '@/lib/formatters';
-import { useSession } from '@/lib/session-context';
-import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
-/** Ejecuta una liquidación con confirmación e idempotencia (gated por finance:payout). */
-export function PayoutActions({ payout }: { payout: PayoutView }) {
-  const user = useSession();
+/**
+ * Ejecuta el BATCH de liquidaciones del periodo (semana previa). NO es por-payout: el backend agrega los
+ * cobros capturados de cada conductor y liquida toda la semana de una. Idempotente (Idempotency-Key);
+ * >S/5000 exige step-up MFA (lo valida payment-service). Gated por finance:payout (solo FINANCE).
+ */
+export function RunPayoutsButton() {
   const { toast } = useToast();
   const run = useRunPayout();
-
-  if (!can(user, 'finance:payout') || payout.status.toUpperCase() !== 'PENDING') {
-    return <span className="text-xs text-ink-subtle">—</span>;
-  }
 
   return (
     <ConfirmDialog
       trigger={
         <Button size="sm" variant="primary">
           <PlayCircle className="size-4" aria-hidden />
-          Ejecutar
+          Ejecutar liquidaciones
         </Button>
       }
-      title="Ejecutar liquidación"
-      description={`Se transferirá ${money(payout.amountCents)} al conductor ${payout.driverId.slice(0, 8)} (periodo ${payout.period}). Esta acción es idempotente.`}
-      confirmLabel="Ejecutar pago"
+      title="Ejecutar liquidaciones del periodo"
+      description="Se liquida la semana previa: se agregan los cobros capturados de cada conductor y se transfieren. Los conductores en revisión quedan retenidos (HELD). La acción es idempotente."
+      confirmLabel="Ejecutar batch"
       onConfirm={async () => {
-        await run.mutateAsync({ id: payout.id, idempotencyKey: crypto.randomUUID() });
-        toast({ tone: 'success', title: 'Liquidación ejecutada' });
+        const res = await run.mutateAsync({ idempotencyKey: crypto.randomUUID() });
+        toast({
+          tone: 'success',
+          title: `Liquidación ejecutada: ${res.processed} pagadas, ${res.held} retenidas`,
+          description: `Total transferido ${money(res.totalAmountCents)}`,
+        });
       }}
     />
   );

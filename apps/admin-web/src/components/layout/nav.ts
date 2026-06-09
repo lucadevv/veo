@@ -2,10 +2,13 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Banknote,
   Car,
+  Cctv,
+  Coins,
   MapPinned,
   ScrollText,
   ShieldAlert,
   Truck,
+  UserCog,
   Users,
   Video,
 } from 'lucide-react';
@@ -32,12 +35,14 @@ export const NAV: NavGroup[] = [
       { href: '/ops', label: 'En vivo', icon: MapPinned, permission: 'ops:view', exact: true },
       { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
       { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
+      { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },
     ],
   },
   {
     title: 'Seguridad',
     items: [
       { href: '/security/panics', label: 'Pánicos', icon: ShieldAlert, permission: 'panics:view' },
+      { href: '/security/live-wall', label: 'Cámaras en vivo', icon: Cctv, permission: 'live:view' },
       { href: '/media', label: 'Video', icon: Video, permission: 'media:view' },
     ],
   },
@@ -47,7 +52,10 @@ export const NAV: NavGroup[] = [
   },
   {
     title: 'Finanzas',
-    items: [{ href: '/finance', label: 'Liquidaciones', icon: Banknote, permission: 'finance:view' }],
+    items: [
+      { href: '/finance', label: 'Liquidaciones', icon: Banknote, permission: 'finance:view', exact: true },
+      { href: '/finance/pricing', label: 'Modo de pricing', icon: Coins, permission: 'pricing:view' },
+    ],
   },
   {
     title: 'Cumplimiento',

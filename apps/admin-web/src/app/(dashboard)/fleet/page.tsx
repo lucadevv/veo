@@ -16,12 +16,20 @@ import type {
 } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
+import { useSession } from '@/lib/session-context';
+import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
 import { ErrorState } from '@/components/ui/states';
+import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DocumentActions } from '@/components/fleet/document-actions';
+import {
+  CreateDocumentDialog,
+  CreateInspectionDialog,
+  CreateVehicleDialog,
+} from '@/components/fleet/fleet-forms';
 
 const OWNER_LABEL: Record<'DRIVER' | 'VEHICLE', string> = {
   DRIVER: 'Conductor',
@@ -132,7 +140,11 @@ const expiringColumns: ColumnDef<ExpiringDocumentView, unknown>[] = [
 ];
 
 export default function FleetPage() {
-  const documents = useFleetDocuments('PENDING');
+  const user = useSession();
+  const canManage = can(user, 'fleet:manage');
+  // El estado de "por revisar" en el dominio de flota es PENDING_REVIEW (no 'PENDING', que es de
+  // otros dominios). Con 'PENDING' el filtro no matcheaba ningún enum y el tab quedaba vacío/erroreaba.
+  const documents = useFleetDocuments('PENDING_REVIEW');
   const vehicles = useVehicles();
   const inspections = useInspections();
   const expiring = useExpiringDocuments();
@@ -154,44 +166,80 @@ export default function FleetPage() {
           </TabsList>
 
           <TabsContent value="documents">
+            {canManage ? (
+              <div className="flex justify-end pb-3">
+                <CreateDocumentDialog />
+              </div>
+            ) : null}
             {documents.isError ? (
               <ErrorState onRetry={() => void documents.refetch()} />
             ) : (
-              <DataTable
-                caption="Documentos por revisar"
-                columns={documentColumns}
-                data={documents.data?.items ?? []}
-                loading={documents.isLoading}
-                emptyTitle="Sin documentos pendientes"
-              />
+              <>
+                <DataTable
+                  caption="Documentos por revisar"
+                  columns={documentColumns}
+                  data={documents.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={documents.isLoading}
+                  emptyTitle="Sin documentos pendientes"
+                />
+                <LoadMore
+                  hasNextPage={!!documents.hasNextPage}
+                  isFetching={documents.isFetchingNextPage}
+                  onLoadMore={() => void documents.fetchNextPage()}
+                />
+              </>
             )}
           </TabsContent>
 
           <TabsContent value="vehicles">
+            {canManage ? (
+              <div className="flex justify-end pb-3">
+                <CreateVehicleDialog />
+              </div>
+            ) : null}
             {vehicles.isError ? (
               <ErrorState onRetry={() => void vehicles.refetch()} />
             ) : (
-              <DataTable
-                caption="Vehículos de la flota"
-                columns={vehicleColumns}
-                data={vehicles.data?.items ?? []}
-                loading={vehicles.isLoading}
-                emptyTitle="Sin vehículos"
-              />
+              <>
+                <DataTable
+                  caption="Vehículos de la flota"
+                  columns={vehicleColumns}
+                  data={vehicles.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={vehicles.isLoading}
+                  emptyTitle="Sin vehículos"
+                />
+                <LoadMore
+                  hasNextPage={!!vehicles.hasNextPage}
+                  isFetching={vehicles.isFetchingNextPage}
+                  onLoadMore={() => void vehicles.fetchNextPage()}
+                />
+              </>
             )}
           </TabsContent>
 
           <TabsContent value="inspections">
+            {canManage ? (
+              <div className="flex justify-end pb-3">
+                <CreateInspectionDialog />
+              </div>
+            ) : null}
             {inspections.isError ? (
               <ErrorState onRetry={() => void inspections.refetch()} />
             ) : (
-              <DataTable
-                caption="Inspecciones"
-                columns={inspectionColumns}
-                data={inspections.data?.items ?? []}
-                loading={inspections.isLoading}
-                emptyTitle="Sin inspecciones"
-              />
+              <>
+                <DataTable
+                  caption="Inspecciones"
+                  columns={inspectionColumns}
+                  data={inspections.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={inspections.isLoading}
+                  emptyTitle="Sin inspecciones"
+                />
+                <LoadMore
+                  hasNextPage={!!inspections.hasNextPage}
+                  isFetching={inspections.isFetchingNextPage}
+                  onLoadMore={() => void inspections.fetchNextPage()}
+                />
+              </>
             )}
           </TabsContent>
 
