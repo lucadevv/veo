@@ -74,6 +74,28 @@ export class RecordingService {
     return { roomName, token, url: this.livekitUrl, expiresInSeconds: this.tokenTtl };
   }
 
+  /**
+   * Emite un token LiveKit SOLO-SUSCRIPCIÓN (espectador puro) de la cabina EN VIVO de un viaje.
+   * Misma room donde PUBLICA el conductor (`roomNameForTrip` = `trip-${tripId}`). Lo usa el muro de
+   * cámaras del admin tras doble-auth (Roles + MFA fresca, gateado en el controller). canPublish:false +
+   * canPublishData:false → el admin observa, jamás inyecta audio/video/datos en la cabina.
+   */
+  async issueViewerToken(
+    params: IssueTokenParams,
+  ): Promise<{ roomName: string; token: string; url: string; expiresInSeconds: number }> {
+    const roomName = roomNameForTrip(params.tripId);
+    const token = await this.livekit.issueAccessToken({
+      roomName,
+      identity: params.identity,
+      name: params.name,
+      canPublish: false,
+      canSubscribe: true,
+      canPublishData: false,
+      ttlSeconds: this.tokenTtl,
+    });
+    return { roomName, token, url: this.livekitUrl, expiresInSeconds: this.tokenTtl };
+  }
+
   /** Inicio automático de grabación al comenzar el viaje (BR-S01). Idempotente por viaje. */
   async startForTrip(
     tripId: string,

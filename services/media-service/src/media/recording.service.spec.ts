@@ -2,8 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { RecordingService, roomNameForTrip } from './recording.service';
 import { LiveKitSandboxAdapter } from '../ports/livekit/livekit.module';
+import type { IssueTokenInput, LiveKitPort } from '../ports/livekit/livekit.port';
 import type { StoragePort } from '../ports/storage/storage.port';
 import type { Env } from '../config/env.schema';
+
+/** Adapter LiveKit espía: captura el último IssueTokenInput para aseverar los grants emitidos. */
+function makeSpyLivekit(): { livekit: LiveKitPort; captured: { input?: IssueTokenInput } } {
+  const captured: { input?: IssueTokenInput } = {};
+  const livekit: LiveKitPort = {
+    issueAccessToken: async (input) => {
+      captured.input = input;
+      return 'spy-token';
+    },
+    startRecording: async () => ({ egressId: 'spy-egress' }),
+    stopRecording: async () => ({ bytes: 0 }),
+  };
+  return { livekit, captured };
+}
 
 const config = new ConfigService<Env, true>({
   LIVEKIT_TOKEN_TTL_SECONDS: 3600,
@@ -123,6 +138,24 @@ describe('RecordingService.issueRoomToken · token de cámara (BR-S01)', () => {
     expect(res.roomName).toBe(roomNameForTrip('trip-1'));
     expect(res.token).toContain('trip-1');
     expect(res.expiresInSeconds).toBe(3600);
+  });
+});
+
+describe('RecordingService.issueViewerToken · espectador PURO del muro admin', () => {
+  it('mintea SOLO-SUSCRIPCIÓN en la sala donde publica el conductor (canPublish/Data:false)', async () => {
+    const { prisma } = makePrisma();
+    const { livekit, captured } = makeSpyLivekit();
+    const svc = new RecordingService(prisma as never, livekit, makeSpyStorage().storage, config);
+
+    const res = await svc.issueViewerToken({ tripId: 'trip-1', identity: 'admin-7' });
+
+    // MISMA sala que el conductor (si divergiera, el admin vería una sala vacía — el bug que arreglamos).
+    expect(res.roomName).toBe(roomNameForTrip('trip-1'));
+    expect(captured.input?.canSubscribe).toBe(true);
+    // Espectador puro: jamás publica audio/video NI datos en la cabina.
+    expect(captured.input?.canPublish).toBe(false);
+    expect(captured.input?.canPublishData).toBe(false);
+    expect(captured.input?.identity).toBe('admin-7');
   });
 });
 

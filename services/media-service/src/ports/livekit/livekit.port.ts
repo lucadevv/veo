@@ -15,6 +15,9 @@ export interface IssueTokenInput {
   name?: string;
   canPublish: boolean;
   canSubscribe: boolean;
+  /** Permite enviar mensajes de datos a la room. Default true (cámara conductor/pasajero); el viewer
+   *  de vigilancia (admin) lo pone en false para ser espectador PURO (no inyecta data en la cabina). */
+  canPublishData?: boolean;
   ttlSeconds: number;
 }
 

@@ -49,7 +49,7 @@ class LiveKitLiveAdapter implements LiveKitPort {
       roomJoin: true,
       canPublish: input.canPublish,
       canSubscribe: input.canSubscribe,
-      canPublishData: true,
+      canPublishData: input.canPublishData ?? true,
     });
     return token.toJwt();
   }

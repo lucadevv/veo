@@ -49,6 +49,25 @@ export class MediaController {
     return this.recording.issueRoomToken({ tripId, identity: user.userId, name: dto.name });
   }
 
+  /**
+   * Muro de cámaras EN VIVO (admin): token LiveKit SOLO-SUSCRIPCIÓN de la cabina de un viaje en curso.
+   * Doble-auth como las grabaciones: @Roles (compliance/admin) + StepUpMfaGuard (MFA fresca). El admin-bff
+   * re-gatea y AUDITA con el motivo. Es espectador puro (canPublish/Data:false en issueViewerToken).
+   */
+  @UseGuards(InternalIdentityGuard, RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @Post('rooms/:tripId/viewer-token')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Token LiveKit solo-suscripción de la cabina en vivo (admin, doble-auth)' })
+  issueViewerToken(
+    @Param('tripId') tripId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: IssueRoomTokenDto,
+  ): Promise<{ roomName: string; token: string; url: string; expiresInSeconds: number }> {
+    return this.recording.issueViewerToken({ tripId, identity: user.userId, name: dto.name });
+  }
+
   /** BR-S02 (paso 1): un operador solicita acceso a video con un motivo (> 20 chars). */
   @UseGuards(InternalIdentityGuard)
   @Post('access')
