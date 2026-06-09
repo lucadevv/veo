@@ -2,11 +2,19 @@ import { describe, it, expect } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '@veo/utils';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
+import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
+
+/** Identidad autenticada de prueba. cancel() usa user.userId como dueño (anti-IDOR), no el dto. */
+function userOf(userId: string, type: 'passenger' | 'driver' = 'passenger'): AuthenticatedUser {
+  return { userId, type, roles: [], sessionId: 's1' };
+}
+/** Para los cancels del CONDUCTOR: la rama de pasajero se saltea, así que el userId no importa. */
+const DRIVER_USER = userOf('drv-user', 'driver');
 
 // ── Dobles de prueba (sin Nest DI), al estilo de identity-service ──
 
@@ -295,6 +303,27 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     await svc.createTrip({ ...baseCreateDto, vehicleType: 'MOTO' });
     const requested = prisma._outbox.find((e) => e.eventType === 'trip.requested');
     expect((requested?.envelope.payload as { vehicleType?: string }).vehicleType).toBe('MOTO');
+  });
+
+  it('Ola 2B · las paradas (waypoints) viajan en trip.requested (dispatch ya no queda ciego)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps);
+    const stops = [
+      { lat: -12.05, lon: -77.04 },
+      { lat: -12.06, lon: -77.05 },
+    ];
+    await svc.createTrip({ ...baseCreateDto, waypoints: stops });
+    const requested = prisma._outbox.find((e) => e.eventType === 'trip.requested');
+    expect((requested?.envelope.payload as { waypoints?: unknown }).waypoints).toEqual(stops);
+  });
+
+  it('Ola 2B · las paradas (waypoints) viajan en trip.bid_posted', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps);
+    const stops = [{ lat: -12.07, lon: -77.06 }];
+    await svc.createTrip({ ...baseCreateDto, bidCents: 900, waypoints: stops });
+    const bid = prisma._outbox.find((e) => e.eventType === 'trip.bid_posted');
+    expect((bid?.envelope.payload as { waypoints?: unknown }).waypoints).toEqual(stops);
   });
 });
 
@@ -604,7 +633,7 @@ describe('TripsService.cancel · BR-T03', () => {
       buildTrip({ status: TripStatus.ACCEPTED, assignedAt, driverId: 'drv-1', durationSeconds: 3600 }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'PASSENGER', reason: 'cambié de planes' });
+    const view = await svc.cancel('trip-1', { by: 'PASSENGER', reason: 'cambié de planes' }, userOf('pax-1'));
     expect(view.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(view.penaltyCents).toBe(300);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(true);
@@ -614,7 +643,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const assignedAt = new Date(Date.now() - 30_000); // 30s atrás
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, assignedAt, driverId: 'drv-1' }));
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'PASSENGER' });
+    const view = await svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-1'));
     expect(view.penaltyCents).toBe(0);
   });
 
@@ -623,7 +652,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }));
     const svc = new TripsService(prisma as never, maps);
     await expect(
-      svc.cancel('trip-1', { by: 'PASSENGER', passengerId: 'pax-OTRO' }),
+      svc.cancel('trip-1', { by: 'PASSENGER', passengerId: 'pax-OTRO' }, userOf('pax-OTRO')),
     ).rejects.toBeInstanceOf(NotFoundError);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(false);
   });
@@ -631,8 +660,18 @@ describe('TripsService.cancel · BR-T03', () => {
   it('PASSENGER con su PROPIO passengerId → cancela ok', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }));
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'PASSENGER', passengerId: 'pax-1' });
+    const view = await svc.cancel('trip-1', { by: 'PASSENGER', passengerId: 'pax-1' }, userOf('pax-1'));
     expect(view.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
+  });
+
+  it('A1 · anti-IDOR sin passengerId en el body: usa el userId FIRMADO → ajeno = 404 (ya no se saltea)', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }));
+    const svc = new TripsService(prisma as never, maps);
+    // Antes, sin dto.passengerId el check se SALTEABA; ahora el dueño es la identidad firmada.
+    await expect(svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-OTRO'))).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(false);
   });
 });
 
@@ -988,7 +1027,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER', reason: 'se me pinchó la llanta' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER', reason: 'se me pinchó la llanta' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     const reassign = prisma._outbox.find((e) => e.eventType === 'trip.reassigning');
     expect(reassign).toBeTruthy();
@@ -1021,7 +1060,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       buildTrip({ status: TripStatus.ARRIVING, driverId: 'drv-2', reassignCount: 1 }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._store?.reassignCount).toBe(2);
   });
@@ -1031,7 +1070,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-3', passengerId: 'pax-3', reassignCount: 3 }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     // 4 > 3 → NO re-puja: cae a terminal honesto FAILED.
     expect(view.status).toBe(TripStatus.FAILED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(false);
@@ -1046,14 +1085,14 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
   it('cancel del CONDUCTOR desde ARRIVED → REASSIGNING', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ARRIVED, driverId: 'drv-1' }));
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
   });
 
   it('cancel del CONDUCTOR desde ASSIGNED (pre-accept) sigue siendo terminal CANCELLED_BY_DRIVER', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.CANCELLED_BY_DRIVER);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(false);
@@ -1065,7 +1104,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1', dispatchMode: 'FIXED', fareCents: 1500 }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     // FIXED re-despacha el flujo de tarifa fija: trip.requested, NO la puja (trip.reassigning).
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
@@ -1087,7 +1126,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1', dispatchMode: 'PUJA' }),
     );
     const svc = new TripsService(prisma as never, maps);
-    const view = await svc.cancel('trip-1', { by: 'DRIVER' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
@@ -1213,7 +1252,7 @@ describe('TripsService · H12 · re-negociación NO descarta la tarifa recién a
     const svc = new TripsService(prisma as never, maps);
 
     // Driver cancela post-accept → REASSIGNING. La re-negociación RESETEA el guard once-ever Y bumpea el ciclo.
-    const view = await svc.cancel('trip-1', { by: 'DRIVER', reason: 'se me pinchó la llanta' });
+    const view = await svc.cancel('trip-1', { by: 'DRIVER', reason: 'se me pinchó la llanta' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._store?.agreedFareCents).toBeNull(); // H12: guard reseteado → próximo offer_accepted aplica
     // H13: el ciclo de negociación avanzó 1 → 2 (monotónico; NO resetea como reassignCount).
@@ -1255,7 +1294,7 @@ describe('TripsService · H12 · re-negociación NO descarta la tarifa recién a
     const svc = new TripsService(prisma as never, maps);
 
     // 1) driver cancela → REASSIGNING (guard reseteado + ciclo 1 → 2 por la reasignación automática).
-    await svc.cancel('trip-1', { by: 'DRIVER' });
+    await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(prisma._store?.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._store?.agreedFareCents).toBeNull();
     expect(prisma._store?.negotiationSeq).toBe(2);

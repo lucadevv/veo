@@ -8,6 +8,7 @@ import type { LatLon } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import type { Prisma, Trip } from '../generated/prisma';
+import { readWaypoints } from './trip-view.mapper';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -59,6 +60,8 @@ export async function emitTripRequested(
         vehicleType: trip.vehicleType,
         // Ola 2B: si el viaje proviene de una reserva, dispatch puede incluirlo como "reservado".
         scheduled,
+        // Ola 2B: paradas intermedias por el riel de eventos (dispatch ya no queda ciego; [] si es directo).
+        waypoints: readWaypoints(trip),
       },
     }),
     trip.id,
@@ -108,6 +111,8 @@ export async function emitBidPosted(
         specialRequests: trip.specialRequests,
         // #1 — activación de reserva: notification-service pushea al pasajero (deep-link al board).
         scheduled,
+        // Ola 2B: paradas intermedias por el riel de eventos (dispatch las recibe para el board; [] si directo).
+        waypoints: readWaypoints(trip),
       },
     }),
     trip.id,

@@ -17,6 +17,8 @@ import type { Env } from '../config/env.schema';
 interface MatchFoundPayload {
   tripId: string;
   driverId: string;
+  /** Vehículo activo del conductor (best-effort, resuelto por dispatch al aceptar). Puede faltar. */
+  vehicleId?: string;
   scoreMs: number;
 }
 
@@ -54,9 +56,9 @@ export class DispatchConsumer implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('dispatch.match_found con payload inválido; ignorado');
       return;
     }
-    const { tripId, driverId } = parsed.data as MatchFoundPayload;
+    const { tripId, driverId, vehicleId } = parsed.data as MatchFoundPayload;
     try {
-      await this.trips.assignFromDispatch(tripId, driverId);
+      await this.trips.assignFromDispatch(tripId, driverId, vehicleId);
     } catch (err) {
       // No-ack/retry lo gestiona kafkajs; aquí solo registramos para diagnóstico.
       this.logger.error({ err, tripId }, 'No se pudo asignar el viaje desde dispatch');

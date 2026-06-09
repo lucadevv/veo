@@ -3,13 +3,36 @@
  * ENRIQUECIDOS del detalle de "Mis Viajes" (timestamps reales + puntos del viaje + polyline persistida),
  * que sueltan la dependencia del snapshot MMKV local de la app para la FECHA y el MAPA de ruta.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import type { Metadata } from '@grpc/grpc-js';
 import { TripStatus } from '@veo/shared-types';
+import {
+  signInternalIdentity,
+  INTERNAL_IDENTITY_HEADER,
+  INTERNAL_IDENTITY_SIG_HEADER,
+  type AuthenticatedUser,
+} from '@veo/auth';
+import type { ConfigService } from '@nestjs/config';
 import { TripGrpcController } from './trip.grpc.controller';
 import { Prisma, type Trip } from '../generated/prisma';
 import type { PrismaService } from '../infra/prisma.service';
 import type { TripsService } from '../trips/trips.service';
 import type { TripQueryService } from '../trips/trip-query.service';
+import type { Env } from '../config/env.schema';
+
+const SECRET = 'test-internal-secret';
+const config = { get: () => SECRET } as unknown as ConfigService<Env, true>;
+
+/** Metadata gRPC con la identidad interna FIRMADA (lo que el BFF propaga). */
+function signedMeta(user: AuthenticatedUser): Metadata {
+  const { header, signature } = signInternalIdentity(user, SECRET);
+  const map: Record<string, string> = {
+    [INTERNAL_IDENTITY_HEADER]: header,
+    [INTERNAL_IDENTITY_SIG_HEADER]: signature,
+  };
+  return { get: (k: string) => (map[k] !== undefined ? [map[k]] : []) } as unknown as Metadata;
+}
+const emptyMeta = { get: () => [] } as unknown as Metadata;
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   const now = new Date('2026-06-06T12:00:00.000Z');
@@ -62,13 +85,12 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
   };
 }
 
-function makeController(trip: Trip | null): TripGrpcController {
+function makeController(trip: Trip | null, trips: Partial<TripsService> = {}): TripGrpcController {
   const prisma = {
     read: { trip: { findUnique: async () => trip, findFirst: async () => trip } },
   } as unknown as PrismaService;
-  const trips = {} as unknown as TripsService;
   const query = {} as unknown as TripQueryService;
-  return new TripGrpcController(prisma, trips, query);
+  return new TripGrpcController(prisma, trips as TripsService, query, config);
 }
 
 describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () => {
@@ -111,5 +133,52 @@ describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () 
     expect(reply.requestedAt).toBe('');
     expect(reply.routePolyline).toBe('');
     expect(reply.originLat).toBe(0);
+  });
+});
+
+describe('TripGrpcController · CloseTripByPassenger (anti-IDOR: identidad FIRMADA, no el payload)', () => {
+  const view = {
+    id: 'trip-1',
+    passengerId: 'pax-real',
+    driverId: 'drv-1',
+    vehicleId: 'veh-1',
+    status: TripStatus.COMPLETED,
+    fareCents: 1500,
+    currency: 'PEN',
+    distanceMeters: 5000,
+    durationSeconds: 600,
+    paymentMethod: 'CASH',
+    childMode: false,
+    penaltyCents: 0,
+    vehicleType: 'CAR',
+    scheduledFor: null,
+    passengerClosedAt: '2026-06-06T12:30:00.000Z',
+    requestedAt: '2026-06-06T12:00:00.000Z',
+    completedAt: '2026-06-06T12:20:00.000Z',
+    cancelledAt: null,
+    origin: { lat: -12.0464, lon: -77.0428 },
+    destination: { lat: -12.1219, lon: -77.0297 },
+    routePolyline: null,
+  };
+
+  it('rechaza UNAUTHENTICATED si falta la identidad firmada en la metadata (no intenta cerrar)', async () => {
+    const closeByPassenger = vi.fn();
+    const ctrl = makeController(null, { closeByPassenger });
+    await expect(
+      ctrl.closeTripByPassenger({ id: 'trip-1', passengerId: 'pax-forjado' }, emptyMeta),
+    ).rejects.toThrow(/Identidad interna/);
+    expect(closeByPassenger).not.toHaveBeenCalled();
+  });
+
+  it('cierra con el userId de la identidad FIRMADA, IGNORANDO el passengerId del payload (forjado)', async () => {
+    const closeByPassenger = vi.fn().mockResolvedValue(view as never);
+    const ctrl = makeController(null, { closeByPassenger });
+    const meta = signedMeta({ userId: 'pax-real', type: 'passenger', roles: [], sessionId: 's1' });
+
+    const reply = await ctrl.closeTripByPassenger({ id: 'trip-1', passengerId: 'pax-FORJADO' }, meta);
+
+    // El dueño es el de la firma (pax-real), NO el del cuerpo (pax-FORJADO) → un payload falsificado no cierra ajenos.
+    expect(closeByPassenger).toHaveBeenCalledWith('trip-1', 'pax-real');
+    expect(reply.found).toBe(true);
   });
 });

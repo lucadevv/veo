@@ -25,6 +25,7 @@ import {
 } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
+import type { AuthenticatedUser } from '@veo/auth';
 import { PricingMode, TripStatus, VehicleType } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import type Redis from 'ioredis';
@@ -397,11 +398,12 @@ export class TripsService {
   }
 
   /**
-   * Asignación disparada por dispatch.match_found (consumidor Kafka). El evento de dispatch no
-   * transporta vehicleId, por lo que se asigna solo el conductor (vehicleId se confirma al aceptar).
-   * Idempotente: si el viaje ya está ASSIGNED con ese conductor, no hace nada.
+   * Asignación disparada por dispatch.match_found (consumidor Kafka). dispatch resuelve el vehículo
+   * ACTIVO del conductor al aceptar y lo adjunta en el evento (`vehicleId` opcional, best-effort): si
+   * viene, se persiste en el viaje (trazabilidad viaje→vehículo); si no (fleet no respondió), se asigna
+   * solo el conductor. Idempotente: si el viaje ya está ASSIGNED con ese conductor, no hace nada.
    */
-  async assignFromDispatch(id: string, driverId: string): Promise<void> {
+  async assignFromDispatch(id: string, driverId: string, vehicleId?: string): Promise<void> {
     const trip = await this.prisma.read.trip.findUnique({ where: { id } });
     if (!trip) {
       this.logger.warn(`dispatch.match_found para viaje inexistente ${id}; ignorado`);
@@ -420,7 +422,7 @@ export class TripsService {
     // que el consumer reintente. Capturar el error de `assign` (en vez de pre-chequear) cubre además la
     // carrera en que el viaje cae a un estado no-asignable ENTRE el read de arriba y el assertTransition.
     try {
-      await this.assign(id, driverId, null);
+      await this.assign(id, driverId, vehicleId ?? null);
     } catch (err) {
       if (err instanceof InvalidTripTransition) {
         this.logger.warn(
@@ -763,13 +765,22 @@ export class TripsService {
    * viaje NO termina — se reasigna (→ REASSIGNING, emite trip.reassigning, re-abre la puja). El
    * cancel del conductor PRE-accept (desde ASSIGNED) y el cancel del pasajero siguen siendo terminales.
    */
-  async cancel(id: string, dto: CancelTripDto): Promise<TripView> {
+  async cancel(id: string, dto: CancelTripDto, user: AuthenticatedUser): Promise<TripView> {
     const trip = await this.mustFind(id);
 
     // A1 · ownership server-side (anti-IDOR, defensa en profundidad junto al gate del BFF): un pasajero
-    // solo cancela SU viaje. 404 (no 403) para no filtrar la existencia de un viaje ajeno. La cancelación
-    // por el CONDUCTOR no manda passengerId (su ownership es por driverId, lo enforce su propio BFF).
-    if (dto.by === 'PASSENGER' && dto.passengerId && trip.passengerId !== dto.passengerId) {
+    // solo cancela SU viaje. 404 (no 403) para no filtrar la existencia de un viaje ajeno. Se usa el
+    // `user.userId` de la identidad FIRMADA (siempre presente vía InternalIdentityGuard), NO un id del body
+    // — sin skip condicional: un payload sin/forjado passengerId ya no saltea el check. La cancelación por
+    // CONDUCTOR usa driverId (su BFF lo deriva; el firmado aún no lo trae fiable) — se re-chequea abajo.
+    if (dto.by === 'PASSENGER' && trip.passengerId !== user.userId) {
+      throw new NotFoundError('Viaje no encontrado', { id });
+    }
+
+    // A1 · ownership del CONDUCTOR (simétrico al del pasajero). Va ANTES de la rama de reasignación
+    // POST-accept para que un tripId ajeno no dispare un reassign del viaje de otro. Permisivo con
+    // callers sin driverId (compat), como start/complete; el gate fuerte está en el BFF que lo deriva.
+    if (dto.by === 'DRIVER' && dto.driverId && trip.driverId !== dto.driverId) {
       throw new NotFoundError('Viaje no encontrado', { id });
     }
 

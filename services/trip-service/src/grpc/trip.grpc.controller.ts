@@ -4,7 +4,10 @@
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
@@ -13,6 +16,7 @@ import { TripsService } from '../trips/trips.service';
 import { TripQueryService } from '../trips/trip-query.service';
 import type { TripView } from '../trips/dto/trip.dto';
 import type { Trip } from '../generated/prisma';
+import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
@@ -131,11 +135,16 @@ const EMPTY_TRIP: TripReply = {
 
 @Controller()
 export class TripGrpcController {
+  private readonly secret: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
     private readonly query: TripQueryService,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
 
   @GrpcMethod('TripService', 'GetTrip')
   async getTrip({ id }: GetByIdRequest): Promise<TripReply> {
@@ -190,12 +199,23 @@ export class TripGrpcController {
    * verificó ownership antes de delegar; el pending-settlement solo ofrece cerrar viajes COMPLETED).
    */
   @GrpcMethod('TripService', 'CloseTripByPassenger')
-  async closeTripByPassenger({ id, passengerId }: CloseTripRequest): Promise<TripReply> {
+  async closeTripByPassenger({ id }: CloseTripRequest, metadata: Metadata): Promise<TripReply> {
+    // ANTI-IDOR (mutación): NO se confía en el `passengerId` del payload. Se verifica la identidad
+    // interna FIRMADA que el BFF propaga en la metadata gRPC y se usa SU userId como dueño. Aunque
+    // Linkerd (mTLS) ya autentica el pod caller, un handler que MUTA confiando en un owner-id del cuerpo
+    // es IDOR de manual: con la firma verificada, un payload falsificado no puede cerrar viajes ajenos.
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
     try {
       // closeByPassenger YA devuelve el TripView (con el sello aplicado): lo mapeamos directo al
       // contrato gRPC, sin un re-read a prisma.read (que además, por réplica, podría leer una fila
       // todavía sin el passengerClosedAt recién escrito). Ver tripViewToReply.
-      const view = await this.trips.closeByPassenger(id, passengerId);
+      const view = await this.trips.closeByPassenger(id, identity.userId);
       return this.tripViewToReply(view);
     } catch (err) {
       if (err instanceof NotFoundError) return EMPTY_TRIP; // ajeno/inexistente: no se filtra existencia

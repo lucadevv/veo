@@ -275,6 +275,17 @@ export class CancelTripDto {
   @IsOptional()
   @IsUUID()
   passengerId?: string;
+
+  /**
+   * A1 · ownership server-side (anti-IDOR), simétrico a `passengerId`. El BFF del conductor lo DERIVA
+   * de la identidad autenticada (nunca del cliente) cuando `by==='DRIVER'`; trip-service verifica
+   * `trip.driverId === driverId` (404 si no, no filtra existencia ajena). Opcional en el contrato
+   * porque la cancelación por el PASAJERO no lo envía (y por compat con callers legacy sin el campo).
+   */
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  driverId?: string;
 }
 
 export class ChangeDestinationDto {
