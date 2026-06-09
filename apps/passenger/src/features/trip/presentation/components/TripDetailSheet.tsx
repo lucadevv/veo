@@ -245,7 +245,8 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
               {detail?.driver ? (
                 <EnterView index={2}>
                   <DriverCard
-                    name={t('trip.driver')}
+                    // SEGURIDAD: nombre real del conductor; "Conductor" genérico solo si el backend no lo tiene.
+                    name={detail.driver.name ?? t('trip.driver')}
                     rating={detail.driver.rating ?? undefined}
                     vehicle={
                       detail.vehicle

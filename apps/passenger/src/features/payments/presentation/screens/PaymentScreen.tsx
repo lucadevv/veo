@@ -66,7 +66,7 @@ export function PaymentScreen(): React.JSX.Element {
   const payment = confirmMutation.data ?? chargeMutation.data;
   const isCash = method === 'CASH';
   const cashPending =
-    payment != null && isCash && payment.status.toUpperCase() !== 'PAID' && !confirmMutation.data;
+    payment != null && isCash && payment.status !== 'CAPTURED' && !confirmMutation.data;
 
   if (payment && !cashPending) {
     return (

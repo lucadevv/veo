@@ -236,21 +236,31 @@ export function KycCameraScreen(): React.JSX.Element {
       <SafeScreen
         footer={
           result === 'rejected' ? (
-            <Button
-              label={t('kyc.retry')}
-              fullWidth
-              onPress={() => {
-                setResult(null);
-                setRejectionReason(undefined);
-                setChallenge(null);
-                centeredRef.current = false;
-                setFaceCentered(false);
-                setPhase('requesting');
-                challengeMutation.reset();
-                submitMutation.reset();
-                challengeMutation.mutate();
-              }}
-            />
+            // Rechazado: además de reintentar, SIEMPRE una salida (antes solo había "Reintentar" → el
+            // usuario quedaba atrapado en el loop sin poder volver al perfil).
+            <View style={{ gap: 8 }}>
+              <Button
+                label={t('kyc.retry')}
+                fullWidth
+                onPress={() => {
+                  setResult(null);
+                  setRejectionReason(undefined);
+                  setChallenge(null);
+                  centeredRef.current = false;
+                  setFaceCentered(false);
+                  setPhase('requesting');
+                  challengeMutation.reset();
+                  submitMutation.reset();
+                  challengeMutation.mutate();
+                }}
+              />
+              <Button
+                label={t('actions.close')}
+                variant="ghost"
+                fullWidth
+                onPress={() => navigation.goBack()}
+              />
+            </View>
           ) : (
             <Button label={t('actions.close')} fullWidth onPress={() => navigation.goBack()} />
           )

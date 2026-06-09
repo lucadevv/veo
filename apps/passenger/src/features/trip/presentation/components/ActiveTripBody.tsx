@@ -81,7 +81,8 @@ export function ActiveTripBody({
       {hasDriver ? (
         <EnterView>
           <DriverCard
-            name={t('trip.driver')}
+            // SEGURIDAD: nombre real del conductor; "Conductor" genérico solo si el backend no lo tiene.
+            name={trip.driver?.name ?? t('trip.driver')}
             rating={trip.driver?.rating ?? undefined}
             vehicle={
               trip.vehicle ? `${trip.vehicle.make} ${trip.vehicle.model} · ${trip.vehicle.color}` : undefined

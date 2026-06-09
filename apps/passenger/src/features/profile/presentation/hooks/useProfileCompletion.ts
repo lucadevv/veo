@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { useBiometricGateStore, useProfileLocalStore } from '../../../auth/presentation';
+import { usePaymentPrefsStore } from '../../../payments/presentation/stores/paymentPrefsStore';
 
 /**
  * Clave de caché del perfil real del pasajero (`GET /users/me`), AISLADA por `userId`.
@@ -70,6 +71,28 @@ export function useProfileCompletion(): ProfileCompletion {
     queryFn: () => getProfile.execute(),
     enabled: active,
   });
+
+  // Reconcilia el método de pago por defecto entre backend y local, UNA vez por usuario (no en cada
+  // refetch: así un cambio local posterior no se revierte por una respuesta vieja en vuelo). El ref es
+  // local al hook → se "resetea" solo al cambiar de usuario (logout/login remonta la decisión).
+  const syncedForUser = useRef<string | null>(null);
+  useEffect(() => {
+    // Esperamos a que el perfil cargue (data definida, aunque el campo sea null) y corremos 1× por usuario.
+    if (!userId || query.data === undefined || syncedForUser.current === userId) {
+      return;
+    }
+    syncedForUser.current = userId;
+    const store = usePaymentPrefsStore.getState();
+    if (query.data.defaultPaymentMethod) {
+      // El backend es la fuente de verdad cuando tiene valor → hidrata el local (sin re-empujar).
+      store.hydrate(query.data.defaultPaymentMethod);
+    } else {
+      // Backend sin preferencia (usuario que migró con un default local, o cuenta nueva): PROMOVEMOS la
+      // local al backend para cerrar la sincronización (multi-dispositivo). setDefault reafirma el valor
+      // local (sin cambiar la UI) y dispara el PATCH best-effort. Sin esto, el local nunca subía.
+      store.setDefault(store.defaultMethod);
+    }
+  }, [query.data, userId]);
 
   if (!active) {
     return 'loading';

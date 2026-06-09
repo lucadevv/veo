@@ -18,7 +18,7 @@ import {
 } from '@veo/ui-kit';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { useSessionStore } from '../../../../core/session/sessionStore';
@@ -33,8 +33,10 @@ import { isDocumentValid } from '../../../payments/domain/affiliationUsecases';
 import { maskDocument } from '../../../../shared/utils/format';
 import { EnterView } from '../components/motion';
 import { PhoneVerificationSheet } from '../components/PhoneVerificationSheet';
+import { usePushPermission } from '../../../notifications/presentation/hooks/usePushPermission';
 import {
   IconAccessibility,
+  IconBell,
   IconCamera,
   IconCard,
   IconChild,
@@ -86,6 +88,8 @@ export function ProfileScreen(): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
   const navigation = useNavigation<Nav>();
+  // Permiso de push (estado real del SO + activar). El toggle de notificaciones lo refleja y gestiona.
+  const push = usePushPermission();
 
   const getProfile = useDependency(TOKENS.getProfileUseCase);
   const updateProfile = useDependency(TOKENS.updateProfileUseCase);
@@ -440,11 +444,12 @@ export function ProfileScreen(): React.JSX.Element {
                 trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
                 onPress={() => setComingSoon('cameraControl')}
               />
+              {/* "Compartir viaje" NO es "próximamente" — es REAL y vive en la pantalla del viaje activo.
+                  Acá es una fila INFORMATIVA honesta (educación de la feature de seguridad), sin pill falsa. */}
               <ListItem
                 title={t('profile.shareTrip')}
+                subtitle={t('profile.shareTripSub')}
                 leading={<IconShare color={accent} size={glyph} />}
-                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
-                onPress={() => setComingSoon('shareTrip')}
               />
             </Card>
           </View>
@@ -478,6 +483,35 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconGift color={accent} size={glyph} />}
                 chevron
                 onPress={() => navigation.navigate('Referrals')}
+              />
+              {/* Notificaciones push: refleja el estado REAL del SO y lo gestiona. 'undetermined' →
+                  dispara el permiso (diálogo del SO); 'granted'/'denied' → abre Ajustes del SO (el SO
+                  no deja revocar/activar desde la app una vez decidido). Responde "¿dónde lo activo?". */}
+              <ListItem
+                title={t('profile.notifications')}
+                subtitle={
+                  push.status === 'granted'
+                    ? t('profile.notificationsOn')
+                    : push.status === 'denied'
+                      ? t('profile.notificationsDenied')
+                      : push.status === 'loading'
+                        ? '…'
+                        : t('profile.notificationsOff')
+                }
+                leading={<IconBell color={accent} size={glyph} />}
+                trailing={
+                  push.status === 'granted' ? (
+                    <StatusPill label={t('profile.notificationsPill')} tone="success" dot />
+                  ) : undefined
+                }
+                chevron={push.status === 'undetermined' || push.status === 'denied'}
+                onPress={() => {
+                  if (push.status === 'undetermined') {
+                    void push.enable();
+                  } else if (push.status !== 'loading') {
+                    void Linking.openSettings();
+                  }
+                }}
               />
             </Card>
           </View>

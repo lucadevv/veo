@@ -171,7 +171,9 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
           </View>
         </Animated.View>
       </View>
-      <Text variant="footnote" color="inkMuted">
+      {/* El estado del viaje es la info MÁS importante de este momento (esperás al conductor) → legible,
+          no en el tamaño/color más apagado. */}
+      <Text variant="subhead" color="ink">
         {t(labelKey)}
       </Text>
     </View>

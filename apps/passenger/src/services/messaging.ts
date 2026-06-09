@@ -1,6 +1,7 @@
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
 import { env } from '../core/config/env';
+import { queryClient } from '../core/query/queryClient';
 import { TOKENS } from '../core/di/tokens';
 import { container } from '../core/di/registry';
 import { resolveDeepLink } from '../features/notifications/domain/deepLink';
@@ -47,6 +48,29 @@ async function loadMessaging(): Promise<Messaging> {
     import('@react-native-firebase/app'),
   ]);
   return getMessaging(getApp());
+}
+
+/**
+ * Espera (reintentos cortos) a que el APNs token de Apple esté disponible en iOS antes de pedir el FCM
+ * token. Registrar para remote messages NO garantiza que el APNs token YA llegó: Apple lo entrega
+ * ASYNC y en fresh-install tarda ~1-2s. Si `getToken()` corre antes, RNFirebase lanza
+ * "No APNS token specified before fetching FCM Token" (la causa real del error de FCM tras reinstalar).
+ * Reintenta `getAPNSToken` hasta tenerlo o agotar el presupuesto (~4.5s). No-op fuera de iOS (Android
+ * no usa APNs). Devuelve true si hay token (o no aplica), false si se agotó el presupuesto sin él.
+ */
+async function waitForApnsToken(messaging: Messaging): Promise<boolean> {
+  if (Platform.OS !== 'ios') {
+    return true;
+  }
+  const { getAPNSToken } = await import('@react-native-firebase/messaging');
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const apns = await getAPNSToken(messaging);
+    if (apns) {
+      return true;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
 }
 
 /**
@@ -165,12 +189,16 @@ async function wireForeground(messaging: Messaging): Promise<void> {
   );
   const registrar = container.resolve(TOKENS.pushTokenRegistrar);
 
-  // Mensajes con la app en PRIMER PLANO: no-op deliberado. NO auto-navegamos (el pasajero ya está usando la
-  // app y un salto sería agresivo) y el banner lo presenta el sistema (willPresentNotification). El deep-link
-  // se dispara al TOCAR la notificación (onNotificationOpenedApp / getInitialNotification). Handler registrado
-  // porque RNFirebase lo exige para entregar el mensaje en foreground. NO logueamos: un mensaje normal no es
-  // un warning (ese console.warn aparecía amarillo en Metro y se confundía con un error).
-  onMessage(messaging, async () => {});
+  // Mensajes con la app en PRIMER PLANO: NO auto-navegamos (el pasajero ya está usando la app y un salto
+  // sería agresivo) ni logueamos; el banner lo presenta el sistema (willPresentNotification) y el deep-link
+  // se dispara al TOCAR (onNotificationOpenedApp / getInitialNotification). Pero SÍ invalidamos la bandeja:
+  // si llega un aviso con el centro de notificaciones abierto, se refresca al instante (efecto dominó
+  // push → bandeja). invalidateQueries solo refetchea si la query está MONTADA; si no, la marca stale (sin red).
+  onMessage(messaging, async () => {
+    // Best-effort: si la invalidación falla, la bandeja igual se refresca por staleTime/focus. El
+    // `.catch` evita un unhandled rejection dentro del callback de RNFirebase (no debe tirar acá).
+    await queryClient.invalidateQueries({ queryKey: ['notifications', 'list'] }).catch(() => {});
+  });
 
   // App en SEGUNDO PLANO y el usuario TOCA la notificación → la trae al frente: deep-link al board.
   onNotificationOpenedApp(messaging, (remoteMessage) => {
@@ -183,57 +211,112 @@ async function wireForeground(messaging: Messaging): Promise<void> {
   });
 }
 
+/** Estado del permiso de push en términos de UI (para el toggle del perfil + decidir el pre-prompt). */
+export type PushPermission = 'granted' | 'denied' | 'undetermined';
+
+/** Mapea el `AuthorizationStatus` de RNFirebase a nuestro estado de UI (AUTHORIZED/PROVISIONAL = granted). */
+function toPushPermission(
+  status: number,
+  Auth: { AUTHORIZED: number; PROVISIONAL: number; NOT_DETERMINED: number },
+): PushPermission {
+  if (status === Auth.AUTHORIZED || status === Auth.PROVISIONAL) return 'granted';
+  if (status === Auth.NOT_DETERMINED) return 'undetermined';
+  return 'denied';
+}
+
 /**
- * Arranca el messaging: permisos + token + handlers. Devuelve el token FCM o null si no aplica.
+ * NÚCLEO de registro: cablea handlers (foreground/refresh), asegura el APNs token en iOS y obtiene +
+ * registra el FCM token en el backend (`POST /devices`). ASUME el permiso YA concedido (no promptea).
+ * Privado: lo usan `syncPushRegistration` (arranque) y `enablePush` (activación explícita del usuario).
  */
-export async function initMessaging(): Promise<string | null> {
+async function registerForPush(messaging: Messaging): Promise<string | null> {
+  const { registerDeviceForRemoteMessages, getInitialNotification, getToken } = await import(
+    '@react-native-firebase/messaging'
+  );
+  await wireForeground(messaging);
+
+  // iOS · registro EXPLÍCITO con APNs antes de pedir el token. El APNs token llega ASYNC tras el
+  // registro; esperarlo evita el "No APNS token specified before fetching FCM Token" en fresh-install.
+  // Si tras el presupuesto no llegó (raro), salimos sin token: se registra en un arranque posterior.
+  // En Android es no-op (FCM no usa APNs), por eso se gatea por plataforma.
+  if (Platform.OS === 'ios') {
+    await registerDeviceForRemoteMessages(messaging);
+    const apnsReady = await waitForApnsToken(messaging);
+    if (!apnsReady) {
+      return null;
+    }
+  }
+
+  // Cold-start: si la app se abrió tocando un push (proceso muerto), navegá al deep-link al montar.
+  const initial = await getInitialNotification(messaging);
+  if (initial) navigateFromPush(initial);
+
+  const token = await getToken(messaging);
+  const registrar = container.resolve(TOKENS.pushTokenRegistrar);
+  await registrar.register(token, currentPlatform());
+  return token;
+}
+
+/**
+ * Lee el estado del permiso de push SIN promptear (`hasPermission` no muestra diálogo). Lo usa el toggle
+ * del perfil para reflejar el estado real y la lógica del pre-prompt para decidir si ofrecer activar.
+ */
+export async function getPushPermission(): Promise<PushPermission> {
+  if (!env.firebaseEnabled) {
+    return 'denied';
+  }
+  try {
+    const { hasPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
+    const messaging = await loadMessaging();
+    return toPushPermission(await hasPermission(messaging), AuthorizationStatus);
+  } catch {
+    return 'denied';
+  }
+}
+
+/**
+ * ARRANQUE (auth + desbloqueo): registra el token SOLO si el permiso YA estaba concedido. NO promptea —
+ * el permiso se pide PROGRESIVO (pre-prompt contextual / toggle del perfil), no de golpe al entrar al
+ * Home. Así quien ya aceptó sigue recibiendo push sin fricción, y a quien no, no le cae un prompt frío.
+ */
+export async function syncPushRegistration(): Promise<string | null> {
   if (!env.firebaseEnabled) {
     return null;
   }
-
   try {
-    const {
-      requestPermission,
-      registerDeviceForRemoteMessages,
-      getInitialNotification,
-      getToken,
-      AuthorizationStatus,
-    } = await import('@react-native-firebase/messaging');
+    const { hasPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
-
-    const authStatus = await requestPermission(messaging);
-    const enabled =
-      authStatus === AuthorizationStatus.AUTHORIZED ||
-      authStatus === AuthorizationStatus.PROVISIONAL;
-
-    if (!enabled) {
-      return null;
+    if (toPushPermission(await hasPermission(messaging), AuthorizationStatus) !== 'granted') {
+      return null; // sin permiso previo: NO prompteamos en el arranque (permiso progresivo)
     }
-
-    await wireForeground(messaging);
-
-    // iOS · registro EXPLÍCITO con APNs antes de pedir el token. RNFirebase auto-registra por
-    // default, pero ese camino es implícito y con timing: en device físico `getToken()` puede correr
-    // antes de que llegue el APNs token y lanzar "You must be registered for remote messages...".
-    // Llamarlo explícito lo vuelve determinístico (idempotente: si ya está registrado, resuelve al toque).
-    // En Android es no-op conceptual (FCM no usa APNs), por eso se gatea por plataforma.
-    if (Platform.OS === 'ios') {
-      await registerDeviceForRemoteMessages(messaging);
-    }
-
-    // Cold-start: si la app se abrió tocando un push (proceso muerto), navegá al deep-link en cuanto
-    // monte el contenedor (lo retoma flushPendingDeepLink desde onReady).
-    const initial = await getInitialNotification(messaging);
-    if (initial) navigateFromPush(initial);
-
-    const token = await getToken(messaging);
-    const registrar = container.resolve(TOKENS.pushTokenRegistrar);
-    await registrar.register(token, currentPlatform());
-    return token;
+    return await registerForPush(messaging);
   } catch (error) {
-    // No relanzar: el arranque de la app no depende de FCM.
-    console.warn('[messaging] inicialización de FCM omitida:', error);
+    console.warn('[messaging] sincronización de push omitida:', error);
     return null;
+  }
+}
+
+/**
+ * ACTIVACIÓN EXPLÍCITA del usuario (CTA del pre-prompt contextual o toggle del perfil). Pide el permiso
+ * (muestra el diálogo del SO la PRIMERA vez; luego devuelve el estado actual sin diálogo) y, si queda
+ * concedido, registra el token. Devuelve el estado resultante para que la UI reaccione (activado / hay
+ * que ir a Ajustes del SO si quedó denegado).
+ */
+export async function enablePush(): Promise<PushPermission> {
+  if (!env.firebaseEnabled) {
+    return 'denied';
+  }
+  try {
+    const { requestPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
+    const messaging = await loadMessaging();
+    const status = toPushPermission(await requestPermission(messaging), AuthorizationStatus);
+    if (status === 'granted') {
+      await registerForPush(messaging);
+    }
+    return status;
+  } catch (error) {
+    console.warn('[messaging] activación de push omitida:', error);
+    return 'denied';
   }
 }
 

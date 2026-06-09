@@ -98,6 +98,10 @@ export function PanicScreen(): React.JSX.Element {
             fullWidth
             size="lg"
             loading={mutation.isPending}
+            // Anti doble-tap: en el camino de EMERGENCIA, dos taps rápidos podían disparar 2 alertas con
+            // dedupKeys distintos (el server dedup por key, pero el cliente generaba 2). `disabled` corta
+            // el 2º tap apenas arranca el envío (no esperamos a que `loading` repinte).
+            disabled={mutation.isPending}
             onPress={() => mutation.mutate()}
           />
           <Button
@@ -129,11 +133,9 @@ export function PanicScreen(): React.JSX.Element {
           {t('panic.subtitle')}
         </Text>
         {mutation.isError ? <Banner tone="danger" title={errorMessage} /> : null}
-        <Banner
-          tone="info"
-          icon={<IconShield color={theme.colors.inkMuted} size={18} />}
-          title={t('panic.volumeHintSoon')}
-        />
+        {/* El aviso "próximamente: 3× volumen" se quitó de la pantalla de EMERGENCIA: en el momento
+            crítico distrae y resta confianza (anunciar una feature faltante). Va en onboarding/ajustes
+            donde el usuario aprende las features de seguridad con calma. */}
       </View>
     </SafeScreen>
   );

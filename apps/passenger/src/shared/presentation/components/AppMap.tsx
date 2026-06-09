@@ -69,6 +69,8 @@ export interface AppMapProps {
   nearbyVehicles?: ReadonlyArray<NearbyVehicle>;
   /** Geometría de la ruta en orden GeoJSON [lng, lat] (de `/maps/quote` o polyline decodificada). */
   routeCoordinates?: ReadonlyArray<[number, number]>;
+  /** Paradas intermedias ORDENADAS (Ola 2B): se pintan como beads `stop` entre origen y destino. */
+  waypoints?: ReadonlyArray<GeoPoint>;
   /** Ajusta el encuadre a la ruta + markers (fitBounds). */
   fitToRoute?: boolean;
   /**
@@ -79,6 +81,11 @@ export interface AppMapProps {
   fitEdgePadding?: { top?: number; bottom?: number; left?: number; right?: number };
   /** Permite fijar puntos tocando el mapa. */
   onPress?: (point: GeoPoint) => void;
+  /**
+   * Reporta el CENTRO del mapa cuando la cámara cambia (pan/zoom). Habilita el patrón "pin fijo al centro
+   * + el mapa se mueve debajo + confirmar" (elegir recojo/destino). Se lee de `MapState.properties.center`.
+   */
+  onCenterChange?: (center: GeoPoint) => void;
   /** Deshabilita gestos (mapa decorativo en sheets). */
   interactive?: boolean;
   /**
@@ -211,9 +218,11 @@ function AppMapComponent({
   cameraTarget,
   nearbyVehicles,
   routeCoordinates,
+  waypoints,
   fitToRoute = false,
   fitEdgePadding,
   onPress,
+  onCenterChange,
   interactive = true,
   bottomInset = 0,
 }: AppMapProps): React.JSX.Element {
@@ -241,13 +250,57 @@ function AppMapComponent({
 
   // Gesto manual del usuario → modo libre (solo si la cámara está dirigida). `isGestureActive` lo
   // reporta rnmapbox en `onCameraChanged`: detectar el pellizco/arrastre es barato con este callback.
+  // onCameraChanged dispara por FRAME durante el pan (~60×/s). Emitir el centro en cada frame haría
+  // re-renderizar al consumer 60×/s (jank, regla "Map a 60fps"). Throttle leading+trailing a ~120ms:
+  // emite ya si pasó el intervalo, y agenda el ÚLTIMO punto al soltar (trailing) para no perder el destino.
+  const centerEmit = useRef<{ last: number; timer: ReturnType<typeof setTimeout> | null; pending: GeoPoint | null }>({
+    last: 0,
+    timer: null,
+    pending: null,
+  });
+  const emitCenter = useCallback(
+    (point: GeoPoint) => {
+      if (!onCenterChange) return;
+      const ref = centerEmit.current;
+      ref.pending = point;
+      const elapsed = Date.now() - ref.last;
+      if (elapsed >= 120) {
+        ref.last = Date.now();
+        onCenterChange(point);
+      } else if (!ref.timer) {
+        ref.timer = setTimeout(() => {
+          ref.timer = null;
+          ref.last = Date.now();
+          if (ref.pending) onCenterChange(ref.pending);
+        }, 120 - elapsed);
+      }
+    },
+    [onCenterChange],
+  );
+  useEffect(
+    () => () => {
+      if (centerEmit.current.timer) clearTimeout(centerEmit.current.timer);
+    },
+    [],
+  );
+
   const onCameraChanged = useCallback(
     (state: MapState) => {
       if (directedCamera && state.gestures?.isGestureActive) {
         onGesture();
       }
+      // Patrón "pin al centro": reporta el centro ([lng, lat] → GeoPoint), throttleado. Defensa ante
+      // coords no finitas (la cámara nativa puede emitir un estado transitorio inválido).
+      if (onCenterChange) {
+        const c = state.properties?.center;
+        const lng = c?.[0];
+        const lat = c?.[1];
+        if (typeof lng === 'number' && typeof lat === 'number' && Number.isFinite(lng) && Number.isFinite(lat)) {
+          emitCenter({ lat, lon: lng });
+        }
+      }
     },
-    [directedCamera, onGesture],
+    [directedCamera, onGesture, onCenterChange, emitCenter],
   );
   // GeoJSON de la ruta (LineString). Vacío si no hay suficientes puntos.
   const routeShape = useMemo<GeoJSON.Feature<GeoJSON.LineString> | null>(() => {
@@ -305,7 +358,7 @@ function AppMapComponent({
       scrollEnabled={interactive}
       zoomEnabled={interactive}
       pitchEnabled={false}
-      onCameraChanged={directedCamera ? onCameraChanged : undefined}
+      onCameraChanged={directedCamera || onCenterChange ? onCameraChanged : undefined}
       onPress={
         onPress
           ? (feature) => {
@@ -403,6 +456,20 @@ function AppMapComponent({
           <RoutePin variant="origin" />
         </MarkerView>
       ) : null}
+
+      {/* Paradas intermedias (Ola 2B): beads `stop` más chicos, entre origen y destino. */}
+      {waypoints?.map((wp, i) =>
+        isValidPoint(wp) ? (
+          <MarkerView
+            key={`wp:${wp.lat}:${wp.lon}:${i}`}
+            coordinate={toLngLat(wp)}
+            anchor={{ x: 0.5, y: 0.5 }}
+            allowOverlap
+          >
+            <RoutePin variant="stop" size={13} />
+          </MarkerView>
+        ) : null,
+      )}
 
       {isValidPoint(destination) ? (
         <MarkerView coordinate={toLngLat(destination)} anchor={{ x: 0.5, y: 1 }} allowOverlap>

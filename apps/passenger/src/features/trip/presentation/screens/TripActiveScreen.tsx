@@ -182,6 +182,7 @@ export function TripActiveScreen(): React.JSX.Element {
           <AppMap
             origin={snapshot?.origin ?? null}
             destination={destination}
+            waypoints={snapshot?.waypoints}
             driver={live.driverLocation ?? null}
             routeCoordinates={routeCoordinates.length > 1 ? routeCoordinates : undefined}
             fitToRoute={!picking && routeCoordinates.length > 1}
@@ -252,7 +253,9 @@ export function TripActiveScreen(): React.JSX.Element {
         {hasDriver ? (
           <EnterView>
             <DriverCard
-              name={t('trip.driver')}
+              // SEGURIDAD: el nombre real del conductor (del backend) para confirmar a quién se sube; cae
+              // a "Conductor" genérico solo si el backend aún no lo tiene (degradación honesta).
+              name={trip.driver?.name ?? t('trip.driver')}
               rating={trip.driver?.rating ?? undefined}
               vehicle={
                 trip.vehicle
@@ -431,7 +434,9 @@ export function TripActiveScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   mapArea: { flex: 1 },
-  sheet: { flex: 1.3 },
+  // El MAPA manda en el viaje activo (regla del dueño: "mapa arriba del sheet"). Antes el sheet (1.3)
+  // se comía la pantalla y el mapa quedaba chico; igualamos para que el mapa recupere protagonismo.
+  sheet: { flex: 1 },
   sos: { position: 'absolute' },
   chat: { position: 'absolute' },
   livePill: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },

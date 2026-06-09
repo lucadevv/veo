@@ -34,7 +34,7 @@ import {
   QuoteRideUseCase,
   ReverseGeocodeUseCase,
 } from '../../features/maps/domain/usecases';
-import { EmptyNotificationsRepository } from '../../features/notifications/data/emptyNotificationsRepository';
+import { HttpNotificationsRepository } from '../../features/notifications/data/httpNotificationsRepository';
 import { ListNotificationsUseCase } from '../../features/notifications/domain/usecases';
 import { HttpPushTokenRegistrar } from '../../features/notifications/data/httpPushTokenRegistrar';
 import { LogPushTokenRegistrar } from '../../features/notifications/data/logPushTokenRegistrar';
@@ -140,6 +140,8 @@ import { TOKENS } from './tokens';
  * abstracción domain), puertos para la oleada nativa (defaults explícitos, sin mocks) y casos de uso.
  * Resolución perezosa: nada se instancia hasta el primer `resolve`.
  */
+import { setPaymentPrefsBackendSync } from '../../features/payments/presentation/stores/paymentPrefsStore';
+
 export function buildContainer(): Container {
   const container = new Container();
 
@@ -226,12 +228,13 @@ export function buildContainer(): Container {
     () => new LocalTripHistoryRepository(prefsStore),
   );
 
-  // Centro de avisos: feed VACÍO honesto por HUECO DE BACKEND (el bff no expone el listado de avisos;
-  // ver notificationsRepository.ts). Cuando exista el endpoint, se sustituye por una impl HTTP bajo
-  // este mismo token sin tocar dominio ni presentación.
+  // Centro de avisos: HTTP REAL contra el public-bff (`GET /notifications`). El aviso llega YA
+  // renderizado y categorizado por el notification-service; el repo solo mapea category→kind. El
+  // recipientId lo deriva el BFF del JWT (anti-IDOR). Reemplazó al EmptyNotificationsRepository
+  // (HUECO DE BACKEND cerrado) sin tocar dominio ni presentación. Sin leído/no-leído aún (MVP).
   container.register(
     TOKENS.notificationsRepository,
-    () => new EmptyNotificationsRepository(),
+    (c) => new HttpNotificationsRepository(c.resolve(TOKENS.httpClient)),
   );
 
   // Lugares guardados: HTTP REAL contra el public-bff (`/places`, JwtAuthGuard) + caché MMKV
@@ -643,3 +646,14 @@ export function buildContainer(): Container {
 
 /** Contenedor singleton de la app. */
 export const container = buildContainer();
+
+// Cablea el push best-effort del método de pago por defecto al backend (perfil). El store de
+// preferencias es offline-first (MMKV) y libre de dependencias; acá, en el composition root, le
+// inyectamos CÓMO sincronizar al backend (PATCH /users/me vía el caso de uso de perfil). Si el PATCH
+// falla, el valor local ya quedó persistido (degradación honesta) y se reintenta al próximo cambio.
+setPaymentPrefsBackendSync((method) => {
+  void container
+    .resolve(TOKENS.updateProfileUseCase)
+    .execute({ defaultPaymentMethod: method })
+    .catch(() => {});
+});

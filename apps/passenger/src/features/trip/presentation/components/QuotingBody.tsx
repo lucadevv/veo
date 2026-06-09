@@ -32,6 +32,8 @@ import { ScheduleSheet } from './ScheduleSheet';
 import { initialBidCents, stepBidCents } from '../../../../shared/utils/bid';
 import { uuidv4 } from '../../../../shared/utils/uuid';
 import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
+import { mapKycStatus } from '../../../kyc/domain/entities';
+import { KycGate } from './KycGate';
 import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
 import { RoutePointsList } from '../../../maps/presentation/components/RoutePointsList';
 import { SpecialRequestChips } from '../../../maps/presentation/components/SpecialRequestChips';
@@ -53,6 +55,12 @@ export interface QuotingBodyProps {
   onScheduled: () => void;
   /** El BFF exige verificación facial (403 KYC) — la pantalla deriva al KYC. */
   onKycRequired: () => void;
+  /**
+   * Estado de verificación facial del pasajero (`kycStatus` de `GET /users/me`, ya cacheado en el Home).
+   * Si NO está `approved`, el sheet muestra un GATE contextual ("verificá antes de pedir") en vez del
+   * botón Confirmar — proactivo, no la emboscada del 403. El gate REAL sigue siendo server-side.
+   */
+  kycStatus?: string | null;
   /**
    * El BFF bloqueó crear porque el pasajero tiene una DEUDA pendiente (403 `DEBT_PENDING`). En vez de un
    * error genérico, la pantalla abre el `DebtSheet` para saldar y volver a pedir. El gate es server-side
@@ -89,6 +97,7 @@ export function QuotingBody({
   onActiveTripExists,
   onRouteChange,
   requestAgainToken,
+  kycStatus,
 }: QuotingBodyProps): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
@@ -124,6 +133,11 @@ export function QuotingBody({
   const yapeAutoActive = useIsYapeAutoActive();
 
   const ready = Boolean(origin && destination);
+
+  // Verificación facial (KYC): si NO está aprobada, mostramos el GATE contextual en vez del Confirmar.
+  // El estado viene del perfil ya cacheado en el Home; KycCamera invalida ['profile'] al aprobar → al
+  // volver, el gate desaparece solo. 'approved' = puede pedir; resto (unverified/pending/rejected) = gate.
+  const kycApproved = mapKycStatus(kycStatus) === 'approved';
 
   const setWaypoints = useMemo<RoutePlace[]>(() => waypoints.filter(isWaypointSet), [waypoints]);
   const quoteWaypoints = useMemo<MapPoint[]>(() => setWaypoints.map((stop) => stop.point), [setWaypoints]);
@@ -171,11 +185,19 @@ export function QuotingBody({
   const bidFloorCents = quote?.bidFloorCents ?? 0;
   const suggestedCents = quote?.suggestedCents;
 
+  // Re-ancla el bid cuando la RUTA cambia (agregar/quitar parada → nueva tarifa sugerida): el precio
+  // OFRECIDO sigue al nuevo estimado, en vez de quedar clavado en el de la ruta anterior. Antes se
+  // seteaba UNA sola vez (`bidCents === null`) → al agregar una parada el bid no se movía ("el precio no
+  // se actualiza"). Se re-ancla SOLO cuando cambia `suggestedCents` (= cambió la ruta/distancia),
+  // preservando los ajustes manuales del usuario MIENTRAS la ruta no cambie.
+  const lastSuggestedRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (isPuja && quote && bidCents === null) {
+    if (!isPuja || !quote) return;
+    if (suggestedCents !== lastSuggestedRef.current) {
+      lastSuggestedRef.current = suggestedCents;
       setBidCents(initialBidCents(suggestedCents, bidFloorCents));
     }
-  }, [isPuja, quote, bidCents, suggestedCents, bidFloorCents]);
+  }, [isPuja, quote, suggestedCents, bidFloorCents]);
 
   const decrementBid = useCallback(
     () => setBidCents((b) => stepBidCents(b ?? bidFloorCents, -1, bidFloorCents)),
@@ -433,7 +455,7 @@ export function QuotingBody({
 
       {/* Método de pago PARA ESTE VIAJE (antes del CTA): refleja la selección actual y abre el selector.
           La elección viaja al conductor en la puja y define el cobro automático al completar. */}
-      {ready ? (
+      {ready && kycApproved ? (
         <PaymentMethodRow
           method={tripPaymentMethod}
           onPress={() => setPaymentSheetOpen(true)}
@@ -442,14 +464,20 @@ export function QuotingBody({
         />
       ) : null}
 
-      <Button
-        label={confirmLabel}
-        variant="primary"
-        fullWidth
-        loading={createMutation.isPending}
-        disabled={!canConfirm}
-        onPress={() => createMutation.mutate()}
-      />
+      {ready && !kycApproved ? (
+        // Gate de verificación CONTEXTUAL (mejor UX): el pasajero ve su ruta/precio y, en vez de confirmar
+        // y comerse un 403, hace el paso único de seguridad ANTES. El 403 sigue como defensa (server-side).
+        <KycGate status={mapKycStatus(kycStatus)} onVerify={onKycRequired} />
+      ) : (
+        <Button
+          label={confirmLabel}
+          variant="primary"
+          fullWidth
+          loading={createMutation.isPending}
+          disabled={!canConfirm}
+          onPress={() => createMutation.mutate()}
+        />
+      )}
 
       <PaymentMethodSheet
         visible={paymentSheetOpen}

@@ -232,6 +232,14 @@ export function SearchScreen(): React.JSX.Element {
                 leading={<IconTarget color={theme.colors.accent} size={20} />}
               />
             ) : null}
+            {/* Elegir el punto en edición ARRASTRANDO el mapa (recojo/destino/parada). SIEMPRE visible:
+                es el fallback natural cuando la búsqueda por texto no encuentra el punto. Antes se
+                escondía con `!active` justo al tipear — exactamente cuando más falta hace. */}
+            <ListItem
+              title={t('maps.pickOnMap')}
+              onPress={() => navigation.navigate('MapPick')}
+              leading={<IconPin color={theme.colors.accent} size={20} />}
+            />
             {/* Accesos rápidos a lugares guardados (fijan el extremo en edición con un toque). */}
             {!active ? <SavedPlacesShortcuts onSelect={applySavedPlace} /> : null}
           </View>

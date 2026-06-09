@@ -318,6 +318,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
         <AppMap
           origin={origin ? toGeoPoint(origin.point) : null}
           destination={destination ? toGeoPoint(destination.point) : null}
+          waypoints={setWaypoints.map((stop) => toGeoPoint(stop.point))}
           routeCoordinates={routeCoordinates}
           fitToRoute={Boolean(routeCoordinates)}
           fitEdgePadding={mapFitPadding}

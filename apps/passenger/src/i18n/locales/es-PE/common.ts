@@ -278,6 +278,8 @@ export const common = {
     greeting: 'Hola',
     whereTo: '¿A dónde vamos?',
     yourLocation: 'Tu ubicación',
+    pickupLabel: 'Recojo',
+    adjustPickup: 'Ajustar',
     shortcutHome: 'Casa',
     shortcutWork: 'Trabajo',
     shortcutRecent: 'Recientes',
@@ -328,13 +330,16 @@ export const common = {
    * devuelve un feed vacío honesto y la pantalla aterriza en el estado vacío con un aviso claro.
    */
   notifications: {
+    // Pre-prompt contextual de permiso de push (al buscar conductor). Tuteo peruano.
+    prePromptTitle: 'Activa las notificaciones',
+    prePromptBody:
+      'Te avisamos cuando un conductor acepte tu viaje y cuando esté llegando, aunque tengas la app cerrada.',
+    prePromptEnable: 'Activar notificaciones',
+    prePromptDismiss: 'Ahora no',
     empty: 'No tienes avisos',
     emptySubtitle: 'Cuando tengas novedades de tus viajes, las verás aquí.',
     end: 'No hay más notificaciones.',
     loadError: 'No pudimos cargar tus avisos. Inténtalo de nuevo.',
-    comingSoonTitle: 'Centro de avisos en camino',
-    comingSoonBody:
-      'Mientras tanto, te avisamos por notificación cuando tu conductor esté en camino y por cada novedad de tu viaje.',
   },
 
   /**
@@ -405,6 +410,18 @@ export const common = {
     noResults: 'Sin resultados para tu búsqueda.',
     typeMore: 'Escribe al menos 3 caracteres para buscar.',
     searchError: 'No pudimos buscar direcciones. Inténtalo de nuevo.',
+    pickOnMap: 'Elegir en el mapa',
+    pickedPoint: 'Ubicación elegida en el mapa',
+    pickup: {
+      titleOrigin: 'Ajusta tu punto de recojo',
+      titleDestination: 'Ajusta tu destino',
+      titleStop: 'Ajusta la parada {{index}}',
+      hint: 'Mueve el mapa para ubicar el punto exacto',
+      resolving: 'Buscando dirección…',
+      resolveError: 'No pudimos resolver la dirección. Igual puedes confirmar.',
+      outsideLima: 'Ese punto está fuera de Lima Metropolitana',
+      confirm: 'Confirmar',
+    },
   },
 
   /** Ruta + cotización (previsualización antes de confirmar). */
@@ -561,6 +578,15 @@ export const common = {
   trip: {
     driver: 'Conductor',
     vehicle: 'Vehículo',
+    // Gate de verificación facial contextual (antes de pedir el viaje). Tuteo peruano.
+    kycGateTitle: 'Verifica tu identidad',
+    kycGateBody:
+      'Por tu seguridad, confirmamos que eres tú con una verificación facial. Es un paso único y toma menos de un minuto.',
+    kycGateCta: 'Verificar ahora',
+    kycPendingTitle: 'Estamos verificando tu identidad',
+    kycPendingBody:
+      'Tu verificación está en revisión. Te avisamos apenas esté lista para que puedas pedir tu viaje.',
+    kycPendingPill: 'En revisión',
     eta: 'Llegada estimada',
     etaMinutes: '{{minutes}} min',
     etaUnknown: 'Calculando…',
@@ -1386,16 +1412,23 @@ export const common = {
     cameraControl: 'Control de cámara',
     cameraControlSub: 'Quién ve tu cámara',
     shareTrip: 'Compartir mi viaje',
+    shareTripSub: 'Durante tu viaje puedes compartirlo con tu familia para que te sigan en tiempo real.',
     // Preferencias
     paymentMethods: 'Métodos de pago',
     savedPlaces: 'Lugares guardados',
     referrals: 'Invita y gana',
+    // Toggle de notificaciones push (estado real del SO). Tuteo peruano.
+    notifications: 'Notificaciones',
+    notificationsOn: 'Activadas — te avisamos de tu viaje',
+    notificationsOff: 'Actívalas para enterarte de tu viaje',
+    notificationsDenied: 'Bloqueadas — actívalas en Ajustes',
+    notificationsPill: 'Activadas',
     sectionPreferences: 'Preferencias',
     scheduledTrips: 'Viajes programados',
     // Promociones (opt-in marketing)
     sectionPromotions: 'Promociones',
     promotions: 'Promociones y novedades',
-    promotionsSub: 'Ofertas y avisos de VEO. Podés desactivarlo cuando quieras.',
+    promotionsSub: 'Ofertas y avisos de VEO. Puedes desactivarlo cuando quieras.',
     // Cuenta
     accessibility: 'Accesibilidad e idioma',
     help: 'Ayuda',

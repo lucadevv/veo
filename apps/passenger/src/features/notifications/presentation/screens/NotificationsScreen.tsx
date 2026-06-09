@@ -1,7 +1,5 @@
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
-import { Banner, Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -9,11 +7,8 @@ import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
 import { formatShortDate } from '../../../../shared/utils/format';
-import type { RootStackParamList } from '../../../../navigation/types';
 import type { AppNotification, NotificationKind } from '../../domain/entities';
 import { iconForKind } from '../icons';
-
-type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** Tono (color del ícono) por categoría de aviso. */
 function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
@@ -30,16 +25,14 @@ function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
  * Centro de avisos del pasajero (Notifs del design-handoff). Cubre los cuatro estados
  * (carga/error/vacío/lista) sobre el puerto `ListNotificationsUseCase`.
  *
- * DEGRADACIÓN HONESTA: el listado de avisos NO tiene endpoint en el `public-bff` todavía (solo
- * existe el registro del token de push). El repositorio devuelve hoy una lista VACÍA — nunca
- * avisos inventados — por lo que la pantalla aterriza en su estado vacío con un aviso claro de que
- * los avisos llegarán por notificación push mientras tanto. Cuando exista el endpoint, basta
- * sustituir la implementación del repositorio bajo su token de DI.
+ * Conectado al backend REAL (`GET /notifications` del public-bff → notification-service): trae las
+ * notificaciones PUSH del pasajero ya renderizadas (título + cuerpo del template i18n). Lista vacía =
+ * el pasajero todavía no tiene avisos (estado vacío HONESTO, sin "próximamente" falso). Sin
+ * leído/no-leído por ahora (MVP cronológico; el `read_at` real es un follow-up).
  */
 export function NotificationsScreen(): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
-  const navigation = useNavigation<Nav>();
   const listNotifications = useDependency(TOKENS.listNotificationsUseCase);
 
   const query = useQuery({
@@ -66,12 +59,10 @@ export function NotificationsScreen(): React.JSX.Element {
   const notifications = query.data ?? [];
 
   if (notifications.length === 0) {
+    // Vacío HONESTO: el feed está conectado al backend; lista vacía = aún no hay avisos (no "próximamente").
     return (
       <SafeScreen>
-        <View style={{ flex: 1, gap: theme.spacing.xl }}>
-          <Banner tone="info" title={t('notifications.comingSoonTitle')} description={t('notifications.comingSoonBody')} />
-          <EmptyState title={t('notifications.empty')} subtitle={t('notifications.emptySubtitle')} />
-        </View>
+        <EmptyState title={t('notifications.empty')} subtitle={t('notifications.emptySubtitle')} />
       </SafeScreen>
     );
   }
@@ -83,7 +74,7 @@ export function NotificationsScreen(): React.JSX.Element {
         showsVerticalScrollIndicator={false}
       >
         {notifications.map((item) => (
-          <NotificationCard key={item.id} notification={item} navigation={navigation} />
+          <NotificationCard key={item.id} notification={item} />
         ))}
         <Text variant="footnote" color="inkSubtle" align="center">
           {t('notifications.end')}
@@ -95,7 +86,6 @@ export function NotificationsScreen(): React.JSX.Element {
 
 interface NotificationCardProps {
   notification: AppNotification;
-  navigation: Nav;
 }
 
 /** Tarjeta de un aviso: círculo con el ícono de su categoría, título, cuerpo y fecha. */

@@ -3,11 +3,13 @@ import { create } from 'zustand';
 import { prefsStore } from '../../../../core/storage/mmkv';
 
 /**
- * Preferencia de método de pago por defecto (Zustand + persistencia en prefs).
+ * Preferencia de método de pago por defecto del pasajero (Zustand + cache MMKV, offline-first).
  *
- * HUECO DE CONTRATO: el public-bff NO expone métodos de pago guardados (solo cobra en
- * `POST /payments/charge`). Los métodos son el enum del contrato (`mobilePaymentMethod`:
- * YAPE/PLIN/CASH/CARD); la SELECCIÓN por defecto es una preferencia local del dispositivo.
+ * FUENTE DE VERDAD: el backend (identity-service, `User.defaultPaymentMethod`), expuesto en el perfil
+ * (`GET/PATCH /users/me`). Al boot, `useProfileCompletion` HIDRATA este store desde el perfil
+ * (`hydrate`); al elegir un default, `setDefault` actualiza MMKV (instantáneo, offline) Y empuja el
+ * cambio al backend best-effort (`backendSync`, cableado en el composition root). MMKV es el cache que
+ * sirve la UI al instante y sobrevive sin red; el backend lo hace sobrevivir reinstalación/multi-dispositivo.
  */
 const KEY = 'payments.defaultMethod';
 /**
@@ -19,7 +21,10 @@ const DEFAULT_METHOD: MobilePaymentMethod = 'YAPE';
 
 interface PaymentPrefsState {
   defaultMethod: MobilePaymentMethod;
+  /** Elige el default (acción del usuario): persiste en MMKV + empuja al backend (best-effort). */
   setDefault: (method: MobilePaymentMethod) => void;
+  /** Hidrata desde el backend (perfil) SIN re-empujar: el valor YA viene del backend (evita el echo). */
+  hydrate: (method: MobilePaymentMethod) => void;
 }
 
 function loadDefault(): MobilePaymentMethod {
@@ -36,9 +41,24 @@ function loadDefault(): MobilePaymentMethod {
   return DEFAULT_METHOD;
 }
 
+/**
+ * Sincronizador al backend, INYECTADO desde el composition root (registry). El store NO depende de la DI
+ * ni de HTTP (DIP): el root le pasa CÓMO persistir al backend. `null` hasta cablearse → sin él `setDefault`
+ * solo persiste local (degradación honesta; p.ej. en tests no se dispara red).
+ */
+let backendSync: ((method: MobilePaymentMethod) => void) | null = null;
+export function setPaymentPrefsBackendSync(fn: (method: MobilePaymentMethod) => void): void {
+  backendSync = fn;
+}
+
 export const usePaymentPrefsStore = create<PaymentPrefsState>((set) => ({
   defaultMethod: loadDefault(),
   setDefault: (method) => {
+    prefsStore.setString(KEY, method);
+    set({ defaultMethod: method });
+    backendSync?.(method);
+  },
+  hydrate: (method) => {
     prefsStore.setString(KEY, method);
     set({ defaultMethod: method });
   },

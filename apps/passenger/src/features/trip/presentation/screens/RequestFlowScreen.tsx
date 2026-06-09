@@ -1,4 +1,4 @@
-import type { DebtView, GeoPoint, MapPoint, OfferView, PlaceSuggestion, TripResource } from '@veo/api-client';
+import type { DebtView, GeoPoint, MapPoint, OfferView, PlaceSuggestion, TripHistoryItem, TripResource } from '@veo/api-client';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import {
   Card,
   IconButton,
   ListItem,
+  RoutePin,
   SearchField,
   Skeleton,
   SosButton,
@@ -28,7 +29,7 @@ import {
   DraggableSheet,
   type DraggableSheetHandle,
 } from '../../../../shared/presentation/components/DraggableSheet';
-import type { RoutePlace } from '../../../maps/domain/entities';
+import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
 import { useNearbyVehicles } from '../../../dispatch/presentation/hooks/useNearbyVehicles';
 import { useAutocomplete } from '../../../maps/presentation/hooks/useAutocomplete';
 import { useRideDraftStore } from '../../../maps/presentation/stores/rideDraftStore';
@@ -39,6 +40,9 @@ import { DebtSheet, useMyDebts } from '../../../payments/presentation';
 import { formatPEN } from '../../../../shared/utils/format';
 import { EnterView } from '../components/motion';
 import { QuotingBody } from '../components/QuotingBody';
+import { usePushPermission } from '../../../notifications/presentation/hooks/usePushPermission';
+import { PushPrePrompt } from '../../../notifications/presentation/components/PushPrePrompt';
+import { useTripHistory } from '../hooks/useTripHistory';
 import { OffersBody } from '../components/OffersBody';
 import { ActiveTripBody } from '../components/ActiveTripBody';
 import { LiveBadge } from '../components/LiveBadge';
@@ -111,6 +115,28 @@ function recentDestinations(trips: TripResource[]): TripResource['destination'][
   return result;
 }
 
+/**
+ * Extrae destinos recientes únicos del HISTORIAL REAL del backend (`GET /trips/history`). El destino del
+ * item es `historyGeoPoint` (lng); convertimos a `GeoPoint` (lon) en el borde. Así las recientes reflejan
+ * tus viajes REALES (sincronizados, no se pierden al reinstalar) en vez del snapshot local.
+ */
+function recentDestinationsFromHistory(items: TripHistoryItem[]): GeoPoint[] {
+  const seen = new Set<string>();
+  const result: GeoPoint[] = [];
+  for (const item of items) {
+    const point: GeoPoint = { lat: item.destination.lat, lon: item.destination.lng };
+    const key = `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(point);
+    }
+    if (result.length >= MAX_RECENTS) {
+      break;
+    }
+  }
+  return result;
+}
+
 /** Convierte un lugar guardado en el `RoutePlace` que consume el borrador. */
 function placeToRoute(place: SavedPlace): RoutePlace {
   return {
@@ -155,6 +181,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   const { point: myLocation, status: locationStatus, retry: retryLocation } = useCurrentLocation();
   const origin = useRideDraftStore((s) => s.origin);
   const destination = useRideDraftStore((s) => s.destination);
+  const waypoints = useRideDraftStore((s) => s.waypoints);
   const setOrigin = useRideDraftStore((s) => s.setOrigin);
   const setDestination = useRideDraftStore((s) => s.setDestination);
   const setEditing = useRideDraftStore((s) => s.setEditing);
@@ -253,8 +280,21 @@ export function RequestFlowScreen(): React.JSX.Element {
   // cameraTarget, …). El vehicleType del conductor NO viene en TripActiveView (solo make/model/plate) →
   // CAR por defecto (decisión del dueño: "si no hay tipo, CAR"). Memoizado por las coords que driftean
   // para no reconstruir el target en cada render del padre.
-  const originGeo = draftToGeo(origin);
-  const destinationGeo = draftToGeo(destination);
+  // Memoizados por el RoutePlace del store (referencia estable salvo que cambien). Se pasan al AppMap
+  // (React.memo): sin memo, un objeto nuevo por render rompía el memo y empujaba props nuevas al GL thread
+  // del mapa en cada keystroke del buscador / cambio de peekHeight. Un solo origen para route y trip mode.
+  const originGeo = useMemo(() => draftToGeo(origin), [origin]);
+  const destinationGeo = useMemo(() => draftToGeo(destination), [destination]);
+  // Paradas intermedias (Ola 2B) para pintarlas en el MAPA del flujo principal (antes solo iban al
+  // RouteQuoteScreen legacy). Filtramos los placeholders vacíos y convertimos lng→lon.
+  const waypointsGeo = useMemo(
+    () =>
+      waypoints
+        .filter(isWaypointSet)
+        .map(draftToGeo)
+        .filter((p): p is GeoPoint => p !== null),
+    [waypoints],
+  );
   const mapDirective = useMemo(
     () =>
       resolveMapDirective({
@@ -311,7 +351,13 @@ export function RequestFlowScreen(): React.JSX.Element {
     staleTime: 5 * 60_000,
   });
 
-  // Siembra el origen del borrador con la ubicación actual etiquetada.
+  // Permiso de push para el PRE-PROMPT contextual: se ofrece cuando ya pediste el viaje y esperás
+  // conductor (ahí el push importa), NO al entrar. Solo si nunca se decidió ('undetermined'). Una vez por
+  // sesión (`pushPrePromptSeen`): "Ahora no" no insiste; el toggle del Perfil queda para activarlo luego.
+  const push = usePushPermission();
+  const [pushPrePromptSeen, setPushPrePromptSeen] = useState(false);
+
+  // Siembra el origen del borrador con la ubicación actual etiquetada (centro INICIAL del mapa).
   useEffect(() => {
     if (!origin && reverseQuery.data) {
       setOrigin({
@@ -322,7 +368,47 @@ export function RequestFlowScreen(): React.JSX.Element {
     }
   }, [origin, reverseQuery.data, setOrigin]);
 
-  const recents = useMemo(() => recentDestinations(history.list()), [history]);
+  // ── MODELO CABIFY · recojo con PIN en el Home ──────────────────────────────────────────────────
+  // En el Home idle el mapa es interactivo y un pin FIJO al centro marca el RECOJO: arrastrás el mapa y el
+  // origen SIGUE al centro (reverse-geocode en vivo). Antes el origen se clavaba al GPS sin forma de
+  // elegir el punto. `pickupMode` = Home idle (no buscando, no en cotización/viaje).
+  const pickupMode = phase === 'idle' && flow !== 'searching';
+  // Centro VIVO que reporta el AppMap al hacer pan (throttle interno 120ms).
+  const [pickupCenter, setPickupCenter] = useState<GeoPoint | null>(null);
+  // Centro INICIAL del mapa idle: se captura UNA vez (GPS) y NO se actualiza → un refresh de GPS no hace
+  // snap-back que deshaga el pan del usuario (mismo patrón que MapPick).
+  const [pickupInitial, setPickupInitial] = useState<GeoPoint | null>(null);
+  useEffect(() => {
+    if (!pickupInitial && myLocation) setPickupInitial(myLocation);
+  }, [pickupInitial, myLocation]);
+  // Debounce del centro → reverse-geocode → el origen sigue al pin. Solo en pickupMode. Degradación
+  // honesta: si el reverse falla (red), se conserva el origen previo (no inventamos una dirección).
+  useEffect(() => {
+    if (!pickupMode || !pickupCenter) return;
+    const id = setTimeout(() => {
+      void reverseGeocode
+        .execute({ lat: pickupCenter.lat, lng: pickupCenter.lon })
+        .then((place) =>
+          setOrigin({
+            point: { lat: pickupCenter.lat, lng: pickupCenter.lon },
+            title: place.title,
+            subtitle: place.subtitle,
+          }),
+        )
+        .catch(() => undefined);
+    }, 350);
+    return () => clearTimeout(id);
+  }, [pickupMode, pickupCenter, reverseGeocode, setOrigin]);
+
+  // RECIENTES desde el BACKEND REAL (`GET /trips/history`, compartido/cacheado con el tab Historial):
+  // tus destinos recientes salen de tus viajes REALES (sincronizados, no se pierden al reinstalar). Si el
+  // backend aún no respondió o no hay historial (offline/primer uso), cae al snapshot local — degradación
+  // honesta, sin pantalla vacía.
+  const tripHistory = useTripHistory();
+  const recents = useMemo(() => {
+    const fromBackend = recentDestinationsFromHistory(tripHistory.items);
+    return fromBackend.length > 0 ? fromBackend : recentDestinations(history.list());
+  }, [tripHistory.items, history]);
 
   // Autocompletado real (debounce + sesgo por ubicación), activo solo cuando hay texto.
   const { suggestions, loading: searchLoading, error: searchError, active } = useAutocomplete(query, myPoint);
@@ -518,7 +604,8 @@ export function RequestFlowScreen(): React.JSX.Element {
         ? t('home.locationServicesOff')
         : locationStatus === 'error'
           ? t('home.locationUnavailable')
-          : reverseQuery.data?.title ??
+          : origin?.title ??
+            reverseQuery.data?.title ??
             (locationStatus === 'locating' ? t('home.locating') : t('home.yourLocation'));
   // La acción del pill: permiso/GPS → abrir Ajustes del sistema; fix fallido → reintentar en el acto.
   const locationActionLabel =
@@ -535,14 +622,22 @@ export function RequestFlowScreen(): React.JSX.Element {
     }
   }, [locationStatus, retryLocation]);
 
+  // Encuadre del mapa memoizado (mismo objeto para route y trip mode): un literal inline se recreaba en
+  // cada render y rompía el React.memo del AppMap. Solo cambia con el safe-area top o el alto del peek.
+  const fitEdgePadding = useMemo(
+    () => ({ top: insets.top + 40, bottom: peekHeight + 16, left: 40, right: 40 }),
+    [insets.top, peekHeight],
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
       {/* MAPA PERSISTENTE ÚNICO: nunca se desmonta; reacciona a la fase (idle=pin / route=ruta / trip=auto). */}
       <View style={StyleSheet.absoluteFill}>
         {mapModeForPhase(phase) === 'route' ? (
           <AppMap
-            origin={draftToGeo(origin)}
-            destination={draftToGeo(destination)}
+            origin={originGeo}
+            destination={destinationGeo}
+            waypoints={waypointsGeo}
             // Ambiente solo en searching (la otra fase 'route' es quoting, donde no van autitos).
             nearbyVehicles={showNearby ? nearbyVehicles : undefined}
             routeCoordinates={routeCoords.length > 1 ? routeCoords : undefined}
@@ -551,7 +646,7 @@ export function RequestFlowScreen(): React.JSX.Element {
             // TOPA ese bottom (CAP duro) para que un sheet alto (ofertas) no aplaste el viewport y aleje la
             // cámara de más. Paddings APRETADOS (40 top/lados, gusto del dueño "más encima"): cierran el
             // encuadre de ruta sin que los pins toquen el borde. Rutas cortas las absorbe FIT_MAX_ZOOM.
-            fitEdgePadding={{ top: insets.top + 40, bottom: peekHeight + 16, left: 40, right: 40 }}
+            fitEdgePadding={fitEdgePadding}
             interactive={false}
           />
         ) : mapModeForPhase(phase) === 'trip' ? (
@@ -561,6 +656,7 @@ export function RequestFlowScreen(): React.JSX.Element {
             // contexto de la ruta (el destino siempre; el origen solo pre-pickup).
             origin={phase === 'inProgress' ? null : originGeo}
             destination={destinationGeo}
+            waypoints={waypointsGeo}
             driver={live.driverLocation ?? null}
             driverHeading={live.driverHeading}
             driverVehicleType="CAR"
@@ -577,7 +673,7 @@ export function RequestFlowScreen(): React.JSX.Element {
             // zoom-ciudad. Con conductor, manda el cameraTarget (director) y este fit se ignora. En
             // 'completed' (cameraTarget null pero sin querer fit de ruta) cae al center sobre mi ubicación.
             fitToRoute={mapDirective.cameraTarget == null && isActiveTrip}
-            fitEdgePadding={{ top: insets.top + 40, bottom: peekHeight + 16, left: 40, right: 40 }}
+            fitEdgePadding={fitEdgePadding}
             // El encuadre lo gobierna el cameraTarget (director) cuando dirige; si no, el fit declarativo.
             // El AppMap TOPA el bottomInset al CAP para el fit dirigido (enRoute conductor+recogida).
             bottomInset={peekHeight + 16}
@@ -585,7 +681,8 @@ export function RequestFlowScreen(): React.JSX.Element {
           />
         ) : (
           <AppMap
-            center={myLocation}
+            center={pickupInitial ?? myLocation}
+            onCenterChange={pickupMode ? setPickupCenter : undefined}
             userPoint={myLocation}
             nearbyVehicles={nearbyVehicles}
             interactive
@@ -593,6 +690,14 @@ export function RequestFlowScreen(): React.JSX.Element {
           />
         )}
       </View>
+
+      {/* MODELO CABIFY · pin FIJO al centro = punto de RECOJO (solo Home idle). No intercepta gestos
+          (pointerEvents none) → el mapa se arrastra DEBAJO; el origen sigue al centro vía onCenterChange. */}
+      {pickupMode ? (
+        <View style={styles.pickupPinLayer} pointerEvents="none">
+          <RoutePin variant="origin" size={22} />
+        </View>
+      ) : null}
 
       {/* Chrome superior del HOME (pill de ubicación + campana + avatar). Oculta durante el viaje activo. */}
       {!isActiveTrip ? (
@@ -766,6 +871,7 @@ export function RequestFlowScreen(): React.JSX.Element {
                 onActiveTripExists={setActiveTripId}
                 onRouteChange={setRouteCoords}
                 requestAgainToken={requestAgainToken}
+                kycStatus={profileQuery.data?.kycStatus ?? null}
               />
             ) : phase === 'searching' || phase === 'offers' ? (
               <OffersBody
@@ -861,6 +967,17 @@ export function RequestFlowScreen(): React.JSX.Element {
         pendingActionPaymentId={pendingActionPaymentId}
         onClose={closeDebtSheet}
         onSettled={onDebtSettled}
+      />
+
+      {/* Pre-prompt CONTEXTUAL de notificaciones: al estar BUSCANDO conductor (ahí el push importa) y solo
+          si el permiso nunca se decidió ('undetermined'). Una vez por sesión; "Ahora no" no insiste. */}
+      <PushPrePrompt
+        visible={phase === 'searching' && push.status === 'undetermined' && !pushPrePromptSeen}
+        onDismiss={() => setPushPrePromptSeen(true)}
+        onEnable={() => {
+          setPushPrePromptSeen(true);
+          void push.enable();
+        }}
       />
     </View>
   );
@@ -1197,6 +1314,9 @@ function SearchingBody({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // Capa del pin de recojo (modelo Cabify): centra el pin en el centro GEOMÉTRICO del mapa — que es lo que
+  // reporta onCenterChange — sobre el mapa y bajo el chrome. No intercepta gestos (pointerEvents none).
+  pickupPinLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   topRow: {
     position: 'absolute',
     left: 12,

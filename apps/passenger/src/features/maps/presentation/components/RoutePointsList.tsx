@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { MAX_WAYPOINTS, type RoutePlace } from '../../domain/entities';
 import { IconClose } from '../../../trip/presentation/components/icons';
+import { IconPencil } from '../../../auth/presentation/components/icons';
 
 export interface RoutePointsListProps {
   origin: RoutePlace | null;
@@ -44,6 +45,7 @@ export function RoutePointsList({
         muted={!origin}
         showConnector
         onPress={onEditOrigin}
+        trailing={<IconPencil color={theme.colors.inkSubtle} size={16} />}
       />
 
       {waypoints.map((stop, index) => (
@@ -71,6 +73,7 @@ export function RoutePointsList({
         label={destination?.title ?? t('waypoints.destination')}
         muted={!destination}
         onPress={onEditDestination}
+        trailing={<IconPencil color={theme.colors.inkSubtle} size={16} />}
       />
 
       {canAdd ? (

@@ -40,9 +40,9 @@ import {
   TripActiveScreen,
   TripHistoryScreen,
 } from '../features/trip/presentation';
-import { RouteQuoteScreen, SearchScreen } from '../features/maps/presentation';
+import { MapPickScreen, RouteQuoteScreen, SearchScreen } from '../features/maps/presentation';
 import { useSessionStore } from '../core/session/sessionStore';
-import { initMessaging } from '../services/messaging';
+import { syncPushRegistration } from '../services/messaging';
 import { IconTabHome, IconTabTrips, IconTabUser } from './components/TabBarIcons';
 import { SplashGate } from './components/SplashGate';
 import type { MainTabParamList, RootStackParamList } from './types';
@@ -122,15 +122,16 @@ export function RootNavigator(): React.JSX.Element {
   // de un flag global (que atrapaba a sesiones existentes). 'loading' mientras se resuelve.
   const profileCompletion = useProfileCompletion();
 
-  // Registro de push (FCM/APNs) una vez que la sesión está activa y desbloqueada. Cubre tanto el
-  // login fresco como el cold-start con sesión rehidratada. Best-effort y gateado por
-  // FIREBASE_ENABLED dentro de initMessaging; no bloquea ni tumba la navegación.
+  // SINCRONIZACIÓN de push una vez que la sesión está activa y desbloqueada: registra el token SOLO si
+  // el permiso YA estaba concedido (NO promptea — el permiso se pide PROGRESIVO: pre-prompt contextual
+  // al pedir viaje + toggle del perfil). Cubre login fresco y cold-start. Best-effort, gateado por
+  // FIREBASE_ENABLED; no bloquea ni tumba la navegación. Quien ya aceptó sigue recibiendo push.
   const pushRegistered = React.useRef(false);
   React.useEffect(() => {
     const active = status === 'authenticated' && !biometricLocked;
     if (active && !pushRegistered.current) {
       pushRegistered.current = true;
-      void initMessaging();
+      void syncPushRegistration();
     } else if (!active) {
       // Sesión cerrada/bloqueada: permite re-registrar en el próximo login.
       pushRegistered.current = false;
@@ -222,6 +223,11 @@ export function RootNavigator(): React.JSX.Element {
         name="RouteQuote"
         component={RouteQuoteScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MapPick"
+        component={MapPickScreen}
+        options={{ headerShown: false, animation: 'slide_from_bottom' }}
       />
       <Stack.Screen
         name="OffersBoard"

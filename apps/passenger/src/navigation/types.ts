@@ -30,6 +30,8 @@ export type RootStackParamList = {
    *    `RouteQuote`. Es el default a propósito para no romper esos callers.
    */
   Search: { flow?: 'sheet' | 'quote' } | undefined;
+  /** Elegir un punto (recojo/destino/parada) arrastrando el mapa bajo un pin fijo. Aplica al `editing`. */
+  MapPick: undefined;
   RouteQuote: undefined;
   /** PUJA · board de ofertas en vivo tras crear la puja (ADR 010). */
   OffersBoard: { tripId: string };
