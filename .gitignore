@@ -117,6 +117,3 @@ temp/
 
 # Fastlane / Ruby gems vendoreados (bundle install --path vendor) — deps, no se commitean
 apps/*/vendor/
-
-# Trazabilidad local (SQLite .db + artefactos de la herramienta) — binario local, no al repo
-.trazabilidad/
