@@ -108,12 +108,19 @@ export const driverSummary = z.object({
 });
 export type DriverSummary = z.infer<typeof driverSummary>;
 
+/**
+ * Estado de un documento de flota. Espeja `FleetDocumentStatus` de fleet-service (enum Prisma) y
+ * @veo/shared-types. Tiparlo (no `z.string()`) hace que comparar contra un literal fuera del set sea
+ * error de compilación, no un magic string mudo (ej. el tab muerto `PENDING` vs `PENDING_REVIEW`).
+ */
+export const fleetDocumentStatus = z.enum(['PENDING_REVIEW', 'VALID', 'EXPIRING_SOON', 'EXPIRED', 'REJECTED']);
+
 export const fleetDocumentView = z.object({
   id: z.string(),
   ownerType: z.enum(['DRIVER', 'VEHICLE']),
   ownerId: z.string(),
   type: z.string(),
-  status: z.string(),
+  status: fleetDocumentStatus,
   expiresAt: z.string().nullable(),
 });
 export type FleetDocumentView = z.infer<typeof fleetDocumentView>;

@@ -14,7 +14,7 @@ import { MarkerGlyph, type MarkerKind } from './internal/MarkerGlyph';
 export type RoutePinVariant = MarkerKind;
 
 export interface RoutePinProps {
-  /** `origin` = anillo · `destination` = punto sólido · `user` = punto de ubicación. */
+  /** `origin` = anillo · `destination` = punto sólido · `user` = ubicación · `stop` = parada intermedia. */
   variant?: RoutePinVariant;
   size?: number;
   /** Halo pulsante (sólo tiene sentido para `user`/"en vivo"). Respeta reduce-motion. */

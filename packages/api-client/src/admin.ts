@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { geoPoint, tripStatus, tripSummary, driverSummary } from './types.js';
+import { pricingMode } from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
 
@@ -124,6 +125,86 @@ export const driverApproval = driverSummary.extend({
 });
 export type DriverApproval = z.infer<typeof driverApproval>;
 
+/* ── Operadores del panel (staff): alta + asignación de roles RBAC (solo ADMIN/SUPERADMIN) ── */
+
+/**
+ * Roles RBAC asignables a un operador del panel admin. Espejo del enum `AdminRole` de @veo/shared-types
+ * (fuente de verdad server-side). Se define acá como enum del CONTRATO para que admin-web tipe el selector
+ * sin importar shared-types en el cliente. El admin-bff revalida `@Roles(...)` server-side (la UI no autoriza).
+ */
+export const adminRole = z.enum([
+  'SUPPORT_L1',
+  'SUPPORT_L2',
+  'COMPLIANCE_SUPERVISOR',
+  'DISPATCHER',
+  'FINANCE',
+  'ADMIN',
+  'SUPERADMIN',
+]);
+export type AdminRoleValue = z.infer<typeof adminRole>;
+
+/** Conductor pendiente de aprobación de antecedentes (GET /ops/drivers/pending → identity pending-approval). */
+export const pendingDriver = z.object({
+  id: z.string(),
+  userId: z.string(),
+  licenseNumber: z.string().nullable(),
+});
+export type PendingDriver = z.infer<typeof pendingDriver>;
+
+/** Operador pendiente de aprobación (lo que devuelve GET /ops/operators/pending). */
+export const pendingOperator = z.object({
+  id: z.string(),
+  email: z.string(),
+  createdAt: z.string(),
+});
+export type PendingOperator = z.infer<typeof pendingOperator>;
+
+/** Resultado de aprobar un operador: queda activo con los roles asignados. */
+export const operatorApproval = z.object({
+  id: z.string(),
+  status: z.string(),
+  roles: z.array(adminRole),
+});
+export type OperatorApproval = z.infer<typeof operatorApproval>;
+
+/* ── Pricing: modo de despacho PUJA↔FIJO (schedule global · ADR 011) ── */
+/* `pricingMode` ('PUJA'|'FIXED') se reutiliza de ./mobile (fuente única del enum), no se redefine. */
+
+/** Una regla horaria del schedule: día (bitmask Lun=1..Dom=64) + rango en minutos del día (Lima) → modo. */
+export const pricingModeRule = z.object({
+  dayMask: z.number().int().min(1).max(127),
+  startMinute: z.number().int().min(0).max(1439),
+  endMinute: z.number().int().min(0).max(1439),
+  mode: pricingMode,
+});
+export type PricingModeRule = z.infer<typeof pricingModeRule>;
+
+/** Schedule vigente (GET /pricing/mode-schedule): default + reglas + versión. */
+export const modeScheduleView = z.object({
+  version: z.number().int(),
+  defaultMode: pricingMode,
+  rules: z.array(pricingModeRule),
+  updatedAt: z.string().nullable(),
+});
+export type ModeScheduleView = z.infer<typeof modeScheduleView>;
+
+/** Body del PUT /pricing/mode-schedule: REEMPLAZA wholesale (default + reglas). */
+export const replaceScheduleRequest = z.object({
+  defaultMode: pricingMode,
+  rules: z.array(pricingModeRule),
+});
+export type ReplaceScheduleRequest = z.infer<typeof replaceScheduleRequest>;
+
+/* ── Finanzas: resultado del batch de liquidaciones (POST /finance/payouts/run) ── */
+export const runPayoutsResult = z.object({
+  periodStart: z.string(),
+  periodEnd: z.string(),
+  processed: z.number().int(),
+  held: z.number().int(),
+  totalAmountCents: z.number().int(),
+});
+export type RunPayoutsResult = z.infer<typeof runPayoutsResult>;
+
 /* ── Flota: vehículos, inspecciones, vencimientos ── */
 export const vehicleView = z.object({
   id: z.string(),
@@ -147,6 +228,42 @@ export const inspectionView = z.object({
   result: z.string().nullable(),
 });
 export type InspectionView = z.infer<typeof inspectionView>;
+
+/* ── Flota: requests de alta (admin) ── */
+/** Alta de vehículo por el operador. `year` acotado; el fleet-service revalida BR-D04 (año mínimo + placa). */
+export const createVehicleRequest = z.object({
+  plate: z.string().min(1),
+  make: z.string().min(1),
+  model: z.string().min(1),
+  year: z.number().int().min(1950).max(2100),
+  color: z.string().min(1),
+  fleetId: z.string().optional(),
+  insuranceExpiresAt: z.string().optional(),
+  active: z.boolean().optional(),
+});
+export type CreateVehicleRequest = z.infer<typeof createVehicleRequest>;
+
+/** Alta de documento (conductor/vehículo). Entra PENDING_REVIEW hasta que el operador lo valide. */
+export const createDocumentRequest = z.object({
+  ownerType: z.enum(['DRIVER', 'VEHICLE']),
+  ownerId: z.string().min(1),
+  type: z.string().min(1),
+  documentNumber: z.string().min(1),
+  issuedAt: z.string().optional(),
+  expiresAt: z.string().optional(),
+  fileS3Key: z.string().optional(),
+});
+export type CreateDocumentRequest = z.infer<typeof createDocumentRequest>;
+
+/** Registro de una inspección técnica (ITV) ya realizada. El fleet-service calcula el próximo vencimiento. */
+export const createInspectionRequest = z.object({
+  vehicleId: z.string().min(1),
+  passed: z.boolean(),
+  inspectedAt: z.string().optional(),
+  inspectorId: z.string().optional(),
+  notes: z.string().optional(),
+});
+export type CreateInspectionRequest = z.infer<typeof createInspectionRequest>;
 
 export const expiringDocumentView = z.object({
   id: z.string(),
@@ -178,6 +295,23 @@ export const signedMedia = z.object({
   watermark: z.string(),
 });
 export type SignedMedia = z.infer<typeof signedMedia>;
+
+/* ── Media EN VIVO: muro de cámaras (token solo-suscripción · doble-auth rol+MFA · auditado) ── */
+/** Body del POST /media/live/token: viaje + motivo (> 20 chars). La identidad del operador la deriva el bff. */
+export const liveAccessRequest = z.object({
+  tripId: z.string(),
+  reason: z.string().min(21, 'El motivo debe tener más de 20 caracteres'),
+});
+export type LiveAccessRequest = z.infer<typeof liveAccessRequest>;
+
+/** Credenciales LiveKit solo-suscripción para mirar la cabina en vivo de un viaje en curso. */
+export const liveViewerToken = z.object({
+  roomName: z.string(),
+  token: z.string(),
+  url: z.string(),
+  expiresInSeconds: z.number().int(),
+});
+export type LiveViewerToken = z.infer<typeof liveViewerToken>;
 
 /* ── Auditoría: verificación de cadena hash ── */
 export const auditChainVerification = z.object({

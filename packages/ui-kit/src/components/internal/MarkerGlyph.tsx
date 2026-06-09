@@ -1,7 +1,7 @@
 import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 
-export type MarkerKind = 'origin' | 'destination' | 'user';
+export type MarkerKind = 'origin' | 'destination' | 'user' | 'stop';
 
 export interface MarkerGlyphProps {
   kind?: MarkerKind;
@@ -12,8 +12,9 @@ export interface MarkerGlyphProps {
 
 /**
  * Glifo de marcador de ubicación (puramente visual, sin lógica de mapa). Lima de marca:
- * `origin` = anillo hueco, `destination` = punto sólido con núcleo oscuro, `user` = punto con
- * halo. Lo consumen SearchField, OriginDestinationField y RoutePin para mantener un único
+ * `origin` = anillo hueco, `destination` = punto sólido con núcleo cuadrado (fin), `user` = punto con
+ * halo, `stop` = bead sólido con núcleo REDONDO (parada intermedia/Ola 2B · "punto de paso", subordinado
+ * al destino). Lo consumen SearchField, OriginDestinationField y RoutePin para mantener un único
  * lenguaje de "punto lima".
  */
 export function MarkerGlyph({ kind = 'origin', size = 14, style }: MarkerGlyphProps) {
@@ -43,6 +44,23 @@ export function MarkerGlyph({ kind = 'origin', size = 14, style }: MarkerGlyphPr
         ]}
       >
         <View style={{ width: core, height: core, borderRadius: 2, backgroundColor: theme.colors.bg }} />
+      </View>
+    );
+  }
+
+  if (kind === 'stop') {
+    // Parada intermedia (Ola 2B): bead sólido lima con núcleo REDONDO del lienzo → "punto de paso".
+    // Se distingue del destino (núcleo cuadrado = fin) y se pinta más chico en el mapa.
+    const core = Math.round(size * 0.4);
+    return (
+      <View
+        style={[
+          styles.center,
+          { width: size, height: size, borderRadius: size / 2, backgroundColor: brand },
+          style,
+        ]}
+      >
+        <View style={{ width: core, height: core, borderRadius: core / 2, backgroundColor: theme.colors.bg }} />
       </View>
     );
   }

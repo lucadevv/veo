@@ -60,6 +60,9 @@ export const tripRequested = z.object({
   /// Ola 2B · viaje programado: marca que el viaje se activó desde el scheduler (reserva). dispatch
   /// puede incluirlo en la oferta como "reservado". Opcional.
   scheduled: z.boolean().optional(),
+  /// Ola 2B · paradas intermedias ORDENADAS (máx 3). dispatch las recibe en el riel de eventos (no por
+  /// join cross-servicio) para poder contemplarlas en el matching/oferta. Omitible por compat N-2 (= []).
+  waypoints: z.array(geo).max(3).optional(),
 });
 export const tripAssigned = z.object({ tripId: z.string(), driverId: z.string(), vehicleId: z.string() });
 /// `passengerId` ENRIQUECIDO (opcional, compat N-2): trip-service lo añade al outbox para que
@@ -144,7 +147,22 @@ export const tripPiiErased = z.object({
 
 /* ── dispatch ── (BR-T06) */
 export const dispatchMatchFound = z.object({ tripId: z.string(), driverId: z.string(), vehicleId: z.string().optional(), scoreMs: z.number() });
-export const dispatchOffered = z.object({ tripId: z.string(), driverId: z.string(), matchId: z.string(), expiresAt: z.string() });
+// `dispatch.offered` lo COMPARTEN dos flujos: el matcher FIXED (ofrece UN viaje concreto a un conductor) y
+// el broadcast de PUJA (`offer-board.broadcast` difunde una puja abierta a los elegibles). Los campos de puja
+// van OPCIONALES porque el camino FIXED emite SIN ellos; el conductor branchea por presencia de `bidCents`
+// (presente ⇒ tarjeta de PUJA contraofertable; ausente ⇒ oferta FIXED a aceptar/rechazar). Mismos nombres que
+// `OpenBidView` (GET /bids) — ambos derivan del MISMO OfferBoard, así el evento y el REST no divergen.
+export const dispatchOffered = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  matchId: z.string(),
+  expiresAt: z.string(),
+  bidCents: z.number().int().positive().optional(),
+  vehicleType: z.string().optional(),
+  originLat: z.number().optional(),
+  originLon: z.number().optional(),
+  specialRequests: z.array(z.string()).optional(),
+});
 
 /* ── PUJA / negociación (ADR 010 §4) ── (Lote A: contratos)
  * Marketplace "proponé tu precio": el pasajero pone un bid (puja abierta), los conductores elegibles
@@ -174,6 +192,9 @@ export const tripBidPosted = z.object({
   /// el pasajero NO está en la app, así que notification-service le manda un push con deep-link al board.
   /// `false`/ausente en la puja inmediata o el rebid (el pasajero ya está mirando el board). Compat N-2.
   scheduled: z.boolean().optional(),
+  /// Ola 2B · paradas intermedias ORDENADAS (máx 3). dispatch las recibe acá para el board/oferta sin
+  /// join cross-servicio. Omitible por compat N-2 (= []).
+  waypoints: z.array(geo).max(3).optional(),
 });
 /// dispatch → public-bff (pasajero). La respuesta de UN conductor elegible a un board. `kind` consolida
 /// ambos casos del diseño: ACCEPT_PRICE (acepta el `bidCents` tal cual ⇒ `priceCents` == bid) y COUNTER

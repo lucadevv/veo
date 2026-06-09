@@ -281,6 +281,12 @@ export const passengerProfile = z.object({
    */
   documentType: documentType.nullable(),
   document: z.string().nullable(),
+  /**
+   * Método de pago por defecto del pasajero (preferencia de UI: siembra el selector al pedir viaje).
+   * Vive en el backend (identity-service) → sobrevive reinstalación y multi-dispositivo. `null` si nunca
+   * lo eligió: la app cae a su default local.
+   */
+  defaultPaymentMethod: mobilePaymentMethod.nullable(),
 });
 export type PassengerProfile = z.infer<typeof passengerProfile>;
 
@@ -296,6 +302,8 @@ export const updatePassengerProfile = z.object({
    */
   documentType: documentType.optional(),
   document: z.string().min(6).max(20).optional(),
+  /** Método de pago por defecto del pasajero (se asciende al marcar "recordar como predeterminado"). */
+  defaultPaymentMethod: mobilePaymentMethod.optional(),
 });
 export type UpdatePassengerProfile = z.infer<typeof updatePassengerProfile>;
 
@@ -749,6 +757,8 @@ export type ScheduledTripList = z.infer<typeof scheduledTripList>;
 
 export const tripDriverView = z.object({
   id: z.string(),
+  /** Nombre visible del conductor (SEGURIDAD: confirmar a quién se sube); null si aún no lo tiene. */
+  name: z.string().nullable(),
   status: z.string(),
   backgroundCheckStatus: z.string(),
   rating: z.number().nullable(),
@@ -919,6 +929,48 @@ export function getTripHistory(
   });
 }
 
+/**
+ * Bandeja de notificaciones in-app del pasajero. La notificación llega YA RENDERIZADA por el
+ * notification-service (título + cuerpo interpolados desde la plantilla i18n) y categorizada: el
+ * cliente NUNCA ve la key interna del template, solo su `category` (para ícono/tono). Sin estado
+ * leído/no-leído por ahora (MVP cronológico — el `read_at` real es un follow-up).
+ */
+export const notificationCategory = z.enum(['trip', 'safety', 'payment', 'promo', 'general']);
+export type NotificationCategory = z.infer<typeof notificationCategory>;
+
+export const appNotification = z.object({
+  id: z.string(),
+  /** Familia del aviso: define ícono/tono en la app. */
+  category: notificationCategory,
+  /** Título ya renderizado. */
+  title: z.string(),
+  /** Cuerpo ya renderizado. */
+  body: z.string(),
+  /** ISO-8601 de emisión (orden DESC por este campo). */
+  createdAt: z.string(),
+});
+export type AppNotification = z.infer<typeof appNotification>;
+
+/** Opciones de `getNotifications`: tamaño de página (el servidor lo acota a 1..100). */
+export interface NotificationsQuery {
+  limit?: number;
+}
+
+/**
+ * GET /notifications → bandeja in-app del pasajero (SUS notificaciones PUSH renderizadas, recientes
+ * primero). El recipientId lo deriva el BFF del JWT (el cliente NO lo manda: anti-IDOR). Valida la
+ * respuesta con `appNotification`.
+ */
+export function getNotifications(
+  http: { get<T>(path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; schema?: z.ZodType<T> }): Promise<T> },
+  query: NotificationsQuery = {},
+): Promise<AppNotification[]> {
+  return http.get<AppNotification[]>('/notifications', {
+    query: { limit: query.limit },
+    schema: z.array(appNotification),
+  });
+}
+
 /** POST /trips/:id/cancel → body. */
 export const cancelTripRequest = z.object({ reason: z.string().optional() });
 export type CancelTripRequest = z.infer<typeof cancelTripRequest>;
@@ -1026,12 +1078,19 @@ export const addTipRequest = z.object({
 });
 export type AddTipRequest = z.infer<typeof addTipRequest>;
 
+/**
+ * Estado de un pago. Espeja `PaymentStatus` de @veo/shared-types (el public-bff lo pasa 1:1 desde
+ * payment-service). Tiparlo (no `z.string()`) evita comparar contra un literal inexistente: el estado
+ * "pagado" es CAPTURED, NUNCA 'PAID' (PaymentStatus no tiene 'PAID').
+ */
+export const paymentStatus = z.enum(['PENDING', 'CAPTURED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'DEBT']);
+
 /** Vista de pago del pasajero (POST /payments/charge, GET /payments/:id, cash/confirm, POST /trips/:id/tip). */
 export const paymentView = z.object({
   id: z.string(),
   tripId: z.string(),
   method: z.string(),
-  status: z.string(),
+  status: paymentStatus,
   amountCents: z.number().int(),
   grossCents: z.number().int(),
   /** Propina acumulada del viaje (100% al conductor, fuera de comisión). */
@@ -1657,6 +1716,50 @@ export const driverOfferView = z.object({
 });
 export type DriverOfferView = z.infer<typeof driverOfferView>;
 
+/* ── PUJA · lado conductor (ADR 010 §6) ──
+ * Marketplace "proponé tu precio" visto desde el conductor: ve las pujas OPEN cercanas que PUEDE ofertar y
+ * responde aceptando el precio o contraofertando. El `driverId` NUNCA viaja del cliente: lo deriva el
+ * driver-bff de la identidad autenticada (anti-IDOR). El gate de elegibilidad se enforce downstream.
+ */
+
+/**
+ * GET /bids → una puja OPEN cercana que el conductor elegible puede ofertar. `expiresAt` = epoch(ms) del
+ * vencimiento de la ventana (para el countdown). Espeja `OpenBidView` del driver-bff y el enrich de
+ * `dispatch.offered`.
+ */
+export const openBidView = z.object({
+  tripId: z.string(),
+  bidCents: z.number().int(),
+  vehicleType: z.string(),
+  expiresAt: z.number(),
+  originLat: z.number(),
+  originLon: z.number(),
+  /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla). */
+  specialRequests: z.array(z.string()),
+});
+export type OpenBidView = z.infer<typeof openBidView>;
+
+/**
+ * POST /bids/:tripId/offer → body. `ACCEPT_PRICE` debe IGUALAR el bid; `COUNTER` debe ser mayor al bid (y
+ * ≤ techo). Las reglas de precio las valida dispatch downstream; la UI clampa para no mandar inválidos.
+ */
+export const submitOfferRequest = z.object({
+  kind: z.enum(['ACCEPT_PRICE', 'COUNTER']),
+  priceCents: z.number().int().positive(),
+});
+export type SubmitOfferRequest = z.infer<typeof submitOfferRequest>;
+
+/** POST /bids/:tripId/offer → respuesta: la oferta que el conductor acaba de enviar (estado PENDING). */
+export const submittedOfferView = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  kind: z.string(),
+  priceCents: z.number().int(),
+  etaSeconds: z.number().int(),
+  status: z.string(),
+});
+export type SubmittedOfferView = z.infer<typeof submittedOfferView>;
+
 /* ── Viaje activo (lado conductor) ── */
 
 /** GET /trips/:id → viaje (lado conductor). `status` crudo del downstream. */
@@ -1757,6 +1860,10 @@ export const tripRoute = z.object({
   distanceMeters: z.number().int(),
   durationSeconds: z.number().int(),
   steps: z.array(routeStep),
+  /** Recojo (origen), destino y paradas intermedias ORDENADAS (Ola 2B) para pintar los markers del mapa. */
+  origin: geoPoint,
+  destination: geoPoint,
+  waypoints: z.array(geoPoint),
 });
 export type TripRoute = z.infer<typeof tripRoute>;
 
@@ -1824,6 +1931,13 @@ export type DriverIncentiveList = z.infer<typeof driverIncentiveList>;
 
 /* ── Ganancias / payouts ── */
 
+/**
+ * Estado de una liquidación (payout). Espeja `PayoutStatus` de @veo/shared-types. Tiparlo como enum
+ * (no `z.string()`) hace que cualquier comparación contra un literal fuera de este set sea error de
+ * compilación, no un bug mudo (ej. la UI esperaba `'PAID'`, el back emite `'PROCESSED'`).
+ */
+export const payoutStatus = z.enum(['PENDING', 'PROCESSING', 'PROCESSED', 'HELD', 'FAILED']);
+
 /** Liquidación (payout) del conductor (espeja el modelo Payout de payment-service). */
 export const driverPayoutView = z.object({
   id: z.string(),
@@ -1834,7 +1948,7 @@ export const driverPayoutView = z.object({
   commissionCents: z.number().int(),
   amountCents: z.number().int(),
   currency: z.string(),
-  status: z.string(),
+  status: payoutStatus,
   processedAt: z.string().nullable(),
   heldReason: z.string().nullable(),
   createdAt: z.string(),
@@ -2093,12 +2207,23 @@ export interface DriverEventEnvelope<T> {
   payload: T;
 }
 
-/** Oferta directa (dispatch.offered): el conductor debe aceptar/rechazar antes de `expiresAt`. */
+/**
+ * Oferta directa (dispatch.offered): el conductor debe aceptar/rechazar antes de `expiresAt`.
+ * Enriquecido SOLO en el broadcast de PUJA (ADR 010 §6): la PRESENCIA de `bidCents` distingue una puja
+ * abierta (contraofertable) de una oferta FIXED (la actual, a aceptar/rechazar). El matcher FIXED emite sin
+ * estos campos. Mismos nombres que `OpenBidView` (GET /bids) — el conductor puede pintar la tarjeta sin
+ * refetch, y si quiere el detalle/lista completa cae a `GET /bids`.
+ */
 export interface DispatchOfferedPayload {
   tripId: string;
   driverId: string;
   matchId: string;
   expiresAt: string;
+  bidCents?: number;
+  vehicleType?: string;
+  originLat?: number;
+  originLon?: number;
+  specialRequests?: string[];
 }
 
 /** Match encontrado (dispatch.match_found). */
