@@ -320,8 +320,12 @@ export class PaymentsService {
   private async captureSuccess(payment: Payment, externalRef: string | null, attempts: number): Promise<Payment> {
     assertPaymentTransition(payment.status, 'CAPTURED');
     return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
+      // CAS atómico: el estado va en el WHERE. Dos entregas del webhook procesadas EN PARALELO leen
+      // ambas PENDING (TOCTOU en applyWebhookResult: read en 688 + check en 696); solo la que matchea
+      // PENDING→CAPTURED emite payment.captured y colecta la penalidad. La perdedora ve count=0 →
+      // devuelve el pago ya capturado SIN duplicar el evento (espeja el guard de collectPenaltyInTx).
+      const { count } = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
         data: {
           status: 'CAPTURED',
           externalRef,
@@ -330,6 +334,8 @@ export class PaymentsService {
           failureReason: null,
         },
       });
+      const updated = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+      if (count === 0) return updated; // otra entrega ya capturó: no re-emitir ni re-colectar
       const envelope = createEnvelope({
         eventType: 'payment.captured',
         producer: 'payment-service',
@@ -871,24 +877,30 @@ export class PaymentsService {
   private async captureCash(payment: Payment): Promise<void> {
     assertPaymentTransition(payment.status, 'CAPTURED');
     await this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
+      // CAS atómico: el estado va en el WHERE. Dos confirmaciones bilaterales concurrentes
+      // (driver+passenger en la misma ventana de ms) leen ambas PENDING; solo la que matchea
+      // PENDING→CAPTURED gana → un único payment.captured (sin push duplicado). El check en
+      // confirmCash es TOCTOU contra el read stale; este CAS cierra la ventana.
+      const { count } = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
         data: { status: 'CAPTURED', capturedAt: new Date(), externalRef: `cash:${payment.tripId}` },
       });
+      if (count === 0) return; // otra captura concurrente ya ganó: no re-emitir
       const envelope = createEnvelope({
         eventType: 'payment.captured',
         producer: 'payment-service',
         payload: {
-          paymentId: updated.id,
-          tripId: updated.tripId,
-          method: updated.method,
-          grossCents: updated.grossCents,
-          commissionCents: updated.commissionCents,
+          // Campos inmutables post-create → tomar del payment leído es correcto (updateMany no retorna fila).
+          paymentId: payment.id,
+          tripId: payment.tripId,
+          method: payment.method,
+          grossCents: payment.grossCents,
+          commissionCents: payment.commissionCents,
           // ENRIQUECIDO: push "pago confirmado · S/X.XX" al pasajero (notification-service).
-          passengerId: updated.passengerId ?? undefined,
+          passengerId: payment.passengerId ?? undefined,
         },
       });
-      await enqueueOutbox(tx, envelope, updated.id);
+      await enqueueOutbox(tx, envelope, payment.id);
     });
   }
 
