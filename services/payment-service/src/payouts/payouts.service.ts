@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { aggregatePayouts, periodLabel, type DriverEarningRow } from './payout.policy';
+import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
@@ -27,6 +28,18 @@ export interface PayoutRunSummary {
   processed: number;
   held: number;
   totalAmountCents: number;
+}
+
+/** Página con cursor (id uuidv7) para el listado admin de payouts. */
+export interface PayoutPage {
+  items: Payout[];
+  nextCursor: string | null;
+}
+const PAYOUTS_DEFAULT_LIMIT = 25;
+const PAYOUTS_MAX_LIMIT = 100;
+function clampPayoutLimit(limit?: number): number {
+  if (limit === undefined || !Number.isFinite(limit)) return PAYOUTS_DEFAULT_LIMIT;
+  return Math.min(Math.max(Math.trunc(limit), 1), PAYOUTS_MAX_LIMIT);
 }
 
 @Injectable()
@@ -132,6 +145,26 @@ export class PayoutsService {
       where: { driverId },
       orderBy: { periodStart: 'desc' },
     });
+  }
+
+  /**
+   * Listado paginado de TODOS los payouts para el operador (admin/finance), filtrable por estado.
+   * Paginación cursor por id (uuidv7 ⇒ orden temporal estable). Separado de listByDriver (anti-IDOR
+   * del conductor): este lo gatea el controller con RBAC FINANCE/ADMIN, no es por-dueño.
+   */
+  async listAll(opts: { status?: PayoutStatus; cursor?: string; limit?: number }): Promise<PayoutPage> {
+    const limit = clampPayoutLimit(opts.limit);
+    const where: Prisma.PayoutWhereInput = {};
+    if (opts.status) where.status = opts.status;
+    if (opts.cursor) where.id = { lt: opts.cursor };
+    const rows = await this.prisma.read.payout.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
   }
 
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */

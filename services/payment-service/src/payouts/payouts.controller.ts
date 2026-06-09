@@ -10,8 +10,8 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { assertDriverOwnsResource } from '@veo/auth';
 import { ValidationError } from '@veo/utils';
-import { PayoutsService, previousWeek } from './payouts.service';
-import { RunPayoutsDto, ListPayoutsQueryDto } from './dto/payouts.dto';
+import { PayoutsService, previousWeek, type PayoutPage } from './payouts.service';
+import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
 
 @ApiTags('payouts')
 @ApiBearerAuth()
@@ -29,6 +29,15 @@ export class PayoutsController {
     // Identidades no-conductor (admin/finance vía admin-bff) pasan por su propio RBAC.
     assertDriverOwnsResource(user, query.driverId);
     return this.payouts.listByDriver(query.driverId);
+  }
+
+  // ── Listado admin de TODOS los payouts (paginado, por estado). RBAC finanzas/admin (no por-dueño). ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('all')
+  @ApiOperation({ summary: 'Listar todos los payouts (paginado, filtro por estado) — FINANCE/ADMIN' })
+  listAll(@Query() query: ListAllPayoutsQueryDto): Promise<PayoutPage> {
+    return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
   }
 
   // ── Disparo manual (BR-P05): rol FINANCE. Step-up MFA si el total supera S/5000 (validado en el servicio). ──
