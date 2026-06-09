@@ -1,11 +1,12 @@
 import {useEffect} from 'react';
 import {useQueryClient} from '@tanstack/react-query';
-import {navigateToIncoming} from '../../../navigation/navigationRef';
+import {navigateToBids, navigateToIncoming} from '../../../navigation/navigationRef';
 import {useDi} from '../../../core/di/useDi';
 import {SHIFT_STATE_QUERY_KEY} from '../../shift/presentation/hooks/useShift';
 import {useShiftState} from '../../shift/presentation/hooks/useShift';
 import {isOnShift} from '../../shift/domain';
 import {TRIP_QUERY_PREFIX} from '../../trips/presentation/hooks/useTrips';
+import {BIDS_QUERY_KEY} from '../../bidding/presentation';
 import {useChatStore} from '../../chat/presentation';
 import {useDriverRealtime} from './hooks/useDriverRealtime';
 import {useLocationPublisher} from './hooks/useLocationPublisher';
@@ -21,6 +22,7 @@ export const RealtimeManager = (): null => {
   const {foregroundService} = useDi();
   const setIncomingOffer = useDispatchStore(s => s.setIncomingOffer);
   const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
+  const activeTripId = useDispatchStore(s => s.activeTripId);
   const receiveMessage = useChatStore(s => s.receiveMessage);
 
   const {data: shift} = useShiftState();
@@ -43,6 +45,17 @@ export const RealtimeManager = (): null => {
   // seguridad se renderiza como un estado normal (p. ej. "Cancelado"), sin delatar el pánico.
   const socket = useDriverRealtime(true, {
     onOffer: (payload, scheduled) => {
+      // PUJA (marketplace "proponé tu precio"): el ping trae `bidCents` → NO es una oferta FIXED a
+      // aceptar/rechazar, es una puja abierta a la que el conductor contraoferta. Refrescamos el board y,
+      // si no está en un viaje, lo llevamos a las pujas. NO usamos el flujo FIXED (TripIncoming/incomingOffer).
+      if (payload.bidCents != null) {
+        queryClient.invalidateQueries({queryKey: BIDS_QUERY_KEY});
+        if (!activeTripId) {
+          navigateToBids();
+        }
+        return;
+      }
+      // Oferta FIXED (por defecto): el conductor debe aceptar/rechazar antes de `expiresAt`.
       setIncomingOffer({
         matchId: payload.matchId,
         tripId: payload.tripId,

@@ -50,7 +50,15 @@ class FakeTripsRepository implements TripsRepository {
     return Promise.resolve({id: 't1', status: 'IN_PROGRESS'});
   }
   getRoute(): Promise<TripRouteView> {
-    return Promise.resolve({polyline: '', distanceMeters: 0, durationSeconds: 0, steps: []});
+    return Promise.resolve({
+      polyline: '',
+      distanceMeters: 0,
+      durationSeconds: 0,
+      steps: [],
+      origin: {lat: 0, lon: 0},
+      destination: {lat: 0, lon: 0},
+      waypoints: [],
+    });
   }
   accept(_tripId: string, _input: AcceptTripInput): Promise<Trip> {
     return Promise.resolve(TRIP);

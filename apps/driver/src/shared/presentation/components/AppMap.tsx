@@ -36,6 +36,8 @@ export interface AppMapProps {
   destination?: GeoPoint | null;
   /** Geometría de la ruta en orden GeoJSON [lng, lat] (de `/maps/quote` o polyline decodificada). */
   routeCoordinates?: ReadonlyArray<[number, number]>;
+  /** Paradas intermedias ORDENADAS (Ola 2B): se pintan como beads `stop` entre origen y destino. */
+  waypoints?: ReadonlyArray<GeoPoint>;
   /** Celdas de demanda (mapa de calor). Cuando se pasan, se pintan como círculos cian translúcidos. */
   heatCells?: ReadonlyArray<HeatCell>;
   /** Ajusta el encuadre a la ruta + markers (fitBounds). */
@@ -67,6 +69,7 @@ function AppMapComponent({
   origin,
   destination,
   routeCoordinates,
+  waypoints,
   heatCells,
   fitToRoute = false,
   interactive = true,
@@ -230,6 +233,19 @@ function AppMapComponent({
           <RoutePin variant="origin" />
         </MarkerView>
       ) : null}
+
+      {/* Paradas intermedias (Ola 2B): beads `stop` más chicos, entre origen y destino. */}
+      {waypoints?.map((wp, i) =>
+        isValidPoint(wp) ? (
+          <MarkerView
+            key={`wp:${wp.lat}:${wp.lon}:${i}`}
+            coordinate={toLngLat(wp)}
+            anchor={{x: 0.5, y: 0.5}}
+            allowOverlap>
+            <RoutePin variant="stop" size={13} />
+          </MarkerView>
+        ) : null,
+      )}
 
       {isValidPoint(destination) ? (
         <MarkerView coordinate={toLngLat(destination)} anchor={{x: 0.5, y: 1}} allowOverlap>

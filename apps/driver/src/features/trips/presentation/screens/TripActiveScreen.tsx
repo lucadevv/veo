@@ -272,6 +272,9 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
           <AppMap
             center={driverLocation ?? LIMA_CENTER}
             driver={driverLocation}
+            origin={tripRoute?.origin}
+            destination={tripRoute?.destination}
+            waypoints={tripRoute?.waypoints}
             routeCoordinates={routeCoordinates}
             fitToRoute={Boolean(routeCoordinates && routeCoordinates.length >= 2)}
             interactive={false}

@@ -29,6 +29,8 @@ export type RootStackParamList = {
   Support: {tripId?: string} | undefined;
   TripIncoming: {matchId: string; tripId: string};
   TripActive: {tripId: string};
+  /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
+  Bids: undefined;
   Chat: {tripId: string};
 };
 

@@ -266,7 +266,32 @@
     "historyTitle": "Historial",
     "historyUnavailable": "El historial de viajes aún no está disponible desde el servidor.",
     "completedTitle": "Viaje completado",
-    "completedBody": "El viaje finalizó correctamente."
+    "completedBody": "El viaje finalizó correctamente.",
+    "bid": {
+      "screenTitle": "Pujas abiertas",
+      "title": "Puja abierta",
+      "subtitle": "Aceptá la tarifa o contraofertá tu precio.",
+      "expiresIn": "Vence en {{seconds}} s",
+      "expired": "La puja venció",
+      "gone": "Esta puja ya no está disponible. Otro conductor la tomó o venció.",
+      "acceptFare": "Aceptar {{amount}}",
+      "counter": "Contraofertar",
+      "yourCounter": "Tu contraoferta",
+      "counterHelper": "Debe ser mayor a {{min}}",
+      "send": "Enviar contraoferta",
+      "sent": "Oferta enviada. Esperando que el pasajero elija.",
+      "empty": "No hay pujas cerca de ti ahora.",
+      "emptyHint": "Te avisamos apenas llegue una.",
+      "offline": "Ponete en turno para ver y ofertar pujas.",
+      "goOnline": "Ir a Inicio",
+      "open": "Ofertar",
+      "vehicle": "Vehículo",
+      "special": {
+        "PET": "Mascota",
+        "LUGGAGE": "Equipaje",
+        "CHILD_SEAT": "Silla para niño"
+      }
+    }
   },
   "navigation": {
     "stepsTitle": "Indicaciones",
@@ -318,7 +343,8 @@
       "pending": "Pendiente",
       "paid": "Pagado",
       "held": "Retenido",
-      "processing": "Procesando"
+      "processing": "Procesando",
+      "failed": "Fallido"
     }
   },
   "profile": {

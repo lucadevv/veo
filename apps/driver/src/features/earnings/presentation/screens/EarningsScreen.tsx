@@ -13,29 +13,36 @@ import {SegmentedTabs} from '../components/SegmentedTabs';
 import {Appear} from '../components/motion';
 import {useEarningsBreakdown, useEarningsSummary} from '../hooks/useEarnings';
 
-// ── Mapeo de estado de payout (sin cambios respecto a la versión previa). ──────────────────────
-function payoutTone(status: string): StatusTone {
-  switch (status.toUpperCase()) {
-    case 'PAID':
+// ── Mapeo de estado de payout → tono/etiqueta. `status` es el enum TIPADO del contrato
+// (`payoutStatus`), no un string libre: el switch es exhaustivo sobre el union, así un valor nuevo o
+// un literal mal escrito es error de compilación, NO un payout pagado que se ve "pendiente". ─────────
+type PayoutStatusValue = DriverPayoutView['status'];
+
+function payoutTone(status: PayoutStatusValue): StatusTone {
+  switch (status) {
+    case 'PROCESSED':
       return 'success';
-    case 'HELD':
-      return 'danger';
     case 'PROCESSING':
       return 'accent';
-    default:
+    case 'HELD':
+    case 'FAILED':
+      return 'danger';
+    case 'PENDING':
       return 'warn';
   }
 }
 
-function payoutLabel(status: string, t: TFunction): string {
-  switch (status.toUpperCase()) {
-    case 'PAID':
+function payoutLabel(status: PayoutStatusValue, t: TFunction): string {
+  switch (status) {
+    case 'PROCESSED':
       return t('earnings.payoutStatus.paid');
-    case 'HELD':
-      return t('earnings.payoutStatus.held');
     case 'PROCESSING':
       return t('earnings.payoutStatus.processing');
-    default:
+    case 'HELD':
+      return t('earnings.payoutStatus.held');
+    case 'FAILED':
+      return t('earnings.payoutStatus.failed');
+    case 'PENDING':
       return t('earnings.payoutStatus.pending');
   }
 }

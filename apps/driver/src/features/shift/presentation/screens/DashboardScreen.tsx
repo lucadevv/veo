@@ -267,6 +267,15 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
           <VehicleTypeSelector disabled={status === 'ON_TRIP'} />
         </View>
         <View style={styles.spaced}>{earningsMetrics}</View>
+        {/* Pujas abiertas: el conductor entra al marketplace "proponé tu precio" para ofertar/contraofertar. */}
+        <Button
+          label={t('trips.bid.screenTitle')}
+          variant="accent"
+          fullWidth
+          leftIcon={<IconFlame size={18} color={theme.colors.onAccent} strokeWidth={2} />}
+          onPress={() => navigation.navigate('Bids')}
+          style={styles.spaced}
+        />
         <View style={styles.actionsRow}>
           {status === 'AVAILABLE' ? (
             <Button

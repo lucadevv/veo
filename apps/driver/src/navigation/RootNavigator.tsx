@@ -10,6 +10,7 @@ import {UnderReviewScreen, useRegistrationGate, useRegistrationStore} from '../f
 import {RegistrationNavigator} from './RegistrationNavigator';
 import {BiometricEnrollScreen, DashboardScreen, ShiftStartScreen} from '../features/shift/presentation';
 import {TripActiveScreen, TripHistoryScreen, TripIncomingScreen} from '../features/trips/presentation';
+import {BidsScreen} from '../features/bidding/presentation';
 import {EarningsScreen} from '../features/earnings/presentation';
 import {ProfileScreen} from '../features/profile/presentation';
 import {DocumentsScreen} from '../features/documents/presentation';
@@ -157,6 +158,7 @@ export const RootNavigator = (): React.JSX.Element => {
           component={TripActiveScreen}
           options={{gestureEnabled: false}}
         />
+        <Stack.Screen name="Bids" component={BidsScreen} options={{animation: 'slide_from_right'}} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{animation: 'slide_from_right'}} />
       </Stack.Navigator>
       <RealtimeManager />
