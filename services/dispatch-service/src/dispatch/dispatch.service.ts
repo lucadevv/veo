@@ -6,7 +6,7 @@
  * match ACCEPTED y encola `dispatch.match_found` en el outbox (FOUNDATION §6). Tras commitear,
  * resuelve la oferta pendiente del MatchingService para que el bucle de matching se detenga.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
 import { ConflictError, NotFoundError, type LatLon } from '@veo/utils';
 import { DispatchOutcome, type VehicleType } from '@veo/shared-types';
@@ -14,6 +14,8 @@ import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
 import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry } from '../hot-index/hot-index.port';
+import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
+import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { MatchingService } from './matching.service';
 
 export interface MatchView {
@@ -30,14 +32,46 @@ export interface MatchView {
 
 @Injectable()
 export class DispatchService {
+  private readonly logger = new Logger(DispatchService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     @Inject(EXCLUSION_REGISTRY) private readonly exclusion: ExclusionRegistry,
+    @Inject(FLEET_CLIENT) private readonly fleet: FleetClient,
+    @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
     private readonly matching: MatchingService,
   ) {}
 
+  /**
+   * Resuelve el vehículo activo del conductor (fail-soft: null si algo falla, NO bloquea la asignación).
+   * MAPEO CRÍTICO: el match trae el `Driver.id` (entidad), pero fleet indexa los vehículos por `User.id`
+   * (el sujeto de la identidad propagada — fleet no conoce el id de perfil Driver). Así que primero
+   * `identity.GetDriver(driverId) → userId` y recién con ESE userId pegamos a fleet. Sin el mapeo,
+   * GetDriverVehicles devolvía vacío SIEMPRE (bug latente que tapaba el auto en ofertas y viaje).
+   */
+  private async resolveVehicleId(driverId: string): Promise<string | null> {
+    try {
+      const driver = await this.identity.getDriver(driverId);
+      if (!driver.found) return null;
+      return await this.fleet.getActiveVehicleId(driver.userId);
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo resolver el vehículo del conductor ${driverId} (asigno sin vehicleId): ${String(err)}`,
+      );
+      return null;
+    }
+  }
+
   async accept(matchId: string): Promise<MatchView> {
+    // Resolvemos el vehículo activo del conductor ANTES de la transacción (no hacemos I/O de red dentro
+    // de la tx). El claim atómico de abajo sigue garantizando la concurrencia; resolver para un accept
+    // perdedor es trabajo descartado pero inofensivo. Fail-soft: si fleet no responde, vehicleId = null
+    // y la asignación NO se bloquea (la trazabilidad es deseable, no bloqueante del viaje).
+    const pre = await this.prisma.read.dispatchMatch.findUnique({ where: { id: matchId } });
+    if (!pre) throw new NotFoundError('Oferta no encontrada');
+    const vehicleId = await this.resolveVehicleId(pre.driverId);
+
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
       if (!match) throw new NotFoundError('Oferta no encontrada');
@@ -55,7 +89,8 @@ export class DispatchService {
       const envelope = createEnvelope({
         eventType: 'dispatch.match_found',
         producer: 'dispatch-service',
-        payload: { tripId: match.tripId, driverId: match.driverId, scoreMs },
+        // vehicleId adjunto (si se resolvió) → trip-service lo persiste en el viaje (trazabilidad).
+        payload: { tripId: match.tripId, driverId: match.driverId, vehicleId: vehicleId ?? undefined, scoreMs },
         // dedupKey DETERMINISTA (no uuidv7 aleatorio): un retry HTTP del accept NO duplica el match_found.
         dedupKey: `match_found:${match.tripId}:${match.driverId}`,
       });

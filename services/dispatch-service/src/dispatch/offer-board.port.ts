@@ -129,6 +129,45 @@ export interface Offer {
 }
 
 /**
+ * Campos de una puja OPEN que viajan en DOS salidas: el enrich del ping `dispatch.offered` (broadcast a los
+ * conductores elegibles, para que pinten la tarjeta sin refetch) y la vista REST `OpenBidView` (`GET /bids/open`).
+ * Hay UN solo derivador (`bidFieldsFromBoard`) del OfferBoard → el evento y el REST NO pueden divergir en qué
+ * campos llevan ni cómo se calculan. `expiresAt` no va acá: el ping ya lo lleva como ISO y el REST como epoch(ms).
+ */
+export interface BidBroadcastFields {
+  bidCents: number;
+  vehicleType: string;
+  originLat: number;
+  originLon: number;
+  specialRequests: string[];
+}
+
+/**
+ * Precisión del origen que ve el conductor ANTES de aceptar: ~111m (3 decimales). Need-to-know
+ * (Ley 29733 · "movilidad segura"): alcanza para juzgar distancia/conveniencia al pujar, sin exponer
+ * el punto EXACTO de recojo (la puerta del pasajero) a los N conductores elegibles que aún no aceptaron.
+ * El origen EXACTO se entrega SOLO al conductor ASIGNADO, vía `GET /trips/:id/route` (que verifica
+ * ownership). 1 decimal ≈ 11km · 2 ≈ 1.1km · 3 ≈ 111m · 4 ≈ 11m.
+ */
+const PREBID_ORIGIN_DECIMALS = 3;
+function coarsenPreBid(coord: number): number {
+  const f = 10 ** PREBID_ORIGIN_DECIMALS;
+  return Math.round(coord * f) / f;
+}
+
+/** Único mapper OfferBoard → campos de puja. Lo usan el broadcast (evento) y `toOpenBidDto` (REST). */
+export function bidFieldsFromBoard(b: OfferBoard): BidBroadcastFields {
+  return {
+    bidCents: b.bidCents,
+    vehicleType: b.vehicleType,
+    // Origen ENGROSADO a ~111m pre-aceptación (privacidad). El exacto va por /route al asignarse.
+    originLat: coarsenPreBid(b.origin.lat),
+    originLon: coarsenPreBid(b.origin.lon),
+    specialRequests: b.specialRequests,
+  };
+}
+
+/**
  * Estado del board tal como lo VE el pasajero en `GET /bids/:tripId/offers`. Suma `GONE` a los estados
  * del board: la key ya NO existe en Redis (expiró por TTL) — el pasajero distingue "puja evaporada" de
  * "puja viva sin ofertas". Los demás valores son los `BoardStatus` reales.

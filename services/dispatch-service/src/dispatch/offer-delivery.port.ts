@@ -7,6 +7,8 @@
  * outbox (topic `dispatch`); driver-bff lo consume y lo reemite por Socket.IO (`dispatch:offer`)
  * al conductor destino. La fila OFFERED sigue siendo la fuente de verdad para las lecturas gRPC.
  */
+import type { BidBroadcastFields } from './offer-board.port';
+
 export const OFFER_DELIVERY = Symbol('OFFER_DELIVERY');
 
 export interface DispatchOffer {
@@ -19,6 +21,12 @@ export interface DispatchOffer {
   surgeMultiplier: number;
   /** ISO-8601: límite para responder la oferta (offeredAt + DISPATCH_OFFER_TIMEOUT_MS). */
   expiresAt: string;
+  /**
+   * Enriquecimiento de PUJA: presente SOLO cuando el ping proviene del broadcast de un OfferBoard
+   * (`offer-board.broadcast`). El matcher FIXED lo deja `undefined` → el conductor lo trata como oferta
+   * FIXED. Deriva del MISMO OfferBoard que `GET /bids/open` (vía `bidFieldsFromBoard`).
+   */
+  bid?: BidBroadcastFields;
 }
 
 export interface OfferDelivery {

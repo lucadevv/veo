@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { isDomainError, toH3, neighbors, DISPATCH_H3_RESOLUTION } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleType, SpecialRequest } from '@veo/shared-types';
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
@@ -448,6 +448,35 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // Cada candidato recibió su entrega con la eta del lote (zip 1:1).
     expect(c.delivery.delivered.map((d) => d.driverId).sort()).toEqual(['d1', 'd2', 'd3']);
     expect(c.delivery.delivered.every((d) => d.etaSeconds === 120)).toBe(true);
+  });
+
+  it('L2: el broadcast ENRIQUECE el ping con el bid del board (monto/origen/vehículo/specials)', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d-near', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
+    // Board con special request: el conductor debe poder pintar la tarjeta de puja SIN refetch.
+    await c.svc.openBoard({
+      tripId: 'trip-1',
+      passengerId: PASSENGER,
+      bidCents: 850,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+      specialRequests: [SpecialRequest.PET],
+    });
+
+    expect(c.delivery.delivered).toHaveLength(1);
+    // El enrich deriva del MISMO OfferBoard que `GET /bids/open` (bidFieldsFromBoard) → no divergen.
+    // El origen viaja ENGROSADO a ~111m (3 decimales) pre-aceptación: -12.0464→-12.046, -77.0428→-77.043
+    // (privacidad · Ley 29733). El exacto se entrega al asignarse vía /trips/:id/route.
+    expect(c.delivery.delivered[0]?.bid).toEqual({
+      bidCents: 850,
+      vehicleType: VehicleType.CAR,
+      originLat: -12.046,
+      originLon: -77.043,
+      specialRequests: [SpecialRequest.PET],
+    });
   });
 
   it('submitOffer ACCEPT_PRICE válido → PENDING + emite dispatch.offer_made', async () => {

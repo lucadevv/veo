@@ -28,7 +28,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { ForbiddenError } from '@veo/utils';
 import { OfferBoardService } from './offer-board.service';
-import type { Offer, OfferBoard, OffersView } from './offer-board.port';
+import { bidFieldsFromBoard, type Offer, type OfferBoard, type OffersView } from './offer-board.port';
 import {
   AcceptOfferDto,
   OfferDto,
@@ -64,15 +64,9 @@ function requireDriverId(user: AuthenticatedUser | undefined): string {
 }
 
 function toOpenBidDto(b: OfferBoard): OpenBidDto {
-  return {
-    tripId: b.tripId,
-    bidCents: b.bidCents,
-    vehicleType: b.vehicleType,
-    expiresAt: b.expiresAt,
-    originLat: b.origin.lat,
-    originLon: b.origin.lon,
-    specialRequests: b.specialRequests,
-  };
+  // MISMO derivador que el enrich del broadcast (`bidFieldsFromBoard`) → el REST y el ping `dispatch.offered`
+  // no pueden divergir. `expiresAt` (epoch ms) es propio del REST; el ping lo lleva como ISO aparte.
+  return { tripId: b.tripId, expiresAt: b.expiresAt, ...bidFieldsFromBoard(b) };
 }
 
 @ApiTags('bids')

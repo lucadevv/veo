@@ -44,6 +44,7 @@ import {
   OfferStatus,
   OfferKind,
   ClientBoardStatus,
+  bidFieldsFromBoard,
   type Offer,
   type OfferBoard,
   type OfferBoardStore,
@@ -231,6 +232,9 @@ export class OfferBoardService {
             score: 0,
             surgeMultiplier: 1,
             expiresAt: expiresAtIso,
+            // Enrich de PUJA: el ping lleva monto/origen/vehículo/specials del board (MISMO derivador que
+            // `GET /bids/open`) para que el conductor pinte la tarjeta de puja sin un refetch.
+            bid: bidFieldsFromBoard(board),
           }),
         ).catch((err) => this.logger.warn(`broadcast a ${cand.driverId} falló: ${String(err)}`));
       }),

@@ -24,6 +24,8 @@ import { DispatchTimeoutReconciler } from './dispatch-timeout.reconciler';
 import { EligibilityGate, ELIGIBILITY_CACHE_TTL_MS } from './eligibility.gate';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
+import { FLEET_CLIENT } from '../fleet/fleet-client.port';
+import { GrpcFleetClient } from '../fleet/grpc-fleet-client';
 import type { Env } from '../config/env.schema';
 
 const offerBoardStoreProvider: Provider = {
@@ -37,6 +39,13 @@ const identityClientProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>) =>
     new GrpcIdentityClient(config.getOrThrow<string>('IDENTITY_GRPC_URL')),
+};
+
+const fleetClientProvider: Provider = {
+  provide: FLEET_CLIENT,
+  inject: [ConfigService],
+  useFactory: (config: ConfigService<Env, true>) =>
+    new GrpcFleetClient(config.getOrThrow<string>('FLEET_GRPC_URL')),
 };
 
 // A4 — TTL (ms) del cache de elegibilidad, desde ELIGIBILITY_CACHE_TTL_MS (default 3s en el schema).
@@ -55,6 +64,7 @@ const eligibilityCacheTtlProvider: Provider = {
     { provide: OFFER_DELIVERY, useClass: RealtimeOfferDelivery },
     offerBoardStoreProvider,
     identityClientProvider,
+    fleetClientProvider,
     eligibilityCacheTtlProvider,
     DriverProjectionService,
     SurgeService,

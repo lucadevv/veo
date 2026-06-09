@@ -27,6 +27,9 @@ export const envSchema = z.object({
   // gRPC CLIENT a identity-service: re-valida la elegibilidad del conductor en el submit de la PUJA
   // (ADR 010 §6, cierre estructural del catastrófico #9). Default = dev-stack.
   IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
+  // gRPC CLIENT a fleet-service: resuelve el vehículo activo del conductor al ACEPTAR (awarding) para
+  // adjuntar vehicleId al match → el viaje queda con su vehículo (trazabilidad). Default = dev-stack.
+  FLEET_GRPC_URL: z.string().default('localhost:50062'),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),

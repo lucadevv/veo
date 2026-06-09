@@ -79,7 +79,18 @@ beforeAll(async () => {
     config,
   );
   // DispatchService (accept/reject del conductor) comparte el mismo matching + hot-index reales.
-  dispatch = new DispatchService(prismaService, hotIndex, exclusion, matching);
+  // Fakes de fleet+identity: este e2e no ejercita la resolución de vehículo (camino fail-soft → null).
+  const fleet = { getActiveVehicleId: async (): Promise<string | null> => null };
+  const identity = {
+    getDriver: async (id: string) => ({
+      id,
+      userId: id,
+      currentStatus: 'AVAILABLE',
+      suspendedAt: null,
+      found: true,
+    }),
+  };
+  dispatch = new DispatchService(prismaService, hotIndex, exclusion, fleet, identity, matching);
 }, 180_000);
 
 afterAll(async () => {

@@ -33,6 +33,10 @@ export class RealtimeOfferDelivery implements OfferDelivery {
         driverId: offer.driverId,
         matchId: offer.matchId,
         expiresAt: offer.expiresAt,
+        // Enrich de PUJA: si el ping es de un broadcast de board, viaja el bid (monto/origen/vehículo/
+        // specials) para que el conductor pinte la tarjeta sin refetch. En FIXED, `offer.bid` es undefined
+        // → no se agrega ninguna key (los campos son opcionales en el schema `dispatch.offered`).
+        ...(offer.bid ?? {}),
       },
       dedupKey: offer.matchId,
     });
