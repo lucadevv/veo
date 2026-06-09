@@ -18,7 +18,8 @@ export function DriverCard({ driver }: { driver: FamilyDriver }) {
           <User className="size-6" aria-hidden />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-lg font-semibold">{driver.name}</p>
+          {/* Nombre real del conductor (identity); degrada a "Conductor" si llegara vacío (honesto). */}
+          <p className="truncate text-lg font-semibold">{driver.name.trim() || 'Conductor'}</p>
           {rating ? (
             <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-muted">
               <Star className="size-4 text-warn" aria-hidden />
