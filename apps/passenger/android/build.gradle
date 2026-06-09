@@ -32,12 +32,12 @@ apply plugin: "com.facebook.react.rootproject"
 allprojects {
     repositories {
         maven {
-            url("${rootProject.projectDir}/../node_modules/react-native-background-geolocation/android/libs")
+            url("${rootProject.projectDir}/../../../node_modules/react-native-background-geolocation/android/libs")
         }
         // react-native-background-fetch distribuye su AAR (tsbackgroundfetch) en su
         // propio maven local; necesario porque es peer de background-geolocation.
         maven {
-            url("${rootProject.projectDir}/../node_modules/react-native-background-fetch/android/libs")
+            url("${rootProject.projectDir}/../../../node_modules/react-native-background-fetch/android/libs")
         }
         maven { url 'https://developer.huawei.com/repo/' }
 

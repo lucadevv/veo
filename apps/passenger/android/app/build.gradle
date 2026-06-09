@@ -7,7 +7,7 @@ project.ext.envConfigFiles = [
     debug: ".env",
     release: ".env",
 ]
-apply from: "../../node_modules/react-native-config/android/dotenv.gradle"
+apply from: "../../../../node_modules/react-native-config/android/dotenv.gradle"
 
 // Firebase: el plugin de Google Services lee `google-services.json`. Se aplica
 // solo si el archivo existe para que el build NO falle sin credenciales reales.
@@ -21,14 +21,13 @@ if (file("google-services.json").exists()) {
  */
 react {
     /* Folders */
-    //   The root of your project, i.e. where "package.json" lives. Default is '../..'
-    // root = file("../../")
-    //   The folder where the react-native NPM package is. Default is ../../node_modules/react-native
-    // reactNativeDir = file("../../node_modules/react-native")
-    //   The folder where the react-native Codegen package is. Default is ../../node_modules/@react-native/codegen
-    // codegenDir = file("../../node_modules/@react-native/codegen")
-    //   The cli.js file which is the React Native CLI entrypoint. Default is ../../node_modules/react-native/cli.js
-    // cliFile = file("../../node_modules/react-native/cli.js")
+    //   root = package.json del app (apps/passenger). Las deps están HOISTED al node_modules RAÍZ del
+    //   monorepo (pnpm node-linker=hoisted), por eso reactNativeDir/codegenDir/cliFile apuntan a la raíz
+    //   (../../../../node_modules) y NO al default ../../node_modules (que en hoisted está vacío).
+    root = file("../../")
+    reactNativeDir = file("../../../../node_modules/react-native")
+    codegenDir = file("../../../../node_modules/@react-native/codegen")
+    cliFile = file("../../../../node_modules/react-native/cli.js")
 
     /* Variants */
     //   The list of variants to that are debuggable. For those we're going to

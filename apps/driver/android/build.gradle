@@ -33,11 +33,11 @@ allprojects {
         // background-fetch alojan sus AAR (tslocationmanager / tsbackgroundfetch) en /libs.
         // Se referencian por ruta de archivo porque background-fetch no es un subproyecto
         // autoenlazado (es dependencia transitiva, no directa).
-        def bgGeoLibs = file("$rootDir/../node_modules/react-native-background-geolocation/android/libs")
+        def bgGeoLibs = file("$rootDir/../../../node_modules/react-native-background-geolocation/android/libs")
         if (bgGeoLibs.exists()) {
             maven { url bgGeoLibs }
         }
-        def bgFetchLibs = file("$rootDir/../node_modules/react-native-background-fetch/android/libs")
+        def bgFetchLibs = file("$rootDir/../../../node_modules/react-native-background-fetch/android/libs")
         if (bgFetchLibs.exists()) {
             maven { url bgFetchLibs }
         }
