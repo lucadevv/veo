@@ -9,8 +9,9 @@ import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import { deriveVehicleReviewStatus, isVehicleYearEligible } from './vehicle-rules';
 import type { CreateVehicleDto, DriverVehicleResponse, RegisterDriverVehicleDto } from './dto/vehicle.dto';
-import { Prisma, type Vehicle } from '../generated/prisma';
+import { Prisma, VehicleDocStatus, type Vehicle } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
+import { clampLimit, toPage, type Page } from '../infra/pagination';
 
 @Injectable()
 export class VehiclesService {
@@ -56,6 +57,24 @@ export class VehiclesService {
     const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundError('Vehículo no encontrado', { id });
     return vehicle;
+  }
+
+  /**
+   * Lista paginada de la flota para el operador (admin). Filtros opcionales por estado documental y
+   * actividad. Paginación cursor por id (uuidv7 ⇒ orden temporal estable, sin offset costoso).
+   */
+  async list(opts: { docStatus?: VehicleDocStatus; active?: boolean; cursor?: string; limit?: number }): Promise<Page<Vehicle>> {
+    const limit = clampLimit(opts.limit);
+    const where: Prisma.VehicleWhereInput = {};
+    if (opts.docStatus) where.docStatus = opts.docStatus;
+    if (opts.active !== undefined) where.active = opts.active;
+    if (opts.cursor) where.id = { lt: opts.cursor };
+    const rows = await this.prisma.read.vehicle.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+    });
+    return toPage(rows, limit);
   }
 
   /**

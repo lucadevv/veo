@@ -11,6 +11,7 @@ import { AdminRole } from '@veo/shared-types';
 import { InspectionsService } from './inspections.service';
 import { CreateInspectionDto } from './dto/inspection.dto';
 import type { Inspection } from '../generated/prisma';
+import type { Page } from '../infra/pagination';
 
 @ApiTags('inspections')
 @ApiBearerAuth()
@@ -28,9 +29,15 @@ export class InspectionsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar inspecciones de un vehículo' })
-  @ApiQuery({ name: 'vehicleId', required: true })
-  listByVehicle(@Query('vehicleId') vehicleId: string): Promise<Inspection[]> {
-    return this.inspections.listByVehicle(vehicleId);
+  @ApiOperation({ summary: 'Listar inspecciones (paginado cursor). Filtro opcional: vehicleId' })
+  @ApiQuery({ name: 'vehicleId', required: false })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  list(
+    @Query('vehicleId') vehicleId?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ): Promise<Page<Inspection>> {
+    return this.inspections.list({ vehicleId, cursor, limit: limit ? Number(limit) : undefined });
   }
 }

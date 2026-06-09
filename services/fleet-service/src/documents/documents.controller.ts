@@ -10,7 +10,8 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto, ReviewDocumentDto } from './dto/document.dto';
-import type { FleetDocument } from '../generated/prisma';
+import { FleetDocumentStatus, type FleetDocument } from '../generated/prisma';
+import type { Page } from '../infra/pagination';
 
 @ApiTags('documents')
 @ApiBearerAuth()
@@ -26,10 +27,18 @@ export class DocumentsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar documentos de un dueño (conductor o vehículo)' })
-  @ApiQuery({ name: 'ownerId', required: true })
-  listByOwner(@Query('ownerId') ownerId: string): Promise<FleetDocument[]> {
-    return this.documents.listByOwner(ownerId);
+  @ApiOperation({ summary: 'Listar documentos (paginado cursor). Filtros: status, ownerId' })
+  @ApiQuery({ name: 'status', required: false, enum: FleetDocumentStatus })
+  @ApiQuery({ name: 'ownerId', required: false })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  list(
+    @Query('status') status?: FleetDocumentStatus,
+    @Query('ownerId') ownerId?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ): Promise<Page<FleetDocument>> {
+    return this.documents.list({ status, ownerId, cursor, limit: limit ? Number(limit) : undefined });
   }
 
   @UseGuards(RolesGuard)

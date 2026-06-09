@@ -5,9 +5,10 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { uuidv7, NotFoundError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
+import { clampLimit, toPage, type Page } from '../infra/pagination';
 import { computeNextInspectionDue } from './inspection-rules';
 import type { CreateInspectionDto } from './dto/inspection.dto';
-import type { Inspection } from '../generated/prisma';
+import { Prisma, type Inspection } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 @Injectable()
@@ -46,5 +47,22 @@ export class InspectionsService {
       where: { vehicleId },
       orderBy: { inspectedAt: 'desc' },
     });
+  }
+
+  /**
+   * Lista paginada de inspecciones para el operador (admin), opcionalmente filtrada por vehículo.
+   * Paginación cursor por id (uuidv7 ⇒ orden temporal estable).
+   */
+  async list(opts: { vehicleId?: string; cursor?: string; limit?: number }): Promise<Page<Inspection>> {
+    const limit = clampLimit(opts.limit);
+    const where: Prisma.InspectionWhereInput = {};
+    if (opts.vehicleId) where.vehicleId = opts.vehicleId;
+    if (opts.cursor) where.id = { lt: opts.cursor };
+    const rows = await this.prisma.read.inspection.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+    });
+    return toPage(rows, limit);
   }
 }

@@ -6,6 +6,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { uuidv7, NotFoundError, ConflictError, ValidationError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
+import { clampLimit, toPage, type Page } from '../infra/pagination';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import { deriveExpiryStatus, isCriticalDocument } from './document-rules';
 import { ReviewDecision } from './dto/document.dto';
@@ -71,6 +72,24 @@ export class DocumentsService {
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Lista paginada de documentos para el operador (admin), filtrable por estado (índice
+   * `[status, expiresAt]`). Paginación cursor por id (uuidv7). Sin `status` lista todos.
+   */
+  async list(opts: { ownerId?: string; status?: FleetDocumentStatus; cursor?: string; limit?: number }): Promise<Page<FleetDocument>> {
+    const limit = clampLimit(opts.limit);
+    const where: Prisma.FleetDocumentWhereInput = {};
+    if (opts.ownerId) where.ownerId = opts.ownerId;
+    if (opts.status) where.status = opts.status;
+    if (opts.cursor) where.id = { lt: opts.cursor };
+    const rows = await this.prisma.read.fleetDocument.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+    });
+    return toPage(rows, limit);
   }
 
   /**
