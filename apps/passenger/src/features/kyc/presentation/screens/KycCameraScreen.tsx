@@ -439,9 +439,9 @@ export function KycCameraScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  fill: { ...StyleSheet.absoluteFillObject },
+  fill: { ...StyleSheet.absoluteFill },
   preview: { flex: 1, overflow: 'hidden' },
-  overlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  overlay: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   faceGuide: { width: '70%', aspectRatio: 0.78, borderWidth: 3, borderRadius: 9999, opacity: 0.9 },
   recBadge: { position: 'absolute' },
   challengeBanner: { position: 'absolute' },

@@ -390,5 +390,5 @@ const styles = StyleSheet.create({
   prefix: {paddingRight: 10, borderRightWidth: StyleSheet.hairlineWidth},
   otpRow: {flexDirection: 'row', justifyContent: 'space-between', position: 'relative'},
   otpBox: {flex: 1, marginHorizontal: 4, aspectRatio: 0.82, alignItems: 'center', justifyContent: 'center'},
-  otpHiddenInput: {...StyleSheet.absoluteFillObject, opacity: 0},
+  otpHiddenInput: {...StyleSheet.absoluteFill, opacity: 0},
 });

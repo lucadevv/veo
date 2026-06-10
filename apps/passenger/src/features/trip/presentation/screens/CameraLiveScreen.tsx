@@ -190,7 +190,7 @@ function Scrim({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,

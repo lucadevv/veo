@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   vehiclePicker: {marginBottom: 16},
   greetCard: {flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220},
   greetText: {flexShrink: 1, paddingRight: 4},
-  dim: {...StyleSheet.absoluteFillObject, opacity: 0.55},
+  dim: {...StyleSheet.absoluteFill, opacity: 0.55},
   kpisRow: {flexDirection: 'row', gap: 16},
   kpi: {flex: 1, gap: 2},
   onlineHead: {flexDirection: 'row', alignItems: 'center', gap: 8},

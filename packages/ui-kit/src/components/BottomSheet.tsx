@@ -231,7 +231,7 @@ export function BottomSheet({
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   flex: { flex: 1 },
-  backdrop: { ...StyleSheet.absoluteFillObject },
+  backdrop: { ...StyleSheet.absoluteFill },
   sheet: { width: '100%' },
   handleArea: { alignItems: 'center', paddingVertical: 10 },
   handle: { width: 40, height: 5, borderRadius: 999 },

@@ -56,7 +56,7 @@ class MmkvStore implements KeyValueStore {
       return JSON.parse(raw) as T;
     } catch {
       // Valor corrupto: lo eliminamos para no propagar el error.
-      this.mmkv.delete(key);
+      this.mmkv.remove(key);
       return undefined;
     }
   }
@@ -78,7 +78,7 @@ class MmkvStore implements KeyValueStore {
   }
 
   remove(key: string): void {
-    this.mmkv.delete(key);
+    this.mmkv.remove(key);
   }
 
   clear(): void {

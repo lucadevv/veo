@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   haloGlow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: HALO / 2,
     // Opacidad baja: tiñe el lienzo oscuro como un resplandor cian sin lavar el fondo.
     opacity: 0.12,

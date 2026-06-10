@@ -148,5 +148,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   box: { flex: 1, aspectRatio: 0.82, alignItems: 'center', justifyContent: 'center' },
   caret: { width: 2, height: 28, borderRadius: 1 },
-  hiddenInput: { ...StyleSheet.absoluteFillObject, opacity: 0 },
+  hiddenInput: { ...StyleSheet.absoluteFill, opacity: 0 },
 });

@@ -115,6 +115,6 @@ export function CabinVideoPanel({
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   stage: { height: 180, overflow: 'hidden' },
-  center: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', padding: 16 },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 16 },
   hint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
 });

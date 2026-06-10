@@ -74,5 +74,5 @@ const styles = StyleSheet.create({
   wrap: {alignItems: 'center', justifyContent: 'center'},
   // El SVG arranca a las 3:00; lo rotamos -90° para que el arco comience arriba (12:00).
   svg: {transform: [{rotate: '-90deg'}]},
-  center: {...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center'},
+  center: {...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center'},
 });

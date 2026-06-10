@@ -350,7 +350,7 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
 
 const styles = StyleSheet.create({
   canvas: { position: 'relative' },
-  center: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   map: { overflow: 'hidden' },
   carWheels: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginTop: -3 },
   wheel: { width: 6, height: 6, borderRadius: 3 },

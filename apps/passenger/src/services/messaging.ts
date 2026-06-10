@@ -1,4 +1,26 @@
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+// Imports ESTÁTICOS (no `await import(...)`): el import dinámico + lazy-bundling de Metro en dev
+// rompe con `LoadBundleFromServerError: Could not load bundle` (URL de split-bundle malformada) en
+// CADA sitio que difería la carga (background handler en el boot, registro de token en el login…).
+// La carga diferida no compraba nada: el módulo nativo de Firebase se inicializa igual al arrancar
+// la app; el gate real sigue siendo `env.firebaseEnabled` EN EJECUCIÓN (ninguna función corre sin él).
+import {
+  AuthorizationStatus,
+  getAPNSToken,
+  getInitialNotification,
+  getMessaging,
+  getToken,
+  hasPermission,
+  onMessage,
+  onNotificationOpenedApp,
+  onTokenRefresh,
+  registerDeviceForRemoteMessages,
+  requestPermission,
+  setBackgroundMessageHandler,
+  subscribeToTopic,
+  unsubscribeFromTopic,
+} from '@react-native-firebase/messaging';
+import { getApp } from '@react-native-firebase/app';
 import { Platform } from 'react-native';
 import { env } from '../core/config/env';
 import { queryClient } from '../core/query/queryClient';
@@ -38,15 +60,8 @@ function currentPlatform(): PushPlatform {
   return Platform.OS === 'ios' ? 'ios' : 'android';
 }
 
-/**
- * Resuelve la instancia modular de messaging cargando el SDK por import dinámico (respeta el gate:
- * el bundle de Firebase solo se carga cuando `FIREBASE_ENABLED=true`). Devuelve la instancia lista.
- */
+/** Resuelve la instancia modular de messaging (firma async preservada para los call-sites). */
 async function loadMessaging(): Promise<Messaging> {
-  const [{ getMessaging }, { getApp }] = await Promise.all([
-    import('@react-native-firebase/messaging'),
-    import('@react-native-firebase/app'),
-  ]);
   return getMessaging(getApp());
 }
 
@@ -62,7 +77,6 @@ async function waitForApnsToken(messaging: Messaging): Promise<boolean> {
   if (Platform.OS !== 'ios') {
     return true;
   }
-  const { getAPNSToken } = await import('@react-native-firebase/messaging');
   for (let attempt = 0; attempt < 15; attempt += 1) {
     const apns = await getAPNSToken(messaging);
     if (apns) {
@@ -83,7 +97,6 @@ export async function setPromotionsSubscription(enabled: boolean): Promise<void>
     return;
   }
   try {
-    const { subscribeToTopic, unsubscribeFromTopic } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     await (enabled
       ? subscribeToTopic(messaging, PROMOS_TOPIC)
@@ -102,7 +115,6 @@ export async function registerBackgroundMessageHandler(): Promise<void> {
     return;
   }
   try {
-    const { setBackgroundMessageHandler } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     // Handler de background REQUERIDO por RNFirebase para procesar data-messages headless. Hoy es no-op
     // deliberado (las notificaciones VISIBLES las presenta el sistema); acá iría el procesamiento data-only
@@ -184,9 +196,6 @@ export function clearPendingDeepLink(): void {
 
 /** Cablea los handlers de PRIMER PLANO y el refresh de token; entrega el token al backend. */
 async function wireForeground(messaging: Messaging): Promise<void> {
-  const { onMessage, onNotificationOpenedApp, onTokenRefresh } = await import(
-    '@react-native-firebase/messaging'
-  );
   const registrar = container.resolve(TOKENS.pushTokenRegistrar);
 
   // Mensajes con la app en PRIMER PLANO: NO auto-navegamos (el pasajero ya está usando la app y un salto
@@ -230,9 +239,6 @@ function toPushPermission(
  * Privado: lo usan `syncPushRegistration` (arranque) y `enablePush` (activación explícita del usuario).
  */
 async function registerForPush(messaging: Messaging): Promise<string | null> {
-  const { registerDeviceForRemoteMessages, getInitialNotification, getToken } = await import(
-    '@react-native-firebase/messaging'
-  );
   await wireForeground(messaging);
 
   // iOS · registro EXPLÍCITO con APNs antes de pedir el token. El APNs token llega ASYNC tras el
@@ -266,7 +272,6 @@ export async function getPushPermission(): Promise<PushPermission> {
     return 'denied';
   }
   try {
-    const { hasPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     return toPushPermission(await hasPermission(messaging), AuthorizationStatus);
   } catch {
@@ -284,7 +289,6 @@ export async function syncPushRegistration(): Promise<string | null> {
     return null;
   }
   try {
-    const { hasPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     if (toPushPermission(await hasPermission(messaging), AuthorizationStatus) !== 'granted') {
       return null; // sin permiso previo: NO prompteamos en el arranque (permiso progresivo)
@@ -307,7 +311,6 @@ export async function enablePush(): Promise<PushPermission> {
     return 'denied';
   }
   try {
-    const { requestPermission, AuthorizationStatus } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     const status = toPushPermission(await requestPermission(messaging), AuthorizationStatus);
     if (status === 'granted') {
@@ -333,7 +336,6 @@ export async function unregisterMessaging(): Promise<void> {
     return;
   }
   try {
-    const { getToken } = await import('@react-native-firebase/messaging');
     const messaging = await loadMessaging();
     const token = await getToken(messaging);
     const registrar = container.resolve(TOKENS.pushTokenRegistrar);

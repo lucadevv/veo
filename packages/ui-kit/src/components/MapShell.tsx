@@ -80,8 +80,8 @@ export function MapShell({
 
 const styles = StyleSheet.create({
   container: { flex: 1, overflow: 'hidden' },
-  fill: { ...StyleSheet.absoluteFillObject },
-  center: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  fill: { ...StyleSheet.absoluteFill },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   live: { position: 'absolute', top: 12, left: 12 },
   top: { position: 'absolute', top: 12, left: 12, right: 12 },
   bottom: { position: 'absolute', left: 12, right: 12, bottom: 12 },

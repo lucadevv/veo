@@ -49,7 +49,7 @@ class MmkvKeyValueStore implements KeyValueStore {
   }
 
   remove(key: string): void {
-    this.mmkv.delete(key);
+    this.mmkv.remove(key);
   }
 
   clear(): void {

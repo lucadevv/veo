@@ -1316,7 +1316,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   // Capa del pin de recojo (modelo Cabify): centra el pin en el centro GEOMÉTRICO del mapa — que es lo que
   // reporta onCenterChange — sobre el mapa y bajo el chrome. No intercepta gestos (pointerEvents none).
-  pickupPinLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  pickupPinLayer: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   topRow: {
     position: 'absolute',
     left: 12,

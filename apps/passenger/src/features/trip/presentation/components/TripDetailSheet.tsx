@@ -315,7 +315,7 @@ const SNAP_POINTS = ['content', 0.92] as const;
 const PEEK_MAX_FRACTION = 0.6;
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000' },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: '#000000' },
   mapWrap: { borderRadius: 18, overflow: 'hidden' },
   map: { height: 168 },
   scroll: { flex: 1 },

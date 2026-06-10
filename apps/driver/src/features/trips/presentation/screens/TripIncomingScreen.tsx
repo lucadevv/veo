@@ -246,7 +246,7 @@ export const TripIncomingScreen = ({navigation, route}: Props): React.JSX.Elemen
 
 const styles = StyleSheet.create({
   mapArea: {flex: 1},
-  scrim: {...StyleSheet.absoluteFillObject},
+  scrim: {...StyleSheet.absoluteFill},
   topBar: {position: 'absolute', left: 20, right: 20, alignItems: 'center'},
   sheet: {paddingHorizontal: 20, paddingTop: 10, maxHeight: '64%'},
   grabber: {alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 8},

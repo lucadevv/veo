@@ -111,5 +111,5 @@ export function AnimatedBar({
 
 const styles = StyleSheet.create({
   track: {width: '100%', overflow: 'hidden'},
-  fill: {...StyleSheet.absoluteFillObject},
+  fill: {...StyleSheet.absoluteFill},
 });
