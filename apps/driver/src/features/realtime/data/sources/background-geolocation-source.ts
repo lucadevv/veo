@@ -90,9 +90,15 @@ export class BackgroundGeolocationSource implements LocationSource {
   private async configure(): Promise<void> {
     const bg = this.bg;
     if (!this.nativeSub) {
-      this.nativeSub = bg.onLocation((location: Location) => {
-        this.dispatch(location);
-      });
+      // El 2do argumento (failure) es OBLIGATORIO en la práctica: sin él, la librería entrega los
+      // errores transitorios de GPS al callback de éxito como `{error}` SIN `coords` (NativeModule.js
+      // addListener) y reventaría el dispatch. Un error puntual no corta el tracking: se ignora.
+      this.nativeSub = bg.onLocation(
+        (location: Location) => {
+          this.dispatch(location);
+        },
+        () => undefined,
+      );
       // El SDK emite `providerchange` (RCTDeviceEventEmitter) al hacer `ready()`/cambiar el proveedor.
       // Sin listener, RN advierte "Sending `providerchange` with no listeners registered" (benigno
       // pero ruidoso). Lo consumimos; la degradación por permisos la maneja el flujo de turno.
@@ -132,6 +138,10 @@ export class BackgroundGeolocationSource implements LocationSource {
   /** Convierte la `Location` nativa a `LocationSample` del dominio y notifica a los listeners. */
   private dispatch(location: Location): void {
     const {coords} = location;
+    // Cinturón y tirantes: cualquier payload sin coords (error/evento no-ubicación) se descarta.
+    if (!coords) {
+      return;
+    }
     const sample: LocationSample = {
       lat: coords.latitude,
       lon: coords.longitude,
