@@ -9,6 +9,9 @@ import 'react-native-get-random-values';
 // `_plural`, pero las traducciones usan el formato v4 (`_one`/`_other`) → plurales ROTOS en runtime
 // (además del error "i18next::pluralResolver" en el arranque). Debe ir ANTES de cargar i18n.
 import 'intl-pluralrules';
+// Polyfill DOMException (Hermes no lo trae): livekit-client extiende DOMException al evaluarse el
+// módulo, así que el global debe existir ANTES del bootstrap nativo (que arrastra livekit-client).
+import './src/core/polyfills/dom-exception';
 import 'react-native-gesture-handler';
 import { AppRegistry } from 'react-native';
 // Bootstrap de la capa NATIVA (WebRTC globals, visor LiveKit, handler push background).
