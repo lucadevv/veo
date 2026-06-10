@@ -38,6 +38,7 @@
     "@veo/utils": "workspace:*",
     "axios": "^1.7.7",
     "i18next": "^23.15.2",
+    "intl-pluralrules": "^2.0.1",
     "livekit-client": "^2.19.0",
     "react": "19.2.3",
     "react-i18next": "^15.0.2",

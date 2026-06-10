@@ -37,9 +37,10 @@ function loadMessaging(): MessagingModule | null {
   try {
     // require lazy/opcional: el módulo nativo puede no estar presente (degradación honesta). Va dentro
     // del try/catch a propósito; un import estático tiraría al CARGAR el módulo si el nativo falta.
+    // API MODULAR (la namespaced `firebase.apps` está deprecada en RNFB v22+ y loguea warning):
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('@react-native-firebase/app').default as {apps: unknown[]};
-    if (firebase.apps.length === 0) {
+    const { getApps } = require('@react-native-firebase/app') as { getApps: () => unknown[] };
+    if (getApps().length === 0) {
       return null;
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports

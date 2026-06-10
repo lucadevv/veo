@@ -16,9 +16,10 @@ const isFirebaseAvailable = (): boolean => {
   try {
     // Carga diferida: si el módulo nativo no está enlazado, no rompe el arranque. require (no import
     // estático) a propósito, dentro del try/catch, para degradar si el nativo falta.
+    // API MODULAR (la namespaced `firebase.apps` está deprecada en RNFB v22+ y loguea warning):
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('@react-native-firebase/app').default;
-    return firebase.apps.length > 0;
+    const { getApps } = require('@react-native-firebase/app') as { getApps: () => unknown[] };
+    return getApps().length > 0;
   } catch {
     return false;
   }
