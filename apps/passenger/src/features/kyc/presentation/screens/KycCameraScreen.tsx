@@ -7,12 +7,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
 import {
+  Camera as VisionCamera,
   useCameraDevice,
-  useCameraFormat,
   useCameraPermission,
+  usePhotoOutput,
 } from 'react-native-vision-camera';
-import type { Camera as VisionCamera } from 'react-native-vision-camera';
-import { Camera as FaceCamera, type Face } from 'react-native-vision-camera-face-detector';
+import { useFaceDetectorOutput, type Face } from 'react-native-vision-camera-face-detector';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import type { RootStackParamList } from '../../../../navigation/types';
@@ -76,9 +76,9 @@ export function KycCameraScreen(): React.JSX.Element {
 
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
-  // Formato de foto moderado (no full-res) para que el JPEG base64 viaje liviano al bff.
-  const format = useCameraFormat(device, [{ photoResolution: { width: 1280, height: 720 } }]);
-  const cameraRef = useRef<VisionCamera>(null);
+  // v5 nitro: la captura es por OUTPUTS, no por ref. `usePhotoOutput` habilita la foto; el output de
+  // detección facial (más abajo) se combina con éste en el array `outputs` del <Camera>.
+  const photoOutput = usePhotoOutput({});
 
   const [phase, setPhaseState] = useState<Phase>('requesting');
   const phaseRef = useRef<Phase>('requesting');
@@ -157,21 +157,19 @@ export function KycCameraScreen(): React.JSX.Element {
   }, []);
 
   // Captura un frame y lo envía (autocaptura tras detectar el movimiento del reto).
+  // v5 nitro: `capturePhotoToFile` escribe la foto a un archivo temporal y devuelve su `path`.
   const capture = useCallback(async () => {
     try {
-      const photo = await cameraRef.current?.takePhoto({
-        flash: 'off',
-        enableShutterSound: false,
-      });
-      if (!photo) throw new Error('no-photo');
-      const base64 = await fileToBase64(`file://${photo.path}`);
+      const photoFile = await photoOutput.capturePhotoToFile({ flashMode: 'off' }, {});
+      // `filePath` es una ruta de filesystem (no un URL `file://`); fileToBase64 espera el esquema.
+      const base64 = await fileToBase64(`file://${photoFile.filePath}`);
       if (!mountedRef.current) return;
       setPhase('submitting');
       submitMutation.mutate(base64);
     } catch {
       if (mountedRef.current) setPhase('ready');
     }
-  }, [setPhase, submitMutation]);
+  }, [photoOutput, setPhase, submitMutation]);
 
   // Callback de detección facial (corre por frame). Mantenemos el estado en refs y sólo disparamos
   // re-render / transición cuando cambia algo relevante, para no re-renderizar a 30fps.
@@ -192,8 +190,12 @@ export function KycCameraScreen(): React.JSX.Element {
       }
       if (phaseRef.current === 'ready') {
         const moved = Math.abs(face.yawAngle) > MOVE_YAW || Math.abs(face.pitchAngle) > MOVE_PITCH;
+        // `leftEyeOpenProbability`/`rightEyeOpenProbability` son opcionales en el Face de v2 (solo se
+        // pueblan con `runClassifications`). Si faltan, asumimos OJO ABIERTO (?? 1) para no disparar un
+        // parpadeo falso.
         const blinked =
-          face.leftEyeOpenProbability < BLINK_CLOSED && face.rightEyeOpenProbability < BLINK_CLOSED;
+          (face.leftEyeOpenProbability ?? 1) < BLINK_CLOSED &&
+          (face.rightEyeOpenProbability ?? 1) < BLINK_CLOSED;
         // Exigimos el gesto que PIDIÓ el server (challenge.action), no cualquiera. Si la acción es
         // desconocida, aceptamos cualquier gesto (fallback degradado, no traba al usuario).
         const action = (actionRef.current ?? '').toUpperCase();
@@ -214,6 +216,25 @@ export function KycCameraScreen(): React.JSX.Element {
     },
     [capture, setPhase],
   );
+
+  // `onFacesDetected` ESTABLE (vía ref): el output de detección no debe recrearse en cada render (el
+  // callback real `onFaces` cambia con sus deps, pero la identidad del que pasamos al output es fija).
+  const onFacesRef = useRef(onFaces);
+  onFacesRef.current = onFaces;
+  const stableOnFaces = useCallback((faces: Face[]) => onFacesRef.current(faces), []);
+  // Output de detección facial (v2 nitro): clasificaciones ON (probabilidades de ojo para el parpadeo),
+  // landmarks/contornos OFF por velocidad. Se combina con el photoOutput en el <Camera>.
+  const faceOutput = useFaceDetectorOutput({
+    onFacesDetected: stableOnFaces,
+    // Un error de detección NO rompe el KYC: el veredicto de liveness lo da SIEMPRE el servidor. Se
+    // ignora a nivel UI (la cámara sigue; si no detecta, el usuario reintenta) — degradación honesta.
+    onError: () => undefined,
+    performanceMode: 'fast',
+    runClassifications: true,
+    runLandmarks: false,
+    runContours: false,
+    minFaceSize: 0.2,
+  });
 
   const cameraActive =
     isFocused && (phase === 'detecting' || phase === 'ready' || phase === 'capturing');
@@ -320,21 +341,12 @@ export function KycCameraScreen(): React.JSX.Element {
       <View style={styles.fill}>
         <View style={[styles.preview, { backgroundColor: theme.colors.ink }]}>
           {hasPermission ? (
-            <FaceCamera
-              ref={cameraRef}
+            <VisionCamera
               style={StyleSheet.absoluteFill}
               device={device}
-              format={format}
               isActive={cameraActive}
-              photo
-              faceDetectionOptions={{
-                performanceMode: 'fast',
-                classificationMode: 'all',
-                landmarkMode: 'none',
-                contourMode: 'none',
-                minFaceSize: 0.2,
-              }}
-              faceDetectionCallback={onFaces}
+              // v5 nitro: detección facial + captura de foto se cablean como OUTPUTS combinados.
+              outputs={[faceOutput, photoOutput]}
             />
           ) : null}
 
