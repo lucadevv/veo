@@ -6,7 +6,8 @@
  * que publica `driver.location_updated` a Kafka.
  */
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { NotFoundError } from '@veo/utils';
+import { ExternalServiceError, NotFoundError } from '@veo/utils';
+import { normalizeTripStatus, type TripStatus } from '@veo/api-client';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { LatLon, MapsClient } from '@veo/maps';
 import { GrpcGateway } from '../infra/grpc.gateway';
@@ -27,13 +28,27 @@ function emptyToNull(value: string): string | null {
   return value ? value : null;
 }
 
+/**
+ * Normaliza el status crudo del dominio (gRPC trip-service: `CANCELLED_BY_*`, etc.) al enum del
+ * contrato mobile, aplicando la política de error del BFF. SIN esto, el driver-bff devolvía el valor
+ * crudo y la app del conductor lo rechazaba con safeParse → caía a UNKNOWN y no mostraba el cierre del
+ * viaje cancelado. El alias+parse viven en @veo/api-client (fuente única, compartida con public-bff).
+ */
+function toTripStatus(raw: string): TripStatus {
+  const normalized = normalizeTripStatus(raw);
+  if (!normalized) {
+    throw new ExternalServiceError('Estado de viaje desconocido', { status: raw });
+  }
+  return normalized;
+}
+
 export function toTripView(trip: TripReply): TripView {
   return {
     id: trip.id,
     passengerId: trip.passengerId,
     driverId: emptyToNull(trip.driverId),
     vehicleId: emptyToNull(trip.vehicleId),
-    status: trip.status,
+    status: toTripStatus(trip.status),
     fareCents: trip.fareCents,
     currency: trip.currency,
     distanceMeters: trip.distanceMeters,
@@ -74,7 +89,7 @@ export class TripsService {
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {
     const state = await this.grpc.call<TripStateReply>('trip', 'GetTripState', { id }, identity);
     if (!state.found) throw new NotFoundError('Viaje no encontrado');
-    return { id: state.id, status: state.status };
+    return { id: state.id, status: toTripStatus(state.status) };
   }
 
   /**

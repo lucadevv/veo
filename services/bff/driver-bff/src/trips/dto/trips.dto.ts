@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import type { TripStatus } from '@veo/api-client';
 
 export class AcceptTripDto {
   @ApiPropertyOptional({ description: 'ETA del conductor al recojo, en segundos' })
@@ -55,7 +56,7 @@ export interface TripView {
   passengerId: string;
   driverId: string | null;
   vehicleId: string | null;
-  status: string;
+  status: TripStatus;
   fareCents: number;
   currency: string;
   distanceMeters: number;
@@ -68,7 +69,7 @@ export interface TripView {
 /** Vista del estado del viaje (para tracking ligero). */
 export interface TripStateView {
   id: string;
-  status: string;
+  status: TripStatus;
 }
 
 /** Un paso de navegación turn-by-turn (Ola 2C). Espeja `routeStep` de @veo/api-client. */

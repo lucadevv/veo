@@ -3,7 +3,7 @@
  * (conductor) + rating (agregado) + fleet (vehículo) en la vista que consume la app del pasajero.
  * Aislados para poder testearlos directamente.
  */
-import { tripStatus, type TripStatus } from '@veo/api-client';
+import { DOMAIN_STATUS_ALIASES, normalizeTripStatus, type TripStatus } from '@veo/api-client';
 import { ExternalServiceError } from '@veo/utils';
 import type {
   AggregateReply,
@@ -123,25 +123,21 @@ export interface TripHistoryPageView {
   nextCursor: string | null;
 }
 
-/**
- * Alias del DOMINIO (trip-service) → contrato MOBILE. El dominio distingue quién canceló
- * (`CANCELLED_BY_PASSENGER`/`CANCELLED_BY_DRIVER`, @veo/shared-types), pero el contrato mobile colapsa
- * ambos en `CANCELLED` (igual que la ruta socket en realtime-consumer). Sin esto, `safeParse` fallaba y
- * `GET /trips/:id` + `/state` tiraban 5xx para CUALQUIER viaje cancelado (el gRPC devuelve el status crudo).
- */
-export const DOMAIN_STATUS_ALIASES: Readonly<Record<string, TripStatus>> = {
-  CANCELLED_BY_PASSENGER: 'CANCELLED',
-  CANCELLED_BY_DRIVER: 'CANCELLED',
-};
+// El mapa de alias dominio→mobile vive en @veo/api-client (fuente única). Se re-exporta para los
+// consumidores internos que aún lo referencian directo (p. ej. share/family-view).
+export { DOMAIN_STATUS_ALIASES };
 
-/** Normaliza un status crudo del downstream al enum compartido; falla si es desconocido. */
+/**
+ * Normaliza un status crudo del downstream al enum compartido; lanza 5xx de servicio si es desconocido.
+ * La normalización (alias + parse) la centraliza `normalizeTripStatus` de @veo/api-client; aquí solo se
+ * aplica la POLÍTICA DE ERROR del BFF (un estado fuera de contrato es una falla del downstream).
+ */
 export function toTripStatus(raw: string): TripStatus {
-  const canonical = DOMAIN_STATUS_ALIASES[raw] ?? raw;
-  const parsed = tripStatus.safeParse(canonical);
-  if (!parsed.success) {
+  const normalized = normalizeTripStatus(raw);
+  if (!normalized) {
     throw new ExternalServiceError('Estado de viaje desconocido', { status: raw });
   }
-  return parsed.data;
+  return normalized;
 }
 
 /** Construye la vista de conductor combinando datos de identity y el agregado de rating. */

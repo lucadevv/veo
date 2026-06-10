@@ -32,6 +32,29 @@ export const tripStatus = z.enum([
 ]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
+/**
+ * Alias DOMINIO (trip-service / @veo/shared-types) → contrato MOBILE. El dominio distingue QUIÉN
+ * canceló (`CANCELLED_BY_PASSENGER`/`CANCELLED_BY_DRIVER`); el contrato mobile colapsa ambos en
+ * `CANCELLED`. Fuente ÚNICA de verdad: los BFFs que reciben el status crudo del gRPC/REST de
+ * trip-service DEBEN normalizarlo con `normalizeTripStatus` antes de exponerlo a las apps — si no, el
+ * `safeParse` del cliente falla y el viaje cae a estado desconocido (bug histórico en driver-bff).
+ */
+export const DOMAIN_STATUS_ALIASES: Readonly<Record<string, TripStatus>> = {
+  CANCELLED_BY_PASSENGER: 'CANCELLED',
+  CANCELLED_BY_DRIVER: 'CANCELLED',
+};
+
+/**
+ * Normaliza un status crudo del dominio al enum del contrato mobile. Devuelve `null` si el valor no
+ * pertenece al contrato (el caller decide la política de error: los BFFs lanzan su 5xx de servicio).
+ * NO lanza: api-client es contrato puro (solo depende de zod), sin acoplarse a un tipo de error HTTP.
+ */
+export function normalizeTripStatus(raw: string): TripStatus | null {
+  const canonical = DOMAIN_STATUS_ALIASES[raw] ?? raw;
+  const parsed = tripStatus.safeParse(canonical);
+  return parsed.success ? parsed.data : null;
+}
+
 /* ── Sesión (admin-web) ── */
 export const sessionUser = z.object({
   userId: z.string(),
