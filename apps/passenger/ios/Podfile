@@ -22,21 +22,24 @@ use_frameworks! :linkage => linkage
 $RNFirebaseAsStaticFramework = true
 
 # ─── Mapbox (@rnmapbox/maps · migración del mapa) ────────────────────────────────────────────────
-# SDK iOS = el DEFAULT de @rnmapbox/maps@10.2.1 (v11.15.2). Mapbox v11.8.0+ ELIMINÓ el requerimiento
-# del download token (sk): release notes v11.8.0 → "Configuring Mapbox's secret token is no longer
-# required when installing our SDKs". Por eso `pod install` funciona con SOLO el pk público — sin
-# `~/.netrc` ni sk. NO fijar una versión v10.x (esas SÍ pedían el sk de DOWNLOADS:READ).
+# SDK iOS = el DEFAULT de @rnmapbox/maps@10.3.1 → `mapbox.ios = "~> 11.20.1"` (su package.json), MISMA
+# versión que en Android (11.20.1). DEBE coincidir: el Swift de rnmapbox 10.3.1 usa APIs de Mapbox
+# 11.20.x (LineLayer.lineElevationGroundScale, ModelLayer.modelAllowDensityReduction) — pinear una
+# v11 más vieja (p.ej. 11.15.2) ROMPE el build con "has no member". Mapbox v11.8.0+ ELIMINÓ el
+# download token (sk): "Configuring Mapbox's secret token is no longer required when installing our
+# SDKs". Por eso `pod install` funciona con SOLO el pk público — sin `~/.netrc` ni sk. NO fijar v10.x.
 # El pk de runtime vive en `env/dev.secret.env` (lo consume `Mapbox.setAccessToken`).
-$RNMapboxMapsVersion = '~> 11.15.2'
+$RNMapboxMapsVersion = '~> 11.20.1'
 
 target 'VEO' do
   config = use_native_modules!
 
-  # react-native-vision-camera-face-detector declara `GoogleMLKit/FaceDetection` SIN versión, y
-  # CocoaPods backtrackea hasta un MLKit ancestral (GoogleUtilities ~>7) que choca con Firebase 11.11
-  # (GoogleUtilities 8.1 / GTMSessionFetcher 3.5). Pineamos un MLKit MODERNO (7.x usa GoogleUtilities
-  # ~>8 + GTMSessionFetcher ~>3.3), coherente con el stack de Firebase.
-  pod 'GoogleMLKit/FaceDetection', '7.0.0'
+  # react-native-vision-camera-face-detector@2.0.1 (bump RN 0.85) depende de
+  # `GoogleMLKit/FaceDetection (= 8.0.0)` de forma EXPLÍCITA — antes (1.x) no pineaba versión y
+  # CocoaPods backtrackeaba a un MLKit ancestral (GoogleUtilities ~>7) que choca con Firebase 11.x.
+  # Alineamos el pin a 8.0.0 (MLKit 8.x sigue usando GoogleUtilities ~>8 + GTMSessionFetcher ~>3,
+  # coherente con el stack de Firebase). Debe coincidir con el `=` que exige face-detector o el resolver falla.
+  pod 'GoogleMLKit/FaceDetection', '8.0.0'
 
   # Con `use_frameworks! :linkage => :static` los pods se construyen como frameworks estáticos
   # (ya proveen module maps), así que NO hacen falta los `:modular_headers` explícitos de Firebase
@@ -47,6 +50,15 @@ target 'VEO' do
   pre_install do |installer|
     $RNMapboxMaps.pre_install(installer) if defined?($RNMapboxMaps)
   end
+
+  # ─── React Native desde FUENTE (no prebuilt) ─────────────────────────────────────────────────────
+  # RN 0.85 baja React-Core PREBUILT por default (RCT_USE_RN_DEP=1). Bajo `use_frameworks!` (que
+  # necesitamos para Mapbox v11 dynamic) ese module map prebuilt rompe @react-native-firebase y
+  # vision-camera con "RCTPromiseRejectBlock must be imported from module 'RNFBApp.RNFBAppModule'
+  # before it is required". Fix ROBUSTO recomendado por el maintainer de RNFirebase (issue #8657):
+  # construir React Native desde fuente. Debe setearse ANTES de `use_react_native!` (lee estos ENV).
+  ENV['RCT_USE_RN_DEP'] = '0'
+  ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -81,6 +93,12 @@ target 'VEO' do
         if current.nil? || current.to_f < 15.5
           build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
         end
+
+        # use_frameworks! (necesario para Mapbox v11 dynamic) + @react-native-firebase: los headers
+        # de RNFB hacen `#import <React/RCTConvert.h>` y, dentro de un framework module, clang lo marca
+        # "non-modular header inside framework module" → con -Werror es FATAL. Relajamos ese check (fix
+        # documentado de la comunidad RN para use_frameworks + Firebase + React-Core no-modular).
+        build_configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
     end
   end

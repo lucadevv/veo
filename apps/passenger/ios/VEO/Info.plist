@@ -62,6 +62,8 @@
 	<string>VEO accede a tus fotos para que elijas una imagen de perfil.</string>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>VEO usa esta información solo para mejorar tu experiencia y la seguridad del servicio.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>ClashDisplay-Bold.otf</string>
