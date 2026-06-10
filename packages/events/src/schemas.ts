@@ -317,6 +317,10 @@ export const driverLocationUpdated = z.object({
   point: geo,
   h3: z.string(),
   at: z.string(),
+  /// Rumbo del conductor en grados [0,360). Lo emite la app (GPS nativo) y el public-bff lo reenvía al
+  /// pasajero/familia para ROTAR el ícono del vehículo en el mapa. Opcional/nullable por compat con
+  /// pings antiguos y muestras sin rumbo (vehículo detenido) ⇒ el cliente no rota.
+  heading: z.number().min(0).max(360).nullable().optional(),
   /// Ola 2B · tier moto-taxi: tipo de vehículo activo del conductor. dispatch lo proyecta en el hot
   /// index para filtrar el matching por tipo. Opcional por compat (pings antiguos) ⇒ default CAR.
   vehicleType: z.enum(['CAR', 'MOTO']).optional(),

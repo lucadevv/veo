@@ -241,14 +241,22 @@ export class RealtimeConsumerService implements OnModuleInit, OnModuleDestroy {
     const parsed = driverLocationUpdated.safeParse(env.payload);
     if (!parsed.success) return Promise.resolve();
     const tripId = this.state.tripForDriver(parsed.data.driverId);
-    if (!tripId || !this.state.isActive(tripId)) return Promise.resolve();
+    if (!tripId) return Promise.resolve();
+    // Fan-out a QUIEN esté escuchando: el PASAJERO (socket /passenger) y/o la FAMILIA (link /family).
+    // Antes el gate usaba solo `isActive` (suscriptores /family) → el pasajero NUNCA veía el taxi
+    // moverse salvo que hubiera un familiar mirando el share. Cada gateway aplica su propio filtro
+    // (passenger: isPassengerActive · family: isActive + corte por isPanicked), así que acá solo
+    // evitamos trabajo cuando NADIE escucha.
+    if (!this.state.isActive(tripId) && !this.state.isPassengerActive(tripId)) {
+      return Promise.resolve();
+    }
     const point = { lat: parsed.data.point.lat, lon: parsed.data.point.lon };
     this.state.setLocation(tripId, { point, at: parsed.data.at });
     const locationMsg = {
       tripId,
       driverId: parsed.data.driverId,
       point,
-      heading: null,
+      heading: parsed.data.heading ?? null,
       speedKph: null,
       at: parsed.data.at,
     };

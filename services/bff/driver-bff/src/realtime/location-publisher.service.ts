@@ -48,6 +48,8 @@ export class LocationPublisherService implements OnModuleInit, OnModuleDestroy {
         point,
         h3: toH3(point),
         at: report.ts,
+        // Rumbo para rotar el ícono del vehículo en el mapa del pasajero. null si la muestra no lo trae.
+        heading: report.heading ?? null,
         // Ola 2B: tipo de vehículo activo del conductor (default CAR). dispatch filtra el matching.
         vehicleType: report.vehicleType ?? 'CAR',
       };
