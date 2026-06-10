@@ -1,6 +1,10 @@
 import type { GeoPoint } from '@veo/api-client';
+// v5: las constantes (DESIRED_ACCURACY_HIGH/PERSIST_MODE_NONE/AUTHORIZATION_STATUS_*) existen en runtime
+// como static getters pero los typings ya NO las exponen; la API tipada son los enums (valores idénticos).
 import BackgroundGeolocation, {
-  type AuthorizationStatus,
+  AuthorizationStatus,
+  DesiredAccuracy,
+  PersistMode,
   type Location,
   type ProviderChangeEvent,
   type Subscription,
@@ -41,9 +45,13 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
   /** Configura el SDK una única vez (idempotente). */
   private ensureReady(): Promise<void> {
     if (!this.readyOnce) {
-      this.readyOnce = BackgroundGeolocation.ready({
+      // Typings inconsistentes en v5.1.1: `ready()` está tipado con el `Config` ANIDADO de
+      // @transistorsoft/background-geolocation-types, pero el runtime (NativeModule.validateConfig) valida
+      // la config PLANA documentada (la misma de v4). Cast acotado al parámetro real, sin reescribir una
+      // config correcta en runtime (idéntico criterio que el driver).
+      const config = {
         // Precisión máxima durante el viaje (seguridad sobre batería).
-        desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
+        desiredAccuracy: DesiredAccuracy.High,
         distanceFilter: 10,
         // El propio SDK gestiona el servicio en primer plano en Android.
         stopOnTerminate: false,
@@ -51,13 +59,16 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
         // El arranque del tracking lo controla `watchPosition`, no el SDK.
         autoSync: false,
         // No persistimos ubicaciones en la base interna del SDK (las consume la app).
-        persistMode: BackgroundGeolocation.PERSIST_MODE_NONE,
+        persistMode: PersistMode.None,
         // Notificación obligatoria del foreground-service en Android.
         notification: {
           title: 'VEO',
           text: 'Seguimiento de seguridad del viaje activo',
         },
-      }).then(() => {
+      };
+      this.readyOnce = BackgroundGeolocation.ready(
+        config as unknown as Parameters<typeof BackgroundGeolocation.ready>[0],
+      ).then(() => {
         // El SDK emite `location`/`providerchange` (RCTDeviceEventEmitter) también en
         // `getCurrentPosition`, aunque NO haya un `watchPosition` activo. Sin un listener registrado,
         // RN advierte "Sending `location`/`providerchange` with no listeners registered" (benigno
@@ -81,17 +92,21 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
     return { lat: location.coords.latitude, lon: location.coords.longitude };
   }
 
-  /** Traduce el `AuthorizationStatus` numérico del SDK al permiso de dominio. */
-  private toPermission(status: AuthorizationStatus): LocationPermission {
+  /**
+   * Traduce el status de autorización numérico del SDK al permiso de dominio. El parámetro es `number`
+   * porque `ProviderChangeEvent.status` viene como número genérico; el switch lo compara contra los
+   * valores del enum `AuthorizationStatus`.
+   */
+  private toPermission(status: number): LocationPermission {
     switch (status) {
-      case BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS:
-      case BackgroundGeolocation.AUTHORIZATION_STATUS_WHEN_IN_USE:
+      case AuthorizationStatus.Always:
+      case AuthorizationStatus.WhenInUse:
         return 'granted';
-      case BackgroundGeolocation.AUTHORIZATION_STATUS_DENIED:
+      case AuthorizationStatus.Denied:
         return 'denied';
-      case BackgroundGeolocation.AUTHORIZATION_STATUS_RESTRICTED:
+      case AuthorizationStatus.Restricted:
         return 'restricted';
-      // AUTHORIZATION_STATUS_NOT_DETERMINED (iOS) y cualquier valor futuro → aún sin decidir.
+      // AuthorizationStatus.NotDetermined (iOS) y cualquier valor futuro → aún sin decidir.
       default:
         return 'undetermined';
     }
@@ -122,7 +137,7 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
       samples: 2,
       timeout: 15,
       maximumAge: 5000,
-      desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
+      desiredAccuracy: DesiredAccuracy.High,
     });
     return this.toGeoPoint(location);
   }

@@ -1,4 +1,7 @@
 import {NativeModules} from 'react-native';
+// v5: las constantes (DESIRED_ACCURACY_HIGH/LOG_LEVEL_OFF) existen en runtime como static getters pero
+// los typings ya NO las exponen; la API tipada son los enums DesiredAccuracy/LogLevel (valores idénticos).
+import {DesiredAccuracy, LogLevel} from 'react-native-background-geolocation';
 import type {
   default as BackgroundGeolocationModule,
   Location,
@@ -105,8 +108,12 @@ export class BackgroundGeolocationSource implements LocationSource {
       this.providerSub = bg.onProviderChange(() => undefined);
     }
 
-    await bg.ready({
-      desiredAccuracy: bg.DESIRED_ACCURACY_HIGH,
+    // Typings inconsistentes en v5.1.1: `ready()` está tipado con el `Config` ANIDADO de
+    // @transistorsoft/background-geolocation-types, pero el runtime (NativeModule.validateConfig) acepta
+    // y valida la config PLANA documentada (la misma de v4, la que usamos). Conciliamos el typing roto del
+    // SDK con un cast acotado al parámetro real de `ready()`, SIN reescribir una config correcta en runtime.
+    const config = {
+      desiredAccuracy: DesiredAccuracy.High,
       distanceFilter: 10,
       // No detener el tracking al cerrar la app: el turno sigue activo en background.
       stopOnTerminate: false,
@@ -131,8 +138,9 @@ export class BackgroundGeolocationSource implements LocationSource {
       url: undefined,
       autoSync: false,
       debug: false,
-      logLevel: bg.LOG_LEVEL_OFF,
-    });
+      logLevel: LogLevel.Off,
+    };
+    await bg.ready(config as unknown as Parameters<typeof bg.ready>[0]);
   }
 
   /** Convierte la `Location` nativa a `LocationSample` del dominio y notifica a los listeners. */
@@ -148,7 +156,8 @@ export class BackgroundGeolocationSource implements LocationSource {
       heading: coords.heading ?? null,
       speed: coords.speed ?? null,
       accuracy: coords.accuracy ?? null,
-      ts: location.timestamp,
+      // v5 tipa timestamp como `string | number`; el dominio (y el backend) esperan ISO-8601.
+      ts: toIso(location.timestamp),
     };
     this.listeners.forEach(listener => listener(sample));
   }
@@ -161,6 +170,11 @@ export class BackgroundGeolocationSource implements LocationSource {
       // El stop puede rechazar si el módulo aún no estaba iniciado; es seguro ignorarlo.
     }
   }
+}
+
+/** Normaliza el timestamp del SDK (v5: `string | number`) a ISO-8601, que es lo que el dominio expone. */
+function toIso(timestamp: string | number): string {
+  return typeof timestamp === 'string' ? timestamp : new Date(timestamp).toISOString();
 }
 
 /** Instancia singleton: una sola suscripción nativa multiplexada para toda la app. */
