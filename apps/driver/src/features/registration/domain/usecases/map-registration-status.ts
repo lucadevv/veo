@@ -8,7 +8,8 @@ import type {RegistrationStatus} from '../entities';
 const REJECTED_TOKENS = ['REJECTED', 'FAILED', 'DENIED', 'BLOCKED'];
 
 /** Estados crudos que consideramos APROBADO/verificado para el KYC y antecedentes. */
-const APPROVED_TOKENS = ['APPROVED', 'VERIFIED', 'CLEAR', 'PASSED', 'OK', 'COMPLETED'];
+// 'CLEARED' es el valor canónico de identity (enum BackgroundCheckStatus: PENDING|CLEARED|REJECTED).
+const APPROVED_TOKENS = ['APPROVED', 'VERIFIED', 'CLEAR', 'CLEARED', 'PASSED', 'OK', 'COMPLETED'];
 
 function normalize(raw: string): string {
   return raw.trim().toUpperCase();
