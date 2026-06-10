@@ -1,10 +1,16 @@
 /**
- * Polyfill DOMException (Hermes no lo trae): livekit-client 2.x define clases que EXTIENDEN
- * DOMException en el scope del módulo (p. ej. DeferrableMapAbortError), o sea que el global debe
- * existir ANTES de evaluar cualquier import de livekit-client — sin esto el publisher del viaje
- * revienta con "Property 'DOMException' doesn't exist" al iniciar el viaje.
- * `registerGlobals()` de react-native-webrtc registra RTCPeerConnection y compañía, pero NO esto.
+ * Polyfills de Hermes para livekit-client 2.x (publisher de la cámara en vivo del viaje). Hermes no
+ * trae varios globals web que livekit usa al EVALUAR su módulo, así que deben existir ANTES de
+ * cualquier import que arrastre livekit-client. `registerGlobals()` de react-native-webrtc registra
+ * RTCPeerConnection y cía, pero NO estos.
+ *
+ *  - TextEncoder/TextDecoder (text-encoding-polyfill): livekit los usa para serializar data-channel.
+ *    Sin ellos: "Property 'TextDecoder' doesn't exist" al montar el LiveKitTripPublisher.
+ *  - DOMException: livekit define clases que lo EXTIENDEN en el scope del módulo (DeferrableMapAbortError).
+ *    Sin él: "Property 'DOMException' doesn't exist".
  */
+import 'text-encoding-polyfill';
+
 if (typeof global.DOMException === 'undefined') {
   global.DOMException = class DOMException extends Error {
     constructor(message, name) {

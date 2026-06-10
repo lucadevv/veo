@@ -290,6 +290,9 @@ importers:
       socket.io-client:
         specifier: ^4.8.0
         version: 4.8.3
+      text-encoding-polyfill:
+        specifier: ^0.6.7
+        version: 0.6.7
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -589,6 +592,9 @@ importers:
       socket.io-client:
         specifier: ^4.8.0
         version: 4.8.3
+      text-encoding-polyfill:
+        specifier: ^0.6.7
+        version: 0.6.7
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -11614,6 +11620,9 @@ packages:
 
   text-decoder@1.2.7:
     resolution: {integrity: sha512-vlLytXkeP4xvEq2otHeJfSQIRyWxo/oZGEbXrtEEF9Hnmrdly59sUbzZ/QgyWuLYHctCHxFF4tRQZNQ9k60ExQ==}
+
+  text-encoding-polyfill@0.6.7:
+    resolution: {integrity: sha512-/DZ1XJqhbqRkCop6s9ZFu8JrFRwmVuHg4quIRm+ziFkR3N3ec6ck6yBvJ1GYeEQZhLVwRW0rZE+C3SSJpy0RTg==}
 
   text-extensions@2.4.0:
     resolution: {integrity: sha512-te/NtwBwfiNRLf9Ijqx3T0nlqZiQ2XrrtBvu+cLL8ZRrGkO0NHTug8MYFKyoSrv/sHTaSKfilUkizV6XhxMJ3g==}
@@ -23375,6 +23384,8 @@ snapshots:
       b4a: 1.8.1
     transitivePeerDependencies:
       - react-native-b4a
+
+  text-encoding-polyfill@0.6.7: {}
 
   text-extensions@2.4.0: {}
 
