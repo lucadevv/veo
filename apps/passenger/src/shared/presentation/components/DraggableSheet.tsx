@@ -96,14 +96,16 @@ export interface DraggableSheetProps {
   style?: ViewStyle;
 }
 
+// Reanimated 4 unificó los umbrales de reposo `restDisplacementThreshold` + `restSpeedThreshold` en un
+// solo `energyThreshold`; usamos su default (el asentamiento lo determina la energía del sistema). La
+// SENSACIÓN del spring la fijan damping/stiffness/mass, que se mantienen idénticos.
+
 /** Spring de asentamiento: rápido pero con cuerpo (sensación premium, sin rebote excesivo). */
 const SPRING: WithSpringConfig = {
   damping: 22,
   stiffness: 240,
   mass: 0.9,
   overshootClamping: false,
-  restDisplacementThreshold: 0.4,
-  restSpeedThreshold: 2,
 };
 
 /** Spring suave para re-acomodar la altura del peek cuando el contenido cambia (sin tirón). */
@@ -112,8 +114,6 @@ const RESIZE_SPRING: WithSpringConfig = {
   stiffness: 200,
   mass: 0.9,
   overshootClamping: true,
-  restDisplacementThreshold: 0.4,
-  restSpeedThreshold: 2,
 };
 
 /** Umbral de velocidad (px/s) a partir del cual el flick decide la dirección del snap. */
