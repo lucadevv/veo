@@ -1797,6 +1797,14 @@ export const startTripRequest = z.object({
 });
 export type StartTripRequest = z.infer<typeof startTripRequest>;
 
+/**
+ * POST /trips/:id/complete → body. EFECTIVO (decisión del dueño, BR-P03): al terminar el viaje el
+ * conductor marca si COBRÓ el efectivo en mano (`cashCollected`) — su lado de la confirmación
+ * bilateral (driverConfirmed). Solo aplica a viajes CASH; en digital el BFF lo ignora.
+ */
+export const completeTripRequest = z.object({ cashCollected: z.boolean().optional() });
+export type CompleteTripRequest = z.infer<typeof completeTripRequest>;
+
 /** POST /trips/:id/cancel → body (el actor se fija a DRIVER en el BFF). */
 export const driverCancelTripRequest = z.object({ reason: z.string().optional() });
 export type DriverCancelTripRequest = z.infer<typeof driverCancelTripRequest>;

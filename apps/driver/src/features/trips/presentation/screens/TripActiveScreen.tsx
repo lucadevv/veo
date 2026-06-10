@@ -19,6 +19,7 @@ import {
   useTheme,
   type StatusTone,
 } from '@veo/ui-kit';
+import {mobilePaymentMethod} from '@veo/api-client';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {StateView} from '../../../../shared/presentation/components/StateView';
@@ -119,6 +120,7 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
   const [cancelReason, setCancelReason] = useState('');
   const [childOpen, setChildOpen] = useState(false);
   const [childCode, setChildCode] = useState('');
+  const [cashOpen, setCashOpen] = useState(false);
 
   const status = trip.data ? parseTripStatus(trip.data.status) : 'UNKNOWN';
 
@@ -169,8 +171,22 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
     actions.start.mutate(undefined);
   };
 
+  // EFECTIVO (BR-P03): en un viaje CASH, terminar abre la confirmación de cobro (el conductor marca
+  // que recibió el efectivo en mano → driverConfirmed). En digital, completa directo (sin sheet).
+  const isCashTrip = trip.data?.paymentMethod === mobilePaymentMethod.enum.CASH;
   const onComplete = () => {
+    if (isCashTrip) {
+      setCashOpen(true);
+      return;
+    }
     actions.complete.mutate(undefined, {onSuccess: finishToDashboard});
+  };
+
+  // Cierra el viaje declarando si se cobró el efectivo. `collected=false` lo termina igual (flujo
+  // bilateral: el cobro queda a la espera de la confirmación del pasajero), nunca data falsa.
+  const completeCash = (collected: boolean) => {
+    setCashOpen(false);
+    actions.complete.mutate({cashCollected: collected}, {onSuccess: finishToDashboard});
   };
 
   // Entrada al chat con el pasajero (con badge de no leídos). Solo tiene sentido mientras el viaje
@@ -431,6 +447,36 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
           maxLength={6}
         />
       </BottomSheet>
+
+      {/* EFECTIVO (BR-P03): confirmación de cobro al terminar un viaje CASH. El monto se muestra para que
+          el conductor coteje lo que cobró en mano; ambas opciones cierran el viaje (cobrado o pendiente). */}
+      <BottomSheet
+        visible={cashOpen}
+        onClose={() => setCashOpen(false)}
+        title={t('trips.cashCollectTitle')}
+        footer={
+          <View style={styles.sheetFooter}>
+            <Button
+              label={t('trips.cashCollectSkip')}
+              variant="secondary"
+              disabled={actions.complete.isPending}
+              onPress={() => completeCash(false)}
+            />
+            <Button
+              label={t('trips.cashCollectConfirm', {amount: formatPEN(trip.data?.fareCents ?? 0)})}
+              variant="safe"
+              loading={actions.complete.isPending}
+              onPress={() => completeCash(true)}
+            />
+          </View>
+        }>
+        <Text variant="title3" style={styles.cashAmount}>
+          {formatPEN(trip.data?.fareCents ?? 0)}
+        </Text>
+        <Text variant="callout" color="inkMuted" style={styles.spacer}>
+          {t('trips.cashCollectBody')}
+        </Text>
+      </BottomSheet>
     </SafeScreen>
   );
 };
@@ -453,4 +499,5 @@ const styles = StyleSheet.create({
   actions: {gap: 12, marginTop: 4},
   sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
   spacer: {marginTop: 12},
+  cashAmount: {textAlign: 'center', marginTop: 4},
 });

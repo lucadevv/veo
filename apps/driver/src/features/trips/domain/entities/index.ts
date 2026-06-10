@@ -1,6 +1,7 @@
 import type {
   AcceptTripRequest,
   ArrivingTripRequest,
+  CompleteTripRequest,
   DriverCancelTripRequest,
   DriverOfferView,
   DriverTripStateView,
@@ -20,6 +21,7 @@ export type TripState = DriverTripStateView;
 export type AcceptTripInput = AcceptTripRequest;
 export type ArrivingTripInput = ArrivingTripRequest;
 export type StartTripInput = StartTripRequest;
+export type CompleteTripInput = CompleteTripRequest;
 export type CancelTripInput = DriverCancelTripRequest;
 
 /** Ruta del viaje activo con geometría completa + pasos de navegación turn-by-turn. */

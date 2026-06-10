@@ -10,6 +10,7 @@ import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CompleteTripInput,
   StartTripInput,
   Trip,
   TripOffer,
@@ -64,8 +65,8 @@ export class HttpTripsRepository implements TripsRepository {
     return this.http.post(`/trips/${tripId}/start`, {body: input, schema: driverTripView});
   }
 
-  complete(tripId: string): Promise<Trip> {
-    return this.http.post(`/trips/${tripId}/complete`, {body: {}, schema: driverTripView});
+  complete(tripId: string, input?: CompleteTripInput): Promise<Trip> {
+    return this.http.post(`/trips/${tripId}/complete`, {body: input ?? {}, schema: driverTripView});
   }
 
   cancel(tripId: string, input: CancelTripInput): Promise<Trip> {

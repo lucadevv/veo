@@ -1,5 +1,5 @@
 import type {TripsRepository} from '../repositories/trips-repository';
-import type {Trip, TripOffer, TripRouteView, TripState} from '../entities';
+import type {CompleteTripInput, Trip, TripOffer, TripRouteView, TripState} from '../entities';
 import {parseTripStatus} from '../value-objects/trip-status';
 
 /** Error de validación del código del modo niño (4 a 6 dígitos). */
@@ -156,11 +156,11 @@ export class StartTripUseCase {
   }
 }
 
-/** Caso de uso: completar el viaje (→ COMPLETED). */
+/** Caso de uso: completar el viaje (→ COMPLETED). EFECTIVO: `input.cashCollected` confirma el cobro. */
 export class CompleteTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
-  execute(tripId: string): Promise<Trip> {
-    return this.trips.complete(tripId);
+  execute(tripId: string, input?: CompleteTripInput): Promise<Trip> {
+    return this.trips.complete(tripId, input);
   }
 }
 

@@ -2,6 +2,7 @@ import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CompleteTripInput,
   StartTripInput,
   Trip,
   TripOffer,
@@ -35,8 +36,11 @@ export interface TripsRepository {
   arrived(tripId: string): Promise<Trip>;
   /** POST /trips/:id/start — inicia el viaje (código modo niño si aplica) (→ IN_PROGRESS). */
   start(tripId: string, input: StartTripInput): Promise<Trip>;
-  /** POST /trips/:id/complete — finaliza el viaje (→ COMPLETED). */
-  complete(tripId: string): Promise<Trip>;
+  /**
+   * POST /trips/:id/complete — finaliza el viaje (→ COMPLETED). EFECTIVO: `input.cashCollected`
+   * marca el cobro en mano (driverConfirmed). Omitido ⇒ flujo bilateral normal / viaje digital.
+   */
+  complete(tripId: string, input?: CompleteTripInput): Promise<Trip>;
   /** POST /trips/:id/cancel — cancela (actor DRIVER fijado en el BFF). */
   cancel(tripId: string, input: CancelTripInput): Promise<Trip>;
 }

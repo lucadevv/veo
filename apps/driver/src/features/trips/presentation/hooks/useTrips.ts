@@ -14,6 +14,7 @@ import {
   GetTripUseCase,
   RejectOfferUseCase,
   StartTripUseCase,
+  type CompleteTripInput,
   type Trip,
 } from '../../domain';
 
@@ -124,7 +125,7 @@ export function useTripActions(tripId: string) {
     onSuccess: onTrip,
   });
   const complete = useMutation({
-    mutationFn: () => new CompleteTripUseCase(trips).execute(tripId),
+    mutationFn: (input?: CompleteTripInput) => new CompleteTripUseCase(trips).execute(tripId, input),
     onSuccess: onTrip,
   });
   const cancel = useMutation({
