@@ -1,4 +1,7 @@
-import { MMKV } from 'react-native-mmkv';
+// mmkv v4 (Nitro): `MMKV` ya NO es una clase exportada — es SOLO un type; las instancias se crean
+// con la factory `createMMKV(config)`. `new MMKV(...)` compila en TS (el type existe) pero en
+// runtime es `undefined` → "TypeError: undefined cannot be used as a constructor" al arrancar.
+import { createMMKV, type MMKV } from 'react-native-mmkv';
 import {
   BOOTSTRAP_ENCRYPTION_KEY,
   initSecureStorage as initSecureStorageWithRecrypt,
@@ -87,7 +90,7 @@ class MmkvStore implements KeyValueStore {
  * Instancia MMKV segura. Se crea con la clave de ARRANQUE; se re-cifra con la clave del
  * Keychain en `initSecureStorage()`. Privada al módulo: solo `recrypt` la toca desde aquí.
  */
-const secureMmkv = new MMKV({
+const secureMmkv = createMMKV({
   id: 'veo.secure',
   encryptionKey: BOOTSTRAP_ENCRYPTION_KEY,
 });
@@ -97,7 +100,7 @@ export const secureStore: KeyValueStore = new MmkvStore(secureMmkv);
 
 /** Almacén de preferencias / caché no sensible. */
 export const prefsStore: KeyValueStore = new MmkvStore(
-  new MMKV({ id: 'veo.prefs' }),
+  createMMKV({ id: 'veo.prefs' }),
 );
 
 /**

@@ -1,6 +1,14 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+// RN 0.85 — patrón del template oficial: RCTReactNativeFactory + un delegate que hereda de
+// RCTDefaultReactNativeFactoryDelegate, con `dependencyProvider` (generado por codegen) que
+// registra los módulos core + autolinkeados en bridgeless. El viejo RCTAppDelegate está
+// deprecado y dejaba el registro de TurboModules VACÍO → crash al arrancar con
+// `TurboModuleRegistry.getEnforcing('DeviceInfo') could not be found`.
+#import <RCTDefaultReactNativeFactoryDelegate.h>
+#import <RCTReactNativeFactory.h>
+#import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
 
 // Firebase: se importa solo si el pod está instalado. La configuración se ejecuta
 // únicamente si existe GoogleService-Info.plist en el bundle, evitando crashes
@@ -9,6 +17,38 @@
 #import <FirebaseCore/FirebaseCore.h>
 #define VEO_FIREBASE_AVAILABLE 1
 #endif
+
+#pragma mark - Delegate de la factory (bundleURL + provider de dependencias)
+
+@interface VeoReactNativeFactoryDelegate : RCTDefaultReactNativeFactoryDelegate
+@end
+
+@implementation VeoReactNativeFactoryDelegate
+
+- (NSURL *)sourceURLForBridge:(RCTBridge *)bridge
+{
+  return [self bundleURL];
+}
+
+- (NSURL *)bundleURL
+{
+#if DEBUG
+  return [[RCTBundleURLProvider sharedSettings] jsBundleURLForBundleRoot:@"index"];
+#else
+  return [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
+#endif
+}
+
+@end
+
+#pragma mark - AppDelegate
+
+@interface AppDelegate ()
+
+@property (nonatomic, strong) VeoReactNativeFactoryDelegate *reactNativeDelegate;
+@property (nonatomic, strong) RCTReactNativeFactory *reactNativeFactory;
+
+@end
 
 @implementation AppDelegate
 
@@ -51,25 +91,18 @@ static BOOL VeoHasRealFirebaseCredentials(void)
   }
 #endif
 
-  self.moduleName = @"VEO";
-  // Props iniciales que se pasan al ViewController de React Native.
-  self.initialProps = @{};
+  self.reactNativeDelegate = [VeoReactNativeFactoryDelegate new];
+  // Provider generado por codegen: registra módulos core + autolinkeados (obligatorio en bridgeless).
+  self.reactNativeDelegate.dependencyProvider = [RCTAppDependencyProvider new];
+  self.reactNativeFactory = [[RCTReactNativeFactory alloc] initWithDelegate:self.reactNativeDelegate];
 
-  return [super application:application didFinishLaunchingWithOptions:launchOptions];
-}
+  self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  [self.reactNativeFactory startReactNativeWithModuleName:@"VEO"
+                                                  inWindow:self.window
+                                         initialProperties:@{}
+                                             launchOptions:launchOptions];
 
-- (NSURL *)sourceURLForBridge:(RCTBridge *)bridge
-{
-  return [self bundleURL];
-}
-
-- (NSURL *)bundleURL
-{
-#if DEBUG
-  return [[RCTBundleURLProvider sharedSettings] jsBundleURLForBundleRoot:@"index"];
-#else
-  return [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
-#endif
+  return YES;
 }
 
 @end

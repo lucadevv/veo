@@ -1,11 +1,11 @@
 buildscript {
     ext {
-        buildToolsVersion = "34.0.0"
+        buildToolsVersion = "36.0.0"
         minSdkVersion = 24
-        compileSdkVersion = 34
-        targetSdkVersion = 34
-        ndkVersion = "26.1.10909125"
-        kotlinVersion = "1.9.24"
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "28.2.13676358"
+        kotlinVersion = "2.1.20"
         // @rnmapbox/maps@10.2.1 → Mapbox Maps SDK Android línea 10.16.* (Lote 4). Mantener alineado
         // al actualizar @rnmapbox/maps. (En Android NO hace falta token de descarga: Mapbox levantó
         // el requisito de auth en el repo de releases, por eso no se configura MAPBOX_DOWNLOADS_TOKEN.)

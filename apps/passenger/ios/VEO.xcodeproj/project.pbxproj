@@ -30,7 +30,6 @@
 		544485722FD6385400B8F6DF /* Outfit-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5444855E2FD6385400B8F6DF /* Outfit-Bold.ttf */; };
 		56726E39245A87E34B641695 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 617B81B24DC0A3074DAA9985 /* GoogleService-Info.plist */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
-		884F90BA2FCBDCBB005110D9 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = D04F33E463E2F495BBD9D75D /* MapLibre */; };
 		884F90BB2FCBDCBB005110D9 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = B37BD3A730E02D796ABA7F95 /* MapLibre */; };
 		AA010000000000000000B1B1 /* VeoPanicVolume.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA010000000000000000A1A1 /* VeoPanicVolume.swift */; };
 		AA010000000000000000B2B2 /* VeoPanicVolume.m in Sources */ = {isa = PBXBuildFile; fileRef = AA010000000000000000A2A2 /* VeoPanicVolume.m */; };
@@ -100,7 +99,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				884F90BA2FCBDCBB005110D9 /* MapLibre in Frameworks */,
 				BA77C180DBAB2FDEF96DEE6B /* Pods_VEO.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -259,9 +257,6 @@
 			dependencies = (
 			);
 			name = VEO;
-			packageProductDependencies = (
-				D04F33E463E2F495BBD9D75D /* MapLibre */,
-			);
 			productName = VEO;
 			productReference = 13B07F961A680F5B00A75B9A /* VEO.app */;
 			productType = "com.apple.product-type.application";
@@ -899,11 +894,6 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		B37BD3A730E02D796ABA7F95 /* MapLibre */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 5BF4F4F3740C3B31E22DD808 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
-			productName = MapLibre;
-		};
-		D04F33E463E2F495BBD9D75D /* MapLibre */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5BF4F4F3740C3B31E22DD808 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;

@@ -23,8 +23,8 @@
     "lucide-react": "^0.451.0",
     "maplibre-gl": "^4.7.1",
     "next": "15.5.19",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "socket.io-client": "^4.8.0",
     "tailwind-merge": "^2.5.3",
     "zod": "^3.23.8"
