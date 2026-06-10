@@ -26,24 +26,25 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>VEO usa tu ubicación durante el turno para asignarte viajes cercanos y compartir tu posición con el pasajero.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>VEO usa la cámara para la verificación facial al iniciar turno y para la grabación de seguridad durante el viaje.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>VEO usa Face ID para verificar tu identidad de forma segura al iniciar el turno.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>VEO necesita tu ubicación en segundo plano para mantener el seguimiento del viaje activo aunque la app no esté en pantalla.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>VEO necesita tu ubicación en segundo plano para mantener el seguimiento del viaje activo aunque la app no esté en pantalla.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>VEO usa la cámara para la verificación facial al iniciar turno y para la grabación de seguridad durante el viaje.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>VEO usa tu ubicación durante el turno para asignarte viajes cercanos y compartir tu posición con el pasajero.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VEO usa el micrófono para la comunicación de audio y el monitoreo de seguridad durante el viaje.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>VEO usa Face ID para verificar tu identidad de forma segura al iniciar el turno.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
