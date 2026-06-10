@@ -1,14 +1,18 @@
 import type { GeoPoint } from '@veo/api-client';
-// v5: las constantes (DESIRED_ACCURACY_HIGH/PERSIST_MODE_NONE/AUTHORIZATION_STATUS_*) existen en runtime
-// como static getters pero los typings ya NO las exponen; la API tipada son los enums (valores idénticos).
+// v5: los enums se importan del paquete de TYPES, NO de react-native-background-geolocation. Razón
+// (verificado en runtime): el paquete principal re-exporta los TIPOS pero NO los VALORES de los enums →
+// serían `undefined` en runtime y `DesiredAccuracy.High` crashea. @transistorsoft/...-types sí los
+// exporta como valores. Los tipos/valores son idénticos.
 import BackgroundGeolocation, {
-  AuthorizationStatus,
-  DesiredAccuracy,
-  PersistMode,
   type Location,
   type ProviderChangeEvent,
   type Subscription,
 } from 'react-native-background-geolocation';
+import {
+  AuthorizationStatus,
+  DesiredAccuracy,
+  PersistMode,
+} from '@transistorsoft/background-geolocation-types';
 import type {
   LocationAvailability,
   LocationPermission,

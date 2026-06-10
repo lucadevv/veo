@@ -1,7 +1,10 @@
 import {NativeModules} from 'react-native';
-// v5: las constantes (DESIRED_ACCURACY_HIGH/LOG_LEVEL_OFF) existen en runtime como static getters pero
-// los typings ya NO las exponen; la API tipada son los enums DesiredAccuracy/LogLevel (valores idénticos).
-import {DesiredAccuracy, LogLevel} from 'react-native-background-geolocation';
+// v5: los enums DesiredAccuracy/LogLevel se importan del paquete de TYPES, NO de
+// react-native-background-geolocation. Razón (verificado en runtime): el paquete principal re-exporta
+// los TIPOS pero NO los VALORES de los enums → `DesiredAccuracy` sería `undefined` en runtime y
+// `DesiredAccuracy.High` crashea ("cannot read property 'High' of undefined"). @transistorsoft/...-types
+// sí los exporta como valores (DesiredAccuracy={High:-1,...}). Los typings/valores son idénticos.
+import {DesiredAccuracy, LogLevel} from '@transistorsoft/background-geolocation-types';
 import type {
   default as BackgroundGeolocationModule,
   Location,
