@@ -77,7 +77,8 @@ export interface ServiceSpec {
  * Las usa el orquestador para los health checks y el test para hablar con los BFFs.
  */
 export const PORTS = {
-  identity: 3001,
+  // Overridable: en la máquina de dev el 3001 puede estar ocupado por otro stack (docker).
+  identity: Number(process.env.E2E_IDENTITY_PORT ?? 3001),
   trip: 3002,
   dispatch: 3003,
   payment: 3005,
