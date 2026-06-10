@@ -1054,9 +1054,12 @@ export const common = {
     failedBody: 'Lo intentaremos de nuevo automáticamente. No se te cobró dos veces.',
     debtTitle: 'Pago pendiente',
     debtBody: 'El cobro quedó pendiente. Lo regularizaremos en tu próximo viaje.',
-    /** Cobro reembolsado — estado honesto, neutral: ni "pagado" ni propina. */
+    /** Cobro reembolsado TOTAL — estado honesto, neutral: ni "pagado" ni propina. */
     refundedTitle: 'Este viaje fue reembolsado',
     refundedBody: 'Se te devolvió {{amount}}. No hay nada que pagar por este viaje.',
+    /** Cobro reembolsado PARCIAL — honesto: NO es "pagado" pleno; se devolvió parte del importe. */
+    partialRefundTitle: 'Reembolso parcial',
+    partialRefundBody: 'Se te devolvió parte del importe de este viaje. Revisá el detalle abajo.',
     /** Propina post-viaje (solo si tipCents === 0). 100% va al conductor. */
     tipPrompt: 'Propina (opcional · 100% al conductor)',
     /**

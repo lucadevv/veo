@@ -46,7 +46,9 @@ export interface SettlementBodyProps {
   canFinish: boolean;
 }
 
-type UpperStatus = 'PENDING' | 'CAPTURED' | 'FAILED' | 'REFUNDED' | 'DEBT' | string;
+// Estados de pago que esta vista distingue. Sin escape `| string`: el contrato (PaymentStatus) ya los
+// enumera, y dejar el escape fue lo que hizo que PARTIALLY_REFUNDED cayera al recibo "Pagado" (es plata).
+type UpperStatus = 'PENDING' | 'CAPTURED' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'DEBT';
 
 /** Normaliza el método a la clave i18n del kit (`payments.method.*`). */
 function methodLabelKey(method: string): string {
@@ -187,7 +189,9 @@ export function SettlementBody({
     return <ProcessingBody title={t('settlement.processing')} hint={t('settlement.processingHint')} />;
   }
 
-  const status: UpperStatus = payment.status.toUpperCase();
+  // payment.status YA es PaymentStatus (enum del contrato, en mayúsculas): sin toUpperCase ni cast,
+  // así el compilador EXIGE manejar cada estado (incl. PARTIALLY_REFUNDED) — no más fallthrough silencioso.
+  const status: UpperStatus = payment.status;
   const isCash = payment.method.toUpperCase() === 'CASH';
   const passengerConfirmedCash = confirmMutation.isSuccess;
 
@@ -273,17 +277,23 @@ export function SettlementBody({
     );
   }
 
-  // ── REFUNDED → reembolso honesto: SIN check verde, SIN "pagado", SIN propina ─────────────────
-  // El cobro se revirtió (devolución): no celebramos un pago que ya no existe. Mostramos un banner
-  // NEUTRAL + el desglose (sin el check de éxito) y dejamos continuar al rating/cierre. Si ofreciéramos
-  // chips de propina sobre un viaje reembolsado, le pediríamos plata por algo que le devolvimos: no va.
-  if (status === 'REFUNDED') {
+  // ── REFUNDED / PARTIALLY_REFUNDED → reembolso honesto: SIN check verde, SIN "pagado", SIN propina ─
+  // El cobro se revirtió (total o parcial): no celebramos un pago como pleno cuando se devolvió plata.
+  // Banner NEUTRAL + desglose (sin el check de éxito) y dejamos continuar al rating/cierre. Nada de
+  // chips de propina: pedir plata sobre un viaje que reembolsamos (aunque sea en parte) no va.
+  // PARTIALLY_REFUNDED no expone el monto devuelto en el contrato → texto honesto sin inventar cifra.
+  if (status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED') {
+    const isPartial = status === 'PARTIALLY_REFUNDED';
     return (
       <View style={{ gap: theme.spacing.md }}>
         <Banner
           tone="info"
-          title={t('settlement.refundedTitle')}
-          description={t('settlement.refundedBody', { amount: formatPEN(payment.amountCents) })}
+          title={t(isPartial ? 'settlement.partialRefundTitle' : 'settlement.refundedTitle')}
+          description={
+            isPartial
+              ? t('settlement.partialRefundBody')
+              : t('settlement.refundedBody', { amount: formatPEN(payment.amountCents) })
+          }
         />
         <ReceiptCard payment={payment} />
         {resolvedActions}
