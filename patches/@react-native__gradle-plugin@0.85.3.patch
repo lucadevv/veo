@@ -1,0 +1,65 @@
+diff --git a/react-native-gradle-plugin/build.gradle.kts b/react-native-gradle-plugin/build.gradle.kts
+index 85dadeba0c42cf0b09b964eb00b3e2c12b5ed6e9..18e6767cf344a694e6fa152311b20ee036084d6d 100644
+--- a/react-native-gradle-plugin/build.gradle.kts
++++ b/react-native-gradle-plugin/build.gradle.kts
+@@ -60,7 +60,7 @@ dependencies {
+ // nice message showing that JDK 11 (or 17) is required first
+ java { targetCompatibility = JavaVersion.VERSION_11 }
+ 
+-kotlin { jvmToolchain(17) }
++kotlin { jvmToolchain(21) }
+ 
+ tasks.withType<KotlinCompile>().configureEach {
+   compilerOptions {
+diff --git a/settings-plugin/build.gradle.kts b/settings-plugin/build.gradle.kts
+index 2fbeafd502c98ba81856d3a1579f3b0d8bc60b2d..c8524bfee3dd9c7f77a899bb2b668ae4cde164ed 100644
+--- a/settings-plugin/build.gradle.kts
++++ b/settings-plugin/build.gradle.kts
+@@ -50,7 +50,7 @@ dependencies {
+ // nice message showing that JDK 11 (or 17) is required first
+ java { targetCompatibility = JavaVersion.VERSION_11 }
+ 
+-kotlin { jvmToolchain(17) }
++kotlin { jvmToolchain(21) }
+ 
+ tasks.withType<KotlinCompile>().configureEach {
+   compilerOptions {
+diff --git a/settings.gradle.kts b/settings.gradle.kts
+index b3c46a3bf5eb21c0bb1c9435b5582aecbc57d57a..14f1e9c2063ef10ca3f2ecbb2336b8a4aacfcc9c 100644
+--- a/settings.gradle.kts
++++ b/settings.gradle.kts
+@@ -13,7 +13,7 @@ pluginManagement {
+   }
+ }
+ 
+-plugins { id("org.gradle.toolchains.foojay-resolver-convention").version("0.5.0") }
++plugins { id("org.gradle.toolchains.foojay-resolver-convention").version("1.0.0") }
+ 
+ include(
+     ":react-native-gradle-plugin",
+diff --git a/shared/build.gradle.kts b/shared/build.gradle.kts
+index 315984875ad8ea2de476d4ab895932d2e9d47b0b..fba730f822fca761da731baba0e5c173f06b42a1 100644
+--- a/shared/build.gradle.kts
++++ b/shared/build.gradle.kts
+@@ -29,7 +29,7 @@ dependencies {
+ 
+ java { targetCompatibility = JavaVersion.VERSION_11 }
+ 
+-kotlin { jvmToolchain(17) }
++kotlin { jvmToolchain(21) }
+ 
+ tasks.withType<KotlinCompile>().configureEach {
+   compilerOptions {
+diff --git a/shared-testutil/build.gradle.kts b/shared-testutil/build.gradle.kts
+index 26173fb55578417118679d6243de84146b6c8a9f..6f84b6635f99d1ec045bf1bdf23f95801095424c 100644
+--- a/shared-testutil/build.gradle.kts
++++ b/shared-testutil/build.gradle.kts
+@@ -23,7 +23,7 @@ dependencies { implementation(libs.junit) }
+ 
+ java { targetCompatibility = JavaVersion.VERSION_11 }
+ 
+-kotlin { jvmToolchain(17) }
++kotlin { jvmToolchain(21) }
+ 
+ tasks.withType<KotlinCompile>().configureEach {
+   compilerOptions {

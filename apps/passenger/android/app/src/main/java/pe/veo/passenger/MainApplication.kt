@@ -9,6 +9,7 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import pe.veo.passenger.kyc.KycFrameGrabberPackage
 import pe.veo.passenger.panic.VolumePanicPackage
@@ -39,7 +40,10 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    SoLoader.init(this, false)
+    // RN 0.85: libs nativas FUSIONADAS en libreactnative.so (merged so). SoLoader necesita
+    // OpenSourceMergedSoMapping para resolver los nombres viejos hacia la lib fusionada; con `false`
+    // crashea con UnsatisfiedLinkError (libreact_featureflagsjni.so not found) en el entry point new-arch.
+    SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // New Architecture habilitada: cargamos el entry point nativo.
       load()
