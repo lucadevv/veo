@@ -8,11 +8,12 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Mapbox v11 distribuye XCFrameworks DINÁMICOS; sin `use_frameworks!` NO se embeben en el .app
+# (→ runtime "native code not available"). Igual que el passenger: linkage estático por default
+# (ejemplo oficial de @rnmapbox/maps).
+linkage = (ENV['USE_FRAMEWORKS'] || 'static').to_sym
+Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+use_frameworks! :linkage => linkage
 
 # @react-native-firebase: los pods Swift de Firebase requieren module maps de
 # GoogleUtilities para poder enlazarse como librerías estáticas (sin use_frameworks!).
@@ -32,19 +33,22 @@ $RNMapboxMapsVersion = '~> 11.20.1'
 target 'VEODriver' do
   config = use_native_modules!
 
-  # Habilita module maps en las dependencias de Firebase que no los definen.
-  pod 'GoogleUtilities', :modular_headers => true
-  pod 'FirebaseCoreInternal', :modular_headers => true
-  pod 'FirebaseCore', :modular_headers => true
-  pod 'FirebaseInstallations', :modular_headers => true
-  pod 'GoogleDataTransport', :modular_headers => true
-  pod 'nanopb', :modular_headers => true
+  # Con `use_frameworks! :linkage => :static` los pods se construyen como frameworks estáticos
+  # (ya proveen module maps) → NO hacen falta los `:modular_headers` explícitos de Firebase
+  # (igual que el passenger).
 
   # @rnmapbox/maps: hook previo a la instalación (configura el podspec de MapboxMaps). Debe ir antes
   # de `use_react_native!` para que CocoaPods resuelva la dependencia nativa de Mapbox.
   pre_install do |installer|
     $RNMapboxMaps.pre_install(installer) if defined?($RNMapboxMaps)
   end
+
+  # ─── React Native desde FUENTE (no prebuilt) — igual que el passenger ───────────────────────────
+  # RN 0.85 baja React-Core PREBUILT por default. Bajo `use_frameworks!` (necesario para Mapbox v11)
+  # ese module map prebuilt rompe @react-native-firebase con "RCTPromiseRejectBlock must be imported
+  # from module before required" (fix del maintainer de RNFirebase, issue #8657). ANTES de use_react_native!.
+  ENV['RCT_USE_RN_DEP'] = '0'
+  ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -68,5 +72,19 @@ target 'VEODriver' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Igual que el passenger: (1) MapboxMaps 11.x exige iOS 14+ y `react_native_post_install` resetea
+    # el deployment target de los pods al mínimo de RN — elevamos cualquier target por debajo de 15.1
+    # (mínimo de RN 0.85). (2) use_frameworks! + RNFirebase + -Werror: los headers de RNFB hacen
+    # `#import <React/...>` no-modular dentro de un framework module → relajamos ese check.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_configuration|
+        current = build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || current.to_f < 15.1
+          build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+        end
+        build_configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
   end
 end

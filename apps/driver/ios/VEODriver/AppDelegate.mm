@@ -1,18 +1,19 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+// RN 0.85 — patrón del template oficial: RCTReactNativeFactory + delegate que hereda de
+// RCTDefaultReactNativeFactoryDelegate, con `dependencyProvider` (codegen) que registra los
+// módulos core + autolinkeados en bridgeless. Espejo del passenger.
+#import <RCTDefaultReactNativeFactoryDelegate.h>
+#import <RCTReactNativeFactory.h>
+#import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
 
-@implementation AppDelegate
+#pragma mark - Delegate de la factory (bundleURL + provider de dependencias)
 
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
-{
-  self.moduleName = @"VEODriver";
-  // You can add your custom initial props in the dictionary below.
-  // They will be passed down to the ViewController used by React Native.
-  self.initialProps = @{};
+@interface VeoDriverReactNativeFactoryDelegate : RCTDefaultReactNativeFactoryDelegate
+@end
 
-  return [super application:application didFinishLaunchingWithOptions:launchOptions];
-}
+@implementation VeoDriverReactNativeFactoryDelegate
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge
 {
@@ -26,6 +27,35 @@
 #else
   return [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
 #endif
+}
+
+@end
+
+#pragma mark - AppDelegate
+
+@interface AppDelegate ()
+
+@property (nonatomic, strong) VeoDriverReactNativeFactoryDelegate *reactNativeDelegate;
+@property (nonatomic, strong) RCTReactNativeFactory *reactNativeFactory;
+
+@end
+
+@implementation AppDelegate
+
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
+{
+  self.reactNativeDelegate = [VeoDriverReactNativeFactoryDelegate new];
+  // Provider generado por codegen: registra módulos core + autolinkeados (obligatorio en bridgeless).
+  self.reactNativeDelegate.dependencyProvider = [RCTAppDependencyProvider new];
+  self.reactNativeFactory = [[RCTReactNativeFactory alloc] initWithDelegate:self.reactNativeDelegate];
+
+  self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  [self.reactNativeFactory startReactNativeWithModuleName:@"VEODriver"
+                                                  inWindow:self.window
+                                         initialProperties:@{}
+                                             launchOptions:launchOptions];
+
+  return YES;
 }
 
 @end
