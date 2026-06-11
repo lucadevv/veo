@@ -9,6 +9,13 @@ export type { InternalRestOptions, InternalRequest } from './internal-rest.js';
 export { DownstreamError, normalizeError } from './error.js';
 export type { ApiErrorLike } from './error.js';
 export {
+  BffExceptionsFilter,
+  UPSTREAM_UNAVAILABLE_CODE,
+  UPSTREAM_UNAVAILABLE_STATUS,
+  UPSTREAM_UNAVAILABLE_MESSAGE,
+} from './bff-exception-filter.js';
+export type { BffExceptionFilterOptions } from './bff-exception-filter.js';
+export {
   PROTO_DIR,
   SERVICE_PROTO,
   SERVICE_PACKAGE,
@@ -16,3 +23,4 @@ export {
   protoPathFor,
 } from './proto-paths.js';
 export type { ServiceName } from './proto-paths.js';
+export type * from './contracts/index.js';

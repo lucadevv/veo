@@ -2,7 +2,10 @@ syntax = "proto3";
 
 package veo.share.v1;
 
+// Contrato gRPC que share-service expone a otros servicios (notification, panic).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service ShareService {
+  // Contactos de confianza verificados de un usuario (para notificar en pánico).
   rpc GetTrustedContacts (GetTrustedContactsRequest) returns (TrustedContactsReply);
 }
 

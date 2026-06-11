@@ -12,6 +12,8 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/services/identity-service/dist ./dist
+# El servidor gRPC carga el .proto en runtime (join(__dirname, '../proto/identity.proto')).
+COPY --from=builder /app/services/identity-service/proto ./proto
 COPY --from=builder /app/services/identity-service/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 EXPOSE 3001

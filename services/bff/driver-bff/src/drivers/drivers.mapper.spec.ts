@@ -21,6 +21,8 @@ const driver: DriverReply = {
   backgroundCheckStatus: 'APPROVED',
   averageRating: 4.8,
   found: true,
+  suspendedAt: '',
+  name: 'Khalid Ríos',
 };
 
 const user: UserReply = {
@@ -30,6 +32,7 @@ const user: UserReply = {
   kycStatus: 'VERIFIED',
   deleted: false,
   found: true,
+  name: 'Khalid Ríos',
 };
 
 function docsWith(types: { type: string; status: string; expiresAt?: string }[]): DriverDocumentsReply {

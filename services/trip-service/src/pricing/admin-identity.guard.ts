@@ -8,11 +8,7 @@
  */
 import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { ForbiddenError } from '@veo/utils';
-import type { AuthenticatedUser } from '@veo/auth';
-
-interface RequestWithUser {
-  user?: AuthenticatedUser;
-}
+import type { RequestWithUser } from '@veo/auth';
 
 @Injectable()
 export class AdminIdentityGuard implements CanActivate {

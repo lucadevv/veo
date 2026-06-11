@@ -4,7 +4,7 @@
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { GrpcServiceClient } from '@veo/rpc';
+import type { GrpcServiceClient, RecordReply } from '@veo/rpc';
 import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_AUDIT } from '../infra/tokens';
 import type { Env } from '../config/env.schema';
@@ -14,12 +14,6 @@ export interface AuditAction {
   resourceType: string;
   resourceId: string;
   payload?: Record<string, unknown>;
-}
-
-interface RecordReply {
-  id: string;
-  seq: string;
-  hash: string;
 }
 
 @Injectable()

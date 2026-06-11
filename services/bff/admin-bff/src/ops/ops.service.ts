@@ -4,7 +4,13 @@
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
+import {
+  InternalRestClient,
+  type GrpcServiceClient,
+  type TripReply,
+  type UserReply,
+  type DriverReply,
+} from '@veo/rpc';
 import { NotFoundError } from '@veo/utils';
 import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
 import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api-client';
@@ -21,44 +27,6 @@ import type { ListTripsQueryDto, ListDriversQueryDto } from './dto/ops.dto';
 
 const DEFAULT_LIMIT = 25;
 
-interface TripReply {
-  id: string;
-  passengerId: string;
-  driverId: string;
-  vehicleId: string;
-  status: string;
-  fareCents: number;
-  currency: string;
-  distanceMeters: number;
-  durationSeconds: number;
-  paymentMethod: string;
-  childMode: boolean;
-  penaltyCents: number;
-  // Enriquecimiento del detalle (proto TripReply): timestamp real + coords de origen/destino.
-  requestedAt: string;
-  originLat: number;
-  originLng: number;
-  destinationLat: number;
-  destinationLng: number;
-  found: boolean;
-}
-interface UserReply {
-  id: string;
-  type: string;
-  kycStatus: string;
-  name: string; // proto UserReply.name (de User.name); '' si no registrado.
-  deleted: boolean;
-  found: boolean;
-}
-interface DriverReply {
-  id: string;
-  userId: string;
-  currentStatus: string;
-  backgroundCheckStatus: string;
-  averageRating: number;
-  name: string; // proto DriverReply.name (de User.name vía driver→user); '' si no registrado.
-  found: boolean;
-}
 /** Coords del proto (lng) → GeoPoint (lon); 0,0 (default proto3 = sin set) → null honesto. */
 function toGeo(lat: number, lng: number): GeoPoint | null {
   if (!lat && !lng) return null;
@@ -142,6 +110,8 @@ export class OpsService {
       distanceMeters: trip.distanceMeters || null,
       passengerName: passenger?.found ? passenger.name || null : null,
       driverName: driver?.found ? driver.name || null : null,
+      // Fecha de suspensión del conductor (proto DriverReply.suspendedAt; '' = no suspendido → null).
+      driverSuspendedAt: driver?.found ? driver.suspendedAt || null : null,
       vehiclePlate: null, // follow-up: requiere lookup a fleet por vehicleId
       paymentMethod: trip.paymentMethod || null,
       timeline: [], // follow-up: timeline de eventos no expuesta por GetTrip

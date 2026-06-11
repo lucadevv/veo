@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package veo.panic.v1;
 
+// Contrato gRPC que panic-service expone a otros servicios (dispatch, audit, BFF admin).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service PanicService {
   rpc GetPanic (GetPanicRequest) returns (PanicReply);
 }

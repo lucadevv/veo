@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package veo.dispatch.v1;
 
+// Contrato gRPC que dispatch-service expone a otros servicios (trip-service consulta el match).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service DispatchService {
   rpc GetMatch (GetMatchRequest) returns (MatchReply);
   rpc GetSurge (GetSurgeRequest) returns (SurgeReply);

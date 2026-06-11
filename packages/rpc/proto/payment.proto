@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package veo.payment.v1;
 
+// Contrato gRPC que payment-service expone a otros servicios (trip, bff, finance panel).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service PaymentService {
   rpc GetPayment (GetPaymentRequest) returns (PaymentReply);
   // Cobro canónico de un viaje, por trip_id (re-entrada del recibo). Resuelve el Payment del cobro

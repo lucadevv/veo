@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package veo.trip.v1;
 
+// Contrato gRPC que trip-service expone a otros servicios (payment, panic, rating, share…).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service TripService {
   rpc GetTrip (GetByIdRequest) returns (TripReply);
   rpc GetTripState (GetByIdRequest) returns (TripStateReply);

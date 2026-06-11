@@ -11,6 +11,7 @@ import {
   type AutocompleteOptions,
   type GeocodeResult,
   type MapsClient,
+  type MapsMode,
   type RouteResult,
   type RouteWithStepsResult,
 } from '@veo/maps';
@@ -106,7 +107,7 @@ export class FallbackMapsClient implements MapsClient {
 }
 
 export interface BuildMapsClientInput {
-  mode: 'osrm' | 'local' | 'mapbox';
+  mode: MapsMode;
   osrmUrl: string;
   nominatimUrl: string;
   /** Token público de Mapbox (`pk....`). Requerido solo en modo `mapbox`. */

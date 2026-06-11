@@ -17,24 +17,7 @@ import {
   type DebtView,
   type PaymentView,
 } from './dto/payments.dto';
-
-/** Forma del resumen accionable que devuelve payment-service GET /payments/debt. */
-interface DebtSummaryReply {
-  hasDebt: boolean;
-  debts: {
-    /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY. */
-    paymentId?: string;
-    /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
-    penaltyId?: string;
-    tripId: string;
-    amountCents: number;
-    reason: string;
-    createdAt: string;
-    /** DEBT/CANCELLATION_PENALTY bloquean el gate; PENDING_ACTION (pago por completar) NO. */
-    kind?: 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
-  }[];
-  totalCents: number;
-}
+import type { DebtSummaryReply } from './payments.types';
 
 /**
  * Clave de idempotencia DETERMINISTA del cobro por viaje. DEBE coincidir byte-a-byte con

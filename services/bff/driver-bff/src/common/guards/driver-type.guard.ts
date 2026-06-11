@@ -4,12 +4,8 @@
  */
 import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { IS_PUBLIC_KEY, type AuthenticatedUser } from '@veo/auth';
+import { IS_PUBLIC_KEY, type RequestWithUser } from '@veo/auth';
 import { ForbiddenError } from '@veo/utils';
-
-interface RequestWithUser {
-  user?: AuthenticatedUser;
-}
 
 @Injectable()
 export class DriverTypeGuard implements CanActivate {

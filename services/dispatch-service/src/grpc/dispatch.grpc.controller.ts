@@ -7,6 +7,7 @@ import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
 import { isDomainError } from '@veo/utils';
 import type { VehicleClass } from '@veo/shared-types';
+import type { MatchReply, NearbyDriver, SurgeReply } from '@veo/rpc';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { SurgeService } from '../dispatch/surge.service';
 import { NearbyDriversService } from '../dispatch/nearby-drivers.service';
@@ -14,26 +15,9 @@ import { NearbyDriversService } from '../dispatch/nearby-drivers.service';
 interface GetMatchRequest {
   matchId: string;
 }
-interface MatchReply {
-  id: string;
-  tripId: string;
-  driverId: string;
-  score: number;
-  attempt: number;
-  surgeMultiplier: number;
-  outcome: string;
-  offeredAt: string;
-  respondedAt: string;
-  found: boolean;
-}
 interface GetSurgeRequest {
   lat: number;
   lon: number;
-}
-interface SurgeReply {
-  multiplier: number;
-  zoneId: string;
-  active: boolean;
 }
 interface GetNearbyDriversRequest {
   lat: number;
@@ -41,10 +25,8 @@ interface GetNearbyDriversRequest {
   /** Vacío = todos los tipos; si viene, filtra (CAR/MOTO). */
   vehicleType?: string;
 }
-interface NearbyDriverReply {
-  lat: number;
-  lon: number;
-  /** Clase canónica del catálogo (ADR 013): la respuesta la construimos nosotros, va tipada. */
+/** Contrato compartido, ESTRECHADO: la respuesta la construimos nosotros → clase canónica (ADR 013). */
+interface NearbyDriverReply extends NearbyDriver {
   vehicleType: VehicleClass;
 }
 interface NearbyDriversReply {

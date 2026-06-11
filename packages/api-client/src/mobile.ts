@@ -1156,8 +1156,9 @@ export type ShareTripRequest = z.infer<typeof shareTripRequest>;
 
 /**
  * POST /share/:tripId → respuesta. Enlace de seguimiento recién creado.
- * Espeja `CreatedShareLink` de public-bff. `url` es la URL pública (family-web) que el pasajero
- * comparte; `token` es el token firmado embebido en ella (sirve para revocar/identificar).
+ * Espeja `CreatedShareLink` de public-bff (incluido `deduped`). `url` es la URL pública
+ * (family-web) que el pasajero comparte; `token` es el token firmado embebido en ella
+ * (sirve para revocar/identificar).
  */
 export const createdShareLink = z.object({
   shareId: z.string(),
@@ -1169,6 +1170,12 @@ export const createdShareLink = z.object({
   /** Caducidad del enlace (ISO-8601). */
   expiresAt: z.string(),
   maxUses: z.number().int(),
+  /**
+   * true si el enlace ya existía (dedup por dedupKey en share-service); en ese caso NO se reenvía
+   * el SMS. Optional (no `.nullable()`) a propósito: additive — apps viejas que no lo conocen y
+   * respuestas de BFFs previos a la unificación siguen parseando.
+   */
+  deduped: z.boolean().optional(),
 });
 export type CreatedShareLink = z.infer<typeof createdShareLink>;
 

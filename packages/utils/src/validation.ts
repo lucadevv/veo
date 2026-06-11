@@ -1,5 +1,5 @@
 /**
- * Helpers de validación con Zod + esquemas reutilizables del dominio peruano.
+ * Helpers de validación con Zod, narrowing estructural + esquemas reutilizables del dominio peruano.
  */
 import { z } from 'zod';
 import { ValidationError } from './errors.js';
@@ -13,6 +13,15 @@ export function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown, context?: s
     });
   }
   return result.data;
+}
+
+/**
+ * Narrowing estructural: ¿es un objeto plano (record) y no un array/null? Útil para tratar
+ * `unknown` como `details` de un error público sin castear. Fuente única: antes vivía duplicado
+ * en los ExceptionFilters de @veo/observability y @veo/rpc.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Teléfono móvil peruano: +51 9XXXXXXXX (9 dígitos empezando en 9). Normaliza a +51XXXXXXXXX. */

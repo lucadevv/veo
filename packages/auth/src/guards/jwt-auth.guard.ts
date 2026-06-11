@@ -7,12 +7,7 @@ import { Reflector } from '@nestjs/core';
 import { UnauthorizedError } from '@veo/utils';
 import { IS_PUBLIC_KEY } from '../decorators.js';
 import { JWT_SERVICE } from '../tokens.js';
-import { type JwtService, type AuthenticatedUser, toAuthenticatedUser } from '../jwt.js';
-
-interface RequestWithUser {
-  headers: Record<string, string | string[] | undefined>;
-  user?: AuthenticatedUser;
-}
+import { type JwtService, type RequestWithUser, toAuthenticatedUser } from '../jwt.js';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {

@@ -9,8 +9,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { LoggingInterceptor, createLogger, initDefaultMetrics } from '@veo/observability';
+import { BffExceptionsFilter } from '@veo/rpc';
 import { AppModule } from './app.module';
-import { BffExceptionsFilter } from './common/bff-exception.filter';
 
 async function bootstrap(): Promise<void> {
   const logger = createLogger('admin-bff');
@@ -21,7 +21,8 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.enableCors({ origin: process.env.ADMIN_WEB_ORIGIN ?? 'http://localhost:5000', credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  // Mapea DownstreamError (de @veo/rpc) + DomainError/HttpException al modelo de error público.
+  // Filter canónico de @veo/rpc (DownstreamError + DomainError/HttpException → modelo de error
+  // público). Admin con defaults: conserva status/code del downstream (más detalle para operación).
   app.useGlobalFilters(new BffExceptionsFilter(createLogger('admin-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('admin-bff'));
   // health/metrics fuera del prefijo /api/v1 (sondas y scraping).

@@ -4,7 +4,13 @@
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
+import {
+  InternalRestClient,
+  type GrpcServiceClient,
+  type TripReply,
+  type UserReply,
+  type DriverReply,
+} from '@veo/rpc';
 import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { GRPC_IDENTITY, GRPC_TRIP, REST_PANIC } from '../infra/tokens';
@@ -31,20 +37,6 @@ interface PanicEntity {
   ackBy?: string;
   resolvedAt?: string;
 }
-/** Replies gRPC mínimas para enriquecer nombres (mismo contrato que ops.service). */
-interface UserReply {
-  name: string;
-  found: boolean;
-}
-interface DriverReply {
-  name: string;
-  found: boolean;
-}
-interface TripReply {
-  driverId: string;
-  found: boolean;
-}
-
 @Injectable()
 export class SecurityService {
   private readonly secret: string;

@@ -90,6 +90,8 @@ export const tripDetail = tripSummary.extend({
   distanceMeters: z.number().nullable(),
   passengerName: z.string().nullable(),
   driverName: z.string().nullable(),
+  // ISO-8601 de suspensión del conductor (identity DriverReply.suspendedAt); null si no está suspendido.
+  driverSuspendedAt: z.string().nullable(),
   vehiclePlate: z.string().nullable(),
   paymentMethod: z.string().nullable(),
   timeline: z.array(z.object({ status: tripStatus, at: z.string() })),

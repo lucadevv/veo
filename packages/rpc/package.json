@@ -22,12 +22,15 @@
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
+    "sync:protos": "node scripts/sync-protos.mjs",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.2",
     "@grpc/proto-loader": "^0.7.13",
+    "@nestjs/common": "^10.4.4",
     "@veo/auth": "workspace:*",
+    "@veo/observability": "workspace:*",
     "@veo/shared-types": "workspace:*",
     "@veo/utils": "workspace:*"
   },

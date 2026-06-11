@@ -1,8 +1,11 @@
 /** Normalización de errores downstream para que el BFF los remapee a su modelo público. */
-export interface ApiErrorLike {
-  error?: { code?: string; message?: string; details?: unknown };
-  message?: string;
-}
+import type { ApiErrorBody } from '@veo/utils';
+
+/**
+ * Alias del contrato único `ApiErrorBody` (@veo/utils). Mismo shape que parsea @veo/api-client:
+ * los microservicios y los BFFs emiten el MISMO modelo de error, así que el tipo vive UNA vez.
+ */
+export type ApiErrorLike = ApiErrorBody;
 
 export class DownstreamError extends Error {
   readonly status: number;

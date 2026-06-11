@@ -40,6 +40,7 @@ import type {
   VehicleReply,
 } from '../infra/grpc-types';
 import { DebtPendingError, type PaymentView } from '../payments/dto/payments.dto';
+import type { DebtSummaryReply } from '../payments/payments.types';
 import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from '../share/livekit-token';
 import {
   buildTripDetail,
@@ -69,24 +70,6 @@ export class KycRequiredError extends DomainError {
   constructor() {
     super('Verificá tu identidad para pedir tu primer viaje.');
   }
-}
-
-/** Resumen accionable que devuelve payment-service GET /payments/debt. */
-interface DebtSummaryReply {
-  hasDebt: boolean;
-  debts: {
-    /** id del Payment (DEBT/PENDING_ACTION). Ausente en CANCELLATION_PENALTY. */
-    paymentId?: string;
-    /** id de la CancellationPenalty (kind=CANCELLATION_PENALTY). */
-    penaltyId?: string;
-    tripId: string;
-    amountCents: number;
-    reason: string;
-    createdAt: string;
-    /** DEBT y CANCELLATION_PENALTY bloquean el gate; PENDING_ACTION (pago por completar) NO. */
-    kind?: 'DEBT' | 'PENDING_ACTION' | 'CANCELLATION_PENALTY';
-  }[];
-  totalCents: number;
 }
 
 /** TTL del cache del KYC verificado (positivo). Corto: acota la ventana de un eventual EXPIRED. */

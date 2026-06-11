@@ -10,6 +10,18 @@ export interface DomainErrorJSON {
   details?: Record<string, unknown>;
 }
 
+/**
+ * Cuerpo de error del modelo público uniforme (`{ error: { code, message, details? } }`) visto
+ * desde el LADO CONSUMIDOR: todo opcional porque el body puede venir de un upstream degradado
+ * (proxy, HTML de error, body vacío). FUENTE ÚNICA del contrato: @veo/rpc lo re-exporta como
+ * `ApiErrorLike` (BFF→microservicio) y @veo/api-client como `ApiErrorBody` (app→BFF) — antes
+ * eran dos definiciones divergentes del MISMO contrato.
+ */
+export interface ApiErrorBody {
+  error?: { code?: string; message?: string; details?: unknown };
+  message?: string;
+}
+
 export abstract class DomainError extends Error {
   abstract readonly code: string;
   abstract readonly httpStatus: number;

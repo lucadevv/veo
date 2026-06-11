@@ -17,6 +17,7 @@ const driver: DriverReply = {
   backgroundCheckStatus: 'APPROVED',
   averageRating: 4.0,
   found: true,
+  suspendedAt: '',
   name: 'Khalid Ríos',
 };
 const aggregate: AggregateReply = {
@@ -39,6 +40,8 @@ const vehicle: VehicleReply = {
   docStatus: 'OK',
   active: true,
   found: true,
+  vehicleType: 'CAR',
+  status: 'ACTIVE',
 };
 
 describe('safeTripStatus', () => {

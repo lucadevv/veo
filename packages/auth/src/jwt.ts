@@ -51,6 +51,16 @@ export interface AuthenticatedUser {
   kycVerified?: boolean;
 }
 
+/**
+ * Request HTTP con la identidad autenticada adjunta por los guards (JwtAuthGuard en los BFFs,
+ * InternalIdentityGuard en los microservicios). FUENTE ÚNICA del contrato: los guards derivados
+ * (driver-type, admin-identity, etc.) la importan de aquí en vez de redeclararla localmente.
+ */
+export interface RequestWithUser {
+  headers: Record<string, string | string[] | undefined>;
+  user?: AuthenticatedUser;
+}
+
 export interface JwtKeys {
   privatePem: string; // PKCS8
   publicPem: string; // SPKI

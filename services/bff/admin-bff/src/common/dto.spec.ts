@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+// Los decoradores @Type (class-transformer) llaman Reflect.getMetadata al DECORAR las clases:
+// sin este import el spec falla si le toca un worker limpio (mismo patrón que driver-bff).
+import 'reflect-metadata';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { LoginDto } from '../auth/dto/auth.dto';

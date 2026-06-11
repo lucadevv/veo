@@ -18,6 +18,8 @@ export interface CreatedShareLink {
   contactId: string | null;
   expiresAt: string;
   maxUses: number;
+  /** true si el enlace ya existía (dedup por dedupKey en share-service); en ese caso NO se reenvía el SMS. */
+  deduped: boolean;
 }
 
 /** Sala Socket.IO de un viaje en el namespace /family. */

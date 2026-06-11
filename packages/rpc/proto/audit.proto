@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package veo.audit.v1;
 
+// Contrato gRPC que audit-service expone a otros servicios (registro/verificación síncrona).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono.
 service AuditService {
   rpc Record (RecordRequest) returns (RecordReply);
   rpc Verify (VerifyRequest) returns (VerifyReply);
@@ -12,6 +14,7 @@ message RecordRequest {
   string action = 2;
   string resource_type = 3;
   string resource_id = 4;
+  // Payload del detalle, serializado como JSON.
   string payload_json = 5;
 }
 
@@ -22,6 +25,7 @@ message RecordReply {
 }
 
 message VerifyRequest {
+  // seq inicial/final del rango (string para soportar bigint). Vacío = sin límite.
   string from_seq = 1;
   string to_seq = 2;
 }

@@ -48,7 +48,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     const identityGrpc = grpc((m) => {
       if (m === 'GetUser') return { id: 'p1', type: 'passenger', kycStatus: 'VERIFIED', name: 'Ana Pérez', deleted: false, found: true };
       if (m === 'GetDriver')
-        return { id: 'd1', userId: 'u-d1', currentStatus: 'AVAILABLE', backgroundCheckStatus: 'CLEARED', averageRating: 4.8, name: 'Khalid Ríos', found: true };
+        return { id: 'd1', userId: 'u-d1', currentStatus: 'SUSPENDED', backgroundCheckStatus: 'CLEARED', averageRating: 4.8, name: 'Khalid Ríos', suspendedAt: '2026-06-02T08:00:00.000Z', found: true };
       return {};
     });
 
@@ -62,6 +62,8 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     expect(view.destination).toEqual({ lat: -12.1, lon: -77.0 });
     expect(view.passengerName).toBe('Ana Pérez');
     expect(view.driverName).toBe('Khalid Ríos');
+    // El proto manda suspendedAt (identity) y la view del panel YA NO lo pierde (drift cerrado).
+    expect(view.driverSuspendedAt).toBe('2026-06-02T08:00:00.000Z');
     expect(view.paymentMethod).toBe('YAPE');
     // Datos EN VIVO / no expuestos por GetTrip → null/[] honesto (no data falsa).
     expect(view.driverLocation).toBeNull();
@@ -81,6 +83,8 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     expect(view.origin).toBeNull();
     expect(view.destination).toBeNull();
     expect(view.driverId).toBeNull();
+    // Sin conductor asignado → sin fecha de suspensión (null honesto, no '').
+    expect(view.driverSuspendedAt).toBeNull();
   });
 
   it('lanza NotFoundError si el viaje no existe', async () => {

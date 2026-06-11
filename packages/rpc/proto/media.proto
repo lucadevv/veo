@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package veo.media.v1;
 
+// Contrato gRPC que media-service expone a otros servicios (panic, audit, compliance).
+// mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
+// Nunca se exponen URLs de video por aquí: solo metadatos de segmentos (la URL firmada exige
+// la doble autorización del flujo BR-S02).
 service MediaService {
   rpc GetSegments (GetSegmentsRequest) returns (SegmentsReply);
 }

@@ -14,6 +14,7 @@ import {
   generateDevKeyPairPem,
   type JwtKeys,
 } from '@veo/auth';
+import { type MapsMode } from '@veo/maps';
 import { createGrpcClient, InternalRestClient, type ServiceName } from '@veo/rpc';
 import { REDIS, redisProvider } from './redis';
 import { buildMapsClient } from './maps.client';
@@ -115,7 +116,8 @@ const mapsProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>) =>
     buildMapsClient({
-      mode: config.getOrThrow<'osrm' | 'local' | 'mapbox'>('VEO_MAPS_MODE'),
+      // MapsMode de @veo/maps: la fuente única del union (env.schema valida con z.enum(MAPS_MODES)).
+      mode: config.getOrThrow<MapsMode>('VEO_MAPS_MODE'),
       osrmUrl: config.getOrThrow<string>('OSRM_URL'),
       nominatimUrl: config.getOrThrow<string>('NOMINATIM_URL'),
       mapboxAccessToken: config.get<string>('MAPBOX_ACCESS_TOKEN'),

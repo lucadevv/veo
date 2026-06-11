@@ -13,12 +13,7 @@ import {
   INTERNAL_IDENTITY_SIG_HEADER,
   verifyInternalIdentity,
 } from '../internal-identity.js';
-import type { AuthenticatedUser } from '../jwt.js';
-
-interface RequestWithUser {
-  headers: Record<string, string | string[] | undefined>;
-  user?: AuthenticatedUser;
-}
+import type { RequestWithUser } from '../jwt.js';
 
 @Injectable()
 export class InternalIdentityGuard implements CanActivate {

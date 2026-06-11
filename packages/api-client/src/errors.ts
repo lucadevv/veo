@@ -1,11 +1,12 @@
 /**
  * Error normalizado del cliente. Los BFFs responden con el modelo de error de @veo/utils
  * ({ error: { code, message, details? } }); aquí lo normalizamos a una clase tipada.
+ * `ApiErrorBody` es la FUENTE ÚNICA del shape (vive en @veo/utils, junto a DomainError);
+ * acá se re-exporta para que las apps lo sigan importando de @veo/api-client.
  */
-export interface ApiErrorBody {
-  error?: { code?: string; message?: string; details?: unknown };
-  message?: string;
-}
+import type { ApiErrorBody } from '@veo/utils';
+
+export type { ApiErrorBody } from '@veo/utils';
 
 export class ApiError extends Error {
   readonly status: number;
