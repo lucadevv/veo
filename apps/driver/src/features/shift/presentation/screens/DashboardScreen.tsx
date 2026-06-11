@@ -1,5 +1,6 @@
 import React, {useEffect, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Linking, StyleSheet, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useTranslation} from 'react-i18next';
 import type {TFunction} from 'i18next';
 import type {CompositeScreenProps} from '@react-navigation/native';
@@ -25,14 +26,15 @@ import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {IconFlame, IconPower} from '../../../../shared/presentation/icons';
 import {toErrorMessage} from '../../../../shared/presentation/errors';
 import {formatPEN} from '../../../../shared/presentation/format';
+import {vehicleClassLabelKey} from '../../../../shared/presentation/vehicle-class';
 import {LIMA_CENTER} from '../../../../shared/utils/geo';
 import {useEarningsSummary} from '../../../earnings/presentation/hooks/useEarnings';
 import {DemandLegend, useHeatCells, useHeatmap} from '../../../ops/presentation';
 import {useDispatchStore} from '../../../realtime/presentation/state/dispatchStore';
-import {useLocationSource} from '../../../realtime/presentation';
-import {canStartShift, isOnShift, type ShiftStatus, type VehicleType} from '../../domain';
+import {useLocationAvailability, useLocationSource, useTipStore} from '../../../realtime/presentation';
+import {canStartShift, isOnShift, isSuspended, type ShiftStatus, type VehicleType} from '../../domain';
 import {useEndShift, usePauseShift, useShiftState} from '../hooks/useShift';
-import {useVehicleTypeStore} from '../state/vehicleTypeStore';
+import {useActiveVehicle} from '../../../registration/presentation';
 import {VehicleTypeSelector} from '../components/VehicleTypeSelector';
 import {Appear, PressableScale, Pulse} from '../components/motion';
 
@@ -57,33 +59,39 @@ interface ShiftPill {
  * Mapea el estado de turno al pill del header. AVAILABLE comunica que se están buscando viajes
  * (tono éxito, pulsante); el resto reutiliza las etiquetas i18n existentes o "Desconectado".
  */
-/** Etiqueta i18n del tipo de vehículo activo (para el indicador del header). */
+/** Etiqueta i18n del tipo de vehículo activo (registro exhaustivo clase→clave, ADR 013 §1.6). */
 function vehicleTypeLabel(type: VehicleType, t: TFunction): string {
-  return t(`shift.vehicleType.${type === 'CAR' ? 'car' : 'moto'}`);
+  return t(vehicleClassLabelKey(type));
 }
 
 function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   switch (status) {
     case 'AVAILABLE':
       return {label: `${t('shift.status.available')} · Buscando viajes`, tone: 'success', live: true};
+    case 'ASSIGNED':
     case 'ON_TRIP':
       return {label: t('shift.status.onTrip'), tone: 'accent', live: true};
     case 'ON_BREAK':
       return {label: t('shift.status.onBreak'), tone: 'warn', live: false};
+    case 'SUSPENDED':
+      return {label: t('shift.status.suspended'), tone: 'danger', live: false};
     default:
-      return {label: 'Desconectado', tone: 'neutral', live: false};
+      return {label: t('shift.status.offline'), tone: 'neutral', live: false};
   }
 }
 
 export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   const {t} = useTranslation();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const shift = useShiftState();
   const earnings = useEarningsSummary();
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore(s => s.activeTripId);
-  const vehicleType = useVehicleTypeStore(s => s.vehicleType);
+  const lastTip = useTipStore(s => s.lastTip);
+  const clearTip = useTipStore(s => s.clearTip);
+  const activeVehicle = useActiveVehicle();
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
   const [demandOn, setDemandOn] = useState(false);
@@ -113,6 +121,20 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   const online = isOnShift(status);
   const pill = shiftPill(status, t);
 
+  // Disponibilidad del GPS (servicios del SO + permiso). Si el conductor está EN TURNO pero apagó la
+  // ubicación o no dio permiso, NO emite su posición y el dispatch no lo ve, aunque la UI lo muestre
+  // "en línea". Avisamos explícito para que lo corrija (gap operativo silencioso, no data falsa).
+  const gpsAvailability = useLocationAvailability();
+  const gpsUnavailable =
+    online &&
+    gpsAvailability != null &&
+    (!gpsAvailability.servicesEnabled || !gpsAvailability.permissionGranted);
+  // Mensaje según la causa concreta: permiso denegado vs. servicio de ubicación apagado.
+  const gpsBannerBody =
+    gpsAvailability && !gpsAvailability.permissionGranted
+      ? t('shift.gpsPermissionBody')
+      : t('shift.gpsServicesBody');
+
   // Mapa de calor de demanda: solo cuando el conductor está en línea, sin viaje, con el toggle
   // activo y con ubicación conocida. Si falta cualquier condición, la query queda inactiva (null).
   const heatmapQuery =
@@ -125,7 +147,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
 
   // Cabecera flotante: avatar (→ perfil) + saludo a la izquierda; pill de estado a la derecha.
   const topOverlay = (
-    <View style={styles.topRow} pointerEvents="box-none">
+    <View style={[styles.topRow, {paddingTop: insets.top}]} pointerEvents="box-none">
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel={t('shift.viewProfile')}
@@ -144,18 +166,20 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
         <Avatar name="VEO" size="sm" online={online} />
         <View style={styles.greetText}>
           <Text variant="footnote" color="inkSubtle">
-            Hola,
+            {t('shift.greetingHi')}
           </Text>
           <Text variant="subhead" numberOfLines={1}>
-            Conductor
+            {t('shift.greetingRole')}
           </Text>
         </View>
       </PressableScale>
       <View style={styles.topRight}>
         <StatusPill label={pill.label} tone={pill.tone} live={pill.live} dot />
-        {/* Indicador del tipo de vehículo ACTIVO (Auto | Moto): el conductor ve de un vistazo con
-            qué vehículo está operando, que es lo que el dispatch usa para ofrecerle viajes. */}
-        <StatusPill label={vehicleTypeLabel(vehicleType, t)} tone="accent" dot />
+        {/* Indicador del vehículo ACTIVO (server-authoritative): el conductor ve con qué vehículo está
+            operando, que es lo que el dispatch usa para ofrecerle viajes. Oculto si aún no hay activo. */}
+        {activeVehicle.data ? (
+          <StatusPill label={vehicleTypeLabel(activeVehicle.data.vehicleType, t)} tone="accent" dot />
+        ) : null}
         {/* Toggle "Zonas de demanda": pinta el mapa de calor para saber a dónde ir. */}
         {showDemandToggle ? (
           <PressableScale
@@ -242,7 +266,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
           {t('trips.activeTitle')}
         </Text>
         <Button
-          label="Ver viaje activo"
+          label={t('shift.viewActiveTrip')}
           variant="accent"
           fullWidth
           onPress={() => navigation.navigate('TripActive', {tripId: activeTripId})}
@@ -255,16 +279,29 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
     bottomOverlay = (
       <Appear key="online">
       <Card variant="filled" padding="lg">
+        {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
+            Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
+        {gpsUnavailable ? (
+          <Banner
+            tone="danger"
+            title={t('shift.gpsUnavailableTitle')}
+            description={gpsBannerBody}
+            // Acción directa: abre los ajustes del SO de la app, donde el conductor activa el permiso o
+            // el servicio de ubicación. Sin esto el banner solo informaba y el conductor debía adivinar.
+            action={{label: t('shift.gpsOpenSettings'), onPress: () => Linking.openSettings()}}
+            style={styles.bannerBelow}
+          />
+        ) : null}
         <View style={styles.onlineHead}>
           <Pulse active={status === 'AVAILABLE'} style={styles.liveDotWrap}>
             <View style={[styles.liveDot, {backgroundColor: theme.colors.success}]} />
           </Pulse>
-          <Text variant="headline">Listo para recibir viajes</Text>
+          <Text variant="headline">{t('shift.readyForTrips')}</Text>
         </View>
         {/* Tipo de vehículo activo: editable en línea (bloqueado solo durante un viaje), porque es
             lo que decide qué viajes —Auto o Moto— le ofrece el dispatch. */}
         <View style={styles.spaced}>
-          <VehicleTypeSelector disabled={status === 'ON_TRIP'} />
+          <VehicleTypeSelector disabled={status === 'ON_TRIP' || status === 'ASSIGNED'} />
         </View>
         <View style={styles.spaced}>{earningsMetrics}</View>
         {/* Pujas abiertas: el conductor entra al marketplace "proponé tu precio" para ofertar/contraofertar. */}
@@ -288,7 +325,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
             />
           ) : null}
           <Button
-            label="Desconectarse"
+            label={t('shift.goOffline')}
             variant="ghost"
             fullWidth
             loading={end.isPending}
@@ -313,6 +350,14 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
         {/* Elige el vehículo ANTES de conectarte: define qué viajes recibirás al iniciar turno. */}
         <View style={styles.vehiclePicker}>
           <VehicleTypeSelector />
+          {/* Gestionar/registrar vehículos (p. ej. sumar una moto para poder cambiar de tipo). */}
+          <Button
+            label={t('vehicles.manage')}
+            variant="ghost"
+            size="sm"
+            onPress={() => navigation.navigate('Vehicles')}
+            style={styles.spaced}
+          />
         </View>
         {earningsMetrics}
         <Button
@@ -322,16 +367,36 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
             onPress={() => navigation.navigate('Ganancias')}
           style={styles.spaced}
         />
-        {canStartShift(status) ? (
+        {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
+            en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
+        {isSuspended(status) ? (
+          <Banner
+            tone="danger"
+            title={t('shift.suspendedTitle')}
+            description={t('shift.suspendedBody')}
+            action={{label: t('shift.contactSupport'), onPress: () => navigation.navigate('Support')}}
+            style={styles.spaced}
+          />
+        ) : canStartShift(status) ? (
           <Button
-            label={status === 'ON_BREAK' ? t('shift.resume') : 'Conéctate'}
+            label={status === 'ON_BREAK' ? t('shift.resume') : t('shift.connect')}
             size="lg"
             fullWidth
             leftIcon={<IconPower size={20} color={theme.colors.onAccent} />}
             onPress={() => navigation.navigate('ShiftStart')}
             style={styles.spaced}
           />
-        ) : null}
+        ) : (
+          /* Estado NO reconocido (UNKNOWN): ni suspendido ni conectable. En vez de un dock sin CTA ni
+             explicación (conductor confundido), avisamos honesto y ofrecemos reintentar la lectura. */
+          <Banner
+            tone="warn"
+            title={t('shift.unknownStateTitle')}
+            description={t('shift.unknownStateBody')}
+            action={{label: t('common.retry'), onPress: () => shift.refetch()}}
+            style={styles.spaced}
+          />
+        )}
         {end.isError ? (
           <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(end.error, t)} style={styles.spaced} />
         ) : null}
@@ -341,7 +406,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   }
 
   return (
-    <SafeScreen padded={false}>
+    <SafeScreen padded={false} topInset={false}>
       <MapShell topOverlay={topOverlay} bottomOverlay={bottomOverlay} loading={shift.isLoading}>
         <AppMap
           center={driverPoint ?? LIMA_CENTER}
@@ -355,6 +420,18 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
             style={[styles.dim, {backgroundColor: theme.colors.bg}]}
             pointerEvents="none"
           />
+        ) : null}
+        {/* Propina recibida en vivo (100% del conductor): banner celebratorio flotante, descartable.
+            Aparece en cualquier estado de turno; el monto real ya entró a ganancias. */}
+        {lastTip ? (
+          <View style={styles.tipWrap}>
+            <Banner
+              tone="success"
+              title={t('shift.tipReceivedTitle', {amount: formatPEN(lastTip.tipCents)})}
+              description={t('shift.tipReceivedBody')}
+              action={{label: t('common.gotIt'), onPress: clearTip}}
+            />
+          </View>
         ) : null}
         {/* Leyenda / estado del mapa de calor cuando el toggle está activo. */}
         {demandOn && showDemandToggle ? (
@@ -409,6 +486,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   legendWrap: {position: 'absolute', left: 16, right: 16, bottom: 16},
+  tipWrap: {position: 'absolute', left: 16, right: 16, top: 96},
   vehiclePicker: {marginBottom: 16},
   greetCard: {flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220},
   greetText: {flexShrink: 1, paddingRight: 4},
@@ -421,5 +499,6 @@ const styles = StyleSheet.create({
   actionsRow: {flexDirection: 'row', gap: 12, marginTop: 16},
   actionItem: {flex: 1},
   spaced: {marginTop: 12},
+  bannerBelow: {marginBottom: 12},
   sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
 });

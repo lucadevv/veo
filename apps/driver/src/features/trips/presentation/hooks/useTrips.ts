@@ -1,4 +1,5 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import type {GeoPoint} from '@veo/api-client';
 import {useRepositories} from '../../../../core/di/useDi';
 import {SHIFT_STATE_QUERY_KEY} from '../../../shift/presentation/hooks/useShift';
 import {
@@ -9,6 +10,7 @@ import {
   CancelTripUseCase,
   CompleteTripUseCase,
   EnsureTripAcceptedUseCase,
+  GetActiveTripUseCase,
   GetOfferUseCase,
   GetTripRouteUseCase,
   GetTripUseCase,
@@ -21,7 +23,17 @@ import {
 /** Prefijo de caché de viajes (para invalidación masiva desde realtime). */
 export const TRIP_QUERY_PREFIX = ['trip'] as const;
 export const tripQueryKey = (tripId: string) => ['trip', tripId] as const;
-export const tripRouteQueryKey = (tripId: string) => ['trip', tripId, 'route'] as const;
+/**
+ * Resolución de re-ruteo: la posición del conductor se CUANTIZA a ~4 decimales (≈11 m por décima de
+ * milésima) antes de entrar en la queryKey. Así react-query solo RE-FETCHea la ruta cuando el conductor
+ * se movió de verdad (no en cada micro-jitter del GPS) = ETA vivo + re-ruteo por desvío sin sobrecargar
+ * al BFF. `null` cuando no hay posición (sin GPS): la ruta sale del origen del viaje (degradación honesta).
+ */
+const ROUTE_POSITION_PRECISION = 4;
+const quantize = (n: number) => Number(n.toFixed(ROUTE_POSITION_PRECISION));
+
+export const tripRouteQueryKey = (tripId: string, from?: GeoPoint) =>
+  ['trip', tripId, 'route', from ? quantize(from.lat) : null, from ? quantize(from.lon) : null] as const;
 export const offerQueryKey = (matchId: string) => ['offer', matchId] as const;
 
 /** Query: detalle de la oferta entrante. */
@@ -33,28 +45,53 @@ export function useOffer(matchId: string) {
   });
 }
 
-/** Query: viaje activo (lado conductor). */
+/** Clave de caché del viaje activo del conductor (rehidratación tras reinicio). */
+export const ACTIVE_TRIP_QUERY_KEY = ['trip', 'active'] as const;
+
+/**
+ * Query: viaje ACTIVO del conductor para REHIDRATAR tras un reinicio (sin conocer el id). `null` si no
+ * tiene ninguno en curso. Server-authoritative: la app no recuerda el viaje en memoria volátil, lo
+ * deriva del servidor al (re)arrancar. La consume `RealtimeManager` para volver al viaje + reanudar.
+ */
+export function useActiveTrip() {
+  const {trips} = useRepositories();
+  return useQuery({
+    queryKey: ACTIVE_TRIP_QUERY_KEY,
+    queryFn: () => new GetActiveTripUseCase(trips).execute(),
+  });
+}
+
+/** Query: viaje activo (lado conductor). Inactiva con `tripId` vacío (p. ej. sin viaje activo). */
 export function useTrip(tripId: string) {
   const {trips} = useRepositories();
   return useQuery({
     queryKey: tripQueryKey(tripId),
     queryFn: () => new GetTripUseCase(trips).execute(tripId),
+    enabled: tripId.length > 0,
   });
 }
 
 /**
  * Query: ruta + pasos de navegación turn-by-turn del viaje activo. Solo se activa (`enabled`) cuando
  * el viaje está realmente en marcha (el llamador pasa `enabled`), porque la ruta solo aporta valor
- * mientras el conductor navega. Refresca cada 30 s para reflejar recálculos del servidor.
+ * mientras el conductor navega.
+ *
+ * `from` (posición ACTUAL del conductor) entra CUANTIZADA en la queryKey: cuando el conductor avanza
+ * lo suficiente (≈11 m), react-query re-fetchea y la ruta se RE-CALCULA desde su nueva posición = ETA
+ * en vivo + próxima maniobra viva + re-ruteo por desvío. El `refetchInterval` de 15 s es el fallback
+ * (recálculos del servidor / GPS quieto). Sin `from`: ruta desde el origen del viaje (degradación honesta).
  */
-export function useTripRoute(tripId: string, enabled: boolean) {
+export function useTripRoute(tripId: string, enabled: boolean, from?: GeoPoint) {
   const {trips} = useRepositories();
+  // Cuantizamos ANTES de pasar al repo para que la posición enviada al BFF coincida con la de la
+  // queryKey (misma celda ⇒ mismo fetch; sin esto la URL variaría con jitter sub-métrico que la key ignora).
+  const quantized: GeoPoint | undefined = from ? {lat: quantize(from.lat), lon: quantize(from.lon)} : undefined;
   return useQuery({
-    queryKey: tripRouteQueryKey(tripId),
-    queryFn: () => new GetTripRouteUseCase(trips).execute(tripId),
+    queryKey: tripRouteQueryKey(tripId, quantized),
+    queryFn: () => new GetTripRouteUseCase(trips).execute(tripId, quantized),
     enabled,
     staleTime: 15_000,
-    refetchInterval: enabled ? 30_000 : false,
+    refetchInterval: enabled ? 15_000 : false,
   });
 }
 

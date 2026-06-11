@@ -8,17 +8,24 @@ jest.mock('react-native-reanimated', () =>
   require('react-native-reanimated/mock'),
 );
 
-// MMKV: storage nativo no disponible en Jest.
-jest.mock('react-native-mmkv', () => ({
-  MMKV: jest.fn().mockImplementation(() => ({
+// MMKV: storage nativo no disponible en Jest. v4 expone la factory `createMMKV(config)` (además del
+// type `MMKV`); el código usa la factory, así que el mock DEBE proveerla, no solo la clase.
+jest.mock('react-native-mmkv', () => {
+  const instance = () => ({
     set: jest.fn(),
     getString: jest.fn(),
     getNumber: jest.fn(),
     getBoolean: jest.fn(),
+    // v4 renombró `delete` → `remove`; mantenemos ambos por compat con cualquier consumidor.
+    remove: jest.fn(),
     delete: jest.fn(),
     clearAll: jest.fn(),
-  })),
-}));
+  });
+  return {
+    createMMKV: jest.fn(instance),
+    MMKV: jest.fn().mockImplementation(instance),
+  };
+});
 
 // react-native-config: variables de entorno nativas.
 jest.mock('react-native-config', () => ({}));
@@ -51,6 +58,3 @@ jest.mock('react-native-keychain', () => ({
   ACCESS_CONTROL: {BIOMETRY_CURRENT_SET: 'BiometryCurrentSet'},
   ACCESSIBLE: {WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'AccessibleWhenPasscodeSetThisDeviceOnly'},
 }));
-
-// Silenciar el warning de animaciones nativas en pruebas.
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');

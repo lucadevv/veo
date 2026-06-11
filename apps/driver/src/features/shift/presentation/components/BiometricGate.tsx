@@ -24,6 +24,8 @@ export interface BiometricGateProps {
   ctaLabel: string;
   /** Estado de carga del flujo: deshabilita y muestra spinner. */
   loading: boolean;
+  /** Deshabilita el CTA sin spinner (p. ej. bloqueo biométrico de 1h: no se puede reintentar todavía). */
+  disabled?: boolean;
   /** Dispara la captura biométrica (cableado al hook del flujo). */
   onCapture: () => void;
   /** Retroceso de navegación. */
@@ -42,6 +44,7 @@ export const BiometricGate = ({
   banner,
   ctaLabel,
   loading,
+  disabled = false,
   onCapture,
   onBack,
 }: BiometricGateProps): React.JSX.Element => {
@@ -71,6 +74,7 @@ export const BiometricGate = ({
           size="lg"
           fullWidth
           loading={loading}
+          disabled={disabled}
           onPress={onCapture}
         />
       }>

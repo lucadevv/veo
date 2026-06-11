@@ -4,13 +4,22 @@ import {NativeModules} from 'react-native';
 // los TIPOS pero NO los VALORES de los enums → `DesiredAccuracy` sería `undefined` en runtime y
 // `DesiredAccuracy.High` crashea ("cannot read property 'High' of undefined"). @transistorsoft/...-types
 // sí los exporta como valores (DesiredAccuracy={High:-1,...}). Los typings/valores son idénticos.
-import {DesiredAccuracy, LogLevel} from '@transistorsoft/background-geolocation-types';
+import {
+  AuthorizationStatus,
+  DesiredAccuracy,
+  LogLevel,
+} from '@transistorsoft/background-geolocation-types';
 import type {
   default as BackgroundGeolocationModule,
   Location,
+  ProviderChangeEvent,
   Subscription,
 } from 'react-native-background-geolocation';
-import type {LocationSample, LocationSource} from '../../domain/location-source';
+import type {
+  LocationAvailability,
+  LocationSample,
+  LocationSource,
+} from '../../domain/location-source';
 
 /**
  * Fuente de GPS nativa real sobre `react-native-background-geolocation` (Transistor Software, OSS,
@@ -47,9 +56,13 @@ export class BackgroundGeolocationSource implements LocationSource {
 
   /** Listeners activos de la app (varios consumidores comparten una sola suscripción nativa). */
   private readonly listeners = new Set<(sample: LocationSample) => void>();
+  /** Listeners de DISPONIBILIDAD del GPS (servicios del SO + permiso), multiplexados igual que los de muestra. */
+  private readonly availabilityListeners = new Set<
+    (availability: LocationAvailability) => void
+  >();
   /** Suscripción nativa al evento `onLocation` (una sola, multiplexada). */
   private nativeSub: Subscription | null = null;
-  /** Suscripción a `onProviderChange`: la consumimos para que RN no advierta "no listeners registered". */
+  /** Suscripción a `onProviderChange`: alimenta a los `availabilityListeners` (una sola, multiplexada). */
   private providerSub: Subscription | null = null;
   /** Garantiza que `ready()` se invoque una única vez por ciclo de vida del proceso. */
   private readyPromise: Promise<void> | null = null;
@@ -71,6 +84,41 @@ export class BackgroundGeolocationSource implements LocationSource {
         this.stop().catch(() => undefined);
       }
     };
+  }
+
+  onAvailabilityChange(
+    listener: (availability: LocationAvailability) => void,
+  ): () => void {
+    if (!this.available) {
+      // Sin GPS nativo (Jest/build parcial): no hay proveedor que observar.
+      return () => undefined;
+    }
+
+    this.availabilityListeners.add(listener);
+    this.ensureProviderListener();
+    // Emitimos el estado ACTUAL al suscribirse (no esperamos a un cambio): si el conductor ya tenía
+    // la ubicación apagada al abrir el dashboard, el aviso debe salir de inmediato.
+    this.bg
+      .getProviderState()
+      .then(state => listener(toAvailability(state)))
+      .catch(() => undefined);
+
+    return () => {
+      this.availabilityListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Registra (una sola vez) la suscripción nativa a `onProviderChange` que alimenta a los
+   * `availabilityListeners`. Independiente del tracking: observar la disponibilidad NO arranca el GPS.
+   */
+  private ensureProviderListener(): void {
+    if (!this.providerSub) {
+      this.providerSub = this.bg.onProviderChange(event => {
+        const availability = toAvailability(event);
+        this.availabilityListeners.forEach(l => l(availability));
+      });
+    }
   }
 
   /** Resuelve (y memoiza) la librería nativa. Solo se invoca cuando `available === true`. */
@@ -106,9 +154,10 @@ export class BackgroundGeolocationSource implements LocationSource {
         () => undefined,
       );
       // El SDK emite `providerchange` (RCTDeviceEventEmitter) al hacer `ready()`/cambiar el proveedor.
-      // Sin listener, RN advierte "Sending `providerchange` with no listeners registered" (benigno
-      // pero ruidoso). Lo consumimos; la degradación por permisos la maneja el flujo de turno.
-      this.providerSub = bg.onProviderChange(() => undefined);
+      // Lo consumimos para alimentar a los `availabilityListeners` (y de paso silenciar el aviso de RN
+      // "Sending `providerchange` with no listeners registered"): la degradación por permisos/servicios
+      // apagados en pleno turno la refleja la UI vía `onAvailabilityChange`.
+      this.ensureProviderListener();
     }
 
     // Typings inconsistentes en v5.1.1: `ready()` está tipado con el `Config` ANIDADO de
@@ -178,6 +227,20 @@ export class BackgroundGeolocationSource implements LocationSource {
 /** Normaliza el timestamp del SDK (v5: `string | number`) a ISO-8601, que es lo que el dominio expone. */
 function toIso(timestamp: string | number): string {
   return typeof timestamp === 'string' ? timestamp : new Date(timestamp).toISOString();
+}
+
+/**
+ * Mapea el `ProviderChangeEvent` nativo al `LocationAvailability` del dominio. `permissionGranted`
+ * compara contra el enum tipado `AuthorizationStatus` (NO contra el número crudo): el permiso cuenta
+ * como otorgado solo con `Always` o `WhenInUse`; `Denied`/`Restricted`/`NotDetermined` no operan.
+ */
+function toAvailability(event: ProviderChangeEvent): LocationAvailability {
+  return {
+    servicesEnabled: event.enabled,
+    permissionGranted:
+      event.status === AuthorizationStatus.Always ||
+      event.status === AuthorizationStatus.WhenInUse,
+  };
 }
 
 /** Instancia singleton: una sola suscripción nativa multiplexada para toda la app. */

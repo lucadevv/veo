@@ -75,12 +75,23 @@ export const secureStore: KeyValueStore = new MmkvKeyValueStore(secureMmkv);
 export const prefsStore: KeyValueStore = new MmkvKeyValueStore(prefsMmkv);
 
 /**
- * Inicializa la seguridad del almacén: deriva la `encryptionKey` del Keychain/Keystore y
- * re-cifra el almacén seguro. Llamar en el bootstrap (`index.js`) ANTES de leer tokens.
- * Idempotente y con fallback controlado (ver helper).
+ * Promesa única del re-cifrado del almacén seguro. Memoizada (single-flight): la primera llamada
+ * lanza el `recrypt`; las siguientes devuelven la MISMA promesa. Así `index.js` puede DISPARARLO
+ * temprano y `App` (antes de `hydrate`) puede ESPERARLO sin re-cifrar dos veces.
+ */
+let secureStorageReady: Promise<boolean> | null = null;
+
+/**
+ * Inicializa la seguridad del almacén: deriva la `encryptionKey` del Keychain/Keystore y re-cifra el
+ * almacén seguro. Debe AWAITearse ANTES de leer tokens (la rehidratación de sesión): leer antes del
+ * `recrypt` descifra con la clave de ARRANQUE equivocada → tokens null → login espurio.
+ * Memoizada/idempotente, con fallback controlado (ver helper).
  *
  * @returns `true` si quedó activa la clave del Keystore; `false` si se degradó al fallback.
  */
 export function initSecureStorage(): Promise<boolean> {
-  return initSecureStorageWithRecrypt(key => secureMmkv.recrypt(key));
+  if (!secureStorageReady) {
+    secureStorageReady = initSecureStorageWithRecrypt(key => secureMmkv.recrypt(key));
+  }
+  return secureStorageReady;
 }

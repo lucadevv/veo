@@ -12,6 +12,7 @@ import React, {useMemo} from 'react';
 import {StyleSheet} from 'react-native';
 import {boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat} from '../../utils/geo';
 import {veoDarkMapboxStyleJSON} from './mapbox/veoDarkStyle';
+import {NavPuck} from './NavPuck';
 
 /** Celda de demanda a pintar sobre el mapa (centroide + estilo ya derivado de la intensidad). */
 export interface HeatCell {
@@ -42,6 +43,14 @@ export interface AppMapProps {
   heatCells?: ReadonlyArray<HeatCell>;
   /** Ajusta el encuadre a la ruta + markers (fitBounds). */
   fitToRoute?: boolean;
+  /**
+   * Modo NAVEGACIÓN (estilo Waze): la cámara SIGUE al conductor con vista inclinada, orientada al
+   * rumbo (heading-up) y zoom cercano, en vez del encuadre general. Requiere `driver` válido; si no
+   * hay ubicación, degrada al encuadre/centro normal. Tiene prioridad sobre `fitToRoute`.
+   */
+  navMode?: boolean;
+  /** Rumbo del conductor en grados (0=N, 90=E) para orientar la cámara en navegación (heading-up). */
+  heading?: number | null;
   /** Deshabilita gestos (mapa decorativo en sheets). */
   interactive?: boolean;
 }
@@ -49,6 +58,16 @@ export interface AppMapProps {
 const ROUTE_SOURCE = 'veo-route';
 const HEAT_SOURCE = 'veo-heat';
 const FIT_PADDING = 64;
+
+/* ── Cámara de NAVEGACIÓN (Waze) — constantes tipadas, NO magic numbers (§4-ter) ──────────────────
+ * Vista de conducción: inclinada para dar profundidad 3D, zoom cercano para ver la próxima maniobra,
+ * y transición `easeTo` corta para que el seguimiento se sienta fluido sin marearse. */
+/** Inclinación de la cámara en navegación (grados desde el cenital). */
+const NAV_PITCH = 55;
+/** Zoom de navegación (calle/maniobra). */
+const NAV_ZOOM = 17;
+/** Duración de la transición de seguimiento entre muestras de GPS (ms). */
+const NAV_ANIM_MS = 700;
 
 const isValidPoint = (p: GeoPoint | null | undefined): p is GeoPoint =>
   p != null && Number.isFinite(p.lat) && Number.isFinite(p.lon);
@@ -72,8 +91,13 @@ function AppMapComponent({
   waypoints,
   heatCells,
   fitToRoute = false,
+  navMode = false,
+  heading,
   interactive = true,
 }: AppMapProps): React.JSX.Element {
+  // Navegación activa SOLO si se pidió `navMode` Y hay una ubicación de conductor válida que seguir
+  // (sin ubicación no hay a quién seguir → degrada al encuadre normal, degradación honesta).
+  const navigating = navMode && isValidPoint(driver);
   // GeoJSON de la ruta (LineString). Vacío si no hay suficientes puntos.
   const routeShape = useMemo<GeoJSON.Feature<GeoJSON.LineString> | null>(() => {
     if (!routeCoordinates || routeCoordinates.length < 2) {
@@ -156,7 +180,18 @@ function AppMapComponent({
       scrollEnabled={interactive}
       zoomEnabled={interactive}
       pitchEnabled={false}>
-      {bounds ? (
+      {navigating ? (
+        // NAVEGACIÓN (Waze): cámara siguiendo al conductor, orientada al rumbo (heading-up), inclinada
+        // y con zoom de calle. Se re-anima en cada muestra de GPS (centerCoordinate/heading cambian).
+        <Camera
+          centerCoordinate={centerCoordinate}
+          heading={heading ?? 0}
+          pitch={NAV_PITCH}
+          zoomLevel={NAV_ZOOM}
+          animationMode="easeTo"
+          animationDuration={NAV_ANIM_MS}
+        />
+      ) : bounds ? (
         <Camera
           bounds={{ne: bounds.ne, sw: bounds.sw}}
           padding={{
@@ -224,7 +259,9 @@ function AppMapComponent({
 
       {isValidPoint(driver) ? (
         <MarkerView coordinate={toLngLat(driver)} anchor={{x: 0.5, y: 0.5}} allowOverlap>
-          <RoutePin variant="user" pulse />
+          {/* En navegación: puck direccional (la cámara heading-up hace que apunte al rumbo de viaje).
+              Fuera de navegación: anillo pulsante de presencia. */}
+          {navigating ? <NavPuck /> : <RoutePin variant="user" pulse />}
         </MarkerView>
       ) : null}
 

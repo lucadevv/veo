@@ -105,3 +105,10 @@ async function ensureCameraPermission(): Promise<void> {
 
 /** Singleton del frame-grabber nativo para inyectar en la capa de presentación. */
 export const nativeBiometricFrameGrabber: BiometricFrameGrabber = new NativeBiometricFrameGrabber();
+
+/**
+ * `true` si el módulo nativo de cámara está enlazado en este build/plataforma. Es `false` en el
+ * SIMULADOR (no hay `VeoBiometricFrameGrabber`). La composición lo usa para, SOLO en dev, caer a un
+ * grabber stub y poder probar el gate biométrico de turno sin cámara real. Nunca altera producción.
+ */
+export const nativeBiometricFrameGrabberLinked: boolean = nativeModule !== undefined;

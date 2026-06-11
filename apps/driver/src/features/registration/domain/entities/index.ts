@@ -3,6 +3,7 @@
  * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
  * global de la solicitud que conmuta la navegación.
  */
+import {VehicleClass} from '@veo/shared-types';
 import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,
@@ -37,8 +38,14 @@ export type PersonalDataView = DriverPersonalData;
 export type VehicleRegisterInput = RegisterVehicleRequest;
 export type VehicleView = DriverVehicleView;
 
-/** Tipo de vehículo declarado por el conductor en el alta. */
-export type VehicleType = 'MOTO' | 'CAR';
+/**
+ * Tipo de vehículo declarado por el conductor en el alta. Re-export del enum CANÓNICO
+ * `VehicleClass` de `@veo/shared-types` (ADR 013 §1.6: la definición local muere; el wire field
+ * sigue siendo `vehicleType`). Exporta valor + tipo: el store del wizard usa `VehicleType.MOTO`
+ * como default sin strings mágicos.
+ */
+export const VehicleType = VehicleClass;
+export type VehicleType = VehicleClass;
 
 /** Paso 1: datos personales tal como aparecen en el DNI. */
 export interface PersonalData {

@@ -2,7 +2,9 @@ import React from 'react';
 import {ActivityIndicator, Linking, StyleSheet, View} from 'react-native';
 import Svg, {Circle, Path, Rect} from 'react-native-svg';
 import {useTranslation} from 'react-i18next';
+import {useQueryClient} from '@tanstack/react-query';
 import {Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import {REGISTRATION_GATE_QUERY_KEY} from '../hooks/useRegistrationGate';
 import {
   IconAccount,
   IconCar,
@@ -101,11 +103,13 @@ function ChecklistRow({icon, label, done, pendingLabel, isLast}: ChecklistRowPro
 export const UnderReviewScreen = (): React.JSX.Element => {
   const {t} = useTranslation();
   const theme = useTheme();
+  const queryClient = useQueryClient();
 
-  const onUnderstood = () => {
-    // Acuse de recibo. El conductor permanece en `in_review`: la aprobación NUNCA se hace localmente,
-    // viene del backend (ver `useRegistrationGate`). El gate ya muestra esta pantalla mientras el
-    // estado siga en revisión, así que no hay navegación ni cambio de estado que disparar aquí.
+  const onCheckStatus = () => {
+    // RE-CHEQUEA el estado del alta contra el backend (la aprobación NUNCA se hace localmente). Si ya
+    // está aprobado, el `useRegistrationGate` re-resuelve y el `RootNavigator` saca al conductor de acá.
+    // Antes "Entendido" no hacía NADA al tap (se veía roto); ahora el botón sí tiene efecto.
+    queryClient.invalidateQueries({queryKey: REGISTRATION_GATE_QUERY_KEY});
   };
 
   const onContactSupport = () => {
@@ -118,7 +122,7 @@ export const UnderReviewScreen = (): React.JSX.Element => {
       scroll
       footer={
         <View style={{gap: theme.spacing.sm}}>
-          <Button label={t('registration.review.understood')} variant="secondary" fullWidth onPress={onUnderstood} />
+          <Button label={t('registration.review.checkStatus')} variant="secondary" fullWidth onPress={onCheckStatus} />
           <Button
             label={t('registration.review.contactSupport')}
             variant="ghost"

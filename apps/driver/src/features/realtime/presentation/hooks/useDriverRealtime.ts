@@ -4,6 +4,8 @@ import type {
   DispatchMatchPayload,
   DispatchOfferedPayload,
   DriverEventEnvelope,
+  TipAddedPayload,
+  WaypointProposedMsg,
 } from '@veo/api-client';
 import {useDi} from '../../../../core/di/useDi';
 import type {DriverSocket} from '../../../../core/realtime/socket';
@@ -26,6 +28,13 @@ export interface DriverRealtimeHandlers {
    * emite el `ChatMessage` "pelado" (NO envuelto en `DriverEventEnvelope`).
    */
   onChatMessage(message: ChatMessage): void;
+  /** Propina recibida en vivo (el 100% es del conductor). El payload viene en el sobre de dominio. */
+  onTipAdded(payload: TipAddedPayload): void;
+  /**
+   * El pasajero PROPUSO una parada mid-trip (Lote C4). El driver-bff emite la shape TIPADA plana (NO
+   * envuelta en `DriverEventEnvelope`): el conductor la acepta/rechaza antes de `expiresAt`.
+   */
+  onWaypointProposed(message: WaypointProposedMsg): void;
 }
 
 /**
@@ -97,11 +106,27 @@ export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHand
       }
       handlersRef.current.onChatMessage(msg);
     });
+    const onTipAdded = safe((msg: DriverEventEnvelope<TipAddedPayload>) => {
+      // Defensa: solo celebramos propinas con monto válido (entero positivo) y viaje conocido.
+      if (!msg?.payload?.tripId || !(msg.payload.tipCents > 0)) {
+        return;
+      }
+      handlersRef.current.onTipAdded(msg.payload);
+    });
+    const onWaypointProposed = safe((msg: WaypointProposedMsg) => {
+      // Defensa: ignoramos propuestas malformadas (sin id/viaje); el server garantiza el resto.
+      if (!msg?.proposalId || !msg.tripId) {
+        return;
+      }
+      handlersRef.current.onWaypointProposed(msg);
+    });
 
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
     s.on('trip:update', onTripUpdate);
     s.on('chat:message', onChatMessage);
+    s.on('payment:tip', onTipAdded);
+    s.on('waypoint:proposed', onWaypointProposed);
     s.connect();
     setSocket(s);
 
@@ -110,6 +135,8 @@ export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHand
       s.off('dispatch:match', onMatch);
       s.off('trip:update', onTripUpdate);
       s.off('chat:message', onChatMessage);
+      s.off('payment:tip', onTipAdded);
+      s.off('waypoint:proposed', onWaypointProposed);
       s.disconnect();
       setSocket(null);
     };

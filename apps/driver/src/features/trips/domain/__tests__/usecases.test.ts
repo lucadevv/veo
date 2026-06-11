@@ -1,3 +1,4 @@
+import type {RespondWaypointView} from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -11,6 +12,7 @@ import type {
 } from '../index';
 import {
   EnsureTripAcceptedUseCase,
+  GetActiveTripUseCase,
   InvalidChildCodeError,
   StartTripUseCase,
 } from '../index';
@@ -46,6 +48,9 @@ class FakeTripsRepository implements TripsRepository {
   getTrip(): Promise<Trip> {
     return Promise.resolve(TRIP);
   }
+  getActiveTrip(): Promise<Trip | null> {
+    return Promise.resolve(TRIP);
+  }
   getTripState(): Promise<TripState> {
     return Promise.resolve({id: 't1', status: 'IN_PROGRESS'});
   }
@@ -79,6 +84,17 @@ class FakeTripsRepository implements TripsRepository {
   cancel(_tripId: string, _input: CancelTripInput): Promise<Trip> {
     return Promise.resolve(TRIP);
   }
+  respondWaypoint(
+    _tripId: string,
+    proposalId: string,
+    accept: boolean,
+  ): Promise<RespondWaypointView> {
+    return Promise.resolve({
+      proposalId,
+      status: accept ? 'ACCEPTED' : 'REJECTED',
+      fareCents: 0,
+    });
+  }
 }
 
 describe('StartTripUseCase (modo niño)', () => {
@@ -99,6 +115,21 @@ describe('StartTripUseCase (modo niño)', () => {
     const repo = new FakeTripsRepository();
     await new StartTripUseCase(repo).execute('t1');
     expect(repo.startCalls[0]).toEqual({tripId: 't1', input: {childCode: undefined}});
+  });
+});
+
+describe('GetActiveTripUseCase (rehidratación)', () => {
+  it('devuelve el viaje activo del conductor cuando hay uno en curso', async () => {
+    const repo = new FakeTripsRepository();
+    const result = await new GetActiveTripUseCase(repo).execute();
+    expect(result?.id).toBe('t1');
+  });
+
+  it('devuelve null cuando el conductor no tiene viaje activo', async () => {
+    const repo = new FakeTripsRepository();
+    repo.getActiveTrip = () => Promise.resolve(null);
+    const result = await new GetActiveTripUseCase(repo).execute();
+    expect(result).toBeNull();
   });
 });
 

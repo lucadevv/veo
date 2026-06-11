@@ -1,16 +1,27 @@
-import {useEffect} from 'react';
+import {useEffect, useRef} from 'react';
 import {useQueryClient} from '@tanstack/react-query';
-import {navigateToBids, navigateToIncoming} from '../../../navigation/navigationRef';
+import {
+  navigateToBids,
+  navigateToIncoming,
+  navigateToTripActive,
+} from '../../../navigation/navigationRef';
 import {useDi} from '../../../core/di/useDi';
 import {SHIFT_STATE_QUERY_KEY} from '../../shift/presentation/hooks/useShift';
 import {useShiftState} from '../../shift/presentation/hooks/useShift';
 import {isOnShift} from '../../shift/domain';
-import {TRIP_QUERY_PREFIX} from '../../trips/presentation/hooks/useTrips';
+import {isTripTerminal, parseTripStatus} from '../../trips/domain';
+import {TRIP_QUERY_PREFIX, useActiveTrip, useTrip} from '../../trips/presentation/hooks/useTrips';
 import {BIDS_QUERY_KEY} from '../../bidding/presentation';
 import {useChatStore} from '../../chat/presentation';
+import {
+  EARNINGS_BREAKDOWN_QUERY_KEY,
+  EARNINGS_SUMMARY_QUERY_KEY,
+} from '../../earnings/presentation/hooks/useEarnings';
 import {useDriverRealtime} from './hooks/useDriverRealtime';
 import {useLocationPublisher} from './hooks/useLocationPublisher';
 import {useDispatchStore} from './state/dispatchStore';
+import {useTipStore} from './state/tipStore';
+import {useWaypointProposalStore} from './state/waypointProposalStore';
 
 /**
  * Cablea el realtime del conductor mientras la sesión está activa: conecta el socket `/driver`,
@@ -24,9 +35,46 @@ export const RealtimeManager = (): null => {
   const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
   const activeTripId = useDispatchStore(s => s.activeTripId);
   const receiveMessage = useChatStore(s => s.receiveMessage);
+  const setTip = useTipStore(s => s.setTip);
+  const setWaypointProposal = useWaypointProposalStore(s => s.setProposal);
 
   const {data: shift} = useShiftState();
   const onShift = shift ? isOnShift(shift.status) : false;
+
+  // El viaje activo deja de ser activo cuando alcanza un estado TERMINAL (completado, cancelado,
+  // vencido, fallido o reasignado). `activeTripId` es estado de cliente: si no lo limpiamos, el
+  // dashboard sigue mostrando "Ver viaje activo" apuntando a un viaje muerto. Lo derivamos del status
+  // AUTORITATIVO del viaje (no del tipo de evento), así funciona igual por push o por refetch, y en
+  // cualquier pantalla. Antes solo se limpiaba con el tap manual en TripActive (hallazgo #4).
+  const activeTrip = useTrip(activeTripId ?? '');
+  useEffect(() => {
+    if (
+      activeTripId &&
+      activeTrip.data &&
+      isTripTerminal(parseTripStatus(activeTrip.data.status))
+    ) {
+      setActiveTripId(null);
+    }
+  }, [activeTripId, activeTrip.data, setActiveTripId]);
+
+  // REHIDRATACIÓN tras un reinicio (regla #4: cámara viva TODO el viaje). `activeTripId` vive en memoria
+  // volátil: si el conductor mató la app mid-viaje, al reabrir perdía el viaje Y el publisher de
+  // seguridad (solo corre dentro de TripActive). Lo recuperamos del SERVIDOR (fuente de verdad) UNA vez
+  // por arranque; si hay un viaje vivo, lo restauramos y volvemos a su pantalla → el publisher se reanuda
+  // solo (useTripPublisher). Server-derived, no estado de cliente persistido (que podría quedar stale).
+  const activeTripRecovery = useActiveTrip();
+  const recoveredRef = useRef(false);
+  useEffect(() => {
+    if (recoveredRef.current || activeTripRecovery.isLoading) {
+      return;
+    }
+    recoveredRef.current = true;
+    const recovered = activeTripRecovery.data;
+    if (recovered && !isTripTerminal(parseTripStatus(recovered.status))) {
+      setActiveTripId(recovered.id);
+      navigateToTripActive(recovered.id);
+    }
+  }, [activeTripRecovery.isLoading, activeTripRecovery.data, setActiveTripId]);
 
   // Foreground Service obligatorio en Android (regla #3): se enciende mientras hay turno activo y se
   // apaga al finalizar. Mantiene GPS + WebRTC vivos en background. En iOS es no-op (UIBackgroundModes).
@@ -67,6 +115,10 @@ export const RealtimeManager = (): null => {
     onMatch: payload => {
       setActiveTripId(payload.tripId);
       queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+      // Match confirmado → llevamos al conductor a su viaje. Clave en PUJA (ganó la puja, no pasó por
+      // TripIncoming) y si el match llega estando en otra pantalla. En FIXED ya está en TripActive (el
+      // accept navega): navegar a la misma ruta+params es no-op, así que es seguro en ambos flujos.
+      navigateToTripActive(payload.tripId);
     },
     onTripUpdate: () => {
       queryClient.invalidateQueries({queryKey: TRIP_QUERY_PREFIX});
@@ -77,6 +129,22 @@ export const RealtimeManager = (): null => {
     // duplicados por `id`, así que el eco del propio POST no se contabiliza dos veces.
     onChatMessage: message => {
       receiveMessage(message);
+    },
+    // Propina en vivo (100% del conductor): guardamos el aviso efímero para el banner del dashboard e
+    // invalidamos ganancias, así el neto acumulado refleja el monto real (la verdad vive en el server).
+    onTipAdded: payload => {
+      setTip({tripId: payload.tripId, tipCents: payload.tipCents});
+      // Invalida AMBAS vistas de ganancias (resumen + desglose): la propina entra al neto y al detalle.
+      // Antes solo el resumen → la pantalla de Ganancias (breakdown) quedaba desactualizada.
+      queryClient.invalidateQueries({queryKey: EARNINGS_SUMMARY_QUERY_KEY});
+      queryClient.invalidateQueries({queryKey: EARNINGS_BREAKDOWN_QUERY_KEY});
+    },
+    // Parada propuesta por el pasajero (Lote C4): se guarda en el store; la pantalla del viaje activo la
+    // ofrece para aceptar/rechazar. Solo la mostramos si es del viaje activo (defensa contra cruces).
+    onWaypointProposed: message => {
+      if (message.tripId === activeTripId) {
+        setWaypointProposal(message);
+      }
     },
   });
 

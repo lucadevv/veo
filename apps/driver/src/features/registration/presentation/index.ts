@@ -1,6 +1,7 @@
 export {
   PersonalDataScreen,
   VehicleScreen,
+  VehiclesScreen,
   DocumentsScreen,
   IdentityVerificationScreen,
   UnderReviewScreen,
@@ -15,7 +16,10 @@ export {
   useUpdatePersonalData,
   useRegisterVehicle,
   useDriverVehicles,
+  useActiveVehicle,
+  useSetActiveVehicle,
   REGISTRATION_VEHICLES_QUERY_KEY,
+  ACTIVE_VEHICLE_QUERY_KEY,
 } from './hooks/useRegistrationWizard';
 export {
   useRegistrationDocuments,

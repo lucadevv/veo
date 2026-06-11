@@ -20,3 +20,14 @@ export function navigateToBids(): void {
     navigationRef.navigate('Bids');
   }
 }
+
+/**
+ * Navega a la pantalla del viaje activo. La usa la REHIDRATACIÓN tras un reinicio: si el conductor mató
+ * la app mid-viaje, al reabrir se lo devuelve a su viaje en curso (y el publisher de seguridad se
+ * reanuda, regla #4). `navigate` (no `reset`) preserva el back-stack hacia el dashboard.
+ */
+export function navigateToTripActive(tripId: string): void {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate('TripActive', {tripId});
+  }
+}

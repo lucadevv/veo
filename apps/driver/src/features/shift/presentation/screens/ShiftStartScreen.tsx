@@ -31,6 +31,11 @@ export const ShiftStartScreen = ({navigation}: Props): React.JSX.Element => {
 
   const banner = resolveBanner(error, score, phase, t);
 
+  // Bloqueo biométrico (regla #1: 3 fallos → 1h, solo central destraba). Mientras dure, deshabilitamos
+  // el CTA para que el conductor NO siga reintentando y comiéndose rechazos. El banner ya explica el lock.
+  const errorCode = error instanceof Error ? (error as {code?: string}).code : undefined;
+  const locked = errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403);
+
   return (
     <BiometricGate
       topTitle={t('shift.startTitle')}
@@ -39,6 +44,7 @@ export const ShiftStartScreen = ({navigation}: Props): React.JSX.Element => {
       banner={banner}
       ctaLabel={isBusy ? t('shift.biometricCapturing') : t('shift.biometricStart')}
       loading={isBusy}
+      disabled={locked}
       onCapture={run}
       onBack={navigation.goBack}
     />

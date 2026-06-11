@@ -2,9 +2,10 @@ import React, {useState} from 'react';
 import {FlatList, RefreshControl, StyleSheet, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Button, SafeScreen, Skeleton, Text, useTheme} from '@veo/ui-kit';
+import {SafeScreen, Skeleton, useTheme} from '@veo/ui-kit';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {StateView} from '../../../../shared/presentation/components/StateView';
+import {TopBar} from '../../../../shared/presentation/components/TopBar';
 import {toErrorMessage} from '../../../../shared/presentation/errors';
 import {isOnShift} from '../../../shift/domain';
 import {useShiftState} from '../../../shift/presentation/hooks/useShift';
@@ -34,19 +35,7 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
   const selectedGone =
     selected !== null && bids.data !== undefined && !bids.data.some(b => b.tripId === selected.tripId);
 
-  const header = (
-    <View style={[styles.header, {borderBottomColor: theme.colors.border}]}>
-      <Button
-        label={t('common.back')}
-        variant="ghost"
-        size="sm"
-        onPress={() => navigation.goBack()}
-        style={styles.back}
-      />
-      <Text variant="title3">{t('trips.bid.screenTitle')}</Text>
-      <View style={styles.back} />
-    </View>
-  );
+  const header = <TopBar title={t('trips.bid.screenTitle')} onBack={() => navigation.goBack()} />;
 
   let content: React.ReactNode;
   if (!onShift) {
@@ -102,14 +91,5 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: {minWidth: 64},
   list: {gap: 12, paddingVertical: 16},
 });

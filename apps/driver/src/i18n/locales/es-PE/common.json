@@ -12,7 +12,14 @@
     "close": "Cerrar",
     "confirm": "Confirmar",
     "loading": "Cargando…",
-    "save": "Guardar"
+    "save": "Guardar",
+    "gotIt": "¡Gracias!"
+  },
+  "nav": {
+    "home": "Inicio",
+    "earnings": "Ganancias",
+    "trips": "Viajes",
+    "account": "Cuenta"
   },
   "errors": {
     "generic": "Algo salió mal",
@@ -167,6 +174,7 @@
       "facial": "Verificación facial",
       "inReview": "En revisión",
       "understood": "Entendido",
+      "checkStatus": "Verificar mi estado",
       "contactSupport": "Contactar a soporte"
     }
   },
@@ -178,12 +186,30 @@
       "available": "En línea",
       "onBreak": "En pausa",
       "onTrip": "En viaje",
+      "suspended": "Cuenta suspendida",
       "unknown": "Desconocido"
     },
+    "suspendedTitle": "Tu cuenta está suspendida",
+    "suspendedBody": "No podés ponerte en turno mientras tu cuenta esté suspendida. Comunicate con soporte para regularizar tu situación.",
+    "contactSupport": "Contactar a soporte",
+    "unknownStateTitle": "No pudimos leer tu estado",
+    "unknownStateBody": "Tu estado de turno no se reconoce ahora mismo. Reintentá; si sigue, comunicate con soporte.",
+    "gpsUnavailableTitle": "No estás compartiendo tu ubicación",
+    "gpsOpenSettings": "Abrir ajustes",
+    "gpsPermissionBody": "Estás en turno pero la app no tiene permiso de ubicación. Sin esto el sistema no te asigna viajes. Activá el permiso de ubicación de VEO.",
+    "gpsServicesBody": "Estás en turno pero la ubicación del dispositivo está apagada. Sin esto el sistema no te asigna viajes. Activá la ubicación (GPS).",
+    "tipReceivedTitle": "¡Recibiste una propina de {{amount}}!",
+    "tipReceivedBody": "El 100% es para vos. Ya se sumó a tus ganancias.",
     "goOnline": "Iniciar turno",
     "endShift": "Finalizar turno",
     "pause": "Tomar pausa",
     "resume": "Reanudar turno",
+    "greetingHi": "Hola,",
+    "greetingRole": "Conductor",
+    "connect": "Conéctate",
+    "goOffline": "Desconectarse",
+    "readyForTrips": "Listo para recibir viajes",
+    "viewActiveTrip": "Ver viaje activo",
     "kpisTitle": "Resumen",
     "kpisUnavailable": "El detalle por día aún no está disponible desde el servidor.",
     "netTotal": "Neto acumulado",
@@ -218,14 +244,28 @@
     "vehicleType": {
       "label": "Vehículo activo",
       "car": "Auto",
-      "moto": "Moto"
+      "moto": "Moto",
+      "none": "No tenés un vehículo con documentos vigentes. Registrá uno o renová los documentos para operar.",
+      "pendingReview": "Tu vehículo está en revisión; podés operar mientras tanto.",
+      "changeError": "No se pudo cambiar el vehículo. Probá de nuevo."
     }
+  },
+  "vehicles": {
+    "title": "Mis vehículos",
+    "manage": "Gestionar vehículos",
+    "addTitle": "Agregar un vehículo",
+    "empty": "Todavía no registraste ningún vehículo.",
+    "active": "Activo",
+    "verified": "Verificado",
+    "inReview": "En revisión",
+    "setActive": "Usar este vehículo"
   },
   "trips": {
     "incomingTitle": "Viaje entrante",
     "scheduledBadge": "Reservado",
     "incomingExpires": "Vence en {{seconds}} s",
     "incomingExpired": "La oferta venció",
+    "incomingDismiss": "Volver al inicio",
     "estimatedFare": "Tarifa estimada",
     "distance": "Distancia",
     "duration": "Duración",
@@ -248,6 +288,9 @@
       "inProgress": "Viaje en marcha",
       "completed": "Completado",
       "cancelled": "Cancelado",
+      "expired": "Viaje vencido",
+      "failed": "Viaje fallido",
+      "reassigning": "Reasignando a otro conductor",
       "unknown": "—"
     },
     "actions": {
@@ -256,6 +299,15 @@
       "start": "Iniciar viaje",
       "complete": "Completar viaje",
       "cancel": "Cancelar viaje"
+    },
+    "waypoint": {
+      "proposedTitle": "El pasajero quiere agregar una parada",
+      "proposedBody": "Si aceptas, se suma la parada a tu ruta y la tarifa se actualiza.",
+      "extraFare": "Tarifa adicional {{amount}}",
+      "newFare": "Nueva tarifa {{amount}}",
+      "accept": "Aceptar parada",
+      "reject": "Rechazar",
+      "error": "No se pudo enviar tu respuesta. Inténtalo de nuevo."
     },
     "payment": "Pago",
     "fare": "Tarifa",
@@ -365,9 +417,46 @@
     "documentInvalid": "Requiere atención",
     "complianceOk": "Documentación al día",
     "complianceMissing": "Faltan documentos: {{items}}",
+    "noDocuments": "Todavía no cargaste documentos.",
     "logout": "Cerrar sesión",
     "logoutConfirmTitle": "¿Cerrar sesión?",
-    "logoutConfirmBody": "Tendrás que volver a ingresar con tu número."
+    "logoutConfirmBody": "Tendrás que volver a ingresar con tu número.",
+    "driverStatus": {
+      "OFFLINE": "Desconectado",
+      "AVAILABLE": "En línea",
+      "ASSIGNED": "En viaje",
+      "ON_TRIP": "En viaje",
+      "ON_BREAK": "En pausa",
+      "SUSPENDED": "Suspendido"
+    },
+    "kycStatus": {
+      "VERIFIED": "Verificado",
+      "PENDING": "En revisión",
+      "PENDING_REVIEW": "En revisión",
+      "REJECTED": "Rechazado"
+    },
+    "bgCheckStatus": {
+      "CLEARED": "Aprobado",
+      "PENDING": "En revisión",
+      "PENDING_REVIEW": "En revisión",
+      "REJECTED": "Rechazado"
+    },
+    "docType": {
+      "DRIVER_LICENSE": "Licencia de conducir",
+      "LICENSE_A1": "Licencia A1",
+      "SOAT": "SOAT",
+      "PROPERTY_CARD": "Tarjeta de propiedad",
+      "BACKGROUND_CHECK": "Antecedentes",
+      "ITV": "Revisión técnica (ITV)"
+    },
+    "docStatus": {
+      "VALID": "Vigente",
+      "PENDING": "En revisión",
+      "PENDING_REVIEW": "En revisión",
+      "EXPIRING_SOON": "Por vencer",
+      "EXPIRED": "Vencido",
+      "REJECTED": "Rechazado"
+    }
   },
   "documents": {
     "title": "Documentos",

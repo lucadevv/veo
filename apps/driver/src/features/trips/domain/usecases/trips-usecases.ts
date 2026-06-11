@@ -1,3 +1,4 @@
+import type {GeoPoint} from '@veo/api-client';
 import type {TripsRepository} from '../repositories/trips-repository';
 import type {CompleteTripInput, Trip, TripOffer, TripRouteView, TripState} from '../entities';
 import {parseTripStatus} from '../value-objects/trip-status';
@@ -44,6 +45,14 @@ export class GetTripUseCase {
   }
 }
 
+/** Caso de uso: viaje activo del conductor (rehidratación tras reinicio). `null` si no tiene ninguno. */
+export class GetActiveTripUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(): Promise<Trip | null> {
+    return this.trips.getActiveTrip();
+  }
+}
+
 /** Caso de uso: estado ligero del viaje. */
 export class GetTripStateUseCase {
   constructor(private readonly trips: TripsRepository) {}
@@ -55,8 +64,8 @@ export class GetTripStateUseCase {
 /** Caso de uso: ruta + pasos de navegación turn-by-turn del viaje activo. */
 export class GetTripRouteUseCase {
   constructor(private readonly trips: TripsRepository) {}
-  execute(tripId: string): Promise<TripRouteView> {
-    return this.trips.getRoute(tripId);
+  execute(tripId: string, from?: GeoPoint): Promise<TripRouteView> {
+    return this.trips.getRoute(tripId, from);
   }
 }
 

@@ -1,14 +1,14 @@
 import {create} from 'zustand';
 import {prefsStore} from '../../../../core/storage/mmkv';
-import type {
-  FaceCapture,
-  PersonalData,
-  RegistrationDocument,
-  RegistrationDocumentType,
-  RegistrationDraft,
-  RegistrationStatus,
-  VehicleData,
+import {
   VehicleType,
+  type FaceCapture,
+  type PersonalData,
+  type RegistrationDocument,
+  type RegistrationDocumentType,
+  type RegistrationDraft,
+  type RegistrationStatus,
+  type VehicleData,
 } from '../../domain';
 
 /** Total de pasos del wizard (Datos · Vehículo · Documentos · KYC). */
@@ -34,7 +34,7 @@ interface PersistedRegistration {
 }
 
 const emptyPersonal: PersonalData = {fullName: '', dni: '', birthdate: ''};
-const emptyVehicle: VehicleData = {type: 'MOTO', plate: '', brand: '', year: '', model: ''};
+const emptyVehicle: VehicleData = {type: VehicleType.MOTO, plate: '', brand: '', year: '', model: ''};
 const initialDocuments: RegistrationDocument[] = [
   {type: 'LICENSE', status: 'pending'},
   {type: 'SOAT', status: 'pending'},

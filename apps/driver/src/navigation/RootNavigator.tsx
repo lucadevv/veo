@@ -1,12 +1,14 @@
 import React from 'react';
 import {StyleSheet} from 'react-native';
+import {useTranslation} from 'react-i18next';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {driverTheme, useTheme} from '@veo/ui-kit';
 import type {MainTabParamList, RootStackParamList} from './types';
 import {useSessionStore} from '../core/session/sessionStore';
 import {LoginScreen, OnboardingScreen, SplashScreen, useOnboardingStore} from '../features/auth/presentation';
-import {UnderReviewScreen, useRegistrationGate, useRegistrationStore} from '../features/registration/presentation';
+import {UnderReviewScreen, VehiclesScreen, useRegistrationGate, useRegistrationStore} from '../features/registration/presentation';
 import {RegistrationNavigator} from './RegistrationNavigator';
 import {BiometricEnrollScreen, DashboardScreen, ShiftStartScreen} from '../features/shift/presentation';
 import {TripActiveScreen, TripHistoryScreen, TripIncomingScreen} from '../features/trips/presentation';
@@ -35,6 +37,12 @@ const screenOptions = {
  */
 function MainTabs(): React.JSX.Element {
   const theme = useTheme();
+  const {t} = useTranslation();
+  // El home-indicator (iPhone) y la barra de gestos (Android) viven en `insets.bottom`. Un `height`
+  // fijo en `tabBarStyle` PISA el inset que React Navigation añade solo, dejando el tab bar pegado al
+  // borde. Sumamos el inset al alto y al padding inferior: mantenemos el look compacto de 64px de
+  // CONTENIDO y reservamos la zona segura debajo (igual criterio que el footer de `SafeScreen`).
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       detachInactiveScreens={false}
@@ -46,9 +54,9 @@ function MainTabs(): React.JSX.Element {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
-          height: 64,
+          height: 64 + insets.bottom,
           paddingTop: 8,
-          paddingBottom: 10,
+          paddingBottom: 10 + insets.bottom,
         },
         tabBarLabelStyle: {fontSize: 11, fontWeight: '600'},
         tabBarIcon: ({color, focused}) => {
@@ -68,10 +76,12 @@ function MainTabs(): React.JSX.Element {
           }
         },
       })}>
-      <Tab.Screen name="Inicio" component={DashboardScreen} />
-      <Tab.Screen name="Ganancias" component={EarningsScreen} />
-      <Tab.Screen name="Viajes" component={TripHistoryScreen} />
-      <Tab.Screen name="Cuenta" component={ProfileScreen} />
+      {/* `name` es el ID de ruta (no se traduce, lo usa la navegación); la etiqueta visible va por
+          `tabBarLabel` i18n. Antes el `name` se renderizaba como label → texto hardcodeado en el tab bar. */}
+      <Tab.Screen name="Inicio" component={DashboardScreen} options={{tabBarLabel: t('nav.home')}} />
+      <Tab.Screen name="Ganancias" component={EarningsScreen} options={{tabBarLabel: t('nav.earnings')}} />
+      <Tab.Screen name="Viajes" component={TripHistoryScreen} options={{tabBarLabel: t('nav.trips')}} />
+      <Tab.Screen name="Cuenta" component={ProfileScreen} options={{tabBarLabel: t('nav.account')}} />
     </Tab.Navigator>
   );
 }
@@ -146,6 +156,7 @@ export const RootNavigator = (): React.JSX.Element => {
         <Stack.Screen name="ShiftStart" component={ShiftStartScreen} />
         <Stack.Screen name="BiometricEnroll" component={BiometricEnrollScreen} />
         <Stack.Screen name="Documents" component={DocumentsScreen} />
+        <Stack.Screen name="Vehicles" component={VehiclesScreen} />
         <Stack.Screen name="Incentives" component={IncentivesScreen} />
         <Stack.Screen name="Support" component={SupportScreen} />
         <Stack.Screen

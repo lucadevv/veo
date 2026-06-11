@@ -33,8 +33,10 @@ import {useDispatchStore} from '../../../realtime/presentation/state/dispatchSto
 import {ChatButton, useChatStore} from '../../../chat/presentation';
 import {isTripActive, parseTripStatus, type DriverTripStatus} from '../../domain';
 import {useEnsureTripAccepted, useTrip, useTripActions, useTripRoute} from '../hooks/useTrips';
+import {useDriverWaypointProposal} from '../hooks/useDriverWaypointProposal';
 import {useTripPublisher} from '../hooks/useTripPublisher';
-import {useDriverLocation} from '../components/useDriverLocation';
+import {WaypointProposalCard} from '../components/WaypointProposalCard';
+import {useDriverPose} from '../components/useDriverPose';
 import {ManeuverBanner} from '../components/ManeuverBanner';
 import {RouteStepsList} from '../components/RouteStepsList';
 import {ExternalNavButtons} from '../components/ExternalNavButtons';
@@ -80,6 +82,12 @@ function statusLabel(status: DriverTripStatus, t: TFunction): string {
       return t('trips.status.completed');
     case 'CANCELLED':
       return t('trips.status.cancelled');
+    case 'EXPIRED':
+      return t('trips.status.expired');
+    case 'FAILED':
+      return t('trips.status.failed');
+    case 'REASSIGNING':
+      return t('trips.status.reassigning');
     default:
       return t('trips.status.unknown');
   }
@@ -97,8 +105,10 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
   const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
   const clearChat = useChatStore(s => s.clear);
 
-  // Ubicación del conductor SOLO para pintar el mapa (degrada a null sin GPS nativo → sin pin).
-  const driverLocation = useDriverLocation();
+  // Pose del conductor (ubicación + rumbo) para pintar el mapa y la cámara de NAVEGACIÓN tipo Waze.
+  // Degrada a null sin GPS nativo → sin pin y la cámara cae al encuadre normal (degradación honesta).
+  const driverPose = useDriverPose();
+  const driverLocation = driverPose?.point ?? null;
 
   // GAP 2: tras aceptar la oferta el viaje queda ASSIGNED; la máquina de estados exige ACCEPTED
   // antes de ARRIVING. Confirmamos la asignación (ASSIGNED→ACCEPTED) en cuanto llegamos a un viaje
@@ -124,6 +134,11 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
 
   const status = trip.data ? parseTripStatus(trip.data.status) : 'UNKNOWN';
 
+  // Parada propuesta por el pasajero (Lote C4): la propuesta entrante (socket) + el respond (POST). Solo
+  // se ofrece en el viaje en curso (IN_PROGRESS), que es cuando el contrato permite proponer una parada.
+  const waypointProposal = useDriverWaypointProposal(tripId);
+  const showWaypointProposal = status === 'IN_PROGRESS' && waypointProposal.proposal !== null;
+
   // Publisher de seguridad: cámara+micrófono del habitáculo a la sala `trip:<tripId>` mientras el
   // viaje está en marcha (pasajero a bordo). Se detiene al completar/cancelar.
   useTripPublisher(tripId, status === 'IN_PROGRESS');
@@ -136,7 +151,9 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
     status === 'ARRIVING' ||
     status === 'ARRIVED' ||
     status === 'IN_PROGRESS';
-  const routeQuery = useTripRoute(tripId, isNavigating);
+  // `driverPose?.point` = posición ACTUAL → el BFF traza la ruta desde donde está el conductor (ETA
+  // vivo + próxima maniobra viva + re-ruteo por desvío). Sin GPS (null) la ruta sale del origen del viaje.
+  const routeQuery = useTripRoute(tripId, isNavigating, driverPose?.point);
   const tripRoute = routeQuery.data;
 
   // Geometría de la ruta para pintarla en el mapa (GeoJSON [lng, lat]).
@@ -293,6 +310,8 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
             waypoints={tripRoute?.waypoints}
             routeCoordinates={routeCoordinates}
             fitToRoute={Boolean(routeCoordinates && routeCoordinates.length >= 2)}
+            navMode
+            heading={driverPose?.heading ?? null}
             interactive={false}
           />
         </MapShell>
@@ -349,6 +368,19 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
           <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(actionError, t)} />
         ) : null}
 
+        {/* Parada propuesta por el pasajero (Lote C4): tarjeta para aceptar/rechazar, sobre las acciones
+            normales del viaje, solo en curso. El server recalcula tarifa+ruta si el conductor acepta. */}
+        {showWaypointProposal && waypointProposal.proposal ? (
+          <Appear key="waypoint-proposal">
+            <WaypointProposalCard
+              proposal={waypointProposal.proposal}
+              isResponding={waypointProposal.isResponding}
+              isError={waypointProposal.isError}
+              onRespond={waypointProposal.respond}
+            />
+          </Appear>
+        ) : null}
+
         <Appear key={`actions-${status}`} style={styles.actions}>
           {confirming ? <Button label={t('trips.confirmingAssignment')} fullWidth loading disabled /> : null}
           {confirmFailed ? <Button label={t('common.retry')} fullWidth onPress={retryConfirm} /> : null}
@@ -377,7 +409,10 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
             <Button label={t('trips.actions.complete')} variant="safe" fullWidth loading={anyBusy} onPress={onComplete} />
           ) : null}
 
-          {status === 'COMPLETED' || status === 'CANCELLED' ? (
+          {/* Salida al dashboard cuando el viaje NO es accionable: cualquier cierre (completado,
+              cancelado, vencido, fallido, reasignado) Y TAMBIÉN un estado UNKNOWN (contrato no reconocido).
+              `!isTripActive` = terminal o desconocido → siempre hay botón para volver, nunca trabado. */}
+          {!isTripActive(status) ? (
             <Button label={t('shift.dashboardTitle')} fullWidth onPress={finishToDashboard} />
           ) : null}
 

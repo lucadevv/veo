@@ -1,16 +1,17 @@
-import type {
-  BiometricEnrollInput,
-  BiometricEnrollResult,
-  LicenseOnboardInput,
-  PersonalDataInput,
-  PersonalDataView,
-  RegistrationDocumentRequest,
-  RegistrationDocumentView,
-  RegistrationDraft,
-  RegistrationRepository,
-  RegistrationSubmissionResult,
-  VehicleRegisterInput,
-  VehicleView,
+import {
+  VehicleType,
+  type BiometricEnrollInput,
+  type BiometricEnrollResult,
+  type LicenseOnboardInput,
+  type PersonalDataInput,
+  type PersonalDataView,
+  type RegistrationDocumentRequest,
+  type RegistrationDocumentView,
+  type RegistrationDraft,
+  type RegistrationRepository,
+  type RegistrationSubmissionResult,
+  type VehicleRegisterInput,
+  type VehicleView,
 } from '../../domain';
 
 /**
@@ -53,6 +54,25 @@ export class StubRegistrationRepository implements RegistrationRepository {
   async listVehicles(): Promise<VehicleView[]> {
     await delay(200);
     return [];
+  }
+
+  async getActiveVehicle(): Promise<VehicleView | null> {
+    await delay(200);
+    return null;
+  }
+
+  async setActiveVehicle(vehicleId: string): Promise<VehicleView> {
+    await delay(300);
+    return {
+      id: vehicleId,
+      plate: 'DEV-000',
+      make: 'Dev',
+      model: 'Stub',
+      year: 2020,
+      vehicleType: VehicleType.CAR,
+      status: 'ACTIVE',
+      docStatus: 'VALID',
+    };
   }
 
   async listDocuments(): Promise<RegistrationDocumentView[]> {

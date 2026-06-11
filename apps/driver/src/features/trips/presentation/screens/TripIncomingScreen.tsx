@@ -96,6 +96,13 @@ export const TripIncomingScreen = ({navigation, route}: Props): React.JSX.Elemen
     });
   };
 
+  // Oferta VENCIDA: salida limpia. NO pega `reject` al backend (la oferta ya expiró del lado dispatch;
+  // rechazarla es un request inútil que además puede errorar). Solo limpia el estado local y vuelve.
+  const onExpiredDismiss = () => {
+    clearOffer();
+    navigation.goBack();
+  };
+
   return (
     <SafeScreen padded={false}>
       {/* Mapa de fondo atenuado: sin coordenadas reales pre-aceptación, centramos en Lima sin pin. */}
@@ -220,24 +227,35 @@ export const TripIncomingScreen = ({navigation, route}: Props): React.JSX.Elemen
           {expired ? <Banner tone="danger" title={t('trips.incomingExpired')} /> : null}
         </ScrollView>
 
-        {/* Acciones: rechazar (ghost, secundario) + aceptar (accent, dominante). */}
+        {/* Acciones: vencida → una sola salida limpia ("Volver"); viva → rechazar + aceptar. */}
         <View style={styles.actions}>
-          <Button
-            label={t('trips.reject')}
-            variant="ghost"
-            loading={rejectOffer.isPending}
-            onPress={onReject}
-            style={styles.rejectBtn}
-          />
-          <Button
-            label={t('trips.accept')}
-            variant="accent"
-            fullWidth
-            disabled={expired || acceptOffer.isPending}
-            loading={acceptOffer.isPending}
-            onPress={onAccept}
-            style={styles.acceptBtn}
-          />
+          {expired ? (
+            <Button
+              label={t('trips.incomingDismiss')}
+              variant="accent"
+              fullWidth
+              onPress={onExpiredDismiss}
+            />
+          ) : (
+            <>
+              <Button
+                label={t('trips.reject')}
+                variant="ghost"
+                loading={rejectOffer.isPending}
+                onPress={onReject}
+                style={styles.rejectBtn}
+              />
+              <Button
+                label={t('trips.accept')}
+                variant="accent"
+                fullWidth
+                disabled={acceptOffer.isPending}
+                loading={acceptOffer.isPending}
+                onPress={onAccept}
+                style={styles.acceptBtn}
+              />
+            </>
+          )}
         </View>
       </Animated.View>
     </SafeScreen>

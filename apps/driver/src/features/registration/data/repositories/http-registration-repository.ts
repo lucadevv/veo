@@ -67,6 +67,18 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     return this.http.get('/drivers/vehicles', {schema: driverVehicleList});
   }
 
+  async getActiveVehicle(): Promise<VehicleView | null> {
+    // 204 (sin vehículo operable) → el HttpClient devuelve undefined; lo mapeamos a null.
+    const active = (await this.http.get('/drivers/active-vehicle', {schema: driverVehicleView})) as
+      | VehicleView
+      | undefined;
+    return active ?? null;
+  }
+
+  setActiveVehicle(vehicleId: string): Promise<VehicleView> {
+    return this.http.patch('/drivers/active-vehicle', {body: {vehicleId}, schema: driverVehicleView});
+  }
+
   listDocuments(): Promise<RegistrationDocumentView[]> {
     return this.http.get('/drivers/me/documents', {schema: driverDocumentList});
   }

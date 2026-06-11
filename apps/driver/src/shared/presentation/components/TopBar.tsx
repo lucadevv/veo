@@ -1,5 +1,6 @@
 import React, {type ReactNode} from 'react';
 import {StyleSheet, View} from 'react-native';
+import {useTranslation} from 'react-i18next';
 import {Button, Text} from '@veo/ui-kit';
 
 export interface TopBarProps {
@@ -14,11 +15,13 @@ export interface TopBarProps {
  * Barra superior simple de pantalla: título + retroceso opcional + acciones.
  * Sin íconos de mapa de bits ni emojis (regla del sistema de diseño): el retroceso usa texto.
  */
-export const TopBar = ({title, onBack, trailing}: TopBarProps): React.JSX.Element => (
+export const TopBar = ({title, onBack, trailing}: TopBarProps): React.JSX.Element => {
+  const {t} = useTranslation();
+  return (
   <View style={styles.row}>
     <View style={styles.left}>
       {onBack ? (
-        <Button label="Atrás" variant="ghost" size="sm" onPress={onBack} />
+        <Button label={t('common.back')} variant="ghost" size="sm" onPress={onBack} />
       ) : null}
       <Text variant="title2" numberOfLines={1}>
         {title}
@@ -26,7 +29,8 @@ export const TopBar = ({title, onBack, trailing}: TopBarProps): React.JSX.Elemen
     </View>
     {trailing ? <View>{trailing}</View> : null}
   </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   row: {

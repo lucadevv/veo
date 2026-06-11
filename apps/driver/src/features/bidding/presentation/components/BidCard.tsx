@@ -3,17 +3,13 @@ import {StyleSheet, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {Card, StatusPill, Text, useTheme} from '@veo/ui-kit';
 import {formatPEN} from '../../../../shared/presentation/format';
+import {vehicleClassLabelKey} from '../../../../shared/presentation/vehicle-class';
 import type {OpenBid} from '../../domain';
 import {useCountdownMs} from '../hooks/useCountdownMs';
 
 interface Props {
   bid: OpenBid;
   onPress: () => void;
-}
-
-/** Etiqueta i18n del tipo de vehículo (reusa las claves de shift). */
-function vehicleLabel(type: string): 'shift.vehicleType.car' | 'shift.vehicleType.moto' {
-  return type === 'MOTO' ? 'shift.vehicleType.moto' : 'shift.vehicleType.car';
 }
 
 /**
@@ -46,7 +42,7 @@ export const BidCard = ({bid, onPress}: Props): React.JSX.Element => {
       </View>
 
       <View style={styles.metaRow}>
-        <StatusPill label={t(vehicleLabel(bid.vehicleType))} tone="accent" dot />
+        <StatusPill label={t(vehicleClassLabelKey(bid.vehicleType))} tone="accent" dot />
         {bid.specialRequests.map(req => (
           <StatusPill key={req} label={t(`trips.bid.special.${req}`, {defaultValue: req})} tone="neutral" />
         ))}

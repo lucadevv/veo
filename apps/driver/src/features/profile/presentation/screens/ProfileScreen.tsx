@@ -28,6 +28,7 @@ import {
   IconShield,
 } from '../../../../shared/presentation/icons';
 import {useLogout, useProfile} from '../hooks/useProfile';
+import {BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel} from '../labels';
 import {ProfileIdentityCard} from '../components/ProfileIdentityCard';
 import {ProfileLinkRow} from '../components/ProfileLinkRow';
 import {Appear} from '../components/motion';
@@ -101,14 +102,14 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
             <Card>
               <ListItem
                 title={t('profile.currentStatus')}
-                trailing={<StatusPill label={data.currentStatus} tone="neutral" dot />}
+                trailing={<StatusPill label={enumLabel(t, 'profile.driverStatus', data.currentStatus)} tone="neutral" dot />}
               />
               <ListItem
                 title={t('profile.kyc')}
                 trailing={
                   <StatusPill
-                    label={data.kycStatus}
-                    tone={data.kycStatus === 'VERIFIED' ? 'success' : 'warn'}
+                    label={enumLabel(t, 'profile.kycStatus', data.kycStatus)}
+                    tone={data.kycStatus === KYC_VERIFIED ? 'success' : 'warn'}
                     dot
                   />
                 }
@@ -117,8 +118,8 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
                 title={t('profile.backgroundCheck')}
                 trailing={
                   <StatusPill
-                    label={data.backgroundCheckStatus}
-                    tone={data.backgroundCheckStatus === 'CLEARED' ? 'success' : 'warn'}
+                    label={enumLabel(t, 'profile.bgCheckStatus', data.backgroundCheckStatus)}
+                    tone={data.backgroundCheckStatus === BACKGROUND_CHECK_CLEARED ? 'success' : 'warn'}
                     dot
                   />
                 }
@@ -134,14 +135,14 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
             <Card>
               {data.documents.length === 0 ? (
                 <Text variant="callout" color="inkMuted">
-                  {t('profile.complianceOk')}
+                  {t('profile.noDocuments')}
                 </Text>
               ) : (
                 data.documents.map(doc => (
                   <ListItem
                     key={doc.type}
-                    title={doc.type}
-                    subtitle={doc.status}
+                    title={enumLabel(t, 'profile.docType', doc.type)}
+                    subtitle={enumLabel(t, 'profile.docStatus', doc.status)}
                     trailing={
                       <StatusPill
                         label={doc.ok ? t('profile.documentValid') : t('profile.documentInvalid')}

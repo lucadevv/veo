@@ -9,6 +9,9 @@ module.exports = {
       '|@react-navigation' +
       '|react-native-gesture-handler' +
       '|react-native-reanimated' +
+      // RN 0.85: reanimated/gesture-handler arrastran react-native-worklets (reemplazó worklets-core),
+      // distribuido como ESM → debe transformarse o Jest no parsea su `import`.
+      '|react-native-worklets' +
       '|react-native-screens' +
       '|react-native-safe-area-context' +
       '|react-native-config' +

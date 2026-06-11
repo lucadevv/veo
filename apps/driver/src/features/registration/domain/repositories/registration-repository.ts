@@ -36,6 +36,15 @@ export interface RegistrationRepository {
   /** GET /drivers/vehicles — vehículos del conductor (rehidratación; más recientes primero). */
   listVehicles(): Promise<VehicleView[]>;
 
+  /**
+   * GET /drivers/active-vehicle — vehículo ACTIVO (el que el conductor opera; server-authoritative).
+   * `null` si no tiene ninguno operable (el BFF responde 204). El dispatch deriva el tipo de ESTE.
+   */
+  getActiveVehicle(): Promise<VehicleView | null>;
+
+  /** PATCH /drivers/active-vehicle — selecciona el vehículo activo del conductor. Devuelve el activo. */
+  setActiveVehicle(vehicleId: string): Promise<VehicleView>;
+
   /** GET /drivers/me/documents — documentos reales del conductor (con `simpleStatus` para chips). */
   listDocuments(): Promise<RegistrationDocumentView[]>;
 

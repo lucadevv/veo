@@ -26,6 +26,8 @@ export type RootStackParamList = {
   BiometricEnroll: undefined;
   Documents: undefined;
   Incentives: undefined;
+  /** Mis vehículos: lista + selección del activo (server) + alta de un vehículo nuevo (2do, moto). */
+  Vehicles: undefined;
   Support: {tripId?: string} | undefined;
   TripIncoming: {matchId: string; tripId: string};
   TripActive: {tripId: string};

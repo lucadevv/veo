@@ -13,6 +13,13 @@ import {
 /** Clave de caché del estado de turno. */
 export const SHIFT_STATE_QUERY_KEY = ['shift', 'state'] as const;
 
+/**
+ * Cada cuánto se re-consulta el estado de turno mientras la app está en primer plano (ms). El estado
+ * es server-authoritative: si la central SUSPENDE al conductor mid-turno y NO llega un evento de socket,
+ * el polling lo detecta igual. RN no refetchea en background por defecto, así que esto no corre dormido.
+ */
+const SHIFT_STATE_REFETCH_INTERVAL_MS = 30_000;
+
 export interface ShiftStateView {
   driverId: string;
   /** Estado normalizado para la UI. */
@@ -34,6 +41,11 @@ export function useShiftState() {
         rawStatus: state.status,
       };
     },
+    // Seguridad operativa (regla #1: un suspendido no opera). El default global es no revalidar
+    // (`refetchOnWindowFocus:false`); acá lo forzamos para ESTE estado crítico: polling acotado +
+    // refetch al volver a primer plano (vía focusManager↔AppState, ver `nativeAppState.ts`).
+    refetchInterval: SHIFT_STATE_REFETCH_INTERVAL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 

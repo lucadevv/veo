@@ -197,6 +197,9 @@ export const LoginScreen = (): React.JSX.Element => {
   const requestOtp = useRequestOtp();
   const login = useLogin();
   const biometric = useBiometricRelogin();
+  // En dev ocultamos el re-login biométrico para una pantalla de login LIMPIA (solo teléfono+OTP)
+  // durante demos/pruebas. En producción el fast-path Face ID (returning-user) se mantiene intacto.
+  const faceIdEnabled = biometric.available && !__DEV__;
 
   const phoneValid = isValidPeruPhone(phone);
   const codeValid = /^\d{6}$/.test(code);
@@ -229,8 +232,8 @@ export const LoginScreen = (): React.JSX.Element => {
 
           {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
 
-          {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado). */}
-          {biometric.available && showBiometricCard ? (
+          {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado; oculto en dev). */}
+          {faceIdEnabled && showBiometricCard ? (
             <Reveal delay={100}>
               <Card variant="filled" padding="xl" style={{gap: theme.spacing.lg}}>
                 <View style={[styles.biometricHead, {gap: theme.spacing.md}]}>
@@ -273,7 +276,7 @@ export const LoginScreen = (): React.JSX.Element => {
 
           {/* Formulario de teléfono con prefijo +51 visible y CTA cian full-width. */}
           <Reveal delay={140} style={[styles.form, {gap: theme.spacing.lg}]}>
-            {biometric.available ? (
+            {faceIdEnabled ? (
               <Text variant="footnote" color="inkSubtle" align="center">
                 {t('auth.phoneDivider')}
               </Text>
