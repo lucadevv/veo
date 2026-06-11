@@ -5,6 +5,7 @@ import { useTrip } from '@/lib/api/queries';
 import type { TripDetail } from '@/lib/api/schemas';
 import { dateTime, duration, money } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/states';
@@ -50,6 +51,12 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
                 <Detail label="Método de pago" value={trip.paymentMethod ?? '—'} />
                 <Detail label="Pasajero" value={trip.passengerName ?? trip.passengerId.slice(0, 8)} />
                 <Detail label="Conductor" value={trip.driverName ?? trip.driverId?.slice(0, 8) ?? '—'} />
+                {/* Alerta solo si el conductor está suspendido (identity DriverReply.suspendedAt); si es null no se renderiza nada. */}
+                {trip.driverSuspendedAt != null && (
+                  <div className="col-span-2">
+                    <Badge tone="warn">Conductor suspendido el {dateTime(trip.driverSuspendedAt)}</Badge>
+                  </div>
+                )}
                 <Detail label="Placa" value={trip.vehiclePlate ?? '—'} mono />
                 <Detail label="ETA" value={duration(trip.etaSeconds)} />
                 <Detail
