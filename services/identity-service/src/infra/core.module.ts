@@ -19,7 +19,7 @@ import {
 } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
-import { OutboxRelay } from './outbox.relay';
+import { outboxRelayProvider } from './outbox.relay';
 import type { Env } from '../config/env.schema';
 
 async function resolveJwtKeys(config: ConfigService<Env, true>): Promise<JwtKeys> {
@@ -72,7 +72,7 @@ const internalSecretProvider: Provider = {
     { provide: JWT_SERVICE, useExisting: JwtService },
     refreshStoreProvider,
     internalSecretProvider,
-    OutboxRelay,
+    outboxRelayProvider,
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,

@@ -4,7 +4,7 @@
  */
 import { Module } from '@nestjs/common';
 import { S3ReplicationRelay } from '../storage/s3-replication.relay';
-import { OutboxRelay } from '../infra/outbox.relay';
+import { outboxRelayProvider } from '../infra/outbox.relay';
 import { AuditConsumer } from '../consumers/audit.consumer';
 import { AuditGrpcController } from '../grpc/audit.grpc.controller';
 import { AuditController } from './audit.controller';
@@ -13,7 +13,7 @@ import { AuditRepository } from './audit.repository';
 
 @Module({
   controllers: [AuditController, AuditGrpcController],
-  providers: [AuditRepository, AuditService, AuditConsumer, S3ReplicationRelay, OutboxRelay],
+  providers: [AuditRepository, AuditService, AuditConsumer, S3ReplicationRelay, outboxRelayProvider],
   exports: [AuditService, AuditRepository],
 })
 export class AuditModule {}

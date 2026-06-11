@@ -2,15 +2,15 @@
  * Consumidor Kafka de `dispatch.match_found` → transición a ASSIGNED (BR-T02).
  * dispatch-service publica el match (conductor elegido); trip-service lo materializa.
  * Idempotente: el servicio ignora reprocesos del mismo conductor ya asignado.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId = UN consumer con TODOS
+ * sus eventos en `handlers()`.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventConsumer,
-  schemaForEvent,
-  type EventEnvelope,
-} from '@veo/events';
+import { schemaForEvent, type EventEnvelope, type EventHandler } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { TripsService } from './trips.service';
 import type { Env } from '../config/env.schema';
 
@@ -22,31 +22,32 @@ interface MatchFoundPayload {
   scoreMs: number;
 }
 
-@Injectable()
-export class DispatchConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(DispatchConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este servicio. */
+const KAFKA_CLIENT_ID = 'trip-service';
 
+/** Group propio del match (no comparte el de PUJA ni el de erasure). */
+const DISPATCH_GROUP_ID = 'trip-service.dispatch';
+
+@Injectable()
+export class DispatchConsumer extends KafkaConsumerBootstrap {
   constructor(
     private readonly trips: TripsService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'trip-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'trip-service.dispatch',
+      groupId: DISPATCH_GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'trip-service.dispatch');
-    this.consumer.on('dispatch.match_found', (envelope) => this.onMatchFound(envelope));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Suscrito a dispatch.match_found');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return { 'dispatch.match_found': (envelope) => this.onMatchFound(envelope) };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Suscrito a ${eventTypes.join(' + ')}`;
   }
 
   private async onMatchFound(envelope: EventEnvelope<unknown>): Promise<void> {

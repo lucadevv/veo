@@ -1,51 +1,27 @@
 /**
- * OutboxRelay — drena la tabla outbox de audit y publica a Kafka (FOUNDATION §6).
- * audit-service emite `audit.recorded` (señal tamper-evident de registro). Bucle cada 500ms.
+ * Wiring del OutboxRelay compartido (@veo/database) — drena la tabla outbox de audit y publica
+ * a Kafka (FOUNDATION §6). Acá vive SOLO lo que varía por servicio: clientId Kafka + schema
+ * Prisma (advisory lock). El esqueleto (bucle 500ms, batch, drainOutbox vía @veo/events,
+ * manejo de error, logs) es el helper promovido — idéntico al histórico.
+ *
+ * audit-service emite `audit.recorded` (señal tamper-evident de registro).
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Logger, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createKafka, KafkaEventProducer, drainOutbox, type OutboxStore } from '@veo/events';
-import { PrismaOutboxStore } from '@veo/database';
+import { OutboxRelay } from '@veo/database';
 import { PrismaService } from './prisma.service';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(OutboxRelay.name);
-  private readonly producer: KafkaEventProducer;
-  private readonly store: OutboxStore;
-  private timer?: NodeJS.Timeout;
-  private running = false;
-
-  constructor(prisma: PrismaService, config: ConfigService<Env, true>) {
-    const kafka = createKafka({
+export const outboxRelayProvider: Provider = {
+  provide: OutboxRelay,
+  inject: [PrismaService, ConfigService],
+  useFactory: (prisma: PrismaService, config: ConfigService<Env, true>) =>
+    new OutboxRelay({
       clientId: 'audit-service',
+      schema: 'audit',
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-    });
-    this.producer = new KafkaEventProducer(kafka);
-    this.store = new PrismaOutboxStore(prisma.write, 'audit');
-  }
-
-  async onModuleInit(): Promise<void> {
-    await this.producer.connect();
-    this.timer = setInterval(() => void this.tick(), 500);
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
-    await this.producer.disconnect();
-  }
-
-  private async tick(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
-      const n = await drainOutbox(this.store, this.producer, 100);
-      if (n > 0) this.logger.debug(`outbox: publicados ${n} eventos`);
-    } catch (err) {
-      this.logger.error({ err }, 'outbox relay falló');
-    } finally {
-      this.running = false;
-    }
-  }
-}
+      // Write client: la escritura de dominio pobló el outbox en la misma transacción.
+      prisma: prisma.write,
+      logger: new Logger(OutboxRelay.name),
+    }),
+};

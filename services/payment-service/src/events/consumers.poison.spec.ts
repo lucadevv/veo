@@ -5,52 +5,33 @@
  * Prisma P2023 → el catch RELANZABA SIEMPRE → kafkajs reintenta 5 → crash → restart → MISMO
  * offset → loop infinito, partición bloqueada.
  *
- * Verifica el handler onTripCompleted SIN Kafka real:
+ * Verifica el handler onTripCompleted SIN Kafka real (espía sobre el KafkaEventConsumer real,
+ * con start/stop anulados — los handlers los registra el bootstrap promovido de @veo/events/nest
+ * en onModuleInit):
  *  1. tripId no-UUID  → NO relanza (poison: log & skip), NO intenta cobrar.
  *  2. tripId válido   → cobra normalmente (chargeFromTripCompleted).
  *  3. error transitorio (DB caída) → SÍ relanza (reintento de Kafka).
  *  4. error permanente (P2023 desde DB, defensa en profundidad) → NO relanza.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createEnvelope } from '@veo/events';
-import type * as VeoEvents from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, type EventHandler } from '@veo/events';
 import { PaymentEventConsumers } from './consumers';
 import type { PaymentsService } from '../payments/payments.service';
 import type { PayoutsService } from '../payouts/payouts.service';
 import type { IncentivesService } from '../incentives/incentives.service';
 
-class FakeConsumer {
-  readonly handlers = new Map<string, (env: unknown) => Promise<void>>();
-  on(eventType: string, handler: (env: unknown) => Promise<void>): this {
-    this.handlers.set(eventType, handler);
-    return this;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-}
-
-vi.mock('@veo/events', async (orig) => {
-  const actual = await orig<typeof VeoEvents>();
-  return {
-    ...actual,
-    createKafka: () => ({}),
-    KafkaEventConsumer: class {
-      private readonly fake = new FakeConsumer();
-      on(eventType: string, handler: (env: unknown) => Promise<void>) {
-        return this.fake.on(eventType, handler);
-      }
-      async start() {
-        return this.fake.start();
-      }
-      async stop() {
-        return this.fake.stop();
-      }
-      fire(eventType: string, env: unknown) {
-        return this.fake.handlers.get(eventType)?.(env);
-      }
-    },
-  };
+// Captura los handlers que el bootstrap registra con .on() para dispararlos a mano (sin Kafka real).
+const handlers = new Map<string, EventHandler>();
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  eventType: string,
+  handler: EventHandler,
+) {
+  handlers.set(eventType, handler);
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 const config = {
   getOrThrow: (k: string): string => (k === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
@@ -71,9 +52,7 @@ function build(charge: ReturnType<typeof vi.fn>): {
   return { svc, creditTrip };
 }
 
-function fire(svc: PaymentEventConsumers, tripId: string) {
-  const consumer = (svc as unknown as { consumer: { fire: (t: string, e: unknown) => Promise<void> } })
-    .consumer;
+function fire(_svc: PaymentEventConsumers, tripId: string) {
   const env = createEnvelope({
     eventType: 'trip.completed',
     producer: 'trip-service',
@@ -86,7 +65,7 @@ function fire(svc: PaymentEventConsumers, tripId: string) {
       paymentMethod: 'CASH',
     },
   });
-  return consumer.fire('trip.completed', env);
+  return handlers.get('trip.completed')?.(env);
 }
 
 describe('PaymentEventConsumers · trip.completed hardening (poison vs transitorio)', () => {

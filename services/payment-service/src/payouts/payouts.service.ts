@@ -9,7 +9,13 @@ import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
-import { ForbiddenError, uuidv7 } from '@veo/utils';
+import {
+  ConflictError,
+  ForbiddenError,
+  uuidv7,
+  withDistributedLock,
+  type DistributedLockOutcome,
+} from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
@@ -68,12 +74,13 @@ export class PayoutsService {
   /** Cron semanal: lunes 06:00 (hora del servidor). Liquida la semana previa [lun, lun). */
   @Cron('0 6 * * 1')
   async weeklyCron(): Promise<void> {
-    // Lock distribuido: solo una instancia corre el cron.
-    const acquired = await this.redis.set(CRON_LOCK_KEY, '1', 'EX', CRON_LOCK_TTL_SECONDS, 'NX');
-    if (acquired !== 'OK') return;
     const { start, end } = previousWeek(new Date());
     try {
-      const summary = await this.runPayouts(start, end);
+      // Lock distribuido DENTRO de la liquidación (no acá): si otra réplica/corrida manual lo tiene,
+      // el cron skipea en silencio (semántica de siempre); el lock vive donde está la sección crítica.
+      const outcome = await this.runPayoutsExclusive(start, end);
+      if (!outcome.acquired) return;
+      const summary = outcome.result;
       this.logger.log(`Payouts semanales: ${summary.processed} pagados, ${summary.held} retenidos`);
     } catch (err) {
       this.logger.error({ err }, 'Cron de payouts falló');
@@ -83,8 +90,38 @@ export class PayoutsService {
   /**
    * Corre la liquidación para un período. Idempotente por conductor+período (UNIQUE).
    * Si el operador la dispara manualmente y el total supera S/5000, exige step-up MFA fresco (BR-S07).
+   * Protegida por el MISMO lock distribuido que el cron (fix auditoría: el lock vivía solo en
+   * weeklyCron y una corrida manual del operador podía solaparse con el cron). Si otra liquidación
+   * está en curso, la manual falla con ConflictError (409 honesto) en vez de competir.
    */
   async runPayouts(start: Date, end: Date, operator?: AuthenticatedUser): Promise<PayoutRunSummary> {
+    const outcome = await this.runPayoutsExclusive(start, end, operator);
+    if (!outcome.acquired) {
+      throw new ConflictError('Ya hay una liquidación de payouts en curso: reintentá cuando termine');
+    }
+    return outcome.result;
+  }
+
+  /** Adquiere el lock de liquidación y corre; libera al terminar (una manual posterior no espera el TTL). */
+  private runPayoutsExclusive(
+    start: Date,
+    end: Date,
+    operator?: AuthenticatedUser,
+  ): Promise<DistributedLockOutcome<PayoutRunSummary>> {
+    return withDistributedLock(
+      this.redis,
+      CRON_LOCK_KEY,
+      CRON_LOCK_TTL_SECONDS,
+      () => this.executePayoutRun(start, end, operator),
+      { releaseOnSettle: true },
+    );
+  }
+
+  private async executePayoutRun(
+    start: Date,
+    end: Date,
+    operator?: AuthenticatedUser,
+  ): Promise<PayoutRunSummary> {
     const rows = await this.collectEarnings(start, end);
     const aggregated = aggregatePayouts(rows, this.minCents);
     const projectedTotal = aggregated.reduce((sum, p) => sum + p.amountCents, 0);

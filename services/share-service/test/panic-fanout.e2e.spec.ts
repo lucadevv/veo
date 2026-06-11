@@ -8,8 +8,9 @@
  *   3) Pasajero sin contactos verificados → no crashea, no manda SMS.
  *   4) trip.started → el read-model del viaje pasa a IN_PROGRESS.
  *
- * Mockeamos SOLO @veo/events para capturar los handlers que EventsConsumer registra con .on() y dispararlos
- * a mano (sin Kafka real); el resto del grafo (ShareService/ContactsService/TripSnapshot) es REAL contra el
+ * Espiamos SOLO el KafkaEventConsumer real (start/stop anulados) para capturar los handlers que el
+ * bootstrap promovido (@veo/events/nest) registra en onModuleInit y dispararlos a mano (sin Kafka
+ * real); el resto del grafo (ShareService/ContactsService/TripSnapshot) es REAL contra el
  * contenedor. El SmsSender del consumer es un doble que cuenta los envíos.
  */
 import { fileURLToPath } from 'node:url';
@@ -17,8 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { ConfigService } from '@nestjs/config';
 import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
-import { createEnvelope, type EventEnvelope } from '@veo/events';
-import type * as VeoEvents from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, type EventEnvelope } from '@veo/events';
 import type Redis from 'ioredis';
 import { PrismaClient } from '../src/generated/prisma';
 import { ShareService } from '../src/share/share.service';
@@ -31,21 +31,19 @@ import type { SmsSender } from '../src/ports/sms/sms.port';
 import type { Env } from '../src/config/env.schema';
 
 // Captura los handlers que EventsConsumer registra con .on() — los disparamos como una entrega (y RE-entrega)
-// de Kafka, sin broker real. createEnvelope/el resto de @veo/events se preservan (...actual).
+// de Kafka, sin broker real. createEnvelope/el resto de @veo/events se preservan (espía, no mock).
 type Handler = (env: EventEnvelope<unknown>) => Promise<void>;
 const handlers = new Map<string, Handler>();
-vi.mock('@veo/events', async (importOriginal) => {
-  const actual = await importOriginal<typeof VeoEvents>();
-  class FakeConsumer {
-    on(type: string, handler: Handler): this {
-      handlers.set(type, handler);
-      return this;
-    }
-    async start(): Promise<void> {}
-    async stop(): Promise<void> {}
-  }
-  return { ...actual, createKafka: () => ({}), KafkaEventConsumer: FakeConsumer };
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  type: string,
+  handler: Handler,
+) {
+  handlers.set(type, handler);
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 
@@ -92,8 +90,8 @@ beforeAll(async () => {
       smsSent.push({ to, message });
     },
   };
-  // Construir el consumer registra sus handlers en el `handlers` map (vía FakeConsumer).
-  new EventsConsumer(share, contacts, snapshots, sms, config);
+  // onModuleInit registra sus handlers en el `handlers` map (vía el espía) y "arranca" el consumer anulado.
+  await new EventsConsumer(share, contacts, snapshots, sms, config).onModuleInit();
 }, 180_000);
 
 afterAll(async () => {

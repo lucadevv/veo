@@ -17,19 +17,23 @@
  *  - Lo que hace MÁS que un push queda acá como handler DEDICADO y EXPLÍCITO (`DEDICATED_EVENT_TYPES`):
  *    pánico (fan-out SMS + webhook, SLA p99 < 3s), payment.failed (push + webhook a central) y
  *    penalidad saldada (DOS destinatarios). Forzarlos al registro sería over-engineering del patrón.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle + log de suscripción derivado del
+ * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
+ * = UN consumer con TODOS sus eventos en `handlers()` (dedicados + filas del registro juntos).
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import {
-  createKafka,
-  KafkaEventConsumer,
   isUuid,
   isPermanentDataError,
   EVENT_SCHEMAS,
   type EventEnvelope,
+  type EventHandler,
   type EventType,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { NotificationChannel } from '@veo/shared-types';
 import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationPriority } from '../engine/types';
@@ -78,10 +82,12 @@ const paymentFailedEnrichment = pushTargetHintSchema.extend({
   centralWebhookUrl: z.string().optional(),
 });
 
+/** clientId kafkajs de este servicio (también su groupId de consumo). */
+const KAFKA_CLIENT_ID = 'notification-service';
+const GROUP_ID = 'notification-service';
+
 @Injectable()
-export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(EventConsumerService.name);
-  private readonly consumer: KafkaEventConsumer;
+export class EventConsumerService extends KafkaConsumerBootstrap {
   private readonly centralWebhookUrl?: string;
 
   /** Cableado DI del motor del registro: resolución poison-guarded + engine real + logger real. */
@@ -97,12 +103,11 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     private readonly devices: DeviceTokenRepository,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'notification-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'notification-service',
+      groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'notification-service');
     this.centralWebhookUrl = config.get<string>('CENTRAL_ALERT_WEBHOOK_URL');
   }
 
@@ -139,27 +144,24 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleInit(): Promise<void> {
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
     // Handlers dedicados (multi-canal / multi-destinatario): explícitos, no forzados al registro.
-    this.consumer
-      .on('panic.triggered', (e) => this.onPanic(e))
-      .on('payment.failed', (e) => this.onPaymentFailed(e))
-      .on('payment.cancellation_penalty_collected', (e) => this.onCancellationPenaltyCollected(e));
-
+    const record: Record<string, EventHandler> = {
+      'panic.triggered': (e) => this.onPanic(e),
+      'payment.failed': (e) => this.onPaymentFailed(e),
+      'payment.cancellation_penalty_collected': (e) => this.onCancellationPenaltyCollected(e),
+    };
     // El caso común: cada fila del registro declarativo pasa por el MISMO motor (runPushSpec).
     for (const spec of Object.values(PUSH_NOTIFICATION_SPECS)) {
-      this.consumer.on(spec.eventType, (e) => runPushSpec(this.specContext, spec, e));
+      record[spec.eventType] = (e) => runPushSpec(this.specContext, spec, e);
     }
-
-    await this.consumer.start();
-
-    // El log de suscripciones se DERIVA de las mismas fuentes que los .on(): cero double-source.
-    const subscribed = [...DEDICATED_EVENT_TYPES, ...Object.keys(PUSH_NOTIFICATION_SPECS)];
-    this.logger.log(`Consumidores activos (${subscribed.length}): ${subscribed.join(', ')}`);
+    return record;
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  /** El log de suscripciones se DERIVA del mismo record que los .on(): cero double-source. */
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Consumidores activos (${eventTypes.length}): ${eventTypes.join(', ')}`;
   }
 
   /** BR-S05: SMS + link a hasta 4 contactos de confianza + alerta (webhook firmado) a la central. */

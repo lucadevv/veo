@@ -3,68 +3,57 @@
  * (BR-S06 derecho al olvido, Ley 29733). identity-service emite este evento cuando el sweeper
  * aplica el tombstone definitivo tras la gracia; aquí materializamos la cascada de borrado.
  *
- * Conserva la fila del viaje (auditoría/finanzas) y borra coordenadas precisas + ruta. Idempotente:
- * la anonimización es una sobre-escritura determinista, reprocesar el evento es un no-op.
+ * Conserva la fila del viaje (auditoría/finanzas) y borra coordenadas precisas + ruta.
+ *
+ * El ESQUELETO (bootstrap kafka + validar payload contra el registro central + logs + relanzar
+ * para que kafkajs reintente) vive promovido en ErasureConsumerBase (@veo/events/nest); acá solo
+ * queda la config declarativa del dominio. SIN dedup Redis: la anonimización es una
+ * sobre-escritura determinista, reprocesar el evento es un no-op (idempotente por construcción).
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventConsumer,
-  schemaForEvent,
-  type EventEnvelope,
-} from '@veo/events';
+import type { EventEnvelope } from '@veo/events';
+import { ErasureConsumerBase, type ErasureHandlers } from '@veo/events/nest';
 import { TripsService } from './trips.service';
 import type { Env } from '../config/env.schema';
 
-interface UserDeletedPayload {
-  userId: string;
-  driverId?: string;
-  at: string;
-}
+/** clientId kafkajs de este servicio. */
+const KAFKA_CLIENT_ID = 'trip-service';
+
+/** Group ÚNICO de erasure: todos sus topics los suscribe ESTE consumer (@veo/events/nest). */
+const ERASURE_GROUP_ID = 'trip-service.erasure';
 
 @Injectable()
-export class UserDeletedConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(UserDeletedConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
-
+export class UserDeletedConsumer extends ErasureConsumerBase {
   constructor(
     private readonly trips: TripsService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'trip-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'trip-service.erasure',
+      groupId: ERASURE_GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'trip-service.erasure');
-    this.consumer.on('user.deleted', (envelope) => this.onUserDeleted(envelope));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Suscrito a user.deleted (derecho al olvido)');
+  /** Config del group de erasure: la LÓGICA de anonimización vive en TripsService (dominio). */
+  protected override erasureHandlers(): ErasureHandlers {
+    return {
+      'user.deleted': {
+        // El pasajero del viaje es el usuario borrado (passengerId === userId de identity).
+        erase: async ({ userId }) => {
+          await this.trips.anonymizePassenger(userId);
+        },
+        logError: ({ userId }) => ({
+          context: { userId },
+          message: 'No se pudo anonimizar los viajes del usuario borrado',
+        }),
+      },
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
-  }
-
-  private async onUserDeleted(envelope: EventEnvelope<unknown>): Promise<void> {
-    const schema = schemaForEvent('user.deleted');
-    const parsed = schema?.safeParse(envelope.payload);
-    if (!parsed?.success) {
-      this.logger.warn('user.deleted con payload inválido; ignorado');
-      return;
-    }
-    const { userId } = parsed.data as UserDeletedPayload;
-    try {
-      // El pasajero del viaje es el usuario borrado (passengerId === userId de identity).
-      await this.trips.anonymizePassenger(userId);
-    } catch (err) {
-      // No-ack/retry lo gestiona kafkajs; aquí solo registramos para diagnóstico.
-      this.logger.error({ err, userId }, 'No se pudo anonimizar los viajes del usuario borrado');
-      throw err;
-    }
+  // Seam de los specs: invoca el handler directo (sin Kafka) sobre el esqueleto promovido.
+  private onUserDeleted(envelope: EventEnvelope<unknown>): Promise<void> {
+    return this.processErasureEvent('user.deleted', envelope);
   }
 }

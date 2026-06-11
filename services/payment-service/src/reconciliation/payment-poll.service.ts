@@ -25,6 +25,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type Redis from 'ioredis';
+import { withDistributedLock } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import {
@@ -100,19 +101,24 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
     if (!this.active || this.running) return;
 
     // Lock por tick (no se solapa entre instancias). NX+EX: si otro lo tomó, salimos en silencio.
-    const acquired = await this.redis.set(POLL_LOCK_KEY, '1', 'EX', POLL_LOCK_TTL_SECONDS, 'NX');
-    if (acquired !== 'OK') return;
-
-    this.running = true;
-    try {
-      await this.pollOnce();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'error';
-      this.logger.warn(`Poll fallback ProntoPaga: tick con error (continúa el próximo): ${msg}`);
-    } finally {
-      this.running = false;
-      await this.redis.del(POLL_LOCK_KEY).catch(() => undefined);
-    }
+    // Se libera al terminar (releaseOnSettle): el próximo tick no debe encontrar un lock residual.
+    await withDistributedLock(
+      this.redis,
+      POLL_LOCK_KEY,
+      POLL_LOCK_TTL_SECONDS,
+      async () => {
+        this.running = true;
+        try {
+          await this.pollOnce();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'error';
+          this.logger.warn(`Poll fallback ProntoPaga: tick con error (continúa el próximo): ${msg}`);
+        } finally {
+          this.running = false;
+        }
+      },
+      { releaseOnSettle: true },
+    );
   }
 
   /**

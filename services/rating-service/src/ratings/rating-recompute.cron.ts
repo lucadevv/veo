@@ -9,6 +9,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
+import { withDistributedLock } from '@veo/utils';
 import { REDIS } from '../infra/redis';
 import { RatingsService } from './ratings.service';
 
@@ -26,18 +27,23 @@ export class RatingRecomputeCron {
 
   @Cron(process.env.RECOMPUTE_CRON ?? '0 10 3 * * *', { name: 'rating-recompute' })
   async handleDailyRecompute(): Promise<void> {
-    const acquired = await this.redis.set(LOCK_KEY, '1', 'EX', LOCK_TTL_SECONDS, 'NX');
-    if (acquired !== 'OK') {
-      this.logger.debug('recálculo diario: otra réplica tiene el lock, se omite');
-      return;
-    }
-    try {
-      const processed = await this.ratings.recomputeAll();
-      this.logger.log(`recálculo diario completado: ${processed} agregados`);
-    } catch (err) {
-      this.logger.error({ err }, 'recálculo diario falló');
-    } finally {
-      await this.redis.del(LOCK_KEY);
-    }
+    await withDistributedLock(
+      this.redis,
+      LOCK_KEY,
+      LOCK_TTL_SECONDS,
+      async () => {
+        try {
+          const processed = await this.ratings.recomputeAll();
+          this.logger.log(`recálculo diario completado: ${processed} agregados`);
+        } catch (err) {
+          this.logger.error({ err }, 'recálculo diario falló');
+        }
+      },
+      {
+        onSkip: () => this.logger.debug('recálculo diario: otra réplica tiene el lock, se omite'),
+        // El barrido libera su lock al terminar (semántica original: DEL en finally).
+        releaseOnSettle: true,
+      },
+    );
   }
 }

@@ -1,8 +1,9 @@
 /**
  * Unit del AuditConsumer — verifica el wiring de handlers SIN Kafka real.
- * Espía `KafkaEventConsumer.prototype.on` para capturar los handlers que el consumer registra en su
- * constructor, luego dispara un envelope por el handler y comprueba que delega en
- * `AuditService.recordFromEvent` con el mapeo correcto. Foco: derecho al olvido (BR-S06).
+ * Espía `KafkaEventConsumer.prototype.on` (con `start` anulado) para capturar los handlers que el
+ * bootstrap promovido (@veo/events/nest) registra en onModuleInit, luego dispara un envelope por el
+ * handler y comprueba que delega en `AuditService.recordFromEvent` con el mapeo correcto.
+ * Foco: derecho al olvido (BR-S06).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
@@ -29,9 +30,9 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
   let recordFromEvent: ReturnType<typeof vi.fn>;
   let audit: AuditService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     handlers.clear();
-    // Captura cada handler registrado en el constructor del consumer; evita Kafka real.
+    // Captura cada handler que el bootstrap registra en onModuleInit; evita Kafka real.
     vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
       this: KafkaEventConsumer,
       type: string,
@@ -40,11 +41,12 @@ describe('AuditConsumer · derecho al olvido (BR-S06)', () => {
       handlers.set(type, handler);
       return this;
     });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
 
     recordFromEvent = vi.fn(async () => ({ created: true }));
     audit = { recordFromEvent } as unknown as AuditService;
-    // Construir el consumer registra los handlers (vía el spy).
-    new AuditConsumer(audit, makeConfig());
+    // onModuleInit registra los handlers (vía el spy) y "arranca" el consumer anulado.
+    await new AuditConsumer(audit, makeConfig()).onModuleInit();
   });
 
   afterEach(() => {
@@ -101,7 +103,7 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
   const handlers = new Map<string, Handler>();
   let recordFromEvent: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     handlers.clear();
     vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
       this: KafkaEventConsumer,
@@ -111,8 +113,9 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
       handlers.set(type, handler);
       return this;
     });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
     recordFromEvent = vi.fn(async () => ({ created: true }));
-    new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig());
+    await new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig()).onModuleInit();
   });
 
   afterEach(() => vi.restoreAllMocks());

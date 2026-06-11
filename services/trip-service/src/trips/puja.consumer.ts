@@ -11,15 +11,15 @@
  *    (pantalla NoOffers; el pasajero re-puja). Subsume el viejo dispatch.timeout (#5).
  *
  * Idempotente: ambos handlers releen el viaje y aplican escrituras deterministas / guardadas por estado.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId = UN consumer con TODOS
+ * sus eventos en `handlers()`.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventConsumer,
-  schemaForEvent,
-  type EventEnvelope,
-} from '@veo/events';
+import { schemaForEvent, type EventEnvelope, type EventHandler } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { TripsService } from './trips.service';
 import type { Env } from '../config/env.schema';
 
@@ -41,35 +41,38 @@ interface BidCancelledPayload {
   reason: string;
 }
 
-@Injectable()
-export class PujaConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(PujaConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este servicio. */
+const KAFKA_CLIENT_ID = 'trip-service';
 
+/** Group propio de la PUJA (no comparte el del match ni el de erasure). */
+const PUJA_GROUP_ID = 'trip-service.puja';
+
+@Injectable()
+export class PujaConsumer extends KafkaConsumerBootstrap {
   constructor(
     private readonly trips: TripsService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'trip-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'trip-service.puja',
+      groupId: PUJA_GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'trip-service.puja');
-    this.consumer.on('dispatch.offer_accepted', (envelope) => this.onOfferAccepted(envelope));
-    this.consumer.on('dispatch.no_offers', (envelope) => this.onNoOffers(envelope));
-    // FIX puja-cancel: el pasajero canceló la PUJA → cierra el VIAJE (no solo el board). Mismo topic
-    // `dispatch` (ya suscrito por offer_accepted/no_offers): agregar el handler NO abre una suscripción nueva.
-    this.consumer.on('dispatch.bid_cancelled', (envelope) => this.onBidCancelled(envelope));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Suscrito a dispatch.offer_accepted + dispatch.no_offers + dispatch.bid_cancelled (PUJA)');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'dispatch.offer_accepted': (envelope) => this.onOfferAccepted(envelope),
+      'dispatch.no_offers': (envelope) => this.onNoOffers(envelope),
+      // FIX puja-cancel: el pasajero canceló la PUJA → cierra el VIAJE (no solo el board). Mismo topic
+      // `dispatch` (ya suscrito por offer_accepted/no_offers): agregar el handler NO abre una suscripción nueva.
+      'dispatch.bid_cancelled': (envelope) => this.onBidCancelled(envelope),
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Suscrito a ${eventTypes.join(' + ')} (PUJA)`;
   }
 
   private async onOfferAccepted(envelope: EventEnvelope<unknown>): Promise<void> {

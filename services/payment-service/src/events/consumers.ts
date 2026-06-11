@@ -3,52 +3,58 @@
  *  - trip.completed → dispara el cobro del viaje (BR-P01), idempotente por dedupKey determinista.
  *  - driver.flagged → retiene los payouts del conductor en review (BR-P05).
  * Los payloads se validan contra EVENT_SCHEMAS antes de procesarlos.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle + log de suscripción derivado del
+ * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
+ * = UN consumer con TODOS sus eventos en `handlers()`. El group de erasure es otro consumer
+ * (user-deleted.consumer).
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  createKafka,
-  KafkaEventConsumer,
   EVENT_SCHEMAS,
   isPermanentDataError,
   isUuid,
   type EventEnvelope,
+  type EventHandler,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { PaymentsService } from '../payments/payments.service';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import { PayoutsService } from '../payouts/payouts.service';
 import { IncentivesService } from '../incentives/incentives.service';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class PaymentEventConsumers implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(PaymentEventConsumers.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este servicio (también su groupId principal de consumo). */
+const KAFKA_CLIENT_ID = 'payment-service';
+const GROUP_ID = 'payment-service';
 
+@Injectable()
+export class PaymentEventConsumers extends KafkaConsumerBootstrap {
   constructor(
     private readonly payments: PaymentsService,
     private readonly payouts: PayoutsService,
     private readonly incentives: IncentivesService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'payment-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'payment-service',
+      groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'payment-service');
-    this.consumer.on('trip.completed', (env) => this.onTripCompleted(env));
-    this.consumer.on('trip.cancelled', (env) => this.onTripCancelled(env));
-    this.consumer.on('driver.flagged', (env) => this.onDriverFlagged(env));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Consumidores Kafka iniciados (trip.completed, trip.cancelled, driver.flagged)');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'trip.completed': (env) => this.onTripCompleted(env),
+      'trip.cancelled': (env) => this.onTripCancelled(env),
+      'driver.flagged': (env) => this.onDriverFlagged(env),
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Consumidores Kafka iniciados (${eventTypes.join(', ')})`;
   }
 
   private async onTripCompleted(env: EventEnvelope<unknown>): Promise<void> {

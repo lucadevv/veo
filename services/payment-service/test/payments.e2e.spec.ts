@@ -62,6 +62,7 @@ beforeAll(async () => {
     sismember: async () => 0,
     sadd: async () => 1,
     set: async () => 'OK',
+    del: async () => 1,
   } as unknown as Redis;
   payouts = new PayoutsService(prismaService, fakeRedis, config);
 }, 180_000);

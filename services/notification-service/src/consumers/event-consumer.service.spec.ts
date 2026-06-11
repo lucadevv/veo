@@ -2,14 +2,14 @@
  * EventConsumerService · handlers de "degradación honesta" (trip.expired / trip.failed).
  *
  * Verifica que el pasajero SIEMPRE se entera cuando la puja no encuentra conductor (trip.expired)
- * o cuando el viaje no se puede completar (trip.failed). Mockeamos @veo/events para capturar los
- * handlers que el servicio registra (sin Kafka real) y los disparamos con envelopes reales contra
+ * o cuando el viaje no se puede completar (trip.failed). Espiamos el KafkaEventConsumer real
+ * (start/stop anulados) para capturar los handlers que el bootstrap promovido (@veo/events/nest)
+ * registra en onModuleInit (sin Kafka real) y los disparamos con envelopes reales contra
  * un NotificationEngine real (store en memoria) — así el test cubre el camino completo de envío.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NotificationChannel } from '@veo/shared-types';
-import { createEnvelope, type EventEnvelope } from '@veo/events';
-import type * as VeoEvents from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, type EventEnvelope } from '@veo/events';
 import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationPriority } from '../engine/types';
 import { RetryPolicy } from '../engine/retry.policy';
@@ -25,7 +25,7 @@ import type {
   TemplateRenderer,
 } from '../engine/types';
 
-/** Fake del consumidor Kafka: captura los handlers registrados con .on() para dispararlos a mano. */
+/** Espía del consumidor Kafka real: captura los handlers registrados con .on() para dispararlos a mano. */
 type Handler = (envelope: EventEnvelope<unknown>) => Promise<void>;
 const registered = new Map<string, Handler>();
 
@@ -39,22 +39,16 @@ const registered = new Map<string, Handler>();
 const PAX_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const PAX_SIN_TOKEN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-vi.mock('@veo/events', async (importOriginal) => {
-  const actual = await importOriginal<typeof VeoEvents>();
-  class FakeConsumer {
-    on(eventType: string, handler: Handler): this {
-      registered.set(eventType, handler);
-      return this;
-    }
-    async start(): Promise<void> {}
-    async stop(): Promise<void> {}
-  }
-  return {
-    ...actual,
-    createKafka: () => ({}),
-    KafkaEventConsumer: FakeConsumer,
-  };
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  eventType: string,
+  handler: Handler,
+) {
+  registered.set(eventType, handler);
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 /** Store en memoria (doble determinista, sin Prisma) para observar lo que el motor encola. */
 class InMemoryStore implements NotificationStore {
@@ -125,7 +119,7 @@ function fakeDevices(tokensByUser: Record<string, DeviceTarget[]>): {
 
 /**
  * Construye el EventConsumerService con dependencias reales (motor) y fakes (devices/config) y
- * ejecuta onModuleInit para que registre los handlers en el FakeConsumer.
+ * ejecuta onModuleInit para que el bootstrap registre los handlers en el espía.
  */
 async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
   registered.clear();
@@ -133,7 +127,6 @@ async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
   const engine = new NotificationEngine(store, renderer, new NoopDispatcher(), policy);
   const devices = fakeDevices(tokensByUser);
 
-  // Import dinámico DESPUÉS del vi.mock para que el servicio use el FakeConsumer.
   const { EventConsumerService } = await import('./event-consumer.service');
   const config = {
     getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),

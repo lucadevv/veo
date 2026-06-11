@@ -8,42 +8,45 @@
  * El eventType casa con EVENT_SCHEMAS (`fleet.driver_suspended`, guion bajo) → el KafkaEventConsumer YA
  * valida el payload por nosotros; igual revalidamos acá con el zod `fleetDriverSuspended` (defensa en
  * profundidad) para extraer los campos tipados.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId = UN consumer con TODOS
+ * sus eventos en `handlers()`.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createKafka, KafkaEventConsumer, fleetDriverSuspended, type EventEnvelope } from '@veo/events';
+import { fleetDriverSuspended, type EventEnvelope, type EventHandler } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { DriversService } from './drivers.service';
 import type { Env } from '../config/env.schema';
 
 /** eventType en el wire que emite fleet-service (ver services/fleet-service/src/events/fleet-events.ts). */
 const DRIVER_SUSPENDED = 'fleet.driver_suspended';
 
-@Injectable()
-export class DriverSuspensionConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(DriverSuspensionConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este consumer (también su groupId, propio: no comparte el de referidos). */
+const KAFKA_CLIENT_ID = 'identity-service-driver-suspension';
+const GROUP_ID = 'identity-service-driver-suspension';
 
+@Injectable()
+export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
   constructor(
     private readonly drivers: DriversService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'identity-service-driver-suspension',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'identity-service-driver-suspension',
+      groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'identity-service-driver-suspension');
-    // on() resuelve el topic vía topicForEvent → 'fleet'; el dispatch interno casa por envelope.eventType.
-    this.consumer.on(DRIVER_SUSPENDED, (env) => this.onDriverSuspended(env));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log(`Consumidor de suspensión de conductores iniciado (${DRIVER_SUSPENDED})`);
+  /** on() resuelve el topic vía topicForEvent → 'fleet'; el dispatch interno casa por envelope.eventType. */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return { [DRIVER_SUSPENDED]: (env) => this.onDriverSuspended(env) };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(): string {
+    return `Consumidor de suspensión de conductores iniciado (${DRIVER_SUSPENDED})`;
   }
 
   private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {

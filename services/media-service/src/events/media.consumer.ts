@@ -6,56 +6,66 @@
  *  - `panic.triggered`  → fuerza grabación (aunque el viaje no esté IN_PROGRESS) y fija retención
  *                         indefinida (BR-S01 excepción + BR-S03).
  *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle + log de suscripción derivado del
+ * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
+ * = UN consumer con TODOS sus eventos en `handlers()`.
+ *
  * Valida el payload contra el registro central (@veo/events) y descarta lo inválido. Deduplica por
  * `eventId` en Redis con la marca DESPUÉS del éxito (at-least-once): si un handler falla, el dedup
  * NO se escribe y kafkajs reintenta sin perder el evento — un `panic.triggered` jamás se descarta
  * por un fallo transitorio. Reprocesar es seguro: los handlers de RecordingService son idempotentes
  * (segmento abierto por viaje / finish no-op / update al mismo valor).
+ *
+ * POR QUÉ NO ErasureConsumerBase (aunque `handle()` sea casi-gemelo de su esqueleto): su contrato
+ * declarativo pasa SOLO el payload parseado a `erase(payload)` y `logError(payload)`, y este
+ * consumer necesita el ENVELOPE — `trip.completed` usa `envelope.occurredAt` como fin de la
+ * grabación y los logs operativos llevan `envelope.eventId` (trazar un evento de pánico concreto).
+ * Además sus textos fijos son de erasure ("…(derecho al olvido)", "…; ignorado") y estos eventos
+ * no son una cascada de borrado. Adaptar la base para esto la acoplaría a un caso que no es suyo;
+ * si aparece un tercer consumer con este shape (validar+dedup post-éxito+envelope), promover
+ * entonces un esqueleto genérico a @veo/events/nest.
  */
-import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventConsumer,
-  processEventOnce,
-  schemaForEvent,
-  type EventEnvelope,
-} from '@veo/events';
+import { processEventOnce, schemaForEvent, type EventEnvelope, type EventHandler } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import type Redis from 'ioredis';
 import { REDIS } from '../infra/redis';
 import { RecordingService } from '../media/recording.service';
 import { MEDIA_EVENT_DEDUP } from './dedup.options';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class MediaEventConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(MediaEventConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este servicio. */
+const KAFKA_CLIENT_ID = 'media-service';
 
+/** Group principal de media-service (grabación); el de erasure es otro group (erasure.consumer). */
+const MEDIA_GROUP_ID = 'media-service';
+
+@Injectable()
+export class MediaEventConsumer extends KafkaConsumerBootstrap {
   constructor(
     private readonly recording: RecordingService,
     @Inject(REDIS) private readonly redis: Redis,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'media-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'media-service',
+      groupId: MEDIA_GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'media-service');
-    this.consumer
-      .on('trip.started', (e) => this.handle(e, (env) => this.onTripStarted(env)))
-      .on('trip.completed', (e) => this.handle(e, (env) => this.onTripCompleted(env)))
-      .on('panic.triggered', (e) => this.handle(e, (env) => this.onPanicTriggered(env)));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Consumiendo trip.started, trip.completed, panic.triggered');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'trip.started': (e) => this.handle(e, (env) => this.onTripStarted(env)),
+      'trip.completed': (e) => this.handle(e, (env) => this.onTripCompleted(env)),
+      'panic.triggered': (e) => this.handle(e, (env) => this.onPanicTriggered(env)),
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Consumiendo ${eventTypes.join(', ')}`;
   }
 
   /** Valida payload + delega con dedup por eventId marcado DESPUÉS del éxito. */

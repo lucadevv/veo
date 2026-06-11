@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { INTERNAL_IDENTITY_SECRET, InternalIdentityGuard } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
-import { OutboxRelay } from './outbox.relay';
+import { outboxRelayProvider } from './outbox.relay';
 import type { Env } from '../config/env.schema';
 
 const internalSecretProvider: Provider = {
@@ -24,7 +24,7 @@ const internalSecretProvider: Provider = {
     redisProvider,
     internalSecretProvider,
     InternalIdentityGuard,
-    OutboxRelay,
+    outboxRelayProvider,
   ],
   exports: [PrismaService, REDIS, INTERNAL_IDENTITY_SECRET, InternalIdentityGuard],
 })

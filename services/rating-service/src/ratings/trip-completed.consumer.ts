@@ -6,43 +6,55 @@
  * { tripId, fareCents, distanceMeters, durationSeconds } y NO incluye driverId/passengerId,
  * por lo que aquí no podemos pre-poblar quién califica a quién. El POST /ratings recibe `ratedId`
  * y `ratedRole` del llamante. Ver README ("Necesidades de contrato compartido").
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); acá solo se conserva el ARRANQUE RESILIENTE
+ * (reintento en segundo plano) sobre ese esqueleto.
  */
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createKafka, KafkaEventConsumer, type EventEnvelope } from '@veo/events';
+import { type EventEnvelope, type EventHandler } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { domainEventsTotal } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 
+/** clientId kafkajs de este servicio (también su groupId de consumo). */
+const KAFKA_CLIENT_ID = 'rating-service';
 const GROUP_ID = 'rating-service';
 
 @Injectable()
-export class TripCompletedConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(TripCompletedConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+export class TripCompletedConsumer extends KafkaConsumerBootstrap {
   private retryTimer?: NodeJS.Timeout;
   private stopped = false;
 
   constructor(config: ConfigService<Env, true>) {
-    const kafka = createKafka({
-      clientId: 'rating-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
       groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, GROUP_ID);
-    this.consumer.on('trip.completed', (envelope) => this.onTripCompleted(envelope));
   }
 
-  async onModuleInit(): Promise<void> {
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return { 'trip.completed': (envelope) => this.onTripCompleted(envelope) };
+  }
+
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `consumiendo ${eventTypes.join(', ')} (group ${GROUP_ID})`;
+  }
+
+  override async onModuleInit(): Promise<void> {
     // Arranque resiliente: si el topic `trip` aún no existe o el broker está cargando, NO se tumba
     // el servicio (REST + gRPC siguen vivos). Se reintenta en segundo plano hasta conectar.
     await this.startWithRetry();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  override async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     try {
-      await this.consumer.stop();
+      await super.onModuleDestroy();
     } catch (err) {
       this.logger.warn({ err }, 'error al detener el consumidor');
     }
@@ -51,8 +63,9 @@ export class TripCompletedConsumer implements OnModuleInit, OnModuleDestroy {
   private async startWithRetry(): Promise<void> {
     if (this.stopped) return;
     try {
-      await this.consumer.start();
-      this.logger.log(`consumiendo trip.completed (group ${GROUP_ID})`);
+      // Registro de handlers + start + log de suscripción (esqueleto promovido). Reintentar es
+      // seguro: el registro re-escribe las mismas entradas y start vuelve a conectar.
+      await super.onModuleInit();
     } catch (err) {
       this.logger.warn({ err }, 'no se pudo iniciar el consumidor de trip.completed; reintentando en 5s');
       this.retryTimer = setTimeout(() => void this.startWithRetry(), 5000);

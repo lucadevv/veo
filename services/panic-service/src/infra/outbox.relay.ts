@@ -1,55 +1,28 @@
 /**
- * OutboxRelay — drena la tabla outbox de panic y publica a Kafka (FOUNDATION §6).
- * Bucle cada 500ms. Idempotente (republicar es seguro: el envelope lleva dedupKey).
+ * Wiring del OutboxRelay compartido (@veo/database) — drena la tabla outbox de panic y publica
+ * a Kafka (FOUNDATION §6). Acá vive SOLO lo que varía por servicio: clientId Kafka + schema
+ * Prisma (advisory lock). El esqueleto (bucle 500ms, batch, drainOutbox vía @veo/events,
+ * manejo de error, logs) es el helper promovido — idéntico al histórico.
  *
- * Este relay es lo que garantiza el BR-S05: panic.triggered se publica sí o sí cuando la
- * transacción de dominio commiteó, sin acoplar el ack al cliente (<800ms) a la latencia de Kafka.
+ * BR-S05: panic.triggered se publica sí o sí cuando la transacción de dominio commiteó, sin
+ * acoplar el ack al cliente (<800ms) a la latencia de Kafka.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Logger, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createKafka, KafkaEventProducer, drainOutbox } from '@veo/events';
-import { PrismaOutboxStore } from '@veo/database';
+import { OutboxRelay } from '@veo/database';
 import { PrismaService } from './prisma.service';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(OutboxRelay.name);
-  private readonly producer: KafkaEventProducer;
-  private readonly store: PrismaOutboxStore;
-  private timer?: NodeJS.Timeout;
-  private running = false;
-
-  constructor(prisma: PrismaService, config: ConfigService<Env, true>) {
-    const kafka = createKafka({
+export const outboxRelayProvider: Provider = {
+  provide: OutboxRelay,
+  inject: [PrismaService, ConfigService],
+  useFactory: (prisma: PrismaService, config: ConfigService<Env, true>) =>
+    new OutboxRelay({
       clientId: 'panic-service',
+      schema: 'panic',
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-    });
-    this.producer = new KafkaEventProducer(kafka);
-    // OutboxStore sobre el write client (la escritura de dominio pobló el outbox en la misma tx).
-    this.store = new PrismaOutboxStore(prisma.write, 'panic');
-  }
-
-  async onModuleInit(): Promise<void> {
-    await this.producer.connect();
-    this.timer = setInterval(() => void this.tick(), 500);
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
-    await this.producer.disconnect();
-  }
-
-  private async tick(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
-      const n = await drainOutbox(this.store, this.producer, 100);
-      if (n > 0) this.logger.debug(`outbox: publicados ${n} eventos`);
-    } catch (err) {
-      this.logger.error({ err }, 'outbox relay falló');
-    } finally {
-      this.running = false;
-    }
-  }
-}
+      // Write client: la escritura de dominio pobló el outbox en la misma transacción.
+      prisma: prisma.write,
+      logger: new Logger(OutboxRelay.name),
+    }),
+};

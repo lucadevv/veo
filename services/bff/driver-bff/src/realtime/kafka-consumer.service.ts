@@ -2,17 +2,21 @@
  * Consumidor Kafka del driver-bff. Suscrito a los topics `dispatch` y `trip`; por cada evento
  * relevante resuelve el conductor destino y lo empuja a su sala Socket.IO.
  * Los payloads se validan con EVENT_SCHEMAS de @veo/events antes de emitir.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId = UN consumer con TODOS
+ * sus eventos en `handlers()`.
  */
-import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  createKafka,
-  KafkaEventConsumer,
   EVENT_SCHEMAS,
   chatMessageSent,
   tripWaypointProposed,
   type EventEnvelope,
+  type EventHandler,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { createLogger, domainEventsTotal, type Logger } from '@veo/observability';
 import type { ChatMessage, WaypointProposedMsg } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
@@ -41,45 +45,48 @@ const TRIP_EVENTS = [
   'trip.reassigning',
 ] as const;
 
+/** clientId kafkajs de este BFF. */
+const KAFKA_CLIENT_ID = 'driver-bff';
+
 @Injectable()
-export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
-  private consumer?: KafkaEventConsumer;
-  private readonly logger: Logger;
+export class KafkaConsumerService extends KafkaConsumerBootstrap {
+  private readonly log: Logger;
 
   constructor(
-    private readonly config: ConfigService<Env, true>,
+    config: ConfigService<Env, true>,
     private readonly gateway: DriverGateway,
     private readonly grpc: GrpcGateway,
   ) {
-    this.logger = createLogger('driver-bff-kafka');
+    super({
+      clientId: KAFKA_CLIENT_ID,
+      brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(',').map((b) => b.trim()),
+      groupId: config.getOrThrow<string>('KAFKA_GROUP_ID'),
+    });
+    this.log = createLogger('driver-bff-kafka');
   }
 
-  async onModuleInit(): Promise<void> {
-    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',').map((b) => b.trim());
-    const kafka = createKafka({ clientId: 'driver-bff', brokers });
-    const consumer = new KafkaEventConsumer(kafka, this.config.getOrThrow<string>('KAFKA_GROUP_ID'));
-
-    consumer.on('dispatch.offered', (env) => this.handleEvent(env, 'dispatch:offer'));
-    consumer.on('dispatch.match_found', (env) => this.handleEvent(env, 'dispatch:match'));
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    const record: Record<string, EventHandler> = {
+      'dispatch.offered': (env) => this.handleEvent(env, 'dispatch:offer'),
+      'dispatch.match_found': (env) => this.handleEvent(env, 'dispatch:match'),
+    };
     for (const type of TRIP_EVENTS) {
-      consumer.on(type, (env) => this.handleEvent(env, 'trip:update'));
+      record[type] = (env) => this.handleEvent(env, 'trip:update');
     }
-    consumer.on('chat.message_sent', (env) => this.handleChatMessage(env));
+    record['chat.message_sent'] = (env) => this.handleChatMessage(env);
     // Lote C4 · el pasajero PROPUSO una parada mid-trip → al CONDUCTOR (`waypoint:proposed`) para que
     // acepte/rechace. Shape tipada plana (no el sobre genérico): por eso un handler dedicado.
-    consumer.on('trip.waypoint_proposed', (env) => this.handleWaypointProposed(env));
+    record['trip.waypoint_proposed'] = (env) => this.handleWaypointProposed(env);
     // Propina en vivo (BR-P04): el 100% va al conductor. Reusa el relay genérico (resuelve el conductor
     // por `driverId` enriquecido o por `tripId`→gRPC) y lo emite como `payment:tip` para que la app lo
     // celebre. Suscribe automáticamente el topic `payment` (topicForEvent).
-    consumer.on('payment.tip_added', (env) => this.handleEvent(env, 'payment:tip'));
-
-    this.consumer = consumer;
-    await consumer.start();
-    this.logger.info('consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment)');
+    record['payment.tip_added'] = (env) => this.handleEvent(env, 'payment:tip');
+    return record;
   }
 
-  async onModuleDestroy(): Promise<void> {
-    if (this.consumer) await this.consumer.stop();
+  protected override subscriptionLog(): string {
+    return 'consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment)';
   }
 
   /** Valida el payload, resuelve el conductor y emite a su sala. */
@@ -106,7 +113,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       });
       domainEventsTotal.inc({ event: envelope.eventType, result: 'emitted' });
     } catch (err) {
-      this.logger.warn({ err, eventType: envelope.eventType }, 'no se pudo enrutar el evento al conductor');
+      this.log.warn({ err, eventType: envelope.eventType }, 'no se pudo enrutar el evento al conductor');
       domainEventsTotal.inc({ event: envelope.eventType, result: 'error' });
     }
   }
@@ -143,7 +150,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       this.gateway.emitToDriver(trip.driverId, 'chat:message', msg);
       domainEventsTotal.inc({ event: 'chat.message_sent', result: 'emitted' });
     } catch (err) {
-      this.logger.warn({ err }, 'no se pudo enrutar el mensaje de chat al conductor');
+      this.log.warn({ err }, 'no se pudo enrutar el mensaje de chat al conductor');
       domainEventsTotal.inc({ event: 'chat.message_sent', result: 'error' });
     }
   }

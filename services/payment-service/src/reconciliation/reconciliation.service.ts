@@ -10,7 +10,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
-import { uuidv7 } from '@veo/utils';
+import { uuidv7, withDistributedLock } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
@@ -57,21 +57,21 @@ export class ReconciliationService {
     this.refundPendingAlertMin = config.getOrThrow<number>('REFUND_PENDING_ALERT_MIN');
   }
 
-  /** Cron diario 04:00 (hora del servidor). Concilia el día previo. */
+  /** Cron diario 04:00 (hora del servidor). Concilia el día previo. Lock distribuido: corre UNA réplica. */
   @Cron('0 4 * * *')
   async dailyCron(): Promise<void> {
-    const acquired = await this.redis.set(CRON_LOCK_KEY, '1', 'EX', CRON_LOCK_TTL_SECONDS, 'NX');
-    if (acquired !== 'OK') return;
-    const { start, end } = previousDay(new Date());
-    await this.reconcile(start, end);
+    await withDistributedLock(this.redis, CRON_LOCK_KEY, CRON_LOCK_TTL_SECONDS, async () => {
+      const { start, end } = previousDay(new Date());
+      await this.reconcile(start, end);
+    });
   }
 
   /** Cron horario (minuto 15): red de seguridad de Refunds PENDING viejos. Lock propio (multi-pod). */
   @Cron('15 * * * *')
   async staleRefundCron(): Promise<void> {
-    const acquired = await this.redis.set(REFUND_SWEEP_LOCK_KEY, '1', 'EX', REFUND_SWEEP_LOCK_TTL_SECONDS, 'NX');
-    if (acquired !== 'OK') return;
-    await this.sweepStalePendingRefunds(new Date());
+    await withDistributedLock(this.redis, REFUND_SWEEP_LOCK_KEY, REFUND_SWEEP_LOCK_TTL_SECONDS, async () => {
+      await this.sweepStalePendingRefunds(new Date());
+    });
   }
 
   /**

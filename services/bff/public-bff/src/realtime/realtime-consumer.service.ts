@@ -3,12 +3,14 @@
  * Suscrito a los topics `trip`, `dispatch`, `panic` y `driver` (driver.location_updated).
  * Valida cada payload con los schemas de @veo/events, mantiene el mapa driver→trip y el último
  * estado/ubicación, y emite a las salas de viajes con tokens vivos.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + registro) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest). Acá se conserva el ARRANQUE NO BLOQUEANTE del BFF:
+ * si Kafka aún no responde, el proceso sigue vivo y se registra el error.
  */
-import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  KafkaEventConsumer,
-  createKafka,
   dispatchMatchFound,
   dispatchOfferMade,
   dispatchOfferWithdrawn,
@@ -30,7 +32,9 @@ import {
   tripWaypointRejected,
   tripWaypointExpired,
   type EventEnvelope,
+  type EventHandler,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { createLogger, type Logger } from '@veo/observability';
 import { WaypointProposalStatus, type ChatMessage, type TripStatus } from '@veo/api-client';
 import { FamilyGateway } from './family.gateway';
@@ -38,74 +42,75 @@ import { PassengerGateway } from './passenger.gateway';
 import { RealtimeStateService } from './realtime-state.service';
 import type { Env } from '../config/env.schema';
 
+/** clientId kafkajs de este BFF. */
+const KAFKA_CLIENT_ID = 'public-bff';
+
+/** Group del tiempo real de public-bff. */
+const REALTIME_GROUP_ID = 'public-bff-realtime';
+
 @Injectable()
-export class RealtimeConsumerService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger: Logger = createLogger('public-bff:realtime');
-  private consumer?: KafkaEventConsumer;
+export class RealtimeConsumerService extends KafkaConsumerBootstrap {
+  private readonly log: Logger = createLogger('public-bff:realtime');
 
   constructor(
-    private readonly config: ConfigService<Env, true>,
+    config: ConfigService<Env, true>,
     private readonly gateway: FamilyGateway,
     private readonly passenger: PassengerGateway,
     private readonly state: RealtimeStateService,
-  ) {}
-
-  onModuleInit(): void {
-    // No bloquea el arranque: si Kafka aún no responde, se reintenta y se registra el error.
-    this.start().catch((err: unknown) => {
-      this.logger.error({ err }, 'el consumidor Kafka de tiempo real no inició');
+  ) {
+    super({
+      clientId: KAFKA_CLIENT_ID,
+      brokers: config
+        .getOrThrow<string>('KAFKA_BROKERS')
+        .split(',')
+        .map((b) => b.trim())
+        .filter(Boolean),
+      groupId: REALTIME_GROUP_ID,
     });
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer?.stop();
+  override onModuleInit(): Promise<void> {
+    // No bloquea el arranque: si Kafka aún no responde, el proceso sigue y se registra el error.
+    void super.onModuleInit().catch((err: unknown) => {
+      this.log.error({ err }, 'el consumidor Kafka de tiempo real no inició');
+    });
+    return Promise.resolve();
   }
 
-  private async start(): Promise<void> {
-    const brokers = this.config
-      .getOrThrow<string>('KAFKA_BROKERS')
-      .split(',')
-      .map((b) => b.trim())
-      .filter(Boolean);
-    const kafka = createKafka({ clientId: 'public-bff', brokers });
-    const consumer = new KafkaEventConsumer(kafka, 'public-bff-realtime');
-    this.register(consumer);
-    this.consumer = consumer;
-    await consumer.start();
-    this.logger.info({ brokers }, 'consumidor de tiempo real iniciado');
+  protected override subscriptionLog(): string {
+    return 'consumidor de tiempo real iniciado';
   }
 
-  /** Registra los handlers por tipo de evento (cada uno se suscribe a su topic). */
-  private register(consumer: KafkaEventConsumer): void {
-    consumer.on('trip.requested', (env) => this.onTripStatus(env, tripRequested, 'REQUESTED'));
-    consumer.on('trip.assigned', (env) => this.onTripAssigned(env));
-    consumer.on('trip.accepted', (env) => this.onTripAccepted(env));
-    consumer.on('trip.arriving', (env) => this.onTripArriving(env));
-    consumer.on('trip.arrived', (env) => this.onTripStatus(env, tripArrived, 'ARRIVED'));
-    consumer.on('trip.started', (env) => this.onTripStatus(env, tripStarted, 'IN_PROGRESS'));
-    consumer.on('trip.completed', (env) => this.onTripEnded(env, tripCompleted, 'COMPLETED'));
-    consumer.on('trip.cancelled', (env) => this.onTripEnded(env, tripCancelled, 'CANCELLED'));
-    // Antes NO se consumían: el pasajero quedaba colgado en "Buscando conductor" para siempre cuando
-    // la puja expiraba, el viaje fallaba (watchdog) o el conductor cancelaba (reasignación).
-    consumer.on('trip.expired', (env) => this.onTripExpired(env));
-    consumer.on('trip.failed', (env) => this.onTripFailed(env));
-    consumer.on('trip.reassigning', (env) => this.onTripReassigning(env));
-    consumer.on('dispatch.match_found', (env) => this.onMatchFound(env));
-    consumer.on('dispatch.offer_made', (env) => this.onOfferMade(env));
-    consumer.on('dispatch.offer_withdrawn', (env) => this.onOfferWithdrawn(env));
-    consumer.on('driver.location_updated', (env) => this.onDriverLocation(env));
-    consumer.on('panic.triggered', (env) => this.onPanic(env));
-    consumer.on('chat.message_sent', (env) => this.onChatMessage(env));
-    // Lote C4 · desenlace de una PARADA propuesta → outcome en vivo al PASAJERO (cierra el "esperando").
-    consumer.on('trip.waypoint_accepted', (env) =>
-      this.onWaypointOutcome(env, tripWaypointAccepted, WaypointProposalStatus.ACCEPTED),
-    );
-    consumer.on('trip.waypoint_rejected', (env) =>
-      this.onWaypointOutcome(env, tripWaypointRejected, WaypointProposalStatus.REJECTED),
-    );
-    consumer.on('trip.waypoint_expired', (env) =>
-      this.onWaypointOutcome(env, tripWaypointExpired, WaypointProposalStatus.EXPIRED),
-    );
+  /** TODOS los eventos del group, en un solo record (cada uno se suscribe a su topic). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'trip.requested': (env) => this.onTripStatus(env, tripRequested, 'REQUESTED'),
+      'trip.assigned': (env) => this.onTripAssigned(env),
+      'trip.accepted': (env) => this.onTripAccepted(env),
+      'trip.arriving': (env) => this.onTripArriving(env),
+      'trip.arrived': (env) => this.onTripStatus(env, tripArrived, 'ARRIVED'),
+      'trip.started': (env) => this.onTripStatus(env, tripStarted, 'IN_PROGRESS'),
+      'trip.completed': (env) => this.onTripEnded(env, tripCompleted, 'COMPLETED'),
+      'trip.cancelled': (env) => this.onTripEnded(env, tripCancelled, 'CANCELLED'),
+      // Antes NO se consumían: el pasajero quedaba colgado en "Buscando conductor" para siempre cuando
+      // la puja expiraba, el viaje fallaba (watchdog) o el conductor cancelaba (reasignación).
+      'trip.expired': (env) => this.onTripExpired(env),
+      'trip.failed': (env) => this.onTripFailed(env),
+      'trip.reassigning': (env) => this.onTripReassigning(env),
+      'dispatch.match_found': (env) => this.onMatchFound(env),
+      'dispatch.offer_made': (env) => this.onOfferMade(env),
+      'dispatch.offer_withdrawn': (env) => this.onOfferWithdrawn(env),
+      'driver.location_updated': (env) => this.onDriverLocation(env),
+      'panic.triggered': (env) => this.onPanic(env),
+      'chat.message_sent': (env) => this.onChatMessage(env),
+      // Lote C4 · desenlace de una PARADA propuesta → outcome en vivo al PASAJERO (cierra el "esperando").
+      'trip.waypoint_accepted': (env) =>
+        this.onWaypointOutcome(env, tripWaypointAccepted, WaypointProposalStatus.ACCEPTED),
+      'trip.waypoint_rejected': (env) =>
+        this.onWaypointOutcome(env, tripWaypointRejected, WaypointProposalStatus.REJECTED),
+      'trip.waypoint_expired': (env) =>
+        this.onWaypointOutcome(env, tripWaypointExpired, WaypointProposalStatus.EXPIRED),
+    };
   }
 
   // ── Handlers ──
@@ -333,7 +338,7 @@ export class RealtimeConsumerService implements OnModuleInit, OnModuleDestroy {
     const parsed = panicTriggered.safeParse(env.payload);
     if (parsed.success) {
       this.gateway.cutFamilyForPanic(parsed.data.tripId);
-      this.logger.warn({ tripId: parsed.data.tripId }, 'pánico: canal /family cortado (seguimiento en vivo suprimido)');
+      this.log.warn({ tripId: parsed.data.tripId }, 'pánico: canal /family cortado (seguimiento en vivo suprimido)');
     }
     return Promise.resolve();
   }

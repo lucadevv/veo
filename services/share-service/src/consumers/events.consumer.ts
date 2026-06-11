@@ -4,15 +4,15 @@
  *  - panic.triggered (BR-S05): activa automáticamente enlaces de seguimiento para los contactos de
  *    confianza verificados del pasajero, publica share.link_generated (outbox) y envía el SMS con el
  *    enlace por el puerto SMS (el evento no transporta el token, ver docs/events.md).
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle + log de suscripción derivado del
+ * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
+ * = UN consumer con TODOS sus eventos en `handlers()`.
  */
-import { Inject, Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createKafka,
-  KafkaEventConsumer,
-  type EventEnvelope,
-  type EventPayload,
-} from '@veo/events';
+import { type EventEnvelope, type EventHandler, type EventPayload } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { isDomainError } from '@veo/utils';
 import { ShareService } from '../share/share.service';
 import { ContactsService } from '../contacts/contacts.service';
@@ -20,10 +20,11 @@ import { TripSnapshotService } from '../read-model/trip-snapshot.service';
 import { SMS_SENDER, type SmsSender } from '../ports/sms/sms.port';
 import type { Env } from '../config/env.schema';
 
+/** clientId kafkajs de este servicio. */
+const KAFKA_CLIENT_ID = 'share-service';
+
 @Injectable()
-export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(EventsConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+export class EventsConsumer extends KafkaConsumerBootstrap {
   private readonly panicLinkTtlSeconds: number;
   private readonly panicLinkMaxUses: number;
 
@@ -34,28 +35,26 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
     @Inject(SMS_SENDER) private readonly sms: SmsSender,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'share-service',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
       groupId: config.getOrThrow<string>('KAFKA_CONSUMER_GROUP'),
     });
-    this.consumer = new KafkaEventConsumer(kafka, config.getOrThrow<string>('KAFKA_CONSUMER_GROUP'));
     // Enlaces de pánico viven más que un share normal y admiten muchas aperturas.
     this.panicLinkTtlSeconds = config.getOrThrow<number>('SHARE_LINK_TTL_SECONDS');
     this.panicLinkMaxUses = config.getOrThrow<number>('SHARE_LINK_MAX_USES');
-
-    this.consumer
-      .on('trip.started', (env) => this.handleTripStarted(env))
-      .on('panic.triggered', (env) => this.handlePanic(env));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Consumidor Kafka iniciado (trip.started, panic.triggered)');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'trip.started': (env) => this.handleTripStarted(env),
+      'panic.triggered': (env) => this.handlePanic(env),
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Consumidor Kafka iniciado (${eventTypes.join(', ')})`;
   }
 
   private async handleTripStarted(envelope: EventEnvelope<unknown>): Promise<void> {

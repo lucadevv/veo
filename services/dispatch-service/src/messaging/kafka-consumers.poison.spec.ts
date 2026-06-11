@@ -4,52 +4,32 @@
  * dispatch.driverForTrip consultaba una columna `@db.Uuid` → Prisma P2023 → el handler relanzaba →
  * kafkajs reintentaba → crash-loop → partición bloqueada (los viajes nuevos no abrían board).
  *
- * Verifica el comportamiento del handler onTripCompleted SIN Kafka real (mismo idiom .on() que el
- * resto de specs de este módulo):
+ * Verifica el comportamiento del handler onTripCompleted SIN Kafka real (espía sobre el
+ * KafkaEventConsumer real, con start/stop anulados — los handlers los registra el bootstrap
+ * promovido de @veo/events/nest en onModuleInit):
  *  1. tripId no-UUID  → NO relanza (poison: log & skip), NO toca DB.
  *  2. tripId válido   → flujo normal (driverForTrip → projection → releaseDriver).
  *  3. error transitorio (DB caída) → SÍ relanza (reintento de Kafka).
  *  4. error permanente (P2023 desde DB, defensa en profundidad) → NO relanza.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createEnvelope } from '@veo/events';
-import type * as VeoEvents from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, type EventHandler } from '@veo/events';
 import { KafkaConsumersService } from './kafka-consumers.service';
 import type { DispatchService } from '../dispatch/dispatch.service';
 import type { DriverProjectionService } from '../dispatch/driver-projection.service';
 
-class FakeConsumer {
-  readonly handlers = new Map<string, (env: unknown) => Promise<void>>();
-  on(eventType: string, handler: (env: unknown) => Promise<void>): this {
-    this.handlers.set(eventType, handler);
-    return this;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-}
-
-vi.mock('@veo/events', async (orig) => {
-  const actual = await orig<typeof VeoEvents>();
-  return {
-    ...actual,
-    createKafka: () => ({}),
-    KafkaEventConsumer: class {
-      private readonly fake = new FakeConsumer();
-      on(eventType: string, handler: (env: unknown) => Promise<void>) {
-        return this.fake.on(eventType, handler);
-      }
-      async start() {
-        return this.fake.start();
-      }
-      async stop() {
-        return this.fake.stop();
-      }
-      fire(eventType: string, env: unknown) {
-        return this.fake.handlers.get(eventType)?.(env);
-      }
-    },
-  };
+// Captura los handlers que el bootstrap registra con .on() para dispararlos a mano (sin Kafka real).
+const handlers = new Map<string, EventHandler>();
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  eventType: string,
+  handler: EventHandler,
+) {
+  handlers.set(eventType, handler);
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 const config = {
   getOrThrow: (k: string): string => (k === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
@@ -91,11 +71,9 @@ function build(over: Partial<Spies> = {}): { svc: KafkaConsumersService; spies: 
   return { svc, spies };
 }
 
-function fire(svc: KafkaConsumersService, payload: Record<string, unknown>) {
-  const consumer = (svc as unknown as { consumer: { fire: (t: string, e: unknown) => Promise<void> } })
-    .consumer;
+function fire(_svc: KafkaConsumersService, payload: Record<string, unknown>) {
   const env = createEnvelope({ eventType: 'trip.completed', producer: 'trip-service', payload });
-  return consumer.fire('trip.completed', env);
+  return handlers.get('trip.completed')?.(env);
 }
 
 const completedPayload = (tripId: string): Record<string, unknown> => ({

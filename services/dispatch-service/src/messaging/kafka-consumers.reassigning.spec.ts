@@ -7,50 +7,28 @@
  *  2. RECONSTRUYE el board desde el payload enriquecido (no depende de la key vieja de Redis).
  *
  * Sin Kafka real: construimos el consumidor con dobles y accionamos onReassigning vía el handler
- * registrado en un consumer-fake (mismo idiom .on(eventType, handler) que el KafkaEventConsumer real).
+ * que el bootstrap promovido (@veo/events/nest) registra en onModuleInit (espía sobre el
+ * KafkaEventConsumer real, con start/stop anulados).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createEnvelope } from '@veo/events';
-import type * as VeoEvents from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, type EventHandler } from '@veo/events';
 import { VehicleType } from '@veo/shared-types';
 import { KafkaConsumersService } from './kafka-consumers.service';
 import type { DispatchService } from '../dispatch/dispatch.service';
 import type { OfferBoardService, Reassigning } from '../dispatch/offer-board.service';
 
-// Consumer-fake: captura los handlers registrados con .on() para poder dispararlos a mano.
-class FakeConsumer {
-  readonly handlers = new Map<string, (env: unknown) => Promise<void>>();
-  on(eventType: string, handler: (env: unknown) => Promise<void>): this {
-    this.handlers.set(eventType, handler);
-    return this;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-}
-
-vi.mock('@veo/events', async (orig) => {
-  const actual = await orig<typeof VeoEvents>();
-  return {
-    ...actual,
-    createKafka: () => ({}),
-    KafkaEventConsumer: class {
-      private readonly fake = new FakeConsumer();
-      on(eventType: string, handler: (env: unknown) => Promise<void>) {
-        return this.fake.on(eventType, handler);
-      }
-      async start() {
-        return this.fake.start();
-      }
-      async stop() {
-        return this.fake.stop();
-      }
-      // Atajo de test: dispara el handler registrado.
-      fire(eventType: string, env: unknown) {
-        return this.fake.handlers.get(eventType)?.(env);
-      }
-    },
-  };
+// Captura los handlers registrados con .on() para poder dispararlos a mano (sin Kafka real).
+const handlers = new Map<string, EventHandler>();
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  eventType: string,
+  handler: EventHandler,
+) {
+  handlers.set(eventType, handler);
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 const config = {
   getOrThrow: (k: string): string => (k === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
@@ -87,8 +65,6 @@ describe('KafkaConsumersService · trip.reassigning (robustez #4)', () => {
   it('libera al conductor que canceló y reconstruye el board desde el payload enriquecido', async () => {
     const { svc, released, reopened } = build();
     await svc.onModuleInit();
-    // El consumer real expone .fire() en el mock para disparar el handler registrado.
-    const consumer = (svc as unknown as { consumer: { fire: (t: string, e: unknown) => Promise<void> } }).consumer;
 
     const env = createEnvelope({
       eventType: 'trip.reassigning',
@@ -105,7 +81,7 @@ describe('KafkaConsumersService · trip.reassigning (robustez #4)', () => {
       },
     });
 
-    await consumer.fire('trip.reassigning', env);
+    await handlers.get('trip.reassigning')?.(env);
 
     // Liberó al conductor que canceló (vuelve al pool elegible).
     expect(released).toEqual(['drv-cancel']);

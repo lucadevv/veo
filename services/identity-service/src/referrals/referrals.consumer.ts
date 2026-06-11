@@ -3,45 +3,48 @@
  *  - trip.completed → si el pasajero fue referido y el vínculo está PENDING, otorga la recompensa
  *    al referidor (idempotente: solo el primer viaje completado dispara el reward).
  * El payload se valida contra EVENT_SCHEMAS antes de procesarse.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle + log de suscripción derivado del
+ * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
+ * = UN consumer con TODOS sus eventos en `handlers()`.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  createKafka,
-  KafkaEventConsumer,
   EVENT_SCHEMAS,
   isPermanentDataError,
   isUuid,
   type EventEnvelope,
+  type EventHandler,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { ReferralsService } from './referrals.service';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class ReferralsConsumer implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(ReferralsConsumer.name);
-  private readonly consumer: KafkaEventConsumer;
+/** clientId kafkajs de este consumer (también su groupId, propio: no comparte el de suspensión). */
+const KAFKA_CLIENT_ID = 'identity-service-referrals';
+const GROUP_ID = 'identity-service-referrals';
 
+@Injectable()
+export class ReferralsConsumer extends KafkaConsumerBootstrap {
   constructor(
     private readonly referrals: ReferralsService,
     config: ConfigService<Env, true>,
   ) {
-    const kafka = createKafka({
-      clientId: 'identity-service-referrals',
+    super({
+      clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'identity-service-referrals',
+      groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'identity-service-referrals');
-    this.consumer.on('trip.completed', (env) => this.onTripCompleted(env));
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.consumer.start();
-    this.logger.log('Consumidor de referidos iniciado (trip.completed)');
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return { 'trip.completed': (env) => this.onTripCompleted(env) };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer.stop();
+  protected override subscriptionLog(eventTypes: readonly string[]): string {
+    return `Consumidor de referidos iniciado (${eventTypes.join(', ')})`;
   }
 
   private async onTripCompleted(env: EventEnvelope<unknown>): Promise<void> {

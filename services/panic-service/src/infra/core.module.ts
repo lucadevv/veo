@@ -12,7 +12,7 @@ import {
 } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
-import { OutboxRelay } from './outbox.relay';
+import { outboxRelayProvider } from './outbox.relay';
 import { PanicMetrics } from '../metrics/panic.metrics';
 import type { Env } from '../config/env.schema';
 
@@ -30,7 +30,7 @@ const internalSecretProvider: Provider = {
     redisProvider,
     internalSecretProvider,
     PanicMetrics,
-    OutboxRelay,
+    outboxRelayProvider,
     InternalIdentityGuard,
     RolesGuard,
   ],

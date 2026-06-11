@@ -73,7 +73,9 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
       { id: 'panic', s3Key: 'recordings/t3/panic.mp4', retentionUntil: null },
     ];
     const { prisma, deleted } = makePrisma(segments);
-    const sweeper = new RetentionSweeper(prisma as never, new StorageSandboxAdapter());
+    // Redis fake mínimo: sweep() no toca el lock (vive en run()); el cliente solo se inyecta.
+    const fakeRedis = { set: async () => 'OK', del: async () => 1 };
+    const sweeper = new RetentionSweeper(prisma as never, new StorageSandboxAdapter(), fakeRedis as never);
 
     const purged = await sweeper.sweep(now);
 

@@ -1,36 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import type * as VeoEvents from '@veo/events';
-import type { EventEnvelope } from '@veo/events';
+import { KafkaEventConsumer, type EventEnvelope, type EventHandler } from '@veo/events';
 import type { Env } from '../config/env.schema';
 import { DriverSuspensionConsumer } from './driver-suspension.consumer';
 
 /**
- * Mock de @veo/events: KafkaEventConsumer.on() solo CAPTURA el handler (sin conexión real a Kafka),
- * para poder invocarlo directamente y verificar parsing + delegación + idempotencia. `fleetDriverSuspended`
- * se re-exporta del módulo real (es solo un schema zod puro), así la validación del consumer es la real.
- * `captured` se crea con vi.hoisted porque vi.mock se eleva por encima de los imports.
+ * Espía sobre el KafkaEventConsumer REAL (start anulado, sin conexión a Kafka): captura el handler
+ * que el bootstrap promovido (@veo/events/nest) registra en onModuleInit, para poder invocarlo
+ * directamente y verificar parsing + delegación + idempotencia. La validación zod del consumer
+ * (`fleetDriverSuspended`) es la real.
  */
-const captured = vi.hoisted(() => ({
-  handler: undefined as ((env: EventEnvelope<unknown>) => Promise<void>) | undefined,
-}));
+const captured: { handler?: EventHandler } = {};
 
-vi.mock('@veo/events', async (importOriginal) => {
-  const actual = await importOriginal<typeof VeoEvents>();
-  class FakeConsumer {
-    on(_eventType: string, handler: (env: EventEnvelope<unknown>) => Promise<void>): this {
-      captured.handler = handler;
-      return this;
-    }
-    async start(): Promise<void> {}
-    async stop(): Promise<void> {}
-  }
-  return {
-    ...actual,
-    createKafka: () => ({}),
-    KafkaEventConsumer: FakeConsumer,
-  };
+vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+  this: KafkaEventConsumer,
+  _eventType: string,
+  handler: EventHandler,
+) {
+  captured.handler = handler;
+  return this;
 });
+vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+vi.spyOn(KafkaEventConsumer.prototype, 'stop').mockResolvedValue(undefined);
 
 const config = new ConfigService<Env, true>({ KAFKA_BROKERS: 'localhost:9094' });
 
@@ -59,7 +50,7 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
 
   it('suspende al conductor con el suspendedAt del evento', async () => {
     const drivers = { suspendByFleet: vi.fn(async () => true) };
-    new DriverSuspensionConsumer(drivers as never, config);
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope(validPayload));
     expect(drivers.suspendByFleet).toHaveBeenCalledTimes(1);
     expect(drivers.suspendByFleet).toHaveBeenCalledWith(
@@ -70,7 +61,7 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
 
   it('es idempotente extremo-a-extremo: reentrega del mismo evento (suspendByFleet → false) no rompe', async () => {
     const drivers = { suspendByFleet: vi.fn(async () => false) };
-    new DriverSuspensionConsumer(drivers as never, config);
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope(validPayload));
     await captured.handler?.(envelope(validPayload));
     expect(drivers.suspendByFleet).toHaveBeenCalledTimes(2);
@@ -79,14 +70,14 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
 
   it('descarta payloads inválidos sin tocar la DB', async () => {
     const drivers = { suspendByFleet: vi.fn(async () => true) };
-    new DriverSuspensionConsumer(drivers as never, config);
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope({ reason: 'sin driverId' }));
     expect(drivers.suspendByFleet).not.toHaveBeenCalled();
   });
 
   it('descarta suspendedAt no parseable sin tocar la DB', async () => {
     const drivers = { suspendByFleet: vi.fn(async () => true) };
-    new DriverSuspensionConsumer(drivers as never, config);
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope({ ...validPayload, suspendedAt: 'no-es-fecha' }));
     expect(drivers.suspendByFleet).not.toHaveBeenCalled();
   });
@@ -97,7 +88,7 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
         throw new Error('db down');
       }),
     };
-    new DriverSuspensionConsumer(drivers as never, config);
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await expect(captured.handler?.(envelope(validPayload))).rejects.toThrow('db down');
   });
 });

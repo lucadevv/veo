@@ -10,17 +10,21 @@
  *
  * El matching es de larga duración (ofertas secuenciales con timeout): se lanza sin bloquear el
  * commit del consumidor; sus efectos durables (matches, eventos) se persisten igual.
+ *
+ * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
+ * KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId = UN consumer con TODOS
+ * sus eventos en `handlers()`.
  */
-import { Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  createKafka,
-  KafkaEventConsumer,
   EVENT_SCHEMAS,
   isPermanentDataError,
   isUuid,
   type EventEnvelope,
+  type EventHandler,
 } from '@veo/events';
+import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { domainEventsTotal } from '@veo/observability';
 import { VehicleClass } from '@veo/shared-types';
 import { DispatchService } from '../dispatch/dispatch.service';
@@ -31,49 +35,48 @@ import { OfferBoardService } from '../dispatch/offer-board.service';
 import { HeatmapService } from '../heatmap/heatmap.service';
 import type { Env } from '../config/env.schema';
 
-@Injectable()
-export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(KafkaConsumersService.name);
-  private consumer?: KafkaEventConsumer;
+/** clientId kafkajs de este servicio (también su groupId de consumo). */
+const KAFKA_CLIENT_ID = 'dispatch-service';
+const GROUP_ID = 'dispatch-service';
 
+@Injectable()
+export class KafkaConsumersService extends KafkaConsumerBootstrap {
   constructor(
-    private readonly config: ConfigService<Env, true>,
+    config: ConfigService<Env, true>,
     private readonly dispatch: DispatchService,
     private readonly matching: MatchingService,
     private readonly surge: SurgeService,
     private readonly projection: DriverProjectionService,
     private readonly offerBoard: OfferBoardService,
     private readonly heatmap: HeatmapService,
-  ) {}
-
-  async onModuleInit(): Promise<void> {
-    const kafka = createKafka({
-      clientId: 'dispatch-service',
-      brokers: this.config.getOrThrow<string>('KAFKA_BROKERS').split(','),
-      groupId: 'dispatch-service',
+  ) {
+    super({
+      clientId: KAFKA_CLIENT_ID,
+      brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
+      groupId: GROUP_ID,
     });
-    this.consumer = new KafkaEventConsumer(kafka, 'dispatch-service');
+  }
 
-    this.consumer
-      .on('trip.requested', (env) => this.onTripRequested(env))
+  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  protected override handlers(): Readonly<Record<string, EventHandler>> {
+    return {
+      'trip.requested': (env) => this.onTripRequested(env),
       // PUJA (ADR 010 · Lote B): el board consume el bid del pasajero y la re-apertura tras cancel.
       // Lote C: trip-service emitirá `trip.bid_posted`; hoy el board lo consume en aislamiento, sin
       // tocar el camino legacy `trip.requested`→matching auto-secuencial.
-      .on('trip.bid_posted', (env) => this.onBidPosted(env))
-      .on('trip.reassigning', (env) => this.onReassigning(env))
-      .on('driver.location_updated', (env) => this.onDriverLocation(env))
-      .on('panic.triggered', (env) => this.onPanic(env))
-      .on('rating.created', (env) => this.onRating(env))
-      .on('driver.flagged', (env) => this.onDriverFlagged(env))
-      .on('trip.completed', (env) => this.onTripCompleted(env))
-      .on('trip.cancelled', (env) => this.onTripCancelled(env));
-
-    await this.consumer.start();
-    this.logger.log('consumidores Kafka iniciados');
+      'trip.bid_posted': (env) => this.onBidPosted(env),
+      'trip.reassigning': (env) => this.onReassigning(env),
+      'driver.location_updated': (env) => this.onDriverLocation(env),
+      'panic.triggered': (env) => this.onPanic(env),
+      'rating.created': (env) => this.onRating(env),
+      'driver.flagged': (env) => this.onDriverFlagged(env),
+      'trip.completed': (env) => this.onTripCompleted(env),
+      'trip.cancelled': (env) => this.onTripCancelled(env),
+    };
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.consumer?.stop();
+  protected override subscriptionLog(): string {
+    return 'consumidores Kafka iniciados';
   }
 
   private async onTripRequested(env: EventEnvelope<unknown>): Promise<void> {
