@@ -31,6 +31,7 @@ import { BffClient } from '../lib/http.js';
 import { BASE_URLS } from '../lib/config.js';
 import { signPanic, uuidv7 } from '../lib/panic.js';
 import { approveDriverByUserId, clearDispatchHotIndex, injectOtp } from '../lib/fixtures.js';
+import { putModeSchedule, ruleCoveringNow } from '../lib/pricing-admin.js';
 import { pollUntil } from '../lib/wait.js';
 
 // ── Tipos mínimos de las respuestas que consumimos de los BFFs ──
@@ -95,6 +96,10 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     await orchestrator.start();
     // Limpia conductores fantasma de corridas previas del hot index de dispatch (anti-flaky).
     await clearDispatchHotIndex();
+    // El default del sistema evolucionó a PUJA (marketplace "proponé tu precio"): sin schedule, una
+    // creación de viaje SIN bid se rechaza con "falta tu oferta {mode: PUJA}". El golden path valida el
+    // flujo FIXED (oferta directa → accept), así que congelamos FIXED-ahora vía el PUT admin firmado.
+    await putModeSchedule({ defaultMode: 'PUJA', rules: [ruleCoveringNow('FIXED')] });
     await collector.start();
   }, 600_000);
 
@@ -116,6 +121,21 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     expect(tokens.accessToken).toBeTruthy();
     expect(tokens.user.type.toUpperCase()).toContain('PASSENGER');
     passenger.setToken(tokens.accessToken);
+
+    // KYC del pasajero (decisión de producto: liveness OK → VERIFIED). En sandbox el biométrico pasa
+    // (igual que el gate del conductor). Sin esto, `POST /trips` rechaza el PRIMER viaje con
+    // 403 KYC_REQUIRED y cae todo el flujo: el pasajero real lo hace por cámara en el onboarding.
+    const kycChallenge = await passenger.post<{ challengeId: string }>('/kyc/challenge', {});
+    expect(kycChallenge.challengeId).toBeTruthy();
+    const kyc = await passenger.post<{ status: string }>('/kyc/verifications', {
+      challengeId: kycChallenge.challengeId,
+      frames: [
+        { base64Jpeg: 'f1', capturedAt: Date.now() },
+        { base64Jpeg: 'f2', capturedAt: Date.now() },
+        { base64Jpeg: 'f3', capturedAt: Date.now() },
+      ],
+    });
+    expect(kyc.status).toBe('VERIFIED');
   });
 
   it('2. conductor hace login, onboarding, gate biométrico y queda AVAILABLE', async () => {
@@ -152,6 +172,17 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
       frames: ['f1', 'f2', 'f3'],
     });
     expect(verify.sessionRef).toBeTruthy();
+
+    // Registra el vehículo del conductor (CAR). fleet lo toma como su vehículo ACTIVO, y el driver-bff
+    // sella ESE tipo en el ping (server-authoritative) — base del test de override del paso 3.
+    const vehicle = await driverPublic.post<{ id: string; vehicleType: string }>('/drivers/vehicles', {
+      vehicleType: 'CAR',
+      plate: `${run.slice(0, 3)}-${run.slice(3, 6)}`,
+      make: 'Toyota',
+      model: 'Yaris',
+      year: 2021,
+    });
+    expect(vehicle.vehicleType).toBe('CAR');
 
     // Inicio de turno → AVAILABLE.
     const shift = await driverPublic.post<{ status: string }>('/drivers/shift/start', {
@@ -190,6 +221,16 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
       (e) => e.eventType === 'driver.location_updated',
       { timeoutMs: 15_000, label: 'driver.location_updated' },
     );
+
+    // SEGURIDAD (server-authoritative del tipo): el cliente DECLARA MOTO en el ping, pero el conductor
+    // tiene un CAR registrado. El BFF debe SELLAR CAR (ignorando el spoofeo). Correlacionamos por `at`.
+    const spoofTs = `2026-06-10T09:09:09.${String(Number(run) % 1000).padStart(3, '0')}Z`;
+    await driverSocket.publishLocation({ ...ORIGIN, vehicleType: 'MOTO', ts: spoofTs });
+    const sealed = await collector.waitForEvent(
+      (e) => e.eventType === 'driver.location_updated' && e.payload.at === spoofTs,
+      { timeoutMs: 10_000, label: 'override de tipo (MOTO declarado → CAR sellado)' },
+    );
+    expect(sealed.payload.vehicleType).toBe('CAR');
   });
 
   it('4. pasajero crea viaje → dispatch ofrece → conductor acepta → ASSIGNED', async () => {
@@ -255,8 +296,22 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     await driverPublic.post(`/trips/${tripId}/start`, {});
     await expectState('IN_PROGRESS');
 
-    await driverPublic.post(`/trips/${tripId}/complete`);
+    // REHIDRATACIÓN (regla #4): con un viaje VIVO, GET /trips/active devuelve ESTE viaje sin conocer su
+    // id — así la app del conductor recupera el viaje en curso tras un reinicio (app matada mid-viaje).
+    const liveActive = await driverPublic.get<{ id: string; status: string }>(`/trips/active`);
+    expect(liveActive?.id).toBe(tripId);
+    expect(liveActive?.status).toBe('IN_PROGRESS');
+
+    // Viaje CASH: el conductor confirma que COBRÓ el efectivo en mano (`cashCollected`). Sin este flag,
+    // payment-service entra al flujo "bilateral normal" y NO emite ni payment.captured ni cash_pending
+    // (espera confirmaciones por otra vía), dejando el cobro sin evento determinista para el e2e.
+    await driverPublic.post(`/trips/${tripId}/complete`, { cashCollected: true });
     await expectState('COMPLETED');
+
+    // COMPLETED es terminal (fuera de LIVE_STATES) → GET /trips/active responde 204 → undefined: el
+    // conductor ya NO tiene viaje activo, así la rehidratación no lo devuelve a un viaje muerto.
+    const noActive = await driverPublic.get<unknown>(`/trips/active`);
+    expect(noActive).toBeUndefined();
 
     // trip.completed debe propagarse (lo consumen payment + dispatch).
     await collector.waitForEvent(
@@ -266,19 +321,28 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
   });
 
   it('6. cobro automático (payment-service consume trip.completed) + propina', async () => {
-    // payment-service cobra al consumir trip.completed (BR-P01) → payment.captured.
-    const captured = await collector.waitForEvent(
-      (e) => e.eventType === 'payment.captured' && e.payload.tripId === tripId,
-      { timeoutMs: 25_000, label: 'payment.captured' },
+    // payment-service cobra al consumir trip.completed (BR-P01). Viaje CASH con cashCollected=true →
+    // crea el Payment PENDING (driverConfirmed) y emite payment.cash_pending (push al pasajero a confirmar).
+    const cashPending = await collector.waitForEvent(
+      (e) => e.eventType === 'payment.cash_pending' && e.payload.tripId === tripId,
+      { timeoutMs: 25_000, label: 'payment.cash_pending' },
     );
-    expect(captured.payload.tripId).toBe(tripId);
+    expect(cashPending.payload.tripId).toBe(tripId);
 
     // Propina (BR-P04): 100% al conductor. El viaje ya está cobrado.
+    // El conductor sigue conectado al socket /driver: la propina debe llegarle EN VIVO como
+    // `payment:tip` (payment-service emite `payment.tip_added` por OUTBOX → Kafka → driver-bff lo
+    // enruta al socket). Registramos el waiter ANTES del POST para no perder el evento.
+    const tipPromise = driverSocket!.waitForTip(20_000);
     const tipped = await passenger.post<{ tripId: string; tipCents: number }>(
       `/trips/${tripId}/tip`,
       { tipCents: 300 },
     );
     expect(tipped.tipCents).toBeGreaterThanOrEqual(300);
+
+    const liveTip = await tipPromise;
+    expect(liveTip.tripId).toBe(tripId);
+    expect(liveTip.tipCents).toBe(300);
   });
 
   it('7. pánico: el pasajero dispara pánico firmado → ack < 3s + panic.triggered', async () => {

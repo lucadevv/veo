@@ -192,7 +192,9 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: veo_dev
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-    ports: ["3001:3000"]
+    # 3300 en el host: el rango 3001-3099 es de microservicios (CLAUDE.md) — grafana en 3001
+    # chocaba con identity-service (EADDRINUSE detectado por el e2e golden-path).
+    ports: ["3300:3000"]
     volumes:
       - grafana-data:/var/lib/grafana
 

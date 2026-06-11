@@ -25,10 +25,42 @@ interface OfferEnvelope {
   payload?: DispatchOfferEvent;
 }
 
+/** Propina recibida en vivo (payment.tip_added → driver-bff → `payment:tip`). */
+export interface TipEvent {
+  paymentId: string;
+  tripId: string;
+  driverId?: string;
+  tipCents: number;
+}
+
+/** Sobre de `payment:tip`: el payload viene anidado bajo `.payload` igual que `dispatch:offer`. */
+interface TipEnvelope {
+  eventType?: string;
+  occurredAt?: string;
+  payload?: TipEvent;
+}
+
+/**
+ * Parada propuesta por el pasajero que el conductor recibe en vivo (Lote C4, evento `waypoint:proposed`).
+ * A diferencia de dispatch:offer/payment:tip, viaja como shape PLANA (no anidada en `.payload`).
+ */
+export interface WaypointProposedEvent {
+  proposalId: string;
+  tripId: string;
+  point: { lat: number; lon: number };
+  deltaFareCents: number;
+  newFareCents: number;
+  expiresAt: string;
+}
+
 export class DriverSocket {
   private socket?: Socket;
   private readonly offers: DispatchOfferEvent[] = [];
   private offerWaiter?: (o: DispatchOfferEvent) => void;
+  private readonly tips: TipEvent[] = [];
+  private tipWaiter?: (t: TipEvent) => void;
+  private readonly waypointProposals: WaypointProposedEvent[] = [];
+  private waypointWaiter?: (w: WaypointProposedEvent) => void;
 
   constructor(private readonly token: string) {}
 
@@ -57,6 +89,24 @@ export class DriverSocket {
         if (this.offerWaiter) {
           this.offerWaiter(offer);
           this.offerWaiter = undefined;
+        }
+      });
+      socket.on('payment:tip', (envelope: TipEnvelope) => {
+        const tip = envelope.payload;
+        if (!tip) return;
+        this.tips.push(tip);
+        if (this.tipWaiter) {
+          this.tipWaiter(tip);
+          this.tipWaiter = undefined;
+        }
+      });
+      // Lote C4 · parada propuesta (shape PLANA, sin sobre): la app la pinta para aceptar/rechazar.
+      socket.on('waypoint:proposed', (msg: WaypointProposedEvent) => {
+        if (!msg?.proposalId) return;
+        this.waypointProposals.push(msg);
+        if (this.waypointWaiter) {
+          this.waypointWaiter(msg);
+          this.waypointWaiter = undefined;
         }
       });
     });
@@ -105,6 +155,38 @@ export class DriverSocket {
       this.offerWaiter = (o): void => {
         clearTimeout(timer);
         resolve(o);
+      };
+    });
+  }
+
+  /** Espera la propina en vivo `payment:tip` (ya recibida o futura). */
+  waitForTip(timeoutMs: number): Promise<TipEvent> {
+    const existing = this.tips[0];
+    if (existing) return Promise.resolve(existing);
+    return new Promise<TipEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.tipWaiter = undefined;
+        reject(new Error(`timeout esperando payment:tip (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.tipWaiter = (tp): void => {
+        clearTimeout(timer);
+        resolve(tp);
+      };
+    });
+  }
+
+  /** Espera la parada propuesta `waypoint:proposed` (ya recibida o futura). */
+  waitForWaypointProposed(timeoutMs: number): Promise<WaypointProposedEvent> {
+    const existing = this.waypointProposals[0];
+    if (existing) return Promise.resolve(existing);
+    return new Promise<WaypointProposedEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waypointWaiter = undefined;
+        reject(new Error(`timeout esperando waypoint:proposed (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.waypointWaiter = (w): void => {
+        clearTimeout(timer);
+        resolve(w);
       };
     });
   }

@@ -8,6 +8,8 @@
     "e2e:golden": "vitest run golden-path",
     "e2e:golden:watch": "vitest golden-path",
     "e2e:pricing": "vitest run --config vitest.pricing.config.ts",
+    "e2e:serve": "vitest run --config vitest.serve.config.ts",
+    "e2e:waypoint": "VEO_E2E_HELD_STACK=1 vitest run waypoint-negotiated-stop",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

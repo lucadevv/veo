@@ -109,6 +109,10 @@ export function commonEnv(): Record<string, string> {
     VEO_MAPS_MODE: process.env.E2E_MAPS_MODE ?? 'local',
     OSRM_URL: process.env.E2E_OSRM_URL ?? 'http://localhost:5005',
     NOMINATIM_URL: process.env.E2E_NOMINATIM_URL ?? 'http://localhost:8091',
+    // Token de Mapbox para TODOS los servicios (no solo public-bff): trip/dispatch/driver-bff ya
+    // soportan VEO_MAPS_MODE=mapbox, y su superRefine lo exige cuando el modo es mapbox. Vacío si no
+    // se corre en modo mapbox (el superRefine solo dispara con mode=mapbox).
+    MAPBOX_ACCESS_TOKEN: process.env.MAPBOX_ACCESS_TOKEN ?? '',
     VEO_SMS_MODE: 'sandbox',
     VEO_BIOMETRIC_MODE: 'sandbox',
     VEO_PAYMENT_MODE: 'sandbox',
@@ -252,6 +256,12 @@ export function bffSpecs(): ServiceSpec[] {
       env: {
         PORT: String(PORTS.publicBff),
         ...downstreamGrpc,
+        // El reverse-geocode/autocomplete del Home (la dirección que ve el pasajero) lo sirve SOLO el
+        // public-bff. Le damos su propio modo de mapas para usar Mapbox (direcciones reales) sin tocar a
+        // los demás servicios: trip/dispatch aún NO aceptan 'mapbox' en su enum (drift de contrato), así
+        // que quedan en su modo del commonEnv (local/osrm) para rutas. Override por var dedicada.
+        VEO_MAPS_MODE: process.env.PUBLIC_BFF_MAPS_MODE ?? process.env.E2E_MAPS_MODE ?? 'local',
+        MAPBOX_ACCESS_TOKEN: process.env.MAPBOX_ACCESS_TOKEN ?? '',
         // REST interno: public-bff AÑADE /api/v1 a la baseUrl (env.schema).
         IDENTITY_URL: `http://localhost:${PORTS.identity}/api/v1`,
         TRIP_URL: `http://localhost:${PORTS.trip}/api/v1`,

@@ -175,6 +175,21 @@ interface ReadyDriver {
     });
     passenger.setToken(ptok.accessToken);
 
+    // KYC del pasajero (sandbox determinista): el public-bff exige VERIFIED para el PRIMER viaje
+    // (403 KYC_REQUIRED) — mismo paso que el golden-path; sin esto A3/B2 caen antes de crear el trip.
+    const kycChallenge = await passenger.post<{ challengeId: string }>('/kyc/challenge', {});
+    const kyc = await passenger.post<{ status: string }>('/kyc/verifications', {
+      challengeId: kycChallenge.challengeId,
+      frames: [
+        { base64Jpeg: 'f1', capturedAt: Date.now() },
+        { base64Jpeg: 'f2', capturedAt: Date.now() },
+        { base64Jpeg: 'f3', capturedAt: Date.now() },
+      ],
+    });
+    if (kyc.status !== 'VERIFIED') {
+      throw new Error(`KYC sandbox no verificó al pasajero (status=${kyc.status})`);
+    }
+
     // Solo driverA online para la fase FIXED (sin ambigüedad de candidato en el matching secuencial).
     driverA = await setupDriver(DRIVER_A_PHONE);
     await collector.waitForEvent((e) => e.eventType === 'driver.location_updated', {
@@ -281,6 +296,11 @@ interface ReadyDriver {
   });
 
   it('B2. driverB online; createTrip CON bid → trip.bid_posted, dispatchMode CONGELADO en PUJA', async () => {
+    // El producto ahora exige UN solo viaje activo por pasajero (ACTIVE_TRIP_EXISTS, 409):
+    // cerramos el viaje FIXED de la fase A antes de abrir el de PUJA. El persist-once de C1
+    // ya quedó verificado sobre ese viaje; cancelarlo no toca ningún monto esperado.
+    await passenger.post(`/trips/${fixedTripId}/cancel`, { reason: 'e2e: fin de fase FIXED' });
+
     // driverB entra AHORA (driverA ya está ASSIGNED → excluido del matching). driverB queda AVAILABLE.
     driverB = await setupDriver(DRIVER_B_PHONE);
     await driverB.socket.publishLocation({ ...ORIGIN, vehicleType: 'CAR' });
@@ -324,12 +344,14 @@ interface ReadyDriver {
     expect(submitted.tripId).toBe(pujaTripId);
     expect(submitted.priceCents).toBe(1500);
 
-    const offers = await pollUntil(
-      () => passenger.get<OfferView[]>(`/trips/${pujaTripId}/offers`),
-      (list) => list.length > 0,
+    // El endpoint devuelve el TABLERO de la puja: { board: { status, expiresAt }, offers: [...] }
+    // (antes era el array pelado — el sobre llegó con el board de expiración).
+    const boardView = await pollUntil(
+      () => passenger.get<{ board: { status: string }; offers: OfferView[] }>(`/trips/${pujaTripId}/offers`),
+      (view) => view.offers.length > 0,
       { timeoutMs: 15_000, intervalMs: 1000, label: 'pasajero lista ofertas (≥1)' },
     );
-    const chosen = offers[0]!;
+    const chosen = boardView.offers[0]!;
     expect(chosen.priceCents).toBe(1500);
 
     await passenger.post(`/trips/${pujaTripId}/offers/${chosen.driverId}/accept`);
