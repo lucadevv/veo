@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '@veo/utils';
-import { TripStatus, PaymentMethod } from '@veo/shared-types';
+import { EVENT_SCHEMAS } from '@veo/events';
+import {
+  TripStatus,
+  PaymentMethod,
+  PricingMode,
+  OFFERINGS,
+  OfferingId,
+  VehicleClass,
+  type OfferingSpec,
+} from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
+import { emitTripRequested, emitBidPosted } from './trip-events';
+import { offeringModeOverriddenTotal } from './trip-metrics';
+import type { TripOfferingResolution } from './domain/offering';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
@@ -468,6 +480,39 @@ describe('TripsService.start · BR-T07 modo niño', () => {
     expect(prisma._store?.status).toBe(TripStatus.ARRIVED);
   });
 
+  // CONTRATO evento↔schema (dominó S3): el gate de @veo/events (KafkaEventConsumer) DESCARTA en
+  // silencio todo payload que no pase el schema del registro central, y el relay del outbox lo
+  // PUBLICA con `schema.parse` (lanza). Si el payload REAL que emite el producer no pasa el
+  // `safeParse` del schema REGISTRADO, el evento jamás llega al handler de notification (código
+  // muerto) o, peor, envenena el outbox. Este spec es el que faltaba en la ronda 1.
+  it('CONTRATO: el payload REAL de trip.child_code_failed pasa el schema del registro central', async () => {
+    const hash = bcrypt.hashSync('1234', 10);
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ARRIVED, childMode: true, childCodeHash: hash, driverId: 'drv-1' }),
+    );
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.start('trip-1', { childCode: '9999', driverId: 'drv-1' })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    const emitted = prisma._outbox.find((e) => e.eventType === 'trip.child_code_failed');
+    expect(emitted).toBeTruthy();
+    expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse(emitted!.envelope.payload).success).toBe(true);
+    const payload = emitted!.envelope.payload as {
+      tripId: string;
+      passengerId?: string;
+      driverId?: string;
+      attempt?: number;
+      at: string;
+    };
+    // attempt SIEMPRE viaja (el registro lo tolera ausente SOLO por filas pre-fix del outbox); sin
+    // Redis degrada honesto a 1 ("al menos este intento").
+    expect(payload.attempt).toBe(1);
+    // passengerId enriquecido: destinatario del push crítico al padre/madre (sin él, notification
+    // degrada honesto y NO hay alerta).
+    expect(payload.passengerId).toBe('pax-1');
+    expect(payload.driverId).toBe('drv-1');
+  });
+
   it('viaje con modo niño sin código → ValidationError', async () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ARRIVED, childMode: true, childCodeHash: bcrypt.hashSync('1234', 10), driverId: 'd' }),
@@ -546,7 +591,7 @@ describe('TripsService.start · B · lockout anti-brute-force del código de mod
 
   it('5 intentos fallidos → el 6º queda BLOQUEADO con 429 (RateLimitError)', async () => {
     const redis = makeRedis();
-    const { svc } = build(redis);
+    const { svc, prisma } = build(redis);
     // 5 intentos con código incorrecto: cada uno lanza ValidationError (no bloqueo todavía).
     for (let i = 0; i < 5; i += 1) {
       await expect(svc.start('trip-1', { childCode: '9999', driverId: 'drv-1' })).rejects.toBeInstanceOf(
@@ -558,6 +603,13 @@ describe('TripsService.start · B · lockout anti-brute-force del código de mod
       RateLimitError,
     );
     expect(redis._store.get('childcode:lock:trip-1')).toBe('1');
+    // CONTRATO: cada alerta emitida lleva el Nº de intento REAL del contador (1..5) y pasa el schema
+    // del registro central (si no, el gate del consumer la descartaría en silencio).
+    const failures = prisma._outbox.filter((e) => e.eventType === 'trip.child_code_failed');
+    expect(failures.map((e) => (e.envelope.payload as { attempt?: number }).attempt)).toEqual([1, 2, 3, 4, 5]);
+    for (const e of failures) {
+      expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse(e.envelope.payload).success).toBe(true);
+    }
   });
 
   it('un acierto ANTES del tope resetea el contador y el candado (DEL)', async () => {
@@ -1392,4 +1444,194 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
     );
     expect(prisma._store?.status).toBe(TripStatus.IN_PROGRESS); // sin transición
   });
+});
+
+// ──────────────────────── ADR 013 · catálogo de ofertas en createTrip (Lote B) ────────────────────────
+
+describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedencia + pool + pricing)', () => {
+  it('(a) category DESCONOCIDA → 400 UNKNOWN_OFFERING tipado; NO se crea nada (jamás default económico)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.createTrip({ ...baseCreateDto, category: 'veo_fantasma' })).rejects.toMatchObject({
+      code: 'UNKNOWN_OFFERING',
+      httpStatus: 400,
+    });
+    expect(prisma._outbox).toHaveLength(0);
+    expect(prisma._store).toBeNull();
+  });
+
+  it('(b) category AUSENTE + vehicleType MOTO (cliente viejo) → resuelve veo_moto y SU pricing (825)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps); // sin resolver, sin bid ⇒ FIXED legacy
+    const view = await svc.createTrip({ ...baseCreateDto, vehicleType: 'MOTO' });
+    // Pool del catálogo (no del dto suelto, aunque acá coinciden) + política REAL de moto:
+    // base 1500 (5000m/600s) × 0.55 = 825 ≥ minFare 300. ANTES del fix cobraba 1500 (más que el quote).
+    expect(prisma._store?.vehicleType).toBe('MOTO');
+    expect(view.fareCents).toBe(825);
+    expect(prisma._store?.category).toBeNull(); // el cliente viejo no mandó category: se persiste null
+  });
+
+  it('(c) INCONSISTENCIA category veo_moto + vehicleType CAR → gana la OFERTA (pool MOTO) + warn', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps);
+    const warnSpy = vi.spyOn(svc['logger'], 'warn');
+    const view = await svc.createTrip({
+      ...baseCreateDto,
+      category: OfferingId.VEO_MOTO,
+      vehicleType: 'CAR',
+    });
+    // offering.vehicleClass es la fuente del pool: el viaje va al pool MOTO con el pricing de moto.
+    expect(prisma._store?.vehicleType).toBe('MOTO');
+    expect(view.fareCents).toBe(825);
+    const requested = prisma._outbox.find((e) => e.eventType === 'trip.requested');
+    expect((requested?.envelope.payload as { vehicleType?: string }).vehicleType).toBe('MOTO');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('inconsistentes'));
+  });
+
+  it('(e) FIXED + veo_confort: la tarifa FIRME es ×1.25 → 1875 (= round(1500 × 1.25), mínima 500 no muerde)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_CONFORT });
+    expect(view.fareCents).toBe(1875); // ANTES del fix: 1500 (cobraba la tarifa de económico)
+    expect(prisma._store?.dispatchMode).toBe('FIXED');
+    expect(prisma._store?.category).toBe(OfferingId.VEO_CONFORT);
+  });
+
+  it('(e) FIXED + veo_moto: ×0.55 con minFare 300 → 825 (moto DEJA de cobrar de más que su preview)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_MOTO });
+    expect(view.fareCents).toBe(825); // max(round(1500 × 0.55), 300) — ANTES del fix: 1500
+    expect(view.fareCents).toBeLessThan(1500);
+    expect(prisma._store?.vehicleType).toBe('MOTO');
+  });
+
+  it('(e) FIXED + veo_economico: ×1.0 → 1500 INVARIANTE (golden-path/pricing-switch no cambian de montos)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_ECONOMICO });
+    expect(view.fareCents).toBe(1500); // max(round(1500 × 1.0), 500) = 1500: cero regresión
+  });
+
+  it('PUJA + category premium: el bid sigue siendo la tarifa (la política NO toca el bid)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_CONFORT, bidCents: 900 });
+    expect(view.fareCents).toBe(900); // el bid ES la tarifa; el multiplier solo afecta el quote
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
+  });
+});
+
+describe('TripsService.createTrip · ADR 013 §1.3.3 · conflicto de modo: la oferta veta al schedule', () => {
+  /**
+   * El catálogo REAL aún no tiene ofertas restringidas (las 4 permiten [PUJA, FIXED] → intersección
+   * no-op), así que el conflicto se testea por el SEAM protected `resolveOffering` (subclase del spec
+   * inyecta una oferta solo-FIXED). NO se mockea el módulo del catálogo (vi.mock contaminaría TODOS los
+   * specs del archivo) ni se inventa una entrada fantasma en producción. La precedencia pura ya está
+   * cubierta por resolveOfferingMode (shared-types); acá se verifica el CABLEADO: modo efectivo
+   * persistido + warn + counter.
+   */
+  const SOLO_FIXED_OFFERING: OfferingSpec = {
+    ...OFFERINGS[OfferingId.VEO_ECONOMICO],
+    allowedModes: [PricingMode.FIXED], // fixture de oferta que NO negocia (estilo ambulancia futura)
+  };
+
+  class SoloFixedOfferingTripsService extends TripsService {
+    protected override resolveOffering(): TripOfferingResolution {
+      return { offering: SOLO_FIXED_OFFERING, mismatch: false };
+    }
+  }
+
+  /** Suma total del counter pricing_offering_mode_overridden_total (todas las labels). */
+  async function readOverriddenTotal(): Promise<number> {
+    const { values } = await offeringModeOverriddenTotal.get();
+    return values.reduce((sum, v) => sum + v.value, 0);
+  }
+
+  it('(d) schedule pide PUJA pero la oferta solo permite FIXED → gana la oferta + warn + counter', async () => {
+    const prisma = makePrisma(null);
+    const svc = new SoloFixedOfferingTripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const warnSpy = vi.spyOn(svc['logger'], 'warn');
+    const before = await readOverriddenTotal();
+
+    // Sin bid: el modo EFECTIVO es FIXED (preferido de la oferta) y FIXED no exige bid.
+    const view = await svc.createTrip({ ...baseCreateDto });
+
+    expect(view.dispatchMode).toBe('FIXED'); // allowedModes[0]: la oferta vetó el PUJA del schedule
+    expect(prisma._store?.dispatchMode).toBe('FIXED'); // persist-once intacto (Trip.dispatchMode)
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('gana la oferta'));
+    expect(await readOverriddenTotal()).toBe(before + 1); // pricing_offering_mode_overridden_total++
+  });
+
+  it('sin conflicto (schedule FIXED ∈ allowedModes) → NO hay warn ni counter (no-op de la intersección)', async () => {
+    const prisma = makePrisma(null);
+    const svc = new SoloFixedOfferingTripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const warnSpy = vi.spyOn(svc['logger'], 'warn');
+    const before = await readOverriddenTotal();
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.dispatchMode).toBe('FIXED');
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(await readOverriddenTotal()).toBe(before); // sin override no se bumpea
+  });
+});
+
+// ─────────── mini-lote "abrir el wire" · CONTRATO producer↔schema POR CLASE de vehículo ───────────
+
+describe('CONTRATO producer↔schema · parametrizado POR CLASE (gap 3 de la prueba de fuego ADR 013)', () => {
+  /**
+   * El gate del consumer (@veo/events KafkaEventConsumer: safeParse → DESCARTA) es donde un evento con
+   * una clase nueva moría EN SILENCIO (prueba de fuego VEO_AMBULANCIA). Estas filas iteran el enum
+   * canónico `VehicleClass`: una clase NUEVA queda cubierta SOLA, y si alguien re-hardcodea el
+   * z.enum(['CAR','MOTO']) en @veo/events en vez de derivarlo del enum, GRITA acá — no en producción.
+   * El payload es el REAL del producer (trip-events.ts / PujaDispatchStrategy.reassign), no un fixture.
+   */
+  const vehicleClasses = Object.values(VehicleClass);
+  const origin = { lat: -12.0464, lon: -77.0428 };
+  const destination = { lat: -12.1219, lon: -77.0297 };
+
+  it.each(vehicleClasses)(
+    'trip.requested · el payload REAL de emitTripRequested con clase %s pasa el schema registrado',
+    async (vehicleClass) => {
+      const prisma = makePrisma(null);
+      await prisma.write.$transaction(async (tx) => {
+        await emitTripRequested(tx as never, buildTrip({ vehicleType: vehicleClass }), origin, destination);
+      });
+      const event = prisma._outbox.find((e) => e.eventType === 'trip.requested');
+      expect(event).toBeTruthy();
+      expect(EVENT_SCHEMAS['trip.requested'].safeParse(event!.envelope.payload).success).toBe(true);
+      // La clase viaja TAL CUAL (sin casteo silencioso a otra clase): el pool de matching es fiel.
+      expect((event!.envelope.payload as { vehicleType?: string }).vehicleType).toBe(vehicleClass);
+    },
+  );
+
+  it.each(vehicleClasses)(
+    'trip.bid_posted · el payload REAL de emitBidPosted con clase %s pasa el schema registrado',
+    async (vehicleClass) => {
+      const prisma = makePrisma(null);
+      await prisma.write.$transaction(async (tx) => {
+        await emitBidPosted(tx as never, buildTrip({ vehicleType: vehicleClass }), origin, 60);
+      });
+      const event = prisma._outbox.find((e) => e.eventType === 'trip.bid_posted');
+      expect(event).toBeTruthy();
+      expect(EVENT_SCHEMAS['trip.bid_posted'].safeParse(event!.envelope.payload).success).toBe(true);
+      expect((event!.envelope.payload as { vehicleType?: string }).vehicleType).toBe(vehicleClass);
+    },
+  );
+
+  it.each(vehicleClasses)(
+    'trip.reassigning · cancel(DRIVER) post-accept con clase %s emite un payload que pasa el schema registrado',
+    async (vehicleClass) => {
+      const prisma = makePrisma(
+        buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1', vehicleType: vehicleClass }),
+      );
+      const svc = new TripsService(prisma as never, maps);
+      await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
+      const event = prisma._outbox.find((e) => e.eventType === 'trip.reassigning');
+      expect(event).toBeTruthy();
+      expect(EVENT_SCHEMAS['trip.reassigning'].safeParse(event!.envelope.payload).success).toBe(true);
+      expect((event!.envelope.payload as { vehicleType?: string }).vehicleType).toBe(vehicleClass);
+    },
+  );
 });

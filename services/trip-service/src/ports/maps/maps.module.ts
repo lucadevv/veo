@@ -24,6 +24,14 @@ const mapsProvider: Provider = {
         },
       });
     }
+    if (mode === 'mapbox') {
+      // Mapbox Directions (token pk, server-side, detrás del puerto). Antes este `mode` caía al `return`
+      // de abajo y usaba 'local' EN SILENCIO (degradación oculta): pedías mapbox y obtenías el motor local.
+      return createMapsClient({
+        mode: 'mapbox',
+        mapbox: { accessToken: config.getOrThrow<string>('MAPBOX_ACCESS_TOKEN') },
+      });
+    }
     return createMapsClient({ mode: 'local' });
   },
 };

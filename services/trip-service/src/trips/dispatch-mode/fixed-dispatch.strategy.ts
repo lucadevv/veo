@@ -6,7 +6,7 @@
 import type { LatLon } from '@veo/utils';
 import { PricingMode, TripStatus } from '@veo/shared-types';
 import { emitTripRequested } from '../trip-events';
-import { calculateFare } from '../domain/fare';
+import { applyOfferingPricing, calculateFare } from '../domain/fare';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
   DispatchModeStrategy,
@@ -21,17 +21,27 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
   readonly mode = PricingMode.FIXED;
 
   /**
-   * FIXED (BR-T05): IGNORA cualquier bid; calcula la tarifa FIRME por ruta (distancia/duración/surge/niño).
-   * No negocia → negotiationSeq=0 (nunca emite offer_accepted).
+   * FIXED (BR-T05 + ADR 013 §1.7): IGNORA cualquier bid; calcula la tarifa FIRME por ruta
+   * (distancia/duración/surge/niño) y le APLICA la política de la OFERTA:
+   *
+   *   fareCents = max(round(calculateFare(...) × pricing.multiplier), pricing.minFareCents)
+   *
+   * Cierra el bug del multiplier: antes veo_confort/veo_xl cobraban la tarifa de económico y veo_moto
+   * cobraba MÁS que su preview. La fórmula vive en `applyOfferingPricing` (domain/fare.ts, FUENTE
+   * ÚNICA — también la consume el re-quote de la parada mid-trip): céntimos ENTEROS vía `scaleMoney`
+   * (Math.round), la MISMA convención de calculateFare (que ya usa scaleMoney para el surge). Acá NO
+   * se redondea a S/0.10 como el preview del BFF (FARE_ROUNDING_CENTS): ese redondeo es cosmético del
+   * quote (que tampoco incluye surge/niño); la tarifa firme es exacta al céntimo. No negocia →
+   * negotiationSeq=0 (nunca emite offer_accepted).
    */
   resolveCreation(input: DispatchCreationInput): DispatchCreation {
-    const fare = calculateFare({
+    const base = calculateFare({
       distanceMeters: input.route.distanceMeters,
       durationSeconds: input.route.durationSeconds,
       surgeMultiplier: input.surge,
       childMode: input.childMode,
     });
-    return { fareCents: fare.cents, negotiationSeq: 0 };
+    return { fareCents: applyOfferingPricing(base, input.pricing).cents, negotiationSeq: 0 };
   }
 
   async openDispatch(

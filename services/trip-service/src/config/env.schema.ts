@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { BID_MAX_CENTS, secret } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -22,10 +23,13 @@ export const envSchema = z.object({
   // Secreto para validar la identidad interna que el BFF propaga a servicios
   INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
-  // Puerto de mapas (@veo/maps). 'local' = motor propio determinista; 'osrm' = infra OSM self-hosted.
-  VEO_MAPS_MODE: z.enum(['osrm', 'local']).default('local'),
+  // Puerto de mapas (@veo/maps). 'local' = motor propio determinista; 'osrm' = infra OSM self-hosted;
+  // 'mapbox' = Directions API (token pk, detrás del puerto). Enum derivado de MAPS_MODES (sin drift).
+  VEO_MAPS_MODE: z.enum(MAPS_MODES).default('local'),
   OSRM_BASE_URL: z.string().default('http://localhost:5000'),
   NOMINATIM_BASE_URL: z.string().default('http://localhost:8080'),
+  // Token público de Mapbox (`pk....`). Obligatorio solo cuando VEO_MAPS_MODE=mapbox (ver superRefine).
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
@@ -58,10 +62,24 @@ export const envSchema = z.object({
   // Holgura generosa: viajes largos reales no deben dispararlo.
   TRIP_INPROGRESS_STALE_HOURS: z.coerce.number().int().positive().default(6),
 
+  // Lote C1 · Parada mid-trip negociada: TTL (segundos) de una propuesta de parada. Pasado este lapso
+  // sin respuesta del conductor, el sweeper la expira (EXPIRED + outbox). Ventana corta porque el viaje
+  // está EN CURSO: el conductor debe decidir rápido. Default 30s.
+  WAYPOINT_PROPOSAL_TTL_SEC: z.coerce.number().int().positive().default(30),
+
   // S3 (ADR 011) — TTL (ms) del cache in-proc del schedule de pricing. La fila cambia en el orden de
   // HORAS, así que un cache corto absorbe el read-per-resolve (createTrip + quote). El PUT lo invalida
   // (cambio inmediato), así que el TTL solo acota la staleness ante ediciones desde OTRO proceso. 0 = off.
   PRICING_SCHEDULE_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
+}).superRefine((env, ctx) => {
+  // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.
+  if (env.VEO_MAPS_MODE === 'mapbox' && !env.MAPBOX_ACCESS_TOKEN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAPBOX_ACCESS_TOKEN'],
+      message: 'MAPBOX_ACCESS_TOKEN es obligatorio cuando VEO_MAPS_MODE=mapbox',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

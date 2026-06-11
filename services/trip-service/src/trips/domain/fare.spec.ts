@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { ValidationError } from '@veo/utils';
+import { ValidationError, money } from '@veo/utils';
+import { OFFERINGS, OfferingId } from '@veo/shared-types';
 import {
   calculateFare,
+  applyOfferingPricing,
   BASE_FARE_CENTS,
   PER_KM_CENTS,
   PER_MIN_CENTS,
@@ -64,5 +66,39 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(() => calculateFare({ distanceMeters: -1, durationSeconds: 60 })).toThrow(ValidationError);
     expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: -1 })).toThrow(ValidationError);
     expect(() => calculateFare({ distanceMeters: Number.NaN, durationSeconds: 60 })).toThrow(ValidationError);
+  });
+});
+
+describe('ADR 013 §1.7 · applyOfferingPricing (tarifa firme desde base — FUENTE ÚNICA)', () => {
+  // La consumen FixedDispatchStrategy (create FIXED) y el re-quote de la parada mid-trip: estos
+  // tests fijan la fórmula max(round(base × multiplier), minFareCents) UNA sola vez.
+
+  it('confort ×1.25: escala la base y redondea a céntimos enteros (Math.round)', () => {
+    // 1590 × 1.25 = 1987.5 → 1988 (mismo redondeo scaleMoney que el surge de calculateFare).
+    const fare = applyOfferingPricing(money(1590), OFFERINGS[OfferingId.VEO_CONFORT].pricing);
+    expect(fare.cents).toBe(1988);
+  });
+
+  it('moto ×0.55: escala hacia abajo (la moto es MÁS barata, nunca tasa de auto)', () => {
+    // 1500 × 0.55 = 825 (la mínima de 300 no aplica: 825 > 300).
+    const fare = applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_MOTO].pricing);
+    expect(fare.cents).toBe(825);
+  });
+
+  it('moto: la MÍNIMA (S/3.00) pisa cuando la base escalada queda por debajo', () => {
+    // 400 × 0.55 = 220 < 300 → cobra la mínima de la oferta.
+    const fare = applyOfferingPricing(money(400), OFFERINGS[OfferingId.VEO_MOTO].pricing);
+    expect(fare.cents).toBe(OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents);
+  });
+
+  it('económico ×1.0: identidad por encima de la mínima; mínima (S/5.00) por debajo', () => {
+    expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents).toBe(1500);
+    expect(applyOfferingPricing(money(400), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents).toBe(
+      OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents,
+    );
+  });
+
+  it('preserva la currency de la base', () => {
+    expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_XL].pricing).currency).toBe('PEN');
   });
 });

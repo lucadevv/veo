@@ -15,6 +15,7 @@ import { LIVE_STATES } from '../trips/domain/trip-state-machine';
 import { TripsService } from '../trips/trips.service';
 import { TripQueryService } from '../trips/trip-query.service';
 import type { TripView } from '../trips/dto/trip.dto';
+import { readWaypoints } from '../trips/trip-view.mapper';
 import type { Trip } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -24,6 +25,10 @@ interface GetByIdRequest {
 
 interface ActiveTripRequest {
   passengerId: string;
+}
+
+interface ActiveTripByDriverRequest {
+  driverId: string;
 }
 
 interface PendingSettlementRequest {
@@ -66,6 +71,9 @@ interface TripReply {
   destinationLng: number;
   /// Ruta del viaje (polyline persistida en Trip.routePolyline); '' si el viaje no la tiene (→ null en el BFF).
   routePolyline: string;
+  /// Paradas intermedias ordenadas (Ola 2B); [] si el viaje es directo. El BFF las pasa al tripActiveView
+  /// para que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
+  waypoints: { lat: number; lon: number }[];
   found: boolean;
 }
 
@@ -130,6 +138,7 @@ const EMPTY_TRIP: TripReply = {
   destinationLat: 0,
   destinationLng: 0,
   routePolyline: '',
+  waypoints: [],
   found: false,
 };
 
@@ -164,6 +173,24 @@ export class TripGrpcController {
   async getActiveTrip({ passengerId }: ActiveTripRequest): Promise<TripReply> {
     const t = await this.prisma.read.trip.findFirst({
       where: { passengerId, status: { in: [...LIVE_STATES] } },
+      orderBy: { requestedAt: 'desc' },
+    });
+    if (!t) return EMPTY_TRIP;
+    return this.toReply(t);
+  }
+
+  /**
+   * Viaje ACTIVO (vivo) del CONDUCTOR, sin conocer su id: la app del conductor lo usa para REHIDRATAR
+   * el viaje en curso tras un reinicio (app matada mid-viaje → reabre → vuelve a la pantalla del viaje y
+   * reanuda la cámara de seguridad, regla #4). Filtrar por `driverId` ya acota a viajes asignados a ESTE
+   * conductor; LIVE_STATES los deja en estados no terminales. Normalmente 0 o 1; orden por robustez.
+   * found=false si no tiene ninguno (la app interpreta "sin viaje activo", no es error).
+   */
+  @GrpcMethod('TripService', 'GetActiveTripByDriver')
+  async getActiveTripByDriver({ driverId }: ActiveTripByDriverRequest): Promise<TripReply> {
+    if (!driverId) return EMPTY_TRIP;
+    const t = await this.prisma.read.trip.findFirst({
+      where: { driverId, status: { in: [...LIVE_STATES] } },
       orderBy: { requestedAt: 'desc' },
     });
     if (!t) return EMPTY_TRIP;
@@ -252,6 +279,8 @@ export class TripGrpcController {
       destinationLat: t.destLat,
       destinationLng: t.destLon,
       routePolyline: t.routePolyline ?? '',
+      // Paradas intermedias (Ola 2B) persistidas como JSON en Trip.waypoints; [] si el viaje es directo.
+      waypoints: readWaypoints(t),
       found: true,
     };
   }
@@ -289,6 +318,8 @@ export class TripGrpcController {
       destinationLat: v.destination.lat,
       destinationLng: v.destination.lon,
       routePolyline: v.routePolyline ?? '',
+      // El TripView ya trae las paradas como {lat,lon} ([] si directo); pasthrough directo al contrato gRPC.
+      waypoints: v.waypoints,
       found: true,
     };
   }

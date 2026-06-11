@@ -15,6 +15,7 @@ import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
+import { WaypointProposalService } from './waypoint-proposal.service';
 import { KycRequiredError } from './trips.errors';
 import {
   AcceptTripDto,
@@ -26,7 +27,9 @@ import {
   ChangeDestinationDto,
   CompleteTripDto,
   CreateTripDto,
+  ProposeWaypointDto,
   RebidTripDto,
+  RespondWaypointDto,
   ScheduledListQueryDto,
   StartTripDto,
 } from './dto/trip.dto';
@@ -44,6 +47,7 @@ export class TripsController {
     private readonly trips: TripsService,
     private readonly query: TripQueryService,
     private readonly scheduled: ScheduledTripService,
+    private readonly waypoints: WaypointProposalService,
   ) {}
 
   @Post()
@@ -147,6 +151,41 @@ export class TripsController {
   @ApiOperation({ summary: 'Cambio de destino aprobado por el pasajero; recalcula tarifa (BR-T01)' })
   changeDestination(@Param('id') id: string, @Body() dto: ChangeDestinationDto) {
     return this.trips.changeDestination(id, dto);
+  }
+
+  // ───────────────────────── Lote C1 · Parada mid-trip negociada ─────────────────────────
+
+  @Post(':id/waypoints')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'El PASAJERO propone una parada DURANTE el viaje (IN_PROGRESS): el server calcula el delta de ' +
+      'tarifa + ruta nueva y crea una propuesta con TTL. El conductor la acepta/rechaza (Lote C1).',
+  })
+  proposeWaypoint(
+    @Param('id') id: string,
+    @Body() dto: ProposeWaypointDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    // Anti-IDOR: el dueño es el userId FIRMADO (siempre presente vía InternalIdentityGuard), no el del body.
+    return this.waypoints.proposeWaypoint(id, { point: dto.point, passengerId: user.userId });
+  }
+
+  @Post(':id/waypoints/:proposalId/respond')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'El CONDUCTOR acepta o rechaza la parada propuesta. Si acepta: el waypoint se agrega al viaje y ' +
+      'la tarifa se actualiza (delta estampado server-side) en una transacción ACID (Lote C1).',
+  })
+  respondWaypoint(
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+    @Body() dto: RespondWaypointDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    // Anti-IDOR: el driverId dueño se toma de la identidad FIRMADA (driver-bff lo deriva), no del cliente.
+    return this.waypoints.respondWaypoint(id, proposalId, { accept: dto.accept, driverId: user.driverId });
   }
 
   @Post(':id/rebid')

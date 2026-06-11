@@ -15,6 +15,23 @@ type TxClient = Prisma.TransactionClient;
 /** Identidad del producer en los envelopes de evento que emite trip-service. */
 export const PRODUCER = 'trip-service';
 
+/**
+ * Lote C1 · Vocabulario TIPADO de eventos de la PARADA mid-trip negociada (§4-ter: nombres como const,
+ * nunca strings sueltos en el código de aplicación). Se usan en `recordTripEvent`/`enqueueOutbox` y en
+ * los consumidores downstream (notification-service push al pasajero/conductor). Mismo formato `trip.*`.
+ */
+export const WAYPOINT_EVENTS = {
+  /** El pasajero propuso una parada mid-trip; el conductor debe responder antes del TTL. */
+  PROPOSED: 'trip.waypoint_proposed',
+  /** El conductor aceptó: el waypoint se agregó al viaje y la tarifa se actualizó (delta estampado). */
+  ACCEPTED: 'trip.waypoint_accepted',
+  /** El conductor rechazó la parada propuesta. */
+  REJECTED: 'trip.waypoint_rejected',
+  /** Nadie respondió antes del TTL; el sweeper la expiró. */
+  EXPIRED: 'trip.waypoint_expired',
+} as const;
+export type WaypointEvent = (typeof WAYPOINT_EVENTS)[keyof typeof WAYPOINT_EVENTS];
+
 /** Inserta un evento de dominio en la tabla `trip_events` (historial auditable del viaje). */
 export async function recordTripEvent(
   tx: TxClient,
@@ -116,5 +133,117 @@ export async function emitBidPosted(
       },
     }),
     trip.id,
+  );
+}
+
+// ───────────────────────── Lote C1 · Parada mid-trip negociada ─────────────────────────
+
+/** Snapshot mínimo de una propuesta de parada para los emisores de eventos (sin acoplar al row Prisma). */
+export interface WaypointProposalEventData {
+  proposalId: string;
+  tripId: string;
+  passengerId: string;
+  driverId?: string;
+  point: { lat: number; lon: number };
+  deltaFareCents: number;
+  newFareCents: number;
+}
+
+/**
+ * El pasajero PROPUSO una parada mid-trip. Inserta el trip_event + outbox `trip.waypoint_proposed` en
+ * la MISMA transacción que crea la propuesta. notification-service pushea al CONDUCTOR (debe responder
+ * antes del TTL). `expiresAt` viaja en ISO para que el cliente muestre la cuenta regresiva.
+ */
+export async function emitWaypointProposed(
+  tx: TxClient,
+  data: WaypointProposalEventData,
+  expiresAt: Date,
+): Promise<void> {
+  const payload = {
+    proposalId: data.proposalId,
+    tripId: data.tripId,
+    passengerId: data.passengerId,
+    driverId: data.driverId,
+    point: data.point,
+    deltaFareCents: data.deltaFareCents,
+    newFareCents: data.newFareCents,
+    expiresAt: expiresAt.toISOString(),
+  };
+  await recordTripEvent(tx, data.tripId, WAYPOINT_EVENTS.PROPOSED, payload);
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: WAYPOINT_EVENTS.PROPOSED, producer: PRODUCER, payload }),
+    data.tripId,
+  );
+}
+
+/**
+ * El conductor ACEPTÓ la parada: el waypoint ya se agregó al viaje y la tarifa se actualizó (delta
+ * estampado server-side). trip_event + outbox `trip.waypoint_accepted` en la MISMA transacción que la
+ * mutación del viaje. notification-service pushea al PASAJERO ("tu parada fue aceptada, +S/ X").
+ */
+export async function emitWaypointAccepted(
+  tx: TxClient,
+  data: WaypointProposalEventData,
+): Promise<void> {
+  const payload = {
+    proposalId: data.proposalId,
+    tripId: data.tripId,
+    passengerId: data.passengerId,
+    driverId: data.driverId,
+    point: data.point,
+    deltaFareCents: data.deltaFareCents,
+    newFareCents: data.newFareCents,
+  };
+  await recordTripEvent(tx, data.tripId, WAYPOINT_EVENTS.ACCEPTED, payload);
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: WAYPOINT_EVENTS.ACCEPTED, producer: PRODUCER, payload }),
+    data.tripId,
+  );
+}
+
+/**
+ * El conductor RECHAZÓ la parada. trip_event + outbox `trip.waypoint_rejected` en la MISMA transacción
+ * que marca la propuesta REJECTED. notification-service pushea al PASAJERO ("tu parada fue rechazada").
+ */
+export async function emitWaypointRejected(
+  tx: TxClient,
+  data: WaypointProposalEventData,
+): Promise<void> {
+  const payload = {
+    proposalId: data.proposalId,
+    tripId: data.tripId,
+    passengerId: data.passengerId,
+    driverId: data.driverId,
+    point: data.point,
+  };
+  await recordTripEvent(tx, data.tripId, WAYPOINT_EVENTS.REJECTED, payload);
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: WAYPOINT_EVENTS.REJECTED, producer: PRODUCER, payload }),
+    data.tripId,
+  );
+}
+
+/**
+ * La propuesta EXPIRÓ sin respuesta (TTL vencido). La emite el sweeper en la MISMA transacción que la
+ * marca EXPIRED. notification-service pushea al PASAJERO ("tu parada venció sin respuesta").
+ */
+export async function emitWaypointExpired(
+  tx: TxClient,
+  data: Pick<WaypointProposalEventData, 'proposalId' | 'tripId' | 'passengerId' | 'point'>,
+): Promise<void> {
+  const payload = {
+    proposalId: data.proposalId,
+    tripId: data.tripId,
+    passengerId: data.passengerId,
+    point: data.point,
+  };
+  await recordTripEvent(tx, data.tripId, WAYPOINT_EVENTS.EXPIRED, payload);
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: WAYPOINT_EVENTS.EXPIRED, producer: PRODUCER, payload }),
+    data.tripId,
   );
 }

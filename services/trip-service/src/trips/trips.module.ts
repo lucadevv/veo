@@ -5,6 +5,8 @@ import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { TripWatchdogService } from './trip-watchdog.service';
+import { WaypointProposalService } from './waypoint-proposal.service';
+import { WaypointProposalScheduler } from './waypoint-proposal.scheduler';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
@@ -26,8 +28,10 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     UserDeletedConsumer,
     ScheduledTripsScheduler,
     TripWatchdogScheduler,
+    WaypointProposalService,
+    WaypointProposalScheduler,
   ],
   controllers: [TripsController],
-  exports: [TripsService, TripQueryService],
+  exports: [TripsService, TripQueryService, WaypointProposalService],
 })
 export class TripsModule {}

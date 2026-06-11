@@ -26,7 +26,7 @@ import {
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import type { AuthenticatedUser } from '@veo/auth';
-import { PricingMode, TripStatus, VehicleType } from '@veo/shared-types';
+import { PricingMode, TripStatus, resolveOfferingMode } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import type Redis from 'ioredis';
 import { PrismaService } from '../infra/prisma.service';
@@ -44,6 +44,8 @@ import { calculateFare } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
+import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
+import { bumpOfferingModeOverridden } from './trip-metrics';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
@@ -193,6 +195,16 @@ export class TripsService {
   }
 
   /**
+   * ADR 013 §2 · seam de resolución de la oferta del create. Delegación PURA en el resolver de dominio
+   * (domain/offering.ts). `protected` a propósito: los specs del conflicto de modo (§1.3.3) subclasean
+   * el servicio para inyectar una oferta restringida (solo-FIXED) — el catálogo real aún no tiene
+   * ofertas con allowedModes ≠ [PUJA, FIXED] y NO se inventa una entrada fantasma en producción.
+   */
+  protected resolveOffering(dto: CreateTripDto): TripOfferingResolution {
+    return resolveTripOffering(dto.category, dto.vehicleType);
+  }
+
+  /**
    * Piso del bid para una zona (ADR 010 §9.3). Decisión RATIFICADA: el piso canónico es Admin·Pricing
    * POR ZONA (motor de tarifas expone floor(zona)). Ese motor AÚN NO existe/está expuesto, así que
    * degradamos HONESTAMENTE al piso GLOBAL de config (BID_FLOOR_CENTS, default S/7). El parámetro
@@ -255,7 +267,22 @@ export class TripsService {
       }
     }
 
-    const vehicleType: PrismaVehicleType = dto.vehicleType ?? VehicleType.CAR;
+    // ADR 013 §2 · resuelve la OFERTA del catálogo (fuente única de pool + pricing + modos) con la
+    // precedencia EXACTA: category > vehicleType > default económico. Categoría desconocida → 400
+    // UNKNOWN_OFFERING (jamás default silencioso a económico). El seam protected permite a los specs
+    // inyectar una oferta restringida (el catálogo real aún no tiene allowedModes ≠ [PUJA, FIXED]).
+    const { offering, mismatch } = this.resolveOffering(dto);
+    if (mismatch) {
+      // category y vehicleType inconsistentes (bug de UI de una app vieja): GANA la oferta —
+      // offering.vehicleClass es la fuente del pool de matching. No 400: no rompemos apps en la calle.
+      this.logger.warn(
+        `createTrip: category '${offering.id}' y vehicleType '${dto.vehicleType}' inconsistentes; ` +
+          `gana la oferta (pool ${offering.vehicleClass}) (ADR 013 §2)`,
+      );
+    }
+    // ADR 013 · Trip.vehicleType DERIVA de la oferta (no del dto suelto): dispatch filtra por el pool
+    // certificable de la oferta elegida.
+    const vehicleType: PrismaVehicleType = offering.vehicleClass;
 
     // Ruta multi-punto (origen → paradas → destino): distancia/duración incluyen las paradas. La
     // ruta sigue alimentando distancia/duración/polyline aunque el precio venga del bid (la puja no
@@ -275,11 +302,24 @@ export class TripsService {
     // `scheduledFor` es null → resolvemos con `now` (sin cambio de comportamiento).
     const now = new Date();
     const resolveAt = scheduledFor ?? now;
-    const mode = await this.resolveDispatchMode(toZone(origin), resolveAt, dto.bidCents !== undefined);
+    const scheduledMode = await this.resolveDispatchMode(toZone(origin), resolveAt, dto.bidCents !== undefined);
+    // ADR 013 §1.3 · la oferta ACOTA al schedule: el admin PROPONE (scheduledMode) y la oferta decide
+    // si lo permite. Conflicto (modo fuera de allowedModes) → gana la oferta con su modo PREFERIDO
+    // (allowedModes[0]) + warn + counter (observabilidad: el flip del admin NUNCA hace negociar a una
+    // oferta que no negocia). Con las 4 ofertas actuales [PUJA, FIXED] la intersección es no-op.
+    const { mode, overridden } = resolveOfferingMode(offering, scheduledMode);
+    if (overridden) {
+      this.logger.warn(
+        `createTrip: el schedule pidió ${scheduledMode} pero la oferta ${offering.id} solo permite ` +
+          `[${offering.allowedModes.join(', ')}]; gana la oferta → ${mode} (ADR 013 §1.3.3)`,
+      );
+      bumpOfferingModeOverridden({ offering: offering.id, scheduledMode, mode });
+    }
     // El modo elegido por el SERVIDOR fija la tarifa + el seq de negociación vía Strategy (open/closed):
     //  - PUJA (ADR 010 §2): valida el bid (piso ≤ bid ≤ techo) y el bid ES el fareCents; seq=1. Falta el
     //    bid → 400 "falta tu oferta". El surge solo SUGIERE (decisión #5), no se aplica al bid.
-    //  - FIXED (BR-T05): IGNORA el bid, calcula la tarifa firme por ruta; seq=0.
+    //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
+    //    política de la oferta — max(round(calculateFare × multiplier), minFareCents); seq=0.
     // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
       bidCents: dto.bidCents,
@@ -287,6 +327,7 @@ export class TripsService {
       route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
       surge,
       childMode: dto.childMode ?? false,
+      pricing: offering.pricing,
     });
     const currency = 'PEN';
 
@@ -317,10 +358,10 @@ export class TripsService {
           paymentMethod: dto.paymentMethod,
           status: initialStatus,
           routePolyline: route.polyline || null,
-          // Categoría elegida en la cotización: se PERSISTE tal cual (quoteOption.id). La tarifa
-          // firme no se recalcula por categoría aquí; el multiplicador por categoría es de la
-          // previsualización del BFF (maps/fare.ts). Si se modela tarifa por categoría a futuro,
-          // este es el punto donde alimentar calculateFare con el multiplicador correspondiente.
+          // Categoría elegida en la cotización: se PERSISTE tal cual la mandó el cliente
+          // (quoteOption.id, validada contra el catálogo arriba; null = cliente viejo sin el campo —
+          // su oferta default ya alimentó pricing/pool igual). ADR 013 §1.7: la tarifa firme YA aplica
+          // la política de la oferta (multiplier + minFare) vía el Strategy — deuda saldada.
           category: dto.category ?? null,
           childMode: dto.childMode ?? false,
           childCodeHash,
@@ -614,9 +655,12 @@ export class TripsService {
         : false;
       if (!ok) {
         // B · registra el intento fallido (atómico) y, si alcanza el tope, echa el candado de 15 min.
-        await this.registerChildCodeFailure(id);
+        // El nº de intento VIAJA en el evento (contrato del registro central): para la alerta al
+        // padre/madre el 3er intento no es lo mismo que el 1ro.
+        const attempt = await this.registerChildCodeFailure(id);
+        const at = new Date().toISOString();
         await this.prisma.write.$transaction(async (tx) => {
-          await recordTripEvent(tx, id, 'trip.child_code_failed', { at: new Date().toISOString() });
+          await recordTripEvent(tx, id, 'trip.child_code_failed', { attempt, at });
           await enqueueOutbox(
             tx,
             createEnvelope({
@@ -625,8 +669,11 @@ export class TripsService {
               payload: {
                 tripId: id,
                 passengerId: trip.passengerId,
-                driverId: trip.driverId,
-                at: new Date().toISOString(),
+                // El schema central modela driverId como string opcional (nunca null): un null
+                // serializado al outbox haría fallar el parse del relay al publicar.
+                driverId: trip.driverId ?? undefined,
+                attempt,
+                at,
               },
             }),
             id,
@@ -675,13 +722,16 @@ export class TripsService {
   }
 
   /**
-   * B · registra UN intento fallido del código de modo niño (atómico vía INCR). En el PRIMER intento
-   * arma la ventana de 15 min (EXPIRE) para que el contador se auto-limpie. Al alcanzar el tope (5)
-   * echa el candado de 15 min (EX 900). INCR es atómico ⇒ robusto a reintentos concurrentes; el último
-   * que cruza el umbral setea el lock (idempotente: re-setearlo solo refresca el mismo TTL).
+   * B · registra UN intento fallido del código de modo niño (atómico vía INCR) y devuelve el Nº DE
+   * INTENTO dentro de la ventana (1..tope): viaja en `trip.child_code_failed` para que la alerta al
+   * padre/madre distinga el 3er intento del 1ro. En el PRIMER intento arma la ventana de 15 min
+   * (EXPIRE) para que el contador se auto-limpie. Al alcanzar el tope (5) echa el candado de 15 min
+   * (EX 900). INCR es atómico ⇒ robusto a reintentos concurrentes; el último que cruza el umbral setea
+   * el lock (idempotente: re-setearlo solo refresca el mismo TTL). Sin Redis (tests legacy) degrada
+   * honesto a 1: no hay contador, pero "hubo al menos este intento" y el evento no viaja sin el dato.
    */
-  private async registerChildCodeFailure(tripId: string): Promise<void> {
-    if (!this.redis) return;
+  private async registerChildCodeFailure(tripId: string): Promise<number> {
+    if (!this.redis) return 1;
     const attempts = await this.redis.incr(childCodeAttemptsKey(tripId));
     if (attempts === 1) {
       // primer fallo de la ventana → arma el TTL del contador (se auto-resetea si no se llega al tope).
@@ -690,6 +740,7 @@ export class TripsService {
     if (attempts >= CHILD_CODE_MAX_ATTEMPTS) {
       await this.redis.set(childCodeLockKey(tripId), '1', 'EX', CHILD_CODE_LOCK_SECONDS);
     }
+    return attempts;
   }
 
   /** B · acierto del código → borra contador y candado (reset al iniciar limpio). */

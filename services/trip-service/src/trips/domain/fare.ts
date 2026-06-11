@@ -7,6 +7,7 @@
  * que entrega @veo/maps (distanceMeters, durationSeconds). surge ∈ [1.0, 2.0] (default 1.0).
  */
 import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
+import type { OfferingPricingPolicy } from '@veo/shared-types';
 
 /** Banderazo base: S/ 6.00. */
 export const BASE_FARE_CENTS = 600;
@@ -53,4 +54,20 @@ export function calculateFare(input: FareInput): Money {
   const subtotalCents = Math.round(BASE_FARE_CENTS + PER_KM_CENTS * km + PER_MIN_CENTS * min);
   const surged = scaleMoney(money(subtotalCents), surge);
   return childMode ? addMoney(surged, money(CHILD_MODE_FEE_CENTS)) : surged;
+}
+
+/**
+ * ADR 013 §1.7 — aplica la política de pricing de la OFERTA (catálogo de @veo/shared-types, fuente
+ * única) a una tarifa BASE BR-T05:
+ *
+ *   tarifa firme = max(round(base × pricing.multiplier), pricing.minFareCents)
+ *
+ * FUENTE ÚNICA de la fórmula "tarifa firme desde base": la consumen FixedDispatchStrategy (tarifa
+ * del create FIXED) y el re-quote de la parada mid-trip (WaypointProposalService). NO se copia la
+ * fórmula a mano en ningún otro lado: si la política cambia, cambia ACÁ. Redondeo a céntimos
+ * ENTEROS vía `scaleMoney` (Math.round) — la misma convención del surge de `calculateFare`.
+ */
+export function applyOfferingPricing(base: Money, pricing: OfferingPricingPolicy): Money {
+  const scaled = scaleMoney(base, pricing.multiplier);
+  return money(Math.max(scaled.cents, pricing.minFareCents), base.currency);
 }

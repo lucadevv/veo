@@ -204,7 +204,10 @@ model Trip {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  events TripEvent[]
+  events             TripEvent[]
+  /// Propuestas de parada mid-trip negociadas (Lote C1). A lo sumo UNA PROPOSED viva a la vez (índice
+  /// único parcial en TripWaypointProposal); el resto son históricas (ACCEPTED/REJECTED/EXPIRED).
+  waypointProposals  TripWaypointProposal[]
 
   /// Historial del pasajero (hot-path): SUS viajes ordenados por requestedAt DESC con tie-break por id
   /// DESC para la paginación keyset (cursor). Postgres escanea el btree HACIA ATRÁS para el DESC, así que
@@ -259,6 +262,58 @@ model PricingModeSchedule {
   updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("pricing_mode_schedule")
+  @@schema("trip")
+}
+
+/// Estado de una PROPUESTA de parada mid-trip negociada (Lote C1). Coincide con
+/// WaypointProposalStatus del dominio (trips/domain/waypoint-proposal.ts). Solo PROPOSED es vivo;
+/// el resto son terminales. El pasajero PROPONE durante IN_PROGRESS, el conductor acepta/rechaza, o
+/// el sweeper la expira pasado el TTL.
+enum WaypointProposalStatus {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+
+  @@schema("trip")
+}
+
+/// Propuesta de PARADA mid-trip negociada (Lote C1). El pasajero propone agregar una parada DURANTE
+/// el viaje (IN_PROGRESS); el server calcula el delta de tarifa + la ruta nueva y crea esta propuesta
+/// con un TTL; el conductor la acepta (se agrega el waypoint al Trip y se estampa la tarifa nueva) o
+/// la rechaza. Server-authoritative: el delta/tarifa los computa el server, nunca el cliente (BR-T01).
+///
+/// "Una sola propuesta ACTIVA por viaje": índice ÚNICO PARCIAL `WHERE status='PROPOSED'` sobre tripId
+/// (se agrega a mano en la migración SQL — Prisma no modela índices parciales). Garantiza a nivel DB
+/// que no coexistan dos PROPOSED para el mismo viaje, cerrando la carrera de dos propose concurrentes.
+model TripWaypointProposal {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId String @map("trip_id") @db.Uuid
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  /// Coordenadas de la parada propuesta (mismo formato lat/lon que origen/destino del viaje).
+  lat Float
+  lon Float
+
+  /// Delta de tarifa en céntimos PEN (tarifa nueva − tarifa actual). Entero (dinero en enteros).
+  deltaFareCents Int @map("delta_fare_cents")
+  /// Tarifa TOTAL nueva en céntimos PEN si se acepta (= Trip.fareCents al aceptar). Snapshot server-side.
+  newFareCents   Int @map("new_fare_cents")
+
+  status      WaypointProposalStatus @default(PROPOSED)
+  proposedAt  DateTime               @default(now()) @map("proposed_at") @db.Timestamptz
+  /// Vencimiento del TTL (proposedAt + WAYPOINT_PROPOSAL_TTL_SEC). El sweeper expira PROPOSED vencidas.
+  expiresAt   DateTime               @map("expires_at") @db.Timestamptz
+  /// Cuándo el conductor respondió (accept/reject) o el sweeper expiró. Null mientras siga PROPOSED.
+  respondedAt DateTime?              @map("responded_at") @db.Timestamptz
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// El sweeper escanea PROPOSED con expiresAt vencido; respond/get leen por tripId.
+  @@index([status, expiresAt])
+  @@index([tripId])
+  @@map("trip_waypoint_proposals")
   @@schema("trip")
 }
 

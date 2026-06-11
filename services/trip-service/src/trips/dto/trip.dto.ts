@@ -302,6 +302,41 @@ export class ChangeDestinationDto {
 }
 
 /**
+ * Lote C1 · POST /trips/:id/waypoints — el PASAJERO propone una parada DURANTE el viaje (IN_PROGRESS).
+ * El server calcula el delta de tarifa + la ruta nueva y crea una propuesta con TTL. El passengerId lo
+ * fija el BFF desde la identidad autenticada (anti-IDOR; trip-service verifica la pertenencia server-side).
+ */
+export class ProposeWaypointDto {
+  @ApiProperty({ type: GeoPointDto, description: 'Parada propuesta (lat/lon).' })
+  @ValidateNested()
+  @Type(() => GeoPointDto)
+  point!: GeoPointDto;
+
+  /** A1 · ownership server-side (anti-IDOR). El BFF lo fija desde la identidad autenticada del pasajero. */
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  passengerId?: string;
+}
+
+/**
+ * Lote C1 · POST /trips/:id/waypoints/:proposalId/respond — el CONDUCTOR acepta o rechaza la parada
+ * propuesta. `accept` es la decisión; el driverId lo DERIVA el driver-bff server-side (anti-IDOR), el
+ * cliente no lo envía. Server-authoritative: el conductor NO fija la tarifa, solo acepta el delta estampado.
+ */
+export class RespondWaypointDto {
+  @ApiProperty({ description: 'true = aceptar la parada (se agrega al viaje); false = rechazar.' })
+  @IsBoolean()
+  accept!: boolean;
+
+  /** A1 · ownership server-side (anti-IDOR). driverId derivado por el BFF; trip-service verifica trip.driverId === driverId (404). */
+  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @IsOptional()
+  @IsUUID()
+  driverId?: string;
+}
+
+/**
  * POST /trips/:id/rebid — RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4). Reactiva la puja de un viaje
  * que quedó en REASSIGNING (re-match en curso) o EXPIRED (sin ofertas) a un NUEVO bid. El passengerId
  * lo fija el BFF desde la identidad autenticada (trip-service verifica la pertenencia server-side).

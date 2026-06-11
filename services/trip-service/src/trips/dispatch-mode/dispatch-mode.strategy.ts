@@ -8,7 +8,7 @@
  * `reassign` se incorporan en lotes siguientes (la firma se extiende, no se rompe).
  */
 import type { LatLon } from '@veo/utils';
-import type { PricingMode } from '@veo/shared-types';
+import type { OfferingPricingPolicy, PricingMode } from '@veo/shared-types';
 import type { Prisma, Trip } from '../../generated/prisma';
 
 type TxClient = Prisma.TransactionClient;
@@ -28,6 +28,13 @@ export interface DispatchCreationInput {
   route: { distanceMeters: number; durationSeconds: number };
   surge: number;
   childMode: boolean;
+  /**
+   * ADR 013 §1.7 · política de pricing de la OFERTA (del catálogo de @veo/shared-types, fuente única —
+   * NO se duplica la tabla acá). FIXED la APLICA a la tarifa firme: max(round(calculateFare ×
+   * multiplier), minFareCents). PUJA la IGNORA (el bid ES la tarifa; el multiplier solo afecta el
+   * suggestedCents del quote, que ya lo aplica el BFF).
+   */
+  pricing: OfferingPricingPolicy;
 }
 
 /** Resultado de fijar la creación: la tarifa firme + el seq inicial de negociación. */
