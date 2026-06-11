@@ -4,6 +4,7 @@ import { isDomainError, toH3, neighbors, DISPATCH_H3_RESOLUTION } from '@veo/uti
 import { VehicleType, SpecialRequest } from '@veo/shared-types';
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
+import type { DispatchRadiusConfigService } from './dispatch-radius-config.service';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
 import { DriverPool } from './driver-pool';
 import type {
@@ -371,6 +372,11 @@ function makeService(opts: {
   const config = new ConfigService<Env, true>({ DISPATCH_MAX_K_RING: 2 } as Partial<Env> as Env);
   const gate = opts.gate as unknown as EligibilityGate;
   const driverPool = new DriverPool(opts.hotIndex, opts.exclusion);
+  // Fake de la config de radios: el broadcast/listOpenBidsNear leen `matchKRing` en runtime. Devuelve 2
+  // para preservar el k-ring que estos tests asertan (neighbors(cell, 2)). `nearbyKRing` no aplica acá.
+  const radiusConfig = {
+    getKRings: async () => ({ nearbyKRing: 1, matchKRing: 2 }),
+  } as unknown as DispatchRadiusConfigService;
   return new OfferBoardService(
     opts.outbox.prisma as never,
     opts.store,
@@ -379,6 +385,7 @@ function makeService(opts: {
     (opts.maps ?? new FakeMaps()) as never,
     opts.delivery,
     gate,
+    radiusConfig,
     config,
   );
 }

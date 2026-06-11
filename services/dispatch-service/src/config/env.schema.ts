@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { BID_MAX_CENTS, secret } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -34,11 +35,14 @@ export const envSchema = z.object({
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
-  // ── Mapas self-hosted (NO Google). ETA para el scoring (BR-T06). ──
-  VEO_MAPS_MODE: z.enum(['osrm', 'local']).default('local'),
+  // ── Mapas (NO Google). ETA para el scoring (BR-T06). osrm/local self-hosted; 'mapbox' = Matrix API
+  // (token pk, detrás del puerto). Enum derivado de MAPS_MODES (fuente única, sin drift). ──
+  VEO_MAPS_MODE: z.enum(MAPS_MODES).default('local'),
   OSRM_BASE_URL: z.string().default('http://localhost:5000'),
   NOMINATIM_BASE_URL: z.string().default('http://localhost:8080'),
   MAPS_CACHE_TTL_SECONDS: z.coerce.number().default(60),
+  // Token público de Mapbox (`pk....`). Obligatorio solo cuando VEO_MAPS_MODE=mapbox (ver superRefine).
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
   // ── Hot index ──
   /// TTL del registro de ubicación de un conductor; si no pinguea, deja de ser candidato (BR-T06).
@@ -49,6 +53,11 @@ export const envSchema = z.object({
   DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
   /// Radio máximo del k-ring al expandir la búsqueda. El advance agota cada anillo antes de expandir.
   DISPATCH_MAX_K_RING: z.coerce.number().default(2),
+
+  // Config de RADIOS (k-rings) editable en runtime por el admin: TTL (ms) del cache in-proc de UN slot
+  // que sirve los k-rings al hot-path (feed de mapa + broadcast de pujas). La config cambia en el orden
+  // de HORAS; el PUT invalida el cache, así un cambio se ve de inmediato sin esperar el TTL. Default 10s.
+  DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
 
   // PUJA (ADR 010 §6, A4): TTL (ms) del cache in-proc de elegibilidad del conductor. El gate hace un
   // gRPC a identity por CADA submit/listOpenBidsNear; un conductor que pollea /bids/open cada 2-3s pega
@@ -77,6 +86,15 @@ export const envSchema = z.object({
   // ── Mapa de calor de demanda (Ola 2C) ──
   /// Ventana DESLIZANTE (s) de intensidad por celda H3; cada solicitud refresca el TTL de la celda.
   HEATMAP_WINDOW_SECONDS: z.coerce.number().default(900),
+}).superRefine((env, ctx) => {
+  // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.
+  if (env.VEO_MAPS_MODE === 'mapbox' && !env.MAPBOX_ACCESS_TOKEN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAPBOX_ACCESS_TOKEN'],
+      message: 'MAPBOX_ACCESS_TOKEN es obligatorio cuando VEO_MAPS_MODE=mapbox',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

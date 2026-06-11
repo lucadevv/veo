@@ -9,7 +9,7 @@
  */
 import type Redis from 'ioredis';
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import type { DriverLocation, HotIndex } from './hot-index.port';
 
 const LOC_PREFIX = 'driver:loc:';
@@ -56,7 +56,7 @@ export class RedisHotIndex implements HotIndex {
   async upsertLocation(
     driverId: string,
     point: LatLon,
-    vehicleType: VehicleType = VehicleType.CAR,
+    vehicleType: VehicleClass,
   ): Promise<DriverLocation> {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
     const prev = await this.getLocation(driverId);
@@ -161,9 +161,15 @@ export class RedisHotIndex implements HotIndex {
     return out;
   }
 
-  /** Parsea una loc del Redis y normaliza vehicleType (default CAR para pings previos a Ola 2B). */
+  /**
+   * Parsea una loc del Redis y normaliza vehicleType. El default CAR acá SE QUEDA (excepción explícita
+   * del ADR 013 §5 · Lote D): el hot index tiene DATOS VIEJOS REALES — locs persistidas por pings
+   * previos a Ola 2B sin el campo, que siguen vivas hasta que su TTL venza. No es un default que
+   * oculte una clase nueva (una loc nueva SIEMPRE trae la clase: upsertLocation la exige), es la
+   * lectura honesta de datos legacy en reposo.
+   */
   private static parseLocation(raw: string): DriverLocation {
     const parsed = JSON.parse(raw) as Partial<DriverLocation> & DriverLocation;
-    return { ...parsed, vehicleType: parsed.vehicleType ?? VehicleType.CAR };
+    return { ...parsed, vehicleType: parsed.vehicleType ?? VehicleClass.CAR };
   }
 }

@@ -29,7 +29,7 @@ import {
   type LatLon,
 } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
-import { DispatchOutcome, type SpecialRequest, VehicleType } from '@veo/shared-types';
+import { DispatchOutcome, type SpecialRequest, type VehicleClass } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
@@ -51,13 +51,14 @@ import {
   type OffersView,
 } from './offer-board.port';
 import { EligibilityGate } from './eligibility.gate';
+import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
 import type { Env } from '../config/env.schema';
 
 export interface BidPosted {
   tripId: string;
   passengerId: string;
   bidCents: number;
-  vehicleType: VehicleType;
+  vehicleType: VehicleClass;
   origin: LatLon;
   windowSec: number;
   /// H13 — ciclo de negociación del viaje (lo guardamos en el board y lo estampamos en offer_accepted).
@@ -72,7 +73,7 @@ export interface Reassigning {
   /// Conductor que canceló (se libera del hot-index para que vuelva a ser elegible).
   driverId: string;
   passengerId: string;
-  vehicleType: VehicleType;
+  vehicleType: VehicleClass;
   origin: LatLon;
   bidCents: number;
   /// H13 — ciclo de negociación del NUEVO re-match (seq incrementado por trip al pasar a REASSIGNING).
@@ -89,7 +90,6 @@ export interface SubmitOfferInput {
 @Injectable()
 export class OfferBoardService {
   private readonly logger = new Logger(OfferBoardService.name);
-  private readonly broadcastKRing: number;
   /**
    * Techo de la contraoferta en céntimos PEN (guardarraíl anti-abuso/anti-overflow int4). Un COUNTER
    * se vuelve el fareCents del viaje si el pasajero lo acepta, así que tampoco puede superarlo.
@@ -106,9 +106,11 @@ export class OfferBoardService {
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Inject(OFFER_DELIVERY) private readonly offerDelivery: OfferDelivery,
     private readonly eligibility: EligibilityGate,
+    // Radio de broadcast de pujas EDITABLE en runtime por el admin (config singleton, cacheado). La
+    // fuente VIVA del k-ring es este service; DISPATCH_MAX_K_RING queda como default de la config (schema).
+    private readonly radiusConfig: DispatchRadiusConfigService,
     config: ConfigService<Env, true>,
   ) {
-    this.broadcastKRing = config.getOrThrow<number>('DISPATCH_MAX_K_RING');
     // Techo de la contraoferta: del env (ajustable por entorno) con fallback al canónico de @veo/utils.
     this.bidMaxCents = config.get<number>('BID_MAX_CENTS') ?? BID_MAX_CENTS;
   }
@@ -199,7 +201,9 @@ export class OfferBoardService {
    */
   private async broadcast(board: OfferBoard): Promise<void> {
     const center = toH3(board.origin, DISPATCH_H3_RESOLUTION);
-    const cells = neighbors(center, this.broadcastKRing);
+    // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado); sin config → DEFAULT.
+    const { matchKRing } = await this.radiusConfig.getKRings();
+    const cells = neighbors(center, matchKRing);
     // Candidatos elegibles (disponibles + del tipo del board + no excluidos por pánico). Filtrado
     // centralizado en DriverPool (misma fuente que el matcher secuencial FIXED).
     const candidates = await this.driverPool.eligible(cells, board.vehicleType);
@@ -587,7 +591,9 @@ export class OfferBoardService {
     await this.eligibility.assertEligibleToOffer(driverId, loc.vehicleType);
 
     const center = toH3({ lat: loc.lat, lon: loc.lon }, DISPATCH_H3_RESOLUTION);
-    const cells = neighbors(center, this.broadcastKRing);
+    // Mismo radio que el broadcast, leído en RUNTIME (config editable por el admin, cacheado).
+    const { matchKRing } = await this.radiusConfig.getKRings();
+    const cells = neighbors(center, matchKRing);
     // A3/H11 — índice inverso celda→board: trae SOLO los boards cuyo ORIGEN cae en el k-ring del conductor
     // (ZRANGEBYSCORE `board:cell:<c>` <now>..+inf + MGET de ESOS candidatos), no TODOS los OPEN del
     // platform-wide. El costo del poll pasa de O(total open boards) a O(boards en el k-ring). El ZSET ya

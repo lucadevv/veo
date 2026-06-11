@@ -9,7 +9,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
 import { ConflictError, NotFoundError, type LatLon } from '@veo/utils';
-import { DispatchOutcome, type VehicleType } from '@veo/shared-types';
+import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
@@ -138,10 +138,11 @@ export class DispatchService {
   }
 
   /**
-   * Ingestión de un ping de ubicación (consumido de driver.location_updated). `vehicleType` (Ola 2B)
-   * refleja el vehículo activo del conductor y se persiste en el hot index para filtrar el matching.
+   * Ingestión de un ping de ubicación (consumido de driver.location_updated). `vehicleType` refleja
+   * la clase de vehículo activa del conductor y se persiste en el hot index para filtrar el matching.
+   * OBLIGATORIA (ADR 013 · Lote D): el default legacy vive en el borde Kafka, no acá.
    */
-  async ingestLocation(driverId: string, point: LatLon, vehicleType?: VehicleType): Promise<void> {
+  async ingestLocation(driverId: string, point: LatLon, vehicleType: VehicleClass): Promise<void> {
     await this.hotIndex.upsertLocation(driverId, point, vehicleType);
   }
 

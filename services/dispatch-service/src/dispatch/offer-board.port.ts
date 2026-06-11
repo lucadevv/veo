@@ -6,7 +6,7 @@
  * depende de esta interfaz (D de SOLID); en tests se inyecta un fake en memoria con el MISMO contrato.
  */
 import type { LatLon } from '@veo/utils';
-import type { SpecialRequest, VehicleType } from '@veo/shared-types';
+import type { SpecialRequest, VehicleClass } from '@veo/shared-types';
 
 export const OFFER_BOARD_STORE = Symbol('OFFER_BOARD_STORE');
 
@@ -78,7 +78,7 @@ export interface OfferBoard {
   passengerId: string;
   /** Piso de la negociación (céntimos PEN). ACCEPT_PRICE == bidCents; COUNTER > bidCents. */
   bidCents: number;
-  vehicleType: VehicleType;
+  vehicleType: VehicleClass;
   origin: LatLon;
   /**
    * A3 — celda H3 (a `DISPATCH_H3_RESOLUTION`) del ORIGEN del board, calculada UNA vez al abrirlo. Es la
@@ -136,7 +136,7 @@ export interface Offer {
  */
 export interface BidBroadcastFields {
   bidCents: number;
-  vehicleType: string;
+  vehicleType: VehicleClass;
   originLat: number;
   originLon: number;
   specialRequests: string[];
@@ -318,4 +318,4 @@ export interface OfferBoardStore {
   lapseAndAccept(tripId: string, winnerDriverId: string | null): Promise<number>;
 }
 
-export type { LatLon, VehicleType };
+export type { LatLon, VehicleClass };

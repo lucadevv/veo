@@ -8,7 +8,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import type { LatLon } from '@veo/utils';
-import type { VehicleType } from '@veo/shared-types';
+import type { VehicleClass } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
 
@@ -21,7 +21,7 @@ export class MatchingSessionStore {
    * inicio de ESTA ronda: el advance solo cuenta como "ya ofertados" los matches con offeredAt ≥ createdAt,
    * así un re-bid vuelve a ofertar a conductores de rondas previas (paridad con el matcher viejo).
    */
-  start(input: { tripId: string; origin: LatLon; vehicleType: VehicleType }): Promise<DispatchSession> {
+  start(input: { tripId: string; origin: LatLon; vehicleType: VehicleClass }): Promise<DispatchSession> {
     const data = {
       originLat: input.origin.lat,
       originLon: input.origin.lon,

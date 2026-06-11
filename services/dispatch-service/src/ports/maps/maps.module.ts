@@ -13,7 +13,19 @@ const mapsProvider: Provider = {
   provide: MAPS_CLIENT,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): MapsClient => {
-    const mode = config.getOrThrow<'osrm' | 'local'>('VEO_MAPS_MODE');
+    const mode = config.getOrThrow<Env['VEO_MAPS_MODE']>('VEO_MAPS_MODE');
+    if (mode === 'mapbox') {
+      // Mapbox Matrix/Directions (token pk, server-side, detrás del puerto). Antes `mode` se pasaba
+      // CRUDO al factory con solo opts `osrm` → createMapsClient lanzaba "mode mapbox requiere opciones
+      // mapbox" y dispatch NO arrancaba en modo mapbox (raíz del crash del stack global).
+      return createMapsClient({
+        mode: 'mapbox',
+        mapbox: {
+          accessToken: config.getOrThrow<string>('MAPBOX_ACCESS_TOKEN'),
+          cacheTtlSeconds: config.getOrThrow<number>('MAPS_CACHE_TTL_SECONDS'),
+        },
+      });
+    }
     return createMapsClient({
       mode,
       osrm: {

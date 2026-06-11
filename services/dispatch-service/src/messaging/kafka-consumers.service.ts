@@ -22,6 +22,7 @@ import {
   type EventEnvelope,
 } from '@veo/events';
 import { domainEventsTotal } from '@veo/observability';
+import { VehicleClass } from '@veo/shared-types';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { MatchingService } from '../dispatch/matching.service';
 import { SurgeService } from '../dispatch/surge.service';
@@ -81,9 +82,11 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
     await this.surge.recordDemand(p.origin);
     // Ola 2C: alimenta el mapa de calor de demanda por celda H3 (ventana deslizante en Redis).
     await this.heatmap.recordDemand(p.origin);
-    // Ola 2B: el matching filtra candidatos por tipo de vehículo (MOTO solo a conductores MOTO).
-    // Default CAR para eventos previos a Ola 2B (compat).
-    const requiredVehicleType = p.vehicleType ?? 'CAR';
+    // El matching filtra candidatos por clase de vehículo (MOTO solo a conductores MOTO). El default
+    // CAR acá es SOLO para eventos legacy pre-Ola 2B aún en el topic (el schema mantiene el campo
+    // opcional por compat N-2); post-catálogo (ADR 013 · Lote B) trip-service SIEMPRE lo emite
+    // derivado del offering, así que una clase nueva jamás cae acá: viaja explícita en el evento.
+    const requiredVehicleType = p.vehicleType ?? VehicleClass.CAR;
     // Abre la sesión de matching (event-driven) y dispara la primera oferta. NO bloquea el commit del
     // consumidor: el desenlace avanza por ESTADO en DB (offerNext desde el reject del conductor / el
     // reconciler de timeout), no por un await-loop con estado en proceso.
@@ -138,8 +141,10 @@ export class KafkaConsumersService implements OnModuleInit, OnModuleDestroy {
 
   private async onDriverLocation(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.location_updated'].parse(env.payload);
-    // Ola 2B: el tipo de vehículo activo (default CAR) se proyecta en el hot index para el filtrado.
-    await this.dispatch.ingestLocation(p.driverId, p.point, p.vehicleType ?? 'CAR');
+    // La clase de vehículo activa se proyecta en el hot index para el filtrado del matching. El
+    // default CAR es SOLO para pings legacy pre-Ola 2B aún en el topic (campo opcional por compat
+    // N-2 en el schema); driver-bff hoy SIEMPRE sella la clase server-authoritative en el evento.
+    await this.dispatch.ingestLocation(p.driverId, p.point, p.vehicleType ?? VehicleClass.CAR);
     domainEventsTotal.inc({ event: 'driver.location_updated', result: 'consumed' });
   }
 

@@ -16,22 +16,18 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { toH3, neighbors, distanceMeters, isWithinLima, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal, createLogger, type Logger } from '@veo/observability';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
 
 /** Conductor cercano ANÓNIMO (lo único que el pasajero ve en el mapa de "buscando"). */
 export interface NearbyDriver {
   lat: number;
   lon: number;
-  vehicleType: VehicleType;
+  vehicleType: VehicleClass;
 }
 
-/**
- * Anillos H3 (res 9 ≈ 174m de arista) del feed. k=1 → 7 celdas (centro + vecinas, ~500m de diámetro):
- * suficiente para "autos cerca tuyo" en el mapa, sin barrer una zona amplia (eso era el matching).
- */
-const NEARBY_K_RING = 1;
 /** Muestra máxima a traer de Redis (acota el costo del hot-path; ver header). */
 const SAMPLE_LIMIT = 60;
 /** Tope de autitos devueltos al cliente (de la muestra, los más cercanos primero). */
@@ -44,13 +40,16 @@ const round = (n: number): number => {
   return Math.round(n * f) / f;
 };
 
-const VEHICLE_TYPES = new Set<string>(Object.values(VehicleType));
+const VEHICLE_CLASSES = new Set<string>(Object.values(VehicleClass));
 
 @Injectable()
 export class NearbyDriversService {
   private readonly logger: Logger = createLogger('dispatch:nearby-drivers');
 
-  constructor(@Inject(HOT_INDEX) private readonly hotIndex: HotIndex) {}
+  constructor(
+    @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
+    private readonly radiusConfig: DispatchRadiusConfigService,
+  ) {}
 
   /**
    * Conductores disponibles cerca del `origin`, anónimos, ordenados por cercanía y capeados.
@@ -66,10 +65,12 @@ export class NearbyDriversService {
       return [];
     }
     // vehicleType del cliente: solo se respeta si es un valor REAL del enum; si no, se ignora (todos).
-    const vt = vehicleType && VEHICLE_TYPES.has(vehicleType) ? (vehicleType as VehicleType) : undefined;
+    const vt = vehicleType && VEHICLE_CLASSES.has(vehicleType) ? (vehicleType as VehicleClass) : undefined;
 
     const startedAt = Date.now();
-    const cells = neighbors(toH3(origin, DISPATCH_H3_RESOLUTION), NEARBY_K_RING);
+    // Radio del feed EDITABLE en runtime por el admin (config singleton, cacheado). Sin config → DEFAULT.
+    const { nearbyKRing } = await this.radiusConfig.getKRings();
+    const cells = neighbors(toH3(origin, DISPATCH_H3_RESOLUTION), nearbyKRing);
     const sample = await this.hotIndex.availableSample(cells, SAMPLE_LIMIT);
     const byType = vt ? sample.filter((l) => l.vehicleType === vt) : sample;
     const out = byType

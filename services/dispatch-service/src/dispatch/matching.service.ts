@@ -24,7 +24,7 @@ import {
   type LatLon,
 } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
-import { DispatchOutcome, VehicleType } from '@veo/shared-types';
+import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
@@ -43,11 +43,12 @@ export interface TripRequest {
   tripId: string;
   origin: LatLon;
   /**
-   * Tipo de vehículo requerido (Ola 2B · tier moto-taxi). Solo se ofertan conductores cuyo vehículo
-   * activo coincide (un viaje MOTO solo va a conductores MOTO; uno CAR solo a conductores CAR).
-   * Default CAR si el viaje no lo especifica.
+   * Clase de vehículo requerida (ADR 013 · key del pool de matching). Solo se ofertan conductores
+   * cuya clase activa coincide (un viaje MOTO solo va a conductores MOTO; uno CAR solo a CAR).
+   * OBLIGATORIA (Lote D): el default legacy para eventos viejos vive en el borde Kafka
+   * (kafka-consumers), no acá — un caller nuevo no puede omitirla y caer silencioso a CAR.
    */
-  requiredVehicleType?: VehicleType;
+  requiredVehicleType: VehicleClass;
 }
 
 @Injectable()
@@ -82,7 +83,7 @@ export class MatchingService {
     await this.sessions.start({
       tripId: trip.tripId,
       origin: trip.origin,
-      vehicleType: trip.requiredVehicleType ?? VehicleType.CAR,
+      vehicleType: trip.requiredVehicleType,
     });
     await this.offerNext(trip.tripId);
   }
@@ -222,7 +223,7 @@ export class MatchingService {
     cells: string[],
     origin: LatLon,
     attempted: Set<string>,
-    requiredVehicleType: VehicleType,
+    requiredVehicleType: VehicleClass,
   ): Promise<{ driverId: string; score: number; location: LatLon }[]> {
     // Candidatos elegibles (disponibles + del tipo requerido + no excluidos por pánico + no ya ofertados).
     // Filtrado centralizado en DriverPool (misma fuente que el broadcast de la PUJA).

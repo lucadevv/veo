@@ -11,14 +11,23 @@ import { describe, it, expect } from 'vitest';
 import { toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
 import { VehicleType } from '@veo/shared-types';
 import { NearbyDriversService } from './nearby-drivers.service';
+import {
+  DEFAULT_RADIUS_CONFIG,
+  type DispatchRadiusConfigService,
+} from './dispatch-radius-config.service';
 import { InMemoryHotIndex } from '../hot-index/in-memory-hot-index';
 
 const ORIGIN = { lat: -12.0464, lon: -77.0428 }; // Lima centro
 const CELL = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
 
+/** Fake de la config de radios: devuelve los DEFAULT k-rings (el hot-path los lee en runtime). */
+const fakeRadiusConfig = {
+  getKRings: async () => ({ ...DEFAULT_RADIUS_CONFIG }),
+} as unknown as DispatchRadiusConfigService;
+
 function makeService() {
   const hotIndex = new InMemoryHotIndex();
-  const service = new NearbyDriversService(hotIndex);
+  const service = new NearbyDriversService(hotIndex, fakeRadiusConfig);
   return { service, hotIndex };
 }
 

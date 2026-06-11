@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsPositive, IsString, Max } from 'class-validator';
 import { BID_MAX_CENTS } from '@veo/utils';
+import { VehicleClass } from '@veo/shared-types';
 import { OfferKind, OfferStatus, ClientBoardStatus } from '../offer-board.port';
 
 /**
@@ -82,8 +83,8 @@ export class OpenBidDto {
   tripId!: string;
   @ApiProperty()
   bidCents!: number;
-  @ApiProperty({ enum: ['CAR', 'MOTO'] })
-  vehicleType!: string;
+  @ApiProperty({ enum: VehicleClass })
+  vehicleType!: VehicleClass;
   @ApiProperty({ description: 'epoch(ms) en que vence la ventana de la puja.' })
   expiresAt!: number;
   @ApiProperty({ example: -12.0464 })

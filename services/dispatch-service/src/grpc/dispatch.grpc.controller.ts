@@ -6,6 +6,7 @@
 import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
 import { isDomainError } from '@veo/utils';
+import type { VehicleClass } from '@veo/shared-types';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { SurgeService } from '../dispatch/surge.service';
 import { NearbyDriversService } from '../dispatch/nearby-drivers.service';
@@ -43,7 +44,8 @@ interface GetNearbyDriversRequest {
 interface NearbyDriverReply {
   lat: number;
   lon: number;
-  vehicleType: string;
+  /** Clase canónica del catálogo (ADR 013): la respuesta la construimos nosotros, va tipada. */
+  vehicleType: VehicleClass;
 }
 interface NearbyDriversReply {
   drivers: NearbyDriverReply[];

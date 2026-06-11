@@ -17,7 +17,7 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ForbiddenError } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 
@@ -74,7 +74,7 @@ export class EligibilityGate {
    */
   async assertEligibleToOffer(
     driverId: string,
-    vehicleType: VehicleType,
+    vehicleType: VehicleClass,
     fresh = false,
   ): Promise<void> {
     // Capa 3: estado autoritativo en identity (NO el hot-index). Falla-cerrado ante error de red.
@@ -160,4 +160,4 @@ export class EligibilityGate {
   }
 }
 
-export { VehicleType };
+export { VehicleClass };

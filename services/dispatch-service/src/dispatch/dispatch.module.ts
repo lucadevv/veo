@@ -22,6 +22,16 @@ import { OfferBoardService } from './offer-board.service';
 import { OfferBoardScheduler } from './offer-board.scheduler';
 import { DispatchTimeoutReconciler } from './dispatch-timeout.reconciler';
 import { EligibilityGate, ELIGIBILITY_CACHE_TTL_MS } from './eligibility.gate';
+import { DispatchRadiusConfigController } from './dispatch-radius-config.controller';
+import {
+  DispatchRadiusConfigService,
+  DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS,
+} from './dispatch-radius-config.service';
+import { AdminIdentityGuard } from './admin-identity.guard';
+import {
+  DISPATCH_RADIUS_CONFIG_REPO,
+  PrismaDispatchRadiusConfigRepository,
+} from './dispatch-radius-config.repository';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
 import { FLEET_CLIENT } from '../fleet/fleet-client.port';
@@ -56,8 +66,16 @@ const eligibilityCacheTtlProvider: Provider = {
     config.getOrThrow<number>('ELIGIBILITY_CACHE_TTL_MS'),
 };
 
+// TTL (ms) del cache de la config de radios, desde DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS (default 10s).
+const radiusConfigCacheTtlProvider: Provider = {
+  provide: DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS,
+  inject: [ConfigService],
+  useFactory: (config: ConfigService<Env, true>) =>
+    config.getOrThrow<number>('DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS'),
+};
+
 @Module({
-  controllers: [DispatchController, OfferBoardController],
+  controllers: [DispatchController, OfferBoardController, DispatchRadiusConfigController],
   providers: [
     scorerProvider,
     { provide: EPHEMERAL_EVENT_PUBLISHER, useClass: KafkaEphemeralPublisher },
@@ -77,6 +95,12 @@ const eligibilityCacheTtlProvider: Provider = {
     OfferBoardService,
     OfferBoardScheduler,
     DispatchTimeoutReconciler,
+    // Config de RADIOS (k-rings) editable en runtime por el admin (espejo del pricing del trip-service).
+    DispatchRadiusConfigService,
+    AdminIdentityGuard,
+    radiusConfigCacheTtlProvider,
+    // Puerto → adaptador Prisma (clean arch: el servicio depende de la interfaz, no de la clase).
+    { provide: DISPATCH_RADIUS_CONFIG_REPO, useClass: PrismaDispatchRadiusConfigRepository },
   ],
   exports: [
     DispatchService,
@@ -86,6 +110,7 @@ const eligibilityCacheTtlProvider: Provider = {
     DriverProjectionService,
     OfferBoardService,
     EligibilityGate,
+    DispatchRadiusConfigService,
   ],
 })
 export class DispatchModule {}

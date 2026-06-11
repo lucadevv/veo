@@ -4,7 +4,7 @@
  * implementación real en memoria). La integración usa Redis real (testcontainers / localhost).
  */
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import type { DriverLocation, ExclusionRegistry, HotIndex } from './hot-index.port';
 
 export class InMemoryHotIndex implements HotIndex {
@@ -14,7 +14,7 @@ export class InMemoryHotIndex implements HotIndex {
   async upsertLocation(
     driverId: string,
     point: LatLon,
-    vehicleType: VehicleType = VehicleType.CAR,
+    vehicleType: VehicleClass,
   ): Promise<DriverLocation> {
     const loc: DriverLocation = {
       driverId,
@@ -34,7 +34,7 @@ export class InMemoryHotIndex implements HotIndex {
     lat: number,
     lon: number,
     h3: string,
-    vehicleType: VehicleType = VehicleType.CAR,
+    vehicleType: VehicleClass = VehicleClass.CAR,
   ): Promise<void> {
     this.locations.set(driverId, { driverId, lat, lon, h3, vehicleType, updatedAt: Date.now() });
   }

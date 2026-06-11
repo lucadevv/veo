@@ -44,7 +44,7 @@
  *    (o esperar a que todos los boards previos vencidos por TTL liberen sus keys de celda) en el cutover.
  */
 import type Redis from 'ioredis';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import { BoardStatus } from './offer-board.port';
 import type {
   ClaimResult,
@@ -506,8 +506,14 @@ export class RedisOfferBoardStore implements OfferBoardStore {
     return res;
   }
 
+  /**
+   * El default CAR acá SE QUEDA (mismo criterio que el parse del hot-index, ADR 013 §5 · Lote D):
+   * normaliza boards EN REPOSO en Redis escritos por una versión previa sin el campo (ventana de
+   * rolling deploy; el TTL del board los drena solo). Un board nuevo SIEMPRE trae la clase
+   * (`trip.bid_posted`/`trip.reassigning` la exigen en su schema) — esto no oculta una clase nueva.
+   */
   private static parseBoard(raw: string): OfferBoard {
     const parsed = JSON.parse(raw) as OfferBoard;
-    return { ...parsed, vehicleType: parsed.vehicleType ?? VehicleType.CAR };
+    return { ...parsed, vehicleType: parsed.vehicleType ?? VehicleClass.CAR };
   }
 }

@@ -7,7 +7,7 @@
  * (D de SOLID: depende de los puertos HotIndex/ExclusionRegistry, no de Redis directamente.)
  */
 import { Inject, Injectable } from '@nestjs/common';
-import type { VehicleType } from '@veo/shared-types';
+import type { VehicleClass } from '@veo/shared-types';
 import {
   HOT_INDEX,
   EXCLUSION_REGISTRY,
@@ -30,7 +30,7 @@ export class DriverPool {
    */
   async eligible(
     cells: string[],
-    vehicleType: VehicleType,
+    vehicleType: VehicleClass,
     opts: { exclude?: ReadonlySet<string> } = {},
   ): Promise<DriverLocation[]> {
     const available = await this.hotIndex.candidates(cells);

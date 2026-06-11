@@ -9,7 +9,7 @@
  * (D de SOLID: el dominio depende de estas interfaces, no de ioredis directamente.)
  */
 import type { LatLon } from '@veo/utils';
-import type { VehicleType } from '@veo/shared-types';
+import type { VehicleClass } from '@veo/shared-types';
 
 export const HOT_INDEX = Symbol('HOT_INDEX');
 export const EXCLUSION_REGISTRY = Symbol('EXCLUSION_REGISTRY');
@@ -22,10 +22,10 @@ export interface DriverLocation {
   /** Celda H3 (res 9) en la que está indexado. */
   h3: string;
   /**
-   * Tipo de vehículo activo del conductor (Ola 2B · tier moto-taxi). El matching filtra por este
-   * valor: un viaje MOTO solo se ofrece a conductores MOTO. Default CAR si el ping no lo trae.
+   * Clase de vehículo activa del conductor (ADR 013 · key del pool de matching). El matching filtra
+   * por este valor: un viaje MOTO solo se ofrece a conductores MOTO.
    */
-  vehicleType: VehicleType;
+  vehicleType: VehicleClass;
   /** epoch(ms) del último ping. */
   updatedAt: number;
 }
@@ -37,10 +37,11 @@ export interface DriverLocation {
 export interface HotIndex {
   /**
    * Ingiere un ping de ubicación (consumido de `driver.location_updated`). Mueve de celda si cambió.
-   * `vehicleType` (Ola 2B) refleja el vehículo activo del conductor; se persiste para filtrar el
-   * matching por tipo. Default CAR si no se provee.
+   * `vehicleType` refleja la clase de vehículo activa del conductor; se persiste para filtrar el
+   * matching por clase. OBLIGATORIO (ADR 013 · Lote D): el default legacy vive en el BORDE del evento
+   * (kafka-consumers), no acá — un caller nuevo no puede "olvidar" la clase y caer silencioso a CAR.
    */
-  upsertLocation(driverId: string, point: LatLon, vehicleType?: VehicleType): Promise<DriverLocation>;
+  upsertLocation(driverId: string, point: LatLon, vehicleType: VehicleClass): Promise<DriverLocation>;
   /** Marca al conductor como ocupado (asignado / en viaje): sale del pool disponible. */
   markBusy(driverId: string): Promise<void>;
   /** Reincorpora al conductor al pool disponible en su última celda conocida. */
@@ -72,4 +73,4 @@ export interface ExclusionRegistry {
   clear(driverId: string): Promise<void>;
 }
 
-export type { LatLon, VehicleType };
+export type { LatLon, VehicleClass };

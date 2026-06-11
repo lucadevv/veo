@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GenericContainer, type StartedTestContainer } from 'testcontainers';
 import Redis from 'ioredis';
 import { toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
+import { VehicleClass } from '@veo/shared-types';
 import { RedisHotIndex } from './redis-hot-index';
 import { RedisExclusionRegistry } from './redis-exclusion.registry';
 
@@ -34,23 +35,23 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('indexa y recupera candidatos disponibles por celda', async () => {
-    await hotIndex.upsertLocation('d1', A);
+    await hotIndex.upsertLocation('d1', A, VehicleClass.CAR);
     const cellA = toH3(A, DISPATCH_H3_RESOLUTION);
     const found = await hotIndex.candidates([cellA]);
     expect(found.map((f) => f.driverId)).toContain('d1');
   });
 
   it('mueve atómicamente al conductor entre celdas (LUA SREM+SADD)', async () => {
-    await hotIndex.upsertLocation('d2', A);
+    await hotIndex.upsertLocation('d2', A, VehicleClass.CAR);
     const cellA = toH3(A, DISPATCH_H3_RESOLUTION);
     const cellB = toH3(B, DISPATCH_H3_RESOLUTION);
-    await hotIndex.upsertLocation('d2', B);
+    await hotIndex.upsertLocation('d2', B, VehicleClass.CAR);
     expect((await hotIndex.candidates([cellA])).map((f) => f.driverId)).not.toContain('d2');
     expect((await hotIndex.candidates([cellB])).map((f) => f.driverId)).toContain('d2');
   });
 
   it('markBusy saca al conductor del pool y markAvailable lo reincorpora', async () => {
-    await hotIndex.upsertLocation('d3', A);
+    await hotIndex.upsertLocation('d3', A, VehicleClass.CAR);
     const cellA = toH3(A, DISPATCH_H3_RESOLUTION);
     await hotIndex.markBusy('d3');
     expect((await hotIndex.candidates([cellA])).map((f) => f.driverId)).not.toContain('d3');
