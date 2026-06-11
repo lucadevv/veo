@@ -5,9 +5,9 @@
 import { ForbiddenException, Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
 import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
-import { grpcIdentityMeta } from '../infra/grpc-identity';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import type { LiveAccessDto, RequestAccessDto } from './dto/media.dto';
@@ -95,10 +95,13 @@ export class MediaService {
     // la autoridad es esta verificación (un admin no puede mintear un token para un viaje arbitrario por
     // API directa). NO se bloquea el pánico: el admin/compliance es el RESPONDEDOR (el panel existe para eso),
     // a diferencia de la familia (a quien sí se le oculta, por si un atacante mira el enlace).
-    const meta = grpcIdentityMeta(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret);
     const trip = await this.tripGrpc.call<TripStateReply>('GetTrip', { id: dto.tripId }, meta);
     if (!trip.found) throw new NotFoundException('Viaje no encontrado');
-    if (trip.status !== 'IN_PROGRESS') {
+    // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política
+    // (solo viaje en curso) vive en el predicado de dominio compartido por los 3 BFFs.
+    const status = normalizeTripStatus(trip.status);
+    if (status === null || !canAccessLiveCabin(status)) {
       throw new ForbiddenException('La cámara en vivo solo está disponible durante un viaje en curso');
     }
     await this.audit.record(identity, {

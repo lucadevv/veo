@@ -1,5 +1,6 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsLatitude, IsLongitude, IsOptional, IsString, Matches, Min } from 'class-validator';
 import type { TripStatus } from '@veo/api-client';
 
 export class AcceptTripDto {
@@ -34,6 +35,18 @@ export class CancelTripDto {
 }
 
 /**
+ * Lote C2 · POST /trips/:id/waypoints/:proposalId/respond (lado conductor). El conductor ACEPTA o RECHAZA
+ * la parada propuesta por el pasajero. El cuerpo SOLO transporta la decisión: el driverId NO se acepta del
+ * cliente, el BFF lo DERIVA server-side (anti-IDOR) y lo manda al trip-service. Server-authoritative: el
+ * conductor no fija la tarifa, solo acepta el delta ya estampado por trip-service al proponer.
+ */
+export class RespondWaypointDto {
+  @ApiProperty({ description: 'true = aceptar la parada (se agrega al viaje); false = rechazar.' })
+  @IsBoolean()
+  accept!: boolean;
+}
+
+/**
  * POST /trips/:id/complete (lado conductor). EFECTIVO (decisión del dueño): al dar por terminado el
  * viaje, el conductor marca si COBRÓ el efectivo en mano (`cashCollected`) — su lado de la confirmación
  * bilateral (driverConfirmed, BR-P03). Solo aplica a viajes CASH; en digital se ignora. El driverId NO
@@ -48,6 +61,26 @@ export class CompleteTripDto {
   @IsOptional()
   @IsBoolean()
   cashCollected?: boolean;
+}
+
+/**
+ * Query opcional de GET /trips/:id/route: la POSICIÓN ACTUAL del conductor para calcular la ruta desde
+ * donde está (ETA vivo + re-ruteo por desvío). Ambos opcionales y validados como lat/lon; el controller
+ * exige AMBOS para usarlos (si falta uno, degrada a ruta desde el origen del viaje). `@Type(Number)`
+ * porque el query string llega como texto y class-validator necesita el número para validar el rango.
+ */
+export class RouteQueryDto {
+  @ApiPropertyOptional({ description: 'Latitud actual del conductor (-90..90)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsLatitude()
+  lat?: number;
+
+  @ApiPropertyOptional({ description: 'Longitud actual del conductor (-180..180)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsLongitude()
+  lon?: number;
 }
 
 /** Vista de un viaje (lado conductor). */

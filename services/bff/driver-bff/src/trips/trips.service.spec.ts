@@ -29,6 +29,9 @@ function makeService(opts: {
     id: 'trip-1',
     driverId: opts.tripDriverId ?? 'drv-9',
     found: opts.tripFound ?? true,
+    // `toTripView` normaliza el status (lanza si es desconocido). El fixture debe traer un status
+    // válido; antes faltaba y el test de getTrip propio reventaba con "Estado de viaje desconocido".
+    status: 'IN_PROGRESS',
   };
   // grpc.call resuelve según el método: GetDriverByUser → perfil; GetTrip → viaje.
   const call = vi.fn((_svc: string, method: string) =>

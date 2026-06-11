@@ -1,7 +1,7 @@
 /**
  * Sesión/onboarding del conductor. Todos los endpoints exigen JWT de tipo 'driver'.
  */
-import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type {
@@ -20,6 +20,7 @@ import {
   EnrollFaceDto,
   OnboardDto,
   RegisterVehicleDto,
+  SelectActiveVehicleDto,
   StartShiftDto,
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
@@ -27,6 +28,11 @@ import {
   type DriverProfileView,
   type DriverVehicleView,
 } from './dto/drivers.dto';
+
+/** Mínimo del response para fijar el status (204) sin acoplar a express/fastify. */
+interface HttpResponseLike {
+  status(code: number): unknown;
+}
 
 @ApiTags('drivers')
 @DriverApi()
@@ -87,6 +93,29 @@ export class DriversController {
   @ApiOperation({ summary: 'Listar los vehículos del conductor autenticado (rehidratación)' })
   vehicles(@CurrentUser() user: AuthenticatedUser): Promise<DriverVehicleView[]> {
     return this.drivers.getVehicles(user);
+  }
+
+  @Get('active-vehicle')
+  @ApiOperation({ summary: 'Vehículo ACTIVO (operado) del conductor; 200 + vehículo o 204 si ninguno' })
+  async activeVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<DriverVehicleView | undefined> {
+    const vehicle = await this.drivers.getActiveVehicle(user);
+    if (!vehicle) {
+      res.status(204);
+      return undefined;
+    }
+    return vehicle;
+  }
+
+  @Patch('active-vehicle')
+  @ApiOperation({ summary: 'Seleccionar el vehículo ACTIVO del conductor (server-authoritative)' })
+  selectActiveVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SelectActiveVehicleDto,
+  ): Promise<DriverVehicleView> {
+    return this.drivers.setActiveVehicle(user, dto.vehicleId);
   }
 
   @Get('shift/state')

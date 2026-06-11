@@ -54,6 +54,7 @@ export const envSchema = z.object({
   // ── REST interno firmado (COMANDOS) — todos /api/v1 ──
   IDENTITY_URL: z.string().default('http://localhost:3001/api/v1'),
   TRIP_URL: z.string().default('http://localhost:3002/api/v1'),
+  DISPATCH_URL: z.string().default('http://localhost:3003/api/v1'),
   PAYMENT_URL: z.string().default('http://localhost:3005/api/v1'),
   PANIC_URL: z.string().default('http://localhost:3006/api/v1'),
   MEDIA_URL: z.string().default('http://localhost:3007/api/v1'),

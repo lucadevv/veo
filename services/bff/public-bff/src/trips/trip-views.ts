@@ -68,6 +68,12 @@ export interface TripDetailView {
   origin: { lat: number; lng: number };
   destination: { lat: number; lng: number };
   /**
+   * Paradas intermedias ordenadas (Ola 2B · paradas múltiples); `[]` si el viaje es directo. FUENTE ÚNICA:
+   * el pasajero las pinta desde el trip del servidor (las MISMAS que ve el conductor), no desde su borrador
+   * local. Forma `{lat,lon}` (igual que el `geoPoint` del contrato mobile `tripActiveView.waypoints`).
+   */
+  waypoints: { lat: number; lon: number }[];
+  /**
    * Ruta del viaje codificada (polyline), persistida por trip-service (Trip.routePolyline); null si el viaje
    * no la tiene. La app la pinta en el mapa del detalle; si es null degrada a línea recta origen→destino.
    */
@@ -206,6 +212,8 @@ export function buildTripDetail(
     cancelledAt: trip.cancelledAt || null,
     origin: { lat: trip.originLat, lng: trip.originLng },
     destination: { lat: trip.destinationLat, lng: trip.destinationLng },
+    // Paradas intermedias del trip del servidor (passthrough gRPC); [] si directo (proto3 nunca null).
+    waypoints: trip.waypoints ?? [],
     routePolyline: trip.routePolyline || null,
     driver: buildDriverView(driver, aggregate),
     vehicle: buildVehicleView(vehicle),

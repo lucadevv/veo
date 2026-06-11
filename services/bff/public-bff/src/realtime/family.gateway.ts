@@ -26,7 +26,7 @@ import { InternalRestClient } from '@veo/rpc';
 import { Public } from '@veo/auth';
 import { createLogger, type Logger } from '@veo/observability';
 import { REST_SHARE } from '../infra/downstream.tokens';
-import { ANONYMOUS_IDENTITY } from '../infra/internal-identity';
+import { ANONYMOUS_IDENTITY } from '../common/identities';
 import { RealtimeStateService } from './realtime-state.service';
 import { familyRoom, type ShareTrackingDownstream } from '../share/share.types';
 

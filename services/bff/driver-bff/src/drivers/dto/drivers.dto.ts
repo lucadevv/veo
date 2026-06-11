@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -203,6 +204,13 @@ export class RegisterVehicleDto {
   @IsString()
   @Length(1, 30)
   color?: string;
+}
+
+/** Body para seleccionar el vehículo ACTIVO del conductor (PATCH /drivers/active-vehicle). */
+export class SelectActiveVehicleDto {
+  @ApiProperty({ description: 'Id del vehículo del conductor a marcar como activo' })
+  @IsUUID()
+  vehicleId!: string;
 }
 
 /**

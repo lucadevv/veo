@@ -22,3 +22,4 @@ export const REST_PAYMENT = Symbol('VEO_REST_PAYMENT');
 export const REST_MEDIA = Symbol('VEO_REST_MEDIA');
 export const REST_AUDIT = Symbol('VEO_REST_AUDIT');
 export const REST_FLEET = Symbol('VEO_REST_FLEET');
+export const REST_DISPATCH = Symbol('VEO_REST_DISPATCH');

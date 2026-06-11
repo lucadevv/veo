@@ -5,10 +5,9 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { GRPC_IDENTITY, GRPC_TRIP, REST_PANIC } from '../infra/tokens';
-import { grpcIdentityMeta } from '../infra/grpc-identity';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import type { ListPanicsQueryDto, ResolvePanicDto, PanicEvidenceDto } from './dto/panic.dto';
@@ -84,7 +83,7 @@ export class SecurityService {
    */
   private async enrichPanicDetail(identity: AuthenticatedUser, p: PanicEntity): Promise<PanicDetail> {
     const base = toPanicDetail(p);
-    const meta = grpcIdentityMeta(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: p.tripId }, meta).catch(() => null);
     const driverId = trip?.found ? trip.driverId || null : null;
     const [passenger, driver] = await Promise.all([

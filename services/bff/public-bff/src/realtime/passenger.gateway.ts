@@ -26,8 +26,10 @@ import {
   type PassengerServerToClient,
   type TripStatus,
   type TripUpdateMsg,
+  type WaypointProposalOutcome,
 } from '@veo/api-client';
 import {
+  grpcIdentityMetadata,
   INTERNAL_IDENTITY_SECRET,
   JWT_SERVICE,
   Public,
@@ -38,7 +40,6 @@ import {
 import { GrpcServiceClient } from '@veo/rpc';
 import { createLogger, type Logger } from '@veo/observability';
 import { GRPC_TRIP } from '../infra/downstream.tokens';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { TripReply } from '../infra/grpc-types';
 import { RealtimeStateService } from './realtime-state.service';
 import { passengerRoom } from '../share/share.types';
@@ -160,6 +161,13 @@ export class PassengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  /** Lote C4 · desenlace de una parada propuesta (aceptada/rechazada/vencida) a la sala del pasajero. */
+  emitWaypointOutcome(tripId: string, msg: WaypointProposalOutcome): void {
+    if (this.state.isPassengerActive(tripId)) {
+      this.server.to(passengerRoom(tripId)).emit('waypoint:outcome', msg);
+    }
+  }
+
   private async authenticate(client: PassengerSocket): Promise<AuthenticatedUser> {
     const token = this.extractToken(client);
     if (!token) throw new Error('falta el token de acceso');
@@ -173,7 +181,7 @@ export class PassengerGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   /** Verifica vía gRPC que el viaje exista, sea de este pasajero y siga activo. */
   private async authorizeTrip(user: AuthenticatedUser, tripId: string): Promise<void> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new Error('viaje no encontrado');
     if (trip.passengerId !== user.userId) throw new Error('el viaje no pertenece al pasajero');

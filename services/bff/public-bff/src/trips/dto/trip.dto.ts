@@ -158,6 +158,18 @@ export class ChangeDestinationDto {
 }
 
 /**
+ * Lote C2 · POST /trips/:id/waypoints — el PASAJERO propone una parada DURANTE el viaje (IN_PROGRESS).
+ * El cuerpo SOLO transporta el punto: el passengerId lo estampa el BFF desde la identidad (anti-IDOR) y
+ * el delta de tarifa lo calcula trip-service (server-authoritative; el cliente no fija precio).
+ */
+export class ProposeWaypointDto {
+  @ApiProperty({ type: GeoPointDto, description: 'Parada propuesta (lat/lon).' })
+  @ValidateNested()
+  @Type(() => GeoPointDto)
+  point!: GeoPointDto;
+}
+
+/**
  * RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4). El pasajero reactiva la puja de SU viaje
  * (REASSIGNING/EXPIRED) a un nuevo bid. El passengerId lo fija el BFF desde la identidad; el ownership
  * y la validación AUTORITATIVA (piso ≤ bid ≤ techo, estado válido) viven server-side en trip-service.

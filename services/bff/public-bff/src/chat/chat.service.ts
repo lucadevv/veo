@@ -6,11 +6,10 @@
  */
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import type { ChatMessage } from '@veo/api-client';
 import { GRPC_TRIP, REST_CHAT } from '../infra/downstream.tokens';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { TripReply } from '../infra/grpc-types';
 
 /** Estados en los que el chat está habilitado (viaje activo entre sus dos partes). */
@@ -56,7 +55,7 @@ export class ChatService {
     tripId: string,
     requireActive: boolean,
   ): Promise<void> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {

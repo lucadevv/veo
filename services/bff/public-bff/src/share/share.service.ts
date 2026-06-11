@@ -6,7 +6,7 @@
  */
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { DownstreamError, GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import type { MapsClient } from '@veo/maps';
 import type { FamilyTrackingView, FamilyVideoGrant, GeoPoint } from '@veo/api-client';
 import {
@@ -19,7 +19,7 @@ import {
   REST_TRIP,
 } from '../infra/downstream.tokens';
 import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from './livekit-token';
-import { ANONYMOUS_IDENTITY, internalGrpcMetadata } from '../infra/internal-identity';
+import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { AggregateReply, DriverReply, VehicleReply } from '../infra/grpc-types';
 import { RealtimeStateService } from '../realtime/realtime-state.service';
 import { FamilyGateway } from '../realtime/family.gateway';
@@ -91,7 +91,7 @@ export class ShareService {
       return assembleMaskedPanicView(downstream.tripId, shareTokenExpiryIso(token));
     }
 
-    const meta = internalGrpcMetadata(ANONYMOUS_IDENTITY, this.secret);
+    const meta = grpcIdentityMetadata(ANONYMOUS_IDENTITY, this.secret);
     const trip = await this.tripRest
       .get<TripResource>(`/trips/${downstream.tripId}`, { identity: ANONYMOUS_IDENTITY })
       .catch(() => null);

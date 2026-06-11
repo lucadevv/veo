@@ -5,9 +5,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { GrpcServiceClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_AUDIT } from '../infra/tokens';
-import { grpcIdentityMeta } from '../infra/grpc-identity';
 import type { Env } from '../config/env.schema';
 
 export interface AuditAction {
@@ -44,7 +43,7 @@ export class AuditRecorder {
         resourceId: action.resourceId,
         payloadJson: JSON.stringify(action.payload ?? {}),
       },
-      grpcIdentityMeta(identity, this.secret),
+      grpcIdentityMetadata(identity, this.secret),
     );
   }
 }

@@ -5,13 +5,7 @@
  */
 import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  signInternalIdentity,
-  INTERNAL_IDENTITY_HEADER,
-  INTERNAL_IDENTITY_SIG_HEADER,
-  INTERNAL_IDENTITY_SECRET,
-  type AuthenticatedUser,
-} from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { createGrpcClient, type GrpcServiceClient, type ServiceName } from '@veo/rpc';
 import type { Env } from '../config/env.schema';
 
@@ -47,11 +41,8 @@ export class GrpcGateway implements OnModuleDestroy {
     identity: AuthenticatedUser,
   ): Promise<TRes> {
     const client = this.clientFor(service);
-    const { header, signature } = signInternalIdentity(identity, this.secret);
-    return client.call<TRes>(method, request, {
-      [INTERNAL_IDENTITY_HEADER]: header,
-      [INTERNAL_IDENTITY_SIG_HEADER]: signature,
-    });
+    const meta = grpcIdentityMetadata(identity, this.secret);
+    return client.call<TRes>(method, request, meta);
   }
 
   private clientFor(service: DriverGrpcService): GrpcServiceClient {

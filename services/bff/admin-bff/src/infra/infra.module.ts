@@ -26,6 +26,7 @@ import {
   REST_MEDIA,
   REST_AUDIT,
   REST_FLEET,
+  REST_DISPATCH,
 } from './tokens';
 
 /** Cierra los clientes gRPC y Redis al apagar el proceso. */
@@ -109,6 +110,7 @@ const providers: Provider[] = [
   restProvider(REST_MEDIA, 'MEDIA_URL'),
   restProvider(REST_AUDIT, 'AUDIT_URL'),
   restProvider(REST_FLEET, 'FLEET_URL'),
+  restProvider(REST_DISPATCH, 'DISPATCH_URL'),
   InfraLifecycle,
 ];
 

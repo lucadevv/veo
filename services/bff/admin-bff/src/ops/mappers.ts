@@ -1,7 +1,14 @@
 /**
  * Mappers OPS: registros del read-model / replies gRPC → vistas públicas de @veo/api-client.
  */
-import type { TripSummary, DriverSummary, DriverApproval, TripStatus } from '@veo/api-client';
+import {
+  normalizeTripStatus,
+  type AdminTripStatus,
+  type DriverApproval,
+  type DriverSummary,
+  type TripStatus,
+  type TripSummary,
+} from '@veo/api-client';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
 
 export function tripRecordToSummary(r: TripRecord): TripSummary {
@@ -39,23 +46,36 @@ export function driverRecordToApproval(r: DriverRecord): DriverApproval {
   };
 }
 
-/** Normaliza el estado de trip-service (@veo/shared-types) al enum de la vista (@veo/api-client). */
-export function mapTripStatus(raw: string): TripStatus {
-  switch (raw) {
-    case 'REQUESTED':
-    case 'ASSIGNED':
-    case 'ACCEPTED':
-    case 'ARRIVING':
-    case 'ARRIVED':
-    case 'IN_PROGRESS':
-    case 'COMPLETED':
-      return raw;
-    case 'CANCELLED_BY_PASSENGER':
-    case 'CANCELLED_BY_DRIVER':
-    case 'EXPIRED':
-    case 'FAILED':
-      return 'CANCELLED';
-    default:
-      return 'REQUESTED';
-  }
+/**
+ * Vista OPS de cada estado del contrato — EXHAUSTIVO: agregar un `TripStatus` nuevo sin decidir su
+ * cara admin es error de COMPILACIÓN (el Record exige cubrir cada clave), no un default mudo.
+ * Hoy es identidad porque el contrato admin ya expresa todos los estados de forma honesta —
+ * en particular REASSIGNING (pasajero abandonado, ops DEBE intervenir), SCHEDULED, EXPIRED y
+ * FAILED, que el switch anterior disfrazaba de REQUESTED/CANCELLED.
+ */
+const ADMIN_TRIP_STATUS: Record<TripStatus, AdminTripStatus> = {
+  SCHEDULED: 'SCHEDULED',
+  REQUESTED: 'REQUESTED',
+  MATCHING: 'MATCHING',
+  ASSIGNED: 'ASSIGNED',
+  ACCEPTED: 'ACCEPTED',
+  ARRIVING: 'ARRIVING',
+  ARRIVED: 'ARRIVED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  REASSIGNING: 'REASSIGNING',
+  EXPIRED: 'EXPIRED',
+  FAILED: 'FAILED',
+};
+
+/**
+ * Normaliza el estado CRUDO de trip-service al enum de la vista OPS (@veo/api-client).
+ * `normalizeTripStatus` resuelve los alias del dominio (CANCELLED_BY_* → CANCELLED) y valida contra
+ * el contrato; un valor fuera del contrato se reporta como UNKNOWN honesto (visible para ops),
+ * nunca como un REQUESTED falso.
+ */
+export function mapTripStatus(raw: string): AdminTripStatus {
+  const normalized = normalizeTripStatus(raw);
+  return normalized === null ? 'UNKNOWN' : ADMIN_TRIP_STATUS[normalized];
 }

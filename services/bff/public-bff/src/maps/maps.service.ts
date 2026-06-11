@@ -11,10 +11,18 @@ import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { GeocodeResult, MapsClient } from '@veo/maps';
 import { InternalRestClient } from '@veo/rpc';
+import {
+  OFFERING_LIST,
+  OFFERINGS,
+  OfferingId,
+  resolveOfferingMode,
+  type OfferingSpec,
+} from '@veo/shared-types';
 import { MAPS, REST_TRIP } from '../infra/downstream.tokens';
-import { ANONYMOUS_IDENTITY } from '../infra/internal-identity';
+import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { Env } from '../config/env.schema';
-import { categoryFareCents, minFareForCategory, RIDE_CATEGORIES } from './fare';
+import { categoryFareCents } from './fare';
+import { OFFERING_DISPLAY_NAMES } from './offering-names';
 import {
   type PlaceSuggestion,
   type PricingMode,
@@ -26,8 +34,12 @@ import {
 /** Longitud mínima del texto para disparar el autocompletado (evita ruido/costos). */
 const MIN_QUERY_LENGTH = 3;
 
-/** Multiplicador de la categoría ancla (VEO Económico = 1.0) para el `suggestedCents` de la PUJA. */
-const ANCHOR_MULTIPLIER = 1.0;
+/**
+ * Oferta ANCLA del quote (ADR 013 §1.3): VEO Económico. Su política alimenta el `suggestedCents`
+ * de la PUJA (la tarifa que SERÍA fija con la oferta base) y su modo es el `mode` top-level
+ * (compat con apps viejas que no leen `options[].mode`).
+ */
+const ANCHOR_OFFERING = OFFERINGS[OfferingId.VEO_ECONOMICO];
 
 /** Respuesta del endpoint interno GET /internal/pricing/resolve de trip-service (ADR 011). */
 interface ResolveModeReply {
@@ -90,27 +102,38 @@ export class MapsService {
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
     // La ruta y la resolución del modo son independientes → en paralelo (el modo usa el origen).
-    const [route, mode] = await Promise.all([
+    const [route, scheduledMode] = await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
       // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
       this.resolveMode(dto.origin.lat, dto.origin.lng, identity, dto.scheduledFor),
     ]);
 
-    const options = RIDE_CATEGORIES.map((category) => ({
-      id: category.id,
-      name: category.name,
-      // Ola 2B: el tipo de vehículo de la opción (la app lo usa para mostrar y para crear el viaje).
-      vehicleType: category.vehicleType,
-      // ETA del trayecto (mismo recorrido para todas las categorías).
+    // ADR 013 §1.3 · el `mode` top-level mantiene su semántica: el modo de la oferta ANCLA (VEO
+    // Económico). Hoy el ancla permite ambos modos → es el scheduledMode tal cual (no-op); si algún
+    // día el ancla se restringiera, el top-level seguiría siendo honesto por construcción.
+    const mode = resolveOfferingMode(ANCHOR_OFFERING, scheduledMode).mode;
+
+    // Las opciones SALEN del catálogo (ADR 013): OFFERING_LIST ya viene ordenado por sortOrder.
+    const options = this.quotedOfferings().map((offering) => ({
+      id: offering.id,
+      // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
+      name: OFFERING_DISPLAY_NAMES[offering.id],
+      // Ola 2B: la clase de vehículo de la oferta (la app la usa para mostrar y para crear el viaje).
+      vehicleType: offering.vehicleClass,
+      // ETA del trayecto (mismo recorrido para todas las ofertas).
       etaSeconds: route.durationSeconds,
       priceCents: categoryFareCents(
         route.distanceMeters,
         route.durationSeconds,
-        category.multiplier,
-        minFareForCategory(category.vehicleType),
+        offering.pricing.multiplier,
+        offering.pricing.minFareCents,
       ),
       currency: 'PEN' as const,
+      // ADR 013 §1.3 (additive) · modo POR oferta = allowedModes ∩ schedule: la oferta acota al admin.
+      mode: resolveOfferingMode(offering, scheduledMode).mode,
+      labelKey: offering.labelKey,
+      icon: offering.icon,
     }));
 
     const base: QuoteResult = {
@@ -122,16 +145,28 @@ export class MapsService {
     };
 
     if (mode === 'PUJA') {
-      // El ancla sugerida es la tarifa que SERÍA fija con la categoría base (VEO Económico, mult 1.0):
-      // mismo cálculo determinista que el modo fijo, ofrecido como referencia del bid.
+      // El ancla sugerida es la tarifa que SERÍA fija con la oferta base (VEO Económico, mult 1.0):
+      // mismo cálculo determinista que el modo fijo, alimentado por la política del catálogo.
       const suggestedCents = categoryFareCents(
         route.distanceMeters,
         route.durationSeconds,
-        ANCHOR_MULTIPLIER,
+        ANCHOR_OFFERING.pricing.multiplier,
+        ANCHOR_OFFERING.pricing.minFareCents,
       );
       return { ...base, bidFloorCents: this.bidFloorCents, suggestedCents };
     }
     return base;
+  }
+
+  /**
+   * ADR 013 · seam de las ofertas cotizables. Delegación PURA en el catálogo (`OFFERING_LIST`, ya
+   * ordenado por `sortOrder`). `protected` a propósito: los specs de la intersección oferta×schedule
+   * (§1.3) subclasean el servicio para inyectar una oferta restringida (solo-FIXED) — el catálogo
+   * real aún no tiene ofertas con `allowedModes ≠ [PUJA, FIXED]` y NO se inventa una entrada
+   * fantasma en producción (mismo seam que `TripsService.resolveOffering`).
+   */
+  protected quotedOfferings(): readonly OfferingSpec[] {
+    return OFFERING_LIST;
   }
 
   /**

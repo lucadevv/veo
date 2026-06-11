@@ -10,11 +10,13 @@ import { REST_PAYMENT } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { RunPayoutsDto, RefundDto } from './dto/finance.dto';
 
+/** Shape interno que sirve payment-service (GET /payouts/all). `status` ES el enum Prisma `PayoutStatus`
+ *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1. */
 interface Payout {
   id: string;
   driverId: string;
   amountCents: number;
-  status: string;
+  status: PayoutView['status'];
   periodStart: string;
   periodEnd: string;
 }
@@ -29,6 +31,13 @@ export interface RunPayoutsResult {
   periodEnd: string;
   processed: number;
   held: number;
+  totalAmountCents: number;
+}
+
+/** Resultado de liberar la retención de un conductor (payouts HELD → PROCESSED). */
+export interface ReleaseHeldPayoutsResult {
+  driverId: string;
+  released: number;
   totalAmountCents: number;
 }
 
@@ -61,6 +70,28 @@ export class FinanceService {
       resourceType: 'payout_batch',
       resourceId: `${res.periodStart}..${res.periodEnd}`,
       payload: { processed: res.processed, held: res.held, totalAmountCents: res.totalAmountCents },
+    });
+    return res;
+  }
+
+  /**
+   * Libera los payouts HELD de un conductor y levanta su retención (camino de vuelta de driver.flagged).
+   * payment-service hace la transición tipada HELD→PROCESSED + emite payout.processed; acá se audita la
+   * acción del operador (mismo patrón que payout.run). Idempotente (re-liberar libera 0).
+   */
+  async releaseDriverPayouts(
+    identity: AuthenticatedUser,
+    driverId: string,
+  ): Promise<ReleaseHeldPayoutsResult> {
+    const res = await this.rest.post<ReleaseHeldPayoutsResult>(
+      `/payouts/drivers/${driverId}/release`,
+      { identity },
+    );
+    await this.audit.record(identity, {
+      action: 'payout.release_held',
+      resourceType: 'driver',
+      resourceId: driverId,
+      payload: { released: res.released, totalAmountCents: res.totalAmountCents },
     });
     return res;
   }

@@ -1,13 +1,14 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
-import type { TripVideoGrant } from '@veo/api-client';
+import type { TripVideoGrant, WaypointProposalView } from '@veo/api-client';
 import { TripsService } from './trips.service';
 import {
   AddTipDto,
   CancelTripDto,
   ChangeDestinationDto,
   CreateTripDto,
+  ProposeWaypointDto,
   RebidTripDto,
   TripHistoryQueryDto,
   type TripResource,
@@ -162,6 +163,21 @@ export class TripsController {
     @Body() dto: ChangeDestinationDto,
   ): Promise<TripResource> {
     return this.trips.changeDestination(user, id, dto);
+  }
+
+  @Post(':id/waypoints')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'El pasajero PROPONE una parada DURANTE el viaje (IN_PROGRESS): trip-service calcula el delta de ' +
+      'tarifa + ruta nueva y crea una propuesta con TTL para que el conductor la acepte/rechace (Lote C2).',
+  })
+  proposeWaypoint(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ProposeWaypointDto,
+  ): Promise<WaypointProposalView> {
+    return this.trips.proposeWaypoint(user, id, dto.point);
   }
 
   @Delete(':id/schedule')

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsLatitude, IsLongitude, IsPositive } from 'class-validator';
+import type { VehicleClass } from '@veo/shared-types';
 
 export class SurgeQueryDto {
   @ApiProperty({ example: -12.0464 })
@@ -54,7 +55,8 @@ export class SubmitOfferDto {
 export interface OpenBidView {
   tripId: string;
   bidCents: number;
-  vehicleType: string;
+  /** Clase canónica del catálogo (ADR 013); dispatch la tipa igual en su `OpenBidDto`. */
+  vehicleType: VehicleClass;
   expiresAt: number;
   originLat: number;
   originLon: number;

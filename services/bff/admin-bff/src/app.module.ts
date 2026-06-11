@@ -18,6 +18,7 @@ import { FinanceModule } from './finance/finance.module';
 import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PricingModule } from './pricing/pricing.module';
+import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { PricingModule } from './pricing/pricing.module';
     MediaModule,
     AnalyticsModule,
     PricingModule,
+    DispatchConfigModule,
   ],
   providers: [
     // Orden de guards globales: Jwt (adjunta user) → RateLimit → Roles → StepUpMfa.

@@ -6,11 +6,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import { GRPC_PAYMENT, GRPC_TRIP, REST_PAYMENT } from '../infra/downstream.tokens';
 import { REDIS } from '../infra/redis';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { PaymentReply, TripReply } from '../infra/grpc-types';
 import {
   type CashConfirmDto,
@@ -114,7 +113,7 @@ export class PaymentsService {
    * identidad firmada). NO exponer directo a una ruta sin gate previo.
    */
   private async fetchPaymentView(user: AuthenticatedUser, id: string): Promise<PaymentView> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const reply = await this.paymentGrpc.call<PaymentReply>('GetPayment', { id }, meta);
     return this.toPaymentView(reply);
   }
@@ -127,7 +126,7 @@ export class PaymentsService {
    * cobro (found=false) → 404 'Pago no encontrado'.
    */
   async getPaymentByTrip(user: AuthenticatedUser, tripId: string): Promise<PaymentView> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {

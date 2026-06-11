@@ -6,10 +6,12 @@
 import { ExternalServiceError, type LatLon } from '@veo/utils';
 import {
   LocalMapsEngine,
+  MapboxMapsClient,
   OsrmMapsClient,
   type AutocompleteOptions,
   type GeocodeResult,
   type MapsClient,
+  type MapsMode,
   type RouteResult,
   type RouteWithStepsResult,
 } from '@veo/maps';
@@ -96,14 +98,25 @@ export class FallbackMapsClient implements MapsClient {
 }
 
 export interface BuildMapsClientInput {
-  mode: 'osrm' | 'local';
+  mode: MapsMode;
   osrmUrl: string;
   nominatimUrl: string;
+  /** Token público de Mapbox (`pk....`). Requerido solo en modo `mapbox`. */
+  mapboxAccessToken?: string;
 }
 
-/** Construye el cliente de mapas según el modo (osrm con fallback local, o local puro). */
+/**
+ * Construye el cliente de mapas según el modo: `local` puro, `osrm` o `mapbox` (Directions API,
+ * token pk server-side) — estos dos con fallback al motor local ante fallo externo (degradación honesta).
+ */
 export function buildMapsClient(input: BuildMapsClientInput): MapsClient {
   if (input.mode === 'local') return new LocalMapsEngine();
+  if (input.mode === 'mapbox') {
+    if (!input.mapboxAccessToken) {
+      throw new Error('buildMapsClient: mode "mapbox" requiere mapboxAccessToken (pk)');
+    }
+    return new FallbackMapsClient(new MapboxMapsClient({ accessToken: input.mapboxAccessToken }));
+  }
   const osrm = new OsrmMapsClient({ osrmBaseUrl: input.osrmUrl, nominatimBaseUrl: input.nominatimUrl });
   return new FallbackMapsClient(osrm);
 }

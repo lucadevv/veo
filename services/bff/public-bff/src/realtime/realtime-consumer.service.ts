@@ -26,10 +26,13 @@ import {
   tripRequested,
   tripStarted,
   chatMessageSent,
+  tripWaypointAccepted,
+  tripWaypointRejected,
+  tripWaypointExpired,
   type EventEnvelope,
 } from '@veo/events';
 import { createLogger, type Logger } from '@veo/observability';
-import type { ChatMessage, TripStatus } from '@veo/api-client';
+import { WaypointProposalStatus, type ChatMessage, type TripStatus } from '@veo/api-client';
 import { FamilyGateway } from './family.gateway';
 import { PassengerGateway } from './passenger.gateway';
 import { RealtimeStateService } from './realtime-state.service';
@@ -93,6 +96,16 @@ export class RealtimeConsumerService implements OnModuleInit, OnModuleDestroy {
     consumer.on('driver.location_updated', (env) => this.onDriverLocation(env));
     consumer.on('panic.triggered', (env) => this.onPanic(env));
     consumer.on('chat.message_sent', (env) => this.onChatMessage(env));
+    // Lote C4 · desenlace de una PARADA propuesta → outcome en vivo al PASAJERO (cierra el "esperando").
+    consumer.on('trip.waypoint_accepted', (env) =>
+      this.onWaypointOutcome(env, tripWaypointAccepted, WaypointProposalStatus.ACCEPTED),
+    );
+    consumer.on('trip.waypoint_rejected', (env) =>
+      this.onWaypointOutcome(env, tripWaypointRejected, WaypointProposalStatus.REJECTED),
+    );
+    consumer.on('trip.waypoint_expired', (env) =>
+      this.onWaypointOutcome(env, tripWaypointExpired, WaypointProposalStatus.EXPIRED),
+    );
   }
 
   // ── Handlers ──
@@ -282,6 +295,24 @@ export class RealtimeConsumerService implements OnModuleInit, OnModuleDestroy {
         createdAt: parsed.data.createdAt,
       };
       this.passenger.emitChatMessage(parsed.data.tripId, msg);
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * Lote C4 · desenlace de una parada propuesta. Reenvía al PASAJERO (`waypoint:outcome`) el estado
+   * TERMINAL (ACCEPTED/REJECTED/EXPIRED) para que cierre el "esperando al conductor". Los tres eventos
+   * comparten {proposalId} en el payload; el `status` lo fija el tipo de evento (typed, sin string suelto).
+   * No toca /family (la negociación de la parada es del pasajero, no del seguimiento familiar).
+   */
+  private onWaypointOutcome(
+    env: EventEnvelope<unknown>,
+    schema: typeof tripWaypointAccepted | typeof tripWaypointRejected | typeof tripWaypointExpired,
+    status: WaypointProposalStatus,
+  ): Promise<void> {
+    const parsed = schema.safeParse(env.payload);
+    if (parsed.success) {
+      this.passenger.emitWaypointOutcome(parsed.data.tripId, { proposalId: parsed.data.proposalId, status });
     }
     return Promise.resolve();
   }

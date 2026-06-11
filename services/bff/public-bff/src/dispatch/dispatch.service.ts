@@ -3,9 +3,8 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_DISPATCH } from '../infra/downstream.tokens';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { NearbyDriversReply, SurgeReply } from '../infra/grpc-types';
 import { type SurgeView } from './dto/surge-query.dto';
 import { type NearbyVehiclesView } from './dto/nearby-query.dto';
@@ -18,7 +17,7 @@ export class DispatchService {
   ) {}
 
   async getSurge(user: AuthenticatedUser, lat: number, lon: number): Promise<SurgeView> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const reply = await this.dispatchGrpc.call<SurgeReply>('GetSurge', { lat, lon }, meta);
     return { multiplier: reply.multiplier, zoneId: reply.zoneId, active: reply.active };
   }
@@ -34,7 +33,7 @@ export class DispatchService {
     lon: number,
     vehicleType?: string,
   ): Promise<NearbyVehiclesView> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const reply = await this.dispatchGrpc.call<NearbyDriversReply>(
       'GetNearbyDrivers',
       { lat, lon, vehicleType: vehicleType ?? '' },

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { VehicleClass } from '@veo/shared-types';
 import { DriverGateway } from './driver.gateway';
 import { roomForDriver } from './rooms';
 
@@ -21,9 +22,20 @@ function makeGateway(opts: {
   const publisher = {
     publishDriverLocation: opts.publish ?? vi.fn(() => Promise.resolve(true)),
   };
+  // Resolver del tipo activo: por defecto devuelve el `fallback` (lo que vino en el ping), así las
+  // aserciones de tipo de los tests existentes no cambian. Su lógica real se testea aparte (fleet).
+  const activeVehicleType = {
+    resolve: vi.fn((_identity: unknown, fallback: VehicleClass) => Promise.resolve(fallback)),
+  };
   const config = { getOrThrow: () => '' };
-  const gateway = new DriverGateway(jwt as never, grpc as never, publisher as never, config as never);
-  return { gateway, grpc, publisher };
+  const gateway = new DriverGateway(
+    jwt as never,
+    grpc as never,
+    publisher as never,
+    activeVehicleType as never,
+    config as never,
+  );
+  return { gateway, grpc, publisher, activeVehicleType };
 }
 
 function fakeSocket(token?: string) {
@@ -92,10 +104,11 @@ describe('DriverGateway evento location', () => {
   it('publica driver.location_updated y responde ack ok', async () => {
     const publish = vi.fn(() => Promise.resolve(true));
     const { gateway } = makeGateway({ publish });
-    const client = { data: { driverId: 'drv-1' } };
+    const client = { data: { driverId: 'drv-1', identity: { userId: 'usr-1', type: 'driver' } } };
     const ack = await gateway.onLocation(client as never, report);
     expect(ack).toEqual({ ok: true });
-    expect(publish).toHaveBeenCalledWith('drv-1', report);
+    // El BFF SELLA el tipo server-authoritative (resolver mock → fallback 'CAR' porque el report no lo trae).
+    expect(publish).toHaveBeenCalledWith('drv-1', { ...report, vehicleType: 'CAR' });
   });
 
   it('rechaza si el socket no está autenticado (sin driverId)', async () => {
@@ -110,7 +123,7 @@ describe('DriverGateway evento location', () => {
   it('rechaza un reporte inválido (sin publicar)', async () => {
     const publish = vi.fn();
     const { gateway } = makeGateway({ publish });
-    const client = { data: { driverId: 'drv-1' } };
+    const client = { data: { driverId: 'drv-1', identity: { userId: 'usr-1', type: 'driver' } } };
     const ack = await gateway.onLocation(client as never, { lat: 999, lon: 0, ts: 'x' });
     expect(ack).toEqual({ ok: false, error: 'invalid_report' });
     expect(publish).not.toHaveBeenCalled();
@@ -119,7 +132,7 @@ describe('DriverGateway evento location', () => {
   it('refleja fallo de publicación en el ack', async () => {
     const publish = vi.fn(() => Promise.resolve(false));
     const { gateway } = makeGateway({ publish });
-    const client = { data: { driverId: 'drv-1' } };
+    const client = { data: { driverId: 'drv-1', identity: { userId: 'usr-1', type: 'driver' } } };
     const ack = await gateway.onLocation(client as never, report);
     expect(ack).toEqual({ ok: false, error: 'publish_failed' });
   });

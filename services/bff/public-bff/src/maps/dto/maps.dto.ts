@@ -121,15 +121,26 @@ export interface ReversePlace {
   lng: number;
 }
 
-/** Opción de viaje cotizada (una por categoría de vehículo). */
+/** Opción de viaje cotizada (una por oferta del catálogo, ADR 013). */
 export interface QuoteOption {
   id: string;
+  /** Nombre resuelto server-side (compat apps viejas; las nuevas resuelven `labelKey` en su i18n). */
   name: string;
-  /** Tipo de vehículo de la categoría (Ola 2B): 'CAR' | 'MOTO'. */
+  /** Clase de vehículo de la oferta (wire field histórico, Ola 2B): 'CAR' | 'MOTO'. */
   vehicleType: 'CAR' | 'MOTO';
   etaSeconds: number;
   priceCents: number;
   currency: 'PEN';
+  /**
+   * ADR 013 §1.3 (additive) · modo RESUELTO POR OFERTA: `offering.allowedModes ∩ schedule`. Le dice a
+   * la app qué pantalla pintar (puja vs precio firme) POR opción; el `mode` top-level se mantiene
+   * (compat, ancla VEO Económico).
+   */
+  mode: PricingMode;
+  /** ADR 013 (additive) · token i18n del nombre (`offering.veo_moto.name`); la app lo resuelve. */
+  labelKey: string;
+  /** ADR 013 (additive) · token de ícono (`car` | `moto`) que la app resuelve en su registro token→glyph. */
+  icon: string;
 }
 
 /**

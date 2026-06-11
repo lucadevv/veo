@@ -10,17 +10,24 @@ import {
   KafkaEventConsumer,
   EVENT_SCHEMAS,
   chatMessageSent,
+  tripWaypointProposed,
   type EventEnvelope,
 } from '@veo/events';
 import { createLogger, domainEventsTotal, type Logger } from '@veo/observability';
-import type { ChatMessage } from '@veo/api-client';
+import type { ChatMessage, WaypointProposedMsg } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import type { TripReply } from '../common/grpc-replies';
 import { SYSTEM_IDENTITY } from '../common/identities';
 import { DriverGateway } from './driver.gateway';
 import type { Env } from '../config/env.schema';
 
-/** Eventos de la máquina de estados del viaje que interesan al conductor. */
+/**
+ * Eventos de la máquina de estados del viaje que interesan al conductor. Incluye los CIERRES del
+ * watchdog y la reasignación: el public-bff (lado pasajero) ya los reenviaba, pero el driver-bff no,
+ * así que un viaje EXPIRADO/FALLIDO/REASIGNADO dejaba al conductor sin enterarse (hallazgo #4). Los
+ * tres traen `driverId` (requerido en `reassigning`, opcional en `expired`/`failed`) o `tripId` para
+ * resolver al conductor destino vía `resolveDriverId`.
+ */
 const TRIP_EVENTS = [
   'trip.assigned',
   'trip.accepted',
@@ -29,6 +36,9 @@ const TRIP_EVENTS = [
   'trip.started',
   'trip.completed',
   'trip.cancelled',
+  'trip.expired',
+  'trip.failed',
+  'trip.reassigning',
 ] as const;
 
 @Injectable()
@@ -55,10 +65,17 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       consumer.on(type, (env) => this.handleEvent(env, 'trip:update'));
     }
     consumer.on('chat.message_sent', (env) => this.handleChatMessage(env));
+    // Lote C4 · el pasajero PROPUSO una parada mid-trip → al CONDUCTOR (`waypoint:proposed`) para que
+    // acepte/rechace. Shape tipada plana (no el sobre genérico): por eso un handler dedicado.
+    consumer.on('trip.waypoint_proposed', (env) => this.handleWaypointProposed(env));
+    // Propina en vivo (BR-P04): el 100% va al conductor. Reusa el relay genérico (resuelve el conductor
+    // por `driverId` enriquecido o por `tripId`→gRPC) y lo emite como `payment:tip` para que la app lo
+    // celebre. Suscribe automáticamente el topic `payment` (topicForEvent).
+    consumer.on('payment.tip_added', (env) => this.handleEvent(env, 'payment:tip'));
 
     this.consumer = consumer;
     await consumer.start();
-    this.logger.info('consumidor Kafka driver-bff iniciado (topics dispatch, trip)');
+    this.logger.info('consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment)');
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -129,6 +146,31 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn({ err }, 'no se pudo enrutar el mensaje de chat al conductor');
       domainEventsTotal.inc({ event: 'chat.message_sent', result: 'error' });
     }
+  }
+
+  /**
+   * Lote C4 · parada propuesta por el pasajero → al CONDUCTOR. El `driverId` viene en el payload
+   * (la propuesta nace sobre un viaje ya asignado). Emite la shape TIPADA `WaypointProposedMsg` (subset
+   * del evento: sin passengerId/driverId — el conductor no los necesita) para que la app pinte la
+   * tarjeta de aceptar/rechazar con el costo adicional + tarifa nueva + vencimiento.
+   */
+  private handleWaypointProposed(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = tripWaypointProposed.safeParse(envelope.payload);
+    if (!parsed.success) {
+      domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'invalid' });
+      return Promise.resolve();
+    }
+    const msg: WaypointProposedMsg = {
+      proposalId: parsed.data.proposalId,
+      tripId: parsed.data.tripId,
+      point: parsed.data.point,
+      deltaFareCents: parsed.data.deltaFareCents,
+      newFareCents: parsed.data.newFareCents,
+      expiresAt: parsed.data.expiresAt,
+    };
+    this.gateway.emitToDriver(parsed.data.driverId, 'waypoint:proposed', msg);
+    domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'emitted' });
+    return Promise.resolve();
   }
 
   /** driverId del payload si viene; si no (p.ej. trip.cancelled), se lee del viaje por gRPC. */

@@ -4,9 +4,8 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_SHARE, REST_SHARE } from '../infra/downstream.tokens';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { TrustedContactsReply } from '../infra/grpc-types';
 import {
   type AddContactDto,
@@ -24,7 +23,7 @@ export class ContactsService {
   ) {}
 
   async list(user: AuthenticatedUser): Promise<ContactView[]> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     const reply = await this.shareGrpc.call<TrustedContactsReply>(
       'GetTrustedContacts',
       { userId: user.userId },

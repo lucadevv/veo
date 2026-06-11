@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { OFFERING_LIST } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import {
   categoryFareCents,
@@ -8,7 +9,6 @@ import {
   PER_MIN_CENTS,
   MIN_FARE_CENTS,
   MOTO_MIN_FARE_CENTS,
-  RIDE_CATEGORIES,
 } from './fare';
 
 describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
@@ -36,19 +36,31 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
     expect(categoryFareCents(0, 0, 0.5)).toBe(MIN_FARE_CENTS);
   });
 
-  it('el catálogo incluye el tier MOTO y las categorías de auto (moto→económico→premium)', () => {
-    expect(RIDE_CATEGORIES.map((c) => c.id)).toEqual([
+  // ADR 013 (Lote C): el catálogo ya NO se define en fare.ts — es OFFERING_LIST de @veo/shared-types.
+  it('el catálogo (OFFERING_LIST) incluye el tier MOTO y las ofertas de auto (moto→económico→premium)', () => {
+    expect(OFFERING_LIST.map((o) => o.id)).toEqual([
       'veo_moto',
       'veo_economico',
       'veo_confort',
       'veo_xl',
     ]);
-    const moto = RIDE_CATEGORIES.find((c) => c.id === 'veo_moto');
-    expect(moto?.vehicleType).toBe('MOTO');
-    expect(moto?.multiplier).toBeLessThan(1.0); // mototaxi es más barato que el económico
-    const economico = RIDE_CATEGORIES.find((c) => c.id === 'veo_economico');
-    expect(economico?.multiplier).toBe(1.0);
-    expect(economico?.vehicleType).toBe('CAR');
+    const moto = OFFERING_LIST.find((o) => o.id === 'veo_moto');
+    expect(moto?.vehicleClass).toBe('MOTO');
+    expect(moto?.pricing.multiplier).toBeLessThan(1.0); // mototaxi es más barato que el económico
+    const economico = OFFERING_LIST.find((o) => o.id === 'veo_economico');
+    expect(economico?.pricing.multiplier).toBe(1.0);
+    expect(economico?.vehicleClass).toBe('CAR');
+  });
+
+  // ADR 013: las mínimas del preview se DERIVAN del catálogo (una sola fuente — si esto falla,
+  // alguien re-definió la política en el BFF en vez de importarla).
+  it('las mínimas del preview son las del catálogo (derivadas, no re-definidas)', () => {
+    expect(MOTO_MIN_FARE_CENTS).toBe(
+      OFFERING_LIST.find((o) => o.id === 'veo_moto')?.pricing.minFareCents,
+    );
+    expect(MIN_FARE_CENTS).toBe(
+      OFFERING_LIST.find((o) => o.id === 'veo_economico')?.pricing.minFareCents,
+    );
   });
 
   it('Ola 2B · el tier moto-taxi usa su tarifa mínima propia (menor que la de auto)', () => {

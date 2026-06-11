@@ -6,14 +6,13 @@ import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
 import { NotFoundError } from '@veo/utils';
-import type { AuthenticatedUser as AuthUser } from '@veo/auth';
+import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
 import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api-client';
 import {
   GRPC_TRIP,
   GRPC_IDENTITY,
   REST_IDENTITY,
 } from '../infra/tokens';
-import { grpcIdentityMeta } from '../infra/grpc-identity';
 import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -115,7 +114,7 @@ export class OpsService {
    * eventos) va `null`/`[]` honesto — su enriquecimiento (tracking/fleet/trip-events) es follow-up.
    */
   async tripDetail(identity: AuthUser, tripId: string): Promise<TripDetail> {
-    const meta = grpcIdentityMeta(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado', { tripId });
 

@@ -7,7 +7,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient } from '@veo/rpc';
 import { REST_IDENTITY } from '../infra/downstream.tokens';
-import { ANONYMOUS_IDENTITY } from '../infra/internal-identity';
+import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { Env } from '../config/env.schema';
 import {
   PANIC_SIGNATURE_VERSION,

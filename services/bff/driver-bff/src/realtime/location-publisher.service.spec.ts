@@ -5,13 +5,16 @@ import type { DriverLocationReport } from '@veo/api-client';
 import type { EventEnvelope } from '@veo/events';
 import { LocationPublisherService } from './location-publisher.service';
 
-const report: DriverLocationReport = {
+// La clase de vehículo viene SELLADA por el gateway (server-authoritative): el publisher la exige
+// por tipo (ADR 013 · Lote D) y ya no tiene default propio.
+const report: DriverLocationReport & { vehicleType: 'CAR' } = {
   lat: -12.0464,
   lon: -77.0428,
   heading: 90,
   speed: 8.3,
   accuracy: 5,
   ts: '2026-05-29T00:00:00.000Z',
+  vehicleType: 'CAR',
 };
 
 function makeService(publishImpl?: () => Promise<void>) {
@@ -42,7 +45,9 @@ describe('LocationPublisherService.publishDriverLocation', () => {
       point: { lat: report.lat, lon: report.lon },
       h3: toH3({ lat: report.lat, lon: report.lon }),
       at: report.ts,
-      // Ola 2B: el tipo de vehículo activo se incluye (default CAR si la app no lo envía).
+      // Rumbo para rotar el ícono en el mapa del pasajero (null si la muestra no lo trae).
+      heading: report.heading ?? null,
+      // La clase de vehículo activa viaja tal cual la selló el gateway (sin default del publisher).
       vehicleType: 'CAR',
     });
   });

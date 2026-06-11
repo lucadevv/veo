@@ -1,12 +1,12 @@
 /**
  * FINANZAS — payouts y reembolsos (RBAC FINANCE/admin). payouts/run exige rol FINANCE.
  */
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { PayoutView } from '@veo/api-client';
-import { FinanceService, type RunPayoutsResult } from './finance.service';
+import { FinanceService, type ReleaseHeldPayoutsResult, type RunPayoutsResult } from './finance.service';
 import { PayoutsQueryDto, RunPayoutsDto, RefundDto } from './dto/finance.dto';
 
 @ApiTags('finance')
@@ -30,6 +30,19 @@ export class FinanceController {
   @ApiOperation({ summary: 'Ejecuta el batch de payouts del periodo (solo FINANCE)' })
   runPayouts(@CurrentUser() user: AuthenticatedUser, @Body() dto: RunPayoutsDto): Promise<RunPayoutsResult> {
     return this.finance.runPayouts(user, dto);
+  }
+
+  // Camino de vuelta de driver.flagged: libera la plata retenida del conductor. Mutación de PLATA →
+  // mismo rol restrictivo que payouts/run (solo FINANCE); el espejo de UI es `finance:payout` en rbac.ts.
+  @Post('payouts/drivers/:driverId/release')
+  @HttpCode(200)
+  @Roles(AdminRole.FINANCE)
+  @ApiOperation({ summary: 'Libera los payouts HELD de un conductor y levanta su retención (solo FINANCE)' })
+  releaseDriverPayouts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+  ): Promise<ReleaseHeldPayoutsResult> {
+    return this.finance.releaseDriverPayouts(user, driverId);
   }
 
   @Post('refunds/:tripId')

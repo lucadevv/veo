@@ -4,14 +4,14 @@
  *    @Public y NO valida la identidad; el header firmado se ignora, pero el cliente REST lo exige).
  *  - SYSTEM: para lecturas gRPC que dispara el consumidor Kafka (sin usuario en contexto).
  */
-import type { AuthenticatedUser } from '@veo/auth';
+import { anonymousIdentity, type AuthenticatedUser } from '@veo/auth';
 
-export const ANONYMOUS_DRIVER_IDENTITY: AuthenticatedUser = {
-  userId: 'anonymous',
-  type: 'driver',
-  roles: [],
-  sessionId: 'anonymous',
-};
+/**
+ * Sabor driver de la identidad anónima canónica (@veo/auth `anonymousIdentity`): la FORMA vive una
+ * sola vez allá. `sessionId` pasa de 'anonymous' a '' (la convención canónica: vacío = sin sesión);
+ * el downstream ignora la identidad en estos passthroughs @Public, así que no cambia semántica.
+ */
+export const ANONYMOUS_DRIVER_IDENTITY: AuthenticatedUser = anonymousIdentity('driver');
 
 export const SYSTEM_IDENTITY: AuthenticatedUser = {
   userId: 'driver-bff-system',

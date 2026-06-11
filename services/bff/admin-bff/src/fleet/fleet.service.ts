@@ -40,12 +40,15 @@ interface Vehicle {
   active: boolean;
   driverId: string | null;
 }
+/** Shape interno que sirve fleet-service (REST /documents). `status` ES el enum Prisma
+ *  `FleetDocumentStatus` serializado tal cual (sin transformación intermedia); el contrato
+ *  `fleetDocumentStatus` lo espeja 1:1 — mismo endurecimiento que `Payout.status` en finance. */
 interface FleetDocument {
   id: string;
   ownerType: 'DRIVER' | 'VEHICLE';
   ownerId: string;
   type: string;
-  status: string;
+  status: FleetDocumentView['status'];
   expiresAt: string | null;
 }
 interface Inspection {

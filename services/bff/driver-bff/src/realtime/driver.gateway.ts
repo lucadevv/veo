@@ -26,15 +26,23 @@ import {
   type AuthenticatedUser,
 } from '@veo/auth';
 import { driverLocationReport, type DriverLocationAck } from '@veo/api-client';
+import { VehicleClass } from '@veo/shared-types';
 import { createLogger, type Logger } from '@veo/observability';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import type { DriverReply } from '../common/grpc-replies';
 import { roomForDriver } from './rooms';
 import { LocationPublisherService } from './location-publisher.service';
+import { ActiveVehicleTypeResolver } from './active-vehicle-type.resolver';
 import type { Env } from '../config/env.schema';
 
 interface HandshakeAuth {
   token?: string;
+}
+
+/** Estado que el handshake fija en el socket: el id de perfil (para la sala) y la identidad (para fleet). */
+interface DriverSocketData {
+  driverId?: string;
+  identity?: AuthenticatedUser;
 }
 
 @Injectable()
@@ -49,6 +57,7 @@ export class DriverGateway implements OnGatewayConnection {
     @Inject(JWT_SERVICE) private readonly jwt: JwtService,
     private readonly grpc: GrpcGateway,
     private readonly locationPublisher: LocationPublisherService,
+    private readonly activeVehicleType: ActiveVehicleTypeResolver,
     config: ConfigService<Env, true>,
   ) {
     this.logger = createLogger('driver-bff-ws');
@@ -60,7 +69,9 @@ export class DriverGateway implements OnGatewayConnection {
       const identity = await this.authenticate(client);
       const driverId = await this.resolveDriverId(identity);
       await client.join(roomForDriver(driverId));
-      (client.data as { driverId?: string }).driverId = driverId;
+      const data = client.data as DriverSocketData;
+      data.driverId = driverId;
+      data.identity = identity;
       this.logger.info({ driverId, sid: client.id }, 'ws conductor conectado');
     } catch (err) {
       this.logger.warn({ err, sid: client.id }, 'handshake ws rechazado');
@@ -77,11 +88,24 @@ export class DriverGateway implements OnGatewayConnection {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: unknown,
   ): Promise<DriverLocationAck> {
-    const driverId = (client.data as { driverId?: string }).driverId;
-    if (!driverId) return { ok: false, error: 'unauthenticated' };
+    const { driverId, identity } = client.data as DriverSocketData;
+    if (!driverId || !identity) return { ok: false, error: 'unauthenticated' };
     const parsed = driverLocationReport.safeParse(body);
     if (!parsed.success) return { ok: false, error: 'invalid_report' };
-    const published = await this.locationPublisher.publishDriverLocation(driverId, parsed.data);
+    // SERVER-AUTHORITATIVE: la clase de vehículo la decide el vehículo ACTIVO del conductor en fleet, NO
+    // lo que declara el cliente en el ping (que era spoofeable). Sobreescribimos `vehicleType` con el
+    // resuelto; si fleet no responde, el resolver cae al valor del ping (degradación honesta).
+    // El `?? CAR` SE QUEDA (ADR 013 · Lote D): es el fallback de ÚLTIMO recurso para apps viejas que no
+    // mandan el campo Y fleet caído a la vez — no oculta una clase nueva (si el ping la trae, viaja; si
+    // fleet responde, manda la clase certificada). Sin él, un ping legacy dejaría de publicar ubicación.
+    const vehicleType = await this.activeVehicleType.resolve(
+      identity,
+      parsed.data.vehicleType ?? VehicleClass.CAR,
+    );
+    const published = await this.locationPublisher.publishDriverLocation(driverId, {
+      ...parsed.data,
+      vehicleType,
+    });
     return published ? { ok: true } : { ok: false, error: 'publish_failed' };
   }
 

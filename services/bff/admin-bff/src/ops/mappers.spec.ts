@@ -40,12 +40,18 @@ describe('mappers OPS', () => {
     });
   });
 
-  it('normaliza estados de trip-service al enum de la vista', () => {
+  // Cambio de spec JUSTIFICADO (auditoría, lote P): el mapper anterior DISFRAZABA estados —
+  // REASSIGNING (pasajero abandonado, ops debe intervenir) y todo lo desconocido caían en
+  // REQUESTED; EXPIRED/FAILED se colapsaban en CANCELLED. El contrato admin ya expresa esos
+  // estados: la vista ahora es honesta (identidad + alias CANCELLED_BY_* + UNKNOWN explícito).
+  it('normaliza estados de trip-service al enum de la vista (honesto, sin default mudo)', () => {
     expect(mapTripStatus('IN_PROGRESS')).toBe('IN_PROGRESS');
     expect(mapTripStatus('CANCELLED_BY_PASSENGER')).toBe('CANCELLED');
     expect(mapTripStatus('CANCELLED_BY_DRIVER')).toBe('CANCELLED');
-    expect(mapTripStatus('EXPIRED')).toBe('CANCELLED');
-    expect(mapTripStatus('FAILED')).toBe('CANCELLED');
-    expect(mapTripStatus('ALGO_RARO')).toBe('REQUESTED');
+    expect(mapTripStatus('SCHEDULED')).toBe('SCHEDULED');
+    expect(mapTripStatus('REASSIGNING')).toBe('REASSIGNING');
+    expect(mapTripStatus('EXPIRED')).toBe('EXPIRED');
+    expect(mapTripStatus('FAILED')).toBe('FAILED');
+    expect(mapTripStatus('ALGO_RARO')).toBe('UNKNOWN');
   });
 });

@@ -7,7 +7,7 @@
  */
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ExternalServiceError, NotFoundError } from '@veo/utils';
-import { normalizeTripStatus, type TripStatus } from '@veo/api-client';
+import { isOnboard, normalizeTripStatus, type RespondWaypointView, type TripStatus } from '@veo/api-client';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { LatLon, MapsClient } from '@veo/maps';
 import { GrpcGateway } from '../infra/grpc.gateway';
@@ -86,6 +86,28 @@ export class TripsService {
     return toTripView(trip);
   }
 
+  /**
+   * Viaje ACTIVO (vivo) de ESTE conductor para rehidratar tras un reinicio (app matada mid-viaje).
+   * Resuelve el `driverId` del perfil desde la identidad (igual que el gate anti-IDOR de `getTrip`) y
+   * pregunta a trip-service por su viaje en LIVE_STATES. `null` si no tiene ninguno (no es error).
+   */
+  async getActiveTrip(identity: AuthenticatedUser): Promise<TripView | null> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) return null;
+    const trip = await this.grpc.call<TripReply>(
+      'trip',
+      'GetActiveTripByDriver',
+      { driverId: driver.id },
+      identity,
+    );
+    return trip.found ? toTripView(trip) : null;
+  }
+
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {
     const state = await this.grpc.call<TripStateReply>('trip', 'GetTripState', { id }, identity);
     if (!state.found) throw new NotFoundError('Viaje no encontrado');
@@ -96,9 +118,22 @@ export class TripsService {
    * Ola 2C · navegación turn-by-turn. Verifica (gRPC) que el viaje está asignado a ESTE conductor,
    * resuelve origen/recojo/destino (con waypoints) del recurso REST de trip-service y calcula la ruta
    * CON pasos vía la fachada soberana @veo/maps (OSRM `steps=true`, fallback al motor local en dev).
-   * La ruta cubre recojo (origin) → paradas → destino.
+   *
+   * `from` (posición ACTUAL del conductor, opcional) habilita ETA en vivo + próxima maniobra viva +
+   * re-ruteo por desvío: la ruta se calcula desde DONDE ESTÁ el conductor, no desde el origen fijo.
+   *  - ONBOARD (pasajero a bordo, `IN_PROGRESS`): `from` → paradas → destino (el recojo ya quedó atrás).
+   *  - PRE-RECOJO: `from` → recojo → paradas → destino (el recojo entra como primera parada).
+   * SIN `from` válido: comportamiento histórico (recojo → paradas → destino) — degradación honesta,
+   * backward-compat con clientes que aún no mandan posición.
+   *
+   * Los MARKERS del mapa (origin/destination/waypoints) son SIEMPRE los del viaje, intactos: `from`
+   * solo cambia desde dónde se traza la polyline/pasos, no qué puntos se pintan.
    */
-  async route(id: string, identity: AuthenticatedUser): Promise<TripRouteView> {
+  async route(
+    id: string,
+    identity: AuthenticatedUser,
+    from?: { lat: number; lon: number },
+  ): Promise<TripRouteView> {
     // A1 · ownership server-side (anti-IDOR): la ruta expone origin/destino/paradas (PII de ubicación
     // EXACTA) → verificamos que el viaje es de ESTE conductor ANTES de resolverla. Sin esto, cualquier
     // conductor con un tripId ajeno leía el recojo/paradas/destino de un viaje que no es suyo (mismo
@@ -109,11 +144,17 @@ export class TripsService {
       .client('trip')
       .get<TripResourceReply>(`/trips/${id}`, { identity });
 
-    const route = await this.maps.routeWithSteps(
-      resource.origin,
-      resource.destination,
-      resource.waypoints ?? [],
-    );
+    const waypoints = resource.waypoints ?? [];
+    let route;
+    if (from) {
+      // El status (normalizado al contrato mobile) decide si el recojo ya quedó atrás. Lo pedimos por
+      // gRPC (GetTripState) SOLO cuando hay `from`: sin posición la rama histórica no necesita el status.
+      const { status } = await this.getTripState(id, identity);
+      const intermediate = isOnboard(status) ? waypoints : [resource.origin, ...waypoints];
+      route = await this.maps.routeWithSteps(from, resource.destination, intermediate);
+    } else {
+      route = await this.maps.routeWithSteps(resource.origin, resource.destination, waypoints);
+    }
     return {
       polyline: route.polyline,
       distanceMeters: route.distanceMeters,
@@ -124,10 +165,11 @@ export class TripsService {
         maneuver: s.maneuver,
         geometryPolyline: s.geometryPolyline,
       })),
-      // Markers del mapa: recojo, destino y paradas (Ola 2B) — el recurso REST ya los trae.
+      // Markers del mapa: recojo, destino y paradas (Ola 2B) — el recurso REST ya los trae. SIEMPRE los
+      // del viaje (NO `from`): `from` solo movió el punto de partida de la polyline, no qué se pinta.
       origin: resource.origin,
       destination: resource.destination,
-      waypoints: resource.waypoints ?? [],
+      waypoints,
     };
   }
 
@@ -159,6 +201,27 @@ export class TripsService {
   async start(id: string, dto: StartTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
     return this.trip().post(`/trips/${id}/start`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
+  }
+
+  /**
+   * Lote C2 · el CONDUCTOR responde (acepta/rechaza) la parada propuesta por el pasajero. Mismo patrón
+   * anti-IDOR que accept/start: deriva el driverId del perfil (assertDriverTrip → GetDriverByUser) y lo
+   * verifica contra trip.driverId ANTES de delegar; el driverId DERIVADO viaja al trip-service en el body
+   * (2da capa de defensa allí), NUNCA uno del cliente. Server-authoritative: el conductor solo decide
+   * `accept`; la tarifa/ruta las estampó trip-service al proponer. Los 409 del downstream (propuesta no
+   * pendiente / vencida / viaje ya no en curso) se propagan tal cual.
+   */
+  async respondWaypoint(
+    id: string,
+    proposalId: string,
+    accept: boolean,
+    identity: AuthenticatedUser,
+  ): Promise<RespondWaypointView> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    return this.trip().post<RespondWaypointView>(`/trips/${id}/waypoints/${proposalId}/respond`, {
+      identity: { ...identity, driverId },
+      body: { accept, driverId },
+    });
   }
 
   /** Verifica (gRPC) que el viaje está asignado a ESTE conductor y devuelve su driverId derivado. */

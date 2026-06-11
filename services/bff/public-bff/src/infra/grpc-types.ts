@@ -52,6 +52,11 @@ export interface TripReply {
   destinationLat: number;
   destinationLng: number;
   routePolyline: string;
+  /**
+   * Paradas intermedias ordenadas (Ola 2B · paradas múltiples); [] si el viaje es directo. proto3 nunca
+   * manda null para un `repeated`. Espeja `repeated GeoPoint waypoints` del trip.proto (keepCase:false).
+   */
+  waypoints: { lat: number; lon: number }[];
   found: boolean;
 }
 

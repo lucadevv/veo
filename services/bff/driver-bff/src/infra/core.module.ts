@@ -72,9 +72,10 @@ const mapsProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>) =>
     buildMapsClient({
-      mode: config.getOrThrow<'osrm' | 'local'>('VEO_MAPS_MODE'),
+      mode: config.getOrThrow<Env['VEO_MAPS_MODE']>('VEO_MAPS_MODE'),
       osrmUrl: config.getOrThrow<string>('OSRM_URL'),
       nominatimUrl: config.getOrThrow<string>('NOMINATIM_URL'),
+      mapboxAccessToken: config.get<string>('MAPBOX_ACCESS_TOKEN'),
     }),
 };
 

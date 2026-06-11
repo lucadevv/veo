@@ -22,9 +22,8 @@ import {
 } from '@nestjs/common';
 import { status as GrpcStatus } from '@grpc/grpc-js';
 import { GrpcServiceClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_PLACES } from '../infra/downstream.tokens';
-import { internalGrpcMetadata } from '../infra/internal-identity';
 import type { PlaceReply, PlacesReply, RemovePlaceReply, SavedPlaceReply } from '../infra/grpc-types';
 import {
   PLACE_KINDS,
@@ -70,7 +69,7 @@ export class PlacesService {
     request: Record<string, unknown>,
     user: AuthenticatedUser,
   ): Promise<T> {
-    const meta = internalGrpcMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret);
     try {
       return await this.placesGrpc.call<T>(method, request, meta);
     } catch (err) {

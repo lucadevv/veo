@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { secret } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -30,10 +31,13 @@ export const envSchema = z.object({
   KAFKA_BROKERS: z.string().default('localhost:9094'),
   KAFKA_GROUP_ID: z.string().default('driver-bff'),
 
-  // ── Mapas (Ola 2C · navegación turn-by-turn). OSM self-hosted con fallback al motor local. ──
-  VEO_MAPS_MODE: z.enum(['osrm', 'local']).default('osrm'),
+  // ── Mapas (Ola 2C · navegación turn-by-turn). osrm/local self-hosted; 'mapbox' = Directions API
+  // (token pk, detrás del puerto), con fallback al motor local. Enum derivado de MAPS_MODES (sin drift). ──
+  VEO_MAPS_MODE: z.enum(MAPS_MODES).default('osrm'),
   OSRM_URL: z.string().default('http://localhost:5000'),
   NOMINATIM_URL: z.string().default('http://localhost:8080'),
+  // Token público de Mapbox (`pk....`). Obligatorio solo cuando VEO_MAPS_MODE=mapbox (ver superRefine).
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
   // gRPC (LECTURAS): host:port de cada microservicio.
   IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
@@ -63,6 +67,15 @@ export const envSchema = z.object({
   DOWNSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+}).superRefine((env, ctx) => {
+  // Mapbox sin token reventaría al construir el cliente. Falla temprano y claro.
+  if (env.VEO_MAPS_MODE === 'mapbox' && !env.MAPBOX_ACCESS_TOKEN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAPBOX_ACCESS_TOKEN'],
+      message: 'MAPBOX_ACCESS_TOKEN es obligatorio cuando VEO_MAPS_MODE=mapbox',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -100,6 +100,25 @@ export class DriversService {
     return buildDriverVehicles(reply.vehicles ?? []);
   }
 
+  /**
+   * Vehículo ACTIVO (operado) del conductor → fleet por REST. `null` si no tiene ninguno operable
+   * (fleet responde 204). Lo usa la app para marcar cuál vehículo está activo en el selector de turno.
+   */
+  async getActiveVehicle(identity: AuthenticatedUser): Promise<DriverVehicleView | null> {
+    const active = await this.rest
+      .client('fleet')
+      .get<FleetDriverVehicleReply | undefined>('/drivers/vehicles/active', { identity });
+    return active ? buildDriverVehicleFromRest(active) : null;
+  }
+
+  /** Selecciona el vehículo ACTIVO del conductor → fleet por REST (server-authoritative del tipo). */
+  async setActiveVehicle(identity: AuthenticatedUser, vehicleId: string): Promise<DriverVehicleView> {
+    const updated = await this.rest
+      .client('fleet')
+      .patch<FleetDriverVehicleReply>('/drivers/vehicles/active', { identity, body: { vehicleId } });
+    return buildDriverVehicleFromRest(updated);
+  }
+
   /** Enrolamiento facial de referencia (BR-I02) → identity-service. */
   enrollFace(identity: AuthenticatedUser, dto: EnrollFaceDto): Promise<DriverBiometricEnrollResult> {
     return this.identity().post<DriverBiometricEnrollResult>('/drivers/biometric/enroll', {

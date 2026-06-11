@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 import { secret } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -33,7 +34,7 @@ export const envSchema = z.object({
 
   // ── Mapas. Modos: `osrm`/`local` (OSM self-hosted, soberanía §0.7) o `mapbox` (APIs HTTP de
   //    Mapbox con token público `pk`, server-side). Todos degradan al motor local ante fallo. ──
-  VEO_MAPS_MODE: z.enum(['osrm', 'local', 'mapbox']).default('osrm'),
+  VEO_MAPS_MODE: z.enum(MAPS_MODES).default('osrm'),
   OSRM_URL: z.string().default('http://localhost:5000'),
   NOMINATIM_URL: z.string().default('http://localhost:8080'),
   // Token público de Mapbox (`pk....`). Obligatorio solo cuando VEO_MAPS_MODE=mapbox.

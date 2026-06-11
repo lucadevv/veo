@@ -64,6 +64,10 @@ const trip: TripReply = {
   destinationLat: -12.05,
   destinationLng: -77.05,
   routePolyline: 'abc_polyline_encoded',
+  waypoints: [
+    { lat: -12.048, lon: -77.043 },
+    { lat: -12.049, lon: -77.046 },
+  ],
   found: true,
 };
 
@@ -150,6 +154,16 @@ describe('buildTripDetail', () => {
     expect(view.origin).toEqual({ lat: -12.0464, lng: -77.0428 });
     expect(view.destination).toEqual({ lat: -12.05, lng: -77.05 });
     expect(view.routePolyline).toBe('abc_polyline_encoded');
+    // Fuente única (§5-bis): las paradas del trip del servidor van en la vista, intactas y ordenadas.
+    expect(view.waypoints).toEqual([
+      { lat: -12.048, lon: -77.043 },
+      { lat: -12.049, lon: -77.046 },
+    ]);
+  });
+
+  it('viaje directo: sin paradas del servidor → waypoints [] (degradación honesta, no crash)', () => {
+    const view = buildTripDetail({ ...trip, waypoints: [] }, null, null, null);
+    expect(view.waypoints).toEqual([]);
   });
 
   it('re-mapea los opcionales vacíos del gRPC (proto3 "" → null) null-safe', () => {

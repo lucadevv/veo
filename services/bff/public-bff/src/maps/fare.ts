@@ -3,13 +3,22 @@
  *
  * Reutiliza la fórmula base de trip-service (BR-T05):
  *   tarifa = BASE + (km · POR_KM) + (min · POR_MIN)
- * y le aplica un multiplicador por categoría de vehículo (VEO Económico/Confort/XL).
- * Sin surge ni recargo de modo niño: esos los fija trip-service al CREAR el viaje. Este cálculo
- * es solo para mostrar opciones antes de confirmar; el precio firme sale de POST /trips.
+ * y le aplica la política de pricing POR OFERTA del catálogo ADR 013 (`offering.pricing`:
+ * multiplier + minFareCents). Sin surge ni recargo de modo niño: esos los fija trip-service al
+ * CREAR el viaje. Este cálculo es solo para mostrar opciones antes de confirmar; el precio firme
+ * sale de POST /trips.
  *
  * NADA aleatorio: km y min provienen de la ruta real de OSRM (distanceMeters/durationSeconds).
- * Todo en céntimos PEN (enteros). Estas constantes ESPEJAN las de trip-service/domain/fare.ts.
+ * Todo en céntimos PEN (enteros).
+ *
+ * ADR 013 (Lote C) · la tabla de categorías (multiplicadores, mínimas y el mapeo
+ * category→vehicleType) YA NO se define acá: vive en `OFFERINGS`/`OFFERING_LIST` de
+ * @veo/shared-types, la MISMA fuente que consume trip-service. Ya no existe el "espejo de
+ * constantes BFF↔trip-service" para el pricing por oferta — hay UNA fuente y no puede divergir.
+ * Las constantes de la fórmula base (banderazo/km/min/redondeo) sí siguen espejando
+ * `trip-service/domain/fare.ts` (BR-T05): son la matemática, no la política por oferta.
  */
+import { OFFERINGS, OfferingId, VehicleClass } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 
 /** Banderazo base: S/ 6.00 (igual que trip-service). */
@@ -18,8 +27,16 @@ export const BASE_FARE_CENTS = 600;
 export const PER_KM_CENTS = 120;
 /** Por minuto: S/ 0.30. */
 export const PER_MIN_CENTS = 30;
-/** Tarifa mínima cobrable: S/ 5.00 (viajes muy cortos). */
-export const MIN_FARE_CENTS = 500;
+/**
+ * Tarifa mínima general (ofertas de auto): S/ 5.00. DERIVADA del catálogo (oferta ancla
+ * VEO Económico, ADR 013) — el valor ya no se define acá, se importa.
+ */
+export const MIN_FARE_CENTS = OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents;
+/**
+ * Tarifa mínima del tier moto-taxi: S/ 3.00 (más barata que la mínima de auto). DERIVADA del
+ * catálogo (oferta VEO Moto, ADR 013).
+ */
+export const MOTO_MIN_FARE_CENTS = OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents;
 /** Redondeo del precio final a S/ 0.10 (10 céntimos) para precios "limpios". */
 export const FARE_ROUNDING_CENTS = 10;
 
@@ -31,55 +48,27 @@ export const FARE_ROUNDING_CENTS = 10;
  */
 export const DEFAULT_BID_FLOOR_CENTS = 700;
 
-/** Categoría de vehículo seleccionable en la cotización. */
-export interface RideCategory {
-  /** Identificador estable (se envía luego al crear el viaje si se requiere). */
-  id: string;
-  /** Nombre visible para el pasajero. */
-  name: string;
-  /** Multiplicador sobre la tarifa base. VEO Económico = 1.0 (referencia). */
-  multiplier: number;
-  /**
-   * Tipo de vehículo de la categoría (Ola 2B). El BFF lo propaga a trip-service como `vehicleType`
-   * para que dispatch filtre el matching por tipo (MOTO solo a conductores MOTO). Default CAR.
-   */
-  vehicleType: 'CAR' | 'MOTO';
-}
-
 /**
- * Catálogo de categorías. El orden refleja la prioridad de presentación (moto → económico → premium).
- * Multiplicadores deterministas y comentados; no dependen de demanda ni de azar.
- *
- * Ola 2B · tier MOTO (mototaxi): el más barato. multiplier 0.55 sobre la base CAR (Económico = 1.0).
- * Es razonable para Lima: una carrera corta de mototaxi cuesta ~la mitad que un auto económico. Aun
- * con el multiplier bajo, MIN_FARE_CENTS (S/5.00) acota el precio mínimo de viajes muy cortos; para
- * mototaxi conviene una mínima menor, así que se aplica una mínima propia por categoría (ver abajo).
+ * Resuelve la tarifa mínima aplicable por CLASE de vehículo (el mototaxi tiene una mínima menor).
+ * Las mínimas se derivan del catálogo (ADR 013). El quote alimenta `categoryFareCents` DIRECTO
+ * desde `offering.pricing.minFareCents`; esta función queda como matemática del preview para
+ * consumidores que razonan por clase, no por oferta.
  */
-export const RIDE_CATEGORIES: readonly RideCategory[] = [
-  { id: 'veo_moto', name: 'VEO Moto', multiplier: 0.55, vehicleType: 'MOTO' },
-  { id: 'veo_economico', name: 'VEO Económico', multiplier: 1.0, vehicleType: 'CAR' },
-  { id: 'veo_confort', name: 'VEO Confort', multiplier: 1.25, vehicleType: 'CAR' },
-  { id: 'veo_xl', name: 'VEO XL', multiplier: 1.6, vehicleType: 'CAR' },
-] as const;
-
-/** Tarifa mínima del tier moto-taxi: S/ 3.00 (más barata que la mínima general de auto). */
-export const MOTO_MIN_FARE_CENTS = 300;
-
-/** Resuelve la tarifa mínima aplicable por categoría (mototaxi tiene una mínima menor). */
-export function minFareForCategory(vehicleType: 'CAR' | 'MOTO'): number {
-  return vehicleType === 'MOTO' ? MOTO_MIN_FARE_CENTS : MIN_FARE_CENTS;
+export function minFareForCategory(vehicleClass: VehicleClass): number {
+  return vehicleClass === VehicleClass.MOTO ? MOTO_MIN_FARE_CENTS : MIN_FARE_CENTS;
 }
 
 /**
- * Calcula el precio (céntimos PEN) de una categoría a partir de la distancia y duración reales.
- * Aplica el multiplicador, redondea a S/ 0.10 y respeta la tarifa mínima.
+ * Calcula el precio (céntimos PEN) de una oferta a partir de la distancia y duración reales.
+ * Aplica el multiplicador, redondea a S/ 0.10 y respeta la tarifa mínima. Los insumos de política
+ * (`multiplier`, `minFareCents`) vienen de `offering.pricing` del catálogo (ADR 013).
  * Lanza `ValidationError` si los insumos son negativos o no finitos.
  */
 export function categoryFareCents(
   distanceMeters: number,
   durationSeconds: number,
   multiplier: number,
-  /** Tarifa mínima aplicable (Ola 2B: el tier moto-taxi usa una mínima menor). Default MIN_FARE_CENTS. */
+  /** Tarifa mínima aplicable (`offering.pricing.minFareCents`). Default MIN_FARE_CENTS (auto). */
   minFareCents: number = MIN_FARE_CENTS,
 ): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {

@@ -13,6 +13,7 @@
  */
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '@veo/auth';
+import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import type { DriverReply, TripReply } from '../common/grpc-replies';
@@ -56,7 +57,10 @@ export class MediaService {
     if (trip.driverId !== driver.id) {
       throw new ForbiddenException('El viaje no pertenece al conductor');
     }
-    if (trip.status !== 'IN_PROGRESS') {
+    // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política
+    // (solo viaje en curso) vive en el predicado de dominio compartido por los 3 BFFs.
+    const status = normalizeTripStatus(trip.status);
+    if (status === null || !canAccessLiveCabin(status)) {
       throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
     }
 
