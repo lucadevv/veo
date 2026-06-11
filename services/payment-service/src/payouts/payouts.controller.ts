@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   Roles,
@@ -10,7 +10,7 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { assertDriverOwnsResource } from '@veo/auth';
 import { ValidationError } from '@veo/utils';
-import { PayoutsService, previousWeek, type PayoutPage } from './payouts.service';
+import { PayoutsService, previousWeek, type PayoutPage, type ReleaseHeldPayoutsResult } from './payouts.service';
 import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
 
 @ApiTags('payouts')
@@ -51,5 +51,22 @@ export class PayoutsController {
     const start = dto.periodStart ? new Date(dto.periodStart) : fallback.start;
     const end = dto.periodEnd ? new Date(dto.periodEnd) : fallback.end;
     return this.payouts.runPayouts(start, end, user);
+  }
+
+  // ── Camino de VUELTA de driver.flagged (S4): el review del conductor se resolvió → liberar sus
+  // payouts HELD (HELD→PROCESSED + payout.processed por outbox) y levantar la retención (srem).
+  // Mutación de PLATA: mismos roles que /run; >S/5000 exige step-up MFA (validado en el servicio). ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('drivers/:driverId/release')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — FINANCE/ADMIN. Idempotente',
+  })
+  release(
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ReleaseHeldPayoutsResult> {
+    return this.payouts.releaseHeldPayouts(driverId, user);
   }
 }

@@ -54,4 +54,27 @@ export class ProntoPagaWebhookService {
       errorCode: result.errorCode,
     });
   }
+
+  /**
+   * Callback de REEMBOLSO (S5): ProntoPaga confirma/rechaza el reverso pegándole a la ruta DEDICADA
+   * `urlCallbackRefund` (POST /webhooks/prontopaga/refund). La RUTA clasifica el evento (el payload del
+   * reverso no trae un marcador de tipo confiable); la FIRMA se verifica igual que el webhook principal
+   * y la transición del Refund es idempotente (applyRefundWebhookResult, CAS por estado). Recién acá
+   * —con la plata efectivamente devuelta— se emite payment.refunded (push al pasajero).
+   */
+  async processRefund(
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+  ): Promise<void> {
+    if (!supportsWebhooks(this.gateway)) {
+      this.logger.warn('Callback de reembolso recibido pero el gateway activo no soporta verificación; rechazado');
+      throw new UnauthorizedError('El gateway activo no verifica webhooks');
+    }
+    // Lanza UnauthorizedError (→401) si la firma es inválida. No logueamos el cuerpo crudo.
+    const result = this.gateway.verifyWebhook(rawBody, headers);
+    await this.payments.applyRefundWebhookResult({
+      externalRefundId: result.externalId,
+      status: result.status,
+    });
+  }
 }

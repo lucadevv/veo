@@ -122,3 +122,11 @@ export function retryDelayMs(attempt: number, baseMs: number): number {
 export function deriveTripChargeDedupKey(tripId: string): string {
   return `trip-completed:${tripId}`;
 }
+
+/**
+ * Clave de idempotencia del REVERSO contra el proveedor (INTEGRACIONES §4): derivada de la operación
+ * de negocio (el Refund persistido ANTES de llamar al riel). Mismo refund → misma key.
+ */
+export function deriveRefundIdempotencyKey(refundId: string): string {
+  return `refund-${refundId}`;
+}

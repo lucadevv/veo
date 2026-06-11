@@ -44,6 +44,9 @@ export const envSchema = z.object({
   CANCELLATION_DRIVER_SHARE: z.coerce.number().min(0).max(1).default(0.5),
   /// Umbral de discrepancia de conciliación que dispara alerta a finanzas (BR-P07). Default 1%.
   RECONCILIATION_ALERT_PCT: z.coerce.number().min(0).max(1).default(0.01),
+  /// Red de seguridad del lazo de reembolsos (S5 · BR-P06): un Refund PENDING más viejo que este umbral
+  /// (minutos) dispara ALERTA a ops (el callback del proveedor no llegó o no correlacionó). Default 60.
+  REFUND_PENDING_ALERT_MIN: z.coerce.number().int().min(1).default(60),
 
   // ── Riel externo tras el puerto PaymentGateway ──
   /// Selección de adapter: `live` (API directa) | `sandbox` (determinista) | `prontopaga` (agregador PE).

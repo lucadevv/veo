@@ -42,4 +42,30 @@ export class ProntoPagaWebhookController {
     await this.service.process(raw, req.headers);
     return { ok: true };
   }
+
+  // ── Callback de REEMBOLSO (S5): ruta DEDICADA que ProntoPaga recibe como urlCallbackRefund. La ruta
+  // clasifica el evento como reverso (el payload no trae marcador de tipo confiable); misma firma HMAC
+  // y mismo trato idempotente que el webhook principal.
+  // CONTRATO DE RESPUESTA (playbook): 200 SOLO cuando pudimos correlacionar/persistir el desenlace.
+  // Un callback cuyo uid todavía no matchea un Refund (carrera: llegó antes de que refundViaGateway
+  // persistiera el uid del reverso) propaga NotFoundError → 404: el proveedor REINTENTA la entrega
+  // (igual que ante el 401 de firma inválida) y en el retry la correlación ya existe. Absorberlo con
+  // 200 dejaría el Refund PENDING para siempre (el proveedor no reintenta lo que cree entregado). ──
+  @Public()
+  @Post('refund')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Callback de reembolso de ProntoPaga (urlCallbackRefund). Firma HMAC verificada. Idempotente. ' +
+      '404 si el reverso aún no correlaciona (el proveedor reintenta).',
+  })
+  async handleRefund(@Req() req: RawBodyRequest): Promise<{ ok: true }> {
+    const raw = req.rawBody?.toString('utf8');
+    if (!raw) {
+      this.logger.warn('Callback de reembolso ProntoPaga sin rawBody; rechazado');
+      throw new UnauthorizedError('Webhook sin cuerpo verificable');
+    }
+    await this.service.processRefund(raw, req.headers);
+    return { ok: true };
+  }
 }

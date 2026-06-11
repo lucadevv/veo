@@ -13,7 +13,7 @@ import { ForbiddenError, uuidv7 } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
-import { aggregatePayouts, periodLabel, type DriverEarningRow } from './payout.policy';
+import { aggregatePayouts, assertPayoutTransition, periodLabel, type DriverEarningRow } from './payout.policy';
 import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -27,6 +27,14 @@ export interface PayoutRunSummary {
   periodEnd: string;
   processed: number;
   held: number;
+  totalAmountCents: number;
+}
+
+/** Resultado de liberar la retención de un conductor (camino de vuelta de driver.flagged). */
+export interface ReleaseHeldPayoutsResult {
+  driverId: string;
+  /** Payouts HELD→PROCESSED liberados por esta llamada (0 si ya estaban liberados: idempotente). */
+  released: number;
   totalAmountCents: number;
 }
 
@@ -170,6 +178,71 @@ export class PayoutsService {
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */
   async holdDriver(driverId: string): Promise<void> {
     await this.redis.sadd(FLAGGED_DRIVERS_KEY, driverId);
+  }
+
+  /**
+   * Camino de VUELTA de driver.flagged (review resuelto, acción admin): libera los payouts HELD del
+   * conductor (transición tipada HELD→PROCESSED) y levanta su retención (srem del set de flaggeados,
+   * para que las próximas liquidaciones no nazcan HELD).
+   *
+   *  - Los payouts se liberan en UNA transacción; cada liberación emite `payout.processed` por OUTBOX
+   *    en la MISMA tx (idéntico dominó que el cron para un payout no retenido: la plata sale y
+   *    notification-service avisa). El CAS `updateMany where status=HELD` hace la operación idempotente
+   *    y concurrencia-segura: una liberación re-entrante libera 0 y NO re-emite.
+   *  - El srem va DESPUÉS de la tx: si liberar falla, el conductor sigue retenido (estado consistente)
+   *    y el operador reintenta; el reintento es seguro.
+   *  - Plata grande exige step-up MFA fresco, espejo de runPayouts (BR-S07).
+   *  - `heldReason` se conserva (historia de POR QUÉ estuvo retenido); el estado vigente es PROCESSED.
+   *  - El audit trail del operador lo registra admin-bff (AuditRecorder, action payout.release_held),
+   *    como hace con payout.run; acá queda el rastro de dominio (outbox + log estructurado).
+   */
+  async releaseHeldPayouts(driverId: string, operator?: AuthenticatedUser): Promise<ReleaseHeldPayoutsResult> {
+    const held = await this.prisma.read.payout.findMany({
+      where: { driverId, status: PayoutStatus.HELD },
+      orderBy: { periodStart: 'asc' },
+    });
+    const projectedTotal = held.reduce((sum, p) => sum + p.amountCents, 0);
+
+    if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
+      throw new ForbiddenError(
+        `Liberar ${projectedTotal} céntimos retenidos supera S/5000: requiere verificación MFA fresca (step-up)`,
+      );
+    }
+
+    let released = 0;
+    let totalAmountCents = 0;
+    await this.prisma.write.$transaction(async (tx) => {
+      for (const payout of held) {
+        assertPayoutTransition(payout.status, PayoutStatus.PROCESSED);
+        const { count } = await tx.payout.updateMany({
+          where: { id: payout.id, status: PayoutStatus.HELD },
+          data: { status: PayoutStatus.PROCESSED, processedAt: new Date() },
+        });
+        if (count === 0) continue; // otra liberación concurrente ya lo procesó: no re-emitir.
+        const envelope = createEnvelope({
+          eventType: 'payout.processed',
+          producer: 'payment-service',
+          payload: {
+            payoutId: payout.id,
+            driverId: payout.driverId,
+            amountCents: payout.amountCents,
+            period: periodLabel(payout.periodStart, payout.periodEnd),
+          },
+        });
+        await enqueueOutbox(tx, envelope, payout.id);
+        released += 1;
+        totalAmountCents += payout.amountCents;
+      }
+    });
+
+    // Des-flag al final: las próximas liquidaciones del conductor ya no nacen HELD. Idempotente.
+    await this.redis.srem(FLAGGED_DRIVERS_KEY, driverId);
+
+    this.logger.log(
+      `Retención liberada para el conductor ${driverId}: ${released} payout(s) HELD→PROCESSED ` +
+        `por ${totalAmountCents} céntimos${operator ? ` (operador ${operator.userId})` : ''}`,
+    );
+    return { driverId, released, totalAmountCents };
   }
 
   private async collectEarnings(start: Date, end: Date): Promise<DriverEarningRow[]> {

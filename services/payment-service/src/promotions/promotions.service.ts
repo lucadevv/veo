@@ -11,10 +11,10 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
+import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError, uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, type Promotion } from '../generated/prisma';
+import type { Promotion } from '../generated/prisma';
 import {
   evaluatePromo,
   normalizeCode,
@@ -160,7 +160,7 @@ export class PromotionsService {
       });
     } catch (err) {
       // Carrera de doble-submit: el UNIQUE (dedupKey o tripleta) garantiza un único canje.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err)) {
         const dup =
           (await this.prisma.read.promoRedemption.findUnique({ where: { dedupKey: input.dedupKey } })) ??
           (await this.prisma.read.promoRedemption.findUnique({

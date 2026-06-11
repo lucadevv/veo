@@ -265,7 +265,9 @@ describe('Refund: status-guard transaccional (F1, idempotencia financiera #3)', 
 
     const operator = { userId: uuidv7(), roles: [] } as unknown as AuthenticatedUser;
     const first = await service.refund(tripId, 2000, 'ok', operator);
-    expect(first.status).toBe('REFUNDED');
+    // S5: status = estado del REFUND. El sandbox reembolsa síncrono (ACCEPTED) → COMPLETED.
+    expect(first.status).toBe('COMPLETED');
+    expect((await service.getPayment(captured.id)).status).toBe('REFUNDED');
 
     // 2do refund del mismo viaje: ya no hay CAPTURED → rechazado, sin crear otro Refund ni emitir otro evento.
     await expect(service.refund(tripId, 2000, 'duplicado', operator)).rejects.toThrow();
@@ -296,17 +298,18 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
     expect(captured.status).toBe('CAPTURED');
     expect(captured.amountCents).toBe(3000);
 
-    // Parcial 1: 1000 de 3000 → PARTIALLY_REFUNDED, refundedCents=1000, refundedAt aún null.
+    // Parcial 1: 1000 de 3000 → el pago queda PARTIALLY_REFUNDED, refundedCents=1000, refundedAt null.
+    // S5: el status devuelto es el del REFUND (COMPLETED: el sandbox confirma síncrono).
     const r1 = await service.refund(tripId, 1000, 'parcial-1', operator());
-    expect(r1.status).toBe('PARTIALLY_REFUNDED');
+    expect(r1.status).toBe('COMPLETED');
     let p = await prisma.payment.findUnique({ where: { id: captured.id } });
     expect(p?.status).toBe('PARTIALLY_REFUNDED');
     expect(p?.refundedCents).toBe(1000);
     expect(p?.refundedAt).toBeNull();
 
-    // Parcial 2: 2000 → completa 3000 → REFUNDED, refundedAt seteado.
+    // Parcial 2: 2000 → completa 3000 → el pago pasa a REFUNDED, refundedAt seteado.
     const r2 = await service.refund(tripId, 2000, 'parcial-2', operator());
-    expect(r2.status).toBe('REFUNDED');
+    expect(r2.status).toBe('COMPLETED');
     p = await prisma.payment.findUnique({ where: { id: captured.id } });
     expect(p?.status).toBe('REFUNDED');
     expect(p?.refundedCents).toBe(3000);

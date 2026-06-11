@@ -1,7 +1,11 @@
 /**
  * Políticas puras de liquidación (payouts). Sin I/O.
  * Agrega los cobros capturados de un conductor en un período y decide si supera el mínimo (BR-P05).
+ * Incluye la máquina de estados del payout (espejo de PAYMENT_TRANSITIONS en payment.policy).
  */
+import { InvalidStateError } from '@veo/utils';
+import type { PayoutStatus } from '@veo/shared-types';
+
 export interface DriverEarningRow {
   driverId: string;
   grossCents: number;
@@ -51,6 +55,33 @@ export function aggregatePayouts(rows: DriverEarningRow[], minCents: number): Ag
 export function periodLabel(start: Date, end: Date): string {
   const fmt = (d: Date): string => d.toISOString().slice(0, 10);
   return `${fmt(start)}/${fmt(end)}`;
+}
+
+/**
+ * Transiciones válidas de la máquina de estados del payout (BR-P05). Mapa TIPADO y exhaustivo
+ * (Record<PayoutStatus, ...>): agregar un estado al enum obliga a declarar sus transiciones.
+ *  - HELD → PROCESSED es el camino de VUELTA de driver.flagged: la retención se libera cuando el
+ *    review del conductor se resuelve (acción admin), nunca en silencio.
+ */
+const PAYOUT_TRANSITIONS: Readonly<Record<PayoutStatus, readonly PayoutStatus[]>> = {
+  PENDING: ['PROCESSING', 'PROCESSED', 'HELD', 'FAILED'],
+  PROCESSING: ['PROCESSED', 'FAILED'],
+  // La retención se LIBERA (review resuelto) → se procesa. No vuelve a PENDING: liberar = pagar.
+  HELD: ['PROCESSED'],
+  // Un payout fallido puede reintentarse (transferencia caída) hasta procesarse.
+  FAILED: ['PROCESSING', 'PROCESSED'],
+  PROCESSED: [],
+};
+
+export function canTransitionPayout(from: PayoutStatus, to: PayoutStatus): boolean {
+  if (from === to) return true;
+  return PAYOUT_TRANSITIONS[from].includes(to);
+}
+
+export function assertPayoutTransition(from: PayoutStatus, to: PayoutStatus): void {
+  if (!canTransitionPayout(from, to)) {
+    throw new InvalidStateError(`Transición de payout inválida: ${from} → ${to}`);
+  }
 }
 
 /** Discrepancia (0..1) entre lo capturado en DB y el extracto del gateway (BR-P07). */

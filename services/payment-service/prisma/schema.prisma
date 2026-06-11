@@ -216,6 +216,9 @@ model Payout {
 }
 
 /// Solicitud de reembolso (BR-P06): ventana 7 días, aprobación manual L1/L2 (>S/30 requiere L2).
+/// S5 · Reembolso REAL contra el proveedor: el Refund digital nace PENDING (intent persistido ANTES de
+/// llamar al riel, §4 idempotencia) y SOLO pasa a COMPLETED cuando el proveedor confirma el reverso
+/// (síncrono o por callback) — recién ahí se emite payment.refunded (push "te devolvimos S/X").
 model Refund {
   id          String       @id @db.Uuid
   paymentId   String       @map("payment_id") @db.Uuid
@@ -225,11 +228,18 @@ model Refund {
   approvedBy  String?      @map("approved_by")
   status      RefundStatus @default(PENDING)
   reason      String
+  /// UID del reverso en el proveedor (ProntoPaga /reverse/new → uid). Correlaciona el callback
+  /// asíncrono (urlCallbackRefund). Null si el reverso fue local (CASH) o el proveedor no lo emitió.
+  externalRefundId String? @map("external_refund_id")
+  /// Motivo del RECHAZO del proveedor (status=REJECTED). Distinto de `reason` (motivo del pedido).
+  failureReason String?    @map("failure_reason")
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([paymentId])
   @@index([status])
+  /// Correlación del callback de reembolso del proveedor (uid → Refund).
+  @@index([externalRefundId])
   @@map("refunds")
   @@schema("payment")
 }

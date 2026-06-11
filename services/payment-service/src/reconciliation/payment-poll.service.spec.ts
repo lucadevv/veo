@@ -30,6 +30,9 @@ function makeGateway(byUid: Record<string, PaymentStatusDetail>): PaymentGateway
   getPaymentStatus: (uid: string) => Promise<PaymentStatusDetail>;
 } {
   return {
+    // Capacidades DECLARADAS (contrato base del puerto): el poll solo corre contra un agregador.
+    chargeFlow: 'aggregator',
+    supports: () => true,
     charge: vi.fn(),
     getStatement: vi.fn(),
     getPaymentStatus: vi.fn(async (uid: string) => {

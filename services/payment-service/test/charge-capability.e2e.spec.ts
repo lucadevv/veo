@@ -34,7 +34,6 @@ const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
-    VEO_PAYMENT_MODE: 'prontopaga',
     COMMISSION_RATE: 0.2,
     PAYMENT_MAX_RETRIES: 3,
     PAYMENT_RETRY_BASE_MS: 1,
@@ -46,12 +45,19 @@ function makeConfig(): ConfigService {
   return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
 }
 
-/** Gateway que devuelve un result fijo en charge (clasificación inyectada por test). */
+/**
+ * Gateway que devuelve un result fijo en charge (clasificación inyectada por test). Declara sus
+ * capacidades como exige el contrato BASE del puerto (chargeFlow + supports): el service despacha
+ * según lo que el adapter DECLARA (acá: agregador con catálogo total — la deshabilitación COMERCIAL
+ * se clasifica en runtime vía failureKind, que es exactamente lo que prueban estos tests).
+ */
 function fixedGateway(result: GatewayChargeResult): PaymentGateway {
   return {
+    chargeFlow: 'aggregator',
+    supports: () => true,
     charge: async (_req: GatewayChargeRequest) => result,
     getStatement: async () => [],
-  } as unknown as PaymentGateway;
+  } satisfies PaymentGateway;
 }
 
 function makeService(gateway: PaymentGateway): PaymentsService {

@@ -15,14 +15,24 @@ import { Logger } from '@nestjs/common';
 import { UnauthorizedError } from '@veo/utils';
 import type {
   PaymentGateway,
+  GatewayChargeFlow,
   GatewayChargeRequest,
   GatewayChargeResult,
+  GatewayPaymentMethod,
   GatewayStatementEntry,
   WebhookVerifier,
   WebhookResult,
+  Refundable,
+  RefundResult,
+  RefundMeta,
 } from './payment-gateway.port';
 import { signPayload, verifySignature, type SignablePayload } from './prontopaga.signer';
 import { mapProntoPagaStatus, normalizeWebhook } from './prontopaga.mapping';
+
+/** Catálogo del riel directo simulado: Yape/Plin (espeja al adapter `live`). */
+const DIRECT_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN']);
+/** Catálogo del modo agregador simulado: espeja a ProntoPaga (Yape/Plin/tarjeta/PagoEfectivo). */
+const AGGREGATOR_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO']);
 
 interface LedgerEntry {
   externalRef: string;
@@ -42,11 +52,26 @@ export interface SandboxGatewayOptions {
   webhookSecret?: string;
 }
 
-export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier {
+export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, Refundable {
   private readonly logger = new Logger('SandboxPaymentGateway');
   private readonly ledger: LedgerEntry[] = [];
+  /** Reversos aceptados, por id determinista (idempotencia: re-llamar con la misma key no duplica). */
+  private readonly refunds = new Map<string, { externalRef: string; amountCents: number }>();
 
   constructor(private readonly opts: SandboxGatewayOptions) {}
+
+  /**
+   * Capacidades DECLARADAS (contrato base del puerto): con `pendingExternal` el sandbox espeja a un
+   * AGREGADOR (flujo asíncrono + catálogo de 4 métodos, como ProntoPaga); sin él, al riel DIRECTO
+   * (síncrono, solo Yape/Plin, como `live`). El dominio despacha según esto, no según el env.
+   */
+  get chargeFlow(): GatewayChargeFlow {
+    return this.opts.pendingExternal ? 'aggregator' : 'direct';
+  }
+
+  supports(method: GatewayPaymentMethod): boolean {
+    return (this.opts.pendingExternal ? AGGREGATOR_METHODS : DIRECT_METHODS).has(method);
+  }
 
   async charge(req: GatewayChargeRequest): Promise<GatewayChargeResult> {
     if (this.opts.confirmDelayMs > 0) {
@@ -76,6 +101,21 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier {
     }
     this.logger.log(`[SANDBOX ${req.method}] cobro confirmado tx=${externalRef} monto=${req.amountCents}`);
     return { status: 'CONFIRMED', externalRef };
+  }
+
+  /**
+   * Reembolso DETERMINISTA y SÍNCRONO (capacidad `Refundable`, ISP del puerto). No es un mock de test:
+   * es la red de pagos en proceso devolviendo la plata en el acto. El id del reverso se deriva de la
+   * idempotency key del dominio (INTEGRACIONES §4): re-llamar con la MISMA key devuelve el MISMO
+   * reverso sin duplicar (idempotente, espeja el contrato de un proveedor con idempotencia real).
+   */
+  async refund(externalRef: string, amountCents: number, meta?: RefundMeta): Promise<RefundResult> {
+    const externalRefundId = `sbx_refund_${meta?.idempotencyKey ?? externalRef}`;
+    if (!this.refunds.has(externalRefundId)) {
+      this.refunds.set(externalRefundId, { externalRef, amountCents });
+      this.logger.log(`[SANDBOX] reverso confirmado ${externalRefundId} sobre tx=${externalRef} monto=${amountCents}`);
+    }
+    return { status: 'ACCEPTED', externalRefundId };
   }
 
   async getStatement(periodStart: Date, periodEnd: Date): Promise<GatewayStatementEntry[]> {

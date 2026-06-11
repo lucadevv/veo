@@ -10,10 +10,19 @@
  * El efectivo (CASH) no pasa por el gateway (confirmación bilateral, BR-P03).
  *
  * DISEÑO SOLID/ISP: el contrato base `PaymentGateway` solo exige lo que TODO adapter cumple
- * (charge + getStatement). Las capacidades opcionales del proveedor —verificar webhooks y reembolsar—
- * viven en interfaces SEPARADAS (`WebhookVerifier`, `Refundable`) que un adapter implementa si las
- * soporta. El dominio consulta la capacidad con los type-guards (`supportsWebhooks`, `supportsRefund`)
- * en vez de obligar a cada adapter a stubbear métodos que no aplican.
+ * (charge + getStatement + sus capacidades DECLARADAS: `chargeFlow` y `supports`). Las capacidades
+ * opcionales del proveedor —verificar webhooks y reembolsar— viven en interfaces SEPARADAS
+ * (`WebhookVerifier`, `Refundable`) que un adapter implementa si las soporta. El dominio consulta la
+ * capacidad con los type-guards (`supportsWebhooks`, `supportsRefund`) en vez de obligar a cada
+ * adapter a stubbear métodos que no aplican.
+ *
+ * CAPACIDADES DE COBRO (misma filosofía que los type-guards, pero en el contrato BASE): cobrar es la
+ * capacidad obligatoria de todo gateway, así que sus metadatos de despacho —qué métodos cobra
+ * (`supports`) y con qué flujo (`chargeFlow`)— son OBLIGATORIOS, no opcionales: si fueran type-guards
+ * opcionales, el dominio necesitaría una rama default silenciosa para los adapters que no declaran
+ * (exactamente lo que está prohibido). El env `VEO_PAYMENT_MODE` lo mira SOLO la factory que elige el
+ * adapter (payment-gateway.module); el dominio pregunta al puerto y JAMÁS vuelve a mirar el env —
+ * agregar un proveedor = un adapter nuevo + cableado en la factory, CERO ediciones en el dominio.
  */
 import type { PaymentMethod } from '@veo/shared-types';
 
@@ -21,6 +30,16 @@ export const PAYMENT_GATEWAY = Symbol('PAYMENT_GATEWAY');
 
 /** Métodos digitales enrutables al gateway (CASH se confirma bilateral, fuera del puerto). */
 export type GatewayPaymentMethod = Extract<PaymentMethod, 'YAPE' | 'PLIN' | 'CARD' | 'PAGOEFECTIVO'>;
+
+/**
+ * Flujo de cobro que el adapter IMPLEMENTA y DECLARA (el dominio despacha preguntándole al puerto,
+ * nunca re-derivándolo del env):
+ *  - 'aggregator' → cobro asíncrono de UN intento: `charge` devuelve PENDING_EXTERNAL con checkout
+ *                   y el desenlace llega por webhook/poll (ProntoPaga; sandbox con pendingExternal).
+ *  - 'direct'     → riel síncrono: el dominio reintenta con backoff y conoce el desenlace en línea
+ *                   (live; sandbox clásico).
+ */
+export type GatewayChargeFlow = 'aggregator' | 'direct';
 
 export interface GatewayChargeRequest {
   /** id del Payment de dominio (UUIDv7); el adapter lo usa para trazabilidad/idempotencia (order único). */
@@ -120,6 +139,18 @@ export interface GatewayStatementEntry {
 }
 
 export interface PaymentGateway {
+  /**
+   * Flujo de cobro que este adapter implementa (capacidad DECLARADA). El dominio elige el camino
+   * (un intento asíncrono vs reintentos síncronos) según ESTO, jamás según `VEO_PAYMENT_MODE`.
+   */
+  readonly chargeFlow: GatewayChargeFlow;
+  /**
+   * ¿Este adapter puede cobrar `method`? Capacidad DECLARADA (espejo de supportsRefund/
+   * supportsWebhooks): el dominio pregunta al puerto en lugar de adivinar el catálogo por env.
+   * La habilitación COMERCIAL real del método se descubre igual en runtime
+   * (failureKind=capability_unavailable); esto declara el catálogo que el adapter SABE hablar.
+   */
+  supports(method: GatewayPaymentMethod): boolean;
   /** Intenta cobrar contra el riel. Un solo intento; el reintento/backoff lo orquesta el dominio. */
   charge(req: GatewayChargeRequest): Promise<GatewayChargeResult>;
   /** Extracto del riel en una ventana [start, end) para conciliar contra lo capturado en DB. */
@@ -166,6 +197,14 @@ export interface RefundResult {
 export interface RefundMeta {
   clientDocument?: string;
   urlCallbackRefund?: string;
+  /**
+   * Clave de idempotencia del reverso, derivada de la operación de negocio (`refund-{refundId}`,
+   * INTEGRACIONES §4) y persistida ANTES de llamar. El adapter la usa si el proveedor soporta
+   * idempotencia (sandbox: reverso determinista por key). ProntoPaga NO expone un campo de
+   * idempotencia en /reverse/new → ahí la idempotencia la garantiza el dominio (Refund PENDING
+   * persistido antes de llamar + claim transaccional; nunca se re-llama a ciegas).
+   */
+  idempotencyKey?: string;
 }
 
 /** Capacidad: el adapter reembolsa una transacción capturada. */

@@ -12,10 +12,10 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
+import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, type Incentive, type IncentiveProgress } from '../generated/prisma';
+import type { Incentive, IncentiveProgress } from '../generated/prisma';
 import { computeCompleted, isActiveAt, isMetaCompleted } from './incentives.policy';
 
 export interface DriverIncentiveView {
@@ -101,7 +101,7 @@ export class IncentivesService {
       });
     } catch (err) {
       // El viaje ya estaba acreditado a este incentivo (UNIQUE): idempotente, no es un error.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return;
+      if (isUniqueViolation(err)) return;
       throw err;
     }
   }

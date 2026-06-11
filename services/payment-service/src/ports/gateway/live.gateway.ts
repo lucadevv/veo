@@ -11,10 +11,15 @@ import { Logger } from '@nestjs/common';
 import { ExternalServiceError } from '@veo/utils';
 import type {
   PaymentGateway,
+  GatewayChargeFlow,
   GatewayChargeRequest,
   GatewayChargeResult,
+  GatewayPaymentMethod,
   GatewayStatementEntry,
 } from './payment-gateway.port';
+
+/** Catálogo del riel directo: solo Yape/Plin (tarjeta/PagoEfectivo no tienen riel directo — van por agregador). */
+const SUPPORTED_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN']);
 
 export interface LiveGatewayOptions {
   baseUrl: string;
@@ -34,8 +39,15 @@ interface StatementResponseBody {
 }
 
 export class LivePaymentGateway implements PaymentGateway {
+  /** Capacidades DECLARADAS: riel directo SÍNCRONO (el dominio reintenta con backoff), solo Yape/Plin. */
+  readonly chargeFlow: GatewayChargeFlow = 'direct';
+
   private readonly logger = new Logger('LivePaymentGateway');
   private readonly timeoutMs: number;
+
+  supports(method: GatewayPaymentMethod): boolean {
+    return SUPPORTED_METHODS.has(method);
+  }
 
   constructor(private readonly opts: LiveGatewayOptions) {
     if (!opts.baseUrl || !opts.apiKey || !opts.merchantId) {

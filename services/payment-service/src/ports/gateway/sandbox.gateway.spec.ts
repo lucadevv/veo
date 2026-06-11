@@ -67,3 +67,23 @@ describe('SandboxPaymentGateway · verifyWebhook (firma timing-safe)', () => {
     expect(() => gw().verifyWebhook('no-json')).toThrow(UnauthorizedError);
   });
 });
+
+describe('SandboxPaymentGateway · refund (S5 · capacidad Refundable)', () => {
+  it('supportsRefund detecta la capacidad en el adapter sandbox', async () => {
+    const { supportsRefund } = await import('./payment-gateway.port');
+    expect(supportsRefund(gw())).toBe(true);
+  });
+
+  it('acepta SÍNCRONO y determinista, con id derivado de la idempotency key', async () => {
+    const r = await gw().refund('sbx_yape_p1', 1000, { idempotencyKey: 'refund-r1' });
+    expect(r.status).toBe('ACCEPTED');
+    expect(r.externalRefundId).toBe('sbx_refund_refund-r1');
+  });
+
+  it('es idempotente: re-llamar con la MISMA key devuelve el MISMO reverso', async () => {
+    const g = gw();
+    const first = await g.refund('sbx_yape_p1', 1000, { idempotencyKey: 'refund-r1' });
+    const second = await g.refund('sbx_yape_p1', 1000, { idempotencyKey: 'refund-r1' });
+    expect(second.externalRefundId).toBe(first.externalRefundId);
+  });
+});

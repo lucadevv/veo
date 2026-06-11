@@ -5,8 +5,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
+import { deletedPlaceholder, enqueueOutbox, isUniqueViolation } from '@veo/database';
 import {
+  assertNever,
   ConflictError,
   ForbiddenError,
   InvalidStateError,
@@ -20,8 +21,10 @@ import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import {
   PAYMENT_GATEWAY,
+  supportsRefund,
   type PaymentGateway,
   type GatewayChargeResult,
+  type RefundResult,
   type WebhookStatus,
   YAPE_ONFILE_MAX_CENTS,
   YAPE_INSUFFICIENT_FUNDS_CODE,
@@ -29,11 +32,12 @@ import {
 } from '../ports/gateway/payment-gateway.port';
 import { AffiliationsService } from '../affiliations/affiliations.service';
 import { PromotionsService } from '../promotions/promotions.service';
-import { Prisma, type Payment } from '../generated/prisma';
+import { Prisma, RefundStatus, type Payment, type Refund } from '../generated/prisma';
 import {
   assertCanAddTip,
   assertPaymentTransition,
   computeChargeAmounts,
+  deriveRefundIdempotencyKey,
   retryDelayMs,
 } from './payment.policy';
 import type { Env } from '../config/env.schema';
@@ -78,6 +82,16 @@ export interface ChargeInput {
   };
 }
 
+/** Reserva de reembolso ya VALIDADA en refund(): montos + transición destino del Payment (S5). */
+interface RefundClaim {
+  amountCents: number;
+  reason: string;
+  operator: AuthenticatedUser;
+  newStatus: 'REFUNDED' | 'PARTIALLY_REFUNDED';
+  newRefundedCents: number;
+  isFullyRefunded: boolean;
+}
+
 /** Desglose real de ganancias de un conductor en una ventana temporal (BR-P05). Céntimos PEN. */
 export interface DriverEarningsBreakdown {
   grossCents: number;
@@ -100,8 +114,6 @@ export class PaymentsService {
   private readonly refundL2ThresholdCents: number;
   private readonly cancellationDriverShare: number;
 
-  private readonly paymentMode: 'live' | 'sandbox' | 'prontopaga';
-
   constructor(
     private readonly prisma: PrismaService,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
@@ -109,7 +121,6 @@ export class PaymentsService {
     private readonly promotions: PromotionsService,
     config: ConfigService<Env, true>,
   ) {
-    this.paymentMode = config.getOrThrow<'live' | 'sandbox' | 'prontopaga'>('VEO_PAYMENT_MODE');
     this.commissionRate = config.getOrThrow<number>('COMMISSION_RATE');
     this.maxRetries = config.getOrThrow<number>('PAYMENT_MAX_RETRIES');
     this.retryBaseMs = config.getOrThrow<number>('PAYMENT_RETRY_BASE_MS');
@@ -120,18 +131,48 @@ export class PaymentsService {
   }
 
   /**
+   * Guard método×capacidad (compartido por charge y settleCancellationPenalty): un método DIGITAL
+   * solo se cobra si el ADAPTER activo lo DECLARA en su catálogo (`gateway.supports`). Antes era un
+   * check contra el modo del env DUPLICADO verbatim en ambos llamadores; ahora la capacidad la
+   * declara el puerto y el dominio pregunta — agregar un proveedor NO toca este service.
+   * CASH no pasa por el gateway (confirmación bilateral, BR-P03) → acá no se valida.
+   */
+  private assertGatewaySupportsMethod(method: PaymentMethod): void {
+    if (method === 'CASH') return;
+    if (!this.gateway.supports(method)) {
+      throw new InvalidStateError(
+        `El cobro con ${method} no está habilitado en el gateway de pagos activo; elegí otro método`,
+      );
+    }
+  }
+
+  /**
+   * Despacho POLIMÓRFICO del cobro digital según el flujo que el ADAPTER declara (`chargeFlow`),
+   * jamás según el env: 'aggregator' → un intento asíncrono (checkout + webhook/poll cierran el
+   * Payment); 'direct' → riel síncrono con reintentos y backoff (BR-P02). Switch EXHAUSTIVO sin
+   * default silencioso: un flujo nuevo en el puerto OBLIGA a decidir acá (assertNever).
+   */
+  private dispatchDigitalCharge(payment: Payment, input: ChargeInput): Promise<Payment> {
+    const flow = this.gateway.chargeFlow;
+    switch (flow) {
+      case 'aggregator':
+        return this.processAggregatorCharge(payment, input);
+      case 'direct':
+        return this.processGatewayCharge(payment);
+      default:
+        return assertNever(flow, 'GatewayChargeFlow no contemplado');
+    }
+  }
+
+  /**
    * Cobro idempotente (BR-P01/P04 + idempotencia). Segundo intento con la misma dedupKey
    * devuelve el MISMO pago sin recobrar. Yape/Plin se procesan contra el riel con reintentos→DEBT;
    * el efectivo queda PENDING hasta la confirmación bilateral (BR-P03).
    */
   async charge(input: ChargeInput): Promise<Payment> {
-    // CARD/PAGOEFECTIVO solo se cobran vía el agregador (ProntoPaga). En sandbox/live, la tarjeta
-    // (pre-auth) sigue siendo fase 4 y PagoEfectivo no aplica (no hay riel para ellos).
-    if ((input.method === 'CARD' || input.method === 'PAGOEFECTIVO') && this.paymentMode !== 'prontopaga') {
-      throw new InvalidStateError(
-        `El cobro con ${input.method} requiere VEO_PAYMENT_MODE=prontopaga (no habilitado en modo ${this.paymentMode})`,
-      );
-    }
+    // Un método digital solo si el adapter activo lo declara (p.ej. el riel directo Yape/Plin no
+    // cobra CARD/PAGOEFECTIVO — eso lo habla el agregador).
+    this.assertGatewaySupportsMethod(input.method);
 
     const existing = await this.prisma.read.payment.findUnique({ where: { dedupKey: input.dedupKey } });
     if (existing) return existing;
@@ -182,7 +223,7 @@ export class PaymentsService {
       });
     } catch (err) {
       // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza un solo pago.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'dedupKey')) {
         const dup = await this.prisma.read.payment.findUnique({ where: { dedupKey: input.dedupKey } });
         if (dup) return dup;
         throw new ConflictError('Cobro duplicado para la misma dedupKey');
@@ -195,13 +236,9 @@ export class PaymentsService {
       return payment;
     }
 
-    // Modo agregador (ProntoPaga): el cobro es ASÍNCRONO (un intento; el desenlace llega por webhook).
-    if (this.paymentMode === 'prontopaga') {
-      return this.processAggregatorCharge(payment, input);
-    }
-
-    // YAPE/PLIN sandbox/live → riel externo con reintentos y backoff (BR-P02).
-    return this.processGatewayCharge(payment);
+    // Cobro digital: el flujo lo DECLARA el adapter (aggregator asíncrono / riel directo con
+    // reintentos, BR-P02). El env que elige el adapter solo lo mira la factory, nunca este service.
+    return this.dispatchDigitalCharge(payment, input);
   }
 
   /**
@@ -519,9 +556,9 @@ export class PaymentsService {
    *  - Sobre un pago YA CAPTURED → no-op (devuelve el estado actual; la deuda ya se saldó).
    *  - Sobre DEBT → status-guard TRANSACCIONAL (`updateMany where status=DEBT` → DEBT→PENDING).
    *    Solo UN llamador gana el guard (count=1); los concurrentes ven count=0 y no re-cobran.
-   *  - prontopaga: re-corre el cobro por el agregador → nuevo checkout (urlPay/deepLink/qr/cip),
+   *  - gateway 'aggregator' (ProntoPaga): re-corre el cobro → nuevo checkout (urlPay/deepLink/qr/cip),
    *    el Payment queda PENDING y el poll/webhook existente lo cierra (CAPTURED o vuelve a DEBT).
-   *  - sandbox/live (YAPE/PLIN): re-corre processGatewayCharge (reintentos→CAPTURED o DEBT).
+   *  - gateway 'direct' (live/sandbox): re-corre el riel con reintentos → CAPTURED o DEBT.
    * NO valida ownership: el BFF lo hace ANTES (passengerId === user, 404 anti-enumeración).
    */
   async retryCharge(id: string): Promise<Payment> {
@@ -559,20 +596,17 @@ export class PaymentsService {
     const reclaimed = await this.prisma.read.payment.findUnique({ where: { id } });
     if (!reclaimed) throw new NotFoundError('Pago no encontrado');
 
-    // Re-cobro por el mismo camino que el cobro original, según el modo del gateway.
-    if (this.paymentMode === 'prontopaga') {
-      // El agregador es asíncrono: nuevo checkout; el poll/webhook existente cierra el Payment.
-      return this.processAggregatorCharge(reclaimed, {
-        tripId: reclaimed.tripId,
-        grossCents: reclaimed.grossCents,
-        method: reclaimed.method,
-        dedupKey: reclaimed.dedupKey,
-        userId: reclaimed.passengerId ?? undefined,
-        payerRef: reclaimed.payerRef ?? undefined,
-      });
-    }
-    // sandbox/live: reintentos contra el riel → CAPTURED o de vuelta a DEBT.
-    return this.processGatewayCharge(reclaimed);
+    // Re-cobro por el mismo camino que el cobro original, según el flujo que DECLARA el adapter:
+    // aggregator → nuevo checkout asíncrono (el poll/webhook existente cierra el Payment);
+    // direct → reintentos contra el riel → CAPTURED o de vuelta a DEBT.
+    return this.dispatchDigitalCharge(reclaimed, {
+      tripId: reclaimed.tripId,
+      grossCents: reclaimed.grossCents,
+      method: reclaimed.method,
+      dedupKey: reclaimed.dedupKey,
+      userId: reclaimed.passengerId ?? undefined,
+      payerRef: reclaimed.payerRef ?? undefined,
+    });
   }
 
   /**
@@ -598,8 +632,8 @@ export class PaymentsService {
    *  - status-guard `updateMany where status in (PENDING,DEBT)`: setea method nuevo, LIMPIA los checkout
    *    fields viejos (externalUid/checkoutUrl/qrCode/deepLink/cip/checkoutExpiresAt) y normaliza a PENDING
    *    (DEBT→PENDING). Solo UN llamador concurrente gana el guard (count=1); el resto ve count=0 → no-op.
-   *  - re-corre el cobro con el método nuevo por el MISMO camino que el cobro original según el modo:
-   *    prontopaga → processAggregatorCharge (nuevo checkout PENDING); sandbox/live → processGatewayCharge.
+   *  - re-corre el cobro con el método nuevo por el MISMO camino que el cobro original según el flujo
+   *    que DECLARA el adapter: 'aggregator' → nuevo checkout PENDING; 'direct' → riel con reintentos.
    * NO valida ownership: el BFF lo hace ANTES (passengerId === user, 404 anti-enumeración).
    */
   async changeMethod(id: string, method: PaymentMethod): Promise<Payment> {
@@ -617,6 +651,11 @@ export class PaymentsService {
     if (method === 'CASH') {
       throw new UnprocessableEntityError('El efectivo no está disponible para pagos pendientes');
     }
+
+    // Guard CAPACIDAD (mismo que charge y settleCancellationPenalty): el método nuevo solo si el
+    // adapter activo lo DECLARA en su catálogo — sin esto se re-cobraba por un riel que no habla el
+    // método (p.ej. CARD contra el riel directo Yape/Plin) y el error aparecía recién en el gateway.
+    this.assertGatewaySupportsMethod(method);
 
     // No-op idempotente: mismo método pedido. NO re-cobramos ni rompemos un checkout vivo del mismo medio;
     // devolvemos el estado vigente (un PENDING con checkout válido sigue tal cual; un DEBT se mantiene).
@@ -649,20 +688,17 @@ export class PaymentsService {
     const reclaimed = await this.prisma.read.payment.findUnique({ where: { id } });
     if (!reclaimed) throw new NotFoundError('Pago no encontrado');
 
-    // Re-cobro con el método NUEVO por el mismo camino que el cobro original, según el modo del gateway.
-    if (this.paymentMode === 'prontopaga') {
-      // El agregador es asíncrono: nuevo checkout del método nuevo; el poll/webhook existente lo cierra.
-      return this.processAggregatorCharge(reclaimed, {
-        tripId: reclaimed.tripId,
-        grossCents: reclaimed.grossCents,
-        method: reclaimed.method,
-        dedupKey: reclaimed.dedupKey,
-        userId: reclaimed.passengerId ?? undefined,
-        payerRef: reclaimed.payerRef ?? undefined,
-      });
-    }
-    // sandbox/live (YAPE/PLIN): reintentos contra el riel → CAPTURED o de vuelta a DEBT.
-    return this.processGatewayCharge(reclaimed);
+    // Re-cobro con el método NUEVO por el mismo camino que el cobro original, según el flujo que
+    // DECLARA el adapter: aggregator → nuevo checkout del método nuevo (el poll/webhook existente lo
+    // cierra); direct → reintentos contra el riel → CAPTURED o de vuelta a DEBT.
+    return this.dispatchDigitalCharge(reclaimed, {
+      tripId: reclaimed.tripId,
+      grossCents: reclaimed.grossCents,
+      method: reclaimed.method,
+      dedupKey: reclaimed.dedupKey,
+      userId: reclaimed.passengerId ?? undefined,
+      payerRef: reclaimed.payerRef ?? undefined,
+    });
   }
 
   /**
@@ -782,17 +818,32 @@ export class PaymentsService {
             tipCents: input.tipCents,
           },
         });
-        return tx.payment.update({
+        const updated = await tx.payment.update({
           where: { id: payment.id },
           data: {
             tipCents: { increment: input.tipCents },
             amountCents: { increment: input.tipCents },
           },
         });
+        // Outbox (regla CLAUDE.md §3): la propina se publica en la MISMA transacción que su registro,
+        // así el conductor se entera en vivo (driver-bff → push) sin que pueda quedar suma sin evento ni
+        // evento sin suma. `driverId` ENRIQUECIDO para rutear sin join cross-servicio (puede ser null).
+        const envelope = createEnvelope({
+          eventType: 'payment.tip_added',
+          producer: 'payment-service',
+          payload: {
+            paymentId: updated.id,
+            tripId: updated.tripId,
+            driverId: updated.driverId ?? undefined,
+            tipCents: input.tipCents,
+          },
+        });
+        await enqueueOutbox(tx, envelope, updated.id);
+        return updated;
       });
     } catch (err) {
       // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola suma.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'dedupKey')) {
         const dup = await this.prisma.read.tipAddition.findUnique({ where: { dedupKey: input.dedupKey } });
         if (dup) return this.getPayment(dup.paymentId);
         throw new ConflictError('Propina duplicada para la misma dedupKey');
@@ -917,7 +968,23 @@ export class PaymentsService {
 
   /**
    * Reembolso (BR-P06): ventana de 7 días desde la captura; aprobación L1/L2 según monto
-   * (>S/30 requiere L2). El operador autorizado aprueba en el acto → pago REFUNDED.
+   * (>S/30 requiere L2). Branch TIPADO por método (S5):
+   *
+   *  - CASH → la plata se devuelve FUERA del riel (decisión del dominio: el efectivo nunca pasó por el
+   *    gateway). El flujo local queda: Refund COMPLETED + payment.refunded en una sola transacción.
+   *  - DIGITAL (YAPE/PLIN/CARD/PAGOEFECTIVO) → reembolso REAL contra el proveedor:
+   *      1) RESERVA transaccional del saldo en el Payment (CAS optimista) + Refund PENDING — el intent
+   *         queda PERSISTIDO ANTES de llamar al riel (INTEGRACIONES §4) con key `refund-{refundId}`.
+   *      2) gateway.refund: ACCEPTED síncrono → COMPLETED + payment.refunded; PENDING (ProntoPaga,
+   *         asíncrono) → se guarda el uid del reverso y lo CIERRA el callback (applyRefundWebhookResult)
+   *         — la notificación "te devolvimos S/X" sale recién cuando la plata efectivamente volvió;
+   *         REJECTED → se COMPENSA la reserva y se devuelve un error tipado (nunca éxito falso).
+   *      3) TIMEOUT ≠ FALLA: ante un fallo transitorio NO se compensa ni se marca rechazado — el Refund
+   *         queda PENDING y lo resuelve el callback/conciliación (no se re-llama a ciegas: ProntoPaga
+   *         no soporta idempotencia en /reverse/new).
+   *
+   * `status` devuelto = estado del REFUND: 'COMPLETED' (la plata volvió) o 'PENDING' (reverso aceptado
+   * o en confirmación). Degradación honesta: nunca se reporta COMPLETED sin confirmación del proveedor.
    */
   async refund(
     tripId: string,
@@ -957,57 +1024,294 @@ export class PaymentsService {
     const isFullyRefunded = newRefundedCents === payment.amountCents;
     const newStatus = isFullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
     assertPaymentTransition(payment.status, newStatus);
+
+    const claim: RefundClaim = { amountCents, reason, operator, newStatus, newRefundedCents, isFullyRefunded };
+
+    // Branch TIPADO por método: el efectivo nunca pasó por el gateway → devolución local explícita.
+    if (payment.method === 'CASH') {
+      return this.refundCashLocally(payment, claim);
+    }
+    return this.refundViaGateway(payment, claim);
+  }
+
+  /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */
+  private async refundCashLocally(
+    payment: Payment,
+    claim: RefundClaim,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
     return this.prisma.write.$transaction(async (tx) => {
-      // CAS TRANSACCIONAL (BR-P06, idempotencia financiera #3): reclama el cobro SOLO si sigue reembolsable
-      // Y `refundedCents` no cambió desde el read (optimistic lock). Cierra la carrera de refunds parciales/
-      // totales concurrentes — bajo READ COMMITTED el 2do bloquea en el row-lock; al re-evaluar el WHERE
-      // (refundedCents ya incrementado) obtiene count===0. Sin esto, dos refunds sumaban doble plata.
-      const claimed = await tx.payment.updateMany({
-        where: {
-          id: payment.id,
-          status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
-          refundedCents: payment.refundedCents,
-        },
-        data: {
-          status: newStatus,
-          refundedCents: newRefundedCents,
-          refundedAt: isFullyRefunded ? new Date() : null,
-        },
-      });
-      if (claimed.count === 0) {
-        throw new InvalidStateError(
-          'El cobro cambió de estado o saldo por otra operación concurrente',
-        );
-      }
+      await this.claimRefundReservationInTx(tx, payment, claim);
+      // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto.
       const refund = await tx.refund.create({
         data: {
           id: uuidv7(),
           paymentId: payment.id,
-          amountCents,
-          requestedBy: operator.userId,
-          approvedBy: operator.userId,
-          status: 'COMPLETED',
-          reason,
+          amountCents: claim.amountCents,
+          requestedBy: claim.operator.userId,
+          approvedBy: claim.operator.userId,
+          status: RefundStatus.COMPLETED,
+          reason: claim.reason,
         },
       });
-      // payment.refunded por OUTBOX (misma tx, idempotencia financiera BR-P06): el evento NO se emitía
-      // y notification-service no podía avisar al pasajero. `amountCents` = lo reembolsado (no el bruto
-      // original). `passengerId` enriquecido (persistido al cobrar) → push "te devolvimos S/X.XX".
-      const envelope = createEnvelope({
-        eventType: 'payment.refunded',
-        producer: 'payment-service',
-        payload: {
-          paymentId: payment.id,
-          tripId: payment.tripId,
-          amountCents,
-          reason,
-          approvedBy: operator.userId,
-          passengerId: payment.passengerId ?? undefined,
-        },
-      });
-      await enqueueOutbox(tx, envelope, payment.id);
-      return { refundId: refund.id, paymentId: payment.id, status: newStatus };
+      await this.enqueueRefundedEventInTx(tx, payment, refund);
+      return { refundId: refund.id, paymentId: payment.id, status: refund.status };
     });
+  }
+
+  private async refundViaGateway(
+    payment: Payment,
+    claim: RefundClaim,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    // Capacidad del adapter (ISP del puerto): sin `Refundable` NO hay riel por donde devolver la plata.
+    // Error tipado explícito — JAMÁS marcar REFUNDED sin que el proveedor mueva el dinero (S5).
+    if (!supportsRefund(this.gateway)) {
+      throw new InvalidStateError(
+        'El gateway de pagos activo no soporta reembolsos digitales; no se puede devolver la plata por el riel',
+      );
+    }
+    // Referencia del cobro en el riel (uid del proveedor): sin ella el reverso no se puede correlacionar.
+    const railRef = payment.externalRef ?? payment.externalUid;
+    if (!railRef) {
+      throw new InvalidStateError('El cobro no tiene referencia del riel; no se puede reembolsar por el gateway');
+    }
+
+    // 1) RESERVA + INTENT persistidos ANTES de llamar al proveedor (§4): el CAS bloquea refunds
+    //    concurrentes sobre el mismo saldo y el Refund PENDING es el registro durable de la operación.
+    const refund = await this.prisma.write.$transaction(async (tx) => {
+      await this.claimRefundReservationInTx(tx, payment, claim);
+      return tx.refund.create({
+        data: {
+          id: uuidv7(),
+          paymentId: payment.id,
+          amountCents: claim.amountCents,
+          requestedBy: claim.operator.userId,
+          approvedBy: claim.operator.userId,
+          status: RefundStatus.PENDING,
+          reason: claim.reason,
+        },
+      });
+    });
+
+    // 2) Reverso REAL en el proveedor, con la idempotency key derivada de la operación (§4).
+    let result: RefundResult;
+    try {
+      result = await this.gateway.refund(railRef, claim.amountCents, {
+        idempotencyKey: deriveRefundIdempotencyKey(refund.id),
+      });
+    } catch (err) {
+      // TIMEOUT/red ≠ FALLA (§4): no sabemos si el proveedor recibió el reverso. NO compensamos ni
+      // marcamos REJECTED; el Refund queda PENDING (reserva en pie) y lo cierra el callback del
+      // proveedor o la conciliación. NO se re-llama a ciegas (ProntoPaga sin idempotencia de reverso).
+      this.logger.error(
+        { err },
+        `Reverso ${refund.id} (pago ${payment.id}) sin respuesta del proveedor; queda PENDING a confirmar`,
+      );
+      return { refundId: refund.id, paymentId: payment.id, status: RefundStatus.PENDING };
+    }
+
+    // uid del reverso PERSISTIDO APENAS LLEGA, ANTES de procesar el desenlace: es la ÚNICA clave de
+    // correlación del callback (urlCallbackRefund → applyRefundWebhookResult). Si se persistiera después
+    // (o solo dentro de la tx de completar), un callback rápido o un fallo transitorio posterior dejaría
+    // el Refund sin uid → NO_MATCH → PENDING para siempre. Si aun así el callback gana esta escritura,
+    // applyRefundWebhookResult responde no-2xx (NotFoundError) y el retry del proveedor correlaciona.
+    if (result.externalRefundId) {
+      await this.prisma.write.refund.update({
+        where: { id: refund.id },
+        data: { externalRefundId: result.externalRefundId },
+      });
+    }
+
+    switch (result.status) {
+      case 'ACCEPTED': {
+        // Confirmación SÍNCRONA del proveedor → completar y emitir payment.refunded (push al pasajero).
+        await this.completeRefund(refund.id, result.externalRefundId ?? null);
+        return { refundId: refund.id, paymentId: payment.id, status: RefundStatus.COMPLETED };
+      }
+      case 'PENDING': {
+        // Asíncrono (ProntoPaga): el uid ya quedó persistido arriba; la notificación al pasajero sale
+        // recién cuando el callback confirme (applyRefundWebhookResult).
+        this.logger.log(
+          `Reverso ${refund.id} ACEPTADO por el proveedor (uid=${result.externalRefundId ?? '-'}); espera confirmación`,
+        );
+        return { refundId: refund.id, paymentId: payment.id, status: RefundStatus.PENDING };
+      }
+      case 'REJECTED': {
+        // Rechazo REAL del proveedor: compensar la reserva (la plata nunca se movió) y fallar honesto.
+        await this.rejectRefundAndCompensate(refund.id, result.reason ?? 'reverse_rejected');
+        throw new UnprocessableEntityError(
+          `El proveedor rechazó el reembolso: ${result.reason ?? 'sin motivo informado'}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * CAS TRANSACCIONAL (BR-P06, idempotencia financiera #3): reclama el cobro SOLO si sigue reembolsable
+   * Y `refundedCents` no cambió desde el read (optimistic lock). Cierra la carrera de refunds parciales/
+   * totales concurrentes — bajo READ COMMITTED el 2do bloquea en el row-lock; al re-evaluar el WHERE
+   * (refundedCents ya incrementado) obtiene count===0. Sin esto, dos refunds sumaban doble plata.
+   * Para el camino DIGITAL esto es una RESERVA: si el proveedor rechaza el reverso, se compensa
+   * (rejectRefundAndCompensate); el evento/push al pasajero NUNCA sale de la reserva, solo de la confirmación.
+   */
+  private async claimRefundReservationInTx(
+    tx: Prisma.TransactionClient,
+    payment: Payment,
+    claim: RefundClaim,
+  ): Promise<void> {
+    const claimed = await tx.payment.updateMany({
+      where: {
+        id: payment.id,
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+        refundedCents: payment.refundedCents,
+      },
+      data: {
+        status: claim.newStatus,
+        refundedCents: claim.newRefundedCents,
+        refundedAt: claim.isFullyRefunded ? new Date() : null,
+      },
+    });
+    if (claimed.count === 0) {
+      throw new InvalidStateError('El cobro cambió de estado o saldo por otra operación concurrente');
+    }
+  }
+
+  /**
+   * payment.refunded por OUTBOX (misma tx, idempotencia financiera BR-P06). Se emite SOLO cuando la
+   * plata efectivamente volvió (CASH local o confirmación del proveedor). `amountCents` = lo reembolsado
+   * (no el bruto). `passengerId` enriquecido (persistido al cobrar) → push "te devolvimos S/X.XX".
+   */
+  private async enqueueRefundedEventInTx(
+    tx: Prisma.TransactionClient,
+    payment: Pick<Payment, 'id' | 'tripId' | 'passengerId'>,
+    refund: Pick<Refund, 'amountCents' | 'reason' | 'approvedBy' | 'requestedBy'>,
+  ): Promise<void> {
+    const envelope = createEnvelope({
+      eventType: 'payment.refunded',
+      producer: 'payment-service',
+      payload: {
+        paymentId: payment.id,
+        tripId: payment.tripId,
+        amountCents: refund.amountCents,
+        reason: refund.reason,
+        approvedBy: refund.approvedBy ?? refund.requestedBy,
+        passengerId: payment.passengerId ?? undefined,
+      },
+    });
+    await enqueueOutbox(tx, envelope, payment.id);
+  }
+
+  /**
+   * Completa un Refund PENDING → COMPLETED (confirmación del proveedor, síncrona o por callback) y
+   * emite payment.refunded en la MISMA transacción. IDEMPOTENTE por CAS (updateMany where status=PENDING):
+   * una redelivery del callback no re-emite el evento ni duplica el push. Devuelve si aplicó.
+   */
+  private async completeRefund(refundId: string, externalRefundId: string | null): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const claimed = await tx.refund.updateMany({
+        where: { id: refundId, status: RefundStatus.PENDING },
+        data: {
+          status: RefundStatus.COMPLETED,
+          ...(externalRefundId ? { externalRefundId } : {}),
+        },
+      });
+      if (claimed.count === 0) return false; // ya resuelto (redelivery) → idempotente, sin segundo evento.
+      const refund = await tx.refund.findUniqueOrThrow({
+        where: { id: refundId },
+        include: { payment: true },
+      });
+      await this.enqueueRefundedEventInTx(tx, refund.payment, refund);
+      return true;
+    });
+  }
+
+  /**
+   * Rechazo del reverso (síncrono o por callback): Refund → REJECTED (con `failureReason` del proveedor)
+   * y COMPENSACIÓN de la reserva en el Payment (la plata nunca se movió): refundedCents vuelve a restarse
+   * y el estado se restaura (PARTIALLY_REFUNDED si queda algo reembolsado, sino CAPTURED).
+   * NOTA: la restauración NO es una transición forward de la máquina de estados (REFUNDED no "avanza" a
+   * CAPTURED): es el rollback explícito de una reserva optimista que no se materializó — por eso no pasa
+   * por assertPaymentTransition. El CAS sobre el Refund garantiza que UN solo camino compensa.
+   *
+   * COMPENSACIÓN ATÓMICA (misma disciplina que claimRefundReservationInTx): la resta NO se computa en
+   * JS sobre un read previo. Bajo READ COMMITTED, una reserva concurrente (claimRefundReservationInTx)
+   * que commitea entre la lectura y el update quedaría PISADA (lost update → refundedCents subcontado →
+   * un refund futuro podría superar amountCents = doble salida de plata). El `decrement` se evalúa EN la
+   * base sobre la fila ya lockeada por este UPDATE; el row-lock se sostiene hasta el commit de la tx, así
+   * que el valor que devuelve es el saldo REAL post-compensación y el segundo update (status/refundedAt
+   * derivados de ese saldo) no puede ser interferido por otra transacción.
+   */
+  private async rejectRefundAndCompensate(refundId: string, failureReason: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const claimed = await tx.refund.updateMany({
+        where: { id: refundId, status: RefundStatus.PENDING },
+        data: { status: RefundStatus.REJECTED, failureReason },
+      });
+      if (claimed.count === 0) return false; // ya resuelto → idempotente.
+      const refund = await tx.refund.findUniqueOrThrow({ where: { id: refundId } });
+      // Decremento ATÓMICO en la DB (no read-compute-write): toma el row-lock del Payment y devuelve la
+      // fila con el saldo real ya restado, aun si otra reserva commiteó después de nuestro claim.
+      const restored = await tx.payment.update({
+        where: { id: refund.paymentId },
+        data: { refundedCents: { decrement: refund.amountCents } },
+      });
+      // status/refundedAt derivados del saldo REAL post-decremento. Seguro dentro de la misma tx: el
+      // row-lock tomado por el decremento bloquea cualquier escritura concurrente hasta nuestro commit.
+      await tx.payment.update({
+        where: { id: restored.id },
+        data: {
+          status: restored.refundedCents > 0 ? 'PARTIALLY_REFUNDED' : 'CAPTURED',
+          refundedAt: null,
+        },
+      });
+      this.logger.warn(
+        `Reverso ${refundId} RECHAZADO por el proveedor (${failureReason}); reserva compensada en el pago ${restored.id}`,
+      );
+      return true;
+    });
+  }
+
+  /**
+   * Aplica el resultado del CALLBACK de reembolso del proveedor (ProntoPaga urlCallbackRefund →
+   * POST /webhooks/prontopaga/refund). Correlaciona por `externalRefundId` (uid del reverso, persistido
+   * APENAS el proveedor lo devuelve en refundViaGateway). IDEMPOTENTE: las transiciones van por CAS
+   * (PENDING→COMPLETED / PENDING→REJECTED); una redelivery no re-emite payment.refunded ni compensa
+   * dos veces.
+   *
+   * SIN MATCH → NotFoundError (no-2xx): el patrón del playbook es responder 2xx SOLO cuando pudimos
+   * persistir/correlacionar. Un callback que llega ANTES de que el uid quede persistido (carrera entre
+   * la respuesta HTTP de /reverse/new y nuestro update) NO debe absorberse con 200 — eso le diría al
+   * proveedor "recibido" y el Refund quedaría PENDING para siempre. Con no-2xx el proveedor REINTENTA
+   * la entrega (igual que ante el 401 de firma inválida) y en el retry el uid ya está persistido.
+   */
+  async applyRefundWebhookResult(input: {
+    externalRefundId: string;
+    status: WebhookStatus;
+  }): Promise<{ applied: boolean; status: string }> {
+    const refund = await this.prisma.read.refund.findFirst({
+      where: { externalRefundId: input.externalRefundId },
+    });
+    if (!refund) {
+      this.logger.warn(
+        `Callback de reembolso sin match (uid=${input.externalRefundId}); respondemos no-2xx para que el proveedor reintente`,
+      );
+      throw new NotFoundError('Reverso no correlacionado todavía; reintente la entrega');
+    }
+    switch (input.status) {
+      case 'CONFIRMED': {
+        const applied = await this.completeRefund(refund.id, input.externalRefundId);
+        return { applied, status: RefundStatus.COMPLETED };
+      }
+      case 'DECLINED':
+      case 'EXPIRED': {
+        const applied = await this.rejectRefundAndCompensate(
+          refund.id,
+          `reverse_${input.status.toLowerCase()}`,
+        );
+        return { applied, status: RefundStatus.REJECTED };
+      }
+      case 'PENDING':
+        return { applied: false, status: refund.status }; // sigue en curso → sin transición.
+    }
   }
 
   /**
@@ -1072,7 +1376,7 @@ export class PaymentsService {
       });
     } catch (err) {
       // Carrera: otra réplica creó la penalidad entre el findUnique y el create (P2002 sobre trip_id).
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'tripId')) {
         const raced = await this.prisma.read.cancellationPenalty.findUnique({
           where: { tripId: input.tripId },
         });
@@ -1102,11 +1406,8 @@ export class PaymentsService {
     if (input.method === 'CASH') {
       throw new InvalidStateError('Una penalidad de cancelación se paga por un medio digital, no en efectivo');
     }
-    if ((input.method === 'CARD' || input.method === 'PAGOEFECTIVO') && this.paymentMode !== 'prontopaga') {
-      throw new InvalidStateError(
-        `El cobro con ${input.method} requiere VEO_PAYMENT_MODE=prontopaga (no habilitado en modo ${this.paymentMode})`,
-      );
-    }
+    // MISMO guard de capacidad que charge() (antes duplicado verbatim): el adapter declara su catálogo.
+    this.assertGatewaySupportsMethod(input.method);
 
     const penalty = await this.prisma.read.cancellationPenalty.findUnique({ where: { id: input.penaltyId } });
     // Ajena o inexistente → 404 (no 403): no filtramos que exista para otro pasajero (anti-enumeración).
@@ -1150,7 +1451,7 @@ export class PaymentsService {
       });
     } catch (err) {
       // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola liquidación.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'dedupKey')) {
         const dup = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
         if (dup) return dup;
         throw new ConflictError('Liquidación duplicada para la misma penalidad');
@@ -1158,20 +1459,18 @@ export class PaymentsService {
       throw err;
     }
 
-    // Cobro por el rail (espejo de charge): prontopaga es ASÍNCRONO (webhook captura → COLLECTED);
-    // sandbox/live (YAPE/PLIN) corre el riel con reintentos y captura sync → COLLECTED en captureSuccess.
-    if (this.paymentMode === 'prontopaga') {
-      return this.processAggregatorCharge(payment, {
-        tripId: penalty.tripId,
-        grossCents: penalty.penaltyCents,
-        method: input.method,
-        payerRef: input.payerRef,
-        dedupKey,
-        userId: penalty.passengerId,
-        client: input.client,
-      });
-    }
-    return this.processGatewayCharge(payment);
+    // Cobro por el rail (espejo de charge), según el flujo que DECLARA el adapter: aggregator es
+    // ASÍNCRONO (webhook captura → COLLECTED); direct corre el riel con reintentos y captura sync
+    // → COLLECTED en captureSuccess.
+    return this.dispatchDigitalCharge(payment, {
+      tripId: penalty.tripId,
+      grossCents: penalty.penaltyCents,
+      method: input.method,
+      payerRef: input.payerRef,
+      dedupKey,
+      userId: penalty.passengerId,
+      client: input.client,
+    });
   }
 
   /** Cobro disparado por el evento trip.completed (BR-P01). dedupKey determinista por viaje. */
@@ -1273,5 +1572,24 @@ export class PaymentsService {
       `Efectivo ${payment.id} (viaje ${payment.tripId}): conductor confirmó, falta el pasajero → cash_pending`,
     );
     return payment;
+  }
+
+  /**
+   * Derecho al olvido (Ley 29733, BR-S06) — consumido desde `user.deleted` (S7c). Los registros
+   * financieros (payments/refunds/payouts: montos, fechas, estados, ids) se CONSERVAN por obligación
+   * legal contable; lo que se ANONIMIZA es la PII del usuario que viaja en ellos: `payerRef`
+   * (teléfono/token del pagador en el riel) se sobrescribe con el placeholder irreversible compartido
+   * de @veo/database. Idempotente: la sobre-escritura es determinista, reprocesar es un no-op.
+   */
+  async eraseUserPii(userId: string): Promise<{ paymentsAnonymized: number }> {
+    const result = await this.prisma.write.payment.updateMany({
+      where: { passengerId: userId, payerRef: { not: null } },
+      data: { payerRef: deletedPlaceholder(userId, 'payerRef') },
+    });
+    this.logger.log(
+      `Derecho al olvido: payerRef anonimizado en ${result.count} pago(s) del usuario ${userId} ` +
+        '(registros financieros conservados por obligación contable)',
+    );
+    return { paymentsAnonymized: result.count };
   }
 }

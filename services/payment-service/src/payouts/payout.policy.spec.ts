@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { aggregatePayouts, discrepancyPct, periodLabel } from './payout.policy';
+import {
+  aggregatePayouts,
+  assertPayoutTransition,
+  canTransitionPayout,
+  discrepancyPct,
+  periodLabel,
+} from './payout.policy';
 
 describe('aggregatePayouts (BR-P05)', () => {
   it('agrega por conductor: neto = (bruto − comisión) + propinas', () => {
@@ -59,6 +65,27 @@ describe('discrepancyPct (BR-P07)', () => {
 
   it('ambos en cero → 0', () => {
     expect(discrepancyPct(0, 0)).toBe(0);
+  });
+});
+
+describe('máquina de estados del payout (S4)', () => {
+  it('HELD → PROCESSED es válida (liberación de la retención, review resuelto)', () => {
+    expect(canTransitionPayout('HELD', 'PROCESSED')).toBe(true);
+    expect(() => assertPayoutTransition('HELD', 'PROCESSED')).not.toThrow();
+  });
+
+  it('PROCESSED es terminal: no vuelve a HELD ni a PENDING', () => {
+    expect(canTransitionPayout('PROCESSED', 'HELD')).toBe(false);
+    expect(canTransitionPayout('PROCESSED', 'PENDING')).toBe(false);
+    expect(() => assertPayoutTransition('PROCESSED', 'HELD')).toThrow('Transición de payout inválida');
+  });
+
+  it('HELD no puede caer a FAILED en silencio (liberar = pagar, no fallar)', () => {
+    expect(canTransitionPayout('HELD', 'FAILED')).toBe(false);
+  });
+
+  it('misma → misma es no-op válido (idempotencia)', () => {
+    expect(canTransitionPayout('HELD', 'HELD')).toBe(true);
   });
 });
 

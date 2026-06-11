@@ -298,6 +298,37 @@ export class AffiliationsService {
   }
 
   /**
+   * Derecho al olvido (Ley 29733, BR-S06) — consumido desde `user.deleted` (S7c). Da de baja la
+   * afiliación en el proveedor (best-effort, MISMO trato que revokeAffiliation: la purga local no se
+   * bloquea por un fallo del riel) y BORRA la PII local: `walletUid` (el token que habilita cobros
+   * on-file), `phoneMasked` y `documentMasked` → null; status → REVOKED. La fila se conserva
+   * (integridad referencial), sin PII. Idempotente: re-aplicar deja el mismo estado.
+   */
+  async eraseUser(userId: string): Promise<{ erased: boolean }> {
+    const aff = await this.prisma.read.walletAffiliation.findUnique({
+      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    });
+    if (!aff) return { erased: false };
+
+    if (aff.walletUid && supportsYapeSubscription(this.gateway)) {
+      try {
+        await this.gateway.cancelYapeSubscription(aff.walletUid);
+        this.logger.log(`Derecho al olvido: afiliación cancelada en el proveedor user=${userId} aff=${aff.id}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'error';
+        this.logger.warn(`Cancel en el proveedor falló (purgo PII local igual) user=${userId} aff=${aff.id}: ${msg}`);
+      }
+    }
+
+    await this.prisma.write.walletAffiliation.update({
+      where: { id: aff.id },
+      data: { status: 'REVOKED', walletUid: null, phoneMasked: null, documentMasked: null },
+    });
+    this.logger.log(`Derecho al olvido: PII de la afiliación ${aff.id} purgada (user=${userId})`);
+    return { erased: true };
+  }
+
+  /**
    * Resuelve el walletUid ACTIVE de un usuario para cobrar on-file (SOLO uso interno del dominio).
    * Devuelve null si no hay afiliación activa. NUNCA exponer este valor fuera del servidor.
    */

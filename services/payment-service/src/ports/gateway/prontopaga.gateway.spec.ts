@@ -372,3 +372,52 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
     ).rejects.toThrow(/No se pudo contactar ProntoPaga/);
   });
 });
+
+describe('ProntoPagaGateway · refund (S5 · reverso REAL contra el proveedor)', () => {
+  it('refund: POST firmado a /api/reverse/new con amount decimal, reference y callback DEDICADO /refund', async () => {
+    const { client, calls } = mockHttp({ uid: 'rev-1', status: 'pending' });
+    const g = new ProntoPagaGateway(OPTS, client);
+
+    const res = await g.refund('tx-abc', 12_50, { idempotencyKey: 'refund-r1' });
+
+    const call = calls.find((c) => c.url.endsWith('/api/reverse/new'))!;
+    expect(call.body.amount).toBe('12.50');
+    expect(call.body.reference).toBe('tx-abc');
+    // La RUTA clasifica el callback como reverso (el payload no trae marcador de tipo confiable).
+    expect(call.body.urlCallbackRefund).toBe('http://localhost:3005/api/v1/webhooks/prontopaga/refund');
+    // ProntoPaga no documenta campo de idempotencia: la key NO viaja al proveedor.
+    expect(call.body).not.toHaveProperty('idempotencyKey');
+    // El reverso es ASÍNCRONO: aceptado a la espera del callback, con el uid para correlacionar.
+    expect(res).toEqual({ status: 'PENDING', externalRefundId: 'rev-1' });
+  });
+
+  it('refund: rechazo REAL del proveedor (status rejected) → REJECTED con motivo', async () => {
+    const { client } = mockHttp({ uid: 'rev-2', status: 'rejected', message: 'monto excede el cobro' });
+    const g = new ProntoPagaGateway(OPTS, client);
+
+    const res = await g.refund('tx-abc', 1000);
+
+    expect(res.status).toBe('REJECTED');
+    expect(res.reason).toBe('monto excede el cobro');
+  });
+
+  it('refund: fallo de RED relanza (timeout ≠ falla §4) — NUNCA degrada a REJECTED', async () => {
+    const client: ProntoPagaHttpClient = {
+      send: vi.fn(async () => {
+        throw new Error('ETIMEDOUT');
+      }),
+    };
+    const g = new ProntoPagaGateway(OPTS, client);
+
+    await expect(g.refund('tx-abc', 1000)).rejects.toBeInstanceOf(ExternalServiceError);
+  });
+
+  it('refund: 5xx del proveedor relanza (transitorio: el Refund del dominio queda PENDING)', async () => {
+    const client: ProntoPagaHttpClient = {
+      send: vi.fn(async () => ({ status: 503, text: async () => 'unavailable' })),
+    };
+    const g = new ProntoPagaGateway(OPTS, client);
+
+    await expect(g.refund('tx-abc', 1000)).rejects.toBeInstanceOf(ExternalServiceError);
+  });
+});

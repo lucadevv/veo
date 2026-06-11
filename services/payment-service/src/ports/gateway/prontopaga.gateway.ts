@@ -28,8 +28,10 @@ import {
 } from '@veo/utils';
 import type {
   PaymentGateway,
+  GatewayChargeFlow,
   GatewayChargeRequest,
   GatewayChargeResult,
+  GatewayPaymentMethod,
   GatewayStatementEntry,
   WebhookVerifier,
   WebhookResult,
@@ -158,6 +160,14 @@ function isCapabilityNotEnabled(body: string): boolean {
 export class ProntoPagaGateway
   implements PaymentGateway, WebhookVerifier, Refundable, PaymentStatusQuery
 {
+  /**
+   * Capacidades DECLARADAS: AGREGADOR asíncrono (un intento; el desenlace llega por webhook/poll).
+   * Habla TODOS los métodos digitales del puerto (`mapMethodToProntoPaga` es total sobre
+   * GatewayPaymentMethod). La habilitación REAL por comercio se descubre en runtime
+   * (failureKind=capability_unavailable); acá se declara el catálogo que el adapter sabe mapear.
+   */
+  readonly chargeFlow: GatewayChargeFlow = 'aggregator';
+
   private readonly logger = new Logger('ProntoPagaGateway');
   private readonly timeoutMs: number;
   private readonly webhookUrl: string;
@@ -188,6 +198,12 @@ export class ProntoPagaGateway
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.webhookUrl = `${opts.webhookBaseUrl.replace(/\/$/, '')}/api/v1/webhooks/prontopaga`;
     this.http = httpClient ?? new UndiciProntoPagaHttpClient();
+  }
+
+  supports(_method: GatewayPaymentMethod): boolean {
+    // El mapeo a métodos ProntoPaga es TOTAL (ver mapMethodToProntoPaga): todo método digital del
+    // puerto se sabe cobrar por el agregador.
+    return true;
   }
 
   /* ───────────────────────────────── AUTH (token cacheado) ───────────────────────────────── */
@@ -346,29 +362,46 @@ export class ProntoPagaGateway
 
   /* ──────────────────────────────────── REFUND ────────────────────────────────────────── */
 
+  /**
+   * Reverso de un cobro capturado: POST /api/reverse/new (body FIRMADO). ASÍNCRONO: ProntoPaga acepta
+   * el reverso y confirma por callback a `urlCallbackRefund` → ruta DEDICADA /refund (la ruta clasifica
+   * el evento; el payload del reverso no trae un marcador confiable de tipo).
+   *
+   * `meta.idempotencyKey` NO viaja al proveedor: /reverse/new no documenta campo de idempotencia. La
+   * idempotencia del reverso la garantiza el DOMINIO (Refund PENDING persistido antes de llamar +
+   * claim transaccional); por lo mismo, un fallo de red NO se reintenta a ciegas desde acá.
+   *
+   * TIMEOUT ≠ FALLA (INTEGRACIONES §4): un fallo transitorio (red/5xx/CF) se RELANZA — el dominio NO
+   * marca el Refund como rechazado (no sabemos si el proveedor recibió el reverso); lo cierra el
+   * callback o la conciliación. Solo un rechazo REAL del proveedor devuelve REJECTED.
+   */
   async refund(externalRef: string, amountCents: number, meta?: RefundMeta): Promise<RefundResult> {
     const payload: SignablePayload = {
       amount: (amountCents / 100).toFixed(2),
       clientDocument: meta?.clientDocument ?? '00000000',
       reference: externalRef,
-      urlCallbackRefund: meta?.urlCallbackRefund ?? this.webhookUrl,
+      urlCallbackRefund: meta?.urlCallbackRefund ?? `${this.webhookUrl}/refund`,
     };
+    let body: { uid?: string; status?: string; message?: string };
     try {
-      const body = await this.request<{ uid?: string; status?: string; message?: string }>(
+      body = await this.request<{ uid?: string; status?: string; message?: string }>(
         'POST',
         '/api/reverse/new',
         payload,
       );
-      const status = (body.status ?? '').toLowerCase();
-      if (status === 'rejected' || status === 'canceled' || status === 'cancelled') {
-        return { status: 'REJECTED', reason: body.message ?? `reverse_${status}` };
-      }
-      // ProntoPaga reembolsa de forma asíncrona (callback): aceptado a la espera de confirmación.
-      return { status: 'PENDING', externalRefundId: body.uid };
     } catch (err) {
-      const reason = err instanceof Error ? err.message : 'reverse_error';
-      return { status: 'REJECTED', reason };
+      // Capacidad no habilitada en el comercio (400 tipado): rechazo PERMANENTE, no transitorio.
+      if (err instanceof GatewayCapabilityUnavailableError) {
+        return { status: 'REJECTED', reason: err.message };
+      }
+      throw err; // red/5xx/timeout → transitorio: el dominio deja el Refund PENDING (timeout ≠ falla).
     }
+    const status = (body.status ?? '').toLowerCase();
+    if (status === 'rejected' || status === 'canceled' || status === 'cancelled') {
+      return { status: 'REJECTED', reason: body.message ?? `reverse_${status}` };
+    }
+    // ProntoPaga reembolsa de forma asíncrona (callback): aceptado a la espera de confirmación.
+    return { status: 'PENDING', externalRefundId: body.uid };
   }
 
   /* ──────────────────────────────── HTTP helpers ──────────────────────────────────────── */
