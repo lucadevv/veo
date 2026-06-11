@@ -3,7 +3,14 @@ import { OsrmMapsClient, type OsrmMapsClientOptions } from './osrm-client.js';
 import { MapboxMapsClient, type MapboxMapsClientOptions } from './mapbox-client.js';
 import type { MapsClient } from './types.js';
 
-export type MapsMode = 'osrm' | 'local' | 'mapbox';
+/**
+ * Modos de mapas soportados. FUENTE DE VERDAD ÚNICA: los env schemas de los servicios derivan su
+ * `z.enum(MAPS_MODES)` de aquí (no duplican la lista a mano), así no vuelve a haber drift de contrato
+ * —que dejó a trip/dispatch/driver-bff sin `mapbox` mientras public-bff sí lo tenía—.
+ */
+export const MAPS_MODES = ['osrm', 'local', 'mapbox'] as const;
+
+export type MapsMode = (typeof MAPS_MODES)[number];
 
 export interface CreateMapsClientOptions {
   mode: MapsMode;

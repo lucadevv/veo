@@ -5,6 +5,7 @@ import { signHmac, verifyHmac, chainHash, numericOtp } from './crypto.js';
 import { toH3, distanceMeters, isWithinLima, neighbors } from './geo.js';
 import { peruPhoneSchema, plateSchema, childCodeSchema, parseOrThrow } from './validation.js';
 import { ValidationError } from './errors.js';
+import { assertNever } from './assert.js';
 
 describe('ids', () => {
   it('genera UUIDv7 válidos y ordenables por tiempo', () => {
@@ -58,6 +59,30 @@ describe('geo (H3)', () => {
     expect(isWithinLima(miraflores)).toBe(true);
     expect(isWithinLima({ lat: -16.4, lon: -71.5 })).toBe(false); // Arequipa
     expect(neighbors(toH3(miraflores), 1)).toHaveLength(7);
+  });
+});
+
+describe('assertNever (exhaustividad sin default silencioso)', () => {
+  it('lanza ante una variante imprevista en runtime (no se traga el caso)', () => {
+    expect(() => assertNever('inesperado' as never)).toThrow('Variante no contemplada: "inesperado"');
+  });
+  it('acepta un mensaje de contexto propio', () => {
+    expect(() => assertNever(undefined as never, 'Flujo no contemplado')).toThrow('Flujo no contemplado');
+  });
+  it('hace exhaustivo un switch sobre una unión (compila solo si cubre todos los casos)', () => {
+    type Flow = 'a' | 'b';
+    const route = (f: Flow): number => {
+      switch (f) {
+        case 'a':
+          return 1;
+        case 'b':
+          return 2;
+        default:
+          return assertNever(f);
+      }
+    };
+    expect(route('a')).toBe(1);
+    expect(route('b')).toBe(2);
   });
 });
 

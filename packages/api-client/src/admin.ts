@@ -195,6 +195,24 @@ export const replaceScheduleRequest = z.object({
 });
 export type ReplaceScheduleRequest = z.infer<typeof replaceScheduleRequest>;
 
+/* ── Dispatch: config de RADIOS (k-rings) singleton global ── */
+
+/** Config de radios vigente (GET /admin/dispatch/radius-config): k-rings + versión + sello. */
+export const dispatchRadiusConfigView = z.object({
+  nearbyKRing: z.number().int().min(1).max(8),
+  matchKRing: z.number().int().min(1).max(8),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type DispatchRadiusConfigView = z.infer<typeof dispatchRadiusConfigView>;
+
+/** Body del PUT /admin/dispatch/radius-config: REEMPLAZA los k-rings (bump version aguas abajo). */
+export const replaceRadiusConfigRequest = z.object({
+  nearbyKRing: z.number().int().min(1).max(8),
+  matchKRing: z.number().int().min(1).max(8),
+});
+export type ReplaceRadiusConfigRequest = z.infer<typeof replaceRadiusConfigRequest>;
+
 /* ── Finanzas: resultado del batch de liquidaciones (POST /finance/payouts/run) ── */
 export const runPayoutsResult = z.object({
   periodStart: z.string(),

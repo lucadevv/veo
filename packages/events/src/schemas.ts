@@ -6,12 +6,19 @@
  * los consumidores validen lo que reciben. Ampliar al implementar cada servicio.
  */
 import { z } from 'zod';
+import { VehicleClass } from '@veo/shared-types';
 
 const geo = z.object({ lat: z.number(), lon: z.number() });
 
-/// Modo de pricing/despacho (ADR 011). Espeja PricingMode de @veo/shared-types (PUJA | FIXED). Se
-/// declara como enum local (los packages de eventos no dependen de shared-types) y se reutiliza en
-/// los eventos de pricing.
+/// Clase de vehículo del wire: DERIVADA del enum canónico `VehicleClass` de @veo/shared-types
+/// (mini-lote "abrir el wire", gap 1 de la prueba de fuego del ADR 013). Una clase nueva en el enum
+/// canónico ABRE estos schemas automáticamente; antes era un z.enum(['CAR','MOTO']) hardcodeado ×5 y
+/// un evento con la clase nueva moría EN SILENCIO en el gate del consumer (kafka.ts safeParse → descarta).
+const vehicleClassSchema = z.enum(Object.values(VehicleClass) as [VehicleClass, ...VehicleClass[]]);
+
+/// Modo de pricing/despacho (ADR 011). Espeja PricingMode de @veo/shared-types (PUJA | FIXED, cerrado
+/// y estable — a diferencia de la clase de vehículo, que es un eje de extensión del catálogo). Se
+/// declara como enum local y se reutiliza en los eventos de pricing.
 const pricingMode = z.enum(['PUJA', 'FIXED']);
 
 /* ── identity ── */
@@ -56,7 +63,7 @@ export const tripRequested = z.object({
   childMode: z.boolean(),
   /// Ola 2B · tier moto-taxi: tipo de vehículo solicitado. dispatch filtra el matching por este
   /// valor (un viaje MOTO solo se ofrece a conductores MOTO). Opcional ⇒ default CAR en el consumidor.
-  vehicleType: z.enum(['CAR', 'MOTO']).optional(),
+  vehicleType: vehicleClassSchema.optional(),
   /// Ola 2B · viaje programado: marca que el viaje se activó desde el scheduler (reserva). dispatch
   /// puede incluirlo en la oferta como "reservado". Opcional.
   scheduled: z.boolean().optional(),
@@ -108,7 +115,24 @@ export const tripCancelled = z.object({
   /// conductor POST-accept emite reassigning (no cancelled). Ausente → el consumidor omite el push.
   passengerId: z.string().optional(),
 });
-export const tripChildCodeFailed = z.object({ tripId: z.string(), driverId: z.string().optional(), attempt: z.number().int(), at: z.string() });
+/// BR-T07 modo niño (dominó S3): alguien intentó iniciar el viaje del hijo con un código INCORRECTO
+/// (escenario impostor). `attempt` = nº de intento fallido dentro de la ventana de lockout (contador
+/// Redis de trip-service, tope 5): la alerta al padre/madre distingue el 3er intento del 1ro.
+/// OPCIONAL A PROPÓSITO (tolerancia de consumo, NO laxitud del producer): el relay del outbox publica
+/// con `schema.parse` (lanza) y drena oldest-first dentro de UNA transacción (rollback ⇒ reintenta la
+/// MISMA fila) — una fila pre-fix SIN `attempt` (backlog por Kafka caído / rolling deploy) sería un
+/// poison pill que bloquea TODO el outbox de trip por head-of-line. El producer SIEMPRE lo emite hoy
+/// (contrato cubierto por spec en trip-service); ausente ⇒ evento viejo y el consumidor degrada
+/// honesto (alerta sin nº de intento).
+/// `passengerId` ENRIQUECIDO (opcional, compat N-2): destinatario del push CRÍTICO (el padre/madre
+/// dueño de la cuenta) sin join cross-servicio. Ausente → notification degrada honesto (omite el push).
+export const tripChildCodeFailed = z.object({
+  tripId: z.string(),
+  driverId: z.string().optional(),
+  passengerId: z.string().optional(),
+  attempt: z.number().int().optional(),
+  at: z.string(),
+});
 /// Watchdog (sweeper temporal): un viaje PRE-RECOJO se estancó (sin conductor / sin aceptación /
 /// sin avanzar al recojo) más allá del umbral y se llevó a EXPIRED. Downstream: notificar al
 /// pasajero; payment NO cobra (no hubo viaje). `fromStatus` = estado en que se estancó.
@@ -133,6 +157,48 @@ export const tripFailed = z.object({
   /// Antigüedad de la última actividad (minutos) que disparó el fallo.
   staleMinutes: z.number().int(),
   at: z.string(),
+});
+/// PARADA negociada mid-trip (Lote C). El pasajero PROPONE una parada durante el viaje EN CURSO; el
+/// server calcula el delta de tarifa y la tarifa nueva (server-authoritative). driver-bff lo reenvía al
+/// CONDUCTOR en vivo (`waypoint:proposed`); notification-service lo pushea. `expiresAt` ISO para la cuenta
+/// regresiva del cliente. El conductor debe responder antes del TTL.
+export const tripWaypointProposed = z.object({
+  proposalId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  point: geo,
+  deltaFareCents: z.number().int(),
+  newFareCents: z.number().int(),
+  expiresAt: z.string(),
+});
+/// El conductor ACEPTÓ la parada: el waypoint ya se agregó al viaje y la tarifa se actualizó (delta
+/// estampado server-side, MISMA transacción). public-bff lo reenvía al PASAJERO (`waypoint:outcome`).
+export const tripWaypointAccepted = z.object({
+  proposalId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  point: geo,
+  deltaFareCents: z.number().int(),
+  newFareCents: z.number().int(),
+});
+/// El conductor RECHAZÓ la parada: el viaje sigue igual (sin cambio de ruta ni tarifa). public-bff lo
+/// reenvía al PASAJERO (`waypoint:outcome`).
+export const tripWaypointRejected = z.object({
+  proposalId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  point: geo,
+});
+/// La propuesta EXPIRÓ sin respuesta (TTL vencido, sweeper). Sin conductor en el payload (pudo no haber
+/// respondido nunca). public-bff lo reenvía al PASAJERO (`waypoint:outcome`).
+export const tripWaypointExpired = z.object({
+  proposalId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  point: geo,
 });
 /// Derecho al olvido (BR-S06, Ley 29733) · señal per-viaje de la cascada de borrado. Al anonimizar
 /// la PII de un viaje del usuario borrado (consumidor de `user.deleted`), trip-service emite UN
@@ -177,7 +243,7 @@ export const tripBidPosted = z.object({
   tripId: z.string(),
   passengerId: z.string(),
   bidCents: z.number().int().positive(),
-  vehicleType: z.enum(['CAR', 'MOTO']),
+  vehicleType: vehicleClassSchema,
   origin: geo,
   windowSec: z.number().int().positive(),
   /// H13 — secuencia MONOTÓNICA de negociación del viaje (NUNCA se resetea, a diferencia de
@@ -269,7 +335,7 @@ export const tripReassigning = z.object({
   /// Pasajero del viaje (para reconstruir el board sin depender de la key vieja de Redis).
   passengerId: z.string(),
   /// Tipo de vehículo del viaje: dispatch difunde la re-puja solo a conductores de ese tipo.
-  vehicleType: z.enum(['CAR', 'MOTO']),
+  vehicleType: vehicleClassSchema,
   /// Origen del viaje (geo): centro del broadcast a conductores elegibles cercanos.
   origin: geo,
   bidCents: z.number().int().positive(),
@@ -323,7 +389,7 @@ export const driverLocationUpdated = z.object({
   heading: z.number().min(0).max(360).nullable().optional(),
   /// Ola 2B · tier moto-taxi: tipo de vehículo activo del conductor. dispatch lo proyecta en el hot
   /// index para filtrar el matching por tipo. Opcional por compat (pings antiguos) ⇒ default CAR.
-  vehicleType: z.enum(['CAR', 'MOTO']).optional(),
+  vehicleType: vehicleClassSchema.optional(),
 });
 export const driverEnteredZone = z.object({ driverId: z.string(), zoneId: z.string(), at: z.string() });
 
@@ -354,6 +420,18 @@ export const paymentCaptured = z.object({
   passengerId: z.string().optional(),
 });
 export const paymentFailed = z.object({ paymentId: z.string(), tripId: z.string(), reason: z.string(), willRetry: z.boolean() });
+/// PROPINA añadida a un viaje YA cobrado (BR-P04): el 100% va al CONDUCTOR, fuera de comisión.
+/// payment-service la emite por OUTBOX desde `addTip` (en la MISMA transacción que el incremento de
+/// `tipCents`, así nunca hay propina sumada sin evento ni evento sin propina). El driver-bff la consume
+/// para empujar al CONDUCTOR "recibiste una propina de S/X" en vivo. `driverId` ENRIQUECIDO (opcional,
+/// compat N-2): destino del push sin join cross-servicio; ausente ⇒ el consumidor lo resuelve por
+/// `tripId`. `tipCents` = monto de la propina (céntimos, entero positivo).
+export const paymentTipAdded = z.object({
+  paymentId: z.string(),
+  tripId: z.string(),
+  driverId: z.string().optional(),
+  tipCents: z.number().int(),
+});
 /// EFECTIVO bilateral (BR-P03) · se creó un Payment CASH que YA tiene la confirmación del CONDUCTOR
 /// (cobró en mano al terminar, driverConfirmed=true) y queda PENDING esperando SOLO la confirmación del
 /// PASAJERO para capturarse. payment-service lo emite por OUTBOX desde el cobro disparado por
@@ -522,7 +600,7 @@ export const fleetVehicleRegistered = z.object({
   vehicleId: z.string(),
   driverId: z.string(),
   plate: z.string(),
-  vehicleType: z.enum(['CAR', 'MOTO']),
+  vehicleType: vehicleClassSchema,
   registeredAt: z.string(),
 });
 
@@ -552,6 +630,10 @@ export const EVENT_SCHEMAS = {
   'trip.pii_erased': tripPiiErased,
   'trip.bid_posted': tripBidPosted,
   'trip.reassigning': tripReassigning,
+  'trip.waypoint_proposed': tripWaypointProposed,
+  'trip.waypoint_accepted': tripWaypointAccepted,
+  'trip.waypoint_rejected': tripWaypointRejected,
+  'trip.waypoint_expired': tripWaypointExpired,
   'dispatch.match_found': dispatchMatchFound,
   'dispatch.offered': dispatchOffered,
   'dispatch.offer_made': dispatchOfferMade,
@@ -567,6 +649,7 @@ export const EVENT_SCHEMAS = {
   'media.access_granted': mediaAccessGranted,
   'payment.captured': paymentCaptured,
   'payment.failed': paymentFailed,
+  'payment.tip_added': paymentTipAdded,
   'payment.cash_pending': paymentCashPending,
   'payment.refunded': paymentRefunded,
   'payment.cancellation_penalty_recorded': cancellationPenaltyRecorded,

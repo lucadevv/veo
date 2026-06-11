@@ -8,6 +8,7 @@ import {
   type OutboxPrismaClient,
 } from './outbox.js';
 import { tombstone, deletedPlaceholder, type UpdatableDelegate } from './tombstone.js';
+import { isUniqueViolation } from './prisma-errors.js';
 import { createEnvelope } from '@veo/events';
 
 class FakeClient implements PrismaLike {
@@ -137,5 +138,39 @@ describe('tombstone (derecho al olvido BR-S06)', () => {
     expect(captured.email).toBeNull();
     expect(captured.dniHash).toBeNull();
     expect(captured.phone).toBe('[deleted:phone:u1]');
+  });
+});
+
+describe('isUniqueViolation (P2002 estructural, cross-cliente-generado)', () => {
+  /** Réplica de cómo el runtime generado de Prisma construye el error (name fijado en el ctor). */
+  function prismaError(code: string, target?: unknown): Error {
+    const err = new Error('Unique constraint failed') as Error & { code: string; meta?: { target?: unknown } };
+    err.name = 'PrismaClientKnownRequestError';
+    err.code = code;
+    if (target !== undefined) err.meta = { target };
+    return err;
+  }
+
+  it('matchea P2002 sin columna (cualquier unique)', () => {
+    expect(isUniqueViolation(prismaError('P2002'))).toBe(true);
+    expect(isUniqueViolation(prismaError('P2002', ['dedupKey']))).toBe(true);
+  });
+
+  it('rechaza otros códigos, errores ajenos y no-errores', () => {
+    expect(isUniqueViolation(prismaError('P2025'))).toBe(false);
+    expect(isUniqueViolation(new Error('P2002'))).toBe(false);
+    expect(isUniqueViolation(null)).toBe(false);
+    expect(isUniqueViolation('P2002')).toBe(false);
+  });
+
+  it('con columna: matchea field camelCase, columna snake_case y nombre de constraint', () => {
+    expect(isUniqueViolation(prismaError('P2002', ['dedupKey']), 'dedupKey')).toBe(true);
+    expect(isUniqueViolation(prismaError('P2002', ['dedup_key']), 'dedupKey')).toBe(true);
+    expect(isUniqueViolation(prismaError('P2002', 'panic_events_dedup_key_key'), 'dedupKey')).toBe(true);
+    expect(isUniqueViolation(prismaError('P2002', ['tripId']), 'dedupKey')).toBe(false);
+  });
+
+  it('sin meta.target fiable, asume el unique esperado (no rompe la idempotencia)', () => {
+    expect(isUniqueViolation(prismaError('P2002'), 'dedupKey')).toBe(true);
   });
 });

@@ -23,3 +23,11 @@ export { RideOptionRow, type RideOptionRowProps } from './RideOptionRow';
 export { DriverCard, type DriverCardProps } from './DriverCard';
 export { SosButton, type SosButtonProps } from './SosButton';
 export { RoutePin, type RoutePinProps, type RoutePinVariant } from './RoutePin';
+export {
+  Appear,
+  PressableScale,
+  Pulse,
+  type AppearProps,
+  type PressableScaleProps,
+  type PulseProps,
+} from './motion';

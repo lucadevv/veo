@@ -7,3 +7,4 @@ export * from './schemas.js';
 export * from './kafka.js';
 export * from './outbox.js';
 export * from './poison.js';
+export * from './dedup.js';

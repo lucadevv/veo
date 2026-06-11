@@ -33,6 +33,7 @@
   "dependencies": {
     "zod": "^3.23.8",
     "kafkajs": "^2.2.4",
+    "@veo/shared-types": "workspace:*",
     "@veo/utils": "workspace:*"
   }
 }

@@ -13,6 +13,12 @@ export interface SafeScreenProps {
   header?: ReactNode;
   /** Footer fijo (p.ej. barra de CTA), con inset inferior seguro. */
   footer?: ReactNode;
+  /**
+   * Reserva el inset superior (notch/status bar). Por defecto `true`. Ponelo en `false` para
+   * pantallas full-bleed donde el contenido es el héroe hasta el borde (mapa): en ese caso los
+   * overlays flotantes deben offsetearse ellos mismos con `insets.top`.
+   */
+  topInset?: boolean;
   /** Override del color de fondo (por defecto `colors.bg` del tema). */
   backgroundColor?: string;
   contentContainerStyle?: ViewStyle;
@@ -32,6 +38,7 @@ export function SafeScreen({
   backgroundColor,
   contentContainerStyle,
   style,
+  topInset = true,
 }: SafeScreenProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -57,7 +64,7 @@ export function SafeScreen({
   );
 
   return (
-    <View style={[styles.flex, { backgroundColor: bg, paddingTop: insets.top }, style]}>
+    <View style={[styles.flex, { backgroundColor: bg, paddingTop: topInset ? insets.top : 0 }, style]}>
       <StatusBar barStyle={theme.statusBarStyle} backgroundColor={bg} translucent />
       {header ? <View style={{ paddingHorizontal: horizontal }}>{header}</View> : null}
       {body}

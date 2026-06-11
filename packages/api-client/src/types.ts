@@ -55,6 +55,28 @@ export function normalizeTripStatus(raw: string): TripStatus | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * ¿El pasajero está A BORDO? (= viaje en curso, `IN_PROGRESS`). Predicado de FASE tipado: el caller
+ * pasa un `TripStatus` del contrato (no un string suelto), así comparar contra un valor fuera del enum
+ * es error de compilación, no un magic string mudo. Lo consume el driver-bff para decidir el ORIGEN de
+ * la navegación: onboard ⇒ ruta directa al destino; pre-recojo ⇒ pasar por el recojo primero.
+ */
+export function isOnboard(status: TripStatus): boolean {
+  return status === 'IN_PROGRESS';
+}
+
+/**
+ * ¿La cámara EN VIVO del habitáculo está disponible? Política de DOMINIO única (BR-S01): solo
+ * durante el viaje en curso. La comparten los TRES gates (public-bff `videoGrant`, driver-bff
+ * `issuePublisherToken`, admin-bff `issueLiveToken`): si mañana la política cambia (p.ej. incluir
+ * ARRIVED), se cambia ACÁ y los tres BFFs la heredan — no se caza copy-paste. El caller normaliza
+ * el status crudo del gRPC con `normalizeTripStatus` antes de preguntar (raw fuera del contrato ⇒
+ * `null` ⇒ se niega el acceso: fail-closed).
+ */
+export function canAccessLiveCabin(status: TripStatus): boolean {
+  return status === 'IN_PROGRESS';
+}
+
 /* ── Sesión (admin-web) ── */
 export const sessionUser = z.object({
   userId: z.string(),
@@ -101,9 +123,18 @@ export const familyTrackingView = z.object({
 export type FamilyTrackingView = z.infer<typeof familyTrackingView>;
 
 /* ── Ops dashboard (admin-web) ── */
+/**
+ * Estado de viaje en la vista OPS: el contrato mobile + `UNKNOWN`. `UNKNOWN` es el camino HONESTO
+ * para un status crudo que no pertenece al contrato (drift de versión, dato corrupto): ops ve
+ * "Desconocido" y escala, en vez de un `REQUESTED` falso que esconde el problema (bug histórico:
+ * REASSIGNING — pasajero abandonado, ops DEBE intervenir — se mostraba como REQUESTED).
+ */
+export const adminTripStatus = z.enum([...tripStatus.options, 'UNKNOWN']);
+export type AdminTripStatus = z.infer<typeof adminTripStatus>;
+
 export const tripSummary = z.object({
   id: z.string(),
-  status: tripStatus,
+  status: adminTripStatus,
   passengerId: z.string(),
   driverId: z.string().nullable(),
   fareCents: z.number().int(),
@@ -148,11 +179,20 @@ export const fleetDocumentView = z.object({
 });
 export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 
+/**
+ * Estado de una liquidación (payout). Espeja `PayoutStatus` de payment-service (enum Prisma) y
+ * @veo/shared-types. Tiparlo como enum (no `z.string()`) hace que cualquier comparación contra un
+ * literal fuera de este set sea error de compilación, no un bug mudo (ej. la UI esperaba `'PAID'`,
+ * el back emite `'PROCESSED'`). Fuente de verdad: services/payment-service/prisma/schema.prisma.
+ */
+export const payoutStatus = z.enum(['PENDING', 'PROCESSING', 'PROCESSED', 'HELD', 'FAILED']);
+export type PayoutStatus = z.infer<typeof payoutStatus>;
+
 export const payoutView = z.object({
   id: z.string(),
   driverId: z.string(),
   amountCents: z.number().int(),
-  status: z.string(),
+  status: payoutStatus,
   period: z.string(),
 });
 export type PayoutView = z.infer<typeof payoutView>;

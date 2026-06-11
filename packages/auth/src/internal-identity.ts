@@ -26,6 +26,33 @@ export function signInternalIdentity(
   return { header, signature: signHmac(header, secret) };
 }
 
+/**
+ * Construye la metadata gRPC saliente con la identidad interna firmada (HMAC). Espejo CLIENT-side
+ * de `verifyGrpcIdentity`: mismos headers que el REST interno; NUNCA se reenvía el JWT crudo aguas
+ * abajo. Centralizado acá para que cada BFF/gateway no re-implemente el par header+firma.
+ */
+export function grpcIdentityMetadata(
+  identity: AuthenticatedUser,
+  secret: string,
+): Record<string, string> {
+  const { header, signature } = signInternalIdentity(identity, secret);
+  return {
+    [INTERNAL_IDENTITY_HEADER]: header,
+    [INTERNAL_IDENTITY_SIG_HEADER]: signature,
+  };
+}
+
+/**
+ * Identidad sintética ANÓNIMA para lecturas/passthroughs sin usuario final (p.ej. vista pública de
+ * seguimiento, endpoints @Public de auth donde el downstream ignora la identidad pero el cliente
+ * interno exige el header firmado). La FORMA vive acá una sola vez; cada BFF declara su sabor
+ * (`anonymousIdentity('passenger')` / `anonymousIdentity('driver')`). `sessionId` vacío = sin
+ * sesión real (señal honesta para audit/logs).
+ */
+export function anonymousIdentity(type: AuthenticatedUser['type']): AuthenticatedUser {
+  return { userId: 'anonymous', type, roles: [], sessionId: '' };
+}
+
 export interface VerifyInternalIdentityOptions {
   /** ventana máxima de validez del header en ms (anti-replay). Default 30s. */
   maxAgeMs?: number;

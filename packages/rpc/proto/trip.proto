@@ -8,6 +8,10 @@ service TripService {
   // Viaje ACTIVO (vivo) del pasajero, sin conocer el id (re-entrada al flujo unificado).
   // Devuelve found=false si el pasajero no tiene ningún viaje en curso.
   rpc GetActiveTrip (ActiveTripRequest) returns (TripReply);
+  // Viaje ACTIVO (vivo) del CONDUCTOR, sin conocer el id: la app del conductor lo usa para REHIDRATAR
+  // el viaje en curso tras un reinicio (app matada mid-viaje → reabre → vuelve a la pantalla del viaje y
+  // reanuda la cámara de seguridad). Filtra por driver_id + LIVE_STATES; found=false si no tiene ninguno.
+  rpc GetActiveTripByDriver (ActiveTripByDriverRequest) returns (TripReply);
   // Pending settlement (re-entrada del cierre): viaje MÁS VIEJO COMPLETED del pasajero sin cerrar
   // (passenger_closed_at = null), orden FIFO (completedAt asc). found=false si no hay ninguno. COMPLETED
   // es terminal (fuera de LIVE_STATES) → GetActiveTrip no lo devuelve y el pasajero perdería el cierre
@@ -77,6 +81,10 @@ message ActiveTripRequest {
   string passenger_id = 1;
 }
 
+message ActiveTripByDriverRequest {
+  string driver_id = 1;
+}
+
 message PendingSettlementRequest {
   string passenger_id = 1;
 }
@@ -117,6 +125,16 @@ message TripReply {
   // Ruta del viaje codificada (polyline). trip-service la PERSISTE (Trip.route_polyline). '' si el viaje
   // no la tiene (proto3 → el BFF la re-mapea a null); la app degrada a línea recta origen→destino.
   string route_polyline = 22;
+  // Paradas intermedias ordenadas (Ola 2B · paradas múltiples), persistidas en Trip.waypoints. Lista
+  // VACÍA si el viaje es directo (proto3 → repeated nunca es null). El BFF las pasa al tripActiveView para
+  // que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
+  repeated GeoPoint waypoints = 23;
+}
+
+// Punto geográfico del viaje (lat/lon). Reusado por las paradas intermedias del TripReply.
+message GeoPoint {
+  double lat = 1;
+  double lon = 2;
 }
 
 message TripStateReply {

@@ -9,3 +9,4 @@
 export * from './read-write.js';
 export * from './outbox.js';
 export * from './tombstone.js';
+export * from './prisma-errors.js';

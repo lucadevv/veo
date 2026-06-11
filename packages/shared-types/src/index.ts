@@ -20,3 +20,4 @@ export * from './domain/notification.js';
 export * from './domain/fleet.js';
 export * from './domain/admin.js';
 export * from './enums/index.js';
+export * from './catalog/index.js';

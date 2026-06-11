@@ -125,35 +125,41 @@ const passengerColors: ThemeColors = {
   skeletonHighlight: '#2A2A30',
 };
 
-/* ── Driver · noche, denso, alto contraste ───────────────────────────────── */
+/* ── Driver · marca oficial VEO · noche, acento VEO Cyan ──────────────────────
+ * Alineado al VEO Brand Book (entrega de marca): MISMO sistema de color que el pasajero —
+ * lienzo NEGRO PURO de marca (#000000, ideal OLED para turnos largos), tipografía de alto
+ * contraste y un único acento VEO Cyan #00E5FF de uso DISCIPLINADO (acción primaria, estado
+ * activo, ruta). El conductor NO se diferencia por el theme sino por el app icon (fondo negro,
+ * V cyan) y el lockup "VEO | Conductores". Antes el driver usaba un navy #121824 + cyan lavado
+ * #39BCDF que DIVERGÍA del Brand Book; se corrigió en el pase de marca del conductor. */
 const driverColors: ThemeColors = {
-  bg: '#121824',
-  surface: '#1A2230',
-  surfaceElevated: '#232B3C',
-  ink: '#EFF2F6',
-  inkMuted: '#B3B7BF',
-  inkSubtle: '#878C96',
-  border: '#383D48',
-  borderStrong: '#515866',
-  brand: '#54AAD1',
-  brandHover: '#68BDE4',
-  onBrand: '#0B111F',
-  accent: '#39BCDF',
-  accentHover: '#52CFF3',
-  onAccent: '#0B111F',
-  safe: '#39BF89',
+  bg: '#000000',
+  surface: '#0E0E11',
+  surfaceElevated: '#1C1C22',
+  ink: '#F4F6F8',
+  inkMuted: '#CFD3DA',
+  inkSubtle: '#8A909C',
+  border: '#17171B',
+  borderStrong: '#2A2A30',
+  brand: '#00E5FF',
+  brandHover: '#00B8CC',
+  onBrand: '#000000',
+  accent: '#00E5FF',
+  accentHover: '#33EAFF',
+  onAccent: '#000000',
+  safe: '#34D399',
   onSafe: '#04160D',
-  success: '#39BF89',
+  success: '#34D399',
   onSuccess: '#04160D',
   warn: '#F2AF48',
   onWarn: '#201301',
-  danger: '#F36164',
-  dangerHover: '#FF7576',
-  onDanger: '#180808',
-  focus: '#39BCDF',
-  overlay: 'rgba(4,7,13,0.6)',
-  skeleton: '#232B3C',
-  skeletonHighlight: '#2E374A',
+  danger: '#FF3B5C',
+  dangerHover: '#E62E4D',
+  onDanger: '#000000',
+  focus: '#00E5FF',
+  overlay: 'rgba(0,0,0,0.66)',
+  skeleton: '#1C1C22',
+  skeletonHighlight: '#2A2A30',
 };
 
 // Marca VEO: la elevación se expresa con superficie + sombras tenues (modo noche),
@@ -243,11 +249,11 @@ export const passengerMapRoute: MapRouteTokens = {
  * la ruta dibujada en MapLibre sea consistente con el resto de la app del conductor.
  */
 export const driverMapRoute: MapRouteTokens = {
-  routeColor: '#39BCDF',
+  routeColor: '#00E5FF',
   routeWidth: 6,
-  routeGlowColor: 'rgba(57,188,223,0.35)',
+  routeGlowColor: 'rgba(0,229,255,0.35)',
   routeGlowWidth: 14,
-  originColor: '#39BCDF',
-  destinationColor: '#39BCDF',
-  userDotColor: '#39BCDF',
+  originColor: '#00E5FF',
+  destinationColor: '#00E5FF',
+  userDotColor: '#00E5FF',
 };

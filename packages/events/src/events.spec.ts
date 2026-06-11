@@ -215,6 +215,39 @@ describe('efectivo · cierre del dominó (cashCollected + payment.cash_pending)'
   });
 });
 
+describe('trip.child_code_failed · dominó S3 (BR-T07 modo niño)', () => {
+  it('acepta el payload REAL del producer (con attempt + passengerId enriquecido)', () => {
+    const ok: EventPayload<'trip.child_code_failed'> = {
+      tripId: 't1',
+      passengerId: 'p1',
+      driverId: 'd1',
+      attempt: 3,
+      at: new Date().toISOString(),
+    };
+    expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse(ok).success).toBe(true);
+  });
+
+  it('tolera filas pre-fix SIN attempt/passengerId (anti poison pill del relay del outbox)', () => {
+    // El relay publica con `schema.parse` (lanza) y drena oldest-first en UNA tx: si una fila vieja
+    // sin `attempt` no pasara, bloquearía TODO el outbox de trip por head-of-line. Compat de consumo.
+    expect(
+      EVENT_SCHEMAS['trip.child_code_failed'].safeParse({ tripId: 't1', at: new Date().toISOString() }).success,
+    ).toBe(true);
+  });
+
+  it('rechaza attempt no-entero y campos requeridos faltantes', () => {
+    const at = new Date().toISOString();
+    expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse({ tripId: 't1', attempt: 1.5, at }).success).toBe(false);
+    // tripId / at siguen REQUERIDOS.
+    expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse({ attempt: 1, at }).success).toBe(false);
+    expect(EVENT_SCHEMAS['trip.child_code_failed'].safeParse({ tripId: 't1', attempt: 1 }).success).toBe(false);
+  });
+
+  it('enruta al topic trip', () => {
+    expect(topicForEvent('trip.child_code_failed')).toBe('trip');
+  });
+});
+
 describe("poison · clasificación de errores de consumidor Kafka", () => {
   it("isUuid: acepta UUID canónico, rechaza no-UUID", () => {
     expect(isUuid("018f9a3e-1c2b-7d4e-8a1f-0123456789ab")).toBe(true);

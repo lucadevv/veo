@@ -10,7 +10,7 @@
  *  - Conductor → driver-bff  REST `/api/v1/*` + Socket.IO namespace `/driver`    (Bearer JWT, type driver).
  */
 import { z } from 'zod';
-import { geoPoint, tripStatus } from './types.js';
+import { geoPoint, payoutStatus, tripStatus } from './types.js';
 import type { TripStatus } from './types.js';
 import type { DriverLocationMsg, TripUpdateMsg } from './socket.js';
 
@@ -476,9 +476,10 @@ export const geoJsonLineString = z.object({
 });
 export type GeoJsonLineString = z.infer<typeof geoJsonLineString>;
 
-/** Opción de viaje cotizada por categoría (precio en céntimos PEN). */
+/** Opción de viaje cotizada por oferta del catálogo (ADR 013; precio en céntimos PEN). */
 export const quoteOption = z.object({
   id: z.string(),
+  /** Nombre resuelto server-side (compat apps viejas; las nuevas resuelven `labelKey` en su i18n). */
   name: z.string(),
   /**
    * Tipo de vehículo de la categoría (Ola 2B). 'veo_moto' ⇒ MOTO; el resto CAR. La app debe enviar
@@ -488,6 +489,23 @@ export const quoteOption = z.object({
   etaSeconds: z.number().int(),
   priceCents: z.number().int(),
   currency: z.literal('PEN'),
+  /**
+   * ADR 013 §1.3 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.allowedModes` ∩ schedule
+   * del admin): pinta la pantalla de puja o de precio firme POR opción. Opcional: un server viejo no
+   * lo manda — fallback: el `mode` top-level del quote (ancla VEO Económico).
+   */
+  mode: pricingMode.optional(),
+  /**
+   * ADR 013 (additive) · token i18n del nombre (`offering.veo_moto.name`); la app lo resuelve en su
+   * i18n. Opcional (server viejo) — fallback: `name` resuelto server-side.
+   */
+  labelKey: z.string().optional(),
+  /**
+   * ADR 013 (additive) · token de ícono (`car` | `moto`; futuro `ambulance`…) que la app resuelve en
+   * su registro token→glyph. String ABIERTO a propósito: un token nuevo de un server más nuevo NO debe
+   * romper el parse de una app vieja (su registro cae al glyph genérico).
+   */
+  icon: z.string().optional(),
 });
 export type QuoteOption = z.infer<typeof quoteOption>;
 
@@ -507,7 +525,10 @@ export const quoteResult = z.object({
   durationSeconds: z.number(),
   geometry: geoJsonLineString,
   options: z.array(quoteOption),
-  /** Modo de pricing resuelto por el servidor: decide la pantalla (PUJA vs FIXED). */
+  /**
+   * Modo de pricing resuelto por el servidor: decide la pantalla (PUJA vs FIXED). ADR 013: ancla la
+   * oferta VEO Económico (compat); el modo POR oferta viaja en `options[].mode` (additive).
+   */
   mode: pricingMode,
   /** Solo PUJA: piso de la oferta en la zona (céntimos PEN). El bid del pasajero no puede ser menor. */
   bidFloorCents: z.number().int().optional(),
@@ -814,6 +835,8 @@ export const tripActiveView = z.object({
   /** Puntos del viaje ({lat,lng}, igual que `mapPoint`/historial; la app los pasa a {lat,lon} internamente). */
   origin: mapPoint,
   destination: mapPoint,
+  /** Paradas intermedias ordenadas (Ola 2B); `[]` si directo. FUENTE ÚNICA: el server (no el borrador local). */
+  waypoints: z.array(geoPoint),
   /**
    * Ruta del viaje codificada (polyline), persistida por el servidor; null si el viaje no la tiene. La app
    * pinta ESTA ruta en el mapa del detalle sin depender del snapshot MMKV; si es null degrada a línea recta
@@ -978,6 +1001,99 @@ export type CancelTripRequest = z.infer<typeof cancelTripRequest>;
 /** POST /trips/:id/destination → body. */
 export const changeDestinationRequest = z.object({ destination: geoPoint });
 export type ChangeDestinationRequest = z.infer<typeof changeDestinationRequest>;
+
+/**
+ * Lote C2 · PARADA mid-trip NEGOCIADA — contrato cliente↔BFF.
+ *
+ * Estado de una propuesta de parada. ESPEJA el enum de dominio de trip-service (única fuente de verdad
+ * del lado servidor). Se expone TIPADO al cliente para que las apps NO comparen strings mágicos
+ * (§4-ter): branchean con los predicados de abajo o contra `WaypointProposalStatus.ACCEPTED`, jamás
+ * contra `=== 'ACCEPTED'`. `PROPOSED` es el único estado VIVO; el resto son terminales.
+ */
+export const WaypointProposalStatus = {
+  PROPOSED: 'PROPOSED',
+  ACCEPTED: 'ACCEPTED',
+  REJECTED: 'REJECTED',
+  EXPIRED: 'EXPIRED',
+} as const;
+export const waypointProposalStatus = z.nativeEnum(WaypointProposalStatus);
+export type WaypointProposalStatus = z.infer<typeof waypointProposalStatus>;
+
+/** ¿La propuesta sigue VIVA (esperando respuesta del conductor)? Solo PROPOSED lo está. */
+export function isProposalLive(status: WaypointProposalStatus): boolean {
+  return status === WaypointProposalStatus.PROPOSED;
+}
+/** ¿La propuesta fue ACEPTADA (ruta+tarifa cambian)? */
+export function isProposalAccepted(status: WaypointProposalStatus): boolean {
+  return status === WaypointProposalStatus.ACCEPTED;
+}
+
+/**
+ * POST /trips/:id/waypoints → el PASAJERO PROPONE una parada durante el viaje (IN_PROGRESS). El cuerpo
+ * SOLO transporta el punto: el passengerId lo estampa el BFF desde la identidad autenticada (anti-IDOR);
+ * el delta de tarifa y la ruta nueva los calcula el server (server-authoritative, el cliente no fija precio).
+ */
+export const proposeWaypointRequest = z.object({ point: geoPoint });
+export type ProposeWaypointRequest = z.infer<typeof proposeWaypointRequest>;
+
+/**
+ * Respuesta de la PROPUESTA: lo que la app del pasajero muestra en la confirmación (delta a pagar, tarifa
+ * nueva, ETA nuevo, hasta cuándo vive la propuesta). Espeja `ProposeWaypointResult` de trip-service.
+ */
+export const waypointProposalView = z.object({
+  proposalId: z.string(),
+  deltaFareCents: z.number().int(),
+  newFareCents: z.number().int(),
+  newEtaSeconds: z.number(),
+  expiresAt: z.string(),
+});
+export type WaypointProposalView = z.infer<typeof waypointProposalView>;
+
+/**
+ * POST /trips/:id/waypoints/:proposalId/respond → el CONDUCTOR acepta/rechaza. El cuerpo SOLO transporta
+ * `accept`: el driverId lo DERIVA el BFF server-side (anti-IDOR), el cliente no lo envía.
+ */
+export const respondWaypointRequest = z.object({ accept: z.boolean() });
+export type RespondWaypointRequest = z.infer<typeof respondWaypointRequest>;
+
+/**
+ * Resultado de RESPONDER la propuesta: estado terminal (ACCEPTED/REJECTED) + tarifa VIGENTE del viaje
+ * (la nueva si aceptó, la misma si rechazó). Server-authoritative. Espeja `RespondWaypointResult`.
+ */
+export const respondWaypointView = z.object({
+  proposalId: z.string(),
+  status: waypointProposalStatus,
+  fareCents: z.number().int(),
+});
+export type RespondWaypointView = z.infer<typeof respondWaypointView>;
+
+/**
+ * OUTCOME en VIVO de una propuesta (server → PASAJERO por socket `/passenger`, evento `waypoint:outcome`,
+ * Lote C4): el conductor respondió o la propuesta venció. `status` es TERMINAL (ACCEPTED/REJECTED/EXPIRED
+ * — nunca PROPOSED). NO trae tarifa: en ACCEPTED la app refetchea el detalle (ruta+paradas+tarifa nuevas,
+ * fuente única del servidor); en REJECTED/EXPIRED el viaje sigue igual. La app cierra el "esperando" con esto.
+ */
+export const waypointProposalOutcome = z.object({
+  proposalId: z.string(),
+  status: waypointProposalStatus,
+});
+export type WaypointProposalOutcome = z.infer<typeof waypointProposalOutcome>;
+
+/**
+ * Propuesta de parada que el CONDUCTOR recibe en vivo (server → /driver, evento `waypoint:proposed`,
+ * Lote C4): el pasajero propuso una parada en su viaje EN CURSO. El conductor ve el punto, el costo
+ * adicional y la tarifa nueva (calculados por el server) y el vencimiento, y acepta/rechaza vía
+ * `POST /trips/:id/waypoints/:proposalId/respond` antes de `expiresAt`.
+ */
+export const waypointProposedMsg = z.object({
+  proposalId: z.string(),
+  tripId: z.string(),
+  point: geoPoint,
+  deltaFareCents: z.number().int(),
+  newFareCents: z.number().int(),
+  expiresAt: z.string(),
+});
+export type WaypointProposedMsg = z.infer<typeof waypointProposedMsg>;
 
 /**
  * GET /trips/:id/video → token viewer LiveKit (solo suscripción) del habitáculo de SU viaje en curso.
@@ -1938,13 +2054,8 @@ export const driverIncentiveList = z.array(driverIncentive);
 export type DriverIncentiveList = z.infer<typeof driverIncentiveList>;
 
 /* ── Ganancias / payouts ── */
-
-/**
- * Estado de una liquidación (payout). Espeja `PayoutStatus` de @veo/shared-types. Tiparlo como enum
- * (no `z.string()`) hace que cualquier comparación contra un literal fuera de este set sea error de
- * compilación, no un bug mudo (ej. la UI esperaba `'PAID'`, el back emite `'PROCESSED'`).
- */
-export const payoutStatus = z.enum(['PENDING', 'PROCESSING', 'PROCESSED', 'HELD', 'FAILED']);
+// El enum `payoutStatus` vive en types.ts (contrato compartido mobile + admin): UNA sola fuente del
+// vocabulario de payout en el package, sin riesgo de drift entre dos definiciones.
 
 /** Liquidación (payout) del conductor (espeja el modelo Payout de payment-service). */
 export const driverPayoutView = z.object({
@@ -2164,6 +2275,12 @@ export interface PassengerServerToClient {
    * card por `driverId`. El public-bff la emite al consumir `dispatch.offer_withdrawn`.
    */
   'offer:withdrawn': (msg: OfferWithdrawnMsg) => void;
+  /**
+   * Desenlace de una PARADA propuesta (Lote C4): el conductor aceptó/rechazó o la propuesta venció.
+   * El public-bff lo emite al consumir `trip.waypoint_accepted/rejected/expired`. La app cierra el
+   * estado "esperando"; en ACCEPTED refetchea el detalle para traer ruta+tarifa nuevas.
+   */
+  'waypoint:outcome': (msg: WaypointProposalOutcome) => void;
   error: (msg: { code: string; message: string }) => void;
 }
 
@@ -2242,6 +2359,17 @@ export interface DispatchMatchPayload {
   scoreMs: number;
 }
 
+/**
+ * Propina añadida a un viaje ya cobrado (payment.tip_added). El 100% es del conductor. El driver-bff
+ * la reenvía en vivo para celebrarla en la app; el monto en céntimos (entero positivo).
+ */
+export interface TipAddedPayload {
+  paymentId: string;
+  tripId: string;
+  driverId?: string;
+  tipCents: number;
+}
+
 export interface DriverServerToClient {
   'dispatch:offer': (msg: DriverEventEnvelope<DispatchOfferedPayload>) => void;
   'dispatch:match': (msg: DriverEventEnvelope<DispatchMatchPayload>) => void;
@@ -2251,6 +2379,14 @@ export interface DriverServerToClient {
    * tras persistirlo. La app también lo recibe como respuesta del POST /trips/:id/messages.
    */
   'chat:message': (msg: ChatMessage) => void;
+  /** Propina recibida en vivo (payment.tip_added → driver-bff). El conductor la ve al instante. */
+  'payment:tip': (msg: DriverEventEnvelope<TipAddedPayload>) => void;
+  /**
+   * El pasajero PROPUSO una parada mid-trip (Lote C4): el driver-bff lo emite a la sala del viaje al
+   * consumir `trip.waypoint_proposed`. El conductor ve el punto + costo adicional + tarifa nueva y
+   * responde (acepta/rechaza) antes de `expiresAt`. No usa el sobre genérico: shape tipada y validada.
+   */
+  'waypoint:proposed': (msg: WaypointProposedMsg) => void;
 }
 
 export interface DriverClientToServer {
