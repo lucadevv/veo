@@ -14,6 +14,7 @@ import type {
   TripResource,
   TripStateView,
   TripVideoGrant,
+  WaypointProposalView,
 } from '@veo/api-client';
 
 /**
@@ -54,6 +55,13 @@ export interface TripRepository {
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource>;
   /** POST /trips/:id/destination → cambia el destino en curso. */
   changeDestination(tripId: string, destination: GeoPoint): Promise<TripResource>;
+  /**
+   * POST /trips/:id/waypoints → PROPONE una parada intermedia durante el viaje EN CURSO (Lote C2/C3).
+   * El cuerpo solo transporta el punto; el server calcula el delta de tarifa, la ruta y el ETA nuevos
+   * (server-authoritative). Devuelve la propuesta (id + delta + tarifa/ETA nuevos + vencimiento) que el
+   * pasajero confirma visualmente mientras espera la respuesta del conductor.
+   */
+  proposeWaypoint(tripId: string, point: GeoPoint): Promise<WaypointProposalView>;
   /** GET /trips/:id/video → token viewer LiveKit del habitáculo (puede degradar a "sin video"). */
   getVideoGrant(tripId: string): Promise<TripVideoGrant>;
   /** POST /share/:tripId → crea un enlace público firmado de seguimiento del viaje en curso. */

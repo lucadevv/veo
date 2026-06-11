@@ -26,7 +26,7 @@ const PANIC_LOCATION_TIMEOUT_MS = 5000;
  * Dispara una alerta de pánico real contra el bff (`POST /panic`). Orquesta (SRP):
  *  1. Aprovisiona el secreto HMAC si aún no está en el device (perezoso, primera vez).
  *  2. Obtiene la ubicación actual (puerto `LocationProvider`, oleada nativa).
- *  3. Genera un `dedupKey` (UUIDv7) para idempotencia ante reintentos.
+ *  3. Usa el `dedupKey` (UUIDv7) recibido —o genera uno— para idempotencia ante reintentos.
  *  4. Firma el mensaje canónico (puerto `PanicSigner`, HMAC con el secreto real).
  *  5. Envía la alerta (idempotente vía dedupKey). Si el backend rechaza la firma (401), rota la
  *     clave UNA vez y reintenta con el mismo dedupKey.
@@ -42,7 +42,14 @@ export class TriggerPanicUseCase {
     private readonly provisioner: PanicSecretProvisioner,
   ) {}
 
-  async execute(tripId: string): Promise<PanicTriggerResult> {
+  /**
+   * @param tripId   Viaje activo sobre el que se dispara la alerta.
+   * @param dedupKey UUIDv7 de idempotencia. Por defecto se genera uno nuevo (camino manual). El
+   *                 `SilentPanicDispatcher` lo INYECTA para reenviar la MISMA alerta en cada
+   *                 reintento (at-least-once): si un POST anterior llegó al server pero la
+   *                 respuesta se perdió, el reintento dedup-ea en vez de duplicar la alerta.
+   */
+  async execute(tripId: string, dedupKey: string = uuidv7()): Promise<PanicTriggerResult> {
     // Asegura el secreto HMAC antes de firmar (lo descarga del backend si aún no está provisionado).
     await this.provisioner.ensureProvisioned();
     // Tope de tiempo: un getCurrentPosition() que cuelga dejaría el pánico en un spinner infinito
@@ -53,7 +60,6 @@ export class TriggerPanicUseCase {
       'No pudimos obtener tu ubicación a tiempo',
     );
     // El panic-service exige UUIDv7 para dedupKey (rechaza otras versiones, BR-S04).
-    const dedupKey = uuidv7();
     return this.signAndTrigger(tripId, dedupKey, geo, true);
   }
 

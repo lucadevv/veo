@@ -7,8 +7,9 @@ import { Share, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
+import type { WaypointProposalController } from '../hooks/useWaypointProposal';
 import { TripStatusStrip } from './TripStatusStrip';
-import { IconCamera } from './icons';
+import { IconCamera, IconRoute } from './icons';
 import { EnterView } from './motion';
 
 export interface ActiveTripBodyProps {
@@ -21,6 +22,11 @@ export interface ActiveTripBodyProps {
   onOpenCamera: () => void;
   /** El viaje terminó por cancelación del pasajero (→ el screen limpia y vuelve al home). */
   onCancelled: () => void;
+  /**
+   * Controlador de la PARADA negociada mid-trip (Lote C3). Lo posee la pantalla unificada (dueña del
+   * mapa, que captura el tap del picking); acá solo se renderiza su estado y se invocan sus acciones.
+   */
+  addStop: WaypointProposalController;
 }
 
 /**
@@ -35,6 +41,7 @@ export function ActiveTripBody({
   etaSeconds,
   onOpenCamera,
   onCancelled,
+  addStop,
 }: ActiveTripBodyProps): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
@@ -125,17 +132,35 @@ export function ActiveTripBody({
         />
       ) : null}
 
-      <Button
-        label={t('trip.share')}
-        variant="secondary"
-        fullWidth
-        loading={shareMutation.isPending}
-        disabled={shareMutation.isPending}
-        onPress={() => shareMutation.mutate()}
-      />
-      {shareMutation.isError ? <Banner tone="danger" title={t('trip.shareError')} /> : null}
+      {/* PARADA negociada (Lote C3): solo en curso. Cuando hay un flujo de parada activo (picking o una
+          propuesta en vuelo/resuelta), TOMA el foco del sheet; en idle es un botón más entre las acciones. */}
+      {isInProgress && (addStop.picking || addStop.phase !== 'idle') ? (
+        <AddStopFlow addStop={addStop} />
+      ) : (
+        <>
+          {isInProgress ? (
+            <Button
+              label={t('trip.addStop')}
+              variant="secondary"
+              fullWidth
+              leftIcon={<IconRoute color={theme.colors.ink} size={18} />}
+              onPress={addStop.startPicking}
+            />
+          ) : null}
 
-      <Button label={t('trip.cancel')} variant="ghost" fullWidth onPress={() => setCancelOpen(true)} />
+          <Button
+            label={t('trip.share')}
+            variant="secondary"
+            fullWidth
+            loading={shareMutation.isPending}
+            disabled={shareMutation.isPending}
+            onPress={() => shareMutation.mutate()}
+          />
+          {shareMutation.isError ? <Banner tone="danger" title={t('trip.shareError')} /> : null}
+
+          <Button label={t('trip.cancel')} variant="ghost" fullWidth onPress={() => setCancelOpen(true)} />
+        </>
+      )}
 
       <BottomSheet
         visible={cancelOpen}
@@ -164,6 +189,104 @@ export function ActiveTripBody({
       </BottomSheet>
     </View>
   );
+}
+
+/**
+ * Sub-flujo de la PARADA negociada (Lote C3). Renderiza el estado del controlador:
+ *  - picking          → instrucción de tocar el mapa + Confirmar (habilitado al tener punto) / Cancelar.
+ *  - proposing        → cargando (POST en vuelo).
+ *  - waiting          → esperando al conductor: cuenta regresiva + costo adicional + tarifa nueva.
+ *  - accepted/rejected/expired/error → banner del desenlace + "Entendido" (vuelve a idle).
+ * El cálculo del precio es del SERVIDOR (la vista solo lo muestra; nunca lo computa).
+ */
+function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): React.JSX.Element {
+  const theme = useTheme();
+  const { t } = useTranslation();
+  const { phase, picking, pickedPoint, proposal, secondsLeft } = addStop;
+
+  if (picking) {
+    return (
+      <View style={{ gap: theme.spacing.sm }}>
+        <Banner
+          tone="info"
+          title={t('trip.addStopPickTitle')}
+          description={t('trip.addStopPickBody')}
+        />
+        <Button
+          label={t('trip.addStopConfirm')}
+          variant="primary"
+          fullWidth
+          disabled={!pickedPoint}
+          onPress={addStop.confirm}
+        />
+        <Button label={t('trip.addStopCancel')} variant="ghost" fullWidth onPress={addStop.cancelPicking} />
+      </View>
+    );
+  }
+
+  if (phase === 'proposing') {
+    return (
+      <Button label={t('trip.addStopProposing')} variant="primary" fullWidth loading disabled onPress={() => undefined} />
+    );
+  }
+
+  if (phase === 'waiting' && proposal) {
+    return (
+      <EnterView>
+        <Card variant="outlined" padding="lg">
+          <View style={{ gap: theme.spacing.sm }}>
+            <Text variant="bodyStrong">{t('trip.addStopWaitingTitle')}</Text>
+            <Text variant="footnote" color="inkMuted">
+              {t('trip.addStopWaitingBody')}
+            </Text>
+            {proposal.deltaFareCents > 0 ? (
+              <View style={styles.fareRow}>
+                <Text variant="callout" color="inkMuted">
+                  {t('trip.addStopDelta', { amount: formatPEN(proposal.deltaFareCents) })}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.fareRow}>
+              <Text variant="callout" color="inkMuted">
+                {t('trip.addStopNewFare', { amount: formatPEN(proposal.newFareCents) })}
+              </Text>
+              {secondsLeft != null ? (
+                <Text variant="bodyStrong" tabular>
+                  {t('trip.addStopCountdown', { seconds: secondsLeft })}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        </Card>
+      </EnterView>
+    );
+  }
+
+  // Desenlaces terminales: banner + "Entendido" (cierra y reabilita "Agregar parada").
+  const terminal = resolveTerminalBanner(phase);
+  return (
+    <View style={{ gap: theme.spacing.sm }}>
+      <Banner tone={terminal.tone} title={t(terminal.title)} description={t(terminal.body)} />
+      <Button label={t('trip.addStopDismiss')} variant="ghost" fullWidth onPress={addStop.dismiss} />
+    </View>
+  );
+}
+
+/** Mapea la fase terminal a su banner (tono + claves i18n). Sin strings sueltos de UI. */
+function resolveTerminalBanner(
+  phase: WaypointProposalController['phase'],
+): { tone: 'success' | 'warn' | 'danger'; title: string; body: string } {
+  if (phase === 'accepted') {
+    return { tone: 'success', title: 'trip.addStopAcceptedTitle', body: 'trip.addStopAcceptedBody' };
+  }
+  if (phase === 'rejected') {
+    return { tone: 'warn', title: 'trip.addStopRejectedTitle', body: 'trip.addStopRejectedBody' };
+  }
+  if (phase === 'expired') {
+    return { tone: 'warn', title: 'trip.addStopExpiredTitle', body: 'trip.addStopExpiredBody' };
+  }
+  // error (POST falló)
+  return { tone: 'danger', title: 'trip.addStopError', body: 'trip.addStopError' };
 }
 
 const styles = StyleSheet.create({

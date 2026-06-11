@@ -27,6 +27,8 @@ import {
   tripStateView,
   type TripVideoGrant,
   tripVideoGrant,
+  type WaypointProposalView,
+  waypointProposalView,
 } from '@veo/api-client';
 import type { TripRepository } from '../domain/tripRepository';
 
@@ -90,6 +92,15 @@ export class HttpTripRepository implements TripRepository {
     return this.http.post(`/trips/${tripId}/destination`, {
       body: { destination },
       schema: tripResource,
+    });
+  }
+
+  proposeWaypoint(tripId: string, point: GeoPoint): Promise<WaypointProposalView> {
+    // El cuerpo SOLO lleva el punto: el passengerId lo estampa el BFF desde el JWT (anti-IDOR) y el
+    // server calcula delta de tarifa + ruta + ETA (server-authoritative; el cliente nunca fija precio).
+    return this.http.post(`/trips/${tripId}/waypoints`, {
+      body: { point },
+      schema: waypointProposalView,
     });
   }
 

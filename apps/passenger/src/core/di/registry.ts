@@ -51,6 +51,8 @@ import { NativePanicTrigger } from '../../features/panic/data/nativePanicTrigger
 import { KeychainPanicSecretProvisioner } from '../../features/panic/data/keychainPanicSecretProvisioner';
 import { KeychainPanicSecretStore } from '../../features/panic/data/keychainPanicSecretStore';
 import { KeychainPanicSigner } from '../../features/panic/data/keychainPanicSigner';
+import { NavigationPanicEscalation } from '../../features/panic/data/navigationPanicEscalation';
+import { SilentPanicDispatcher } from '../../features/panic/domain/silentPanicDispatcher';
 import { TriggerPanicUseCase } from '../../features/panic/domain/usecases';
 import { HttpPaymentsRepository } from '../../features/payments/data/httpPaymentsRepository';
 import { HttpAffiliationRepository } from '../../features/payments/data/httpAffiliationRepository';
@@ -453,6 +455,18 @@ export function buildContainer(): Container {
         c.resolve(TOKENS.locationProvider),
         c.resolve(TOKENS.panicSigner),
         c.resolve(TOKENS.panicSecretProvisioner),
+      ),
+  );
+  // Escalamiento del pánico silencioso fallido: navega a la pantalla manual (canal visible).
+  container.register(TOKENS.panicEscalation, () => new NavigationPanicEscalation());
+  // Entrega at-least-once del disparo SILENCIOSO (singleton del contenedor: los reintentos con
+  // backoff + dedupKey idempotente sobreviven al desmontaje de la pantalla que armó el detector).
+  container.register(
+    TOKENS.silentPanicDispatcher,
+    (c) =>
+      new SilentPanicDispatcher(
+        c.resolve(TOKENS.triggerPanicUseCase),
+        c.resolve(TOKENS.panicEscalation),
       ),
   );
 

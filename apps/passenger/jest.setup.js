@@ -109,33 +109,39 @@ jest.mock('@invertase/react-native-apple-authentication', () => {
 });
 
 // MMKV: implementación en memoria para tests (no hay capa nativa en Jest).
+// v4 expone la factory `createMMKV(config)` (es lo que usa `core/storage/mmkv.ts`; `new MMKV()`
+// quedó solo como type). Un store POR INSTANCIA para no cruzar claves entre almacenes (prefs vs
+// secure) y `recrypt` no-op (en memoria no hay nada que re-cifrar).
 jest.mock('react-native-mmkv', () => {
-  const store = new Map();
   class MMKV {
+    constructor() {
+      this.store = new Map();
+    }
     set(key, value) {
-      store.set(key, value);
+      this.store.set(key, value);
     }
     getString(key) {
-      const v = store.get(key);
+      const v = this.store.get(key);
       return typeof v === 'string' ? v : undefined;
     }
     getNumber(key) {
-      const v = store.get(key);
+      const v = this.store.get(key);
       return typeof v === 'number' ? v : undefined;
     }
     getBoolean(key) {
-      const v = store.get(key);
+      const v = this.store.get(key);
       return typeof v === 'boolean' ? v : undefined;
     }
     contains(key) {
-      return store.has(key);
+      return this.store.has(key);
     }
     delete(key) {
-      store.delete(key);
+      this.store.delete(key);
     }
     clearAll() {
-      store.clear();
+      this.store.clear();
     }
+    recrypt() {}
   }
-  return { MMKV };
+  return { MMKV, createMMKV: () => new MMKV() };
 });

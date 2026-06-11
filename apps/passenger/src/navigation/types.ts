@@ -55,7 +55,12 @@ export type RootStackParamList = {
   Reassign: { tripId: string };
   /** Reportar un objeto olvidado de un viaje (vía ticket de soporte). */
   LostItem: { tripId: string };
-  Panic: { tripId: string };
+  /**
+   * Pantalla manual de pánico. `escalated: true` cuando llega por ESCALAMIENTO del disparo
+   * silencioso fallido (SilentPanicDispatcher agotó reintentos): la pantalla arranca avisando
+   * que la alerta oculta NO se envió, en vez del estado neutro "¿Necesitas ayuda?".
+   */
+  Panic: { tripId: string; escalated?: boolean };
   TrustedContacts: undefined;
   ChildMode: undefined;
   KycCamera: undefined;

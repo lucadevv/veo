@@ -11,9 +11,9 @@ import {
   formatShortDate,
   formatTimeOfDay,
 } from '../../../../shared/utils/format';
+import { offeringGlyph } from '../../../../shared/presentation/components/offeringGlyphs';
 import { hexAlpha } from './color';
 import { Animated, usePressScale } from './motion';
-import { IconCar, IconMoto } from './icons';
 import { TripRatingTag } from './TripRatingTag';
 
 export interface TripHistoryRowProps {
@@ -105,7 +105,9 @@ export function TripHistoryRow({
   }, [trip.requestedAt, t]);
 
   const time = formatTimeOfDay(trip.requestedAt);
-  const VehicleIcon = trip.vehicleType === 'MOTO' ? IconMoto : IconCar;
+  // Ícono del tier desde el registro de glyphs (ADR 013 §1.6): el historial no trae `icon`, así que
+  // resuelve por clase de vehículo (mapeo exhaustivo, no ternario).
+  const { LineIcon: VehicleIcon } = offeringGlyph({ vehicleType: trip.vehicleType });
 
   // Resumen del trayecto SIN inventar direcciones: distancia + duración (lo que el item SÍ sabe).
   const distanceText = formatDistance(trip.distanceMeters);

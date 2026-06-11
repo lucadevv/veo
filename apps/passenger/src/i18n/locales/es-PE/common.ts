@@ -445,6 +445,18 @@ export const common = {
     cheapest: 'Más barato',
   },
 
+  /**
+   * Nombres de las ofertas del catálogo (ADR 013): la app resuelve `options[].labelKey`
+   * (`offering.veo_moto.name`) acá. Mismos textos que `OFFERING_DISPLAY_NAMES` del public-bff
+   * (compat server-side): si la app no conoce una clave (oferta más nueva), cae al `name` del quote.
+   */
+  offering: {
+    veo_moto: { name: 'VEO Moto' },
+    veo_economico: { name: 'VEO Económico' },
+    veo_confort: { name: 'VEO Confort' },
+    veo_xl: { name: 'VEO XL' },
+  },
+
   /** PUJA · "proponé tu precio" (ADR 010 · regateo inverso). */
   puja: {
     title: 'Tu viaje',
@@ -619,6 +631,28 @@ export const common = {
     shareTitle: 'Sigue mi viaje en VEO',
     shareMessage: 'Estoy en un viaje con VEO. Sigue mi recorrido en vivo aquí: {{url}}',
     shareError: 'No pudimos generar el enlace para compartir. Inténtalo de nuevo.',
+
+    // Parada negociada en viaje (Lote C3): el pasajero propone una parada durante el viaje en curso; el
+    // conductor la acepta o rechaza. El server calcula el costo adicional y la ruta (nunca el cliente).
+    addStop: 'Agregar parada',
+    addStopPickTitle: 'Elige la parada',
+    addStopPickBody: 'Toca el mapa para marcar dónde quieres parar.',
+    addStopConfirm: 'Proponer parada',
+    addStopCancel: 'Cancelar',
+    addStopProposing: 'Enviando tu propuesta…',
+    addStopWaitingTitle: 'Esperando al conductor',
+    addStopWaitingBody: 'Le propusimos tu parada. Si la acepta, se actualizan la ruta y la tarifa.',
+    addStopCountdown: 'Vence en {{seconds}} s',
+    addStopDelta: 'Costo adicional {{amount}}',
+    addStopNewFare: 'Nueva tarifa {{amount}}',
+    addStopAcceptedTitle: 'Parada agregada',
+    addStopAcceptedBody: 'Tu conductor aceptó. La ruta y la tarifa ya se actualizaron.',
+    addStopRejectedTitle: 'Parada rechazada',
+    addStopRejectedBody: 'Tu conductor no agregó la parada. El viaje continúa igual.',
+    addStopExpiredTitle: 'La propuesta venció',
+    addStopExpiredBody: 'No recibimos respuesta a tiempo. Puedes intentarlo de nuevo.',
+    addStopError: 'No pudimos enviar tu propuesta. Inténtalo de nuevo.',
+    addStopDismiss: 'Entendido',
   },
 
   /**
@@ -736,6 +770,11 @@ export const common = {
     errorLocation: 'No pudimos obtener tu ubicación. Se habilita en la app instalada.',
     errorSign: 'La firma de seguridad se habilita en la app instalada.',
     errorGeneric: 'No pudimos enviar la alerta. Inténtalo de nuevo.',
+    // Escalamiento del disparo SILENCIOSO fallido (SilentPanicDispatcher agotó reintentos):
+    // la pantalla debe decir la verdad de entrada, no aterrizar en el estado neutro.
+    escalatedTitle: 'No pudimos enviar tu alerta silenciosa',
+    escalatedBody:
+      'Tu alerta aún no llegó a nuestro equipo de seguridad. Reintenta ahora con el botón de abajo.',
     volumeHintSoon:
       'Próximamente: activar la alerta presionando 3 veces el botón de volumen, sin tocar la pantalla.',
   },

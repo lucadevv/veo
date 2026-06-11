@@ -2,7 +2,6 @@ import type {
   GeoPoint,
   MapPoint,
   MobilePaymentMethod,
-  MobileVehicleType,
   QuoteOption,
   SpecialRequest,
   TripResource,
@@ -35,6 +34,10 @@ import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
 import { mapKycStatus } from '../../../kyc/domain/entities';
 import { KycGate } from './KycGate';
 import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
+import {
+  offeringDisplayName,
+  offeringGlyph,
+} from '../../../../shared/presentation/components/offeringGlyphs';
 import { RoutePointsList } from '../../../maps/presentation/components/RoutePointsList';
 import { SpecialRequestChips } from '../../../maps/presentation/components/SpecialRequestChips';
 import { VehicleIcon } from '../../../maps/presentation/components/VehicleIcon';
@@ -325,11 +328,9 @@ export function QuotingBody({
   const formatEta = (option: QuoteOption): string =>
     t('trip.etaMinutes', { minutes: formatDurationMinutes(option.etaSeconds) });
 
-  const vehicleColor = (vehicleType: MobileVehicleType): React.ComponentProps<typeof Text>['color'] =>
-    vehicleType === 'MOTO' ? 'brand' : 'ink';
-
+  // Subtítulo de la opción: etiqueta del tipo de vehículo (del registro de glyphs, ADR 013 §1.6).
   const optionDescription = (option: QuoteOption, cheapest: boolean): string => {
-    const vehicle = option.vehicleType === 'MOTO' ? t('quote.vehicle.moto') : t('quote.vehicle.car');
+    const vehicle = t(offeringGlyph(option).vehicleLabelKey);
     return cheapest ? `${vehicle} · ${t('quote.cheapest')}` : vehicle;
   };
 
@@ -400,11 +401,11 @@ export function QuotingBody({
           {options.map((option, index) => (
             <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
               <RideOptionRow
-                name={option.name}
+                name={offeringDisplayName(option)}
                 price={formatPEN(option.priceCents)}
                 eta={formatEta(option)}
                 description={optionDescription(option, index === 0)}
-                icon={<VehicleIcon vehicleType={option.vehicleType} color={vehicleColor(option.vehicleType)} />}
+                icon={<VehicleIcon icon={option.icon} vehicleType={option.vehicleType} />}
                 selected={option.id === selectedId}
                 onPress={() => selectChanged(option.id)}
               />

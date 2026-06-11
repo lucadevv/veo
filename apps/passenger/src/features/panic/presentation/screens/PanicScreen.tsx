@@ -29,6 +29,10 @@ const BADGE = 84;
  *
  * La DETECCIÓN automática (triple volumen, background) la añade la oleada nativa vía `PanicTrigger`:
  * aquí se anota como "Próximamente" sin simularla, según la regla de seguridad.
+ *
+ * Con `escalated: true` en los params (escalamiento del disparo SILENCIOSO fallido, ver
+ * `NavigationPanicEscalation`), la pantalla NO arranca neutra: muestra de entrada el banner de
+ * urgencia "no pudimos enviar tu alerta silenciosa" con el CTA de reintento como protagonista.
  */
 export function PanicScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -132,7 +136,18 @@ export function PanicScreen(): React.JSX.Element {
         <Text variant="body" color="inkMuted" align="center">
           {t('panic.subtitle')}
         </Text>
-        {mutation.isError ? <Banner tone="danger" title={errorMessage} /> : null}
+        {mutation.isError ? (
+          <Banner tone="danger" title={errorMessage} />
+        ) : params.escalated ? (
+          // Llegó por ESCALAMIENTO del disparo silencioso fallido: decir la verdad de entrada
+          // (la alerta oculta NO se envió) en vez del estado neutro. Si el reintento manual
+          // falla, el banner de error de arriba (más específico) lo reemplaza.
+          <Banner
+            tone="danger"
+            title={t('panic.escalatedTitle')}
+            description={t('panic.escalatedBody')}
+          />
+        ) : null}
         {/* El aviso "próximamente: 3× volumen" se quitó de la pantalla de EMERGENCIA: en el momento
             crítico distrae y resta confianza (anunciar una feature faltante). Va en onboarding/ajustes
             donde el usuario aprende las features de seguridad con calma. */}

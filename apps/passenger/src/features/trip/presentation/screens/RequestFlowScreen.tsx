@@ -2,7 +2,7 @@ import type { DebtView, GeoPoint, MapPoint, OfferView, PlaceSuggestion, TripHist
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Avatar,
   Banner,
@@ -65,6 +65,7 @@ import {
 } from '../components/icons';
 import { useCurrentLocation } from '../hooks/useCurrentLocation';
 import { usePassengerTripSocket } from '../hooks/usePassengerTripSocket';
+import { useWaypointProposal } from '../hooks/useWaypointProposal';
 import { useOfferBoard } from '../hooks/useOfferBoard';
 import { useHydrateActiveTrip } from '../hooks/useHydrateActiveTrip';
 import { resolveTripPhase, mapModeForPhase, isLiveSocketPhase } from '../hooks/tripFlowPhase';
@@ -275,6 +276,21 @@ export function RequestFlowScreen(): React.JSX.Element {
     refetchInterval: live.ended ? false : 15_000,
   });
 
+  // PARADA negociada mid-trip (Lote C3): el pasajero propone una parada durante el viaje EN CURSO. El
+  // hook posee el picking (el tap del mapa → `addStop.pickPoint`), el POST y la máquina de la propuesta.
+  // El OUTCOME en vivo (aceptó/rechazó/venció) llega por el socket `/passenger` (Lote C4); el hook lo
+  // consume para cerrar el "esperando". Si el socket está caído, el vencimiento local sigue resolviendo.
+  const queryClient = useQueryClient();
+  const addStop = useWaypointProposal(activeTripId ?? '', live.waypointOutcome);
+
+  // Al ACEPTARSE la parada, el viaje cambió server-side (ruta + paradas + tarifa): refrescamos el detalle
+  // para que el mapa y la tarifa reflejen lo nuevo sin esperar al poll de 15 s.
+  useEffect(() => {
+    if (addStop.phase === 'accepted' && activeTripId) {
+      void queryClient.invalidateQueries({ queryKey: ['trip', activeTripId, 'active'] });
+    }
+  }, [addStop.phase, activeTripId, queryClient]);
+
   // COREOGRAFÍA DEL MAPA POR FASE (helper puro). Decide qué markers muestra y cómo encuadra la cámara
   // (fit conductor+recogida / follow taxi / center). El AppMap solo recibe props simples (showUserPoint,
   // cameraTarget, …). El vehicleType del conductor NO viene en TripActiveView (solo make/model/plate) →
@@ -294,6 +310,14 @@ export function RequestFlowScreen(): React.JSX.Element {
         .map(draftToGeo)
         .filter((p): p is GeoPoint => p !== null),
     [waypoints],
+  );
+  // FUENTE ÚNICA (§5-bis): en el VIAJE ACTIVO las paradas las manda el TRIP DEL SERVIDOR (las MISMAS que
+  // ve el conductor), NO el borrador local — que podría divergir. El contrato `tripActiveView.waypoints`
+  // ya viene como GeoPoint {lat,lon} (sin conversión). [] mientras el detalle no cargó o si el viaje es
+  // directo: degradación honesta (línea recta, sin crash). En COTIZACIÓN sigue mandando `waypointsGeo`.
+  const serverWaypointsGeo = useMemo<GeoPoint[]>(
+    () => tripDetailQuery.data?.waypoints ?? [],
+    [tripDetailQuery.data?.waypoints],
   );
   const mapDirective = useMemo(
     () =>
@@ -656,7 +680,15 @@ export function RequestFlowScreen(): React.JSX.Element {
             // contexto de la ruta (el destino siempre; el origen solo pre-pickup).
             origin={phase === 'inProgress' ? null : originGeo}
             destination={destinationGeo}
-            waypoints={waypointsGeo}
+            // Viaje ACTIVO → paradas del SERVIDOR (fuente única), no del borrador local. Ver serverWaypointsGeo.
+            // Durante el picking de una parada nueva (C3), el punto elegido se previsualiza como un pin más.
+            waypoints={
+              addStop.picking && addStop.pickedPoint
+                ? [...serverWaypointsGeo, addStop.pickedPoint]
+                : serverWaypointsGeo
+            }
+            // Picking de parada mid-trip: el tap del mapa fija el punto propuesto (solo mientras se elige).
+            onPress={addStop.picking ? addStop.pickPoint : undefined}
             driver={live.driverLocation ?? null}
             driverHeading={live.driverHeading}
             driverVehicleType="CAR"
@@ -898,6 +930,7 @@ export function RequestFlowScreen(): React.JSX.Element {
                   etaSeconds={live.etaSeconds}
                   onOpenCamera={() => navigation.navigate('CameraLive', { tripId: activeTripId as string })}
                   onCancelled={clearTrip}
+                  addStop={addStop}
                 />
               ) : (
                 <Skeleton variant="rect" height={140} />

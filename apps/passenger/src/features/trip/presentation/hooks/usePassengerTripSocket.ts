@@ -1,4 +1,10 @@
-import type { ChatMessage, GeoPoint, OfferMadeMsg, TripStatus } from '@veo/api-client';
+import type {
+  ChatMessage,
+  GeoPoint,
+  OfferMadeMsg,
+  TripStatus,
+  WaypointProposalOutcome,
+} from '@veo/api-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPassengerSocket } from '../../../../core/realtime/socket';
 import { useSessionStore } from '../../../../core/session/sessionStore';
@@ -22,6 +28,12 @@ export interface LiveTripState {
   incomingOffers: OfferMadeMsg[];
   /** BE-3 · driverIds cuyas ofertas se RETIRARON (evento `offer:withdrawn`); el board las excluye al instante. */
   withdrawnDriverIds: string[];
+  /**
+   * Lote C4 · último DESENLACE de una parada propuesta (evento `waypoint:outcome`): el conductor
+   * aceptó/rechazó o venció. La pantalla lo pasa a `useWaypointProposal` para cerrar el "esperando".
+   * `null` mientras no llegó ninguno en esta sesión de socket.
+   */
+  waypointOutcome: WaypointProposalOutcome | null;
 }
 
 const INITIAL: LiveTripState = {
@@ -34,6 +46,7 @@ const INITIAL: LiveTripState = {
   incomingMessages: [],
   incomingOffers: [],
   withdrawnDriverIds: [],
+  waypointOutcome: null,
 };
 
 /**
@@ -157,6 +170,12 @@ export function usePassengerTripSocket(
           ? prev.withdrawnDriverIds
           : [...prev.withdrawnDriverIds, msg.driverId],
       }));
+    });
+
+    // Lote C4 · desenlace de una parada propuesta: el conductor aceptó/rechazó o venció. Se guarda el
+    // último; `useWaypointProposal` lo consume (idempotente por proposalId) para cerrar el "esperando".
+    socket.on('waypoint:outcome', (msg) => {
+      setState((prev) => ({ ...prev, waypointOutcome: msg }));
     });
 
     socket.connect();

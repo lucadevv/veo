@@ -2,7 +2,6 @@ import type {
   GeoPoint,
   MapPoint,
   MobilePaymentMethod,
-  MobileVehicleType,
   QuoteOption,
   SpecialRequest,
 } from '@veo/api-client';
@@ -28,6 +27,10 @@ import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import {
+  offeringDisplayName,
+  offeringGlyph,
+} from '../../../../shared/presentation/components/offeringGlyphs';
 import { formatDateTime, formatDistance, formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
 import { useChildModeStore } from '../../../childMode/presentation/stores/childModeStore';
 import { usePaymentPrefsStore } from '../../../payments/presentation/stores/paymentPrefsStore';
@@ -289,12 +292,10 @@ export function RouteQuoteScreen(): React.JSX.Element {
   const formatEta = (option: QuoteOption): string =>
     t('trip.etaMinutes', { minutes: formatDurationMinutes(option.etaSeconds) });
 
-  const vehicleColor = (vehicleType: MobileVehicleType): React.ComponentProps<typeof Text>['color'] =>
-    vehicleType === 'MOTO' ? 'brand' : 'ink';
-
-  // Subtítulo de la opción: etiqueta de tipo de vehículo (moto vs auto) y, en la más barata, el sello.
+  // Subtítulo de la opción: etiqueta del tipo de vehículo (del registro de glyphs, ADR 013 §1.6)
+  // y, en la más barata, el sello.
   const optionDescription = (option: QuoteOption, cheapest: boolean): string => {
-    const vehicle = option.vehicleType === 'MOTO' ? t('quote.vehicle.moto') : t('quote.vehicle.car');
+    const vehicle = t(offeringGlyph(option).vehicleLabelKey);
     return cheapest ? `${vehicle} · ${t('quote.cheapest')}` : vehicle;
   };
 
@@ -416,11 +417,11 @@ export function RouteQuoteScreen(): React.JSX.Element {
               {options.map((option, index) => (
                 <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
                   <RideOptionRow
-                    name={option.name}
+                    name={offeringDisplayName(option)}
                     price={formatPEN(option.priceCents)}
                     eta={formatEta(option)}
                     description={optionDescription(option, index === 0)}
-                    icon={<VehicleIcon vehicleType={option.vehicleType} color={vehicleColor(option.vehicleType)} />}
+                    icon={<VehicleIcon icon={option.icon} vehicleType={option.vehicleType} />}
                     selected={option.id === selectedId}
                     onPress={() => selectChanged(option.id)}
                   />

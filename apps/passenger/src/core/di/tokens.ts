@@ -38,11 +38,13 @@ import type {
   ResendContactOtpUseCase,
   VerifyContactUseCase,
 } from '../../features/contacts/domain/usecases';
+import type { PanicEscalation } from '../../features/panic/domain/panicEscalation';
 import type { PanicKeyRepository } from '../../features/panic/domain/panicKeyRepository';
 import type { PanicRepository } from '../../features/panic/domain/panicRepository';
 import type { PanicSecretProvisioner } from '../../features/panic/domain/panicSecretProvisioner';
 import type { PanicSigner } from '../../features/panic/domain/panicSigner';
 import type { PanicTrigger } from '../../features/panic/domain/panicTrigger';
+import type { SilentPanicDispatcher } from '../../features/panic/domain/silentPanicDispatcher';
 import type { TriggerPanicUseCase } from '../../features/panic/domain/usecases';
 import type { PaymentsRepository } from '../../features/payments/domain/paymentsRepository';
 import type { AffiliationRepository } from '../../features/payments/domain/affiliationRepository';
@@ -177,6 +179,8 @@ export const TOKENS = {
   panicTrigger: createToken<PanicTrigger>('PanicTrigger'),
   panicSecretStore: createToken<PanicSecretStore>('PanicSecretStore'),
   panicSecretProvisioner: createToken<PanicSecretProvisioner>('PanicSecretProvisioner'),
+  // Escalamiento del pánico silencioso fallido al canal visible (navegación a la pantalla manual).
+  panicEscalation: createToken<PanicEscalation>('PanicEscalation'),
   pushTokenRegistrar: createToken<PushTokenRegistrar>('PushTokenRegistrar'),
 
   // Casos de uso · Auth
@@ -233,6 +237,8 @@ export const TOKENS = {
 
   // Casos de uso · Panic
   triggerPanicUseCase: createToken<TriggerPanicUseCase>('TriggerPanicUseCase'),
+  // Entrega at-least-once del disparo SILENCIOSO (singleton: los reintentos sobreviven al unmount).
+  silentPanicDispatcher: createToken<SilentPanicDispatcher>('SilentPanicDispatcher'),
 
   // Casos de uso · Contacts
   listContactsUseCase: createToken<ListContactsUseCase>('ListContactsUseCase'),

@@ -1,11 +1,13 @@
 import type { GeoPoint, NearbyVehiclesView } from '@veo/api-client';
+import type { VehicleClass } from '@veo/shared-types';
 
 /**
  * Tipo de vehículo para FILTRAR los autitos de ambiente (opcional). Ausente = todos los tipos.
- * Espejo del enum del contrato (`@veo/api-client`), expuesto acá para no acoplar los consumidores
- * de presentación al SDK directamente.
+ * Alias de la `VehicleClass` canónica de `@veo/shared-types` (ADR 013: la definición local
+ * duplicada del eje 1 se eliminó), expuesto acá para no acoplar los consumidores de presentación
+ * al SDK directamente.
  */
-export type NearbyVehicleType = 'CAR' | 'MOTO';
+export type NearbyVehicleType = VehicleClass;
 
 /**
  * Abstracción del repositorio de Dispatch (DIP). Por ahora solo cubre los vehículos cercanos ANÓNIMOS
