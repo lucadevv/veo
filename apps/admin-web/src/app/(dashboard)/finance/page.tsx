@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Lock } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { usePayouts } from '@/lib/api/queries';
-import type { PayoutView } from '@/lib/api/schemas';
+import { payoutStatus, type PayoutView } from '@/lib/api/schemas';
 import { money } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -14,7 +14,7 @@ import { StatusPill } from '@/components/ui/status-pill';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { RunPayoutsButton } from '@/components/finance/payout-actions';
+import { ReleaseHeldPayoutButton, RunPayoutsButton } from '@/components/finance/payout-actions';
 import { RefundDialog } from '@/components/finance/refund-dialog';
 
 const columns: ColumnDef<PayoutView, unknown>[] = [
@@ -31,6 +31,17 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
     cell: ({ row }) => <span className="tabular font-medium text-ink">{money(row.original.amountCents)}</span>,
   },
   { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    id: 'actions',
+    header: '',
+    // Acción que REFLEJA el estado: solo una fila HELD ofrece liberar la retención del conductor
+    // (camino de vuelta de driver.flagged). El botón se auto-oculta sin permiso finance:payout.
+    // `status` es el enum tipado del contrato (payoutStatus): nada de literales sueltos.
+    cell: ({ row }) =>
+      row.original.status === payoutStatus.enum.HELD ? (
+        <ReleaseHeldPayoutButton driverId={row.original.driverId} amountCents={row.original.amountCents} />
+      ) : null,
+  },
 ];
 
 export default function FinancePage() {
@@ -69,6 +80,7 @@ export default function FinancePage() {
         <Tabs value={tab} onValueChange={setTab} className="pt-4">
           <TabsList>
             <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
+            <TabsTrigger value="HELD">Retenidas</TabsTrigger>
             <TabsTrigger value="PROCESSED">Procesadas</TabsTrigger>
             <TabsTrigger value="ALL">Todas</TabsTrigger>
           </TabsList>

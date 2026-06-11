@@ -32,6 +32,8 @@ export type Permission =
   | 'live:view'
   | 'pricing:view'
   | 'pricing:manage'
+  | 'dispatch:view'
+  | 'dispatch:manage'
   | 'audit:view'
   | 'audit:verify';
 
@@ -86,6 +88,11 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'pricing:view': [FINANCE, ADMIN, SUPERADMIN],
   // pricing.controller PUT mode-schedule: reemplazar el schedule (mutación global). Mismos roles.
   'pricing:manage': [FINANCE, ADMIN, SUPERADMIN],
+  // dispatch-config.controller (clase): ver la config de RADIOS (k-rings) de dispatch. DISPATCHER es el
+  // rol operativo natural del despacho; ADMIN/SUPERADMIN mantienen control.
+  'dispatch:view': [DISPATCHER, ADMIN, SUPERADMIN],
+  // dispatch-config.controller PUT radius-config: reemplazar los k-rings (mutación global). Mismos roles.
+  'dispatch:manage': [DISPATCHER, ADMIN, SUPERADMIN],
   // audit.controller (clase): listado y verificación de la hash-chain.
   'audit:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'audit:verify': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],

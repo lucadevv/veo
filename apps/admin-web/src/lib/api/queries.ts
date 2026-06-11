@@ -15,6 +15,8 @@ import {
   type CreateDocumentRequest,
   type CreateInspectionRequest,
   type CreateVehicleRequest,
+  dispatchRadiusConfigView,
+  type ReplaceRadiusConfigRequest,
   driverApproval,
   expiringDocumentView,
   fleetDocumentView,
@@ -58,6 +60,7 @@ export const qk = {
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
+  dispatchRadiusConfig: ['dispatch-radius-config'] as const,
 };
 
 const REALTIME_REFETCH = 15_000;
@@ -368,6 +371,22 @@ export function useRunPayout() {
   });
 }
 
+/**
+ * Libera los payouts HELD de un conductor y levanta su retención (camino de vuelta de driver.flagged).
+ * Idempotente (re-liberar libera 0). Solo FINANCE (el bff revalida con @Roles; espejo `finance:payout`).
+ * Sin schema de respuesta (mismo trato que useRefund): el contrato tipado vive en el bff.
+ */
+export function useReleaseDriverPayouts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { driverId: string }) =>
+      apiClient().post(`/finance/payouts/drivers/${input.driverId}/release`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['payouts'] });
+    },
+  });
+}
+
 export function useRefund() {
   const qc = useQueryClient();
   return useMutation({
@@ -401,6 +420,28 @@ export function useReplaceSchedule() {
       apiClient().put('/pricing/mode-schedule', { body: input, schema: modeScheduleView }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.modeSchedule });
+    },
+  });
+}
+
+/* ── Dispatch: config de RADIOS (k-rings) singleton global (ADMIN/SUPERADMIN/DISPATCHER) ── */
+export function useDispatchRadiusConfig() {
+  return useQuery({
+    queryKey: qk.dispatchRadiusConfig,
+    queryFn: ({ signal }) =>
+      apiClient().get('/dispatch/radius-config', { schema: dispatchRadiusConfigView, signal }),
+  });
+}
+
+export function useUpdateDispatchRadiusConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    // PUT reemplaza los k-rings wholesale y bumpea version. El admin-bff revalida
+    // `@Roles(ADMIN, SUPERADMIN, DISPATCHER)` y dispatch-service re-firma server-side: la UI solo refleja.
+    mutationFn: (input: ReplaceRadiusConfigRequest) =>
+      apiClient().put('/dispatch/radius-config', { body: input, schema: dispatchRadiusConfigView }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.dispatchRadiusConfig });
     },
   });
 }

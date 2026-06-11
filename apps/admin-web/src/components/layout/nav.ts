@@ -5,6 +5,7 @@ import {
   Cctv,
   Coins,
   MapPinned,
+  Radar,
   ScrollText,
   ShieldAlert,
   Truck,
@@ -36,6 +37,7 @@ export const NAV: NavGroup[] = [
       { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
       { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
       { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },
+      { href: '/ops/dispatch-radius', label: 'Radios de dispatch', icon: Radar, permission: 'dispatch:view' },
     ],
   },
   {
