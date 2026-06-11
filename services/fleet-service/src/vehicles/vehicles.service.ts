@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { uuidv7, plateSchema, parseOrThrow, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
-import { deriveVehicleReviewStatus, isVehicleYearEligible } from './vehicle-rules';
+import { deriveVehicleReviewStatus, isVehicleYearEligible, pickActiveVehicle } from './vehicle-rules';
 import type { CreateVehicleDto, DriverVehicleResponse, RegisterDriverVehicleDto } from './dto/vehicle.dto';
 import { Prisma, VehicleDocStatus, type Vehicle } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -132,21 +132,60 @@ export class VehiclesService {
       return created;
     });
 
-    return toDriverVehicleResponse(vehicle);
+    // El alta puede convertir al nuevo vehículo en el activo (si es el primero/único operable): lo
+    // resolvemos sobre la flota completa del conductor para no mentir el `isActive` de la respuesta.
+    const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    const active = pickActiveVehicle(all);
+    return toDriverVehicleResponse(vehicle, active?.id === vehicle.id);
   }
 
-  /** Rehidrata los vehículos del conductor (más recientes primero). */
+  /** Rehidrata los vehículos del conductor (más recientes primero), marcando cuál es el ACTIVO. */
   async listForDriver(driverId: string): Promise<DriverVehicleResponse[]> {
     const vehicles = await this.prisma.read.vehicle.findMany({
       where: { driverId },
       orderBy: { createdAt: 'desc' },
     });
-    return vehicles.map(toDriverVehicleResponse);
+    const active = pickActiveVehicle(vehicles);
+    return vehicles.map((v) => toDriverVehicleResponse(v, v.id === active?.id));
+  }
+
+  /**
+   * Vehículo ACTIVO (operado) del conductor, server-authoritative: el de `selectedAt` más reciente con
+   * docs vigentes (o el más reciente registrado si ninguno fue seleccionado). `null` si no tiene ninguno
+   * operable. Lo usa el driver-bff para sellar el tipo en el ping (sin confiar en lo que declara la app).
+   */
+  async getActiveVehicle(driverId: string): Promise<DriverVehicleResponse | null> {
+    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    const active = pickActiveVehicle(vehicles);
+    return active ? toDriverVehicleResponse(active, true) : null;
+  }
+
+  /**
+   * Selecciona el vehículo ACTIVO del conductor (marca `selectedAt = ahora`, así gana por recencia).
+   * Anti-IDOR: el vehículo debe ser de ESTE conductor (si no → NotFound, no se filtra existencia ajena).
+   * No se puede activar un vehículo con docs VENCIDOS (BR-D04). Idempotente: re-seleccionar el mismo es ok.
+   */
+  async setActiveVehicle(driverId: string, vehicleId: string): Promise<DriverVehicleResponse> {
+    const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: vehicleId } });
+    if (!vehicle || vehicle.driverId !== driverId) {
+      throw new NotFoundError('Vehículo no encontrado');
+    }
+    if (vehicle.docStatus === VehicleDocStatus.EXPIRED) {
+      throw new ValidationError('No podés operar un vehículo con documentos vencidos', {
+        vehicleId,
+        docStatus: vehicle.docStatus,
+      });
+    }
+    const updated = await this.prisma.write.vehicle.update({
+      where: { id: vehicleId },
+      data: { selectedAt: new Date() },
+    });
+    return toDriverVehicleResponse(updated, true);
   }
 }
 
 /** Proyecta un Vehicle al shape de respuesta self-service con el estado de revisión derivado. */
-function toDriverVehicleResponse(vehicle: Vehicle): DriverVehicleResponse {
+function toDriverVehicleResponse(vehicle: Vehicle, isActive: boolean): DriverVehicleResponse {
   return {
     id: vehicle.id,
     plate: vehicle.plate,
@@ -156,5 +195,6 @@ function toDriverVehicleResponse(vehicle: Vehicle): DriverVehicleResponse {
     vehicleType: vehicle.vehicleType,
     docStatus: vehicle.docStatus,
     status: deriveVehicleReviewStatus(vehicle),
+    isActive,
   };
 }

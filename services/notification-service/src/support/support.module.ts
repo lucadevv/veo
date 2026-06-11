@@ -11,5 +11,7 @@ import { SupportTicketRepository } from './support.repository';
 @Module({
   controllers: [SupportController],
   providers: [SupportService, SupportTicketRepository],
+  // Exportado para el borrado del derecho al olvido (consumers · UserDeletedConsumer).
+  exports: [SupportTicketRepository],
 })
 export class SupportModule {}

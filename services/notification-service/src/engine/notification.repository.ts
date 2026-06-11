@@ -145,6 +145,29 @@ export class NotificationRepository implements NotificationStore {
     });
   }
 
+  /**
+   * Derecho al olvido (Ley 29733, BR-S06): purga el HISTORIAL del destinatario Y su COLA pendiente
+   * (las filas PENDING son la cola del worker: borrarlas es des-encolar). En la MISMA transacción
+   * borra las filas del outbox derivadas de esas notificaciones (`aggregateId` = id de la notificación):
+   * sus envelopes notification.sent/failed llevan el destino `to` (token/teléfono) → PII. Idempotente
+   * (deleteMany/relay con updateMany: la carrera con el drain no rompe). NO forma parte del puerto
+   * NotificationStore: es capacidad de borrado del repositorio, no del motor de envío.
+   */
+  async eraseByRecipients(recipientIds: string[]): Promise<number> {
+    if (recipientIds.length === 0) return 0;
+    return this.prisma.write.$transaction(async (tx) => {
+      const rows = await tx.notification.findMany({
+        where: { recipientId: { in: recipientIds } },
+        select: { id: true },
+      });
+      const ids = rows.map((r) => r.id);
+      if (ids.length === 0) return 0;
+      await tx.outboxEvent.deleteMany({ where: { aggregateId: { in: ids } } });
+      const { count } = await tx.notification.deleteMany({ where: { id: { in: ids } } });
+      return count;
+    });
+  }
+
   async scheduleRetry(
     id: string,
     args: { attempts: number; nextAttemptAt: Date; reason: string },

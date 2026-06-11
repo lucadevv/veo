@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 import { VehicleType } from '@veo/shared-types';
 import type { VehicleReviewStatus } from '../vehicle-rules';
 
@@ -112,4 +112,13 @@ export interface DriverVehicleResponse {
   vehicleType: VehicleType;
   docStatus: string;
   status: VehicleReviewStatus;
+  /** true si este es el vehículo ACTIVO (el que el conductor opera; server-authoritative). */
+  isActive: boolean;
+}
+
+/** Body para seleccionar el vehículo ACTIVO del conductor (PATCH /drivers/vehicles/active). */
+export class SelectVehicleDto {
+  @ApiProperty({ description: 'Id del vehículo del conductor a marcar como activo' })
+  @IsUUID()
+  vehicleId!: string;
 }

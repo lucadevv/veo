@@ -11,6 +11,7 @@ import { NotificationChannel } from '@veo/shared-types';
 import { createEnvelope, type EventEnvelope } from '@veo/events';
 import type * as VeoEvents from '@veo/events';
 import { NotificationEngine } from '../engine/notification.engine';
+import { NotificationPriority } from '../engine/types';
 import { RetryPolicy } from '../engine/retry.policy';
 import { TEMPLATE_KEYS } from '../engine/template.catalog';
 import type { DeviceTarget } from '../devices/device-token.repository';
@@ -27,6 +28,16 @@ import type {
 /** Fake del consumidor Kafka: captura los handlers registrados con .on() para dispararlos a mano. */
 type Handler = (envelope: EventEnvelope<unknown>) => Promise<void>;
 const registered = new Map<string, Handler>();
+
+/**
+ * Poison-guard UNIFICADO (Lote P): TODOS los handlers que resuelven el token del device-store pasan
+ * por isUuid (antes solo el "flujo crítico"; expired/failed/bid_posted/reassigning/completed usaban
+ * la variante sin guard — copy-paste drift resuelto hacia el guard, que evita el crash-loop P2023).
+ * ⇒ los passengerId de los fixtures son UUIDs canónicos, como ya documentaba el bloque del flujo
+ * crítico. La intención de cada test (el pasajero SIEMPRE se entera / degrada honesto) no cambia.
+ */
+const PAX_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const PAX_SIN_TOKEN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 vi.mock('@veo/events', async (importOriginal) => {
   const actual = await importOriginal<typeof VeoEvents>();
@@ -194,8 +205,8 @@ describe('EventConsumerService · #1 PUJA programada (deep-link al board)', () =
   });
 
   it('scheduled=true → push con deep-link al OffersBoard (token del almacén)', async () => {
-    const { store } = await buildAndInit({ pax9: [{ token: 'tok-S', platform: 'android' }] });
-    await registered.get('trip.bid_posted')!(bidPostedEnvelope('pax9', true));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-S', platform: 'android' }] });
+    await registered.get('trip.bid_posted')!(bidPostedEnvelope(PAX_UUID, true));
 
     const recs = [...store.records.values()];
     expect(recs).toHaveLength(1);
@@ -207,21 +218,21 @@ describe('EventConsumerService · #1 PUJA programada (deep-link al board)', () =
   });
 
   it('scheduled=false (puja inmediata / rebid) → NO pushea: el pasajero ya está en el board', async () => {
-    const { store } = await buildAndInit({ pax9: [{ token: 'tok-S', platform: 'android' }] });
-    await registered.get('trip.bid_posted')!(bidPostedEnvelope('pax9', false));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-S', platform: 'android' }] });
+    await registered.get('trip.bid_posted')!(bidPostedEnvelope(PAX_UUID, false));
     expect(store.records.size).toBe(0);
   });
 
   it('sin flag scheduled (compat N-2) → NO pushea', async () => {
-    const { store } = await buildAndInit({ pax9: [{ token: 'tok-S', platform: 'android' }] });
-    await registered.get('trip.bid_posted')!(bidPostedEnvelope('pax9', undefined));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-S', platform: 'android' }] });
+    await registered.get('trip.bid_posted')!(bidPostedEnvelope(PAX_UUID, undefined));
     expect(store.records.size).toBe(0);
   });
 
   it('es idempotente: un bid_posted programado duplicado no pushea dos veces', async () => {
-    const { store } = await buildAndInit({ pax9: [{ token: 'tok-S', platform: 'android' }] });
-    await registered.get('trip.bid_posted')!(bidPostedEnvelope('pax9', true));
-    await registered.get('trip.bid_posted')!(bidPostedEnvelope('pax9', true));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-S', platform: 'android' }] });
+    await registered.get('trip.bid_posted')!(bidPostedEnvelope(PAX_UUID, true));
+    await registered.get('trip.bid_posted')!(bidPostedEnvelope(PAX_UUID, true));
     expect(store.records.size).toBe(1);
   });
 });
@@ -238,7 +249,7 @@ describe('EventConsumerService · H3 reasignación + recibo (deep-link)', () => 
   });
 
   it('trip.reassigning → push con deep-link al OffersBoard re-abierto', async () => {
-    const { store } = await buildAndInit({ paxR: [{ token: 'tok-R', platform: 'android' }] });
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-R', platform: 'android' }] });
     await registered.get('trip.reassigning')!(
       createEnvelope({
         eventType: 'trip.reassigning',
@@ -246,7 +257,7 @@ describe('EventConsumerService · H3 reasignación + recibo (deep-link)', () => 
         payload: {
           tripId: 'trip-R',
           driverId: 'drv-X',
-          passengerId: 'paxR',
+          passengerId: PAX_UUID,
           vehicleType: 'CAR',
           origin: { lat: -12, lon: -77 },
           bidCents: 1500,
@@ -261,7 +272,7 @@ describe('EventConsumerService · H3 reasignación + recibo (deep-link)', () => 
   });
 
   it('trip.completed con passengerId → push de recibo (deep-link al detalle)', async () => {
-    const { store } = await buildAndInit({ paxC: [{ token: 'tok-C', platform: 'ios' }] });
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-C', platform: 'ios' }] });
     await registered.get('trip.completed')!(
       createEnvelope({
         eventType: 'trip.completed',
@@ -271,7 +282,7 @@ describe('EventConsumerService · H3 reasignación + recibo (deep-link)', () => 
           fareCents: 1800,
           distanceMeters: 5000,
           durationSeconds: 900,
-          passengerId: 'paxC',
+          passengerId: PAX_UUID,
         },
       }),
     );
@@ -281,7 +292,7 @@ describe('EventConsumerService · H3 reasignación + recibo (deep-link)', () => 
   });
 
   it('trip.completed SIN passengerId (compat) → no encola recibo', async () => {
-    const { store } = await buildAndInit({ paxC: [{ token: 'tok-C', platform: 'ios' }] });
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-C', platform: 'ios' }] });
     await registered.get('trip.completed')!(
       createEnvelope({
         eventType: 'trip.completed',
@@ -305,13 +316,13 @@ describe('EventConsumerService · degradación honesta', () => {
   });
 
   it('trip.expired notifica al pasajero con un mensaje no vacío (token del almacén)', async () => {
-    const { store } = await buildAndInit({ pax1: [{ token: 'tok-A', platform: 'android' }] });
-    await registered.get('trip.expired')!(expiredEnvelope('pax1'));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-A', platform: 'android' }] });
+    await registered.get('trip.expired')!(expiredEnvelope(PAX_UUID));
 
     const recs = [...store.records.values()];
     expect(recs).toHaveLength(1);
     const rec = recs[0]!;
-    expect(rec.recipientId).toBe('pax1');
+    expect(rec.recipientId).toBe(PAX_UUID);
     expect(rec.channel).toBe(NotificationChannel.PUSH);
     expect(rec.template).toBe(TEMPLATE_KEYS.TRIP_EXPIRED);
     expect(rec.payload.to).toBe('tok-A');
@@ -321,13 +332,13 @@ describe('EventConsumerService · degradación honesta', () => {
   });
 
   it('trip.failed notifica al pasajero con un mensaje no vacío', async () => {
-    const { store } = await buildAndInit({ pax2: [{ token: 'tok-B', platform: 'ios' }] });
-    await registered.get('trip.failed')!(failedEnvelope('pax2'));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-B', platform: 'ios' }] });
+    await registered.get('trip.failed')!(failedEnvelope(PAX_UUID));
 
     const recs = [...store.records.values()];
     expect(recs).toHaveLength(1);
     const rec = recs[0]!;
-    expect(rec.recipientId).toBe('pax2');
+    expect(rec.recipientId).toBe(PAX_UUID);
     expect(rec.template).toBe(TEMPLATE_KEYS.TRIP_FAILED);
     expect(rec.payload.to).toBe('tok-B');
   });
@@ -339,7 +350,7 @@ describe('EventConsumerService · degradación honesta', () => {
       producer: 'trip-service',
       payload: {
         tripId: 'trip-3',
-        passengerId: 'pax3',
+        passengerId: PAX_UUID,
         fromStatus: 'REQUESTED',
         staleMinutes: 5,
         at: new Date().toISOString(),
@@ -356,21 +367,21 @@ describe('EventConsumerService · degradación honesta', () => {
 
   it('sin token del pasajero (evento ni almacén) no encola nada', async () => {
     const { store } = await buildAndInit({});
-    await registered.get('trip.failed')!(failedEnvelope('paxX'));
+    await registered.get('trip.failed')!(failedEnvelope(PAX_SIN_TOKEN));
     expect(store.records.size).toBe(0);
   });
 
   it('es idempotente: un trip.expired duplicado no notifica dos veces', async () => {
-    const { store } = await buildAndInit({ pax1: [{ token: 'tok-A', platform: 'android' }] });
-    await registered.get('trip.expired')!(expiredEnvelope('pax1'));
-    await registered.get('trip.expired')!(expiredEnvelope('pax1'));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-A', platform: 'android' }] });
+    await registered.get('trip.expired')!(expiredEnvelope(PAX_UUID));
+    await registered.get('trip.expired')!(expiredEnvelope(PAX_UUID));
     expect(store.records.size).toBe(1);
   });
 
   it('es idempotente: un trip.failed duplicado no notifica dos veces', async () => {
-    const { store } = await buildAndInit({ pax2: [{ token: 'tok-B', platform: 'ios' }] });
-    await registered.get('trip.failed')!(failedEnvelope('pax2'));
-    await registered.get('trip.failed')!(failedEnvelope('pax2'));
+    const { store } = await buildAndInit({ [PAX_UUID]: [{ token: 'tok-B', platform: 'ios' }] });
+    await registered.get('trip.failed')!(failedEnvelope(PAX_UUID));
+    await registered.get('trip.failed')!(failedEnvelope(PAX_UUID));
     expect(store.records.size).toBe(1);
   });
 });
@@ -748,6 +759,66 @@ describe('EventConsumerService · afiliación Yape (userId directo)', () => {
     await registered.get('payment.affiliation_activated')!(e);
     await registered.get('payment.affiliation_activated')!(e);
     expect(store.records.size).toBe(1);
+  });
+});
+
+describe('EventConsumerService · S3 trip.child_code_failed (BR-T07, alerta al padre/madre)', () => {
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a trip.child_code_failed', async () => {
+    await buildAndInit({});
+    expect(registered.has('trip.child_code_failed')).toBe(true);
+  });
+
+  it('código incorrecto → push CRÍTICO al pasajero dueño de la cuenta con deep-link al viaje activo', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-K', platform: 'android' }] });
+    await registered.get('trip.child_code_failed')!(
+      env('trip.child_code_failed', { tripId: 'trip-K', driverId: 'drv-1', attempt: 1, at: '2026-06-10T00:00:00Z', passengerId: PAX }),
+    );
+    const recs = [...store.records.values()];
+    expect(recs).toHaveLength(1);
+    const rec = recs[0]!;
+    expect(rec.channel).toBe(NotificationChannel.PUSH);
+    expect(rec.template).toBe(TEMPLATE_KEYS.TRIP_CHILD_CODE_FAILED);
+    expect(rec.recipientId).toBe(PAX);
+    expect(rec.priority).toBe(NotificationPriority.Critical); // seguridad infantil: drena antes que todo
+    expect(rec.payload.to).toBe('tok-K');
+    expect(rec.payload.data).toEqual({ tripId: 'trip-K', screen: 'TripActive' });
+  });
+
+  it('sin passengerId enriquecido (gap de contrato) → degrada honesto (no encola)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-K', platform: 'android' }] });
+    await registered.get('trip.child_code_failed')!(
+      env('trip.child_code_failed', { tripId: 'trip-K', attempt: 1, at: '2026-06-10T00:00:00Z' }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('sin token push del pasajero (evento ni almacén) → degrada honesto (no encola)', async () => {
+    const { store } = await buildAndInit({});
+    await registered.get('trip.child_code_failed')!(
+      env('trip.child_code_failed', { tripId: 'trip-K', attempt: 1, at: '2026-06-10T00:00:00Z', passengerId: PAX }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('redelivery del MISMO evento → no duplica la alerta (dedup por eventId)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-K', platform: 'android' }] });
+    const e = env('trip.child_code_failed', { tripId: 'trip-K', attempt: 1, at: '2026-06-10T00:00:00Z', passengerId: PAX });
+    await registered.get('trip.child_code_failed')!(e);
+    await registered.get('trip.child_code_failed')!(e);
+    expect(store.records.size).toBe(1);
+  });
+
+  it('un intento NUEVO (otro evento, mismo viaje) → SÍ vuelve a alertar (cada intento cuenta)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-K', platform: 'android' }] });
+    await registered.get('trip.child_code_failed')!(
+      env('trip.child_code_failed', { tripId: 'trip-K', attempt: 1, at: '2026-06-10T00:00:00Z', passengerId: PAX }),
+    );
+    await registered.get('trip.child_code_failed')!(
+      env('trip.child_code_failed', { tripId: 'trip-K', attempt: 2, at: '2026-06-10T00:01:00Z', passengerId: PAX }),
+    );
+    expect(store.records.size).toBe(2);
   });
 });
 

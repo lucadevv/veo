@@ -12,6 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
+import { isUniqueViolation } from '@veo/database';
 import { ConflictError } from '@veo/utils';
 import { uuidv7 } from '@veo/utils';
 import { Prisma, type SubjectRole } from '../generated/prisma';
@@ -88,7 +89,7 @@ export class RatingsService {
       });
       return toEntity(rating);
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'tripId')) {
         throw new ConflictError('Ya existe una calificación para este viaje');
       }
       throw err;

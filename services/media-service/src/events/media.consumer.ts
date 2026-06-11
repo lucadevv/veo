@@ -7,22 +7,25 @@
  *                         indefinida (BR-S01 excepción + BR-S03).
  *
  * Valida el payload contra el registro central (@veo/events) y descarta lo inválido. Deduplica por
- * `eventId` en Redis (idempotencia: reprocesar un evento es seguro).
+ * `eventId` en Redis con la marca DESPUÉS del éxito (at-least-once): si un handler falla, el dedup
+ * NO se escribe y kafkajs reintenta sin perder el evento — un `panic.triggered` jamás se descarta
+ * por un fallo transitorio. Reprocesar es seguro: los handlers de RecordingService son idempotentes
+ * (segmento abierto por viaje / finish no-op / update al mismo valor).
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createKafka,
   KafkaEventConsumer,
+  processEventOnce,
   schemaForEvent,
   type EventEnvelope,
 } from '@veo/events';
 import type Redis from 'ioredis';
 import { REDIS } from '../infra/redis';
 import { RecordingService } from '../media/recording.service';
+import { MEDIA_EVENT_DEDUP } from './dedup.options';
 import type { Env } from '../config/env.schema';
-
-const DEDUP_TTL_SECONDS = 86_400; // 24h
 
 @Injectable()
 export class MediaEventConsumer implements OnModuleInit, OnModuleDestroy {
@@ -55,7 +58,7 @@ export class MediaEventConsumer implements OnModuleInit, OnModuleDestroy {
     await this.consumer.stop();
   }
 
-  /** Valida payload + deduplica por eventId, luego delega. */
+  /** Valida payload + delega con dedup por eventId marcado DESPUÉS del éxito. */
   private async handle(
     envelope: EventEnvelope<unknown>,
     fn: (envelope: EventEnvelope<unknown>) => Promise<void>,
@@ -68,10 +71,18 @@ export class MediaEventConsumer implements OnModuleInit, OnModuleDestroy {
         return;
       }
     }
-    const dedupKey = `veo:media:evt:${envelope.eventId}`;
-    const fresh = await this.redis.set(dedupKey, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
-    if (fresh !== 'OK') return; // ya procesado
-    await fn(envelope);
+    try {
+      // Mismo esqueleto que ErasureConsumer: el dedup se marca DESPUÉS de procesar con éxito.
+      // Un fallo deja que kafkajs reintente sin perder el evento.
+      await processEventOnce(this.redis, MEDIA_EVENT_DEDUP, envelope.eventId, () => fn(envelope));
+    } catch (err) {
+      // No-ack/retry lo gestiona kafkajs; el dedup NO se marcó, el reintento volverá a procesar.
+      this.logger.error(
+        { err, eventType: envelope.eventType },
+        `No se pudo procesar ${envelope.eventType} (eventId=${envelope.eventId}); kafkajs reintentará`,
+      );
+      throw err;
+    }
   }
 
   private async onTripStarted(envelope: EventEnvelope<unknown>): Promise<void> {

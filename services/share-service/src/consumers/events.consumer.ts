@@ -60,7 +60,7 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async handleTripStarted(envelope: EventEnvelope<unknown>): Promise<void> {
     const p = envelope.payload as EventPayload<'trip.started'>;
-    await this.snapshots.onTripStarted(p.tripId, p.driverId, new Date(p.startedAt));
+    await this.snapshots.onTripStarted(p.tripId, p.driverId, new Date(p.startedAt), p.passengerId);
   }
 
   private async handlePanic(envelope: EventEnvelope<unknown>): Promise<void> {

@@ -10,12 +10,22 @@ import { PrismaService } from '../infra/prisma.service';
 export class TripSnapshotService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** trip.started → el viaje está en curso. */
-  async onTripStarted(tripId: string, driverId: string, startedAt: Date): Promise<void> {
+  /**
+   * trip.started → el viaje está en curso. Proyecta también el passengerId (trip-service lo enriquece
+   * en el evento justamente para el dominó de compartir/familia): es lo que permite a ShareService
+   * validar pertenencia FALLA-CERRADO al crear/revocar enlaces.
+   */
+  async onTripStarted(
+    tripId: string,
+    driverId: string,
+    startedAt: Date,
+    passengerId?: string,
+  ): Promise<void> {
     await this.prisma.write.tripSnapshot.upsert({
       where: { tripId },
-      create: { tripId, status: 'IN_PROGRESS', driverId, startedAt },
-      update: { status: 'IN_PROGRESS', driverId, startedAt },
+      create: { tripId, status: 'IN_PROGRESS', driverId, startedAt, passengerId: passengerId ?? null },
+      // Si un evento legacy viene sin passengerId, NO pisamos con null uno ya proyectado (p.ej. por panic.triggered).
+      update: { status: 'IN_PROGRESS', driverId, startedAt, ...(passengerId ? { passengerId } : {}) },
     });
   }
 

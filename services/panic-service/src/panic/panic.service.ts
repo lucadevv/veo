@@ -11,10 +11,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope, type EventPayload } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
+import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { InvalidStateError, NotFoundError, UnauthorizedError, ValidationError, isUuidV7, uuidv7, verifyHmac } from '@veo/utils';
 import { PanicStatus } from '@veo/shared-types';
-import { Prisma, type PanicEvent } from '../generated/prisma';
+import type { PanicEvent } from '../generated/prisma';
 import { PrismaService } from '../infra/prisma.service';
 import { PanicMetrics } from '../metrics/panic.metrics';
 import { S3_EVIDENCE_STORE, type S3EvidenceStore } from '../ports/s3-evidence/s3-evidence.port';
@@ -128,7 +128,8 @@ export class PanicService {
       };
     } catch (err) {
       // BR-S04: la unique(dedup_key) convierte el doble submit en no-op idempotente.
-      if (this.isDedupConflict(err)) {
+      // El P2002 se valida CONTRA la columna del dedup (no cualquier unique): @veo/database.
+      if (isUniqueViolation(err, 'dedupKey')) {
         const existing = await this.prisma.write.panicEvent.findUnique({
           where: { dedupKey: input.dedupKey },
         });
@@ -274,17 +275,4 @@ export class PanicService {
     });
   }
 
-  private isDedupConflict(err: unknown): err is Prisma.PrismaClientKnownRequestError {
-    return (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2002' &&
-      this.targetsDedupKey(err.meta?.target)
-    );
-  }
-
-  private targetsDedupKey(target: unknown): boolean {
-    if (typeof target === 'string') return target.includes('dedup');
-    if (Array.isArray(target)) return target.some((t) => String(t).includes('dedup'));
-    return true; // sin meta fiable, asumimos el único unique del modelo (dedup_key)
-  }
 }

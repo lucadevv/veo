@@ -41,4 +41,14 @@ export class SupportTicketRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  /**
+   * Derecho al olvido (Ley 29733, BR-S06): borra los tickets del usuario. `subject`/`body` son texto
+   * libre redactado por el usuario (PII en sí mismo) → borrado duro, igual criterio que los mensajes
+   * de chat (anonimizar solo `userId` dejaría la PII intacta). Idempotente. Devuelve cuántos borró.
+   */
+  async deleteByUser(userId: string): Promise<number> {
+    const { count } = await this.prisma.write.supportTicket.deleteMany({ where: { userId } });
+    return count;
+  }
 }

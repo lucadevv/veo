@@ -99,6 +99,36 @@ export class ChatService {
     return this.view(created);
   }
 
+  /**
+   * Derecho al olvido (BR-S06, Ley 29733) — borra los mensajes ESCRITOS por la identidad borrada.
+   *
+   * Borrado duro y no anonimizado: el `body` es texto libre redactado por el usuario (PII en sí
+   * mismo); anonimizar solo `senderId` dejaría la PII intacta. Los mensajes del OTRO participante
+   * son SU dato y se conservan hasta su propio `user.deleted` o el `trip.pii_erased` del viaje.
+   * `user.deleted` trae `userId` y, si era conductor, también `driverId`: borramos ambos lados de la
+   * misma identidad. Idempotente: `deleteMany` es no-op si ya no quedan filas.
+   */
+  async eraseUser(userId: string, driverId?: string): Promise<{ deletedMessages: number }> {
+    const senderIds = driverId ? [userId, driverId] : [userId];
+    const { count } = await this.prisma.write.message.deleteMany({
+      where: { senderId: { in: senderIds } },
+    });
+    return { deletedMessages: count };
+  }
+
+  /**
+   * Derecho al olvido (BR-S06) — purga TODA la conversación de un viaje cuya PII fue borrada.
+   *
+   * `trip.pii_erased` significa que trip-service anonimizó el viaje del pasajero borrado; la
+   * conversación cuelga de ese viaje (direcciones, nombres en texto libre) y se purga COMPLETA,
+   * ambos lados — mismo criterio que media-service con el video de cabina del viaje.
+   * Idempotente: `deleteMany` es no-op si el viaje ya no tiene mensajes.
+   */
+  async eraseTrip(tripId: string): Promise<{ deletedMessages: number }> {
+    const { count } = await this.prisma.write.message.deleteMany({ where: { tripId } });
+    return { deletedMessages: count };
+  }
+
   private view(m: Message): ChatMessageView {
     return {
       id: m.id,

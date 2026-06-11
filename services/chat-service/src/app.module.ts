@@ -12,6 +12,7 @@ import { CoreModule } from './infra/core.module';
 import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { ChatModule } from './chat/chat.module';
+import { EventsModule } from './events/events.module';
 
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
@@ -36,6 +37,7 @@ const readinessProvider: Provider = {
     ConfigModule.forRoot({ isGlobal: true, cache: true, validate: validateEnv }),
     CoreModule,
     ChatModule,
+    EventsModule,
   ],
   controllers: [HealthController, MetricsController],
   providers: [readinessProvider],

@@ -85,6 +85,11 @@ model Vehicle {
   docStatus          VehicleDocStatus @default(VALID) @map("doc_status")
   insuranceExpiresAt DateTime?        @map("insurance_expires_at") @db.Timestamptz
   active             Boolean          @default(true)
+  /// Cuándo el conductor SELECCIONÓ este vehículo como su activo (el que opera). El vehículo activo
+  /// del conductor = su vehículo con `selected_at` MÁS RECIENTE (con docs vigentes). Null = nunca
+  /// seleccionado explícitamente; si ninguno lo está, el activo cae al más recientemente registrado.
+  /// Es server-authoritative: el tipo que el dispatch usa sale de ESTE vehículo, no del ping del cliente.
+  selectedAt         DateTime?        @map("selected_at") @db.Timestamptz
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 

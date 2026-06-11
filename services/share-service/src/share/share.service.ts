@@ -8,7 +8,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
-import { uuidv7, ForbiddenError, NotFoundError } from '@veo/utils';
+import { uuidv7, ForbiddenError, NotFoundError, UnprocessableEntityError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { signShareToken, tokenHashOf, verifyShareToken, assertShareLinkUsable } from './share-link';
 import type { Env } from '../config/env.schema';
@@ -63,14 +63,28 @@ export class ShareService {
   }
 
   /**
-   * Crea un enlace de seguimiento para un viaje. Si hay snapshot del viaje, valida que el solicitante
-   * sea el pasajero del viaje. Devuelve el token (única vez que se expone).
+   * Pertenencia del viaje FALLA-CERRADO (anti-IDOR): solo el pasajero dueño puede gestionar sus
+   * enlaces. La fuente es el read-model TripSnapshot (passengerId llega en trip.started y
+   * panic.triggered). Sin snapshot, o sin passengerId proyectado, NO podemos verificar al dueño →
+   * se deniega con 422 honesto ("aún no disponible"), distinto del 403 por mismatch comprobado.
+   * Nunca se asume ownership por ausencia de datos.
+   */
+  private async assertTripOwnership(userId: string, tripId: string): Promise<void> {
+    const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId } });
+    if (!snapshot?.passengerId) {
+      throw new UnprocessableEntityError('El viaje aún no está disponible para compartir', { tripId });
+    }
+    if (snapshot.passengerId !== userId) {
+      throw new ForbiddenError('Solo el pasajero del viaje puede gestionar su enlace de seguimiento');
+    }
+  }
+
+  /**
+   * Crea un enlace de seguimiento para un viaje. Valida (falla-cerrado) que el solicitante sea el
+   * pasajero del viaje según el read-model. Devuelve el token (única vez que se expone).
    */
   async createLink(userId: string, tripId: string, opts: CreateLinkOptions = {}): Promise<CreatedShareLink> {
-    const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId } });
-    if (snapshot?.passengerId && snapshot.passengerId !== userId) {
-      throw new ForbiddenError('Solo el pasajero del viaje puede generar su enlace de seguimiento');
-    }
+    await this.assertTripOwnership(userId, tripId);
     if (opts.contactId) {
       const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: opts.contactId } });
       if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
@@ -161,15 +175,12 @@ export class ShareService {
     };
   }
 
-  /** Revoca un enlace (deja de servir la página pública). Valida pertenencia vía snapshot si existe. */
+  /** Revoca un enlace (deja de servir la página pública). Valida pertenencia falla-cerrado vía snapshot. */
   async revoke(userId: string, shareId: string): Promise<{ revokedAt: string }> {
     const link = await this.prisma.read.shareLink.findUnique({ where: { id: shareId } });
     if (!link) throw new NotFoundError('Enlace no encontrado');
 
-    const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId: link.tripId } });
-    if (snapshot?.passengerId && snapshot.passengerId !== userId) {
-      throw new ForbiddenError('Solo el pasajero del viaje puede revocar el enlace');
-    }
+    await this.assertTripOwnership(userId, link.tripId);
     if (link.revokedAt) return { revokedAt: link.revokedAt.toISOString() };
 
     const revokedAt = new Date();

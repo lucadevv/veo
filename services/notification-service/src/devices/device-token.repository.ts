@@ -30,6 +30,15 @@ export class DeviceTokenRepository {
     await this.prisma.write.deviceToken.deleteMany({ where: { token } });
   }
 
+  /**
+   * Derecho al olvido (Ley 29733, BR-S06): borra TODOS los dispositivos registrados del usuario.
+   * Idempotente (deleteMany es no-op si ya no quedan filas). Devuelve cuántos borró.
+   */
+  async deleteByUser(userId: string): Promise<number> {
+    const { count } = await this.prisma.write.deviceToken.deleteMany({ where: { userId } });
+    return count;
+  }
+
   /** Devuelve los dispositivos activos de un usuario (más recientes primero). */
   findActiveByUser(userId: string): Promise<DeviceTarget[]> {
     return this.prisma.read.deviceToken.findMany({

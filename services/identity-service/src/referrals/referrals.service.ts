@@ -13,6 +13,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
+import { isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
@@ -71,7 +72,7 @@ export class ReferralsService {
         });
         return candidate;
       } catch (err) {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        if (isUniqueViolation(err, 'referralCode')) {
           // Colisión de código: reintenta. Si otro proceso lo fijó en paralelo, relee.
           const fresh = await this.prisma.read.user.findUnique({
             where: { id: userId },
@@ -138,7 +139,7 @@ export class ReferralsService {
         });
       });
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err, 'referredUserId')) {
         throw new ConflictError('Este usuario ya fue referido');
       }
       throw err;

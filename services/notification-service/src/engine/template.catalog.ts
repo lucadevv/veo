@@ -20,6 +20,7 @@ export const TEMPLATE_KEYS = {
   TRIP_CANCELLED_BY_DRIVER: 'trip.cancelled_by_driver',
   TRIP_EXPIRED: 'trip.expired',
   TRIP_FAILED: 'trip.failed',
+  TRIP_CHILD_CODE_FAILED: 'trip.child_code_failed',
   PAYMENT_FAILED: 'payment.failed',
   PAYMENT_CAPTURED: 'payment.captured',
   PAYMENT_CASH_PENDING: 'payment.cash_pending',
@@ -33,6 +34,9 @@ export const TEMPLATE_KEYS = {
   CHAT_MESSAGE: 'chat.message',
   CONTACT_OTP: 'contact.otp',
 } as const;
+
+/** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
+export type TemplateKey = (typeof TEMPLATE_KEYS)[keyof typeof TEMPLATE_KEYS];
 
 export interface TemplateSeed {
   key: string;
@@ -166,6 +170,15 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Tu viaje no pudo completarse',
     body: 'Tu viaje no pudo completarse. No se te cobro.',
+  },
+  {
+    key: TEMPLATE_KEYS.TRIP_CHILD_CODE_FAILED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Alerta de seguridad',
+    body:
+      'Alguien intento iniciar el viaje de tu hijo con un codigo incorrecto. ' +
+      'El viaje NO inicio. Revisa el viaje ahora.',
   },
   {
     key: TEMPLATE_KEYS.PAYMENT_FAILED,
