@@ -770,6 +770,9 @@ importers:
       '@types/node':
         specifier: ^20.16.10
         version: 20.19.41
+      '@veo/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
@@ -847,6 +850,9 @@ importers:
 
   packages/events:
     dependencies:
+      '@veo/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@veo/utils':
         specifier: workspace:*
         version: link:../utils
