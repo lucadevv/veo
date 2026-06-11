@@ -117,3 +117,8 @@ temp/
 
 # Fastlane / Ruby gems vendoreados (bundle install --path vendor) — deps, no se commitean
 apps/*/vendor/
+
+# Trazabilidad (grafo de hechos local — DB por máquina, no se versiona)
+.trazabilidad/
+# Logs del harness e2e
+e2e/.logs/
