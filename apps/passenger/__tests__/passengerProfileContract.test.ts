@@ -19,6 +19,8 @@ describe('Contrato passengerProfile (@veo/api-client)', () => {
       // Documento de identidad para Yape On File de UN TAP: nullable (puede no estar cargado aún).
       documentType: null,
       document: null,
+      // Método de pago por defecto (172b34f): el server SIEMPRE manda el campo; null si nunca lo eligió.
+      defaultPaymentMethod: null,
       deletionRequestedAt: null,
     };
     expect(passengerProfile.safeParse(appleUser).success).toBe(true);
@@ -35,6 +37,7 @@ describe('Contrato passengerProfile (@veo/api-client)', () => {
       photoUrl: null,
       documentType: null,
       document: null,
+      defaultPaymentMethod: null,
     };
     expect(passengerProfile.safeParse(phoneUser).success).toBe(true);
   });
@@ -50,6 +53,8 @@ describe('Contrato passengerProfile (@veo/api-client)', () => {
       photoUrl: null,
       documentType: 'DN',
       document: '12345678',
+      // Con preferencia elegida: debe aceptar cualquier valor del enum de métodos móviles.
+      defaultPaymentMethod: 'YAPE',
     };
     expect(passengerProfile.safeParse(withDoc).success).toBe(true);
   });
