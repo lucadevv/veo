@@ -3,7 +3,8 @@ import { OpsService } from './ops.service';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import type { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
-import { NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
+import { AdminRole } from '@veo/shared-types';
 import type { ReadModelService } from '../read-model/read-model.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -102,5 +103,36 @@ describe('OpsService.approveDriver', () => {
     const out = await svc.approveDriver(identity, 'd1');
     expect(out.backgroundCheckStatus).toBe('CLEARED');
     expect(audit.record).toHaveBeenCalledOnce();
+  });
+});
+
+describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
+  it('ADMIN → [SUPERADMIN]: ForbiddenError 403 que CORTA antes de identityRest.post', async () => {
+    const post = vi.fn();
+    const record = vi.fn();
+    const rest = { post } as unknown as InternalRestClient;
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), rest, noopReadModel, audit, config);
+
+    const err = await svc
+      .approveOperator(identity, 'op2', [AdminRole.SUPERADMIN])
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(post).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN → [SUPPORT_L2]: pasa, llama al REST y audita', async () => {
+    const post = vi.fn().mockResolvedValue({ id: 'op2', status: 'ACTIVE', roles: ['SUPPORT_L2'] });
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const rest = { post } as unknown as InternalRestClient;
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), rest, noopReadModel, audit, config);
+
+    const out = await svc.approveOperator(identity, 'op2', [AdminRole.SUPPORT_L2]);
+    expect(out.status).toBe('ACTIVE');
+    expect(post).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledOnce();
   });
 });

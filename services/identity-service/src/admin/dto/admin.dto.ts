@@ -1,4 +1,5 @@
-import { IsArray, IsEmail, IsOptional, IsString, Length, MinLength } from 'class-validator';
+import { IsArray, IsEmail, IsIn, IsOptional, IsString, Length, MinLength } from 'class-validator';
+import { AdminRole } from '@veo/shared-types';
 
 export class AdminRegisterDto {
   @IsEmail()
@@ -36,8 +37,8 @@ export class AdminEnrollConfirmDto {
 
 export class ApproveAdminDto {
   @IsArray()
-  @IsString({ each: true })
-  roles!: string[];
+  @IsIn(Object.values(AdminRole), { each: true })
+  roles!: AdminRole[];
 }
 
 export class StepUpDto {

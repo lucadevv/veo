@@ -119,6 +119,42 @@ export const AdminRole = {
 } as const;
 export type AdminRole = (typeof AdminRole)[keyof typeof AdminRole];
 
+/**
+ * Rango jerárquico de roles admin. Mayor número = más autoridad.
+ * Regla: nadie otorga un rol de rango >= al suyo (excepción: SUPERADMIN sí otorga SUPERADMIN).
+ * El `Record<AdminRole, number>` es EXHAUSTIVO: agregar un rol al enum sin rango rompe el typecheck (intencional).
+ */
+export const ADMIN_ROLE_RANK: Record<AdminRole, number> = {
+  [AdminRole.SUPPORT_L1]: 10,
+  [AdminRole.SUPPORT_L2]: 20,
+  [AdminRole.DISPATCHER]: 30,
+  [AdminRole.FINANCE]: 30,
+  [AdminRole.COMPLIANCE_SUPERVISOR]: 40,
+  [AdminRole.ADMIN]: 90,
+  [AdminRole.SUPERADMIN]: 100,
+};
+
+/** Rango del rol más alto del actor (0 si no tiene roles con rango). */
+export function maxRoleRank(roles: readonly AdminRole[]): number {
+  return roles.reduce((m, r) => Math.max(m, ADMIN_ROLE_RANK[r] ?? 0), 0);
+}
+
+/**
+ * ¿Puede `actorRoles` otorgar TODOS los `targetRoles`?
+ * Regla ESTRICTA (`<`): solo roles de rango estrictamente menor al del actor.
+ * Excepción: un SUPERADMIN sí puede otorgar SUPERADMIN (igual rango).
+ */
+export function canGrantRoles(
+  actorRoles: readonly AdminRole[],
+  targetRoles: readonly AdminRole[],
+): boolean {
+  const actorRank = maxRoleRank(actorRoles);
+  const isSuperadmin = actorRank >= ADMIN_ROLE_RANK[AdminRole.SUPERADMIN];
+  return targetRoles.every(
+    (r) => ADMIN_ROLE_RANK[r] < actorRank || (isSuperadmin && r === AdminRole.SUPERADMIN),
+  );
+}
+
 export const NotificationChannel = {
   PUSH: 'PUSH',
   SMS: 'SMS',

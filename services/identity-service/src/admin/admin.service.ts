@@ -6,7 +6,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import argon2 from 'argon2';
 import { JwtService, RedisRefreshTokenStore, enrollTotp, verifyTotp } from '@veo/auth';
-import { AdminRole as AdminRoles, type AdminRole } from '@veo/shared-types';
+import { AdminRole as AdminRoles, canGrantRoles, type AdminRole } from '@veo/shared-types';
 import {
   ConflictError,
   ForbiddenError,
@@ -53,9 +53,22 @@ export class AdminService {
   }
 
   /** Un ADMIN/SUPERADMIN aprueba y asigna roles → ACTIVE. */
-  async approve(adminId: string, roles: string[]): Promise<{ id: string; status: string; roles: string[] }> {
+  async approve(
+    actorRoles: AdminRole[],
+    adminId: string,
+    roles: string[],
+  ): Promise<{ id: string; status: string; roles: string[] }> {
     for (const r of roles) {
       if (!VALID_ROLES.has(r as AdminRole)) throw new ValidationError(`Rol inválido: ${r}`);
+    }
+    // Anti-escalada (autoridad final): el actor solo otorga roles de rango ESTRICTAMENTE menor al
+    // suyo (excepción: SUPERADMIN→SUPERADMIN). Corre tras validar el enum y ANTES de tocar la DB.
+    // Mensaje honesto sin filtrar rango interno; el detalle estructurado va al log/audit.
+    if (!canGrantRoles(actorRoles, roles as AdminRole[])) {
+      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+        actorRoles,
+        requested: roles,
+      });
     }
     const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
     if (!admin) throw new NotFoundError('Operador no encontrado');

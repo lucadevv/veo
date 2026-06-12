@@ -67,10 +67,11 @@ export class AdminController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Aprobar operador y asignar roles' })
   approve(
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: ApproveAdminDto,
   ): Promise<{ id: string; status: string; roles: string[] }> {
-    return this.admin.approve(id, dto.roles);
+    return this.admin.approve(user.roles, id, dto.roles);
   }
 
   @ApiBearerAuth()

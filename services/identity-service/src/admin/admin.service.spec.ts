@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
+import { AdminRole } from '@veo/shared-types';
 import { AdminService } from './admin.service';
 import { InvalidStatusTransition } from '../domain/state-machine';
 import type { Env } from '../config/env.schema';
@@ -66,5 +67,59 @@ describe('AdminService.reject · decisión validada por la máquina dentro de la
     const { prisma, writes } = makeRejectPrisma({ id: 'a1', status: 'PENDING' }, null);
     await expect(makeService(prisma).reject('a1')).rejects.toBeInstanceOf(NotFoundError);
     expect(writes).toHaveLength(0);
+  });
+});
+
+/**
+ * Prisma doble para approve: read.findUnique (réplica) + write.update.
+ * Los spies permiten afirmar que la escalada CORTA antes de tocar la DB.
+ */
+function makeApprovePrisma(replicaAdmin: unknown) {
+  const findUnique = vi.fn(async () => replicaAdmin);
+  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'a1', ...data }));
+  return {
+    findUnique,
+    update,
+    prisma: {
+      read: { adminUser: { findUnique } },
+      write: { adminUser: { update } },
+    },
+  };
+}
+
+describe('AdminService.approve · anti-escalada de privilegios (jerarquía estricta)', () => {
+  it('ADMIN → [SUPERADMIN]: ForbiddenError 403 SIN tocar la DB', async () => {
+    const { prisma, findUnique, update } = makeApprovePrisma({ id: 'a1', status: 'PENDING' });
+    const err = await makeService(prisma)
+      .approve([AdminRole.ADMIN], 'a1', [AdminRole.SUPERADMIN])
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect((err as ForbiddenError).httpStatus).toBe(403);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN → [SUPPORT_L2]: OK, transiciona a ACTIVE con los roles', async () => {
+    const { prisma, update } = makeApprovePrisma({ id: 'a1', status: 'PENDING' });
+    const res = await makeService(prisma).approve([AdminRole.ADMIN], 'a1', [AdminRole.SUPPORT_L2]);
+    expect(res.status).toBe('ACTIVE');
+    expect(res.roles).toEqual([AdminRole.SUPPORT_L2]);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('SUPERADMIN → [SUPERADMIN]: OK (excepción explícita)', async () => {
+    const { prisma } = makeApprovePrisma({ id: 'a1', status: 'PENDING' });
+    const res = await makeService(prisma).approve([AdminRole.SUPERADMIN], 'a1', [AdminRole.SUPERADMIN]);
+    expect(res.status).toBe('ACTIVE');
+    expect(res.roles).toEqual([AdminRole.SUPERADMIN]);
+  });
+
+  it('rol fuera del enum → ValidationError ANTES del check de jerarquía y sin tocar DB', async () => {
+    const { prisma, findUnique, update } = makeApprovePrisma({ id: 'a1', status: 'PENDING' });
+    await expect(
+      makeService(prisma).approve([AdminRole.SUPERADMIN], 'a1', ['NO_EXISTE']),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });

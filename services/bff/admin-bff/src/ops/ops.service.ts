@@ -11,8 +11,9 @@ import {
   type UserReply,
   type DriverReply,
 } from '@veo/rpc';
-import { NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
+import { canGrantRoles, type AdminRole } from '@veo/shared-types';
 import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api-client';
 import {
   GRPC_TRIP,
@@ -156,8 +157,16 @@ export class OpsService {
   async approveOperator(
     identity: AuthUser,
     operatorId: string,
-    roles: string[],
+    roles: AdminRole[],
   ): Promise<{ id: string; status: string; roles: string[] }> {
+    // Anti-escalada: el actor solo otorga roles de rango ESTRICTAMENTE menor al suyo
+    // (excepción: SUPERADMIN→SUPERADMIN). El detalle estructurado va al log/audit, no al body.
+    if (!canGrantRoles(identity.roles, roles)) {
+      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+        actorRoles: identity.roles,
+        requested: roles,
+      });
+    }
     const res = await this.identityRest.post<{ id: string; status: string; roles: string[] }>(
       `/admin/operators/${operatorId}/approve`,
       { identity, body: { roles } },
