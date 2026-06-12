@@ -63,6 +63,9 @@ model DispatchMatch {
   @@index([tripId])
   @@index([driverId])
   @@index([tripId, outcome])
+  /// Hot-path del reconciler (sweepExpiredOffers, @Interval ~0.5Hz): filtra outcome=OFFERED (igualdad)
+  /// + offeredAt < cutoff (rango) y ordena por offeredAt. outcome primero (igualdad), offeredAt segundo (rango+orden).
+  @@index([outcome, offeredAt])
   @@map("dispatch_matches")
   @@schema("dispatch")
 }

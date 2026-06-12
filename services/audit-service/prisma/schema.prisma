@@ -22,7 +22,9 @@ model AuditLog {
   /// PK UUIDv7 (ordenable por tiempo). Generada en la app con @veo/utils.
   id          String   @id @db.Uuid
   /// Orden monotónico de la cadena (fuente de verdad del orden, no depende de relojes).
-  seq         BigInt   @default(autoincrement())
+  /// @unique: seq es estrictamente único por autoincrement (invariante del dominio) y el índice
+  /// sirve el hot-path `orderBy seq desc` del append (bajo advisory lock global) + filtros/rangos por seq.
+  seq         BigInt   @unique @default(autoincrement())
   /// Id del evento de origen (envelope.eventId si proviene de Kafka, o UUIDv7 nuevo si es síncrono).
   /// Único → idempotencia: reprocesar el mismo evento no duplica la entrada.
   eventId     String   @unique @map("event_id")
