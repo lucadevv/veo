@@ -54,6 +54,16 @@ export class EventsConsumer extends KafkaConsumerBootstrap {
     return {
       'trip.started': (env) => this.handleTripStarted(env),
       'panic.triggered': (env) => this.handlePanic(env),
+      // Dominó del cierre de pánico (auditoría R3): el operador cerró la alerta. DESENMASCARA la vista
+      // familiar SOLO si FALSE_ALARM (restaura el snapshot fuera de PANIC); si RESOLVED (emergencia real)
+      // MANTIENE la máscara. La ramificación por status vive en TripSnapshotService.onPanicResolved.
+      'panic.resolved': (env) => this.handlePanicResolved(env),
+      // Auto-revoke del kill-switch (auditoría R3): al terminar el viaje (cualquier estado TERMINAL) los
+      // enlaces de seguimiento dejan de exponer la ubicación. Idempotente (revocar un revocado = no-op),
+      // así una redelivery at-least-once no rompe nada. Un mismo viaje puede emitir solo UNO de estos.
+      'trip.completed': (env) => this.handleTripTerminated(env),
+      'trip.cancelled': (env) => this.handleTripTerminated(env),
+      'trip.failed': (env) => this.handleTripTerminated(env),
     };
   }
 
@@ -64,6 +74,32 @@ export class EventsConsumer extends KafkaConsumerBootstrap {
   private async handleTripStarted(envelope: EventEnvelope<unknown>): Promise<void> {
     const p = envelope.payload as EventPayload<'trip.started'>;
     await this.snapshots.onTripStarted(p.tripId, p.driverId, new Date(p.startedAt), p.passengerId);
+  }
+
+  /**
+   * Fin del viaje (TERMINAL: completed/cancelled/failed) → auto-revoca los enlaces de seguimiento del
+   * viaje (kill-switch automático, auditoría R3): la ubicación en vivo deja de exponerse al instante.
+   * Los tres payloads comparten `tripId` (lo único que necesitamos). Idempotente: `revokeAllForTrip`
+   * solo toca enlaces vivos, así una redelivery at-least-once o un viaje sin enlaces es un no-op.
+   */
+  private async handleTripTerminated(envelope: EventEnvelope<unknown>): Promise<void> {
+    const p = envelope.payload as { tripId: string };
+    const { revoked } = await this.share.revokeAllForTrip(p.tripId);
+    if (revoked > 0) {
+      this.logger.log(`Viaje ${p.tripId} terminado: ${revoked} enlace(s) de seguimiento revocado(s)`);
+    }
+  }
+
+  /**
+   * panic.resolved → DESENMASCARADO CONDICIONAL de la vista familiar (decisión del dueño, conservadora).
+   * El operador cerró la alerta: si `FALSE_ALARM` el snapshot se restaura fuera de PANIC (la familia
+   * vuelve a ver el viaje en vivo); si `RESOLVED` (emergencia real atendida) la máscara se MANTIENE —el
+   * enlace pudo ser capturado por el agresor—. La ramificación por el enum TIPADO vive en
+   * `onPanicResolved` (esta capa solo desestructura el payload enriquecido: tripId + status del enum).
+   */
+  private async handlePanicResolved(envelope: EventEnvelope<unknown>): Promise<void> {
+    const p = envelope.payload as EventPayload<'panic.resolved'>;
+    await this.snapshots.onPanicResolved(p.tripId, p.status);
   }
 
   private async handlePanic(envelope: EventEnvelope<unknown>): Promise<void> {

@@ -28,7 +28,7 @@
  */
 import { z } from 'zod';
 import { EVENT_SCHEMAS, type EventEnvelope, type EventPayload, type EventType } from '@veo/events';
-import { NotificationChannel } from '@veo/shared-types';
+import { NotificationChannel, PanicStatus } from '@veo/shared-types';
 import { NotificationPriority, type EnqueueInput } from '../engine/types';
 import { TEMPLATE_KEYS, type TemplateKey } from '../engine/template.catalog';
 import type { DeviceTarget } from '../devices/device-token.repository';
@@ -385,6 +385,39 @@ export const PUSH_NOTIFICATION_SPECS = {
       preview: p.body.length > CHAT_PREVIEW_MAX ? `${p.body.slice(0, CHAT_PREVIEW_SLICE)}...` : p.body,
     }),
     data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.Chat }),
+  }),
+
+  /**
+   * SEGURIDAD · panic.acknowledged → push al PASAJERO: "la central vio tu alerta y está respondiendo".
+   * Feedback tranquilizador en VIVO. Va SIEMPRE (no depende del desenmascarado familiar). passengerId
+   * ENRIQUECIDO por panic-service desde la fila PanicEvent (siempre presente, no compat N-2). Priority
+   * Critical: seguridad drena antes que cualquier transaccional. dedup `panic:{panicId}:ack`.
+   * Deep-link al viaje activo (la víctima sigue viendo su viaje con normalidad para no delatar el pánico).
+   */
+  'panic.acknowledged': defineSpec('panic.acknowledged', {
+    recipient: (p) => p.passengerId,
+    template: TEMPLATE_KEYS.PANIC_ACKNOWLEDGED,
+    priority: NotificationPriority.Critical,
+    dedup: (p) => `panic:${p.panicId}:ack`,
+    data: (p) => ({ tripId: p.tripId, panicId: p.panicId, screen: PUSH_SCREEN.TripActive }),
+  }),
+
+  /**
+   * SEGURIDAD · panic.resolved → push al PASAJERO: "tu alerta fue cerrada". Va SIEMPRE en AMBOS status
+   * (el pasajero recibe feedback del cierre tanto si fue RESOLVED como FALSE_ALARM — NO depende del
+   * desenmascarado familiar). El COPY varía por status (template dinámico, ramificado por el enum
+   * TIPADO `PanicStatus`, cero strings mágicos): FALSE_ALARM tiene tono distinto al cierre de emergencia.
+   * passengerId ENRIQUECIDO por panic-service. Priority Critical. dedup `panic:{panicId}:resolved`.
+   */
+  'panic.resolved': defineSpec('panic.resolved', {
+    recipient: (p) => p.passengerId,
+    template: (p) =>
+      p.status === PanicStatus.FALSE_ALARM
+        ? TEMPLATE_KEYS.PANIC_RESOLVED_FALSE_ALARM
+        : TEMPLATE_KEYS.PANIC_RESOLVED,
+    priority: NotificationPriority.Critical,
+    dedup: (p) => `panic:${p.panicId}:resolved`,
+    data: (p) => ({ tripId: p.tripId, panicId: p.panicId, screen: PUSH_SCREEN.TripActive }),
   }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 

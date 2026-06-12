@@ -15,6 +15,7 @@ import {
   dispatchOfferMade,
   dispatchOfferWithdrawn,
   driverLocationUpdated,
+  panicResolved,
   panicTriggered,
   tripAccepted,
   tripArrived,
@@ -36,6 +37,7 @@ import {
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import { createLogger, type Logger } from '@veo/observability';
+import { PanicStatus } from '@veo/shared-types';
 import { WaypointProposalStatus, type ChatMessage, type TripStatus } from '@veo/api-client';
 import { FamilyGateway } from './family.gateway';
 import { PassengerGateway } from './passenger.gateway';
@@ -102,6 +104,9 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
       'dispatch.offer_withdrawn': (env) => this.onOfferWithdrawn(env),
       'driver.location_updated': (env) => this.onDriverLocation(env),
       'panic.triggered': (env) => this.onPanic(env),
+      // Dominó del cierre de pánico: RESTAURA el feed en vivo a /family SOLO si FALSE_ALARM; si RESOLVED
+      // (emergencia real) NO restaura (la máscara se mantiene — el enlace pudo ser capturado).
+      'panic.resolved': (env) => this.onPanicResolved(env),
       'chat.message_sent': (env) => this.onChatMessage(env),
       // Lote C4 · desenlace de una PARADA propuesta → outcome en vivo al PASAJERO (cierra el "esperando").
       'trip.waypoint_accepted': (env) =>
@@ -339,6 +344,27 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
     if (parsed.success) {
       this.gateway.cutFamilyForPanic(parsed.data.tripId);
       this.log.warn({ tripId: parsed.data.tripId }, 'pánico: canal /family cortado (seguimiento en vivo suprimido)');
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * SEGURIDAD-CRÍTICA · cierre de pánico (VEO_SPEC_FAMILIA, fail-safe = ocultar).
+   *
+   * El operador cerró la alerta (`panic.resolved`, no forjable: detrás de RolesGuard + PANIC_OPERATORS).
+   * DESENMASCARADO CONDICIONAL (decisión del dueño, conservadora) ramificado por el enum TIPADO:
+   *  - `FALSE_ALARM`: levanta la marca de pánico (`clearPanic`) → el fan-out en vivo a /family vuelve a
+   *    fluir. La familia recupera el seguimiento en su próxima reconexión/poll.
+   *  - `RESOLVED` (emergencia REAL atendida): NO restaura. La máscara se MANTIENE porque el enlace pudo
+   *    ser capturado por el agresor; restaurar la ubicación en vivo lo expondría. NO-OP deliberado.
+   *
+   * El payload trae el `tripId` enriquecido (panic-service lo añade desde la fila PanicEvent).
+   */
+  private onPanicResolved(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = panicResolved.safeParse(env.payload);
+    if (parsed.success && parsed.data.status === PanicStatus.FALSE_ALARM) {
+      this.state.clearPanic(parsed.data.tripId);
+      this.log.warn({ tripId: parsed.data.tripId }, 'pánico cerrado (falsa alarma): canal /family restaurado');
     }
     return Promise.resolve();
   }

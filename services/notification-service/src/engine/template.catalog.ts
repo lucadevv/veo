@@ -7,6 +7,9 @@ import { NotificationChannel } from '@veo/shared-types';
 export const TEMPLATE_KEYS = {
   PANIC_CONTACT_ALERT: 'panic.contact_alert',
   PANIC_CENTRAL_ALERT: 'panic.central_alert',
+  PANIC_ACKNOWLEDGED: 'panic.acknowledged',
+  PANIC_RESOLVED: 'panic.resolved',
+  PANIC_RESOLVED_FALSE_ALARM: 'panic.resolved_false_alarm',
   TRIP_ASSIGNED: 'trip.assigned',
   TRIP_ACCEPTED: 'trip.accepted',
   TRIP_STARTED: 'trip.started',
@@ -79,6 +82,31 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: null,
     body: 'PANICO panic={{panicId}} viaje={{tripId}} pasajero={{passengerId}}',
+  },
+  {
+    // Push al PASAJERO cuando la central RECONOCE su alerta. Feedback tranquilizador SIN PII (el cuerpo
+    // se resuelve en cliente; el push lleva solo IDs/deep-link, §0.7).
+    key: TEMPLATE_KEYS.PANIC_ACKNOWLEDGED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'La central vio tu alerta',
+    body: 'La central de seguridad VEO vio tu alerta y esta respondiendo. Mantente seguro.',
+  },
+  {
+    // Push al PASAJERO cuando la central CIERRA la alerta como emergencia atendida (RESOLVED).
+    key: TEMPLATE_KEYS.PANIC_RESOLVED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tu alerta fue cerrada',
+    body: 'La central de seguridad VEO cerro tu alerta. Si necesitas ayuda otra vez, vuelve a activarla.',
+  },
+  {
+    // Variante de copy cuando el cierre fue FALSA ALARMA: tono distinto (sin "emergencia").
+    key: TEMPLATE_KEYS.PANIC_RESOLVED_FALSE_ALARM,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tu alerta fue cerrada',
+    body: 'Tu alerta se cerro como falsa alarma. Tu viaje continua normal. Gracias por cuidarte.',
   },
   {
     key: TEMPLATE_KEYS.TRIP_ASSIGNED,

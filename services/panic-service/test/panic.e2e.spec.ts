@@ -126,9 +126,10 @@ describe('panic-service E2E · idempotencia BR-S04 (Postgres real)', () => {
 });
 
 describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
-  it('ack reconoce la alerta y publica panic.acknowledged; no se puede reconocer dos veces', async () => {
+  it('ack reconoce la alerta y publica panic.acknowledged ENRIQUECIDO (tripId+passengerId); no dos veces', async () => {
     const operatorId = uuidv7();
-    const created = await svc.trigger(makeSignedInput());
+    const input = makeSignedInput();
+    const created = await svc.trigger(input);
 
     const acked = await svc.acknowledge(created.panicId, operatorId);
     expect(acked.status).toBe('ACKNOWLEDGED');
@@ -139,6 +140,14 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
       where: { aggregateId: created.panicId, eventType: 'panic.acknowledged' },
     });
     expect(events).toHaveLength(1);
+    // ENRIQUECIDO: tripId + passengerId viajan en el payload (notification pushea al pasajero sin join).
+    const payload = (events[0]!.envelope as { payload: Record<string, unknown> }).payload;
+    expect(payload).toMatchObject({
+      panicId: created.panicId,
+      tripId: input.tripId,
+      passengerId: input.passengerId,
+      operatorId,
+    });
 
     await expect(svc.acknowledge(created.panicId, operatorId)).rejects.toThrow();
   });
@@ -167,21 +176,29 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
     expect(events).toHaveLength(1);
   });
 
-  it('resolve cierra la alerta (FALSE_ALARM), publica panic.resolved y no se puede cerrar dos veces', async () => {
+  it('resolve cierra la alerta (FALSE_ALARM), publica panic.resolved ENRIQUECIDO y no se cierra dos veces', async () => {
     const operatorId = uuidv7();
-    const created = await svc.trigger(makeSignedInput());
+    const input = makeSignedInput();
+    const created = await svc.trigger(input);
 
     const resolved = await svc.resolve(created.panicId, 'FALSE_ALARM', operatorId);
     expect(resolved.status).toBe('FALSE_ALARM');
     expect(resolved.resolvedAt).toBeInstanceOf(Date);
 
-    // Dominó: el cierre publica panic.resolved (admin-bff actualiza el dashboard; audit lo registra).
+    // Dominó: el cierre publica panic.resolved (share desenmascara si FALSE_ALARM; notification pushea).
     const events = await client.outboxEvent.findMany({
       where: { aggregateId: created.panicId, eventType: 'panic.resolved' },
     });
     expect(events).toHaveLength(1);
     const payload = (events[0]!.envelope as { payload: Record<string, unknown> }).payload;
-    expect(payload).toMatchObject({ panicId: created.panicId, status: 'FALSE_ALARM', resolvedBy: operatorId });
+    // ENRIQUECIDO: tripId (share mapea para desenmascarar) + passengerId (notification pushea al pasajero).
+    expect(payload).toMatchObject({
+      panicId: created.panicId,
+      tripId: input.tripId,
+      passengerId: input.passengerId,
+      status: 'FALSE_ALARM',
+      resolvedBy: operatorId,
+    });
 
     // Idempotencia/guard: un segundo cierre lanza y NO publica un segundo evento.
     await expect(svc.resolve(created.panicId, 'RESOLVED', operatorId)).rejects.toThrow();

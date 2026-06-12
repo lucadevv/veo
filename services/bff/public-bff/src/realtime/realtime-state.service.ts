@@ -105,6 +105,18 @@ export class RealtimeStateService {
     return this.panickedTrips.has(tripId);
   }
 
+  /**
+   * SEGURIDAD-CRÍTICA · pánico oculto. LEVANTA la marca de pánico de un viaje: a partir de aquí el
+   * fan-out en vivo a /family vuelve a fluir. Simétrico a `markPanic`, idempotente (borrar de un Set).
+   *
+   * Solo lo debe invocar el dominó de `panic.resolved` con status FALSE_ALARM (desenmascarado
+   * conservador): un cierre RESOLVED (emergencia real) NO debe llamarlo —la máscara se mantiene porque
+   * el enlace pudo ser capturado por el agresor—. La ramificación por status vive en el consumer.
+   */
+  clearPanic(tripId: string): void {
+    this.panickedTrips.delete(tripId);
+  }
+
   setEta(tripId: string, etaSeconds: number | null): void {
     this.lastEta.set(tripId, etaSeconds);
   }

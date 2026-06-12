@@ -31,7 +31,10 @@ interface ContactRow {
 }
 
 function build(verified: ContactRow[]) {
-  const snapshots = { onPanic: vi.fn(async () => undefined) } as unknown as TripSnapshotService;
+  const snapshots = {
+    onPanic: vi.fn(async () => undefined),
+    onPanicResolved: vi.fn(async () => undefined),
+  } as unknown as TripSnapshotService;
   const contacts = {
     listVerified: vi.fn(async () => verified),
   } as unknown as ContactsService;
@@ -42,10 +45,11 @@ function build(verified: ContactRow[]) {
       emitted: true,
     }),
   );
-  const share = { createPanicFanout } as unknown as ShareService;
+  const revokeAllForTrip: ReturnType<typeof vi.fn> = vi.fn(async (_tripId: string) => ({ revoked: 1 }));
+  const share = { createPanicFanout, revokeAllForTrip } as unknown as ShareService;
 
   const consumer = new EventsConsumer(share, contacts, snapshots, config);
-  return { consumer, snapshots, contacts, share, createPanicFanout };
+  return { consumer, snapshots, contacts, share, createPanicFanout, revokeAllForTrip };
 }
 
 function panicEnvelope() {
@@ -63,10 +67,26 @@ function panicEnvelope() {
   });
 }
 
-/** Accede al handler de panic.triggered (privado) tipándolo via index sin usar any. */
-function panicHandler(consumer: EventsConsumer) {
+/** Accede a un handler (privado) por tipo de evento tipándolo via index sin usar any. */
+function handlerFor(consumer: EventsConsumer, eventType: string) {
   const handlers = (consumer as unknown as { handlers(): Record<string, (e: unknown) => Promise<void>> }).handlers();
-  return handlers['panic.triggered']!;
+  return handlers[eventType]!;
+}
+
+/** Atajo legacy para el handler de pánico (mantiene las pruebas de pánico legibles). */
+function panicHandler(consumer: EventsConsumer) {
+  return handlerFor(consumer, 'panic.triggered');
+}
+
+function terminalEnvelope(eventType: 'trip.completed' | 'trip.cancelled' | 'trip.failed') {
+  const base = { tripId: 'trip-1' };
+  const payload =
+    eventType === 'trip.completed'
+      ? { ...base, fareCents: 1500, distanceMeters: 4200, durationSeconds: 900 }
+      : eventType === 'trip.cancelled'
+        ? { ...base, by: 'PASSENGER' as const, penaltyCents: 0 }
+        : { ...base, passengerId: 'pax-1', fromStatus: 'IN_PROGRESS', staleMinutes: 30, at: new Date().toISOString() };
+  return createEnvelope({ eventType, producer: 'trip-service', payload });
 }
 
 describe('EventsConsumer.handlePanic · delega el fan-out (no SMS inline)', () => {
@@ -107,5 +127,56 @@ describe('EventsConsumer.handlePanic · delega el fan-out (no SMS inline)', () =
     const { consumer, share } = build([{ id: 'c1', phone: '+51911111111', name: 'Ana' }]);
     (share.createPanicFanout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db caída'));
     await expect(panicHandler(consumer)(panicEnvelope())).rejects.toThrow('db caída');
+  });
+});
+
+function resolvedEnvelope(status: 'RESOLVED' | 'FALSE_ALARM') {
+  return createEnvelope({
+    eventType: 'panic.resolved',
+    producer: 'panic-service',
+    payload: {
+      panicId: 'pn-1',
+      tripId: 'trip-1',
+      passengerId: 'pax-1',
+      status,
+      resolvedBy: 'op-1',
+      at: new Date().toISOString(),
+    },
+  });
+}
+
+describe('EventsConsumer.handlePanicResolved · desenmascarado condicional (seguridad física)', () => {
+  it('FALSE_ALARM → delega a onPanicResolved(tripId, FALSE_ALARM)', async () => {
+    const { consumer, snapshots } = build([]);
+    await handlerFor(consumer, 'panic.resolved')(resolvedEnvelope('FALSE_ALARM'));
+    expect(snapshots.onPanicResolved).toHaveBeenCalledOnce();
+    expect(snapshots.onPanicResolved).toHaveBeenCalledWith('trip-1', 'FALSE_ALARM');
+  });
+
+  it('ADVERSARIAL · RESOLVED → delega a onPanicResolved(tripId, RESOLVED) (la rama lo MANTIENE enmascarado)', async () => {
+    const { consumer, snapshots } = build([]);
+    await handlerFor(consumer, 'panic.resolved')(resolvedEnvelope('RESOLVED'));
+    // El consumer propaga el status TIPADO tal cual; onPanicResolved es quien NO desenmascara en RESOLVED.
+    expect(snapshots.onPanicResolved).toHaveBeenCalledWith('trip-1', 'RESOLVED');
+  });
+});
+
+describe('EventsConsumer · auto-revoke al terminar el viaje (kill-switch R3)', () => {
+  it.each(['trip.completed', 'trip.cancelled', 'trip.failed'] as const)(
+    '%s → revoca todos los enlaces del viaje por tripId',
+    async (eventType) => {
+      const { consumer, revokeAllForTrip } = build([]);
+      await handlerFor(consumer, eventType)(terminalEnvelope(eventType));
+      expect(revokeAllForTrip).toHaveBeenCalledOnce();
+      expect(revokeAllForTrip).toHaveBeenCalledWith('trip-1');
+    },
+  );
+
+  it('idempotente: sin enlaces vivos (revoked=0) no rompe', async () => {
+    const { consumer, revokeAllForTrip } = build([]);
+    (revokeAllForTrip as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ revoked: 0 });
+    await expect(
+      handlerFor(consumer, 'trip.completed')(terminalEnvelope('trip.completed')),
+    ).resolves.toBeUndefined();
   });
 });

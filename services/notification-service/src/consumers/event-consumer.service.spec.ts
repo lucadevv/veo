@@ -985,3 +985,87 @@ describe('EventConsumerService · panic.fanout_requested (fan-out durable, anti-
     expect(store.records.size).toBe(0);
   });
 });
+
+/**
+ * Dominó del cierre de pánico → push al PASAJERO (SIEMPRE, en ambos status). Filas del registro
+ * declarativo (un evento → un push al passengerId enriquecido). El pasajero recibe feedback tanto en el
+ * ack ("la central vio tu alerta") como en el cierre ("tu alerta fue cerrada", copy según FALSE_ALARM).
+ */
+function ackEnvelope(passengerId: string): EventEnvelope<unknown> {
+  return env('panic.acknowledged', {
+    panicId: 'pn-1',
+    tripId: 'trip-PA',
+    passengerId,
+    operatorId: 'op-1',
+    ackAt: new Date().toISOString(),
+  });
+}
+
+function panicResolvedEnvelope(passengerId: string, status: 'RESOLVED' | 'FALSE_ALARM'): EventEnvelope<unknown> {
+  return env('panic.resolved', {
+    panicId: 'pn-1',
+    tripId: 'trip-PR',
+    passengerId,
+    status,
+    resolvedBy: 'op-1',
+    at: new Date().toISOString(),
+  });
+}
+
+describe('EventConsumerService · panic.acknowledged → "la central vio tu alerta" (push al pasajero)', () => {
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a panic.acknowledged (fila del registro)', async () => {
+    await buildAndInit({});
+    expect(registered.has('panic.acknowledged')).toBe(true);
+  });
+
+  it('payload válido → push PANIC_ACKNOWLEDGED al pasajero, priority Critical', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-A', platform: 'ios' }] });
+    await registered.get('panic.acknowledged')!(ackEnvelope(PAX));
+    const rec = [...store.records.values()][0]!;
+    expect(rec.template).toBe(TEMPLATE_KEYS.PANIC_ACKNOWLEDGED);
+    expect(rec.priority).toBe(NotificationPriority.Critical);
+    expect(rec.payload.data).toMatchObject({ tripId: 'trip-PA', panicId: 'pn-1', screen: 'TripActive' });
+  });
+
+  it('dedup idempotente: redelivery del MISMO ack no duplica (dedup panic:{id}:ack)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-A', platform: 'ios' }] });
+    await registered.get('panic.acknowledged')!(ackEnvelope(PAX));
+    await registered.get('panic.acknowledged')!(ackEnvelope(PAX));
+    expect(store.records.size).toBe(1);
+  });
+});
+
+describe('EventConsumerService · panic.resolved → "tu alerta fue cerrada" (push al pasajero, AMBOS status)', () => {
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a panic.resolved (fila del registro)', async () => {
+    await buildAndInit({});
+    expect(registered.has('panic.resolved')).toBe(true);
+  });
+
+  it('FALSE_ALARM → push con copy de falsa alarma (PANIC_RESOLVED_FALSE_ALARM)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-R', platform: 'android' }] });
+    await registered.get('panic.resolved')!(panicResolvedEnvelope(PAX, 'FALSE_ALARM'));
+    const rec = [...store.records.values()][0]!;
+    expect(rec.template).toBe(TEMPLATE_KEYS.PANIC_RESOLVED_FALSE_ALARM);
+    expect(rec.priority).toBe(NotificationPriority.Critical);
+  });
+
+  it('RESOLVED → push con copy de cierre de emergencia (PANIC_RESOLVED) — el pasajero SIEMPRE recibe feedback', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-R', platform: 'android' }] });
+    await registered.get('panic.resolved')!(panicResolvedEnvelope(PAX, 'RESOLVED'));
+    const rec = [...store.records.values()][0]!;
+    // Aunque la familia NO se desenmascare en RESOLVED, el PASAJERO sí recibe su push de cierre.
+    expect(rec.template).toBe(TEMPLATE_KEYS.PANIC_RESOLVED);
+  });
+
+  it('dedup idempotente: redelivery del cierre no duplica (dedup panic:{id}:resolved)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-R', platform: 'android' }] });
+    const e = panicResolvedEnvelope(PAX, 'FALSE_ALARM');
+    await registered.get('panic.resolved')!(e);
+    await registered.get('panic.resolved')!(e);
+    expect(store.records.size).toBe(1);
+  });
+});

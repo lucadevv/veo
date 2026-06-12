@@ -172,8 +172,12 @@ export class PanicService {
         );
       }
       const row = await tx.panicEvent.findUniqueOrThrow({ where: { id: panicId } });
+      // tripId + passengerId ENRIQUECIDOS desde la fila (downstream: notification pushea al pasajero
+      // "la central vio tu alerta"). Sin un join cross-servicio: panic-service ya es dueño de ambos.
       const payload: EventPayload<'panic.acknowledged'> = {
         panicId: row.id,
+        tripId: row.tripId,
+        passengerId: row.passengerId,
         operatorId,
         ackAt: ackAt.toISOString(),
       };
@@ -218,8 +222,12 @@ export class PanicService {
         });
       }
       const row = await tx.panicEvent.findUniqueOrThrow({ where: { id: panicId } });
+      // tripId + passengerId ENRIQUECIDOS desde la fila: share-service mapea por tripId para
+      // DESENMASCARAR la vista familiar SOLO si FALSE_ALARM; notification pushea al passengerId el cierre.
       const payload: EventPayload<'panic.resolved'> = {
         panicId: row.id,
+        tripId: row.tripId,
+        passengerId: row.passengerId,
         status: resolution,
         resolvedBy: operatorId,
         at: resolvedAt.toISOString(),

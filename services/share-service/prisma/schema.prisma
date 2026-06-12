@@ -78,6 +78,12 @@ model ShareView {
 model TripSnapshot {
   tripId         String    @id @map("trip_id") @db.Uuid
   status         String    @default("UNKNOWN")
+  /// SEGURIDAD-CRÍTICA · estado del viaje JUSTO ANTES de que `panic.triggered` pisara `status` con
+  /// "PANIC". Permite DESENMASCARAR la vista familiar restaurando el estado previo (p.ej. IN_PROGRESS)
+  /// SOLO cuando el operador cierra como FALSE_ALARM (`panic.resolved`). Si el cierre es RESOLVED
+  /// (emergencia real), NUNCA se restaura: la máscara se mantiene (el enlace pudo ser capturado por el
+  /// agresor). Nullable: sin pánico no aplica; se limpia al desenmascarar (additive, BR sin downtime).
+  prePanicStatus String?   @map("pre_panic_status")
   driverId       String?   @map("driver_id") @db.Uuid
   passengerId    String?   @map("passenger_id") @db.Uuid
   startedAt      DateTime? @map("started_at") @db.Timestamptz
