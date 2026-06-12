@@ -12,6 +12,7 @@ import { logout } from '@/lib/api/auth';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { ConnectionStatus } from '@/components/ops/connection-status';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +62,10 @@ export function Topbar() {
       </form>
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Estado de la conexión de tiempo real /ops — global: un admin en CUALQUIER página ve
+            si el monitor de pánico perdió conexión, no solo en /ops. */}
+        <ConnectionStatus />
+
         <Badge tone={user.mfaFresh ? 'success' : 'neutral'}>
           <ShieldCheck className="size-3.5" aria-hidden />
           {user.mfaFresh ? 'MFA fresco' : 'MFA inactivo'}

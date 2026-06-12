@@ -8,7 +8,6 @@ import { useOpsStore } from '@/lib/realtime/ops-store';
 import { money, relativeFromNow } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { KpiGrid } from '@/components/ops/kpi-grid';
-import { ConnectionStatus } from '@/components/ops/connection-status';
 import { OverviewChart } from '@/components/charts/overview-chart';
 import { TripStatusBadge, isActiveTrip } from '@/components/trips/status-badge';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
@@ -50,7 +49,6 @@ export default function OpsPage() {
       <PageHeader
         title="Operación en vivo"
         description="Conductores, viajes y alertas en tiempo real."
-        actions={<ConnectionStatus />}
       />
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[1fr_400px]">
