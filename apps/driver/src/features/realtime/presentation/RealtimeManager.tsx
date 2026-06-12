@@ -33,6 +33,7 @@ export const RealtimeManager = (): null => {
   const {foregroundService} = useDi();
   const setIncomingOffer = useDispatchStore(s => s.setIncomingOffer);
   const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
+  const setConnected = useDispatchStore(s => s.setConnected);
   const activeTripId = useDispatchStore(s => s.activeTripId);
   const receiveMessage = useChatStore(s => s.receiveMessage);
   const setTip = useTipStore(s => s.setTip);
@@ -145,6 +146,20 @@ export const RealtimeManager = (): null => {
       if (message.tripId === activeTripId) {
         setWaypointProposal(message);
       }
+    },
+    // Estado de la conexión `/driver`: alimenta el indicador de las pantallas (viaje activo / dispatch).
+    onConnectionChange: connected => {
+      setConnected(connected);
+    },
+    // RECUPERACIÓN tras RECONECTAR: el namespace `/driver` NO reemite el último snapshot (no hay
+    // `resync` server-side como en `/passenger`), así que recuperamos por REST lo que se perdió durante
+    // el corte (túnel, zona muerta). Invalidamos las queries de viaje (prefijo `['trip']` ⇒ cubre el
+    // detalle del activo Y la rehidratación `['trip','active']`), las PUJAS/dispatch en vuelo y el
+    // estado de turno. React Query refetchea solo las queries OBSERVADAS (montadas), sin pedir en vano.
+    onResync: () => {
+      queryClient.invalidateQueries({queryKey: TRIP_QUERY_PREFIX});
+      queryClient.invalidateQueries({queryKey: BIDS_QUERY_KEY});
+      queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
     },
   });
 

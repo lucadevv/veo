@@ -2,7 +2,15 @@ import {useDispatchStore} from '../dispatchStore';
 
 describe('dispatchStore', () => {
   beforeEach(() => {
-    useDispatchStore.setState({incomingOffer: null, activeTripId: null});
+    useDispatchStore.setState({incomingOffer: null, activeTripId: null, connected: false});
+  });
+
+  it('refleja el estado de conexión del socket /driver', () => {
+    expect(useDispatchStore.getState().connected).toBe(false);
+    useDispatchStore.getState().setConnected(true);
+    expect(useDispatchStore.getState().connected).toBe(true);
+    useDispatchStore.getState().setConnected(false);
+    expect(useDispatchStore.getState().connected).toBe(false);
   });
 
   it('registra y limpia la oferta entrante', () => {

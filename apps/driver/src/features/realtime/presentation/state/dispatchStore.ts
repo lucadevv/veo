@@ -17,8 +17,16 @@ export interface IncomingOffer {
 export interface DispatchState {
   incomingOffer: IncomingOffer | null;
   activeTripId: string | null;
+  /**
+   * ¿El socket `/driver` está conectado AHORA? Estado de sesión en vivo (lo fija `useDriverRealtime`
+   * en los handlers `connect`/`disconnect`). Las pantallas lo leen para mostrar el indicador de
+   * conexión: si está `false` (túnel, zona muerta), el conductor ve "Reconectando…" en vez de creer
+   * que recibe eventos en vivo cuando en realidad está aislado. Arranca `false` (aún sin conectar).
+   */
+  connected: boolean;
   setIncomingOffer(offer: IncomingOffer | null): void;
   setActiveTripId(tripId: string | null): void;
+  setConnected(connected: boolean): void;
   /** Limpia la oferta tras aceptarla/rechazarla o cuando vence. */
   clearOffer(): void;
 }
@@ -26,7 +34,9 @@ export interface DispatchState {
 export const useDispatchStore = create<DispatchState>(set => ({
   incomingOffer: null,
   activeTripId: null,
+  connected: false,
   setIncomingOffer: offer => set({incomingOffer: offer}),
   setActiveTripId: tripId => set({activeTripId: tripId}),
+  setConnected: connected => set({connected}),
   clearOffer: () => set({incomingOffer: null}),
 }));

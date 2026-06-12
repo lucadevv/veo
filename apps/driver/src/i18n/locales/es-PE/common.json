@@ -279,6 +279,10 @@
     "reject": "Rechazar",
     "activeTitle": "Viaje en curso",
     "confirmingAssignment": "Confirmando asignación…",
+    "connection": {
+      "live": "En vivo",
+      "reconnecting": "Reconectando…"
+    },
     "status": {
       "scheduled": "Reservado",
       "assigned": "Asignado",

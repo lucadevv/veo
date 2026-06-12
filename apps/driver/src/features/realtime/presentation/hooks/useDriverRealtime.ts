@@ -35,6 +35,22 @@ export interface DriverRealtimeHandlers {
    * envuelta en `DriverEventEnvelope`): el conductor la acepta/rechaza antes de `expiresAt`.
    */
   onWaypointProposed(message: WaypointProposedMsg): void;
+  /**
+   * Cambió el estado de la conexión del socket `/driver`: `true` al (re)conectar, `false` al caerse.
+   * La presentación lo refleja en un indicador (p. ej. "Reconectando…") para no fingir tiempo real
+   * cuando el conductor está aislado (túnel, zona muerta).
+   */
+  onConnectionChange(connected: boolean): void;
+  /**
+   * RE-SINCRONIZACIÓN tras RECONECTAR (NO en la conexión inicial). Mientras el socket estuvo caído
+   * (túnel, zona muerta) un `dispatch:match`/`trip:update` pudo perderse: el namespace `/driver` NO
+   * reemite el último snapshot (a diferencia de `/passenger`, que tiene un `resync` server-side en el
+   * contrato y el gateway). Como acá NO existe ese evento ni en `DriverClientToServer` ni en el
+   * `DriverGateway`, la recuperación es por REST: la presentación invalida las queries del viaje
+   * activo / pujas para refetchear el estado AUTORITATIVO del servidor. NO se dispara en la primera
+   * conexión porque al montar las queries ya cargan fresco (evita el doble fetch del caso feliz).
+   */
+  onResync(): void;
 }
 
 /**
@@ -121,12 +137,40 @@ export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHand
       handlersRef.current.onWaypointProposed(msg);
     });
 
+    // socket.io re-emite `connect` en CADA (re)conexión. Distinguimos la PRIMERA (al montar, las
+    // queries ya cargan fresco solas) de las posteriores (RECONEXIÓN tras un corte: ahí SÍ hay que
+    // recuperar lo perdido por REST). El flag es local al ciclo de vida del socket (se reinicia con él).
+    let hasConnectedOnce = false;
+    // `connect`/`disconnect` no llevan payload de dominio: se envuelven en su propio try/catch (en vez
+    // de `safe`, que exige un parámetro) para no tumbar la app si un handler de la presentación lanza.
+    const onConnect = () => {
+      try {
+        handlersRef.current.onConnectionChange(true);
+        if (hasConnectedOnce) {
+          // RECONEXIÓN: un `dispatch:match`/`trip:update` pudo perderse durante el corte → recuperar.
+          handlersRef.current.onResync();
+        }
+        hasConnectedOnce = true;
+      } catch {
+        // Degradar sin tumbar la app (mismo criterio que los listeners de dominio).
+      }
+    };
+    const onDisconnect = () => {
+      try {
+        handlersRef.current.onConnectionChange(false);
+      } catch {
+        // Degradar sin tumbar la app.
+      }
+    };
+
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
     s.on('trip:update', onTripUpdate);
     s.on('chat:message', onChatMessage);
     s.on('payment:tip', onTipAdded);
     s.on('waypoint:proposed', onWaypointProposed);
+    s.on('connect', onConnect);
+    s.on('disconnect', onDisconnect);
     s.connect();
     setSocket(s);
 
@@ -137,8 +181,12 @@ export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHand
       s.off('chat:message', onChatMessage);
       s.off('payment:tip', onTipAdded);
       s.off('waypoint:proposed', onWaypointProposed);
+      s.off('connect', onConnect);
+      s.off('disconnect', onDisconnect);
       s.disconnect();
       setSocket(null);
+      // Al desmontar/deshabilitar, el indicador ya no debe quedar "conectado" de un socket muerto.
+      handlersRef.current.onConnectionChange(false);
     };
   }, [enabled, di]);
 

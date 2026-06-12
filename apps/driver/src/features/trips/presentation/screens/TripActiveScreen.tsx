@@ -103,6 +103,9 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
   const ensureAccepted = useEnsureTripAccepted(tripId);
   const ensureMutate = ensureAccepted.mutate;
   const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
+  // Estado de la conexión `/driver` en vivo: si el socket está caído (túnel, zona muerta) el conductor
+  // ve "Reconectando…" en vez de creer que el viaje se actualiza en tiempo real cuando está aislado.
+  const connected = useDispatchStore(s => s.connected);
   const clearChat = useChatStore(s => s.clear);
 
   // Pose del conductor (ubicación + rumbo) para pintar el mapa y la cámara de NAVEGACIÓN tipo Waze.
@@ -344,6 +347,13 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
 
         <Appear key={`pill-${status}`} style={styles.statusPillRow}>
           <StatusPill label={statusLabel(status, t)} tone={statusTone[status]} dot />
+          {/* Indicador de conexión en vivo: "En vivo" (pulso) cuando el socket está conectado;
+              "Reconectando…" (neutral, sin pulso) cuando se cayó. Igual que el board del pasajero. */}
+          <StatusPill
+            label={connected ? t('trips.connection.live') : t('trips.connection.reconnecting')}
+            tone={connected ? 'brand' : 'neutral'}
+            live={connected}
+          />
         </Appear>
 
         {data.childMode ? (
@@ -530,7 +540,7 @@ const styles = StyleSheet.create({
   sheetContent: {paddingHorizontal: 20, paddingTop: 16, gap: 14},
   passengerRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
   fareCol: {alignItems: 'flex-end'},
-  statusPillRow: {flexDirection: 'row'},
+  statusPillRow: {flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap'},
   actions: {gap: 12, marginTop: 4},
   sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
   spacer: {marginTop: 12},
