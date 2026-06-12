@@ -2,10 +2,11 @@
  * MediaService — acceso a video con doble-auth (BR-S07): un operador SOLICITA y otro APRUEBA con
  * step-up MFA fresco. La aprobación devuelve una URL firmada con watermark. Todo se audita.
  */
-import { ForbiddenException, Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient, type GrpcServiceClient, type TripReply } from '@veo/rpc';
 import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
 import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -92,12 +93,12 @@ export class MediaService {
     // a diferencia de la familia (a quien sí se le oculta, por si un atacante mira el enlace).
     const meta = grpcIdentityMetadata(identity, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: dto.tripId }, meta);
-    if (!trip.found) throw new NotFoundException('Viaje no encontrado');
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política
     // (solo viaje en curso) vive en el predicado de dominio compartido por los 3 BFFs.
     const status = normalizeTripStatus(trip.status);
     if (status === null || !canAccessLiveCabin(status)) {
-      throw new ForbiddenException('La cámara en vivo solo está disponible durante un viaje en curso');
+      throw new ForbiddenError('La cámara en vivo solo está disponible durante un viaje en curso');
     }
     await this.audit.record(identity, {
       action: 'media.live_access',

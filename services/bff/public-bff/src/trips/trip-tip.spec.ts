@@ -70,7 +70,7 @@ describe('TripsService.tip', () => {
 
   it('rechaza si el viaje no pertenece al pasajero', async () => {
     const { svc } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.tip(user, 'trip-1', 300)).rejects.toMatchObject({ status: 403 });
+    await expect(svc.tip(user, 'trip-1', 300)).rejects.toMatchObject({ httpStatus: 403 });
   });
 
   it('404 si el viaje no existe', async () => {

@@ -124,7 +124,7 @@ describe('TripsService.close', () => {
         return TRIP_REPLY;
       },
     });
-    await expect(svc.close(user, 'trip-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.close(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 403 });
     expect(close).not.toHaveBeenCalled();
   });
 

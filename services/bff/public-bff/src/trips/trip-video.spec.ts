@@ -56,16 +56,16 @@ describe('TripsService.videoGrant', () => {
 
   it('responde 404 (NotFound) si LiveKit no está configurado', async () => {
     const svc = makeService({ livekit: { ...enabled, apiKey: '', apiSecret: '' } });
-    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ status: 404 });
+    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 404 });
   });
 
   it('rechaza si el viaje no pertenece al pasajero', async () => {
     const svc = makeService({ trip: { found: true, passengerId: 'otro', status: 'IN_PROGRESS' } });
-    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 403 });
   });
 
   it('rechaza si el viaje no está IN_PROGRESS', async () => {
     const svc = makeService({ trip: { found: true, passengerId: 'usr-1', status: 'ARRIVED' } });
-    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.videoGrant(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 403 });
   });
 });

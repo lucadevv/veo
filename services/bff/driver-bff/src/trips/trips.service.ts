@@ -5,8 +5,8 @@
  * El tracking GPS se envía por el evento Socket.IO `location` del gateway /driver (soberanía: no MQTT),
  * que publica `driver.location_updated` a Kafka.
  */
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { ExternalServiceError, NotFoundError } from '@veo/utils';
+import { Inject, Injectable } from '@nestjs/common';
+import { ExternalServiceError, ForbiddenError, NotFoundError } from '@veo/utils';
 import { isOnboard, normalizeTripStatus, type RespondWaypointView, type TripStatus } from '@veo/api-client';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { LatLon, MapsClient } from '@veo/maps';
@@ -232,12 +232,12 @@ export class TripsService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new ForbiddenException('No existe perfil de conductor para el usuario');
+    if (!driver.found) throw new ForbiddenError('No existe perfil de conductor para el usuario');
 
     const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id: tripId }, identity);
-    if (!trip.found) throw new NotFoundException('Viaje no encontrado');
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.driverId !== driver.id) {
-      throw new ForbiddenException('El viaje no está asignado a este conductor');
+      throw new ForbiddenError('El viaje no está asignado a este conductor');
     }
     return driver.id;
   }

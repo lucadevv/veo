@@ -6,21 +6,15 @@
  * verifica y resuelve el userId del contexto autenticado, por lo que un usuario solo opera sobre sus
  * propios lugares.
  *
- * Mapeo de errores gRPC → HTTP (los códigos de dominio los emite places-service):
- *  - INVALID_ARGUMENT (3)   → 400  (validación de dominio)
- *  - NOT_FOUND (5)          → 404  (lugar inexistente o de otro usuario)
- *  - RESOURCE_EXHAUSTED (8) → 409  (tope de favoritos alcanzado)
- *  - UNAUTHENTICATED (16)   → 401  (identidad interna inválida — no debería pasar con JWT válido)
+ * Mapeo de errores gRPC → DomainError (el filtro global los lleva a HTTP):
+ *  - INVALID_ARGUMENT (3)   → 400 VALIDATION    (validación de dominio)
+ *  - NOT_FOUND (5)          → 404 NOT_FOUND     (lugar inexistente o de otro usuario)
+ *  - RESOURCE_EXHAUSTED (8) → 409 CONFLICT      (tope de favoritos alcanzado)
+ *  - UNAUTHENTICATED (16)   → 401 UNAUTHORIZED  (identidad interna inválida — no debería pasar con JWT válido)
  */
-import {
-  BadRequestException,
-  ConflictException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { status as GrpcStatus } from '@grpc/grpc-js';
+import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@veo/utils';
 import { GrpcServiceClient } from '@veo/rpc';
 import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_PLACES } from '../infra/downstream.tokens';
@@ -121,13 +115,13 @@ function mapGrpcError(err: unknown): Error {
   const message = err instanceof Error ? err.message : 'Error en places-service';
   switch (grpcStatusOf(err)) {
     case GrpcStatus.INVALID_ARGUMENT:
-      return new BadRequestException(stripGrpcPrefix(message));
+      return new ValidationError(stripGrpcPrefix(message));
     case GrpcStatus.NOT_FOUND:
-      return new NotFoundException(stripGrpcPrefix(message));
+      return new NotFoundError(stripGrpcPrefix(message));
     case GrpcStatus.RESOURCE_EXHAUSTED:
-      return new ConflictException(stripGrpcPrefix(message));
+      return new ConflictError(stripGrpcPrefix(message));
     case GrpcStatus.UNAUTHENTICATED:
-      return new UnauthorizedException(stripGrpcPrefix(message));
+      return new UnauthorizedError(stripGrpcPrefix(message));
     default:
       return err instanceof Error ? err : new Error(message);
   }

@@ -6,9 +6,10 @@
  * - reverse: etiqueta del punto actual ("Tu ubicación").
  * - quote: ruta + ETA + tarifa por categoría (OSRM + cálculo determinista local) + modo PUJA/FIXED.
  */
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
+import { NotFoundError } from '@veo/utils';
 import type { GeocodeResult, MapsClient } from '@veo/maps';
 import { InternalRestClient } from '@veo/rpc';
 import {
@@ -77,7 +78,7 @@ export class MapsService {
   async reverse(lat: number, lng: number): Promise<ReversePlace> {
     const result = await this.maps.reverse({ lat, lon: lng });
     if (!result) {
-      throw new NotFoundException('No se encontró una dirección para el punto');
+      throw new NotFoundError('No se encontró una dirección para el punto');
     }
     const { title, subtitle } = this.splitLabel(result);
     return { title, subtitle, lat: result.lat, lng: result.lon };

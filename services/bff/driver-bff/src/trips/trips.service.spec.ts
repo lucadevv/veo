@@ -7,8 +7,7 @@
  *  - pasa el driverId DERIVADO al trip-service en el body (2da capa de defensa), nunca uno del cliente.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
 
@@ -61,7 +60,7 @@ describe('TripsService.start — anti-IDOR (driverId derivado server-side)', () 
   it('un viaje de OTRO conductor → 403 Forbidden y NO llama al trip-service', async () => {
     const { service, post } = makeService({ driverId: 'drv-9', tripDriverId: 'drv-OTRO' });
     await expect(service.start('trip-1', { childCode: '1234' }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -69,7 +68,7 @@ describe('TripsService.start — anti-IDOR (driverId derivado server-side)', () 
   it('sin perfil de conductor para el usuario → 403 Forbidden', async () => {
     const { service, post } = makeService({ driverFound: false });
     await expect(service.start('trip-1', { childCode: '1234' }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -77,7 +76,7 @@ describe('TripsService.start — anti-IDOR (driverId derivado server-side)', () 
   it('viaje inexistente → 404 NotFound', async () => {
     const { service, post } = makeService({ tripFound: false });
     await expect(service.start('trip-1', { childCode: '1234' }, identity)).rejects.toBeInstanceOf(
-      NotFoundException,
+      NotFoundError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -86,19 +85,19 @@ describe('TripsService.start — anti-IDOR (driverId derivado server-side)', () 
 describe('TripsService.route — anti-IDOR (la ruta expone recojo/paradas/destino · PII de ubicación)', () => {
   it('un viaje de OTRO conductor → 403 Forbidden (NO resuelve la ruta ajena)', async () => {
     const { service } = makeService({ driverId: 'drv-9', tripDriverId: 'drv-OTRO' });
-    // Si llegara a resolver la ruta, maps={} crashearía con TypeError; un ForbiddenException PRUEBA que
+    // Si llegara a resolver la ruta, maps={} crashearía con TypeError; un ForbiddenError PRUEBA que
     // cortó en el gate de ownership ANTES de exponer origin/destino/paradas del viaje ajeno.
-    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('sin perfil de conductor para el usuario → 403 Forbidden', async () => {
     const { service } = makeService({ driverFound: false });
-    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('viaje inexistente → 404 NotFound', async () => {
     const { service } = makeService({ tripFound: false });
-    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.route('trip-1', identity)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -128,7 +127,7 @@ describe('TripsService.complete — EFECTIVO + anti-IDOR (driverId derivado serv
   it('un viaje de OTRO conductor → 403 Forbidden y NO llama al trip-service', async () => {
     const { service, post } = makeService({ driverId: 'drv-9', tripDriverId: 'drv-OTRO' });
     await expect(service.complete('trip-1', { cashCollected: true }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -136,7 +135,7 @@ describe('TripsService.complete — EFECTIVO + anti-IDOR (driverId derivado serv
   it('sin perfil de conductor para el usuario → 403 Forbidden', async () => {
     const { service, post } = makeService({ driverFound: false });
     await expect(service.complete('trip-1', { cashCollected: true }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -144,7 +143,7 @@ describe('TripsService.complete — EFECTIVO + anti-IDOR (driverId derivado serv
   it('viaje inexistente → 404 NotFound', async () => {
     const { service, post } = makeService({ tripFound: false });
     await expect(service.complete('trip-1', { cashCollected: true }, identity)).rejects.toBeInstanceOf(
-      NotFoundException,
+      NotFoundError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -167,7 +166,7 @@ describe('TripsService.cancel — anti-IDOR (driverId derivado server-side)', ()
   it('un viaje de OTRO conductor → 403 Forbidden y NO cancela (anti-IDOR + anti-reassign)', async () => {
     const { service, post } = makeService({ driverId: 'drv-9', tripDriverId: 'drv-OTRO' });
     await expect(service.cancel('trip-1', { reason: 'x' }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -175,7 +174,7 @@ describe('TripsService.cancel — anti-IDOR (driverId derivado server-side)', ()
   it('sin perfil de conductor para el usuario → 403 Forbidden', async () => {
     const { service, post } = makeService({ driverFound: false });
     await expect(service.cancel('trip-1', { reason: 'x' }, identity)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
@@ -183,7 +182,7 @@ describe('TripsService.cancel — anti-IDOR (driverId derivado server-side)', ()
   it('viaje inexistente → 404 NotFound', async () => {
     const { service, post } = makeService({ tripFound: false });
     await expect(service.cancel('trip-1', { reason: 'x' }, identity)).rejects.toBeInstanceOf(
-      NotFoundException,
+      NotFoundError,
     );
     expect(post).not.toHaveBeenCalled();
   });

@@ -2,8 +2,9 @@
  * Incentivos del conductor (lado conductor, Ola 2C). Resuelve el driverId desde la identidad
  * (gRPC GetDriverByUser) y proxya firmado a payment-service (`GET /incentives?driverId=`).
  */
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '@veo/auth';
+import { ForbiddenError } from '@veo/utils';
 import type { DriverIncentive } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
@@ -23,7 +24,7 @@ export class IncentivesService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new ForbiddenException('No existe perfil de conductor para el usuario');
+    if (!driver.found) throw new ForbiddenError('No existe perfil de conductor para el usuario');
     return this.rest.client('payment').get<DriverIncentive[]>('/incentives', {
       identity,
       query: { driverId: driver.id },

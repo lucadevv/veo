@@ -3,11 +3,11 @@
  * comandos vía REST interno firmado. El passengerId/actor se derivan SIEMPRE de la identidad
  * autenticada, nunca del cliente.
  */
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { DriverEnrichmentService } from './driver-enrichment.service';
 import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
-import { DomainError, NotFoundError, uuidv7 } from '@veo/utils';
+import { DomainError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import {
   canAccessLiveCabin,
   normalizeTripStatus,
@@ -257,7 +257,7 @@ export class TripsService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
     return this.enrichTripDetail(user, trip, meta);
   }
@@ -400,7 +400,7 @@ export class TripsService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
     const state = await this.tripGrpc.call<TripStateReply>('GetTripState', { id: tripId }, meta);
     if (!state.found) throw new NotFoundError('Viaje no encontrado');
@@ -415,19 +415,19 @@ export class TripsService {
    */
   async videoGrant(user: AuthenticatedUser, tripId: string): Promise<TripVideoGrant> {
     if (!liveKitEnabled(this.livekit)) {
-      throw new NotFoundException('El video del habitáculo no está disponible');
+      throw new NotFoundError('El video del habitáculo no está disponible');
     }
     const meta = grpcIdentityMetadata(user, this.secret);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
     // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política
     // (solo viaje en curso) vive en el predicado de dominio compartido por los 3 BFFs.
     const status = normalizeTripStatus(trip.status);
     if (status === null || !canAccessLiveCabin(status)) {
-      throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
+      throw new ForbiddenError('La cámara solo está disponible durante el viaje en curso');
     }
     const room = liveKitRoomForTrip(tripId);
     const minted = mintViewerToken(this.livekit, {
@@ -492,7 +492,7 @@ export class TripsService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
     const dedupKey = `tip:${user.userId}:${tripId}:${tipCents}`;
     const payment = await this.paymentRest.post<PaymentReply>(`/payments/${tripId}/tip`, {
@@ -535,7 +535,7 @@ export class TripsService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
   }
 

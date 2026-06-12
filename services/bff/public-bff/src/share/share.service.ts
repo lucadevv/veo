@@ -4,7 +4,8 @@
  *   Socket.IO vivas del enlace (link:revoked).
  * - Vista pública: agrega share + estado de viaje + conductor/vehículo + ubicación + ETA/ruta (maps).
  */
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { DownstreamError, GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import type { MapsClient } from '@veo/maps';
@@ -144,7 +145,7 @@ export class ShareService {
    */
   async videoGrant(token: string): Promise<FamilyVideoGrant> {
     if (!liveKitEnabled(this.livekit)) {
-      throw new NotFoundException('El video del habitáculo no está disponible');
+      throw new NotFoundError('El video del habitáculo no está disponible');
     }
 
     let downstream: ShareTrackingDownstream;
@@ -155,7 +156,7 @@ export class ShareService {
       );
     } catch (err) {
       if (err instanceof DownstreamError && [403, 404, 410].includes(err.status)) {
-        throw new ForbiddenException('Enlace de seguimiento no válido para video');
+        throw new ForbiddenError('Enlace de seguimiento no válido para video');
       }
       throw err;
     }
@@ -164,18 +165,18 @@ export class ShareService {
     // Durante un pánico el read-model marca 'PANIC' aunque trip-service siga en IN_PROGRESS; NUNCA
     // emitir el grant de video del habitáculo: delataría que algo pasa y expondría video en vivo.
     if (isPanicActive(downstream.status)) {
-      throw new ForbiddenException('La cámara no está disponible para este viaje');
+      throw new ForbiddenError('La cámara no está disponible para este viaje');
     }
 
     const trip = await this.tripRest
       .get<TripResource>(`/trips/${downstream.tripId}`, { identity: ANONYMOUS_IDENTITY })
       .catch(() => null);
     if (isPanicActive(trip?.status)) {
-      throw new ForbiddenException('La cámara no está disponible para este viaje');
+      throw new ForbiddenError('La cámara no está disponible para este viaje');
     }
     const status = safeTripStatus(trip?.status, downstream.status);
     if (status !== 'IN_PROGRESS') {
-      throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
+      throw new ForbiddenError('La cámara solo está disponible durante el viaje en curso');
     }
 
     const room = liveKitRoomForTrip(downstream.tripId);

@@ -5,7 +5,7 @@
  *  - recién entonces se proxea el token al media-service.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { MediaService } from './media.service';
 
@@ -40,33 +40,33 @@ function trip(over: Record<string, unknown> = {}) {
 }
 
 describe('MediaService.issuePublisherToken — anti-IDOR (perfil + IN_PROGRESS)', () => {
-  it('viaje de OTRO conductor → ForbiddenException (no proxea)', async () => {
+  it('viaje de OTRO conductor → ForbiddenError (no proxea)', async () => {
     const { service, post } = makeService({ trip: trip({ driverId: 'drv-OTRO' }) });
     await expect(service.issuePublisherToken(identity, 'trip-1')).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('viaje que NO está IN_PROGRESS → ForbiddenException (no proxea)', async () => {
+  it('viaje que NO está IN_PROGRESS → ForbiddenError (no proxea)', async () => {
     const { service, post } = makeService({ trip: trip({ status: 'ASSIGNED' }) });
     await expect(service.issuePublisherToken(identity, 'trip-1')).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('viaje inexistente → NotFoundException', async () => {
+  it('viaje inexistente → NotFoundError', async () => {
     const { service } = makeService({ trip: { found: false } });
     await expect(service.issuePublisherToken(identity, 'trip-1')).rejects.toBeInstanceOf(
-      NotFoundException,
+      NotFoundError,
     );
   });
 
-  it('sin perfil de conductor → ForbiddenException', async () => {
+  it('sin perfil de conductor → ForbiddenError', async () => {
     const { service } = makeService({ driverFound: false, trip: trip() });
     await expect(service.issuePublisherToken(identity, 'trip-1')).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ForbiddenError,
     );
   });
 

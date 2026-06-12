@@ -82,7 +82,7 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
 
   it('listOffers rechaza con 403 si el viaje no pertenece al pasajero (anti-IDOR)', async () => {
     const { svc, get } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.listOffers(user, 'trip-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.listOffers(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 403 });
     expect(get).not.toHaveBeenCalled();
   });
 
@@ -107,7 +107,7 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
 
   it('acceptOffer rechaza con 403 sobre un viaje ajeno (no llama a dispatch)', async () => {
     const { svc, post } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.acceptOffer(user, 'trip-1', 'd1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.acceptOffer(user, 'trip-1', 'd1')).rejects.toMatchObject({ httpStatus: 403 });
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -120,7 +120,7 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
 
   it('cancelBid rechaza con 403 sobre un viaje ajeno', async () => {
     const { svc, post } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.cancelBid(user, 'trip-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.cancelBid(user, 'trip-1')).rejects.toMatchObject({ httpStatus: 403 });
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -143,7 +143,7 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
 
   it('rebid rechaza con 403 sobre un viaje ajeno (anti-IDOR, no llama a trip-service)', async () => {
     const { svc, tripPost } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({ status: 403 });
+    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({ httpStatus: 403 });
     expect(tripPost).not.toHaveBeenCalled();
   });
 

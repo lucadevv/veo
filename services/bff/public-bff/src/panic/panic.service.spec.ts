@@ -41,7 +41,7 @@ describe('PanicService.getPanic', () => {
 
   it('rechaza (403 Forbidden) si la alerta de pánico es de otro pasajero', async () => {
     const svc = makeService({ ...OWN_PANIC, passengerId: 'otro' });
-    await expect(svc.getPanic(user, 'pnc-1')).rejects.toMatchObject({ status: 403 });
+    await expect(svc.getPanic(user, 'pnc-1')).rejects.toMatchObject({ httpStatus: 403 });
   });
 
   it('responde 404 (NotFound) si la alerta de pánico no existe', async () => {

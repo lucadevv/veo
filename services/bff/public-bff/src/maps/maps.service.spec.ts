@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundError } from '@veo/utils';
 import type { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { GeocodeResult, MapsClient, RouteResult } from '@veo/maps';
@@ -167,7 +167,7 @@ describe('MapsService.reverse', () => {
 
   it('lanza 404 si no hay dirección para el punto', async () => {
     const service = buildService(new FakeMapsClient({ reverse: null }));
-    await expect(service.reverse(0, 0)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.reverse(0, 0)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

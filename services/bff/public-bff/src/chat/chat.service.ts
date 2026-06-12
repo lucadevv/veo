@@ -4,10 +4,10 @@
  * La entrega en tiempo real al conductor la hace el flujo Kafka (chat.message_sent → driver-bff
  * Socket.IO). El POST devuelve el mensaje persistido para que la app lo pinte de inmediato.
  */
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
-import { NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import type { ChatMessage } from '@veo/api-client';
 import { GRPC_TRIP, REST_CHAT } from '../infra/downstream.tokens';
 import type { TripReply } from '../infra/grpc-types';
@@ -59,10 +59,10 @@ export class ChatService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
-      throw new ForbiddenException('El viaje no pertenece al pasajero');
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
     if (requireActive && !ACTIVE_STATUSES.has(trip.status)) {
-      throw new ForbiddenException('El chat solo está disponible durante un viaje activo');
+      throw new ForbiddenError('El chat solo está disponible durante un viaje activo');
     }
   }
 }

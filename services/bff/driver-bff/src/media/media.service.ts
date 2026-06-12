@@ -11,8 +11,9 @@
  * PERFIL de conductor, no el userId del JWT, así que se deriva vía GetDriverByUser (mismo patrón que
  * chat/dispatch en este BFF).
  */
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '@veo/auth';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
@@ -49,19 +50,19 @@ export class MediaService {
       identity,
     );
     if (!driver.found) {
-      throw new ForbiddenException('No existe un perfil de conductor para este usuario');
+      throw new ForbiddenError('No existe un perfil de conductor para este usuario');
     }
 
     const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id: tripId }, identity);
-    if (!trip.found) throw new NotFoundException('Viaje no encontrado');
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.driverId !== driver.id) {
-      throw new ForbiddenException('El viaje no pertenece al conductor');
+      throw new ForbiddenError('El viaje no pertenece al conductor');
     }
     // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política
     // (solo viaje en curso) vive en el predicado de dominio compartido por los 3 BFFs.
     const status = normalizeTripStatus(trip.status);
     if (status === null || !canAccessLiveCabin(status)) {
-      throw new ForbiddenException('La cámara solo está disponible durante el viaje en curso');
+      throw new ForbiddenError('La cámara solo está disponible durante el viaje en curso');
     }
 
     const reply = await this.rest.client('media').post<MediaRoomToken>(

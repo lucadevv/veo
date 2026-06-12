@@ -4,8 +4,9 @@
  * luego delega persistencia/lectura a chat-service (REST firmado). La entrega en tiempo real al
  * pasajero la hace el flujo Kafka (chat.message_sent → public-bff Socket.IO).
  */
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '@veo/auth';
+import { ForbiddenError, NotFoundError } from '@veo/utils';
 import type { ChatMessage } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
@@ -60,15 +61,15 @@ export class ChatService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new ForbiddenException('No existe perfil de conductor para el usuario');
+    if (!driver.found) throw new ForbiddenError('No existe perfil de conductor para el usuario');
 
     const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id: tripId }, identity);
-    if (!trip.found) throw new NotFoundException('Viaje no encontrado');
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.driverId !== driver.id) {
-      throw new ForbiddenException('El viaje no está asignado a este conductor');
+      throw new ForbiddenError('El viaje no está asignado a este conductor');
     }
     if (requireActive && !ACTIVE_STATUSES.has(trip.status)) {
-      throw new ForbiddenException('El chat solo está disponible durante un viaje activo');
+      throw new ForbiddenError('El chat solo está disponible durante un viaje activo');
     }
     return { driverId: driver.id, passengerId: trip.passengerId };
   }
