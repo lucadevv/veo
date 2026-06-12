@@ -1,5 +1,11 @@
 module.exports = {
   preset: '@react-native/jest-preset',
+  // Reanimated 4 delega en react-native-worklets; su mock oficial ya NO alcanza solo: el resolver
+  // OFICIAL de worklets hace que Jest cargue la implementación JS (no la `.native`, que exige el
+  // TurboModule). Sin esto, CUALQUIER test que importe @veo/ui-kit (Button → usePressScale →
+  // reanimated) revienta con "Cannot read properties of undefined (reading 'loadUnpackers')".
+  // Mismo fix que apps/passenger/jest.config.js.
+  resolver: 'react-native-worklets/jest/resolver.js',
   setupFiles: ['./jest.setup.js'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   transformIgnorePatterns: [
