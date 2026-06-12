@@ -3,16 +3,15 @@
  * inmutable (hash chain). Idempotente por envelope.eventId. audit-service principalmente CONSUME.
  *
  * Cobertura actual (eventos definidos en @veo/events · EVENT_SCHEMAS):
- *  - Identidad/KYC: user.registered, driver.verified, biometric.failed
- *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted
- *  - Pánico:        panic.triggered, panic.acknowledged
+ *  - Identidad/KYC: user.registered, user.kyc_verified, driver.verified, biometric.failed
+ *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
+ *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
  *  - Pagos:         payment.captured, payment.failed, payout.processed
- *  - Video/Media:   media.recording_started, media.archived
+ *  - Video/Media:   media.recording_started, media.archived, media.access_granted
  *  - Viaje (ciclo): trip.assigned/accepted/arriving/arrived/started/completed/cancelled/expired/failed
  *                   + trip.child_code_failed (solo IDs+estado, sin geo → ver nota en registerHandlers)
  *
- * Contratos AÚN no disponibles en @veo/events (ver README · "contratos pendientes"):
- *  - Acceso a video por operador (p.ej. media.accessed) desde media-service.
+ * Contratos pendientes en @veo/events (ver README · "contratos pendientes"):
  *  - Cambios RBAC (p.ej. admin.role_changed / rbac.changed) desde identity-service.
  *
  * El BOOTSTRAP (createKafka + consumer del group + lifecycle) vive promovido en
@@ -71,6 +70,13 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'user',
         resourceId: p.userId,
       })),
+      // KYC aprobado (BR-S05): traza de quién quedó verificado y cuándo. El payload solo trae al sujeto
+      // verificado (userId) — no porta verificador → actor=recurso=userId (el dueño del dato verificado).
+      'user.kyc_verified': this.audited('user.kyc_verified', (p) => ({
+        actorId: p.userId,
+        resourceType: 'user',
+        resourceId: p.userId,
+      })),
       'driver.verified': this.audited('driver.verified', (p) => ({
         actorId: p.driverId,
         resourceType: 'driver',
@@ -94,6 +100,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'user',
         resourceId: p.userId,
       })),
+      // PII de un viaje borrada (BR-S06 · derecho al olvido): traza inmutable de QUÉ viaje se anonimizó.
+      // El payload trae el viaje (tripId) y al pasajero dueño del dato (passengerId) — sin sweeper explícito
+      // → actorId=passengerId (el titular cuyo derecho se ejecutó), recurso=trip/tripId.
+      'trip.pii_erased': this.audited('trip.pii_erased', (p) => ({
+        actorId: p.passengerId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
 
       // Pánico
       'panic.triggered': this.audited('panic.triggered', (p) => ({
@@ -103,6 +117,13 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       })),
       'panic.acknowledged': this.audited('panic.acknowledged', (p) => ({
         actorId: p.operatorId,
+        resourceType: 'panic',
+        resourceId: p.panicId,
+      })),
+      // Cierre de la emergencia: traza de QUIÉN resolvió el incidente (resolvedBy, calca el operatorId de
+      // acknowledged) y sobre QUÉ panic. Cierra la cadena triggered→acknowledged→resolved en el WORM.
+      'panic.resolved': this.audited('panic.resolved', (p) => ({
+        actorId: p.resolvedBy,
         resourceType: 'panic',
         resourceId: p.panicId,
       })),
@@ -134,6 +155,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         actorId: 'system',
         resourceType: 'media',
         resourceId: p.tripId,
+      })),
+      // Doble auth para acceso a video (Ley 29733 · regla no negociable #1): traza QUIÉN vio QUÉ video.
+      // actorId=operatorId (quien accedió); recurso = segmento concreto si lo hay, fallback al viaje
+      // (segmentId es optional en el contrato → resourceId cae a tripId).
+      'media.access_granted': this.audited('media.access_granted', (p) => ({
+        actorId: p.operatorId,
+        resourceType: 'media',
+        resourceId: p.segmentId ?? p.tripId,
       })),
 
       // Viaje (ciclo de vida · trazabilidad forense, movilidad segura / Ley 29733): la cadena de custodia

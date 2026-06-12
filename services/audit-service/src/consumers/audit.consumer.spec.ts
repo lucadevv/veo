@@ -171,3 +171,102 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
     expect(mapping.actorId).toBe('system');
   });
 });
+
+describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig()).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('registra handlers para los 4 eventos de compliance', () => {
+    for (const t of ['media.access_granted', 'user.kyc_verified', 'trip.pii_erased', 'panic.resolved']) {
+      expect(handlers.has(t), `falta handler ${t}`).toBe(true);
+    }
+  });
+
+  it('media.access_granted → actorId=operatorId, resourceType=media, resourceId=segmentId (quién vio qué video)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.access_granted',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-1',
+        tripId: 't-1',
+        segmentId: 'seg-9',
+        operatorId: 'op-7',
+        approvedBy: 'sup-3',
+        watermark: 'op-7@veo',
+        expiresAt: new Date().toISOString(),
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.access_granted')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'media', resourceId: 'seg-9' });
+  });
+
+  it('media.access_granted sin segmentId → resourceId cae al tripId (fallback del optional)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.access_granted',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-2',
+        tripId: 't-42',
+        operatorId: 'op-7',
+        approvedBy: 'sup-3',
+        expiresAt: new Date().toISOString(),
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.access_granted')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'media', resourceId: 't-42' });
+  });
+
+  it('user.kyc_verified → actorId=resourceId=userId, resourceType=user', async () => {
+    const envelope = createEnvelope({
+      eventType: 'user.kyc_verified',
+      producer: 'identity-service',
+      payload: { userId: 'u-555', kycStatus: 'APPROVED', verifiedAt: new Date().toISOString() },
+    });
+    await handlers.get('user.kyc_verified')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'u-555', resourceType: 'user', resourceId: 'u-555' });
+  });
+
+  it('trip.pii_erased → actorId=passengerId, resourceType=trip, resourceId=tripId (derecho al olvido)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'trip.pii_erased',
+      producer: 'trip-service',
+      payload: { tripId: 't-77', passengerId: 'pax-9', at: new Date().toISOString() },
+    });
+    await handlers.get('trip.pii_erased')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'pax-9', resourceType: 'trip', resourceId: 't-77' });
+  });
+
+  it('panic.resolved → actorId=resolvedBy, resourceType=panic, resourceId=panicId (cierre de emergencia)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'panic.resolved',
+      producer: 'panic-service',
+      payload: { panicId: 'pn-3', status: 'RESOLVED', resolvedBy: 'op-7', at: new Date().toISOString() },
+    });
+    await handlers.get('panic.resolved')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'panic', resourceId: 'pn-3' });
+  });
+});
