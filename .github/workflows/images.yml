@@ -1,0 +1,91 @@
+name: Images
+
+# Build de imágenes Docker por servicio: en PR es gate (build sin push);
+# en push a main se publica a ECR con tags :<git-sha> y :latest.
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "services/**"
+      - "packages/**"
+      - "patches/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".dockerignore"
+      - ".github/workflows/images.yml"
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # OIDC hacia AWS, misma convención que .github/workflows/terraform.yml
+  id-token: write
+
+env:
+  # Región canónica de la infra (infra/terraform, us-east-1)
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  image:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Servicios node (contexto = raíz del monorepo, workspace pnpm)
+          - { service: audit-service, context: ., dockerfile: services/audit-service/Dockerfile }
+          - { service: admin-bff, context: ., dockerfile: services/bff/admin-bff/Dockerfile }
+          - { service: driver-bff, context: ., dockerfile: services/bff/driver-bff/Dockerfile }
+          - { service: public-bff, context: ., dockerfile: services/bff/public-bff/Dockerfile }
+          - { service: chat-service, context: ., dockerfile: services/chat-service/Dockerfile }
+          - { service: dispatch-service, context: ., dockerfile: services/dispatch-service/Dockerfile }
+          - { service: fleet-service, context: ., dockerfile: services/fleet-service/Dockerfile }
+          - { service: identity-service, context: ., dockerfile: services/identity-service/Dockerfile }
+          - { service: media-service, context: ., dockerfile: services/media-service/Dockerfile }
+          - { service: notification-service, context: ., dockerfile: services/notification-service/Dockerfile }
+          - { service: panic-service, context: ., dockerfile: services/panic-service/Dockerfile }
+          - { service: payment-service, context: ., dockerfile: services/payment-service/Dockerfile }
+          - { service: places-service, context: ., dockerfile: services/places-service/Dockerfile }
+          - { service: rating-service, context: ., dockerfile: services/rating-service/Dockerfile }
+          - { service: share-service, context: ., dockerfile: services/share-service/Dockerfile }
+          - { service: trip-service, context: ., dockerfile: services/trip-service/Dockerfile }
+          # Go (contexto propio)
+          - { service: tracking-service, context: services/tracking-service, dockerfile: services/tracking-service/Dockerfile }
+          # Python (contexto propio)
+          - { service: biometric-service, context: services/biometric-service, dockerfile: services/biometric-service/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Parametrizado: definir vars.AWS_ECR_PUSH_ROLE_ARN en GitHub (sin account IDs hardcodeados)
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build${{ github.event_name == 'push' && ' & Push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Convención de repos ECR: veo/<servicio> (registry sale del login OIDC; en PR queda tag local)
+          tags: |
+            ${{ steps.ecr.outputs.registry || 'localhost' }}/veo/${{ matrix.service }}:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry || 'localhost' }}/veo/${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

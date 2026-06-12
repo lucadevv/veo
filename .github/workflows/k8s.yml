@@ -3,12 +3,12 @@ name: K8s & Workflows
 on:
   pull_request:
     paths:
-      - "k8s/**"
+      - "infra/k8s/**"
       - ".github/workflows/**"
   push:
     branches: [main]
     paths:
-      - "k8s/**"
+      - "infra/k8s/**"
       - ".github/workflows/**"
 
 concurrency:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Build overlay with kustomize
         run: |
-          kubectl kustomize "k8s/overlays/${{ matrix.env }}" > "rendered-${{ matrix.env }}.yaml"
+          kubectl kustomize "infra/k8s/overlays/${{ matrix.env }}" > "rendered-${{ matrix.env }}.yaml"
           echo "Rendered $(grep -c '^kind:' "rendered-${{ matrix.env }}.yaml") top-level resources."
 
       - name: Validate manifests with kubeconform
