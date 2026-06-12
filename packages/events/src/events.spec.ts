@@ -86,6 +86,56 @@ describe('registro de schemas', () => {
       }
     });
   });
+
+  describe('panic.acknowledged / panic.resolved · contrato ENRIQUECIDO (dominó del cierre de pánico)', () => {
+    it('panic.acknowledged valida con tripId + passengerId enriquecidos', () => {
+      const ok = {
+        panicId: 'pn1',
+        tripId: 't1',
+        passengerId: 'p1',
+        operatorId: 'op1',
+        ackAt: new Date().toISOString(),
+      };
+      expect(EVENT_SCHEMAS['panic.acknowledged'].safeParse(ok).success).toBe(true);
+      // Sin el enriquecido (tripId/passengerId) ⇒ RECHAZA: notification no podría pushear al pasajero.
+      const { tripId: _t, ...sinTrip } = ok;
+      expect(EVENT_SCHEMAS['panic.acknowledged'].safeParse(sinTrip).success).toBe(false);
+      const { passengerId: _p, ...sinPax } = ok;
+      expect(EVENT_SCHEMAS['panic.acknowledged'].safeParse(sinPax).success).toBe(false);
+    });
+
+    it('panic.resolved valida con tripId + passengerId + status del ENUM (RESOLVED | FALSE_ALARM)', () => {
+      const base = {
+        panicId: 'pn1',
+        tripId: 't1',
+        passengerId: 'p1',
+        resolvedBy: 'op1',
+        at: new Date().toISOString(),
+      };
+      expect(EVENT_SCHEMAS['panic.resolved'].safeParse({ ...base, status: 'RESOLVED' }).success).toBe(true);
+      expect(EVENT_SCHEMAS['panic.resolved'].safeParse({ ...base, status: 'FALSE_ALARM' }).success).toBe(true);
+    });
+
+    it('panic.resolved RECHAZA un status FUERA del enum (cero strings mágicos, falla-cerrado)', () => {
+      const base = {
+        panicId: 'pn1',
+        tripId: 't1',
+        passengerId: 'p1',
+        resolvedBy: 'op1',
+        at: new Date().toISOString(),
+      };
+      // Estados que NO son de cierre, o basura: el contrato los rechaza (no desenmascararían bien aguas abajo).
+      for (const bad of ['TRIGGERED', 'ACKNOWLEDGED', 'resolved', 'CLOSED', '']) {
+        expect(EVENT_SCHEMAS['panic.resolved'].safeParse({ ...base, status: bad }).success, `status ${bad}`).toBe(false);
+      }
+    });
+
+    it('panic.resolved sin tripId/passengerId enriquecido ⇒ RECHAZA', () => {
+      const base = { panicId: 'pn1', status: 'FALSE_ALARM', resolvedBy: 'op1', at: new Date().toISOString() };
+      expect(EVENT_SCHEMAS['panic.resolved'].safeParse(base).success).toBe(false);
+    });
+  });
+
   it('valida payload de user.kyc_verified (KYC del pasajero)', () => {
     const schema = schemaForEvent('user.kyc_verified');
     expect(schema).toBeDefined();

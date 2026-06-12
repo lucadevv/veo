@@ -6,7 +6,7 @@
  * los consumidores validen lo que reciben. Ampliar al implementar cada servicio.
  */
 import { z } from 'zod';
-import { VehicleClass } from '@veo/shared-types';
+import { PanicStatus, VehicleClass } from '@veo/shared-types';
 
 const geo = z.object({ lat: z.number(), lon: z.number() });
 
@@ -24,6 +24,13 @@ const pricingMode = z.enum(['PUJA', 'FIXED']);
 /* ── identity ── */
 export const userRegistered = z.object({ userId: z.string(), phone: z.string(), kycStatus: z.string() });
 export const driverVerified = z.object({ driverId: z.string(), userId: z.string(), verifiedAt: z.string() });
+/// El operador RECHAZÓ los antecedentes del conductor (espejo de driver.verified). identity-service lo
+/// emite por OUTBOX en la MISMA tx que persiste Driver.backgroundCheckStatus=REJECTED + rejectionReason.
+/// Downstream: audit (traza inmutable de la decisión) y admin-bff (proyecta el motivo en el read-model
+/// para que el panel lo muestre). `reason` = motivo del rechazo (texto del operador); "" si no se dio uno
+/// (degradación honesta, nunca un motivo falso). El conductor lo VE en la app (RejectedScreen) vía GET
+/// /drivers/me, no por este evento. `rejectedAt` ISO-8601 del momento del rechazo.
+export const driverRejected = z.object({ driverId: z.string(), userId: z.string(), reason: z.string(), rejectedAt: z.string() });
 export const userKycVerified = z.object({ userId: z.string(), kycStatus: z.string(), verifiedAt: z.string() });
 /// El usuario confirmó la titularidad de su correo (ADR-012, método correo+contraseña). identity-service
 /// lo emite en la MISMA tx que marca el AuthMethod.emailVerified=true. Downstream: onboarding/CRM.
@@ -531,8 +538,35 @@ export const panicTriggered = z.object({
   triggeredAt: z.string(),
   evidenceS3Keys: z.array(z.string()).optional(),
 });
-export const panicAcknowledged = z.object({ panicId: z.string(), operatorId: z.string(), ackAt: z.string() });
-export const panicResolved = z.object({ panicId: z.string(), status: z.string(), resolvedBy: z.string(), at: z.string() });
+/// El operador de la central RECONOCIÓ la alerta (TRIGGERED→ACKNOWLEDGED). panic-service lo emite por
+/// OUTBOX en la MISMA tx que el CAS de estado (detrás de RolesGuard + PANIC_OPERATORS: el agresor NO
+/// puede forjarlo). `tripId` + `passengerId` ENRIQUECIDOS desde la fila PanicEvent (siempre presentes,
+/// no compat N-2: panic-service los tiene): notification-service los usa para pushear al PASAJERO
+/// "la central vio tu alerta y está respondiendo" sin un join cross-servicio.
+export const panicAcknowledged = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  operatorId: z.string(),
+  ackAt: z.string(),
+});
+/// El operador CERRÓ la alerta (→RESOLVED | FALSE_ALARM). panic-service lo emite por OUTBOX en la MISMA
+/// tx que el CAS de cierre (RolesGuard + PANIC_OPERATORS: no forjable por el agresor — base de seguridad
+/// del fix del dominó). `status` TIPADO al enum canónico `PanicStatus` (solo los dos estados de cierre):
+/// rechaza cualquier string fuera del enum (cero strings mágicos). DESENMASCARADO CONDICIONAL (decisión
+/// del dueño, conservadora): share-service restaura la vista familiar SOLO si `FALSE_ALARM`; si `RESOLVED`
+/// (emergencia real atendida) MANTIENE la máscara —el enlace pudo ser capturado por el agresor—.
+/// `tripId` + `passengerId` ENRIQUECIDOS desde la fila PanicEvent: share-service mapea por `tripId`,
+/// notification pushea al `passengerId` "tu alerta fue cerrada" (SIEMPRE, en ambos status).
+export const panicResolved = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  /// Solo los dos estados de CIERRE del enum canónico (no TRIGGERED/ACKNOWLEDGED): el contrato falla-cerrado.
+  status: z.enum([PanicStatus.RESOLVED, PanicStatus.FALSE_ALARM]),
+  resolvedBy: z.string(),
+  at: z.string(),
+});
 /**
  * panic.fanout_requested (BR-S05, fix de durabilidad del SMS de pánico): share-service ya creó el
  * enlace de seguimiento y DELEGA el fan-out durable de SMS a notification-service (engine con
@@ -634,6 +668,7 @@ export const EVENT_SCHEMAS = {
   'user.deleted': userDeleted,
   'admin.role_changed': adminRoleChanged,
   'driver.verified': driverVerified,
+  'driver.rejected': driverRejected,
   'biometric.failed': biometricFailed,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,
