@@ -443,6 +443,8 @@ export const common = {
       car: 'Auto',
     },
     cheapest: 'Más barato',
+    /** Etiqueta del total en el desglose de tarifa (p. ej. con recargo de modo niño). */
+    total: 'Total',
   },
 
   /**
@@ -819,6 +821,10 @@ export const common = {
     active: 'Modo niño activado',
     inactive: 'Modo niño desactivado',
     explanation: 'El código nunca se muestra al conductor; el sistema valida un hash en el servidor.',
+    /** Línea del desglose de tarifa (precio FIJO): "Recargo modo niño". El monto va aparte. */
+    feeLine: 'Recargo modo niño',
+    /** Aviso del recargo al activar el toggle (solo informa; el recargo aplica en viajes de precio fijo). */
+    feeNotice: 'En viajes de precio fijo se suma un recargo de {{amount}}. En modo puja no hay recargo.',
   },
 
   kyc: {

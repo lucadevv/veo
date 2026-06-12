@@ -31,6 +31,14 @@ export type OfferingId = (typeof OfferingId)[keyof typeof OfferingId];
 export const OfferingIcon = { CAR: 'car', MOTO: 'moto' } as const; // futuro: 'ambulance', 'wrench'…
 export type OfferingIcon = (typeof OfferingIcon)[keyof typeof OfferingIcon];
 
+/**
+ * Recargo del Modo Niño (BR-T07): S/ 2.00 en céntimos PEN. FUENTE ÚNICA — aplica SOLO en viajes de
+ * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma en `calculateFare`
+ * (FIXED) y la app lo muestra en el desglose ANTES de confirmar; ambos consumen ESTA constante para
+ * que el número no diverja entre server y cliente. `as const` la fija como literal `200`.
+ */
+export const CHILD_MODE_FEE_CENTS = 200 as const;
+
 /** Política de pricing de una oferta. FUENTE ÚNICA (ADR 013): BFF y trip-service la consumen de acá. */
 export interface OfferingPricingPolicy {
   /** Multiplicador sobre la fórmula base BR-T05 (económico = 1.0). */

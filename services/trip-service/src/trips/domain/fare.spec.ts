@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { ValidationError, money } from '@veo/utils';
-import { OFFERINGS, OfferingId } from '@veo/shared-types';
+import {
+  OFFERINGS,
+  OfferingId,
+  CHILD_MODE_FEE_CENTS as SHARED_CHILD_MODE_FEE_CENTS,
+} from '@veo/shared-types';
 import {
   calculateFare,
   applyOfferingPricing,
@@ -39,6 +43,13 @@ describe('BR-T05 · cálculo de tarifa', () => {
     });
     // 1500 * 1.5 + 200 = 2450
     expect(fare.cents).toBe(2250 + CHILD_MODE_FEE_CENTS);
+  });
+
+  it('anti-divergencia: el recargo de niño de fare ES el de @veo/shared-types (sin copia local)', () => {
+    // fare.ts ya no declara su propia copia: re-exporta la constante de @veo/shared-types. Si alguien
+    // reintroduce un espejo local con otro valor, este test (y el cálculo de arriba) lo cazan.
+    expect(CHILD_MODE_FEE_CENTS).toBe(SHARED_CHILD_MODE_FEE_CENTS);
+    expect(CHILD_MODE_FEE_CENTS).toBe(200);
   });
 
   it('surge por defecto es 1.0', () => {

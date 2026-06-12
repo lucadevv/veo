@@ -7,7 +7,7 @@
  * que entrega @veo/maps (distanceMeters, durationSeconds). surge ∈ [1.0, 2.0] (default 1.0).
  */
 import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
-import type { OfferingPricingPolicy } from '@veo/shared-types';
+import { CHILD_MODE_FEE_CENTS, type OfferingPricingPolicy } from '@veo/shared-types';
 
 /** Banderazo base: S/ 6.00. */
 export const BASE_FARE_CENTS = 600;
@@ -15,8 +15,12 @@ export const BASE_FARE_CENTS = 600;
 export const PER_KM_CENTS = 120;
 /** Por minuto: S/ 0.30. */
 export const PER_MIN_CENTS = 30;
-/** Recargo por modo niño (BR-T07): S/ 2.00. */
-export const CHILD_MODE_FEE_CENTS = 200;
+/**
+ * Recargo por modo niño (BR-T07): S/ 2.00. FUENTE ÚNICA en `@veo/shared-types` (junto al catálogo de
+ * pricing) — re-exportado acá para los consumidores que ya lo importan de `./fare`. El mismo número lo
+ * muestra la app en el desglose ANTES de confirmar, así no diverge entre server y cliente.
+ */
+export { CHILD_MODE_FEE_CENTS };
 
 export const MIN_SURGE = 1.0;
 export const MAX_SURGE = 2.0;

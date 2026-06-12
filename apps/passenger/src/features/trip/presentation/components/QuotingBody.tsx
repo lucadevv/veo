@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Banner, Button, RideOptionRow, Skeleton, StatusPill, Text, useTheme } from '@veo/ui-kit';
+import { CHILD_MODE_FEE_CENTS } from '@veo/shared-types';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
@@ -226,6 +227,13 @@ export function QuotingBody({
   );
   const selectedFareCents = selectedOption?.priceCents ?? 0;
 
+  // Modo de pricing EFECTIVO de la opción elegida: el de la opción (ADR 013 §1.3) con fallback al
+  // top-level del quote (server viejo / ancla VEO Económico). El recargo de modo niño aplica SOLO en
+  // FIJO (en PUJA el bid ES el precio): este flag decide si mostramos el desglose del recargo.
+  const selectedIsFixed = (selectedOption?.mode ?? quote?.mode) === 'FIXED';
+  const showChildFee = childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
+  const childTotalCents = selectedFareCents + CHILD_MODE_FEE_CENTS;
+
   const selectChanged = (id: string): void => {
     if (id !== selectedId) {
       setAppliedPromo(null);
@@ -414,6 +422,33 @@ export function QuotingBody({
         </View>
       )}
 
+      {/* Transparencia del recargo Modo Niño (BR-T07): SOLO en precio FIJO se suma S/2.00 (en PUJA el
+          bid ES el precio, sin recargo). Se muestra ANTES de confirmar para que el total no sorprenda.
+          El monto sale de la constante compartida (@veo/shared-types), misma fuente que el server. */}
+      {showChildFee ? (
+        <View
+          style={[
+            styles.feeBreakdown,
+            { borderTopColor: theme.colors.border, gap: theme.spacing.xs },
+          ]}
+        >
+          <View style={styles.feeRow}>
+            <Text variant="footnote" color="inkMuted">
+              {t('childMode.feeLine')}
+            </Text>
+            <Text variant="footnote" color="inkMuted" tabular>
+              +{formatPEN(CHILD_MODE_FEE_CENTS)}
+            </Text>
+          </View>
+          <View style={styles.feeRow}>
+            <Text variant="subhead">{t('quote.total')}</Text>
+            <Text variant="subhead" tabular>
+              {formatPEN(childTotalCents)}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       {/* Resumen de programación o atajo para programar. */}
       {scheduledAt !== null ? (
         <View style={styles.scheduleRow}>
@@ -512,4 +547,8 @@ export function QuotingBody({
 const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  // Desglose del recargo de modo niño (precio FIJO): separado del bloque de opciones por un borde fino
+  // (color del token `border`, aplicado inline). El `gap` también viene del token de spacing.
+  feeBreakdown: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
+  feeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

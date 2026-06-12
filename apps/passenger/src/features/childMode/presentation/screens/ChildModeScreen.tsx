@@ -1,8 +1,10 @@
 import { useNavigation } from '@react-navigation/native';
 import { Banner, Button, SafeScreen, StatusPill, Text, TextField, useTheme } from '@veo/ui-kit';
+import { CHILD_MODE_FEE_CENTS } from '@veo/shared-types';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch, View } from 'react-native';
+import { formatPEN } from '../../../../shared/utils/format';
 import { isValidChildCode } from '../../domain/entities';
 import { useChildModeStore } from '../stores/childModeStore';
 
@@ -70,6 +72,16 @@ export function ChildModeScreen(): React.JSX.Element {
           onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
           maxLength={6}
           error={touched && !codeValid ? t('childMode.invalidCode') : undefined}
+        />
+      ) : null}
+
+      {/* Transparencia del recargo (BR-T07): se avisa al activar, no recién al confirmar. El monto sale
+          de la constante compartida (@veo/shared-types), misma fuente que el server, formateada en PEN. */}
+      {enabled ? (
+        <Banner
+          tone="info"
+          title={t('childMode.feeNotice', { amount: formatPEN(CHILD_MODE_FEE_CENTS) })}
+          style={{ marginTop: theme.spacing.lg }}
         />
       ) : null}
 
