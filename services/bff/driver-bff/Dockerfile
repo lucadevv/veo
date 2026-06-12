@@ -2,18 +2,22 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
+COPY patches/ ./patches/
 COPY packages/ ./packages/
 COPY services/bff/driver-bff/package.json ./services/bff/driver-bff/
 RUN pnpm install --frozen-lockfile --filter @veo/driver-bff...
 COPY services/bff/driver-bff/ ./services/bff/driver-bff/
-RUN pnpm --filter @veo/driver-bff build
+# Compila dependencias @veo/* en orden topologico y luego el servicio.
+RUN pnpm --filter @veo/driver-bff... build
+# node_modules de produccion autocontenido (sin devDeps, workspace packages empaquetados).
+RUN pnpm --filter @veo/driver-bff deploy --prod /prod/app
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/services/bff/driver-bff/dist ./dist
-COPY --from=builder /app/services/bff/driver-bff/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /prod/app/dist ./dist
+COPY --from=builder /prod/app/package.json ./
+COPY --from=builder /prod/app/node_modules ./node_modules
 EXPOSE 4002
 USER node
 CMD ["node", "dist/main.js"]
