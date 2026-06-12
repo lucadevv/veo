@@ -15,13 +15,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Usuario no-root (no corre como root). UID/GID 1000 alineado con el
+# securityContext del manifiesto K8s (runAsUser: 1000, fsGroup: 1000).
+RUN groupadd --system --gid 1000 veo \
+    && useradd --system --uid 1000 --gid veo --no-create-home --shell /usr/sbin/nologin veo
+
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY pyproject.toml ./
-RUN mkdir -p /app/models
+
+# Crea el dir de modelos ONNX y cede el workdir al usuario no-root para que
+# pueda leer el código y leer/escribir models/ (descarga en runtime o volumen).
+RUN mkdir -p /app/models && chown -R veo:veo /app
 
 EXPOSE 3013
 
@@ -31,5 +39,8 @@ EXPOSE 3013
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -fsS http://localhost:3013/health || exit 1
+
+# A partir de aquí el contenedor corre sin privilegios de root.
+USER veo
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3013"]
