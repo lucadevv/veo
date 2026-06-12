@@ -30,6 +30,8 @@ interface DriverReply {
   suspendedAt: string;
   /** BE-1b · nombre visible del conductor (de User.name vía la relación driver→user). "" si no registrado. */
   name: string;
+  /** Motivo del último rechazo de antecedentes; "" si NO está rechazado o no se dio motivo. */
+  rejectionReason: string;
 }
 
 const EMPTY_DRIVER: DriverReply = {
@@ -41,6 +43,7 @@ const EMPTY_DRIVER: DriverReply = {
   found: false,
   suspendedAt: '',
   name: '',
+  rejectionReason: '',
 };
 
 @Controller()
@@ -90,6 +93,7 @@ export class IdentityGrpcController {
     backgroundCheckStatus: string;
     averageRating: { toString(): string };
     suspendedAt: Date | null;
+    rejectionReason: string | null;
     user?: { name: string | null } | null;
   }): DriverReply {
     return {
@@ -102,6 +106,8 @@ export class IdentityGrpcController {
       suspendedAt: d.suspendedAt ? d.suspendedAt.toISOString() : '',
       // BE-1b — nombre del usuario asociado (driver→user). "" si no se incluyó / no registrado.
       name: d.user?.name ?? '',
+      // Motivo del último rechazo (dead-end fix); "" si no está rechazado o no se dio motivo.
+      rejectionReason: d.rejectionReason ?? '',
     };
   }
 }

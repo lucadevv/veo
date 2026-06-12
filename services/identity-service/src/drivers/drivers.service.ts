@@ -146,7 +146,14 @@ export class DriversService {
     });
   }
 
-  async reject(driverId: string): Promise<void> {
+  /**
+   * Operador rechaza los antecedentes del conductor (espejo de approve). Persiste el MOTIVO + el
+   * momento del rechazo y emite `driver.rejected` por OUTBOX en la MISMA tx (igual que approve emite
+   * driver.verified): así nunca hay rechazo sin evento ni evento sin rechazo. El conductor NO queda en
+   * dead-end: ve el motivo en la app (GET /drivers/me) y puede corregir-y-reenviar (resubmit).
+   * `reason` es opcional: "" si el operador no dio motivo (degradación honesta, nunca un motivo falso).
+   */
+  async reject(driverId: string, reason: string): Promise<void> {
     await this.prisma.write.$transaction(async (tx) => {
       // Lecturas DENTRO de la tx de escritura (espeja approve): sin lag de réplica ni TOCTOU
       // con un approve concurrente — el assert se serializa con el write.
@@ -159,14 +166,71 @@ export class DriversService {
         BackgroundCheckStatus.REJECTED,
       );
       kycStatusMachine.assertTransition(user.kycStatus, KycStatus.REJECTED);
+      const rejectedAt = new Date();
       await tx.driver.update({
         where: { id: driverId },
-        data: { backgroundCheckStatus: BackgroundCheckStatus.REJECTED },
+        data: {
+          backgroundCheckStatus: BackgroundCheckStatus.REJECTED,
+          rejectionReason: reason,
+          rejectedAt,
+        },
       });
       await tx.user.update({
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.REJECTED },
       });
+      const envelope = createEnvelope({
+        eventType: 'driver.rejected',
+        producer: 'identity-service',
+        payload: {
+          driverId: driver.id,
+          userId: driver.userId,
+          reason,
+          rejectedAt: rejectedAt.toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driver.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
+  /**
+   * Reenvío a revisión del conductor RECHAZADO (resubmit, BR-I01): tras corregir sus datos en la app,
+   * el conductor vuelve a la cola de aprobación. Lleva backgroundCheckStatus REJECTED→PENDING y el KYC
+   * del usuario REJECTED→PENDING (ambas transiciones se abrieron en las máquinas), y LIMPIA el motivo
+   * de rechazo. Idempotencia/seguridad: las máquinas RECHAZAN reenviar desde un estado que no sea
+   * REJECTED (p. ej. un conductor ya CLEARED no puede "reenviar"). Sin evento: el conductor vuelve a la
+   * cola de pendientes que el operador lista por estado PENDING (no hay consumidor de un "resubmitted").
+   */
+  async resubmit(userId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { userId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado');
+      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
+      backgroundCheckMachine.assertTransition(
+        driver.backgroundCheckStatus,
+        BackgroundCheckStatus.PENDING,
+      );
+      kycStatusMachine.assertTransition(user.kycStatus, KycStatus.PENDING);
+      const updated = await tx.driver.update({
+        where: { id: driver.id },
+        data: {
+          backgroundCheckStatus: BackgroundCheckStatus.PENDING,
+          rejectionReason: null,
+          rejectedAt: null,
+        },
+      });
+      await tx.user.update({
+        where: { id: driver.userId },
+        data: { kycStatus: KycStatus.PENDING },
+      });
+      return { id: updated.id, backgroundCheckStatus: updated.backgroundCheckStatus };
     });
   }
 

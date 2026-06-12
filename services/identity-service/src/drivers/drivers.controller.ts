@@ -59,6 +59,14 @@ class VerifyBiometricDto {
   frames!: string[];
 }
 
+class RejectDriverDto {
+  // Motivo del rechazo (opcional). Texto del operador que el conductor verá en la app. Sin motivo → "".
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 class UpdatePersonalInfoDto {
   @IsString()
   @MinLength(1)
@@ -162,8 +170,16 @@ export class DriversController {
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/reject')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Rechazar conductor' })
-  async reject(@Param('id') id: string): Promise<void> {
-    await this.drivers.reject(id);
+  @ApiOperation({ summary: 'Rechazar conductor (con motivo opcional)' })
+  async reject(@Param('id') id: string, @Body() dto: RejectDriverDto): Promise<void> {
+    await this.drivers.reject(id, dto.reason ?? '');
+  }
+
+  // ── Self-service: reenvío a revisión tras corregir (resubmit) ──
+  @Post('me/resubmit')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Reenviar a revisión tras un rechazo (REJECTED → PENDING)' })
+  resubmit(@CurrentUser() user: AuthenticatedUser) {
+    return this.drivers.resubmit(user.userId);
   }
 }

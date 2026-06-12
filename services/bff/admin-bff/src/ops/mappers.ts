@@ -43,6 +43,8 @@ export function driverRecordToApproval(r: DriverRecord): DriverApproval {
     fullName: null,
     phone: null,
     submittedAt: r.updatedAt,
+    // Motivo del último rechazo (proyectado del evento driver.rejected); null si no está rechazado.
+    rejectionReason: r.rejectionReason,
   };
 }
 

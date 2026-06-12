@@ -1179,6 +1179,15 @@ export const createdShareLink = z.object({
 });
 export type CreatedShareLink = z.infer<typeof createdShareLink>;
 
+/**
+ * POST /share/:shareId/revoke → respuesta. Revoca el enlace de seguimiento de la sesión actual
+ * (kill-switch del pasajero): la página pública deja de servir la ubicación al instante. Idempotente
+ * en el server (revocar un enlace ya revocado devuelve su `revokedAt` original). Additive: apps viejas
+ * que no conocen el endpoint siguen funcionando.
+ */
+export const revokedShareLink = z.object({ revokedAt: z.string() });
+export type RevokedShareLink = z.infer<typeof revokedShareLink>;
+
 /* ── Pagos (pasajero) ── */
 
 export const chargeRequest = z.object({
@@ -1727,6 +1736,12 @@ export const driverProfileView = z.object({
   kycStatus: z.string(),
   currentStatus: z.string(),
   backgroundCheckStatus: z.string(),
+  /**
+   * Motivo del último rechazo de antecedentes; `null` si NO está rechazado o no se dio motivo. La app
+   * lo muestra en la pantalla de RECHAZO (corregir-y-reenviar). El driver-bff lo resuelve por gRPC
+   * (DriverReply.rejectionReason, "" → null).
+   */
+  rejectionReason: z.string().nullable(),
   averageRating: z.number(),
   rating: z
     .object({
@@ -1744,6 +1759,17 @@ export const driverProfileView = z.object({
   }),
 });
 export type DriverProfileView = z.infer<typeof driverProfileView>;
+
+/**
+ * POST /drivers/me/resubmit → respuesta. El conductor RECHAZADO corrigió sus datos y reenvió a revisión
+ * (REJECTED → PENDING). Devuelve el estado de antecedentes resultante (PENDING). El driver-bff lo proxya
+ * a identity-service (REST interno firmado).
+ */
+export const driverResubmitResult = z.object({
+  id: z.string(),
+  backgroundCheckStatus: z.string(),
+});
+export type DriverResubmitResult = z.infer<typeof driverResubmitResult>;
 
 /* ── Datos personales del conductor (PII · PATCH /drivers/me/personal) ── */
 

@@ -39,4 +39,8 @@ message DriverReply {
   // BE-1b · nombre visible del conductor (de User.name vía la relación driver→user). "" si no registrado.
   // Lo consume el public-bff para enriquecer la card de la oferta de la puja con el nombre del conductor.
   string name = 8;
+  // Motivo del último rechazo de antecedentes del conductor; "" si NO está rechazado o no se dio motivo.
+  // Añadido sin romper compatibilidad (campo 9). Lo consume el driver-bff (GET /drivers/me) para que la
+  // app del conductor muestre el motivo en la pantalla de RECHAZO y ofrezca corregir-y-reenviar.
+  string rejection_reason = 9;
 }

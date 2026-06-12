@@ -9,6 +9,7 @@ import {
   driverPersonalData,
   driverPersonalDataRequest,
   driverProfileView,
+  driverResubmitResult,
   driverVehicleList,
   driverVehicleView,
   registerVehicleRequest,
@@ -26,6 +27,7 @@ import type {
   RegistrationDraft,
   RegistrationRepository,
   RegistrationSubmissionResult,
+  ResubmitResult,
   VehicleRegisterInput,
   VehicleView,
 } from '../../domain';
@@ -98,5 +100,10 @@ export class HttpRegistrationRepository implements RegistrationRepository {
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     const body = driverBiometricEnrollRequest.parse(input);
     return this.http.post('/drivers/biometric/enroll', {body, schema: driverBiometricEnrollResult});
+  }
+
+  resubmit(): Promise<ResubmitResult> {
+    // Sin body: identity resuelve el conductor desde la identidad propagada. Valida la respuesta.
+    return this.http.post('/drivers/me/resubmit', {body: {}, schema: driverResubmitResult});
   }
 }

@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PendingDriverActions } from '@/components/drivers/pending-driver-actions';
+import { RejectedDriverActions } from '@/components/drivers/rejected-driver-actions';
 
 /** Columnas de la flota verificada (ACTIVE/ALL · read-model). Sin acciones: aprobar/rechazar es del tab Pendientes. */
 const columns: ColumnDef<DriverApproval, unknown>[] = [
@@ -77,6 +78,41 @@ const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
   },
 ];
 
+/** Columnas de la cola de RECHAZADOS: muestra el motivo + permite re-aprobar (cierra el dead-end). */
+const rejectedColumns: ColumnDef<DriverApproval, unknown>[] = [
+  {
+    accessorKey: 'fullName',
+    header: 'Conductor',
+    cell: ({ row }) => (
+      <div className="flex flex-col">
+        <span className="text-ink">{row.original.fullName ?? '—'}</span>
+        <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+      </div>
+    ),
+  },
+  {
+    accessorKey: 'rejectionReason',
+    header: 'Motivo del rechazo',
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="text-ink-muted">
+        {row.original.rejectionReason ?? <span className="italic">Sin motivo registrado</span>}
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'submittedAt',
+    header: 'Rechazado',
+    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.submittedAt)}</span>,
+  },
+  {
+    id: 'actions',
+    header: 'Acciones',
+    enableSorting: false,
+    cell: ({ row }) => <RejectedDriverActions driver={row.original} />,
+  },
+];
+
 export default function DriversPage() {
   const [tab, setTab] = useState('PENDING');
   // La cola de pendientes viene de identity (pending-approval), NO del read-model (que solo tiene ACTIVE/SUSPENDED).
@@ -97,6 +133,7 @@ export default function DriversPage() {
           <TabsList>
             <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
             <TabsTrigger value="ACTIVE">Activos</TabsTrigger>
+            <TabsTrigger value="REJECTED">Rechazados</TabsTrigger>
             <TabsTrigger value="ALL">Todos</TabsTrigger>
           </TabsList>
 
@@ -115,19 +152,23 @@ export default function DriversPage() {
             )}
           </TabsContent>
 
-          {(['ACTIVE', 'ALL'] as const).map((value) => (
+          {(['ACTIVE', 'REJECTED', 'ALL'] as const).map((value) => (
             <TabsContent key={value} value={value}>
               {fleet.isError ? (
                 <ErrorState onRetry={() => void fleet.refetch()} />
               ) : (
                 <>
                   <DataTable
-                    caption="Listado de conductores"
-                    columns={columns}
+                    caption={value === 'REJECTED' ? 'Conductores rechazados' : 'Listado de conductores'}
+                    columns={value === 'REJECTED' ? rejectedColumns : columns}
                     data={fleetRows}
                     loading={fleet.isLoading}
-                    emptyTitle="Sin conductores"
-                    emptyDescription="No hay conductores en esta vista."
+                    emptyTitle={value === 'REJECTED' ? 'Sin conductores rechazados' : 'Sin conductores'}
+                    emptyDescription={
+                      value === 'REJECTED'
+                        ? 'No hay conductores con antecedentes rechazados.'
+                        : 'No hay conductores en esta vista.'
+                    }
                   />
                   <LoadMore
                     hasNextPage={!!fleet.hasNextPage}

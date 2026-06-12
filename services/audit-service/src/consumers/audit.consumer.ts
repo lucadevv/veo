@@ -82,6 +82,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'driver',
         resourceId: p.driverId,
       })),
+      // Rechazo de antecedentes (BR-S03): traza inmutable de la decisión. El payload trae al conductor
+      // (driverId); el operador que decidió se traza por el comando admin (audit.record en admin-bff).
+      // Acá actor=recurso=driverId (el sujeto de la decisión proyectada por el evento de dominio).
+      'driver.rejected': this.audited('driver.rejected', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
       'biometric.failed': this.audited('biometric.failed', (p) => ({
         actorId: p.driverId,
         resourceType: 'driver',

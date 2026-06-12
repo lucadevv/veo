@@ -13,6 +13,7 @@ import type {
   DriverOnboardRequest,
   DriverPersonalData,
   DriverPersonalDataRequest,
+  DriverResubmitResult,
   DriverVehicleView,
   RegisterVehicleRequest,
 } from '@veo/api-client';
@@ -37,6 +38,8 @@ export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
 export type VehicleRegisterInput = RegisterVehicleRequest;
 export type VehicleView = DriverVehicleView;
+/** Resultado de `POST /drivers/me/resubmit` (reenvío a revisión tras rechazo): estado de antecedentes. */
+export type ResubmitResult = DriverResubmitResult;
 
 /**
  * Tipo de vehículo declarado por el conductor en el alta. Re-export del enum CANÓNICO

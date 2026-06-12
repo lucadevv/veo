@@ -9,7 +9,12 @@ import { AdminRole } from '@veo/shared-types';
 import type { TripSummary, DriverApproval, TripDetail } from '@veo/api-client';
 import { OpsService, type PendingDriver, type PendingOperator } from './ops.service';
 import type { Page } from '../read-model/read-model.service';
-import { ListTripsQueryDto, ListDriversQueryDto, ApproveOperatorDto } from './dto/ops.dto';
+import {
+  ListTripsQueryDto,
+  ListDriversQueryDto,
+  ApproveOperatorDto,
+  RejectDriverDto,
+} from './dto/ops.dto';
 
 @ApiTags('ops')
 @Controller('ops')
@@ -62,9 +67,13 @@ export class OpsController {
   @Post('drivers/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Rechaza un conductor (compliance/admin)' })
-  rejectDriver(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
-    return this.ops.rejectDriver(user, id);
+  @ApiOperation({ summary: 'Rechaza un conductor con motivo opcional (compliance/admin)' })
+  rejectDriver(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: RejectDriverDto,
+  ): Promise<void> {
+    return this.ops.rejectDriver(user, id, dto.reason);
   }
 
   // ── Gestión de operadores (admin) ──

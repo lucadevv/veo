@@ -461,8 +461,13 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
       { id: 'u1', kycStatus: 'VERIFIED' },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await svc.reject('d1');
-    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'REJECTED' }]);
+    await svc.reject('d1', 'Antecedente penal hallado');
+    expect(driverWrites).toHaveLength(1);
+    expect(driverWrites[0]).toMatchObject({
+      backgroundCheckStatus: 'REJECTED',
+      rejectionReason: 'Antecedente penal hallado',
+    });
+    expect(driverWrites[0]?.rejectedAt).toBeInstanceOf(Date);
     expect(userWrites).toEqual([{ kycStatus: 'REJECTED' }]);
   });
 
@@ -476,7 +481,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
       { txDriver: { ...okDriver, backgroundCheckStatus: 'LEGACY_GARBAGE' } },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reject('d1')).rejects.toBeInstanceOf(InvalidStatusTransition);
+    await expect(svc.reject('d1', 'motivo')).rejects.toBeInstanceOf(InvalidStatusTransition);
     expect(driverWrites).toHaveLength(0);
     expect(userWrites).toHaveLength(0);
   });
@@ -491,8 +496,9 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
       },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reject('d1')).resolves.toBeUndefined();
-    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'REJECTED' }]);
+    await expect(svc.reject('d1', 'motivo')).resolves.toBeUndefined();
+    expect(driverWrites).toHaveLength(1);
+    expect(driverWrites[0]).toMatchObject({ backgroundCheckStatus: 'REJECTED', rejectionReason: 'motivo' });
   });
 
   it('reject: 404 si el conductor no existe (la lectura vive dentro de la tx)', async () => {
@@ -502,7 +508,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
       { txDriver: null },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reject('d1')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.reject('d1', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
     expect(driverWrites).toHaveLength(0);
   });
 
@@ -513,7 +519,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
       { txUser: null },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reject('d1')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.reject('d1', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
     expect(driverWrites).toHaveLength(0);
   });
 });

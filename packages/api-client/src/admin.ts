@@ -124,8 +124,19 @@ export const driverApproval = driverSummary.extend({
   fullName: z.string().nullable(),
   phone: z.string().nullable(),
   submittedAt: z.string().nullable(),
+  /** Motivo del último rechazo de antecedentes; `null` si no está rechazado o no se dio motivo. */
+  rejectionReason: z.string().nullable(),
 });
 export type DriverApproval = z.infer<typeof driverApproval>;
+
+/**
+ * POST /ops/drivers/:id/reject → body. Motivo OPCIONAL del rechazo: lo escribe el operador y el conductor
+ * lo VE en su app. admin-bff lo proxya a identity-service. Sin motivo ⇒ se omite (degradación honesta).
+ */
+export const rejectDriverRequest = z.object({
+  reason: z.string().max(500).optional(),
+});
+export type RejectDriverRequest = z.infer<typeof rejectDriverRequest>;
 
 /* ── Operadores del panel (staff): alta + asignación de roles RBAC (solo ADMIN/SUPERADMIN) ── */
 

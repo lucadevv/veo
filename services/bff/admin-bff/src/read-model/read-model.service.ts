@@ -17,6 +17,11 @@ const TRIPS = 'bff:rm:trips';
 const DRIVERS = 'bff:rm:drivers';
 const TTL_SECONDS = 60 * 60 * 24 * 14; // retención de 14 días en el read-model
 
+/** Normaliza un valor de hash Redis (ausente o "") a null; cualquier string no vacío se preserva. */
+function nonEmptyOrNull(value: string | undefined): string | null {
+  return value !== undefined && value !== '' ? value : null;
+}
+
 export interface TripRecord {
   id: string;
   status: TripStatus;
@@ -32,6 +37,8 @@ export interface DriverRecord {
   status: string;
   averageRating: number | null;
   backgroundCheckStatus: string;
+  /** Motivo del último rechazo de antecedentes; null si no está rechazado o no se dio motivo. */
+  rejectionReason: string | null;
   updatedAt: string;
 }
 
@@ -134,6 +141,12 @@ export class ReadModelService {
             ? Number(current.averageRating)
             : null,
       backgroundCheckStatus: rec.backgroundCheckStatus ?? current.backgroundCheckStatus ?? 'PENDING',
+      // null SOLO si se pasó explícito (re-aprobación limpia el motivo); undefined conserva el actual.
+      // El hash de Redis guarda "" para "sin motivo": nonEmptyOrNull lo normaliza (cadena vacía → null).
+      rejectionReason:
+        rec.rejectionReason !== undefined
+          ? rec.rejectionReason
+          : nonEmptyOrNull(current.rejectionReason),
       updatedAt: rec.updatedAt ?? new Date().toISOString(),
     };
     const score = Date.parse(merged.updatedAt) || Date.now();
@@ -145,6 +158,7 @@ export class ReadModelService {
       status: merged.status,
       averageRating: merged.averageRating === null ? '' : String(merged.averageRating),
       backgroundCheckStatus: merged.backgroundCheckStatus,
+      rejectionReason: merged.rejectionReason ?? '',
       updatedAt: merged.updatedAt,
     });
     pipe.expire(keyHash, TTL_SECONDS);
@@ -215,6 +229,7 @@ export class ReadModelService {
     status: h.status ?? 'UNKNOWN',
     averageRating: h.averageRating ? Number(h.averageRating) : null,
     backgroundCheckStatus: h.backgroundCheckStatus ?? 'PENDING',
+    rejectionReason: nonEmptyOrNull(h.rejectionReason),
     updatedAt: h.updatedAt ?? '',
   });
 }

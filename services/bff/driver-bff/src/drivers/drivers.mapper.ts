@@ -147,6 +147,8 @@ export function buildDriverProfile(
     kycStatus: user.found ? user.kycStatus : '',
     currentStatus: driver.currentStatus,
     backgroundCheckStatus: driver.backgroundCheckStatus,
+    // Wire gRPC entrega "" si no hay rechazo (proto3 defaults); lo normalizamos a null para la app.
+    rejectionReason: emptyToNull(driver.rejectionReason),
     averageRating: driver.averageRating,
     rating: aggregate.found
       ? {

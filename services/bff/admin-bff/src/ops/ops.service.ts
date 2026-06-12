@@ -139,12 +139,18 @@ export class OpsService {
     return res;
   }
 
-  async rejectDriver(identity: AuthUser, driverId: string): Promise<void> {
-    await this.identityRest.post<void>(`/drivers/${driverId}/reject`, { identity });
+  async rejectDriver(identity: AuthUser, driverId: string, reason?: string): Promise<void> {
+    // El motivo (si lo hay) viaja al identity-service, que lo persiste y emite driver.rejected.
+    await this.identityRest.post<void>(`/drivers/${driverId}/reject`, {
+      identity,
+      body: reason ? { reason } : undefined,
+    });
     await this.audit.record(identity, {
       action: 'driver.reject',
       resourceType: 'driver',
       resourceId: driverId,
+      // El motivo queda en la traza inmutable junto a la decisión (sin motivo ⇒ se omite la clave).
+      ...(reason ? { payload: { reason } } : {}),
     });
   }
 

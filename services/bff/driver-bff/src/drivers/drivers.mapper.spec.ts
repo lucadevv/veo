@@ -23,6 +23,7 @@ const driver: DriverReply = {
   found: true,
   suspendedAt: '',
   name: 'Khalid Ríos',
+  rejectionReason: '',
 };
 
 const user: UserReply = {
@@ -112,6 +113,19 @@ describe('buildDriverProfile', () => {
     expect(view.kycStatus).toBe('VERIFIED');
     expect(view.averageRating).toBe(4.8);
     expect(view.rating?.count30d).toBe(30);
+  });
+
+  it('rejectionReason: wire "" → null (no rechazado); un motivo real se propaga tal cual', () => {
+    const sinRechazo = buildDriverProfile(driver, user, aggregate, docsWith([]));
+    expect(sinRechazo.rejectionReason).toBeNull();
+
+    const rechazado = buildDriverProfile(
+      { ...driver, backgroundCheckStatus: 'REJECTED', rejectionReason: 'Licencia ilegible' },
+      user,
+      aggregate,
+      docsWith([]),
+    );
+    expect(rechazado.rejectionReason).toBe('Licencia ilegible');
   });
 });
 

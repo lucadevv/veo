@@ -1,5 +1,5 @@
 /** DTOs de los endpoints OPS. */
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdminRole } from '@veo/shared-types';
 
@@ -55,6 +55,14 @@ export class ListDriversQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/** POST /ops/drivers/:id/reject → body. Motivo OPCIONAL del rechazo (lo verá el conductor en su app). */
+export class RejectDriverDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 export class ApproveOperatorDto {

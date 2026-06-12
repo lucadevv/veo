@@ -40,7 +40,8 @@ export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
           toast({ tone: 'success', title: 'Conductor aprobado' });
         }}
       />
-      {/* El rechazo NO lleva motivo: identity-service no lo persiste (degradación honesta, no campo falso). */}
+      {/* El rechazo lleva MOTIVO: identity-service lo persiste, emite driver.rejected y el conductor lo VE
+          en su app (pantalla de rechazo) para corregir-y-reenviar. El motivo es obligatorio en la UI. */}
       <ConfirmDialog
         trigger={
           <Button size="sm" variant="secondary">
@@ -49,11 +50,13 @@ export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
           </Button>
         }
         title="Rechazar conductor"
-        description={`Se rechazará al conductor ${driver.id.slice(0, 8)}. La acción queda auditada.`}
+        description={`Se rechazará al conductor ${driver.id.slice(0, 8)}. El motivo se le mostrará para que corrija y reenvíe. La acción queda auditada.`}
         confirmLabel="Rechazar"
         variant="danger"
-        onConfirm={async () => {
-          await decision.mutateAsync({ id: driver.id, decision: 'reject' });
+        withReason
+        reasonLabel="Motivo del rechazo (visible para el conductor)"
+        onConfirm={async (reason) => {
+          await decision.mutateAsync({ id: driver.id, decision: 'reject', reason });
           toast({ tone: 'success', title: 'Conductor rechazado' });
         }}
       />

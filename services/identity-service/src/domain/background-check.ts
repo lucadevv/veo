@@ -3,9 +3,10 @@
  *
  * PENDING → CLEARED | REJECTED es la decisión del operador. Ningún estado es terminal:
  *  - CLEARED → REJECTED: revocación por hallazgo posterior.
- *  - REJECTED → CLEARED: re-evaluación/apelación aprobada (hoy el operador puede re-aprobar
- *    un rechazo, y ese flujo se preserva).
- * Lo que la tabla SÍ prohíbe: volver a PENDING una decisión ya tomada.
+ *  - REJECTED → CLEARED: re-evaluación/apelación aprobada (el operador puede re-aprobar un rechazo).
+ *  - REJECTED → PENDING: el conductor RECHAZADO corrige sus datos y REENVÍA a revisión (resubmit). Sin
+ *    esta transición el rechazo era un dead-end (el conductor no podía volver a la cola de aprobación).
+ * Lo que la tabla SÍ prohíbe: volver a PENDING desde CLEARED (una aprobación no "des-decide" sola).
  */
 import { BackgroundCheckStatus } from '../generated/prisma';
 import { createStateMachine, type StateMachine } from './state-machine';
@@ -16,7 +17,7 @@ export const BACKGROUND_CHECK_TRANSITIONS: Readonly<
 > = {
   [BackgroundCheckStatus.PENDING]: [BackgroundCheckStatus.CLEARED, BackgroundCheckStatus.REJECTED],
   [BackgroundCheckStatus.CLEARED]: [BackgroundCheckStatus.REJECTED],
-  [BackgroundCheckStatus.REJECTED]: [BackgroundCheckStatus.CLEARED],
+  [BackgroundCheckStatus.REJECTED]: [BackgroundCheckStatus.CLEARED, BackgroundCheckStatus.PENDING],
 };
 
 /** Máquina del eje Driver.backgroundCheckStatus. */

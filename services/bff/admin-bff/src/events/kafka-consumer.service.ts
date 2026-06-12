@@ -121,9 +121,24 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         userId: p.userId,
         status: 'ACTIVE',
         backgroundCheckStatus: 'CLEARED',
+        // Aprobado ⇒ ya no hay rechazo vigente: limpiamos el motivo (null explícito).
+        rejectionReason: null,
         updatedAt: p.verifiedAt,
       });
       this.counted('driver.verified');
+    };
+    record['driver.rejected'] = async (e) => {
+      const p = e.payload as EventPayload<'driver.rejected'>;
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        userId: p.userId,
+        status: 'REJECTED',
+        backgroundCheckStatus: 'REJECTED',
+        // "" (operador sin motivo) → null honesto; el panel muestra "sin motivo" en vez de un texto falso.
+        rejectionReason: p.reason ? p.reason : null,
+        updatedAt: p.rejectedAt,
+      });
+      this.counted('driver.rejected');
     };
     record['driver.flagged'] = async (e) => {
       const p = e.payload as EventPayload<'driver.flagged'>;

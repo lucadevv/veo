@@ -8,6 +8,7 @@ const PROFILE: DriverProfile = {
   kycStatus: 'APPROVED',
   currentStatus: 'OFFLINE',
   backgroundCheckStatus: 'CLEARED',
+  rejectionReason: null,
   averageRating: 4.8,
   rating: null,
   documents: [],

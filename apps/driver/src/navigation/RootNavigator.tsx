@@ -8,7 +8,7 @@ import {driverTheme, useTheme} from '@veo/ui-kit';
 import type {MainTabParamList, RootStackParamList} from './types';
 import {useSessionStore} from '../core/session/sessionStore';
 import {LoginScreen, OnboardingScreen, SplashScreen, useOnboardingStore} from '../features/auth/presentation';
-import {UnderReviewScreen, VehiclesScreen, useRegistrationGate, useRegistrationStore} from '../features/registration/presentation';
+import {RejectedScreen, UnderReviewScreen, VehiclesScreen, useRegistrationGate, useRegistrationStore} from '../features/registration/presentation';
 import {RegistrationNavigator} from './RegistrationNavigator';
 import {BiometricEnrollScreen, DashboardScreen, ShiftStartScreen} from '../features/shift/presentation';
 import {TripActiveScreen, TripHistoryScreen, TripIncomingScreen} from '../features/trips/presentation';
@@ -128,7 +128,7 @@ export const RootNavigator = (): React.JSX.Element => {
     return <SplashScreen />;
   }
 
-  // Conductor autenticado pero con el alta sin aprobar: wizard o pantalla de revisión.
+  // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
   if (registrationStatus === 'in_review') {
     return (
       <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
@@ -137,11 +137,16 @@ export const RootNavigator = (): React.JSX.Element => {
     );
   }
 
-  if (
-    registrationStatus === 'not_started' ||
-    registrationStatus === 'in_progress' ||
-    registrationStatus === 'rejected'
-  ) {
+  // Alta RECHAZADA: pantalla propia con el motivo + corregir-y-reenviar (NO cae al wizard mudo).
+  if (registrationStatus === 'rejected') {
+    return (
+      <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
+        <Stack.Screen name="Rejected" component={RejectedScreen} />
+      </Stack.Navigator>
+    );
+  }
+
+  if (registrationStatus === 'not_started' || registrationStatus === 'in_progress') {
     return (
       <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
         <Stack.Screen name="Registration" component={RegistrationNavigator} />

@@ -10,6 +10,7 @@ import type {
   DriverBiometricChallenge,
   DriverBiometricEnrollResult,
   DriverBiometricVerifyResult,
+  DriverResubmitResult,
   DriverShiftStartResult,
   DriverShiftStateView,
   DriverShiftStatusResult,
@@ -54,6 +55,18 @@ export class DriversService {
 
   onboard(identity: AuthenticatedUser, dto: OnboardDto): Promise<unknown> {
     return this.identity().post('/drivers/onboard', { identity, body: dto });
+  }
+
+  /**
+   * Reenvío a revisión tras un rechazo (resubmit) → identity-service por REST interno firmado. El
+   * conductor RECHAZADO corrigió sus datos en la app y vuelve a la cola de aprobación (REJECTED →
+   * PENDING). identity valida la transición con sus máquinas (un conductor no-rechazado obtiene 409).
+   */
+  resubmit(identity: AuthenticatedUser): Promise<DriverResubmitResult> {
+    return this.identity().post<DriverResubmitResult>('/drivers/me/resubmit', {
+      identity,
+      body: {},
+    });
   }
 
   /**

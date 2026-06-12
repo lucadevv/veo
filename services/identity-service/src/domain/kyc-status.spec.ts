@@ -15,6 +15,8 @@ const EXPECTED_VALID = new Set<string>([
   `${KycStatus.VERIFIED}->${KycStatus.REJECTED}`,
   // re-verificación exitosa (el rechazo no es terminal)
   `${KycStatus.REJECTED}->${KycStatus.VERIFIED}`,
+  // resubmit: el conductor rechazado corrige y reenvía a revisión (su KYC vuelve a la cola)
+  `${KycStatus.REJECTED}->${KycStatus.PENDING}`,
   // re-verificación tras caducar
   `${KycStatus.EXPIRED}->${KycStatus.VERIFIED}`,
   `${KycStatus.EXPIRED}->${KycStatus.REJECTED}`,
@@ -38,10 +40,14 @@ describe('Eje User.kycStatus · cobertura del producto cartesiano', () => {
     }
   }
 
-  it('una verificación decidida nunca vuelve a PENDING (no se "des-decide")', () => {
-    for (const from of [KycStatus.VERIFIED, KycStatus.REJECTED, KycStatus.EXPIRED]) {
+  it('una verificación VIGENTE/CADUCA no vuelve sola a PENDING (VERIFIED/EXPIRED no se "des-deciden")', () => {
+    for (const from of [KycStatus.VERIFIED, KycStatus.EXPIRED]) {
       expect(kycStatusMachine.canTransition(from, KycStatus.PENDING)).toBe(false);
     }
+  });
+
+  it('un RECHAZO sí puede volver a PENDING (resubmit del conductor: corrige y reenvía)', () => {
+    expect(kycStatusMachine.canTransition(KycStatus.REJECTED, KycStatus.PENDING)).toBe(true);
   });
 
   it('solo VERIFIED caduca: REJECTED → EXPIRED y PENDING → EXPIRED son inválidas', () => {

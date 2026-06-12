@@ -176,6 +176,16 @@
       "understood": "Entendido",
       "checkStatus": "Verificar mi estado",
       "contactSupport": "Contactar a soporte"
+    },
+    "rejected": {
+      "title": "Tu alta fue\nrechazada",
+      "subtitle": "Revisá el motivo, corregí lo observado y volvé a enviar tu solicitud a revisión.",
+      "reasonLabel": "Motivo del rechazo",
+      "noReason": "No se registró un motivo específico. Comunicate con soporte para más detalle.",
+      "fix": "Corregir mis datos",
+      "resubmit": "Reenviar a revisión",
+      "resubmitError": "No se pudo reenviar tu solicitud. Intentá de nuevo.",
+      "contactSupport": "Contactar a soporte"
     }
   },
   "shift": {

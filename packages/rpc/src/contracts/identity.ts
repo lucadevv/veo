@@ -31,4 +31,9 @@ export interface DriverReply {
   suspendedAt: string;
   /** BE-1b · nombre visible del conductor (de User.name vía driver→user); "" si no registrado. */
   name: string;
+  /**
+   * Motivo del último rechazo de antecedentes; "" si NO está rechazado o no se dio motivo. Lo consume
+   * el driver-bff (GET /drivers/me) para que la app muestre el motivo en la pantalla de rechazo.
+   */
+  rejectionReason: string;
 }

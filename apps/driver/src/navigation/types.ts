@@ -21,6 +21,8 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Registration: NavigatorScreenParams<RegistrationStackParamList>;
   UnderReview: undefined;
+  /** Alta RECHAZADA: muestra el motivo + corregir-y-reenviar (resubmit). Fuera del grupo wizard. */
+  Rejected: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   ShiftStart: undefined;
   BiometricEnroll: undefined;

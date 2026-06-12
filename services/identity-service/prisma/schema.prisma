@@ -195,6 +195,11 @@ model Driver {
   /// Momento del enrolamiento facial. Null = no enrolado.
   faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
   suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
+  /// Motivo del último rechazo de antecedentes (texto del operador). Null si nunca fue rechazado o si se
+  /// re-aprobó / reenvió. Lo expone el driver-bff (GET /drivers/me) para la pantalla de rechazo de la app.
+  rejectionReason       String?               @map("rejection_reason")
+  /// Momento del último rechazo de antecedentes (ISO). Null si nunca fue rechazado.
+  rejectedAt            DateTime?             @map("rejected_at") @db.Timestamptz
   createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 

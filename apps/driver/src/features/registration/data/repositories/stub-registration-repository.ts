@@ -10,6 +10,7 @@ import {
   type RegistrationDraft,
   type RegistrationRepository,
   type RegistrationSubmissionResult,
+  type ResubmitResult,
   type VehicleRegisterInput,
   type VehicleView,
 } from '../../domain';
@@ -101,6 +102,11 @@ export class StubRegistrationRepository implements RegistrationRepository {
   async enrollBiometric(_input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     await delay(500);
     return {enrolled: true, enrolledAt: new Date().toISOString()};
+  }
+
+  async resubmit(): Promise<ResubmitResult> {
+    await delay(400);
+    return {id: `dev-driver-${Date.now()}`, backgroundCheckStatus: 'PENDING'};
   }
 }
 

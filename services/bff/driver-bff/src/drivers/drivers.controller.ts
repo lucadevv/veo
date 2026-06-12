@@ -9,6 +9,7 @@ import type {
   DriverBiometricEnrollResult,
   DriverBiometricVerifyResult,
   DriverDocument,
+  DriverResubmitResult,
   DriverShiftStartResult,
   DriverShiftStateView,
   DriverShiftStatusResult,
@@ -68,6 +69,13 @@ export class DriversController {
   @ApiOperation({ summary: 'Onboarding del conductor (licencia) → PENDING de aprobación' })
   onboard(@CurrentUser() user: AuthenticatedUser, @Body() dto: OnboardDto): Promise<unknown> {
     return this.drivers.onboard(user, dto);
+  }
+
+  @Post('me/resubmit')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Reenviar a revisión tras un rechazo (REJECTED → PENDING)' })
+  resubmit(@CurrentUser() user: AuthenticatedUser): Promise<DriverResubmitResult> {
+    return this.drivers.resubmit(user);
   }
 
   @Patch('me/personal')

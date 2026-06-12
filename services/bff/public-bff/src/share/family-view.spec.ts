@@ -19,6 +19,7 @@ const driver: DriverReply = {
   found: true,
   suspendedAt: '',
   name: 'Khalid Ríos',
+  rejectionReason: '',
 };
 const aggregate: AggregateReply = {
   subjectId: 'drv-1',

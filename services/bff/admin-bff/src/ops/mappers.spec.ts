@@ -29,6 +29,7 @@ describe('mappers OPS', () => {
       status: 'ACTIVE',
       averageRating: null,
       backgroundCheckStatus: 'CLEARED',
+      rejectionReason: null,
       updatedAt: '2026-05-29T00:00:00.000Z',
     };
     expect(driverRecordToSummary(rec)).toEqual({

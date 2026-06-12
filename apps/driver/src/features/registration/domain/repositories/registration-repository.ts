@@ -8,6 +8,7 @@ import type {
   RegistrationDocumentView,
   RegistrationDraft,
   RegistrationSubmissionResult,
+  ResubmitResult,
   VehicleRegisterInput,
   VehicleView,
 } from '../entities';
@@ -56,4 +57,10 @@ export interface RegistrationRepository {
 
   /** POST /drivers/biometric/enroll — enrola el rostro de referencia (foto en base64). */
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult>;
+
+  /**
+   * POST /drivers/me/resubmit — reenvío a revisión tras un rechazo. El conductor RECHAZADO corrigió sus
+   * datos y vuelve a la cola de aprobación (REJECTED → PENDING). El backend valida la transición.
+   */
+  resubmit(): Promise<ResubmitResult>;
 }

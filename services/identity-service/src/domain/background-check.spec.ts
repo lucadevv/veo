@@ -14,6 +14,8 @@ const EXPECTED_VALID = new Set<string>([
   `${BackgroundCheckStatus.CLEARED}->${BackgroundCheckStatus.REJECTED}`,
   // re-evaluación / apelación aprobada
   `${BackgroundCheckStatus.REJECTED}->${BackgroundCheckStatus.CLEARED}`,
+  // resubmit: el conductor rechazado corrige y reenvía a revisión (vuelve a la cola de aprobación)
+  `${BackgroundCheckStatus.REJECTED}->${BackgroundCheckStatus.PENDING}`,
 ]);
 
 describe('Eje Driver.backgroundCheckStatus · cobertura del producto cartesiano (BR-I01)', () => {
@@ -34,19 +36,22 @@ describe('Eje Driver.backgroundCheckStatus · cobertura del producto cartesiano 
     }
   }
 
-  it('una decisión tomada no vuelve a PENDING (no se "des-decide")', () => {
+  it('una APROBACIÓN no vuelve sola a PENDING (CLEARED no se "des-decide")', () => {
     expect(
       backgroundCheckMachine.canTransition(
         BackgroundCheckStatus.CLEARED,
         BackgroundCheckStatus.PENDING,
       ),
     ).toBe(false);
+  });
+
+  it('un RECHAZO sí puede volver a PENDING (resubmit del conductor: corrige y reenvía)', () => {
     expect(
       backgroundCheckMachine.canTransition(
         BackgroundCheckStatus.REJECTED,
         BackgroundCheckStatus.PENDING,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('un status legacy fuera del enum es inválido hacia todo destino (fail-closed)', () => {

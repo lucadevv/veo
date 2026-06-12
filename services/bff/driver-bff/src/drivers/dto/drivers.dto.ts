@@ -237,6 +237,8 @@ export interface DriverProfileView {
   kycStatus: string;
   currentStatus: string;
   backgroundCheckStatus: string;
+  /** Motivo del último rechazo de antecedentes; null si no está rechazado o no se dio motivo. */
+  rejectionReason: string | null;
   averageRating: number;
   rating: {
     rollingAvg30d: number;
