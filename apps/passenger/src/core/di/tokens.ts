@@ -120,6 +120,7 @@ import type {
   ListOffersUseCase,
   ListScheduledTripsUseCase,
   RebidUseCase,
+  RevokeShareUseCase,
   ShareTripUseCase,
 } from '../../features/trip/domain/usecases';
 import type { MapsRepository } from '../../features/maps/domain/mapsRepository';
@@ -214,6 +215,7 @@ export const TOKENS = {
   listScheduledTripsUseCase: createToken<ListScheduledTripsUseCase>('ListScheduledTripsUseCase'),
   cancelScheduledTripUseCase: createToken<CancelScheduledTripUseCase>('CancelScheduledTripUseCase'),
   shareTripUseCase: createToken<ShareTripUseCase>('ShareTripUseCase'),
+  revokeShareUseCase: createToken<RevokeShareUseCase>('RevokeShareUseCase'),
   // Casos de uso · Preferencia de compartir cámara (CameraControl)
   getCameraSharePreferenceUseCase: createToken<GetCameraSharePreferenceUseCase>(
     'GetCameraSharePreferenceUseCase',

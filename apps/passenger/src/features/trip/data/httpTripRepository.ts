@@ -12,6 +12,8 @@ import {
   offerList,
   type OfferView,
   offerView,
+  type RevokedShareLink,
+  revokedShareLink,
   type ScheduledTripList,
   scheduledTripList,
   type ShareTripRequest,
@@ -115,6 +117,15 @@ export class HttpTripRepository implements TripRepository {
     return this.http.post(`/share/${tripId}`, {
       body: input,
       schema: createdShareLink,
+    });
+  }
+
+  revokeShare(shareId: string): Promise<RevokedShareLink> {
+    // Kill-switch: revoca el enlace de seguimiento de la sesión actual (la página pública deja de
+    // servir la ubicación al instante). Idempotente en el server (revocar un revocado = no-op).
+    return this.http.post(`/share/${shareId}/revoke`, {
+      body: {},
+      schema: revokedShareLink,
     });
   }
 

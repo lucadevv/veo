@@ -4,6 +4,7 @@ import type {
   GeoPoint,
   OfferList,
   OfferView,
+  RevokedShareLink,
   ScheduledTripList,
   ShareTripRequest,
   SurgeQuote,
@@ -197,6 +198,20 @@ export class ShareTripUseCase {
 
   execute(tripId: string, input?: ShareTripRequest): Promise<CreatedShareLink> {
     return this.repository.shareTrip(tripId, input);
+  }
+}
+
+/**
+ * Revoca el enlace de seguimiento de la sesión actual (POST /share/:shareId/revoke). Kill-switch
+ * del pasajero: la página pública deja de servir la ubicación al instante. Idempotente en el server
+ * (revocar un enlace ya revocado devuelve su `revokedAt` original sin error). La presentación toma
+ * `revokedAt` solo como confirmación; el efecto real es server-authoritative.
+ */
+export class RevokeShareUseCase {
+  constructor(private readonly repository: TripRepository) {}
+
+  execute(shareId: string): Promise<RevokedShareLink> {
+    return this.repository.revokeShare(shareId);
   }
 }
 

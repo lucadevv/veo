@@ -44,7 +44,10 @@ function makePrisma(opts: { snapshot?: SnapshotStub | null; link?: LinkStub | nu
     },
     write: {
       $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
-      shareLink: { update: vi.fn(async () => undefined) },
+      shareLink: {
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
     },
   };
 }
@@ -179,5 +182,28 @@ describe('ShareService.revoke · pertenencia falla-cerrado', () => {
 
     expect(res.revokedAt).toBeTruthy();
     expect(prisma.write.shareLink.update).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ShareService.revokeAllForTrip · auto-revoke al terminar (kill-switch automático)', () => {
+  it('revoca SOLO los enlaces vivos del viaje (filtra revokedAt:null) — sin userId', async () => {
+    const prisma = makePrisma();
+    (prisma.write.shareLink.updateMany as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ count: 2 });
+    const svc = new ShareService(prisma as never, config);
+
+    const res = await svc.revokeAllForTrip('trip-1');
+
+    expect(res.revoked).toBe(2);
+    expect(prisma.write.shareLink.updateMany).toHaveBeenCalledOnce();
+    const [args] = (prisma.write.shareLink.updateMany as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(args.where).toMatchObject({ tripId: 'trip-1', revokedAt: null });
+    expect(args.data.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it('idempotente: viaje sin enlaces vivos → revoked=0 (no-op, no rompe)', async () => {
+    const prisma = makePrisma();
+    const svc = new ShareService(prisma as never, config);
+
+    await expect(svc.revokeAllForTrip('trip-1')).resolves.toEqual({ revoked: 0 });
   });
 });

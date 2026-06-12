@@ -633,6 +633,18 @@ export const common = {
     shareTitle: 'Sigue mi viaje en VEO',
     shareMessage: 'Estoy en un viaje con VEO. Sigue mi recorrido en vivo aquí: {{url}}',
     shareError: 'No pudimos generar el enlace para compartir. Inténtalo de nuevo.',
+    // Enlace de seguimiento ACTIVO (kill-switch): mientras el enlace vive, el pasajero puede dejar de
+    // compartir su ubicación al instante. Honesto: el efecto lo aplica el server (revoca el enlace).
+    sharingActive: 'Compartiendo ubicación',
+    shareExpiresIn: 'Expira en {{countdown}}',
+    revokeShare: 'Dejar de compartir',
+    revokeShareTitle: '¿Dejar de compartir tu ubicación?',
+    revokeShareConfirm: 'Dejar de compartir',
+    revokeShareBody:
+      'Cualquiera con el enlace dejará de ver tu ubicación al instante. Esto revoca el enlace que compartiste en este viaje.',
+    revokeShareError: 'No pudimos revocar el enlace. Inténtalo de nuevo.',
+    revokeShareKeep: 'Seguir compartiendo',
+    shareRevokedBanner: 'Dejaste de compartir tu ubicación.',
 
     // Parada negociada en viaje (Lote C3): el pasajero propone una parada durante el viaje en curso; el
     // conductor la acepta o rechaza. El server calcula el costo adicional y la ruta (nunca el cliente).

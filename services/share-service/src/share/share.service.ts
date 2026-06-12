@@ -261,6 +261,21 @@ export class ShareService {
   }
 
   /**
+   * Auto-revoca TODOS los enlaces vivos de un viaje (kill-switch automático al terminar: trip.completed/
+   * cancelled/failed). Sin userId — lo dispara un evento de dominio del propio sistema, no el pasajero;
+   * el ownership ya lo garantizó la creación del enlace. IDEMPOTENTE: filtra `revokedAt: null`, así una
+   * redelivery Kafka (at-least-once) o un viaje sin enlaces es un no-op silencioso. Devuelve cuántos se
+   * revocaron (0 = nada que hacer). No emite eventos: revocar es un cambio de estado local del enlace.
+   */
+  async revokeAllForTrip(tripId: string): Promise<{ revoked: number }> {
+    const result = await this.prisma.write.shareLink.updateMany({
+      where: { tripId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { revoked: result.count };
+  }
+
+  /**
    * Página pública (sin login): valida el token (firma + expiración), comprueba el estado autoritativo
    * (revocado/expirado/usos), incrementa usedCount, registra la vista y publica share.viewed (outbox).
    * Devuelve los datos de seguimiento para la "página familia".

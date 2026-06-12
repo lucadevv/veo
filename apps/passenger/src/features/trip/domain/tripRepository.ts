@@ -2,6 +2,7 @@ import type {
   CancelTripRequest,
   CreateTripRequest,
   CreatedShareLink,
+  RevokedShareLink,
   GeoPoint,
   OfferList,
   OfferView,
@@ -66,6 +67,11 @@ export interface TripRepository {
   getVideoGrant(tripId: string): Promise<TripVideoGrant>;
   /** POST /share/:tripId → crea un enlace público firmado de seguimiento del viaje en curso. */
   shareTrip(tripId: string, input?: ShareTripRequest): Promise<CreatedShareLink>;
+  /**
+   * POST /share/:shareId/revoke → revoca el enlace de seguimiento (kill-switch del pasajero): la
+   * página pública deja de servir la ubicación al instante. Idempotente (revocar un revocado = no-op).
+   */
+  revokeShare(shareId: string): Promise<RevokedShareLink>;
   /** GET /trips/scheduled → viajes PROGRAMADOS (estado SCHEDULED) del pasajero, ordenados por hora. */
   listScheduledTrips(): Promise<ScheduledTripList>;
   /**

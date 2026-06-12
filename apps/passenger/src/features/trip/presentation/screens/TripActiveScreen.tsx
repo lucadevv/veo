@@ -13,6 +13,7 @@ import {
   RoutePin,
   SafeScreen,
   SosButton,
+  StatusPill,
   Text,
   TextField,
   useTheme,
@@ -35,6 +36,7 @@ import { TripStatusPill } from '../components/TripStatusPill';
 import { EnterView } from '../components/motion';
 import { IconChat, IconRoute, IconShare } from '../components/icons';
 import { usePassengerTripSocket } from '../hooks/usePassengerTripSocket';
+import { useActiveTripStore } from '../stores/activeTripStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'TripActive'>;
@@ -64,7 +66,16 @@ export function TripActiveScreen(): React.JSX.Element {
   const cancelTrip = useDependency(TOKENS.cancelTripUseCase);
   const changeDestination = useDependency(TOKENS.changeDestinationUseCase);
   const shareTrip = useDependency(TOKENS.shareTripUseCase);
+  const revokeShare = useDependency(TOKENS.revokeShareUseCase);
   const history = useDependency(TOKENS.tripHistoryRepository);
+
+  // Enlace de seguimiento ACTIVO de la sesión (kill-switch R3): el id se RETIENE al crear el enlace
+  // para poder revocarlo (antes se descartaba → endpoint de revoke inalcanzable). Vive en el store del
+  // viaje activo (sobrevive al desmontaje del sheet); `clear()` del viaje lo arrastra (lifecycle).
+  const activeShareId = useActiveTripStore((s) => s.activeShareId);
+  const shareExpiresAt = useActiveTripStore((s) => s.shareExpiresAt);
+  const setActiveShare = useActiveTripStore((s) => s.setActiveShare);
+  const clearShare = useActiveTripStore((s) => s.clearShare);
 
   const live = usePassengerTripSocket(tripId);
 
@@ -111,6 +122,27 @@ export function TripActiveScreen(): React.JSX.Element {
   const [reason, setReason] = useState('');
   const [picking, setPicking] = useState(false);
   const [newDestination, setNewDestination] = useState<GeoPoint | null>(null);
+  // Hoja de confirmación del kill-switch + banner de éxito (estado D, "ya dejaste de compartir").
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [justRevoked, setJustRevoked] = useState(false);
+
+  // Countdown "Expira en …" del enlace activo (estado C). Se re-renderiza por minuto: el segundo a
+  // segundo es ruido visual para un TTL de hasta 2h. `null` si no hay enlace o ya venció.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!shareExpiresAt) return undefined;
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [shareExpiresAt]);
+  const shareCountdown = useMemo(() => {
+    if (!shareExpiresAt) return null;
+    const remainingMs = new Date(shareExpiresAt).getTime() - nowMs;
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+    const totalMinutes = Math.ceil(remainingMs / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`;
+  }, [shareExpiresAt, nowMs]);
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelTrip.execute(tripId, reason.trim() || undefined),
@@ -133,14 +165,33 @@ export function TripActiveScreen(): React.JSX.Element {
 
   // Compartir viaje con la familia: crea el enlace público firmado y abre la hoja nativa de
   // compartir. Errores de red o de la hoja se capturan en la mutación (sin unhandled rejection).
+  // RETENEMOS el enlace (setActiveShare) ANTES de abrir la hoja nativa: el link YA existe en el server,
+  // así el botón "Dejar de compartir" aparece aunque el usuario cancele el sheet nativo (kill-switch R3).
   const shareMutation = useMutation({
     mutationFn: async () => {
       const link = await shareTrip.execute(tripId);
+      setActiveShare(link.shareId, link.expiresAt);
+      setJustRevoked(false);
       await Share.share({
         title: t('trip.shareTitle'),
         message: t('trip.shareMessage', { url: link.url }),
         url: link.url,
       });
+    },
+  });
+
+  // Kill-switch: revoca el enlace de la sesión actual (la página pública deja de servir la ubicación al
+  // instante). Idempotente en el server. En éxito: olvida el enlace (vuelve al estado A) + cierra la hoja
+  // + muestra el banner de confirmación. En error: la hoja NO se cierra y muestra un banner de error.
+  const revokeMutation = useMutation({
+    mutationFn: () => {
+      if (!activeShareId) throw new Error('no-active-share');
+      return revokeShare.execute(activeShareId);
+    },
+    onSuccess: () => {
+      clearShare();
+      setRevokeOpen(false);
+      setJustRevoked(true);
     },
   });
 
@@ -368,19 +419,48 @@ export function TripActiveScreen(): React.JSX.Element {
                   leftIcon={<IconRoute color={theme.colors.ink} size={18} />}
                   onPress={() => setPicking(true)}
                 />
-                {/* Compartir viaje con la familia: visible mientras el viaje no haya terminado. */}
-                <Button
-                  label={t('trip.share')}
-                  variant="secondary"
-                  fullWidth
-                  leftIcon={<IconShare color={theme.colors.ink} size={18} />}
-                  loading={shareMutation.isPending}
-                  disabled={shareMutation.isPending}
-                  onPress={() => shareMutation.mutate()}
-                />
-                {shareMutation.isError ? (
-                  <Banner tone="danger" title={t('trip.shareError')} />
-                ) : null}
+                {/* Compartir viaje con la familia: visible mientras el viaje no haya terminado.
+                    Estado A (sin enlace) → botón de compartir; estado C (enlace activo) → pill "en vivo"
+                    + countdown + botón danger de kill-switch. El estado B (generando) es el `loading`. */}
+                {activeShareId == null ? (
+                  <>
+                    <Button
+                      label={t('trip.share')}
+                      variant="secondary"
+                      fullWidth
+                      leftIcon={<IconShare color={theme.colors.ink} size={18} />}
+                      loading={shareMutation.isPending}
+                      disabled={shareMutation.isPending}
+                      onPress={() => shareMutation.mutate()}
+                    />
+                    {shareMutation.isError ? (
+                      <Banner tone="danger" title={t('trip.shareError')} />
+                    ) : null}
+                    {justRevoked ? (
+                      <Banner tone="success" title={t('trip.shareRevokedBanner')} />
+                    ) : null}
+                  </>
+                ) : (
+                  <Card variant="outlined" padding="lg">
+                    <View style={{ gap: theme.spacing.sm }}>
+                      <StatusPill label={t('trip.sharingActive')} tone="accent" live />
+                      {shareCountdown != null ? (
+                        <Text variant="footnote" color="inkMuted">
+                          {t('trip.shareExpiresIn', { countdown: shareCountdown })}
+                        </Text>
+                      ) : null}
+                      <Button
+                        label={t('trip.revokeShare')}
+                        variant="danger"
+                        fullWidth
+                        onPress={() => {
+                          revokeMutation.reset();
+                          setRevokeOpen(true);
+                        }}
+                      />
+                    </View>
+                  </Card>
+                )}
               </>
             )}
             <Button
@@ -426,6 +506,40 @@ export function TripActiveScreen(): React.JSX.Element {
             onChangeText={setReason}
             multiline
           />
+        </View>
+      </BottomSheet>
+
+      {/* Confirmación del kill-switch (espeja el patrón "Cancelar viaje"): footer danger/ghost. En error
+          la hoja NO se cierra (banner danger); el éxito la cierra desde `revokeMutation.onSuccess`. */}
+      <BottomSheet
+        visible={revokeOpen}
+        onClose={() => setRevokeOpen(false)}
+        title={t('trip.revokeShareTitle')}
+        footer={
+          <View style={{ gap: theme.spacing.sm }}>
+            <Button
+              label={t('trip.revokeShareConfirm')}
+              variant="danger"
+              fullWidth
+              loading={revokeMutation.isPending}
+              onPress={() => revokeMutation.mutate()}
+            />
+            <Button
+              label={t('trip.revokeShareKeep')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setRevokeOpen(false)}
+            />
+          </View>
+        }
+      >
+        <View style={{ gap: theme.spacing.md }}>
+          <Text variant="callout" color="inkMuted">
+            {t('trip.revokeShareBody')}
+          </Text>
+          {revokeMutation.isError ? (
+            <Banner tone="danger" title={t('trip.revokeShareError')} />
+          ) : null}
         </View>
       </BottomSheet>
     </SafeScreen>

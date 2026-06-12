@@ -126,6 +126,7 @@ import {
   ListOffersUseCase,
   ListScheduledTripsUseCase,
   RebidUseCase,
+  RevokeShareUseCase,
   ShareTripUseCase,
 } from '../../features/trip/domain/usecases';
 import { BackgroundGeolocationLocationProvider } from '../../shared/location/data/backgroundGeolocationLocationProvider';
@@ -392,6 +393,10 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.shareTripUseCase,
     (c) => new ShareTripUseCase(c.resolve(TOKENS.tripRepository)),
+  );
+  container.register(
+    TOKENS.revokeShareUseCase,
+    (c) => new RevokeShareUseCase(c.resolve(TOKENS.tripRepository)),
   );
   // Casos de uso · Preferencia de compartir cámara (CameraControl)
   container.register(
