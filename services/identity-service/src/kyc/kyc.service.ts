@@ -13,7 +13,8 @@ import {
   type BiometricChallenge,
   type BiometricProvider,
 } from '../ports/biometric/biometric.port';
-import { Prisma } from '../generated/prisma';
+import { KycStatus, Prisma } from '../generated/prisma';
+import { kycStatusMachine } from '../domain/kyc-status';
 import type { Env } from '../config/env.schema';
 
 /** Entrada de la verificación KYC del pasajero: reto + frames del reto en base64 plano. */
@@ -42,11 +43,11 @@ export class KycService {
   }
 
   /** Carga el pasajero (User type PASSENGER) o lanza el error adecuado. */
-  private async loadPassenger(userId: string): Promise<{ id: string }> {
+  private async loadPassenger(userId: string): Promise<{ id: string; kycStatus: KycStatus }> {
     const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.type !== 'PASSENGER') throw new ForbiddenError('El usuario no es pasajero');
-    return { id: user.id };
+    return { id: user.id, kycStatus: user.kycStatus };
   }
 
   /** Emite un reto de liveness activo para el KYC del pasajero. */
@@ -86,18 +87,25 @@ export class KycService {
     const verificationId = uuidv7();
 
     if (passed) {
+      // Cubre la re-verificación idempotente (VERIFIED → VERIFIED) y falla cerrado ante un
+      // kycStatus legacy fuera del enum; PENDING nunca se "des-decide" (lo garantiza la tabla).
+      kycStatusMachine.assertTransition(passenger.kycStatus, KycStatus.VERIFIED);
       const verifiedAt = new Date();
       await this.prisma.write.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: passenger.id },
-          data: { kycStatus: 'VERIFIED', faceEmbedding: embedding, kycVerifiedAt: verifiedAt },
+          data: {
+            kycStatus: KycStatus.VERIFIED,
+            faceEmbedding: embedding,
+            kycVerifiedAt: verifiedAt,
+          },
         });
         const envelope = createEnvelope({
           eventType: 'user.kyc_verified',
           producer: 'identity-service',
           payload: {
             userId: passenger.id,
-            kycStatus: 'VERIFIED',
+            kycStatus: KycStatus.VERIFIED,
             verifiedAt: verifiedAt.toISOString(),
           },
         });
@@ -109,10 +117,10 @@ export class KycService {
           },
         });
       });
-      return { status: 'VERIFIED', verificationId };
+      return { status: KycStatus.VERIFIED, verificationId };
     }
 
     // Fallo de liveness: no cambiamos kycStatus (queda PENDING) ni emitimos verified.
-    return { status: 'REJECTED', verificationId, reason: 'liveness_failed' };
+    return { status: KycStatus.REJECTED, verificationId, reason: 'liveness_failed' };
   }
 }

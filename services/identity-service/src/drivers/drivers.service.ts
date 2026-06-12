@@ -20,7 +20,10 @@ import {
   type BiometricChallenge,
   type BiometricProvider,
 } from '../ports/biometric/biometric.port';
-import { Prisma } from '../generated/prisma';
+import { BackgroundCheckStatus, DriverStatus, KycStatus, Prisma } from '../generated/prisma';
+import { backgroundCheckMachine, isBackgroundCleared } from '../domain/background-check';
+import { driverStatusMachine, type SelfServiceDriverStatus } from '../domain/driver-status';
+import { kycStatusMachine } from '../domain/kyc-status';
 import type { Env } from '../config/env.schema';
 
 const MAX_BIO_FAILS = 3;
@@ -92,8 +95,8 @@ export class DriversService {
         userId,
         licenseNumber: input.licenseNumber,
         licenseExpiresAt: new Date(input.licenseExpiresAt),
-        currentStatus: 'OFFLINE',
-        backgroundCheckStatus: 'PENDING',
+        currentStatus: DriverStatus.OFFLINE,
+        backgroundCheckStatus: BackgroundCheckStatus.PENDING,
       },
     });
     return { driverId: driver.id, backgroundCheckStatus: driver.backgroundCheckStatus };
@@ -101,7 +104,7 @@ export class DriversService {
 
   listPendingApproval(): Promise<{ id: string; userId: string; licenseNumber: string | null }[]> {
     return this.prisma.read.driver.findMany({
-      where: { backgroundCheckStatus: 'PENDING' },
+      where: { backgroundCheckStatus: BackgroundCheckStatus.PENDING },
       select: { id: true, userId: true, licenseNumber: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -112,11 +115,21 @@ export class DriversService {
     return this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
       if (!driver) throw new NotFoundError('Conductor no encontrado');
+      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
+      backgroundCheckMachine.assertTransition(
+        driver.backgroundCheckStatus,
+        BackgroundCheckStatus.CLEARED,
+      );
+      kycStatusMachine.assertTransition(user.kycStatus, KycStatus.VERIFIED);
       const updated = await tx.driver.update({
         where: { id: driverId },
-        data: { backgroundCheckStatus: 'CLEARED' },
+        data: { backgroundCheckStatus: BackgroundCheckStatus.CLEARED },
       });
-      await tx.user.update({ where: { id: driver.userId }, data: { kycStatus: 'VERIFIED' } });
+      await tx.user.update({
+        where: { id: driver.userId },
+        data: { kycStatus: KycStatus.VERIFIED },
+      });
       const envelope = createEnvelope({
         eventType: 'driver.verified',
         producer: 'identity-service',
@@ -134,11 +147,26 @@ export class DriversService {
   }
 
   async reject(driverId: string): Promise<void> {
-    const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
-    if (!driver) throw new NotFoundError('Conductor no encontrado');
     await this.prisma.write.$transaction(async (tx) => {
-      await tx.driver.update({ where: { id: driverId }, data: { backgroundCheckStatus: 'REJECTED' } });
-      await tx.user.update({ where: { id: driver.userId }, data: { kycStatus: 'REJECTED' } });
+      // Lecturas DENTRO de la tx de escritura (espeja approve): sin lag de réplica ni TOCTOU
+      // con un approve concurrente — el assert se serializa con el write.
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado');
+      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
+      backgroundCheckMachine.assertTransition(
+        driver.backgroundCheckStatus,
+        BackgroundCheckStatus.REJECTED,
+      );
+      kycStatusMachine.assertTransition(user.kycStatus, KycStatus.REJECTED);
+      await tx.driver.update({
+        where: { id: driverId },
+        data: { backgroundCheckStatus: BackgroundCheckStatus.REJECTED },
+      });
+      await tx.user.update({
+        where: { id: driver.userId },
+        data: { kycStatus: KycStatus.REJECTED },
+      });
     });
   }
 
@@ -247,7 +275,7 @@ export class DriversService {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
     if (d.suspendedAt) throw new ForbiddenError('Conductor suspendido');
-    if (d.backgroundCheckStatus !== 'CLEARED') throw new ForbiddenError('KYC no aprobado');
+    if (!isBackgroundCleared(d.backgroundCheckStatus)) throw new ForbiddenError('KYC no aprobado');
     if (d.licenseExpiresAt && d.licenseExpiresAt.getTime() < Date.now()) {
       throw new ForbiddenError('Licencia vencida');
     }
@@ -263,6 +291,16 @@ export class DriversService {
       session.livenessPassed && session.matchPassed && session.score >= this.minScore;
 
     await this.prisma.write.$transaction(async (tx) => {
+      if (passed) {
+        // Re-lee el estado DENTRO de la tx (no la réplica) y asserta ANTES de escribir:
+        // el assert queda serializado y su rollback no se lleva el registro de auditoría.
+        const fresh = await tx.driver.findUnique({
+          where: { id: d.id },
+          select: { currentStatus: true },
+        });
+        if (!fresh) throw new NotFoundError('Conductor no encontrado');
+        driverStatusMachine.assertTransition(fresh.currentStatus, DriverStatus.AVAILABLE);
+      }
       await tx.biometricCheck.create({
         data: {
           userId,
@@ -276,7 +314,7 @@ export class DriversService {
       if (passed) {
         await tx.driver.update({
           where: { id: d.id },
-          data: { currentStatus: 'AVAILABLE', lastVerifiedAt: new Date() },
+          data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
         });
         const envelope = createEnvelope({
           eventType: 'driver.verified',
@@ -366,9 +404,17 @@ export class DriversService {
     };
   }
 
-  async setStatus(userId: string, status: 'OFFLINE' | 'ON_BREAK' | 'AVAILABLE'): Promise<{ status: string }> {
+  /**
+   * Cambio de estado de turno autoservicio (fin de turno / pausa). QUÉ estados puede PEDIR el
+   * conductor lo restringe el tipo (SelfServiceDriverStatus: solo OFFLINE/ON_BREAK); si la
+   * transición desde su estado actual es legítima lo decide la máquina (no hay pausa sin turno).
+   * Cualquier vuelta a AVAILABLE (iniciar turno o volver de pausa) NO pasa por aquí: vive en
+   * startShift detrás del gate biométrico, y el tipo lo garantiza en compile-time.
+   */
+  async setStatus(userId: string, status: SelfServiceDriverStatus): Promise<{ status: string }> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
+    driverStatusMachine.assertTransition(d.currentStatus, status);
     const updated = await this.prisma.write.driver.update({
       where: { id: d.id },
       data: { currentStatus: status },

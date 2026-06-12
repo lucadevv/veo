@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '@veo/utils';
 import { DriversService } from './drivers.service';
+import { InvalidStatusTransition } from '../domain/state-machine';
 import type { Env } from '../config/env.schema';
 
 const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90 });
@@ -10,20 +11,29 @@ const okDriver = {
   id: 'd1',
   userId: 'u1',
   suspendedAt: null as Date | null,
+  currentStatus: 'OFFLINE',
   backgroundCheckStatus: 'CLEARED',
   licenseExpiresAt: futureLicense,
   faceEmbedding: [0.1, 0.2, 0.3],
 };
 
-function makePrisma(driver: unknown) {
+/** Prisma doble: `txDriver` permite simular que otro proceso movió el estado entre la réplica y la tx. */
+function makePrisma(driver: unknown, txDriver: unknown = driver) {
+  const bioChecks: unknown[] = [];
   return {
+    bioChecks,
     read: { driver: { findUnique: async () => driver } },
     write: {
       driver: { update: async () => ({}) },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({
-          biometricCheck: { create: async () => ({}) },
-          driver: { update: async () => ({}) },
+          biometricCheck: {
+            create: async (args: unknown) => {
+              bioChecks.push(args);
+              return {};
+            },
+          },
+          driver: { findUnique: async () => txDriver, update: async () => ({}) },
           outboxEvent: { create: async () => ({}) },
         }),
     },
@@ -148,8 +158,9 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
   });
 
   it('rechaza y cuenta el intento cuando el sessionRef refleja una verificación fallida', async () => {
+    const prisma = makePrisma(okDriver);
     const svc = new DriversService(
-      makePrisma(okDriver) as never,
+      prisma as never,
       makeRedis({
         sessions: session('bad', { score: 40, livenessPassed: false, matchPassed: false }),
       }) as never,
@@ -159,6 +170,24 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
     await expect(svc.startShift('u1', { sessionRef: 'bad' })).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
+    // El intento fallido SÍ queda auditado (el assert de transición no aplica al camino fallido).
+    expect(prisma.bioChecks).toHaveLength(1);
+  });
+
+  it('si una suspensión cayó entre la réplica y la tx, el assert serializado rechaza ANTES de la auditoría', async () => {
+    // Réplica desactualizada dice OFFLINE; la tx ve SUSPENDED (SUSPENDED → AVAILABLE es inválida)
+    // → falla sin escribir el biometricCheck (no hay write que el rollback se lleve).
+    const prisma = makePrisma(okDriver, { ...okDriver, currentStatus: 'SUSPENDED' });
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(
+      InvalidStatusTransition,
+    );
+    expect(prisma.bioChecks).toHaveLength(0);
   });
 
   it('rechaza si el sessionRef no existe o expiró', async () => {
@@ -296,5 +325,195 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     await expect(
       svc.updatePersonalInfo('u1', { legalName: 'X', dni: '12345678', birthDate: '1990-05-20' }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('DriversService.setStatus · transición de turno validada por la máquina', () => {
+  /** Prisma doble que refleja el currentStatus escrito (para verificar qué se persistió). */
+  function makeStatusPrisma(driver: unknown) {
+    const writes: Record<string, unknown>[] = [];
+    return {
+      writes,
+      prisma: {
+        read: { driver: { findUnique: async () => driver } },
+        write: {
+          driver: {
+            update: async ({ data }: { data: Record<string, unknown> }) => {
+              writes.push(data);
+              return { currentStatus: data.currentStatus };
+            },
+          },
+        },
+      },
+    };
+  }
+
+  it('permite el fin de turno AVAILABLE → OFFLINE', async () => {
+    const { prisma } = makeStatusPrisma({ ...okDriver, currentStatus: 'AVAILABLE' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.setStatus('u1', 'OFFLINE')).resolves.toEqual({ status: 'OFFLINE' });
+  });
+
+  it('un SUSPENDED NO puede auto-ponerse AVAILABLE ni saltándose el tipo (409, no escribe)', async () => {
+    // AVAILABLE ya NI compila como SelfServiceDriverStatus (gate compile-time del retoque);
+    // el cast simula un bypass del tipo para fijar que la máquina sigue rechazando en runtime.
+    const { prisma, writes } = makeStatusPrisma({ ...okDriver, currentStatus: 'SUSPENDED' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.setStatus('u1', 'AVAILABLE' as never)).rejects.toBeInstanceOf(
+      InvalidStatusTransition,
+    );
+    expect(writes).toHaveLength(0);
+  });
+
+  it('no hay pausa sin turno: OFFLINE → ON_BREAK es inválida', async () => {
+    const { prisma } = makeStatusPrisma({ ...okDriver, currentStatus: 'OFFLINE' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.setStatus('u1', 'ON_BREAK')).rejects.toBeInstanceOf(InvalidStatusTransition);
+  });
+
+  it('currentStatus legacy fuera del enum → 409 fail-closed, nunca TypeError', async () => {
+    const { prisma } = makeStatusPrisma({ ...okDriver, currentStatus: 'LEGACY_GARBAGE' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.setStatus('u1', 'OFFLINE')).rejects.toBeInstanceOf(InvalidStatusTransition);
+  });
+});
+
+describe('DriversService.approve/reject · decisión de antecedentes validada por las máquinas', () => {
+  /**
+   * Prisma doble: approve y reject leen DENTRO de la tx. `overrides` permite que la tx vea un
+   * estado distinto al de la réplica (simula lag de réplica / decisión concurrente).
+   */
+  function makeApprovalPrisma(
+    driver: unknown,
+    user: unknown,
+    overrides: { txDriver?: unknown; txUser?: unknown } = {},
+  ) {
+    const txDriver = 'txDriver' in overrides ? overrides.txDriver : driver;
+    const txUser = 'txUser' in overrides ? overrides.txUser : user;
+    const driverWrites: Record<string, unknown>[] = [];
+    const userWrites: Record<string, unknown>[] = [];
+    const tx = {
+      driver: {
+        findUnique: async () => txDriver,
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          driverWrites.push(data);
+          return { id: 'd1', ...data };
+        },
+      },
+      user: {
+        findUnique: async () => txUser,
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          userWrites.push(data);
+          return { id: 'u1', ...data };
+        },
+      },
+      outboxEvent: { create: async () => ({}) },
+    };
+    return {
+      driverWrites,
+      userWrites,
+      prisma: {
+        read: {
+          driver: { findUnique: async () => driver },
+          user: { findUnique: async () => user },
+        },
+        write: {
+          $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
+        },
+      },
+    };
+  }
+
+  it('aprueba un PENDING: antecedentes → CLEARED y KYC → VERIFIED', async () => {
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.approve('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
+    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+  });
+
+  it('re-aprueba un REJECTED (apelación): REJECTED → CLEARED es válida', async () => {
+    const { prisma, driverWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'REJECTED' },
+      { id: 'u1', kycStatus: 'REJECTED' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.approve('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
+  });
+
+  it('backgroundCheckStatus legacy fuera del enum → 409 fail-closed sin escribir', async () => {
+    const { prisma, driverWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'LEGACY_GARBAGE' },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(InvalidStatusTransition);
+    expect(driverWrites).toHaveLength(0);
+  });
+
+  it('rechaza un CLEARED (revocación por hallazgo posterior): CLEARED → REJECTED es válida', async () => {
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'CLEARED' },
+      { id: 'u1', kycStatus: 'VERIFIED' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reject('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'REJECTED' }]);
+    expect(userWrites).toEqual([{ kycStatus: 'REJECTED' }]);
+  });
+
+  it('reject TOCTOU: la réplica decía PENDING pero la tx ve un estado inválido → 409 con CERO writes', async () => {
+    // El assert corre sobre lo que ve la TX, no la réplica: un from fuera del enum (fila legacy)
+    // es fail-closed SIEMPRE. (→ REJECTED es válida desde todo estado del enum, y re-aplicar el
+    // mismo estado es no-op idempotente por diseño; el 409 serializado aparece en este caso.)
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+      { txDriver: { ...okDriver, backgroundCheckStatus: 'LEGACY_GARBAGE' } },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reject('d1')).rejects.toBeInstanceOf(InvalidStatusTransition);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
+  it('reject concurrente que ya dejó REJECTED: re-aplicación idempotente (no-op válido por diseño)', async () => {
+    const { prisma, driverWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+      {
+        txDriver: { ...okDriver, backgroundCheckStatus: 'REJECTED' },
+        txUser: { id: 'u1', kycStatus: 'REJECTED' },
+      },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reject('d1')).resolves.toBeUndefined();
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'REJECTED' }]);
+  });
+
+  it('reject: 404 si el conductor no existe (la lectura vive dentro de la tx)', async () => {
+    const { prisma, driverWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+      { txDriver: null },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reject('d1')).rejects.toBeInstanceOf(NotFoundError);
+    expect(driverWrites).toHaveLength(0);
+  });
+
+  it('reject: 404 si el usuario del conductor no existe (la lectura vive dentro de la tx)', async () => {
+    const { prisma, driverWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+      { txUser: null },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reject('d1')).rejects.toBeInstanceOf(NotFoundError);
+    expect(driverWrites).toHaveLength(0);
   });
 });

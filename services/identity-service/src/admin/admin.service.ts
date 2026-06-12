@@ -15,6 +15,8 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
+import { AdminStatus } from '../generated/prisma';
+import { adminStatusMachine, isOperationalAdmin } from '../domain/admin-status';
 import { seal, open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
@@ -45,7 +47,7 @@ export class AdminService {
     if (existing) throw new ConflictError('Ya existe un operador con ese email');
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const admin = await this.prisma.write.adminUser.create({
-      data: { email, passwordHash, roles: [], status: 'PENDING' },
+      data: { email, passwordHash, roles: [], status: AdminStatus.PENDING },
     });
     return { id: admin.id, status: admin.status };
   }
@@ -57,20 +59,31 @@ export class AdminService {
     }
     const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
     if (!admin) throw new NotFoundError('Operador no encontrado');
+    adminStatusMachine.assertTransition(admin.status, AdminStatus.ACTIVE);
     const updated = await this.prisma.write.adminUser.update({
       where: { id: adminId },
-      data: { status: 'ACTIVE', roles },
+      data: { status: AdminStatus.ACTIVE, roles },
     });
     return { id: updated.id, status: updated.status, roles: updated.roles };
   }
 
   async reject(adminId: string): Promise<void> {
-    await this.prisma.write.adminUser.update({ where: { id: adminId }, data: { status: 'REJECTED' } });
+    // Lectura + assert DENTRO de la tx de escritura: sin lag de réplica ni TOCTOU
+    // con un approve concurrente.
+    await this.prisma.write.$transaction(async (tx) => {
+      const admin = await tx.adminUser.findUnique({ where: { id: adminId } });
+      if (!admin) throw new NotFoundError('Operador no encontrado');
+      adminStatusMachine.assertTransition(admin.status, AdminStatus.REJECTED);
+      await tx.adminUser.update({
+        where: { id: adminId },
+        data: { status: AdminStatus.REJECTED },
+      });
+    });
   }
 
   listPending(): Promise<{ id: string; email: string; createdAt: Date }[]> {
     return this.prisma.read.adminUser.findMany({
-      where: { status: 'PENDING' },
+      where: { status: AdminStatus.PENDING },
       select: { id: true, email: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -116,7 +129,7 @@ export class AdminService {
   /** Step-up: re-verifica TOTP y emite un access token con MFA fresca para acciones sensibles (BR-S07). */
   async stepUp(adminId: string, totp: string): Promise<{ accessToken: string }> {
     const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
-    if (admin?.status !== 'ACTIVE') throw new ForbiddenError('Operador no activo');
+    if (!admin || !isOperationalAdmin(admin)) throw new ForbiddenError('Operador no activo');
     this.assertTotp(admin.totpSecretEnc, totp);
     const accessToken = await this.jwt.signAccessToken({
       sub: admin.id,
@@ -131,7 +144,9 @@ export class AdminService {
   private async requireActiveAndAuthed(email: string, password: string) {
     const admin = await this.prisma.read.adminUser.findUnique({ where: { email } });
     if (!admin) throw new UnauthorizedError('Credenciales inválidas');
-    if (admin.status !== 'ACTIVE') throw new ForbiddenError('Operador no activo (pendiente de aprobación)');
+    if (!isOperationalAdmin(admin)) {
+      throw new ForbiddenError('Operador no activo (pendiente de aprobación)');
+    }
     const ok = await argon2.verify(admin.passwordHash, password);
     if (!ok) throw new UnauthorizedError('Credenciales inválidas');
     return admin;

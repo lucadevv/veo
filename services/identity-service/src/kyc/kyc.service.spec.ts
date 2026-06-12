@@ -6,7 +6,12 @@ import type { Env } from '../config/env.schema';
 
 const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90 });
 
-const passenger = { id: 'u1', type: 'PASSENGER', deletedAt: null as Date | null };
+const passenger = {
+  id: 'u1',
+  type: 'PASSENGER',
+  kycStatus: 'PENDING',
+  deletedAt: null as Date | null,
+};
 
 /** Prisma doble: usuario de lectura + transacción de escritura que captura el update emitido. */
 function makePrisma(user: unknown, captured?: { update?: unknown; outbox?: unknown }) {

@@ -20,6 +20,7 @@ import {
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { DriversService } from './drivers.service';
+import { DriverStatus } from '../generated/prisma';
 import { IsPlausibleBirthDate } from '../common/is-plausible-birth-date';
 
 class OnboardDto {
@@ -122,14 +123,14 @@ export class DriversController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Finalizar turno (OFFLINE)' })
   endShift(@CurrentUser() user: AuthenticatedUser) {
-    return this.drivers.setStatus(user.userId, 'OFFLINE');
+    return this.drivers.setStatus(user.userId, DriverStatus.OFFLINE);
   }
 
   @Post('shift/pause')
   @HttpCode(200)
   @ApiOperation({ summary: 'Pausar turno (ON_BREAK)' })
   pauseShift(@CurrentUser() user: AuthenticatedUser) {
-    return this.drivers.setStatus(user.userId, 'ON_BREAK');
+    return this.drivers.setStatus(user.userId, DriverStatus.ON_BREAK);
   }
 
   @Patch('me/personal')
