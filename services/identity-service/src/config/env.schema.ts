@@ -84,6 +84,12 @@ export const envSchema = z.object({
   BIOMETRIC_SERVICE_URL: z.string().default('http://localhost:3013'),
   /// Score mínimo de liveness/match para aprobar verificación de turno (BR-I02).
   BIOMETRIC_MIN_SCORE: z.coerce.number().default(90),
+  /// Timeout (ms) de las llamadas salientes a biometric-service (Python/ONNX). Es el gate del
+  /// inicio de turno (shift-start) + enroll + KYC: si el proveedor de inferencia se cuelga bajo
+  /// carga, el request debe FALLAR RÁPIDO Y HONESTO (502 reintentable) en vez de apilar sockets de
+  /// TODA la flota. Default 20s: holgado para una inferencia ONNX normal (más que los 8-10s del
+  /// resto de clientes salientes, porque liveness+match es más caro), pero acotado.
+  BIOMETRIC_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 

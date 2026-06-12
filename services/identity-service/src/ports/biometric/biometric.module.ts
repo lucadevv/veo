@@ -53,6 +53,17 @@ class BiometricSandboxProvider implements BiometricProvider {
   }
 }
 
+/**
+ * Distingue un abort por timeout (`AbortSignal.timeout`) de cualquier otro fallo de fetch.
+ * `AbortSignal.timeout` aborta con un DOMException name 'TimeoutError'; undici, según la versión,
+ * puede propagarlo como 'AbortError'. Aceptamos ambos sin recurrir a `any` (narrowing sobre unknown).
+ */
+function isTimeoutAbort(err: unknown): boolean {
+  return (
+    err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+  );
+}
+
 /** Respuesta cruda de biometric-service POST /v1/verify (score en 0..1). */
 interface VerifyServiceResponse {
   result: string;
@@ -63,9 +74,20 @@ interface VerifyServiceResponse {
 }
 
 /** Live: llama al biometric-service PROPIO (Python/ONNX) por HTTP con su contrato real. */
-class BiometricServiceClient implements BiometricProvider {
-  constructor(private readonly baseUrl: string) {}
+export class BiometricServiceClient implements BiometricProvider {
+  constructor(
+    private readonly baseUrl: string,
+    /** Timeout (ms) por request. Gate del shift-start: un proveedor colgado debe fallar rápido. */
+    private readonly timeoutMs: number,
+  ) {}
 
+  /**
+   * No reusamos `@veo/rpc` InternalRestClient a propósito: ese cliente firma la identidad interna
+   * HMAC (headers INTERNAL_IDENTITY_*) y EXIGE un AuthenticatedUser por request — contrato que el
+   * biometric-service (server-to-server, JSON pelado) NO espera ni verifica. Replicamos solo el
+   * patrón de timeout, con `AbortSignal.timeout` (Node ≥17.3): sin setTimeout/clearTimeout manual,
+   * sin posibilidad de leak del timer.
+   */
   private async request<T>(path: string, body: unknown): Promise<T> {
     let res: Response;
     try {
@@ -73,8 +95,19 @@ class BiometricServiceClient implements BiometricProvider {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
+      // El abort por timeout llega acá como AbortError/TimeoutError: lo traducimos a un error de
+      // dominio tipado (502 EXTERNAL, reintentable) para que shift-start/KYC degraden HONESTO en
+      // vez de colgarse o devolver un 500 opaco. No relajamos el gate: el turno NO arranca, pero
+      // falla rápido y claro.
+      if (isTimeoutAbort(err)) {
+        throw new ExternalServiceError('biometric-service no respondió a tiempo', {
+          timeoutMs: this.timeoutMs,
+          path,
+        });
+      }
       throw new ExternalServiceError('biometric-service inaccesible', { cause: String(err) });
     }
     if (!res.ok) {
@@ -113,7 +146,10 @@ const biometricProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): BiometricProvider =>
     config.getOrThrow<string>('VEO_BIOMETRIC_MODE') === 'live'
-      ? new BiometricServiceClient(config.getOrThrow<string>('BIOMETRIC_SERVICE_URL'))
+      ? new BiometricServiceClient(
+          config.getOrThrow<string>('BIOMETRIC_SERVICE_URL'),
+          config.getOrThrow<number>('BIOMETRIC_TIMEOUT_MS'),
+        )
       : new BiometricSandboxProvider(),
 };
 
