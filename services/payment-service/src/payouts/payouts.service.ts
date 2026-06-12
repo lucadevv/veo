@@ -122,7 +122,7 @@ export class PayoutsService {
     end: Date,
     operator?: AuthenticatedUser,
   ): Promise<PayoutRunSummary> {
-    const rows = await this.collectEarnings(start, end);
+    const { rows, pendingIncentiveIdsByDriver } = await this.collectEarnings(start, end);
     const aggregated = aggregatePayouts(rows, this.minCents);
     const projectedTotal = aggregated.reduce((sum, p) => sum + p.amountCents, 0);
 
@@ -144,6 +144,11 @@ export class PayoutsService {
       if (existing) continue; // idempotencia: ya liquidado este período.
 
       const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
+      // Bonos pendientes que ESTE driver aporta a este Payout. Solo llegamos acá si agg superó el mínimo
+      // liquidable y no había Payout previo del período → el bono se marca pagado SOLO si la plata sale
+      // (incluido el camino HELD: el bono ya está dentro de agg.amountCents, que es lo que se libera al
+      // resolver el review). Un driver bajo mínimo nunca entra a `aggregated` → su bono sigue paidAt:null.
+      const pendingIncentiveIds = pendingIncentiveIdsByDriver.get(agg.driverId) ?? [];
       await this.prisma.write.$transaction(async (tx) => {
         const payout = await tx.payout.create({
           data: {
@@ -159,6 +164,15 @@ export class PayoutsService {
             processedAt: flagged ? null : new Date(),
           },
         });
+        // Marcado idempotente del bono DENTRO de la tx que crea el Payout: el CAS `paidAt:null` garantiza
+        // que un re-run (o una carrera) NO lo doble-marque ni lo doble-pague. Si la tx aborta, el bono
+        // queda pendiente y el próximo run lo barre (no hay marcado-pagado-pero-no-pagado).
+        if (pendingIncentiveIds.length > 0) {
+          await tx.incentiveProgress.updateMany({
+            where: { id: { in: pendingIncentiveIds }, paidAt: null },
+            data: { paidAt: new Date(), paidInPayoutId: payout.id },
+          });
+        }
         if (!flagged) {
           const envelope = createEnvelope({
             eventType: 'payout.processed',
@@ -282,7 +296,15 @@ export class PayoutsService {
     return { driverId, released, totalAmountCents };
   }
 
-  private async collectEarnings(start: Date, end: Date): Promise<DriverEarningRow[]> {
+  /**
+   * Junta TODO lo que el conductor cobra en el período: cobros capturados, compensación de penalidades
+   * y bonos de incentivo pendientes. Devuelve también, por driver, los IncentiveProgress.id que aportan
+   * cada bono, para marcarlos pagados en la MISMA tx que crea el Payout (atomicidad del marcado).
+   */
+  private async collectEarnings(
+    start: Date,
+    end: Date,
+  ): Promise<{ rows: DriverEarningRow[]; pendingIncentiveIdsByDriver: Map<string, string[]> }> {
     const payments = await this.prisma.read.payment.findMany({
       where: {
         // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
@@ -329,7 +351,37 @@ export class PayoutsService {
         compensationCents: p.driverCompensationCents,
       }));
 
-    return [...earningRows, ...compensationRows];
+    // Bonos de incentivo CONCEDIDOS pero aún NO pagados (paidAt:null). El `incentive.completed` era un
+    // evento huérfano: el bono se concedía en IncentiveProgress pero jamás entraba a un Payout. Acá lo
+    // barremos. BACK-PAY POR ARRASTRE (decisión intencional): el filtro NO acota por `completedAt ∈
+    // [start,end)` sino por `completedAt < end` con `paidAt:null`. Así el primer run post-deploy paga
+    // TODOS los bonos históricos completados-no-pagados, y se auto-limpia (una vez marcados, paidAt deja
+    // de ser null y no vuelven a aparecer). La idempotencia NO se rompe: el guard sigue siendo paidAt:null
+    // —tanto acá (lectura) como en el updateMany (CAS de marcado)—, así que un re-run no los re-paga.
+    const pendingIncentives = await this.prisma.read.incentiveProgress.findMany({
+      where: { paidAt: null, completedAt: { not: null, lt: end } },
+      select: { id: true, driverId: true, rewardGrantedCents: true },
+    });
+    const pendingIncentiveIdsByDriver = new Map<string, string[]>();
+    const incentiveRows: DriverEarningRow[] = pendingIncentives
+      .filter((p) => p.rewardGrantedCents > 0)
+      .map((p) => {
+        const ids = pendingIncentiveIdsByDriver.get(p.driverId) ?? [];
+        ids.push(p.id);
+        pendingIncentiveIdsByDriver.set(p.driverId, ids);
+        return {
+          driverId: p.driverId,
+          grossCents: 0,
+          commissionCents: 0,
+          tipCents: 0,
+          incentiveCents: p.rewardGrantedCents,
+        };
+      });
+
+    return {
+      rows: [...earningRows, ...compensationRows, ...incentiveRows],
+      pendingIncentiveIdsByDriver,
+    };
   }
 
   private hasFreshMfa(user: AuthenticatedUser): boolean {

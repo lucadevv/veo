@@ -432,11 +432,19 @@ model IncentiveProgress {
   tripsCompleted     Int       @default(0) @map("trips_completed")
   completedAt        DateTime? @map("completed_at") @db.Timestamptz
   rewardGrantedCents Int       @default(0) @map("reward_granted_cents")
+  /// Liquidación del bono (fix payout-link). `paidAt` NULL = bono concedido pero aún NO pagado: es el
+  /// guard de idempotencia del marcado (CAS `paidAt:null`). `paidInPayoutId` ata el bono a SU Payout
+  /// (trazabilidad contable). El collectEarnings de payouts barre los pendientes y los marca en la
+  /// MISMA tx que crea el Payout.
+  paidAt             DateTime? @map("paid_at") @db.Timestamptz
+  paidInPayoutId     String?   @map("paid_in_payout_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   @@unique([incentiveId, driverId])
   @@index([driverId])
+  /// "bonos pendientes de un conductor" (paidAt IS NULL) sin escanear: collectEarnings y back-pay.
+  @@index([driverId, paidAt])
   @@map("incentive_progress")
   @@schema("payment")
 }

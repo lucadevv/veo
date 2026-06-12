@@ -36,6 +36,30 @@ describe('aggregatePayouts (BR-P05)', () => {
     expect(p).toEqual({ driverId: 'd1', grossCents: 2000, commissionCents: 400, amountCents: 2000 });
   });
 
+  it('el bono de incentivo entra NETO al amount, sin inflar bruto ni comisión', () => {
+    const rows = [
+      { driverId: 'd1', grossCents: 2000, commissionCents: 400, tipCents: 0 }, // neto viaje 1600
+      { driverId: 'd1', grossCents: 0, commissionCents: 0, tipCents: 0, incentiveCents: 1500 }, // +1500 bono
+    ];
+    const [p] = aggregatePayouts(rows, 0);
+    // grossCents/commissionCents = SOLO la tarifa; amountCents = 1600 + 1500 (bono) = 3100.
+    expect(p).toEqual({ driverId: 'd1', grossCents: 2000, commissionCents: 400, amountCents: 3100 });
+  });
+
+  it('bono + compensación coexisten, ambos netos y sumados (semánticas separadas)', () => {
+    const rows = [
+      { driverId: 'd1', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 400, incentiveCents: 1500 },
+    ];
+    const [p] = aggregatePayouts(rows, 0);
+    expect(p).toEqual({ driverId: 'd1', grossCents: 0, commissionCents: 0, amountCents: 1900 });
+  });
+
+  it('un bono solo puede alcanzar el mínimo liquidable por sí mismo (back-pay de un histórico)', () => {
+    const rows = [{ driverId: 'only-bonus', grossCents: 0, commissionCents: 0, tipCents: 0, incentiveCents: 5000 }];
+    const [p] = aggregatePayouts(rows, 5000);
+    expect(p).toEqual({ driverId: 'only-bonus', grossCents: 0, commissionCents: 0, amountCents: 5000 });
+  });
+
   it('F2.3 · una compensación de penalidad sola puede alcanzar el mínimo liquidable por sí misma', () => {
     const rows = [
       { driverId: 'only-penalty', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 5000 },

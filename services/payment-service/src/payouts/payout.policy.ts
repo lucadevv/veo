@@ -17,6 +17,13 @@ export interface DriverEarningRow {
    * Ausente/0 en las filas de cobro normales.
    */
   compensationCents?: number;
+  /**
+   * Bono de incentivo del conductor (IncentiveProgress.rewardGrantedCents) liquidado en este período.
+   * Es un crédito NETO fuera de la tarifa (no es bruto de viaje ni lleva comisión): entra DIRECTO al
+   * neto, como la propina y la compensación. Campo PROPIO (no se mezcla con compensationCents) para
+   * trazabilidad contable. Ausente/0 en las filas de cobro normales.
+   */
+  incentiveCents?: number;
 }
 
 export interface AggregatedPayout {
@@ -42,8 +49,10 @@ export function aggregatePayouts(rows: DriverEarningRow[], minCents: number): Ag
     };
     acc.grossCents += row.grossCents;
     acc.commissionCents += row.commissionCents;
-    // Neto = (bruto − comisión) + propinas + compensación de penalidad (neta, sin comisión ni bruto).
-    acc.amountCents += row.grossCents - row.commissionCents + row.tipCents + (row.compensationCents ?? 0);
+    // Neto = (bruto − comisión) + propinas + compensación de penalidad + bono de incentivo. Compensación
+    // y bono entran NETOS (sin comisión ni bruto): no inflan grossCents/commissionCents, igual que la propina.
+    acc.amountCents +=
+      row.grossCents - row.commissionCents + row.tipCents + (row.compensationCents ?? 0) + (row.incentiveCents ?? 0);
     byDriver.set(row.driverId, acc);
   }
   return [...byDriver.values()]
