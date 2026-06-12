@@ -35,13 +35,15 @@ function createMarkerElement(kind: 'driver' | 'origin' | 'destination', label: s
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', label);
   el.title = label;
+  // Borde CLARO (border-ink) como halo: sobre el tile oscurecido un borde oscuro se fundiría
+  // con el fondo; el aro claro separa el marker del mapa y le da peso. Tokens, no hex.
   if (kind === 'driver') {
     el.className = 'relative grid place-items-center';
     el.innerHTML =
       '<span class="absolute inline-flex size-7 animate-ping rounded-full bg-accent/40"></span>' +
-      '<span class="relative inline-flex size-4 rounded-full border-2 border-surface bg-accent shadow-2"></span>';
+      '<span class="relative inline-flex size-4 rounded-full border-2 border-ink bg-accent shadow-2"></span>';
   } else if (kind === 'origin') {
-    el.className = 'inline-flex size-3.5 rounded-full border-2 border-surface bg-brand shadow-1';
+    el.className = 'inline-flex size-3.5 rounded-full border-2 border-ink bg-brand shadow-1';
   } else {
     el.className = 'inline-flex size-4 rounded-full border-[3px] border-brand bg-surface shadow-1';
   }
@@ -214,5 +216,14 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     );
   }
 
-  return <div ref={containerRef} className="size-full" aria-label="Mapa del viaje en vivo" role="application" />;
+  // bg-surface oscuro detrás del canvas: evita el flash blanco de MapLibre mientras inicializa
+  // y cargan los tiles, manteniendo coherencia con el lienzo negro de marca.
+  return (
+    <div
+      ref={containerRef}
+      className="size-full bg-surface"
+      aria-label="Mapa del viaje en vivo"
+      role="application"
+    />
+  );
 }
