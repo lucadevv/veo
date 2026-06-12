@@ -66,6 +66,7 @@ module "app_secrets" {
   env               = var.env
   kms_key_arn       = module.kms.key_arns["pii"]
   generated_secrets = local.generated_secrets
+  keypair_secrets   = local.keypair_secrets
   managed_secrets   = local.managed_secrets
   tags              = local.common_tags
 }

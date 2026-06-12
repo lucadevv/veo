@@ -19,21 +19,23 @@ locals {
   critical_db_services = ["identity", "payment", "panic", "audit"]
 
   # Servicios no-criticos que comparten una RDS (con su propia DB logica).
-  # trip, dispatch, tracking, media, notification, rating, share, fleet
+  # trip, dispatch, tracking, media, notification, rating, share, fleet, chat
   shared_db_services = [
     "trip", "dispatch", "tracking", "media",
-    "notification", "rating", "share", "fleet",
+    "notification", "rating", "share", "fleet", "chat",
   ]
 
   # ---------------------------------------------------------------------------
-  # Inventario completo de service accounts (= IRSA roles). 12 svc + 3 bff + 2 fe.
+  # Inventario completo de service accounts (= IRSA roles). 14 svc + 3 bff + 2 fe + ESO.
   # ---------------------------------------------------------------------------
   all_service_accounts = [
     "identity-service", "trip-service", "dispatch-service", "tracking-service",
     "media-service", "payment-service", "panic-service", "notification-service",
     "audit-service", "rating-service", "share-service", "fleet-service",
+    "chat-service", "biometric-service",
     "admin-bff", "driver-bff", "public-bff",
     "admin-web", "family-web",
+    "external-secrets",
   ]
 
   # Buckets cuyos ARNs necesitan algunos servicios.
@@ -135,6 +137,8 @@ locals {
     "dispatch-service"     = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
     "notification-service" = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
     "rating-service"       = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
+    "chat-service"         = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
+    "biometric-service"    = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
 
     # --- BFFs: leen secretos (firma de tokens de sesion) ---
     "admin-bff"  = { statements = [local.read_app_secrets_stmt, local.kms_decrypt_stmt] }
@@ -144,6 +148,18 @@ locals {
     # --- Frontends estaticos: sin permisos AWS (rol vacio, solo identidad) ---
     "admin-web"  = { statements = [] }
     "family-web" = { statements = [] }
+
+    # --- external-secrets (ESO): el SecretStore lee Secrets Manager via IRSA ---
+    "external-secrets" = {
+      statements = [
+        local.read_app_secrets_stmt,
+        {
+          sid       = "KmsDecryptSecretsKey"
+          actions   = ["kms:Decrypt", "kms:DescribeKey"]
+          resources = [module.kms.key_arns["pii"]]
+        },
+      ]
+    }
   }
 
   # ---------------------------------------------------------------------------
@@ -174,6 +190,33 @@ locals {
       length      = 64
       json_key    = "key"
     }
+    dni_hash_salt = {
+      path        = "identity/dni-hash-salt"
+      description = "Salt for DNI hashing (identity-service)"
+      length      = 64
+      json_key    = "key"
+    }
+    totp_enc_key = {
+      path        = "identity/totp-encryption-key"
+      description = "Encryption key for TOTP seeds (identity-service)"
+      length      = 64
+      json_key    = "key"
+    }
+    share_link_secret = {
+      path        = "share/link-signing-secret"
+      description = "Signing secret for public share links (share-service)"
+      length      = 64
+      json_key    = "key"
+    }
+  }
+
+  # Keypair ES256: identity-service firma (JWT_PRIVATE_KEY_PEM) y los BFFs
+  # verifican (VEO_JWT_PUBLIC_PEM). JSON {private_key_pem, public_key_pem}.
+  keypair_secrets = {
+    jwt_es256 = {
+      path        = "auth/jwt-es256-keypair"
+      description = "ES256 keypair for JWT (identity signs, BFFs verify)"
+    }
   }
 
   # Secretos cuyo valor se inyecta fuera de Terraform (proveedores externos,
@@ -181,7 +224,31 @@ locals {
   managed_secrets = {
     push_credentials = {
       path        = "notification/push-provider-credentials"
-      description = "Self-hosted push gateway credentials (filled out-of-band)"
+      description = "Self-hosted push gateway credentials APNs/FCM (filled out-of-band)"
+    }
+    prontopaga_credentials = {
+      path        = "payment/prontopaga-credentials"
+      description = "ProntoPaga API credentials (filled out-of-band)"
+    }
+    livekit_credentials = {
+      path        = "media/livekit-credentials"
+      description = "LiveKit API key/secret (filled out-of-band)"
+    }
+    smtp_credentials = {
+      path        = "notification/smtp-credentials"
+      description = "SMTP user/pass for transactional email (filled out-of-band)"
+    }
+    smpp_credentials = {
+      path        = "notification/smpp-credentials"
+      description = "SMPP credentials for SMS provider (filled out-of-band)"
+    }
+    clickhouse_credentials = {
+      path        = "analytics/clickhouse-credentials"
+      description = "ClickHouse password for admin analytics (filled out-of-band)"
+    }
+    mapbox_access_token = {
+      path        = "maps/mapbox-access-token"
+      description = "Mapbox access token for dispatch (filled out-of-band)"
     }
   }
 }

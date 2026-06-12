@@ -68,6 +68,7 @@ module "app_secrets" {
   env                     = var.env
   kms_key_arn             = module.kms.key_arns["pii"]
   generated_secrets       = local.generated_secrets
+  keypair_secrets         = local.keypair_secrets
   managed_secrets         = local.managed_secrets
   recovery_window_in_days = 0 # dev: borrado inmediato al destruir
   tags                    = local.common_tags

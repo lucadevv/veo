@@ -51,6 +51,42 @@ resource "aws_secretsmanager_secret_version" "generated" {
 }
 
 # ---------------------------------------------------------------------------
+# Secretos keypair (asimetricos, p.ej. ES256 para JWT)
+# Un secret JSON con private_key_pem + public_key_pem.
+# ---------------------------------------------------------------------------
+resource "tls_private_key" "keypair" {
+  for_each = var.keypair_secrets
+
+  algorithm   = each.value.algorithm
+  ecdsa_curve = each.value.ecdsa_curve
+}
+
+resource "aws_secretsmanager_secret" "keypair" {
+  for_each = var.keypair_secrets
+
+  name        = "${local.prefix}/${each.value.path}"
+  description = each.value.description
+  kms_key_id  = var.kms_key_arn
+
+  recovery_window_in_days = var.recovery_window_in_days
+
+  tags = merge(var.tags, {
+    Name = "${local.prefix}/${each.value.path}"
+    Kind = "keypair"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "keypair" {
+  for_each = var.keypair_secrets
+
+  secret_id = aws_secretsmanager_secret.keypair[each.key].id
+  secret_string = jsonencode({
+    private_key_pem = tls_private_key.keypair[each.key].private_key_pem
+    public_key_pem  = tls_private_key.keypair[each.key].public_key_pem
+  })
+}
+
+# ---------------------------------------------------------------------------
 # Secretos placeholder (valor inyectado fuera de Terraform)
 # ---------------------------------------------------------------------------
 resource "aws_secretsmanager_secret" "managed" {
