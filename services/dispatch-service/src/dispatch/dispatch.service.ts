@@ -63,26 +63,33 @@ export class DispatchService {
     }
   }
 
-  async accept(matchId: string): Promise<MatchView> {
+  async accept(matchId: string, driverId: string): Promise<MatchView> {
     // Resolvemos el vehículo activo del conductor ANTES de la transacción (no hacemos I/O de red dentro
     // de la tx). El claim atómico de abajo sigue garantizando la concurrencia; resolver para un accept
     // perdedor es trabajo descartado pero inofensivo. Fail-soft: si fleet no responde, vehicleId = null
     // y la asignación NO se bloquea (la trazabilidad es deseable, no bloqueante del viaje).
     const pre = await this.prisma.read.dispatchMatch.findUnique({ where: { id: matchId } });
-    if (!pre) throw new NotFoundError('Oferta no encontrada');
+    // Ownership-check (anti-IDOR #9): un conductor que conoce el matchId de OTRO recibe 404 (NO 403:
+    // no filtramos existencia). El driverId viene de la identidad FIRMADA, no del cliente.
+    if (!pre || pre.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
     const vehicleId = await this.resolveVehicleId(pre.driverId);
 
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
-      if (!match) throw new NotFoundError('Oferta no encontrada');
+      // Re-chequeo de ownership dentro de la tx (404 si desapareció o no es del dueño). Esto NO es la
+      // señal de concurrencia: el dueño legítimo que llega TARDE pasa este check y cae en el CAS de abajo.
+      if (!match || match.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
       const respondedAt = new Date();
-      // Guard ATÓMICO (no check-then-act): el outcome va en el WHERE. Dos accepts concurrentes del mismo
-      // match → solo UNO matchea OFFERED y gana; el otro ve count=0 → Conflict (idempotencia honesta).
+      // Guard ATÓMICO (no check-then-act): outcome + driverId van en el WHERE. Dos accepts concurrentes del
+      // MISMO dueño → solo UNO matchea OFFERED y gana; el que llega tarde ve count=0 → 409 Conflict
+      // (idempotencia honesta). El driverId en el WHERE es defensa en profundidad sobre el ownership-check.
       const claimed = await tx.dispatchMatch.updateMany({
-        where: { id: matchId, outcome: DispatchOutcome.OFFERED },
+        where: { id: matchId, driverId, outcome: DispatchOutcome.OFFERED },
         data: { outcome: DispatchOutcome.ACCEPTED, respondedAt },
       });
       if (claimed.count === 0) {
+        // count===0 acá = el DUEÑO ya validado llega tarde sobre un match ya respondido/expirado → 409.
+        // NO se confunde con el 404-no-dueño de arriba: ese ya cortó antes del CAS.
         throw new ConflictError('La oferta ya fue respondida o expiró', { outcome: match.outcome });
       }
       const scoreMs = respondedAt.getTime() - match.offeredAt.getTime();
@@ -111,13 +118,15 @@ export class DispatchService {
     return view;
   }
 
-  async reject(matchId: string): Promise<MatchView> {
+  async reject(matchId: string, driverId: string): Promise<MatchView> {
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
-      if (!match) throw new NotFoundError('Oferta no encontrada');
+      // Ownership-check (anti-IDOR #9): 404 si no existe o no es del conductor firmado (NO filtra existencia).
+      if (!match || match.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
       const respondedAt = new Date();
+      // CAS con driverId en el WHERE (defensa en profundidad). count===0 = el DUEÑO llega tarde → 409.
       const claimed = await tx.dispatchMatch.updateMany({
-        where: { id: matchId, outcome: DispatchOutcome.OFFERED },
+        where: { id: matchId, driverId, outcome: DispatchOutcome.OFFERED },
         data: { outcome: DispatchOutcome.REJECTED, respondedAt },
       });
       if (claimed.count === 0) {
@@ -131,9 +140,11 @@ export class DispatchService {
     return view;
   }
 
-  async getMatch(matchId: string): Promise<MatchView> {
+  async getMatch(matchId: string, driverId: string): Promise<MatchView> {
     const match = await this.prisma.read.dispatchMatch.findUnique({ where: { id: matchId } });
-    if (!match) throw new NotFoundError('Match no encontrado');
+    // Ownership-check (anti-IDOR #9): 404 si no existe o no es del conductor firmado (NO 403: no filtra
+    // existencia, un conductor no puede sondear matchIds ajenos por la diferencia de status code).
+    if (!match || match.driverId !== driverId) throw new NotFoundError('Match no encontrado');
     return DispatchService.toView(match);
   }
 

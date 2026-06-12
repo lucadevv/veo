@@ -203,9 +203,10 @@ describe('Respuesta reactiva del conductor (D2.2: accept/reject por ESTADO, sin 
     const driver = uuidv7();
     await hotIndex.seed(driver, ORIGIN.lat, ORIGIN.lon, CENTER);
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
-    const matchId = (await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } })).id;
+    const offered = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } });
+    const matchId = offered.id;
 
-    const view = await dispatch.accept(matchId);
+    const view = await dispatch.accept(matchId, offered.driverId);
     expect(view.outcome).toBe(DispatchOutcome.ACCEPTED);
 
     const match = await prisma.dispatchMatch.findUniqueOrThrow({ where: { id: matchId } });
@@ -223,10 +224,11 @@ describe('Respuesta reactiva del conductor (D2.2: accept/reject por ESTADO, sin 
     const tripId = uuidv7();
     await hotIndex.seed(uuidv7(), ORIGIN.lat, ORIGIN.lon, CENTER);
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
-    const matchId = (await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } })).id;
+    const offered = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } });
+    const matchId = offered.id;
 
-    await dispatch.accept(matchId);
-    await expect(dispatch.accept(matchId)).rejects.toThrow(); // ya no está OFFERED → Conflict
+    await dispatch.accept(matchId, offered.driverId);
+    await expect(dispatch.accept(matchId, offered.driverId)).rejects.toThrow(); // ya no está OFFERED → Conflict
     expect(await matchFoundEvents(tripId)).toHaveLength(1);
   });
 
@@ -239,7 +241,7 @@ describe('Respuesta reactiva del conductor (D2.2: accept/reject por ESTADO, sin 
     await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
     const firstMatch = await prisma.dispatchMatch.findFirstOrThrow({ where: { tripId } });
 
-    const view = await dispatch.reject(firstMatch.id);
+    const view = await dispatch.reject(firstMatch.id, firstMatch.driverId);
     expect(view.outcome).toBe(DispatchOutcome.REJECTED);
 
     // El reject disparó offerNext → hay un nuevo OFFERED al OTRO conductor.

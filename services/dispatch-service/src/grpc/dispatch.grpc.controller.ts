@@ -4,13 +4,17 @@
  * Devuelve `found=false` en vez de lanzar, para que el llamante decida.
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { isDomainError } from '@veo/utils';
 import type { VehicleClass } from '@veo/shared-types';
 import type { MatchReply, NearbyDriver, SurgeReply } from '@veo/rpc';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { SurgeService } from '../dispatch/surge.service';
 import { NearbyDriversService } from '../dispatch/nearby-drivers.service';
+import type { Env } from '../config/env.schema';
 
 interface GetMatchRequest {
   matchId: string;
@@ -48,16 +52,38 @@ const EMPTY_MATCH: MatchReply = {
 
 @Controller()
 export class DispatchGrpcController {
+  private readonly secret: string;
+
   constructor(
     private readonly dispatch: DispatchService,
     private readonly surge: SurgeService,
     private readonly nearby: NearbyDriversService,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
 
+  /**
+   * Lectura del match para el driver-bff (getOffer). ANTI-IDOR #9: el driverId NO se confía del payload
+   * ni se ignora — se DERIVA de la identidad interna FIRMADA que el BFF propaga en la metadata gRPC, y el
+   * service hace el ownership-check con ESE driverId. Identidad inválida/ausente → UNAUTHENTICATED.
+   * Un match ajeno o inexistente → NotFoundError → found=false (anti-enumeración: no se filtra existencia,
+   * mismo criterio que CloseTripByPassenger en trip-service).
+   */
   @GrpcMethod('DispatchService', 'GetMatch')
-  async getMatch({ matchId }: GetMatchRequest): Promise<MatchReply> {
+  async getMatch({ matchId }: GetMatchRequest, metadata: Metadata): Promise<MatchReply> {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
+    // Una identidad SIN driverId (no es un conductor) no puede leer ofertas de dispatch → found=false
+    // (fail-closed sin filtrar existencia). El driverId firmado lo puso el driver-bff vía GetDriverByUser.
+    if (!identity.driverId) return EMPTY_MATCH;
     try {
-      const m = await this.dispatch.getMatch(matchId);
+      const m = await this.dispatch.getMatch(matchId, identity.driverId);
       return {
         id: m.id,
         tripId: m.tripId,

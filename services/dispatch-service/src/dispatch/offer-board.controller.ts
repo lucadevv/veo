@@ -26,8 +26,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
-import { ForbiddenError } from '@veo/utils';
 import { OfferBoardService } from './offer-board.service';
+import { requireDriverId } from './require-driver-id';
 import { bidFieldsFromBoard, type Offer, type OfferBoard, type OffersView } from './offer-board.port';
 import {
   AcceptOfferDto,
@@ -46,21 +46,6 @@ function toOfferDto(o: Offer): OfferDto {
     etaSeconds: o.etaSeconds,
     status: o.status,
   };
-}
-
-/**
- * Deriva el driverId de la identidad interna FIRMADA (anti-suplantación, cierre #9 en el trust
- * boundary). El driver-bff firmó este driverId (vía GetDriverByUser) en la identidad HMAC; el cliente
- * NO lo puede forjar. Una identidad SIN driverId (passenger/admin) no es un conductor → 403.
- */
-function requireDriverId(user: AuthenticatedUser | undefined): string {
-  const driverId = user?.driverId;
-  if (!driverId) {
-    throw new ForbiddenError('Solo un conductor puede operar sobre la puja', {
-      type: user?.type,
-    });
-  }
-  return driverId;
 }
 
 function toOpenBidDto(b: OfferBoard): OpenBidDto {

@@ -50,17 +50,22 @@ export class DispatchService {
   ) {}
 
   async getOffer(matchId: string, identity: AuthenticatedUser): Promise<OfferView> {
-    const match = await this.grpc.call<MatchReply>('dispatch', 'GetMatch', { matchId }, identity);
+    // El driverId se DERIVA de la identidad (GetDriverByUser) y se firma en la propagada: dispatch hace
+    // el ownership-check con ESE driverId (anti-IDOR #9). El cliente nunca provee el driverId.
+    const { identity: signed } = await this.resolveDriver(identity);
+    const match = await this.grpc.call<MatchReply>('dispatch', 'GetMatch', { matchId }, signed);
     if (!match.found) throw new NotFoundError('Oferta no encontrada');
     return toOfferView(match);
   }
 
-  accept(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
-    return this.dispatch().post(`/dispatch/offers/${matchId}/accept`, { identity, body: {} });
+  async accept(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
+    const { identity: signed } = await this.resolveDriver(identity);
+    return this.dispatch().post(`/dispatch/offers/${matchId}/accept`, { identity: signed, body: {} });
   }
 
-  reject(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
-    return this.dispatch().post(`/dispatch/offers/${matchId}/reject`, { identity, body: {} });
+  async reject(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
+    const { identity: signed } = await this.resolveDriver(identity);
+    return this.dispatch().post(`/dispatch/offers/${matchId}/reject`, { identity: signed, body: {} });
   }
 
   async getSurge(lat: number, lon: number, identity: AuthenticatedUser): Promise<SurgeView> {

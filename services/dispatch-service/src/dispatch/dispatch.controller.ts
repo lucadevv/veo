@@ -7,9 +7,10 @@
  */
 import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard } from '@veo/auth';
+import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { DispatchService } from './dispatch.service';
 import { SurgeService } from './surge.service';
+import { requireDriverId } from './require-driver-id';
 import { MatchResponseDto, SurgeQueryDto, SurgeResponseDto } from './dto/dispatch.dto';
 
 @ApiTags('dispatch')
@@ -25,21 +26,31 @@ export class DispatchController {
   @Post('offers/:matchId/accept')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor acepta la oferta (publica dispatch.match_found)' })
-  accept(@Param('matchId', ParseUUIDPipe) matchId: string): Promise<MatchResponseDto> {
-    return this.dispatch.accept(matchId);
+  accept(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MatchResponseDto> {
+    // El driverId sale de la identidad FIRMADA (anti-IDOR #9): un conductor solo opera su propia oferta.
+    return this.dispatch.accept(matchId, requireDriverId(user));
   }
 
   @Post('offers/:matchId/reject')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor rechaza la oferta (se ofrece al siguiente candidato)' })
-  reject(@Param('matchId', ParseUUIDPipe) matchId: string): Promise<MatchResponseDto> {
-    return this.dispatch.reject(matchId);
+  reject(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MatchResponseDto> {
+    return this.dispatch.reject(matchId, requireDriverId(user));
   }
 
   @Get('offers/:matchId')
   @ApiOperation({ summary: 'Lee el estado de un match' })
-  getMatch(@Param('matchId', ParseUUIDPipe) matchId: string): Promise<MatchResponseDto> {
-    return this.dispatch.getMatch(matchId);
+  getMatch(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MatchResponseDto> {
+    return this.dispatch.getMatch(matchId, requireDriverId(user));
   }
 
   @Get('surge')
