@@ -12,6 +12,9 @@ import (
 
 // Config agrupa toda la configuración del tracking-service.
 type Config struct {
+	// Entorno
+	Env string // development|test|production; gobierna el fail-fast de secretos
+
 	// HTTP
 	HTTPAddr string // dirección de escucha (health/metrics/tracking)
 
@@ -64,6 +67,7 @@ func ProducerName() string { return producerName }
 // Load construye la configuración leyendo el entorno con valores por defecto de desarrollo.
 func Load() (Config, error) {
 	cfg := Config{
+		Env:                     appEnv(),
 		HTTPAddr:                env("TRACKING_HTTP_ADDR", ":3004"),
 		MQTTBrokerURL:           env("MQTT_BROKER_URL", "tcp://localhost:1883"),
 		MQTTUsername:            env("MQTT_USERNAME", ""),
@@ -105,7 +109,61 @@ func (c Config) validate() error {
 	if c.PresenceTTL <= 0 {
 		return fmt.Errorf("config: PRESENCE_TTL debe ser > 0")
 	}
+	return c.validateSecrets()
+}
+
+// devClickHousePassword es la credencial conocida del dev-stack local.
+// En producción su presencia (o un password vacío) debe abortar el boot:
+// degradar en silencio a la credencial dev es una vulnerabilidad.
+const devClickHousePassword = "veo_dev"
+
+// validateSecrets aplica fail-fast a los secretos cuando el entorno es producción.
+//
+// Replica la semántica del helper `secret()` de los servicios Node: en
+// development/test los defaults del dev-stack siguen vigentes (no rompemos el
+// arranque local), pero en producción un secreto faltante o con el valor de
+// desarrollo aborta el boot con un error explícito en vez de degradar en
+// silencio a una credencial conocida.
+func (c Config) validateSecrets() error {
+	if !c.isProduction() {
+		return nil
+	}
+
+	// ClickHouse (histórico GPS): el password es obligatorio en producción y
+	// jamás puede ser la credencial conocida del dev-stack.
+	if c.ClickHousePassword == "" {
+		return fmt.Errorf("config: CLICKHOUSE_PASSWORD requerido en producción")
+	}
+	if c.ClickHousePassword == devClickHousePassword {
+		return fmt.Errorf("config: CLICKHOUSE_PASSWORD no puede ser la credencial de desarrollo (%q) en producción", devClickHousePassword)
+	}
+
+	// MQTT (ingesta GPS): el cliente sólo soporta autenticación user/pass
+	// (paho, sin mTLS configurable). Si en producción se declara un usuario,
+	// el password no puede quedar vacío — una auth a medias conectaría al
+	// broker sin credencial. Si no hay usuario (broker sin-auth o mTLS gestionado
+	// fuera del proceso), no se fuerza el password.
+	if c.MQTTUsername != "" && c.MQTTPassword == "" {
+		return fmt.Errorf("config: MQTT_PASSWORD requerido en producción cuando MQTT_USERNAME está definido")
+	}
+
 	return nil
+}
+
+// isProduction indica si el servicio corre en el entorno de producción.
+func (c Config) isProduction() bool {
+	return strings.EqualFold(c.Env, "production")
+}
+
+// appEnv resuelve el entorno de ejecución. El manifiesto K8s del tracking-service
+// inyecta NODE_ENV (hereda el template de los servicios Node); el biometric-service
+// y otros usan APP_ENV. Aceptamos ambos para ser idiomáticos con el repo, con
+// NODE_ENV como fuente primaria. Default seguro para desarrollo local.
+func appEnv() string {
+	if v := env("APP_ENV", ""); v != "" {
+		return v
+	}
+	return env("NODE_ENV", "development")
 }
 
 func env(key, def string) string {

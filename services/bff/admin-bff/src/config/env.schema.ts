@@ -32,7 +32,7 @@ export const envSchema = z.object({
   CLICKHOUSE_URL: z.string().default('http://localhost:8123'),
   CLICKHOUSE_DB: z.string().default('veo_analytics'),
   CLICKHOUSE_USER: z.string().default('veo'),
-  CLICKHOUSE_PASSWORD: z.string().default('veo_dev'),
+  CLICKHOUSE_PASSWORD: secret('veo_dev'),
 
   // Rate limiting (Redis, por IP+usuario). POST /panic no aplica aquí (el BFF admin no recibe pánico crudo).
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
