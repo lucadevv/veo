@@ -1098,7 +1098,7 @@ export const common = {
     refundedBody: 'Se te devolvió {{amount}}. No hay nada que pagar por este viaje.',
     /** Cobro reembolsado PARCIAL — honesto: NO es "pagado" pleno; se devolvió parte del importe. */
     partialRefundTitle: 'Reembolso parcial',
-    partialRefundBody: 'Se te devolvió parte del importe de este viaje. Revisá el detalle abajo.',
+    partialRefundBody: 'Se te devolvió parte del importe de este viaje. Revisa el detalle abajo.',
     /** Propina post-viaje (solo si tipCents === 0). 100% va al conductor. */
     tipPrompt: 'Propina (opcional · 100% al conductor)',
     /**

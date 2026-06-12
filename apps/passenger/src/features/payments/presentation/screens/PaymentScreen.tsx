@@ -20,6 +20,7 @@ import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { formatPEN } from '../../../../shared/utils/format';
 import type { RootStackParamList } from '../../../../navigation/types';
+import { isPaymentSettled } from '../../domain/paymentOutcome';
 import { EnterView, SuccessCheck } from '../components/motion';
 import { PAYMENT_METHODS, usePaymentPrefsStore } from '../stores/paymentPrefsStore';
 
@@ -65,8 +66,10 @@ export function PaymentScreen(): React.JSX.Element {
 
   const payment = confirmMutation.data ?? chargeMutation.data;
   const isCash = method === 'CASH';
+  // La pregunta "¿el cobro ya saldó?" es del DOMINIO (`isPaymentSettled`): efectivo aún no capturado
+  // y sin confirmación del pasajero → falta su lado de la confirmación bilateral (BR-P03).
   const cashPending =
-    payment != null && isCash && payment.status !== 'CAPTURED' && !confirmMutation.data;
+    payment != null && isCash && !isPaymentSettled(payment) && !confirmMutation.data;
 
   if (payment && !cashPending) {
     return (

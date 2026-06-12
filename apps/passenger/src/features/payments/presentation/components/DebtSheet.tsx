@@ -18,7 +18,12 @@ import {
   PaymentMethodNotApplicableError,
   PaymentNotChangeableError,
 } from '../../domain/usecases';
-import { CheckoutInstructions, hasCheckout } from './CheckoutInstructions';
+import {
+  assertNever,
+  interpretPaymentOutcome,
+  isPaymentSettled,
+} from '../../domain/paymentOutcome';
+import { CheckoutInstructions } from './CheckoutInstructions';
 import { PaymentMethodPicker } from './PaymentMethodPicker';
 import {
   DIGITAL_PAYMENT_METHODS,
@@ -86,12 +91,11 @@ const PAYMENT_METHOD_VALUES: readonly MobilePaymentMethod[] = [
 /**
  * Clasifica el fallo de un cobro a partir de la información DISPONIBLE, de forma DEFENSIVA.
  *
- * NOTA DE MIGRACIÓN (contrato en construcción paralela): el `paymentView` del wire aún NO expone
- * `failureReason`/`failureKind` — solo el `debtItemView.reason` (string normalizado del backend, p. ej.
- * `yape_insufficient_funds`, `gateway_error`, `unknown`, y a futuro `method_unavailable:PAGOEFECTIVO`).
- * Por eso leemos el reason del ítem de deuda (o, si llegara, un `failureReason` colado en el payment) y
- * lo interpretamos acá. Cuando el contrato exponga `failureReason`/`failureKind` en el payment, basta
- * con alimentar esta misma función desde ahí — el copy y la UI no cambian.
+ * Fuentes del reason (ambas YA en el contrato): el `paymentView` expone `failureReason` (string
+ * estructurado, p. ej. `method_unavailable:PAGOEFECTIVO`, `declined`; nullable/opcional ⇒ compat con
+ * backends viejos) — el dominio lo lee en el outcome `debt` — y el `debtItemView.reason` (string
+ * normalizado, p. ej. `yape_insufficient_funds`, `gateway_error`, `unknown`) queda como FALLBACK
+ * cuando el payment no lo trae. Esta función interpreta cualquiera de los dos con la misma heurística.
  *
  * Heurística (case-insensitive):
  *  - `method_unavailable[:METHOD]` o `*_unavailable` / `capability*` / `not_supported` → methodUnavailable.
@@ -224,19 +228,29 @@ export function DebtSheet({
         if (cancelled) {
           return;
         }
-        const status = payment.status.toUpperCase();
-        if (status === 'CAPTURED') {
-          // Ya se completó (webhook entró): éxito directo, sin checkout.
-          markSettled();
-          return;
+        // Switch EXHAUSTIVO sobre el resultado de DOMINIO: un PaymentStatus nuevo obliga acá
+        // en compile-time (assertNever) — no más fallthrough silencioso.
+        const outcome = interpretPaymentOutcome(payment);
+        switch (outcome.kind) {
+          case 'settled':
+            // Ya se completó (webhook entró): éxito directo, sin checkout.
+            markSettled();
+            return;
+          case 'checkoutPending':
+            setPendingPayment(payment);
+            setPhase('checkout');
+            return;
+          case 'processing':
+          case 'cashPending':
+          case 'debt':
+          case 'failed':
+          case 'refunded':
+            // PENDING sin checkout, DEBT, FAILED…: ya no es un pago por completar accionable.
+            setPhase('unavailable');
+            return;
+          default:
+            assertNever(outcome);
         }
-        if (status === 'PENDING' && hasCheckout(payment)) {
-          setPendingPayment(payment);
-          setPhase('checkout');
-          return;
-        }
-        // PENDING sin checkout, DEBT, FAILED…: ya no es un pago por completar accionable.
-        setPhase('unavailable');
       })
       .catch(() => {
         if (!cancelled) {
@@ -256,7 +270,7 @@ export function DebtSheet({
     enabled: phase === 'checkout' && Boolean(pendingPayment?.id),
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (data && data.status.toUpperCase() === 'CAPTURED') {
+      if (data && isPaymentSettled(data)) {
         return false;
       }
       return POLL_INTERVAL_MS;
@@ -265,7 +279,7 @@ export function DebtSheet({
 
   // El cobro se confirmó por el poll del checkout → éxito (sin tocar la fuente del recibo del viaje).
   React.useEffect(() => {
-    if (phase === 'checkout' && pollQuery.data?.status.toUpperCase() === 'CAPTURED') {
+    if (phase === 'checkout' && pollQuery.data && isPaymentSettled(pollQuery.data)) {
       markSettled();
     }
   }, [phase, pollQuery.data, markSettled]);
@@ -281,29 +295,40 @@ export function DebtSheet({
    */
   const resolveOutcome = React.useCallback(
     (payment: PaymentView, method: MobileDigitalPaymentMethod) => {
-      const status = payment.status.toUpperCase();
-      if (status === 'CAPTURED') {
-        // Saldó directo: éxito inmediato.
-        markSettled();
-        return;
+      // Switch EXHAUSTIVO sobre el resultado de DOMINIO (assertNever): la interpretación del cobro
+      // vive en `interpretPaymentOutcome`; acá solo se elige la rama de UI.
+      const outcome = interpretPaymentOutcome(payment);
+      switch (outcome.kind) {
+        case 'settled':
+          // Saldó directo: éxito inmediato.
+          markSettled();
+          return;
+        case 'checkoutPending':
+          // Requiere completar el pago fuera de banda: mostramos el checkout del método elegido + poll.
+          setPendingPayment(payment);
+          setResolveFailure(null);
+          setPhase('checkout');
+          return;
+        case 'processing':
+        case 'cashPending':
+        case 'debt':
+        case 'failed':
+        case 'refunded': {
+          // Volvió a DEBT (o PENDING mudo sin checkout): ese método NO saldó. Lo marcamos como probado para
+          // no ofrecer un bucle infinito sobre lo mismo, clasificamos el fallo HONESTO y quedamos en idle.
+          setPendingPayment(payment);
+          setTriedMethods((prev) => new Set(prev).add(method));
+          // Motivo del fallo: el `failureReason` ESTRUCTURADO que el dominio leyó del cobro en DEBT
+          // (ver `classifyResolveFailure`) y, si falta, el `reason` de la deuda objetivo.
+          const rawReason =
+            (outcome.kind === 'debt' ? outcome.failureReason : null) ?? target?.reason ?? null;
+          setResolveFailure(classifyResolveFailure(rawReason) ?? { kind: 'transient' });
+          setPhase('idle');
+          return;
+        }
+        default:
+          assertNever(outcome);
       }
-      if (status === 'PENDING' && hasCheckout(payment)) {
-        // Requiere completar el pago fuera de banda: mostramos el checkout del método elegido + poll.
-        setPendingPayment(payment);
-        setResolveFailure(null);
-        setPhase('checkout');
-        return;
-      }
-      // Volvió a DEBT (o PENDING mudo sin checkout): ese método NO saldó. Lo marcamos como probado para
-      // no ofrecer un bucle infinito sobre lo mismo, clasificamos el fallo HONESTO y quedamos en idle.
-      setPendingPayment(payment);
-      setTriedMethods((prev) => new Set(prev).add(method));
-      // Lectura DEFENSIVA del motivo (ver `classifyResolveFailure`): hoy el payment no expone failureReason,
-      // así que probamos un campo colado (forward-compat) y, si no, el `reason` de la deuda objetivo.
-      const rawReason =
-        (payment as { failureReason?: unknown }).failureReason ?? target?.reason ?? null;
-      setResolveFailure(classifyResolveFailure(rawReason) ?? { kind: 'transient' });
-      setPhase('idle');
     },
     [markSettled, target],
   );
@@ -317,7 +342,7 @@ export function DebtSheet({
       // Cambia al método ELEGIDO (re-cobra). Si el backend hace no-op (método == original → sigue DEBT),
       // disparamos retry-charge para re-intentar ese mismo método (no quedarnos sin re-cobro).
       const changed = await changePaymentMethod.execute(paymentId, method);
-      if (changed.status.toUpperCase() === 'DEBT') {
+      if (interpretPaymentOutcome(changed).kind === 'debt') {
         return retryCharge.execute(paymentId);
       }
       return changed;
@@ -345,20 +370,29 @@ export function DebtSheet({
     mutationFn: ({ paymentId, method }) => changePaymentMethod.execute(paymentId, method),
     onSuccess: (payment) => {
       setChangeMethodOpen(false);
-      const status = payment.status.toUpperCase();
-      if (status === 'CAPTURED') {
-        // Cambió y capturó de una (poco común, pero honesto): éxito directo.
-        markSettled();
-        return;
+      // Switch EXHAUSTIVO sobre el resultado de DOMINIO (assertNever): mismo intérprete que el resto.
+      const outcome = interpretPaymentOutcome(payment);
+      switch (outcome.kind) {
+        case 'settled':
+          // Cambió y capturó de una (poco común, pero honesto): éxito directo.
+          markSettled();
+          return;
+        case 'checkoutPending':
+          // El caso esperado: el server devolvió el checkout NUEVO del método elegido → re-render + poll.
+          setPendingPayment(payment);
+          setPhase('checkout');
+          return;
+        case 'processing':
+        case 'cashPending':
+        case 'debt':
+        case 'failed':
+        case 'refunded':
+          // PENDING sin checkout (u otro estado no accionable): el método no produjo medios → honesto.
+          setPhase('unavailable');
+          return;
+        default:
+          assertNever(outcome);
       }
-      if (status === 'PENDING' && hasCheckout(payment)) {
-        // El caso esperado: el server devolvió el checkout NUEVO del método elegido → re-render + poll.
-        setPendingPayment(payment);
-        setPhase('checkout');
-        return;
-      }
-      // PENDING sin checkout: el método no produjo medios accionables → honesto.
-      setPhase('unavailable');
     },
     onError: (err) => {
       // 409 (ya no cambiable): el pago cambió de estado → estado honesto, no insistir con un checkout muerto.

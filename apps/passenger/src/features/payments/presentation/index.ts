@@ -23,7 +23,6 @@ export { YapeManageSheet, type YapeManageSheetProps } from './components/YapeMan
 export { DebtSheet, type DebtSheetProps } from './components/DebtSheet';
 export {
   CheckoutInstructions,
-  hasCheckout,
   isCheckoutExpired,
   type CheckoutInstructionsProps,
 } from './components/CheckoutInstructions';

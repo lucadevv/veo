@@ -7,7 +7,12 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { formatPEN } from '../../../../shared/utils/format';
-import { CheckoutInstructions, hasCheckout } from './CheckoutInstructions';
+import {
+  assertNever,
+  interpretPaymentOutcome,
+  isCashPayment,
+} from '../../domain/paymentOutcome';
+import { CheckoutInstructions } from './CheckoutInstructions';
 import { Animated, EnterView, SuccessCheck, usePressScale } from './motion';
 
 /** Propinas rápidas post-viaje sugeridas (céntimos PEN), alineadas al handoff: [Sin, S/2, S/3, S/5]. */
@@ -46,9 +51,10 @@ export interface SettlementBodyProps {
   canFinish: boolean;
 }
 
-// Estados de pago que esta vista distingue. Sin escape `| string`: el contrato (PaymentStatus) ya los
-// enumera, y dejar el escape fue lo que hizo que PARTIALLY_REFUNDED cayera al recibo "Pagado" (es plata).
-type UpperStatus = 'PENDING' | 'CAPTURED' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'DEBT';
+// Qué resultado tiene el cobro lo responde el DOMINIO (`interpretPaymentOutcome` → `PaymentOutcome`):
+// esta vista hace switch EXHAUSTIVO sobre el outcome y solo elige UI. La lección de PARTIALLY_REFUNDED
+// (que caía al recibo "Pagado" por un escape `| string`) ahora es un gate de compile-time compartido
+// con `DebtSheet`, no un tipo local de esta vista.
 
 /** Normaliza el método a la clave i18n del kit (`payments.method.*`). */
 function methodLabelKey(method: string): string {
@@ -113,9 +119,9 @@ export function SettlementBody({
       if (data == null) {
         return POLL_INTERVAL_MS;
       }
-      const status = data.status.toUpperCase();
-      const isDigital = data.method.toUpperCase() !== 'CASH';
-      if (status === 'PENDING' && isDigital) {
+      // Sigue PENDING-digital (con o sin checkout): el webhook/consumer aún puede moverlo.
+      const outcome = interpretPaymentOutcome(data);
+      if (outcome.kind === 'checkoutPending' || outcome.kind === 'processing') {
         return POLL_INTERVAL_MS;
       }
       return false;
@@ -189,20 +195,21 @@ export function SettlementBody({
     return <ProcessingBody title={t('settlement.processing')} hint={t('settlement.processingHint')} />;
   }
 
-  // payment.status YA es PaymentStatus (enum del contrato, en mayúsculas): sin toUpperCase ni cast,
-  // así el compilador EXIGE manejar cada estado (incl. PARTIALLY_REFUNDED) — no más fallthrough silencioso.
-  const status: UpperStatus = payment.status;
-  const isCash = payment.method.toUpperCase() === 'CASH';
+  // La interpretación del cobro vive en el DOMINIO (`interpretPaymentOutcome` → `PaymentOutcome`):
+  // cada rama de abajo elige UI sobre `outcome.kind` y RETORNA; el guard con `assertNever` antes del
+  // recibo final sella la exhaustividad en compile-time (un `PaymentOutcome.kind` nuevo obliga acá).
+  const outcome = interpretPaymentOutcome(payment);
+  const isCash = isCashPayment(payment);
   const passengerConfirmedCash = confirmMutation.isSuccess;
 
-  // ── PENDING + digital ────────────────────────────────────────────────────────────────────────
-  if (status === 'PENDING' && !isCash) {
-    // Pago digital con CHECKOUT (ProntoPaga): el usuario DEBE completarlo (deepLink / web / QR / CIP).
-    // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
-    // SIN checkout (sandbox actual) → todo como hoy: procesando + poll, CERO regresión.
-    if (hasCheckout(payment)) {
-      return <CheckoutBody payment={payment} onRetry={retryPoll} retrying={paymentQuery.isFetching} />;
-    }
+  // ── PENDING digital con CHECKOUT (ProntoPaga): el usuario DEBE completarlo (deepLink/web/QR/CIP).
+  // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
+  if (outcome.kind === 'checkoutPending') {
+    return <CheckoutBody payment={payment} onRetry={retryPoll} retrying={paymentQuery.isFetching} />;
+  }
+
+  // ── PENDING digital SIN checkout (sandbox actual): procesando + poll, CERO regresión ────────────
+  if (outcome.kind === 'processing') {
     if (timedOut) {
       return (
         <View style={{ gap: theme.spacing.md }}>
@@ -221,7 +228,7 @@ export function SettlementBody({
   }
 
   // ── PENDING + CASH ───────────────────────────────────────────────────────────────────────────
-  if (status === 'PENDING' && isCash) {
+  if (outcome.kind === 'cashPending') {
     // El pasajero ya confirmó su lado pero el cobro sigue PENDING → falta el conductor (bilateral).
     if (passengerConfirmedCash) {
       return (
@@ -262,8 +269,8 @@ export function SettlementBody({
   }
 
   // ── FAILED / DEBT → estado honesto, nunca data falsa; deja continuar al rating ───────────────
-  if (status === 'FAILED' || status === 'DEBT') {
-    const isDebt = status === 'DEBT';
+  if (outcome.kind === 'failed' || outcome.kind === 'debt') {
+    const isDebt = outcome.kind === 'debt';
     return (
       <View style={{ gap: theme.spacing.md }}>
         <Banner
@@ -282,8 +289,8 @@ export function SettlementBody({
   // Banner NEUTRAL + desglose (sin el check de éxito) y dejamos continuar al rating/cierre. Nada de
   // chips de propina: pedir plata sobre un viaje que reembolsamos (aunque sea en parte) no va.
   // PARTIALLY_REFUNDED no expone el monto devuelto en el contrato → texto honesto sin inventar cifra.
-  if (status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED') {
-    const isPartial = status === 'PARTIALLY_REFUNDED';
+  if (outcome.kind === 'refunded') {
+    const isPartial = outcome.partial;
     return (
       <View style={{ gap: theme.spacing.md }}>
         <Banner
@@ -302,6 +309,13 @@ export function SettlementBody({
   }
 
   // ── CAPTURED (o efectivo ya capturado por ambos) → RECIBO canónico ───────────────────────────
+  // SELLO de exhaustividad: a esta altura todas las ramas anteriores RETORNARON, así que el único
+  // kind posible es 'settled'. Si `PaymentOutcome` suma un kind nuevo, este guard deja de narrowear
+  // a never y `assertNever` revienta en COMPILE-TIME (no más fallthrough silencioso al recibo
+  // "Pagado" — la lección de PARTIALLY_REFUNDED).
+  if (outcome.kind !== 'settled') {
+    return assertNever(outcome);
+  }
   return (
     <View style={{ gap: theme.spacing.md }}>
       <SuccessCheck />

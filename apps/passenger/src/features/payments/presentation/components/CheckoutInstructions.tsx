@@ -6,14 +6,8 @@ import { Clipboard, Image, StyleSheet, View } from 'react-native';
 import { formatDateTime } from '../../../../shared/utils/format';
 import { openExternalUrl } from '../../../../shared/utils/linking';
 
-/**
- * ¿El pago trae instrucciones de checkout para completar el pago digital? (ProntoPaga). Cualquiera de
- * deepLink / checkoutUrl / qrCode / cip habilita la rama "Completa tu pago". Si TODOS son null/ausentes
- * (sandbox sin checkout), NO hay rama de checkout → el llamador cae a su propio estado "procesando".
- */
-export function hasCheckout(payment: PaymentView): boolean {
-  return Boolean(payment.deepLink || payment.checkoutUrl || payment.qrCode || payment.cip);
-}
+// La pregunta "¿trae checkout?" vive en el DOMINIO (`hasCheckout` de `domain/paymentOutcome`): acá
+// solo se RENDERIZAN los medios. La copia local murió con la migración a `PaymentOutcome`.
 
 /** ¿El checkout ya venció? (`checkoutExpiresAt` en el pasado). Sin fecha, no lo damos por vencido. */
 export function isCheckoutExpired(payment: PaymentView): boolean {
