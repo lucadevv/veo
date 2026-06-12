@@ -3,6 +3,52 @@ kind: Kustomization
 namespace: veo-staging
 resources:
   - ../../base
+  # Lote I-B: secrets reales (ESO) + ServiceAccounts IRSA + config no-secreta
+  - serviceaccounts.yaml
+  - secret-store.yaml
+  - external-secrets.yaml
+  - configmaps.yaml
 patches:
   - path: replicas.yaml
     target: { kind: Deployment }
+
+# Contrato CD: el CI publica veo/<svc>:<git-sha> en ECR y actualiza newName/newTag aqui (kustomize edit set image); ArgoCD sincroniza.
+images:
+  - name: ecr/admin-bff
+    newTag: latest
+  - name: ecr/admin-web
+    newTag: latest
+  - name: ecr/audit-service
+    newTag: latest
+  - name: ecr/biometric-service
+    newTag: latest
+  - name: ecr/chat-service
+    newTag: latest
+  - name: ecr/dispatch-service
+    newTag: latest
+  - name: ecr/driver-bff
+    newTag: latest
+  - name: ecr/family-web
+    newTag: latest
+  - name: ecr/fleet-service
+    newTag: latest
+  - name: ecr/identity-service
+    newTag: latest
+  - name: ecr/media-service
+    newTag: latest
+  - name: ecr/notification-service
+    newTag: latest
+  - name: ecr/panic-service
+    newTag: latest
+  - name: ecr/payment-service
+    newTag: latest
+  - name: ecr/public-bff
+    newTag: latest
+  - name: ecr/rating-service
+    newTag: latest
+  - name: ecr/share-service
+    newTag: latest
+  - name: ecr/tracking-service
+    newTag: latest
+  - name: ecr/trip-service
+    newTag: latest

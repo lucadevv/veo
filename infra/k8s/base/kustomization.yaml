@@ -27,6 +27,9 @@ resources:
   # === Frontends ===
   - frontends/admin-web.yaml
   - frontends/family-web.yaml
+  - frontends/stub-secrets.yaml
+  # === Migraciones (Jobs PreSync de ArgoCD: prisma migrate deploy) ===
+  - migrations/prisma-migrate-jobs.yaml
   # === Ingress ===
   - ingress/ingress.yaml
   # === Observability (self-hosted: Prometheus, Grafana, OTel, Tempo, Loki) ===

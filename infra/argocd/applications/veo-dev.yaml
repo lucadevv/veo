@@ -1,0 +1,14 @@
+# App de dev (el README de infra la referencia en el paso 4 del bootstrap; faltaba el manifest).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: veo-dev, namespace: argocd }
+spec:
+  project: veo
+  source:
+    repoURL: git@github.com:lucadevv/veo.git
+    targetRevision: main
+    path: infra/k8s/overlays/dev
+  destination: { server: https://kubernetes.default.svc, namespace: veo-dev }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
