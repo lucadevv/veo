@@ -12,11 +12,14 @@
 
 ## 0. Principios (no negociables)
 
-1. **Misma marca, dos modos.** VEO es navy profundo + cian eléctrico de acento. Las dos apps comparten
-   la identidad; cambia el contexto: **Passenger** cálido/claro (confianza y calma), **Driver** noche/denso
-   (operación al volante).
-2. **Tokens, no hex.** Los colores se portaron 1:1 desde los tokens **OKLCH** de la web a **hex sRGB**
-   (RN no parsea `oklch()`). La derivación es reproducible: `packages/ui-kit/scripts/oklch-to-hex.mjs`.
+1. **Misma marca, un sistema.** VEO es un **lienzo NEGRO** (`#000`) + **VEO Cyan** (`#00E5FF`) de acento
+   disciplinado, igual en passenger y driver (Brand Book). Las dos apps comparten la identidad y el mismo
+   sistema de color; el conductor NO se diferencia por el tema sino por el app icon y el lockup
+   "VEO | Conductores". El cyan sobre claro es ilegible (~1.5:1) y sobre negro ~13.6:1: por eso el lienzo
+   es oscuro y el texto sobre cyan es NEGRO.
+2. **Tokens, no hex.** La FUENTE única de marca es `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del
+   Brand Book); la web DERIVA esos valores a **OKLCH** en `tokens.css` (RN no parsea `oklch()`, la web sí).
+   El script `packages/ui-kit/scripts/oklch-to-hex.mjs` ayuda a verificar la equivalencia OKLCH↔hex.
 3. **Accesibilidad primero.** Targets táctiles ≥44pt, labels accesibles (obligatorios en botones de sólo
    ícono), el color nunca es el único indicador (siempre texto/ícono), `reduce-motion` siempre respetado,
    contraste AA verificado en ambos temas.
@@ -67,46 +70,38 @@ export default function App() {
 Dos temas con **el mismo contrato de color** (`ThemeColors`), para que los componentes no ramifiquen por
 app. Se eligen con `<ThemeProvider name="passenger" | "driver">` o pasando `theme={...}`.
 
-### 2.1 Passenger — "Midnight Motion": noche, lima-eléctrico
+> **FUENTE ÚNICA de marca y tokens: `packages/ui-kit/src/tokens/themes.ts`.** Los hex sRGB del VEO Brand
+> Book viven ahí; `packages/shared-config/tailwind/tokens.css` DERIVA esos valores a OKLCH para la web. No
+> se duplican los hex en este doc (evita drift): describe la intención, el token vive en el código.
 
-App de seguridad personal sobre **modo noche**: fondo navy casi-negro, acento **lima-eléctrico** para
-acciones/ruta/CTA, verde de confianza para seguridad (compartir viaje). Coherente con el handoff de diseño
-(`docs/design-handoff/`, el clicable del pasajero). `scheme: 'dark'`, status bar `light-content`.
+### 2.1 Passenger — marca VEO: noche, VEO Cyan
 
-> **Valores canónicos: `@veo/ui-kit` → `src/tokens/themes.ts` (`passengerTheme`).** No se duplican los hex
-> acá para evitar el drift (este doc describe la intención; el token vive en el código). Claves:
-> `bg #0E1014` · `accent`/`brand` lima `#C8F230` · `onAccent`/`onBrand #0E1014` · `ink #F4F6F8` ·
-> `focus #C8F230`. Contraste verificado (ink/bg ~16:1, onAccent/lima ~15:1).
+App de seguridad personal sobre **lienzo NEGRO puro de marca** (`bg #000000`), acento **VEO Cyan**
+(`#00E5FF`) de uso disciplinado para acciones/ruta/CTA/estados activos, verde de confianza para seguridad
+(compartir viaje). Cuando el cyan rellena (botón primario), el texto encima es **NEGRO**. `scheme: 'dark'`,
+status bar `light-content`. Valores canónicos en `themes.ts` → `passengerTheme`.
 
-### 2.2 Driver — noche por defecto, denso, alto contraste
+### 2.2 Driver — mismo sistema de marca (negro + VEO Cyan)
 
-Los conductores trabajan horas en poca luz: arranca en **modo noche**. Jerarquía operativa, números
-grandes y tabulares (ganancias, ETAs), legible al volante. `scheme: 'dark'`, status bar `light-content`.
+El conductor usa el **mismo sistema de color que el pasajero** (no se diferencia por el tema sino por el app
+icon y el lockup "VEO | Conductores"). Lienzo NEGRO puro (`#000000`, ideal OLED para turnos largos), acento
+VEO Cyan `#00E5FF`, alto contraste y números tabulares (ganancias, ETAs) legibles al volante.
+`scheme: 'dark'`, status bar `light-content`. Valores canónicos en `themes.ts` → `driverTheme`.
 
-| Token | Hex | Rol |
-|---|---|---|
-| `bg` | `#121824` | fondo (navy casi negro) |
-| `surface` | `#1A2230` | tarjetas |
-| `surfaceElevated` | `#232B3C` | capa elevada |
-| `ink` / `inkMuted` / `inkSubtle` | `#EFF2F6` / `#B3B7BF` / `#878C96` | texto 1°/2°/3° |
-| `border` / `borderStrong` | `#383D48` / `#515866` | divisores / énfasis |
-| `brand` / `onBrand` | `#54AAD1` / `#0B111F` | navy de marca aclarado para dark |
-| `accent` / `accentHover` / `onAccent` | `#39BCDF` / `#52CFF3` / `#0B111F` | cian de acción |
-| `safe` / `success` | `#39BF89` | confianza / éxito |
-| `warn` / `danger` | `#F2AF48` / `#F36164` | estados |
-| `focus` | `#39BCDF` | anillo de foco |
-| `overlay` | `rgba(4,7,13,0.6)` | scrim de sheets/modales |
-
-> En dark, la elevación se expresa con la **superficie** (no con sombras fuertes): `level1..3` usan
-> sombras tenues; los planos se separan por `surface` → `surfaceElevated`.
+> Antes el driver usaba un navy `#121824` + cyan lavado `#39BCDF` que DIVERGÍA del Brand Book; se corrigió
+> en el pase de marca para unificar con el pasajero. En dark, la elevación se expresa con la **superficie**
+> (`surface` → `surfaceElevated`) y sombras negras tenues, no con sombras fuertes ni color.
 
 ---
 
 ## 3. Tokens compartidos (estructura, no marca)
 
 ### Tipografía (`typography`)
-- **Familias:** `display`/`text` sans humanista de sistema por defecto (las apps registran Inter/Geist y
-  sobre-escriben), `mono` tabular para datos. Escala alineada a la web: `12 14 16 18 20 24 30 36 48`.
+- **Familias de marca (bundleadas):** `display` → **Clash Display Bold** (Fontshare) para títulos/héroe;
+  `text*` → **Outfit** (Google Fonts OFL) por peso (Regular/Medium/SemiBold/Bold) para interfaz/cuerpo;
+  `mono` tabular para datos. Nombres PostScript reales: `ClashDisplay-Bold`, `Outfit-{Regular…Bold}`. Hasta
+  que la app recompile con las fuentes bundleadas, RN cae a la grotesk del sistema (esperado). Escala
+  alineada a la web: `12 14 16 18 20 24 30 36 48`.
 - **Roles (`textStyles`)** — los componentes consumen roles, no tamaños sueltos:
   `display, title1, title2, title3, headline, body, bodyStrong, callout, subhead, footnote, caption, label`.
 - **Números tabulares:** `<Text tabular>` para tarifas (céntimos PEN → S/), ETAs, timers, placas, IDs.

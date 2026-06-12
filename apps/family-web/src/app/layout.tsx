@@ -25,14 +25,13 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
-    { media: '(prefers-color-scheme: dark)', color: '#11161f' },
-  ],
+  // Marca VEO = lienzo NEGRO: la barra del navegador acompaña el negro de marca (#000000).
+  themeColor: '#000000',
 };
 
-// Aplica el tema del sistema antes de pintar para evitar parpadeo (sin login ni preferencia guardada).
-const themeScript = `(function(){try{if(window.matchMedia('(prefers-color-scheme: dark)').matches){document.documentElement.classList.add('dark');}}catch(e){}})();`;
+// La marca VEO es un lienzo negro: family-web no tiene toggle, siempre arranca en oscuro.
+// Fijamos la clase antes del paint para alinear color-scheme y evitar parpadeo.
+const themeScript = `(function(){try{document.documentElement.classList.add('dark');}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

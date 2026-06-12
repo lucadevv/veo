@@ -13,14 +13,16 @@ export interface TokenColors {
   border: string;
 }
 
+// Fallback alineado a los tokens de marca VEO (lienzo negro + VEO Cyan). Espeja `tokens.css`;
+// es solo un respaldo para SSR / antes de que el navegador resuelva las CSS vars.
 const FALLBACK: TokenColors = {
-  accent: 'oklch(0.6 0.12 230)',
-  brand: 'oklch(0.32 0.08 264)',
-  success: 'oklch(0.62 0.14 162)',
-  warn: 'oklch(0.72 0.15 75)',
-  danger: 'oklch(0.58 0.2 22)',
-  inkMuted: 'oklch(0.47 0.02 264)',
-  border: 'oklch(0.9 0.008 264)',
+  accent: 'oklch(0.823 0.135 207)',
+  brand: 'oklch(0.823 0.135 207)',
+  success: 'oklch(0.78 0.14 162)',
+  warn: 'oklch(0.80 0.13 75)',
+  danger: 'oklch(0.65 0.21 17)',
+  inkMuted: 'oklch(0.86 0.008 263)',
+  border: 'oklch(0.20 0.003 286)',
 };
 
 function read(name: string, fallback: string): string {

@@ -145,7 +145,7 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     // MapLibre pinta en WebGL y no puede leer variables CSS: resolvemos el token --accent
     // computado (respeta claro/oscuro) en vez de hardcodear un color.
     const accentColor =
-      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'oklch(0.6 0.12 230)';
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'oklch(0.823 0.135 207)';
 
     const routeCoords = poly ? decodePolyline(poly) : [];
     const existingSource = map.getSource<GeoJSONSource>(ROUTE_SOURCE);

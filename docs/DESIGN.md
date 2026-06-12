@@ -3,6 +3,10 @@
 > Fuente de verdad de diseño para `admin-web` y `family-web` (Ola 3). Destilado de las skills
 > `ui-ux-pro-max`, `impeccable` y `emil-design-eng`. **Léelo antes de escribir cualquier UI.**
 > Tokens vivos en `@veo/shared-config/tailwind/preset.cjs` + `tokens.css` (OKLCH). No hardcodear color/spacing.
+>
+> **Fuente ÚNICA de marca:** `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del VEO Brand Book).
+> `tokens.css` DERIVA esos valores a OKLCH para la web. Si la marca cambia, se cambia en `themes.ts`
+> y se re-deriva, nunca al revés.
 
 ---
 
@@ -19,33 +23,41 @@
 
 ## 1. Color (OKLCH, tokens semánticos)
 
-Marca VEO: navy profundo + cian eléctrico de acento. **Estrategia de color: Restrained** para producto
-(neutros tintados + 1 acento ≤10% de la superficie). El navy es identidad, no relleno; el cian solo en acentos/acciones.
+Marca VEO: **lienzo NEGRO** (`#000000`) + **VEO Cyan** (`#00E5FF`) de acento (igual que las apps móviles,
+coherencia total con el Brand Book). **Estrategia de color: Restrained** para producto (neutros tintados +
+1 acento cian ≤10% de la superficie). El cyan nunca rellena áreas grandes; cuando lo hace (botón primario)
+el texto encima es **NEGRO** (`--on-brand`/`--on-accent` = `#000`).
 
-Tokens semánticos (definidos como CSS vars OKLCH en `tokens.css`, modo claro + oscuro):
+> **Por qué el lienzo es oscuro:** VEO Cyan `#00E5FF` sobre claro da ~1.5:1 (ilegible, falla WCAG); sobre
+> negro da ~13.6:1. El acento solo es legible sobre lienzo oscuro, así que la marca web es negra.
+
+Tokens semánticos (definidos como CSS vars OKLCH en `tokens.css`, derivados del Brand Book):
 
 | Token | Rol |
 |---|---|
-| `--bg` / `--surface` / `--surface-2` | fondo de página / tarjetas / capas elevadas |
-| `--ink` / `--ink-muted` / `--ink-subtle` | texto primario / secundario / terciario |
-| `--border` / `--border-strong` | divisores y bordes |
-| `--brand` / `--on-brand` | navy de marca + texto sobre marca |
-| `--accent` / `--on-accent` | cian de acción + texto sobre acento |
-| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado |
-| `--focus` | anillo de foco (3px, offset 2px) |
+| `--bg` / `--surface` / `--surface-2` | lienzo negro / tarjetas / capas elevadas (`#000` · `#0E0E11` · `#1C1C22`) |
+| `--ink` / `--ink-muted` / `--ink-subtle` | texto primario / secundario / terciario (`#F4F6F8` · `#CFD3DA` · `#8A909C`) |
+| `--border` / `--border-strong` | divisores y bordes (`#17171B` · `#2A2A30`) |
+| `--brand` / `--on-brand` | VEO Cyan de marca + texto NEGRO sobre marca |
+| `--accent` / `--on-accent` | VEO Cyan de acción + texto NEGRO sobre acento |
+| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (texto NEGRO encima) |
+| `--focus` | anillo de foco VEO Cyan (3px, offset 2px) |
 
 En Tailwind se consumen como `bg-surface`, `text-ink`, `text-ink-muted`, `border-border`, `bg-brand`, `text-accent`, etc.
-**Prohibido** `text-gray-400` sobre fondos tintados; usar `text-ink-muted` (calibrado para contraste).
+**Prohibido** `text-gray-400` sobre el lienzo negro; usar `text-ink-muted` (calibrado para contraste ≥4.5:1).
 
-- NO usar el body crema/sand (default IA 2026). Fondo claro = off-white casi neutro; oscuro = navy desaturado, no negro puro.
-- Modo oscuro: variantes tonales desaturadas/aclaradas, no inversión. Verificar contraste por separado.
+- El lienzo es **negro puro** de marca (`#000`), no navy ni gris. Las superficies se separan por elevación
+  (`surface` → `surface-2`) y sombras negras tenues, no por color.
+- La marca ES oscura: la clase `.dark` existe como alias de coherencia (admin puede alternarla) pero hereda
+  el mismo sistema negro+cyan; no reintroduce navy. Contraste verificado AA sobre `#000`.
 
 ---
 
 ## 2. Tipografía
 
-- **Familias (máx 3):** display/headings + body en una sans humanista de pantalla self-hosted vía `next/font/local`
-  (recomendado **Inter** o **Geist** con archivos locales), + `mono` tabular para datos/precios/IDs. No pares dos sans casi-iguales.
+- **Familias (máx 3):** títulos/display en **Clash Display Bold** (Fontshare) + interfaz/cuerpo en **Outfit**
+  (Google Fonts OFL, pesos Regular/Medium/SemiBold/Bold), ambas self-hosted vía `next/font/local`, + `mono`
+  tabular para datos/precios/IDs. Mismas familias que las apps móviles (`packages/ui-kit`, ver DESIGN-MOBILE §3).
 - Escala: `12 · 14 · 16 · 18 · 20 · 24 · 30 · 36 · 48`. Contraste de peso ≥ 1.25 entre niveles. Cuerpo base 16px (mín en mobile 16px).
 - `line-height` cuerpo 1.5–1.7; longitud de línea 65–75ch.
 - Headings: `text-wrap: balance`. Prosa larga: `text-wrap: pretty`.

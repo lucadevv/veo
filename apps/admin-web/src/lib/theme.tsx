@@ -13,13 +13,15 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = 'veo-theme';
 
 function currentDomTheme(): Theme {
-  if (typeof document === 'undefined') return 'light';
+  // La marca VEO es un lienzo negro: el default es dark cuando no hay DOM (SSR).
+  if (typeof document === 'undefined') return 'dark';
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // El script inline de layout ya fijó la clase antes del paint; sincronizamos el estado.
-  const [theme, setTheme] = useState<Theme>('light');
+  // Default dark: la marca VEO arranca en el lienzo negro.
+  const [theme, setTheme] = useState<Theme>('dark');
 
   useEffect(() => {
     setTheme(currentDomTheme());

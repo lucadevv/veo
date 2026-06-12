@@ -11,7 +11,8 @@
   html {
     /* Las fuentes self-hosted (next/font) inyectan --font-sans/--font-mono en <html>. */
     -webkit-text-size-adjust: 100%;
-    color-scheme: light;
+    /* Marca VEO = lienzo NEGRO: esquema oscuro por defecto (el toggle puede alternar la clase). */
+    color-scheme: dark;
   }
   html.dark {
     color-scheme: dark;

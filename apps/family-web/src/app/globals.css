@@ -6,8 +6,10 @@
 @tailwind utilities;
 
 @layer base {
+  /* La marca VEO es un lienzo NEGRO: el esquema base es oscuro para que los controles
+   * nativos del navegador (scrollbars, form controls) rendericen en oscuro por defecto. */
   :root {
-    color-scheme: light;
+    color-scheme: dark;
   }
 
   .dark {
