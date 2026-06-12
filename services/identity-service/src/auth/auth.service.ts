@@ -10,12 +10,12 @@ import {
   type SubjectType,
 } from '@veo/auth';
 import { parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
-import { createEnvelope } from '@veo/events';
 import { PrismaService } from '../infra/prisma.service';
 import { OtpService } from './otp.service';
 import { TokenIssuerService } from './token-issuer.service';
+import { registerUser } from './user-registration';
 import { SMS_SENDER, type SmsSender } from '../ports/sms/sms.port';
-import { Prisma, type UserType } from '../generated/prisma';
+import { type UserType } from '../generated/prisma';
 import type { AuthTokens } from './dto/auth.dto';
 
 @Injectable()
@@ -53,24 +53,12 @@ export class AuthService {
         });
         return existing;
       }
-      const created = await tx.user.create({ data: { phone, type } });
-      // Credencial del método teléfono+OTP (ADR-012 §2): cuelga del mismo User.
-      await tx.authMethod.create({
-        data: { userId: created.id, type: 'PHONE_OTP', verified: true },
+      // Alta nueva: User + credencial PHONE_OTP (ADR-012 §2) + outbox user.registered, vía el
+      // registro transaccional único (Lote A2).
+      return registerUser(tx, {
+        user: { phone, type },
+        authMethod: { type: 'PHONE_OTP', verified: true },
       });
-      const envelope = createEnvelope({
-        eventType: 'user.registered',
-        producer: 'identity-service',
-        payload: { userId: created.id, phone: created.phone ?? '', kycStatus: created.kycStatus },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: created.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
-      return created;
     });
 
     return this.tokenIssuer.issue(user.id, this.subjectType(user.type), {

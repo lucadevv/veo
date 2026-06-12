@@ -28,6 +28,7 @@ import { REDIS } from '../infra/redis';
 import { EmailCodeService } from './email-code.service';
 import { TokenIssuerService } from './token-issuer.service';
 import { resolveUserForVerifiedEmail } from './account-linking';
+import { registerUser } from './user-registration';
 import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
 import { Prisma, type UserType } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -123,27 +124,16 @@ export class EmailAuthService {
         return;
       }
 
-      const user = await tx.user.create({ data: { email, name, type } });
-      await tx.authMethod.create({
-        data: {
-          userId: user.id,
+      // Alta nueva: User + credencial EMAIL_PASSWORD + outbox user.registered, vía el registro
+      // transaccional único (Lote A2).
+      await registerUser(tx, {
+        user: { email, name, type },
+        authMethod: {
           type: 'EMAIL_PASSWORD',
           email,
           passwordHash,
           emailVerified: false,
           verified: false,
-        },
-      });
-      const envelope = createEnvelope({
-        eventType: 'user.registered',
-        producer: 'identity-service',
-        payload: { userId: user.id, phone: user.phone ?? '', kycStatus: user.kycStatus },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: user.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
         },
       });
     });

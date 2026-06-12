@@ -6,6 +6,7 @@ import { VerificationCodeService } from './verification-code.service';
 import { OtpService } from './otp.service';
 import { EmailCodeService } from './email-code.service';
 import { TokenIssuerService } from './token-issuer.service';
+import { OAuthLoginService } from './oauth-login.service';
 import { AuthService } from './auth.service';
 import { EmailAuthService } from './email-auth.service';
 import { GoogleAuthService } from './google-auth.service';
@@ -19,6 +20,7 @@ import { AuthController } from './auth.controller';
     OtpService,
     EmailCodeService,
     TokenIssuerService,
+    OAuthLoginService,
     AuthService,
     EmailAuthService,
     GoogleAuthService,
