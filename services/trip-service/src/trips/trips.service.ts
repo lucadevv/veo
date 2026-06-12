@@ -475,6 +475,39 @@ export class TripsService {
     }
   }
 
+  /**
+   * GUARD CAS ATÓMICO genérico para las transiciones de viaje OPERADAS POR EL USUARIO (accept/arriving/
+   * arrived/start/complete/cancel/fail). Mueve el viaje a `to` en el MISMO statement que valida que era
+   * una transición legal — `status` viaja en el WHERE del updateMany (`status: { in: transitionSources(to) }`),
+   * NO se hace check-then-act. Cierra la carrera en que dos taps concurrentes pisan un terminal (ej. accept
+   * pisando CANCELLED_BY_PASSENGER → viaje zombie; complete cobrando un viaje ya cancelado).
+   *
+   * Si el claim NO movió fila (count === 0) el viaje no existe o ya NO estaba en un estado fuente: releemos
+   * para dar un error HONESTO con el `from` real → !current ⇒ NotFoundError; current ⇒ InvalidTripTransition
+   * (409). A diferencia de los handlers de consumidores Kafka (assign/cancelFromBid/expireFromNoOffers/
+   * watchdog) que tratan count===0 como no-op idempotente, estas 7 son acciones de usuario y DEBEN fallar 409.
+   *
+   * NO emite eventos: `recordTripEvent`/`enqueueOutbox` varían por método y van AGUAS ABAJO del claim, en la
+   * misma tx, para que un CAS perdido NO emita el evento. `data` lleva los campos sin `status` (lo setea el
+   * helper). Devuelve void: el caller relee con `findUniqueOrThrow` la fila ya escrita.
+   */
+  private async casTransition(
+    tx: Prisma.TransactionClient,
+    id: string,
+    to: TripStatus,
+    data: Prisma.TripUpdateManyMutationInput,
+  ): Promise<void> {
+    const claim = await tx.trip.updateMany({
+      where: { id, status: { in: transitionSources(to) } },
+      data: { status: to, ...data },
+    });
+    if (claim.count === 0) {
+      const current = await tx.trip.findUnique({ where: { id } });
+      if (!current) throw new NotFoundError('Viaje no encontrado', { id });
+      throw new InvalidTripTransition(current.status, to);
+    }
+  }
+
   private async assign(id: string, driverId: string, vehicleId: string | null): Promise<TripView> {
     // GUARD ATÓMICO (no check-then-act): el estado va en el WHERE del updateMany, así el viaje se mueve a
     // ASSIGNED en el MISMO statement que valida que era asignable. Dos `dispatch.match_found` concurrentes
@@ -526,10 +559,11 @@ export class TripsService {
     const etaSeconds = dto.etaSeconds ?? 300;
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: { status: TripStatus.ACCEPTED, acceptedAt: new Date() },
-      });
+      // CAS atómico: el assertTransition de arriba es solo pre-check fail-fast (UX antes de abrir tx); el
+      // guard REAL contra la carrera va acá (status en el WHERE). Si el viaje cayó a un terminal entre el
+      // mustFind y este claim, casTransition lanza InvalidTripTransition y el evento NO se emite.
+      await this.casTransition(tx, id, TripStatus.ACCEPTED, { acceptedAt: new Date() });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.accepted', { driverId: trip.driverId, etaSeconds });
       await enqueueOutbox(
         tx,
@@ -559,10 +593,9 @@ export class TripsService {
     const at = new Date();
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: { status: TripStatus.ARRIVING, arrivingAt: at },
-      });
+      // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
+      await this.casTransition(tx, id, TripStatus.ARRIVING, { arrivingAt: at });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.arriving', { etaSeconds });
       await enqueueOutbox(
         tx,
@@ -596,10 +629,9 @@ export class TripsService {
     const at = new Date();
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: { status: TripStatus.ARRIVED, arrivedAt: at },
-      });
+      // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
+      await this.casTransition(tx, id, TripStatus.ARRIVED, { arrivedAt: at });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.arrived', {});
       await enqueueOutbox(
         tx,
@@ -687,10 +719,9 @@ export class TripsService {
 
     const startedAt = new Date();
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: { status: TripStatus.IN_PROGRESS, startedAt },
-      });
+      // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
+      await this.casTransition(tx, id, TripStatus.IN_PROGRESS, { startedAt });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.started', { startedAt: startedAt.toISOString() });
       await enqueueOutbox(
         tx,
@@ -778,10 +809,11 @@ export class TripsService {
       trip.paymentMethod === 'CASH' ? (dto.cashCollected ?? undefined) : undefined;
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: { status: TripStatus.COMPLETED, completedAt },
-      });
+      // CAS atómico CRÍTICO (cobro): si una carrera ya canceló el viaje (CANCELLED_BY_*), el claim falla y
+      // NO se emite trip.completed → payment-service NO cobra un viaje muerto. assertTransition arriba es
+      // solo pre-check fail-fast; el guard autoritativo va en el WHERE del updateMany.
+      await this.casTransition(tx, id, TripStatus.COMPLETED, { completedAt });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.completed', { fareCents: trip.fareCents });
       await enqueueOutbox(
         tx,
@@ -855,16 +887,18 @@ export class TripsService {
     });
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: {
-          status: target,
-          cancelledAt: now,
-          cancelledBy: dto.by,
-          cancellationReason: dto.reason ?? null,
-          penaltyCents,
-        },
+      // CAS atómico CRÍTICO (split de penalidad): el `target` ya está resuelto (passenger vs driver) ANTES
+      // de abrir la tx; el claim valida que el viaje SIGUE en un estado cancelable. Si una carrera ya lo
+      // movió a un terminal, el claim falla y NO se emite trip.cancelled → payment-service NO procesa un
+      // split sobre un viaje muerto. El cálculo de penaltyCents es puro (pre-tx) y se descarta solo si el
+      // CAS pierde. assertTransition(target) arriba es solo pre-check fail-fast.
+      await this.casTransition(tx, id, target, {
+        cancelledAt: now,
+        cancelledBy: dto.by,
+        cancellationReason: dto.reason ?? null,
+        penaltyCents,
       });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.cancelled', { by: dto.by, penaltyCents, reason: dto.reason });
       await enqueueOutbox(
         tx,
@@ -952,16 +986,15 @@ export class TripsService {
     const cancelledDriverId = trip.driverId;
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id: trip.id },
-        data: {
-          status: TripStatus.FAILED,
-          driverId: null,
-          reassignCount,
-          cancelledAt: at,
-          cancellationReason: 'max_reassign_exceeded',
-        },
+      // CAS atómico (ver acceptTrip): assertTransition(FAILED) arriba es pre-check; el guard de carrera va
+      // en el WHERE. Si el viaje ya cayó a otro terminal entre el read y este claim, lanza y no emite.
+      await this.casTransition(tx, trip.id, TripStatus.FAILED, {
+        driverId: null,
+        reassignCount,
+        cancelledAt: at,
+        cancellationReason: 'max_reassign_exceeded',
       });
+      const next = await tx.trip.findUniqueOrThrow({ where: { id: trip.id } });
       const payload = {
         tripId: trip.id,
         passengerId: trip.passengerId,

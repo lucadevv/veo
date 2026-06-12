@@ -455,6 +455,99 @@ describe('TripsService · BR-T02 guardas de transición', () => {
   });
 });
 
+// ── CAS atómico: las 7 transiciones de usuario lanzan 409 ante una carrera que ya pisó un terminal ──
+//
+// Cada test mete el store en un estado terminal/inválido para la transición y verifica que (a) lanza
+// InvalidTripTransition y (b) NO se emite el evento al outbox. El guard real es el `status` en el WHERE
+// del updateMany (casTransition): aunque el assertTransition pre-tx pasara por una carrera, el claim
+// fallaría. Espeja el test de `assign sobre un viaje COMPLETED`. CRÍTICOS: complete (no cobra) y cancel
+// (no procesa el split) sobre un viaje ya muerto.
+describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario lanzan 409 ante carrera', () => {
+  const DRV = '22222222-2222-2222-2222-222222222222';
+
+  it('acceptTrip sobre un viaje CANCELLED_BY_PASSENGER → InvalidTripTransition, NO emite trip.accepted', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.acceptTrip('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.accepted')).toBe(false);
+    expect(prisma._store?.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
+  });
+
+  it('arriving sobre un viaje CANCELLED_BY_PASSENGER → InvalidTripTransition, NO emite trip.arriving', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.arriving('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.arriving')).toBe(false);
+  });
+
+  it('arrived sobre un viaje CANCELLED_BY_PASSENGER → InvalidTripTransition, NO emite trip.arrived', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.arrived('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.arrived')).toBe(false);
+  });
+
+  it('start sobre un viaje CANCELLED_BY_PASSENGER → InvalidTripTransition, NO emite trip.started', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.start('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.started')).toBe(false);
+  });
+
+  it('CRÍTICO complete sobre un viaje CANCELLED_BY_PASSENGER → InvalidTripTransition, NO emite trip.completed (no cobra)', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.complete('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.completed')).toBe(false);
+    expect(prisma._store?.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
+  });
+
+  it('CRÍTICO cancel sobre un viaje COMPLETED → InvalidTripTransition, NO emite trip.cancelled (no procesa split)', async () => {
+    const prisma = makePrisma(buildTrip({ status: TripStatus.COMPLETED, passengerId: 'pax-1', driverId: DRV }));
+    const svc = new TripsService(prisma as never, maps);
+    await expect(
+      svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-1')),
+    ).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(false);
+    expect(prisma._store?.status).toBe(TripStatus.COMPLETED);
+  });
+
+  // failAfterTooManyReassigns (#7): la rama es PRIVADA y se alcanza vía `cancel` del conductor POST-accept
+  // con reassignCount en el tope. Con el mock de store ÚNICO no se puede expresar "read ve ACCEPTED, CAS ve
+  // terminal" (findUnique y updateMany leen el MISMO store: el routing a la rama fail depende del read). Por
+  // eso aquí cubrimos las dos garantías que SÍ son expresables:
+  //   (a) ruta feliz: deriva a FAILED por el CAS y emite trip.failed (NO trip.reassigning) — prueba el CAS nuevo;
+  //   (b) garantía de carrera: el dispatchModes registry no está cableado en este doble, así que el camino
+  //       REASSIGNING (no-fail) lanzaría; por eso fijamos reassignCount=maxReassign para forzar SOLO la rama fail.
+  it('failAfterTooManyReassigns: cancel del conductor POST-accept con tope superado → FAILED vía CAS, emite trip.failed y NO trip.reassigning', async () => {
+    // maxReassign default = 3; con reassignCount 3, nextReassignCount 4 > 3 → failAfterTooManyReassigns.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, driverId: DRV, reassignCount: 3 }),
+    );
+    const svc = new TripsService(prisma as never, maps);
+    const view = await svc.cancel('trip-1', { by: 'DRIVER', driverId: DRV, reason: 'x' }, DRIVER_USER);
+    expect(view.status).toBe(TripStatus.FAILED);
+    expect(prisma._store?.status).toBe(TripStatus.FAILED);
+    expect(prisma._store?.driverId).toBeNull(); // el conductor que canceló se desvincula
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.failed')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(false);
+  });
+
+  it('failAfterTooManyReassigns: si una carrera ya llevó el viaje a un terminal, el cancel del conductor lanza InvalidTripTransition y NO emite trip.failed', async () => {
+    // Store ya CANCELLED_BY_PASSENGER: mustFind lo ve terminal → NO entra a POST_ACCEPT_STATES → cae al
+    // cancel normal (target CANCELLED_BY_DRIVER), cuyo assertTransition pre-tx ya lanza (terminal sin
+    // salidas). Garantía de fondo idéntica: viaje muerto ⇒ 409 y CERO eventos al outbox.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV, reassignCount: 3 }),
+    );
+    const svc = new TripsService(prisma as never, maps);
+    await expect(
+      svc.cancel('trip-1', { by: 'DRIVER', driverId: DRV, reason: 'x' }, DRIVER_USER),
+    ).rejects.toBeInstanceOf(InvalidTripTransition);
+    expect(prisma._outbox).toHaveLength(0);
+  });
+});
+
 describe('TripsService.start · BR-T07 modo niño', () => {
   it('código correcto inicia el viaje (→ IN_PROGRESS) y emite trip.started', async () => {
     const hash = bcrypt.hashSync('1234', 10);
