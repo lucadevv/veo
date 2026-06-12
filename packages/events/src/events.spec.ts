@@ -48,6 +48,44 @@ describe('registro de schemas', () => {
   it('rechaza payload inválido', () => {
     expect(EVENT_SCHEMAS['rating.created'].safeParse({ stars: 9 }).success).toBe(false);
   });
+
+  describe('panic.fanout_requested · contrato anti-PII (FOUNDATION §0.7)', () => {
+    const validPayload = {
+      panicId: 'pn1',
+      tripId: 't1',
+      passengerId: 'p1',
+      geo: { lat: -12.1, lon: -77.0 },
+      contactIds: ['c1', 'c2'],
+      shareLink: 'https://veo.pe/s/abc123',
+    };
+
+    it('valida un payload con SOLO IDs + deep-link', () => {
+      const schema = schemaForEvent('panic.fanout_requested');
+      expect(schema).toBeDefined();
+      expect(schema!.safeParse(validPayload).success).toBe(true);
+    });
+
+    it('enruta al topic panic', () => {
+      expect(topicForEvent('panic.fanout_requested')).toBe('panic');
+    });
+
+    it('RECHAZA un teléfono filtrado en el payload (PII, .strict falla-cerrado)', () => {
+      const leaked = { ...validPayload, phone: '+51987654321' };
+      expect(EVENT_SCHEMAS['panic.fanout_requested'].safeParse(leaked).success).toBe(false);
+    });
+
+    it('RECHAZA un nombre de contacto filtrado en el payload (PII)', () => {
+      const leaked = { ...validPayload, contactName: 'Maria Perez' };
+      expect(EVENT_SCHEMAS['panic.fanout_requested'].safeParse(leaked).success).toBe(false);
+    });
+
+    it('el payload válido NO contiene ningún campo de PII (teléfono/nombre/email)', () => {
+      const keys = Object.keys(validPayload);
+      for (const piiKey of ['phone', 'name', 'contactName', 'email', 'phones', 'contacts']) {
+        expect(keys).not.toContain(piiKey);
+      }
+    });
+  });
   it('valida payload de user.kyc_verified (KYC del pasajero)', () => {
     const schema = schemaForEvent('user.kyc_verified');
     expect(schema).toBeDefined();

@@ -2109,6 +2109,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/rpc':
+        specifier: workspace:*
+        version: link:../../packages/rpc
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

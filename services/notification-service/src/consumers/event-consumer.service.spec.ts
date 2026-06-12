@@ -131,11 +131,17 @@ async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
   const config = {
     getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
     get: () => undefined,
+  } as unknown as ConstructorParameters<typeof EventConsumerService>[3];
+
+  // Resolver de contactos por defecto: vacío (estos tests no ejercen el fan-out de pánico).
+  const shareContacts = {
+    resolveByPassenger: async () => [],
   } as unknown as ConstructorParameters<typeof EventConsumerService>[2];
 
   const service = new EventConsumerService(
     engine,
     devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
+    shareContacts,
     config,
   );
   await service.onModuleInit();
@@ -853,5 +859,129 @@ describe('EventConsumerService · chat.message_sent (sin presencia, push al pasa
     await registered.get('chat.message_sent')!(e);
     await registered.get('chat.message_sent')!(e);
     expect(store.records.size).toBe(1);
+  });
+});
+
+// ───────────────────── panic.fanout_requested → fan-out durable de SMS (B1) ─────────────────────
+import type { ResolvedTrustedContact, TrustedContactsResolver } from '../ports/share/share-contacts.port';
+
+/** Construye el servicio con un resolver de contactos CONFIGURABLE (fake gRPC a share). */
+async function buildWithContacts(resolver: TrustedContactsResolver) {
+  registered.clear();
+  const store = new InMemoryStore();
+  const engine = new NotificationEngine(store, renderer, new NoopDispatcher(), policy);
+  const devices = fakeDevices({});
+
+  const { EventConsumerService } = await import('./event-consumer.service');
+  const config = {
+    getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
+    get: () => undefined,
+  } as unknown as ConstructorParameters<typeof EventConsumerService>[3];
+
+  const service = new EventConsumerService(
+    engine,
+    devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
+    resolver,
+    config,
+  );
+  await service.onModuleInit();
+  return { store };
+}
+
+const PANIC_PAX = '33333333-3333-4333-8333-333333333333';
+
+function fanoutEnvelope(contactIds: string[]): EventEnvelope<unknown> {
+  return createEnvelope({
+    eventType: 'panic.fanout_requested',
+    producer: 'share-service',
+    payload: {
+      panicId: 'pn-1',
+      tripId: 'trip-1',
+      passengerId: PANIC_PAX,
+      geo: { lat: -12.04, lon: -77.04 },
+      contactIds,
+      shareLink: 'https://veo.pe/s/abc',
+    },
+  });
+}
+
+/** Resolver fake: mapea los IDs solicitados a contactos con teléfono+nombre (la PII vive solo acá). */
+function resolverWith(contacts: ResolvedTrustedContact[]): TrustedContactsResolver {
+  return { resolveByPassenger: async () => contacts };
+}
+
+describe('EventConsumerService · panic.fanout_requested (fan-out durable, anti-PII)', () => {
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a panic.fanout_requested', async () => {
+    await buildWithContacts(resolverWith([]));
+    expect(registered.has('panic.fanout_requested')).toBe(true);
+  });
+
+  it('resuelve teléfonos por gRPC y encola UN SMS por contactId (template PANIC_CONTACT_ALERT)', async () => {
+    const { store } = await buildWithContacts(
+      resolverWith([
+        { id: 'c1', phone: '+51911111111', name: 'Ana' },
+        { id: 'c2', phone: '+51922222222', name: 'Beto' },
+      ]),
+    );
+    await registered.get('panic.fanout_requested')!(fanoutEnvelope(['c1', 'c2']));
+
+    const recs = [...store.records.values()];
+    expect(recs).toHaveLength(2);
+    for (const rec of recs) {
+      expect(rec.channel).toBe(NotificationChannel.SMS);
+      expect(rec.template).toBe(TEMPLATE_KEYS.PANIC_CONTACT_ALERT);
+      expect(rec.priority).toBe(NotificationPriority.Critical);
+      // dedupKey por contactId, NUNCA por teléfono (sin PII en la clave).
+      expect(rec.dedupKey).toMatch(/^panic:pn-1:sms:c[12]$/);
+      // El teléfono va al riel (payload.to) pero NO está en la dedupKey.
+      expect(rec.dedupKey).not.toContain('+51');
+    }
+    // El shareLink del evento llega a las vars de la plantilla.
+    expect((recs[0]!.payload.vars as Record<string, unknown>).shareLink).toBe('https://veo.pe/s/abc');
+  });
+
+  it('redelivery del evento → dedup del engine evita SMS duplicados', async () => {
+    const { store } = await buildWithContacts(
+      resolverWith([{ id: 'c1', phone: '+51911111111', name: 'Ana' }]),
+    );
+    await registered.get('panic.fanout_requested')!(fanoutEnvelope(['c1']));
+    await registered.get('panic.fanout_requested')!(fanoutEnvelope(['c1']));
+    expect(store.records.size).toBe(1);
+  });
+
+  it('contacto borrado/desverificado entre trigger y fan-out → omite ese SMS sin romper el resto', async () => {
+    const { store } = await buildWithContacts(
+      resolverWith([{ id: 'c1', phone: '+51911111111', name: 'Ana' }]), // c2 ya no existe en share
+    );
+    await registered.get('panic.fanout_requested')!(fanoutEnvelope(['c1', 'c2']));
+    expect(store.records.size).toBe(1);
+    expect([...store.records.values()][0]!.dedupKey).toBe('panic:pn-1:sms:c1');
+  });
+
+  it('cap BR-S05: como máximo 4 contactos notificados', async () => {
+    const many: ResolvedTrustedContact[] = Array.from({ length: 6 }, (_, i) => ({
+      id: `c${i}`,
+      phone: `+5190000000${i}`,
+      name: `N${i}`,
+    }));
+    const { store } = await buildWithContacts(resolverWith(many));
+    await registered.get('panic.fanout_requested')!(fanoutEnvelope(many.map((c) => c.id)));
+    expect(store.records.size).toBe(4);
+  });
+
+  it('degradación honesta: si el gRPC a share falla (transitorio), RELANZA para que Kafka reintente', async () => {
+    const failing: TrustedContactsResolver = {
+      resolveByPassenger: async () => {
+        throw new Error('share gRPC unavailable');
+      },
+    };
+    const { store } = await buildWithContacts(failing);
+    await expect(registered.get('panic.fanout_requested')!(fanoutEnvelope(['c1']))).rejects.toThrow(
+      'share gRPC unavailable',
+    );
+    // No se encoló nada a medias; el reintento de Kafka volverá a intentar el fan-out completo.
+    expect(store.records.size).toBe(0);
   });
 });

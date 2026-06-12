@@ -22,7 +22,7 @@
  * registro) vive promovido en KafkaConsumerBootstrap (@veo/events/nest); regla de oro: un groupId
  * = UN consumer con TODOS sus eventos en `handlers()` (dedicados + filas del registro juntos).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import {
@@ -39,6 +39,7 @@ import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationPriority } from '../engine/types';
 import { TEMPLATE_KEYS } from '../engine/template.catalog';
 import { DeviceTokenRepository, type DeviceTarget } from '../devices/device-token.repository';
+import { SHARE_CONTACTS_RESOLVER, type TrustedContactsResolver } from '../ports/share/share-contacts.port';
 import type { Env } from '../config/env.schema';
 import {
   PUSH_NOTIFICATION_SPECS,
@@ -61,18 +62,15 @@ const MAX_TRUSTED_CONTACTS = 4; // BR-S05
  */
 export const DEDICATED_EVENT_TYPES = [
   'panic.triggered',
+  'panic.fanout_requested',
   'payment.failed',
   'payment.cancellation_penalty_collected',
 ] as const satisfies readonly EventType[];
 
 /* ── enrichments de los handlers dedicados (campos FUERA del contrato del registro central) ── */
 
-const contactSchema = z.object({ name: z.string().optional(), phone: z.string().min(1) });
-
-/** panic.triggered: destinatarios reales que el producer enriquece (contactos, link, central). */
+/** panic.triggered: la URL de la central (la única pieza que panic.triggered necesita enriquecer). */
 const panicEnrichment = z.object({
-  contacts: z.array(contactSchema).optional(),
-  shareLink: z.string().optional(),
   centralWebhookUrl: z.string().optional(),
 });
 
@@ -101,6 +99,7 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
   constructor(
     private readonly engine: NotificationEngine,
     private readonly devices: DeviceTokenRepository,
+    @Inject(SHARE_CONTACTS_RESOLVER) private readonly shareContacts: TrustedContactsResolver,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -149,6 +148,7 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     // Handlers dedicados (multi-canal / multi-destinatario): explícitos, no forzados al registro.
     const record: Record<string, EventHandler> = {
       'panic.triggered': (e) => this.onPanic(e),
+      'panic.fanout_requested': (e) => this.onPanicFanout(e),
       'payment.failed': (e) => this.onPaymentFailed(e),
       'payment.cancellation_penalty_collected': (e) => this.onCancellationPenaltyCollected(e),
     };
@@ -164,36 +164,19 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     return `Consumidores activos (${eventTypes.length}): ${eventTypes.join(', ')}`;
   }
 
-  /** BR-S05: SMS + link a hasta 4 contactos de confianza + alerta (webhook firmado) a la central. */
+  /**
+   * panic.triggered → SOLO la alerta (webhook firmado) a la central de monitoreo.
+   *
+   * El fan-out de SMS a contactos YA NO vive acá: lo dispara `onPanicFanout` (evento
+   * panic.fanout_requested que emite share-service tras crear el enlace, con los IDs de contacto).
+   * Separar evita el doble envío y rompe la dependencia de un enrichment de contactos que el
+   * producer de panic.triggered nunca llenaba (causa del gap "contacts vacío → SMS omitidos").
+   */
   private async onPanic(envelope: EventEnvelope<unknown>): Promise<void> {
     const base = EVENT_SCHEMAS['panic.triggered'].safeParse(envelope.payload);
     const extra = panicEnrichment.safeParse(envelope.payload);
     if (!base.success || !extra.success) return;
     const p = { ...base.data, ...extra.data };
-
-    const contacts = (p.contacts ?? []).slice(0, MAX_TRUSTED_CONTACTS);
-    if (contacts.length === 0) {
-      this.logger.warn(`panic ${p.panicId}: sin contactos en el evento (gap de contrato) → SMS omitidos`);
-    }
-    for (const contact of contacts) {
-      await this.engine.enqueue({
-        recipientId: p.passengerId,
-        channel: NotificationChannel.SMS,
-        template: TEMPLATE_KEYS.PANIC_CONTACT_ALERT,
-        // SAFETY: el pánico drena ANTES que cualquier transaccional/broadcast (SLA fan-out p99 < 3s).
-        priority: NotificationPriority.Critical,
-        dedupKey: `panic:${p.panicId}:sms:${contact.phone}`,
-        payload: {
-          to: contact.phone,
-          vars: {
-            name: contact.name ?? '',
-            shareLink: p.shareLink ?? '',
-            lat: p.geo.lat,
-            lon: p.geo.lon,
-          },
-        },
-      });
-    }
 
     const centralUrl = p.centralWebhookUrl ?? this.centralWebhookUrl;
     if (!centralUrl) {
@@ -215,6 +198,67 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
         geo: p.geo,
       },
     });
+  }
+
+  /**
+   * panic.fanout_requested (BR-S05, fix de durabilidad) → fan-out DURABLE de SMS a los contactos de
+   * confianza. share-service ya creó el enlace y delegó acá con SOLO los IDs de contacto + el deep-link
+   * (CERO PII en Kafka, §0.7). Resolvemos teléfonos+nombres por gRPC GetTrustedContacts y encolamos un
+   * SMS por contacto en el engine durable (retry/backoff/SMPP) — un fallo del proveedor NO se pierde.
+   *
+   * Idempotencia: dedupKey `panic:{panicId}:sms:{contactId}` (contactId, NO el teléfono → ni PII en la
+   * clave ni en logs). Una redelivery del evento NO duplica el SMS (dedup del engine).
+   *
+   * Degradación honesta: si el gRPC a share falla (transitorio), RELANZAMOS para que Kafka reintente
+   * el evento; el dedup del engine evita duplicar lo ya encolado. El SMS no se pierde por un blip.
+   */
+  private async onPanicFanout(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['panic.fanout_requested'].safeParse(envelope.payload);
+    if (!parsed.success) {
+      this.logger.warn('panic.fanout_requested: payload inválido (descarto sin reintento)');
+      return;
+    }
+    const p = parsed.data;
+
+    if (p.contactIds.length === 0) {
+      this.logger.warn(`panic ${p.panicId}: fan-out sin contactIds → nada que notificar`);
+      return;
+    }
+
+    // PII resuelta SÍNCRONAMENTE por gRPC (jamás viaja por Kafka). Un fallo acá es transitorio → relanza.
+    const resolved = await this.shareContacts.resolveByPassenger(p.passengerId);
+    const byId = new Map(resolved.map((c) => [c.id, c]));
+
+    const targets = p.contactIds.slice(0, MAX_TRUSTED_CONTACTS);
+    let enqueued = 0;
+    for (const contactId of targets) {
+      const contact = byId.get(contactId);
+      if (!contact) {
+        // El contacto fue borrado/desverificado entre el trigger y el fan-out: gap honesto, no rompe el resto.
+        this.logger.warn(`panic ${p.panicId}: contacto ${contactId} no resuelto por share → SMS omitido`);
+        continue;
+      }
+      await this.engine.enqueue({
+        recipientId: p.passengerId,
+        channel: NotificationChannel.SMS,
+        template: TEMPLATE_KEYS.PANIC_CONTACT_ALERT,
+        // SAFETY: el pánico drena ANTES que cualquier transaccional/broadcast (SLA fan-out p99 < 3s).
+        priority: NotificationPriority.Critical,
+        // dedupKey por contactId (NO por teléfono): idempotente y sin PII en la clave.
+        dedupKey: `panic:${p.panicId}:sms:${contactId}`,
+        payload: {
+          to: contact.phone,
+          vars: {
+            name: contact.name,
+            shareLink: p.shareLink,
+            lat: p.geo.lat,
+            lon: p.geo.lon,
+          },
+        },
+      });
+      enqueued += 1;
+    }
+    this.logger.log(`panic ${p.panicId}: fan-out encoló ${enqueued}/${targets.length} SMS (durable)`);
   }
 
   /**

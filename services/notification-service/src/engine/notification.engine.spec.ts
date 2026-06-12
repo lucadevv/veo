@@ -298,3 +298,64 @@ describe('NotificationEngine · prioridad (SAFETY: pánico antes que broadcast)'
     expect(store.records.get(notification.id)?.priority).toBe(NotificationPriority.Normal);
   });
 });
+
+/**
+ * REGRESIÓN del bug de durabilidad del SMS de pánico (fix B1). Antes, share-service mandaba el SMS
+ * INLINE: si el proveedor fallaba, el catch lo tragaba y Kafka ACKeaba → el SMS se perdía PARA SIEMPRE
+ * (en redelivery el enlace deduped lo omitía). Ahora el fan-out es DURABLE en el engine: un fallo
+ * transitorio del proveedor reprograma con backoff y el SMS TERMINA enviado.
+ */
+describe('NotificationEngine · pánico durable (REGRESIÓN del SMS perdido)', () => {
+  it('SMS de pánico: el proveedor falla el 1er intento, éxito el 2do → el SMS TERMINA enviado', async () => {
+    const dispatcher = new FlakyDispatcher(1); // falla 1 vez, luego acepta
+    const { store, engine } = build(dispatcher);
+
+    const { notification } = await engine.enqueue({
+      recipientId: 'pax-1',
+      channel: NotificationChannel.SMS,
+      template: 'panic.contact_alert',
+      priority: NotificationPriority.Critical,
+      // dedupKey por contactId (NO por teléfono): idempotente y sin PII.
+      dedupKey: 'panic:pn1:sms:contact-1',
+      payload: { to: '+51987654321', vars: { name: 'Ana', shareLink: 'https://veo.pe/s/x', lat: -12, lon: -77 } },
+    });
+
+    // 1er intento: el proveedor falla → en el modelo viejo el SMS se PERDÍA acá.
+    const first = await engine.process(notification);
+    expect(first.status).toBe('RETRY');
+    expect(store.records.get(notification.id)?.status).toBe('PENDING'); // sigue vivo, reprogramado
+
+    // El worker lo vuelve a tomar cuando vence el backoff…
+    const due = await store.findDue(new Date(FIXED_NOW.getTime() + 5_000), 10);
+    const second = await engine.process(due[0]!);
+
+    // …y el 2do intento ENTREGA. El SMS de pánico NO se pierde.
+    expect(second.status).toBe('SENT');
+    expect(second.attempts).toBe(2);
+    expect(store.records.get(notification.id)?.status).toBe('SENT');
+    expect(dispatcher.calls).toBe(2);
+  });
+
+  it('reintenta hasta agotar y persiste con backoff acumulado sin perder el registro', async () => {
+    const dispatcher = new FlakyDispatcher(2); // falla 2 veces, luego aceptaría
+    const { store, engine } = build(dispatcher);
+    const { notification } = await engine.enqueue({
+      recipientId: 'pax-1',
+      channel: NotificationChannel.SMS,
+      template: 'panic.contact_alert',
+      priority: NotificationPriority.Critical,
+      dedupKey: 'panic:pn2:sms:contact-9',
+      payload: { to: '+51900000000', vars: { name: 'Beto', shareLink: 'l', lat: 0, lon: 0 } },
+    });
+
+    const r1 = await engine.process(notification);
+    expect(r1.status).toBe('RETRY');
+    const due1 = await store.findDue(new Date(FIXED_NOW.getTime() + 2_000), 10);
+    const r2 = await engine.process(due1[0]!);
+    expect(r2.status).toBe('RETRY'); // 2º fallo → sigue reprogramado, no perdido
+    const due2 = await store.findDue(new Date(FIXED_NOW.getTime() + 10_000), 10);
+    const r3 = await engine.process(due2[0]!);
+    expect(r3.status).toBe('SENT'); // 3º entrega
+    expect(r3.attempts).toBe(3);
+  });
+});

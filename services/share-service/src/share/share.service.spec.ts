@@ -101,6 +101,53 @@ describe('ShareService.createLink · pertenencia falla-cerrado', () => {
   });
 });
 
+describe('ShareService.createPanicFanout · delega el fan-out durable (B1, anti-PII)', () => {
+  const panic = {
+    panicId: 'pn-1',
+    passengerId: 'pax-1',
+    geo: { lat: -12.04, lon: -77.04 },
+    contactIds: ['c1', 'c2'],
+  };
+  const ttl = { ttlSeconds: 3600, maxUses: 50 };
+
+  it('crea EL enlace y encola panic.fanout_requested (SOLO IDs + deep-link, CERO PII)', async () => {
+    const prisma = makePrisma({ link: null });
+    const svc = new ShareService(prisma as never, config);
+
+    const res = await svc.createPanicFanout('trip-1', panic, ttl);
+
+    expect(res.emitted).toBe(true);
+    expect(res.url).toContain('https://veo.pe/f/');
+    expect(prisma.tx.shareLink.create).toHaveBeenCalledOnce();
+    // Dos eventos en la MISMA tx: share.link_generated + panic.fanout_requested.
+    expect(prisma.tx.outboxEvent.create).toHaveBeenCalledTimes(2);
+
+    type OutboxArg = { data: { eventType: string; envelope: { payload: Record<string, unknown> } } };
+    const calls = prisma.tx.outboxEvent.create.mock.calls as unknown as OutboxArg[][];
+    const fanoutCall = calls.find((c) => c[0]?.data.eventType === 'panic.fanout_requested');
+    expect(fanoutCall).toBeDefined();
+    const payload = fanoutCall![0]!.data.envelope.payload;
+    // Contrato: IDs + geo + deep-link. NADA de teléfono/nombre.
+    expect(payload.contactIds).toEqual(['c1', 'c2']);
+    expect(typeof payload.shareLink).toBe('string');
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toMatch(/phone/i);
+    expect(serialized).not.toMatch(/\+51/);
+    expect(serialized).not.toMatch(/name/i);
+  });
+
+  it('redelivery (enlace ya existe) → NO re-emite el evento (emitted=false), sin duplicar fan-out', async () => {
+    const prisma = makePrisma({ link: makeLink({ dedupKey: 'panic:pn-1:link' } as never) });
+    const svc = new ShareService(prisma as never, config);
+
+    const res = await svc.createPanicFanout('trip-1', panic, ttl);
+
+    expect(res.emitted).toBe(false);
+    expect(prisma.write.$transaction).not.toHaveBeenCalled();
+    expect(prisma.tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+});
+
 describe('ShareService.revoke · pertenencia falla-cerrado', () => {
   it('sin snapshot del viaje → deniega con UnprocessableEntityError', async () => {
     const prisma = makePrisma({ snapshot: null, link: makeLink() });

@@ -5,11 +5,20 @@ import { SMS_SENDER, type SmsSender } from './sms.port';
 import { SmppClient } from './smpp-client';
 import type { Env } from '../../config/env.schema';
 
-/** Sandbox: no envía nada real; imprime el SMS (determinista) en el log de la consola. */
+/** Enmascara un teléfono dejando solo los últimos 4 dígitos (PII §0.7). */
+function maskPhone(to: string): string {
+  const tail = to.replace(/\D/g, '').slice(-4);
+  return tail ? `•••${tail}` : '•••';
+}
+
+/**
+ * Sandbox: no envía nada real. NO loguea el cuerpo (puede traer enlace/datos del pasajero) ni el
+ * teléfono completo: solo destino enmascarado + longitud. Soberanía §0.7: cero PII en logs.
+ */
 export class SmsSandboxSender implements SmsSender {
   private readonly logger = new Logger('SmsSandbox');
   async send(to: string, message: string): Promise<void> {
-    this.logger.warn(`[SANDBOX SMS] → ${to}: ${message}`);
+    this.logger.warn(`[SANDBOX SMS] → ${maskPhone(to)} (${message.length} chars)`);
   }
 }
 

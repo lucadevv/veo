@@ -85,6 +85,11 @@ export const envSchema = z.object({
   /// Destino de alertas hacia la central de monitoreo (pánico / pagos críticos).
   CENTRAL_ALERT_WEBHOOK_URL: z.string().optional(),
 
+  // ---- gRPC downstream ----
+  /// share-service (lectura síncrona): resuelve teléfonos+nombres de contactos para el fan-out de
+  /// pánico (panic.fanout_requested). El payload Kafka no transporta PII; se resuelve acá por gRPC.
+  SHARE_GRPC_URL: z.string().default('localhost:50059'),
+
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 });
 

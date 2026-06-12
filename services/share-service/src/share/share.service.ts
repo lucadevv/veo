@@ -155,6 +155,78 @@ export class ShareService {
     };
   }
 
+  /**
+   * Pánico (BR-S05, fix de durabilidad): crea EL enlace de seguimiento del viaje y, en la MISMA
+   * transacción, encola `panic.fanout_requested` al outbox para que notification-service haga el
+   * fan-out DURABLE de SMS (engine con retry/backoff). El SMS YA NO se manda inline desde share.
+   *
+   * SOBERANÍA (§0.7): el evento lleva SOLO IDs de contacto + el deep-link (URL), CERO teléfonos/nombres;
+   * notification los resuelve por gRPC GetTrustedContacts. Idempotencia: dedupKey del enlace por (pánico).
+   * En redelivery Kafka el enlace ya existe (deduped) → NO se re-encola el evento (notification tiene su
+   * propia idempotencia por contacto). Devuelve `emitted=false` cuando fue dedup (nada nuevo que delegar).
+   */
+  async createPanicFanout(
+    tripId: string,
+    input: { panicId: string; passengerId: string; geo: { lat: number; lon: number }; contactIds: string[] },
+    opts: { ttlSeconds: number; maxUses: number },
+  ): Promise<{ shareId: string; url: string; emitted: boolean }> {
+    const dedupKey = `panic:${input.panicId}:link`;
+
+    const existing = await this.prisma.read.shareLink.findUnique({ where: { dedupKey } });
+    if (existing) {
+      // Redelivery: el enlace (y por ende el evento de fan-out) ya se crearon. No re-delegamos.
+      return { shareId: existing.id, url: '', emitted: false };
+    }
+
+    const shareId = uuidv7();
+    const expiresAt = new Date(Date.now() + opts.ttlSeconds * 1000);
+    const { token, tokenHash } = signShareToken(shareId, expiresAt.getTime(), this.secret);
+    const url = `${this.publicBaseUrl}/${token}`;
+
+    try {
+      await this.prisma.write.$transaction(async (tx) => {
+        await tx.shareLink.create({
+          data: { id: shareId, tripId, contactId: null, tokenHash, dedupKey, expiresAt, maxUses: opts.maxUses },
+        });
+        // El share.link_generated histórico se mantiene (alimenta read-models/auditoría de enlaces).
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'share.link_generated',
+            producer: 'share-service',
+            payload: { shareId, tripId, expiresAt: expiresAt.toISOString() },
+          }),
+          shareId,
+        );
+        // Delegación del fan-out durable: SOLO IDs + deep-link (sin PII).
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'panic.fanout_requested',
+            producer: 'share-service',
+            dedupKey,
+            payload: {
+              panicId: input.panicId,
+              tripId,
+              passengerId: input.passengerId,
+              geo: input.geo,
+              contactIds: input.contactIds,
+              shareLink: url,
+            },
+          }),
+          input.panicId,
+        );
+      });
+    } catch (err) {
+      // CARRERA con otra réplica (mismo dedupKey @unique): si ahora existe, la otra réplica ya delegó.
+      const raced = await this.prisma.read.shareLink.findUnique({ where: { dedupKey } });
+      if (raced) return { shareId: raced.id, url: '', emitted: false };
+      throw err;
+    }
+
+    return { shareId, url, emitted: true };
+  }
+
   /** Mapea un ShareLink ya existente (dedup) a la forma de retorno SIN token/url (no reconstruibles). */
   private toDedupedLink(link: {
     id: string;

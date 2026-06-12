@@ -1,17 +1,19 @@
 /**
  * E2E con Postgres REAL (testcontainers) — sin mocks de DB (CLAUDE regla: panic/share = testcontainers).
  *
- * Cubre el INVARIANTE crítico del fan-out de pánico (BR-S05) bajo la entrega at-least-once de Kafka:
- *   1) panic.triggered → genera UN enlace de seguimiento por contacto VERIFICADO y manda UN SMS a cada uno.
- *   2) REDELIVERY del MISMO panic.triggered → reutiliza los enlaces por dedupKey y NO reenvía ningún SMS
- *      (la familia no recibe pánico duplicado). La idempotencia vive en el @unique de `dedup_key` (DB real).
- *   3) Pasajero sin contactos verificados → no crashea, no manda SMS.
+ * Fix B1: share YA NO manda SMS inline. Cubre el INVARIANTE crítico del fan-out de pánico (BR-S05)
+ * bajo la entrega at-least-once de Kafka, con el NUEVO contrato (delegación durable a notification):
+ *   1) panic.triggered → crea EL enlace de seguimiento del viaje y encola `panic.fanout_requested` en
+ *      el OUTBOX (misma tx) con los IDs de contacto verificados + el deep-link. CERO PII en el evento.
+ *   2) REDELIVERY del MISMO panic.triggered → reutiliza el enlace por dedupKey y NO re-emite el evento
+ *      de fan-out (notification tiene su propia idempotencia). La familia no recibe pánico duplicado.
+ *   3) Pasajero sin contactos verificados → no crashea, no crea enlace ni emite fan-out.
  *   4) trip.started → el read-model del viaje pasa a IN_PROGRESS.
  *
  * Espiamos SOLO el KafkaEventConsumer real (start/stop anulados) para capturar los handlers que el
  * bootstrap promovido (@veo/events/nest) registra en onModuleInit y dispararlos a mano (sin Kafka
- * real); el resto del grafo (ShareService/ContactsService/TripSnapshot) es REAL contra el
- * contenedor. El SmsSender del consumer es un doble que cuenta los envíos.
+ * real); el resto del grafo (ShareService/ContactsService/TripSnapshot) es REAL contra el contenedor.
+ * El envío real de SMS ahora vive en notification-service (otro servicio): acá verificamos el OUTBOX.
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,8 +52,6 @@ const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 let db: TestDatabase;
 let prisma: PrismaClient;
 let prismaService: PrismaService;
-// SMS que el consumer manda a la familia (el doble que CUENTA los envíos).
-const smsSent: Array<{ to: string; message: string }> = [];
 
 beforeAll(async () => {
   db = await createTestDatabase({
@@ -85,14 +85,18 @@ beforeAll(async () => {
     config,
   );
   const snapshots = new TripSnapshotService(prismaService);
-  const sms: SmsSender = {
-    send: async (to, message) => {
-      smsSent.push({ to, message });
-    },
-  };
   // onModuleInit registra sus handlers en el `handlers` map (vía el espía) y "arranca" el consumer anulado.
-  await new EventsConsumer(share, contacts, snapshots, sms, config).onModuleInit();
+  // El consumer YA NO recibe SmsSender (fix B1: el envío se delega a notification por evento).
+  await new EventsConsumer(share, contacts, snapshots, config).onModuleInit();
 }, 180_000);
+
+/** Lee del outbox los eventos panic.fanout_requested emitidos para un panicId. */
+async function fanoutEventsFor(panicId: string): Promise<Array<Record<string, unknown>>> {
+  const rows = await prisma.outboxEvent.findMany({ where: { eventType: 'panic.fanout_requested' } });
+  return rows
+    .map((r) => (r.envelope as { payload: Record<string, unknown> }).payload)
+    .filter((p) => p.panicId === panicId);
+}
 
 afterAll(async () => {
   await prisma?.$disconnect();
@@ -100,7 +104,6 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  smsSent.length = 0;
   // Aislamiento entre tests: limpiamos el estado por viaje (FK share_links→trusted_contacts: orden importa).
   await prisma.shareView.deleteMany();
   await prisma.shareLink.deleteMany();
@@ -141,25 +144,35 @@ function panicEnvelope(panicId: string, tripId: string, passengerId: string): Ev
 }
 
 describe('Fan-out de pánico idempotente con Postgres real (BR-S05 + redelivery at-least-once)', () => {
-  it('panic.triggered genera un enlace por contacto verificado y manda un SMS a cada uno', async () => {
+  it('panic.triggered crea EL enlace del viaje y encola panic.fanout_requested con los IDs verificados (sin PII)', async () => {
     const passengerId = uuidv7();
     const tripId = uuidv7();
-    await seedContact(passengerId, 'Mamá', '+51999000001', true);
-    await seedContact(passengerId, 'Hermano', '+51999000002', true);
-    await seedContact(passengerId, 'No verificado', '+51999000003', false); // NO debe recibir
+    const panicId = uuidv7();
+    const c1 = await seedContact(passengerId, 'Mamá', '+51999000001', true);
+    const c2 = await seedContact(passengerId, 'Hermano', '+51999000002', true);
+    await seedContact(passengerId, 'No verificado', '+51999000003', false); // NO debe entrar al fan-out
 
-    await handlers.get('panic.triggered')!(panicEnvelope(uuidv7(), tripId, passengerId));
+    await handlers.get('panic.triggered')!(panicEnvelope(panicId, tripId, passengerId));
 
+    // UN enlace del viaje (no uno por contacto): el deep-link compartido.
     const links = await prisma.shareLink.findMany({ where: { tripId } });
-    expect(links).toHaveLength(2); // solo los 2 verificados
-    expect(smsSent).toHaveLength(2);
-    expect(smsSent.map((s) => s.to).sort()).toEqual(['+51999000001', '+51999000002']);
+    expect(links).toHaveLength(1);
+
+    // Se encoló EXACTAMENTE un panic.fanout_requested con los 2 IDs verificados y CERO PII.
+    const fanouts = await fanoutEventsFor(panicId);
+    expect(fanouts).toHaveLength(1);
+    const payload = fanouts[0]!;
+    expect((payload.contactIds as string[]).sort()).toEqual([c1, c2].sort());
+    expect(typeof payload.shareLink).toBe('string');
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toMatch(/\+5199900000|Mamá|Hermano/); // ningún teléfono/nombre
+
     // El read-model del viaje quedó en PANIC.
     const snap = await prisma.tripSnapshot.findUnique({ where: { tripId } });
     expect(snap?.status).toBe('PANIC');
   });
 
-  it('REDELIVERY del mismo panic.triggered NO reenvía SMS ni duplica enlaces (idempotencia por dedupKey)', async () => {
+  it('REDELIVERY del mismo panic.triggered NO duplica enlace ni re-emite el fan-out (idempotencia por dedupKey)', async () => {
     const passengerId = uuidv7();
     const tripId = uuidv7();
     const panicId = uuidv7();
@@ -171,21 +184,23 @@ describe('Fan-out de pánico idempotente con Postgres real (BR-S05 + redelivery 
     await handlers.get('panic.triggered')!(env); // RE-entrega (Kafka at-least-once)
 
     const links = await prisma.shareLink.findMany({ where: { tripId } });
-    expect(links).toHaveLength(2); // sigue 2, no 4
-    expect(smsSent).toHaveLength(2); // sigue 2, no 4 — la familia NO recibe pánico duplicado
+    expect(links).toHaveLength(1); // sigue 1, no 2
+    const fanouts = await fanoutEventsFor(panicId);
+    expect(fanouts).toHaveLength(1); // un solo evento — notification no recibe pánico duplicado
   });
 
-  it('pasajero sin contactos verificados: no crashea y no manda SMS', async () => {
+  it('pasajero sin contactos verificados: no crashea, no crea enlace ni emite fan-out', async () => {
     const passengerId = uuidv7();
     const tripId = uuidv7();
+    const panicId = uuidv7();
     await seedContact(passengerId, 'Sin verificar', '+51999000009', false);
 
     await expect(
-      handlers.get('panic.triggered')!(panicEnvelope(uuidv7(), tripId, passengerId)),
+      handlers.get('panic.triggered')!(panicEnvelope(panicId, tripId, passengerId)),
     ).resolves.not.toThrow();
 
     expect(await prisma.shareLink.count({ where: { tripId } })).toBe(0);
-    expect(smsSent).toHaveLength(0);
+    expect(await fanoutEventsFor(panicId)).toHaveLength(0);
     // Aun sin contactos, el snapshot de pánico se registra (la página pública lo refleja).
     const snap = await prisma.tripSnapshot.findUnique({ where: { tripId } });
     expect(snap?.status).toBe('PANIC');

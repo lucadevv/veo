@@ -4,11 +4,20 @@ import { ExternalServiceError } from '@veo/utils';
 import { SMS_SENDER, type SmsSender } from './sms.port';
 import type { Env } from '../../config/env.schema';
 
-/** Sandbox: no envía nada real; imprime el mensaje (incluido el OTP/enlace) en el log de la consola. */
+/** Enmascara un teléfono dejando solo los últimos 4 dígitos (PII §0.7): +51•••••4321 → "•••4321". */
+function maskPhone(to: string): string {
+  const tail = to.replace(/\D/g, '').slice(-4);
+  return tail ? `•••${tail}` : '•••';
+}
+
+/**
+ * Sandbox: no envía nada real. NO loguea el cuerpo (puede traer OTP/enlace) ni el teléfono completo:
+ * solo destino enmascarado + longitud del mensaje. Soberanía §0.7: cero PII en logs.
+ */
 class SmsSandboxSender implements SmsSender {
   private readonly logger = new Logger('SmsSandbox');
   async send(to: string, message: string): Promise<void> {
-    this.logger.warn(`[SANDBOX SMS] → ${to}: ${message}`);
+    this.logger.warn(`[SANDBOX SMS] → ${maskPhone(to)} (${message.length} chars)`);
   }
 }
 

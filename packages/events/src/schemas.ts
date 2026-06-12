@@ -533,6 +533,27 @@ export const panicTriggered = z.object({
 });
 export const panicAcknowledged = z.object({ panicId: z.string(), operatorId: z.string(), ackAt: z.string() });
 export const panicResolved = z.object({ panicId: z.string(), status: z.string(), resolvedBy: z.string(), at: z.string() });
+/**
+ * panic.fanout_requested (BR-S05, fix de durabilidad del SMS de pánico): share-service ya creó el
+ * enlace de seguimiento y DELEGA el fan-out durable de SMS a notification-service (engine con
+ * retry/backoff/SMPP). notification resuelve los teléfonos+nombres por gRPC GetTrustedContacts.
+ *
+ * SOBERANÍA (FOUNDATION §0.7): SOLO IDs + el deep-link (URL permitida). CERO PII en el payload:
+ * ningún teléfono ni nombre viaja por Kafka. `.strict()` RECHAZA cualquier campo extra (p. ej. un
+ * `phone` filtrado) — el contrato falla-cerrado contra fugas de PII, verificado por test.
+ */
+export const panicFanoutRequested = z
+  .object({
+    panicId: z.string(),
+    tripId: z.string(),
+    passengerId: z.string(),
+    geo,
+    /** IDs de los contactos de confianza a notificar; notification resuelve sus teléfonos por gRPC. */
+    contactIds: z.array(z.string()),
+    /** Deep-link público de seguimiento (family-web). Permitido: es un enlace, no PII de la persona. */
+    shareLink: z.string(),
+  })
+  .strict();
 
 /* ── notification ── */
 /** Honesto: el RIEL (FCM/APNs/SMS…) ACEPTÓ el mensaje. NO garantiza recepción en el device. */
@@ -660,6 +681,7 @@ export const EVENT_SCHEMAS = {
   'promo.redeemed': promoRedeemed,
   'incentive.completed': incentiveCompleted,
   'panic.triggered': panicTriggered,
+  'panic.fanout_requested': panicFanoutRequested,
   'panic.acknowledged': panicAcknowledged,
   'panic.resolved': panicResolved,
   'notification.sent': notificationSent,
