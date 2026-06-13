@@ -4,8 +4,12 @@
  * NUNCA expone URLs de video: la visualización exige el flujo de doble autorización (BR-S02).
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
+import type { Env } from '../config/env.schema';
 
 interface GetSegmentsRequest {
   tripId: string;
@@ -29,10 +33,24 @@ interface SegmentsReply {
 
 @Controller()
 export class MediaGrpcController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly secret: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
 
   @GrpcMethod('MediaService', 'GetSegments')
-  async getSegments({ tripId }: GetSegmentsRequest): Promise<SegmentsReply> {
+  async getSegments({ tripId }: GetSegmentsRequest, metadata: Metadata): Promise<SegmentsReply> {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
     const rows = await this.prisma.read.mediaSegment.findMany({
       where: { tripId },
       orderBy: { startedAt: 'asc' },

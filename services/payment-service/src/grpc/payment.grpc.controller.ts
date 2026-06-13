@@ -3,10 +3,14 @@
  * Lectura síncrona de un pago para otros servicios. Devuelve `found=false` en vez de lanzar.
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import type { Payment } from '../generated/prisma';
+import type { Env } from '../config/env.schema';
 
 interface GetPaymentRequest {
   id: string;
@@ -62,10 +66,29 @@ const EMPTY: PaymentReply = {
 
 @Controller()
 export class PaymentGrpcController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly secret: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
+  private requireIdentity(metadata: Metadata): void {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
+  }
 
   @GrpcMethod('PaymentService', 'GetPayment')
-  async getPayment({ id }: GetPaymentRequest): Promise<PaymentReply> {
+  async getPayment({ id }: GetPaymentRequest, metadata: Metadata): Promise<PaymentReply> {
+    this.requireIdentity(metadata);
     const p = await this.prisma.read.payment.findUnique({ where: { id } });
     if (!p) return EMPTY;
     return this.toReply(p);
@@ -79,7 +102,11 @@ export class PaymentGrpcController {
    * viaje aún no tiene cobro. El anti-IDOR (¿el viaje es del pasajero?) vive en el BFF, no acá.
    */
   @GrpcMethod('PaymentService', 'GetPaymentByTrip')
-  async getPaymentByTrip({ tripId }: GetPaymentByTripRequest): Promise<PaymentReply> {
+  async getPaymentByTrip(
+    { tripId }: GetPaymentByTripRequest,
+    metadata: Metadata,
+  ): Promise<PaymentReply> {
+    this.requireIdentity(metadata);
     const p = await this.prisma.read.payment.findUnique({
       where: { dedupKey: deriveTripChargeDedupKey(tripId) },
     });

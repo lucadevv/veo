@@ -8,18 +8,25 @@
  * no responde, el gate FALLA-CERRADO (no se permite ofertar) — degradación honesta, nunca un conductor
  * no elegible colándose por un error de red.
  */
+import { anonymousIdentity, grpcIdentityMetadata } from '@veo/auth';
 import { createGrpcClient, type DriverReply, type GrpcServiceClient } from '@veo/rpc';
 import type { IdentityClient, IdentityDriver } from './identity-client.port';
 
 export class GrpcIdentityClient implements IdentityClient {
   private readonly client: GrpcServiceClient;
+  private readonly secret: string;
 
-  constructor(identityGrpcUrl: string, deadlineMs = 2_000) {
+  constructor(identityGrpcUrl: string, secret: string, deadlineMs = 2_000) {
     this.client = createGrpcClient('identity', { url: identityGrpcUrl, deadlineMs });
+    this.secret = secret;
   }
 
   async getDriver(driverId: string): Promise<IdentityDriver> {
-    const reply = await this.client.call<DriverReply>('GetDriver', { id: driverId });
+    // Re-validación de elegibilidad: llamada de SISTEMA (no del usuario final). identity exige la
+    // identidad interna firmada en la metadata; firmamos una identidad anónima de tipo 'driver'
+    // (sin sesión real) — la verificación HMAC pasa sin reusar la identidad del pasajero original.
+    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret);
+    const reply = await this.client.call<DriverReply>('GetDriver', { id: driverId }, meta);
     return {
       id: reply.id,
       userId: reply.userId,

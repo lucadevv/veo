@@ -4,8 +4,12 @@
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
+import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
@@ -48,10 +52,29 @@ const EMPTY_DRIVER: DriverReply = {
 
 @Controller()
 export class IdentityGrpcController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly secret: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
+  private requireIdentity(metadata: Metadata): void {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
+  }
 
   @GrpcMethod('IdentityService', 'GetUser')
-  async getUser({ id }: GetByIdRequest): Promise<UserReply> {
+  async getUser({ id }: GetByIdRequest, metadata: Metadata): Promise<UserReply> {
+    this.requireIdentity(metadata);
     const u = await this.prisma.read.user.findUnique({ where: { id } });
     if (!u) {
       return { id: '', phone: '', type: '', kycStatus: '', deleted: false, found: false, name: '' };
@@ -68,7 +91,8 @@ export class IdentityGrpcController {
   }
 
   @GrpcMethod('IdentityService', 'GetDriver')
-  async getDriver({ id }: GetByIdRequest): Promise<DriverReply> {
+  async getDriver({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverReply> {
+    this.requireIdentity(metadata);
     // BE-1b — incluye el nombre del usuario (driver→user, ambos en identity: NO es join cross-servicio).
     const d = await this.prisma.read.driver.findUnique({
       where: { id },
@@ -78,7 +102,8 @@ export class IdentityGrpcController {
   }
 
   @GrpcMethod('IdentityService', 'GetDriverByUser')
-  async getDriverByUser({ id }: GetByIdRequest): Promise<DriverReply> {
+  async getDriverByUser({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverReply> {
+    this.requireIdentity(metadata);
     const d = await this.prisma.read.driver.findUnique({
       where: { userId: id },
       include: { user: { select: { name: true } } },

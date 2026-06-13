@@ -48,14 +48,20 @@ const identityClientProvider: Provider = {
   provide: IDENTITY_CLIENT,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>) =>
-    new GrpcIdentityClient(config.getOrThrow<string>('IDENTITY_GRPC_URL')),
+    new GrpcIdentityClient(
+      config.getOrThrow<string>('IDENTITY_GRPC_URL'),
+      config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
+    ),
 };
 
 const fleetClientProvider: Provider = {
   provide: FLEET_CLIENT,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>) =>
-    new GrpcFleetClient(config.getOrThrow<string>('FLEET_GRPC_URL')),
+    new GrpcFleetClient(
+      config.getOrThrow<string>('FLEET_GRPC_URL'),
+      config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
+    ),
 };
 
 // A4 — TTL (ms) del cache de elegibilidad, desde ELIGIBILITY_CACHE_TTL_MS (default 3s en el schema).

@@ -4,8 +4,12 @@
  * lanzar, para que el llamante decida (evita ruido de errores cross-servicio).
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { PanicService } from '../panic/panic.service';
+import type { Env } from '../config/env.schema';
 
 interface GetPanicRequest {
   id: string;
@@ -38,10 +42,24 @@ const EMPTY: PanicReply = {
 
 @Controller()
 export class PanicGrpcController {
-  constructor(private readonly panic: PanicService) {}
+  private readonly secret: string;
+
+  constructor(
+    private readonly panic: PanicService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
 
   @GrpcMethod('PanicService', 'GetPanic')
-  async getPanic({ id }: GetPanicRequest): Promise<PanicReply> {
+  async getPanic({ id }: GetPanicRequest, metadata: Metadata): Promise<PanicReply> {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
     const p = await this.panic.getById(id);
     if (!p) return EMPTY;
     return {

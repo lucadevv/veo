@@ -4,10 +4,14 @@
  * Devuelve `found=false` en vez de lanzar, para que el llamante decida.
  */
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
+import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
+import { verifyGrpcIdentity } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { deriveVehicleReviewStatus } from '../vehicles/vehicle-rules';
 import { FleetOwnerType, type Vehicle } from '../generated/prisma';
+import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
@@ -82,10 +86,29 @@ function toVehicleReply(v: Vehicle): VehicleReply {
 
 @Controller()
 export class FleetGrpcController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly secret: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
+  private requireIdentity(metadata: Metadata): void {
+    const identity = verifyGrpcIdentity(metadata, this.secret);
+    if (!identity) {
+      throw new RpcException({
+        code: GrpcStatus.UNAUTHENTICATED,
+        message: 'Identidad interna inválida o ausente',
+      });
+    }
+  }
 
   @GrpcMethod('FleetService', 'GetVehicle')
-  async getVehicle({ id }: GetByIdRequest): Promise<VehicleReply> {
+  async getVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
+    this.requireIdentity(metadata);
     const v = await this.prisma.read.vehicle.findUnique({ where: { id } });
     if (!v) return EMPTY_VEHICLE;
     return toVehicleReply(v);
@@ -93,7 +116,8 @@ export class FleetGrpcController {
 
   /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
   @GrpcMethod('FleetService', 'GetDriverVehicles')
-  async getDriverVehicles({ id }: GetByIdRequest): Promise<DriverVehiclesReply> {
+  async getDriverVehicles({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverVehiclesReply> {
+    this.requireIdentity(metadata);
     const vehicles = await this.prisma.read.vehicle.findMany({
       where: { driverId: id },
       orderBy: { createdAt: 'desc' },
@@ -102,7 +126,8 @@ export class FleetGrpcController {
   }
 
   @GrpcMethod('FleetService', 'GetDriverDocuments')
-  async getDriverDocuments({ id }: GetByIdRequest): Promise<DriverDocumentsReply> {
+  async getDriverDocuments({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverDocumentsReply> {
+    this.requireIdentity(metadata);
     const docs = await this.prisma.read.fleetDocument.findMany({
       where: { ownerType: FleetOwnerType.DRIVER, ownerId: id },
       orderBy: { createdAt: 'desc' },
