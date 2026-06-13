@@ -2,7 +2,7 @@
 #
 # boot-passenger-stack.sh · Arranque reusable del stack backend del PASAJERO (dev local).
 #
-# Levanta places(3013), identity(3091), trip(3002), dispatch(3003), fleet(3012),
+# Levanta places(3013), identity(3091), trip(3092), dispatch(3093), fleet(3012),
 # payment(3005 + gRPC 50055), rating(3010 + gRPC 50060) y public-bff(4001) desde sus
 # `dist/main.js`, con el env de cada uno cargado desde `env/dev.env` (tracked) +
 # `env/dev.secret.env` (GITIGNORED).
@@ -55,17 +55,15 @@ RATING_DIR="$ROOT_DIR/services/rating-service"
 NOTIFICATION_DIR="$ROOT_DIR/services/notification-service"
 BFF_DIR="$ROOT_DIR/services/bff/public-bff"
 
-# Credenciales de PUSH: viven en el config/ del WORKSPACE (hermano de veo-platform, gitignored).
-#   - APNs .p8 (riel directo opcional): config/app-ios/AuthKey_<KeyId>.p8
-#   - FCM service-account JSON (riel default): cualquier *.json en config/firebase/ (Firebase lo nombra
-#     veo-drive-firebase-adminsdk-*.json). Tomamos el primero que exista (glob robusto, no hardcode).
-# Si el JSON de FCM existe, el notification arranca en VEO_PUSH_MODE=live; si no, sandbox (loguea).
-WORKSPACE_CONFIG_DIR="$ROOT_DIR/../config"
-APNS_P8_FILE="$WORKSPACE_CONFIG_DIR/app-ios/AuthKey_TGZXNZ7CU8.p8"
-FCM_SA_JSON_FILE=""
-for _sa in "$WORKSPACE_CONFIG_DIR"/firebase/*.json; do
-  [[ -s "$_sa" ]] && { FCM_SA_JSON_FILE="$_sa"; break; }
-done
+# Credenciales de PUSH — STACK AUTOCONTENIDO (no depende del path hermano ../config en runtime).
+#   - El notification consume SIEMPRE las copias in-repo de secrets/ (gitignored), no ../config.
+#   - ../config queda SOLO como FUENTE de la siembra inicial (one-shot, en ensure_secrets). Tras la
+#     primera copia, el stack arranca aunque ../config no exista.
+#   - APNs .p8 (riel iOS directo, opcional) y FCM service-account JSON (riel push default).
+# Si la copia in-repo del JSON FCM existe, el notification arranca en VEO_PUSH_MODE=live; si no, sandbox.
+WORKSPACE_CONFIG_DIR="$ROOT_DIR/../config"          # solo FUENTE de la copia inicial (seed)
+APNS_P8_FILE="$SECRETS_DIR/apns-key.p8"             # copia in-repo (gitignored)
+FCM_SA_JSON_FILE="$SECRETS_DIR/fcm-service-account.json"  # copia in-repo (gitignored)
 
 mkdir -p "$SECRETS_DIR" "$LOGS_DIR" "$PIDS_DIR"
 
@@ -118,6 +116,26 @@ ensure_secrets() {
     log "PRONTOPAGA_API_TOKEN sembrado con el de prueba PÚBLICO (cambiá $PRONTOPAGA_TOKEN_FILE en prod)"
   else
     log "PRONTOPAGA_API_TOKEN existente, reuso"
+  fi
+
+  # Siembra ONE-SHOT de las credenciales de PUSH al secrets/ del repo (gitignored). Hace el stack
+  # AUTOCONTENIDO: copia desde ../config SOLO si la copia in-repo no existe; después usa siempre la
+  # copia local. Si ../config tampoco está, degrada honesto (push en sandbox). Idempotente.
+  if [[ ! -s "$FCM_SA_JSON_FILE" ]]; then
+    local _src_fcm=""
+    for _sa in "$WORKSPACE_CONFIG_DIR"/firebase/*.json; do [[ -s "$_sa" ]] && { _src_fcm="$_sa"; break; }; done
+    if [[ -n "$_src_fcm" ]]; then
+      cp "$_src_fcm" "$FCM_SA_JSON_FILE"; chmod 600 "$FCM_SA_JSON_FILE"
+      log "FCM service-account copiado al repo (gitignored): ${FCM_SA_JSON_FILE#"$ROOT_DIR"/}"
+    else
+      c_red "[push] sin FCM service-account (ni copia in-repo ni en ../config) → push en SANDBOX"
+    fi
+  else
+    log "FCM service-account in-repo presente, reuso (no toco ../config)"
+  fi
+  if [[ ! -s "$APNS_P8_FILE" && -s "$WORKSPACE_CONFIG_DIR/app-ios/AuthKey_TGZXNZ7CU8.p8" ]]; then
+    cp "$WORKSPACE_CONFIG_DIR/app-ios/AuthKey_TGZXNZ7CU8.p8" "$APNS_P8_FILE"; chmod 600 "$APNS_P8_FILE"
+    log "APNs .p8 copiado al repo (gitignored): ${APNS_P8_FILE#"$ROOT_DIR"/}"
   fi
 
   local priv pub secret mapbox_token pp_secret pp_token
@@ -275,8 +293,8 @@ cmd_start() {
   # Orden: places + identity + trip + dispatch (downstream) → bff (los agrega).
   start_service "places"   "$PLACES_DIR"   3013
   start_service "identity" "$IDENTITY_DIR" 3091
-  start_service "trip"     "$TRIP_DIR"     3002
-  start_service "dispatch" "$DISPATCH_DIR" 3003
+  start_service "trip"     "$TRIP_DIR"     3092
+  start_service "dispatch" "$DISPATCH_DIR" 3093
   start_service "fleet"    "$FLEET_DIR"    3012
   start_service "payment"  "$PAYMENT_DIR"  3005
   start_service "rating"   "$RATING_DIR"   3010
@@ -308,8 +326,8 @@ cmd_start() {
   # places ahora excluye health del prefijo (/health, como trip/dispatch/identity/payment/rating).
   wait_health "places"   "http://localhost:3013/health" 45
   # trip/dispatch/fleet montan health en /health (FUERA del prefijo /api/v1, como el bff).
-  wait_health "trip"     "http://localhost:3002/health" 45
-  wait_health "dispatch" "http://localhost:3003/health" 45
+  wait_health "trip"     "http://localhost:3092/health" 45
+  wait_health "dispatch" "http://localhost:3093/health" 45
   # fleet ahora excluye health del prefijo (/health, como trip/dispatch/identity/payment/rating).
   wait_health "fleet"    "http://localhost:3012/health" 45
   # payment y rating excluyen health del prefijo (/health, como trip/dispatch/identity).

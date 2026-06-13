@@ -98,6 +98,17 @@ pnpm format                           # antes de PR
 docker compose -f infra/docker/dev/docker-compose.yml logs -f <svc>
 ```
 
+### Metro / React Native — puertos de dev server
+
+`apps/passenger` y `apps/driver` corren `react-native start` SIN `--port`, así que **ambos defaultean a 8081** (el default universal de Metro). Si corrés una sola app por vez, perfecto. Si necesitás **passenger y driver a la vez**, levantá el driver en otro puerto:
+
+```bash
+# passenger queda en 8081 (default). Para driver en paralelo:
+RCT_METRO_PORT=8084 pnpm --filter @veo/driver dev
+```
+
+`8084` está libre y fuera de los rangos que veo usa (8082 = tileserver, 8088 = ui-stack — NO usar). En iOS `RCT_METRO_PORT` ya redirige la app; en Android, si conectás un device real al driver, ajustá `react_native_dev_server_port` a 8084. El cruce con `go-frontend` (otro producto RN, también en 8081) es cosmético: son productos distintos que no co-corren.
+
 ## Documentos de referencia
 
 - Blueprint maestro: `../VEO_Blueprint.pdf` (19 páginas, capacity + arquitectura + costos)

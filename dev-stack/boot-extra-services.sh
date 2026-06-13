@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# boot-extra-services.sh · Arranca los servicios NestJS que el boot-passenger NO toca.
+# (audit, media, panic, share, chat) + driver-bff + admin-bff. Idempotente por puerto.
+set -uo pipefail
+
+DEV_STACK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DEV_STACK/.." && pwd)"
+LOGS="$DEV_STACK/logs"; mkdir -p "$LOGS"
+PIDS="$DEV_STACK/.pids"; mkdir -p "$PIDS"
+
+port_in_use() { lsof -ti "tcp:$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+start_node() { # <name> <dir> <port>
+  local name="$1" dir="$ROOT/$2" port="$3"
+  if port_in_use "$port"; then echo "  · $name ya corre en $port"; return; fi
+  ( cd "$dir" && set -a && . env/dev.env 2>/dev/null && . env/dev.secret.env 2>/dev/null && set +a \
+    && nohup node dist/main.js > "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid" )
+  echo "  ▶ $name lanzado (puerto $port, log $LOGS/$name.log)"
+}
+
+start_node audit      services/audit-service       3009
+start_node media      services/media-service       3007
+start_node panic      services/panic-service       3006
+start_node share      services/share-service       3011
+start_node chat       services/chat-service         3014
+start_node driver-bff services/bff/driver-bff       4002
+start_node admin-bff  services/bff/admin-bff        4003
+
+echo "Esperando health (hasta 40s)…"
+for i in $(seq 1 40); do
+  ok=1
+  for hp in audit:3009 media:3007 panic:3006 share:3011 chat:3014 driver-bff:4002 admin-bff:4003; do
+    p="${hp#*:}"
+    curl -sf "http://localhost:$p/health" >/dev/null 2>&1 || ok=0
+  done
+  [ "$ok" = 1 ] && { echo "✅ los 7 responden /health"; break; }
+  sleep 1
+done

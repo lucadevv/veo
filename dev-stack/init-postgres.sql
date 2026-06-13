@@ -20,7 +20,8 @@ CREATE SCHEMA IF NOT EXISTS media;
 CREATE SCHEMA IF NOT EXISTS fleet;
 CREATE SCHEMA IF NOT EXISTS biometric;
 CREATE SCHEMA IF NOT EXISTS chat;
+CREATE SCHEMA IF NOT EXISTS places;
 
 -- Usuario de aplicación (en prod cada servicio tiene su propio user con permisos mínimos)
 -- En dev mantenemos uno solo por simplicidad.
-GRANT ALL ON SCHEMA identity, trip, dispatch, payment, panic, notification, audit, rating, share, media, fleet, biometric, chat TO veo;
+GRANT ALL ON SCHEMA identity, trip, dispatch, payment, panic, notification, audit, rating, share, media, fleet, biometric, chat, places TO veo;
