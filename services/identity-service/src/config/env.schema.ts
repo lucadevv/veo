@@ -81,9 +81,12 @@ export const envSchema = z.object({
   // Puertos externos (modo propio/sandbox por defecto)
   VEO_SMS_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
   VEO_BIOMETRIC_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
-  BIOMETRIC_SERVICE_URL: z.string().default('http://localhost:3013'),
-  /// Score mínimo de liveness/match para aprobar verificación de turno (BR-I02).
-  BIOMETRIC_MIN_SCORE: z.coerce.number().default(90),
+  BIOMETRIC_SERVICE_URL: z.string().default('http://localhost:3015'),
+  /// Score mínimo (0..100) de liveness/match para aprobar verificación de turno (BR-I02). Es el MISMO
+  /// umbral que biometric-service VEO_BIO_MATCH_THRESHOLD pero en escala 0..100 (score = coseno*100).
+  /// Default 40: alineado a 0.40 (franja oficial InsightFace 0.30–0.45 para buffalo_l). El 90 anterior
+  /// rechazaba conductores legítimos (same-person ArcFace ~0.3–0.45). Calibrar con validation set real.
+  BIOMETRIC_MIN_SCORE: z.coerce.number().default(40),
   /// Timeout (ms) de las llamadas salientes a biometric-service (Python/ONNX). Es el gate del
   /// inicio de turno (shift-start) + enroll + KYC: si el proveedor de inferencia se cuelga bajo
   /// carga, el request debe FALLAR RÁPIDO Y HONESTO (502 reintentable) en vez de apilar sockets de

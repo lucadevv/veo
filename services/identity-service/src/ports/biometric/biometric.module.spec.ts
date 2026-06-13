@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExternalServiceError } from '@veo/utils';
+import {
+  INTERNAL_IDENTITY_HEADER,
+  INTERNAL_IDENTITY_SIG_HEADER,
+  verifyInternalIdentity,
+} from '@veo/auth';
 import { BiometricServiceClient } from './biometric.module';
+
+const SECRET = 'test-internal-secret';
 
 /**
  * Resiliencia del cliente biométrico LIVE: es el gate del inicio de turno (shift-start) + enroll +
@@ -28,7 +35,7 @@ describe('BiometricServiceClient timeout', () => {
       });
     });
 
-    const client = new BiometricServiceClient('http://biometric.local', 1);
+    const client = new BiometricServiceClient('http://biometric.local', 1, SECRET);
 
     const err = await client
       .verify({ driverId: 'd1', challengeId: 'c1', frames: ['f'], referenceEmbedding: [0.1] })
@@ -44,8 +51,10 @@ describe('BiometricServiceClient timeout', () => {
 
   it('pasa el signal de timeout a fetch y mapea el caso feliz sin abortar', async () => {
     let receivedSignal: AbortSignal | undefined;
+    let receivedHeaders: Record<string, string> | undefined;
     vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
       receivedSignal = (init as RequestInit | undefined)?.signal ?? undefined;
+      receivedHeaders = (init as RequestInit | undefined)?.headers as Record<string, string>;
       return Promise.resolve(
         new Response(JSON.stringify({ result: 'ok', score: 0.96, livenessPassed: true, matchPassed: true, reason: '' }), {
           status: 200,
@@ -54,7 +63,7 @@ describe('BiometricServiceClient timeout', () => {
       );
     });
 
-    const client = new BiometricServiceClient('http://biometric.local', 20_000);
+    const client = new BiometricServiceClient('http://biometric.local', 20_000, SECRET);
     const out = await client.verify({
       driverId: 'd1',
       challengeId: 'c1',
@@ -66,5 +75,14 @@ describe('BiometricServiceClient timeout', () => {
     expect(receivedSignal?.aborted).toBe(false);
     // score 0..1 del servicio → 0..100 del dominio (BR-I02).
     expect(out).toEqual({ score: 96, livenessPassed: true, matchPassed: true });
+
+    // Auth interna: manda los headers firmados y la firma VERIFICA con el secreto compartido.
+    const header = receivedHeaders?.[INTERNAL_IDENTITY_HEADER];
+    const sig = receivedHeaders?.[INTERNAL_IDENTITY_SIG_HEADER];
+    expect(header).toBeTruthy();
+    expect(sig).toBeTruthy();
+    const identity = verifyInternalIdentity(header as string, sig as string, SECRET);
+    expect(identity).not.toBeNull();
+    expect(identity?.type).toBe('driver');
   });
 });

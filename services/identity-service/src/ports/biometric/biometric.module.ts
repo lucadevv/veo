@@ -3,6 +3,12 @@ import { Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ExternalServiceError, uuidv7 } from '@veo/utils';
 import {
+  INTERNAL_IDENTITY_HEADER,
+  INTERNAL_IDENTITY_SIG_HEADER,
+  anonymousIdentity,
+  signInternalIdentity,
+} from '@veo/auth';
+import {
   BIOMETRIC_PROVIDER,
   type BiometricChallenge,
   type BiometricProvider,
@@ -79,21 +85,32 @@ export class BiometricServiceClient implements BiometricProvider {
     private readonly baseUrl: string,
     /** Timeout (ms) por request. Gate del shift-start: un proveedor colgado debe fallar rápido. */
     private readonly timeoutMs: number,
+    /** Secreto HMAC compartido con biometric-service (INTERNAL_IDENTITY_SECRET). */
+    private readonly internalSecret: string,
   ) {}
 
   /**
-   * No reusamos `@veo/rpc` InternalRestClient a propósito: ese cliente firma la identidad interna
-   * HMAC (headers INTERNAL_IDENTITY_*) y EXIGE un AuthenticatedUser por request — contrato que el
-   * biometric-service (server-to-server, JSON pelado) NO espera ni verifica. Replicamos solo el
-   * patrón de timeout, con `AbortSignal.timeout` (Node ≥17.3): sin setTimeout/clearTimeout manual,
-   * sin posibilidad de leak del timer.
+   * Firma la identidad interna (HMAC, esquema @veo/auth `signInternalIdentity`) y propaga los headers
+   * `x-veo-identity` + `x-veo-identity-sig` — el biometric-service ahora EXIGE este gate (server-to-server).
+   * Usamos `anonymousIdentity('driver')`: la llamada es de servicio (el driverId real va en el body), así
+   * que basta probar que el caller conoce el secreto compartido + frescura (anti-replay 30s). No reusamos
+   * `@veo/rpc` InternalRestClient para conservar el patrón de timeout con `AbortSignal.timeout` (sin leak
+   * de timer) y no acoplar este puerto al cliente gRPC.
    */
   private async request<T>(path: string, body: unknown): Promise<T> {
+    const { header, signature } = signInternalIdentity(
+      anonymousIdentity('driver'),
+      this.internalSecret,
+    );
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          [INTERNAL_IDENTITY_HEADER]: header,
+          [INTERNAL_IDENTITY_SIG_HEADER]: signature,
+        },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -149,6 +166,7 @@ const biometricProvider: Provider = {
       ? new BiometricServiceClient(
           config.getOrThrow<string>('BIOMETRIC_SERVICE_URL'),
           config.getOrThrow<number>('BIOMETRIC_TIMEOUT_MS'),
+          config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
         )
       : new BiometricSandboxProvider(),
 };
