@@ -14,7 +14,7 @@ import { uuidv7, withDistributedLock } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
-import { RefundStatus } from '../generated/prisma';
+import { PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
 import { discrepancyPct } from '../payouts/payout.policy';
 import type { Env } from '../config/env.schema';
 
@@ -25,6 +25,11 @@ const REFUND_SWEEP_LOCK_KEY = 'veo:payment:lock:stale-refund-sweep';
 const REFUND_SWEEP_LOCK_TTL_SECONDS = 300;
 /** Tope de refunds DETALLADOS por barrido (cota de volumen de logs); el total real va en el resumen. */
 const REFUND_SWEEP_DETAIL_LIMIT = 50;
+
+const CASH_SWEEP_LOCK_KEY = 'veo:payment:lock:stale-cash-sweep';
+const CASH_SWEEP_LOCK_TTL_SECONDS = 300;
+/** Tope de pagos en efectivo DETALLADOS por barrido (cota de logs); el total real va en el resumen. */
+const CASH_SWEEP_DETAIL_LIMIT = 50;
 
 export interface ReconciliationResult {
   ranAt: string;
@@ -41,11 +46,19 @@ export interface StaleRefundSweepResult {
   alerted: boolean;
 }
 
+export interface StaleCashSweepResult {
+  ranAt: string;
+  /** Pagos en efectivo PENDING más viejos que el umbral (total real, no acotado por el límite de detalle). */
+  staleCount: number;
+  alerted: boolean;
+}
+
 @Injectable()
 export class ReconciliationService {
   private readonly logger = new Logger(ReconciliationService.name);
   private readonly alertPct: number;
   private readonly refundPendingAlertMin: number;
+  private readonly cashPendingAlertMin: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -55,6 +68,7 @@ export class ReconciliationService {
   ) {
     this.alertPct = config.getOrThrow<number>('RECONCILIATION_ALERT_PCT');
     this.refundPendingAlertMin = config.getOrThrow<number>('REFUND_PENDING_ALERT_MIN');
+    this.cashPendingAlertMin = config.getOrThrow<number>('CASH_PENDING_ALERT_MIN');
   }
 
   /** Cron diario 04:00 (hora del servidor). Concilia el día previo. Lock distribuido: corre UNA réplica. */
@@ -71,6 +85,15 @@ export class ReconciliationService {
   async staleRefundCron(): Promise<void> {
     await withDistributedLock(this.redis, REFUND_SWEEP_LOCK_KEY, REFUND_SWEEP_LOCK_TTL_SECONDS, async () => {
       await this.sweepStalePendingRefunds(new Date());
+    });
+  }
+
+  /** Cron horario (minuto 30): red de seguridad de pagos en EFECTIVO PENDING viejos (el conductor
+   * cobró en mano pero el pasajero nunca confirmó). Lock propio (multi-pod). */
+  @Cron('30 * * * *')
+  async staleCashCron(): Promise<void> {
+    await withDistributedLock(this.redis, CASH_SWEEP_LOCK_KEY, CASH_SWEEP_LOCK_TTL_SECONDS, async () => {
+      await this.sweepStaleCashPending(new Date());
     });
   }
 
@@ -125,6 +148,61 @@ export class ReconciliationService {
     }
     this.logger.error(
       `ALERTA REEMBOLSOS PENDING: ${staleCount} refund(s) más viejos que ${this.refundPendingAlertMin}min ` +
+        `(detallados ${stale.length}/${staleCount})`,
+    );
+    return { ranAt: now.toISOString(), staleCount, alerted: true };
+  }
+
+  /**
+   * Barrido de pagos en EFECTIVO PENDING más viejos que el umbral (red de seguridad gemela del lazo de
+   * refunds). Un cobro en efectivo queda PENDING tras driverConfirmed esperando la confirmación del
+   * pasajero (payment.cash_pending → push); si el pasajero NUNCA confirma, el Payment quedaba PENDING
+   * para siempre — plata cobrada en la calle, invisible al sistema. Este barrido lo hace VISIBLE a ops.
+   *
+   * SOLO ALERTA, igual que el sweep de refunds: capturar sin la confirmación del pasajero invertiría el
+   * doble-OK (anti-fraude del conductor); marcar DEBT/CAPTURED es una decisión de negocio que ops resuelve
+   * con estos datos accionables, no un cierre automático silencioso.
+   */
+  async sweepStaleCashPending(now: Date): Promise<StaleCashSweepResult> {
+    const threshold = new Date(now.getTime() - this.cashPendingAlertMin * 60_000);
+    const where = {
+      status: PaymentStatus.PENDING,
+      method: PaymentMethod.CASH,
+      createdAt: { lt: threshold },
+    };
+
+    const staleCount = await this.prisma.read.payment.count({ where });
+    if (staleCount === 0) {
+      this.logger.log(`Barrido de efectivo PENDING: sin pagos más viejos que ${this.cashPendingAlertMin}min`);
+      return { ranAt: now.toISOString(), staleCount: 0, alerted: false };
+    }
+
+    const stale = await this.prisma.read.payment.findMany({
+      where,
+      select: {
+        id: true,
+        tripId: true,
+        driverId: true,
+        passengerId: true,
+        amountCents: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: CASH_SWEEP_DETAIL_LIMIT,
+    });
+
+    for (const p of stale) {
+      const ageMin = Math.floor((now.getTime() - p.createdAt.getTime()) / 60_000);
+      this.logger.error(
+        `ALERTA EFECTIVO PENDIENTE VIEJO: pago=${p.id} viaje=${p.tripId} monto=${p.amountCents}c ` +
+          `conductor=${p.driverId ?? 'SIN_CONDUCTOR'} pasajero=${p.passengerId ?? 'SIN_PASAJERO'} ` +
+          `edad=${ageMin}min (umbral ${this.cashPendingAlertMin}min): el conductor cobró pero el pasajero ` +
+          `no confirmó; requiere intervención de ops (sin cierre automático: capturar sin el OK del ` +
+          `pasajero rompería el anti-fraude bilateral)`,
+      );
+    }
+    this.logger.error(
+      `ALERTA EFECTIVO PENDING: ${staleCount} pago(s) más viejos que ${this.cashPendingAlertMin}min ` +
         `(detallados ${stale.length}/${staleCount})`,
     );
     return { ranAt: now.toISOString(), staleCount, alerted: true };

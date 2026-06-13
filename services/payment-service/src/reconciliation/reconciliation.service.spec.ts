@@ -49,6 +49,7 @@ const fakeConfig = (over: Record<string, unknown> = {}) =>
       ({
         RECONCILIATION_ALERT_PCT: 0.01,
         REFUND_PENDING_ALERT_MIN: 60,
+        CASH_PENDING_ALERT_MIN: 1440,
         ...over,
       })[k],
   }) as unknown as ConfigService<Record<string, unknown>, true>;
@@ -119,5 +120,90 @@ describe('ReconciliationService.sweepStalePendingRefunds · red de seguridad S5'
     expect(refund.count).toHaveBeenCalledTimes(1);
     expect(refund.findMany).toHaveBeenCalledTimes(1);
     // El fake no define update/updateMany: si el barrido intentara escribir, explotaría acá.
+  });
+});
+
+// ── Barrido de EFECTIVO PENDING (sweepStaleCashPending) — gemelo del de refunds ──
+interface FakeCashRow {
+  id: string;
+  tripId: string;
+  driverId: string | null;
+  passengerId: string | null;
+  amountCents: number;
+  createdAt: Date;
+}
+
+interface CashWhere {
+  status: string;
+  method: string;
+  createdAt: { lt: Date };
+}
+
+function makeFakeCashPrisma(rows: FakeCashRow[]) {
+  const payment = {
+    count: vi.fn(async (_args: { where: CashWhere }) => rows.length),
+    findMany: vi.fn(async ({ take }: { where: CashWhere; take: number }) => rows.slice(0, take)),
+  };
+  const client = { payment, refund: { count: vi.fn(async () => 0) }, reconciliationRun: { create: vi.fn() } };
+  return { prisma: { read: client, write: client } as unknown as PrismaService, payment };
+}
+
+function buildCash(rows: FakeCashRow[], configOver: Record<string, unknown> = {}) {
+  const { prisma, payment } = makeFakeCashPrisma(rows);
+  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver) as never);
+  return { svc, payment };
+}
+
+function staleCashRow(over: Partial<FakeCashRow> = {}): FakeCashRow {
+  return {
+    id: 'pay-cash-1',
+    tripId: 'trip-1',
+    driverId: 'drv-1',
+    passengerId: 'pax-1',
+    amountCents: 1500,
+    createdAt: new Date(NOW.getTime() - 30 * 60 * 60_000), // 30h: pasado el umbral de 24h
+    ...over,
+  };
+}
+
+describe('ReconciliationService.sweepStaleCashPending · red de seguridad del efectivo', () => {
+  it('sin efectivo PENDING viejo → alerted=false y staleCount=0', async () => {
+    const { svc } = buildCash([]);
+    const res = await svc.sweepStaleCashPending(NOW);
+    expect(res).toMatchObject({ staleCount: 0, alerted: false });
+  });
+
+  it('consulta SOLO PENDING+CASH más viejos que el umbral (createdAt < now − CASH_PENDING_ALERT_MIN)', async () => {
+    const { svc, payment } = buildCash([], { CASH_PENDING_ALERT_MIN: 120 });
+    await svc.sweepStaleCashPending(NOW);
+    const where = payment.count.mock.calls[0]![0].where;
+    expect(where.status).toBe('PENDING');
+    expect(where.method).toBe('CASH');
+    expect(where.createdAt.lt.toISOString()).toBe(new Date(NOW.getTime() - 120 * 60_000).toISOString());
+  });
+
+  it('con efectivo viejo → alerted=true + alerta accionable (pago/viaje/monto/conductor/pasajero/edad) + resumen', async () => {
+    const { svc } = buildCash([staleCashRow()]);
+    const errorSpy = vi.spyOn(svc['logger'], 'error');
+    const res = await svc.sweepStaleCashPending(NOW);
+
+    expect(res).toMatchObject({ staleCount: 1, alerted: true });
+    expect(errorSpy).toHaveBeenCalledTimes(2); // 1 detalle + 1 resumen
+    const detail = errorSpy.mock.calls[0]?.[0] as string;
+    expect(detail).toContain('pago=pay-cash-1');
+    expect(detail).toContain('viaje=trip-1');
+    expect(detail).toContain('monto=1500c');
+    expect(detail).toContain('conductor=drv-1');
+    expect(detail).toContain('pasajero=pax-1');
+    expect(detail).toContain('edad=1800min');
+  });
+
+  it('NUNCA captura: solo count+findMany de lectura (sin auto-capture del efectivo sin OK del pasajero)', async () => {
+    const { svc, payment } = buildCash([staleCashRow()]);
+    vi.spyOn(svc['logger'], 'error').mockImplementation(() => undefined);
+    await svc.sweepStaleCashPending(NOW);
+    expect(payment.count).toHaveBeenCalledTimes(1);
+    expect(payment.findMany).toHaveBeenCalledTimes(1);
+    // El fake de payment no define update/updateMany: cualquier intento de escritura explotaría acá.
   });
 });

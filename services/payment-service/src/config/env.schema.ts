@@ -47,6 +47,10 @@ export const envSchema = z.object({
   /// Red de seguridad del lazo de reembolsos (S5 · BR-P06): un Refund PENDING más viejo que este umbral
   /// (minutos) dispara ALERTA a ops (el callback del proveedor no llegó o no correlacionó). Default 60.
   REFUND_PENDING_ALERT_MIN: z.coerce.number().int().min(1).default(60),
+  /// Red de seguridad del efectivo: un pago CASH PENDING más viejo que este umbral (minutos) dispara
+  /// ALERTA a ops (el conductor cobró pero el pasajero nunca confirmó). Default 1440 (24h). Solo alerta,
+  /// sin cierre automático (capturar sin el OK del pasajero rompería el anti-fraude bilateral).
+  CASH_PENDING_ALERT_MIN: z.coerce.number().int().min(1).default(1440),
 
   // ── Riel externo tras el puerto PaymentGateway ──
   /// Selección de adapter: `live` (API directa) | `sandbox` (determinista) | `prontopaga` (agregador PE).
