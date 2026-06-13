@@ -38,7 +38,7 @@ spec:
             - { name: http, containerPort: 3004, protocol: TCP }
           env:
             - { name: NODE_ENV, value: production }
-            - { name: PORT, value: "3004" }
+            - { name: TRACKING_HTTP_ADDR, value: ":3004" }
           envFrom:
             - secretRef: { name: tracking-service-secrets }
             - configMapRef: { name: tracking-service-config }

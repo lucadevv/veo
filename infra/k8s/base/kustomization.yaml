@@ -20,6 +20,7 @@ resources:
   - services/fleet-service.yaml
   - services/biometric-service.yaml
   - services/chat-service.yaml
+  - services/places-service.yaml
   # === BFFs ===
   - bff/public-bff.yaml
   - bff/driver-bff.yaml

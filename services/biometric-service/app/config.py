@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # --- HTTP ---
     host: str = "0.0.0.0"
-    port: int = 3013
+    port: int = 3015
     service_name: str = "biometric-service"
 
     # --- Modelos ONNX ---

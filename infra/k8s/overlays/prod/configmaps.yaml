@@ -149,7 +149,7 @@ data:
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
 # GAP: los Service de k8s/base solo exponen el puerto 80 http; los puertos gRPC 50xxx NO estan expuestos — agregar al Service de cada svc.
-# GAP: PLACES_GRPC_URL apunta a places-service, que NO tiene manifest en k8s/base (existe en services/).
+# places-service: manifest en k8s/base/services/places-service.yaml (Service expone grpc 50063).
 ---
 apiVersion: v1
 kind: ConfigMap

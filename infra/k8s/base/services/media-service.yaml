@@ -1,5 +1,5 @@
 ## Template para Deployment + Service de un microservicio VEO.
-## Copiar a services/<svc-name>.yaml y sustituir media-service y 3005.
+## Copiar a services/<svc-name>.yaml y sustituir media-service y 3007.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -15,7 +15,7 @@ spec:
       labels: { app: media-service, tier: backend }
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3005"
+        prometheus.io/port: "3007"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: media-service  # IRSA bound to least-privilege IAM role
@@ -35,10 +35,10 @@ spec:
           image: ecr/media-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - { name: http, containerPort: 3005, protocol: TCP }
+            - { name: http, containerPort: 3007, protocol: TCP }
           env:
             - { name: NODE_ENV, value: production }
-            - { name: PORT, value: "3005" }
+            - { name: PORT, value: "3007" }
           envFrom:
             - secretRef: { name: media-service-secrets }
             - configMapRef: { name: media-service-config }

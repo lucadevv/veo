@@ -1,5 +1,5 @@
 ## Template para Deployment + Service de un microservicio VEO.
-## biometric-service: Python/FastAPI + ONNX, puerto 3013, schema biométrico.
+## biometric-service: Python/FastAPI + ONNX, puerto 3015, schema biométrico.
 ## Difiere del template estándar: más CPU/mem por inferencia ONNX (CPU, sin GPU
 ## obligatorio), env de Python en vez de NODE_ENV, y emptyDir /tmp escribible
 ## porque ONNX Runtime necesita escratch temporal con readOnlyRootFilesystem.
@@ -18,7 +18,7 @@ spec:
       labels: { app: biometric-service, tier: backend }
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3013"
+        prometheus.io/port: "3015"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: biometric-service  # IRSA bound to least-privilege IAM role
@@ -38,10 +38,10 @@ spec:
           image: ecr/biometric-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - { name: http, containerPort: 3013, protocol: TCP }
+            - { name: http, containerPort: 3015, protocol: TCP }
           env:
             - { name: APP_ENV, value: production }
-            - { name: PORT, value: "3013" }
+            - { name: VEO_BIO_PORT, value: "3015" }
             - { name: PYTHONUNBUFFERED, value: "1" }
             # Limitar hilos de ONNX/OpenMP a los cores asignados al pod.
             - { name: OMP_NUM_THREADS, value: "2" }

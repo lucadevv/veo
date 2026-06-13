@@ -1,5 +1,5 @@
 ## Template para Deployment + Service de un microservicio VEO.
-## Copiar a services/<svc-name>.yaml y sustituir payment-service y 3006.
+## Copiar a services/<svc-name>.yaml y sustituir payment-service y 3005.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -15,7 +15,7 @@ spec:
       labels: { app: payment-service, tier: backend }
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3006"
+        prometheus.io/port: "3005"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: payment-service  # IRSA bound to least-privilege IAM role
@@ -35,10 +35,10 @@ spec:
           image: ecr/payment-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - { name: http, containerPort: 3006, protocol: TCP }
+            - { name: http, containerPort: 3005, protocol: TCP }
           env:
             - { name: NODE_ENV, value: production }
-            - { name: PORT, value: "3006" }
+            - { name: PORT, value: "3005" }
           envFrom:
             - secretRef: { name: payment-service-secrets }
             - configMapRef: { name: payment-service-config }

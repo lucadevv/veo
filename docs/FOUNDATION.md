@@ -94,7 +94,9 @@ dependencias** (`turbo` ya lo hace con `dependsOn: ["^build"]`; si corres `pnpm 
 | rating-service | 3010 |
 | share-service | 3011 |
 | fleet-service | 3012 |
-| biometric-service (Python/FastAPI) | 3013 |
+| places-service | 3013 |
+| chat-service | 3014 |
+| biometric-service (Python/FastAPI) | 3015 |
 | public-bff | 4001 |
 | driver-bff | 4002 |
 | admin-bff | 4003 |

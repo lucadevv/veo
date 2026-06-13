@@ -1,24 +1,25 @@
 ## Template para Deployment + Service de un microservicio VEO.
-## Copiar a services/<svc-name>.yaml y sustituir panic-service y 3006.
+## places-service: NestJS, HTTP 3013 + gRPC 50063 (geocoding/places). Consumido por
+## otros services vía PLACES_GRPC_URL (places-service:50063, ver overlays/*/configmaps.yaml).
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: panic-service
-  labels: { app: panic-service, tier: backend }
+  name: places-service
+  labels: { app: places-service, tier: backend }
 spec:
   replicas: 2
   strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
-  selector: { matchLabels: { app: panic-service } }
+  selector: { matchLabels: { app: places-service } }
   template:
     metadata:
-      labels: { app: panic-service, tier: backend }
+      labels: { app: places-service, tier: backend }
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3006"
+        prometheus.io/port: "3013"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: panic-service  # IRSA bound to least-privilege IAM role
+      serviceAccountName: places-service  # IRSA bound to least-privilege IAM role
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -29,19 +30,21 @@ spec:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: ScheduleAnyway
-          labelSelector: { matchLabels: { app: panic-service } }
+          labelSelector: { matchLabels: { app: places-service } }
       containers:
         - name: app
-          image: ecr/panic-service:latest
+          image: ecr/places-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - { name: http, containerPort: 3006, protocol: TCP }
+            - { name: http, containerPort: 3013, protocol: TCP }
+            - { name: grpc, containerPort: 50063, protocol: TCP }
           env:
             - { name: NODE_ENV, value: production }
-            - { name: PORT, value: "3006" }
+            - { name: PORT, value: "3013" }
+            - { name: GRPC_PORT, value: "50063" }
           envFrom:
-            - secretRef: { name: panic-service-secrets }
-            - configMapRef: { name: panic-service-config }
+            - secretRef: { name: places-service-secrets }
+            - configMapRef: { name: places-service-config }
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
             limits:   { cpu: "1000m", memory: "1Gi" }
@@ -71,33 +74,34 @@ spec:
             - weight: 100
               podAffinityTerm:
                 topologyKey: kubernetes.io/hostname
-                labelSelector: { matchLabels: { app: panic-service } }
+                labelSelector: { matchLabels: { app: places-service } }
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: panic-service
-  labels: { app: panic-service }
+  name: places-service
+  labels: { app: places-service }
 spec:
   type: ClusterIP
   ports:
     - { name: http, port: 80, targetPort: http, protocol: TCP }
-  selector: { app: panic-service }
+    - { name: grpc, port: 50063, targetPort: grpc, protocol: TCP }
+  selector: { app: places-service }
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: panic-service-pdb
+  name: places-service-pdb
 spec:
   minAvailable: 1
-  selector: { matchLabels: { app: panic-service } }
+  selector: { matchLabels: { app: places-service } }
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: panic-service-hpa
+  name: places-service-hpa
 spec:
-  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: panic-service }
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: places-service }
   minReplicas: 2
   maxReplicas: 10
   metrics:
