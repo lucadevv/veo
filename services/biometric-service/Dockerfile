@@ -1,9 +1,9 @@
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    VEO_BIO_PORT=3013 \
+    VEO_BIO_PORT=3015 \
     VEO_BIO_MODEL_DIR=/app/models
 
 WORKDIR /app
@@ -27,20 +27,21 @@ COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY pyproject.toml ./
 
-# Crea el dir de modelos ONNX y cede el workdir al usuario no-root para que
-# pueda leer el código y leer/escribir models/ (descarga en runtime o volumen).
-RUN mkdir -p /app/models && chown -R veo:veo /app
+# Aprovisiona los modelos ONNX EN BUILD (self-hosted, HORNEADOS en la imagen). Resuelve el deploy con
+# readOnlyRootFilesystem: los .onnx ya están presentes y NO se descargan en runtime (no hace falta
+# initContainer ni volumen de modelos). Trade-off: la imagen crece ~190MB. Soberanía: espejá
+# buffalo_l.zip en un registry/S3 propio y apuntá download_models.py ahí (hoy baja de la release oficial).
+# Luego cede el workdir al usuario no-root (incluye models/).
+RUN python scripts/download_models.py \
+    && chown -R veo:veo /app
 
-EXPOSE 3013
+EXPOSE 3015
 
-# Aprovisiona los modelos en build (requiere red) o monta un volumen en runtime:
-#   docker run -v /host/models:/app/models ...
-# RUN python scripts/download_models.py
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD curl -fsS http://localhost:3013/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+    CMD curl -fsS http://localhost:3015/health || exit 1
 
 # A partir de aquí el contenedor corre sin privilegios de root.
 USER veo
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3013"]
+# El puerto lo resuelve la config (VEO_BIO_PORT, default 3015) vía app/main.py — sin hardcode.
+CMD ["python", "-m", "app.main"]

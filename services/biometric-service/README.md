@@ -6,7 +6,7 @@ detección facial real (SCRFD), embeddings reales (ArcFace), **liveness activo p
 y **match por similitud coseno con umbral ≥ 0.90** (BR-I02). Soberanía de datos: ningún
 dato biométrico sale a terceros.
 
-- **Puerto HTTP:** `3013`
+- **Puerto HTTP:** `3015`
 - **Modelos:** InsightFace `buffalo_l` (SCRFD-10G + ArcFace `w600k_r50`, embedding 512-d)
 - **Runtime de inferencia:** `onnxruntime` (CPU por defecto; configurable a GPU)
 
@@ -53,7 +53,7 @@ pip install -r requirements.txt
 python scripts/download_models.py
 
 # Arrancar
-uvicorn app.main:app --host 0.0.0.0 --port 3013
+uvicorn app.main:app --host 0.0.0.0 --port 3015
 # o: python -m app.main
 ```
 
@@ -104,7 +104,7 @@ estén presentes (pon `VEO_BIO_REQUIRE_MODELS=true` para fallar el arranque en s
 | Variable | Default | Descripción |
 |---|---|---|
 | `VEO_BIO_HOST` | `0.0.0.0` | host de bind |
-| `VEO_BIO_PORT` | `3013` | puerto HTTP |
+| `VEO_BIO_PORT` | `3015` | puerto HTTP |
 | `VEO_BIO_MODEL_DIR` | `models` | carpeta de modelos ONNX |
 | `VEO_BIO_DETECTOR_MODEL` | `det_10g.onnx` | fichero del detector |
 | `VEO_BIO_EMBEDDER_MODEL` | `w600k_r50.onnx` | fichero del recognizer |
@@ -139,7 +139,7 @@ Cada reto es de **un solo uso** y expira (`challenge_store`), mitigando replay.
 
 ## 6. Contrato REST (para el adapter live de identity-service)
 
-Base URL = `BIOMETRIC_SERVICE_URL` (p. ej. `http://biometric-service:3013`).
+Base URL = `BIOMETRIC_SERVICE_URL` (p. ej. `http://biometric-service:3015`).
 
 ### `POST /v1/liveness/challenge`
 Inicia un reto de liveness.
@@ -230,7 +230,7 @@ el resultado real** de cada verificación. La política de negocio —**3 intent
 
 ```bash
 docker build -t veo/biometric-service .
-docker run -p 3013:3013 -v /opt/veo/models:/app/models veo/biometric-service
+docker run -p 3015:3015 -v /opt/veo/models:/app/models veo/biometric-service
 ```
 
 La imagen base es `python:3.11-slim` con `libgl1`/`libglib2.0-0` (requisitos de OpenCV).

@@ -46,8 +46,10 @@ def metrics_payload() -> tuple[bytes, str]:
 
 
 def setup_telemetry(app: "FastAPI", settings: Settings) -> None:
-    """Configura OpenTelemetry (tracing) si está habilitado por env."""
-    logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
+    """Configura logging estructurado JSON + OpenTelemetry (tracing) si está habilitado por env."""
+    from app.logging_setup import configure_logging
+
+    configure_logging(settings.log_level)
     if not settings.otel_enabled:
         return
     try:

@@ -36,6 +36,9 @@ class DecisionInput:
     liveness_passed: bool
     match_score: float
     match_threshold: float
+    # Anti-spoofing: ¿todos los frames con rostro son la MISMA persona que hizo el gesto?
+    # False ⇒ se intercaló una identidad distinta (splicing) ⇒ sesión no confiable.
+    identity_consistent: bool = True
 
 
 @dataclass(frozen=True)
@@ -77,7 +80,18 @@ def decide(data: DecisionInput) -> Decision:
             ),
         )
 
-    # 3) Liveness + match.
+    # 3) Anti-spoofing: la persona que hizo el gesto debe ser la MISMA en todos los frames. Si se
+    #    intercaló otra identidad (splicing video del conductor + cara del atacante) → FAIL, no PASS.
+    if not data.identity_consistent:
+        return Decision(
+            result=VerificationResult.FAIL,
+            score=data.match_score,
+            liveness_passed=False,
+            match_passed=match_passed,
+            reason="Identidad inconsistente entre frames (posible manipulación)",
+        )
+
+    # 4) Liveness + match.
     if data.liveness_passed and match_passed:
         return Decision(
             result=VerificationResult.PASS,

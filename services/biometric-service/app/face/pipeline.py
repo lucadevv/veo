@@ -11,6 +11,7 @@ de los modelos (está testeada de forma aislada).
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Sequence
 
@@ -66,6 +67,9 @@ class BiometricPipeline:
         self._embedder: Optional["ArcFaceEmbedder"] = None
         self._load_error: Optional[str] = None
         self._thresholds = thresholds_from_settings(settings)
+        # Serializa la carga de modelos: FastAPI sirve los endpoints sync en un threadpool, así que
+        # dos requests en frío podrían construir DOS InferenceSession a la vez (pico de RAM + race).
+        self._load_lock = threading.Lock()
 
     # --- carga de modelos ---
     def _detector_path(self) -> str:
@@ -78,23 +82,28 @@ class BiometricPipeline:
         return os.path.isfile(self._detector_path()) and os.path.isfile(self._embedder_path())
 
     def load(self) -> None:
-        """Carga los modelos ONNX. Idempotente; registra error si falla."""
+        """Carga los modelos ONNX. Idempotente y thread-safe; registra error si falla."""
+        # Fast-path sin lock: una vez cargado, no se paga contención.
         if self._detector is not None and self._embedder is not None:
             return
-        if not self.models_present():
-            self._load_error = (
-                f"Modelos ausentes en '{self._settings.model_dir}'. "
-                "Ejecuta scripts/download_models.py."
-            )
-            if self._settings.require_models:
-                raise RuntimeError(self._load_error)
-            return
-        from app.face.detector import load_detector
-        from app.face.embedder import load_embedder
+        with self._load_lock:
+            # Re-chequeo dentro del lock: otro thread pudo cargar mientras esperábamos.
+            if self._detector is not None and self._embedder is not None:
+                return
+            if not self.models_present():
+                self._load_error = (
+                    f"Modelos ausentes en '{self._settings.model_dir}'. "
+                    "Ejecuta scripts/download_models.py."
+                )
+                if self._settings.require_models:
+                    raise RuntimeError(self._load_error)
+                return
+            from app.face.detector import load_detector
+            from app.face.embedder import load_embedder
 
-        self._detector = load_detector(self._settings, self._detector_path())
-        self._embedder = load_embedder(self._settings, self._embedder_path())
-        self._load_error = None
+            self._detector = load_detector(self._settings, self._detector_path())
+            self._embedder = load_embedder(self._settings, self._embedder_path())
+            self._load_error = None
 
     @property
     def ready(self) -> bool:
@@ -153,9 +162,10 @@ class BiometricPipeline:
         """Ejecuta el pipeline completo sobre los frames y la referencia.
 
         - Liveness sobre todos los frames.
-        - Detección/embedding sobre el mejor frame (el último suele ser frontal-neutro;
-          usamos el primer frame con un único rostro claro para el match).
-        - Match coseno contra `reference_embedding`.
+        - Binding anti-spoofing: el match se ata a la identidad que hizo el gesto. Embebemos los frames
+          con un único rostro y exigimos que TODOS sean la misma persona (consistencia intra-secuencia);
+          el probe es esa identidad (anchor), no "cualquier frame con una cara".
+        - Match coseno del anchor contra `reference_embedding`.
         """
         reference = to_vector(reference_embedding)
 
@@ -178,19 +188,30 @@ class BiometricPipeline:
         signals = self.extract_signals(frames_bgr)
         liveness = evaluate_liveness(action, signals, self._thresholds)
 
-        # Frame de match: el primero con exactamente un rostro claro.
-        match_frame_idx = next(
-            (i for i, s in enumerate(signals) if s.face_count == 1), None
-        )
+        # Frames con un único rostro claro (hasta max_match_frames para acotar el costo de inferencia).
+        valid_idxs = [i for i, s in enumerate(signals) if s.face_count == 1][
+            : self._settings.max_match_frames
+        ]
+        embeddings = [
+            self.embed(frames_bgr[i], det)
+            for i in valid_idxs
+            if (det := self.best_detection(frames_bgr[i])[1]) is not None
+        ]
+
         faces_count = 0
         score = 0.0
-        if match_frame_idx is not None:
-            faces_count, detection = self.best_detection(frames_bgr[match_frame_idx])
-            if detection is not None:
-                probe = self.embed(frames_bgr[match_frame_idx], detection)
-                from app.face.matcher import match_score
+        identity_consistent = True
+        if embeddings:
+            from app.face.matcher import cosine_similarity, match_score
 
-                score = match_score(probe, reference)
+            faces_count = 1
+            # anchor = identidad del que hizo el gesto; el match se ata a ÉL, no a un frame cualquiera.
+            anchor = embeddings[0]
+            identity_consistent = all(
+                cosine_similarity(anchor, other) >= self._settings.liveness_consistency_threshold
+                for other in embeddings[1:]
+            )
+            score = match_score(anchor, reference)
 
         decision = decide(
             DecisionInput(
@@ -199,6 +220,7 @@ class BiometricPipeline:
                 liveness_passed=liveness.passed,
                 match_score=score,
                 match_threshold=self._settings.match_threshold,
+                identity_consistent=identity_consistent,
             )
         )
         return PipelineOutput(

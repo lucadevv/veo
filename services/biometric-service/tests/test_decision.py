@@ -59,6 +59,14 @@ def test_fail_when_multiple_faces() -> None:
     assert d.result is VerificationResult.FAIL
 
 
+def test_fail_when_identity_inconsistent() -> None:
+    # Anti-spoofing: aunque liveness y match fuesen perfectos, si los frames intercalan otra identidad
+    # (splicing) → FAIL, no PASS.
+    d = decide(_inp(identity_consistent=False, match_score=1.0, liveness_passed=True))
+    assert d.result is VerificationResult.FAIL
+    assert "inconsistente" in d.reason.lower()
+
+
 def test_blocked_when_challenge_invalid() -> None:
     d = decide(_inp(challenge_valid=False))
     assert d.result is VerificationResult.BLOCKED

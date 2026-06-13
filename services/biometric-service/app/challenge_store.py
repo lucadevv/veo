@@ -1,17 +1,20 @@
 """Almacén de retos de liveness activos (challenge-response).
 
-Implementación in-memory thread-safe con expiración. Para despliegues multi-réplica
-se debe sustituir por un store distribuido (Redis) detrás de la misma interfaz
-`ChallengeStore` (principio D: depender de la abstracción). Aquí entregamos una
-implementación REAL y completa para una réplica.
+Dos implementaciones detrás del mismo Protocol `ChallengeStore` (principio D: depender de la
+abstracción):
+  - `InMemoryChallengeStore`: thread-safe, una réplica (dev / single-pod).
+  - `RedisChallengeStore`: distribuido, MULTI-RÉPLICA. El HPA escala 2–10 pods; con el store
+    in-memory un reto emitido por el pod A y verificado en el B daría BLOCKED espurio. Redis lo
+    centraliza y mantiene el anti-replay (un solo uso) con `GETDEL` ATÓMICO entre réplicas.
 """
 from __future__ import annotations
 
+import json
 import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Optional, Protocol
 
 from app.face.liveness import ChallengeAction
 
@@ -72,3 +75,59 @@ class InMemoryChallengeStore:
         expired = [cid for cid, c in self._items.items() if c.is_expired(now)]
         for cid in expired:
             self._items.pop(cid, None)
+
+
+class RedisLike(Protocol):
+    """Subconjunto de redis-py que usa el store (permite testear sin un Redis real)."""
+
+    def setex(self, name: str, time: int, value: str) -> object: ...
+
+    def getdel(self, name: str) -> Optional[bytes]: ...
+
+
+class RedisChallengeStore:
+    """Store distribuido para MULTI-RÉPLICA. El reto vive en Redis con TTL (limpieza automática, sin
+    GC manual); `consume` usa GETDEL (GET + DEL atómico) → un solo uso aunque dos réplicas lo consuman
+    a la vez: el anti-replay se mantiene entre pods."""
+
+    _PREFIX = "veo:bio:challenge:"
+
+    def __init__(self, client: RedisLike, ttl_seconds: int) -> None:
+        self._redis = client
+        self._ttl = ttl_seconds
+
+    def _key(self, challenge_id: str) -> str:
+        return f"{self._PREFIX}{challenge_id}"
+
+    def issue(self, action: ChallengeAction) -> Challenge:
+        now = time.time()
+        challenge = Challenge(
+            challenge_id=secrets.token_urlsafe(24),
+            action=action,
+            created_at=now,
+            expires_at=now + self._ttl,
+        )
+        payload = json.dumps(
+            {"action": action.value, "created_at": now, "expires_at": challenge.expires_at}
+        )
+        self._redis.setex(self._key(challenge.challenge_id), self._ttl, payload)
+        return challenge
+
+    def consume(self, challenge_id: str) -> Optional[Challenge]:
+        raw = self._redis.getdel(self._key(challenge_id))
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+            action = ChallengeAction(data["action"])
+            challenge = Challenge(
+                challenge_id=challenge_id,
+                action=action,
+                created_at=float(data["created_at"]),
+                expires_at=float(data["expires_at"]),
+            )
+        except (ValueError, KeyError, TypeError):
+            return None
+        if challenge.is_expired(time.time()):
+            return None
+        return challenge

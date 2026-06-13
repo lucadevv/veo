@@ -11,7 +11,7 @@
 #   frontends (Next.js SSR)   → su BFF (admin-web→admin-bff, family-web→public-bff)
 #   BFFs                      → microservicios (REST 30xx + gRPC 50xxx)
 #   dispatch → identity       → gRPC 50051 (re-valida elegibilidad del conductor por puja)
-#   identity → biometric      → REST 3013 (KYC/liveness)
+#   identity → biometric      → REST 3015 (KYC/liveness)
 #   backend + bff             → datastores EXTERNOS (RDS 5432, ElastiCache 6379, MSK 9092/9094)
 #   {notif,pay,media,panic,audit} → internet TLS 443 (FCM/APNs, ProntoPaga, S3)
 #   notification              → SMPP 2775 (SMS operador PE)
@@ -129,7 +129,7 @@ spec:
         - podSelector: { matchLabels: { app: dispatch-service } }
       ports: [{ protocol: TCP, port: 50051 }]
 ---
-# identity-service → biometric-service (REST 3013): verificación KYC/liveness del conductor.
+# identity-service → biometric-service (REST 3015): verificación KYC/liveness del conductor.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -141,7 +141,7 @@ spec:
   egress:
     - to:
         - podSelector: { matchLabels: { app: biometric-service } }
-      ports: [{ protocol: TCP, port: 3013 }]
+      ports: [{ protocol: TCP, port: 3015 }]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -154,7 +154,7 @@ spec:
   ingress:
     - from:
         - podSelector: { matchLabels: { app: identity-service } }
-      ports: [{ protocol: TCP, port: 3013 }]
+      ports: [{ protocol: TCP, port: 3015 }]
 
 # ───────────────────────────── Egress a datastores EXTERNOS (RDS / ElastiCache / MSK) ─────────────────────────────
 ---

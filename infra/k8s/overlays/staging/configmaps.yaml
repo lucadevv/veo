@@ -135,9 +135,13 @@ metadata:
   name: biometric-service-config
   labels: { app: biometric-service }
 data:
-  LOG_LEVEL: "info"
-  KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # pydantic-settings lee SOLO vars con prefijo VEO_BIO_ (env_prefix); sin el prefijo se IGNORAN.
+  # biometric NO usa Kafka (se quitó KAFKA_BROKERS). LOG_LEVEL en MAYÚSCULA (Literal del config).
+  VEO_BIO_LOG_LEVEL: "INFO"
+  VEO_BIO_OTEL_ENABLED: "true"
+  VEO_BIO_OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # Store de retos distribuido (el HPA escala 2–10 réplicas). PENDIENTE: endpoint del Redis del cluster.
+  VEO_BIO_REDIS_URL: "PENDIENTE_REDIS_CLUSTER_URL"
 ---
 apiVersion: v1
 kind: ConfigMap

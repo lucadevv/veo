@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.api import routes
 from app.main import create_app
+from app.security.internal_identity import require_internal_identity
 
 
 class _FakePipeline:
@@ -36,6 +37,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # La decodificación real necesita cv2; la sustituimos por un ndarray sintético.
     monkeypatch.setattr(routes, "decode_base64_image", lambda _b64: np.zeros((4, 4, 3), dtype=np.uint8))
     app = create_app()
+    # Estos tests verifican la LÓGICA del endpoint, no el auth (cubierto en test_internal_identity.py).
+    # Desactivamos el gate interno para no firmar cada request.
+    app.dependency_overrides[require_internal_identity] = lambda: None
     return TestClient(app)
 
 

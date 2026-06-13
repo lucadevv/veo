@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from app import __version__
 from app.api.routes import router
-from app.challenge_store import InMemoryChallengeStore
+from app.challenge_store import ChallengeStore, InMemoryChallengeStore, RedisChallengeStore
 from app.config import Settings, get_settings
 from app.face.pipeline import BiometricPipeline
 from app.telemetry import setup_telemetry
@@ -17,11 +17,23 @@ from app.telemetry import setup_telemetry
 logger = logging.getLogger("biometric")
 
 
+def build_challenge_store(settings: Settings) -> ChallengeStore:
+    """In-memory por defecto (una réplica); Redis si hay VEO_BIO_REDIS_URL (multi-réplica del HPA)."""
+    if settings.redis_url:
+        import redis  # import perezoso: solo si se usa el modo distribuido.
+
+        client = redis.Redis.from_url(settings.redis_url)
+        logger.info("ChallengeStore: Redis (multi-réplica)")
+        return RedisChallengeStore(client, settings.challenge_ttl_seconds)
+    logger.info("ChallengeStore: in-memory (una réplica)")
+    return InMemoryChallengeStore(settings.challenge_ttl_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
     app.state.settings = settings
-    app.state.challenge_store = InMemoryChallengeStore(settings.challenge_ttl_seconds)
+    app.state.challenge_store = build_challenge_store(settings)
     pipeline = BiometricPipeline(settings)
     app.state.pipeline = pipeline
     # Intenta cargar modelos al arrancar (no bloquea el arranque salvo require_models).

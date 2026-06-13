@@ -9,6 +9,8 @@ pydantic>=2.6
 pydantic-settings>=2.1
 python-multipart>=0.0.9
 httpx>=0.27
+# Store de retos distribuido (multi-réplica del HPA). Import perezoso: solo se usa con VEO_BIO_REDIS_URL.
+redis>=5.0
 prometheus-client>=0.20
 opentelemetry-sdk>=1.24
 opentelemetry-instrumentation-fastapi>=0.45b0
