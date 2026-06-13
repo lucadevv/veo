@@ -200,6 +200,48 @@ export class DriversService {
   }
 
   /**
+   * Suspensión MANUAL del conductor por un operador admin (acción de SAFETY, espejo de reject). Escribe
+   * `Driver.suspendedAt` —el MISMO campo que el gate de inicio de turno (startShift) y el eligibility gate
+   * de dispatch leen para bloquear (BR-I02)—, así un conductor suspendido NO puede iniciar turno ni aceptar
+   * ofertas (enforcement ya existente, fail-closed). Emite `driver.suspended` por OUTBOX en la MISMA tx para
+   * que audit/admin-bff reaccionen (igual que reject emite driver.rejected).
+   *
+   * IDEMPOTENTE por CAS (espeja suspendByFleet): `updateMany({ where: { id, suspendedAt: null } })` solo
+   * suspende si NO estaba suspendido; si ya lo estaba, no reescribe el timestamp NI emite un evento duplicado
+   * (no-op silencioso, válido por diseño). El `reason` NO se persiste (el modelo Driver no tiene campo de
+   * motivo de suspensión, igual que suspendByFleet): viaja al evento + al audit del admin-bff.
+   */
+  async suspend(driverId: string, reason: string): Promise<void> {
+    await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado');
+      const suspendedAt = new Date();
+      // CAS dentro de la tx: si ya estaba suspendido, count=0 → no hay evento (idempotencia extremo-a-extremo).
+      const result = await tx.driver.updateMany({
+        where: { id: driverId, suspendedAt: null },
+        data: { suspendedAt },
+      });
+      if (result.count === 0) return; // ya suspendido: no-op honesto, sin evento duplicado
+      const envelope = createEnvelope({
+        eventType: 'driver.suspended',
+        producer: 'identity-service',
+        payload: {
+          driverId: driver.id,
+          reason,
+          suspendedAt: suspendedAt.toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driver.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
+  /**
    * Reenvío a revisión del conductor RECHAZADO (resubmit, BR-I01): tras corregir sus datos en la app,
    * el conductor vuelve a la cola de aprobación. Lleva backgroundCheckStatus REJECTED→PENDING y el KYC
    * del usuario REJECTED→PENDING (ambas transiciones se abrieron en las máquinas), y LIMPIA el motivo

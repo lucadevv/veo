@@ -154,6 +154,13 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
       await this.readModel.upsertDriver({ id: p.driverId, status: 'SUSPENDED', updatedAt: p.suspendedAt });
       this.counted('fleet.driver_suspended');
     };
+    // Suspensión MANUAL por un operador admin (espejo de fleet.driver_suspended, pero originada en el panel):
+    // proyecta status=SUSPENDED para que la lista de conductores lo refleje. Idempotente (upsert por id).
+    record['driver.suspended'] = async (e) => {
+      const p = e.payload as EventPayload<'driver.suspended'>;
+      await this.readModel.upsertDriver({ id: p.driverId, status: 'SUSPENDED', updatedAt: p.suspendedAt });
+      this.counted('driver.suspended');
+    };
     record['driver.location_updated'] = async (e) => {
       const p = e.payload as EventPayload<'driver.location_updated'>;
       this.gateway.emitDriverLocation({

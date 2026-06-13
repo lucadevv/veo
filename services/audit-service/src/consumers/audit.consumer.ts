@@ -90,6 +90,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'driver',
         resourceId: p.driverId,
       })),
+      // Suspensión MANUAL por un operador (BR-S03): traza inmutable de la decisión de SAFETY. El operador
+      // que decidió se traza por el comando admin (audit.record en admin-bff); acá actor=recurso=driverId
+      // (el sujeto de la decisión proyectada por el evento de dominio, igual que driver.rejected).
+      'driver.suspended': this.audited('driver.suspended', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
       'biometric.failed': this.audited('biometric.failed', (p) => ({
         actorId: p.driverId,
         resourceType: 'driver',

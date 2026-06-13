@@ -67,6 +67,16 @@ class RejectDriverDto {
   reason?: string;
 }
 
+class SuspendDriverDto {
+  // Motivo de la suspensión manual (OBLIGATORIO): queda en la traza de auditoría y en el evento
+  // driver.suspended. A diferencia del rechazo, suspender es una acción de SAFETY deliberada: exigimos
+  // un motivo no vacío (el operador debe justificar por qué saca al conductor de circulación).
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reason!: string;
+}
+
 class UpdatePersonalInfoDto {
   @IsString()
   @MinLength(1)
@@ -173,6 +183,15 @@ export class DriversController {
   @ApiOperation({ summary: 'Rechazar conductor (con motivo opcional)' })
   async reject(@Param('id') id: string, @Body() dto: RejectDriverDto): Promise<void> {
     await this.drivers.reject(id, dto.reason ?? '');
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/suspend')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Suspender manualmente a un conductor (SAFETY · con motivo obligatorio)' })
+  async suspend(@Param('id') id: string, @Body() dto: SuspendDriverDto): Promise<void> {
+    await this.drivers.suspend(id, dto.reason);
   }
 
   // ── Self-service: reenvío a revisión tras corregir (resubmit) ──

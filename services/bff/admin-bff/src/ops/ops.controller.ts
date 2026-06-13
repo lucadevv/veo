@@ -14,6 +14,7 @@ import {
   ListDriversQueryDto,
   ApproveOperatorDto,
   RejectDriverDto,
+  SuspendDriverDto,
 } from './dto/ops.dto';
 
 @ApiTags('ops')
@@ -74,6 +75,18 @@ export class OpsController {
     @Body() dto: RejectDriverDto,
   ): Promise<void> {
     return this.ops.rejectDriver(user, id, dto.reason);
+  }
+
+  @Post('drivers/:id/suspend')
+  @HttpCode(204)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({ summary: 'Suspende manualmente a un conductor con motivo (SAFETY · compliance/admin)' })
+  suspendDriver(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SuspendDriverDto,
+  ): Promise<void> {
+    return this.ops.suspendDriver(user, id, dto.reason);
   }
 
   // ── Gestión de operadores (admin) ──

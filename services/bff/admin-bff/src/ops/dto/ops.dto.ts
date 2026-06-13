@@ -1,5 +1,5 @@
 /** DTOs de los endpoints OPS. */
-import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, Max, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, MinLength, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdminRole } from '@veo/shared-types';
 
@@ -63,6 +63,14 @@ export class RejectDriverDto {
   @IsString()
   @MaxLength(500)
   reason?: string;
+}
+
+/** POST /ops/drivers/:id/suspend → body. Motivo OBLIGATORIO de la suspensión (SAFETY · queda en auditoría). */
+export class SuspendDriverDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reason!: string;
 }
 
 export class ApproveOperatorDto {

@@ -154,6 +154,21 @@ export class OpsService {
     });
   }
 
+  async suspendDriver(identity: AuthUser, driverId: string, reason: string): Promise<void> {
+    // El motivo viaja al identity-service, que escribe suspendedAt (CAS idempotente) y emite driver.suspended.
+    await this.identityRest.post<void>(`/drivers/${driverId}/suspend`, {
+      identity,
+      body: { reason },
+    });
+    await this.audit.record(identity, {
+      action: 'driver.suspend',
+      resourceType: 'driver',
+      resourceId: driverId,
+      // El motivo queda en la traza inmutable junto a la decisión del operador (SAFETY).
+      payload: { reason },
+    });
+  }
+
   // ── Operadores ──
 
   listPendingOperators(identity: AuthUser): Promise<PendingOperator[]> {

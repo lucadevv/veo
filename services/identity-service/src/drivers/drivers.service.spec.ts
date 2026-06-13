@@ -283,6 +283,73 @@ describe('DriversService.suspendByFleet · suspensión por fleet (cierre del laz
   });
 });
 
+describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', () => {
+  /**
+   * Prisma doble: suspend lee el driver y hace CAS con updateMany DENTRO de la tx (espeja reject + suspendByFleet).
+   * `alreadySuspended` simula la fila ya-suspendida (count 0 → no-op, sin evento). Captura writes y outbox.
+   */
+  function makeSuspendPrisma(driver: unknown, alreadySuspended = false) {
+    const updateManyCalls: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
+    const outbox: Record<string, unknown>[] = [];
+    const tx = {
+      driver: {
+        findUnique: async () => driver,
+        updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          updateManyCalls.push(args);
+          return { count: alreadySuspended ? 0 : 1 };
+        },
+      },
+      outboxEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          outbox.push(data);
+          return {};
+        },
+      },
+    };
+    return {
+      updateManyCalls,
+      outbox,
+      prisma: {
+        read: { driver: { findUnique: async () => driver } },
+        write: { $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx) },
+      },
+    };
+  }
+
+  it('suspende un conductor no suspendido: CAS escribe suspendedAt y emite driver.suspended por outbox', async () => {
+    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma({ ...okDriver, suspendedAt: null });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.suspend('d1', 'Conducta peligrosa reportada');
+    expect(updateManyCalls).toHaveLength(1);
+    expect(updateManyCalls[0]?.where).toEqual({ id: 'd1', suspendedAt: null });
+    expect(updateManyCalls[0]?.data.suspendedAt).toBeInstanceOf(Date);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('driver.suspended');
+    const envelope = outbox[0]?.envelope as { payload: { driverId: string; reason: string; suspendedAt: string } };
+    expect(envelope.payload).toMatchObject({ driverId: 'd1', reason: 'Conducta peligrosa reportada' });
+    expect(typeof envelope.payload.suspendedAt).toBe('string');
+  });
+
+  it('es idempotente: si ya estaba suspendido (count 0) NO emite evento ni reescribe el timestamp', async () => {
+    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma(
+      { ...okDriver, suspendedAt: new Date('2026-06-01T00:00:00.000Z') },
+      true,
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.suspend('d1', 'motivo')).resolves.toBeUndefined();
+    expect(updateManyCalls).toHaveLength(1); // intentó el CAS
+    expect(outbox).toHaveLength(0); // pero no hubo evento (no-op honesto)
+  });
+
+  it('conductor inexistente → NotFoundError sin tocar el CAS ni el outbox', async () => {
+    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.suspend('ghost', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
+    expect(updateManyCalls).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
+  });
+});
+
 describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () => {
   /** Prisma doble: refleja en la actualización los datos enviados (mapeo dni→document_id). */
   function makePersonalPrisma(driver: unknown) {

@@ -263,7 +263,16 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
     const envelope = createEnvelope({
       eventType: 'panic.resolved',
       producer: 'panic-service',
-      payload: { panicId: 'pn-3', status: 'RESOLVED', resolvedBy: 'op-7', at: new Date().toISOString() },
+      // tripId/passengerId son REQUERIDOS por el schema panicResolved (enriquecido): el envelope debe
+      // pasar `schema.parse` antes de mapearse. El mapping de auditoría solo usa panicId/resolvedBy.
+      payload: {
+        panicId: 'pn-3',
+        tripId: 't-3',
+        passengerId: 'pax-3',
+        status: 'RESOLVED',
+        resolvedBy: 'op-7',
+        at: new Date().toISOString(),
+      },
     });
     await handlers.get('panic.resolved')!(envelope);
     const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];

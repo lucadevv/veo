@@ -31,6 +31,14 @@ export const driverVerified = z.object({ driverId: z.string(), userId: z.string(
 /// (degradación honesta, nunca un motivo falso). El conductor lo VE en la app (RejectedScreen) vía GET
 /// /drivers/me, no por este evento. `rejectedAt` ISO-8601 del momento del rechazo.
 export const driverRejected = z.object({ driverId: z.string(), userId: z.string(), reason: z.string(), rejectedAt: z.string() });
+/// El operador SUSPENDIÓ manualmente al conductor desde el panel (acción admin, espejo de driver.rejected
+/// pero del lado de la SUSPENSIÓN). identity-service lo emite por OUTBOX en la MISMA tx que el CAS de
+/// `Driver.suspendedAt` (así nunca hay suspensión sin evento ni evento sin suspensión). Downstream:
+/// audit-service (traza inmutable de la decisión) y admin-bff (proyecta status=SUSPENDED en el read-model
+/// para que el panel lo refleje). Distinto de `fleet.driver_suspended` (suspensión AUTOMÁTICA por documento
+/// crítico vencido, que emite fleet-service): este lo origina un operador. `reason` = motivo del operador
+/// (texto libre, ""→honesto si no se dio). `suspendedAt` ISO-8601 del momento efectivo de la suspensión.
+export const driverSuspended = z.object({ driverId: z.string(), reason: z.string(), suspendedAt: z.string() });
 export const userKycVerified = z.object({ userId: z.string(), kycStatus: z.string(), verifiedAt: z.string() });
 /// El usuario confirmó la titularidad de su correo (ADR-012, método correo+contraseña). identity-service
 /// lo emite en la MISMA tx que marca el AuthMethod.emailVerified=true. Downstream: onboarding/CRM.
@@ -669,6 +677,7 @@ export const EVENT_SCHEMAS = {
   'admin.role_changed': adminRoleChanged,
   'driver.verified': driverVerified,
   'driver.rejected': driverRejected,
+  'driver.suspended': driverSuspended,
   'biometric.failed': biometricFailed,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,

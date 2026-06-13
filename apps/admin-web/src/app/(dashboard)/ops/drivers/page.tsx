@@ -13,8 +13,9 @@ import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PendingDriverActions } from '@/components/drivers/pending-driver-actions';
 import { RejectedDriverActions } from '@/components/drivers/rejected-driver-actions';
+import { ActiveDriverActions } from '@/components/drivers/active-driver-actions';
 
-/** Columnas de la flota verificada (ACTIVE/ALL · read-model). Sin acciones: aprobar/rechazar es del tab Pendientes. */
+/** Columnas de la flota verificada (ACTIVE/ALL · read-model). Acción de SAFETY: suspender (aprobar/rechazar es del tab Pendientes). */
 const columns: ColumnDef<DriverApproval, unknown>[] = [
   {
     accessorKey: 'fullName',
@@ -50,6 +51,12 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
     accessorKey: 'submittedAt',
     header: 'Enviado',
     cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.submittedAt)}</span>,
+  },
+  {
+    id: 'actions',
+    header: 'Acciones',
+    enableSorting: false,
+    cell: ({ row }) => <ActiveDriverActions driver={row.original} />,
   },
 ];
 

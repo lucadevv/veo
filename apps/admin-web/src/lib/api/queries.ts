@@ -151,6 +151,22 @@ export function useDriverDecision() {
   });
 }
 
+/**
+ * Suspensión MANUAL de un conductor (SAFETY). El motivo es OBLIGATORIO: viaja al admin-bff, que lo
+ * proxya a identity-service (escribe suspendedAt + emite driver.suspended) y lo audita. Respuesta 204
+ * vacía (no se parsea). El éxito refetchea la lista para reflejar el estado SUSPENDED.
+ */
+export function useDriverSuspend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; reason: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/suspend`, { body: { reason: input.reason } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['drivers'] });
+    },
+  });
+}
+
 /** Cola REAL de conductores pendientes de aprobación de antecedentes (identity pending-approval, NO el read-model). */
 export function useDriversPending() {
   return useQuery({

@@ -15,6 +15,7 @@ export type Permission =
   | 'trips:view'
   | 'drivers:view'
   | 'drivers:approve'
+  | 'drivers:suspend'
   | 'operators:view'
   | 'operators:approve'
   | 'panics:view'
@@ -59,6 +60,8 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'drivers:view': [SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // ops.controller drivers/:id/approve|reject.
   'drivers:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // ops.controller drivers/:id/suspend: suspensión manual (SAFETY). Mismos roles que approve/reject.
+  'drivers:suspend': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // ops.controller operators/pending + operators/:id/approve|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
   'operators:view': [ADMIN, SUPERADMIN],
   'operators:approve': [ADMIN, SUPERADMIN],
