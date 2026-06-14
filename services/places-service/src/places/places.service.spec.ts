@@ -122,8 +122,19 @@ class FakePrisma {
   get read(): { savedPlace: FakeSavedPlaceDelegate } {
     return { savedPlace: this.savedPlace };
   }
-  get write(): { savedPlace: FakeSavedPlaceDelegate } {
-    return { savedPlace: this.savedPlace };
+  get write(): {
+    savedPlace: FakeSavedPlaceDelegate;
+    $transaction: <T>(
+      fn: (tx: { savedPlace: FakeSavedPlaceDelegate }) => Promise<T>,
+      opts?: unknown,
+    ) => Promise<T>;
+  } {
+    // El fake es secuencial (sin concurrencia real): la tx corre el body con el MISMO delegate in-memory;
+    // el isolationLevel se ignora. Verifica la LÓGICA (tope de favoritos, reemplazo HOME/WORK), no la carrera.
+    return {
+      savedPlace: this.savedPlace,
+      $transaction: (fn, _opts) => fn({ savedPlace: this.savedPlace }),
+    };
   }
 }
 

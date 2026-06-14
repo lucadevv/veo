@@ -13,7 +13,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../infra/prisma.service';
-import { PlaceKind, type SavedPlace } from '../generated/prisma';
+import { PlaceKind, Prisma, type SavedPlace } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import {
   FavoritesLimitError,
@@ -107,31 +107,6 @@ export class PlacesService {
    */
   async save(userId: string, raw: SavePlaceInput): Promise<SavedPlace> {
     const input = this.validate(raw);
-
-    if (input.kind === PlaceKind.FAVORITE) {
-      const count = await this.prisma.read.savedPlace.count({
-        where: { userId, kind: PlaceKind.FAVORITE },
-      });
-      if (count >= this.maxFavorites) {
-        throw new FavoritesLimitError(this.maxFavorites);
-      }
-      return this.prisma.write.savedPlace.create({
-        data: {
-          userId,
-          kind: input.kind,
-          label: input.label,
-          subtitle: input.subtitle ?? null,
-          lat: input.lat,
-          lng: input.lng,
-        },
-      });
-    }
-
-    // HOME/WORK únicos por usuario: si ya existe uno del mismo kind, se reemplaza (upsert manual,
-    // porque el unique parcial userId+kind sólo cubre HOME/WORK y Prisma no expresa unique parcial).
-    const existing = await this.prisma.read.savedPlace.findFirst({
-      where: { userId, kind: input.kind },
-    });
     const data = {
       userId,
       kind: input.kind,
@@ -140,10 +115,30 @@ export class PlacesService {
       lat: input.lat,
       lng: input.lng,
     };
-    if (existing) {
-      return this.prisma.write.savedPlace.update({ where: { id: existing.id }, data });
-    }
-    return this.prisma.write.savedPlace.create({ data });
+
+    // Read + write en UNA transacción SERIALIZABLE: el count+create del FAVORITE y el findFirst+create
+    // del HOME/WORK eran TOCTOU (dos saves concurrentes superaban el tope o creaban dos HOME). Serializable
+    // serializa esas lecturas con el write; bajo carrera real (mismo usuario y kind a la vez) uno falla
+    // honesto (serialization error) en vez de violar el invariante.
+    return this.prisma.write.$transaction(
+      async (tx) => {
+        if (input.kind === PlaceKind.FAVORITE) {
+          const count = await tx.savedPlace.count({ where: { userId, kind: PlaceKind.FAVORITE } });
+          if (count >= this.maxFavorites) {
+            throw new FavoritesLimitError(this.maxFavorites);
+          }
+          return tx.savedPlace.create({ data });
+        }
+        // HOME/WORK únicos por usuario: si ya existe uno del mismo kind, se reemplaza (upsert manual,
+        // porque el unique parcial userId+kind sólo cubre HOME/WORK y Prisma no expresa unique parcial).
+        const existing = await tx.savedPlace.findFirst({ where: { userId, kind: input.kind } });
+        if (existing) {
+          return tx.savedPlace.update({ where: { id: existing.id }, data });
+        }
+        return tx.savedPlace.create({ data });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   /**
@@ -152,28 +147,32 @@ export class PlacesService {
    */
   async update(userId: string, id: string, raw: SavePlaceInput): Promise<SavedPlace> {
     const input = this.validate(raw);
-    const existing = await this.prisma.read.savedPlace.findFirst({ where: { id, userId } });
-    if (!existing) {
-      throw new PlaceNotFoundError(id);
-    }
-
-    if (input.kind !== PlaceKind.FAVORITE) {
-      // Garantiza unicidad de HOME/WORK: descarta cualquier otro del mismo kind del usuario.
-      await this.prisma.write.savedPlace.deleteMany({
-        where: { userId, kind: input.kind, id: { not: id } },
-      });
-    }
-
-    return this.prisma.write.savedPlace.update({
-      where: { id: existing.id },
-      data: {
-        kind: input.kind,
-        label: input.label,
-        subtitle: input.subtitle ?? null,
-        lat: input.lat,
-        lng: input.lng,
+    // findFirst + deleteMany + update en UNA transacción serializable: el deleteMany (unicidad HOME/WORK)
+    // y el update deben ser atómicos — sin la tx, un edit concurrente podía borrar el registro en edición
+    // o dejar dos del mismo kind.
+    return this.prisma.write.$transaction(
+      async (tx) => {
+        const existing = await tx.savedPlace.findFirst({ where: { id, userId } });
+        if (!existing) {
+          throw new PlaceNotFoundError(id);
+        }
+        if (input.kind !== PlaceKind.FAVORITE) {
+          // Garantiza unicidad de HOME/WORK: descarta cualquier otro del mismo kind del usuario.
+          await tx.savedPlace.deleteMany({ where: { userId, kind: input.kind, id: { not: id } } });
+        }
+        return tx.savedPlace.update({
+          where: { id: existing.id },
+          data: {
+            kind: input.kind,
+            label: input.label,
+            subtitle: input.subtitle ?? null,
+            lat: input.lat,
+            lng: input.lng,
+          },
+        });
       },
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   /** Elimina un lugar del propio usuario. NOT_FOUND si el id no existe o es ajeno. */
