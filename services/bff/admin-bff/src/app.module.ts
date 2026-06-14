@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule, MetricsModule } from '@veo/observability';
-import { JwtAuthGuard, RolesGuard, StepUpMfaGuard } from '@veo/auth';
+import { EXPECTED_SUBJECT_TYPE, JwtAuthGuard, RolesGuard, StepUpMfaGuard, type SubjectType } from '@veo/auth';
 import { validateEnv } from './config/env.schema';
 import { InfraModule } from './infra/infra.module';
 import { AuthCoreModule } from './auth/auth-core.module';
@@ -41,6 +41,9 @@ import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
     DispatchConfigModule,
   ],
   providers: [
+    // admin-bff SOLO acepta tokens de tipo 'admin' (el JwtAuthGuard rechaza pasajero/conductor aunque
+    // la firma/audiencia sean válidas) — no depende solo del RBAC. Defensa en profundidad.
+    { provide: EXPECTED_SUBJECT_TYPE, useValue: 'admin' satisfies SubjectType },
     // Orden de guards globales: Jwt (adjunta user) → RateLimit → Roles → StepUpMfa.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
