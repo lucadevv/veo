@@ -3,7 +3,7 @@
  */
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
+import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { SecurityService } from './security.service';
@@ -48,7 +48,8 @@ export class SecurityController {
   @Post('panics/:id/resolve')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Resuelve / marca falsa alarma (compliance/admin)' })
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Resuelve / marca falsa alarma (compliance/admin) — acción crítica, exige MFA fresca' })
   resolve(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

@@ -3,7 +3,7 @@
  */
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
+import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { PayoutView } from '@veo/api-client';
 import { FinanceService, type ReleaseHeldPayoutsResult, type RunPayoutsResult } from './finance.service';
@@ -27,6 +27,7 @@ export class FinanceController {
   @Post('payouts/run')
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @ApiOperation({ summary: 'Ejecuta el batch de payouts del periodo (solo FINANCE)' })
   runPayouts(@CurrentUser() user: AuthenticatedUser, @Body() dto: RunPayoutsDto): Promise<RunPayoutsResult> {
     return this.finance.runPayouts(user, dto);
@@ -37,6 +38,7 @@ export class FinanceController {
   @Post('payouts/drivers/:driverId/release')
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @ApiOperation({ summary: 'Libera los payouts HELD de un conductor y levanta su retención (solo FINANCE)' })
   releaseDriverPayouts(
     @CurrentUser() user: AuthenticatedUser,
@@ -47,6 +49,7 @@ export class FinanceController {
 
   @Post('refunds/:tripId')
   @HttpCode(200)
+  @RequireStepUpMfa()
   @ApiOperation({ summary: 'Reembolsa el pago de un viaje' })
   refund(
     @CurrentUser() user: AuthenticatedUser,
