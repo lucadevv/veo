@@ -106,7 +106,7 @@ describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma
 
   it('luego el PASAJERO confirma → ambos true → CAPTURED + payment.captured', async () => {
     const payment = await chargeCash({ cashCollected: true });
-    const out = await svc.confirmCash(payment.id, 'passenger', true);
+    const out = await svc.confirmCash(payment.id, PAX, 'passenger', true);
 
     expect(out.status).toBe('CAPTURED');
     expect(out.driverConfirmed).toBe(true);
@@ -156,7 +156,7 @@ describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma
 
   it('idempotente: reprocesar el MISMO trip.completed no duplica la confirmación ni recaptura', async () => {
     const p = await chargeCash({ cashCollected: true });
-    await svc.confirmCash(p.id, 'passenger', true);
+    await svc.confirmCash(p.id, PAX, 'passenger', true);
     const capturesBefore = (await outboxTypes()).filter((t) => t === 'payment.captured').length;
 
     // Redelivery del MISMO trip.completed: charge devuelve el Payment existente (dedupKey UNIQUE). Como ya

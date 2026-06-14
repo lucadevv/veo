@@ -27,6 +27,11 @@ let db: TestDatabase;
 let prisma: PrismaClient;
 let payments: PaymentsService;
 
+// Identidades FIJAS del pago sembrado: confirmCash valida que el caller sea el party (anti-IDOR),
+// así que el seed debe usar estos mismos ids como passengerId/driverId del pago.
+const PASSENGER = '0192f8a0-0000-7000-8000-0000000000aa';
+const DRIVER = '0192f8a0-0000-7000-8000-0000000000bb';
+
 /** Config mínima: el capture path solo lee estas claves del constructor. */
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -71,7 +76,8 @@ async function seedPendingPayment(method: 'YAPE' | 'CASH'): Promise<{ id: string
     data: {
       id,
       tripId,
-      passengerId: uuidv7(),
+      passengerId: PASSENGER,
+      driverId: DRIVER,
       dedupKey: `trip-${tripId}`,
       amountCents: 2000,
       grossCents: 2000,
@@ -116,8 +122,8 @@ describe('Captura de pago · guard atómico CAS (sin payment.captured duplicado)
     });
 
     await Promise.all([
-      payments.confirmCash(id, 'passenger', true),
-      payments.confirmCash(id, 'driver', true),
+      payments.confirmCash(id, PASSENGER, 'passenger', true),
+      payments.confirmCash(id, DRIVER, 'driver', true),
     ]);
 
     const stored = await prisma.payment.findUniqueOrThrow({ where: { id } });

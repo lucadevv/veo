@@ -70,8 +70,14 @@ export class PaymentsController {
   @Post(':id/cash/confirm')
   @HttpCode(200)
   @ApiOperation({ summary: 'Confirmación bilateral de efectivo (BR-P03), por driver o passenger' })
-  confirmCash(@Param('id') id: string, @Body() dto: CashConfirmDto) {
-    return this.payments.confirmCash(id, dto.party, dto.confirmed ?? true);
+  confirmCash(
+    @Param('id') id: string,
+    @Body() dto: CashConfirmDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    // El userId sale de la identidad firmada (CurrentUser), nunca del body → anti-IDOR (el dominio
+    // valida que el caller sea el party del pago).
+    return this.payments.confirmCash(id, user.userId, dto.party, dto.confirmed ?? true);
   }
 
   // ── Saldar deuda (BR-P02): re-cobra un Payment en DEBT. Idempotente (CAPTURED→no-op) y

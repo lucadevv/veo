@@ -885,16 +885,24 @@ export class PaymentsService {
    */
   async confirmCash(
     paymentId: string,
+    callerUserId: string,
     party: 'driver' | 'passenger',
     confirmed: boolean,
   ): Promise<{ tripId: string; driverConfirmed: boolean; passengerConfirmed: boolean; status: string }> {
     const payment = await this.prisma.read.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundError('Pago no encontrado');
     if (payment.method !== 'CASH') throw new InvalidStateError('El pago no es en efectivo');
+
+    // Defensa en profundidad (anti-IDOR): el caller (identidad firmada) DEBE ser el party que dice ser;
+    // no alcanza con que el BFF lo gatee. 404 anti-enumeración (mismo criterio que el resto de payments).
+    const isDriver = party === 'driver';
+    const expectedUserId = isDriver ? payment.driverId : payment.passengerId;
+    if (!expectedUserId || expectedUserId !== callerUserId) {
+      throw new NotFoundError('Pago no encontrado');
+    }
     const tripId = payment.tripId;
 
-    const data =
-      party === 'driver' ? { driverConfirmed: confirmed } : { passengerConfirmed: confirmed };
+    const data = isDriver ? { driverConfirmed: confirmed } : { passengerConfirmed: confirmed };
     const confirmation = await this.prisma.write.cashConfirmation.upsert({
       where: { tripId },
       update: data,
