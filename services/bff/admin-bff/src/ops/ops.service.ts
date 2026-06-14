@@ -10,6 +10,7 @@ import {
   type TripReply,
   type UserReply,
   type DriverReply,
+  type DriverVehiclesReply,
 } from '@veo/rpc';
 import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
@@ -18,6 +19,7 @@ import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api
 import {
   GRPC_TRIP,
   GRPC_IDENTITY,
+  GRPC_FLEET,
   REST_IDENTITY,
 } from '../infra/tokens';
 import { ReadModelService, type Page } from '../read-model/read-model.service';
@@ -52,6 +54,7 @@ export class OpsService {
   constructor(
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
+    @Inject(GRPC_FLEET) private readonly fleetGrpc: GrpcServiceClient,
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
     private readonly readModel: ReadModelService,
     private readonly audit: AuditRecorder,
@@ -87,14 +90,23 @@ export class OpsService {
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado', { tripId });
 
-    const [passenger, driver] = await Promise.all([
+    const [passenger, driver, vehicles] = await Promise.all([
       trip.passengerId
         ? this.identityGrpc.call<UserReply>('GetUser', { id: trip.passengerId }, meta).catch(() => null)
         : Promise.resolve(null),
       trip.driverId
         ? this.identityGrpc.call<DriverReply>('GetDriver', { id: trip.driverId }, meta).catch(() => null)
         : Promise.resolve(null),
+      // Placa del vehículo del conductor (fleet): best-effort, no debe tumbar el detalle si fleet falla.
+      trip.driverId
+        ? this.fleetGrpc
+            .call<DriverVehiclesReply>('GetDriverVehicles', { id: trip.driverId }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
+    // Un conductor puede tener varios vehículos: priorizamos el ACTIVO, si no el primero.
+    const vehiclePlate =
+      vehicles?.vehicles?.find((v) => v.active)?.plate ?? vehicles?.vehicles?.[0]?.plate ?? null;
 
     return {
       id: trip.id,
@@ -113,7 +125,7 @@ export class OpsService {
       driverName: driver?.found ? driver.name || null : null,
       // Fecha de suspensión del conductor (proto DriverReply.suspendedAt; '' = no suspendido → null).
       driverSuspendedAt: driver?.found ? driver.suspendedAt || null : null,
-      vehiclePlate: null, // follow-up: requiere lookup a fleet por vehicleId
+      vehiclePlate,
       paymentMethod: trip.paymentMethod || null,
       timeline: [], // follow-up: timeline de eventos no expuesta por GetTrip
     };

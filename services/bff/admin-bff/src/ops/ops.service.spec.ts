@@ -19,6 +19,7 @@ const config = { get: () => 'secret' } as unknown as ConfigService<Env, true>;
 const noopAudit = { record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }) } as unknown as AuditRecorder;
 const noopReadModel = {} as unknown as ReadModelService;
 const noopRest = {} as unknown as InternalRestClient;
+const noopFleet = grpc(() => ({})); // fleet sin vehículos → vehiclePlate null
 
 describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)', () => {
   it('aplana al contrato: createdAt←requestedAt, origin/destination de coords, nombres de identity', async () => {
@@ -53,7 +54,12 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       return {};
     });
 
-    const svc = new OpsService(tripGrpc, identityGrpc, noopRest, noopReadModel, noopAudit, config);
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverVehicles'
+        ? { driverId: 'd1', vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] }
+        : {},
+    );
+    const svc = new OpsService(tripGrpc, identityGrpc, fleetGrpc, noopRest, noopReadModel, noopAudit, config);
     const view = await svc.tripDetail(identity, 't1');
 
     expect(view.status).toBe('COMPLETED');
@@ -69,7 +75,8 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     // Datos EN VIVO / no expuestos por GetTrip → null/[] honesto (no data falsa).
     expect(view.driverLocation).toBeNull();
     expect(view.etaSeconds).toBeNull();
-    expect(view.vehiclePlate).toBeNull();
+    // vehiclePlate AHORA se enriquece desde fleet (GetDriverVehicles): el ACTIVO.
+    expect(view.vehiclePlate).toBe('ABC-123');
     expect(view.timeline).toEqual([]);
   });
 
@@ -79,7 +86,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
         ? { id: 't1', passengerId: 'p1', driverId: '', vehicleId: '', status: 'REQUESTED', fareCents: 0, currency: 'PEN', distanceMeters: 0, durationSeconds: 0, paymentMethod: 'CASH', childMode: false, penaltyCents: 0, requestedAt: '2026-06-01T10:00:00.000Z', originLat: 0, originLng: 0, destinationLat: 0, destinationLng: 0, found: true }
         : {},
     );
-    const svc = new OpsService(tripGrpc, grpc(() => ({})), noopRest, noopReadModel, noopAudit, config);
+    const svc = new OpsService(tripGrpc, grpc(() => ({})), noopFleet, noopRest, noopReadModel, noopAudit, config);
     const view = await svc.tripDetail(identity, 't1');
     expect(view.origin).toBeNull();
     expect(view.destination).toBeNull();
@@ -90,7 +97,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
 
   it('lanza NotFoundError si el viaje no existe', async () => {
     const tripGrpc = grpc(() => ({ found: false }));
-    const svc = new OpsService(tripGrpc, grpc(() => ({})), noopRest, noopReadModel, noopAudit, config);
+    const svc = new OpsService(tripGrpc, grpc(() => ({})), noopFleet, noopRest, noopReadModel, noopAudit, config);
     await expect(svc.tripDetail(identity, 'missing')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
@@ -99,7 +106,7 @@ describe('OpsService.approveDriver', () => {
   it('aprueba vía REST y registra auditoría', async () => {
     const rest = { post: vi.fn().mockResolvedValue({ id: 'd1', backgroundCheckStatus: 'CLEARED' }) } as unknown as InternalRestClient;
     const audit = { record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }) } as unknown as AuditRecorder;
-    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), rest, noopReadModel, audit, config);
+    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), noopFleet, rest, noopReadModel, audit, config);
     const out = await svc.approveDriver(identity, 'd1');
     expect(out.backgroundCheckStatus).toBe('CLEARED');
     expect(audit.record).toHaveBeenCalledOnce();
@@ -112,7 +119,7 @@ describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
     const record = vi.fn();
     const rest = { post } as unknown as InternalRestClient;
     const audit = { record } as unknown as AuditRecorder;
-    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), rest, noopReadModel, audit, config);
+    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), noopFleet, rest, noopReadModel, audit, config);
 
     const err = await svc
       .approveOperator(identity, 'op2', [AdminRole.SUPERADMIN])
@@ -128,7 +135,7 @@ describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
     const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
     const rest = { post } as unknown as InternalRestClient;
     const audit = { record } as unknown as AuditRecorder;
-    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), rest, noopReadModel, audit, config);
+    const svc = new OpsService(grpc(() => ({})), grpc(() => ({})), noopFleet, rest, noopReadModel, audit, config);
 
     const out = await svc.approveOperator(identity, 'op2', [AdminRole.SUPPORT_L2]);
     expect(out.status).toBe('ACTIVE');
