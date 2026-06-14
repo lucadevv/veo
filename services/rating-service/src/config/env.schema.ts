@@ -36,6 +36,9 @@ export const envSchema = z.object({
 
   // gRPC (lectura síncrona del agregado para scoring de dispatch)
   GRPC_URL: z.string().default('0.0.0.0:50060'),
+  // gRPC CLIENT a trip-service: valida el viaje en el submit de una calificación (existe + COMPLETED +
+  // el rater participó). Gate fail-closed de RatingsService.create. Default = dev-stack.
+  TRIP_GRPC_URL: z.string().default('localhost:50052'),
 });
 
 export type Env = z.infer<typeof envSchema>;

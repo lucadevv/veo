@@ -9,15 +9,17 @@
  *  - BR-I05 (pasajero): rollingAvg < 4.0 → "reverification" (marca + emite `passenger.flagged`).
  *  - El evento de flag se emite solo en la TRANSICIÓN a un (nuevo) estado de flag, para no spamear.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { isUniqueViolation } from '@veo/database';
-import { ConflictError } from '@veo/utils';
+import { ConflictError, ForbiddenError, InvalidStateError, NotFoundError } from '@veo/utils';
 import { uuidv7 } from '@veo/utils';
+import { TripStatus } from '@veo/shared-types';
 import { Prisma, type SubjectRole } from '../generated/prisma';
 import { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
+import { TRIP_CLIENT, type TripClient } from '../trip/trip-client.port';
 import { averageOfStars, windowCutoff, type RollingAverage } from './domain/rolling-average';
 import { evaluateFlag, type FlagThresholds, type FlagReason } from './domain/flags';
 
@@ -38,6 +40,7 @@ export class RatingsService {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
+    @Inject(TRIP_CLIENT) private readonly tripClient: TripClient,
   ) {
     this.windowDays = config.getOrThrow<number>('ROLLING_WINDOW_DAYS');
     this.thresholds = {
@@ -52,6 +55,11 @@ export class RatingsService {
     raterId: string,
     input: { tripId: string; ratedId: string; ratedRole: SubjectRole; stars: number; comment?: string },
   ): Promise<RatingEntity> {
+    // Gate fail-closed (cierre de auditoría): un viaje solo se califica si EXISTE, está COMPLETED y el
+    // rater participó, calificando a su CONTRAPARTE. Se valida ANTES de tocar la DB. Si trip-service no
+    // responde, getTrip PROPAGA el error (no se atrapa): sin verificación NO se permite calificar.
+    await this.assertRatableTrip(raterId, input);
+
     // Pre-chequeo amistoso; la UNIQUE de trip_id es la garantía real ante carreras.
     const existing = await this.prisma.read.rating.findUnique({
       where: { tripId: input.tripId },
@@ -93,6 +101,38 @@ export class RatingsService {
         throw new ConflictError('Ya existe una calificación para este viaje');
       }
       throw err;
+    }
+  }
+
+  /**
+   * Gate de validación del viaje (fail-closed). Valida contra trip-service (fuente autoritativa):
+   *  - El viaje EXISTE (si no → NotFoundError).
+   *  - Está COMPLETED (si no → InvalidStateError; calificar un viaje en curso/cancelado es un dato corrupto).
+   *  - El rater PARTICIPÓ: es el pasajero o el conductor del viaje (si no → ForbiddenError).
+   *  - El ratedId es la CONTRAPARTE: rater pasajero → califica al conductor y viceversa (si no → ForbiddenError).
+   * Si trip-service no responde, getTrip lanza y el error PROPAGA (no se atrapa) → no se califica.
+   */
+  private async assertRatableTrip(
+    raterId: string,
+    input: { tripId: string; ratedId: string },
+  ): Promise<void> {
+    const trip = await this.tripClient.getTrip(input.tripId);
+    if (!trip) throw new NotFoundError('Viaje no encontrado');
+
+    if (trip.status !== TripStatus.COMPLETED) {
+      throw new InvalidStateError('Solo se califica un viaje completado');
+    }
+
+    const isPassenger = raterId === trip.passengerId;
+    const isDriver = raterId === trip.driverId;
+    if (!isPassenger && !isDriver) {
+      throw new ForbiddenError('No participaste de este viaje');
+    }
+
+    // La contraparte exacta: el pasajero solo califica al conductor y el conductor solo al pasajero.
+    const counterparty = isPassenger ? trip.driverId : trip.passengerId;
+    if (input.ratedId !== counterparty) {
+      throw new ForbiddenError('El calificado no es la contraparte del viaje');
     }
   }
 
