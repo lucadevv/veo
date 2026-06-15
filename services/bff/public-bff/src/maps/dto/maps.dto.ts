@@ -130,6 +130,13 @@ export interface QuoteOption {
   vehicleType: 'CAR' | 'MOTO';
   etaSeconds: number;
   priceCents: number;
+  /**
+   * Crédito de referido (Ola 2A · Lote C3) que se aplicaría a ESTA opción: `min(saldo, priceCents)`,
+   * computado SERVER-side (§INTEGRACIONES: el dinero no se calcula en el cliente). 0 si el pasajero no
+   * tiene saldo o el quote es anónimo. PREVIEW sobre la tarifa cotizada: si al cobrar hay una promo, el
+   * crédito real puede ser menor (la promo baja la base primero); el recibo muestra el aplicado real.
+   */
+  creditAppliedCents: number;
   currency: 'PEN';
   /**
    * ADR 013 §1.3 (additive) · modo RESUELTO POR OFERTA: `offering.allowedModes ∩ schedule`. Le dice a

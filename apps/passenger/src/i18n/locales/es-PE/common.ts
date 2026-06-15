@@ -447,6 +447,9 @@ export const common = {
     cheapest: 'Más barato',
     /** Etiqueta del total en el desglose de tarifa (p. ej. con recargo de modo niño). */
     total: 'Total',
+    /** Preview del crédito de referido aplicado a la tarifa (Lote C3). */
+    referralCredit: 'Crédito de referido',
+    youPay: 'Pagás',
   },
 
   /**

@@ -234,6 +234,16 @@ export function QuotingBody({
   const showChildFee = childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
   const childTotalCents = selectedFareCents + CHILD_MODE_FEE_CENTS;
 
+  // Lote C3 · PREVIEW del crédito de referido, SOLO en FIJO (en PUJA el precio es el bid, no `priceCents`).
+  // `creditAppliedCents` lo computó el SERVER (min(saldo, priceCents), §INTEGRACIONES); acá solo se MUESTRA.
+  // El "pagás" suma figuras server/constantes (tarifa + recargo − crédito): es un PREVIEW, el recibo
+  // muestra el aplicado real al cobrar (si hay promo, el crédito real puede ser menor).
+  const selectedCreditCents = selectedIsFixed ? (selectedOption?.creditAppliedCents ?? 0) : 0;
+  const payableAfterCreditCents = Math.max(
+    0,
+    (showChildFee ? childTotalCents : selectedFareCents) - selectedCreditCents,
+  );
+
   const selectChanged = (id: string): void => {
     if (id !== selectedId) {
       setAppliedPromo(null);
@@ -444,6 +454,27 @@ export function QuotingBody({
             <Text variant="subhead">{t('quote.total')}</Text>
             <Text variant="subhead" tabular>
               {formatPEN(childTotalCents)}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Lote C3 · PREVIEW del crédito de referido (solo FIJO): el descuento que se aplicará y lo que
+          pagás. `creditAppliedCents` es server-computed; el recibo confirma el aplicado REAL al cobrar. */}
+      {selectedCreditCents > 0 ? (
+        <View style={[styles.feeBreakdown, { borderTopColor: theme.colors.border, gap: theme.spacing.xs }]}>
+          <View style={styles.feeRow}>
+            <Text variant="footnote" color="inkMuted">
+              {t('quote.referralCredit')}
+            </Text>
+            <Text variant="footnote" color="inkMuted" tabular>
+              −{formatPEN(selectedCreditCents)}
+            </Text>
+          </View>
+          <View style={styles.feeRow}>
+            <Text variant="subhead">{t('quote.youPay')}</Text>
+            <Text variant="subhead" tabular>
+              {formatPEN(payableAfterCreditCents)}
             </Text>
           </View>
         </View>

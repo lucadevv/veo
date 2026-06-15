@@ -499,6 +499,13 @@ export const quoteOption = z.object({
   vehicleType: mobileVehicleType,
   etaSeconds: z.number().int(),
   priceCents: z.number().int(),
+  /**
+   * Crédito de referido (Ola 2A · Lote C3) que se aplicaría a ESTA opción: `min(saldo, priceCents)`,
+   * computado SERVER-side. La app muestra "se aplican S/X · pagás priceCents − X". Opcional: un server
+   * viejo no lo manda (fallback: la app trata `undefined` como 0 = sin preview). PREVIEW sobre la tarifa
+   * cotizada: si al cobrar hay promo, el crédito real puede ser menor; el recibo muestra el aplicado real.
+   */
+  creditAppliedCents: z.number().int().nonnegative().optional(),
   currency: z.literal('PEN'),
   /**
    * ADR 013 §1.3 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.allowedModes` ∩ schedule

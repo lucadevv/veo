@@ -3,7 +3,7 @@ import { NotFoundError } from '@veo/utils';
 import type { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { GeocodeResult, MapsClient, RouteResult } from '@veo/maps';
-import type { InternalRestClient } from '@veo/rpc';
+import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import {
   OFFERING_LIST,
   OFFERINGS,
@@ -213,6 +213,8 @@ describe('MapsService.quote', () => {
       vehicleType: 'MOTO',
       etaSeconds: 600,
       priceCents: categoryFareCents(5000, 600, 0.55, 300),
+      // Sin paymentGrpc inyectado (spec construye con 3 args) → fetchCreditBalance devuelve 0 → sin preview.
+      creditAppliedCents: 0,
       currency: 'PEN',
       mode: 'FIXED',
       labelKey: 'offering.veo_moto.name',
@@ -226,6 +228,7 @@ describe('MapsService.quote', () => {
       vehicleType: 'CAR',
       etaSeconds: 600,
       priceCents: categoryFareCents(5000, 600, 1.0),
+      creditAppliedCents: 0,
       currency: 'PEN',
       mode: 'FIXED',
       labelKey: 'offering.veo_economico.name',
@@ -236,6 +239,33 @@ describe('MapsService.quote', () => {
     expect(fake.lastRoute?.origin).toEqual({ lat: -12.0464, lon: -77.0428 });
     // Quote INMEDIATO: NO se envía `at` (trip-service resuelve con now).
     expect(tripRest.lastQuery).toEqual({ lat: -12.0464, lon: -77.0428 });
+  });
+
+  // Lote C3 — el preview del crédito lo computa el SERVER (§INTEGRACIONES, no la app): cada opción trae
+  // `creditAppliedCents = min(saldo, priceCents)`, topado por opción (la moto barata topa en su tarifa; la
+  // económica cara topa en el saldo). Sin paymentGrpc inyectado el campo es 0 (cubierto por el test FIXED).
+  it('FIXED · enriquece cada opción con creditAppliedCents = min(saldo, priceCents) (server-side)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const motoFare = categoryFareCents(5000, 600, 0.55, 300);
+    // Saldo que ALCANZA para topear la moto (más barata) pero NO la económica (más cara) → prueba ambos topes.
+    const balanceCents = motoFare + 1;
+    const paymentGrpc = { call: async () => ({ balanceCents }) };
+    const service = new MapsService(
+      fake,
+      new FakeTripRest({ mode: 'FIXED' }) as unknown as InternalRestClient,
+      fakeConfig(),
+      paymentGrpc as unknown as GrpcServiceClient,
+      'test-secret',
+    );
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+    const moto = out.options.find((o) => o.id === 'veo_moto');
+    const economico = out.options.find((o) => o.id === 'veo_economico');
+
+    // Saldo > tarifa moto → el crédito TOPA en la tarifa (no se descuenta más que el precio).
+    expect(moto?.creditAppliedCents).toBe(motoFare);
+    // Saldo < tarifa económica → el crédito TOPA en el saldo (no se aplica más de lo que hay).
+    expect(economico?.creditAppliedCents).toBe(balanceCents);
   });
 
   // S2 (M5) — un quote de RESERVA reenvía scheduledFor como `at` → el preview muestra el modo de la HORA

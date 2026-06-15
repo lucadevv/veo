@@ -6,12 +6,12 @@
  * - reverse: etiqueta del punto actual ("Tu ubicación").
  * - quote: ruta + ETA + tarifa por categoría (OSRM + cálculo determinista local) + modo PUJA/FIXED.
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { AuthenticatedUser } from '@veo/auth';
+import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import type { GeocodeResult, MapsClient } from '@veo/maps';
-import { InternalRestClient } from '@veo/rpc';
+import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import {
   OFFERING_LIST,
   OFFERINGS,
@@ -19,8 +19,9 @@ import {
   resolveOfferingMode,
   type OfferingSpec,
 } from '@veo/shared-types';
-import { MAPS, REST_TRIP } from '../infra/downstream.tokens';
+import { GRPC_PAYMENT, MAPS, REST_TRIP } from '../infra/downstream.tokens';
 import { ANONYMOUS_IDENTITY } from '../common/identities';
+import type { UserCreditReply } from '../infra/grpc-types';
 import type { Env } from '../config/env.schema';
 import { categoryFareCents } from './fare';
 import { OFFERING_DISPLAY_NAMES } from './offering-names';
@@ -56,6 +57,10 @@ export class MapsService {
     @Inject(MAPS) private readonly maps: MapsClient,
     @Inject(REST_TRIP) private readonly tripRest: InternalRestClient,
     config: ConfigService<Env, true>,
+    // Opcionales (DI): preview de crédito de referido en el quote (Lote C3). Trailing + @Optional para no
+    // romper los specs que construyen/subclasean el servicio con 3 args; sin ellos el quote no trae preview.
+    @Optional() @Inject(GRPC_PAYMENT) private readonly paymentGrpc?: GrpcServiceClient,
+    @Optional() @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret?: string,
   ) {
     // El schema da default 700 (espeja trip-service); getOrThrow es seguro y respeta la convención.
     this.bidFloorCents = config.getOrThrow<number>('BID_FLOOR_CENTS');
@@ -102,12 +107,15 @@ export class MapsService {
     const destination = { lat: dto.destination.lat, lon: dto.destination.lng };
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
-    // La ruta y la resolución del modo son independientes → en paralelo (el modo usa el origen).
-    const [route, scheduledMode] = await Promise.all([
+    // La ruta, el modo y el saldo de crédito son independientes → en paralelo (el modo usa el origen).
+    const [route, scheduledMode, creditBalanceCents] = await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
       // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
       this.resolveMode(dto.origin.lat, dto.origin.lng, identity, dto.scheduledFor),
+      // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
+      // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
+      this.fetchCreditBalance(identity),
     ]);
 
     // ADR 013 §1.3 · el `mode` top-level mantiene su semántica: el modo de la oferta ANCLA (VEO
@@ -116,26 +124,31 @@ export class MapsService {
     const mode = resolveOfferingMode(ANCHOR_OFFERING, scheduledMode).mode;
 
     // Las opciones SALEN del catálogo (ADR 013): OFFERING_LIST ya viene ordenado por sortOrder.
-    const options = this.quotedOfferings().map((offering) => ({
-      id: offering.id,
-      // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
-      name: OFFERING_DISPLAY_NAMES[offering.id],
-      // Ola 2B: la clase de vehículo de la oferta (la app la usa para mostrar y para crear el viaje).
-      vehicleType: offering.vehicleClass,
-      // ETA del trayecto (mismo recorrido para todas las ofertas).
-      etaSeconds: route.durationSeconds,
-      priceCents: categoryFareCents(
+    const options = this.quotedOfferings().map((offering) => {
+      const priceCents = categoryFareCents(
         route.distanceMeters,
         route.durationSeconds,
         offering.pricing.multiplier,
         offering.pricing.minFareCents,
-      ),
-      currency: 'PEN' as const,
-      // ADR 013 §1.3 (additive) · modo POR oferta = allowedModes ∩ schedule: la oferta acota al admin.
-      mode: resolveOfferingMode(offering, scheduledMode).mode,
-      labelKey: offering.labelKey,
-      icon: offering.icon,
-    }));
+      );
+      return {
+        id: offering.id,
+        // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
+        name: OFFERING_DISPLAY_NAMES[offering.id],
+        // Ola 2B: la clase de vehículo de la oferta (la app la usa para mostrar y para crear el viaje).
+        vehicleType: offering.vehicleClass,
+        // ETA del trayecto (mismo recorrido para todas las ofertas).
+        etaSeconds: route.durationSeconds,
+        priceCents,
+        // Lote C3 · crédito que se aplicaría a ESTA tarifa: min(saldo, priceCents). Server-side, ≤ precio.
+        creditAppliedCents: Math.min(creditBalanceCents, priceCents),
+        currency: 'PEN' as const,
+        // ADR 013 §1.3 (additive) · modo POR oferta = allowedModes ∩ schedule: la oferta acota al admin.
+        mode: resolveOfferingMode(offering, scheduledMode).mode,
+        labelKey: offering.labelKey,
+        icon: offering.icon,
+      };
+    });
 
     const base: QuoteResult = {
       distanceMeters: route.distanceMeters,
@@ -195,6 +208,34 @@ export class MapsService {
         `resolve de modo falló (${(err as Error).message}); degradando a PUJA (ADR 011 §8.2)`,
       );
       return 'PUJA';
+    }
+  }
+
+  /**
+   * Saldo de crédito GASTABLE del pasajero para el PREVIEW del quote (Lote C3). Server-side (§INTEGRACIONES:
+   * el monto del crédito lo computa el server, no la app). Devuelve 0 — sin romper el quote — cuando:
+   *  - el quote es ANÓNIMO (sin user) o sin userId;
+   *  - no se inyectó el cliente gRPC / el secreto (tests que construyen el service con 3 args);
+   *  - la lectura del saldo falla (degradación honesta: el crédito es secundario a la ruta; el recibo
+   *    muestra el aplicado real al cobrar).
+   */
+  private async fetchCreditBalance(identity: AuthenticatedUser): Promise<number> {
+    if (!this.paymentGrpc || !this.secret || identity === ANONYMOUS_IDENTITY || !identity.userId) {
+      return 0;
+    }
+    try {
+      const meta = grpcIdentityMetadata(identity, this.secret);
+      const reply = await this.paymentGrpc.call<UserCreditReply>(
+        'GetUserCredit',
+        { userId: identity.userId },
+        meta,
+      );
+      return reply.balanceCents;
+    } catch (err) {
+      this.logger.warn(
+        `credit fetch para el quote falló (${(err as Error).message}); quote sin preview de crédito`,
+      );
+      return 0;
     }
   }
 
