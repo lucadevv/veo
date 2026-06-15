@@ -7,6 +7,7 @@
  *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
  *  - Pagos:         payment.captured, payment.failed, payout.processed
+ *  - Recompensas:   referral.rewarded, promo.redeemed, incentive.completed (movimientos de crédito · Ley 29733)
  *  - Video/Media:   media.recording_started, media.archived, media.access_granted
  *  - Viaje (ciclo): trip.assigned/accepted/arriving/arrived/started/completed/cancelled/expired/failed
  *                   + trip.child_code_failed (solo IDs+estado, sin geo → ver nota en registerHandlers)
@@ -159,6 +160,25 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         actorId: p.driverId,
         resourceType: 'payout',
         resourceId: p.payoutId,
+      })),
+
+      // Recompensas / créditos (Ola 2A/2C · Ley 29733): los movimientos de dinero —crédito al referidor,
+      // bono al conductor, descuento de promo— quedan en el WORM inmutable para reconstruir QUIÉN recibió
+      // QUÉ crédito y cuándo. actorId = el beneficiario del movimiento; recurso = la entidad de recompensa.
+      'referral.rewarded': this.audited('referral.rewarded', (p) => ({
+        actorId: p.referrerUserId,
+        resourceType: 'referral',
+        resourceId: p.referredUserId,
+      })),
+      'promo.redeemed': this.audited('promo.redeemed', (p) => ({
+        actorId: p.userId,
+        resourceType: 'promotion',
+        resourceId: p.promotionId,
+      })),
+      'incentive.completed': this.audited('incentive.completed', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'incentive',
+        resourceId: p.incentiveId,
       })),
 
       // Video / Media (ciclo de vida de la grabación · BR-S01)

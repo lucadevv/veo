@@ -279,3 +279,86 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
     expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'panic', resourceId: 'pn-3' });
   });
 });
+
+describe('AuditConsumer · recompensas/créditos (Ley 29733: traza de movimientos de dinero)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    const audit = { recordFromEvent } as unknown as AuditService;
+    await new AuditConsumer(audit, makeConfig()).onModuleInit();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('registra handlers para los 3 movimientos de crédito', () => {
+    expect(handlers.has('referral.rewarded')).toBe(true);
+    expect(handlers.has('promo.redeemed')).toBe(true);
+    expect(handlers.has('incentive.completed')).toBe(true);
+  });
+
+  it('referral.rewarded → actor=referidor, recurso=referral/referido', async () => {
+    const envelope = createEnvelope({
+      eventType: 'referral.rewarded',
+      producer: 'identity-service',
+      payload: {
+        referrerUserId: 'u-ref',
+        referredUserId: 'u-new',
+        rewardCents: 1500,
+        tripId: 't-1',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('referral.rewarded')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'u-ref', resourceType: 'referral', resourceId: 'u-new' });
+  });
+
+  it('promo.redeemed → actor=usuario, recurso=promotion', async () => {
+    const envelope = createEnvelope({
+      eventType: 'promo.redeemed',
+      producer: 'payment-service',
+      payload: {
+        promotionId: 'promo-9',
+        code: 'VEO10',
+        userId: 'u-7',
+        tripId: 't-2',
+        discountCents: 500,
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('promo.redeemed')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'u-7', resourceType: 'promotion', resourceId: 'promo-9' });
+  });
+
+  it('incentive.completed → actor=conductor, recurso=incentive', async () => {
+    const envelope = createEnvelope({
+      eventType: 'incentive.completed',
+      producer: 'payment-service',
+      payload: {
+        incentiveId: 'inc-3',
+        driverId: 'drv-5',
+        rewardCents: 2000,
+        tripsCompleted: 10,
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('incentive.completed')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'drv-5', resourceType: 'incentive', resourceId: 'inc-3' });
+  });
+});
