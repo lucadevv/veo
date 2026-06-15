@@ -193,10 +193,22 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('registra handlers para los 4 eventos de compliance', () => {
-    for (const t of ['media.access_granted', 'user.kyc_verified', 'trip.pii_erased', 'panic.resolved']) {
+  it('registra handlers para los 5 eventos de compliance', () => {
+    for (const t of ['media.access_granted', 'user.kyc_verified', 'user.email_verified', 'trip.pii_erased', 'panic.resolved']) {
       expect(handlers.has(t), `falta handler ${t}`).toBe(true);
     }
+  });
+
+  it('user.email_verified → actorId=resourceId=userId, resourceType=user (confirmación de correo)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'user.email_verified',
+      producer: 'identity-service',
+      payload: { userId: 'u-321', email: 'pax@veo.pe', verifiedAt: new Date().toISOString() },
+    });
+    await handlers.get('user.email_verified')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('user.email_verified'));
+    expect(mapping).toEqual({ actorId: 'u-321', resourceType: 'user', resourceId: 'u-321' });
   });
 
   it('media.access_granted → actorId=operatorId, resourceType=media, resourceId=segmentId (quién vio qué video)', async () => {
@@ -302,6 +314,27 @@ describe('AuditConsumer · recompensas/créditos (Ley 29733: traza de movimiento
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('registra handler para el vínculo de referido creado (user.referred)', () => {
+    expect(handlers.has('user.referred')).toBe(true);
+  });
+
+  it('user.referred → actor=referidor, recurso=referral/referido (vínculo creado)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'user.referred',
+      producer: 'identity-service',
+      payload: {
+        referrerUserId: 'u-ref',
+        referredUserId: 'u-new',
+        code: 'VEOABC',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('user.referred')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('user.referred'));
+    expect(mapping).toEqual({ actorId: 'u-ref', resourceType: 'referral', resourceId: 'u-new' });
   });
 
   it('registra handlers para los 3 movimientos de crédito', () => {
