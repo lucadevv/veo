@@ -16,10 +16,10 @@ import {
   IconApple,
   IconChevronLeft,
   IconClock,
-  IconEye,
   IconMail,
   IconPencil,
   IconPhone,
+  IconShieldCheck,
 } from '../components/icons';
 
 type Step = 'start' | 'phone' | 'otp' | 'email';
@@ -235,7 +235,8 @@ export function AuthScreen(): React.JSX.Element {
   if (step === 'start') {
     return (
       <SafeScreen scroll>
-        {/* Insignia de marca: ojo lima con glow (accent). */}
+        {/* Sello de marca: escudo de seguridad con glow (accent) — refuerza "movilidad segura"
+            y reemplaza el ícono de ojo anterior (que no comunicaba el valor de la marca). */}
         <View
           style={[
             styles.startBadge,
@@ -246,7 +247,7 @@ export function AuthScreen(): React.JSX.Element {
             },
           ]}
         >
-          <IconEye color={theme.colors.onAccent} size={26} />
+          <IconShieldCheck color={theme.colors.onAccent} onColor={theme.colors.accent} size={28} />
         </View>
 
         <FadeInView style={styles.headerCopy} offsetY={12}>
