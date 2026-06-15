@@ -48,9 +48,9 @@ export const envSchema = z.object({
   FLEET_GRPC_URL: z.string().default('localhost:50062'),
 
   // REST interno (COMANDOS): base http de cada microservicio (sin /api/v1, se añade en el cliente).
-  IDENTITY_URL: z.string().url().default('http://localhost:3001'),
-  TRIP_URL: z.string().url().default('http://localhost:3002'),
-  DISPATCH_URL: z.string().url().default('http://localhost:3003'),
+  IDENTITY_URL: z.string().url().default('http://localhost:3091'),
+  TRIP_URL: z.string().url().default('http://localhost:3092'),
+  DISPATCH_URL: z.string().url().default('http://localhost:3093'),
   PAYMENT_URL: z.string().url().default('http://localhost:3005'),
   PAYOUTS_URL: z.string().url().default('http://localhost:3005'),
   NOTIFICATION_URL: z.string().url().default('http://localhost:3008'),
