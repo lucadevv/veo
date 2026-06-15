@@ -30,30 +30,46 @@ import { z } from 'zod';
  */
 
 /**
- * Deriva el HOST (IP/hostname) del packager Metro a partir de
- * `NativeModules.SourceCode.scriptURL`.
+ * Deriva el HOST (IP/hostname) del packager Metro en dev.
  *
- * En dev sobre device físico el bundle se sirve desde la IP de la Mac, p.ej.
- * `"http://192.168.18.227:8081/index.bundle?platform=ios&dev=true"` → devuelve `"192.168.18.227"`.
+ * Lee el URL del packager de DOS fuentes, en orden de preferencia:
+ *  1. `getDevServer().url` — API soportada en la **arquitectura nueva (bridgeless)**, donde
+ *     `NativeModules.SourceCode.scriptURL` devuelve `null`. Ej. `"http://localhost:8081/"`
+ *     (simulador) o `"http://192.168.18.238:8081/"` (device físico). `bundleLoadedFromServer:false`
+ *     ⇒ release con bundle embebido → se ignora.
+ *  2. `NativeModules.SourceCode.scriptURL` — fallback para la **arquitectura vieja (puente)**.
+ *     Ej. `"http://192.168.18.238:8081/index.bundle?platform=ios&dev=true"`.
  *
- * En release el bundle es local (`"file:///.../main.jsbundle"`, sin host) → devuelve `null`.
+ * Devuelve el primer host http(s) válido. En release / sin packager (file://, vacío, error)
+ * → `null`, para caer en el fallback localhost/10.0.2.2.
  *
- * Robusta por diseño: cualquier scriptURL que no sea http(s) con host, o cualquier error,
- * devuelve `null` para caer en el fallback localhost/10.0.2.2.
+ * Histórico: antes leía SÓLO `scriptURL`; con `RCTNewArchEnabled=true` eso es `null`, así que el
+ * auto-derive nunca disparaba y un `.env` con IP LAN stale ganaba → "sin conexión". `getDevServer()`
+ * lo arregla porque funciona en ambas arquitecturas.
  */
 export function metroDevHost(): string | null {
+  const urls: unknown[] = [];
   try {
-    const scriptURL: unknown = NativeModules?.SourceCode?.scriptURL;
-    if (typeof scriptURL !== 'string' || scriptURL.length === 0) {
-      return null;
-    }
-    // Sólo nos interesa el packager http(s); file:// (release) y otros esquemas → null.
-    const match = /^https?:\/\/([^/:?#]+)(?::\d+)?/i.exec(scriptURL);
-    const host = match?.[1];
-    return host && host.length > 0 ? host : null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const getDevServer = require('react-native/Libraries/Core/Devtools/getDevServer')
+      .default as () => { url?: string; bundleLoadedFromServer?: boolean };
+    const info = getDevServer();
+    // En release getDevServer devuelve un url placeholder con bundleLoadedFromServer:false.
+    if (info.bundleLoadedFromServer !== false) urls.push(info.url);
   } catch {
-    return null;
+    // getDevServer no disponible en este runtime → probamos scriptURL.
   }
+  urls.push(
+    (NativeModules as { SourceCode?: { scriptURL?: unknown } }).SourceCode?.scriptURL,
+  );
+
+  for (const candidate of urls) {
+    if (typeof candidate !== 'string' || candidate.length === 0) continue;
+    // Sólo packager http(s); file:// (release) y otros esquemas → siguiente candidato.
+    const host = /^https?:\/\/([^/:?#]+)(?::\d+)?/i.exec(candidate)?.[1];
+    if (host && host.length > 0) return host;
+  }
+  return null;
 }
 
 /**
