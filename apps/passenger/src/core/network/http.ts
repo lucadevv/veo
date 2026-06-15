@@ -36,12 +36,15 @@ async function refreshTokens(): Promise<boolean> {
       body: JSON.stringify({ refreshToken }),
     });
     if (!res.ok) {
-      clearSession();
+      // El servidor RECHAZÓ el refresh (token vencido/revocado): sesión EXPIRADA, no un fallo de
+      // red. Cierra con motivo 'expired' para que el RootNavigator muestre `SessionExpired`
+      // (re-login forzado por seguridad), no el Auth de un logout intencional.
+      clearSession('expired');
       return false;
     }
     const parsed = mobileRefreshResult.safeParse(await res.json());
     if (!parsed.success) {
-      clearSession();
+      clearSession('expired');
       return false;
     }
     setTokens(parsed.data.accessToken, parsed.data.refreshToken);

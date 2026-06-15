@@ -156,6 +156,19 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
+  // Sesión EXPIRADA (refresh JWT falló / venció): pantalla dedicada de re-login forzado. Es un
+  // estado tipado de la máquina de auth, distinto de 'unauthenticated' (logout intencional / cold
+  // start sin sesión). Va ANTES del branch de Onboarding/Auth para que 'expired' no caiga al flujo
+  // de ingreso normal. Desde `SessionExpired` el usuario re-ingresa con motivo 'user-logout' →
+  // 'unauthenticated' → Auth.
+  if (status === 'expired') {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+        <Stack.Screen name="SessionExpired" component={SessionExpiredScreen} />
+      </Stack.Navigator>
+    );
+  }
+
   // Flujo de entrada (no autenticado) en UN solo navegador con transición `fade`: al revelarse tras
   // el splash, la sesión ya está resuelta (`splashDone` solo es `true` con `status !== 'unknown'`),
   // así que solo resta conmutar Onboarding/Auth. El fondo oscuro compartido evita destellos.
@@ -320,9 +333,6 @@ export function RootNavigator(): React.JSX.Element {
         {/* Cámara del viaje a pantalla completa (Ola 2A): modal full-screen, sin chrome del SO. */}
         <Stack.Screen name="CameraLive" component={CameraLiveScreen} />
         <Stack.Screen name="Panic" component={PanicScreen} />
-        {/* Sesión expirada por inactividad: la pantalla y la ruta existen; el trigger que conmuta
-            a este estado queda como follow-up. */}
-        <Stack.Screen name="SessionExpired" component={SessionExpiredScreen} />
       </Stack.Group>
     </Stack.Navigator>
   );

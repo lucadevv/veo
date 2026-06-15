@@ -135,8 +135,10 @@ jest.mock('react-native-mmkv', () => {
     contains(key) {
       return this.store.has(key);
     }
-    delete(key) {
-      this.store.delete(key);
+    // v4 (Nitro) expone `remove(key)`, NO `delete` — el wrapper `MmkvStore` llama `mmkv.remove`.
+    // El mock debe espejar la API real o `clearSession()`/logout revientan solo en tests.
+    remove(key) {
+      return this.store.delete(key);
     }
     clearAll() {
       this.store.clear();

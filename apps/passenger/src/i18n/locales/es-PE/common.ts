@@ -171,11 +171,11 @@ export const common = {
     errorRequest: 'No pudimos enviar el código. Verifica tu número e inténtalo de nuevo.',
     errorVerify: 'Código incorrecto o vencido. Inténtalo de nuevo.',
     changeNumber: 'Cambiar número',
-    /** Pantalla de sesión expirada por inactividad. */
+    /** Pantalla de sesión expirada (refresh JWT vencido/revocado). */
     expiredTitle: 'Tu sesión expiró',
     expiredSubtitle:
-      'Por tu seguridad cerramos la sesión tras inactividad. Vuelve a verificar tu identidad para continuar.',
-    expiredAction: 'Volver a ingresar',
+      'Por tu seguridad cerramos la sesión. Vuelve a iniciar sesión para verificar tu identidad y continuar.',
+    expiredAction: 'Volver a iniciar sesión',
     biometricTitle: 'Desbloquea VEO',
     biometricSubtitle: 'Usa tu rostro o huella para continuar tu sesión de forma segura.',
     biometricUnlock: 'Desbloquear',
@@ -449,7 +449,7 @@ export const common = {
     total: 'Total',
     /** Preview del crédito de referido aplicado a la tarifa (Lote C3). */
     referralCredit: 'Crédito de referido',
-    youPay: 'Pagás',
+    youPay: 'Pagas',
   },
 
   /**
@@ -895,6 +895,11 @@ export const common = {
   payments: {
     /** Subtítulo de la pantalla: cuenta el modelo (un solo cobro, al terminar el viaje). */
     subtitle: 'Elige cómo pagas; el cobro es al terminar el viaje.',
+    /**
+     * Error de RED al leer la afiliación Yape (no es "sin Yape": la consulta FALLÓ). Degradación honesta:
+     * nunca mostramos "Vincular" cuando en realidad no pudimos saber tu estado. Reintentable.
+     */
+    loadError: 'No pudimos cargar tus métodos de pago. Inténtalo de nuevo.',
     methodsTitle: 'Métodos disponibles',
     default: 'Por defecto',
     /** Pill en la fila del método elegido por defecto (patrón instrumentos). */
