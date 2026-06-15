@@ -214,9 +214,13 @@ async function wireForeground(messaging: Messaging): Promise<void> {
     navigateFromPush(remoteMessage);
   });
 
-  // Rotación de token: re-registrar contra el backend.
+  // Rotación de token: re-registrar contra el backend. Best-effort: si el POST /devices falla (sin
+  // sesión activa al rotar, backend caído), NO debe quedar como unhandled rejection (era el LogBox
+  // "Uncaught (in promise)" del arranque). Se loguea y sigue — mismo criterio que onMessage arriba.
   onTokenRefresh(messaging, (token: string) => {
-    void registrar.register(token, currentPlatform());
+    registrar.register(token, currentPlatform()).catch((error) => {
+      console.warn('[messaging] no se pudo re-registrar el token rotado:', error);
+    });
   });
 }
 
