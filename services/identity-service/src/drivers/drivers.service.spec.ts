@@ -17,23 +17,43 @@ const okDriver = {
   faceEmbedding: [0.1, 0.2, 0.3],
 };
 
-/** Prisma doble: `txDriver` permite simular que otro proceso movió el estado entre la réplica y la tx. */
+/** Fuentes válidas del eje DriverStatus hacia AVAILABLE (espeja driverStatusSources del servicio). */
+const AVAILABLE_SOURCES = new Set(['OFFLINE', 'AVAILABLE', 'ASSIGNED', 'ON_TRIP', 'ON_BREAK']);
+
+/**
+ * Prisma doble: `txDriver` simula el estado FRESCO que ve la tx (otro proceso pudo moverlo/suspenderlo
+ * entre la réplica y la tx). El CAS del servicio (`updateMany` con `suspendedAt: null` +
+ * `currentStatus in sources`) se modela respetando ese where sobre `txDriver`: matchea (count 1) solo si
+ * NO está suspendido y su estado es una fuente válida hacia AVAILABLE.
+ *
+ * AUDITORÍA: el camino EXITOSO la escribe como su propia escritura suelta ANTES del CAS
+ * (`write.biometricCheck.create`). El camino FALLIDO la escribe DENTRO de su propia tx de evidencia, JUNTO al
+ * outbox `biometric.failed` (`tx.biometricCheck.create` + `tx.outboxEvent.create`) — una tx separada de la del
+ * CAS. Ambos sumideros empujan al MISMO array `bioChecks`, así la aserción "la auditoría persiste" (#13) es
+ * agnóstica al camino: el intento queda registrado venga por la escritura suelta o por la tx de evidencia.
+ */
 function makePrisma(driver: unknown, txDriver: unknown = driver) {
   const bioChecks: unknown[] = [];
+  const recordBioCheck = async (args: unknown) => {
+    bioChecks.push(args);
+    return {};
+  };
+  const tx = txDriver as { suspendedAt?: Date | null; currentStatus?: string };
+  const casMatches = !tx?.suspendedAt && AVAILABLE_SOURCES.has(tx?.currentStatus ?? '');
   return {
     bioChecks,
     read: { driver: { findUnique: async () => driver } },
     write: {
       driver: { update: async () => ({}) },
+      biometricCheck: { create: recordBioCheck },
+      outboxEvent: { create: async () => ({}) },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({
-          biometricCheck: {
-            create: async (args: unknown) => {
-              bioChecks.push(args);
-              return {};
-            },
+          driver: {
+            findUnique: async () => txDriver,
+            updateMany: async () => ({ count: casMatches ? 1 : 0 }),
           },
-          driver: { findUnique: async () => txDriver, update: async () => ({}) },
+          biometricCheck: { create: recordBioCheck },
           outboxEvent: { create: async () => ({}) },
         }),
     },
@@ -174,10 +194,25 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
     expect(prisma.bioChecks).toHaveLength(1);
   });
 
-  it('si una suspensión cayó entre la réplica y la tx, el assert serializado rechaza ANTES de la auditoría', async () => {
-    // Réplica desactualizada dice OFFLINE; la tx ve SUSPENDED (SUSPENDED → AVAILABLE es inválida)
-    // → falla sin escribir el biometricCheck (no hay write que el rollback se lleve).
-    const prisma = makePrisma(okDriver, { ...okDriver, currentStatus: 'SUSPENDED' });
+  it('si una suspensión FRESCA cayó entre la réplica y la tx, el CAS rechaza pero la auditoría PERSISTE (#13)', async () => {
+    // Réplica desactualizada dice OFFLINE/no-suspendido; la tx ve la fila FRESCA ya suspendida → el CAS
+    // (where suspendedAt:null) no matchea (count 0) → ForbiddenError. La evidencia del intento biométrico
+    // YA quedó persistida en su propia tx ANTES del CAS: un rechazo de transición NO borra la auditoría.
+    const prisma = makePrisma(okDriver, { ...okDriver, suspendedAt: new Date() });
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(prisma.bioChecks).toHaveLength(1);
+  });
+
+  it('estado fuente inválido en la tx (ej. ya SUSPENDED) → InvalidStatusTransition, auditoría PERSISTE', async () => {
+    // La fila fresca NO está suspendida (suspendedAt null) pero su currentStatus no es fuente válida hacia
+    // AVAILABLE → el CAS no matchea, el re-read no halla suspensión y assertTransition lanza el 409 tipado.
+    const prisma = makePrisma(okDriver, { ...okDriver, currentStatus: 'SUSPENDED', suspendedAt: null });
     const svc = new DriversService(
       prisma as never,
       makeRedis({ sessions: session('ok') }) as never,
@@ -187,7 +222,30 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
     await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(
       InvalidStatusTransition,
     );
-    expect(prisma.bioChecks).toHaveLength(0);
+    expect(prisma.bioChecks).toHaveLength(1);
+  });
+
+  it('double-shift por carrera: estado fuente válido pero el CAS no matchea (otro ganó) → ConflictError (#2)', async () => {
+    // currentStatus OFFLINE ES fuente válida hacia AVAILABLE, así que assertTransition NO lanza; pero
+    // forzamos count 0 (otro startShift concurrente ya movió la fila). El servicio lo discrimina como carrera.
+    const prisma = makePrisma(okDriver, okDriver);
+    // Forzamos el CAS a perder aunque el estado fuente sea válido (simula la carrera ganada por otro).
+    prisma.write.$transaction = async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        driver: {
+          findUnique: async () => okDriver,
+          updateMany: async () => ({ count: 0 }),
+        },
+        outboxEvent: { create: async () => ({}) },
+      });
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ConflictError);
+    expect(prisma.bioChecks).toHaveLength(1);
   });
 
   it('rechaza si el sessionRef no existe o expiró', async () => {
