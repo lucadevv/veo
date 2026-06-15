@@ -9,7 +9,7 @@
   },
   "scripts": {
     "android": "react-native run-android",
-    "ios": "react-native run-ios",
+    "ios": "react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint .",

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "android": "ENVFILE=env/dev.secret.env react-native run-android",
-    "ios": "ENVFILE=env/dev.secret.env react-native run-ios",
+    "ios": "ENVFILE=env/dev.secret.env react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
     "lint": "eslint src --max-warnings 0",
