@@ -2,7 +2,7 @@
  * PaymentsService — cobros idempotentes, comisión, reintentos→DEBT, efectivo bilateral y reembolsos.
  * BR-P01..P04, P06. El dinero SIEMPRE en céntimos PEN. Eventos vía OUTBOX (misma transacción).
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { deletedPlaceholder, enqueueOutbox, isUniqueViolation } from '@veo/database';
@@ -19,6 +19,7 @@ import type { PaymentMethod } from '@veo/shared-types';
 import { AdminRole } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
+import { CreditService } from '../credit/credit.service';
 import {
   PAYMENT_GATEWAY,
   supportsRefund,
@@ -120,6 +121,10 @@ export class PaymentsService {
     private readonly affiliations: AffiliationsService,
     private readonly promotions: PromotionsService,
     config: ConfigService<Env, true>,
+    // Opcional: lo PROVEE PaymentsModule por DI (redención de crédito de referido · Ola 2A · Lote B).
+    // Trailing + @Optional para no romper los call-sites de test que construyen el service con 5 args;
+    // si no está inyectado, el cobro simplemente no aplica crédito (saldo intacto).
+    @Optional() private readonly credit?: CreditService,
   ) {
     this.commissionRate = config.getOrThrow<number>('COMMISSION_RATE');
     this.maxRetries = config.getOrThrow<number>('PAYMENT_MAX_RETRIES');
@@ -192,11 +197,26 @@ export class PaymentsService {
       discountCents = redemption.discountCents;
     }
 
+    // Crédito de referido (Ola 2A · Lote B): se aplica DESPUÉS de la promo, sobre la tarifa RESTANTE
+    // (gross − promo), NUNCA sobre la propina (esa es del conductor, la paga el pasajero). Mismo trato
+    // financiero que la promo: reduce lo que paga el pasajero, la plataforma lo absorbe (comisión sobre el
+    // bruto). Idempotente por `credit:dedupKey`; si el Payment ya existía cortamos en `existing` arriba, así
+    // el crédito se gasta UNA sola vez. `this.credit` es opcional (DI) → sin él, el cobro no aplica crédito.
+    let creditCents = 0;
+    if (input.userId && this.credit) {
+      const maxCreditCents = Math.max(0, input.grossCents - discountCents);
+      creditCents = await this.credit.spendForCharge({
+        userId: input.userId,
+        maxApplicableCents: maxCreditCents,
+        chargeDedupKey: input.dedupKey,
+      });
+    }
+
     const amounts = computeChargeAmounts(
       input.grossCents,
       input.tipCents ?? 0,
       this.commissionRate,
-      discountCents,
+      discountCents + creditCents,
     );
 
     let payment: Payment;
@@ -212,7 +232,11 @@ export class PaymentsService {
           dedupKey: input.dedupKey,
           amountCents: amounts.amountCents,
           grossCents: amounts.grossCents,
-          discountCents: amounts.discountCents,
+          // discountCents = SOLO promo; creditCents = SOLO crédito de referido (reconciliación separada).
+          // amounts.discountCents es la suma (promo+crédito) que se descontó del payable; los guardamos
+          // partidos. amountCents = gross − discountCents − creditCents + tip (invariante del modelo).
+          discountCents,
+          creditCents,
           tipCents: amounts.tipCents,
           commissionCents: amounts.commissionCents,
           feeCents: amounts.feeCents,

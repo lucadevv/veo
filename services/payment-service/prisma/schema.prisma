@@ -131,9 +131,13 @@ model Payment {
   amountCents     Int           @map("amount_cents")
   grossCents      Int           @map("gross_cents")
   /// Descuento de promoción aplicado al pasajero (céntimos). 0 si no hubo promo (Ola 2A).
-  /// amountCents = grossCents − discountCents + tipCents. La comisión se calcula SOBRE grossCents
-  /// (la plataforma asume el costo de la promo); la propina queda intacta.
+  /// amountCents = grossCents − discountCents − creditCents + tipCents. La comisión se calcula SOBRE
+  /// grossCents (la plataforma asume el costo de promo + crédito); la propina queda intacta.
   discountCents   Int           @default(0) @map("discount_cents")
+  /// Crédito de referido GASTADO en este cobro (céntimos · Ola 2A · Lote B). Separado de discountCents
+  /// para reconciliación: promo = campaña de marketing, crédito = saldo ganado por el usuario (pasivos
+  /// distintos). Decrementa `UserCredit.balanceCents` en spendForCharge (idempotente por `credit:dedupKey`).
+  creditCents     Int           @default(0) @map("credit_cents")
   tipCents        Int           @default(0) @map("tip_cents")
   commissionCents Int           @map("commission_cents")
   feeCents        Int           @map("fee_cents")
@@ -515,10 +519,12 @@ model UserCreditEntry {
   @@schema("payment")
 }
 
-/// Origen de un movimiento del ledger de crédito (Ola 2A). El gasto en el cobro (TRIP_REDEMPTION) llega en
-/// el Lote B; acá solo se ACREDITA por referido.
+/// Origen de un movimiento del ledger de crédito (Ola 2A).
+///  - REFERRAL:        acreditación (delta > 0) por `referral.rewarded`.
+///  - TRIP_REDEMPTION: gasto (delta < 0) al aplicarse el crédito en el cobro de un viaje (Lote B).
 enum CreditSource {
-  REFERRAL // acreditación por `referral.rewarded`
+  REFERRAL
+  TRIP_REDEMPTION
 
   @@schema("payment")
 }
