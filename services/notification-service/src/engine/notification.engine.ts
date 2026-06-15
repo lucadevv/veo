@@ -20,6 +20,7 @@ import {
   type RenderedMessage,
   type TemplateRenderer,
 } from './types';
+import { bumpNotificationFailed, NotificationFailureKind, priorityLabel } from '../metrics/notification.metrics';
 
 @Injectable()
 export class NotificationEngine {
@@ -93,6 +94,11 @@ export class NotificationEngine {
         // Permanente: destino muerto (el dispatcher ya invalidó el token). NO se reintenta.
         await this.store.markFailed(rec.id, { channel: rec.channel, reason: result.reason, attempts });
         this.logger.warn(`notificación ${rec.id} FAILED (destino inválido): ${result.reason}`);
+        bumpNotificationFailed({
+          channel: rec.channel,
+          kind: NotificationFailureKind.InvalidRecipient,
+          priority: priorityLabel(rec.priority),
+        });
         return { status: 'FAILED', attempts, reason: result.reason };
       case DispatchStatus.RateLimited:
         return this.retryOrFail(rec, attempts, result.reason, result.retryAfterMs);
@@ -111,6 +117,11 @@ export class NotificationEngine {
     if (this.retry.isExhausted(attempts, rec.maxAttempts)) {
       await this.store.markFailed(rec.id, { channel: rec.channel, reason, attempts });
       this.logger.warn(`notificación ${rec.id} FAILED tras ${attempts} intentos: ${reason}`);
+      bumpNotificationFailed({
+        channel: rec.channel,
+        kind: NotificationFailureKind.RetryExhausted,
+        priority: priorityLabel(rec.priority),
+      });
       return { status: 'FAILED', attempts, reason };
     }
     const baseDelay = this.retry.nextDelayMs(attempts);
