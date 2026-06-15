@@ -130,3 +130,51 @@ describe('env · precedencia de resolución (dev)', () => {
     expect(env.publicBffWsUrl).toBe('http://localhost:4001');
   });
 });
+
+describe('env · auto-sanado de IP LAN stale (dev)', () => {
+  it('override a IP LAN privada distinta del host VIVO de Metro → usa el host de Metro (el bug "sin conexión")', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // El .env quedó con una IP baked (192.168.18.227) pero el DHCP rotó la Mac a .238.
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: {
+        PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1',
+        PUBLIC_BFF_WS_URL: 'http://192.168.18.227:4001',
+        PUBLIC_MAP_STYLE_URL:
+          'http://192.168.18.227:8082/styles/veo-dark/style.json',
+      },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.238:4001/api/v1');
+    expect(env.publicBffWsUrl).toBe('http://192.168.18.238:4001');
+    expect(env.mapStyleUrl).toBe(
+      'http://192.168.18.238:8082/styles/veo-dark/style.json',
+    );
+    expect(warn).toHaveBeenCalled(); // avisa, no es magia silenciosa
+    warn.mockRestore();
+  });
+
+  it('override a IP LAN IGUAL al host de Metro → se respeta el override tal cual (no hay nada stale)', () => {
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:9999/custom/api' },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.227:9999/custom/api');
+  });
+
+  it('override NO-LAN (dominio staging) GANA aunque haya host de Metro: nunca se auto-sana', () => {
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1' },
+    });
+    expect(env.publicBffUrl).toBe('https://api.veo.pe/passenger/api/v1');
+  });
+
+  it('release (!__DEV__): NUNCA se auto-sana — el override del .env manda siempre', () => {
+    const { env } = loadEnv({
+      dev: false,
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1' },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.227:4001/api/v1');
+  });
+});
