@@ -1,4 +1,4 @@
-import { Banner, Button, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import { Banner, Button, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
@@ -59,6 +59,32 @@ export function EmptyState({
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * Fallback de pantalla para los estados NO-éxito de una vista con datos remotos: pinta carga o error
+ * sobre un `<SafeScreen>` pelado. Se RETORNA desde el early-return del guard, NO envuelve el contenido:
+ * así cada pantalla conserva sus guards inline (`if (q.isLoading) return …`) y con ellos el narrowing
+ * de TS sobre `query.data` y sobre cualquier estado local — un wrapper de children los perdería y forzaría
+ * `data!` (rompe "no any/narrowing"). Su valor es matar el clon estructural del trío `<SafeScreen><LoadingState/></SafeScreen>`
+ * repetido pantalla a pantalla, dejándolo en UNA definición. `loading` decide el modo; sin él, es el estado de error.
+ */
+export function ScreenStateFallback({
+  loading = false,
+  loadingLines,
+  errorMessage,
+  onRetry,
+}: {
+  loading?: boolean;
+  loadingLines?: number;
+  errorMessage?: string;
+  onRetry?: () => void;
+}): React.JSX.Element {
+  return (
+    <SafeScreen>
+      {loading ? <LoadingState lines={loadingLines} /> : <ErrorState message={errorMessage} onRetry={onRetry} />}
+    </SafeScreen>
   );
 }
 

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
+import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
 import { formatShortDate } from '../../../../shared/utils/format';
 import type { AppNotification, NotificationKind } from '../../domain/entities';
 import { iconForKind } from '../icons';
@@ -41,19 +41,11 @@ export function NotificationsScreen(): React.JSX.Element {
   });
 
   if (query.isLoading) {
-    return (
-      <SafeScreen>
-        <LoadingState />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback loading />;
   }
 
   if (query.isError) {
-    return (
-      <SafeScreen>
-        <ErrorState message={t('notifications.loadError')} onRetry={() => query.refetch()} />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback errorMessage={t('notifications.loadError')} onRetry={() => query.refetch()} />;
   }
 
   const notifications = query.data ?? [];
