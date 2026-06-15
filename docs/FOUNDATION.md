@@ -82,9 +82,9 @@ dependencias** (`turbo` ya lo hace con `dependsOn: ["^build"]`; si corres `pnpm 
 
 | Servicio | Puerto |
 |---|---|
-| identity-service | 3001 |
-| trip-service | 3002 |
-| dispatch-service | 3003 |
+| identity-service | 3091 |
+| trip-service | 3092 |
+| dispatch-service | 3093 |
 | tracking-service (Go) | 3004 |
 | payment-service | 3005 |
 | panic-service | 3006 |
@@ -106,9 +106,11 @@ dependencias** (`turbo` ya lo hace con `dependsOn: ["^build"]`; si corres `pnpm 
 Infra local (dev-stack): Postgres `5432`, Redis `6379`, ClickHouse `8123/9000`, Kafka `9094`,
 MinIO/S3 `9002` (API) + `9001` (consola), Mosquitto MQTT `1883`, LiveKit `7880`, Mailpit `1025/8025`,
 Jaeger OTLP `4317/4318` UI `16686`, Prometheus `9090`, Grafana `3001→host` (ver compose, expuesto en host `3001`).
-> ⚠️ Grafana expone host `3001`, que colisiona con identity-service. En local, corre servicios fuera de Docker;
-> si necesitas Grafana, no hay choque real porque identity corre en tu host y Grafana en su contenedor mapeado
-> a host 3001 **solo si lo levantas**. Para evitar confusión: deja Grafana apagado salvo que lo necesites.
+> ⚠️ **Puertos REST de identity/trip/dispatch movidos a `3091/3092/3093`** (eran 3001/3002/3003): Grafana
+> mapea host `3001` y colisionaba con identity; trip/dispatch se corrieron junto para mantener el bloque
+> contiguo (EADDRINUSE en local). **El gRPC NO cambió** (identity `50051`, trip `50052`, dispatch `50053`).
+> Los BFFs apuntan a `IDENTITY/TRIP/DISPATCH_URL=localhost:309X` (base SIN `/api/v1`, que el RestGateway añade).
+> Fuente de verdad = cada `services/<svc>/env/dev.env`; esta tabla los espeja.
 
 ---
 
