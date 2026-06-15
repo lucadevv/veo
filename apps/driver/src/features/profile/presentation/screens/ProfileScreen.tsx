@@ -16,6 +16,7 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
+import {DriverStatus} from '@veo/shared-types';
 import type {MainTabParamList, RootStackParamList} from '../../../../navigation/types';
 import {StateView} from '../../../../shared/presentation/components/StateView';
 import {toErrorMessage} from '../../../../shared/presentation/errors';
@@ -76,7 +77,7 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
           <Appear>
             <ProfileIdentityCard
               name={data.phone}
-              online={data.currentStatus === 'AVAILABLE'}
+              online={data.currentStatus === DriverStatus.AVAILABLE}
               ratingValue={data.averageRating.toFixed(1)}
               ratingMeta={data.rating ? t('profile.ratingCount', {count: data.rating.count30d}) : undefined}
             />

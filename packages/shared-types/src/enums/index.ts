@@ -100,6 +100,25 @@ export const KycStatus = {
 } as const;
 export type KycStatus = (typeof KycStatus)[keyof typeof KycStatus];
 
+/**
+ * Tipo de actor humano de la plataforma: PASSENGER (pasajero) · DRIVER (conductor). Es la FUENTE ÚNICA
+ * de este dominio — reemplaza las uniones inline `'PASSENGER' | 'DRIVER'` y los `@IsIn(['PASSENGER',
+ * 'DRIVER'])` crudos que estaban duplicados por los servicios (auth, chat, trip, rating…).
+ *
+ * Representación en MAYÚSCULAS porque es la PERSISTIDA (Prisma `enum UserType { PASSENGER DRIVER }`) y la
+ * del contrato REST/DTOs. OJO: el claim `typ` del JWT usa minúsculas (`SubjectType = 'passenger' |
+ * 'driver' | 'admin'` en `@veo/auth`) — es OTRA representación, del token, e incluye `admin`. NO se
+ * mezclan: si alguna vez hay que cruzar capas, el mapeo es explícito en el borde, no por coincidencia.
+ */
+export const ActorType = {
+  PASSENGER: 'PASSENGER',
+  DRIVER: 'DRIVER',
+} as const;
+export type ActorType = (typeof ActorType)[keyof typeof ActorType];
+
+/** Valores de `ActorType` para validadores de borde: `@IsIn(ACTOR_TYPES)`. Derivado del const, no re-tipeado. */
+export const ACTOR_TYPES = Object.values(ActorType);
+
 export const PanicStatus = {
   TRIGGERED: 'TRIGGERED',
   ACKNOWLEDGED: 'ACKNOWLEDGED',

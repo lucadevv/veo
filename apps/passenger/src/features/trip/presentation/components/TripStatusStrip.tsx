@@ -1,4 +1,4 @@
-import type { TripStatus } from '@veo/api-client';
+import { tripStatus, type TripStatus } from '@veo/api-client';
 import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -54,9 +54,9 @@ const TRACK_HEIGHT = 2;
 /** Mapea el estado del viaje al modo de la franja + su etiqueta i18n. */
 function resolveStrip(status: string): { mode: StripMode; labelKey: string } {
   switch (status) {
-    case 'ARRIVED':
+    case tripStatus.enum.ARRIVED:
       return { mode: 'arrived', labelKey: 'tripStrip.arrived' };
-    case 'IN_PROGRESS':
+    case tripStatus.enum.IN_PROGRESS:
       return { mode: 'moving', labelKey: 'tripStrip.inProgress' };
     // ASSIGNED / ACCEPTED / ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
     default:

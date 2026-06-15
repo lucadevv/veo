@@ -11,25 +11,59 @@ export interface OsrmStepManeuver {
   modifier?: string;
 }
 
+/**
+ * Vocabulario CRUDO de maniobras de OSRM/Mapbox (CONTRATO DEL MOTOR DE RUTEO, no dominio VEO). Vive en
+ * el adaptador de mapas (§INTEGRACIONES: el adapter es dueño del lenguaje del proveedor; el dominio jamás
+ * compara estos literales). `normalizeManeuver`/`modifierToManeuver` los TRADUCEN a `RouteManeuver`.
+ * Mapbox comparte el vocab de OSRM y añade variantes (exit roundabout/rotary, on ramp, notification).
+ * Fuente: OSRM/Mapbox Directions API (`maneuver.type` + `maneuver.modifier`).
+ */
+export const OsrmManeuverType = {
+  DEPART: 'depart',
+  ARRIVE: 'arrive',
+  ROUNDABOUT: 'roundabout',
+  ROTARY: 'rotary',
+  ROUNDABOUT_TURN: 'roundabout turn',
+  EXIT_ROUNDABOUT: 'exit roundabout',
+  EXIT_ROTARY: 'exit rotary',
+  MERGE: 'merge',
+  ON_RAMP: 'on ramp',
+  FORK: 'fork',
+  CONTINUE: 'continue',
+  NEW_NAME: 'new name',
+  NOTIFICATION: 'notification',
+} as const;
+
+export const OsrmManeuverModifier = {
+  LEFT: 'left',
+  RIGHT: 'right',
+  SLIGHT_LEFT: 'slight left',
+  SLIGHT_RIGHT: 'slight right',
+  SHARP_LEFT: 'sharp left',
+  SHARP_RIGHT: 'sharp right',
+  UTURN: 'uturn',
+  STRAIGHT: 'straight',
+} as const;
+
 /** Mapea (type, modifier) de OSRM a nuestro `RouteManeuver` normalizado. */
 export function normalizeManeuver(maneuver: OsrmStepManeuver | undefined): RouteManeuver {
   const type = maneuver?.type ?? '';
   const modifier = maneuver?.modifier ?? '';
   switch (type) {
-    case 'depart':
+    case OsrmManeuverType.DEPART:
       return 'depart';
-    case 'arrive':
+    case OsrmManeuverType.ARRIVE:
       return 'arrive';
-    case 'roundabout':
-    case 'rotary':
-    case 'roundabout turn':
+    case OsrmManeuverType.ROUNDABOUT:
+    case OsrmManeuverType.ROTARY:
+    case OsrmManeuverType.ROUNDABOUT_TURN:
       return 'roundabout';
-    case 'merge':
+    case OsrmManeuverType.MERGE:
       return 'merge';
-    case 'fork':
+    case OsrmManeuverType.FORK:
       return 'fork';
-    case 'continue':
-    case 'new name':
+    case OsrmManeuverType.CONTINUE:
+    case OsrmManeuverType.NEW_NAME:
       return 'straight';
     default:
       return modifierToManeuver(modifier);
@@ -38,21 +72,21 @@ export function normalizeManeuver(maneuver: OsrmStepManeuver | undefined): Route
 
 function modifierToManeuver(modifier: string): RouteManeuver {
   switch (modifier) {
-    case 'left':
+    case OsrmManeuverModifier.LEFT:
       return 'turn-left';
-    case 'right':
+    case OsrmManeuverModifier.RIGHT:
       return 'turn-right';
-    case 'slight left':
+    case OsrmManeuverModifier.SLIGHT_LEFT:
       return 'turn-slight-left';
-    case 'slight right':
+    case OsrmManeuverModifier.SLIGHT_RIGHT:
       return 'turn-slight-right';
-    case 'sharp left':
+    case OsrmManeuverModifier.SHARP_LEFT:
       return 'turn-sharp-left';
-    case 'sharp right':
+    case OsrmManeuverModifier.SHARP_RIGHT:
       return 'turn-sharp-right';
-    case 'uturn':
+    case OsrmManeuverModifier.UTURN:
       return 'uturn';
-    case 'straight':
+    case OsrmManeuverModifier.STRAIGHT:
       return 'straight';
     default:
       return 'straight';

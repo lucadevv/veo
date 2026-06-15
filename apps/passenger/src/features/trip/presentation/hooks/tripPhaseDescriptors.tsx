@@ -5,6 +5,7 @@ import type {
   TripActiveView,
   TripResource,
 } from '@veo/api-client';
+import { tripStatus } from '@veo/api-client';
 import { IconButton, SearchField, Skeleton, Text, TextField, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -128,7 +129,7 @@ export function BiddingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
     <OffersBody
       offers={board.offers}
       connected={board.connected}
-      expired={board.status === 'EXPIRED'}
+      expired={board.status === tripStatus.enum.EXPIRED}
       // F2 · countdown AUTORITATIVO: vence cuando lo dice el board (epoch ms), no un reloj local.
       expiresAt={board.board?.expiresAt ?? null}
       isLoading={board.isLoading}

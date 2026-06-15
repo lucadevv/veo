@@ -1,4 +1,5 @@
 import type { MobilePaymentMethod } from '@veo/api-client';
+import { affiliationStatus } from '@veo/api-client';
 import { Button, Card, SafeScreen, StatusPill, Text, useTheme } from '@veo/ui-kit';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -31,8 +32,8 @@ export function PaymentMethodsScreen(): React.JSX.Element {
   const affiliationQuery = useYapeAffiliation();
   const yapeStatus = (affiliationQuery.data?.status ?? 'NONE').toUpperCase();
   const phoneMasked = affiliationQuery.data?.phoneMasked ?? null;
-  const isLinked = yapeStatus === 'ACTIVE';
-  const isProcess = yapeStatus === 'PROCESS';
+  const isLinked = yapeStatus === affiliationStatus.enum.ACTIVE;
+  const isProcess = yapeStatus === affiliationStatus.enum.PROCESS;
 
   const [linkSheetOpen, setLinkSheetOpen] = useState(false);
   const [manageSheetOpen, setManageSheetOpen] = useState(false);

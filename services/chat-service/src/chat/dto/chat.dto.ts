@@ -1,12 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
-
-/** Roles permitidos como emisor (espeja SenderRole de Prisma). */
-export enum SenderRoleDto {
-  PASSENGER = 'PASSENGER',
-  DRIVER = 'DRIVER',
-}
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
 
 /** POST /chat/trips/:tripId/messages → body (lo arma el BFF: senderId/Role desde la identidad). */
 export class PostMessageDto {
@@ -14,9 +9,9 @@ export class PostMessageDto {
   @IsUUID()
   senderId!: string;
 
-  @ApiProperty({ enum: SenderRoleDto })
-  @IsEnum(SenderRoleDto)
-  senderRole!: SenderRoleDto;
+  @ApiProperty({ enum: ACTOR_TYPES, description: 'Rol del emisor (espeja SenderRole de Prisma)' })
+  @IsIn(ACTOR_TYPES)
+  senderRole!: ActorType;
 
   @ApiProperty({ description: 'Cuerpo del mensaje' })
   @IsString()

@@ -18,6 +18,42 @@ export type ProntoPagaMethod =
   | 'pagoefectivo_payment'; // PagoEfectivo: CIP para pagar en agente/efectivo
 
 /**
+ * Vocabulario CRUDO de ProntoPaga (CONTRATO DEL PROVEEDOR, no dominio VEO). Vive en el ADAPTADOR
+ * (§INTEGRACIONES: el adapter es dueño del lenguaje del proveedor; el dominio jamás compara estos
+ * literales). Los mappers de abajo TRADUCEN estos valores a los estados normalizados del puerto
+ * (`WebhookStatus`). Fuente: docs.prontopaga.com (payins-status · yape-on-file · webhooks).
+ */
+
+/** Estado de un payin ProntoPaga (doc payins-status, MINÚSCULA). 'cancelled' = variante defensiva de 'canceled'. */
+export const ProntoPagaPayinStatus = {
+  NEW: 'new',
+  CREATED: 'created',
+  PENDING: 'pending',
+  SUCCESS: 'success',
+  REJECTED: 'rejected',
+  CANCELED: 'canceled',
+  CANCELLED: 'cancelled',
+  EXPIRED: 'expired',
+} as const;
+
+/** Estado de una afiliación Yape On-File en ProntoPaga (MAYÚSCULA; /yape/subscription + /show). */
+export const ProntoPagaAffiliationStatus = {
+  ACCEPTED: 'ACCEPTED',
+  ACTIVE: 'ACTIVE',
+  SUCCESS: 'SUCCESS',
+  AFFILIATED: 'AFFILIATED',
+  PROCESS: 'PROCESS',
+  EXPIRED: 'EXPIRED',
+  REJECTED: 'REJECTED',
+  CANCELED: 'CANCELED',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+/** Discriminador del webhook ProntoPaga (afiliación vs pago) + `method_type` de afiliación. */
+export const ProntoPagaWebhookKind = { AFFILIATION: 'affiliation', PAYMENT: 'payment' } as const;
+export const ProntoPagaMethodType = { YAPE_AFFILIATION: 'yape_affiliation' } as const;
+
+/**
  * Mapea NUESTRO método → método ProntoPaga.
  *  - YAPE con `walletUid` (afiliación ACTIVE) → yape_cof_payment (on-file, server-initiated).
  *  - YAPE sin afiliación → yape_oneshot_payment: el flujo one-shot devuelve un deepLink (`yape.deepLink`)
@@ -60,13 +96,13 @@ export function originForMethod(ppMethod: ProntoPagaMethod): 'web' | 'mobile' | 
  */
 export function mapProntoPagaStatus(status: string): WebhookStatus {
   switch (status.toLowerCase()) {
-    case 'success':
+    case ProntoPagaPayinStatus.SUCCESS:
       return 'CONFIRMED';
-    case 'rejected':
-    case 'canceled':
-    case 'cancelled':
+    case ProntoPagaPayinStatus.REJECTED:
+    case ProntoPagaPayinStatus.CANCELED:
+    case ProntoPagaPayinStatus.CANCELLED:
       return 'DECLINED';
-    case 'expired':
+    case ProntoPagaPayinStatus.EXPIRED:
       return 'EXPIRED';
     default:
       // new | created | pending | desconocido → tratamos como pendiente (no captura ni falla).
@@ -77,15 +113,15 @@ export function mapProntoPagaStatus(status: string): WebhookStatus {
 /** Estado de afiliación Yape ProntoPaga → estado normalizado del webhook. */
 export function mapAffiliationStatus(status: string): WebhookStatus {
   switch (status.toUpperCase()) {
-    case 'ACTIVE':
-    case 'SUCCESS':
-    case 'AFFILIATED':
+    case ProntoPagaAffiliationStatus.ACTIVE:
+    case ProntoPagaAffiliationStatus.SUCCESS:
+    case ProntoPagaAffiliationStatus.AFFILIATED:
       return 'CONFIRMED';
-    case 'EXPIRED':
+    case ProntoPagaAffiliationStatus.EXPIRED:
       return 'EXPIRED';
-    case 'REJECTED':
-    case 'CANCELED':
-    case 'CANCELLED':
+    case ProntoPagaAffiliationStatus.REJECTED:
+    case ProntoPagaAffiliationStatus.CANCELED:
+    case ProntoPagaAffiliationStatus.CANCELLED:
       return 'DECLINED';
     default:
       // PROCESS | desconocido → sigue pendiente.
@@ -110,7 +146,10 @@ export function normalizeWebhook(raw: Record<string, unknown>): WebhookResult {
   const walletUid = str(raw.wallet_uid) ?? str(raw.walletUID) ?? str(raw.walletUid);
   const methodType = str(raw.method_type) ?? str(raw.methodType);
   const isAffiliation =
-    !order && (Boolean(walletUid) || methodType === 'yape_affiliation' || raw.kind === 'affiliation');
+    !order &&
+    (Boolean(walletUid) ||
+      methodType === ProntoPagaMethodType.YAPE_AFFILIATION ||
+      raw.kind === ProntoPagaWebhookKind.AFFILIATION);
 
   // Código de error del proveedor (p.ej. YPTRX002 = saldo insuficiente en el cobro on-file).
   const errorCode = str(raw.error_code) ?? str(raw.errorCode) ?? str(raw.code);

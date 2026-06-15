@@ -21,6 +21,17 @@ export const mobilePaymentMethod = z.enum(['YAPE', 'PLIN', 'CASH', 'CARD', 'PAGO
 export type MobilePaymentMethod = z.infer<typeof mobilePaymentMethod>;
 
 /**
+ * Estado de la afiliación Yape On-File del pasajero (Yape On File · ProntoPaga). FUENTE TIPADA del estado
+ * de DOMINIO VEO — espeja el enum Prisma `AffiliationStatus` de payment-service. NO confundir con el estado
+ * del PROVEEDOR que devuelve el gateway (`showYapeSubscription`, incluye 'ACCEPTED'): ese es contrato del
+ * adaptador y vive del lado del servicio. Acá van solo los 4 estados que el BFF expone a la app:
+ *   PROCESS = en trámite · ACTIVE = vinculada (cobro automático) · EXPIRED = venció · REVOKED = revocada.
+ * La app compara contra `affiliationStatus.enum.*` (§4-ter: nunca literales sueltos).
+ */
+export const affiliationStatus = z.enum(['PROCESS', 'ACTIVE', 'EXPIRED', 'REVOKED']);
+export type AffiliationStatus = z.infer<typeof affiliationStatus>;
+
+/**
  * Tipo de vehículo (Ola 2B · tier moto-taxi). Espeja `VehicleType` de @veo/shared-types.
  * MOTO = mototaxi (más barato); CAR = auto. La app lo toma de `quoteOption.vehicleType` y lo
  * envía en `createTripRequest.vehicleType` para que dispatch filtre el matching por tipo.

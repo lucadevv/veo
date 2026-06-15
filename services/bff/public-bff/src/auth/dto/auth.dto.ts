@@ -8,6 +8,7 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
 
 /** Teléfono peruano (formato BR-I06): 9XXXXXXXX, opcionalmente con prefijo de país 51/+51. */
 const PERU_PHONE = /^\+?(?:51)?9\d{8}$/;
@@ -20,8 +21,8 @@ export class RequestOtpDto {
   @Matches(PERU_PHONE, { message: 'Teléfono peruano inválido' })
   phone!: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 export class VerifyOtpDto {
@@ -33,8 +34,8 @@ export class VerifyOtpDto {
   @Length(6, 6, { message: 'El OTP tiene 6 dígitos' })
   code!: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 /**
@@ -57,8 +58,8 @@ export class RegisterEmailDto {
   @Length(1, 80, { message: 'El nombre debe tener entre 1 y 80 caracteres' })
   name?: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 export class VerifyEmailDto {

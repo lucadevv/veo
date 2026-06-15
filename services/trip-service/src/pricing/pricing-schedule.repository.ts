@@ -6,6 +6,7 @@
  * resolver + su servicio se testean con un repo en memoria, y la persistencia real vive en el adaptador.
  */
 import { Injectable } from '@nestjs/common';
+import { PricingMode } from '@veo/shared-types';
 import type { PricingModeSchedule } from '../trips/domain/pricing-mode';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
@@ -80,7 +81,7 @@ function parseRules(raw: Prisma.JsonValue): PricingModeSchedule['rules'] {
       typeof dayMask === 'number' &&
       typeof startMinute === 'number' &&
       typeof endMinute === 'number' &&
-      (mode === 'PUJA' || mode === 'FIXED')
+      (mode === PricingMode.PUJA || mode === PricingMode.FIXED)
     ) {
       out.push({ dayMask, startMinute, endMinute, mode });
     }

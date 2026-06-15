@@ -1,12 +1,13 @@
 import { IsIn, IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
 
 export class RequestOtpDto {
   @IsString()
   @Matches(/^\+?(?:51)?9\d{8}$/, { message: 'Teléfono peruano inválido' })
   phone!: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 export class VerifyOtpDto {
@@ -18,8 +19,8 @@ export class VerifyOtpDto {
   @Length(6, 6, { message: 'El OTP tiene 6 dígitos' })
   code!: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 /** Login con Google OAuth (ADR-012 Lote 3): el cliente manda el id_token; lo verificamos server-side. */

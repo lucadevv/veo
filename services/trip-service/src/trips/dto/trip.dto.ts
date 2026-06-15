@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsISO8601,
   IsInt,
   IsLatitude,
@@ -19,7 +20,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PaymentMethod, PricingMode, SpecialRequest, TripStatus, VehicleType } from '@veo/shared-types';
+import { type ActorType, ACTOR_TYPES, PaymentMethod, PricingMode, SpecialRequest, TripStatus, VehicleType } from '@veo/shared-types';
 import { BID_MAX_CENTS } from '@veo/utils';
 
 /** Máximo de paradas intermedias por viaje (Ola 2B · waypoints). */
@@ -257,9 +258,9 @@ export class CompleteTripDto {
 }
 
 export class CancelTripDto {
-  @ApiProperty({ enum: ['PASSENGER', 'DRIVER'] })
-  @IsEnum({ PASSENGER: 'PASSENGER', DRIVER: 'DRIVER' })
-  by!: 'PASSENGER' | 'DRIVER';
+  @ApiProperty({ enum: ACTOR_TYPES })
+  @IsIn(ACTOR_TYPES)
+  by!: ActorType;
 
   @ApiPropertyOptional()
   @IsOptional()

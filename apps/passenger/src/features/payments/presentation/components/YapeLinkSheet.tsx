@@ -1,4 +1,5 @@
 import type { DocumentType, YapeAffiliationView } from '@veo/api-client';
+import { affiliationStatus } from '@veo/api-client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
@@ -170,7 +171,7 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
         // unhandled rejection. Si no abre, lo reflejamos en la fase de espera ("no pudimos abrir Yape").
         void openExternalUrl(view.deepLink).then((ok) => setOpenFailed(!ok));
       }
-      if (view.status.toUpperCase() === 'ACTIVE') {
+      if (view.status.toUpperCase() === affiliationStatus.enum.ACTIVE) {
         onActive();
         return;
       }
@@ -215,9 +216,9 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
       }
       void affiliationQuery.refetch().then((res) => {
         const status = res.data?.status?.toUpperCase();
-        if (status === 'ACTIVE') {
+        if (status === affiliationStatus.enum.ACTIVE) {
           onActive();
-        } else if (status === 'EXPIRED' || status === 'REVOKED') {
+        } else if (status === affiliationStatus.enum.EXPIRED || status === affiliationStatus.enum.REVOKED) {
           setPhase('timeout');
         }
       });

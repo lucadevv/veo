@@ -1,4 +1,4 @@
-import type { TripStatus } from '@veo/api-client';
+import { tripStatus, type TripStatus } from '@veo/api-client';
 
 /**
  * FASE del flujo de viaje unificado: la única fuente de verdad de "qué muestra el sheet sobre el mapa
@@ -32,8 +32,9 @@ export type TripPhase =
   | 'ended';
 
 /**
- * `status` viene de `live.status ?? trip.status`. OJO: EXPIRED/FAILED/REASSIGNING NO están en el enum
- * `TripStatus` tipado (llegan como strings crudos del estado), por eso el parámetro acepta `string`.
+ * `status` viene de `live.status ?? trip.status`. El parámetro acepta `string` además de `TripStatus`
+ * porque el status puede llegar CRUDO (sin pasar por `normalizeTripStatus`) del socket/REST — un valor
+ * fuera del contrato cae al `default`. Las comparaciones usan `tripStatus.enum.*` (no literales sueltos).
  */
 export interface TripPhaseInput {
   /** Hay destino fijado en el borrador (origen siempre se siembra con la ubicación). */
@@ -58,25 +59,25 @@ export function resolveTripPhase({
     return hasDestination ? 'quoting' : 'idle';
   }
   switch (status) {
-    case 'REQUESTED':
-    case 'MATCHING':
+    case tripStatus.enum.REQUESTED:
+    case tripStatus.enum.MATCHING:
       return offerCount > 0 ? 'offers' : 'searching';
-    case 'EXPIRED':
+    case tripStatus.enum.EXPIRED:
       return 'noOffers';
-    case 'REASSIGNING':
+    case tripStatus.enum.REASSIGNING:
       return 'reassigning';
-    case 'ASSIGNED':
-    case 'ACCEPTED':
-    case 'ARRIVING':
+    case tripStatus.enum.ASSIGNED:
+    case tripStatus.enum.ACCEPTED:
+    case tripStatus.enum.ARRIVING:
       return 'enRoute';
-    case 'ARRIVED':
+    case tripStatus.enum.ARRIVED:
       return 'arrived';
-    case 'IN_PROGRESS':
+    case tripStatus.enum.IN_PROGRESS:
       return 'inProgress';
-    case 'COMPLETED':
+    case tripStatus.enum.COMPLETED:
       return 'completed';
-    case 'CANCELLED':
-    case 'FAILED':
+    case tripStatus.enum.CANCELLED:
+    case tripStatus.enum.FAILED:
       return 'ended';
     default:
       // Estado desconocido con viaje activo: lo más seguro es "buscando" (puja recién abierta).
