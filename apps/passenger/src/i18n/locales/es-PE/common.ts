@@ -12,7 +12,7 @@ export const common = {
   splashTagline: 'Movilidad segura',
   /** Taglines de marca usadas en cabeceras del flujo de ingreso. */
   brandTaglineCity: 'Tu viaje. Tu ciudad.',
-  brandTaglinePeru: 'Tu ride en Perú',
+  brandTaglinePeru: 'Tu viaje en Perú',
   placeholder: {
     subtitle: 'Pantalla en construcción',
   },
