@@ -8,6 +8,7 @@ import { container, TOKENS } from './core/di';
 import { HttpSavedPlacesRepository } from './features/places/data/httpPlacesRepository';
 import { useSavedPlacesStore } from './features/places/presentation';
 import { queryClient } from './core/query/queryClient';
+import { initSecureStorage } from './core/storage/mmkv';
 import { useSessionStore } from './core/session/sessionStore';
 // Inicializa i18n (es-PE) por efecto secundario antes de renderizar.
 import './i18n';
@@ -24,9 +25,12 @@ import { flushPendingDeepLink } from './services/messaging';
 export default function App(): React.JSX.Element {
   const hydrate = useSessionStore((state) => state.hydrate);
 
-  // Carga la sesión persistida (tokens en MMKV seguro) al arrancar.
+  // Inicializa el almacén seguro (crea la instancia MMKV con la clave del Keychain) y RECIÉN AHÍ
+  // hidrata la sesión: leer los tokens antes de que el almacén exista con su clave real perdería la
+  // sesión en cold-start (el bug del re-login forzado). La sesión está en estado `unknown` (splash)
+  // hasta que `hydrate()` corre, así que el árbol no lee `secureStore` antes de tiempo.
   useEffect(() => {
-    hydrate();
+    void initSecureStorage().then(hydrate);
   }, [hydrate]);
 
   // Cablea el refresco del store de Lugares guardados cuando el repo HTTP reconcilia el caché con el

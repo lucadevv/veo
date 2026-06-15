@@ -10,25 +10,19 @@ import * as Keychain from 'react-native-keychain';
  * con el .ipa/.aab podría descifrar el almacén MMKV. La clave real se genera aleatoriamente
  * en primer arranque y se persiste en hardware seguro: NO vive en el bundle.
  *
- * ── Arranque sync vs async (decisión) ────────────────────────────────────────────────
- * `MMKV({ encryptionKey })` es SÍNCRONO al cargar el módulo y los consumidores
- * (`secureStore`/`prefsStore`) se importan síncronos; Keychain es async. Para NO cambiar la
- * firma pública de `KeyValueStore` ni obligar a editar archivos de otros agentes:
- *
- *   1. El almacén seguro se crea síncronamente con una clave de ARRANQUE temporal
- *      (`BOOTSTRAP_ENCRYPTION_KEY`). Esto solo cifra datos en el primerísimo instante,
- *      antes de que nadie haya leído/escrito tokens reales.
- *   2. En el bootstrap de la app se llama `initSecureStorage()` (async) ANTES de leer
- *      tokens. Recupera (o genera y guarda) la clave fuerte del Keychain y RE-CIFRA el
- *      almacén con `MMKV.recrypt(key)`. A partir de ahí el almacén usa la clave del Keychain.
- *
- * `recrypt` migra los datos existentes en sitio, así que es seguro aunque ya hubiera datos
- * de un arranque previo cifrados con la misma clave del Keychain (idempotente).
+ * ── Arranque ASYNC (la instancia se crea CON la clave, no se re-cifra) ────────────────
+ * Keychain es async; MMKV se crea con `createMMKV({ encryptionKey })`. La instancia segura se
+ * construye en `initSecureStorage()` (mmkv.ts) DIRECTAMENTE con la clave recuperada acá. NO se usa
+ * una clave de arranque + `recrypt`: ese patrón PERDÍA la sesión en cold-start porque MMKV abría el
+ * archivo (cifrado con la clave del Keychain del login previo) usando la clave de arranque y no lo
+ * descifraba. El bootstrap del árbol espera `initSecureStorage()` antes de leer tokens (la sesión
+ * arranca en estado `unknown` hasta `hydrate()`).
  *
  * ── Fallback ─────────────────────────────────────────────────────────────────────────
  * Si el Keychain falla (caso raro: dispositivo en estado inconsistente, etc.), NO se crashea
- * el arranque: se mantiene la clave de arranque y se loguea un WARN explícito. Es una
- * degradación controlada y documentada, no el camino feliz.
+ * el arranque: el almacén se crea con la clave de ARRANQUE constante (`BOOTSTRAP_ENCRYPTION_KEY`)
+ * y se loguea un WARN. Degradación controlada (la sesión cifrada con la clave del Keychain no se
+ * recupera, pero la app funciona). Lo maneja `initSecureStorage()` en `mmkv.ts`.
  */
 
 /** Servicio (namespace) de la clave de cifrado MMKV en el Keychain/Keystore. */
@@ -37,9 +31,9 @@ const SECURE_KEY_SERVICE = 'pe.veo.passenger.mmkv.encryption-key';
 const SECURE_KEY_ACCOUNT = 'mmkv-secure-encryption-key';
 
 /**
- * Clave de ARRANQUE temporal: solo cifra el almacén en el instante previo a `initSecureStorage()`.
- * NO es la clave de seguridad real (esa vive en el Keychain). Se exporta para que `mmkv.ts`
- * construya la instancia síncrona con ella.
+ * Clave de ARRANQUE temporal: SOLO se usa como fallback si el Keychain es inaccesible. NO es la
+ * clave de seguridad real (esa vive en el Keychain). Se exporta para que `mmkv.ts` construya la
+ * instancia degradada con ella.
  */
 export const BOOTSTRAP_ENCRYPTION_KEY = 'veo-passenger-bootstrap-v1';
 
@@ -97,11 +91,12 @@ function generateRandomKeyHex(): string {
 }
 
 /**
- * Recupera la clave de cifrado del Keychain/Keystore; si no existe (primer arranque),
- * genera una nueva, la persiste y la devuelve. Lanza si el Keychain falla, para que el
- * llamador (initSecureStorage) decida el fallback.
+ * Recupera la clave de cifrado del Keychain/Keystore; si no existe (primer arranque), genera una
+ * nueva, la persiste y la devuelve. La MISMA clave se devuelve en cada arranque siguiente, así el
+ * almacén MMKV cifrado con ella se descifra en cold-start (la sesión persiste). Lanza si el
+ * Keychain falla, para que el llamador (`initSecureStorage` en mmkv.ts) decida el fallback.
  */
-async function getOrCreateEncryptionKey(): Promise<string> {
+export async function getOrCreateEncryptionKey(): Promise<string> {
   const existing = await Keychain.getGenericPassword({
     service: SECURE_KEY_SERVICE,
   });
@@ -118,33 +113,4 @@ async function getOrCreateEncryptionKey(): Promise<string> {
     storage: Keychain.STORAGE_TYPE.AES_GCM_NO_AUTH,
   });
   return key;
-}
-
-/**
- * Inicializa el almacén seguro con la clave derivada del Keychain/Keystore.
- *
- * Debe llamarse en el bootstrap ANTES de leer tokens (p. ej. antes de `hydrate()` de la
- * sesión). Recupera/genera la clave fuerte y re-cifra el almacén MMKV con `recrypt`.
- *
- * @param recrypt callback que aplica `MMKV.recrypt(key)` sobre la instancia segura real.
- *                Se inyecta desde `mmkv.ts` (que posee la instancia) para no exponerla aquí.
- * @returns `true` si la clave del Keychain quedó activa; `false` si se degradó al fallback.
- */
-export async function initSecureStorage(
-  recrypt: (key: string) => void,
-): Promise<boolean> {
-  try {
-    const key = await getOrCreateEncryptionKey();
-    recrypt(key);
-    return true;
-  } catch (error) {
-    // FALLBACK controlado: no crasheamos el arranque. El almacén sigue cifrado con la clave
-    // de arranque (no ideal, pero funcional). Se loguea para visibilidad/telemetría.
-    console.warn(
-      '[secure-encryption-key] Keychain falló; el almacén seguro mantiene la clave de ' +
-        'ARRANQUE (fallback degradado). Error:',
-      error,
-    );
-    return false;
-  }
 }
