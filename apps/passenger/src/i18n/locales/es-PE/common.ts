@@ -88,26 +88,21 @@ export const common = {
 
     safety: {
       eyebrow: 'Seguridad',
-      title: 'Viaja con quien debe ser',
-      body: 'Verificación biométrica del conductor en cada viaje y botón de pánico 24/7.',
+      title: 'Nunca viajas solo',
+      body: 'Conductor verificado y pánico 24/7, en cada viaje.',
+      imageAlt: 'Pasajera viajando tranquila de noche',
     },
 
     price: {
-      title: 'Precio claro antes de subir',
-      body: 'Conoce la tarifa exacta y elige tu VEO: moto o auto.',
-      moto: 'VEO Moto',
-      motoEta: '4 min',
-      motoPrice: 'S/ 7.50',
+      title: 'Tu auto, en minutos',
+      body: 'Autos cómodos y verificados, cuando los necesitas.',
       car: 'VEO Auto',
-      carEta: '6 min',
-      carPrice: 'S/ 12.00',
-      origin: 'Miraflores',
-      destination: 'Santiago de Surco',
+      carTagline: 'Cómodo, seguro y siempre verificado',
     },
 
     consent: {
-      title: 'Tu privacidad, primero',
-      subtitle: 'Necesitamos tu permiso para darte un viaje seguro.',
+      title: 'Tus datos, protegidos',
+      subtitle: 'Solo lo necesario para cuidarte.',
       sectionLabel: 'Consentimientos',
       data: 'Tratamiento de mis datos personales',
       camera: 'Uso de la cámara para verificación',
@@ -119,13 +114,13 @@ export const common = {
 
   auth: {
     /** Paso inicial: elegir método de ingreso. */
-    startTitle: 'Ingresa a VEO',
+    startTitle: 'Bienvenido a VEO',
     startSubtitle: 'Elige cómo quieres entrar.',
     continueGoogle: 'Continuar con Google',
     continueApple: 'Continuar con Apple',
     continueEmail: 'Continuar con correo',
     continuePhone: 'Continuar con teléfono',
-    startHint: '¿Sin celular o sin señal? Usa correo o Google — no necesitas SMS.',
+    startHint: '¿Sin señal para el SMS? Entra con correo o Google.',
     /** Errores del login social (Google/Apple). Cancelar NO muestra Banner. */
     oauthErrorTitle: 'No pudimos iniciar sesión',
     oauthErrorUnavailable:
@@ -142,7 +137,7 @@ export const common = {
     comingSoonWhatsapp: 'El envío del código por WhatsApp estará disponible pronto.',
     back: 'Volver',
     phoneTitle: 'Ingresa tu número',
-    phoneSubtitle: 'Te enviaremos un código por SMS',
+    phoneSubtitle: 'Te enviamos un código por SMS.',
     phoneLabel: 'Número de teléfono',
     phoneHelper: 'Usaremos tu número solo para verificar tu cuenta.',
     phonePlaceholder: '987 654 321',
@@ -267,7 +262,7 @@ export const common = {
      *  Genérico elegante a propósito: la data del perfil no expone el proveedor. */
     emailFromAccount: 'Lo tomamos de tu cuenta',
     privacyNote: 'Tus datos están protegidos y solo los usamos para que viajes mejor.',
-    submit: 'Listo, empieza a viajar',
+    submit: 'Empezar a viajar',
     invalidName: 'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
     invalidEmail: 'Revisa tu correo, parece que le falta algo.',
     saveError: 'No pudimos guardar tu perfil. Inténtalo de nuevo.',
