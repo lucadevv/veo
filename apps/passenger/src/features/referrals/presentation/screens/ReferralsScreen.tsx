@@ -19,6 +19,7 @@ import { ErrorState, LoadingState } from '../../../../shared/presentation/compon
 import { formatPEN } from '../../../../shared/utils/format';
 import { ReferralCodeError } from '../../domain/usecases';
 import type { ReferralCodeReason } from '../../domain/usecases';
+import { useUserCredit } from '../../../payments/presentation/hooks/useUserCredit';
 
 /**
  * "Invita y gana" (Ola 2A). Muestra el código propio del pasajero en grande con copiar/compartir,
@@ -39,6 +40,11 @@ export function ReferralsScreen(): React.JSX.Element {
     queryKey: ['referrals', 'me'],
     queryFn: () => getSummary.execute(),
   });
+
+  // Saldo de crédito GASTABLE (Ola 2A · Lote C). Secundario: no bloquea la pantalla; la card solo aparece
+  // si hay saldo > 0. El cobro lo aplica solo (server-side); acá solo se MUESTRA.
+  const creditQuery = useUserCredit();
+  const availableCreditCents = creditQuery.data?.balanceCents ?? 0;
 
   const [copied, setCopied] = useState(false);
   const [redeemCode, setRedeemCode] = useState('');
@@ -121,6 +127,25 @@ export function ReferralsScreen(): React.JSX.Element {
           </View>
         </View>
       </Card>
+
+      {/* Saldo de crédito GASTABLE: aparece SOLO si hay saldo. El cobro lo aplica solo al próximo viaje
+          (degradación honesta: no prometemos nada que el server no haga). Superficie neutra: el acento
+          lima queda reservado al código héroe. */}
+      {availableCreditCents > 0 ? (
+        <Card variant="filled" padding="lg">
+          <View style={{ gap: theme.spacing.xs }}>
+            <Text variant="footnote" color="inkMuted">
+              {t('referrals.availableCredit')}
+            </Text>
+            <Text variant="title1" tabular accessibilityLabel={t('referrals.availableCredit')}>
+              {formatPEN(availableCreditCents)}
+            </Text>
+            <Text variant="footnote" color="inkMuted">
+              {t('referrals.creditAutoApply')}
+            </Text>
+          </View>
+        </Card>
+      ) : null}
 
       {/* Métricas: referidos y crédito ganado. */}
       <View style={[styles.statsRow, { gap: theme.spacing.md }]}>

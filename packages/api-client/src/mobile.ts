@@ -1328,6 +1328,16 @@ export const debtView = z.object({
 export type DebtView = z.infer<typeof debtView>;
 
 /**
+ * Saldo de crédito GASTABLE del pasajero (redención de referidos · Ola 2A). `GET /payments/credit`.
+ * Se aplica AUTOMÁTICAMENTE como descuento en el cobro del próximo viaje (lo hace el server, no la app).
+ */
+export const userCreditView = z.object({
+  /** Saldo disponible en céntimos PEN (≥ 0). */
+  balanceCents: z.number().int().nonnegative(),
+});
+export type UserCreditView = z.infer<typeof userCreditView>;
+
+/**
  * POST /payments/:id/retry-charge → re-cobra un cobro en DEBT del pasajero (saldar deuda).
  * Sin body. Ownership server-side: 404 si el cobro no es del pasajero autenticado (anti-enumeración).
  * Respuesta: `paymentView` (mismo contrato que `GET /payments/:id`). Idempotente: re-disparar sobre un

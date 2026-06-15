@@ -68,6 +68,7 @@ import type {
   GetMyDebtsUseCase,
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
+  GetUserCreditUseCase,
   RetryChargeUseCase,
 } from '../../features/payments/domain/usecases';
 import type { ProfileRepository } from '../../features/profile/domain/profileRepository';
@@ -263,6 +264,8 @@ export const TOKENS = {
   getPaymentUseCase: createToken<GetPaymentUseCase>('GetPaymentUseCase'),
   // Casos de uso · Payments · Deuda (gate BR-P02: saldar para volver a pedir)
   getMyDebtsUseCase: createToken<GetMyDebtsUseCase>('GetMyDebtsUseCase'),
+  // Caso de uso · Payments · Saldo de crédito gastable del pasajero (referidos · Ola 2A)
+  getUserCreditUseCase: createToken<GetUserCreditUseCase>('GetUserCreditUseCase'),
   retryChargeUseCase: createToken<RetryChargeUseCase>('RetryChargeUseCase'),
   // Caso de uso · Payments · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   changePaymentMethodUseCase: createToken<ChangePaymentMethodUseCase>(

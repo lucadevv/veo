@@ -42,6 +42,17 @@ describe('HttpPaymentsRepository · deuda (BR-P02)', () => {
     );
   });
 
+  it('getUserCredit pega a GET /payments/credit con el schema de saldo', async () => {
+    const get = jest.fn().mockResolvedValue({ balanceCents: 1500 });
+    const repo = new HttpPaymentsRepository(makeHttp({ get }));
+
+    await expect(repo.getUserCredit()).resolves.toMatchObject({ balanceCents: 1500 });
+    expect(get).toHaveBeenCalledWith(
+      '/payments/credit',
+      expect.objectContaining({ schema: expect.anything() }),
+    );
+  });
+
   it('retryCharge pega a POST /payments/:id/retry-charge SIN body (el bff deriva la idempotencia)', async () => {
     const post = jest.fn().mockResolvedValue(CAPTURED_PAYMENT);
     const repo = new HttpPaymentsRepository(makeHttp({ post }));

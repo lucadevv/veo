@@ -1543,6 +1543,9 @@ export const common = {
       'Únete a VEO, la app de viajes más segura del Perú. Usa mi código {{code}} y ambos ganamos crédito. 🚗💚',
     referredCount: 'Amigos referidos',
     rewardsEarned: 'Crédito ganado',
+    /** Saldo de crédito GASTABLE (Ola 2A · Lote C). Distinto de `rewardsEarned` (ganado de por vida). */
+    availableCredit: 'Crédito disponible',
+    creditAutoApply: 'Se aplica solo en tu próximo viaje',
     redeemSection: '¿Te invitó un amigo?',
     redeemLabel: 'Código de tu amigo',
     redeemPlaceholder: 'Ingresa su código',

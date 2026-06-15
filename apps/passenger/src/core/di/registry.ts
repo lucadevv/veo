@@ -62,6 +62,7 @@ import {
   ChargeTripUseCase,
   ConfirmCashUseCase,
   GetMyDebtsUseCase,
+  GetUserCreditUseCase,
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
@@ -532,6 +533,10 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.getMyDebtsUseCase,
     (c) => new GetMyDebtsUseCase(c.resolve(TOKENS.paymentsRepository)),
+  );
+  container.register(
+    TOKENS.getUserCreditUseCase,
+    (c) => new GetUserCreditUseCase(c.resolve(TOKENS.paymentsRepository)),
   );
   container.register(
     TOKENS.retryChargeUseCase,

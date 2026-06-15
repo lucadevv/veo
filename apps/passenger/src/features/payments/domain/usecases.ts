@@ -1,4 +1,4 @@
-import type { ChargeRequest, DebtView, PaymentView } from '@veo/api-client';
+import type { ChargeRequest, DebtView, PaymentView, UserCreditView } from '@veo/api-client';
 import { uuidv4 } from '../../../shared/utils/uuid';
 import type { ChangeablePaymentMethod, PaymentsRepository } from './paymentsRepository';
 
@@ -96,6 +96,18 @@ export class GetMyDebtsUseCase {
 
   execute(): Promise<DebtView> {
     return this.repository.getMyDebts();
+  }
+}
+
+/**
+ * Saldo de crédito GASTABLE del pasajero (`GET /payments/credit` · redención de referidos · Ola 2A). Sin
+ * lógica: el cobro aplica el crédito server-side (Lote B); esto solo lo expone para MOSTRARLO en la app.
+ */
+export class GetUserCreditUseCase {
+  constructor(private readonly repository: PaymentsRepository) {}
+
+  execute(): Promise<UserCreditView> {
+    return this.repository.getUserCredit();
   }
 }
 

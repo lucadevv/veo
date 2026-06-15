@@ -12,6 +12,8 @@ import {
   type PaymentView,
   paymentView,
   retryChargeView,
+  type UserCreditView,
+  userCreditView,
 } from '@veo/api-client';
 import type {
   ChangeablePaymentMethod,
@@ -47,6 +49,10 @@ export class HttpPaymentsRepository implements PaymentsRepository {
 
   getMyDebts(): Promise<DebtView> {
     return this.http.get('/payments/debts', { schema: debtView });
+  }
+
+  getUserCredit(): Promise<UserCreditView> {
+    return this.http.get('/payments/credit', { schema: userCreditView });
   }
 
   retryCharge(paymentId: string): Promise<PaymentView> {
