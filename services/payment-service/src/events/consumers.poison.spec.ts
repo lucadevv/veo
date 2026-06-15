@@ -18,6 +18,7 @@ import { createEnvelope, KafkaEventConsumer, type EventHandler } from '@veo/even
 import { PaymentEventConsumers } from './consumers';
 import type { PaymentsService } from '../payments/payments.service';
 import type { PayoutsService } from '../payouts/payouts.service';
+import type { CreditService } from '../credit/credit.service';
 import type { IncentivesService } from '../incentives/incentives.service';
 
 // Captura los handlers que el bootstrap registra con .on() para dispararlos a mano (sin Kafka real).
@@ -48,7 +49,8 @@ function build(charge: ReturnType<typeof vi.fn>): {
   const payouts = { holdDriver: vi.fn(async () => {}) } as unknown as PayoutsService;
   const creditTrip = vi.fn(async () => {});
   const incentives = { creditTrip } as unknown as IncentivesService;
-  const svc = new PaymentEventConsumers(payments, payouts, incentives, config);
+  const credit = { creditFromReferral: vi.fn(async () => true) } as unknown as CreditService;
+  const svc = new PaymentEventConsumers(payments, payouts, incentives, credit, config);
   return { svc, creditTrip };
 }
 

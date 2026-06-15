@@ -23,6 +23,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import { PayoutsService } from '../payouts/payouts.service';
 import { IncentivesService } from '../incentives/incentives.service';
+import { CreditService } from '../credit/credit.service';
 import type { Env } from '../config/env.schema';
 
 /** clientId kafkajs de este servicio (también su groupId principal de consumo). */
@@ -35,6 +36,7 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
     private readonly payments: PaymentsService,
     private readonly payouts: PayoutsService,
     private readonly incentives: IncentivesService,
+    private readonly credit: CreditService,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -50,6 +52,7 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       'trip.completed': (env) => this.onTripCompleted(env),
       'trip.cancelled': (env) => this.onTripCancelled(env),
       'driver.flagged': (env) => this.onDriverFlagged(env),
+      'referral.rewarded': (env) => this.onReferralRewarded(env),
     };
   }
 
@@ -174,5 +177,40 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
     }
     await this.payouts.holdDriver(parsed.data.driverId);
     this.logger.log(`Conductor ${parsed.data.driverId} marcado para retención de payouts`);
+  }
+
+  /**
+   * referral.rewarded → acredita el crédito GASTABLE del referidor (Ola 2A · Lote A). Idempotente por
+   * eventId (sourceRef UNIQUE). El crédito ya fue "ganado" en identity (display); acá nace lo gastable que
+   * el cobro descuenta en el Lote B.
+   */
+  private async onReferralRewarded(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['referral.rewarded'].safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn('referral.rewarded con payload inválido; descartado');
+      return;
+    }
+    const { referrerUserId, rewardCents } = parsed.data;
+    // POISON (mismo razonamiento que trip.completed): referrerUserId va a la columna user_id @db.Uuid;
+    // un id malformado → P2023 → loop infinito si se relanza. Saltamos sin reintento.
+    if (!isUuid(referrerUserId)) {
+      this.logger.error(
+        `POISON referral.rewarded: referrerUserId no-UUID (eventId=${env.eventId}); descartado sin reintento`,
+      );
+      return;
+    }
+    try {
+      await this.credit.creditFromReferral({ userId: referrerUserId, rewardCents, eventId: env.eventId });
+    } catch (err) {
+      if (isPermanentDataError(err)) {
+        this.logger.error(
+          { err },
+          `POISON referral.rewarded: error permanente al acreditar (eventId=${env.eventId}); descartado sin reintento`,
+        );
+        return;
+      }
+      this.logger.error({ err }, `Falló acreditar el crédito de referido (eventId=${env.eventId})`);
+      throw err; // transitorio → Kafka reintenta; creditFromReferral es idempotente.
+    }
   }
 }

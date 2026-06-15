@@ -478,3 +478,47 @@ model OutboxEvent {
   @@map("outbox_events")
   @@schema("payment")
 }
+
+/// Saldo de crédito GASTABLE de un usuario (céntimos PEN · Ola 2A · redención de referidos). Lo ALIMENTA el
+/// consumer de `referral.rewarded` (Lote A); lo GASTA el cobro del viaje (Lote B). payment-service es dueño
+/// de este saldo: identity guarda "ganado de por vida" (`User.referralRewardCents`, display), payment guarda
+/// lo "gastable" acá — así el descuento se aplica y DECREMENTA en la MISMA tx ACID del cobro (sin doble-gasto
+/// cross-service). Un registro por usuario; `balanceCents` nunca negativo (lo garantiza el gasto en Lote B).
+model UserCredit {
+  userId       String   @id @map("user_id") @db.Uuid
+  balanceCents Int      @default(0) @map("balance_cents")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  entries UserCreditEntry[]
+
+  @@map("user_credits")
+  @@schema("payment")
+}
+
+/// Movimiento del ledger de crédito (append-only · auditable · Ola 2A). `deltaCents` > 0 = acreditación
+/// (referral), < 0 = gasto (cobro · Lote B). `sourceRef` UNIQUE = la idempotencia financiera (§3 CLAUDE):
+/// un `referral.rewarded` re-entregado (mismo eventId) viola el UNIQUE → la tx aborta → NO re-acredita.
+/// `source` tipa el origen del movimiento (sin string mágico).
+model UserCreditEntry {
+  id         String       @id @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  credit     UserCredit   @relation(fields: [userId], references: [userId])
+  deltaCents Int          @map("delta_cents")
+  source     CreditSource
+  /// Clave de idempotencia del movimiento: eventId del `referral.rewarded` que lo originó. UNIQUE.
+  sourceRef  String       @unique @map("source_ref")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("user_credit_entries")
+  @@schema("payment")
+}
+
+/// Origen de un movimiento del ledger de crédito (Ola 2A). El gasto en el cobro (TRIP_REDEMPTION) llega en
+/// el Lote B; acá solo se ACREDITA por referido.
+enum CreditSource {
+  REFERRAL // acreditación por `referral.rewarded`
+
+  @@schema("payment")
+}
