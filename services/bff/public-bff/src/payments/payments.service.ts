@@ -10,7 +10,7 @@ import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser 
 import { NotFoundError } from '@veo/utils';
 import { GRPC_PAYMENT, GRPC_TRIP, REST_PAYMENT } from '../infra/downstream.tokens';
 import { REDIS } from '../infra/redis';
-import type { PaymentReply, TripReply } from '../infra/grpc-types';
+import type { PaymentReply, TripReply, UserCreditReply } from '../infra/grpc-types';
 import {
   type CashConfirmDto,
   type ChargeDto,
@@ -119,6 +119,17 @@ export class PaymentsService {
     const reply = await this.paymentGrpc.call<PaymentReply>('GetPaymentByTrip', { tripId }, meta);
     if (!reply.found) throw new NotFoundError('Pago no encontrado');
     return this.toPaymentView(reply);
+  }
+
+  /**
+   * Saldo de crédito GASTABLE del pasajero (redención de referidos · Ola 2A · Lote C). El cobro ya lo
+   * aplica solo (Lote B); esto es para que la app MUESTRE "tenés S/X de crédito". ANTI-IDOR: el userId es
+   * el del JWT autenticado, nunca uno del cliente → el pasajero solo ve SU saldo.
+   */
+  async getUserCredit(user: AuthenticatedUser): Promise<{ balanceCents: number }> {
+    const meta = grpcIdentityMetadata(user, this.secret);
+    const reply = await this.paymentGrpc.call<UserCreditReply>('GetUserCredit', { userId: user.userId }, meta);
+    return { balanceCents: reply.balanceCents };
   }
 
   /** Mapea la respuesta gRPC PaymentReply a la vista pública del pasajero. */

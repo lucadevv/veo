@@ -37,6 +37,13 @@ export class PaymentsController {
     return this.payments.getMyDebts(user);
   }
 
+  // ── Saldo de crédito gastable del pasajero (redención de referidos · Ola 2A). ANTES de `@Get(':id')`. ──
+  @Get('credit')
+  @ApiOperation({ summary: 'Saldo de crédito gastable del pasajero (referidos) para mostrar en la app' })
+  credit(@CurrentUser() user: AuthenticatedUser): Promise<{ balanceCents: number }> {
+    return this.payments.getUserCredit(user);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un pago por id' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PaymentView> {

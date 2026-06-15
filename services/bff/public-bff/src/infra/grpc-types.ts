@@ -13,6 +13,7 @@ export type {
   SurgeReply,
   NearbyDriversReply,
   PaymentReply,
+  UserCreditReply,
   PanicReply,
   AggregateReply,
   TrustedContactsReply,

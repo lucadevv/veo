@@ -20,6 +20,14 @@ interface GetPaymentByTripRequest {
   tripId: string;
 }
 
+interface GetUserCreditRequest {
+  userId: string;
+}
+
+interface UserCreditReply {
+  balanceCents: number;
+}
+
 interface PaymentReply {
   id: string;
   tripId: string;
@@ -112,6 +120,21 @@ export class PaymentGrpcController {
     });
     if (!p) return EMPTY;
     return this.toReply(p);
+  }
+
+  /**
+   * Saldo de crédito GASTABLE del usuario (redención de referidos · Ola 2A · Lote C). Lectura síncrona
+   * para el BFF: el pasajero ve "tenés S/X de crédito". 0 si no tiene fila de saldo. El anti-IDOR (que el
+   * userId sea el del JWT del pasajero, no uno arbitrario) vive en el BFF, igual que en GetPaymentByTrip.
+   */
+  @GrpcMethod('PaymentService', 'GetUserCredit')
+  async getUserCredit(
+    { userId }: GetUserCreditRequest,
+    metadata: Metadata,
+  ): Promise<UserCreditReply> {
+    this.requireIdentity(metadata);
+    const credit = await this.prisma.read.userCredit.findUnique({ where: { userId } });
+    return { balanceCents: credit?.balanceCents ?? 0 };
   }
 
   /** Mapea la fila Payment al contrato gRPC PaymentReply (found=true). */

@@ -29,3 +29,8 @@ export interface PaymentReply {
   /** Razón estructurada del fallo del cobro; "" cuando no hubo fallo (el BFF la re-mapea a null). */
   failureReason: string;
 }
+
+/** payment.GetUserCredit / mensaje UserCreditReply (saldo de crédito GASTABLE del usuario · céntimos PEN). */
+export interface UserCreditReply {
+  balanceCents: number;
+}
