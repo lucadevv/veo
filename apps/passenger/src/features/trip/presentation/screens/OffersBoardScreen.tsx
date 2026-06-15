@@ -3,7 +3,7 @@ import { type RouteProp, useIsFocused, useNavigation, useRoute } from '@react-na
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Avatar, Banner, Button, Card, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -52,6 +52,8 @@ export function OffersBoardScreen(): React.JSX.Element {
   // Tu ubicación para el mapa del board ("estás acá, buscando"). Los taxis cercanos en vivo son un
   // feed aparte (no existe aún + 0 conductores online) → honestamente no se muestran todavía.
   const { point: myLocation } = useCurrentLocation();
+  // Alto medido del sheet de ofertas → el botón "recentrarme" del mapa flota POR ENCIMA del panel.
+  const [sheetHeight, setSheetHeight] = useState(0);
 
   const offersQuery = useQuery({
     queryKey: ['trip', tripId, 'offers'],
@@ -159,11 +161,18 @@ export function OffersBoardScreen(): React.JSX.Element {
 
       {/* MAPA full-bleed de fondo: tu ubicación mientras se busca conductor. */}
       <View style={StyleSheet.absoluteFill}>
-        <AppMap center={myLocation} userPoint={myLocation} interactive />
+        <AppMap
+          center={myLocation}
+          userPoint={myLocation}
+          interactive
+          showRecenter
+          bottomInset={sheetHeight}
+        />
       </View>
 
       {/* Panel flotante con las ofertas en vivo / estado de búsqueda + acciones. */}
       <View
+        onLayout={(e) => setSheetHeight(e.nativeEvent.layout.height)}
         style={[
           styles.sheet,
           {

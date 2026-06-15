@@ -304,6 +304,8 @@ export const common = {
     locationActionSettings: 'Ajustes',
     /** CTA del pill para reintentar el fix. */
     locationActionRetry: 'Reintentar',
+    /** Botón flotante del mapa para volver la cámara a mi ubicación tras panear libremente. */
+    recenter: 'Centrar en mi ubicación',
     /** Campana de avisos de la Home (centro de notificaciones sin backend todavía). */
     notifications: 'Avisos',
     notificationsComingSoon:

@@ -13,7 +13,7 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
@@ -88,6 +88,8 @@ export function HomeScreen(): React.JSX.Element {
   const history = useDependency(TOKENS.tripHistoryRepository);
 
   const { point: myLocation, loading: locating, error: locationError } = useCurrentLocation();
+  // Alto medido del overlay inferior (búsqueda + atajos) → el botón "recentrarme" flota POR ENCIMA de él.
+  const [bottomChrome, setBottomChrome] = useState(0);
   const origin = useRideDraftStore((s) => s.origin);
   const setOrigin = useRideDraftStore((s) => s.setOrigin);
   const setDestination = useRideDraftStore((s) => s.setDestination);
@@ -199,7 +201,11 @@ export function HomeScreen(): React.JSX.Element {
           </View>
         }
         bottomOverlay={
-          <View style={{ gap: theme.spacing.md }} pointerEvents="box-none">
+          <View
+            style={{ gap: theme.spacing.md }}
+            pointerEvents="box-none"
+            onLayout={(e) => setBottomChrome(e.nativeEvent.layout.height)}
+          >
             {hasShortcuts ? (
               <ScrollView
                 horizontal
@@ -257,7 +263,13 @@ export function HomeScreen(): React.JSX.Element {
           </View>
         }
       >
-        <AppMap center={myLocation} userPoint={myLocation} interactive />
+        <AppMap
+          center={myLocation}
+          userPoint={myLocation}
+          interactive
+          showRecenter
+          bottomInset={bottomChrome}
+        />
       </MapShell>
     </SafeScreen>
   );

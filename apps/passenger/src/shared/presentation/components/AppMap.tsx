@@ -25,6 +25,8 @@ import {
   toLngLat,
 } from '../../utils/geo';
 import { type DirectedCameraRef, useDirectedCamera } from './useDirectedCamera';
+import { useIdleCamera } from './useIdleCamera';
+import { RecenterButton } from './RecenterButton';
 import { veoDarkMapboxStyleJSON } from './mapbox/veoDarkStyle';
 
 export interface AppMapProps {
@@ -94,6 +96,14 @@ export interface AppMapProps {
    * VISIBLE por encima del sheet y no tapado por él. Memoizá el valor en el padre (React.memo).
    */
   bottomInset?: number;
+  /**
+   * Mapa de "mi ubicación" LIBRE (Home / OffersBoard): la cámara NO se controla por `center`/`userPoint`
+   * (que llegan EN VIVO del GPS). Se centra UNA sola vez sobre el primer fix y luego el usuario panea
+   * libre, sin snap-back, con un botón flotante para recentrarse. Sin esto, la cámara idle sigue el
+   * `center` DECLARATIVO (patrón "pin al centro" de MapPick, que pasa un center ESTABILIZADO). Default
+   * `false` → comportamiento idle previo intacto. Ver `useIdleCamera`.
+   */
+  showRecenter?: boolean;
 }
 
 const ROUTE_SOURCE = 'veo-route';
@@ -225,6 +235,7 @@ function AppMapComponent({
   onCenterChange,
   interactive = true,
   bottomInset = 0,
+  showRecenter = false,
 }: AppMapProps): React.JSX.Element {
   // Cámara DIRIGIDA por el `mapDirector` (encuadre conductor+recogida / follow taxi). Cuando hay
   // `cameraTarget`, el encuadre lo maneja `useDirectedCamera` imperativamente (throttle + modo libre);
@@ -247,6 +258,13 @@ function AppMapComponent({
   );
 
   const { onGesture } = useDirectedCamera(cameraRef, cameraTarget ?? noopTarget, fitBottomInset);
+
+  // Mapa "mi ubicación" libre: solo cuando se pide recentrar Y la cámara NO está dirigida (la dirigida la
+  // gobierna `useDirectedCamera` por el MISMO `cameraRef` → nunca deben pelear). Punto a centrar = el
+  // centro válido, o el userPoint. Si no aplica, `null` → `useIdleCamera` no toca la cámara.
+  const freeBrowse = showRecenter && !directedCamera;
+  const idlePoint = isValidPoint(center) ? center : isValidPoint(userPoint) ? userPoint : null;
+  const { recenter } = useIdleCamera(cameraRef, freeBrowse ? idlePoint : null, bottomInset);
 
   // Gesto manual del usuario → modo libre (solo si la cámara está dirigida). `isGestureActive` lo
   // reporta rnmapbox en `onCameraChanged`: detectar el pellizco/arrastre es barato con este callback.
@@ -346,7 +364,7 @@ function AppMapComponent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lon, userPoint?.lat, userPoint?.lon]);
 
-  return (
+  const mapView = (
     <MapView
       style={StyleSheet.absoluteFill}
       styleJSON={veoDarkMapboxStyleJSON}
@@ -397,6 +415,16 @@ function AppMapComponent({
           // Red de zoom: si la ruta es chica, no acercamos a zoom-calle agresivo. NO limita el alejado
           // de rutas largas (encuadre correcto manda). Ver FIT_MAX_ZOOM.
           maxZoomLevel={FIT_MAX_ZOOM}
+          animationDuration={500}
+        />
+      ) : freeBrowse ? (
+        // Mapa "mi ubicación" LIBRE: cámara NO controlada (`defaultSettings` = solo estado inicial). Sin
+        // `centerCoordinate` declarativo, rnmapbox NO re-asserta el centro cuando `myLocation` cambia (GPS
+        // tick / foreground) → se acabó el snap-back que peleaba el paneo. El centrado inicial sobre el
+        // primer fix y el botón "recentrarme" los maneja `useIdleCamera` (imperativo, por el `cameraRef`).
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{ centerCoordinate, zoomLevel: LIMA_ZOOM }}
           animationDuration={500}
         />
       ) : (
@@ -490,6 +518,20 @@ function AppMapComponent({
         )
       ) : null}
     </MapView>
+  );
+
+  // Sin modo libre → solo el lienzo (byte-idéntico para los consumidores que NO lo activan: MapPick,
+  // RequestFlow, Reassign… o un dirigido). El árbol no cambia para ellos.
+  if (!freeBrowse) return mapView;
+
+  // Modo "mi ubicación" libre: el lienzo + el botón flotante "recentrarme" por encima (y del sheet).
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      {mapView}
+      {interactive && isValidPoint(idlePoint) ? (
+        <RecenterButton onPress={recenter} bottomInset={bottomInset} />
+      ) : null}
+    </View>
   );
 }
 
