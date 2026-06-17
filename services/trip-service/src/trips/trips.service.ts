@@ -29,6 +29,8 @@ import type { AuthenticatedUser } from '@veo/auth';
 import {
   PricingMode,
   TripStatus,
+  PaymentMethod,
+  ActorType,
   resolveOfferingModeWithPin,
   findOffering,
   OfferingId,
@@ -994,7 +996,7 @@ export class TripsService {
     // Solo propagamos cashCollected si el viaje es CASH (en digital es ruido: el cobro va por el riel).
     // `?? undefined` para que un flag ausente NO viaje como `false` (preserva la compat N-2 del schema).
     const cashCollected =
-      trip.paymentMethod === 'CASH' ? (dto.cashCollected ?? undefined) : undefined;
+      trip.paymentMethod === PaymentMethod.CASH ? (dto.cashCollected ?? undefined) : undefined;
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
       // CAS atómico CRÍTICO (cobro): si una carrera ya canceló el viaje (CANCELLED_BY_*), el claim falla y
@@ -1044,23 +1046,23 @@ export class TripsService {
     // `user.userId` de la identidad FIRMADA (siempre presente vía InternalIdentityGuard), NO un id del body
     // — sin skip condicional: un payload sin/forjado passengerId ya no saltea el check. La cancelación por
     // CONDUCTOR usa driverId (su BFF lo deriva; el firmado aún no lo trae fiable) — se re-chequea abajo.
-    if (dto.by === 'PASSENGER' && trip.passengerId !== user.userId) {
+    if (dto.by === ActorType.PASSENGER && trip.passengerId !== user.userId) {
       throw new NotFoundError('Viaje no encontrado', { id });
     }
 
     // A1 · ownership del CONDUCTOR (simétrico al del pasajero). Va ANTES de la rama de reasignación
     // POST-accept para que un tripId ajeno no dispare un reassign del viaje de otro. Permisivo con
     // callers sin driverId (compat), como start/complete; el gate fuerte está en el BFF que lo deriva.
-    if (dto.by === 'DRIVER' && dto.driverId && trip.driverId !== dto.driverId) {
+    if (dto.by === ActorType.DRIVER && dto.driverId && trip.driverId !== dto.driverId) {
       throw new NotFoundError('Viaje no encontrado', { id });
     }
 
-    if (dto.by === 'DRIVER' && POST_ACCEPT_STATES.has(trip.status)) {
+    if (dto.by === ActorType.DRIVER && POST_ACCEPT_STATES.has(trip.status)) {
       return this.reassignAfterDriverCancel(trip, dto.reason);
     }
 
     const target =
-      dto.by === 'PASSENGER'
+      dto.by === ActorType.PASSENGER
         ? TripStatus.CANCELLED_BY_PASSENGER
         : TripStatus.CANCELLED_BY_DRIVER;
     assertTransition(trip.status, target);
