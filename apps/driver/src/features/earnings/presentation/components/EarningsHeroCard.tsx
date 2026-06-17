@@ -1,11 +1,11 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import type {TFunction} from 'i18next';
-import type {EarningsSummary} from '@veo/api-client';
-import {Text, useTheme} from '@veo/ui-kit';
-import {IconClock, IconEarnings, IconReceipt} from '../../../../shared/presentation/icons';
-import {formatPEN} from '../../../../shared/presentation/format';
-import {useCountUp} from './motion';
+import { StyleSheet, View } from 'react-native';
+import type { TFunction } from 'i18next';
+import type { EarningsSummary } from '@veo/api-client';
+import { Text, useTheme } from '@veo/ui-kit';
+import { IconClock, IconEarnings, IconReceipt } from '../../../../shared/presentation/icons';
+import { formatPEN } from '../../../../shared/presentation/format';
+import { useCountUp } from './motion';
 
 export interface EarningsHeroCardProps {
   /** Resumen real de ganancias (céntimos PEN). No se transforma ni se inventan datos. */
@@ -22,7 +22,7 @@ export interface EarningsHeroCardProps {
  * y `currency`. No hay serie temporal en el contrato, por eso no se dibuja ninguna gráfica:
  * la única línea cian es un detalle ornamental, nunca un dato.
  */
-export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX.Element {
+export function EarningsHeroCard({ summary, t }: EarningsHeroCardProps): React.JSX.Element {
   const theme = useTheme();
   // Cuenta ascendente sutil del neto total al cargar (respeta reduce-motion).
   const animatedNet = useCountUp(summary.totalNetCents);
@@ -37,9 +37,10 @@ export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX
           padding: theme.spacing['2xl'],
           gap: theme.spacing.lg,
         },
-      ]}>
+      ]}
+    >
       {/* Encabezado: ícono de acento + etiqueta + chip de moneda real del summary. */}
-      <View style={[styles.heroHead, {gap: theme.spacing.md}]}>
+      <View style={[styles.heroHead, { gap: theme.spacing.md }]}>
         <View
           style={[
             styles.iconBadge,
@@ -48,7 +49,8 @@ export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX
               borderRadius: theme.radii.md,
               borderColor: theme.colors.border,
             },
-          ]}>
+          ]}
+        >
           <IconEarnings size={20} color={theme.colors.accent} strokeWidth={2} />
         </View>
         <Text variant="subhead" color="inkMuted" style={styles.flex}>
@@ -57,8 +59,9 @@ export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX
         <View
           style={[
             styles.currencyChip,
-            {backgroundColor: theme.colors.bg, borderRadius: theme.radii.pill},
-          ]}>
+            { backgroundColor: theme.colors.bg, borderRadius: theme.radii.pill },
+          ]}
+        >
           <Text variant="label" color="inkSubtle">
             {summary.currency}
           </Text>
@@ -68,7 +71,7 @@ export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX
       {/* Métrica protagonista: neto total con tinte cian y numerales tabulares. */}
       <View style={styles.amountBlock}>
         {/* Detalle ornamental (no es un dato): subraya el acento Midnight Motion. */}
-        <View style={[styles.accentRule, {backgroundColor: theme.colors.accent}]} />
+        <View style={[styles.accentRule, { backgroundColor: theme.colors.accent }]} />
         <Text variant="display" color="accent" tabular>
           {formatPEN(animatedNet)}
         </Text>
@@ -77,10 +80,10 @@ export function EarningsHeroCard({summary, t}: EarningsHeroCardProps): React.JSX
         </Text>
       </View>
 
-      <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
 
       {/* Fila de estadísticas compactas: solo campos reales del summary. */}
-      <View style={[styles.statsRow, {gap: theme.spacing.md}]}>
+      <View style={[styles.statsRow, { gap: theme.spacing.md }]}>
         <StatTile
           icon={<IconReceipt size={18} color={theme.colors.success} strokeWidth={2} />}
           label={t('earnings.paidNet')}
@@ -112,15 +115,16 @@ interface StatTileProps {
 }
 
 /** Celda de estadística compacta (ícono + etiqueta + monto). Privada de la tarjeta hero. */
-function StatTile({icon, label, value, valueColor}: StatTileProps): React.JSX.Element {
+function StatTile({ icon, label, value, valueColor }: StatTileProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <View style={styles.statTile}>
       <View
         style={[
           styles.statIcon,
-          {backgroundColor: theme.colors.bg, borderRadius: theme.radii.sm},
-        ]}>
+          { backgroundColor: theme.colors.bg, borderRadius: theme.radii.sm },
+        ]}
+      >
         {icon}
       </View>
       <Text variant="caption" color="inkSubtle" numberOfLines={1}>
@@ -134,9 +138,9 @@ function StatTile({icon, label, value, valueColor}: StatTileProps): React.JSX.El
 }
 
 const styles = StyleSheet.create({
-  flex: {flex: 1},
-  card: {alignSelf: 'stretch'},
-  heroHead: {flexDirection: 'row', alignItems: 'center'},
+  flex: { flex: 1 },
+  card: { alignSelf: 'stretch' },
+  heroHead: { flexDirection: 'row', alignItems: 'center' },
   iconBadge: {
     width: 40,
     height: 40,
@@ -144,11 +148,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  currencyChip: {paddingHorizontal: 10, paddingVertical: 4},
-  amountBlock: {gap: 6},
-  accentRule: {width: 36, height: 3, borderRadius: 999, marginBottom: 4},
-  divider: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  statsRow: {flexDirection: 'row'},
-  statTile: {flex: 1, gap: 6},
-  statIcon: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center'},
+  currencyChip: { paddingHorizontal: 10, paddingVertical: 4 },
+  amountBlock: { gap: 6 },
+  accentRule: { width: 36, height: 3, borderRadius: 999, marginBottom: 4 },
+  divider: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  statsRow: { flexDirection: 'row' },
+  statTile: { flex: 1, gap: 6 },
+  statIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 });

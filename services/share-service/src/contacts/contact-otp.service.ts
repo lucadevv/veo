@@ -6,7 +6,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
-import { numericOtp, sha256Hex, ConflictError, RateLimitError, UnauthorizedError } from '@veo/utils';
+import {
+  numericOtp,
+  sha256Hex,
+  ConflictError,
+  RateLimitError,
+  UnauthorizedError,
+} from '@veo/utils';
 import { REDIS } from '../infra/redis';
 import type { Env } from '../config/env.schema';
 

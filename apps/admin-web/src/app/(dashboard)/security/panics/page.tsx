@@ -36,7 +36,9 @@ const columns: ColumnDef<PanicSummary, unknown>[] = [
     accessorKey: 'passengerId',
     header: 'Pasajero',
     cell: ({ row }) => (
-      <span className="font-mono text-xs text-ink-muted">{row.original.passengerId.slice(0, 8)}</span>
+      <span className="font-mono text-xs text-ink-muted">
+        {row.original.passengerId.slice(0, 8)}
+      </span>
     ),
   },
   {
@@ -63,7 +65,10 @@ export default function PanicsPage() {
   if (!can(user, 'panics:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Alertas de pánico" breadcrumbs={[{ label: 'Seguridad' }, { label: 'Pánicos' }]} />
+        <PageHeader
+          title="Alertas de pánico"
+          breadcrumbs={[{ label: 'Seguridad' }, { label: 'Pánicos' }]}
+        />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}

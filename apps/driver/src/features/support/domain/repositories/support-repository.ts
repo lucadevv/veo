@@ -1,4 +1,4 @@
-import type {CreateTicketInput, SupportTicketListView, SupportTicketView} from '../entities';
+import type { CreateTicketInput, SupportTicketListView, SupportTicketView } from '../entities';
 
 /**
  * Contrato del repositorio de soporte (capa domain). Implementación concreta en `data/`.

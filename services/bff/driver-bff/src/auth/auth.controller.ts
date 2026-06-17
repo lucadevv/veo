@@ -7,7 +7,13 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '@veo/auth';
 import { RateLimitGuard } from '../common/guards/rate-limit.guard';
 import { AuthService } from './auth.service';
-import { LogoutDto, RefreshDto, RequestOtpDto, VerifyOtpDto, type AuthTokens } from './dto/auth.dto';
+import {
+  LogoutDto,
+  RefreshDto,
+  RequestOtpDto,
+  VerifyOtpDto,
+  type AuthTokens,
+} from './dto/auth.dto';
 
 @ApiTags('auth')
 @UseGuards(RateLimitGuard)

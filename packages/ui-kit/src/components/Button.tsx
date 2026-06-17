@@ -49,13 +49,26 @@ function getVariantVisual(theme: Theme, variant: ButtonVariant): VariantVisual {
     case 'danger':
       return { backgroundColor: c.danger, borderColor: c.danger, borderWidth: 0, text: 'onDanger' };
     case 'secondary':
-      return { backgroundColor: c.surface, borderColor: c.borderStrong, borderWidth: 1, text: 'ink' };
+      return {
+        backgroundColor: c.surface,
+        borderColor: c.borderStrong,
+        borderWidth: 1,
+        text: 'ink',
+      };
     case 'ghost':
-      return { backgroundColor: 'transparent', borderColor: 'transparent', borderWidth: 0, text: 'accent' };
+      return {
+        backgroundColor: 'transparent',
+        borderColor: 'transparent',
+        borderWidth: 0,
+        text: 'accent',
+      };
   }
 }
 
-const sizeMap: Record<ButtonSize, { minHeight: number; paddingHorizontal: number; variant: 'subhead' | 'bodyStrong' }> = {
+const sizeMap: Record<
+  ButtonSize,
+  { minHeight: number; paddingHorizontal: number; variant: 'subhead' | 'bodyStrong' }
+> = {
   sm: { minHeight: TOUCH_TARGET, paddingHorizontal: 16, variant: 'subhead' },
   md: { minHeight: 52, paddingHorizontal: 20, variant: 'bodyStrong' },
   lg: { minHeight: 58, paddingHorizontal: 24, variant: 'bodyStrong' },

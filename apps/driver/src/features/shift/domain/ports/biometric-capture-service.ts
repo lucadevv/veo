@@ -1,4 +1,4 @@
-import type {BiometricEnrollResult} from './biometric-backend';
+import type { BiometricEnrollResult } from './biometric-backend';
 
 /**
  * Puertos de captura biométrica (prueba de vida) del conductor.

@@ -1,4 +1,4 @@
-import type { GeoPoint } from '@veo/api-client';
+import type {GeoPoint} from '@veo/api-client';
 
 /**
  * Contrato de firma del pánico (BR-S04), ESPEJO EXACTO del backend (`panic-service`).

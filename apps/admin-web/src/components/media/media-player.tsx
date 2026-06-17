@@ -38,7 +38,8 @@ export function MediaPlayer({ media, open, onOpenChange }: MediaPlayerProps) {
               </div>
             </div>
             <p className="text-xs text-ink-muted">
-              Acceso temporal · expira {dateTime(media.expiresAt)}. Toda reproducción queda auditada.
+              Acceso temporal · expira {dateTime(media.expiresAt)}. Toda reproducción queda
+              auditada.
             </p>
           </div>
         ) : null}

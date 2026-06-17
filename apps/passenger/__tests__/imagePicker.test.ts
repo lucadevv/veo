@@ -1,6 +1,6 @@
-import type { ImagePickerResponse } from 'react-native-image-picker';
-import { NativeImagePickerService } from '../src/shared/media/data/nativeImagePickerService';
-import { ImagePickError } from '../src/shared/media/domain/imagePickerService';
+import type {ImagePickerResponse} from 'react-native-image-picker';
+import {NativeImagePickerService} from '../src/shared/media/data/nativeImagePickerService';
+import {ImagePickError} from '../src/shared/media/domain/imagePickerService';
 
 // Mock del SDK nativo: controlamos la respuesta por test (cancelar / error / éxito).
 // El prefijo `mock` es obligatorio para referenciarlas dentro del factory de `jest.mock`.
@@ -21,7 +21,9 @@ describe('NativeImagePickerService · mapeo de la respuesta del SDK', () => {
   });
 
   it('devuelve null cuando el usuario cancela', async () => {
-    mockLaunchImageLibrary.mockResolvedValue({ didCancel: true } satisfies ImagePickerResponse);
+    mockLaunchImageLibrary.mockResolvedValue({
+      didCancel: true,
+    } satisfies ImagePickerResponse);
     await expect(service.pick('library')).resolves.toBeNull();
   });
 
@@ -30,7 +32,9 @@ describe('NativeImagePickerService · mapeo de la respuesta del SDK', () => {
       errorCode: 'permission',
       errorMessage: 'denied',
     } satisfies ImagePickerResponse);
-    await expect(service.pick('camera')).rejects.toMatchObject({ reason: 'permission' });
+    await expect(service.pick('camera')).rejects.toMatchObject({
+      reason: 'permission',
+    });
     await expect(service.pick('camera')).rejects.toBeInstanceOf(ImagePickError);
   });
 
@@ -38,7 +42,9 @@ describe('NativeImagePickerService · mapeo de la respuesta del SDK', () => {
     mockLaunchCamera.mockResolvedValue({
       errorCode: 'camera_unavailable',
     } satisfies ImagePickerResponse);
-    await expect(service.pick('camera')).rejects.toMatchObject({ reason: 'unavailable' });
+    await expect(service.pick('camera')).rejects.toMatchObject({
+      reason: 'unavailable',
+    });
   });
 
   it('mapea el asset elegido al modelo de dominio', async () => {
@@ -67,7 +73,9 @@ describe('NativeImagePickerService · mapeo de la respuesta del SDK', () => {
   });
 
   it('devuelve null si el SDK no entrega assets utilizables', async () => {
-    mockLaunchImageLibrary.mockResolvedValue({ assets: [] } satisfies ImagePickerResponse);
+    mockLaunchImageLibrary.mockResolvedValue({
+      assets: [],
+    } satisfies ImagePickerResponse);
     await expect(service.pick('library')).resolves.toBeNull();
   });
 });

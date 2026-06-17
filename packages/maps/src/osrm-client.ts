@@ -88,9 +88,7 @@ export class OsrmMapsClient implements MapsClient {
     if (cached) return JSON.parse(cached) as RouteResult;
 
     // OSRM acepta una lista de coordenadas `lon,lat;...`: origen → paradas (en orden) → destino.
-    const coords = [origin, ...waypoints, destination]
-      .map((p) => `${p.lon},${p.lat}`)
-      .join(';');
+    const coords = [origin, ...waypoints, destination].map((p) => `${p.lon},${p.lat}`).join(';');
     const url =
       `${this.opts.osrmBaseUrl}/route/v1/driving/` +
       `${coords}` +

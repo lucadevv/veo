@@ -11,7 +11,12 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FleetDocumentType, FleetDocumentStatus, VehicleSegment, EnergySource } from '@veo/shared-types';
+import {
+  FleetDocumentType,
+  FleetDocumentStatus,
+  VehicleSegment,
+  EnergySource,
+} from '@veo/shared-types';
 
 /** Estados de revisión del catálogo de modelos (espeja VehicleModelStatus de fleet-service). */
 const VEHICLE_MODEL_STATUSES = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const;

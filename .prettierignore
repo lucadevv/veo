@@ -4,7 +4,10 @@ build
 .next
 .turbo
 coverage
-ios/Pods
+# Vendored / instalado por toolchains (gitignored): patrón GLOBAL para alcanzar los anidados
+# (apps/*/ios/Pods, apps/*/vendor/bundle de CocoaPods/bundler). El `ios/Pods` anclado no los tomaba.
+**/ios/Pods/
+**/vendor/
 android/.gradle
 android/build
 **/generated/**

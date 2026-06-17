@@ -18,7 +18,12 @@ import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from
 import { GrpcServiceClient } from '@veo/rpc';
 import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
 import { GRPC_PLACES } from '../infra/downstream.tokens';
-import type { PlaceReply, PlacesReply, RemovePlaceReply, SavedPlaceReply } from '../infra/grpc-types';
+import type {
+  PlaceReply,
+  PlacesReply,
+  RemovePlaceReply,
+  SavedPlaceReply,
+} from '../infra/grpc-types';
 import {
   PLACE_KINDS,
   type PlaceKind,

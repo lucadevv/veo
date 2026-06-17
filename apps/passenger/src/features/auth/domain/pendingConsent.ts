@@ -1,4 +1,4 @@
-import type { ConsentSelection } from './usecases';
+import type {ConsentSelection} from './usecases';
 
 /**
  * Estado de la COLA DURABLE de consentimiento (Ley N.° 29733).

@@ -1,11 +1,11 @@
-import type { DebtItemView, DebtView } from '@veo/api-client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type {DebtItemView, DebtView} from '@veo/api-client';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import React from 'react';
-import TestRenderer, { act } from 'react-test-renderer';
-import { TOKENS } from '../../../../core/di/tokens';
-import { container } from '../../../../core/di/registry';
-import type { GetMyDebtsUseCase } from '../../../payments/domain/usecases';
-import { useDebtGate, type DebtGateController } from './useDebtGate';
+import TestRenderer, {act} from 'react-test-renderer';
+import {TOKENS} from '../../../../core/di/tokens';
+import {container} from '../../../../core/di/registry';
+import type {GetMyDebtsUseCase} from '../../../payments/domain/usecases';
+import {useDebtGate, type DebtGateController} from './useDebtGate';
 
 /**
  * Especificación de la MÁQUINA del gate de deuda (BR-P02, plata): los dos orígenes del sheet
@@ -18,7 +18,7 @@ import { useDebtGate, type DebtGateController } from './useDebtGate';
 // no la navegación → stub no-op (sin montar un NavigationContainer real).
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
-  return { ...actual, useFocusEffect: jest.fn() };
+  return {...actual, useFocusEffect: jest.fn()};
 });
 
 /** Ítem accionable del wire. Por defecto una DEUDA real; cada caso pisa lo suyo. */
@@ -35,14 +35,17 @@ function makeItem(overrides: Partial<DebtItemView> = {}): DebtItemView {
 }
 
 function makeDebtView(overrides: Partial<DebtView> = {}): DebtView {
-  return { hasDebt: false, totalCents: 0, debts: [], ...overrides };
+  return {hasDebt: false, totalCents: 0, debts: [], ...overrides};
 }
 
 /** Registra el doble del `GetMyDebtsUseCase` que `useMyDebts` resuelve por DI. */
 function registerDebts(view: DebtView): void {
   container.register(
     TOKENS.getMyDebtsUseCase,
-    () => ({ execute: jest.fn().mockResolvedValue(view) }) as unknown as GetMyDebtsUseCase,
+    () =>
+      ({
+        execute: jest.fn().mockResolvedValue(view),
+      }) as unknown as GetMyDebtsUseCase,
   );
 }
 
@@ -54,7 +57,7 @@ function renderGate(enabled = true): {
   unmount: () => void;
 } {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    defaultOptions: {queries: {retry: false, gcTime: 0}},
   });
   activeClient = client;
   let last!: DebtGateController;
@@ -80,7 +83,7 @@ function renderGate(enabled = true): {
 async function flush(times = 4): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
     });
   }
 }
@@ -99,7 +102,9 @@ describe('useDebtGate · hasDebt crudo del server', () => {
   it('refleja hasDebt/totalCents tal como llegan (sin re-derivar de los ítems)', async () => {
     // Caso adrede "incoherente": hasDebt=false con un ítem DEBT en la lista. El gate es SERVER-SIDE:
     // si la app re-derivara de los ítems, divergiría del 403 real del BFF.
-    registerDebts(makeDebtView({ hasDebt: false, totalCents: 0, debts: [makeItem()] }));
+    registerDebts(
+      makeDebtView({hasDebt: false, totalCents: 0, debts: [makeItem()]}),
+    );
     const gate = renderGate();
     await flush();
     expect(gate.current().hasDebt).toBe(false);
@@ -108,7 +113,11 @@ describe('useDebtGate · hasDebt crudo del server', () => {
   });
 
   it('con deuda real: hasDebt true + total para la franja + debtView para el sheet', async () => {
-    const view = makeDebtView({ hasDebt: true, totalCents: 1500, debts: [makeItem()] });
+    const view = makeDebtView({
+      hasDebt: true,
+      totalCents: 1500,
+      debts: [makeItem()],
+    });
     registerDebts(view);
     const gate = renderGate();
     await flush();
@@ -122,7 +131,11 @@ describe('useDebtGate · hasDebt crudo del server', () => {
 describe('useDebtGate · prioridad deuda > pago por completar', () => {
   it('PENDING_ACTION sin deuda → hasPendingAction true', async () => {
     registerDebts(
-      makeDebtView({ debts: [makeItem({ kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9' })] }),
+      makeDebtView({
+        debts: [
+          makeItem({kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9'}),
+        ],
+      }),
     );
     const gate = renderGate();
     await flush();
@@ -136,7 +149,10 @@ describe('useDebtGate · prioridad deuda > pago por completar', () => {
       makeDebtView({
         hasDebt: true,
         totalCents: 1500,
-        debts: [makeItem(), makeItem({ kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9' })],
+        debts: [
+          makeItem(),
+          makeItem({kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9'}),
+        ],
       }),
     );
     const gate = renderGate();
@@ -149,7 +165,9 @@ describe('useDebtGate · prioridad deuda > pago por completar', () => {
 
 describe('useDebtGate · los dos orígenes del sheet', () => {
   it('origen PEDIDO BLOQUEADO (403): abre en modo deuda y, tras saldar, re-dispara el pedido', async () => {
-    registerDebts(makeDebtView({ hasDebt: true, totalCents: 1500, debts: [makeItem()] }));
+    registerDebts(
+      makeDebtView({hasDebt: true, totalCents: 1500, debts: [makeItem()]}),
+    );
     const gate = renderGate();
     await flush();
 
@@ -166,7 +184,9 @@ describe('useDebtGate · los dos orígenes del sheet', () => {
   });
 
   it('origen FRANJA DEL HOME: abre en modo deuda y, tras saldar, NO re-dispara ningún pedido', async () => {
-    registerDebts(makeDebtView({ hasDebt: true, totalCents: 1500, debts: [makeItem()] }));
+    registerDebts(
+      makeDebtView({hasDebt: true, totalCents: 1500, debts: [makeItem()]}),
+    );
     const gate = renderGate();
     await flush();
 
@@ -184,8 +204,8 @@ describe('useDebtGate · los dos orígenes del sheet', () => {
     registerDebts(
       makeDebtView({
         debts: [
-          makeItem({ kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9' }),
-          makeItem({ kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-10' }),
+          makeItem({kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-9'}),
+          makeItem({kind: 'PENDING_ACTION', reason: '', paymentId: 'pay-10'}),
         ],
       }),
     );
@@ -215,7 +235,9 @@ describe('useDebtGate · los dos orígenes del sheet', () => {
 
 describe('useDebtGate · requestAgainToken re-dispara tras CADA deuda saldada de un pedido', () => {
   it('cada ciclo 403 → saldar incrementa el token; saldar desde el home no', async () => {
-    registerDebts(makeDebtView({ hasDebt: true, totalCents: 1500, debts: [makeItem()] }));
+    registerDebts(
+      makeDebtView({hasDebt: true, totalCents: 1500, debts: [makeItem()]}),
+    );
     const gate = renderGate();
     await flush();
 
@@ -236,7 +258,9 @@ describe('useDebtGate · requestAgainToken re-dispara tras CADA deuda saldada de
   });
 
   it('cerrar el sheet sin saldar (closeDebtSheet) no toca el token ni el modo', async () => {
-    registerDebts(makeDebtView({ hasDebt: true, totalCents: 1500, debts: [makeItem()] }));
+    registerDebts(
+      makeDebtView({hasDebt: true, totalCents: 1500, debts: [makeItem()]}),
+    );
     const gate = renderGate();
     await flush();
 

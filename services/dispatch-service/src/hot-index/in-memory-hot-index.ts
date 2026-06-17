@@ -5,7 +5,12 @@
  */
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
 import { VehicleClass } from '@veo/shared-types';
-import type { DriverLocation, DriverVehicleAttrs, ExclusionRegistry, HotIndex } from './hot-index.port';
+import type {
+  DriverLocation,
+  DriverVehicleAttrs,
+  ExclusionRegistry,
+  HotIndex,
+} from './hot-index.port';
 
 export class InMemoryHotIndex implements HotIndex {
   private readonly locations = new Map<string, DriverLocation>();

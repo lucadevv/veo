@@ -49,7 +49,7 @@ function bearing(from: { lat: number; lon: number }, to: { lat: number; lon: num
   const x =
     Math.cos(toRad(from.lat)) * Math.sin(toRad(to.lat)) -
     Math.sin(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.cos(dLon);
-  return (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360;
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
 /**
@@ -68,7 +68,9 @@ class StubLocationSource implements LocationSource {
   subscribe(listener: (sample: LocationSample) => void): () => void {
     this.listeners.add(listener);
     // Muestra inmediata para el nuevo suscriptor (no esperar al primer tick).
-    listener(this.buildSample(this.last, bearing(this.last, offsetToLatLon(this.angle + ANGLE_STEP))));
+    listener(
+      this.buildSample(this.last, bearing(this.last, offsetToLatLon(this.angle + ANGLE_STEP))),
+    );
     this.ensureTicking();
     return () => {
       this.listeners.delete(listener);

@@ -1,4 +1,4 @@
-import {isValidPeruPhone, normalizePeruPhone} from '../value-objects/phone';
+import { isValidPeruPhone, normalizePeruPhone } from '../value-objects/phone';
 
 describe('phone value-object', () => {
   it('normaliza variantes comunes a +519XXXXXXXX', () => {

@@ -67,7 +67,12 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
    * guard once-ever de applyAgreedFare (agreedFareCents=null, si no el re-match cobraría el precio viejo) +
    * bump del sello de ciclo monotónico (negotiationSeq+1, bloquea un offer_accepted STALE del ciclo viejo).
    */
-  async reassign(tx: TxClient, trip: Trip, nextReassignCount: number, reason?: string): Promise<Trip> {
+  async reassign(
+    tx: TxClient,
+    trip: Trip,
+    nextReassignCount: number,
+    reason?: string,
+  ): Promise<Trip> {
     const bidCents = trip.fareCents;
     const cancelledDriverId = trip.driverId;
     const nextNegotiationSeq = trip.negotiationSeq + 1;

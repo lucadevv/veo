@@ -1,19 +1,31 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { affiliationStatus } from '@veo/api-client';
-import { Button, Card, SafeScreen, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, View } from 'react-native';
-import { ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
-import { EnterView } from '../components/motion';
-import { PaymentInstrumentRow } from '../components/PaymentInstrumentRow';
-import { YapeLinkSheet } from '../components/YapeLinkSheet';
-import { YapeManageSheet } from '../components/YapeManageSheet';
-import { useYapeAffiliation } from '../hooks/useYapeAffiliation';
-import { PAYMENT_METHODS, usePaymentPrefsStore } from '../stores/paymentPrefsStore';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {affiliationStatus} from '@veo/api-client';
+import {
+  Button,
+  Card,
+  SafeScreen,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ActivityIndicator, View} from 'react-native';
+import {ScreenStateFallback} from '../../../../shared/presentation/components/ScreenStates';
+import {EnterView} from '../components/motion';
+import {PaymentInstrumentRow} from '../components/PaymentInstrumentRow';
+import {YapeLinkSheet} from '../components/YapeLinkSheet';
+import {YapeManageSheet} from '../components/YapeManageSheet';
+import {useYapeAffiliation} from '../hooks/useYapeAffiliation';
+import {
+  PAYMENT_METHODS,
+  usePaymentPrefsStore,
+} from '../stores/paymentPrefsStore';
 
 /** Resto de instrumentos (Yape se pinta aparte, primero, por su flujo propio). */
-const OTHER_METHODS: readonly MobilePaymentMethod[] = PAYMENT_METHODS.filter((m) => m !== 'YAPE');
+const OTHER_METHODS: readonly MobilePaymentMethod[] = PAYMENT_METHODS.filter(
+  m => m !== 'YAPE',
+);
 
 /**
  * Métodos de pago · UNA pantalla, patrón INSTRUMENTOS (estilo PedidosYa). Lista única de filas: glifo +
@@ -26,9 +38,9 @@ const OTHER_METHODS: readonly MobilePaymentMethod[] = PAYMENT_METHODS.filter((m)
  */
 export function PaymentMethodsScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const defaultMethod = usePaymentPrefsStore((s) => s.defaultMethod);
-  const setDefault = usePaymentPrefsStore((s) => s.setDefault);
+  const {t} = useTranslation();
+  const defaultMethod = usePaymentPrefsStore(s => s.defaultMethod);
+  const setDefault = usePaymentPrefsStore(s => s.setDefault);
 
   const affiliationQuery = useYapeAffiliation();
 
@@ -47,7 +59,12 @@ export function PaymentMethodsScreen(): React.JSX.Element {
   }
 
   if (affiliationQuery.isError || !affiliationQuery.data) {
-    return <ScreenStateFallback errorMessage={t('payments.loadError')} onRetry={() => affiliationQuery.refetch()} />;
+    return (
+      <ScreenStateFallback
+        errorMessage={t('payments.loadError')}
+        onRetry={() => affiliationQuery.refetch()}
+      />
+    );
   }
 
   // SUCCESS: `data` está garantizado. `status` es el valor REAL del bff ('NONE' = genuinamente sin
@@ -60,7 +77,7 @@ export function PaymentMethodsScreen(): React.JSX.Element {
   // ── Fila Yape: línea + acción/estado según el status de la afiliación ───────────────────────────
   const yapeLine = isLinked
     ? phoneMasked
-      ? t('payments.auto.linkedLine', { phone: phoneMasked })
+      ? t('payments.auto.linkedLine', {phone: phoneMasked})
       : t('payments.auto.linkedLineNoPhone')
     : isProcess
       ? t('payments.auto.processLine')
@@ -68,12 +85,15 @@ export function PaymentMethodsScreen(): React.JSX.Element {
 
   return (
     <SafeScreen scroll>
-      <Text variant="callout" color="inkMuted" style={{ marginBottom: theme.spacing.lg }}>
+      <Text
+        variant="callout"
+        color="inkMuted"
+        style={{marginBottom: theme.spacing.lg}}>
         {t('payments.subtitle')}
       </Text>
 
       <Card variant="outlined" padding="sm">
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           {/* Yape · PRIMERO (instrumento principal). */}
           <EnterView index={0} offsetY={6}>
             <PaymentInstrumentRow
@@ -83,7 +103,11 @@ export function PaymentMethodsScreen(): React.JSX.Element {
               emphasized={isLinked}
               isDefault={defaultMethod === 'YAPE'}
               defaultLabel={defaultPill}
-              accessibilityHint={isLinked ? t('payments.auto.manageTitle') : t('payments.auto.link')}
+              accessibilityHint={
+                isLinked
+                  ? t('payments.auto.manageTitle')
+                  : t('payments.auto.link')
+              }
               onPress={
                 isLinked
                   ? () => setManageSheetOpen(true)
@@ -105,7 +129,11 @@ export function PaymentMethodsScreen(): React.JSX.Element {
               }
               trailing={
                 isLinked && defaultMethod !== 'YAPE' ? (
-                  <StatusPill label={t('payments.autoBadge')} tone="success" dot />
+                  <StatusPill
+                    label={t('payments.autoBadge')}
+                    tone="success"
+                    dot
+                  />
                 ) : undefined
               }
             />
@@ -128,8 +156,14 @@ export function PaymentMethodsScreen(): React.JSX.Element {
         </View>
       </Card>
 
-      <YapeLinkSheet visible={linkSheetOpen} onClose={() => setLinkSheetOpen(false)} />
-      <YapeManageSheet visible={manageSheetOpen} onClose={() => setManageSheetOpen(false)} />
+      <YapeLinkSheet
+        visible={linkSheetOpen}
+        onClose={() => setLinkSheetOpen(false)}
+      />
+      <YapeManageSheet
+        visible={manageSheetOpen}
+        onClose={() => setManageSheetOpen(false)}
+      />
     </SafeScreen>
   );
 }

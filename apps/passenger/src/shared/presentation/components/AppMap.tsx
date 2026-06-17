@@ -1,4 +1,4 @@
-import type { GeoPoint, NearbyVehicle } from '@veo/api-client';
+import type {GeoPoint, NearbyVehicle} from '@veo/api-client';
 import {
   Camera,
   LineLayer,
@@ -7,27 +7,27 @@ import {
   MarkerView,
   ShapeSource,
 } from '@rnmapbox/maps';
-import { passengerMapRoute, RoutePin } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import {passengerMapRoute, RoutePin} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import type { NearbyVehicleType } from '../../../features/dispatch/domain/dispatchRepository';
-import { VehicleIcon } from '../../../features/dispatch/presentation/components/VehicleIcon';
-import type { CameraTarget } from '../../../features/trip/presentation/hooks/mapDirector';
+import type {NearbyVehicleType} from '../../../features/dispatch/domain/dispatchRepository';
+import {VehicleIcon} from '../../../features/dispatch/presentation/components/VehicleIcon';
+import type {CameraTarget} from '../../../features/trip/presentation/hooks/mapDirector';
 import {
   boundsOf,
   LIMA_CENTER_LNGLAT,
   LIMA_ZOOM,
   toLngLat,
 } from '../../utils/geo';
-import { type DirectedCameraRef, useDirectedCamera } from './useDirectedCamera';
-import { useIdleCamera } from './useIdleCamera';
-import { RecenterButton } from './RecenterButton';
-import { veoDarkMapboxStyleJSON } from './mapbox/veoDarkStyle';
+import {type DirectedCameraRef, useDirectedCamera} from './useDirectedCamera';
+import {useIdleCamera} from './useIdleCamera';
+import {RecenterButton} from './RecenterButton';
+import {veoDarkMapboxStyleJSON} from './mapbox/veoDarkStyle';
 
 export interface AppMapProps {
   /** Centro inicial del mapa (cuando no se ajusta a la ruta). */
@@ -80,7 +80,12 @@ export interface AppMapProps {
    * flota sobre el mapa: pasar `{ bottom: altoDelPanel }` reserva ese espacio para que la ruta no
    * quede tapada. Memoizá el objeto en el padre para no romper el `React.memo` del mapa.
    */
-  fitEdgePadding?: { top?: number; bottom?: number; left?: number; right?: number };
+  fitEdgePadding?: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+  };
   /** Permite fijar puntos tocando el mapa. */
   onPress?: (point: GeoPoint) => void;
   /**
@@ -146,19 +151,20 @@ interface NearbyVehicleMarkerProps {
  * translate que lo correría de su coordenada). `React.memo` (abajo) evita re-renderizar cada autito
  * cuando el poll trae la misma lista → no se castiga el 60fps del mapa.
  */
-function NearbyVehicleMarkerComponent({ vehicle }: NearbyVehicleMarkerProps): React.JSX.Element {
+function NearbyVehicleMarkerComponent({
+  vehicle,
+}: NearbyVehicleMarkerProps): React.JSX.Element {
   const opacity = useSharedValue(0);
   useEffect(() => {
-    opacity.value = withTiming(1, { duration: VEHICLE_FADE_MS });
+    opacity.value = withTiming(1, {duration: VEHICLE_FADE_MS});
   }, [opacity]);
-  const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const fadeStyle = useAnimatedStyle(() => ({opacity: opacity.value}));
 
   return (
     <MarkerView
-      coordinate={toLngLat({ lat: vehicle.lat, lon: vehicle.lon })}
-      anchor={{ x: 0.5, y: 0.5 }}
-      allowOverlap
-    >
+      coordinate={toLngLat({lat: vehicle.lat, lon: vehicle.lon})}
+      anchor={{x: 0.5, y: 0.5}}
+      allowOverlap>
       <Animated.View style={fadeStyle} pointerEvents="none">
         <VehicleIcon vehicleType={vehicle.vehicleType} size={VEHICLE_SIZE} />
       </Animated.View>
@@ -186,13 +192,20 @@ function DriverVehicleMarkerComponent({
   heading,
   vehicleType,
 }: DriverVehicleMarkerProps): React.JSX.Element {
-  const rotation = typeof heading === 'number' && Number.isFinite(heading) ? heading : null;
+  const rotation =
+    typeof heading === 'number' && Number.isFinite(heading) ? heading : null;
   return (
-    <MarkerView coordinate={toLngLat(point)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+    <MarkerView
+      coordinate={toLngLat(point)}
+      anchor={{x: 0.5, y: 0.5}}
+      allowOverlap>
       <View
         pointerEvents="none"
-        style={rotation != null ? { transform: [{ rotate: `${rotation}deg` }] } : undefined}
-      >
+        style={
+          rotation != null
+            ? {transform: [{rotate: `${rotation}deg`}]}
+            : undefined
+        }>
         <VehicleIcon vehicleType={vehicleType} size={DRIVER_VEHICLE_SIZE} />
       </View>
     </MarkerView>
@@ -243,7 +256,7 @@ function AppMapComponent({
   const directedCamera = cameraTarget != null;
   const cameraRef = useRef<DirectedCameraRef | null>(null);
   const noopTarget = useMemo<CameraTarget>(
-    () => ({ mode: 'center', fitPoints: [], followPoint: null }),
+    () => ({mode: 'center', fitPoints: [], followPoint: null}),
     [],
   );
 
@@ -251,27 +264,47 @@ function AppMapComponent({
   // pantalla, pero para FITear (ruta / conductor+recogida) jamás reservamos más que `FIT_BOTTOM_INSET_FRACTION`.
   // Así el viewport útil del fit no se aplasta cuando el sheet de ofertas mide alto. El `center` simple
   // (idle) SÍ usa el inset crudo: ahí no hay fit que comprimir, solo se sube el punto centrado.
-  const { height: windowHeight } = useWindowDimensions();
+  const {height: windowHeight} = useWindowDimensions();
   const fitBottomInset = useMemo(
-    () => Math.min(bottomInset, Math.round(windowHeight * FIT_BOTTOM_INSET_FRACTION)),
+    () =>
+      Math.min(
+        bottomInset,
+        Math.round(windowHeight * FIT_BOTTOM_INSET_FRACTION),
+      ),
     [bottomInset, windowHeight],
   );
 
-  const { onGesture } = useDirectedCamera(cameraRef, cameraTarget ?? noopTarget, fitBottomInset);
+  const {onGesture} = useDirectedCamera(
+    cameraRef,
+    cameraTarget ?? noopTarget,
+    fitBottomInset,
+  );
 
   // Mapa "mi ubicación" libre: solo cuando se pide recentrar Y la cámara NO está dirigida (la dirigida la
   // gobierna `useDirectedCamera` por el MISMO `cameraRef` → nunca deben pelear). Punto a centrar = el
   // centro válido, o el userPoint. Si no aplica, `null` → `useIdleCamera` no toca la cámara.
   const freeBrowse = showRecenter && !directedCamera;
-  const idlePoint = isValidPoint(center) ? center : isValidPoint(userPoint) ? userPoint : null;
-  const { recenter } = useIdleCamera(cameraRef, freeBrowse ? idlePoint : null, bottomInset);
+  const idlePoint = isValidPoint(center)
+    ? center
+    : isValidPoint(userPoint)
+      ? userPoint
+      : null;
+  const {recenter} = useIdleCamera(
+    cameraRef,
+    freeBrowse ? idlePoint : null,
+    bottomInset,
+  );
 
   // Gesto manual del usuario → modo libre (solo si la cámara está dirigida). `isGestureActive` lo
   // reporta rnmapbox en `onCameraChanged`: detectar el pellizco/arrastre es barato con este callback.
   // onCameraChanged dispara por FRAME durante el pan (~60×/s). Emitir el centro en cada frame haría
   // re-renderizar al consumer 60×/s (jank, regla "Map a 60fps"). Throttle leading+trailing a ~120ms:
   // emite ya si pasó el intervalo, y agenda el ÚLTIMO punto al soltar (trailing) para no perder el destino.
-  const centerEmit = useRef<{ last: number; timer: ReturnType<typeof setTimeout> | null; pending: GeoPoint | null }>({
+  const centerEmit = useRef<{
+    last: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    pending: GeoPoint | null;
+  }>({
     last: 0,
     timer: null,
     pending: null,
@@ -313,8 +346,13 @@ function AppMapComponent({
         const c = state.properties?.center;
         const lng = c?.[0];
         const lat = c?.[1];
-        if (typeof lng === 'number' && typeof lat === 'number' && Number.isFinite(lng) && Number.isFinite(lat)) {
-          emitCenter({ lat, lon: lng });
+        if (
+          typeof lng === 'number' &&
+          typeof lat === 'number' &&
+          Number.isFinite(lng) &&
+          Number.isFinite(lat)
+        ) {
+          emitCenter({lat, lon: lng});
         }
       }
     },
@@ -376,31 +414,36 @@ function AppMapComponent({
       scrollEnabled={interactive}
       zoomEnabled={interactive}
       pitchEnabled={false}
-      onCameraChanged={directedCamera || onCenterChange ? onCameraChanged : undefined}
+      onCameraChanged={
+        directedCamera || onCenterChange ? onCameraChanged : undefined
+      }
       onPress={
         onPress
-          ? (feature) => {
+          ? feature => {
               const geometry = feature.geometry;
-              if (geometry && geometry.type === 'Point' && geometry.coordinates.length >= 2) {
+              if (
+                geometry &&
+                geometry.type === 'Point' &&
+                geometry.coordinates.length >= 2
+              ) {
                 const [lng, lat] = geometry.coordinates as [number, number];
-                onPress({ lat, lon: lng });
+                onPress({lat, lon: lng});
               }
             }
           : undefined
-      }
-    >
+      }>
       {directedCamera ? (
         // Cámara DIRIGIDA: el encuadre lo aplica `useDirectedCamera` por el ref (fit conductor+recogida /
         // follow taxi, con throttle + modo libre). `defaultSettings` da un estado inicial estable hasta el
         // primer comando del director (evita un flash en el centro de Lima al montar el modo trip).
         <Camera
           ref={cameraRef}
-          defaultSettings={{ centerCoordinate, zoomLevel: LIMA_ZOOM }}
+          defaultSettings={{centerCoordinate, zoomLevel: LIMA_ZOOM}}
           animationDuration={500}
         />
       ) : bounds ? (
         <Camera
-          bounds={{ ne: bounds.ne, sw: bounds.sw }}
+          bounds={{ne: bounds.ne, sw: bounds.sw}}
           padding={{
             paddingLeft: fitEdgePadding?.left ?? FIT_PADDING,
             paddingRight: fitEdgePadding?.right ?? FIT_PADDING,
@@ -424,7 +467,7 @@ function AppMapComponent({
         // primer fix y el botón "recentrarme" los maneja `useIdleCamera` (imperativo, por el `cameraRef`).
         <Camera
           ref={cameraRef}
-          defaultSettings={{ centerCoordinate, zoomLevel: LIMA_ZOOM }}
+          defaultSettings={{centerCoordinate, zoomLevel: LIMA_ZOOM}}
           animationDuration={500}
         />
       ) : (
@@ -433,7 +476,12 @@ function AppMapComponent({
           zoomLevel={LIMA_ZOOM}
           // Reserva el alto del sheet abajo → el centro real sube y el userPoint queda en la franja
           // visible (no tapado por el bottomsheet). Sin sheet (bottomInset=0) centra como siempre.
-          padding={{ paddingTop: 0, paddingBottom: bottomInset, paddingLeft: 0, paddingRight: 0 }}
+          padding={{
+            paddingTop: 0,
+            paddingBottom: bottomInset,
+            paddingLeft: 0,
+            paddingRight: 0,
+          }}
           animationDuration={500}
         />
       )}
@@ -466,7 +514,7 @@ function AppMapComponent({
       {/* AMBIENTE: autitos cercanos anónimos. Se renderizan ANTES (z-order DEBAJO) de los pins del flujo
           (usuario/origen/destino/conductor), que van a continuación. Key estable por coord (ya redondeada
           por el backend) + tipo: identidad de la celda, sin re-montar cuando el poll repite la misma. */}
-      {nearbyVehicles?.map((vehicle) => (
+      {nearbyVehicles?.map(vehicle => (
         <NearbyVehicleMarker
           key={`${vehicle.lat}:${vehicle.lon}:${vehicle.vehicleType}`}
           vehicle={vehicle}
@@ -474,13 +522,19 @@ function AppMapComponent({
       ))}
 
       {showUserPoint && isValidPoint(userPoint) ? (
-        <MarkerView coordinate={toLngLat(userPoint)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+        <MarkerView
+          coordinate={toLngLat(userPoint)}
+          anchor={{x: 0.5, y: 0.5}}
+          allowOverlap>
           <RoutePin variant="user" pulse />
         </MarkerView>
       ) : null}
 
       {isValidPoint(origin) ? (
-        <MarkerView coordinate={toLngLat(origin)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+        <MarkerView
+          coordinate={toLngLat(origin)}
+          anchor={{x: 0.5, y: 0.5}}
+          allowOverlap>
           <RoutePin variant="origin" />
         </MarkerView>
       ) : null}
@@ -491,16 +545,18 @@ function AppMapComponent({
           <MarkerView
             key={`wp:${wp.lat}:${wp.lon}:${i}`}
             coordinate={toLngLat(wp)}
-            anchor={{ x: 0.5, y: 0.5 }}
-            allowOverlap
-          >
+            anchor={{x: 0.5, y: 0.5}}
+            allowOverlap>
             <RoutePin variant="stop" size={13} />
           </MarkerView>
         ) : null,
       )}
 
       {isValidPoint(destination) ? (
-        <MarkerView coordinate={toLngLat(destination)} anchor={{ x: 0.5, y: 1 }} allowOverlap>
+        <MarkerView
+          coordinate={toLngLat(destination)}
+          anchor={{x: 0.5, y: 1}}
+          allowOverlap>
           <RoutePin variant="destination" />
         </MarkerView>
       ) : null}
@@ -510,9 +566,16 @@ function AppMapComponent({
           (compat: "taxi en vivo en tu zona" del ambiente previo). */}
       {isValidPoint(driver) ? (
         showDriverVehicle ? (
-          <DriverVehicleMarker point={driver} heading={driverHeading} vehicleType={driverVehicleType} />
+          <DriverVehicleMarker
+            point={driver}
+            heading={driverHeading}
+            vehicleType={driverVehicleType}
+          />
         ) : (
-          <MarkerView coordinate={toLngLat(driver)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+          <MarkerView
+            coordinate={toLngLat(driver)}
+            anchor={{x: 0.5, y: 0.5}}
+            allowOverlap>
             <RoutePin variant="user" pulse />
           </MarkerView>
         )

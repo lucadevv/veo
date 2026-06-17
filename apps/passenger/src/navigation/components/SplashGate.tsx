@@ -1,6 +1,6 @@
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {StyleSheet} from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -8,8 +8,11 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { SplashScreen } from '../../features/auth/presentation';
-import { DEFAULT_MIN_SPLASH_MS, useMinimumSplash } from '../hooks/useMinimumSplash';
+import {SplashScreen} from '../../features/auth/presentation';
+import {
+  DEFAULT_MIN_SPLASH_MS,
+  useMinimumSplash,
+} from '../hooks/useMinimumSplash';
 
 export interface SplashGateProps {
   /** `true` cuando la sesión (y demás gates aguas arriba) ya se resolvió y se puede revelar el stack. */
@@ -30,11 +33,17 @@ export interface SplashGateProps {
  *
  * Respeta reduce-motion: sin piso animado y salida instantánea (sin fade).
  */
-export function SplashGate({ ready, onDone, minMs }: SplashGateProps): React.JSX.Element {
+export function SplashGate({
+  ready,
+  onDone,
+  minMs,
+}: SplashGateProps): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   // En reduce-motion el piso se degrada a 0 (sin demora artificial ni animación).
-  const floorPending = useMinimumSplash(reduced ? 0 : (minMs ?? DEFAULT_MIN_SPLASH_MS));
+  const floorPending = useMinimumSplash(
+    reduced ? 0 : (minMs ?? DEFAULT_MIN_SPLASH_MS),
+  );
 
   const opacity = useSharedValue(1);
   const reveal = ready && !floorPending;
@@ -49,8 +58,11 @@ export function SplashGate({ ready, onDone, minMs }: SplashGateProps): React.JSX
     }
     opacity.value = withTiming(
       0,
-      { duration: theme.motion.exit.slow, easing: Easing.bezier(...theme.motion.easing.standard) },
-      (finished) => {
+      {
+        duration: theme.motion.exit.slow,
+        easing: Easing.bezier(...theme.motion.easing.standard),
+      },
+      finished => {
         if (finished) {
           runOnJS(onDone)();
         }
@@ -60,18 +72,17 @@ export function SplashGate({ ready, onDone, minMs }: SplashGateProps): React.JSX
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal]);
 
-  const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const fadeStyle = useAnimatedStyle(() => ({opacity: opacity.value}));
 
   return (
     <Animated.View
-      style={[styles.fill, { backgroundColor: theme.colors.bg }, fadeStyle]}
-      pointerEvents="none"
-    >
+      style={[styles.fill, {backgroundColor: theme.colors.bg}, fadeStyle]}
+      pointerEvents="none">
       <SplashScreen />
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  fill: { flex: 1 },
+  fill: {flex: 1},
 });

@@ -21,7 +21,10 @@ export class SupportController {
 
   @Post()
   @ApiOperation({ summary: 'Crear un ticket de soporte (rol derivado de la identidad)' })
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateTicketDto): Promise<SupportTicketView> {
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateTicketDto,
+  ): Promise<SupportTicketView> {
     return this.support.create({
       userId: user.userId,
       role: SupportController.roleOf(user),

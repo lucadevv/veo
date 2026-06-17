@@ -2,11 +2,7 @@ import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { KycService } from './kyc.service';
-import {
-  VerifyKycDto,
-  type KycChallengeView,
-  type KycVerificationView,
-} from './dto/kyc.dto';
+import { VerifyKycDto, type KycChallengeView, type KycVerificationView } from './dto/kyc.dto';
 
 @ApiTags('kyc')
 @ApiBearerAuth()

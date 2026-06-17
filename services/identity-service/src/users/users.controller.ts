@@ -1,6 +1,14 @@
 import { Body, Controller, Delete, Get, HttpCode, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { PaymentMethod } from '@veo/shared-types';
 import { DOCUMENT_TYPES, IsValidDocument, type DocumentTypeValue } from '../common/document';
@@ -70,13 +78,18 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Actualizar perfil (email, foto, nombre)' })
-  update(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto): Promise<ProfileView> {
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateProfileDto,
+  ): Promise<ProfileView> {
     return this.users.updateProfile(user.userId, dto);
   }
 
   @Post('me/phone/request')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Solicitar OTP para vincular un teléfono al perfil (reusa la infra OTP del login)' })
+  @ApiOperation({
+    summary: 'Solicitar OTP para vincular un teléfono al perfil (reusa la infra OTP del login)',
+  })
   requestPhoneLink(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RequestPhoneLinkDto,
@@ -86,7 +99,9 @@ export class UsersController {
 
   @Post('me/phone/verify')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Verificar el OTP y vincular el teléfono al perfil (devuelve el perfil)' })
+  @ApiOperation({
+    summary: 'Verificar el OTP y vincular el teléfono al perfil (devuelve el perfil)',
+  })
   verifyPhoneLink(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: VerifyPhoneLinkDto,

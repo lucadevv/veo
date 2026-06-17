@@ -3,6 +3,7 @@
 > Riel automático de migraciones Prisma (Lote I-B) + procedimiento manual de emergencia.
 
 ## Responsable
+
 - Equipo: Backend + SRE
 - Regla: migraciones destructivas (DROP, rename) requieren patrón expand/contract y review explícita.
 
@@ -60,7 +61,7 @@ kubectl -n veo-<env> run <svc>-migrate-manual --rm -it --restart=Never \
 > (egress a RDS 5432 lo permite `allow-datastores-egress`). Agregarlo con `--labels=tier=backend`.
 
 **Rollback de schema**: Prisma no tiene down-migrations. El procedimiento es siempre
-*roll forward* (nueva migración que revierte el cambio) + patrón expand/contract para que la
+_roll forward_ (nueva migración que revierte el cambio) + patrón expand/contract para que la
 imagen anterior siga funcionando durante el rollback de app.
 
 ## GAPs conocidos (honesto)

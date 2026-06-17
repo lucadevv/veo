@@ -44,7 +44,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
   ) {
     super({
       clientId: KAFKA_CLIENT_ID,
-      brokers: cfg.get('KAFKA_BROKERS', { infer: true }).split(',').map((b) => b.trim()),
+      brokers: cfg
+        .get('KAFKA_BROKERS', { infer: true })
+        .split(',')
+        .map((b) => b.trim()),
       groupId: cfg.get('KAFKA_CONSUMER_GROUP', { infer: true }),
     });
   }
@@ -151,14 +154,22 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
     };
     record['fleet.driver_suspended'] = async (e) => {
       const p = e.payload as EventPayload<'fleet.driver_suspended'>;
-      await this.readModel.upsertDriver({ id: p.driverId, status: 'SUSPENDED', updatedAt: p.suspendedAt });
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        status: 'SUSPENDED',
+        updatedAt: p.suspendedAt,
+      });
       this.counted('fleet.driver_suspended');
     };
     // Suspensión MANUAL por un operador admin (espejo de fleet.driver_suspended, pero originada en el panel):
     // proyecta status=SUSPENDED para que la lista de conductores lo refleje. Idempotente (upsert por id).
     record['driver.suspended'] = async (e) => {
       const p = e.payload as EventPayload<'driver.suspended'>;
-      await this.readModel.upsertDriver({ id: p.driverId, status: 'SUSPENDED', updatedAt: p.suspendedAt });
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        status: 'SUSPENDED',
+        updatedAt: p.suspendedAt,
+      });
       this.counted('driver.suspended');
     };
     record['driver.location_updated'] = async (e) => {
@@ -201,7 +212,12 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
     return record;
   }
 
-  private emitTrip(tripId: string, status: TripStatus, etaSeconds: number | null, at: string): void {
+  private emitTrip(
+    tripId: string,
+    status: TripStatus,
+    etaSeconds: number | null,
+    at: string,
+  ): void {
     this.gateway.emitTripUpdate({ tripId, status, etaSeconds, driverLocation: null, at });
   }
 

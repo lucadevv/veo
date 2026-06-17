@@ -28,7 +28,11 @@ export class RecordConsentDto {
   @MaxLength(40)
   policyVersion!: string;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'Clave de idempotencia (UUIDv7) del cliente; el doble submit con la misma key es no-op' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Clave de idempotencia (UUIDv7) del cliente; el doble submit con la misma key es no-op',
+  })
   @IsOptional()
   @IsUUID()
   dedupKey?: string;

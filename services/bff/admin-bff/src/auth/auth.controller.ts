@@ -9,7 +9,14 @@ import type { SessionUser, WsTicket } from '@veo/api-client';
 import { SkipRateLimit } from '../rate-limit/skip-rate-limit.decorator';
 import { WsTicketService } from '../gateway/ws-ticket.service';
 import { AuthService, type AdminTokens, type LoginResult } from './auth.service';
-import { LoginDto, TotpConfirmDto, StepUpDto, RefreshDto, LogoutDto, RegisterDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  TotpConfirmDto,
+  StepUpDto,
+  RefreshDto,
+  LogoutDto,
+  RegisterDto,
+} from './dto/auth.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -45,7 +52,10 @@ export class AuthController {
   @Post('step-up')
   @HttpCode(200)
   @ApiOperation({ summary: 'Step-up MFA (TOTP): re-emite un access con mfaAt fresco' })
-  stepUp(@CurrentUser() user: AuthenticatedUser, @Body() dto: StepUpDto): Promise<{ accessToken: string }> {
+  stepUp(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StepUpDto,
+  ): Promise<{ accessToken: string }> {
     return this.auth.stepUp(user, dto.totp);
   }
 

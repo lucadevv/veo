@@ -31,7 +31,8 @@ export const NotificationFailureKind = {
   /** Agotó los reintentos (transitorio/rate-limit que no se recuperó). */
   RetryExhausted: 'retry_exhausted',
 } as const;
-export type NotificationFailureKind = (typeof NotificationFailureKind)[keyof typeof NotificationFailureKind];
+export type NotificationFailureKind =
+  (typeof NotificationFailureKind)[keyof typeof NotificationFailureKind];
 
 /** Labels del fallo de notificación. Todos BOUNDED (canal × kind × prioridad = pocas series). */
 export interface NotificationFailedLabels extends Record<string, string> {
@@ -59,7 +60,11 @@ const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor
 
 export const NOTIFICATION_FAILED_METRIC = 'notification_failed_total';
 
-function getOrCreateCounter(name: string, help: string, labelNames: readonly string[]): CounterLike {
+function getOrCreateCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[],
+): CounterLike {
   const existing = metricsRegistry.getSingleMetric(name) as CounterLike | undefined;
   if (existing) return existing;
   return new CounterClass({ name, help, labelNames, registers: [metricsRegistry] });

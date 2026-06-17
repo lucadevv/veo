@@ -1,4 +1,4 @@
-import type {NavigatorScreenParams} from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 
 /**
  * Tabs principales del conductor (bottom tab bar "Midnight Motion").
@@ -30,12 +30,12 @@ export type RootStackParamList = {
   Incentives: undefined;
   /** Mis vehículos: lista + selección del activo (server) + alta de un vehículo nuevo (2do, moto). */
   Vehicles: undefined;
-  Support: {tripId?: string} | undefined;
-  TripIncoming: {matchId: string; tripId: string};
-  TripActive: {tripId: string};
+  Support: { tripId?: string } | undefined;
+  TripIncoming: { matchId: string; tripId: string };
+  TripActive: { tripId: string };
   /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
   Bids: undefined;
-  Chat: {tripId: string};
+  Chat: { tripId: string };
 };
 
 /**

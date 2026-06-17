@@ -79,11 +79,12 @@ modelos ONNX descargados.
 `scripts/download_models.py` descarga el pack open-source `buffalo_l` de InsightFace:
 
 - **Fuente:** `https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip`
-- **Licencia:** modelos InsightFace (uso no comercial del *model zoo* — para uso comercial,
+- **Licencia:** modelos InsightFace (uso no comercial del _model zoo_ — para uso comercial,
   reentrenar/usar pesos con licencia adecuada). El **código** del servicio es propio.
 - Extrae `det_10g.onnx` (detector SCRFD-10G con keypoints) y `w600k_r50.onnx` (ArcFace).
 
 **Soberanía / producción:**
+
 1. Ejecuta la descarga **una vez**, valida los `.onnx` y **espéjalos en tu storage
    privado** (MinIO/S3 on-prem).
 2. En runtime, monta los modelos en `MODEL_DIR` (volumen) o hornéalos en la imagen:
@@ -101,22 +102,22 @@ estén presentes (pon `VEO_BIO_REQUIRE_MODELS=true` para fallar el arranque en s
 
 ## 4. Configuración (env, prefijo `VEO_BIO_`)
 
-| Variable | Default | Descripción |
-|---|---|---|
-| `VEO_BIO_HOST` | `0.0.0.0` | host de bind |
-| `VEO_BIO_PORT` | `3015` | puerto HTTP |
-| `VEO_BIO_MODEL_DIR` | `models` | carpeta de modelos ONNX |
-| `VEO_BIO_DETECTOR_MODEL` | `det_10g.onnx` | fichero del detector |
-| `VEO_BIO_EMBEDDER_MODEL` | `w600k_r50.onnx` | fichero del recognizer |
-| `VEO_BIO_MATCH_THRESHOLD` | `0.90` | **umbral de match (BR-I02)** |
-| `VEO_BIO_REQUIRE_MODELS` | `false` | si `true`, falla el arranque sin modelos |
-| `VEO_BIO_DETECTION_THRESHOLD` | `0.5` | confianza mínima del detector |
-| `VEO_BIO_MIN_FACE_SIZE` | `80` | tamaño mínimo (px) de rostro |
-| `VEO_BIO_CHALLENGE_TTL_SECONDS` | `60` | expiración del reto de liveness |
-| `VEO_BIO_MIN_FRAMES_FOR_LIVENESS` | `3` | frames mínimos para liveness |
-| `VEO_BIO_LIVENESS_ACTIONS` | `TURN_LEFT,TURN_RIGHT,NOD,SMILE` | retos habilitados |
-| `VEO_BIO_OTEL_ENABLED` | `false` | activa OpenTelemetry |
-| `VEO_BIO_OTEL_EXPORTER_OTLP_ENDPOINT` | `""` | endpoint OTLP/HTTP |
+| Variable                              | Default                          | Descripción                              |
+| ------------------------------------- | -------------------------------- | ---------------------------------------- |
+| `VEO_BIO_HOST`                        | `0.0.0.0`                        | host de bind                             |
+| `VEO_BIO_PORT`                        | `3015`                           | puerto HTTP                              |
+| `VEO_BIO_MODEL_DIR`                   | `models`                         | carpeta de modelos ONNX                  |
+| `VEO_BIO_DETECTOR_MODEL`              | `det_10g.onnx`                   | fichero del detector                     |
+| `VEO_BIO_EMBEDDER_MODEL`              | `w600k_r50.onnx`                 | fichero del recognizer                   |
+| `VEO_BIO_MATCH_THRESHOLD`             | `0.90`                           | **umbral de match (BR-I02)**             |
+| `VEO_BIO_REQUIRE_MODELS`              | `false`                          | si `true`, falla el arranque sin modelos |
+| `VEO_BIO_DETECTION_THRESHOLD`         | `0.5`                            | confianza mínima del detector            |
+| `VEO_BIO_MIN_FACE_SIZE`               | `80`                             | tamaño mínimo (px) de rostro             |
+| `VEO_BIO_CHALLENGE_TTL_SECONDS`       | `60`                             | expiración del reto de liveness          |
+| `VEO_BIO_MIN_FRAMES_FOR_LIVENESS`     | `3`                              | frames mínimos para liveness             |
+| `VEO_BIO_LIVENESS_ACTIONS`            | `TURN_LEFT,TURN_RIGHT,NOD,SMILE` | retos habilitados                        |
+| `VEO_BIO_OTEL_ENABLED`                | `false`                          | activa OpenTelemetry                     |
+| `VEO_BIO_OTEL_EXPORTER_OTLP_ENDPOINT` | `""`                             | endpoint OTLP/HTTP                       |
 
 ---
 
@@ -142,9 +143,11 @@ Cada reto es de **un solo uso** y expira (`challenge_store`), mitigando replay.
 Base URL = `BIOMETRIC_SERVICE_URL` (p. ej. `http://biometric-service:3015`).
 
 ### `POST /v1/liveness/challenge`
+
 Inicia un reto de liveness.
 
 **Response 200**
+
 ```json
 {
   "challengeId": "x7Qk...",
@@ -154,11 +157,13 @@ Inicia un reto de liveness.
 }
 ```
 
-### `POST /v1/verify`  (JSON / base64)
+### `POST /v1/verify` (JSON / base64)
+
 Ejecuta el pipeline completo: detección (rechaza si no hay **exactamente 1** rostro claro)
 → liveness (valida el reto) → embedding → match coseno contra la referencia.
 
 **Request (application/json)**
+
 ```json
 {
   "driverId": "drv_123",
@@ -169,11 +174,13 @@ Ejecuta el pipeline completo: detección (rechaza si no hay **exactamente 1** ro
   "referencePhoto": "<base64-jpeg>"
 }
 ```
+
 - `frames`: secuencia temporal de imágenes del reto (≥ `MIN_FRAMES_FOR_LIVENESS`).
 - Referencia: **`referenceEmbedding`** (vector, recomendado: se calcula una vez en el
   enrolamiento) **o** **`referencePhoto`** (base64; el servicio calcula su embedding).
 
 **Response 200**
+
 ```json
 {
   "result": "PASS",
@@ -194,16 +201,18 @@ Ejecuta el pipeline completo: detección (rechaza si no hay **exactamente 1** ro
 > **Errores:** `422` (entrada inválida: sin referencia, frame corrupto, foto de referencia
 > sin 1 rostro), `503` (modelos no disponibles — modo degradado).
 
-### `POST /v1/verify/multipart`  (multipart/form-data)
+### `POST /v1/verify/multipart` (multipart/form-data)
+
 Igual que el anterior pero con ficheros. Campos form: `driverId`, `challengeId`,
 `shiftId?`; ficheros: `frames` (múltiples), `reference_photo`.
 
 ### Salud / observabilidad
-| Endpoint | Descripción |
-|---|---|
-| `GET /health` | liveness del proceso (200 siempre que el proceso esté arriba) |
-| `GET /health/ready` | readiness: `200` si los modelos están cargados, `503` si no |
-| `GET /metrics` | métricas Prometheus |
+
+| Endpoint            | Descripción                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `GET /health`       | liveness del proceso (200 siempre que el proceso esté arriba) |
+| `GET /health/ready` | readiness: `200` si los modelos están cargados, `503` si no   |
+| `GET /metrics`      | métricas Prometheus                                           |
 
 **Métricas:** `veo_biometric_verify_total{result}`, `veo_biometric_liveness_total{passed}`,
 `veo_biometric_challenge_issued_total{action}`, `veo_biometric_match_score` (histograma),

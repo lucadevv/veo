@@ -45,18 +45,18 @@ src/
 
 ## Endpoints REST (`/api/v1`)
 
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| `GET` | `/contacts` | InternalIdentityGuard | Lista contactos de confianza |
-| `POST` | `/contacts` | InternalIdentityGuard | Alta de contacto (máx 3, envía OTP) |
-| `POST` | `/contacts/:id/verify-otp` | InternalIdentityGuard | Verifica el OTP del contacto |
-| `POST` | `/contacts/:id/resend-otp` | InternalIdentityGuard | Reenvía el OTP |
-| `DELETE` | `/contacts/:id` | InternalIdentityGuard | Baja de contacto (cool-down 24h) |
-| `POST` | `/share/:tripId` | InternalIdentityGuard | Crea enlace de seguimiento firmado |
-| `POST` | `/share/:id/revoke` | InternalIdentityGuard | Revoca un enlace |
-| `GET` | `/public/share/:token` | **Público** (`@Public`) | Página familia: estado + ubicación aprox. |
-| `GET` | `/healthz`, `/readyz` | Público | Liveness / readiness |
-| `GET` | `/metrics` | Público | Métricas Prometheus |
+| Método   | Ruta                       | Auth                    | Descripción                               |
+| -------- | -------------------------- | ----------------------- | ----------------------------------------- |
+| `GET`    | `/contacts`                | InternalIdentityGuard   | Lista contactos de confianza              |
+| `POST`   | `/contacts`                | InternalIdentityGuard   | Alta de contacto (máx 3, envía OTP)       |
+| `POST`   | `/contacts/:id/verify-otp` | InternalIdentityGuard   | Verifica el OTP del contacto              |
+| `POST`   | `/contacts/:id/resend-otp` | InternalIdentityGuard   | Reenvía el OTP                            |
+| `DELETE` | `/contacts/:id`            | InternalIdentityGuard   | Baja de contacto (cool-down 24h)          |
+| `POST`   | `/share/:tripId`           | InternalIdentityGuard   | Crea enlace de seguimiento firmado        |
+| `POST`   | `/share/:id/revoke`        | InternalIdentityGuard   | Revoca un enlace                          |
+| `GET`    | `/public/share/:token`     | **Público** (`@Public`) | Página familia: estado + ubicación aprox. |
+| `GET`    | `/healthz`, `/readyz`      | Público                 | Liveness / readiness                      |
+| `GET`    | `/metrics`                 | Público                 | Métricas Prometheus                       |
 
 ## gRPC (`veo.share.v1`)
 

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import {z} from 'zod';
 
 /**
  * Contrato LOCAL del KYC del pasajero (zod). PROVISIONAL.

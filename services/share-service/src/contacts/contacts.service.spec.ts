@@ -41,7 +41,11 @@ describe('ContactsService.add · BR-I06', () => {
     const sms = { send: vi.fn(async () => undefined) };
     const svc = new ContactsService(prisma as never, redis as never, otpStub as never, sms, config);
 
-    const res = await svc.add('u1', { phone: '+51987654321', name: 'María', relationship: 'madre' });
+    const res = await svc.add('u1', {
+      phone: '+51987654321',
+      name: 'María',
+      relationship: 'madre',
+    });
 
     expect(res.otpSent).toBe(true);
     expect(prisma.write.trustedContact.create).toHaveBeenCalledOnce();

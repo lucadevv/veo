@@ -1,6 +1,6 @@
-import type { TripResource } from '@veo/api-client';
-import { groupTripsByTime } from '../src/features/trip/domain/historyGrouping';
-import { calendarDaysAgo, formatTimeOfDay } from '../src/shared/utils/format';
+import type {TripResource} from '@veo/api-client';
+import {groupTripsByTime} from '../src/features/trip/domain/historyGrouping';
+import {calendarDaysAgo, formatTimeOfDay} from '../src/shared/utils/format';
 
 /** Factory mínima: el agrupado solo lee `requestedAt`; el resto son valores plausibles. */
 function trip(id: string, requestedAt: string): TripResource {
@@ -10,8 +10,8 @@ function trip(id: string, requestedAt: string): TripResource {
     driverId: 'd-1',
     vehicleId: 'v-1',
     status: 'COMPLETED',
-    origin: { lat: -12.04, lon: -77.04 },
-    destination: { lat: -12.1, lon: -77.0 },
+    origin: {lat: -12.04, lon: -77.04},
+    destination: {lat: -12.1, lon: -77.0},
     fareCents: 1500,
     currency: 'PEN',
     surgeMultiplier: 1,
@@ -40,10 +40,10 @@ describe('groupTripsByTime', () => {
 
     const sections = groupTripsByTime(trips, now);
 
-    expect(sections.map((s) => s.id)).toEqual(['today', 'week', 'earlier']);
-    expect(sections[0].data.map((t) => t.id)).toEqual(['today-1']);
-    expect(sections[1].data.map((t) => t.id)).toEqual(['week-1']);
-    expect(sections[2].data.map((t) => t.id)).toEqual(['earlier-1']);
+    expect(sections.map(s => s.id)).toEqual(['today', 'week', 'earlier']);
+    expect(sections[0].data.map(t => t.id)).toEqual(['today-1']);
+    expect(sections[1].data.map(t => t.id)).toEqual(['week-1']);
+    expect(sections[2].data.map(t => t.id)).toEqual(['earlier-1']);
   });
 
   it('un solo viaje de hoy produce UN header (no tres secciones vacías)', () => {
@@ -72,8 +72,12 @@ describe('calendarDaysAgo', () => {
   const now = new Date(2026, 5, 7, 12, 0, 0);
 
   it('hoy = 0, ayer = 1 aunque la hora sea anterior', () => {
-    expect(calendarDaysAgo(new Date(2026, 5, 7, 1, 0, 0).toISOString(), now)).toBe(0);
-    expect(calendarDaysAgo(new Date(2026, 5, 6, 23, 0, 0).toISOString(), now)).toBe(1);
+    expect(
+      calendarDaysAgo(new Date(2026, 5, 7, 1, 0, 0).toISOString(), now),
+    ).toBe(0);
+    expect(
+      calendarDaysAgo(new Date(2026, 5, 6, 23, 0, 0).toISOString(), now),
+    ).toBe(1);
   });
 
   it('fecha inválida → null', () => {
@@ -83,7 +87,9 @@ describe('calendarDaysAgo', () => {
 
 describe('formatTimeOfDay', () => {
   it('formatea HH:mm de una fecha local', () => {
-    expect(formatTimeOfDay(new Date(2026, 5, 7, 9, 4, 0).toISOString())).toBe('09:04');
+    expect(formatTimeOfDay(new Date(2026, 5, 7, 9, 4, 0).toISOString())).toBe(
+      '09:04',
+    );
   });
 
   it('fecha inválida → cadena vacía', () => {

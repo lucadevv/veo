@@ -32,7 +32,9 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('notification-service')
-    .setDescription('Motor propio de notificaciones (push FCM/APNs, SMS SMPP, email SMTP, webhooks) · VEO')
+    .setDescription(
+      'Motor propio de notificaciones (push FCM/APNs, SMS SMPP, email SMTP, webhooks) · VEO',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -8,27 +8,22 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {useFocusEffect} from '@react-navigation/native';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Banner, IconButton, SafeScreen, Skeleton, useTheme} from '@veo/ui-kit';
-import type {RootStackParamList} from '../../../../navigation/types';
-import {StateView} from '../../../../shared/presentation/components/StateView';
-import {TopBar} from '../../../../shared/presentation/components/TopBar';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {IconNavigation} from '../../../../shared/presentation/icons';
-import {isTripActive, parseTripStatus} from '../../../trips/domain';
-import {useTrip} from '../../../trips/presentation/hooks/useTrips';
-import type {Message} from '../../domain';
-import {MessageBubble} from '../components/MessageBubble';
-import {QuickReplies} from '../components/QuickReplies';
-import {
-  useChatHistory,
-  useChatMessages,
-  useMarkChatRead,
-  useSendMessage,
-} from '../hooks/useChat';
+import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Banner, IconButton, SafeScreen, Skeleton, useTheme } from '@veo/ui-kit';
+import type { RootStackParamList } from '../../../../navigation/types';
+import { StateView } from '../../../../shared/presentation/components/StateView';
+import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { IconNavigation } from '../../../../shared/presentation/icons';
+import { isTripActive, parseTripStatus } from '../../../trips/domain';
+import { useTrip } from '../../../trips/presentation/hooks/useTrips';
+import type { Message } from '../../domain';
+import { MessageBubble } from '../components/MessageBubble';
+import { QuickReplies } from '../components/QuickReplies';
+import { useChatHistory, useChatMessages, useMarkChatRead, useSendMessage } from '../hooks/useChat';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -36,11 +31,11 @@ const MAX_BODY = 500;
 
 const keyExtractor = (item: Message): string => item.id;
 
-export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const {tripId} = route.params;
+  const { tripId } = route.params;
 
   const trip = useTrip(tripId);
   const history = useChatHistory(tripId);
@@ -66,7 +61,7 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
   // Cada mensaje nuevo nos lleva al pie de la conversación (lo más reciente, abajo).
   useEffect(() => {
     if (messages.length > 0) {
-      listRef.current?.scrollToEnd({animated: true});
+      listRef.current?.scrollToEnd({ animated: true });
     }
   }, [messages.length]);
 
@@ -81,13 +76,13 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
       if (!active || body.length === 0 || send.isPending) {
         return;
       }
-      send.mutate(body, {onSuccess: () => setDraft('')});
+      send.mutate(body, { onSuccess: () => setDraft('') });
     },
     [active, send],
   );
 
   const renderItem = useCallback(
-    ({item}: ListRenderItemInfo<Message>) => <MessageBubble message={item} />,
+    ({ item }: ListRenderItemInfo<Message>) => <MessageBubble message={item} />,
     [],
   );
 
@@ -113,7 +108,7 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
         <StateView
           title={t('errors.generic')}
           description={toErrorMessage(trip.error, t)}
-          action={{label: t('common.retry'), onPress: () => trip.refetch()}}
+          action={{ label: t('common.retry'), onPress: () => trip.refetch() }}
         />
       </SafeScreen>
     );
@@ -126,7 +121,8 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 8}>
+        keyboardVerticalOffset={insets.top + 8}
+      >
         {history.isLoading && messages.length === 0 ? (
           <View style={styles.loading}>
             <Skeleton height={44} />
@@ -144,19 +140,27 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="interactive"
-            onContentSizeChange={() => listRef.current?.scrollToEnd({animated: false})}
+            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           />
         )}
 
         {!active ? (
           <View style={styles.bannerPad}>
-            <Banner tone="warn" title={t('chat.inactiveTitle')} description={t('chat.inactiveBody')} />
+            <Banner
+              tone="warn"
+              title={t('chat.inactiveTitle')}
+              description={t('chat.inactiveBody')}
+            />
           </View>
         ) : null}
 
         {send.isError ? (
           <View style={styles.bannerPad}>
-            <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(send.error, t)} />
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(send.error, t)}
+            />
           </View>
         ) : null}
 
@@ -172,14 +176,20 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
               borderTopColor: theme.colors.border,
               paddingBottom: insets.bottom + 8,
             },
-          ]}>
+          ]}
+        >
           <View
             style={[
               styles.inputWrap,
-              {backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.xl},
-            ]}>
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.xl,
+              },
+            ]}
+          >
             <TextInput
-              style={[styles.input, {color: theme.colors.ink}]}
+              style={[styles.input, { color: theme.colors.ink }]}
               value={draft}
               onChangeText={setDraft}
               editable={active && !send.isPending}
@@ -194,7 +204,12 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
             />
           </View>
           <IconButton
-            icon={<IconNavigation size={22} color={canSend ? theme.colors.onAccent : theme.colors.inkSubtle} />}
+            icon={
+              <IconNavigation
+                size={22}
+                color={canSend ? theme.colors.onAccent : theme.colors.inkSubtle}
+              />
+            }
             accessibilityLabel={t('chat.send')}
             variant={canSend ? 'tinted' : 'surface'}
             size="lg"
@@ -208,12 +223,17 @@ export const ChatScreen = ({navigation, route}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  flex: {flex: 1},
-  headerPad: {paddingHorizontal: 20},
-  skeletonGap: {height: 12},
-  loading: {flex: 1, gap: 10, paddingHorizontal: 16, paddingTop: 16},
-  listContent: {paddingHorizontal: 16, paddingVertical: 12, flexGrow: 1, justifyContent: 'flex-end'},
-  bannerPad: {paddingHorizontal: 16, paddingTop: 8},
+  flex: { flex: 1 },
+  headerPad: { paddingHorizontal: 20 },
+  skeletonGap: { height: 12 },
+  loading: { flex: 1, gap: 10, paddingHorizontal: 16, paddingTop: 16 },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  bannerPad: { paddingHorizontal: 16, paddingTop: 8 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -222,6 +242,11 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  inputWrap: {flex: 1, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingVertical: 6},
-  input: {fontSize: 16, maxHeight: 120, minHeight: 36, paddingTop: 6, paddingBottom: 6},
+  inputWrap: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  input: { fontSize: 16, maxHeight: 120, minHeight: 36, paddingTop: 6, paddingBottom: 6 },
 });

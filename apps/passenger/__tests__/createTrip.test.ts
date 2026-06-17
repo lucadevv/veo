@@ -11,12 +11,15 @@ import type {
   TripStateView,
   TripVideoGrant,
 } from '@veo/api-client';
-import { CreateTripUseCase, TripValidationError } from '../src/features/trip/domain/usecases';
-import type { TripRepository } from '../src/features/trip/domain/tripRepository';
+import {
+  CreateTripUseCase,
+  TripValidationError,
+} from '../src/features/trip/domain/usecases';
+import type {TripRepository} from '../src/features/trip/domain/tripRepository';
 
-const LIMA_ORIGIN: GeoPoint = { lat: -12.046, lon: -77.0428 };
-const LIMA_DESTINATION: GeoPoint = { lat: -12.1, lon: -77.0 };
-const OUTSIDE: GeoPoint = { lat: 0, lon: 0 };
+const LIMA_ORIGIN: GeoPoint = {lat: -12.046, lon: -77.0428};
+const LIMA_DESTINATION: GeoPoint = {lat: -12.1, lon: -77.0};
+const OUTSIDE: GeoPoint = {lat: 0, lon: 0};
 
 function fakeTrip(): TripResource {
   return {
@@ -48,14 +51,33 @@ function fakeTrip(): TripResource {
 
 class FakeTripRepository implements TripRepository {
   createTrip = jest.fn(async (_input: CreateTripRequest) => fakeTrip());
-  getSurge = jest.fn(async (_c: GeoPoint): Promise<SurgeQuote> => ({ multiplier: 1, zoneId: 'z', active: false }));
-  getActiveTrip = jest.fn(async (_id: string): Promise<TripActiveView> => ({} as TripActiveView));
-  getTripState = jest.fn(async (_id: string): Promise<TripStateView> => ({ id: 'x', status: 'REQUESTED' }));
-  cancelTrip = jest.fn(async (_id: string, _i: CancelTripRequest) => fakeTrip());
+  getSurge = jest.fn(
+    async (_c: GeoPoint): Promise<SurgeQuote> => ({
+      multiplier: 1,
+      zoneId: 'z',
+      active: false,
+    }),
+  );
+  getActiveTrip = jest.fn(
+    async (_id: string): Promise<TripActiveView> => ({}) as TripActiveView,
+  );
+  getTripState = jest.fn(
+    async (_id: string): Promise<TripStateView> => ({
+      id: 'x',
+      status: 'REQUESTED',
+    }),
+  );
+  cancelTrip = jest.fn(async (_id: string, _i: CancelTripRequest) =>
+    fakeTrip(),
+  );
   changeDestination = jest.fn(async (_id: string, _d: GeoPoint) => fakeTrip());
-  getVideoGrant = jest.fn(async (_id: string): Promise<TripVideoGrant> => ({ url: 'u', token: 't' }));
+  getVideoGrant = jest.fn(
+    async (_id: string): Promise<TripVideoGrant> => ({url: 'u', token: 't'}),
+  );
   listScheduledTrips = jest.fn(async (): Promise<ScheduledTripList> => []);
-  cancelScheduledTrip = jest.fn(async (_id: string): Promise<void> => undefined);
+  cancelScheduledTrip = jest.fn(
+    async (_id: string): Promise<void> => undefined,
+  );
   listOffers = jest.fn(async (_id: string): Promise<OfferList> => []);
   acceptOffer = jest.fn(
     async (_id: string, _d: string): Promise<OfferView> => ({
@@ -90,7 +112,11 @@ describe('CreateTripUseCase', () => {
     const useCase = new CreateTripUseCase(repo);
 
     expect(() =>
-      useCase.execute({ origin: LIMA_ORIGIN, destination: OUTSIDE, paymentMethod: 'CASH' }),
+      useCase.execute({
+        origin: LIMA_ORIGIN,
+        destination: OUTSIDE,
+        paymentMethod: 'CASH',
+      }),
     ).toThrow(TripValidationError);
     expect(repo.createTrip).not.toHaveBeenCalled();
   });
@@ -114,7 +140,7 @@ describe('CreateTripUseCase', () => {
   it('reenvía paradas intermedias y el tipo de vehículo de la opción elegida', async () => {
     const repo = new FakeTripRepository();
     const useCase = new CreateTripUseCase(repo);
-    const waypoints: GeoPoint[] = [{ lat: -12.06, lon: -77.03 }];
+    const waypoints: GeoPoint[] = [{lat: -12.06, lon: -77.03}];
 
     await useCase.execute({
       origin: LIMA_ORIGIN,
@@ -126,7 +152,11 @@ describe('CreateTripUseCase', () => {
     });
 
     expect(repo.createTrip).toHaveBeenCalledWith(
-      expect.objectContaining({ waypoints, vehicleType: 'MOTO', category: 'veo_moto' }),
+      expect.objectContaining({
+        waypoints,
+        vehicleType: 'MOTO',
+        category: 'veo_moto',
+      }),
       undefined, // IK · sin key explícita en este caso
     );
   });
@@ -158,17 +188,27 @@ describe('CreateTripUseCase', () => {
       scheduledFor,
     });
 
-    expect(repo.createTrip).toHaveBeenCalledWith(expect.objectContaining({ scheduledFor }), undefined);
+    expect(repo.createTrip).toHaveBeenCalledWith(
+      expect.objectContaining({scheduledFor}),
+      undefined,
+    );
   });
 
   it('IK · propaga la idempotency key al repositorio (reintento = mismo viaje, no dos boards)', async () => {
     const repo = new FakeTripRepository();
     const useCase = new CreateTripUseCase(repo);
     await useCase.execute(
-      { origin: LIMA_ORIGIN, destination: LIMA_DESTINATION, paymentMethod: 'CASH' },
+      {
+        origin: LIMA_ORIGIN,
+        destination: LIMA_DESTINATION,
+        paymentMethod: 'CASH',
+      },
       'intent-key-1',
     );
-    expect(repo.createTrip).toHaveBeenCalledWith(expect.anything(), 'intent-key-1');
+    expect(repo.createTrip).toHaveBeenCalledWith(
+      expect.anything(),
+      'intent-key-1',
+    );
   });
 
   it('rechaza programar con menos de 15 minutos de anticipación', () => {

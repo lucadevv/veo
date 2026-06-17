@@ -1,5 +1,5 @@
-import React, {useEffect} from 'react';
-import {Pressable, StyleSheet, View} from 'react-native';
+import React, { useEffect } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   interpolateColor,
@@ -7,11 +7,11 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {Text, useTheme, useReducedMotion} from '@veo/ui-kit';
-import {useTranslation} from 'react-i18next';
-import {VehicleClass} from '@veo/shared-types';
-import {IconCar, IconMoto} from '../../../../shared/presentation/icons';
-import type {VehicleType} from '../../domain';
+import { Text, useTheme, useReducedMotion } from '@veo/ui-kit';
+import { useTranslation } from 'react-i18next';
+import { VehicleClass } from '@veo/shared-types';
+import { IconCar, IconMoto } from '../../../../shared/presentation/icons';
+import type { VehicleType } from '../../domain';
 
 interface VehicleTypeSelectorProps {
   value: VehicleType;
@@ -30,8 +30,8 @@ interface VehicleClassOption {
  * exige su entrada acá (no compila sin ella) y la tarjeta aparece sola en el selector.
  */
 const VEHICLE_CLASS_OPTIONS: Record<VehicleClass, VehicleClassOption> = {
-  [VehicleClass.MOTO]: {labelKey: 'registration.vehicle.typeMoto', Icon: IconMoto, sortOrder: 0},
-  [VehicleClass.CAR]: {labelKey: 'registration.vehicle.typeCar', Icon: IconCar, sortOrder: 1},
+  [VehicleClass.MOTO]: { labelKey: 'registration.vehicle.typeMoto', Icon: IconMoto, sortOrder: 0 },
+  [VehicleClass.CAR]: { labelKey: 'registration.vehicle.typeCar', Icon: IconCar, sortOrder: 1 },
 };
 
 /** Clases en orden de presentación del alta (Moto primero, como el flujo histórico). */
@@ -48,7 +48,7 @@ interface OptionProps {
 }
 
 /** Tarjeta de tipo de vehículo: anima borde, fondo y glow cian al seleccionarse. */
-function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Element {
+function Option({ label, selected, onPress, icon }: OptionProps): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(selected ? 1 : 0);
@@ -56,7 +56,7 @@ function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Elemen
   useEffect(() => {
     const target = selected ? 1 : 0;
     progress.value = reduced
-      ? withTiming(target, {duration: theme.motion.duration.fast})
+      ? withTiming(target, { duration: theme.motion.duration.fast })
       : withTiming(target, {
           duration: theme.motion.duration.base,
           easing: Easing.bezier(...theme.motion.easing.standard),
@@ -72,7 +72,7 @@ function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Elemen
     // Glow cian sutil del seleccionado (sombra de color, no borde+sombra decorativo doble).
     shadowOpacity: progress.value * 0.55,
     shadowRadius: 6 + progress.value * 12,
-    transform: [{scale: 1 + progress.value * 0.01}],
+    transform: [{ scale: 1 + progress.value * 0.01 }],
   }));
 
   const iconColor = selected ? theme.colors.accent : theme.colors.inkMuted;
@@ -80,10 +80,11 @@ function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Elemen
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{selected}}
+      accessibilityState={{ selected }}
       accessibilityLabel={label}
       onPress={onPress}
-      style={styles.flex}>
+      style={styles.flex}
+    >
       <Animated.View
         style={[
           styles.card,
@@ -92,11 +93,12 @@ function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Elemen
             borderRadius: theme.radii.lg,
             borderWidth: 2,
             shadowColor: theme.colors.accent,
-            shadowOffset: {width: 0, height: 0},
+            shadowOffset: { width: 0, height: 0 },
             gap: theme.spacing.md,
           },
           cardStyle,
-        ]}>
+        ]}
+      >
         {icon(iconColor)}
         <Text variant="bodyStrong" color={selected ? 'ink' : 'inkMuted'}>
           {label}
@@ -111,14 +113,17 @@ function Option({label, selected, onPress, icon}: OptionProps): React.JSX.Elemen
  * (ADR 013 §1.6): itera el registro en vez de chips hardcodeados. Una sola selección (rol
  * radiogroup); la tarjeta activa se resalta con borde y glow cian animados, respetando reduce-motion.
  */
-export function VehicleTypeSelector({value, onChange}: VehicleTypeSelectorProps): React.JSX.Element {
+export function VehicleTypeSelector({
+  value,
+  onChange,
+}: VehicleTypeSelectorProps): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
 
   return (
-    <View accessibilityRole="radiogroup" style={[styles.row, {gap: theme.spacing.lg}]}>
-      {ORDERED_CLASSES.map(vehicleClass => {
-        const {labelKey, Icon} = VEHICLE_CLASS_OPTIONS[vehicleClass];
+    <View accessibilityRole="radiogroup" style={[styles.row, { gap: theme.spacing.lg }]}>
+      {ORDERED_CLASSES.map((vehicleClass) => {
+        const { labelKey, Icon } = VEHICLE_CLASS_OPTIONS[vehicleClass];
         return (
           <Option
             key={vehicleClass}
@@ -126,7 +131,7 @@ export function VehicleTypeSelector({value, onChange}: VehicleTypeSelectorProps)
             label={t(labelKey)}
             selected={value === vehicleClass}
             onPress={() => onChange(vehicleClass)}
-            icon={color => <Icon size={44} color={color} strokeWidth={1.8} />}
+            icon={(color) => <Icon size={44} color={color} strokeWidth={1.8} />}
           />
         );
       })}
@@ -135,7 +140,7 @@ export function VehicleTypeSelector({value, onChange}: VehicleTypeSelectorProps)
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignSelf: 'stretch'},
-  flex: {flex: 1},
-  card: {alignItems: 'center', justifyContent: 'center', paddingVertical: 28, elevation: 0},
+  row: { flexDirection: 'row', alignSelf: 'stretch' },
+  flex: { flex: 1 },
+  card: { alignItems: 'center', justifyContent: 'center', paddingVertical: 28, elevation: 0 },
 });

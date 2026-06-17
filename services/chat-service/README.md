@@ -9,10 +9,10 @@ con el evento `chat:message` y una sala por `tripId`. No se crea una capa WS nue
 
 ## Endpoints (internos, REST firmado HMAC — `InternalIdentityGuard`)
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET  | `/api/v1/chat/trips/:tripId/messages?limit=` | Historial (orden cronológico asc, máx 100). |
-| POST | `/api/v1/chat/trips/:tripId/messages` | Persiste `{ senderId, senderRole, body }` → devuelve el mensaje. |
+| Método | Ruta                                         | Descripción                                                      |
+| ------ | -------------------------------------------- | ---------------------------------------------------------------- |
+| GET    | `/api/v1/chat/trips/:tripId/messages?limit=` | Historial (orden cronológico asc, máx 100).                      |
+| POST   | `/api/v1/chat/trips/:tripId/messages`        | Persiste `{ senderId, senderRole, body }` → devuelve el mensaje. |
 
 Los BFFs validan membresía/estado del viaje (gRPC GetTrip) antes de llamar, fijan `senderId`/`senderRole`
 desde la identidad autenticada y, tras persistir, emiten `chat:message` por socket a la otra parte.

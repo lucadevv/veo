@@ -1,14 +1,17 @@
-import { useQuery } from '@tanstack/react-query';
-import { Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import {useQuery} from '@tanstack/react-query';
+import {Card, SafeScreen, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
-import { formatShortDate } from '../../../../shared/utils/format';
-import type { AppNotification, NotificationKind } from '../../domain/entities';
-import { iconForKind } from '../icons';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  EmptyState,
+  ScreenStateFallback,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {formatShortDate} from '../../../../shared/utils/format';
+import type {AppNotification, NotificationKind} from '../../domain/entities';
+import {iconForKind} from '../icons';
 
 /** Tono (color del ícono) por categoría de aviso. */
 function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
@@ -32,7 +35,7 @@ function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
  */
 export function NotificationsScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const listNotifications = useDependency(TOKENS.listNotificationsUseCase);
 
   const query = useQuery({
@@ -45,7 +48,12 @@ export function NotificationsScreen(): React.JSX.Element {
   }
 
   if (query.isError) {
-    return <ScreenStateFallback errorMessage={t('notifications.loadError')} onRetry={() => query.refetch()} />;
+    return (
+      <ScreenStateFallback
+        errorMessage={t('notifications.loadError')}
+        onRetry={() => query.refetch()}
+      />
+    );
   }
 
   const notifications = query.data ?? [];
@@ -54,7 +62,10 @@ export function NotificationsScreen(): React.JSX.Element {
     // Vacío HONESTO: el feed está conectado al backend; lista vacía = aún no hay avisos (no "próximamente").
     return (
       <SafeScreen>
-        <EmptyState title={t('notifications.empty')} subtitle={t('notifications.emptySubtitle')} />
+        <EmptyState
+          title={t('notifications.empty')}
+          subtitle={t('notifications.emptySubtitle')}
+        />
       </SafeScreen>
     );
   }
@@ -62,10 +73,12 @@ export function NotificationsScreen(): React.JSX.Element {
   return (
     <SafeScreen padded={false}>
       <ScrollView
-        contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.md }}
-        showsVerticalScrollIndicator={false}
-      >
-        {notifications.map((item) => (
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          gap: theme.spacing.md,
+        }}
+        showsVerticalScrollIndicator={false}>
+        {notifications.map(item => (
           <NotificationCard key={item.id} notification={item} />
         ))}
         <Text variant="footnote" color="inkSubtle" align="center">
@@ -81,7 +94,9 @@ interface NotificationCardProps {
 }
 
 /** Tarjeta de un aviso: círculo con el ícono de su categoría, título, cuerpo y fecha. */
-function NotificationCard({ notification }: NotificationCardProps): React.JSX.Element {
+function NotificationCard({
+  notification,
+}: NotificationCardProps): React.JSX.Element {
   const theme = useTheme();
   const Glyph = iconForKind(notification.kind);
   const tone = toneForKind(notification.kind);
@@ -93,17 +108,25 @@ function NotificationCard({ notification }: NotificationCardProps): React.JSX.El
         <View
           style={[
             styles.leadCircle,
-            { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border },
-          ]}
-        >
+            {
+              backgroundColor: theme.colors.surfaceElevated,
+              borderColor: theme.colors.border,
+            },
+          ]}>
           <Glyph color={iconColor} size={18} />
         </View>
         <View style={styles.flex}>
           <Text variant="bodyStrong">{notification.title}</Text>
-          <Text variant="footnote" color="inkMuted" style={{ marginTop: theme.spacing.xs }}>
+          <Text
+            variant="footnote"
+            color="inkMuted"
+            style={{marginTop: theme.spacing.xs}}>
             {notification.body}
           </Text>
-          <Text variant="caption" color="inkSubtle" style={{ marginTop: theme.spacing.xs }}>
+          <Text
+            variant="caption"
+            color="inkSubtle"
+            style={{marginTop: theme.spacing.xs}}>
             {formatShortDate(notification.createdAt)}
           </Text>
         </View>
@@ -113,8 +136,8 @@ function NotificationCard({ notification }: NotificationCardProps): React.JSX.El
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 13, alignItems: 'flex-start' },
-  flex: { flex: 1 },
+  row: {flexDirection: 'row', gap: 13, alignItems: 'flex-start'},
+  flex: {flex: 1},
   leadCircle: {
     width: 40,
     height: 40,

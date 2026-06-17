@@ -20,19 +20,20 @@ API REST bajo `/api/v1`.
 
 ## Reglas de negocio
 
-| Regla | Descripción | Dónde |
-|---|---|---|
-| BR-T01 | Tarifa inmutable salvo cambio de destino aprobado (recalcula + `trip_event`) | `trips.service.changeDestination` |
-| BR-T02 | Máquina de estados determinista; transición inválida → `InvalidTripTransition` | `domain/trip-state-machine.ts` |
-| BR-T03 | Penalización de cancelación (gratis <2min o conductor >5min tarde; si no S/3) | `domain/cancellation.ts` |
-| BR-T05 | `tarifa = (600 + 120·km + 30·min)·surge [+200 niño]` en céntimos PEN | `domain/fare.ts` |
-| BR-T07 | Modo niño: solo `childCodeHash` (bcrypt); validación en el recojo | `trips.service.start` |
+| Regla  | Descripción                                                                    | Dónde                             |
+| ------ | ------------------------------------------------------------------------------ | --------------------------------- |
+| BR-T01 | Tarifa inmutable salvo cambio de destino aprobado (recalcula + `trip_event`)   | `trips.service.changeDestination` |
+| BR-T02 | Máquina de estados determinista; transición inválida → `InvalidTripTransition` | `domain/trip-state-machine.ts`    |
+| BR-T03 | Penalización de cancelación (gratis <2min o conductor >5min tarde; si no S/3)  | `domain/cancellation.ts`          |
+| BR-T05 | `tarifa = (600 + 120·km + 30·min)·surge [+200 niño]` en céntimos PEN           | `domain/fare.ts`                  |
+| BR-T07 | Modo niño: solo `childCodeHash` (bcrypt); validación en el recojo              | `trips.service.start`             |
 
 ## Estados (BR-T02)
 
 ```
 REQUESTED → ASSIGNED → ACCEPTED → ARRIVING → ARRIVED → IN_PROGRESS → COMPLETED
 ```
+
 Terminales: `CANCELLED_BY_PASSENGER`, `CANCELLED_BY_DRIVER`, `EXPIRED`, `FAILED`.
 
 ## Desarrollo
@@ -55,19 +56,19 @@ pnpm --filter @veo/trip-service test
 
 ## Endpoints REST (`/api/v1`)
 
-| Método | Ruta | Acción |
-|---|---|---|
-| POST | `/trips` | Crear/cotizar (→ REQUESTED). Idempotente vía `Idempotency-Key` |
-| GET | `/trips/:id` | Obtener viaje |
-| GET | `/trips/:id/state` | Solo estado |
-| POST | `/trips/:id/assign` | Asignar conductor/vehículo (→ ASSIGNED) |
-| POST | `/trips/:id/accept` | Conductor acepta (→ ACCEPTED) |
-| POST | `/trips/:id/arriving` | En camino (→ ARRIVING) |
-| POST | `/trips/:id/arrived` | Llegó al recojo (→ ARRIVED) |
-| POST | `/trips/:id/start` | Iniciar (valida código niño) (→ IN_PROGRESS) |
-| POST | `/trips/:id/complete` | Finalizar (→ COMPLETED) |
-| POST | `/trips/:id/cancel` | Cancelar + penalización (BR-T03) |
-| POST | `/trips/:id/destination` | Cambio de destino (recalcula tarifa, BR-T01) |
+| Método | Ruta                     | Acción                                                         |
+| ------ | ------------------------ | -------------------------------------------------------------- |
+| POST   | `/trips`                 | Crear/cotizar (→ REQUESTED). Idempotente vía `Idempotency-Key` |
+| GET    | `/trips/:id`             | Obtener viaje                                                  |
+| GET    | `/trips/:id/state`       | Solo estado                                                    |
+| POST   | `/trips/:id/assign`      | Asignar conductor/vehículo (→ ASSIGNED)                        |
+| POST   | `/trips/:id/accept`      | Conductor acepta (→ ACCEPTED)                                  |
+| POST   | `/trips/:id/arriving`    | En camino (→ ARRIVING)                                         |
+| POST   | `/trips/:id/arrived`     | Llegó al recojo (→ ARRIVED)                                    |
+| POST   | `/trips/:id/start`       | Iniciar (valida código niño) (→ IN_PROGRESS)                   |
+| POST   | `/trips/:id/complete`    | Finalizar (→ COMPLETED)                                        |
+| POST   | `/trips/:id/cancel`      | Cancelar + penalización (BR-T03)                               |
+| POST   | `/trips/:id/destination` | Cambio de destino (recalcula tarifa, BR-T01)                   |
 
 Health: `GET /health`, `GET /health/ready` · Métricas: `GET /metrics`.
 

@@ -1,27 +1,27 @@
-import {useEffect, useRef} from 'react';
-import {useQueryClient} from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   navigateToBids,
   navigateToIncoming,
   navigateToTripActive,
 } from '../../../navigation/navigationRef';
-import {useDi} from '../../../core/di/useDi';
-import {SHIFT_STATE_QUERY_KEY} from '../../shift/presentation/hooks/useShift';
-import {useShiftState} from '../../shift/presentation/hooks/useShift';
-import {isOnShift} from '../../shift/domain';
-import {isTripTerminal, parseTripStatus} from '../../trips/domain';
-import {TRIP_QUERY_PREFIX, useActiveTrip, useTrip} from '../../trips/presentation/hooks/useTrips';
-import {BIDS_QUERY_KEY} from '../../bidding/presentation';
-import {useChatStore} from '../../chat/presentation';
+import { useDi } from '../../../core/di/useDi';
+import { SHIFT_STATE_QUERY_KEY } from '../../shift/presentation/hooks/useShift';
+import { useShiftState } from '../../shift/presentation/hooks/useShift';
+import { isOnShift } from '../../shift/domain';
+import { isTripTerminal, parseTripStatus } from '../../trips/domain';
+import { TRIP_QUERY_PREFIX, useActiveTrip, useTrip } from '../../trips/presentation/hooks/useTrips';
+import { BIDS_QUERY_KEY } from '../../bidding/presentation';
+import { useChatStore } from '../../chat/presentation';
 import {
   EARNINGS_BREAKDOWN_QUERY_KEY,
   EARNINGS_SUMMARY_QUERY_KEY,
 } from '../../earnings/presentation/hooks/useEarnings';
-import {useDriverRealtime} from './hooks/useDriverRealtime';
-import {useLocationPublisher} from './hooks/useLocationPublisher';
-import {useDispatchStore} from './state/dispatchStore';
-import {useTipStore} from './state/tipStore';
-import {useWaypointProposalStore} from './state/waypointProposalStore';
+import { useDriverRealtime } from './hooks/useDriverRealtime';
+import { useLocationPublisher } from './hooks/useLocationPublisher';
+import { useDispatchStore } from './state/dispatchStore';
+import { useTipStore } from './state/tipStore';
+import { useWaypointProposalStore } from './state/waypointProposalStore';
 
 /**
  * Cablea el realtime del conductor mientras la sesión está activa: conecta el socket `/driver`,
@@ -30,16 +30,16 @@ import {useWaypointProposalStore} from './state/waypointProposalStore';
  */
 export const RealtimeManager = (): null => {
   const queryClient = useQueryClient();
-  const {foregroundService} = useDi();
-  const setIncomingOffer = useDispatchStore(s => s.setIncomingOffer);
-  const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
-  const setConnected = useDispatchStore(s => s.setConnected);
-  const activeTripId = useDispatchStore(s => s.activeTripId);
-  const receiveMessage = useChatStore(s => s.receiveMessage);
-  const setTip = useTipStore(s => s.setTip);
-  const setWaypointProposal = useWaypointProposalStore(s => s.setProposal);
+  const { foregroundService } = useDi();
+  const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
+  const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
+  const setConnected = useDispatchStore((s) => s.setConnected);
+  const activeTripId = useDispatchStore((s) => s.activeTripId);
+  const receiveMessage = useChatStore((s) => s.receiveMessage);
+  const setTip = useTipStore((s) => s.setTip);
+  const setWaypointProposal = useWaypointProposalStore((s) => s.setProposal);
 
-  const {data: shift} = useShiftState();
+  const { data: shift } = useShiftState();
   const onShift = shift ? isOnShift(shift.status) : false;
 
   // El viaje activo deja de ser activo cuando alcanza un estado TERMINAL (completado, cancelado,
@@ -98,7 +98,7 @@ export const RealtimeManager = (): null => {
       // aceptar/rechazar, es una puja abierta a la que el conductor contraoferta. Refrescamos el board y,
       // si no está en un viaje, lo llevamos a las pujas. NO usamos el flujo FIXED (TripIncoming/incomingOffer).
       if (payload.bidCents != null) {
-        queryClient.invalidateQueries({queryKey: BIDS_QUERY_KEY});
+        queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
         if (!activeTripId) {
           navigateToBids();
         }
@@ -111,44 +111,44 @@ export const RealtimeManager = (): null => {
         expiresAt: payload.expiresAt,
         scheduled,
       });
-      navigateToIncoming({matchId: payload.matchId, tripId: payload.tripId});
+      navigateToIncoming({ matchId: payload.matchId, tripId: payload.tripId });
     },
-    onMatch: payload => {
+    onMatch: (payload) => {
       setActiveTripId(payload.tripId);
-      queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
       // Match confirmado → llevamos al conductor a su viaje. Clave en PUJA (ganó la puja, no pasó por
       // TripIncoming) y si el match llega estando en otra pantalla. En FIXED ya está en TripActive (el
       // accept navega): navegar a la misma ruta+params es no-op, así que es seguro en ambos flujos.
       navigateToTripActive(payload.tripId);
     },
     onTripUpdate: () => {
-      queryClient.invalidateQueries({queryKey: TRIP_QUERY_PREFIX});
-      queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });
+      queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
     },
     // Chat con el pasajero (Ola 2A): el `chat:message` se empuja al store de chat aunque la pantalla
     // de chat no esté montada, para alimentar el badge de no leídos del viaje activo. El store ignora
     // duplicados por `id`, así que el eco del propio POST no se contabiliza dos veces.
-    onChatMessage: message => {
+    onChatMessage: (message) => {
       receiveMessage(message);
     },
     // Propina en vivo (100% del conductor): guardamos el aviso efímero para el banner del dashboard e
     // invalidamos ganancias, así el neto acumulado refleja el monto real (la verdad vive en el server).
-    onTipAdded: payload => {
-      setTip({tripId: payload.tripId, tipCents: payload.tipCents});
+    onTipAdded: (payload) => {
+      setTip({ tripId: payload.tripId, tipCents: payload.tipCents });
       // Invalida AMBAS vistas de ganancias (resumen + desglose): la propina entra al neto y al detalle.
       // Antes solo el resumen → la pantalla de Ganancias (breakdown) quedaba desactualizada.
-      queryClient.invalidateQueries({queryKey: EARNINGS_SUMMARY_QUERY_KEY});
-      queryClient.invalidateQueries({queryKey: EARNINGS_BREAKDOWN_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: EARNINGS_SUMMARY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: EARNINGS_BREAKDOWN_QUERY_KEY });
     },
     // Parada propuesta por el pasajero (Lote C4): se guarda en el store; la pantalla del viaje activo la
     // ofrece para aceptar/rechazar. Solo la mostramos si es del viaje activo (defensa contra cruces).
-    onWaypointProposed: message => {
+    onWaypointProposed: (message) => {
       if (message.tripId === activeTripId) {
         setWaypointProposal(message);
       }
     },
     // Estado de la conexión `/driver`: alimenta el indicador de las pantallas (viaje activo / dispatch).
-    onConnectionChange: connected => {
+    onConnectionChange: (connected) => {
       setConnected(connected);
     },
     // RECUPERACIÓN tras RECONECTAR: el namespace `/driver` NO reemite el último snapshot (no hay
@@ -157,9 +157,9 @@ export const RealtimeManager = (): null => {
     // detalle del activo Y la rehidratación `['trip','active']`), las PUJAS/dispatch en vuelo y el
     // estado de turno. React Query refetchea solo las queries OBSERVADAS (montadas), sin pedir en vano.
     onResync: () => {
-      queryClient.invalidateQueries({queryKey: TRIP_QUERY_PREFIX});
-      queryClient.invalidateQueries({queryKey: BIDS_QUERY_KEY});
-      queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });
+      queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
     },
   });
 

@@ -1,4 +1,4 @@
-import type {DemandHeatmap, HeatmapQuery, IncentiveList} from '../entities';
+import type { DemandHeatmap, HeatmapQuery, IncentiveList } from '../entities';
 
 /**
  * Contrato del repositorio operativo (mapa de calor + incentivos). Implementación concreta en

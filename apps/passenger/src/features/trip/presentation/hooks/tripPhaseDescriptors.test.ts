@@ -1,4 +1,4 @@
-import type { TripPhase } from './tripFlowPhase';
+import type {TripPhase} from './tripFlowPhase';
 import {
   ActiveTripPhaseBody,
   BiddingPhaseBody,
@@ -64,49 +64,63 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
   });
 
   it('snap a FULL solo en cotización y cierre (forms largos); el resto abraza el contenido (peek)', () => {
-    const fullPhases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter(
-      (phase) => TRIP_PHASE_DESCRIPTORS[phase].expanded,
-    );
+    const fullPhases = (
+      Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
+    ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].expanded);
     expect(fullPhases.sort()).toEqual(['completed', 'quoting']);
   });
 
   it('AMBIENTE (autitos cercanos) solo en idle, searching y completed', () => {
-    const nearbyPhases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter(
-      (phase) => TRIP_PHASE_DESCRIPTORS[phase].showNearby,
-    );
+    const nearbyPhases = (
+      Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
+    ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].showNearby);
     expect(nearbyPhases.sort()).toEqual(['completed', 'idle', 'searching']);
   });
 
   it('viaje VIVO (chrome SOS/chat + pánico armado) solo en enRoute/arrived/inProgress', () => {
-    const activePhases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter(
-      (phase) => TRIP_PHASE_DESCRIPTORS[phase].activeTrip,
-    );
+    const activePhases = (
+      Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
+    ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].activeTrip);
     expect(activePhases.sort()).toEqual(['arrived', 'enRoute', 'inProgress']);
   });
 
   it('detalle del viaje (conductor/tarifa) solo donde el body lo consume: viaje activo + cierre', () => {
-    const detailPhases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter(
-      (phase) => TRIP_PHASE_DESCRIPTORS[phase].needsTripDetail,
-    );
-    expect(detailPhases.sort()).toEqual(['arrived', 'completed', 'enRoute', 'inProgress']);
+    const detailPhases = (
+      Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
+    ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].needsTripDetail);
+    expect(detailPhases.sort()).toEqual([
+      'arrived',
+      'completed',
+      'enRoute',
+      'inProgress',
+    ]);
   });
 
   it('señales del home idle (deudas) y de la búsqueda de conductor (pre-prompt de push)', () => {
     for (const phase of Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]) {
       expect(TRIP_PHASE_DESCRIPTORS[phase].pollsDebts).toBe(phase === 'idle');
-      expect(TRIP_PHASE_DESCRIPTORS[phase].showsPushPrePrompt).toBe(phase === 'searching');
+      expect(TRIP_PHASE_DESCRIPTORS[phase].showsPushPrePrompt).toBe(
+        phase === 'searching',
+      );
     }
   });
 
   it('el marker de ORIGEN del mapa de viaje se apaga SOLO en curso (ya pasamos por la recogida)', () => {
     for (const phase of Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]) {
-      expect(TRIP_PHASE_DESCRIPTORS[phase].tripMapShowsOrigin).toBe(phase !== 'inProgress');
+      expect(TRIP_PHASE_DESCRIPTORS[phase].tripMapShowsOrigin).toBe(
+        phase !== 'inProgress',
+      );
     }
   });
 
   it('PUENTE interino: reassigning navega, ended limpia, el resto vive en el sheet', () => {
     for (const phase of Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]) {
-      const expected = phase === 'reassigning' ? 'reassign' : phase === 'ended' ? 'clear' : null;
+      const expected =
+        phase === 'reassigning'
+          ? 'reassign'
+          : phase === 'ended'
+            ? 'clear'
+            : null;
       expect(TRIP_PHASE_DESCRIPTORS[phase].handoff).toBe(expected);
     }
   });
@@ -133,7 +147,9 @@ describe('resolvePickupMode (composición EXPLÍCITA de las dos máquinas)', () 
   });
 
   it('cualquier otra fase lo apaga, sin importar el flow', () => {
-    const phases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter((p) => p !== 'idle');
+    const phases = (Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]).filter(
+      p => p !== 'idle',
+    );
     for (const phase of phases) {
       expect(resolvePickupMode(phase, 'idle')).toBe(false);
       expect(resolvePickupMode(phase, 'searching')).toBe(false);

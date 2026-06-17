@@ -38,18 +38,24 @@ describe('EmailCodeService', () => {
     expect(code).toMatch(/^\d{6}$/);
     await expect(svc.verify('email-verify', EMAIL, code!)).resolves.toBeUndefined();
     // consumido → segundo intento falla
-    await expect(svc.verify('email-verify', EMAIL, code!)).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(svc.verify('email-verify', EMAIL, code!)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('rechaza código incorrecto', async () => {
     const svc = new EmailCodeService(fakeRedis() as never, config);
     await svc.issue('pwd-reset', EMAIL);
-    await expect(svc.verify('pwd-reset', EMAIL, '000000')).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(svc.verify('pwd-reset', EMAIL, '000000')).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('verifica código expirado/inexistente como UnauthorizedError', async () => {
     const svc = new EmailCodeService(fakeRedis() as never, config);
-    await expect(svc.verify('email-verify', EMAIL, '123456')).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(svc.verify('email-verify', EMAIL, '123456')).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('aplica cooldown de reenvío (lanza por defecto)', async () => {

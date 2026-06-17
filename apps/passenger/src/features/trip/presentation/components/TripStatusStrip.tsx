@@ -1,8 +1,8 @@
-import { tripStatus, type TripStatus } from '@veo/api-client';
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import {tripStatus, type TripStatus} from '@veo/api-client';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -13,7 +13,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { VehicleIcon } from '../../../dispatch/presentation/components/VehicleIcon';
+import {VehicleIcon} from '../../../dispatch/presentation/components/VehicleIcon';
 
 /**
  * FRANJA DE ESTADO DEL VIAJE (canónica) — una línea sutil de extremo a extremo con el VehicleIcon del
@@ -52,23 +52,25 @@ const PULSE_MS = 900;
 const TRACK_HEIGHT = 2;
 
 /** Mapea el estado del viaje al modo de la franja + su etiqueta i18n. */
-function resolveStrip(status: string): { mode: StripMode; labelKey: string } {
+function resolveStrip(status: string): {mode: StripMode; labelKey: string} {
   switch (status) {
     case tripStatus.enum.ARRIVED:
-      return { mode: 'arrived', labelKey: 'tripStrip.arrived' };
+      return {mode: 'arrived', labelKey: 'tripStrip.arrived'};
     case tripStatus.enum.IN_PROGRESS:
-      return { mode: 'moving', labelKey: 'tripStrip.inProgress' };
+      return {mode: 'moving', labelKey: 'tripStrip.inProgress'};
     // ASSIGNED / ACCEPTED / ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
     default:
-      return { mode: 'moving', labelKey: 'tripStrip.enRoute' };
+      return {mode: 'moving', labelKey: 'tripStrip.enRoute'};
   }
 }
 
-export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Element {
+export function TripStatusStrip({
+  status,
+}: TripStatusStripProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
-  const { mode, labelKey } = resolveStrip(status);
+  const {mode, labelKey} = resolveStrip(status);
 
   // Ancho REAL del track (lo mide el layout) → el recorrido del vehículo es [0, width - icon].
   const [trackWidth, setTrackWidth] = useState(0);
@@ -97,7 +99,10 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
       pulse.value = 0;
       sweep.value = 0;
       sweep.value = withRepeat(
-        withTiming(1, { duration: SWEEP_MS, easing: Easing.bezier(0.45, 0, 0.55, 1) }),
+        withTiming(1, {
+          duration: SWEEP_MS,
+          easing: Easing.bezier(0.45, 0, 0.55, 1),
+        }),
         -1,
         false,
       );
@@ -106,8 +111,14 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
       sweep.value = 0;
       pulse.value = withRepeat(
         withSequence(
-          withTiming(1, { duration: PULSE_MS, easing: Easing.inOut(Easing.quad) }),
-          withTiming(0, { duration: PULSE_MS, easing: Easing.inOut(Easing.quad) }),
+          withTiming(1, {
+            duration: PULSE_MS,
+            easing: Easing.inOut(Easing.quad),
+          }),
+          withTiming(0, {
+            duration: PULSE_MS,
+            easing: Easing.inOut(Easing.quad),
+          }),
         ),
         -1,
         false,
@@ -128,32 +139,42 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
       mode === 'moving'
         ? interpolate(sweep.value, [0, 0.1, 0.9, 1], [0, 1, 1, 0])
         : 1;
-    const scale = mode === 'arrived' ? interpolate(pulse.value, [0, 1], [1, 1.14]) : 1;
+    const scale =
+      mode === 'arrived' ? interpolate(pulse.value, [0, 1], [1, 1.14]) : 1;
     return {
       opacity: edgeFade,
-      transform: [{ translateX: x }, { scale }],
+      transform: [{translateX: x}, {scale}],
     };
   });
 
   // Halo de "esperándote" detrás del vehículo en 'arrived': un punto que pulsa en opacidad/escala.
   const haloStyle = useAnimatedStyle(() => ({
-    opacity: mode === 'arrived' ? interpolate(pulse.value, [0, 1], [0.28, 0]) : 0,
-    transform: [{ scale: mode === 'arrived' ? interpolate(pulse.value, [0, 1], [1, 2.2]) : 1 }],
+    opacity:
+      mode === 'arrived' ? interpolate(pulse.value, [0, 1], [0.28, 0]) : 0,
+    transform: [
+      {
+        scale:
+          mode === 'arrived' ? interpolate(pulse.value, [0, 1], [1, 2.2]) : 1,
+      },
+    ],
   }));
 
   return (
-    <View style={[styles.container, { gap: theme.spacing.sm }]}>
+    <View style={[styles.container, {gap: theme.spacing.sm}]}>
       <View
-        style={[styles.track, { height: ICON_SIZE }]}
+        style={[styles.track, {height: ICON_SIZE}]}
         onLayout={onTrackLayout}
         importantForAccessibility="no-hide-descendants"
-        accessibilityElementsHidden
-      >
+        accessibilityElementsHidden>
         {/* Línea base sutil (token de borde), centrada verticalmente. */}
         <View
           style={[
             styles.line,
-            { backgroundColor: theme.colors.border, borderRadius: TRACK_HEIGHT, top: (ICON_SIZE - TRACK_HEIGHT) / 2 },
+            {
+              backgroundColor: theme.colors.border,
+              borderRadius: TRACK_HEIGHT,
+              top: (ICON_SIZE - TRACK_HEIGHT) / 2,
+            },
           ]}
         />
         {/* Vehículo animado. Rotado 90° (el glyph es top-down apuntando ↑) para que apunte → (sentido
@@ -162,7 +183,7 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
           <Animated.View
             style={[
               styles.halo,
-              { backgroundColor: theme.colors.safe, borderRadius: ICON_SIZE / 2 },
+              {backgroundColor: theme.colors.safe, borderRadius: ICON_SIZE / 2},
               haloStyle,
             ]}
           />
@@ -181,11 +202,18 @@ export function TripStatusStrip({ status }: TripStatusStripProps): React.JSX.Ele
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%' },
+  container: {width: '100%'},
   // Track de extremo a extremo del contenido del sheet (el padre da el ancho).
-  track: { width: '100%', justifyContent: 'center' },
-  line: { position: 'absolute', left: 0, right: 0, height: TRACK_HEIGHT },
-  icon: { position: 'absolute', left: 0, width: ICON_SIZE, height: ICON_SIZE, alignItems: 'center', justifyContent: 'center' },
-  iconRotate: { transform: [{ rotate: '90deg' }] },
-  halo: { position: 'absolute', width: ICON_SIZE, height: ICON_SIZE },
+  track: {width: '100%', justifyContent: 'center'},
+  line: {position: 'absolute', left: 0, right: 0, height: TRACK_HEIGHT},
+  icon: {
+    position: 'absolute',
+    left: 0,
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconRotate: {transform: [{rotate: '90deg'}]},
+  halo: {position: 'absolute', width: ICON_SIZE, height: ICON_SIZE},
 });

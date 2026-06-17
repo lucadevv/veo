@@ -94,7 +94,10 @@ export class CatalogService {
    * PUT interno: REEMPLAZA wholesale el overlay, bumpea `version`, persiste + EMITE catalog.updated por
    * outbox en la MISMA tx. Idempotente en forma: re-enviar el mismo overlay deja el mismo estado.
    */
-  async replaceOverlay(overrides: OfferingOverride[], expectedVersion: number): Promise<CatalogView> {
+  async replaceOverlay(
+    overrides: OfferingOverride[],
+    expectedVersion: number,
+  ): Promise<CatalogView> {
     const nextVersion = expectedVersion + 1;
     // B2: persistimos también mode/multiplier/minFareCents (solo los definidos → JSON limpio). El repo
     // los re-parsea defensivo y resolveCatalog los aplica/valida.
@@ -110,19 +113,27 @@ export class CatalogService {
 
       let row: { version: number; updatedAt: Date };
       if (updated.count === 1) {
-        const persisted = await tx.offeringCatalog.findUnique({ where: { id: CATALOG_SINGLETON_ID } });
+        const persisted = await tx.offeringCatalog.findUnique({
+          where: { id: CATALOG_SINGLETON_ID },
+        });
         if (!persisted) throw new ConflictError('el catálogo desapareció durante el reemplazo');
         row = persisted;
       } else if (expectedVersion === 0) {
-        const existing = await tx.offeringCatalog.findUnique({ where: { id: CATALOG_SINGLETON_ID } });
+        const existing = await tx.offeringCatalog.findUnique({
+          where: { id: CATALOG_SINGLETON_ID },
+        });
         if (existing) {
-          throw new ConflictError(`el catálogo ya fue inicializado (v${existing.version}); recargá y reintentá`);
+          throw new ConflictError(
+            `el catálogo ya fue inicializado (v${existing.version}); recargá y reintentá`,
+          );
         }
         row = await tx.offeringCatalog.create({
           data: { id: CATALOG_SINGLETON_ID, overrides: overridesJson, version: nextVersion },
         });
       } else {
-        throw new ConflictError(`el catálogo cambió (esperabas v${expectedVersion}); recargá y reintentá`);
+        throw new ConflictError(
+          `el catálogo cambió (esperabas v${expectedVersion}); recargá y reintentá`,
+        );
       }
       // Outbox EN LA MISMA TX (FOUNDATION §6): audit + invalidación de cache en consumidores (public-bff).
       await tx.outboxEvent.create({

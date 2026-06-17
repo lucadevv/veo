@@ -1,1 +1,1 @@
-export {HttpProfileRepository} from './repositories/http-profile-repository';
+export { HttpProfileRepository } from './repositories/http-profile-repository';

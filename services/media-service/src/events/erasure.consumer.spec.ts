@@ -199,7 +199,11 @@ describe('ErasureConsumer · trip.pii_erased (derecho al olvido del video)', () 
     const { invokeTripErased: invoke } = setup(recording);
 
     await invoke(
-      tripErasedEnvelope({ tripId: 'trip-1', passengerId: 'pax-1', at: '2026-06-04T00:00:00.000Z' }),
+      tripErasedEnvelope({
+        tripId: 'trip-1',
+        passengerId: 'pax-1',
+        at: '2026-06-04T00:00:00.000Z',
+      }),
     );
 
     expect(erased).toEqual(['trip-1']);

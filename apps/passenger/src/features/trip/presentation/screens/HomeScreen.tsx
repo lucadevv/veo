@@ -1,7 +1,7 @@
-import type { MapPoint, TripResource } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@tanstack/react-query';
+import type {MapPoint, TripResource} from '@veo/api-client';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useQuery} from '@tanstack/react-query';
 import {
   Avatar,
   Card,
@@ -13,20 +13,28 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import type { RootStackParamList } from '../../../../navigation/types';
-import type { SavedPlace, SavedPlaceKind } from '../../../places/domain/entities';
-import { useSavedPlacesStore } from '../../../places/presentation/stores/savedPlacesStore';
-import type { RoutePlace } from '../../../maps/domain/entities';
-import { useRideDraftStore } from '../../../maps/presentation/stores/rideDraftStore';
-import { useCurrentLocation } from '../hooks/useCurrentLocation';
-import { Animated, EnterView, usePressScale } from '../components/motion';
-import { IconBell, IconHome, IconPin, IconSearch, IconStar, IconWork, type GlyphProps } from '../components/icons';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import type {RootStackParamList} from '../../../../navigation/types';
+import type {SavedPlace, SavedPlaceKind} from '../../../places/domain/entities';
+import {useSavedPlacesStore} from '../../../places/presentation/stores/savedPlacesStore';
+import type {RoutePlace} from '../../../maps/domain/entities';
+import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
+import {useCurrentLocation} from '../hooks/useCurrentLocation';
+import {Animated, EnterView, usePressScale} from '../components/motion';
+import {
+  IconBell,
+  IconHome,
+  IconPin,
+  IconSearch,
+  IconStar,
+  IconWork,
+  type GlyphProps,
+} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -34,14 +42,19 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 const MAX_RECENTS = 3;
 
 /** Glyph por tipo de lugar guardado (set `I` del diseño · home/work/star), reemplaza emojis. */
-const PLACE_GLYPH: Record<SavedPlaceKind, (props: GlyphProps) => React.JSX.Element> = {
+const PLACE_GLYPH: Record<
+  SavedPlaceKind,
+  (props: GlyphProps) => React.JSX.Element
+> = {
   HOME: IconHome,
   WORK: IconWork,
   FAVORITE: IconStar,
 };
 
 /** Extrae destinos recientes únicos del historial local (recursos reales del bff). */
-function recentDestinations(trips: TripResource[]): TripResource['destination'][] {
+function recentDestinations(
+  trips: TripResource[],
+): TripResource['destination'][] {
   const seen = new Set<string>();
   const result: TripResource['destination'][] = [];
   for (const trip of trips) {
@@ -62,7 +75,7 @@ function placeToRoute(place: SavedPlace): RoutePlace {
   return {
     point: place.point,
     title: place.label,
-    ...(place.subtitle ? { subtitle: place.subtitle } : {}),
+    ...(place.subtitle ? {subtitle: place.subtitle} : {}),
   };
 }
 
@@ -80,24 +93,28 @@ function placeToRoute(place: SavedPlace): RoutePlace {
  */
 export function HomeScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
   const getProfile = useDependency(TOKENS.getProfileUseCase);
   const history = useDependency(TOKENS.tripHistoryRepository);
 
-  const { point: myLocation, loading: locating, error: locationError } = useCurrentLocation();
+  const {
+    point: myLocation,
+    loading: locating,
+    error: locationError,
+  } = useCurrentLocation();
   // Alto medido del overlay inferior (búsqueda + atajos) → el botón "recentrarme" flota POR ENCIMA de él.
   const [bottomChrome, setBottomChrome] = useState(0);
-  const origin = useRideDraftStore((s) => s.origin);
-  const setOrigin = useRideDraftStore((s) => s.setOrigin);
-  const setDestination = useRideDraftStore((s) => s.setDestination);
-  const setEditing = useRideDraftStore((s) => s.setEditing);
-  const savedPlaces = useSavedPlacesStore((s) => s.places);
+  const origin = useRideDraftStore(s => s.origin);
+  const setOrigin = useRideDraftStore(s => s.setOrigin);
+  const setDestination = useRideDraftStore(s => s.setDestination);
+  const setEditing = useRideDraftStore(s => s.setEditing);
+  const savedPlaces = useSavedPlacesStore(s => s.places);
 
   const myPoint = useMemo<MapPoint | null>(
-    () => (myLocation ? { lat: myLocation.lat, lng: myLocation.lon } : null),
+    () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
     [myLocation],
   );
 
@@ -120,7 +137,7 @@ export function HomeScreen(): React.JSX.Element {
   useEffect(() => {
     if (!origin && reverseQuery.data) {
       setOrigin({
-        point: { lat: reverseQuery.data.lat, lng: reverseQuery.data.lng },
+        point: {lat: reverseQuery.data.lat, lng: reverseQuery.data.lng},
         title: reverseQuery.data.title,
         subtitle: reverseQuery.data.subtitle,
       });
@@ -128,7 +145,7 @@ export function HomeScreen(): React.JSX.Element {
   }, [origin, reverseQuery.data, setOrigin]);
 
   const openSearch = useCallback(() => {
-    setEditing({ kind: 'destination' });
+    setEditing({kind: 'destination'});
     navigation.navigate('Search');
   }, [navigation, setEditing]);
 
@@ -146,7 +163,8 @@ export function HomeScreen(): React.JSX.Element {
   const locationFailed = Boolean(locationError) && !myLocation;
   const userLabel = locationFailed
     ? t('home.locationUnavailable')
-    : reverseQuery.data?.title ?? (locating ? t('home.locating') : t('home.yourLocation'));
+    : (reverseQuery.data?.title ??
+      (locating ? t('home.locating') : t('home.yourLocation')));
 
   // Atajos (chips horizontales): lugares guardados primero, luego recientes — todos con SVG del set.
   const hasShortcuts = savedPlaces.length > 0 || recents.length > 0;
@@ -162,19 +180,27 @@ export function HomeScreen(): React.JSX.Element {
                 styles.locationPill,
                 {
                   backgroundColor: theme.colors.surface,
-                  borderColor: locationFailed ? theme.colors.warn : theme.colors.border,
+                  borderColor: locationFailed
+                    ? theme.colors.warn
+                    : theme.colors.border,
                   borderRadius: theme.radii.pill,
                   ...theme.elevation.level2,
                 },
-              ]}
-            >
+              ]}>
               <View
                 style={[
                   styles.locationDot,
-                  { backgroundColor: locationFailed ? theme.colors.warn : theme.colors.accent },
+                  {
+                    backgroundColor: locationFailed
+                      ? theme.colors.warn
+                      : theme.colors.accent,
+                  },
                 ]}
               />
-              <Text variant="subhead" numberOfLines={1} style={styles.locationLabel}>
+              <Text
+                variant="subhead"
+                numberOfLines={1}
+                style={styles.locationLabel}>
                 {userLabel}
               </Text>
             </View>
@@ -184,13 +210,12 @@ export function HomeScreen(): React.JSX.Element {
                 variant="surface"
                 onPress={() => navigation.navigate('Notifications')}
                 icon={<IconBell color={theme.colors.ink} size={20} />}
-                style={{ ...theme.elevation.level2 }}
+                style={{...theme.elevation.level2}}
               />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('screens.profile')}
-                onPress={() => navigation.navigate('Profile')}
-              >
+                onPress={() => navigation.navigate('Profile')}>
                 <Avatar
                   uri={profileQuery.data?.photoUrl ?? undefined}
                   name={profileQuery.data?.name ?? t('appName')}
@@ -202,17 +227,15 @@ export function HomeScreen(): React.JSX.Element {
         }
         bottomOverlay={
           <View
-            style={{ gap: theme.spacing.md }}
+            style={{gap: theme.spacing.md}}
             pointerEvents="box-none"
-            onLayout={(e) => setBottomChrome(e.nativeEvent.layout.height)}
-          >
+            onLayout={e => setBottomChrome(e.nativeEvent.layout.height)}>
             {hasShortcuts ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: theme.spacing.sm }}
-                keyboardShouldPersistTaps="handled"
-              >
+                contentContainerStyle={{gap: theme.spacing.sm}}
+                keyboardShouldPersistTaps="handled">
                 {savedPlaces.map((place, index) => (
                   <PlaceShortcut
                     key={place.id}
@@ -244,14 +267,16 @@ export function HomeScreen(): React.JSX.Element {
             {savedPlaces.length > 0 ? (
               <EnterView delay={160}>
                 <Card variant="filled" padding="sm">
-                  {savedPlaces.map((place) => {
+                  {savedPlaces.map(place => {
                     const Glyph = PLACE_GLYPH[place.kind];
                     return (
                       <ListItem
                         key={place.id}
                         title={place.label}
                         subtitle={place.subtitle}
-                        leading={<Glyph color={theme.colors.accent} size={20} />}
+                        leading={
+                          <Glyph color={theme.colors.accent} size={20} />
+                        }
                         chevron
                         onPress={() => selectDestination(placeToRoute(place))}
                       />
@@ -261,8 +286,7 @@ export function HomeScreen(): React.JSX.Element {
               </EnterView>
             ) : null}
           </View>
-        }
-      >
+        }>
         <AppMap
           center={myLocation}
           userPoint={myLocation}
@@ -283,9 +307,14 @@ interface PlaceShortcutProps {
 }
 
 /** Chip de atajo (lugar guardado): ícono del set + etiqueta. Fija el destino y va a cotizar. */
-function PlaceShortcut({ label, icon: Glyph, index, onPress }: PlaceShortcutProps): React.JSX.Element {
+function PlaceShortcut({
+  label,
+  icon: Glyph,
+  index,
+  onPress,
+}: PlaceShortcutProps): React.JSX.Element {
   const theme = useTheme();
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale();
+  const {animatedStyle, onPressIn, onPressOut} = usePressScale();
 
   return (
     <EnterView index={index} offsetY={0}>
@@ -294,8 +323,7 @@ function PlaceShortcut({ label, icon: Glyph, index, onPress }: PlaceShortcutProp
         accessibilityLabel={label}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
-        onPress={onPress}
-      >
+        onPress={onPress}>
         <Animated.View
           style={[
             styles.chip,
@@ -308,8 +336,7 @@ function PlaceShortcut({ label, icon: Glyph, index, onPress }: PlaceShortcutProp
               paddingVertical: theme.spacing.sm,
               ...theme.elevation.level1,
             },
-          ]}
-        >
+          ]}>
           <Glyph color={theme.colors.accent} size={16} />
           <Text variant="subhead" numberOfLines={1} style={styles.chipLabel}>
             {label}
@@ -330,11 +357,18 @@ interface RecentChipProps {
  * Atajo de destino reciente: etiqueta el punto con geocoding inverso real y, al tocarlo, fija el
  * destino del borrador y navega a la cotización. El origen ya está sembrado por la ubicación actual.
  */
-function RecentChip({ point, index, onSelect }: RecentChipProps): React.JSX.Element | null {
+function RecentChip({
+  point,
+  index,
+  onSelect,
+}: RecentChipProps): React.JSX.Element | null {
   const theme = useTheme();
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale();
-  const mapPoint = useMemo<MapPoint>(() => ({ lat: point.lat, lng: point.lon }), [point]);
+  const {animatedStyle, onPressIn, onPressOut} = usePressScale();
+  const mapPoint = useMemo<MapPoint>(
+    () => ({lat: point.lat, lng: point.lon}),
+    [point],
+  );
 
   const labelQuery = useQuery({
     queryKey: ['maps', 'reverse', mapPoint.lat, mapPoint.lng],
@@ -355,12 +389,11 @@ function RecentChip({ point, index, onSelect }: RecentChipProps): React.JSX.Elem
         onPressOut={onPressOut}
         onPress={() =>
           onSelect({
-            point: { lat: labelQuery.data!.lat, lng: labelQuery.data!.lng },
+            point: {lat: labelQuery.data!.lat, lng: labelQuery.data!.lng},
             title: labelQuery.data!.title,
             subtitle: labelQuery.data!.subtitle,
           })
-        }
-      >
+        }>
         <Animated.View
           style={[
             styles.chip,
@@ -373,8 +406,7 @@ function RecentChip({ point, index, onSelect }: RecentChipProps): React.JSX.Elem
               paddingVertical: theme.spacing.sm,
               ...theme.elevation.level1,
             },
-          ]}
-        >
+          ]}>
           <IconPin color={theme.colors.accent} size={16} />
           <Text variant="subhead" numberOfLines={1} style={styles.chipLabel}>
             {labelQuery.data.title}
@@ -386,11 +418,30 @@ function RecentChip({ point, index, onSelect }: RecentChipProps): React.JSX.Elem
 }
 
 const styles = StyleSheet.create({
-  topRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  locationPill: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1 },
-  locationDot: { width: 7, height: 7, borderRadius: 999 },
-  locationLabel: { flexShrink: 1 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220 },
-  chipLabel: { flexShrink: 1 },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  topActions: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  locationPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+  },
+  locationDot: {width: 7, height: 7, borderRadius: 999},
+  locationLabel: {flexShrink: 1},
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    maxWidth: 220,
+  },
+  chipLabel: {flexShrink: 1},
 });

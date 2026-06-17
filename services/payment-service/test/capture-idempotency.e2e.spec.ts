@@ -11,7 +11,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -44,7 +48,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 beforeAll(async () => {
@@ -60,7 +67,13 @@ beforeAll(async () => {
   const gateway = {} as unknown as PaymentGateway;
   const affiliations = {} as unknown as AffiliationsService;
   const promotions = {} as unknown as PromotionsService;
-  payments = new PaymentsService(prismaService, gateway, affiliations, promotions, makeConfig() as never);
+  payments = new PaymentsService(
+    prismaService,
+    gateway,
+    affiliations,
+    promotions,
+    makeConfig() as never,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -69,7 +82,9 @@ afterAll(async () => {
 });
 
 /** Inserta un pago PENDING con los campos mínimos requeridos por el modelo. */
-async function seedPendingPayment(method: 'YAPE' | 'CASH'): Promise<{ id: string; tripId: string }> {
+async function seedPendingPayment(
+  method: 'YAPE' | 'CASH',
+): Promise<{ id: string; tripId: string }> {
   const id = uuidv7();
   const tripId = uuidv7();
   await prisma.payment.create({

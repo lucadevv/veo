@@ -26,10 +26,15 @@ export class ProntoPagaWebhookService {
     private readonly affiliations: AffiliationsService,
   ) {}
 
-  async process(rawBody: string, headers: Record<string, string | string[] | undefined>): Promise<void> {
+  async process(
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+  ): Promise<void> {
     if (!supportsWebhooks(this.gateway)) {
       // El gateway activo (live) no verifica webhooks: no aceptamos eventos no verificables.
-      this.logger.warn('Webhook recibido pero el gateway activo no soporta verificación; rechazado');
+      this.logger.warn(
+        'Webhook recibido pero el gateway activo no soporta verificación; rechazado',
+      );
       throw new UnauthorizedError('El gateway activo no verifica webhooks');
     }
 
@@ -67,7 +72,9 @@ export class ProntoPagaWebhookService {
     headers: Record<string, string | string[] | undefined>,
   ): Promise<void> {
     if (!supportsWebhooks(this.gateway)) {
-      this.logger.warn('Callback de reembolso recibido pero el gateway activo no soporta verificación; rechazado');
+      this.logger.warn(
+        'Callback de reembolso recibido pero el gateway activo no soporta verificación; rechazado',
+      );
       throw new UnauthorizedError('El gateway activo no verifica webhooks');
     }
     // Lanza UnauthorizedError (→401) si la firma es inválida. No logueamos el cuerpo crudo.

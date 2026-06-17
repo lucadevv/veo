@@ -1,5 +1,5 @@
-import type {RegistrationRepository} from '../repositories/registration-repository';
-import type {PersonalData, PersonalDataInput, PersonalDataView} from '../entities';
+import type { RegistrationRepository } from '../repositories/registration-repository';
+import type { PersonalData, PersonalDataInput, PersonalDataView } from '../entities';
 
 /**
  * Código de error de validación por campo de datos personales. El dominio NO conoce i18n: emite
@@ -22,8 +22,8 @@ export interface PersonalDataErrors {
 
 /** Resultado de validar/mapear los datos del wizard al body del contrato. */
 export type PersonalDataValidation =
-  | {ok: true; request: PersonalDataInput}
-  | {ok: false; errors: PersonalDataErrors};
+  | { ok: true; request: PersonalDataInput }
+  | { ok: false; errors: PersonalDataErrors };
 
 /** Longitud máxima del nombre legal (coherente con `driverPersonalDataRequest.legalName`). */
 const MAX_NAME_LENGTH = 120;
@@ -58,9 +58,9 @@ export function validatePersonalData(personal: PersonalData): PersonalDataValida
   const birthDate = toIsoBirthDate(personal.birthdate, errors);
 
   if (errors.fullName || errors.dni || errors.birthdate) {
-    return {ok: false, errors};
+    return { ok: false, errors };
   }
-  return {ok: true, request: {legalName, dni, birthDate: birthDate as string}};
+  return { ok: true, request: { legalName, dni, birthDate: birthDate as string } };
 }
 
 /**

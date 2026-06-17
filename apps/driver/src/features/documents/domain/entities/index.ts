@@ -1,4 +1,8 @@
-import type {AddDocumentRequest, DriverDocument, DriverDocumentSimpleStatus} from '@veo/api-client';
+import type {
+  AddDocumentRequest,
+  DriverDocument,
+  DriverDocumentSimpleStatus,
+} from '@veo/api-client';
 
 /**
  * Entidades del dominio de documentos del conductor. El contrato `DriverDocument` trae tanto el
@@ -6,7 +10,7 @@ import type {AddDocumentRequest, DriverDocument, DriverDocumentSimpleStatus} fro
  * UI, además del número, vencimiento (`expiresAt`, ISO o null) y el flag agregado `ok`.
  */
 export type DriverDocument_ = DriverDocument;
-export type {DriverDocument, DriverDocumentSimpleStatus};
+export type { DriverDocument, DriverDocumentSimpleStatus };
 
 /** Lista de documentos tal como la devuelve `GET /drivers/me/documents`. */
 export type DriverDocumentList = DriverDocument[];

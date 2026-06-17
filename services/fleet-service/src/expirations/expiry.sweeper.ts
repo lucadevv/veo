@@ -26,7 +26,10 @@ import {
   deriveExpiryStatus,
   isCriticalDocument,
 } from '../documents/document-rules';
-import { aggregateVehicleDocStatus, VEHICLE_REQUIRED_DOCUMENT_TYPES } from '../vehicles/vehicle-rules';
+import {
+  aggregateVehicleDocStatus,
+  VEHICLE_REQUIRED_DOCUMENT_TYPES,
+} from '../vehicles/vehicle-rules';
 import {
   FleetDocumentStatus,
   FleetOwnerType,
@@ -85,7 +88,11 @@ export class ExpirySweeper {
         where: {
           expiresAt: { not: null },
           status: {
-            in: [FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED],
+            in: [
+              FleetDocumentStatus.VALID,
+              FleetDocumentStatus.EXPIRING_SOON,
+              FleetDocumentStatus.EXPIRED,
+            ],
           },
         },
         orderBy: { id: 'asc' },
@@ -106,7 +113,11 @@ export class ExpirySweeper {
     return summary;
   }
 
-  private async processDocument(doc: FleetDocument, now: Date, summary: SweepSummary): Promise<void> {
+  private async processDocument(
+    doc: FleetDocument,
+    now: Date,
+    summary: SweepSummary,
+  ): Promise<void> {
     const newStatus = deriveExpiryStatus(doc.expiresAt, now, this.warningDays);
     const statusChanged = newStatus !== doc.status;
     const milestone = computeExpiryAlert({
@@ -148,7 +159,11 @@ export class ExpirySweeper {
           expiresAt: doc.expiresAt.toISOString(),
           critical,
         };
-        await this.enqueue(tx, doc.id, buildFleetEvent(FleetEventType.DOCUMENT_EXPIRED, expiredPayload));
+        await this.enqueue(
+          tx,
+          doc.id,
+          buildFleetEvent(FleetEventType.DOCUMENT_EXPIRED, expiredPayload),
+        );
 
         if (critical && doc.ownerType === FleetOwnerType.DRIVER) {
           const suspendPayload: DriverSuspendedPayload = {
@@ -158,7 +173,11 @@ export class ExpirySweeper {
             documentType: doc.type,
             suspendedAt: now.toISOString(),
           };
-          await this.enqueue(tx, doc.ownerId, buildFleetEvent(FleetEventType.DRIVER_SUSPENDED, suspendPayload));
+          await this.enqueue(
+            tx,
+            doc.ownerId,
+            buildFleetEvent(FleetEventType.DRIVER_SUSPENDED, suspendPayload),
+          );
           summary.driversSuspended += 1;
         }
       }
@@ -187,7 +206,11 @@ export class ExpirySweeper {
           ownerId: { in: vehicleIds },
           type: { in: [...VEHICLE_REQUIRED_DOCUMENT_TYPES] },
           status: {
-            in: [FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED],
+            in: [
+              FleetDocumentStatus.VALID,
+              FleetDocumentStatus.EXPIRING_SOON,
+              FleetDocumentStatus.EXPIRED,
+            ],
           },
         },
         select: { ownerId: true, status: true },
@@ -212,7 +235,11 @@ export class ExpirySweeper {
               reason: 'Documentación del vehículo vencida (SOAT/ITV/seguro)',
               suspendedAt: now.toISOString(),
             };
-            await this.enqueue(tx, vehicle.id, buildFleetEvent(FleetEventType.VEHICLE_SUSPENDED, payload));
+            await this.enqueue(
+              tx,
+              vehicle.id,
+              buildFleetEvent(FleetEventType.VEHICLE_SUSPENDED, payload),
+            );
           }
         });
         updated += 1;

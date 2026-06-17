@@ -1,1 +1,1 @@
-export {HttpTripsRepository} from './repositories/http-trips-repository';
+export { HttpTripsRepository } from './repositories/http-trips-repository';

@@ -16,10 +16,7 @@ import type { ImmutableObjectStore } from './storage/object-lock.store';
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
   inject: [PrismaService, AUDIT_OBJECT_STORE],
-  useFactory: (
-    prisma: PrismaService,
-    store: ImmutableObjectStore | null,
-  ): ReadinessCheck[] => {
+  useFactory: (prisma: PrismaService, store: ImmutableObjectStore | null): ReadinessCheck[] => {
     const checks: ReadinessCheck[] = [
       {
         name: 'postgres',

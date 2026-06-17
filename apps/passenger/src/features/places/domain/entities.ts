@@ -1,4 +1,4 @@
-import type { MapPoint } from '@veo/api-client';
+import type {MapPoint} from '@veo/api-client';
 
 /**
  * Entidades de dominio de Lugares guardados (feature 100% LOCAL, sin backend). El pasajero guarda

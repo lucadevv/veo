@@ -1,4 +1,4 @@
-import type {FaceCapture} from '../entities';
+import type { FaceCapture } from '../entities';
 
 /**
  * Puerto de captura facial del REGISTRO (KYC del alta). Es propio del feature de registro y NO

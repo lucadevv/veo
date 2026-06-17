@@ -1,5 +1,5 @@
-import {useCallback, useState} from 'react';
-import {useBiometricEnrollment} from '../providers/BiometricCaptureProvider';
+import { useCallback, useState } from 'react';
+import { useBiometricEnrollment } from '../providers/BiometricCaptureProvider';
 
 export type EnrollPhase = 'idle' | 'capturing' | 'done';
 
@@ -25,5 +25,5 @@ export function useBiometricEnroll(onSuccess: () => void) {
     }
   }, [enrollment, onSuccess]);
 
-  return {run, phase, error, isBusy: phase === 'capturing'};
+  return { run, phase, error, isBusy: phase === 'capturing' };
 }

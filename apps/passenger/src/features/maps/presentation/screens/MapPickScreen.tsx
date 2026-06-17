@@ -1,7 +1,7 @@
-import type { GeoPoint, MapPoint } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@tanstack/react-query';
+import type {GeoPoint, MapPoint} from '@veo/api-client';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useQuery} from '@tanstack/react-query';
 import {
   Banner,
   Button,
@@ -12,24 +12,24 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import { isWithinLima, LIMA_CENTER } from '../../../../shared/utils/geo';
-import { useCurrentLocation } from '../../../trip/presentation/hooks/useCurrentLocation';
-import { IconClose } from '../../../trip/presentation/components/icons';
-import { isWaypointSet, type RoutePlace } from '../../domain/entities';
-import { useRideDraftStore } from '../stores/rideDraftStore';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import {isWithinLima, LIMA_CENTER} from '../../../../shared/utils/geo';
+import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {IconClose} from '../../../trip/presentation/components/icons';
+import {isWaypointSet, type RoutePlace} from '../../domain/entities';
+import {useRideDraftStore} from '../stores/rideDraftStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** La API de mapas usa `lng`; el mapa/GeoPoint usa `lon`. Convertimos en el borde. */
-const toMapPoint = (p: GeoPoint): MapPoint => ({ lat: p.lat, lng: p.lon });
+const toMapPoint = (p: GeoPoint): MapPoint => ({lat: p.lat, lng: p.lon});
 
 /**
  * Elegir un punto (recojo/destino/parada) ARRASTRANDO el mapa bajo un PIN FIJO al centro (patrón
@@ -39,19 +39,19 @@ const toMapPoint = (p: GeoPoint): MapPoint => ({ lat: p.lat, lng: p.lon });
  */
 export function MapPickScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const { point: myLocation } = useCurrentLocation();
+  const {point: myLocation} = useCurrentLocation();
 
-  const editing = useRideDraftStore((s) => s.editing);
-  const origin = useRideDraftStore((s) => s.origin);
-  const destination = useRideDraftStore((s) => s.destination);
-  const waypoints = useRideDraftStore((s) => s.waypoints);
-  const setOrigin = useRideDraftStore((s) => s.setOrigin);
-  const setDestination = useRideDraftStore((s) => s.setDestination);
-  const setWaypoint = useRideDraftStore((s) => s.setWaypoint);
+  const editing = useRideDraftStore(s => s.editing);
+  const origin = useRideDraftStore(s => s.origin);
+  const destination = useRideDraftStore(s => s.destination);
+  const waypoints = useRideDraftStore(s => s.waypoints);
+  const setOrigin = useRideDraftStore(s => s.setOrigin);
+  const setDestination = useRideDraftStore(s => s.setDestination);
+  const setWaypoint = useRideDraftStore(s => s.setWaypoint);
 
   // Abrimos el mapa centrado en el punto ACTUAL del extremo en edición (o en mi ubicación). lng→lon.
   const initialCenter = useMemo<GeoPoint | null>(() => {
@@ -61,7 +61,7 @@ export function MapPickScreen(): React.JSX.Element {
         : editing.kind === 'destination'
           ? destination
           : waypoints[editing.index];
-    if (place) return { lat: place.point.lat, lon: place.point.lng };
+    if (place) return {lat: place.point.lat, lon: place.point.lng};
     if (myLocation) return myLocation;
     // Sin punto previo ni GPS (permiso denegado/sin fix): el picker es MANUAL (arrastrás el mapa bajo el
     // pin), así que caemos al centro de Lima en vez de dejar el centro NULO — que dejaba "Confirmar"
@@ -104,9 +104,15 @@ export function MapPickScreen(): React.JSX.Element {
   const inLima = center ? isWithinLima(center) : false;
 
   const reverse = useQuery({
-    queryKey: ['maps', 'reverse', debounced?.lat ?? null, debounced?.lon ?? null],
+    queryKey: [
+      'maps',
+      'reverse',
+      debounced?.lat ?? null,
+      debounced?.lon ?? null,
+    ],
     queryFn: () => reverseGeocode.execute(toMapPoint(debounced as GeoPoint)),
-    enabled: Boolean(debounced) && (debounced ? isWithinLima(debounced) : false),
+    enabled:
+      Boolean(debounced) && (debounced ? isWithinLima(debounced) : false),
     staleTime: 60_000,
   });
 
@@ -115,9 +121,14 @@ export function MapPickScreen(): React.JSX.Element {
       ? t('maps.pickup.titleOrigin')
       : editing.kind === 'destination'
         ? t('maps.pickup.titleDestination')
-        : t('maps.pickup.titleStop', { index: editing.index + 1 });
+        : t('maps.pickup.titleStop', {index: editing.index + 1});
 
-  const pinVariant = editing.kind === 'destination' ? 'destination' : editing.kind === 'waypoint' ? 'stop' : 'origin';
+  const pinVariant =
+    editing.kind === 'destination'
+      ? 'destination'
+      : editing.kind === 'waypoint'
+        ? 'stop'
+        : 'origin';
 
   const confirm = useCallback(() => {
     // Guard anti doble-tap: `confirm` hace `goBack()`; dos taps rápidos harían un doble-pop del stack
@@ -126,7 +137,7 @@ export function MapPickScreen(): React.JSX.Element {
     if (!center || !isWithinLima(center)) return;
     confirmedRef.current = true;
     const place: RoutePlace = {
-      point: { lat: center.lat, lng: center.lon },
+      point: {lat: center.lat, lng: center.lon},
       title: reverse.data?.title ?? t('maps.pickedPoint'),
       subtitle: reverse.data?.subtitle,
     };
@@ -134,7 +145,16 @@ export function MapPickScreen(): React.JSX.Element {
     else if (editing.kind === 'destination') setDestination(place);
     else setWaypoint(editing.index, place);
     navigation.goBack();
-  }, [center, reverse.data, editing, setOrigin, setDestination, setWaypoint, navigation, t]);
+  }, [
+    center,
+    reverse.data,
+    editing,
+    setOrigin,
+    setDestination,
+    setWaypoint,
+    navigation,
+    t,
+  ]);
 
   return (
     <SafeScreen padded={false}>
@@ -150,20 +170,36 @@ export function MapPickScreen(): React.JSX.Element {
         pointerEvents="none"
         accessible
         accessibilityRole="image"
-        accessibilityLabel={`${title}. ${reverse.data?.title ?? t('maps.pickup.resolving')}`}
-      >
+        accessibilityLabel={`${title}. ${reverse.data?.title ?? t('maps.pickup.resolving')}`}>
         <View style={styles.pinCenter}>
           <View style={styles.pinFloat}>
-            <View style={[styles.pinPuck, { backgroundColor: theme.colors.surface, ...theme.elevation.level3 }]}>
+            <View
+              style={[
+                styles.pinPuck,
+                {
+                  backgroundColor: theme.colors.surface,
+                  ...theme.elevation.level3,
+                },
+              ]}>
               <RoutePin variant={pinVariant} size={20} />
             </View>
           </View>
-          <View style={[styles.pinShadow, { backgroundColor: theme.colors.overlay }]} />
+          <View
+            style={[styles.pinShadow, {backgroundColor: theme.colors.overlay}]}
+          />
         </View>
       </View>
 
       {/* Header flotante: cerrar + título del extremo en edición. */}
-      <View style={[styles.header, { top: insets.top + theme.spacing.sm, paddingHorizontal: theme.spacing.lg }]} pointerEvents="box-none">
+      <View
+        style={[
+          styles.header,
+          {
+            top: insets.top + theme.spacing.sm,
+            paddingHorizontal: theme.spacing.lg,
+          },
+        ]}
+        pointerEvents="box-none">
         <IconButton
           accessibilityLabel={t('actions.close')}
           variant="surface"
@@ -173,9 +209,12 @@ export function MapPickScreen(): React.JSX.Element {
         <View
           style={[
             styles.titlePill,
-            { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill, ...theme.elevation.level2 },
-          ]}
-        >
+            {
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radii.pill,
+              ...theme.elevation.level2,
+            },
+          ]}>
           <Text variant="subhead" numberOfLines={1}>
             {title}
           </Text>
@@ -194,8 +233,7 @@ export function MapPickScreen(): React.JSX.Element {
             borderTopRightRadius: theme.radii.xl,
             ...theme.elevation.level3,
           },
-        ]}
-      >
+        ]}>
         <Text variant="footnote" color="inkMuted">
           {t('maps.pickup.hint')}
         </Text>
@@ -233,7 +271,13 @@ export function MapPickScreen(): React.JSX.Element {
           disabled={!center || !inLima}
           // a11y: explica POR QUÉ está deshabilitado (fuera de Lima / aún sin centro), que el Banner visual
           // no le anuncia al lector de pantalla.
-          accessibilityHint={!inLima ? t('maps.pickup.outsideLima') : !center ? t('maps.pickup.hint') : undefined}
+          accessibilityHint={
+            !inLima
+              ? t('maps.pickup.outsideLima')
+              : !center
+                ? t('maps.pickup.hint')
+                : undefined
+          }
           onPress={confirm}
         />
       </View>
@@ -242,15 +286,41 @@ export function MapPickScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  pinCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  pinCenter: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   // El pin "flota" unos px arriba del punto exacto; la sombra marca el punto en el mapa.
-  pinFloat: { transform: [{ translateY: -12 }] },
+  pinFloat: {transform: [{translateY: -12}]},
   // "Puck" de superficie tras el glifo: contraste garantizado sobre tierra/agua/noche + elevación real.
-  pinPuck: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  pinShadow: { width: 16, height: 5, borderRadius: 8, opacity: 0.45 },
-  header: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  titlePill: { flex: 1, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center' },
-  headerSpacer: { width: 44 },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 16, gap: 12 },
-  addressRow: { minHeight: 44, justifyContent: 'center', gap: 2 },
+  pinPuck: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinShadow: {width: 16, height: 5, borderRadius: 8, opacity: 0.45},
+  header: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  titlePill: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  headerSpacer: {width: 44},
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    gap: 12,
+  },
+  addressRow: {minHeight: 44, justifyContent: 'center', gap: 2},
 });

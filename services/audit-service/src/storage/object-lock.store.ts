@@ -114,9 +114,7 @@ export class S3ObjectLockStore implements ImmutableObjectStore {
 
   async getObject(key: string): Promise<string> {
     try {
-      const res = await this.client.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
       const body = res.Body;
       if (!body) throw new Error('cuerpo vacío');
       return await body.transformToString('utf-8');

@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  AdminRole,
-  ADMIN_ROLE_RANK,
-  maxRoleRank,
-  canGrantRoles,
-} from '../src/enums/index.js';
+import { AdminRole, ADMIN_ROLE_RANK, maxRoleRank, canGrantRoles } from '../src/enums/index.js';
 
 describe('ADMIN_ROLE_RANK · exhaustividad y orden', () => {
   it('cubre TODOS los roles del enum (Record exhaustivo)', () => {
@@ -58,9 +53,9 @@ describe('canGrantRoles · estricta (<) con excepción SUPERADMIN→SUPERADMIN',
   });
 
   it('un solo target inválido invalida todo el lote', () => {
-    expect(
-      canGrantRoles([AdminRole.ADMIN], [AdminRole.SUPPORT_L2, AdminRole.SUPERADMIN]),
-    ).toBe(false);
+    expect(canGrantRoles([AdminRole.ADMIN], [AdminRole.SUPPORT_L2, AdminRole.SUPERADMIN])).toBe(
+      false,
+    );
   });
 
   it('actor sin roles no puede otorgar nada', () => {

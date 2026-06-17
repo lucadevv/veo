@@ -6,7 +6,7 @@ import {
   type YapeAffiliationView,
   yapeAffiliationView,
 } from '@veo/api-client';
-import type { AffiliationRepository } from '../domain/affiliationRepository';
+import type {AffiliationRepository} from '../domain/affiliationRepository';
 import {
   AffiliationDocumentMissingError,
   AffiliationProfileIncompleteError,
@@ -28,10 +28,14 @@ export class HttpAffiliationRepository implements AffiliationRepository {
   constructor(private readonly http: HttpClient) {}
 
   getYapeAffiliation(): Promise<YapeAffiliationView> {
-    return this.http.get('/payments/affiliations/yape', { schema: yapeAffiliationView });
+    return this.http.get('/payments/affiliations/yape', {
+      schema: yapeAffiliationView,
+    });
   }
 
-  async createYapeAffiliation(input?: CreateYapeAffiliation): Promise<YapeAffiliationView> {
+  async createYapeAffiliation(
+    input?: CreateYapeAffiliation,
+  ): Promise<YapeAffiliationView> {
     try {
       // Body OPCIONAL: sin documento → `{}` (UN TAP, el server lo resuelve del perfil); con documento →
       // el server lo persiste en el perfil y afilia (primera vez). El `{}` viaja explícito.
@@ -76,6 +80,8 @@ export class HttpAffiliationRepository implements AffiliationRepository {
   }
 
   revokeYapeAffiliation(): Promise<YapeAffiliationView> {
-    return this.http.delete('/payments/affiliations/yape', { schema: yapeAffiliationView });
+    return this.http.delete('/payments/affiliations/yape', {
+      schema: yapeAffiliationView,
+    });
   }
 }

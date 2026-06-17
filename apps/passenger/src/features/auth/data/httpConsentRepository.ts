@@ -6,7 +6,7 @@ import {
   type HttpClient,
   type RecordConsentRequest,
 } from '@veo/api-client';
-import type { ConsentRepository } from '../domain/consentRepository';
+import type {ConsentRepository} from '../domain/consentRepository';
 
 /** Implementación de `ConsentRepository` contra el public-bff (GET/POST /users/me/consents). */
 export class HttpConsentRepository implements ConsentRepository {
@@ -20,6 +20,6 @@ export class HttpConsentRepository implements ConsentRepository {
   }
 
   getCurrent(): Promise<CurrentConsent> {
-    return this.http.get('/users/me/consents', { schema: currentConsent });
+    return this.http.get('/users/me/consents', {schema: currentConsent});
   }
 }

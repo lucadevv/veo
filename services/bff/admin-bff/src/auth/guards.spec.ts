@@ -54,7 +54,10 @@ describe('StepUpMfaGuard', () => {
 
   it('permite si se exige step-up y la MFA es reciente', () => {
     const guard = new StepUpMfaGuard(reflectorReturning(true));
-    const fresh: AuthenticatedUser = { ...financeUser, mfaVerifiedAt: Math.floor(Date.now() / 1000) };
+    const fresh: AuthenticatedUser = {
+      ...financeUser,
+      mfaVerifiedAt: Math.floor(Date.now() / 1000),
+    };
     expect(guard.canActivate(ctxWithUser(fresh))).toBe(true);
   });
 });

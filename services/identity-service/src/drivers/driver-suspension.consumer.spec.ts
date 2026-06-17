@@ -53,10 +53,7 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
     await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope(validPayload));
     expect(drivers.suspendByFleet).toHaveBeenCalledTimes(1);
-    expect(drivers.suspendByFleet).toHaveBeenCalledWith(
-      'd1',
-      new Date('2026-06-04T10:00:00.000Z'),
-    );
+    expect(drivers.suspendByFleet).toHaveBeenCalledWith('d1', new Date('2026-06-04T10:00:00.000Z'));
   });
 
   it('es idempotente extremo-a-extremo: reentrega del mismo evento (suspendByFleet → false) no rompe', async () => {

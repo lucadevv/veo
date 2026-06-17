@@ -1,6 +1,6 @@
-import type { ReferralSummary } from '@veo/api-client';
-import { normalizeReferralCode } from '../src/features/referrals/domain/entities';
-import type { ReferralsRepository } from '../src/features/referrals/domain/referralsRepository';
+import type {ReferralSummary} from '@veo/api-client';
+import {normalizeReferralCode} from '../src/features/referrals/domain/entities';
+import type {ReferralsRepository} from '../src/features/referrals/domain/referralsRepository';
 import {
   ReferralCodeError,
   RedeemReferralUseCase,

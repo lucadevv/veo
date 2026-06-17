@@ -20,10 +20,7 @@ export class DevicesController {
   @Delete(':token')
   @HttpCode(204)
   @ApiOperation({ summary: 'Eliminar token de push del pasajero' })
-  unregister(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('token') token: string,
-  ): Promise<void> {
+  unregister(@CurrentUser() user: AuthenticatedUser, @Param('token') token: string): Promise<void> {
     return this.devices.unregister(user, token);
   }
 }

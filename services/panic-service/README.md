@@ -30,6 +30,7 @@ real lo ejecutan los consumidores de `panic.triggered` (ver `docs/events.md`).
 ## Reglas de negocio
 
 ### BR-S04 · Idempotencia
+
 `POST /panic` recibe `{ tripId, dedupKey (UUIDv7), geo:{lat,lon}, signature }`.
 
 1. Se valida que `dedupKey` sea **UUIDv7** y se verifica la **firma HMAC** (rechazo si inválida).
@@ -43,6 +44,7 @@ real lo ejecutan los consumidores de `panic.triggered` (ver `docs/events.md`).
 > La idempotencia (no la limitación de tasa) es la que protege la base de datos del doble submit.
 
 ### Firma HMAC (contrato cliente)
+
 Mensaje canónico (`panic.trigger:v1`), campos separados por `\n`:
 
 ```
@@ -57,10 +59,12 @@ panic.trigger:v1
 evitar divergencias por formato de coma flotante entre cliente (Flutter/JS) y servidor.
 
 ### BR-S05 · Fan-out
+
 El fan-out (SMS+link a 4 contactos, push a central) lo hace **notification-service** consumiendo
 `panic.triggered`. Aquí solo se garantiza la publicación inmediata y confiable vía outbox.
 
 ### Evidencia (S3 Object Lock / WORM)
+
 - En el trigger se **reservan** keys S3 (función pura, sin I/O → no penaliza el SLO). `media-service`
   sube los objetos a esas rutas tras el force-start.
 - `POST /panic/:id/evidence` anexa keys y (si `finalize`) aplica **retención WORM** (Object Lock,
@@ -70,24 +74,26 @@ El fan-out (SMS+link a 4 contactos, push a central) lo hace **notification-servi
 
 ## Endpoints REST
 
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/api/v1/panic` | InternalIdentity + HMAC | Disparar pánico (202, idempotente). **Sin throttle.** |
-| GET | `/api/v1/panic/:id` | InternalIdentity | Obtener un evento de pánico |
-| GET | `/api/v1/panic?status=` | RBAC operadores | Listar eventos (filtrable por estado) |
-| POST | `/api/v1/panic/:id/ack` | RBAC `COMPLIANCE_SUPERVISOR`/`SUPPORT_*`/`ADMIN`/`SUPERADMIN` | Reconocer (ACKNOWLEDGED) |
-| POST | `/api/v1/panic/:id/resolve` | RBAC operadores | Cerrar (`RESOLVED`\|`FALSE_ALARM`) |
-| POST | `/api/v1/panic/:id/evidence` | RBAC operadores | Anexar keys S3 (Object Lock si `finalize`) |
+| Método | Ruta                         | Auth                                                          | Descripción                                           |
+| ------ | ---------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| POST   | `/api/v1/panic`              | InternalIdentity + HMAC                                       | Disparar pánico (202, idempotente). **Sin throttle.** |
+| GET    | `/api/v1/panic/:id`          | InternalIdentity                                              | Obtener un evento de pánico                           |
+| GET    | `/api/v1/panic?status=`      | RBAC operadores                                               | Listar eventos (filtrable por estado)                 |
+| POST   | `/api/v1/panic/:id/ack`      | RBAC `COMPLIANCE_SUPERVISOR`/`SUPPORT_*`/`ADMIN`/`SUPERADMIN` | Reconocer (ACKNOWLEDGED)                              |
+| POST   | `/api/v1/panic/:id/resolve`  | RBAC operadores                                               | Cerrar (`RESOLVED`\|`FALSE_ALARM`)                    |
+| POST   | `/api/v1/panic/:id/evidence` | RBAC operadores                                               | Anexar keys S3 (Object Lock si `finalize`)            |
 
 gRPC `veo.panic.v1.PanicService/GetPanic` para lectura síncrona desde otros servicios.
 
 ## Modelo de datos (schema `panic`)
+
 - `panic_events`: `id` (UUIDv7), `tripId`, `passengerId`, `triggeredAt`, `geoLat`, `geoLon`,
   `dedupKey` (**UNIQUE NOT NULL**), `status` (`PanicStatus`), `evidenceS3Keys text[]`,
   `acknowledgedAt?`, `ackBy?`, `resolvedAt?`, `createdAt`.
 - `outbox_events`: outbox transaccional (FOUNDATION §6).
 
 ## Observabilidad
+
 - OTel (`bootstrapOtel`), logs pino con redacción PII, `AllExceptionsFilter`, `LoggingInterceptor`.
 - Métricas propias (Prometheus): `veo_panic_trigger_ack_duration_seconds` (SLO <800ms p99) y
   `veo_panic_operator_ack_duration_seconds`.

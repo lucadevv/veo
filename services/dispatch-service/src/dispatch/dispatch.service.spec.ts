@@ -30,10 +30,12 @@ function matchRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function makeService(opts: {
-  row?: ReturnType<typeof matchRow> | null;
-  claimCount?: number;
-} = {}) {
+function makeService(
+  opts: {
+    row?: ReturnType<typeof matchRow> | null;
+    claimCount?: number;
+  } = {},
+) {
   const row = opts.row === undefined ? matchRow() : opts.row;
   const findUnique = vi.fn(async () => row);
   const updateMany = vi.fn(async () => ({ count: opts.claimCount ?? 1 }));
@@ -51,12 +53,18 @@ function makeService(opts: {
     write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
   };
 
-  const hotIndex = { markBusy: vi.fn(async () => undefined), markAvailable: vi.fn(async () => undefined) };
+  const hotIndex = {
+    markBusy: vi.fn(async () => undefined),
+    markAvailable: vi.fn(async () => undefined),
+  };
   const exclusion = { exclude: vi.fn(async () => undefined) };
   // Fail-soft: si fleet/identity fallan, resolveVehicleId devuelve null y NO bloquea.
   const fleet = { getActiveVehicleId: vi.fn(async () => null) };
   const identity = { getDriver: vi.fn(async () => ({ found: false, userId: '' })) };
-  const matching = { markMatched: vi.fn(async () => undefined), offerNext: vi.fn(async () => undefined) };
+  const matching = {
+    markMatched: vi.fn(async () => undefined),
+    offerNext: vi.fn(async () => undefined),
+  };
 
   const service = new DispatchService(
     prisma as never,

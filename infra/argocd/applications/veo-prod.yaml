@@ -13,5 +13,5 @@ spec:
     server: https://kubernetes.default.svc
     namespace: veo-prod
   syncPolicy:
-    automated: { prune: false, selfHeal: false }  # prod: manual approval
+    automated: { prune: false, selfHeal: false } # prod: manual approval
     syncOptions: [CreateNamespace=true]

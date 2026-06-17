@@ -55,7 +55,11 @@ describe('AvatarService.createUploadTicket · presign del avatar', () => {
   it('acepta image/png con ext png y image/webp con ext webp', async () => {
     const svc = makeService();
     const png = await svc.createUploadTicket({ userId: 'u', contentType: 'image/png', ext: 'png' });
-    const webp = await svc.createUploadTicket({ userId: 'u', contentType: 'image/webp', ext: 'webp' });
+    const webp = await svc.createUploadTicket({
+      userId: 'u',
+      contentType: 'image/webp',
+      ext: 'webp',
+    });
     expect(png.key.endsWith('.png')).toBe(true);
     expect(webp.key.endsWith('.webp')).toBe(true);
   });

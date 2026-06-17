@@ -19,7 +19,13 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { BID_FLOOR_MAX_CENTS, GLOBAL_ZONE, OfferingId, PricingMode, type PricingZoneKey } from '@veo/shared-types';
+import {
+  BID_FLOOR_MAX_CENTS,
+  GLOBAL_ZONE,
+  OfferingId,
+  PricingMode,
+  type PricingZoneKey,
+} from '@veo/shared-types';
 
 const MODES = [PricingMode.PUJA, PricingMode.FIXED] as const;
 const ZONES = [GLOBAL_ZONE] as const satisfies readonly PricingZoneKey[];
@@ -84,11 +90,17 @@ export class PricingModeRuleDto {
 
 /** Body del PUT /pricing/mode-schedule — reemplazo wholesale del schedule. */
 export class ReplaceScheduleDto {
-  @ApiProperty({ enum: MODES, description: 'Modo cuando ninguna regla matchea (§8.2 default PUJA)' })
+  @ApiProperty({
+    enum: MODES,
+    description: 'Modo cuando ninguna regla matchea (§8.2 default PUJA)',
+  })
   @IsIn(MODES)
   defaultMode!: PricingMode;
 
-  @ApiProperty({ type: [PricingModeRuleDto], description: 'Reglas en orden de evaluación (la primera que matchea gana)' })
+  @ApiProperty({
+    type: [PricingModeRuleDto],
+    description: 'Reglas en orden de evaluación (la primera que matchea gana)',
+  })
   @IsArray()
   @ArrayMaxSize(200)
   @ValidateNested({ each: true })
@@ -96,7 +108,8 @@ export class ReplaceScheduleDto {
   rules!: PricingModeRuleDto[];
 
   @ApiProperty({
-    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    description:
+      'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
     minimum: 0,
   })
   @IsInt()
@@ -113,13 +126,21 @@ export const FUEL_KM_PER_LITER_MAX = 200;
  * RENDIMIENTO (km/litro); trip-service deriva el recargo/km. Espejo del DTO de trip-service (re-valida abajo).
  */
 export class ReplaceFuelSurchargeDto {
-  @ApiProperty({ description: 'Precio del combustible por litro en céntimos PEN', minimum: 0, maximum: FUEL_PRICE_MAX_CENTS_PER_LITER })
+  @ApiProperty({
+    description: 'Precio del combustible por litro en céntimos PEN',
+    minimum: 0,
+    maximum: FUEL_PRICE_MAX_CENTS_PER_LITER,
+  })
   @IsInt()
   @Min(0)
   @Max(FUEL_PRICE_MAX_CENTS_PER_LITER)
   fuelPricePerLiterCents!: number;
 
-  @ApiProperty({ description: 'Rendimiento del vehículo de referencia en km por litro', minimum: 0, maximum: FUEL_KM_PER_LITER_MAX })
+  @ApiProperty({
+    description: 'Rendimiento del vehículo de referencia en km por litro',
+    minimum: 0,
+    maximum: FUEL_KM_PER_LITER_MAX,
+  })
   @IsInt()
   @Min(0)
   @Max(FUEL_KM_PER_LITER_MAX)
@@ -146,7 +167,11 @@ export class BidFloorOverrideDto {
   @IsIn(OFFERING_IDS)
   offeringId!: OfferingId;
 
-  @ApiProperty({ description: 'Piso EFECTIVO de esta (zona, oferta) en céntimos PEN', minimum: 1, maximum: BID_FLOOR_MAX_CENTS })
+  @ApiProperty({
+    description: 'Piso EFECTIVO de esta (zona, oferta) en céntimos PEN',
+    minimum: 1,
+    maximum: BID_FLOOR_MAX_CENTS,
+  })
   @IsInt()
   @Min(1)
   @Max(BID_FLOOR_MAX_CENTS)
@@ -158,13 +183,20 @@ export class BidFloorOverrideDto {
  * Reemplazo wholesale; espejo del DTO de trip-service (re-valida aguas abajo).
  */
 export class ReplaceBidFloorDto {
-  @ApiProperty({ description: 'Piso por defecto en céntimos PEN (sin override para la (zona, oferta))', minimum: 1, maximum: BID_FLOOR_MAX_CENTS })
+  @ApiProperty({
+    description: 'Piso por defecto en céntimos PEN (sin override para la (zona, oferta))',
+    minimum: 1,
+    maximum: BID_FLOOR_MAX_CENTS,
+  })
   @IsInt()
   @Min(1)
   @Max(BID_FLOOR_MAX_CENTS)
   defaultFloorCents!: number;
 
-  @ApiProperty({ type: [BidFloorOverrideDto], description: 'Pisos por (zona, oferta). Sin override → el default.' })
+  @ApiProperty({
+    type: [BidFloorOverrideDto],
+    description: 'Pisos por (zona, oferta). Sin override → el default.',
+  })
   @IsArray()
   @ArrayMaxSize(64)
   @ValidateNested({ each: true })
@@ -172,7 +204,8 @@ export class ReplaceBidFloorDto {
   overrides!: BidFloorOverrideDto[];
 
   @ApiProperty({
-    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    description:
+      'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
     minimum: 0,
   })
   @IsInt()

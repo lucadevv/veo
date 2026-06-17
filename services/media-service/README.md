@@ -15,6 +15,7 @@ dominio no depende de `livekit-server-sdk` ni de `@aws-sdk` (regla D de SOLID).
 ## Reglas de negocio
 
 ### BR-S01 · Cámara y grabación
+
 - `POST /media/rooms/:tripId/token` emite un token LiveKit (room `trip-<tripId>`) al passenger/driver.
 - Al consumir `trip.started` se inicia la grabación (egress LiveKit → S3) y se publica
   `media.recording_started`. Al `trip.completed` se detiene y se publica `media.archived`.
@@ -22,6 +23,7 @@ dominio no depende de `livekit-server-sdk` ni de `@aws-sdk` (regla D de SOLID).
   el viaje no esté `IN_PROGRESS` (force-start) y la retención del segmento pasa a **indefinida**.
 
 ### BR-S02 · Acceso a video (doble autorización + watermark)
+
 1. `POST /media/access` — un operador crea una solicitud con `reason` (> 20 chars; CHECK en DB).
 2. `POST /media/access/:id/approve` — exige rol **`COMPLIANCE_SUPERVISOR`** (RBAC) **y MFA fresca**
    (`StepUpMfaGuard`). Genera una **URL prefirmada de S3 válida 5 minutos** + un **watermark
@@ -30,12 +32,14 @@ dominio no depende de `livekit-server-sdk` ni de `@aws-sdk` (regla D de SOLID).
 3. `GET /media/segments?tripId=…` — metadatos de segmentos (solo cumplimiento; **nunca** URLs).
 
 ### BR-S03 · Retención
+
 - Por defecto **30 días**; viajes con **incidente 180 días**; viajes con **pánico → indefinido**
   (`retention_until = NULL`) hasta su resolución.
 - El `RetentionSweeper` (cron diario) borra de S3 y de la base los segmentos vencidos; nunca toca los
   indefinidos.
 
 ## Modelo de datos (schema `media`)
+
 - `media_segments` — un segmento de grabación por viaje (room LiveKit → objeto S3). `retention_until`
   NULL = indefinido. Banderas `has_incident` / `has_panic` para el cálculo de retención.
 - `video_access_requests` — ciclo de solicitud/aprobación de acceso (`reason` con CHECK > 20,
@@ -43,10 +47,12 @@ dominio no depende de `livekit-server-sdk` ni de `@aws-sdk` (regla D de SOLID).
 - `outbox_events` — outbox transaccional.
 
 ## Eventos
+
 Ver [`docs/events.md`](./docs/events.md). Publica `media.recording_started`, `media.archived` y
 (propuesto) `media.access_granted`. Consume `trip.started`, `trip.completed`, `panic.triggered`.
 
 ## Variables de entorno
+
 Ver `src/config/env.schema.ts`. Claves principales (defaults de dev):
 
 ```
@@ -64,6 +70,7 @@ RETENTION_DEFAULT_DAYS=30   RETENTION_INCIDENT_DAYS=180   SIGNED_URL_TTL_SECONDS
 > reales. Los modos `sandbox` son deterministas para tests y dev sin LiveKit levantado.
 
 ## Comandos
+
 ```bash
 pnpm --filter @veo/media-service codegen        # prisma generate
 pnpm --filter @veo/media-service db:migrate     # prisma migrate deploy (schema media)

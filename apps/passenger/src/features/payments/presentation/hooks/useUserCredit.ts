@@ -1,7 +1,7 @@
-import type { UserCreditView } from '@veo/api-client';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import type {UserCreditView} from '@veo/api-client';
+import {useQuery, type UseQueryResult} from '@tanstack/react-query';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /** Clave de caché del saldo de crédito gastable del pasajero (`GET /payments/credit`). */
 export const USER_CREDIT_QUERY_KEY = ['payments', 'credit'] as const;

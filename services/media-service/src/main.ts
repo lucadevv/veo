@@ -52,7 +52,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3007);
   await app.listen(port);
-  logger.info(`media-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50057'})`);
+  logger.info(
+    `media-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50057'})`,
+  );
 }
 
 bootstrap().catch((err) => {

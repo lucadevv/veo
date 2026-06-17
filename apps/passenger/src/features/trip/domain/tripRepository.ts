@@ -30,7 +30,10 @@ export interface TripRepository {
    * IK · `idempotencyKey` viaja como cabecera Idempotency-Key: un reintento (red flaky / doble-submit)
    * con la MISMA key devuelve el MISMO viaje en vez de crear dos boards (y cobrar dos veces).
    */
-  createTrip(input: CreateTripRequest, idempotencyKey?: string): Promise<TripResource>;
+  createTrip(
+    input: CreateTripRequest,
+    idempotencyKey?: string,
+  ): Promise<TripResource>;
   /** GET /trips/:id → vista agregada del viaje activo (estado + conductor + vehículo). */
   getActiveTrip(tripId: string): Promise<TripActiveView>;
   /**
@@ -55,18 +58,27 @@ export interface TripRepository {
   /** POST /trips/:id/cancel → cancela el viaje. */
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource>;
   /** POST /trips/:id/destination → cambia el destino en curso. */
-  changeDestination(tripId: string, destination: GeoPoint): Promise<TripResource>;
+  changeDestination(
+    tripId: string,
+    destination: GeoPoint,
+  ): Promise<TripResource>;
   /**
    * POST /trips/:id/waypoints → PROPONE una parada intermedia durante el viaje EN CURSO (Lote C2/C3).
    * El cuerpo solo transporta el punto; el server calcula el delta de tarifa, la ruta y el ETA nuevos
    * (server-authoritative). Devuelve la propuesta (id + delta + tarifa/ETA nuevos + vencimiento) que el
    * pasajero confirma visualmente mientras espera la respuesta del conductor.
    */
-  proposeWaypoint(tripId: string, point: GeoPoint): Promise<WaypointProposalView>;
+  proposeWaypoint(
+    tripId: string,
+    point: GeoPoint,
+  ): Promise<WaypointProposalView>;
   /** GET /trips/:id/video → token viewer LiveKit del habitáculo (puede degradar a "sin video"). */
   getVideoGrant(tripId: string): Promise<TripVideoGrant>;
   /** POST /share/:tripId → crea un enlace público firmado de seguimiento del viaje en curso. */
-  shareTrip(tripId: string, input?: ShareTripRequest): Promise<CreatedShareLink>;
+  shareTrip(
+    tripId: string,
+    input?: ShareTripRequest,
+  ): Promise<CreatedShareLink>;
   /**
    * POST /share/:shareId/revoke → revoca el enlace de seguimiento (kill-switch del pasajero): la
    * página pública deja de servir la ubicación al instante. Idempotente (revocar un revocado = no-op).

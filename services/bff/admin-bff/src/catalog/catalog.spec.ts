@@ -18,7 +18,12 @@ import { CatalogService, type CatalogView } from './catalog.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import { ReplaceCatalogDto } from './dto/catalog.dto';
 
-const admin: AuthenticatedUser = { userId: 'a1', type: 'admin', roles: [AdminRole.ADMIN], sessionId: 's1' };
+const admin: AuthenticatedUser = {
+  userId: 'a1',
+  type: 'admin',
+  roles: [AdminRole.ADMIN],
+  sessionId: 's1',
+};
 
 // offerings = catálogo base REAL (ResolvedOffering[] de @veo/shared-types) — el mismo tipo que trip-service
 // produce y admin-bff ahora comparte. El test solo valida el proxy (toBe(view)), no inspecciona campos.
@@ -33,7 +38,10 @@ describe('CatalogService · proxy a trip-service', () => {
   it('GET /catalog → proxya con la identidad admin firmada, sin auditar', async () => {
     const rest = { get: vi.fn().mockResolvedValue(view), put: vi.fn() };
     const audit = { record: vi.fn() };
-    const svc = new CatalogService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new CatalogService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     const out = await svc.getCatalog(admin);
 
@@ -45,9 +53,15 @@ describe('CatalogService · proxy a trip-service', () => {
   it('PUT /catalog → proxya el overlay y audita la mutación', async () => {
     const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(view) };
     const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
-    const svc = new CatalogService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new CatalogService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
-    const dto: ReplaceCatalogDto = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: false }], expectedVersion: 2 };
+    const dto: ReplaceCatalogDto = {
+      overrides: [{ id: OfferingId.VEO_MOTO, enabled: false }],
+      expectedVersion: 2,
+    };
     const out = await svc.replaceCatalog(admin, dto);
 
     expect(out).toBe(view);
@@ -66,9 +80,14 @@ describe('CatalogService · proxy a trip-service', () => {
   it('fail-closed: si el audit falla, replaceCatalog falla', async () => {
     const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(view) };
     const audit = { record: vi.fn().mockRejectedValue(new Error('audit down')) };
-    const svc = new CatalogService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new CatalogService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
-    await expect(svc.replaceCatalog(admin, { overrides: [], expectedVersion: 0 })).rejects.toThrow('audit down');
+    await expect(svc.replaceCatalog(admin, { overrides: [], expectedVersion: 0 })).rejects.toThrow(
+      'audit down',
+    );
   });
 });
 
@@ -107,26 +126,51 @@ async function errorsOf<T extends object>(cls: new () => T, payload: unknown): P
 
 describe('Catalog DTO · validación', () => {
   it('ReplaceCatalogDto válido → sin errores', async () => {
-    const ok = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: false }, { id: OfferingId.VEO_XL, enabled: true }], expectedVersion: 0 };
+    const ok = {
+      overrides: [
+        { id: OfferingId.VEO_MOTO, enabled: false },
+        { id: OfferingId.VEO_XL, enabled: true },
+      ],
+      expectedVersion: 0,
+    };
     expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
   });
 
   it('rechaza un id fuera del catálogo', async () => {
-    expect(await errorsOf(ReplaceCatalogDto, { overrides: [{ id: 'veo_fantasma', enabled: true }] })).toContain('overrides');
+    expect(
+      await errorsOf(ReplaceCatalogDto, { overrides: [{ id: 'veo_fantasma', enabled: true }] }),
+    ).toContain('overrides');
   });
 
   it('rechaza enabled no-boolean', async () => {
-    expect(await errorsOf(ReplaceCatalogDto, { overrides: [{ id: OfferingId.VEO_MOTO, enabled: 'sí' }] })).toContain('overrides');
+    expect(
+      await errorsOf(ReplaceCatalogDto, {
+        overrides: [{ id: OfferingId.VEO_MOTO, enabled: 'sí' }],
+      }),
+    ).toContain('overrides');
   });
 
   it('rechaza ids DUPLICADOS (@ArrayUnique)', async () => {
-    const dup = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true }, { id: OfferingId.VEO_MOTO, enabled: false }] };
+    const dup = {
+      overrides: [
+        { id: OfferingId.VEO_MOTO, enabled: true },
+        { id: OfferingId.VEO_MOTO, enabled: false },
+      ],
+    };
     expect(await errorsOf(ReplaceCatalogDto, dup)).toContain('overrides');
   });
 
   it('B2 · acepta mode/multiplier/minFareCents válidos', async () => {
     const ok = {
-      overrides: [{ id: OfferingId.VEO_ECONOMICO, enabled: true, mode: PricingMode.FIXED, multiplier: 1.5, minFareCents: 700 }],
+      overrides: [
+        {
+          id: OfferingId.VEO_ECONOMICO,
+          enabled: true,
+          mode: PricingMode.FIXED,
+          multiplier: 1.5,
+          minFareCents: 700,
+        },
+      ],
       expectedVersion: 0,
     };
     expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
@@ -140,7 +184,10 @@ describe('Catalog DTO · validación', () => {
     const badMin = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, minFareCents: -100 }] };
     expect(await errorsOf(ReplaceCatalogDto, badMin)).toContain('overrides');
     // hardening: minFareCents por encima del techo de cordura (S/1000 = 100000 céntimos) → rechazado.
-    const tooHighMin = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, minFareCents: 200_000 }], expectedVersion: 0 };
+    const tooHighMin = {
+      overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, minFareCents: 200_000 }],
+      expectedVersion: 0,
+    };
     expect(await errorsOf(ReplaceCatalogDto, tooHighMin)).toContain('overrides');
   });
 });

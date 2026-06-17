@@ -98,9 +98,12 @@ export class EligibilityGate {
     // autoriza por sí sola (las dos validaciones de arriba ya corrieron), pero sí aporta el tipo.
     const loc = await this.hotIndex.getLocation(driverId);
     if (!loc) {
-      throw new ForbiddenError('Conductor no elegible: sin ubicación activa (vehículo desconocido)', {
-        driverId,
-      });
+      throw new ForbiddenError(
+        'Conductor no elegible: sin ubicación activa (vehículo desconocido)',
+        {
+          driverId,
+        },
+      );
     }
     if (loc.vehicleType !== vehicleType) {
       throw new ForbiddenError('Conductor no elegible: el vehículo no coincide con la puja', {

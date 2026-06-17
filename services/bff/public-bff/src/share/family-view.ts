@@ -3,7 +3,13 @@
  * Agrega: enlace (share) + estado del viaje + conductor/vehículo + ubicación + ETA/ruta.
  * Sin I/O: el servicio resuelve las piezas (gRPC/REST/maps) y aquí se ensamblan y validan.
  */
-import { familyTrackingView, tripStatus, type FamilyTrackingView, type GeoPoint, type TripStatus } from '@veo/api-client';
+import {
+  familyTrackingView,
+  tripStatus,
+  type FamilyTrackingView,
+  type GeoPoint,
+  type TripStatus,
+} from '@veo/api-client';
 import type { AggregateReply, DriverReply, VehicleReply } from '../infra/grpc-types';
 import { DOMAIN_STATUS_ALIASES } from '../trips/trip-views';
 

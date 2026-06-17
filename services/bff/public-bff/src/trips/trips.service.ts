@@ -42,7 +42,12 @@ import type {
 } from '../infra/grpc-types';
 import { DebtPendingError, type PaymentView } from '../payments/dto/payments.dto';
 import type { DebtSummaryReply } from '../payments/payments.types';
-import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from '../share/livekit-token';
+import {
+  type LiveKitConfig,
+  liveKitEnabled,
+  liveKitRoomForTrip,
+  mintViewerToken,
+} from '../share/livekit-token';
 import {
   buildTripDetail,
   buildTripHistoryPage,
@@ -183,7 +188,9 @@ export class TripsService {
     } catch {
       // Redis no disponible: caemos a la consulta autoritativa (no bypass).
     }
-    const summary = await this.paymentRest.get<DebtSummaryReply>('/payments/debt', { identity: user });
+    const summary = await this.paymentRest.get<DebtSummaryReply>('/payments/debt', {
+      identity: user,
+    });
     // El gate SOLO bloquea por DEUDA real (kind=DEBT). `hasDebt`/`totalCents` ya resumen solo los DEBT;
     // un PENDING_ACTION (pago por completar) viaja en `debts` pero NO debe bloquear ni contar (un pago
     // a medio completar no es una deuda). Defensa en profundidad: derivamos el oldestTripId del primer
@@ -271,7 +278,11 @@ export class TripsService {
    */
   async getActiveTrip(user: AuthenticatedUser): Promise<TripDetailView | null> {
     const meta = grpcIdentityMetadata(user, this.secret);
-    const trip = await this.tripGrpc.call<TripReply>('GetActiveTrip', { passengerId: user.userId }, meta);
+    const trip = await this.tripGrpc.call<TripReply>(
+      'GetActiveTrip',
+      { passengerId: user.userId },
+      meta,
+    );
     if (!trip.found) return null;
     return this.enrichTripDetail(user, trip, meta);
   }
@@ -327,12 +338,16 @@ export class TripsService {
     // necesita su `userId` (fleet indexa por User.id, no por Driver.id — ver resolveTripVehicle). 1 ida
     // extra solo en el detalle (no es hot-path). Best-effort: si identity cae, driver=null y se degrada.
     const driver = trip.driverId
-      ? await this.identityGrpc.call<DriverReply>('GetDriver', { id: trip.driverId }, meta).catch(() => null)
+      ? await this.identityGrpc
+          .call<DriverReply>('GetDriver', { id: trip.driverId }, meta)
+          .catch(() => null)
       : null;
     const [vehicle, aggregate, myRating] = await Promise.all([
       this.resolveTripVehicle(trip, driver?.found ? driver.userId : undefined, meta),
       trip.driverId
-        ? this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId: trip.driverId }, meta).catch(() => null)
+        ? this.ratingGrpc
+            .call<AggregateReply>('GetAggregate', { subjectId: trip.driverId }, meta)
+            .catch(() => null)
         : Promise.resolve(null),
       // MI rating de este viaje (REST firmado, filtrado por el rater = identidad). 404 (sin rating) → null;
       // cualquier otro fallo también → null (degradación grácil: la app cae al GET /ratings?tripId on-demand).
@@ -377,7 +392,10 @@ export class TripsService {
   }
 
   /** Estrellas de MI rating de un viaje (REST firmado, rater=identidad), o null. Nunca lanza (best-effort). */
-  private async fetchMyRatingStars(user: AuthenticatedUser, tripId: string): Promise<number | null> {
+  private async fetchMyRatingStars(
+    user: AuthenticatedUser,
+    tripId: string,
+  ): Promise<number | null> {
     try {
       const r = await this.ratingRest.get<{ stars: number }>('/ratings', {
         identity: user,
@@ -560,11 +578,7 @@ export class TripsService {
   }
 
   /** El pasajero elige UNA oferta de SU board → match. Idempotente (doble-tap → no-op downstream). */
-  async acceptOffer(
-    user: AuthenticatedUser,
-    tripId: string,
-    driverId: string,
-  ): Promise<OfferView> {
+  async acceptOffer(user: AuthenticatedUser, tripId: string, driverId: string): Promise<OfferView> {
     await this.assertOwnsTrip(user, tripId);
     return this.dispatchRest.post<OfferView>(`/bids/${tripId}/accept`, {
       identity: user,

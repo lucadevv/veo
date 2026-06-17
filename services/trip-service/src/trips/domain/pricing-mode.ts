@@ -88,11 +88,7 @@ function dayBit(isoWeekday: number): number {
  * `zone` se ACEPTA pero se IGNORA en el MVP (Tier 1 GLOBAL); está para que Tier 2 (overrides per-zona)
  * sea no-breaking — la firma ya transporta la zona.
  */
-export function resolveMode(
-  schedule: PricingModeSchedule,
-  _zone: ZoneKey,
-  now: Date,
-): PricingMode {
+export function resolveMode(schedule: PricingModeSchedule, _zone: ZoneKey, now: Date): PricingMode {
   const { weekday, minuteOfDay } = toLimaTime(now);
   const todayBit = dayBit(weekday);
   for (const rule of schedule.rules) {

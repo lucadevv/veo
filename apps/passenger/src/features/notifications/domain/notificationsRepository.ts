@@ -1,4 +1,4 @@
-import type { AppNotification } from './entities';
+import type {AppNotification} from './entities';
 
 /**
  * Puerto del centro de avisos (DIP). El listado de avisos NO tiene endpoint en el `public-bff`

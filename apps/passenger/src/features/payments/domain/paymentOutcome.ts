@@ -14,7 +14,7 @@
  *  - `payment.method` es `z.string()` LAXO en el contrato (no enum): la normalización a mayúsculas
  *    es legítima, pero se hace UNA vez acá (`isCashPayment`), no desparramada en cada componente.
  */
-import type { MobilePaymentMethod, PaymentView } from '@veo/api-client';
+import type {MobilePaymentMethod, PaymentView} from '@veo/api-client';
 
 /** Método efectivo, tipado contra el enum del contrato (cero strings mágicos en comparaciones). */
 const CASH_METHOD: MobilePaymentMethod = 'CASH';
@@ -34,13 +34,13 @@ const CASH_METHOD: MobilePaymentMethod = 'CASH';
  *    `partial`): NUNCA se celebra como "Pagado" (la lección de PARTIALLY_REFUNDED).
  */
 export type PaymentOutcome =
-  | { readonly kind: 'settled' }
-  | { readonly kind: 'checkoutPending' }
-  | { readonly kind: 'processing' }
-  | { readonly kind: 'cashPending' }
-  | { readonly kind: 'debt'; readonly failureReason: string | null }
-  | { readonly kind: 'failed' }
-  | { readonly kind: 'refunded'; readonly partial: boolean };
+  | {readonly kind: 'settled'}
+  | {readonly kind: 'checkoutPending'}
+  | {readonly kind: 'processing'}
+  | {readonly kind: 'cashPending'}
+  | {readonly kind: 'debt'; readonly failureReason: string | null}
+  | {readonly kind: 'failed'}
+  | {readonly kind: 'refunded'; readonly partial: boolean};
 
 /**
  * ¿El pago trae instrucciones de checkout para completar el pago digital? (ProntoPaga). Cualquiera de
@@ -48,7 +48,9 @@ export type PaymentOutcome =
  * (sandbox sin checkout), NO hay rama de checkout → el resultado cae a `processing`.
  */
 export function hasCheckout(payment: PaymentView): boolean {
-  return Boolean(payment.deepLink || payment.checkoutUrl || payment.qrCode || payment.cip);
+  return Boolean(
+    payment.deepLink || payment.checkoutUrl || payment.qrCode || payment.cip,
+  );
 }
 
 /**
@@ -73,24 +75,24 @@ export function isPaymentSettled(payment: PaymentView): boolean {
 export function interpretPaymentOutcome(payment: PaymentView): PaymentOutcome {
   switch (payment.status) {
     case 'CAPTURED':
-      return { kind: 'settled' };
+      return {kind: 'settled'};
     case 'PENDING':
       if (isCashPayment(payment)) {
-        return { kind: 'cashPending' };
+        return {kind: 'cashPending'};
       }
       // Checkout VIVO = `externalUid` + algún medio: el MISMO criterio con que payment-service
       // clasifica PENDING_ACTION (un PENDING con medios pero sin externalUid no es accionable).
       return hasCheckout(payment) && payment.externalUid != null
-        ? { kind: 'checkoutPending' }
-        : { kind: 'processing' };
+        ? {kind: 'checkoutPending'}
+        : {kind: 'processing'};
     case 'DEBT':
-      return { kind: 'debt', failureReason: payment.failureReason ?? null };
+      return {kind: 'debt', failureReason: payment.failureReason ?? null};
     case 'FAILED':
-      return { kind: 'failed' };
+      return {kind: 'failed'};
     case 'REFUNDED':
-      return { kind: 'refunded', partial: false };
+      return {kind: 'refunded', partial: false};
     case 'PARTIALLY_REFUNDED':
-      return { kind: 'refunded', partial: true };
+      return {kind: 'refunded', partial: true};
     default:
       return assertNever(payment.status);
   }

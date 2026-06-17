@@ -12,7 +12,9 @@ export const redisProvider: Provider = {
   provide: REDIS,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): Redis => {
-    return createRedisClient(config.getOrThrow<string>('REDIS_URL'), { logger: new Logger('Redis') });
+    return createRedisClient(config.getOrThrow<string>('REDIS_URL'), {
+      logger: new Logger('Redis'),
+    });
   },
 };
 

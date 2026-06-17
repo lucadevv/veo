@@ -108,12 +108,17 @@ export class FuelSurchargeService {
       let row: { version: number; updatedAt: Date };
       if (updated.count === 1) {
         // Releemos para el `updatedAt` autoritativo; la fila existe (la acabamos de actualizar).
-        const persisted = await tx.fuelSurchargeConfig.findUnique({ where: { id: FUEL_SINGLETON_ID } });
-        if (!persisted) throw new ConflictError('el recargo de combustible desapareció durante el reemplazo');
+        const persisted = await tx.fuelSurchargeConfig.findUnique({
+          where: { id: FUEL_SINGLETON_ID },
+        });
+        if (!persisted)
+          throw new ConflictError('el recargo de combustible desapareció durante el reemplazo');
         row = persisted;
       } else if (expectedVersion === 0) {
         // Primer write: no debería haber fila. Si OTRO la creó en la carrera → es conflicto, no lost update.
-        const existing = await tx.fuelSurchargeConfig.findUnique({ where: { id: FUEL_SINGLETON_ID } });
+        const existing = await tx.fuelSurchargeConfig.findUnique({
+          where: { id: FUEL_SINGLETON_ID },
+        });
         if (existing) {
           throw new ConflictError(
             `el recargo de combustible ya fue inicializado (v${existing.version}); recargá y reintentá`,

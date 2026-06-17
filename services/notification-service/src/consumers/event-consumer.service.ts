@@ -39,7 +39,10 @@ import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationPriority } from '../engine/types';
 import { TEMPLATE_KEYS } from '../engine/template.catalog';
 import { DeviceTokenRepository, type DeviceTarget } from '../devices/device-token.repository';
-import { SHARE_CONTACTS_RESOLVER, type TrustedContactsResolver } from '../ports/share/share-contacts.port';
+import {
+  SHARE_CONTACTS_RESOLVER,
+  type TrustedContactsResolver,
+} from '../ports/share/share-contacts.port';
 import type { Env } from '../config/env.schema';
 import {
   PUSH_NOTIFICATION_SPECS,
@@ -129,14 +132,19 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     if (token) return [{ token, platform: platform ?? 'android' }];
     if (!userId) return [];
     if (!isUuid(userId)) {
-      this.logger.error(`POISON ${eventType}: userId no-UUID "${String(userId)}"; push descartado sin reintento`);
+      this.logger.error(
+        `POISON ${eventType}: userId no-UUID "${String(userId)}"; push descartado sin reintento`,
+      );
       return [];
     }
     try {
       return await this.devices.findActiveByUser(userId);
     } catch (err) {
       if (isPermanentDataError(err)) {
-        this.logger.error({ err }, `POISON ${eventType}: error permanente al resolver token de ${userId}; descartado`);
+        this.logger.error(
+          { err },
+          `POISON ${eventType}: error permanente al resolver token de ${userId}; descartado`,
+        );
         return [];
       }
       throw err; // transitorio → relanza para que Kafka reintente (dedup en el engine evita duplicar)
@@ -235,7 +243,9 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
       const contact = byId.get(contactId);
       if (!contact) {
         // El contacto fue borrado/desverificado entre el trigger y el fan-out: gap honesto, no rompe el resto.
-        this.logger.warn(`panic ${p.panicId}: contacto ${contactId} no resuelto por share → SMS omitido`);
+        this.logger.warn(
+          `panic ${p.panicId}: contacto ${contactId} no resuelto por share → SMS omitido`,
+        );
         continue;
       }
       await this.engine.enqueue({
@@ -258,7 +268,9 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
       });
       enqueued += 1;
     }
-    this.logger.log(`panic ${p.panicId}: fan-out encoló ${enqueued}/${targets.length} SMS (durable)`);
+    this.logger.log(
+      `panic ${p.panicId}: fan-out encoló ${enqueued}/${targets.length} SMS (durable)`,
+    );
   }
 
   /**
@@ -272,7 +284,12 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     if (!base.success || !extra.success) return;
     const p = { ...base.data, ...extra.data };
 
-    const targets = await this.safeResolveTargets('payment.failed', p.passengerId, p.passengerPushToken, p.platform);
+    const targets = await this.safeResolveTargets(
+      'payment.failed',
+      p.passengerId,
+      p.passengerPushToken,
+      p.platform,
+    );
     if (targets.length === 0) {
       this.logger.warn(`payment ${p.paymentId}: sin token push del pasajero (evento ni almacén)`);
     }
@@ -317,7 +334,9 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
    * Cada push con su propio dedup (penaltyId + rol) → una redelivery no duplica ninguno.
    */
   private async onCancellationPenaltyCollected(envelope: EventEnvelope<unknown>): Promise<void> {
-    const parsed = EVENT_SCHEMAS['payment.cancellation_penalty_collected'].safeParse(envelope.payload);
+    const parsed = EVENT_SCHEMAS['payment.cancellation_penalty_collected'].safeParse(
+      envelope.payload,
+    );
     if (!parsed.success) return;
     const p = parsed.data;
 
@@ -326,7 +345,9 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
       p.passengerId,
     );
     if (passengerTargets.length === 0) {
-      this.logger.warn(`penalidad ${p.penaltyId}: saldada sin token push del pasajero → push omitido`);
+      this.logger.warn(
+        `penalidad ${p.penaltyId}: saldada sin token push del pasajero → push omitido`,
+      );
     }
     for (const target of passengerTargets) {
       await this.engine.enqueue({

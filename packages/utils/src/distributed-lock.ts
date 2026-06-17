@@ -20,7 +20,13 @@
  * sin acoplar @veo/utils a esa librería (cada servicio inyecta su cliente compartido).
  */
 export interface DistributedLockClient {
-  set(key: string, value: string, expiryMode: 'EX', ttlSeconds: number, condition: 'NX'): Promise<string | null>;
+  set(
+    key: string,
+    value: string,
+    expiryMode: 'EX',
+    ttlSeconds: number,
+    condition: 'NX',
+  ): Promise<string | null>;
   del(key: string): Promise<number>;
 }
 

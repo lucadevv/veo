@@ -40,7 +40,9 @@ export interface ActiveVehicleCandidate {
  * vehículos). NO gatea por `active` (aprobación del operador): no existe workflow de aprobación todavía,
  * gatear ahí dejaría a todos sin operar (degradación honesta) — el gate real es: registrado + docs vigentes.
  */
-export function pickActiveVehicle<T extends ActiveVehicleCandidate>(vehicles: readonly T[]): T | null {
+export function pickActiveVehicle<T extends ActiveVehicleCandidate>(
+  vehicles: readonly T[],
+): T | null {
   const operable = vehicles.filter((v) => v.docStatus !== VehicleDocStatus.EXPIRED);
   if (operable.length === 0) return null;
   return operable.reduce((best, v) => {

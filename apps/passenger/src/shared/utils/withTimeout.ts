@@ -26,7 +26,7 @@ export function withTimeout<T>(
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new TimeoutError(message)), ms);
     promise.then(
-      (value) => {
+      value => {
         clearTimeout(timer);
         resolve(value);
       },

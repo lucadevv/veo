@@ -21,10 +21,14 @@ import type { Env } from '../config/env.schema';
 const USER: AuthenticatedUser = { userId: 'p1', type: 'passenger', roles: [], sessionId: 's1' };
 
 /** ConfigService falso: solo devuelve el piso de la PUJA. */
-function fakeConfig(bidFloorCents = DEFAULT_BID_FLOOR_CENTS, energyModelEnabled = false): ConfigService<Env, true> {
+function fakeConfig(
+  bidFloorCents = DEFAULT_BID_FLOOR_CENTS,
+  energyModelEnabled = false,
+): ConfigService<Env, true> {
   // Key-aware: el flag B5-1.d devuelve su booleano; el resto cae al bidFloorCents (back-compat de los specs).
   return {
-    getOrThrow: (key: string) => (key === 'PRICING_ENERGY_MODEL_ENABLED' ? energyModelEnabled : bidFloorCents),
+    getOrThrow: (key: string) =>
+      key === 'PRICING_ENERGY_MODEL_ENABLED' ? energyModelEnabled : bidFloorCents,
   } as unknown as ConfigService<Env, true>;
 }
 
@@ -61,7 +65,11 @@ class FakeTripRest {
   async get<T>(path: string, req: { query?: Record<string, unknown> }): Promise<T> {
     if (path.includes('/internal/pricing/energy-catalog')) {
       // B5 · catálogo de energía: GASOLINE_95 al precio que espeja el fuel global (shadow-compare del quote).
-      return { sources: [{ sourceId: 'GASOLINE_95', unit: 'LITER', pricePerUnitCents: 0 }], version: 1, updatedAt: new Date(0).toISOString() } as T;
+      return {
+        sources: [{ sourceId: 'GASOLINE_95', unit: 'LITER', pricePerUnitCents: 0 }],
+        version: 1,
+        updatedAt: new Date(0).toISOString(),
+      } as T;
     }
     if (path.includes('/internal/pricing/bid-floor')) {
       if (this.bidFloorError) throw this.bidFloorError; // simula el piso CAÍDO (degradación)
@@ -136,7 +144,10 @@ class FakeMapsClient implements MapsClient {
     );
   }
 
-  async routeWithSteps(origin: { lat: number; lon: number }, destination: { lat: number; lon: number }) {
+  async routeWithSteps(
+    origin: { lat: number; lon: number },
+    destination: { lat: number; lon: number },
+  ) {
     this.lastRoute = { origin, destination };
     const base = this.responses.route ?? {
       distanceMeters: 0,
@@ -181,7 +192,12 @@ describe('MapsService.autocomplete', () => {
   it('mapea GeocodeResult a sugerencia con id estable y título/subtítulo', async () => {
     const fake = new FakeMapsClient({
       autocomplete: [
-        { lat: -12.1133, lon: -77.029, displayName: 'Av. Larco, Miraflores, Lima', name: 'Av. Larco' },
+        {
+          lat: -12.1133,
+          lon: -77.029,
+          displayName: 'Av. Larco, Miraflores, Lima',
+          name: 'Av. Larco',
+        },
       ],
     });
     const service = buildService(fake);
@@ -214,7 +230,12 @@ describe('MapsService.autocomplete', () => {
 describe('MapsService.reverse', () => {
   it('etiqueta el punto y mapea lon→lng', async () => {
     const fake = new FakeMapsClient({
-      reverse: { lat: -12.0464, lon: -77.0428, displayName: 'Plaza Mayor, Cercado, Lima', name: 'Plaza Mayor' },
+      reverse: {
+        lat: -12.0464,
+        lon: -77.0428,
+        displayName: 'Plaza Mayor, Cercado, Lima',
+        name: 'Plaza Mayor',
+      },
     });
     const service = buildService(fake);
     const out = await service.reverse(-12.0464, -77.0428);
@@ -412,7 +433,16 @@ describe('MapsService.quote', () => {
 
   it('ADR 010 §9.3 · piso CAÍDO (trip-service no responde) → degrada al default S/7 (no rompe el quote)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
-    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, 0, undefined, undefined, new Error('boom'));
+    const tripRest = new FakeTripRest(
+      { mode: 'PUJA' },
+      [],
+      undefined,
+      {},
+      0,
+      undefined,
+      undefined,
+      new Error('boom'),
+    );
     const service = buildService(fake, tripRest, fakeConfig());
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
@@ -482,7 +512,14 @@ describe('MapsService.quote', () => {
   it('B4 · degradación HONESTA: si el endpoint de fuel CAE, el quote cotiza con 0 recargo (no rompe ni inventa)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
     // fuel-surcharge CAÍDO: fetchFuelPerKmCents catchea → 0. El resto del quote sigue normal.
-    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], undefined, {}, 0, new Error('fuel-surcharge caído'));
+    const tripRest = new FakeTripRest(
+      { mode: 'FIXED' },
+      [],
+      undefined,
+      {},
+      0,
+      new Error('fuel-surcharge caído'),
+    );
     const service = buildService(fake, tripRest, fakeConfig(700));
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
@@ -502,7 +539,9 @@ describe('MapsService.quote', () => {
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
 
-    expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe(PricingMode.FIXED); // pin gana
+    expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe(
+      PricingMode.FIXED,
+    ); // pin gana
     expect(out.options.find((o) => o.id === OfferingId.VEO_MOTO)?.mode).toBe(PricingMode.PUJA); // sin pin → schedule
   });
 

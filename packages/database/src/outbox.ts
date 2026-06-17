@@ -38,7 +38,10 @@ export interface OutboxDelegate {
     orderBy: { createdAt: 'asc' };
     take: number;
   }): Promise<OutboxRow[]>;
-  updateMany(args: { where: { id: { in: string[] } }; data: { publishedAt: Date } }): Promise<unknown>;
+  updateMany(args: {
+    where: { id: { in: string[] } };
+    data: { publishedAt: Date };
+  }): Promise<unknown>;
 }
 
 interface OutboxCreateData {

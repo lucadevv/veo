@@ -5,30 +5,30 @@ disparar notificaciones reales. Todos los payloads usan el envelope de `@veo/eve
 
 ## Publica (vía outbox)
 
-| Topic / eventType        | Schema (`EVENT_SCHEMAS`)                              | Disparado por                | Consumidores típicos          |
-|--------------------------|------------------------------------------------------|------------------------------|-------------------------------|
-| `notification.delivered` | `{ notificationId, channel, to }`                    | Motor al entregar con éxito  | audit-service, analytics      |
-| `notification.failed`    | `{ notificationId, channel, error }`                 | Motor al agotar `maxAttempts`| audit-service, alerting       |
+| Topic / eventType        | Schema (`EVENT_SCHEMAS`)             | Disparado por                 | Consumidores típicos     |
+| ------------------------ | ------------------------------------ | ----------------------------- | ------------------------ |
+| `notification.delivered` | `{ notificationId, channel, to }`    | Motor al entregar con éxito   | audit-service, analytics |
+| `notification.failed`    | `{ notificationId, channel, error }` | Motor al agotar `maxAttempts` | audit-service, alerting  |
 
 `key` de Kafka = `notificationId` (orden por entidad). El relay (`OutboxRelay`) drena cada 500 ms.
 
 ## Consume (groupId `notification-service`)
 
-| Topic / eventType   | Acción                                                                                              | Canal(es)        | Reintentos |
-|---------------------|----------------------------------------------------------------------------------------------------|------------------|------------|
-| `panic.triggered`   | BR-S05: SMS + link a hasta **4** contactos de confianza + alerta firmada a la central de monitoreo | SMS, WEBHOOK     | Backoff exp. del motor |
-| `trip.assigned`     | Push al pasajero ("conductor asignado")                                                             | PUSH (FCM/APNs)  | Backoff exp. del motor |
-| `payment.failed`    | BR-P02: alerta al pasajero + alerta a la central                                                    | PUSH, WEBHOOK    | Backoff exp. del motor |
+| Topic / eventType | Acción                                                                                             | Canal(es)       | Reintentos             |
+| ----------------- | -------------------------------------------------------------------------------------------------- | --------------- | ---------------------- |
+| `panic.triggered` | BR-S05: SMS + link a hasta **4** contactos de confianza + alerta firmada a la central de monitoreo | SMS, WEBHOOK    | Backoff exp. del motor |
+| `trip.assigned`   | Push al pasajero ("conductor asignado")                                                            | PUSH (FCM/APNs) | Backoff exp. del motor |
+| `payment.failed`  | BR-P02: alerta al pasajero + alerta a la central                                                   | PUSH, WEBHOOK   | Backoff exp. del motor |
 
 Idempotencia: cada notificación derivada lleva una `dedupKey` determinista (Kafka es at-least-once),
 p. ej. `panic:<panicId>:sms:<phone>`, `trip:<tripId>:assigned:push`, `payment:<paymentId>:central`.
 
 ## Comandos síncronos (gRPC `veo.notification.v1`)
 
-| RPC                | Uso                                                                                  |
-|--------------------|--------------------------------------------------------------------------------------|
-| `Enqueue`          | Encolar una notificación. Cubre el **OTP de contactos de confianza (BR-I06)**: el identity-service llama con `channel=SMS`, `template=contact.otp`, `to=<telefono>`, `payload_json={"vars":{"code":"123456"}}`. |
-| `GetNotification`  | Consultar estado por id.                                                              |
+| RPC               | Uso                                                                                                                                                                                                             |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Enqueue`         | Encolar una notificación. Cubre el **OTP de contactos de confianza (BR-I06)**: el identity-service llama con `channel=SMS`, `template=contact.otp`, `to=<telefono>`, `payload_json={"vars":{"code":"123456"}}`. |
+| `GetNotification` | Consultar estado por id.                                                                                                                                                                                        |
 
 ## Gaps de contrato (destinatarios)
 

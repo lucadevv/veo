@@ -19,7 +19,12 @@ describe('requireDriverId — fail-closed del trust boundary conductor (#9)', ()
   });
 
   it('identidad SIN driverId (passenger/admin) → 403 (fail-closed)', () => {
-    const passenger: AuthenticatedUser = { userId: 'u2', type: 'passenger', roles: [], sessionId: 's2' };
+    const passenger: AuthenticatedUser = {
+      userId: 'u2',
+      type: 'passenger',
+      roles: [],
+      sessionId: 's2',
+    };
     expect(() => requireDriverId(passenger)).toThrowError(
       expect.objectContaining({ httpStatus: 403 }),
     );

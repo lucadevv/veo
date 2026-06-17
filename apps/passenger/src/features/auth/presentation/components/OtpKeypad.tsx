@@ -1,8 +1,8 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { Text, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
-import { PressableScale } from '../../../../shared/presentation/components/motion';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {Text, TOUCH_TARGET, useTheme} from '@veo/ui-kit';
+import {PressableScale} from '../../../../shared/presentation/components/motion';
 
 export interface OtpKeypadProps {
   /** Agrega un dígito al código (el padre recorta a la longitud máxima). */
@@ -17,9 +17,9 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
  * callback `onPress` del padre, sin romper el autofill SMS del `OtpField`. Cada tecla tiene área
  * táctil ≥44pt y etiqueta accesible.
  */
-export function OtpKeypad({ onPress }: OtpKeypadProps): React.JSX.Element {
+export function OtpKeypad({onPress}: OtpKeypadProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const keyStyle = {
     backgroundColor: theme.colors.surface,
@@ -30,16 +30,14 @@ export function OtpKeypad({ onPress }: OtpKeypadProps): React.JSX.Element {
   return (
     <View
       accessibilityLabel={t('auth.otpKeypadLabel')}
-      style={[styles.grid, { gap: KEY_GAP }]}
-    >
-      {KEYS.map((digit) => (
+      style={[styles.grid, {gap: KEY_GAP}]}>
+      {KEYS.map(digit => (
         <PressableScale
           key={digit}
           accessibilityRole="button"
-          accessibilityLabel={t('auth.otpKeyLabel', { digit })}
+          accessibilityLabel={t('auth.otpKeyLabel', {digit})}
           onPress={() => onPress(digit)}
-          contentStyle={[styles.key, keyStyle]}
-        >
+          contentStyle={[styles.key, keyStyle]}>
           <Text variant="title3" tabular>
             {digit}
           </Text>
@@ -47,10 +45,9 @@ export function OtpKeypad({ onPress }: OtpKeypadProps): React.JSX.Element {
       ))}
       <PressableScale
         accessibilityRole="button"
-        accessibilityLabel={t('auth.otpKeyLabel', { digit: '0' })}
+        accessibilityLabel={t('auth.otpKeyLabel', {digit: '0'})}
         onPress={() => onPress('0')}
-        contentStyle={[styles.keyWide, keyStyle]}
-      >
+        contentStyle={[styles.keyWide, keyStyle]}>
         <Text variant="title3" tabular>
           0
         </Text>
@@ -65,7 +62,7 @@ const KEY_GAP = 9;
 const KEY_HEIGHT = TOUCH_TARGET;
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  grid: {flexDirection: 'row', flexWrap: 'wrap'},
   // 3 columnas con gap 9: (100% - 2·9) / 3 ≈ 30% (medida del diseño).
   key: {
     width: '30%',

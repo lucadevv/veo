@@ -1,7 +1,17 @@
 /**
  * Viajes (lado conductor). JWT de tipo 'driver'. Los GET son lecturas gRPC; los POST, comandos REST.
  */
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { DriverApi } from '../common/driver-api.decorator';
@@ -53,13 +63,19 @@ export class TripsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un viaje por id (gRPC)' })
-  get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser): Promise<TripView> {
+  get(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<TripView> {
     return this.trips.getTrip(id, user);
   }
 
   @Get(':id/state')
   @ApiOperation({ summary: 'Obtener solo el estado del viaje (gRPC)' })
-  state(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser): Promise<TripStateView> {
+  state(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<TripStateView> {
     return this.trips.getTripState(id, user);
   }
 
@@ -77,7 +93,10 @@ export class TripsController {
   ): Promise<TripRouteView> {
     // Solo usamos la posición si vienen AMBAS coordenadas (degradación honesta: una sola coordenada no
     // define un punto). class-validator ya validó el rango lat/lon; acá solo decidimos presencia.
-    const from = query.lat !== undefined && query.lon !== undefined ? { lat: query.lat, lon: query.lon } : undefined;
+    const from =
+      query.lat !== undefined && query.lon !== undefined
+        ? { lat: query.lat, lon: query.lon }
+        : undefined;
     return this.trips.route(id, user, from);
   }
 
@@ -106,7 +125,10 @@ export class TripsController {
   @Post(':id/arrived')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor llegó al recojo (→ ARRIVED)' })
-  arrived(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser): Promise<unknown> {
+  arrived(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<unknown> {
     return this.trips.arrived(id, user);
   }
 

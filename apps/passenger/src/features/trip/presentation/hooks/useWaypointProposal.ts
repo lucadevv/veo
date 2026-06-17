@@ -1,9 +1,13 @@
-import type { GeoPoint, WaypointProposalOutcome, WaypointProposalView } from '@veo/api-client';
-import { WaypointProposalStatus } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import type {
+  GeoPoint,
+  WaypointProposalOutcome,
+  WaypointProposalView,
+} from '@veo/api-client';
+import {WaypointProposalStatus} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /**
  * Fases LOCALES de la propuesta de parada mid-trip (Lote C3), vistas por el pasajero:
@@ -50,7 +54,9 @@ export interface WaypointProposalController {
 }
 
 /** Mapea el estado terminal del outcome (C4) a la fase local. */
-function phaseFromOutcome(status: WaypointProposalStatus): WaypointProposalPhase {
+function phaseFromOutcome(
+  status: WaypointProposalStatus,
+): WaypointProposalPhase {
   if (status === WaypointProposalStatus.ACCEPTED) return 'accepted';
   if (status === WaypointProposalStatus.REJECTED) return 'rejected';
   return 'expired';
@@ -78,16 +84,17 @@ export function useWaypointProposal(
   const [pickedPoint, setPickedPoint] = useState<GeoPoint | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (point: GeoPoint) => tripRepository.proposeWaypoint(tripId, point),
+    mutationFn: (point: GeoPoint) =>
+      tripRepository.proposeWaypoint(tripId, point),
     onMutate: () => setPhase('proposing'),
-    onSuccess: (view) => {
+    onSuccess: view => {
       setProposal(view);
       setPhase('waiting');
     },
     onError: () => setPhase('error'),
   });
 
-  const { mutate } = mutation;
+  const {mutate} = mutation;
 
   const startPicking = useCallback(() => {
     setPickedPoint(null);

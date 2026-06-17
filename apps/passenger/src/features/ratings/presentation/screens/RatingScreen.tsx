@@ -1,17 +1,32 @@
-import { ApiError, type RatingView } from '@veo/api-client';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { TipCard } from '../../../payments/presentation';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { RatingReasonChips, reasonLabels, type RatingReason } from '../components/RatingReasonChips';
-import { StarRating } from '../components/StarRating';
-import { SuccessCheck } from '../components/motion';
+import {ApiError, type RatingView} from '@veo/api-client';
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
+import {useMutation} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  SafeScreen,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {TipCard} from '../../../payments/presentation';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {
+  RatingReasonChips,
+  reasonLabels,
+  type RatingReason,
+} from '../components/RatingReasonChips';
+import {StarRating} from '../components/StarRating';
+import {SuccessCheck} from '../components/motion';
 
 type Params = RouteProp<RootStackParamList, 'Rating'>;
 
@@ -21,9 +36,9 @@ type Params = RouteProp<RootStackParamList, 'Rating'>;
  */
 export function RatingScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation();
-  const { params } = useRoute<Params>();
+  const {params} = useRoute<Params>();
 
   const submitRating = useDependency(TOKENS.submitRatingUseCase);
 
@@ -51,7 +66,7 @@ export function RatingScreen(): React.JSX.Element {
         ratedId: params.driverId,
         ratedRole: 'DRIVER',
         stars,
-        ...(body ? { comment: body } : {}),
+        ...(body ? {comment: body} : {}),
       });
     },
   });
@@ -67,18 +82,31 @@ export function RatingScreen(): React.JSX.Element {
   // 409 = el viaje YA fue calificado (idempotente / re-entrada / doble-tap). No es un error que
   // mostrar: es éxito disfrazado. Lo tratamos igual que un envío OK (mensaje "ya calificaste"), igual
   // que el `RatingBody` canónico, para que esta pantalla sea coherente y no muestre un banner rojo.
-  const alreadyRated = mutation.error instanceof ApiError && mutation.error.status === 409;
+  const alreadyRated =
+    mutation.error instanceof ApiError && mutation.error.status === 409;
 
   if (mutation.isSuccess || alreadyRated) {
     return (
-      <SafeScreen footer={<Button label={t('actions.close')} fullWidth onPress={() => navigation.goBack()} />}>
+      <SafeScreen
+        footer={
+          <Button
+            label={t('actions.close')}
+            fullWidth
+            onPress={() => navigation.goBack()}
+          />
+        }>
         <ScrollView
-          contentContainerStyle={{ gap: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
+          contentContainerStyle={{
+            gap: theme.spacing.lg,
+            paddingBottom: theme.spacing.xl,
+          }}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+          keyboardShouldPersistTaps="handled">
           <SuccessCheck />
-          <Banner tone="success" title={t(alreadyRated ? 'ratings.alreadyRated' : 'ratings.thanks')} />
+          <Banner
+            tone="success"
+            title={t(alreadyRated ? 'ratings.alreadyRated' : 'ratings.thanks')}
+          />
           {/* Tras calificar, ofrece dejar propina al conductor (100% para él). */}
           <TipCard tripId={params.tripId} />
         </ScrollView>
@@ -89,19 +117,29 @@ export function RatingScreen(): React.JSX.Element {
   return (
     <SafeScreen
       footer={
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Button
-            label={mutation.isPending ? t('ratings.submitting') : t('ratings.submit')}
+            label={
+              mutation.isPending ? t('ratings.submitting') : t('ratings.submit')
+            }
             fullWidth
             loading={mutation.isPending}
             onPress={submit}
           />
-          <Button label={t('actions.skip')} variant="ghost" fullWidth onPress={() => navigation.goBack()} />
+          <Button
+            label={t('actions.skip')}
+            variant="ghost"
+            fullWidth
+            onPress={() => navigation.goBack()}
+          />
         </View>
-      }
-    >
-      <Text variant="body" color="inkMuted" align="center" style={{ marginBottom: theme.spacing.xl }}>
-        {t('ratings.subtitle', { driver: t('trip.driver') })}
+      }>
+      <Text
+        variant="body"
+        color="inkMuted"
+        align="center"
+        style={{marginBottom: theme.spacing.xl}}>
+        {t('ratings.subtitle', {driver: t('trip.driver')})}
       </Text>
 
       <StarRating value={stars} onChange={handleStars} />
@@ -109,16 +147,24 @@ export function RatingScreen(): React.JSX.Element {
       <RatingReasonChips stars={stars} value={reasons} onChange={setReasons} />
 
       {touched && stars < 1 ? (
-        <Text variant="footnote" color="danger" align="center" style={{ marginTop: theme.spacing.sm }}>
+        <Text
+          variant="footnote"
+          color="danger"
+          align="center"
+          style={{marginTop: theme.spacing.sm}}>
           {t('ratings.selectStars')}
         </Text>
       ) : null}
 
       {mutation.isError ? (
-        <Banner tone="danger" title={t('ratings.error')} style={{ marginTop: theme.spacing.lg }} />
+        <Banner
+          tone="danger"
+          title={t('ratings.error')}
+          style={{marginTop: theme.spacing.lg}}
+        />
       ) : null}
 
-      <View style={{ marginTop: theme.spacing.xl }}>
+      <View style={{marginTop: theme.spacing.xl}}>
         <TextField
           label={t('ratings.commentLabel')}
           placeholder={t('ratings.commentPlaceholder')}

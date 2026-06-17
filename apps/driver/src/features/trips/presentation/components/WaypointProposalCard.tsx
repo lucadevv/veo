@@ -1,9 +1,9 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, Button, Card, Text, useTheme} from '@veo/ui-kit';
-import type {WaypointProposedMsg} from '@veo/api-client';
-import {formatPEN} from '../../../../shared/presentation/format';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, Button, Card, Text, useTheme } from '@veo/ui-kit';
+import type { WaypointProposedMsg } from '@veo/api-client';
+import { formatPEN } from '../../../../shared/presentation/format';
 
 export interface WaypointProposalCardProps {
   proposal: WaypointProposedMsg;
@@ -25,11 +25,11 @@ export const WaypointProposalCard = ({
   onRespond,
 }: WaypointProposalCardProps): React.JSX.Element => {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <Card variant="outlined" padding="lg">
-      <View style={{gap: theme.spacing.sm}}>
+      <View style={{ gap: theme.spacing.sm }}>
         <Text variant="bodyStrong">{t('trips.waypoint.proposedTitle')}</Text>
         <Text variant="footnote" color="inkMuted">
           {t('trips.waypoint.proposedBody')}
@@ -38,13 +38,13 @@ export const WaypointProposalCard = ({
         {proposal.deltaFareCents > 0 ? (
           <View style={styles.row}>
             <Text variant="callout" color="inkMuted">
-              {t('trips.waypoint.extraFare', {amount: formatPEN(proposal.deltaFareCents)})}
+              {t('trips.waypoint.extraFare', { amount: formatPEN(proposal.deltaFareCents) })}
             </Text>
           </View>
         ) : null}
         <View style={styles.row}>
           <Text variant="callout" color="inkMuted">
-            {t('trips.waypoint.newFare', {amount: formatPEN(proposal.newFareCents)})}
+            {t('trips.waypoint.newFare', { amount: formatPEN(proposal.newFareCents) })}
           </Text>
         </View>
 
@@ -71,5 +71,5 @@ export const WaypointProposalCard = ({
 };
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

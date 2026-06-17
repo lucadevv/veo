@@ -42,13 +42,23 @@ describe('trip-service Pricing DTO · S5 cross-field (start < end)', () => {
 
   it('rechaza startMinute === endMinute (rango vacío)', async () => {
     expect(
-      await errorsOf(PricingModeRuleDto, { dayMask: 1, startMinute: 600, endMinute: 600, mode: PricingMode.FIXED }),
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 1,
+        startMinute: 600,
+        endMinute: 600,
+        mode: PricingMode.FIXED,
+      }),
     ).toContain('endMinute');
   });
 
   it('una regla same-day válida (start < end) pasa', async () => {
     expect(
-      await errorsOf(PricingModeRuleDto, { dayMask: 127, startMinute: 1320, endMinute: 1439, mode: PricingMode.FIXED }),
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 127,
+        startMinute: 1320,
+        endMinute: 1439,
+        mode: PricingMode.FIXED,
+      }),
     ).toEqual([]);
   });
 });

@@ -28,7 +28,7 @@ import {
   otpRequestResult,
   type OtpVerify,
 } from '@veo/api-client';
-import type { AuthRepository } from '../domain/authRepository';
+import type {AuthRepository} from '../domain/authRepository';
 
 /**
  * Implementación de `AuthRepository` contra el public-bff (REST `/api/v1`).
@@ -53,14 +53,14 @@ export class HttpAuthRepository implements AuthRepository {
 
   refresh(refreshToken: string): Promise<MobileRefreshResult> {
     return this.http.post('/auth/refresh', {
-      body: { refreshToken },
+      body: {refreshToken},
       schema: mobileRefreshResult,
     });
   }
 
   async logout(refreshToken: string): Promise<void> {
     await this.http.post('/auth/logout', {
-      body: { refreshToken },
+      body: {refreshToken},
       schema: mobileLogoutResult,
     });
   }

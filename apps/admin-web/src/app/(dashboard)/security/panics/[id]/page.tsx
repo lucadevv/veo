@@ -1,5 +1,5 @@
-'use client';;
-import { use } from "react";
+'use client';
+import { use } from 'react';
 
 import { BellRing, CheckCircle2, FileText } from 'lucide-react';
 import { usePanic, usePanicAction } from '@/lib/api/queries';
@@ -26,7 +26,15 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
   const panic = query.data;
 
   const markers: MapMarker[] = panic
-    ? [{ id: 'panic', lon: panic.geo.lon, lat: panic.geo.lat, kind: 'panic', label: 'Ubicación del pánico' }]
+    ? [
+        {
+          id: 'panic',
+          lon: panic.geo.lon,
+          lat: panic.geo.lat,
+          kind: 'panic',
+          label: 'Ubicación del pánico',
+        },
+      ]
     : [];
 
   return (
@@ -99,8 +107,14 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <Detail label="Viaje" value={panic.tripId.slice(0, 8)} mono />
-                <Detail label="Pasajero" value={panic.passengerName ?? panic.passengerId.slice(0, 8)} />
-                <Detail label="Conductor" value={panic.driverName ?? panic.driverId?.slice(0, 8) ?? '—'} />
+                <Detail
+                  label="Pasajero"
+                  value={panic.passengerName ?? panic.passengerId.slice(0, 8)}
+                />
+                <Detail
+                  label="Conductor"
+                  value={panic.driverName ?? panic.driverId?.slice(0, 8) ?? '—'}
+                />
                 <Detail label="Disparado" value={dateTime(panic.triggeredAt)} />
                 <Detail label="Reconocido" value={dateTime(panic.acknowledgedAt)} />
                 <Detail label="Resuelto" value={dateTime(panic.resolvedAt)} />
@@ -114,7 +128,10 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
               </CardHeader>
               <CardContent>
                 {panic.evidence.length === 0 ? (
-                  <EmptyState title="Sin evidencia" description="No hay evidencia asociada todavía." />
+                  <EmptyState
+                    title="Sin evidencia"
+                    description="No hay evidencia asociada todavía."
+                  />
                 ) : (
                   <ul className="space-y-2">
                     {panic.evidence.map((ev) => (
@@ -135,7 +152,11 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
 
           <Card className="min-h-[320px] overflow-hidden">
             <div className="h-full min-h-[320px]">
-              <MapView markers={markers} center={{ lon: panic.geo.lon, lat: panic.geo.lat }} zoom={14} />
+              <MapView
+                markers={markers}
+                center={{ lon: panic.geo.lon, lat: panic.geo.lat }}
+                zoom={14}
+              />
             </div>
           </Card>
         </div>

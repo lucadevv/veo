@@ -1,6 +1,6 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { create } from 'zustand';
-import { prefsStore } from '../../../../core/storage/mmkv';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {create} from 'zustand';
+import {prefsStore} from '../../../../core/storage/mmkv';
 
 /**
  * Preferencia de método de pago por defecto del pasajero (Zustand + cache MMKV, offline-first).
@@ -47,20 +47,22 @@ function loadDefault(): MobilePaymentMethod {
  * solo persiste local (degradación honesta; p.ej. en tests no se dispara red).
  */
 let backendSync: ((method: MobilePaymentMethod) => void) | null = null;
-export function setPaymentPrefsBackendSync(fn: (method: MobilePaymentMethod) => void): void {
+export function setPaymentPrefsBackendSync(
+  fn: (method: MobilePaymentMethod) => void,
+): void {
   backendSync = fn;
 }
 
-export const usePaymentPrefsStore = create<PaymentPrefsState>((set) => ({
+export const usePaymentPrefsStore = create<PaymentPrefsState>(set => ({
   defaultMethod: loadDefault(),
-  setDefault: (method) => {
+  setDefault: method => {
     prefsStore.setString(KEY, method);
-    set({ defaultMethod: method });
+    set({defaultMethod: method});
     backendSync?.(method);
   },
-  hydrate: (method) => {
+  hydrate: method => {
     prefsStore.setString(KEY, method);
-    set({ defaultMethod: method });
+    set({defaultMethod: method});
   },
 }));
 
@@ -85,6 +87,5 @@ export const PAYMENT_METHODS: readonly MobilePaymentMethod[] = [
  * fuente y el orden de presentación sea consistente. El wire (`mobileDigitalPaymentMethod`) sigue siendo
  * la red de seguridad de CONTRATO (el BFF valida y responde 422 ante CASH); esta lista es solo la UI.
  */
-export const DIGITAL_PAYMENT_METHODS: readonly MobilePaymentMethod[] = PAYMENT_METHODS.filter(
-  (method) => method !== 'CASH',
-);
+export const DIGITAL_PAYMENT_METHODS: readonly MobilePaymentMethod[] =
+  PAYMENT_METHODS.filter(method => method !== 'CASH');

@@ -49,7 +49,11 @@ export const envSchema = z.object({
   S3_PUBLIC_BASE_URL: z.string().default('http://localhost:9002'),
   /// Tamaño máximo permitido para el avatar, en bytes (BR: el presign no acota el body, se valida en
   /// el `confirm` tras la subida con HeadObject; si excede se borra y se rechaza). Default 5 MiB.
-  AVATAR_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+  AVATAR_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 1024 * 1024),
   S3_FORCE_PATH_STYLE: z
     .union([z.boolean(), z.string()])
     .default(true)

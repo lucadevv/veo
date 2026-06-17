@@ -8,7 +8,11 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InternalIdentityGuard, CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { ForbiddenError } from '@veo/utils';
 import { VehiclesService } from './vehicles.service';
-import { RegisterDriverVehicleDto, SelectVehicleDto, type DriverVehicleResponse } from './dto/vehicle.dto';
+import {
+  RegisterDriverVehicleDto,
+  SelectVehicleDto,
+  type DriverVehicleResponse,
+} from './dto/vehicle.dto';
 
 /** Mínimo del response para fijar el status (204) sin acoplar a express/fastify. */
 interface HttpResponseLike {
@@ -33,14 +37,17 @@ export class DriverVehiclesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lista los vehículos del conductor autenticado (rehidratación), con isActive' })
+  @ApiOperation({
+    summary: 'Lista los vehículos del conductor autenticado (rehidratación), con isActive',
+  })
   listMine(@CurrentUser() user: AuthenticatedUser): Promise<DriverVehicleResponse[]> {
     return this.vehicles.listForDriver(this.driverId(user));
   }
 
   @Get('active')
   @ApiOperation({
-    summary: 'Vehículo ACTIVO (operado) del conductor; 200 + vehículo o 204 si no tiene ninguno operable',
+    summary:
+      'Vehículo ACTIVO (operado) del conductor; 200 + vehículo o 204 si no tiene ninguno operable',
   })
   async active(
     @CurrentUser() user: AuthenticatedUser,
@@ -71,7 +78,9 @@ export class DriverVehiclesController {
    */
   private driverId(user: AuthenticatedUser): string {
     if (user.type !== 'driver') {
-      throw new ForbiddenError('Solo un conductor puede gestionar su propio vehículo', { type: user.type });
+      throw new ForbiddenError('Solo un conductor puede gestionar su propio vehículo', {
+        type: user.type,
+      });
     }
     return user.userId;
   }

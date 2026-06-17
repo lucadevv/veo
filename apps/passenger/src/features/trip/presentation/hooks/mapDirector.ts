@@ -1,6 +1,6 @@
-import type { GeoPoint } from '@veo/api-client';
-import type { NearbyVehicleType } from '../../../dispatch/domain/dispatchRepository';
-import type { TripPhase } from './tripFlowPhase';
+import type {GeoPoint} from '@veo/api-client';
+import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
+import type {TripPhase} from './tripFlowPhase';
 
 /**
  * COREOGRAFÍA DEL MAPA POR FASE — helper PURO (sin React, sin efectos) que decide, para cada fase del
@@ -14,7 +14,10 @@ import type { TripPhase } from './tripFlowPhase';
  */
 
 const isValidPoint = (p: GeoPoint | null | undefined): p is GeoPoint =>
-  p != null && Number.isFinite(p.lat) && Number.isFinite(p.lon) && !(p.lat === 0 && p.lon === 0);
+  p != null &&
+  Number.isFinite(p.lat) &&
+  Number.isFinite(p.lon) &&
+  !(p.lat === 0 && p.lon === 0);
 
 /**
  * Modo de cámara que el `AppMap` debe aplicar:
@@ -92,7 +95,7 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
   // necesitaban (fallbacks/center) ahora devuelven `cameraTarget: null` y delegan el encuadre a la Camera
   // declarativa del AppMap (que lee la ruta/markers/userPoint por su cuenta). Se conservan en el input
   // (el caller los pasa) pero no se desestructuran acá.
-  const { phase, driver, origin } = input;
+  const {phase, driver, origin} = input;
   const driverPt = isValidPoint(driver) ? driver : null;
   const originPt = isValidPoint(origin) ? origin : null;
 
@@ -110,7 +113,7 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
           showUserPoint: false,
           showNearby: false,
           showDriverVehicle: true,
-          cameraTarget: { mode: 'fit', fitPoints, followPoint: null },
+          cameraTarget: {mode: 'fit', fitPoints, followPoint: null},
         };
       }
       return {
@@ -130,7 +133,12 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
         showNearby: false,
         showDriverVehicle: true,
         cameraTarget: driverPt
-          ? { mode: 'follow', fitPoints: [], followPoint: driverPt, followZoom: FOLLOW_ZOOM }
+          ? {
+              mode: 'follow',
+              fitPoints: [],
+              followPoint: driverPt,
+              followZoom: FOLLOW_ZOOM,
+            }
           : null,
       };
     }

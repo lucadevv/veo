@@ -11,20 +11,20 @@ jest.mock('react-native-reanimated', () =>
 
 // react-native-config: sin capa nativa en Jest. Devolvemos vacío para que `env`
 // caiga en sus defaults validados por zod.
-jest.mock('react-native-config', () => ({ __esModule: true, default: {} }));
+jest.mock('react-native-config', () => ({__esModule: true, default: {}}));
 
 // @rnmapbox/maps: el SDK nativo de Mapbox no está disponible en Jest. Mockeamos los componentes
 // usados por `AppMap` como passthrough (renderizan vistas vacías) y `setAccessToken` como no-op,
 // para que las pantallas con mapa se monten en tests sin cargar el módulo nativo ni GL.
 jest.mock('@rnmapbox/maps', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  const Passthrough = ({ children }) => React.createElement(View, null, children);
+  const {View} = require('react-native');
+  const Passthrough = ({children}) => React.createElement(View, null, children);
   return {
     __esModule: true,
     default: {
       setAccessToken: jest.fn(),
-      StyleURL: { Street: 'mapbox://styles/mapbox/streets-v12' },
+      StyleURL: {Street: 'mapbox://styles/mapbox/streets-v12'},
     },
     MapView: Passthrough,
     Camera: Passthrough,
@@ -46,9 +46,9 @@ jest.mock('react-native-background-geolocation', () => ({
     PERSIST_MODE_NONE: 0,
     ready: jest.fn(() => Promise.resolve({})),
     getCurrentPosition: jest.fn(() =>
-      Promise.resolve({ coords: { latitude: 0, longitude: 0 } }),
+      Promise.resolve({coords: {latitude: 0, longitude: 0}}),
     ),
-    onLocation: jest.fn(() => ({ remove: jest.fn() })),
+    onLocation: jest.fn(() => ({remove: jest.fn()})),
     start: jest.fn(() => Promise.resolve()),
     stop: jest.fn(() => Promise.resolve()),
   },
@@ -58,13 +58,19 @@ jest.mock('react-native-background-geolocation', () => ({
 jest.mock('react-native-keychain', () => ({
   __esModule: true,
   getGenericPassword: jest.fn(() => Promise.resolve(false)),
-  setGenericPassword: jest.fn(() => Promise.resolve({ service: 'test' })),
+  setGenericPassword: jest.fn(() => Promise.resolve({service: 'test'})),
   hasGenericPassword: jest.fn(() => Promise.resolve(false)),
   resetGenericPassword: jest.fn(() => Promise.resolve(true)),
   getSupportedBiometryType: jest.fn(() => Promise.resolve(null)),
-  ACCESSIBLE: { AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock', WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'AccessibleWhenUnlockedThisDeviceOnly' },
-  ACCESS_CONTROL: { BIOMETRY_ANY: 'BiometryAny' },
-  STORAGE_TYPE: { AES_GCM_NO_AUTH: 'KeystoreAESGCM_NoAuth', AES_GCM: 'KeystoreAESGCM' },
+  ACCESSIBLE: {
+    AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock',
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'AccessibleWhenUnlockedThisDeviceOnly',
+  },
+  ACCESS_CONTROL: {BIOMETRY_ANY: 'BiometryAny'},
+  STORAGE_TYPE: {
+    AES_GCM_NO_AUTH: 'KeystoreAESGCM_NoAuth',
+    AES_GCM: 'KeystoreAESGCM',
+  },
 }));
 
 // Google Sign-In: sin capa nativa en Jest. Mock con la superficie usada por `useOAuthFlow`
@@ -75,11 +81,11 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
     configure: jest.fn(),
     hasPlayServices: jest.fn(() => Promise.resolve(true)),
     signIn: jest.fn(() =>
-      Promise.resolve({ type: 'success', data: { idToken: 'google.id.token' } }),
+      Promise.resolve({type: 'success', data: {idToken: 'google.id.token'}}),
     ),
   },
-  isSuccessResponse: (r) => r && r.type === 'success',
-  isErrorWithCode: (e) => Boolean(e && typeof e.code === 'string'),
+  isSuccessResponse: r => r && r.type === 'success',
+  isErrorWithCode: e => Boolean(e && typeof e.code === 'string'),
   statusCodes: {
     SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
     IN_PROGRESS: 'IN_PROGRESS',
@@ -91,19 +97,37 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
 // Sign in with Apple: sin capa nativa en Jest. Mock con appleAuth + AppleButton (vista vacía).
 jest.mock('@invertase/react-native-apple-authentication', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  const AppleButton = ({ children }) => React.createElement(View, null, children);
-  AppleButton.Type = { DEFAULT: 'SignIn', SIGN_IN: 'SignIn', CONTINUE: 'Continue', SIGN_UP: 'SignUp' };
-  AppleButton.Style = { DEFAULT: 'White', WHITE: 'White', WHITE_OUTLINE: 'WhiteOutline', BLACK: 'Black' };
+  const {View} = require('react-native');
+  const AppleButton = ({children}) => React.createElement(View, null, children);
+  AppleButton.Type = {
+    DEFAULT: 'SignIn',
+    SIGN_IN: 'SignIn',
+    CONTINUE: 'Continue',
+    SIGN_UP: 'SignUp',
+  };
+  AppleButton.Style = {
+    DEFAULT: 'White',
+    WHITE: 'White',
+    WHITE_OUTLINE: 'WhiteOutline',
+    BLACK: 'Black',
+  };
   return {
     __esModule: true,
     AppleButton,
     appleAuth: {
       isSupported: true,
-      performRequest: jest.fn(() => Promise.resolve({ identityToken: 'apple.identity.token' })),
-      Operation: { LOGOUT: 0, LOGIN: 1, REFRESH: 2, IMPLICIT: 3 },
-      Scope: { EMAIL: 0, FULL_NAME: 1 },
-      Error: { UNKNOWN: '1000', CANCELED: '1001', INVALID_RESPONSE: '1002', NOT_HANDLED: '1003', FAILED: '1004' },
+      performRequest: jest.fn(() =>
+        Promise.resolve({identityToken: 'apple.identity.token'}),
+      ),
+      Operation: {LOGOUT: 0, LOGIN: 1, REFRESH: 2, IMPLICIT: 3},
+      Scope: {EMAIL: 0, FULL_NAME: 1},
+      Error: {
+        UNKNOWN: '1000',
+        CANCELED: '1001',
+        INVALID_RESPONSE: '1002',
+        NOT_HANDLED: '1003',
+        FAILED: '1004',
+      },
     },
   };
 });
@@ -145,5 +169,5 @@ jest.mock('react-native-mmkv', () => {
     }
     recrypt() {}
   }
-  return { MMKV, createMMKV: () => new MMKV() };
+  return {MMKV, createMMKV: () => new MMKV()};
 });

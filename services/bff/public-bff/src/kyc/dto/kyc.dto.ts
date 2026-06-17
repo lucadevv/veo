@@ -38,7 +38,9 @@ export class KycFrameDto {
 }
 
 export class VerifyKycDto {
-  @ApiProperty({ description: 'Identificador del reto de liveness emitido por POST /kyc/challenge' })
+  @ApiProperty({
+    description: 'Identificador del reto de liveness emitido por POST /kyc/challenge',
+  })
   @IsString()
   challengeId!: string;
 

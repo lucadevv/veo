@@ -1,9 +1,9 @@
-import { IconButton, RoutePin, Text, useTheme } from '@veo/ui-kit';
+import {IconButton, RoutePin, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { IconSwapVertical } from './icons';
-import { Animated, usePressScale } from './motion';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {IconSwapVertical} from './icons';
+import {Animated, usePressScale} from './motion';
 
 export interface OriginDestinationCardProps {
   /** Dirección REAL del origen (calle del geocoding inverso). Tiene prioridad sobre el subtítulo. */
@@ -48,7 +48,7 @@ export function OriginDestinationCard({
   onEnterSearch,
 }: OriginDestinationCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   // Feedback de press por fila (escala 0.97 interrumpible, reduce-motion safe). Cada fila tiene su propio
   // valor para que tocar origen no encoja la fila de destino.
   const originPress = usePressScale();
@@ -70,19 +70,21 @@ export function OriginDestinationCard({
           paddingVertical: theme.spacing.xs,
           paddingHorizontal: theme.spacing.lg,
         },
-      ]}
-    >
+      ]}>
       {/* Conector vertical entre el pin de origen y el cuadro de destino (lenguaje de ruta de la app). */}
       <View
         pointerEvents="none"
         style={[
           styles.connector,
-          { left: theme.spacing.lg + RAIL / 2 - 1, backgroundColor: theme.colors.borderStrong },
+          {
+            left: theme.spacing.lg + RAIL / 2 - 1,
+            backgroundColor: theme.colors.borderStrong,
+          },
         ]}
       />
 
       {/* Columna de filas (origen / destino) a la IZQUIERDA; el swap ocupa su propia columna a la derecha. */}
-      <View style={[styles.rows, { paddingRight: SWAP_GUTTER }]}>
+      <View style={[styles.rows, {paddingRight: SWAP_GUTTER}]}>
         <Animated.View style={originPress.animatedStyle}>
           <Pressable
             accessibilityRole="button"
@@ -90,20 +92,22 @@ export function OriginDestinationCard({
             onPress={onEditOrigin}
             onPressIn={originPress.onPressIn}
             onPressOut={originPress.onPressOut}
-            style={({ pressed }) => [
+            style={({pressed}) => [
               styles.row,
-              { borderRadius: theme.radii.md },
-              pressed ? { backgroundColor: theme.colors.surface } : null,
-            ]}
-          >
-            <View style={[styles.rail, { width: RAIL }]}>
+              {borderRadius: theme.radii.md},
+              pressed ? {backgroundColor: theme.colors.surface} : null,
+            ]}>
+            <View style={[styles.rail, {width: RAIL}]}>
               <RoutePin variant="origin" size={14} />
             </View>
             <View style={styles.body}>
               <Text variant="caption" color="inkSubtle">
                 {t('home.pickupLabel')}
               </Text>
-              <Text variant="bodyStrong" color={hasOrigin ? 'ink' : 'inkSubtle'} numberOfLines={1}>
+              <Text
+                variant="bodyStrong"
+                color={hasOrigin ? 'ink' : 'inkSubtle'}
+                numberOfLines={1}>
                 {hasOrigin ? originValue : t('home.definePickup')}
               </Text>
             </View>
@@ -111,7 +115,13 @@ export function OriginDestinationCard({
         </Animated.View>
 
         <View
-          style={[styles.line, { backgroundColor: theme.colors.border, marginLeft: RAIL + theme.spacing.md }]}
+          style={[
+            styles.line,
+            {
+              backgroundColor: theme.colors.border,
+              marginLeft: RAIL + theme.spacing.md,
+            },
+          ]}
         />
 
         <Animated.View style={destinationPress.animatedStyle}>
@@ -121,20 +131,22 @@ export function OriginDestinationCard({
             onPress={onEnterSearch}
             onPressIn={destinationPress.onPressIn}
             onPressOut={destinationPress.onPressOut}
-            style={({ pressed }) => [
+            style={({pressed}) => [
               styles.row,
-              { borderRadius: theme.radii.md },
-              pressed ? { backgroundColor: theme.colors.surface } : null,
-            ]}
-          >
-            <View style={[styles.rail, { width: RAIL }]}>
+              {borderRadius: theme.radii.md},
+              pressed ? {backgroundColor: theme.colors.surface} : null,
+            ]}>
+            <View style={[styles.rail, {width: RAIL}]}>
               <RoutePin variant="destination" size={14} />
             </View>
             <View style={styles.body}>
               <Text variant="caption" color="inkSubtle">
                 {t('home.destination')}
               </Text>
-              <Text variant="bodyStrong" color={hasDestination ? 'ink' : 'inkSubtle'} numberOfLines={1}>
+              <Text
+                variant="bodyStrong"
+                color={hasDestination ? 'ink' : 'inkSubtle'}
+                numberOfLines={1}>
                 {hasDestination ? destinationValue : t('home.whereTo')}
               </Text>
             </View>
@@ -149,9 +161,11 @@ export function OriginDestinationCard({
         pointerEvents="box-none"
         style={[
           styles.swapColumn,
-          { right: theme.spacing.lg, backgroundColor: theme.colors.surfaceElevated },
-        ]}
-      >
+          {
+            right: theme.spacing.lg,
+            backgroundColor: theme.colors.surfaceElevated,
+          },
+        ]}>
         <IconButton
           accessibilityLabel={t('home.swapRoute')}
           variant="tinted"
@@ -165,14 +179,30 @@ export function OriginDestinationCard({
 }
 
 const styles = StyleSheet.create({
-  card: { alignSelf: 'stretch', borderWidth: 1, position: 'relative', justifyContent: 'center' },
+  card: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    position: 'relative',
+    justifyContent: 'center',
+  },
   // La columna de las dos filas deja sitio a la derecha para el swap (no se solapa con el texto).
   rows: {},
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  rail: { alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
-  body: { flex: 1, justifyContent: 'center' },
-  line: { height: StyleSheet.hairlineWidth },
+  row: {flexDirection: 'row', alignItems: 'center', paddingVertical: 10},
+  rail: {alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch'},
+  body: {flex: 1, justifyContent: 'center'},
+  line: {height: StyleSheet.hairlineWidth},
   // Swap centrado vertical sobre el eje de la card, anclado al borde derecho interno (padding `lg`).
-  swapColumn: { position: 'absolute', top: 0, bottom: 0, justifyContent: 'center' },
-  connector: { position: 'absolute', top: 28, bottom: 28, width: 2, borderRadius: 1 },
+  swapColumn: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  connector: {
+    position: 'absolute',
+    top: 28,
+    bottom: 28,
+    width: 2,
+    borderRadius: 1,
+  },
 });

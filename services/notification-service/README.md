@@ -41,12 +41,12 @@ contratos), `ports/` (canales tras interfaces — DIP), `infra/` (Prisma, Redis,
 
 Selección por entorno (default `sandbox`):
 
-| Canal   | Env             | Live                                                        | Sandbox                  |
-|---------|-----------------|------------------------------------------------------------|--------------------------|
-| PUSH    | `VEO_PUSH_MODE` | FCM HTTP v1 (`google-auth-library`) + APNs HTTP/2 (`node:http2` + JWT ES256 con `node:crypto`) | log `[SANDBOX PUSH]` |
-| SMS     | `VEO_SMS_MODE`  | **SMPP 3.4 directo al operador** (cliente propio sobre `node:net`, NO Twilio) | log `[SANDBOX SMS]`  |
-| EMAIL   | `VEO_EMAIL_MODE`| SMTP propio (`nodemailer`); dev → Mailpit `localhost:1025` | log `[SANDBOX EMAIL]`    |
-| WEBHOOK | `VEO_WEBHOOK_MODE` | HTTP `POST` firmado HMAC-SHA256 (`X-VEO-Signature`, `X-VEO-Timestamp`) | log `[SANDBOX WEBHOOK]` |
+| Canal   | Env                | Live                                                                                           | Sandbox                 |
+| ------- | ------------------ | ---------------------------------------------------------------------------------------------- | ----------------------- |
+| PUSH    | `VEO_PUSH_MODE`    | FCM HTTP v1 (`google-auth-library`) + APNs HTTP/2 (`node:http2` + JWT ES256 con `node:crypto`) | log `[SANDBOX PUSH]`    |
+| SMS     | `VEO_SMS_MODE`     | **SMPP 3.4 directo al operador** (cliente propio sobre `node:net`, NO Twilio)                  | log `[SANDBOX SMS]`     |
+| EMAIL   | `VEO_EMAIL_MODE`   | SMTP propio (`nodemailer`); dev → Mailpit `localhost:1025`                                     | log `[SANDBOX EMAIL]`   |
+| WEBHOOK | `VEO_WEBHOOK_MODE` | HTTP `POST` firmado HMAC-SHA256 (`X-VEO-Signature`, `X-VEO-Timestamp`)                         | log `[SANDBOX WEBHOOK]` |
 
 ## Modelo de datos (schema `notification`)
 

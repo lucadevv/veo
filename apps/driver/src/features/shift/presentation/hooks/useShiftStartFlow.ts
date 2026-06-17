@@ -1,7 +1,7 @@
-import {useCallback, useState} from 'react';
-import {BIOMETRIC_NOT_ENROLLED} from '../../domain';
-import {useBiometricCapture} from '../providers/BiometricCaptureProvider';
-import {useStartShift} from './useShift';
+import { useCallback, useState } from 'react';
+import { BIOMETRIC_NOT_ENROLLED } from '../../domain';
+import { useBiometricCapture } from '../providers/BiometricCaptureProvider';
+import { useStartShift } from './useShift';
 
 export type ShiftStartPhase = 'idle' | 'capturing' | 'starting' | 'done';
 
@@ -24,15 +24,15 @@ export function useShiftStartFlow(onSuccess: () => void, onNeedEnrollment?: () =
     setScore(null);
     try {
       setPhase('capturing');
-      const {sessionRef} = await capture.captureForShiftStart();
+      const { sessionRef } = await capture.captureForShiftStart();
       setPhase('starting');
-      const result = await start.mutateAsync({sessionRef});
+      const result = await start.mutateAsync({ sessionRef });
       setScore(result.score);
       setPhase('done');
       onSuccess();
     } catch (e) {
       setPhase('idle');
-      const code = e instanceof Error ? (e as {code?: string}).code : undefined;
+      const code = e instanceof Error ? (e as { code?: string }).code : undefined;
       if (code === BIOMETRIC_NOT_ENROLLED && onNeedEnrollment) {
         // No enrolado: no es un error a mostrar, redirigimos al registro de rostro.
         onNeedEnrollment();
@@ -42,5 +42,5 @@ export function useShiftStartFlow(onSuccess: () => void, onNeedEnrollment?: () =
     }
   }, [capture, start, onSuccess, onNeedEnrollment]);
 
-  return {run, phase, error, score, isBusy: phase === 'capturing' || phase === 'starting'};
+  return { run, phase, error, score, isBusy: phase === 'capturing' || phase === 'starting' };
 }

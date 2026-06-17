@@ -64,9 +64,7 @@ describe('Eje User.kycStatus · cobertura del producto cartesiano', () => {
   it('un kycStatus legacy fuera del enum es inválido hacia todo destino (fail-closed)', () => {
     const legacy = 'LEGACY_GARBAGE' as KycStatus;
     for (const to of ALL_STATES) {
-      expect(() => kycStatusMachine.assertTransition(legacy, to)).toThrow(
-        InvalidStatusTransition,
-      );
+      expect(() => kycStatusMachine.assertTransition(legacy, to)).toThrow(InvalidStatusTransition);
     }
   });
 });

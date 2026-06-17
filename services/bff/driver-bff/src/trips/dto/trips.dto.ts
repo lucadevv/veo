@@ -1,6 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsLatitude, IsLongitude, IsOptional, IsString, Matches, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsLatitude,
+  IsLongitude,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
 import type { TripStatus } from '@veo/api-client';
 
 export class AcceptTripDto {
@@ -20,7 +29,9 @@ export class ArrivingTripDto {
 }
 
 export class StartTripDto {
-  @ApiPropertyOptional({ description: 'Código modo niño (BR-T07), requerido si el viaje es childMode' })
+  @ApiPropertyOptional({
+    description: 'Código modo niño (BR-T07), requerido si el viaje es childMode',
+  })
   @IsOptional()
   @IsString()
   @Matches(/^\d{4,6}$/, { message: 'El código de modo niño tiene 4 a 6 dígitos' })

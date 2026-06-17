@@ -1,9 +1,9 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {IconButton, Text, useTheme} from '@veo/ui-kit';
-import {useTranslation} from 'react-i18next';
-import {IconChevronLeft} from '../../../../shared/presentation/icons';
-import {PeruFlag, VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
+import { StyleSheet, View } from 'react-native';
+import { IconButton, Text, useTheme } from '@veo/ui-kit';
+import { useTranslation } from 'react-i18next';
+import { IconChevronLeft } from '../../../../shared/presentation/icons';
+import { PeruFlag, VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
 
 interface RegistrationHeaderProps {
   onBack?: () => void;
@@ -28,7 +28,7 @@ export function RegistrationHeader({
   peruRight = false,
 }: RegistrationHeaderProps): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <View style={styles.row}>
@@ -47,7 +47,7 @@ export function RegistrationHeader({
       </View>
       <View style={[styles.side, styles.right]}>
         {peruRight ? (
-          <View style={[styles.peruRight, {gap: theme.spacing.xs}]}>
+          <View style={[styles.peruRight, { gap: theme.spacing.xs }]}>
             <PeruFlag width={18} height={12} />
             <Text variant="caption" color="inkMuted">
               {t('registration.country')}
@@ -60,9 +60,9 @@ export function RegistrationHeader({
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', minHeight: 48},
-  side: {width: 64, justifyContent: 'center'},
-  right: {alignItems: 'flex-end'},
-  center: {flex: 1, alignItems: 'center'},
-  peruRight: {flexDirection: 'row', alignItems: 'center'},
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 48 },
+  side: { width: 64, justifyContent: 'center' },
+  right: { alignItems: 'flex-end' },
+  center: { flex: 1, alignItems: 'center' },
+  peruRight: { flexDirection: 'row', alignItems: 'center' },
 });

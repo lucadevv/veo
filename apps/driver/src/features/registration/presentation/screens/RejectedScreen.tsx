@@ -1,20 +1,20 @@
 import React from 'react';
-import {Linking, StyleSheet, View} from 'react-native';
-import Svg, {Circle, Path} from 'react-native-svg';
-import {useTranslation} from 'react-i18next';
-import {useQueryClient} from '@tanstack/react-query';
-import {Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import type {DriverProfile} from '../../../profile/domain';
-import {REGISTRATION_GATE_QUERY_KEY} from '../hooks/useRegistrationGate';
-import {useResubmitRegistration} from '../hooks/useResubmitRegistration';
-import {IconLifebuoy} from '../../../../shared/presentation/icons';
-import {Reveal} from '../../../../shared/presentation/components/motion';
-import {env} from '../../../../core/config/env';
-import {useRegistrationStore} from '../state/registrationStore';
-import {VeoWordmark, hexAlpha} from '../components';
+import { Linking, StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
+import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import type { DriverProfile } from '../../../profile/domain';
+import { REGISTRATION_GATE_QUERY_KEY } from '../hooks/useRegistrationGate';
+import { useResubmitRegistration } from '../hooks/useResubmitRegistration';
+import { IconLifebuoy } from '../../../../shared/presentation/icons';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { env } from '../../../../core/config/env';
+import { useRegistrationStore } from '../state/registrationStore';
+import { VeoWordmark, hexAlpha } from '../components';
 
 /** Ilustración de alerta (line art) para la pantalla de rechazo. */
-function RejectGlyph({color}: {color: string}): React.JSX.Element {
+function RejectGlyph({ color }: { color: string }): React.JSX.Element {
   return (
     <Svg width={132} height={132} viewBox="0 0 132 132" fill="none">
       <Circle cx={66} cy={66} r={44} stroke={color} strokeWidth={2.4} />
@@ -34,10 +34,10 @@ function RejectGlyph({color}: {color: string}): React.JSX.Element {
  * La aprobación NUNCA se decide localmente: tras reenviar, el gate reconcilia contra el backend.
  */
 export const RejectedScreen = (): React.JSX.Element => {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
-  const setStatus = useRegistrationStore(s => s.setStatus);
+  const setStatus = useRegistrationStore((s) => s.setStatus);
   const resubmit = useResubmitRegistration();
 
   // El motivo viene del perfil cacheado por el gate (GET /drivers/me); null si no se dio motivo.
@@ -57,7 +57,7 @@ export const RejectedScreen = (): React.JSX.Element => {
     <SafeScreen
       scroll
       footer={
-        <View style={{gap: theme.spacing.sm}}>
+        <View style={{ gap: theme.spacing.sm }}>
           <Button
             label={t('registration.rejected.fix')}
             variant="primary"
@@ -79,8 +79,9 @@ export const RejectedScreen = (): React.JSX.Element => {
             onPress={onContactSupport}
           />
         </View>
-      }>
-      <View style={[styles.body, {gap: theme.spacing.xl}]}>
+      }
+    >
+      <View style={[styles.body, { gap: theme.spacing.xl }]}>
         <Reveal style={styles.brand}>
           <VeoWordmark size="sm" peru />
         </Reveal>
@@ -110,7 +111,8 @@ export const RejectedScreen = (): React.JSX.Element => {
                   padding: theme.spacing.lg,
                   gap: theme.spacing.xs,
                 },
-              ]}>
+              ]}
+            >
               <Text variant="subhead" color="danger">
                 {t('registration.rejected.reasonLabel')}
               </Text>
@@ -136,9 +138,9 @@ export const RejectedScreen = (): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  body: {paddingTop: 16, alignItems: 'stretch'},
-  brand: {alignItems: 'center', gap: 6},
-  illustration: {alignItems: 'center'},
-  intro: {gap: 8},
-  reasonCard: {alignSelf: 'stretch'},
+  body: { paddingTop: 16, alignItems: 'stretch' },
+  brand: { alignItems: 'center', gap: 6 },
+  illustration: { alignItems: 'center' },
+  intro: { gap: 8 },
+  reasonCard: { alignSelf: 'stretch' },
 });

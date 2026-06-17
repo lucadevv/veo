@@ -56,7 +56,8 @@ import { ThemeProvider } from '@veo/ui-kit';
 
 export default function App() {
   return (
-    <ThemeProvider name="passenger">{/* o "driver" */}
+    <ThemeProvider name="passenger">
+      {/* o "driver" */}
       <RootNavigator />
     </ThemeProvider>
   );
@@ -97,6 +98,7 @@ VEO Cyan `#00E5FF`, alto contraste y números tabulares (ganancias, ETAs) legibl
 ## 3. Tokens compartidos (estructura, no marca)
 
 ### Tipografía (`typography`)
+
 - **Familias de marca (bundleadas):** `display` → **Clash Display Bold** (Fontshare) para títulos/héroe;
   `text*` → **Outfit** (Google Fonts OFL) por peso (Regular/Medium/SemiBold/Bold) para interfaz/cuerpo;
   `mono` tabular para datos. Nombres PostScript reales: `ClashDisplay-Bold`, `Outfit-{Regular…Bold}`. Hasta
@@ -107,17 +109,21 @@ VEO Cyan `#00E5FF`, alto contraste y números tabulares (ganancias, ETAs) legibl
 - **Números tabulares:** `<Text tabular>` para tarifas (céntimos PEN → S/), ETAs, timers, placas, IDs.
 
 ### Espaciado (`spacing`) — base 4pt
+
 `none 0 · xxs 2 · xs 4 · sm 8 · md 12 · lg 16 · xl 20 · 2xl 24 · 3xl 32 · 4xl 40 · 5xl 48 · 6xl 64`.
 Constante `TOUCH_TARGET = 44`.
 
 ### Radios (`radii`)
+
 `sm 8 · md 12 · lg 16 · xl 20 · 2xl 28 · pill 999`. Tarjetas/inputs 12–16; `pill` sólo botones/tags.
 
 ### Elevación (`elevation`) — `level0..level3`
+
 Token RN completo (`shadowColor/Offset/Opacity/Radius` + `elevation` Android). `level1` tarjetas,
 `level2` flotantes, `level3` modales/sheets.
 
 ### Motion (`motion`) — alineado a Reanimated
+
 - **Duraciones:** `fast 120 · base 200 · slow 320 · slower 420`; **exit** `fast 90 · base 140 · slow 200`.
 - **Curvas** (mismas que la web `tokens.css`): `standard [0.23,1,0.32,1]` (ease-out), `inOut [0.77,0,0.175,1]`,
   `drawer [0.32,0.72,0,1]`. Se usan con `Easing.bezier(...theme.motion.easing.standard)`.
@@ -130,29 +136,31 @@ Token RN completo (`shadowColor/Offset/Opacity/Radius` + `elevation` Android). `
 Todos accesibles, tematizados y con targets ≥44pt. Importar desde `@veo/ui-kit`.
 
 ### Provider y hooks
-| Export | API | Notas |
-|---|---|---|
-| `ThemeProvider` | `{ children, name?: 'passenger'\|'driver', theme?: Theme }` | Monta el tema (default passenger). |
-| `useTheme()` | `() => Theme` | Tema activo. |
-| `useThemedStyles(factory)` | `(t: Theme) => Styles` → `Styles` | `StyleSheet.create` memoizado por tema. |
-| `useReducedMotion()` | `() => boolean` | A11y: degradar movimiento. |
+
+| Export                     | API                                                         | Notas                                   |
+| -------------------------- | ----------------------------------------------------------- | --------------------------------------- |
+| `ThemeProvider`            | `{ children, name?: 'passenger'\|'driver', theme?: Theme }` | Monta el tema (default passenger).      |
+| `useTheme()`               | `() => Theme`                                               | Tema activo.                            |
+| `useThemedStyles(factory)` | `(t: Theme) => Styles` → `Styles`                           | `StyleSheet.create` memoizado por tema. |
+| `useReducedMotion()`       | `() => boolean`                                             | A11y: degradar movimiento.              |
 
 ### Componentes
-| Componente | Props clave | Comportamiento |
-|---|---|---|
-| **`Text`** | `variant` (rol), `color` (token), `align`, `tabular` | Toda la tipografía pasa por aquí; soporta Dynamic Type. |
-| **`Button`** | `label`, `variant` (`primary\|accent\|secondary\|ghost\|danger\|safe`), `size` (`sm\|md\|lg`), `fullWidth`, `loading`, `disabled`, `leftIcon`, `rightIcon`, `onPress` | Press `scale(0.97)` ease-out interrumpible; loading deshabilita + spinner; pill; target ≥44. |
-| **`IconButton`** | `icon`, **`accessibilityLabel` (obligatorio)**, `variant` (`plain\|surface\|tinted\|danger`), `size`, `disabled` | Sólo-ícono accesible; área táctil ≥44 (+hitSlop). |
-| **`Card`** | `variant` (`elevated\|outlined\|filled`), `padding` (token), `onPress?` | Anti ghost-card: **borde O sombra, nunca ambos**; radio 16; sin anidar. |
-| **`StatusPill`** | `label`, `tone` (`neutral\|brand\|accent\|safe\|success\|warn\|danger`), `dot`, `live` | Fondo tintado + texto del tono; `live` = punto pulsante (respeta reduce-motion). |
-| **`Avatar`** | `uri?`, `name?`, `size` (`sm\|md\|lg\|xl`), `online` | Fallback a iniciales; anillo de estado. |
-| **`Banner`** | `title`, `description?`, `tone` (`info\|success\|safe\|warn\|danger`), `icon?`, `action?` | Aviso inline tintado (sin side-stripe); `danger` se anuncia como alerta. |
-| **`ListItem`** | `title`, `subtitle?`, `leading?`, `trailing?`, `chevron?`, `onPress?`, `disabled?` | Feedback por cambio de fondo (sin scale: filas frecuentes); target ≥44. |
-| **`Skeleton`** | `width?`, `height?`, `variant` (`rect\|circle\|text`), `radius?` | Shimmer (pulso de color); reserva espacio (anti-CLS); respeta reduce-motion. |
-| **`TextField`** | `label` (visible), `helperText?`, `error?`, `required?`, `leftIcon?`, `rightIcon?`, `secureTextEntry?`, + `TextInputProps` | Label visible (no placeholder-only), foco tematizado, error debajo (`role=alert`), toggle de contraseña, teclado semántico. |
-| **`BottomSheet`** | `visible`, `onClose`, `children`, `title?`, `showHandle?`, `dismissOnBackdrop?`, `footer?` | Modal slide + fade (curva drawer), arrastre para descartar (umbral distancia/velocidad), scrim 45–60%, back de Android cierra; respeta reduce-motion. |
-| **`MapShell`** | `children` (el mapa), `loading?`, `live?`, `topOverlay?`, `bottomOverlay?`, `rounded?` | Enmarca el mapa (héroe) + slots superpuestos + estado de carga; combinar con `SafeScreen`. |
-| **`SafeScreen`** | `children`, `scroll?`, `padded?`, `header?`, `footer?`, `backgroundColor?` | Scaffold con safe areas, status bar por tema y footer con inset inferior seguro. |
+
+| Componente        | Props clave                                                                                                                                                           | Comportamiento                                                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`Text`**        | `variant` (rol), `color` (token), `align`, `tabular`                                                                                                                  | Toda la tipografía pasa por aquí; soporta Dynamic Type.                                                                                               |
+| **`Button`**      | `label`, `variant` (`primary\|accent\|secondary\|ghost\|danger\|safe`), `size` (`sm\|md\|lg`), `fullWidth`, `loading`, `disabled`, `leftIcon`, `rightIcon`, `onPress` | Press `scale(0.97)` ease-out interrumpible; loading deshabilita + spinner; pill; target ≥44.                                                          |
+| **`IconButton`**  | `icon`, **`accessibilityLabel` (obligatorio)**, `variant` (`plain\|surface\|tinted\|danger`), `size`, `disabled`                                                      | Sólo-ícono accesible; área táctil ≥44 (+hitSlop).                                                                                                     |
+| **`Card`**        | `variant` (`elevated\|outlined\|filled`), `padding` (token), `onPress?`                                                                                               | Anti ghost-card: **borde O sombra, nunca ambos**; radio 16; sin anidar.                                                                               |
+| **`StatusPill`**  | `label`, `tone` (`neutral\|brand\|accent\|safe\|success\|warn\|danger`), `dot`, `live`                                                                                | Fondo tintado + texto del tono; `live` = punto pulsante (respeta reduce-motion).                                                                      |
+| **`Avatar`**      | `uri?`, `name?`, `size` (`sm\|md\|lg\|xl`), `online`                                                                                                                  | Fallback a iniciales; anillo de estado.                                                                                                               |
+| **`Banner`**      | `title`, `description?`, `tone` (`info\|success\|safe\|warn\|danger`), `icon?`, `action?`                                                                             | Aviso inline tintado (sin side-stripe); `danger` se anuncia como alerta.                                                                              |
+| **`ListItem`**    | `title`, `subtitle?`, `leading?`, `trailing?`, `chevron?`, `onPress?`, `disabled?`                                                                                    | Feedback por cambio de fondo (sin scale: filas frecuentes); target ≥44.                                                                               |
+| **`Skeleton`**    | `width?`, `height?`, `variant` (`rect\|circle\|text`), `radius?`                                                                                                      | Shimmer (pulso de color); reserva espacio (anti-CLS); respeta reduce-motion.                                                                          |
+| **`TextField`**   | `label` (visible), `helperText?`, `error?`, `required?`, `leftIcon?`, `rightIcon?`, `secureTextEntry?`, + `TextInputProps`                                            | Label visible (no placeholder-only), foco tematizado, error debajo (`role=alert`), toggle de contraseña, teclado semántico.                           |
+| **`BottomSheet`** | `visible`, `onClose`, `children`, `title?`, `showHandle?`, `dismissOnBackdrop?`, `footer?`                                                                            | Modal slide + fade (curva drawer), arrastre para descartar (umbral distancia/velocidad), scrim 45–60%, back de Android cierra; respeta reduce-motion. |
+| **`MapShell`**    | `children` (el mapa), `loading?`, `live?`, `topOverlay?`, `bottomOverlay?`, `rounded?`                                                                                | Enmarca el mapa (héroe) + slots superpuestos + estado de carga; combinar con `SafeScreen`.                                                            |
+| **`SafeScreen`**  | `children`, `scroll?`, `padded?`, `header?`, `footer?`, `backgroundColor?`                                                                                            | Scaffold con safe areas, status bar por tema y footer con inset inferior seguro.                                                                      |
 
 ### Ejemplo (viaje activo · passenger)
 
@@ -160,18 +168,21 @@ Todos accesibles, tematizados y con targets ≥44pt. Importar desde `@veo/ui-kit
 import { SafeScreen, MapShell, Card, Avatar, StatusPill, Text, Button } from '@veo/ui-kit';
 
 <SafeScreen padded={false}>
-  <MapShell live bottomOverlay={
-    <Card variant="elevated">
-      <Avatar name="Jorge M." uri={driver.photo} online />
-      <Text variant="title3">Jorge M.</Text>
-      <StatusPill label="En camino" tone="safe" />
-      <Text tabular>Llegas en 12 min</Text>
-      <Button label="Botón de pánico" variant="danger" fullWidth onPress={panic} />
-    </Card>
-  }>
+  <MapShell
+    live
+    bottomOverlay={
+      <Card variant="elevated">
+        <Avatar name="Jorge M." uri={driver.photo} online />
+        <Text variant="title3">Jorge M.</Text>
+        <StatusPill label="En camino" tone="safe" />
+        <Text tabular>Llegas en 12 min</Text>
+        <Button label="Botón de pánico" variant="danger" fullWidth onPress={panic} />
+      </Card>
+    }
+  >
     <LiveMap /> {/* react-native-maps / MapLibre */}
   </MapShell>
-</SafeScreen>
+</SafeScreen>;
 ```
 
 ---
@@ -191,6 +202,7 @@ import { SafeScreen, MapShell, Card, Avatar, StatusPill, Text, Button } from '@v
 ## 6. Anti-patrones prohibidos (match-and-refuse)
 
 Si vas a escribir algo de esto, reescribe el elemento:
+
 - Hex/medidas hardcodeadas en componentes (usa tokens del tema).
 - Glassmorphism/blur decorativo; gradientes morado-azul; neón "premium" falso.
 - Side-stripe borders; **ghost-card** (borde 1px + sombra grande a la vez); tarjetas **anidadas**.
@@ -211,14 +223,14 @@ Si vas a escribir algo de esto, reescribe el elemento:
 
 Estructura (`docs/design-handoff/`):
 
-| Ruta | Qué es |
-|---|---|
-| `README.md` | instrucciones del handoff (leer primero) |
-| `chats/chat1.md` | la conversación con la intención del producto (el "por qué") |
-| `project/pasajero/` | `VEO Pasajero - App.html` (clicable) · `- Flujo.html` (lienzo) · `screens-pass.jsx` (fuente) |
-| `project/conductor/` | ídem conductor (oferta/contraoferta, gate biométrico, pánico indistinguible) |
-| `project/familia/` | ídem web de familia (link firmado, cámara en vivo) |
-| `project/admin/` | ídem panel admin (pánicos, video doble-auth, finanzas, auditoría) |
+| Ruta                 | Qué es                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| `README.md`          | instrucciones del handoff (leer primero)                                                     |
+| `chats/chat1.md`     | la conversación con la intención del producto (el "por qué")                                 |
+| `project/pasajero/`  | `VEO Pasajero - App.html` (clicable) · `- Flujo.html` (lienzo) · `screens-pass.jsx` (fuente) |
+| `project/conductor/` | ídem conductor (oferta/contraoferta, gate biométrico, pánico indistinguible)                 |
+| `project/familia/`   | ídem web de familia (link firmado, cámara en vivo)                                           |
+| `project/admin/`     | ídem panel admin (pánicos, video doble-auth, finanzas, auditoría)                            |
 
 **Modelo de producto (confirmado en el handoff):** VEO es **regateo inverso (puja)** — el pasajero
 **ofrece su tarifa** (stepper, mínimo por zona), los conductores **aceptan o contraofertan**, y el pasajero
@@ -236,4 +248,7 @@ elige por precio/rating/ETA. Implementar **a fidelidad** del clicable, con los c
 - [ ] Safe areas respetadas (header/footer/CTA); nada bajo notch/home indicator.
 - [ ] El color nunca es el único indicador (texto/ícono presentes).
 - [ ] Sin anti-patrones de §6; sin emojis-icono.
+
+```
+
 ```

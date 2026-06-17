@@ -15,7 +15,9 @@ export function LiveIndicator({ connected, className }: LiveIndicatorProps) {
     <span
       className={cn(
         'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium tabular',
-        connected ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-surface-2 text-ink-muted',
+        connected
+          ? 'border-success/30 bg-success/10 text-success'
+          : 'border-border bg-surface-2 text-ink-muted',
         className,
       )}
       role="status"
@@ -23,10 +25,16 @@ export function LiveIndicator({ connected, className }: LiveIndicatorProps) {
     >
       <span className="relative inline-flex size-2">
         {connected ? (
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success/60" aria-hidden />
+          <span
+            className="absolute inline-flex size-full animate-ping rounded-full bg-success/60"
+            aria-hidden
+          />
         ) : null}
         <span
-          className={cn('relative inline-flex size-2 rounded-full', connected ? 'bg-success' : 'bg-ink-subtle')}
+          className={cn(
+            'relative inline-flex size-2 rounded-full',
+            connected ? 'bg-success' : 'bg-ink-subtle',
+          )}
           aria-hidden
         />
       </span>

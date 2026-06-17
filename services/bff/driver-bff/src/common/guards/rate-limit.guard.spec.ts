@@ -76,7 +76,10 @@ describe('RateLimitGuard', () => {
   it('usa la IP de x-forwarded-for cuando está presente', async () => {
     const usuarios = new FakeRedis();
     const g = new RateLimitGuard(usuarios as never, config as never);
-    const req = makeReq({ user: undefined, headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' } });
+    const req = makeReq({
+      user: undefined,
+      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' },
+    });
     await expect(g.canActivate(ctxFor(req))).resolves.toBe(true);
   });
 });

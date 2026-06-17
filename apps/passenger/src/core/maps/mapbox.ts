@@ -1,5 +1,5 @@
 import Mapbox from '@rnmapbox/maps';
-import { env } from '../config/env';
+import {env} from '../config/env';
 
 /**
  * Bootstrap nativo de Mapbox (Lote 4: migración del pasajero a `@rnmapbox/maps`, gemelo del

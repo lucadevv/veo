@@ -26,7 +26,10 @@ type FamilySocket = Socket<FamilyServerToClient, FamilyClientToServer>;
  * Reconexión automática y limpieza completa al desmontar. Devuelve el estado de conexión
  * para alimentar el indicador "EN VIVO".
  */
-export function useFamilySocket(token: string, handlers: FamilySocketHandlers): { connected: boolean } {
+export function useFamilySocket(
+  token: string,
+  handlers: FamilySocketHandlers,
+): { connected: boolean } {
   const [connected, setConnected] = useState(false);
   // Ref para usar siempre los últimos handlers sin re-suscribir el socket.
   const handlersRef = useRef(handlers);

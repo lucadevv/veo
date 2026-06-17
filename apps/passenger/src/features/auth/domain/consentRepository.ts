@@ -1,4 +1,8 @@
-import type { ConsentRecorded, CurrentConsent, RecordConsentRequest } from '@veo/api-client';
+import type {
+  ConsentRecorded,
+  CurrentConsent,
+  RecordConsentRequest,
+} from '@veo/api-client';
 
 /**
  * Abstracción del repositorio de consentimientos Ley N.° 29733 (DIP).

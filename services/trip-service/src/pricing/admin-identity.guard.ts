@@ -16,7 +16,9 @@ export class AdminIdentityGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<RequestWithUser>();
     const user = req.user;
     if (user?.type !== 'admin') {
-      throw new ForbiddenError('Solo una identidad admin puede editar el schedule de pricing (ADR 011 §6)');
+      throw new ForbiddenError(
+        'Solo una identidad admin puede editar el schedule de pricing (ADR 011 §6)',
+      );
     }
     return true;
   }

@@ -1,5 +1,14 @@
 /** DTOs de finanzas (payouts y reembolsos). */
-import { IsInt, IsISO8601, IsOptional, IsString, Max, Min, IsUUID, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  IsUUID,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Listado admin de payouts: filtro por estado + paginación cursor (el estado lo valida payment-service). */

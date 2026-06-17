@@ -69,7 +69,9 @@ export function BottomSheet({
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvt, (e) => setKeyboardHeight(e.endCoordinates?.height ?? 0));
+    const showSub = Keyboard.addListener(showEvt, (e) =>
+      setKeyboardHeight(e.endCoordinates?.height ?? 0),
+    );
     const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
     return () => {
       showSub.remove();
@@ -97,7 +99,10 @@ export function BottomSheet({
       return;
     }
     backdrop.value = withTiming(1, { duration: theme.motion.duration.base });
-    translateY.value = withTiming(0, { duration: theme.motion.duration.slow, easing: drawerEasing });
+    translateY.value = withTiming(0, {
+      duration: theme.motion.duration.slow,
+      easing: drawerEasing,
+    });
   }, [reduced, theme, backdrop, translateY, drawerEasing]);
 
   const animateClose = useCallback(() => {
@@ -146,7 +151,10 @@ export function BottomSheet({
         if (shouldClose) {
           onClose();
         } else {
-          translateY.value = withTiming(0, { duration: theme.motion.duration.base, easing: drawerEasing });
+          translateY.value = withTiming(0, {
+            duration: theme.motion.duration.base,
+            easing: drawerEasing,
+          });
         }
       },
     }),
@@ -158,7 +166,13 @@ export function BottomSheet({
   if (!rendered) return null;
 
   return (
-    <Modal transparent visible={rendered} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      transparent
+      visible={rendered}
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
       {/* El teclado tapaba los inputs del sheet (anclado abajo dentro de un Modal). En iOS el Modal
           no reacomoda solo: KeyboardAvoidingView con `padding` empuja el sheet por encima del teclado.
           En Android lo resuelve el `adjustResize` del sistema (behavior undefined). */}
@@ -166,7 +180,9 @@ export function BottomSheet({
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Animated.View style={[styles.backdrop, { backgroundColor: theme.colors.overlay }, backdropStyle]}>
+        <Animated.View
+          style={[styles.backdrop, { backgroundColor: theme.colors.overlay }, backdropStyle]}
+        >
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Cerrar"
@@ -218,7 +234,12 @@ export function BottomSheet({
           </ScrollView>
 
           {footer ? (
-            <View style={[styles.footer, { paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.md }]}>
+            <View
+              style={[
+                styles.footer,
+                { paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.md },
+              ]}
+            >
               {footer}
             </View>
           ) : null}

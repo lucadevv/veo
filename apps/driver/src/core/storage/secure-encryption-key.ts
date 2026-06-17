@@ -67,14 +67,14 @@ function bytesToHex(bytes: Uint8Array): string {
 function generateRandomKeyHex(): string {
   const bytes = new Uint8Array(KEY_BYTES);
 
-  const cryptoObj = (globalThis as {crypto?: Crypto}).crypto;
+  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
   if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
     cryptoObj.getRandomValues(bytes);
     return bytesToHex(bytes);
   }
 
   // Fallback NO-CSPRNG (documentado). Mezcla tiempo de alta resolución + Math.random().
-   
+
   console.warn(
     '[secure-encryption-key] crypto.getRandomValues no disponible; usando fallback ' +
       'NO criptográfico para generar la clave. Instala react-native-get-random-values.',
@@ -130,9 +130,7 @@ async function getOrCreateEncryptionKey(): Promise<string> {
  *                Se inyecta desde `mmkv.ts` (que posee la instancia) para no exponerla aquí.
  * @returns `true` si la clave del Keystore quedó activa; `false` si se degradó al fallback.
  */
-export async function initSecureStorage(
-  recrypt: (key: string) => void,
-): Promise<boolean> {
+export async function initSecureStorage(recrypt: (key: string) => void): Promise<boolean> {
   try {
     const key = await getOrCreateEncryptionKey();
     recrypt(key);
@@ -140,7 +138,7 @@ export async function initSecureStorage(
   } catch (error) {
     // FALLBACK controlado: no crasheamos el arranque. El almacén sigue cifrado con la clave
     // de arranque (no ideal, pero funcional). Se loguea para visibilidad/telemetría.
-     
+
     console.warn(
       '[secure-encryption-key] Keystore falló; el almacén seguro mantiene la clave de ' +
         'ARRANQUE (fallback degradado). Error:',

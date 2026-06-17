@@ -29,7 +29,9 @@ function makeService(opts: { zones: ZoneSeed[]; demand: string | null }) {
     incr: async () => 1,
     expire: async () => 1,
   };
-  const config = new ConfigService<Env, true>({ SURGE_DEMAND_WINDOW_SECONDS: 300 } as Partial<Env> as Env);
+  const config = new ConfigService<Env, true>({
+    SURGE_DEMAND_WINDOW_SECONDS: 300,
+  } as Partial<Env> as Env);
   const service = new SurgeService(prisma as never, redis, hotIndex, config);
   return { service, hotIndex };
 }

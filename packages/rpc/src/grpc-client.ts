@@ -43,12 +43,20 @@ export class GrpcServiceClient {
     if (typeof ctor !== 'function') {
       throw new Error(`gRPC service ctor no encontrado para ${service}`);
     }
-    const ClientCtor = ctor as new (url: string, creds: ReturnType<typeof credentials.createInsecure>) => Client;
-    this.raw = new ClientCtor(opts.url, credentials.createInsecure()) as Client & Record<string, UnaryFn>;
+    const ClientCtor = ctor as new (
+      url: string,
+      creds: ReturnType<typeof credentials.createInsecure>,
+    ) => Client;
+    this.raw = new ClientCtor(opts.url, credentials.createInsecure()) as Client &
+      Record<string, UnaryFn>;
     this.deadlineMs = opts.deadlineMs ?? 5000;
   }
 
-  call<TRes = unknown>(method: string, request: Record<string, unknown>, meta?: Record<string, string>): Promise<TRes> {
+  call<TRes = unknown>(
+    method: string,
+    request: Record<string, unknown>,
+    meta?: Record<string, string>,
+  ): Promise<TRes> {
     const fn = this.raw[method];
     if (typeof fn !== 'function') {
       return Promise.reject(new Error(`método gRPC desconocido: ${method}`));

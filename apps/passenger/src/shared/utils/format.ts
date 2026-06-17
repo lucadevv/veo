@@ -83,7 +83,10 @@ export function formatTimeOfDay(iso: string): string {
  * Compara DÍAS, no 24h: un viaje de las 23:00 de ayer es "ayer" aunque hayan pasado <24h. Devuelve
  * `null` si la fecha es inválida.
  */
-export function calendarDaysAgo(iso: string, now: Date = new Date()): number | null {
+export function calendarDaysAgo(
+  iso: string,
+  now: Date = new Date(),
+): number | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return null;

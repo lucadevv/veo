@@ -1,5 +1,5 @@
-import type {StatusTone} from '@veo/ui-kit';
-import type {SupportCategory, SupportStatus} from '../entities';
+import type { StatusTone } from '@veo/ui-kit';
+import type { SupportCategory, SupportStatus } from '../entities';
 
 /** Categorías de soporte que el conductor puede elegir, en orden de presentación. */
 export const SUPPORT_CATEGORIES = [

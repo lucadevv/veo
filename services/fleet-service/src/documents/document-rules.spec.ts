@@ -76,25 +76,50 @@ describe('dueExpiryMilestone / computeExpiryAlert (BR-I04 — alertas 30/15/7/1)
   it('emite cada hito una sola vez (memoriza alreadyAlertedDays)', () => {
     // Primer cruce a 30 días: alerta 30.
     expect(
-      computeExpiryAlert({ expiresAt: inDays(30), now: NOW, milestones: MILESTONES, alreadyAlertedDays: null }),
+      computeExpiryAlert({
+        expiresAt: inDays(30),
+        now: NOW,
+        milestones: MILESTONES,
+        alreadyAlertedDays: null,
+      }),
     ).toBe(30);
     // Mismo hito 30 ya alertado: no repite.
     expect(
-      computeExpiryAlert({ expiresAt: inDays(28), now: NOW, milestones: MILESTONES, alreadyAlertedDays: 30 }),
+      computeExpiryAlert({
+        expiresAt: inDays(28),
+        now: NOW,
+        milestones: MILESTONES,
+        alreadyAlertedDays: 30,
+      }),
     ).toBeNull();
     // Cruza a 15: nueva alerta 15.
     expect(
-      computeExpiryAlert({ expiresAt: inDays(15), now: NOW, milestones: MILESTONES, alreadyAlertedDays: 30 }),
+      computeExpiryAlert({
+        expiresAt: inDays(15),
+        now: NOW,
+        milestones: MILESTONES,
+        alreadyAlertedDays: 30,
+      }),
     ).toBe(15);
     // Cruza a 1: nueva alerta 1.
     expect(
-      computeExpiryAlert({ expiresAt: inDays(1), now: NOW, milestones: MILESTONES, alreadyAlertedDays: 7 }),
+      computeExpiryAlert({
+        expiresAt: inDays(1),
+        now: NOW,
+        milestones: MILESTONES,
+        alreadyAlertedDays: 7,
+      }),
     ).toBe(1);
   });
 
   it('sin expiresAt → sin alerta', () => {
     expect(
-      computeExpiryAlert({ expiresAt: null, now: NOW, milestones: MILESTONES, alreadyAlertedDays: null }),
+      computeExpiryAlert({
+        expiresAt: null,
+        now: NOW,
+        milestones: MILESTONES,
+        alreadyAlertedDays: null,
+      }),
     ).toBeNull();
   });
 

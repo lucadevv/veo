@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import type { ViewStyle } from 'react-native';
+import React, {useEffect} from 'react';
+import type {ViewStyle} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
 
 const MAX_STAGGER_STEPS = 6;
 
@@ -24,7 +24,13 @@ export interface EnterViewProps {
  * Entrada con fade + desplazamiento sutil (ease-out, tokens `motion`). Respeta reduce-motion.
  * Solo anima opacity/transform.
  */
-export function EnterView({ children, index = 0, delay, offsetY = 10, style }: EnterViewProps) {
+export function EnterView({
+  children,
+  index = 0,
+  delay,
+  offsetY = 10,
+  style,
+}: EnterViewProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(0);
@@ -47,10 +53,12 @@ export function EnterView({ children, index = 0, delay, offsetY = 10, style }: E
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * offsetY }],
+    transform: [{translateY: (1 - progress.value) * offsetY}],
   }));
 
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+  );
 }
 
 export interface SelectionBumpProps {
@@ -66,7 +74,12 @@ export interface SelectionBumpProps {
  * (resorte `bouncy`) que acompaña el highlight lima. Combina entrada escalonada al aparecer.
  * Respeta reduce-motion (sin transform).
  */
-export function SelectionBump({ children, selected, index = 0, style }: SelectionBumpProps) {
+export function SelectionBump({
+  children,
+  selected,
+  index = 0,
+  style,
+}: SelectionBumpProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const enter = useSharedValue(0);
@@ -97,8 +110,10 @@ export function SelectionBump({ children, selected, index = 0, style }: Selectio
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 10 }, { scale: scale.value }],
+    transform: [{translateY: (1 - enter.value) * 10}, {scale: scale.value}],
   }));
 
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+  );
 }

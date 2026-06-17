@@ -14,7 +14,10 @@ export class HeatmapController {
 
   @Get()
   @ApiOperation({ summary: 'Mapa de calor de demanda cerca del conductor (Ola 2C)' })
-  get(@Query() query: HeatmapQueryDto, @CurrentUser() user: AuthenticatedUser): Promise<HeatmapView> {
+  get(
+    @Query() query: HeatmapQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<HeatmapView> {
     return this.heatmap.get(user, query.lat, query.lng, query.radius);
   }
 }

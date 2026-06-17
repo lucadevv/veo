@@ -54,8 +54,13 @@ describe('LocationPublisherService.publishDriverLocation', () => {
 
   it('B5-3.2 · sella las certificaciones del conductor en el payload (gate de verticales en dispatch)', async () => {
     const { service, publish } = makeService();
-    await service.publishDriverLocation('drv-1', { ...report, certifications: ['AMBULANCE_OPERATOR'] });
-    const [envelope] = publish.mock.calls[0] as unknown as [EventEnvelope<{ certifications?: string[] }>];
+    await service.publishDriverLocation('drv-1', {
+      ...report,
+      certifications: ['AMBULANCE_OPERATOR'],
+    });
+    const [envelope] = publish.mock.calls[0] as unknown as [
+      EventEnvelope<{ certifications?: string[] }>,
+    ];
     expect(envelope.payload.certifications).toEqual(['AMBULANCE_OPERATOR']);
   });
 

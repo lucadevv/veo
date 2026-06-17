@@ -165,23 +165,31 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     await driverPublic.post('/drivers/biometric/enroll', { photo: `ref-${run}` });
 
     // Gate biométrico de turno: challenge → verify (sandbox pasa, score 96 ≥ 90) → sessionRef.
-    const challenge = await driverPublic.post<BiometricChallenge>('/drivers/shift/biometric/challenge');
+    const challenge = await driverPublic.post<BiometricChallenge>(
+      '/drivers/shift/biometric/challenge',
+    );
     expect(challenge.challengeId).toBeTruthy();
-    const verify = await driverPublic.post<BiometricVerifyResult>('/drivers/shift/biometric/verify', {
-      challengeId: challenge.challengeId,
-      frames: ['f1', 'f2', 'f3'],
-    });
+    const verify = await driverPublic.post<BiometricVerifyResult>(
+      '/drivers/shift/biometric/verify',
+      {
+        challengeId: challenge.challengeId,
+        frames: ['f1', 'f2', 'f3'],
+      },
+    );
     expect(verify.sessionRef).toBeTruthy();
 
     // Registra el vehículo del conductor (CAR). fleet lo toma como su vehículo ACTIVO, y el driver-bff
     // sella ESE tipo en el ping (server-authoritative) — base del test de override del paso 3.
-    const vehicle = await driverPublic.post<{ id: string; vehicleType: string }>('/drivers/vehicles', {
-      vehicleType: 'CAR',
-      plate: `${run.slice(0, 3)}-${run.slice(3, 6)}`,
-      make: 'Toyota',
-      model: 'Yaris',
-      year: 2021,
-    });
+    const vehicle = await driverPublic.post<{ id: string; vehicleType: string }>(
+      '/drivers/vehicles',
+      {
+        vehicleType: 'CAR',
+        plate: `${run.slice(0, 3)}-${run.slice(3, 6)}`,
+        make: 'Toyota',
+        model: 'Yaris',
+        year: 2021,
+      },
+    );
     expect(vehicle.vehicleType).toBe('CAR');
 
     // Inicio de turno → AVAILABLE.
@@ -217,10 +225,10 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     }
 
     // El BFF publica driver.location_updated a Kafka; dispatch lo consume al hot index.
-    await collector.waitForEvent(
-      (e) => e.eventType === 'driver.location_updated',
-      { timeoutMs: 15_000, label: 'driver.location_updated' },
-    );
+    await collector.waitForEvent((e) => e.eventType === 'driver.location_updated', {
+      timeoutMs: 15_000,
+      label: 'driver.location_updated',
+    });
 
     // SEGURIDAD (server-authoritative del tipo): el cliente DECLARA MOTO en el ping, pero el conductor
     // tiene un CAR registrado. El BFF debe SELLAR CAR (ignorando el spoofeo). Correlacionamos por `at`.

@@ -41,7 +41,12 @@ export interface AppearProps {
  * Entrada fade + translateY con ease-out (tokens `theme.motion`). Degrada a fade puro con
  * reduce-motion (sin movimiento de posición). Solo anima transform/opacity (GPU).
  */
-export function Appear({ children, delay = 0, distance = 10, style }: AppearProps): React.JSX.Element {
+export function Appear({
+  children,
+  delay = 0,
+  distance = 10,
+  style,
+}: AppearProps): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const { duration, easing } = theme.motion;
@@ -94,7 +99,10 @@ export function PressableScale({
 
   const handlePressIn = (event: GestureResponderEvent) => {
     if (!reduced) {
-      const config = { duration: theme.motion.duration.fast, easing: Easing.bezier(...theme.motion.easing.standard) };
+      const config = {
+        duration: theme.motion.duration.fast,
+        easing: Easing.bezier(...theme.motion.easing.standard),
+      };
       scale.value = withTiming(target, config);
       opacity.value = withTiming(0.92, config);
     }
@@ -103,7 +111,10 @@ export function PressableScale({
 
   const handlePressOut = (event: GestureResponderEvent) => {
     if (!reduced) {
-      const config = { duration: theme.motion.exit.base, easing: Easing.bezier(...theme.motion.easing.standard) };
+      const config = {
+        duration: theme.motion.exit.base,
+        easing: Easing.bezier(...theme.motion.easing.standard),
+      };
       scale.value = withTiming(1, config);
       opacity.value = withTiming(1, config);
     }
@@ -115,7 +126,8 @@ export function PressableScale({
       {...rest}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      style={({ pressed }) => [animatedStyle, style, pressed ? pressedStyle : null]}>
+      style={({ pressed }) => [animatedStyle, style, pressed ? pressedStyle : null]}
+    >
       {children}
     </AnimatedPressable>
   );

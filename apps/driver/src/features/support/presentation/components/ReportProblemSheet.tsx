@@ -1,7 +1,7 @@
-import React, {useEffect, useMemo, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, BottomSheet, Button, Text, TextField, useTheme} from '@veo/ui-kit';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, BottomSheet, Button, Text, TextField, useTheme } from '@veo/ui-kit';
 import {
   DEFAULT_SUPPORT_CATEGORY,
   SUPPORT_CATEGORIES,
@@ -37,10 +37,12 @@ export function ReportProblemSheet({
   onSubmit,
   submitting = false,
 }: ReportProblemSheetProps): React.JSX.Element {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
 
-  const [category, setCategory] = useState<SupportCategory>(initialCategory ?? DEFAULT_SUPPORT_CATEGORY);
+  const [category, setCategory] = useState<SupportCategory>(
+    initialCategory ?? DEFAULT_SUPPORT_CATEGORY,
+  );
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [attachTrip, setAttachTrip] = useState(true);
@@ -62,7 +64,7 @@ export function ReportProblemSheet({
       category,
       subject,
       body,
-      ...(tripId && attachTrip ? {tripId} : {}),
+      ...(tripId && attachTrip ? { tripId } : {}),
     }),
     [category, subject, body, tripId, attachTrip],
   );
@@ -93,31 +95,39 @@ export function ReportProblemSheet({
             onPress={handleSubmit}
           />
         </View>
-      }>
+      }
+    >
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
-        <View style={[styles.field, {gap: theme.spacing.sm}]}>
+        <View style={[styles.field, { gap: theme.spacing.sm }]}>
           <Text variant="label" color="inkMuted">
             {t('support.form.categoryLabel')}
           </Text>
-          <View style={[styles.chips, {gap: theme.spacing.sm}]}>
-            {SUPPORT_CATEGORIES.map(cat => {
+          <View style={[styles.chips, { gap: theme.spacing.sm }]}>
+            {SUPPORT_CATEGORIES.map((cat) => {
               const selected = cat === category;
               return (
                 <Pressable
                   key={cat}
                   accessibilityRole="button"
-                  accessibilityState={{selected}}
+                  accessibilityState={{ selected }}
                   onPress={() => setCategory(cat)}
-                  style={({pressed}) => [
+                  style={({ pressed }) => [
                     styles.chip,
                     {
                       borderRadius: theme.radii.pill,
                       borderColor: selected ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: selected ? theme.colors.surfaceElevated : theme.colors.surface,
+                      backgroundColor: selected
+                        ? theme.colors.surfaceElevated
+                        : theme.colors.surface,
                       opacity: pressed ? 0.85 : 1,
                     },
-                  ]}>
-                  <Text variant="footnote" color={selected ? 'accent' : 'inkMuted'} numberOfLines={1}>
+                  ]}
+                >
+                  <Text
+                    variant="footnote"
+                    color={selected ? 'accent' : 'inkMuted'}
+                    numberOfLines={1}
+                  >
                     {t(supportCategoryI18nKey(cat))}
                   </Text>
                 </Pressable>
@@ -152,13 +162,16 @@ export function ReportProblemSheet({
         {tripId ? (
           <Pressable
             accessibilityRole="checkbox"
-            accessibilityState={{checked: attachTrip}}
-            onPress={() => setAttachTrip(prev => !prev)}
-            style={styles.field}>
+            accessibilityState={{ checked: attachTrip }}
+            onPress={() => setAttachTrip((prev) => !prev)}
+            style={styles.field}
+          >
             <Banner
               tone={attachTrip ? 'success' : 'info'}
               title={t('support.form.attachTrip')}
-              description={attachTrip ? t('support.form.attachTripOn') : t('support.form.attachTripOff')}
+              description={
+                attachTrip ? t('support.form.attachTripOn') : t('support.form.attachTripOff')
+              }
             />
           </Pressable>
         ) : null}
@@ -168,9 +181,9 @@ export function ReportProblemSheet({
 }
 
 const styles = StyleSheet.create({
-  scroll: {maxHeight: 460},
-  field: {marginBottom: 16},
-  chips: {flexDirection: 'row', flexWrap: 'wrap'},
-  chip: {paddingHorizontal: 14, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth},
-  footer: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
+  scroll: { maxHeight: 460 },
+  field: { marginBottom: 16 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap' },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth },
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
 });

@@ -3,7 +3,12 @@ import { AuditService, toAuditEntryView } from './audit.service';
 import type { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
 
-const identity: AuthenticatedUser = { userId: 'u1', type: 'admin', roles: ['ADMIN'], sessionId: 's1' };
+const identity: AuthenticatedUser = {
+  userId: 'u1',
+  type: 'admin',
+  roles: ['ADMIN'],
+  sessionId: 's1',
+};
 
 function entry(seq: string) {
   return {

@@ -22,7 +22,18 @@ function makeService(opts: {
     ),
   };
   const get = vi.fn(() => Promise.resolve(opts.bids ?? []));
-  const post = vi.fn(opts.postImpl ?? (() => Promise.resolve({ tripId: 'trip-1', driverId: 'drv-9', kind: 'ACCEPT_PRICE', priceCents: 700, etaSeconds: 120, status: 'PENDING' })));
+  const post = vi.fn(
+    opts.postImpl ??
+      (() =>
+        Promise.resolve({
+          tripId: 'trip-1',
+          driverId: 'drv-9',
+          kind: 'ACCEPT_PRICE',
+          priceCents: 700,
+          etaSeconds: 120,
+          status: 'PENDING',
+        })),
+  );
   const rest = { client: vi.fn(() => ({ get, post })) };
   const service = new DispatchService(grpc as never, rest as never);
   return { service, grpc, get, post };
@@ -30,12 +41,26 @@ function makeService(opts: {
 
 describe('DispatchService — PUJA lado conductor (driverId server-side + gate downstream)', () => {
   it('listOpenBids deriva el driverId y lo pasa firmado + en el query a dispatch', async () => {
-    const bids = [{ tripId: 'trip-1', bidCents: 700, vehicleType: 'CAR', expiresAt: 1, originLat: -12, originLon: -77 }];
+    const bids = [
+      {
+        tripId: 'trip-1',
+        bidCents: 700,
+        vehicleType: 'CAR',
+        expiresAt: 1,
+        originLat: -12,
+        originLon: -77,
+      },
+    ];
     const { service, get, grpc } = makeService({ bids });
     const res = await service.listOpenBids(identity);
     expect(res).toEqual(bids);
     // El driverId se derivó vía GetDriverByUser (NUNCA un param del cliente).
-    expect(grpc.call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+    expect(grpc.call).toHaveBeenCalledWith(
+      'identity',
+      'GetDriverByUser',
+      { id: 'usr-1' },
+      identity,
+    );
     expect(get).toHaveBeenCalledWith('/bids/open', {
       identity: { ...identity, driverId: 'drv-9' },
       query: { driverId: 'drv-9' },
@@ -55,7 +80,9 @@ describe('DispatchService — PUJA lado conductor (driverId server-side + gate d
     const { service } = makeService({
       postImpl: () => Promise.reject(new ForbiddenError('Conductor no elegible')),
     });
-    await expect(service.submitOffer('trip-1', 'ACCEPT_PRICE', 700, identity)).rejects.toMatchObject({
+    await expect(
+      service.submitOffer('trip-1', 'ACCEPT_PRICE', 700, identity),
+    ).rejects.toMatchObject({
       httpStatus: 403,
     });
   });

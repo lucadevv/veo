@@ -45,7 +45,10 @@ describe('BiometricServiceClient timeout', () => {
     expect(err).toBeInstanceOf(ExternalServiceError);
     expect((err as ExternalServiceError).httpStatus).toBe(502);
     expect((err as ExternalServiceError).message).toContain('no respondió a tiempo');
-    expect((err as ExternalServiceError).details).toMatchObject({ timeoutMs: 1, path: '/v1/verify' });
+    expect((err as ExternalServiceError).details).toMatchObject({
+      timeoutMs: 1,
+      path: '/v1/verify',
+    });
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
@@ -56,10 +59,19 @@ describe('BiometricServiceClient timeout', () => {
       receivedSignal = (init as RequestInit | undefined)?.signal ?? undefined;
       receivedHeaders = (init as RequestInit | undefined)?.headers as Record<string, string>;
       return Promise.resolve(
-        new Response(JSON.stringify({ result: 'ok', score: 0.96, livenessPassed: true, matchPassed: true, reason: '' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            result: 'ok',
+            score: 0.96,
+            livenessPassed: true,
+            matchPassed: true,
+            reason: '',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
       );
     });
 

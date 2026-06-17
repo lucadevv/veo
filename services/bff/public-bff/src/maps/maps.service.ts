@@ -158,14 +158,24 @@ export class MapsService {
    * `identity` se firma para llamar al endpoint interno de trip-service; default ANÓNIMO si el quote se
    * pidiera sin usuario (no debería: la ruta lleva JWT), suficiente para una lectura interna firmada.
    */
-  async quote(dto: QuoteRequestDto, identity: AuthenticatedUser = ANONYMOUS_IDENTITY): Promise<QuoteResult> {
+  async quote(
+    dto: QuoteRequestDto,
+    identity: AuthenticatedUser = ANONYMOUS_IDENTITY,
+  ): Promise<QuoteResult> {
     const origin = { lat: dto.origin.lat, lon: dto.origin.lng };
     const destination = { lat: dto.destination.lat, lon: dto.destination.lng };
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
     // La ruta, el modo, el crédito y el catálogo activo son independientes → en paralelo.
-    const [route, scheduledMode, creditBalanceCents, effective, fuelPerKmCents, energyPrices, bidFloorConfig] =
-      await Promise.all([
+    const [
+      route,
+      scheduledMode,
+      creditBalanceCents,
+      effective,
+      fuelPerKmCents,
+      energyPrices,
+      bidFloorConfig,
+    ] = await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
       // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
@@ -201,44 +211,52 @@ export class MapsService {
       // Con catálogo del admin: solo las habilitadas (effective.has). En DEGRADACIÓN (effective null):
       // solo las que shippean visibles por default (defaultEnabled) — B5-4: las verticales ocultas
       // (ambulancia/grúa/mecánico/EV) NUNCA se filtran al quote aunque el catálogo esté caído.
-      .filter((offering) => (effective === null ? offering.defaultEnabled : effective.has(offering.id)))
+      .filter((offering) =>
+        effective === null ? offering.defaultEnabled : effective.has(offering.id),
+      )
       .map((offering) => {
-      const ov = effective?.get(offering.id);
-      const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
-      // B5-1.d · FLIP: con el modelo de energía activo, precio por oferta con energía pass-through
-      // (energyPerKm por fuente); con el flag OFF, la fórmula vieja (fuel global). Mismo motor que el create.
-      const priceCents = this.offeringPriceCents(offering, pricing, route, fuelPerKmCents, energyPrices);
-      // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
-      const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
-      return {
-        id: offering.id,
-        // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
-        name: OFFERING_DISPLAY_NAMES[offering.id],
-        // Ola 2B: la clase de vehículo de la oferta (la app la usa para mostrar y para crear el viaje).
-        vehicleType: offering.vehicleClass,
-        // ETA del trayecto (mismo recorrido para todas las ofertas).
-        etaSeconds: route.durationSeconds,
-        priceCents,
-        // Lote C3 · crédito que se aplicaría a ESTA tarifa: min(saldo, priceCents). Server-side, ≤ precio.
-        creditAppliedCents: Math.min(creditBalanceCents, priceCents),
-        currency: 'PEN' as const,
-        mode: offeringMode,
-        // ADR 013 (A2 · additive) · per-oferta PUJA: piso + sugerido PROPIOS. El sugerido es la tarifa que
-        // SERÍA fija de ESTA oferta (= su priceCents, ya calculado con SU multiplier) — antes era SIEMPRE
-        // el del ancla VEO Económico (bug: en Moto/Confort anclaba al precio del auto). El piso es per-OFERTA
-        // (ADR 010 §9.3): config del admin resuelta con el MISMO resolver que el gate autoritativo de
-        // trip-service (consistencia quote↔create por construcción). Solo para DISPLAY; el autoritativo lo
-        // re-resuelve trip-service en createTrip (la app no lo manda).
-        ...(isPujaMode(offeringMode)
-          ? {
-              bidFloorCents: resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, offering.id),
-              suggestedCents: priceCents,
-            }
-          : {}),
-        labelKey: offering.labelKey,
-        icon: offering.icon,
-      };
-    });
+        const ov = effective?.get(offering.id);
+        const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
+        // B5-1.d · FLIP: con el modelo de energía activo, precio por oferta con energía pass-through
+        // (energyPerKm por fuente); con el flag OFF, la fórmula vieja (fuel global). Mismo motor que el create.
+        const priceCents = this.offeringPriceCents(
+          offering,
+          pricing,
+          route,
+          fuelPerKmCents,
+          energyPrices,
+        );
+        // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
+        const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
+        return {
+          id: offering.id,
+          // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
+          name: OFFERING_DISPLAY_NAMES[offering.id],
+          // Ola 2B: la clase de vehículo de la oferta (la app la usa para mostrar y para crear el viaje).
+          vehicleType: offering.vehicleClass,
+          // ETA del trayecto (mismo recorrido para todas las ofertas).
+          etaSeconds: route.durationSeconds,
+          priceCents,
+          // Lote C3 · crédito que se aplicaría a ESTA tarifa: min(saldo, priceCents). Server-side, ≤ precio.
+          creditAppliedCents: Math.min(creditBalanceCents, priceCents),
+          currency: 'PEN' as const,
+          mode: offeringMode,
+          // ADR 013 (A2 · additive) · per-oferta PUJA: piso + sugerido PROPIOS. El sugerido es la tarifa que
+          // SERÍA fija de ESTA oferta (= su priceCents, ya calculado con SU multiplier) — antes era SIEMPRE
+          // el del ancla VEO Económico (bug: en Moto/Confort anclaba al precio del auto). El piso es per-OFERTA
+          // (ADR 010 §9.3): config del admin resuelta con el MISMO resolver que el gate autoritativo de
+          // trip-service (consistencia quote↔create por construcción). Solo para DISPLAY; el autoritativo lo
+          // re-resuelve trip-service en createTrip (la app no lo manda).
+          ...(isPujaMode(offeringMode)
+            ? {
+                bidFloorCents: resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, offering.id),
+                suggestedCents: priceCents,
+              }
+            : {}),
+          labelKey: offering.labelKey,
+          icon: offering.icon,
+        };
+      });
 
     // B5-1.b · shadow-compare del quote (log-only): mide el delta viejo↔nuevo sin cambiar lo que se muestra.
     this.logQuoteFareShadow(energyPrices, route, effective, fuelPerKmCents);
@@ -315,9 +333,12 @@ export class MapsService {
    */
   private async fetchFuelPerKmCents(identity: AuthenticatedUser): Promise<number> {
     try {
-      const reply = await this.tripRest.get<FuelSurchargeReply>('/internal/pricing/fuel-surcharge', {
-        identity,
-      });
+      const reply = await this.tripRest.get<FuelSurchargeReply>(
+        '/internal/pricing/fuel-surcharge',
+        {
+          identity,
+        },
+      );
       return reply.perKmCents;
     } catch (err) {
       this.logger.warn(
@@ -332,14 +353,21 @@ export class MapsService {
    * shadow-compare del quote (y, post-flip, la tarifa autoritativa). `null` = no disponible → el shadow
    * se saltea (degradación honesta, no rompe el quote). Map<sourceId, pricePerUnitCents>.
    */
-  private async fetchEnergyPrices(identity: AuthenticatedUser): Promise<Map<string, number> | null> {
+  private async fetchEnergyPrices(
+    identity: AuthenticatedUser,
+  ): Promise<Map<string, number> | null> {
     try {
-      const reply = await this.tripRest.get<EnergyCatalogReply>('/internal/pricing/energy-catalog', {
-        identity,
-      });
+      const reply = await this.tripRest.get<EnergyCatalogReply>(
+        '/internal/pricing/energy-catalog',
+        {
+          identity,
+        },
+      );
       return new Map(reply.sources.map((s) => [s.sourceId, s.pricePerUnitCents]));
     } catch (err) {
-      this.logger.warn(`catálogo de energía no disponible (${(err as Error).message}); shadow B5-1 salteado`);
+      this.logger.warn(
+        `catálogo de energía no disponible (${(err as Error).message}); shadow B5-1 salteado`,
+      );
       return null;
     }
   }
@@ -352,10 +380,15 @@ export class MapsService {
    */
   private async fetchBidFloorConfig(identity: AuthenticatedUser): Promise<BidFloorConfig> {
     try {
-      const reply = await this.tripRest.get<BidFloorReply>('/internal/pricing/bid-floor', { identity });
+      const reply = await this.tripRest.get<BidFloorReply>('/internal/pricing/bid-floor', {
+        identity,
+      });
       // El resolver (shared-types) ya tolera overrides con ids/zonas desconocidos (los ignora al buscar);
       // pasamos la forma tal cual viene del contrato interno.
-      return { defaultFloorCents: reply.defaultFloorCents, overrides: reply.overrides as BidFloorConfig['overrides'] };
+      return {
+        defaultFloorCents: reply.defaultFloorCents,
+        overrides: reply.overrides as BidFloorConfig['overrides'],
+      };
     } catch (err) {
       this.logger.warn(
         `piso de puja no disponible (${(err as Error).message}); quote con piso por defecto (ADR 010 §9.3 · degradación honesta)`,
@@ -383,7 +416,9 @@ export class MapsService {
         const pricing = effective?.get(offering.id)?.pricing ?? offering.pricing;
         const energyPrice = energyPrices.get(offering.referenceEnergySourceId);
         const energyPerKm =
-          energyPrice === undefined ? 0 : deriveEnergyPerKmCents(energyPrice, offering.referenceEfficiency);
+          energyPrice === undefined
+            ? 0
+            : deriveEnergyPerKmCents(energyPrice, offering.referenceEfficiency);
         const d = shadowCompareCategoryFare(
           route.distanceMeters,
           route.durationSeconds,

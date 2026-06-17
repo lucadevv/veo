@@ -5,7 +5,16 @@
  *  - GET  /dispatch/offers/:matchId         → lectura del match.
  *  - GET  /dispatch/surge?lat&lon           → cotiza el multiplier de surge para un origen.
  */
-import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { DispatchService } from './dispatch.service';
@@ -54,7 +63,9 @@ export class DispatchController {
   }
 
   @Get('surge')
-  @ApiOperation({ summary: 'Cotiza el multiplier de surge para un origen (lo usa trip en la tarifa)' })
+  @ApiOperation({
+    summary: 'Cotiza el multiplier de surge para un origen (lo usa trip en la tarifa)',
+  })
   quoteSurge(@Query() query: SurgeQueryDto): Promise<SurgeResponseDto> {
     return this.surge.quote({ lat: query.lat, lon: query.lon });
   }

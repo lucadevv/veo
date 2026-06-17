@@ -74,7 +74,13 @@ async function main(): Promise<void> {
   // PRIMERVIAJE: 50% de descuento en el primer viaje, topado a S/15 (1500 céntimos), 1 uso por usuario.
   await prisma.promotion.upsert({
     where: { code: 'PRIMERVIAJE' },
-    update: { kind: 'PERCENTAGE', value: 50, maxDiscountCents: 1500, maxUsesPerUser: 1, active: true },
+    update: {
+      kind: 'PERCENTAGE',
+      value: 50,
+      maxDiscountCents: 1500,
+      maxUsesPerUser: 1,
+      active: true,
+    },
     create: {
       id: randomUUID(),
       code: 'PRIMERVIAJE',

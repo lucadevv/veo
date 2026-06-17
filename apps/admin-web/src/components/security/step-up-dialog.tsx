@@ -81,7 +81,12 @@ export function StepUpDialog({
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
           </DialogClose>
-          <Button variant="primary" loading={pending} disabled={code.length < 6} onClick={() => void verify()}>
+          <Button
+            variant="primary"
+            loading={pending}
+            disabled={code.length < 6}
+            onClick={() => void verify()}
+          >
             Verificar
           </Button>
         </DialogFooter>

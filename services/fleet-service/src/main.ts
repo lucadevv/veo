@@ -33,7 +33,9 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('fleet-service')
-    .setDescription('Vehículos, documentos con vencimiento (Licencia A1/SOAT/Tarjeta/Antecedentes/ITV), inspecciones · VEO')
+    .setDescription(
+      'Vehículos, documentos con vencimiento (Licencia A1/SOAT/Tarjeta/Antecedentes/ITV), inspecciones · VEO',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
@@ -52,7 +54,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3012);
   await app.listen(port);
-  logger.info(`fleet-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50062'})`);
+  logger.info(
+    `fleet-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50062'})`,
+  );
 }
 
 bootstrap().catch((err) => {

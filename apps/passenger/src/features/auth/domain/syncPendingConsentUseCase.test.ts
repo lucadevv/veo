@@ -1,15 +1,19 @@
-import { ApiError, type ConsentRecorded, type CurrentConsent } from '@veo/api-client';
+import {
+  ApiError,
+  type ConsentRecorded,
+  type CurrentConsent,
+} from '@veo/api-client';
 import {
   type PendingConsent,
   PendingConsentStatus,
   type PendingConsentStore,
 } from './pendingConsent';
-import { SyncPendingConsentUseCase } from './syncPendingConsentUseCase';
-import type { RecordConsentUseCase } from './usecases';
+import {SyncPendingConsentUseCase} from './syncPendingConsentUseCase';
+import type {RecordConsentUseCase} from './usecases';
 
 /** Doble del use case de POST: solo `execute`, lo único que toca la cola. */
 function makeRecord(execute: jest.Mock): RecordConsentUseCase {
-  return { execute } as unknown as RecordConsentUseCase;
+  return {execute} as unknown as RecordConsentUseCase;
 }
 
 /** Store en memoria que implementa el puerto durable (sin MMKV). */
@@ -32,14 +36,22 @@ function makeStore(initial: PendingConsent | null): PendingConsentStore & {
 
 const PENDING: PendingConsent = {
   status: PendingConsentStatus.Pending,
-  selection: { dataProcessing: true, inCabinCamera: true, location: true, marketing: false },
+  selection: {
+    dataProcessing: true,
+    inCabinCamera: true,
+    location: true,
+    marketing: false,
+  },
   policyVersion: '2026-05-1',
   dedupKey: '0190a0c0-0000-7000-8000-000000000000',
   capturedAt: '2026-06-15T00:00:00.000Z',
   attempts: 0,
 };
 
-const RECORDED = { id: 'c1', policyVersion: '2026-05-1' } as unknown as ConsentRecorded;
+const RECORDED = {
+  id: 'c1',
+  policyVersion: '2026-05-1',
+} as unknown as ConsentRecorded;
 
 /** Error transitorio según la clasificación tipada del cliente (status 0 = red caída). */
 function networkError(): ApiError {
@@ -73,7 +85,7 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
 
   it('éxito al primer intento: un POST con la MISMA dedupKey y la cola se vacía', async () => {
     const execute = jest.fn().mockResolvedValue(RECORDED);
-    const store = makeStore({ ...PENDING });
+    const store = makeStore({...PENDING});
     const sync = new SyncPendingConsentUseCase(makeRecord(execute), store);
 
     await sync.flush();
@@ -88,14 +100,16 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
       .fn()
       .mockRejectedValueOnce(networkError())
       .mockResolvedValue(RECORDED);
-    const store = makeStore({ ...PENDING });
+    const store = makeStore({...PENDING});
     // delay inyectado no-op: el bucle de reintento avanza sin temporizadores reales.
-    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () => Promise.resolve());
+    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () =>
+      Promise.resolve(),
+    );
 
     await sync.flush();
 
     expect(execute).toHaveBeenCalledTimes(2);
-    const keys = execute.mock.calls.map((c) => c[1]);
+    const keys = execute.mock.calls.map(c => c[1]);
     expect(new Set(keys).size).toBe(1); // todos los reintentos reusan el mismo dedupKey
     expect(keys[0]).toBe(PENDING.dedupKey);
     expect(store.value).toBeNull(); // confirmado → cola vacía
@@ -103,8 +117,10 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
 
   it('error no-retryable (401 pre-login): NO se pierde, queda Pending para el próximo disparador', async () => {
     const execute = jest.fn().mockRejectedValue(unauthorizedError());
-    const store = makeStore({ ...PENDING });
-    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () => Promise.resolve());
+    const store = makeStore({...PENDING});
+    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () =>
+      Promise.resolve(),
+    );
 
     await sync.flush();
 
@@ -120,13 +136,15 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
       .fn()
       .mockImplementationOnce(
         () =>
-          new Promise<ConsentRecorded>((resolve) => {
+          new Promise<ConsentRecorded>(resolve => {
             resolveFirst = resolve;
           }),
       )
       .mockResolvedValue(RECORDED);
-    const store = makeStore({ ...PENDING });
-    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () => Promise.resolve());
+    const store = makeStore({...PENDING});
+    const sync = new SyncPendingConsentUseCase(makeRecord(execute), store, () =>
+      Promise.resolve(),
+    );
 
     const first = sync.flush();
     await sync.flush(); // entra y sale: hay uno en vuelo (inFlight)
@@ -139,9 +157,9 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
 
   describe('reconcileWith', () => {
     it('misma policyVersion vigente en el server: vacía la cola (ya llegó)', () => {
-      const store = makeStore({ ...PENDING });
+      const store = makeStore({...PENDING});
       const sync = new SyncPendingConsentUseCase(makeRecord(jest.fn()), store);
-      const current = { policyVersion: '2026-05-1' } as unknown as CurrentConsent;
+      const current = {policyVersion: '2026-05-1'} as unknown as CurrentConsent;
 
       sync.reconcileWith(current);
 
@@ -149,9 +167,9 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
     });
 
     it('versión distinta: conserva la cola (lo encolado aún no llegó)', () => {
-      const store = makeStore({ ...PENDING });
+      const store = makeStore({...PENDING});
       const sync = new SyncPendingConsentUseCase(makeRecord(jest.fn()), store);
-      const current = { policyVersion: '2025-01-1' } as unknown as CurrentConsent;
+      const current = {policyVersion: '2025-01-1'} as unknown as CurrentConsent;
 
       sync.reconcileWith(current);
 
@@ -159,7 +177,7 @@ describe('SyncPendingConsentUseCase (cola durable de consentimiento · Ley 29733
     });
 
     it('server sin consent (null): no toca la cola', () => {
-      const store = makeStore({ ...PENDING });
+      const store = makeStore({...PENDING});
       const sync = new SyncPendingConsentUseCase(makeRecord(jest.fn()), store);
 
       sync.reconcileWith(null);

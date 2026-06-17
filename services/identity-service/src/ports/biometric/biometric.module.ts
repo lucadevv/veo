@@ -65,9 +65,7 @@ class BiometricSandboxProvider implements BiometricProvider {
  * puede propagarlo como 'AbortError'. Aceptamos ambos sin recurrir a `any` (narrowing sobre unknown).
  */
 function isTimeoutAbort(err: unknown): boolean {
-  return (
-    err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
-  );
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
 }
 
 /** Respuesta cruda de biometric-service POST /v1/verify (score en 0..1). */

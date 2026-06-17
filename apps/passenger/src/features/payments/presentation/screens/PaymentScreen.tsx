@@ -1,7 +1,11 @@
-import type { MobilePaymentMethod, PaymentView } from '@veo/api-client';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation } from '@tanstack/react-query';
+import type {MobilePaymentMethod, PaymentView} from '@veo/api-client';
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation} from '@tanstack/react-query';
 import {
   Banner,
   Button,
@@ -13,16 +17,19 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { formatPEN } from '../../../../shared/utils/format';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { isPaymentSettled } from '../../domain/paymentOutcome';
-import { EnterView, SuccessCheck } from '../components/motion';
-import { PAYMENT_METHODS, usePaymentPrefsStore } from '../stores/paymentPrefsStore';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {formatPEN} from '../../../../shared/utils/format';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {isPaymentSettled} from '../../domain/paymentOutcome';
+import {EnterView, SuccessCheck} from '../components/motion';
+import {
+  PAYMENT_METHODS,
+  usePaymentPrefsStore,
+} from '../stores/paymentPrefsStore';
 
 type Params = RouteProp<RootStackParamList, 'Payment'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -33,14 +40,14 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  */
 export function PaymentScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { params } = useRoute<Params>();
-  const { tripId, amountCents, driverId } = params;
+  const {params} = useRoute<Params>();
+  const {tripId, amountCents, driverId} = params;
 
   const chargeTrip = useDependency(TOKENS.chargeTripUseCase);
   const confirmCash = useDependency(TOKENS.confirmCashUseCase);
-  const defaultMethod = usePaymentPrefsStore((s) => s.defaultMethod);
+  const defaultMethod = usePaymentPrefsStore(s => s.defaultMethod);
 
   const [method, setMethod] = useState<MobilePaymentMethod>(defaultMethod);
   const [tip, setTip] = useState('');
@@ -56,7 +63,7 @@ export function PaymentScreen(): React.JSX.Element {
         tripId,
         grossCents: amountCents,
         method,
-        ...(tipCents > 0 ? { tipCents } : {}),
+        ...(tipCents > 0 ? {tipCents} : {}),
       }),
   });
 
@@ -69,15 +76,29 @@ export function PaymentScreen(): React.JSX.Element {
   // La pregunta "¿el cobro ya saldó?" es del DOMINIO (`isPaymentSettled`): efectivo aún no capturado
   // y sin confirmación del pasajero → falta su lado de la confirmación bilateral (BR-P03).
   const cashPending =
-    payment != null && isCash && !isPaymentSettled(payment) && !confirmMutation.data;
+    payment != null &&
+    isCash &&
+    !isPaymentSettled(payment) &&
+    !confirmMutation.data;
 
   if (payment && !cashPending) {
     return (
-      <SafeScreen footer={<Button label={t('actions.close')} fullWidth onPress={() => navigation.goBack()} />}>
-        <View style={{ gap: theme.spacing.lg, flex: 1, justifyContent: 'center' }}>
+      <SafeScreen
+        footer={
+          <Button
+            label={t('actions.close')}
+            fullWidth
+            onPress={() => navigation.goBack()}
+          />
+        }>
+        <View
+          style={{gap: theme.spacing.lg, flex: 1, justifyContent: 'center'}}>
           <SuccessCheck />
           <EnterView delay={140}>
-            <Banner tone="success" title={isCash ? t('payments.cashConfirmed') : t('payments.paid')} />
+            <Banner
+              tone="success"
+              title={isCash ? t('payments.cashConfirmed') : t('payments.paid')}
+            />
           </EnterView>
           <EnterView delay={200}>
             <Card variant="outlined" padding="lg">
@@ -101,7 +122,9 @@ export function PaymentScreen(): React.JSX.Element {
                   </Text>
                 </View>
               ) : null}
-              <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+              <View
+                style={[styles.divider, {backgroundColor: theme.colors.border}]}
+              />
               <View style={styles.breakdownRow}>
                 <Text variant="bodyStrong">{t('payments.breakdownTotal')}</Text>
                 <Text variant="title3" tabular>
@@ -116,7 +139,7 @@ export function PaymentScreen(): React.JSX.Element {
                 label={t('payments.rateTrip')}
                 variant="secondary"
                 fullWidth
-                onPress={() => navigation.replace('Rating', { tripId, driverId })}
+                onPress={() => navigation.replace('Rating', {tripId, driverId})}
               />
             </EnterView>
           ) : null}
@@ -138,15 +161,18 @@ export function PaymentScreen(): React.JSX.Element {
           />
         ) : (
           <Button
-            label={chargeMutation.isPending ? t('payments.paying') : t('payments.payNow')}
+            label={
+              chargeMutation.isPending
+                ? t('payments.paying')
+                : t('payments.payNow')
+            }
             variant="accent"
             fullWidth
             loading={chargeMutation.isPending}
             onPress={() => chargeMutation.mutate()}
           />
         )
-      }
-    >
+      }>
       <Card variant="elevated" padding="lg">
         <Text variant="callout" color="inkMuted">
           {t('payments.amount')}
@@ -157,24 +183,34 @@ export function PaymentScreen(): React.JSX.Element {
       </Card>
 
       {chargeMutation.isError ? (
-        <Banner tone="danger" title={t('payments.payError')} style={{ marginTop: theme.spacing.md }} />
+        <Banner
+          tone="danger"
+          title={t('payments.payError')}
+          style={{marginTop: theme.spacing.md}}
+        />
       ) : null}
 
-      <Text variant="title3" style={{ marginTop: theme.spacing.xl, marginBottom: theme.spacing.sm }}>
+      <Text
+        variant="title3"
+        style={{marginTop: theme.spacing.xl, marginBottom: theme.spacing.sm}}>
         {t('payments.methodsTitle')}
       </Text>
       <Card variant="outlined" padding="sm">
-        {PAYMENT_METHODS.map((item) => (
+        {PAYMENT_METHODS.map(item => (
           <ListItem
             key={item}
             title={t(`payments.method.${item}`)}
-            trailing={item === method ? <StatusPill label={t('payments.default')} tone="accent" dot /> : undefined}
+            trailing={
+              item === method ? (
+                <StatusPill label={t('payments.default')} tone="accent" dot />
+              ) : undefined
+            }
             onPress={() => setMethod(item)}
           />
         ))}
       </Card>
 
-      <View style={{ marginTop: theme.spacing.lg }}>
+      <View style={{marginTop: theme.spacing.lg}}>
         <TextField
           label={t('payments.tip')}
           keyboardType="decimal-pad"
@@ -184,7 +220,11 @@ export function PaymentScreen(): React.JSX.Element {
       </View>
 
       {isCash ? (
-        <Banner tone="info" title={t('payments.cashNote')} style={{ marginTop: theme.spacing.lg }} />
+        <Banner
+          tone="info"
+          title={t('payments.cashNote')}
+          style={{marginTop: theme.spacing.lg}}
+        />
       ) : null}
     </SafeScreen>
   );
@@ -197,5 +237,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 4,
   },
-  divider: { height: 1, marginVertical: 8 },
+  divider: {height: 1, marginVertical: 8},
 });

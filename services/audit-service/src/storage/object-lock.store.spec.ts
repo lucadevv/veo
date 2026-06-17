@@ -44,8 +44,9 @@ beforeAll(async () => {
     await store.ensureBucket();
     available = true;
   } catch (err) {
-     
-    console.warn(`[object-lock.store.spec] MinIO no disponible en ${ENDPOINT}; test omitido. ${String(err)}`);
+    console.warn(
+      `[object-lock.store.spec] MinIO no disponible en ${ENDPOINT}; test omitido. ${String(err)}`,
+    );
   }
 });
 
@@ -83,7 +84,9 @@ describe('S3 Object Lock (MinIO real)', () => {
     expect(put.VersionId).toBeTruthy();
     // Intentar borrar la versión concreta debe ser rechazado por Object Lock (COMPLIANCE).
     await expect(
-      rawClient.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key, VersionId: put.VersionId })),
+      rawClient.send(
+        new DeleteObjectCommand({ Bucket: BUCKET, Key: key, VersionId: put.VersionId }),
+      ),
     ).rejects.toThrow();
   });
 });

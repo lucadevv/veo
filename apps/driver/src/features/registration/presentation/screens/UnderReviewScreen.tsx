@@ -1,10 +1,10 @@
 import React from 'react';
-import {ActivityIndicator, Linking, StyleSheet, View} from 'react-native';
-import Svg, {Circle, Path, Rect} from 'react-native-svg';
-import {useTranslation} from 'react-i18next';
-import {useQueryClient} from '@tanstack/react-query';
-import {Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import {REGISTRATION_GATE_QUERY_KEY} from '../hooks/useRegistrationGate';
+import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
+import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { REGISTRATION_GATE_QUERY_KEY } from '../hooks/useRegistrationGate';
 import {
   IconAccount,
   IconCar,
@@ -12,12 +12,12 @@ import {
   IconDocument,
   IconLifebuoy,
 } from '../../../../shared/presentation/icons';
-import {Reveal} from '../../../../shared/presentation/components/motion';
-import {env} from '../../../../core/config/env';
-import {VeoWordmark, hexAlpha} from '../components';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { env } from '../../../../core/config/env';
+import { VeoWordmark, hexAlpha } from '../components';
 
 /** Ícono de KYC (rostro escaneado) para la fila de verificación facial. */
-function ScanFaceGlyph({color, size = 22}: {color: string; size?: number}): React.JSX.Element {
+function ScanFaceGlyph({ color, size = 22 }: { color: string; size?: number }): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -33,7 +33,7 @@ function ScanFaceGlyph({color, size = 22}: {color: string; size?: number}): Reac
 }
 
 /** Ilustración de portapapeles con checks + reloj (line art cian) de la pantalla de revisión. */
-function ReviewClipboard({color}: {color: string}): React.JSX.Element {
+function ReviewClipboard({ color }: { color: string }): React.JSX.Element {
   return (
     <Svg width={132} height={132} viewBox="0 0 132 132" fill="none">
       <Rect x={26} y={20} width={70} height={92} rx={8} stroke={color} strokeWidth={2.4} />
@@ -48,7 +48,13 @@ function ReviewClipboard({color}: {color: string}): React.JSX.Element {
         strokeLinejoin="round"
       />
       <Circle cx={96} cy={92} r={20} stroke={color} strokeWidth={2.4} fill="none" />
-      <Path d="M96 82v10l6 4" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+      <Path
+        d="M96 82v10l6 4"
+        stroke={color}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
@@ -62,21 +68,29 @@ interface ChecklistRowProps {
 }
 
 /** Fila del checklist de revisión con marcador de timeline a la izquierda. */
-function ChecklistRow({icon, label, done, pendingLabel, isLast}: ChecklistRowProps): React.JSX.Element {
+function ChecklistRow({
+  icon,
+  label,
+  done,
+  pendingLabel,
+  isLast,
+}: ChecklistRowProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <View style={styles.checkRow}>
       <View style={styles.timeline}>
         {done ? (
-          <View style={[styles.marker, {backgroundColor: theme.colors.success}]}>
+          <View style={[styles.marker, { backgroundColor: theme.colors.success }]}>
             <IconCheck size={13} color={theme.colors.onSuccess} strokeWidth={3} />
           </View>
         ) : (
-          <View style={[styles.marker, {backgroundColor: hexAlpha(theme.colors.accent, 0.18)}]}>
+          <View style={[styles.marker, { backgroundColor: hexAlpha(theme.colors.accent, 0.18) }]}>
             <ActivityIndicator size="small" color={theme.colors.accent} />
           </View>
         )}
-        {!isLast ? <View style={[styles.connector, {backgroundColor: theme.colors.border}]} /> : null}
+        {!isLast ? (
+          <View style={[styles.connector, { backgroundColor: theme.colors.border }]} />
+        ) : null}
       </View>
       <View style={styles.checkIcon}>{icon}</View>
       <Text variant="bodyStrong" style={styles.checkLabel} numberOfLines={1}>
@@ -101,7 +115,7 @@ function ChecklistRow({icon, label, done, pendingLabel, isLast}: ChecklistRowPro
  * mientras tanto el conductor permanece en `in_review` y el `RootNavigator` lo mantiene aquí.
  */
 export const UnderReviewScreen = (): React.JSX.Element => {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
 
@@ -109,7 +123,7 @@ export const UnderReviewScreen = (): React.JSX.Element => {
     // RE-CHEQUEA el estado del alta contra el backend (la aprobación NUNCA se hace localmente). Si ya
     // está aprobado, el `useRegistrationGate` re-resuelve y el `RootNavigator` saca al conductor de acá.
     // Antes "Entendido" no hacía NADA al tap (se veía roto); ahora el botón sí tiene efecto.
-    queryClient.invalidateQueries({queryKey: REGISTRATION_GATE_QUERY_KEY});
+    queryClient.invalidateQueries({ queryKey: REGISTRATION_GATE_QUERY_KEY });
   };
 
   const onContactSupport = () => {
@@ -121,8 +135,13 @@ export const UnderReviewScreen = (): React.JSX.Element => {
     <SafeScreen
       scroll
       footer={
-        <View style={{gap: theme.spacing.sm}}>
-          <Button label={t('registration.review.checkStatus')} variant="secondary" fullWidth onPress={onCheckStatus} />
+        <View style={{ gap: theme.spacing.sm }}>
+          <Button
+            label={t('registration.review.checkStatus')}
+            variant="secondary"
+            fullWidth
+            onPress={onCheckStatus}
+          />
           <Button
             label={t('registration.review.contactSupport')}
             variant="ghost"
@@ -131,8 +150,9 @@ export const UnderReviewScreen = (): React.JSX.Element => {
             onPress={onContactSupport}
           />
         </View>
-      }>
-      <View style={[styles.body, {gap: theme.spacing.xl}]}>
+      }
+    >
+      <View style={[styles.body, { gap: theme.spacing.xl }]}>
         <Reveal style={styles.brand}>
           <VeoWordmark size="sm" peru />
         </Reveal>
@@ -161,7 +181,8 @@ export const UnderReviewScreen = (): React.JSX.Element => {
                 padding: theme.spacing.lg,
                 gap: theme.spacing.lg,
               },
-            ]}>
+            ]}
+          >
             <ChecklistRow
               icon={<IconAccount size={22} color={theme.colors.accent} strokeWidth={1.8} />}
               label={t('registration.review.personal')}
@@ -192,15 +213,21 @@ export const UnderReviewScreen = (): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  body: {paddingTop: 16, alignItems: 'stretch'},
-  brand: {alignItems: 'center', gap: 6},
-  illustration: {alignItems: 'center'},
-  intro: {gap: 8},
-  card: {alignSelf: 'stretch'},
-  checkRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  timeline: {width: 24, alignItems: 'center'},
-  marker: {width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center'},
-  connector: {position: 'absolute', top: 24, width: 2, height: 26},
-  checkIcon: {width: 26, alignItems: 'center'},
-  checkLabel: {flex: 1},
+  body: { paddingTop: 16, alignItems: 'stretch' },
+  brand: { alignItems: 'center', gap: 6 },
+  illustration: { alignItems: 'center' },
+  intro: { gap: 8 },
+  card: { alignSelf: 'stretch' },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  timeline: { width: 24, alignItems: 'center' },
+  marker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connector: { position: 'absolute', top: 24, width: 2, height: 26 },
+  checkIcon: { width: 26, alignItems: 'center' },
+  checkLabel: { flex: 1 },
 });

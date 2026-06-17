@@ -1,14 +1,22 @@
-import type { KeyValueStore } from '../../../core/storage/mmkv';
-import { uuidv4 } from '../../../shared/utils/uuid';
-import type { SavedPlace, SavedPlaceInput, SavedPlaceKind } from '../domain/entities';
-import type { PlacesRepository } from '../domain/placesRepository';
+import type {KeyValueStore} from '../../../core/storage/mmkv';
+import {uuidv4} from '../../../shared/utils/uuid';
+import type {
+  SavedPlace,
+  SavedPlaceInput,
+  SavedPlaceKind,
+} from '../domain/entities';
+import type {PlacesRepository} from '../domain/placesRepository';
 
 /** Clave de persistencia y tope de favoritos (Casa/Trabajo no cuentan; evita crecer sin límite). */
 const KEY = 'places.saved';
 const MAX_FAVORITES = 20;
 
 /** Orden de presentación de los tipos (Casa, Trabajo y al final favoritos). */
-const KIND_ORDER: Record<SavedPlaceKind, number> = { HOME: 0, WORK: 1, FAVORITE: 2 };
+const KIND_ORDER: Record<SavedPlaceKind, number> = {
+  HOME: 0,
+  WORK: 1,
+  FAVORITE: 2,
+};
 
 /**
  * Lugares guardados persistidos LOCALMENTE en MMKV (prefs, NO el almacén seguro). Sin red. Casa y
@@ -52,20 +60,22 @@ export class LocalPlacesRepository implements PlacesRepository {
       label: input.label,
       point: input.point,
       createdAt: this.now(),
-      ...(input.subtitle ? { subtitle: input.subtitle } : {}),
+      ...(input.subtitle ? {subtitle: input.subtitle} : {}),
     };
 
     // Casa/Trabajo son únicos: descarta el previo del mismo tipo.
     const rest =
       input.kind === 'FAVORITE'
         ? current
-        : current.filter((item) => item.kind !== input.kind);
+        : current.filter(item => item.kind !== input.kind);
 
     // Limita la cantidad de favoritos (los más antiguos se conservan; rechaza el excedente del nuevo).
-    const favorites = rest.filter((item) => item.kind === 'FAVORITE');
+    const favorites = rest.filter(item => item.kind === 'FAVORITE');
     if (input.kind === 'FAVORITE' && favorites.length >= MAX_FAVORITES) {
       const oldest = this.sort(favorites).pop();
-      const trimmed = oldest ? rest.filter((item) => item.id !== oldest.id) : rest;
+      const trimmed = oldest
+        ? rest.filter(item => item.id !== oldest.id)
+        : rest;
       this.writeAll([...trimmed, place]);
       return place;
     }
@@ -76,7 +86,7 @@ export class LocalPlacesRepository implements PlacesRepository {
 
   update(id: string, input: SavedPlaceInput): SavedPlace {
     const current = this.readAll();
-    const existing = current.find((item) => item.id === id);
+    const existing = current.find(item => item.id === id);
     if (!existing) {
       // Si no existe, lo creamos (idempotencia amistosa para la UI).
       return this.save(input);
@@ -86,13 +96,13 @@ export class LocalPlacesRepository implements PlacesRepository {
       kind: input.kind,
       label: input.label,
       point: input.point,
-      ...(input.subtitle ? { subtitle: input.subtitle } : { subtitle: undefined }),
+      ...(input.subtitle ? {subtitle: input.subtitle} : {subtitle: undefined}),
     };
-    this.writeAll(current.map((item) => (item.id === id ? updated : item)));
+    this.writeAll(current.map(item => (item.id === id ? updated : item)));
     return updated;
   }
 
   remove(id: string): void {
-    this.writeAll(this.readAll().filter((item) => item.id !== id));
+    this.writeAll(this.readAll().filter(item => item.id !== id));
   }
 }

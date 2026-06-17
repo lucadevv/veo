@@ -1,13 +1,13 @@
-import { Button, Card, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Share, StyleSheet, View } from 'react-native';
+import {Button, Card, Text, useTheme} from '@veo/ui-kit';
+import React, {useCallback} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Share, StyleSheet, View} from 'react-native';
 import {
   formatDistance,
   formatDurationMinutes,
   formatPEN,
 } from '../../../../shared/utils/format';
-import { formatReceiptText, type TripReceipt } from '../../domain/receipt';
+import {formatReceiptText, type TripReceipt} from '../../domain/receipt';
 
 export interface TripReceiptCardProps {
   receipt: TripReceipt;
@@ -27,7 +27,9 @@ function Row({
 }): React.JSX.Element {
   return (
     <View style={styles.row}>
-      <Text variant={strong ? 'bodyStrong' : 'callout'} color={strong ? 'ink' : 'inkMuted'}>
+      <Text
+        variant={strong ? 'bodyStrong' : 'callout'}
+        color={strong ? 'ink' : 'inkMuted'}>
         {label}
       </Text>
       <Text variant={strong ? 'bodyStrong' : 'body'} tabular={tabular}>
@@ -42,15 +44,17 @@ function Row({
  * conductor, recorrido) y botón "Compartir recibo" con el Share nativo de RN. Solo muestra las
  * filas con dato real (omite con gracia las ausentes).
  */
-export function TripReceiptCard({ receipt }: TripReceiptCardProps): React.JSX.Element {
+export function TripReceiptCard({
+  receipt,
+}: TripReceiptCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const onShare = useCallback(() => {
     const text = formatReceiptText(receipt, {
       title: t('receipt.shareTitle'),
       baseFare: t('receipt.baseFare'),
-      surge: (multiplier) => t('receipt.surge', { multiplier }),
+      surge: multiplier => t('receipt.surge', {multiplier}),
       tip: t('receipt.tip'),
       total: t('receipt.total'),
       paymentMethod: t('receipt.paymentMethod'),
@@ -60,44 +64,83 @@ export function TripReceiptCard({ receipt }: TripReceiptCardProps): React.JSX.El
       route: t('receipt.route'),
       distance: t('receipt.distance'),
       duration: t('receipt.duration'),
-      durationMinutes: (minutes) => t('receipt.durationMinutes', { minutes }),
+      durationMinutes: minutes => t('receipt.durationMinutes', {minutes}),
     });
-    void Share.share({ title: t('receipt.shareTitle'), message: text });
+    void Share.share({title: t('receipt.shareTitle'), message: text});
   }, [receipt, t]);
 
   return (
     <Card variant="outlined" padding="lg">
       <Text variant="title3">{t('receipt.title')}</Text>
 
-      <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.lg }}>
-        <Row label={t('receipt.baseFare')} value={formatPEN(receipt.baseFareCents)} tabular />
+      <View style={{gap: theme.spacing.sm, marginTop: theme.spacing.lg}}>
+        <Row
+          label={t('receipt.baseFare')}
+          value={formatPEN(receipt.baseFareCents)}
+          tabular
+        />
         {receipt.surgeMultiplier ? (
           <Row
-            label={t('receipt.surge', { multiplier: receipt.surgeMultiplier })}
+            label={t('receipt.surge', {multiplier: receipt.surgeMultiplier})}
             value={`×${receipt.surgeMultiplier}`}
             tabular
           />
         ) : null}
         {receipt.tipCents > 0 ? (
-          <Row label={t('receipt.tip')} value={formatPEN(receipt.tipCents)} tabular />
+          <Row
+            label={t('receipt.tip')}
+            value={formatPEN(receipt.tipCents)}
+            tabular
+          />
         ) : null}
 
-        <View style={[styles.divider, { backgroundColor: theme.colors.border, marginVertical: theme.spacing.xs }]} />
+        <View
+          style={[
+            styles.divider,
+            {
+              backgroundColor: theme.colors.border,
+              marginVertical: theme.spacing.xs,
+            },
+          ]}
+        />
 
-        <Row label={t('receipt.total')} value={formatPEN(receipt.totalCents)} strong tabular />
+        <Row
+          label={t('receipt.total')}
+          value={formatPEN(receipt.totalCents)}
+          strong
+          tabular
+        />
         <Row label={t('receipt.paymentMethod')} value={receipt.paymentMethod} />
       </View>
 
       <View
         style={[
           styles.meta,
-          { gap: theme.spacing.sm, marginTop: theme.spacing.lg, paddingTop: theme.spacing.lg, borderTopColor: theme.colors.border },
-        ]}
-      >
-        {receipt.date ? <Row label={t('receipt.date')} value={receipt.date} /> : null}
-        {receipt.driverLabel ? <Row label={t('receipt.driver')} value={receipt.driverLabel} tabular /> : null}
-        {receipt.vehicleLabel ? <Row label={t('receipt.vehicle')} value={receipt.vehicleLabel} /> : null}
-        <Row label={t('receipt.distance')} value={formatDistance(receipt.distanceMeters)} tabular />
+          {
+            gap: theme.spacing.sm,
+            marginTop: theme.spacing.lg,
+            paddingTop: theme.spacing.lg,
+            borderTopColor: theme.colors.border,
+          },
+        ]}>
+        {receipt.date ? (
+          <Row label={t('receipt.date')} value={receipt.date} />
+        ) : null}
+        {receipt.driverLabel ? (
+          <Row
+            label={t('receipt.driver')}
+            value={receipt.driverLabel}
+            tabular
+          />
+        ) : null}
+        {receipt.vehicleLabel ? (
+          <Row label={t('receipt.vehicle')} value={receipt.vehicleLabel} />
+        ) : null}
+        <Row
+          label={t('receipt.distance')}
+          value={formatDistance(receipt.distanceMeters)}
+          tabular
+        />
         <Row
           label={t('receipt.duration')}
           value={t('receipt.durationMinutes', {
@@ -106,7 +149,7 @@ export function TripReceiptCard({ receipt }: TripReceiptCardProps): React.JSX.El
           tabular
         />
         {receipt.originLabel && receipt.destinationLabel ? (
-          <View style={{ marginTop: theme.spacing.xs }}>
+          <View style={{marginTop: theme.spacing.xs}}>
             <Text variant="footnote" color="inkMuted">
               {t('receipt.route')}
             </Text>
@@ -122,14 +165,18 @@ export function TripReceiptCard({ receipt }: TripReceiptCardProps): React.JSX.El
         variant="secondary"
         fullWidth
         onPress={onShare}
-        style={{ marginTop: theme.spacing.lg }}
+        style={{marginTop: theme.spacing.lg}}
       />
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  divider: { height: StyleSheet.hairlineWidth },
-  meta: { borderTopWidth: StyleSheet.hairlineWidth },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  divider: {height: StyleSheet.hairlineWidth},
+  meta: {borderTopWidth: StyleSheet.hairlineWidth},
 });

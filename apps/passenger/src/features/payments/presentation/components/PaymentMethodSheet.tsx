@@ -1,10 +1,10 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { BottomSheet, Text, useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {BottomSheet, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { PAYMENT_METHODS } from '../stores/paymentPrefsStore';
-import { PaymentMethodPicker } from './PaymentMethodPicker';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {PAYMENT_METHODS} from '../stores/paymentPrefsStore';
+import {PaymentMethodPicker} from './PaymentMethodPicker';
 
 export interface PaymentMethodSheetProps {
   visible: boolean;
@@ -50,11 +50,14 @@ export function PaymentMethodSheet({
   onSelect,
 }: PaymentMethodSheetProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('payments.selectTitle')}>
-      <View style={{ gap: theme.spacing.lg }}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('payments.selectTitle')}>
+      <View style={{gap: theme.spacing.lg}}>
         <Text variant="callout" color="inkMuted">
           {t('payments.selectSubtitle')}
         </Text>

@@ -113,7 +113,12 @@ describe('RateLimitGuard', () => {
     const laxConfig = { getOrThrow: (k: string) => (k === 'RATE_LIMIT_WINDOW_MS' ? 60_000 : 1) };
     const guard = new RateLimitGuard(reflector, store, laxConfig as never);
     const override: RateLimitOptions = { max: 5, windowMs: 600_000, by: ['ip', 'phone'] };
-    const req = { ip: '3.3.3.3', url: '/auth/otp/request', method: 'POST', body: { phone: '987654321' } };
+    const req = {
+      ip: '3.3.3.3',
+      url: '/auth/otp/request',
+      method: 'POST',
+      body: { phone: '987654321' },
+    };
     const ctx = httpContext(req, withMeta(RATE_LIMIT_KEY, override));
     for (let i = 0; i < 5; i++) {
       await expect(guard.canActivate(ctx)).resolves.toBe(true);
@@ -128,7 +133,10 @@ describe('RateLimitGuard', () => {
     const override: RateLimitOptions = { max: 1, windowMs: 600_000, by: ['ip', 'phone'] };
     const handler = withMeta(RATE_LIMIT_KEY, override);
     const mk = (phone: string): ExecutionContext =>
-      httpContext({ ip: '4.4.4.4', url: '/auth/otp/request', method: 'POST', body: { phone } }, handler);
+      httpContext(
+        { ip: '4.4.4.4', url: '/auth/otp/request', method: 'POST', body: { phone } },
+        handler,
+      );
     // Misma IP, teléfonos distintos → contadores independientes.
     await expect(guard.canActivate(mk('900000001')).catch((e) => e)).resolves.toBe(true);
     await expect(guard.canActivate(mk('900000002')).catch((e) => e)).resolves.toBe(true);
@@ -143,11 +151,21 @@ describe('RateLimitGuard', () => {
     const override: RateLimitOptions = { max: 1, windowMs: 600_000, by: ['ip', 'email'] };
     const handler = withMeta(RATE_LIMIT_KEY, override);
     const ctxA = httpContext(
-      { ip: '5.5.5.5', url: '/auth/email/login', method: 'POST', body: { email: ' User@Example.com ' } },
+      {
+        ip: '5.5.5.5',
+        url: '/auth/email/login',
+        method: 'POST',
+        body: { email: ' User@Example.com ' },
+      },
       handler,
     );
     const ctxB = httpContext(
-      { ip: '5.5.5.5', url: '/auth/email/login', method: 'POST', body: { email: 'user@example.com' } },
+      {
+        ip: '5.5.5.5',
+        url: '/auth/email/login',
+        method: 'POST',
+        body: { email: 'user@example.com' },
+      },
       handler,
     );
     await expect(guard.canActivate(ctxA)).resolves.toBe(true);

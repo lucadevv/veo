@@ -52,7 +52,10 @@ export class PromotionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Cuenta usos totales y del usuario para una promo (excluye nada; cada redención es un uso). */
-  private async usageFor(promotionId: string, userId: string): Promise<{ totalUses: number; userUses: number }> {
+  private async usageFor(
+    promotionId: string,
+    userId: string,
+  ): Promise<{ totalUses: number; userUses: number }> {
     const [totalUses, userUses] = await Promise.all([
       this.prisma.read.promoRedemption.count({ where: { promotionId } }),
       this.prisma.read.promoRedemption.count({ where: { promotionId, userId } }),
@@ -64,16 +67,32 @@ export class PromotionsService {
    * Previsualiza el descuento de un código para un usuario sobre un bruto. No muta. Si el código no
    * existe o no aplica, devuelve `valid:false` con un `reason` legible (nunca lanza por negocio).
    */
-  async validatePromo(rawCode: string, userId: string, fareCents: number): Promise<PromoValidation> {
+  async validatePromo(
+    rawCode: string,
+    userId: string,
+    fareCents: number,
+  ): Promise<PromoValidation> {
     const code = normalizeCode(rawCode);
     const promo = await this.prisma.read.promotion.findUnique({ where: { code } });
     if (!promo) {
-      return { code, kind: 'FIXED', valid: false, discountCents: 0, reason: reasonMessage('NOT_FOUND') };
+      return {
+        code,
+        kind: 'FIXED',
+        valid: false,
+        discountCents: 0,
+        reason: reasonMessage('NOT_FOUND'),
+      };
     }
     const usage = await this.usageFor(promo.id, userId);
     const result = evaluatePromo(promo, fareCents, usage);
     if (!result.valid) {
-      return { code, kind: promo.kind, valid: false, discountCents: 0, reason: reasonMessage(result.reason) };
+      return {
+        code,
+        kind: promo.kind,
+        valid: false,
+        discountCents: 0,
+        reason: reasonMessage(result.reason),
+      };
     }
     return { code, kind: promo.kind, valid: true, discountCents: result.discountCents };
   }
@@ -105,7 +124,11 @@ export class PromotionsService {
     // Idempotencia por viaje: un mismo viaje no canjea dos veces la misma promo.
     const existingForTrip = await this.prisma.read.promoRedemption.findUnique({
       where: {
-        promotionId_userId_tripId: { promotionId: promo.id, userId: input.userId, tripId: input.tripId },
+        promotionId_userId_tripId: {
+          promotionId: promo.id,
+          userId: input.userId,
+          tripId: input.tripId,
+        },
       },
     });
     if (existingForTrip) {
@@ -162,10 +185,16 @@ export class PromotionsService {
       // Carrera de doble-submit: el UNIQUE (dedupKey o tripleta) garantiza un único canje.
       if (isUniqueViolation(err)) {
         const dup =
-          (await this.prisma.read.promoRedemption.findUnique({ where: { dedupKey: input.dedupKey } })) ??
+          (await this.prisma.read.promoRedemption.findUnique({
+            where: { dedupKey: input.dedupKey },
+          })) ??
           (await this.prisma.read.promoRedemption.findUnique({
             where: {
-              promotionId_userId_tripId: { promotionId: promo.id, userId: input.userId, tripId: input.tripId },
+              promotionId_userId_tripId: {
+                promotionId: promo.id,
+                userId: input.userId,
+                tripId: input.tripId,
+              },
             },
           }));
         if (dup) {

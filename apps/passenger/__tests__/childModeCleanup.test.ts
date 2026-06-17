@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
-import { join } from 'path';
+import {existsSync, readdirSync, readFileSync, statSync} from 'fs';
+import {join} from 'path';
 
 const SRC = join(__dirname, '..', 'src');
 
@@ -24,14 +24,23 @@ function collectSources(dir: string): string[] {
  */
 describe('limpieza · Modo Niño verifyCode (código muerto eliminado)', () => {
   it('eliminó los archivos del repositorio de Modo Niño', () => {
-    expect(existsSync(join(SRC, 'features/childMode/data/httpChildModeRepository.ts'))).toBe(false);
-    expect(existsSync(join(SRC, 'features/childMode/domain/childModeRepository.ts'))).toBe(false);
+    expect(
+      existsSync(
+        join(SRC, 'features/childMode/data/httpChildModeRepository.ts'),
+      ),
+    ).toBe(false);
+    expect(
+      existsSync(join(SRC, 'features/childMode/domain/childModeRepository.ts')),
+    ).toBe(false);
   });
 
   it('ninguna fuente referencia `verifyCode` ni el token `childModeRepository`', () => {
-    const offenders = collectSources(SRC).filter((file) => {
+    const offenders = collectSources(SRC).filter(file => {
       const content = readFileSync(file, 'utf8');
-      return content.includes('verifyCode') || content.includes('ChildModeRepository');
+      return (
+        content.includes('verifyCode') ||
+        content.includes('ChildModeRepository')
+      );
     });
 
     expect(offenders).toEqual([]);

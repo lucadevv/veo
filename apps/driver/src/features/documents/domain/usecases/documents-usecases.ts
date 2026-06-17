@@ -1,6 +1,6 @@
-import type {DocumentsRepository} from '../repositories/documents-repository';
-import type {DriverDocument, DriverDocumentList, RegisterDocumentInput} from '../entities';
-import {needsAttention, statusPriority} from '../value-objects/document-status';
+import type { DocumentsRepository } from '../repositories/documents-repository';
+import type { DriverDocument, DriverDocumentList, RegisterDocumentInput } from '../entities';
+import { needsAttention, statusPriority } from '../value-objects/document-status';
 
 /**
  * Caso de uso: lista de documentos del conductor, ordenada por urgencia (vencido → rechazado →
@@ -29,5 +29,5 @@ export class RegisterDocumentUseCase {
 
 /** Cuenta cuántos documentos requieren atención (vencido/por vencer/rechazado) para el resumen. */
 export function countDocumentsNeedingAttention(docs: DriverDocumentList): number {
-  return docs.filter(doc => needsAttention(doc.simpleStatus)).length;
+  return docs.filter((doc) => needsAttention(doc.simpleStatus)).length;
 }

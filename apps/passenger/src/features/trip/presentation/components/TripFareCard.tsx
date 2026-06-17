@@ -1,10 +1,10 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { Card, Text, useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {Card, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { PaymentMethodLogo } from '../../../../shared/assets/payment-methods/PaymentMethodLogo';
-import { formatPEN } from '../../../../shared/utils/format';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {PaymentMethodLogo} from '../../../../shared/assets/payment-methods/PaymentMethodLogo';
+import {formatPEN} from '../../../../shared/utils/format';
 
 /** Métodos con logo canónico. El `paymentMethod` del viaje es string; validamos antes de usar el logo. */
 const KNOWN_METHODS: ReadonlySet<string> = new Set([
@@ -31,9 +31,12 @@ export interface TripFareCardProps {
  * que las filas de pago) en vez del texto crudo "YAPE", para que el detalle se vea coherente con el
  * resto de la app y no "legacy". La tarifa va en grande y tabular (es el dato que el pasajero busca).
  */
-export function TripFareCard({ fareCents, paymentMethod }: TripFareCardProps): React.JSX.Element {
+export function TripFareCard({
+  fareCents,
+  paymentMethod,
+}: TripFareCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const method = asPaymentMethod(paymentMethod);
 
   return (
@@ -46,7 +49,16 @@ export function TripFareCard({ fareCents, paymentMethod }: TripFareCardProps): R
           {formatPEN(fareCents)}
         </Text>
       </View>
-      <View style={[styles.row, styles.method, { marginTop: theme.spacing.md, borderTopColor: theme.colors.border, paddingTop: theme.spacing.md }]}>
+      <View
+        style={[
+          styles.row,
+          styles.method,
+          {
+            marginTop: theme.spacing.md,
+            borderTopColor: theme.colors.border,
+            paddingTop: theme.spacing.md,
+          },
+        ]}>
         <Text variant="callout" color="inkMuted">
           {t('home.paymentMethod')}
         </Text>
@@ -62,7 +74,12 @@ export function TripFareCard({ fareCents, paymentMethod }: TripFareCardProps): R
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  method: { borderTopWidth: StyleSheet.hairlineWidth },
-  methodValue: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  method: {borderTopWidth: StyleSheet.hairlineWidth},
+  methodValue: {flexDirection: 'row', alignItems: 'center', gap: 8},
 });

@@ -12,7 +12,13 @@ async function main(): Promise<void> {
       await prisma.template.upsert({
         where: { key: t.key },
         update: { channel: t.channel, locale: t.locale, subject: t.subject, body: t.body },
-        create: { key: t.key, channel: t.channel, locale: t.locale, subject: t.subject, body: t.body },
+        create: {
+          key: t.key,
+          channel: t.channel,
+          locale: t.locale,
+          subject: t.subject,
+          body: t.body,
+        },
       });
     }
     // eslint-disable-next-line no-console

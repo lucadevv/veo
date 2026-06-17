@@ -62,7 +62,7 @@ function bytesToHex(bytes: Uint8Array): string {
 function generateRandomKeyHex(): string {
   const bytes = new Uint8Array(KEY_BYTES);
 
-  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
+  const cryptoObj = (globalThis as {crypto?: Crypto}).crypto;
   if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
     cryptoObj.getRandomValues(bytes);
     return bytesToHex(bytes);

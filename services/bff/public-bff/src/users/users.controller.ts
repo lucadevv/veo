@@ -36,7 +36,9 @@ export class UsersController {
 
   @Post('me/avatar/presign')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Presign de subida del avatar (PUT directo a S3/MinIO vía media-service)' })
+  @ApiOperation({
+    summary: 'Presign de subida del avatar (PUT directo a S3/MinIO vía media-service)',
+  })
   presignAvatar(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: PresignAvatarUploadDto,
@@ -55,7 +57,9 @@ export class UsersController {
   }
 
   @Get('me/consents')
-  @ApiOperation({ summary: 'Consentimiento VIGENTE del pasajero (el más reciente; null si nunca registró)' })
+  @ApiOperation({
+    summary: 'Consentimiento VIGENTE del pasajero (el más reciente; null si nunca registró)',
+  })
   currentConsent(@CurrentUser() user: AuthenticatedUser): Promise<ConsentRecorded | null> {
     return this.users.getCurrentConsent(user);
   }

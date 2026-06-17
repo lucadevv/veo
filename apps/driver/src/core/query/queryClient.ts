@@ -1,4 +1,4 @@
-import {QueryClient} from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 
 /**
  * Cliente React Query: estado del servidor (cache, reintentos, invalidación).

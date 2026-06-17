@@ -92,7 +92,11 @@ export class SmppClient {
         cleanup();
         const header = parseHeader(buf);
         if (header.commandId !== expectedResp) {
-          reject(new ExternalServiceError(`SMPP: respuesta inesperada 0x${header.commandId.toString(16)}`));
+          reject(
+            new ExternalServiceError(
+              `SMPP: respuesta inesperada 0x${header.commandId.toString(16)}`,
+            ),
+          );
           return;
         }
         if (header.commandStatus !== 0) {

@@ -64,11 +64,20 @@ export interface NotificationStore {
   findInboxByRecipient(recipientId: string, limit: number): Promise<NotificationRecord[]>;
   findDue(now: Date, limit: number): Promise<NotificationRecord[]>;
   /** Riel ACEPTÓ el mensaje (honesto: SENT, NO DELIVERED) + outbox notification.sent. */
-  markSent(id: string, args: { to: string; channel: NotificationChannel; attempts: number }): Promise<void>;
+  markSent(
+    id: string,
+    args: { to: string; channel: NotificationChannel; attempts: number },
+  ): Promise<void>;
   /** Agotado / permanente: FAILED + outbox notification.failed. */
-  markFailed(id: string, args: { channel: NotificationChannel; reason: string; attempts: number }): Promise<void>;
+  markFailed(
+    id: string,
+    args: { channel: NotificationChannel; reason: string; attempts: number },
+  ): Promise<void>;
   /** Fallo recuperable: reprograma siguiente intento (backoff). */
-  scheduleRetry(id: string, args: { attempts: number; nextAttemptAt: Date; reason: string }): Promise<void>;
+  scheduleRetry(
+    id: string,
+    args: { attempts: number; nextAttemptAt: Date; reason: string },
+  ): Promise<void>;
 }
 
 export interface RenderedMessage {

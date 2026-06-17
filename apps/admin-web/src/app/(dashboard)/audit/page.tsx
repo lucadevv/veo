@@ -16,9 +16,21 @@ import { Input } from '@/components/ui/input';
 import { ErrorState } from '@/components/ui/states';
 
 const columns: ColumnDef<AuditEntryView, unknown>[] = [
-  { accessorKey: 'seq', header: 'Seq', cell: ({ row }) => <span className="font-mono text-xs tabular">{row.original.seq}</span> },
-  { accessorKey: 'at', header: 'Fecha', cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.at)}</span> },
-  { accessorKey: 'action', header: 'Acción', cell: ({ row }) => <span className="text-ink">{row.original.action}</span> },
+  {
+    accessorKey: 'seq',
+    header: 'Seq',
+    cell: ({ row }) => <span className="font-mono text-xs tabular">{row.original.seq}</span>,
+  },
+  {
+    accessorKey: 'at',
+    header: 'Fecha',
+    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.at)}</span>,
+  },
+  {
+    accessorKey: 'action',
+    header: 'Acción',
+    cell: ({ row }) => <span className="text-ink">{row.original.action}</span>,
+  },
   {
     accessorKey: 'resourceType',
     header: 'Recurso',
@@ -63,7 +75,12 @@ function AuditInner() {
         breadcrumbs={[{ label: 'Cumplimiento' }, { label: 'Auditoría' }]}
         actions={
           can(user, 'audit:verify') ? (
-            <Button variant="secondary" size="sm" loading={verify.isPending} onClick={() => verify.mutate()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={verify.isPending}
+              onClick={() => verify.mutate()}
+            >
               <ShieldCheck className="size-4" aria-hidden />
               Verificar cadena
             </Button>

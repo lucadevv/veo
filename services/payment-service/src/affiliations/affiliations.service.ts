@@ -72,7 +72,9 @@ export class AffiliationsService {
     input: CreateAffiliationInput,
   ): Promise<{ affiliationId: string; status: AffiliationStatus; deepLink?: string }> {
     if (!supportsYapeSubscription(this.gateway)) {
-      throw new InvalidStateError('El gateway activo no soporta afiliación Yape On File (usá VEO_PAYMENT_MODE=prontopaga)');
+      throw new InvalidStateError(
+        'El gateway activo no soporta afiliación Yape On File (usá VEO_PAYMENT_MODE=prontopaga)',
+      );
     }
 
     const existing = await this.prisma.read.walletAffiliation.findUnique({
@@ -123,9 +125,13 @@ export class AffiliationsService {
     });
 
     // AUDIT sin PII completa (phone/document enmascarados; walletUid jamás logueado).
-    this.logger.log(`Afiliación creada user=${userId} aff=${saved.id} origin=${origin} estado=PROCESS`);
+    this.logger.log(
+      `Afiliación creada user=${userId} aff=${saved.id} origin=${origin} estado=PROCESS`,
+    );
     if (!sub.deepLink) {
-      this.logger.warn(`Afiliación ${saved.id} sin deepLink del proveedor (revisar respuesta de ProntoPaga)`);
+      this.logger.warn(
+        `Afiliación ${saved.id} sin deepLink del proveedor (revisar respuesta de ProntoPaga)`,
+      );
     }
     return { affiliationId: saved.id, status: saved.status, deepLink: sub.deepLink };
   }
@@ -166,7 +172,9 @@ export class AffiliationsService {
         this.logger.log(`Afiliación cancelada en el proveedor user=${userId} aff=${aff.id}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'error';
-        this.logger.warn(`Cancel en el proveedor falló (revoco local igual) user=${userId} aff=${aff.id}: ${msg}`);
+        this.logger.warn(
+          `Cancel en el proveedor falló (revoco local igual) user=${userId} aff=${aff.id}: ${msg}`,
+        );
       }
     }
 
@@ -184,7 +192,10 @@ export class AffiliationsService {
    * Al resolver ACCEPTED → ACTIVE: guarda phoneMasked (el /show trae el phoneNumber) y emite
    * payment.affiliation_activated (idempotente con el camino del webhook). Devuelve la fila actualizada o null.
    */
-  private async refreshFromProvider(userId: string, aff: WalletAffiliation): Promise<WalletAffiliation | null> {
+  private async refreshFromProvider(
+    userId: string,
+    aff: WalletAffiliation,
+  ): Promise<WalletAffiliation | null> {
     if (!aff.walletUid || !supportsYapeSubscription(this.gateway)) return null;
 
     const now = Date.now();
@@ -205,7 +216,10 @@ export class AffiliationsService {
     // tipado, no contra literales. (Smell latente: idealmente el gateway normaliza esto a dominio antes de
     // devolverlo; mientras tanto, el const explícito deja la dependencia del proveedor a la vista.)
     const status = (detail.status ?? '').toUpperCase();
-    if (status === ProntoPagaAffiliationStatus.ACCEPTED || status === ProntoPagaAffiliationStatus.ACTIVE) {
+    if (
+      status === ProntoPagaAffiliationStatus.ACCEPTED ||
+      status === ProntoPagaAffiliationStatus.ACTIVE
+    ) {
       const phoneMasked = detail.phoneNumber ? maskPhone(detail.phoneNumber) : aff.phoneMasked;
       return this.activateAndEmit(aff, { phoneMasked, source: 'refresh' });
     }
@@ -229,7 +243,8 @@ export class AffiliationsService {
     aff: WalletAffiliation,
     opts: { phoneMasked: string | null; walletUid?: string | null; source: 'webhook' | 'refresh' },
   ): Promise<WalletAffiliation> {
-    if (aff.status === AffiliationStatus.ACTIVE || aff.status === AffiliationStatus.REVOKED) return aff; // idempotente / no pisar
+    if (aff.status === AffiliationStatus.ACTIVE || aff.status === AffiliationStatus.REVOKED)
+      return aff; // idempotente / no pisar
     return this.prisma.write.$transaction(async (tx) => {
       const updated = await tx.walletAffiliation.update({
         where: { id: aff.id },
@@ -268,7 +283,9 @@ export class AffiliationsService {
   }): Promise<void> {
     const aff = await this.findForWebhook(input.affiliationId, input.walletUid);
     if (!aff) {
-      this.logger.warn(`Webhook de afiliación sin match (aff=${input.affiliationId ?? '-'} walletUid=${input.walletUid ? '***' : '-'})`);
+      this.logger.warn(
+        `Webhook de afiliación sin match (aff=${input.affiliationId ?? '-'} walletUid=${input.walletUid ? '***' : '-'})`,
+      );
       return;
     }
     if (input.status === 'PENDING') return; // sin transición
@@ -299,7 +316,12 @@ export class AffiliationsService {
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_expired',
         producer: 'payment-service',
-        payload: { affiliationId: updated.id, userId: updated.userId, wallet: 'YAPE', at: new Date().toISOString() },
+        payload: {
+          affiliationId: updated.id,
+          userId: updated.userId,
+          wallet: 'YAPE',
+          at: new Date().toISOString(),
+        },
       });
       await enqueueOutbox(tx, envelope, updated.id);
     });
@@ -322,10 +344,14 @@ export class AffiliationsService {
     if (aff.walletUid && supportsYapeSubscription(this.gateway)) {
       try {
         await this.gateway.cancelYapeSubscription(aff.walletUid);
-        this.logger.log(`Derecho al olvido: afiliación cancelada en el proveedor user=${userId} aff=${aff.id}`);
+        this.logger.log(
+          `Derecho al olvido: afiliación cancelada en el proveedor user=${userId} aff=${aff.id}`,
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'error';
-        this.logger.warn(`Cancel en el proveedor falló (purgo PII local igual) user=${userId} aff=${aff.id}: ${msg}`);
+        this.logger.warn(
+          `Cancel en el proveedor falló (purgo PII local igual) user=${userId} aff=${aff.id}: ${msg}`,
+        );
       }
     }
 
@@ -349,9 +375,14 @@ export class AffiliationsService {
     return aff.walletUid;
   }
 
-  private async findForWebhook(affiliationId?: string, walletUid?: string): Promise<WalletAffiliation | null> {
+  private async findForWebhook(
+    affiliationId?: string,
+    walletUid?: string,
+  ): Promise<WalletAffiliation | null> {
     if (affiliationId) {
-      const byId = await this.prisma.read.walletAffiliation.findUnique({ where: { id: affiliationId } });
+      const byId = await this.prisma.read.walletAffiliation.findUnique({
+        where: { id: affiliationId },
+      });
       if (byId) return byId;
     }
     if (walletUid) {
@@ -362,6 +393,11 @@ export class AffiliationsService {
 
   private toView(aff: WalletAffiliation): AffiliationView {
     // EXCLUYE walletUid y documentMasked del payload público por diseño.
-    return { affiliationId: aff.id, status: aff.status, wallet: aff.wallet, phoneMasked: aff.phoneMasked };
+    return {
+      affiliationId: aff.id,
+      status: aff.status,
+      wallet: aff.wallet,
+      phoneMasked: aff.phoneMasked,
+    };
   }
 }

@@ -1,6 +1,6 @@
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {Pressable, StyleSheet, View} from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -25,10 +25,14 @@ export function StarRating({
     <View
       style={styles.row}
       accessibilityRole="adjustable"
-      accessibilityValue={{ min: 1, max: 5, now: value }}
-    >
-      {[1, 2, 3, 4, 5].map((star) => (
-        <Star key={star} star={star} active={star <= value} onPress={() => onChange(star)} />
+      accessibilityValue={{min: 1, max: 5, now: value}}>
+      {[1, 2, 3, 4, 5].map(star => (
+        <Star
+          key={star}
+          star={star}
+          active={star <= value}
+          onPress={() => onChange(star)}
+        />
       ))}
     </View>
   );
@@ -40,7 +44,7 @@ interface StarProps {
   onPress: () => void;
 }
 
-function Star({ star, active, onPress }: StarProps): React.JSX.Element {
+function Star({star, active, onPress}: StarProps): React.JSX.Element {
   const reduced = useReducedMotion();
   const theme = useTheme();
   const scale = useSharedValue(1);
@@ -57,11 +61,13 @@ function Star({ star, active, onPress }: StarProps): React.JSX.Element {
         withSpring(1, theme.motion.spring.default),
       );
     } else {
-      scale.value = withTiming(1, { duration: theme.motion.exit.base });
+      scale.value = withTiming(1, {duration: theme.motion.exit.base});
     }
   }, [active, reduced, scale, theme]);
 
-  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{scale: scale.value}],
+  }));
 
   return (
     <Pressable
@@ -69,8 +75,7 @@ function Star({ star, active, onPress }: StarProps): React.JSX.Element {
       accessibilityLabel={`${star}`}
       hitSlop={6}
       onPress={onPress}
-      style={styles.star}
-    >
+      style={styles.star}>
       <Animated.View style={animatedStyle}>
         <Text variant="display" color={active ? 'warn' : 'inkSubtle'}>
           {active ? '★' : '☆'}
@@ -81,6 +86,6 @@ function Star({ star, active, onPress }: StarProps): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 8, alignSelf: 'center' },
-  star: { paddingHorizontal: 2 },
+  row: {flexDirection: 'row', gap: 8, alignSelf: 'center'},
+  star: {paddingHorizontal: 2},
 });

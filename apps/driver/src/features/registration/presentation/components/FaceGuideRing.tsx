@@ -1,6 +1,6 @@
-import React, {useEffect} from 'react';
-import {StyleSheet, View} from 'react-native';
-import Svg, {Circle, Defs, Ellipse, Path, RadialGradient, Stop} from 'react-native-svg';
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Svg, { Circle, Defs, Ellipse, Path, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -8,15 +8,15 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import {useTheme, useReducedMotion} from '@veo/ui-kit';
-import {hexAlpha} from './color';
+import { useTheme, useReducedMotion } from '@veo/ui-kit';
+import { hexAlpha } from './color';
 
 const SIZE = 260;
 const CENTER = SIZE / 2;
 const RING_RADIUS = 112;
 
 /** Esquinas (corchetes) que enmarcan la guía facial, como en el visor de cámara. */
-function Brackets({color}: {color: string}): React.JSX.Element {
+function Brackets({ color }: { color: string }): React.JSX.Element {
   const m = 14;
   const len = 26;
   const sw = 3;
@@ -56,7 +56,7 @@ function Brackets({color}: {color: string}): React.JSX.Element {
 }
 
 /** Silueta de rostro/hombros de guía (tenue), centrada en el anillo. */
-function FaceSilhouette({color}: {color: string}): React.JSX.Element {
+function FaceSilhouette({ color }: { color: string }): React.JSX.Element {
   return (
     <Svg width={SIZE} height={SIZE} style={StyleSheet.absoluteFill} opacity={0.5}>
       <Defs>
@@ -65,7 +65,14 @@ function FaceSilhouette({color}: {color: string}): React.JSX.Element {
           <Stop offset="100%" stopColor={color} stopOpacity={0.2} />
         </RadialGradient>
       </Defs>
-      <Circle cx={CENTER} cy={CENTER - 18} r={42} fill="none" stroke="url(#faceFade)" strokeWidth={2} />
+      <Circle
+        cx={CENTER}
+        cy={CENTER - 18}
+        r={42}
+        fill="none"
+        stroke="url(#faceFade)"
+        strokeWidth={2}
+      />
       <Path
         d={`M${CENTER - 58} ${SIZE - 28} c10 -42 36 -52 58 -52 s48 10 58 52`}
         fill="none"
@@ -94,21 +101,25 @@ export function FaceGuideRing(): React.JSX.Element {
     }
     // Rotación continua: movimiento constante → linear (emil). Lento para no distraer.
     rotation.value = withRepeat(
-      withTiming(360, {duration: 9000, easing: Easing.linear}),
+      withTiming(360, { duration: 9000, easing: Easing.linear }),
       -1,
       false,
     );
   }, [reduced, rotation]);
 
   const ringStyle = useAnimatedStyle(() => ({
-    transform: [{rotateZ: `${rotation.value}deg`}],
+    transform: [{ rotateZ: `${rotation.value}deg` }],
   }));
 
   // Circunferencia para el patrón de puntos (dash 2 / gap 9).
   const circumference = 2 * Math.PI * RING_RADIUS;
 
   return (
-    <View style={styles.wrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View
+      style={styles.wrap}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       <FaceSilhouette color={theme.colors.inkMuted} />
 
       {/* Elipse punteada interior (guía del rostro). */}
@@ -181,5 +192,5 @@ export function FaceGuideRing(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  wrap: {width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center'},
+  wrap: { width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' },
 });

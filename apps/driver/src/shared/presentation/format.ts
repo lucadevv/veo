@@ -1,6 +1,6 @@
 // Submódulo puro: evita el barrel `@veo/utils` que arrastra `ids`/`crypto` (node:crypto),
 // inexistente en Hermes/React Native.
-import {formatPEN as formatPENRaw} from '@veo/utils/money';
+import { formatPEN as formatPENRaw } from '@veo/utils/money';
 
 /**
  * Formatea céntimos PEN a soles ("S/ 15.00") reutilizando `@veo/utils` (céntimos → soles).
@@ -18,7 +18,7 @@ export function formatShortDate(iso: string): string {
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return date.toLocaleDateString('es-PE', {day: '2-digit', month: 'short', year: 'numeric'});
+  return date.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 /** Formatea segundos a "m min" redondeando hacia arriba (ETAs/duración). */

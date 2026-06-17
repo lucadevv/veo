@@ -18,7 +18,9 @@ class SmsSandboxSender implements SmsSender {
  */
 class SmsOperatorSender implements SmsSender {
   async send(_to: string, _message: string): Promise<void> {
-    throw new ExternalServiceError('SMS en modo live aún no configurado (falta gateway de operador)');
+    throw new ExternalServiceError(
+      'SMS en modo live aún no configurado (falta gateway de operador)',
+    );
   }
 }
 

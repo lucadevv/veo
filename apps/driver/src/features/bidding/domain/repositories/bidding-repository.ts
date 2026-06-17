@@ -1,4 +1,4 @@
-import type {OpenBid, SubmitOfferInput, SubmittedOffer} from '../entities';
+import type { OpenBid, SubmitOfferInput, SubmittedOffer } from '../entities';
 
 /**
  * Contrato del repositorio de PUJAS (capa domain). Implementación concreta en `data/`.

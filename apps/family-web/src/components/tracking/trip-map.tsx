@@ -26,11 +26,16 @@ interface MarkerRefs {
 }
 
 function reducedMotion(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return (
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 }
 
 /** Crea el elemento DOM de un marcador (clases literales para que Tailwind las detecte). */
-function createMarkerElement(kind: 'driver' | 'origin' | 'destination', label: string): HTMLDivElement {
+function createMarkerElement(
+  kind: 'driver' | 'origin' | 'destination',
+  label: string,
+): HTMLDivElement {
   const el = document.createElement('div');
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', label);
@@ -116,7 +121,12 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     const map = mapRef.current;
     if (!map) return;
     const maplibregl = (await import('maplibre-gl')).default;
-    const { driverLocation: driver, origin: from, destination: to, routePolyline: poly } = propsRef.current;
+    const {
+      driverLocation: driver,
+      origin: from,
+      destination: to,
+      routePolyline: poly,
+    } = propsRef.current;
 
     const upsertMarker = (
       key: keyof MarkerRefs,
@@ -147,7 +157,8 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     // MapLibre pinta en WebGL y no puede leer variables CSS: resolvemos el token --accent
     // computado (respeta claro/oscuro) en vez de hardcodear un color.
     const accentColor =
-      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'oklch(0.823 0.135 207)';
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() ||
+      'oklch(0.823 0.135 207)';
 
     const routeCoords = poly ? decodePolyline(poly) : [];
     const existingSource = map.getSource<GeoJSONSource>(ROUTE_SOURCE);

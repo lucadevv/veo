@@ -1,6 +1,6 @@
-import { useTheme } from '@veo/ui-kit';
+import {useTheme} from '@veo/ui-kit';
 import React from 'react';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, {Circle, Path, Rect} from 'react-native-svg';
 
 /**
  * Íconos de la barra de pestañas del pasajero (Home / Viajes / Perfil) dibujados con
@@ -23,7 +23,11 @@ export interface TabIconProps {
 const STROKE = 2;
 
 /** Casa (pestaña Home). Espejo de `I.tHome`: se rellena al activarse. */
-export function IconTabHome({ active = false, color, size = 24 }: TabIconProps): React.JSX.Element {
+export function IconTabHome({
+  active = false,
+  color,
+  size = 24,
+}: TabIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -41,7 +45,11 @@ export function IconTabHome({ active = false, color, size = 24 }: TabIconProps):
  * Calendario de viajes (pestaña TripHistory). Espejo de `I.tTrips`: el recuadro se rellena al
  * activarse; las líneas internas se invierten al color del fondo del tabBar para seguir leyéndose.
  */
-export function IconTabTrips({ active = false, color, size = 24 }: TabIconProps): React.JSX.Element {
+export function IconTabTrips({
+  active = false,
+  color,
+  size = 24,
+}: TabIconProps): React.JSX.Element {
   const theme = useTheme();
   // Sobre el recuadro lleno, las líneas necesitan contraste: usan el fondo del tabBar (surface).
   const innerColor = active ? theme.colors.surface : color;
@@ -58,14 +66,29 @@ export function IconTabTrips({ active = false, color, size = 24 }: TabIconProps)
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M3 9h18" stroke={innerColor} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M8 3v3M16 3v3" stroke={innerColor} strokeWidth={STROKE} strokeLinejoin="round" strokeLinecap="round" />
+      <Path
+        d="M3 9h18"
+        stroke={innerColor}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8 3v3M16 3v3"
+        stroke={innerColor}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Perfil / usuario (pestaña Profile). Espejo de `I.tUser`: se rellena al activarse. */
-export function IconTabUser({ active = false, color, size = 24 }: TabIconProps): React.JSX.Element {
+export function IconTabUser({
+  active = false,
+  color,
+  size = 24,
+}: TabIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle

@@ -1,11 +1,35 @@
-import type { OfferMadeMsg, OfferView } from '@veo/api-client';
-import { mergeOffers } from '../src/features/trip/domain/offers';
+import type {OfferMadeMsg, OfferView} from '@veo/api-client';
+import {mergeOffers} from '../src/features/trip/domain/offers';
 
-function view(driverId: string, priceCents: number, kind: OfferView['kind'], etaSeconds = 240): OfferView {
-  return { tripId: 't1', driverId, kind, priceCents, etaSeconds, status: 'PENDING' };
+function view(
+  driverId: string,
+  priceCents: number,
+  kind: OfferView['kind'],
+  etaSeconds = 240,
+): OfferView {
+  return {
+    tripId: 't1',
+    driverId,
+    kind,
+    priceCents,
+    etaSeconds,
+    status: 'PENDING',
+  };
 }
-function live(driverId: string, priceCents: number, kind: OfferMadeMsg['kind'], etaSeconds = 240): OfferMadeMsg {
-  return { tripId: 't1', driverId, kind, priceCents, etaSeconds, at: '2026-06-05T10:00:00.000Z' };
+function live(
+  driverId: string,
+  priceCents: number,
+  kind: OfferMadeMsg['kind'],
+  etaSeconds = 240,
+): OfferMadeMsg {
+  return {
+    tripId: 't1',
+    driverId,
+    kind,
+    priceCents,
+    etaSeconds,
+    at: '2026-06-05T10:00:00.000Z',
+  };
 }
 
 /**
@@ -26,8 +50,11 @@ describe('puja · mergeOffers', () => {
   });
 
   it('combina conductores distintos de REST y socket', () => {
-    const merged = mergeOffers([view('drv-1', 1300, 'ACCEPT_PRICE')], [live('drv-2', 1400, 'COUNTER')]);
-    expect(merged.map((o) => o.driverId).sort()).toEqual(['drv-1', 'drv-2']);
+    const merged = mergeOffers(
+      [view('drv-1', 1300, 'ACCEPT_PRICE')],
+      [live('drv-2', 1400, 'COUNTER')],
+    );
+    expect(merged.map(o => o.driverId).sort()).toEqual(['drv-1', 'drv-2']);
   });
 
   it('BE-1 · el live (sin enriquecer) preserva nombre/rating/vehículo del REST (no parpadea)', () => {
@@ -41,10 +68,18 @@ describe('puja · mergeOffers', () => {
       driverName: 'Khalid Ríos',
       rating: 4.9,
       ratingCount: 10,
-      vehicle: { make: 'Toyota', model: 'Yaris', color: 'Plomo', plate: 'ABC-481' },
+      vehicle: {
+        make: 'Toyota',
+        model: 'Yaris',
+        color: 'Plomo',
+        plate: 'ABC-481',
+      },
     };
     // El MISMO conductor manda un offer:made fresco (COUNTER a otro precio), SIN enriquecer.
-    const merged = mergeOffers([restEnriched], [live('drv-1', 1600, 'COUNTER')]);
+    const merged = mergeOffers(
+      [restEnriched],
+      [live('drv-1', 1600, 'COUNTER')],
+    );
     expect(merged).toHaveLength(1);
     expect(merged[0]!.priceCents).toBe(1600); // el live gana en precio/kind (es más fresco)
     expect(merged[0]!.kind).toBe('COUNTER');
@@ -59,7 +94,7 @@ describe('puja · mergeOffers', () => {
       [live('drv-3', 1500, 'COUNTER')],
       ['drv-1', 'drv-3'], // retirados: uno del REST, uno del socket
     );
-    expect(merged.map((o) => o.driverId)).toEqual(['drv-2']);
+    expect(merged.map(o => o.driverId)).toEqual(['drv-2']);
   });
 
   it('ordena: acepta-precio primero, luego por precio, luego por ETA', () => {
@@ -72,7 +107,7 @@ describe('puja · mergeOffers', () => {
       ],
       [],
     );
-    expect(merged.map((o) => o.driverId)).toEqual([
+    expect(merged.map(o => o.driverId)).toEqual([
       'acepta-a', // ACCEPT_PRICE, 1300, eta 180
       'acepta-b', // ACCEPT_PRICE, 1300, eta 300
       'counter-barato', // COUNTER, 1400

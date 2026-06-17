@@ -1,4 +1,4 @@
-import type {RouteManeuver} from '@veo/api-client';
+import type { RouteManeuver } from '@veo/api-client';
 
 /**
  * Tipo de maniobra de un paso de navegación (re-export del contrato para que la presentación

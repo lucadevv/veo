@@ -7,7 +7,7 @@
  * conductor declara este valor y lo propaga en el reporte de ubicación del socket `/driver`. El wire
  * field sigue siendo `vehicleType` (`driverLocationReport.vehicleType`, `@veo/api-client`).
  */
-import {VehicleClass} from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 
 export const VehicleType = VehicleClass;
 export type VehicleType = VehicleClass;

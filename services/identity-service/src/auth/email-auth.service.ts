@@ -10,10 +10,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
-import {
-  RedisRefreshTokenStore,
-  type SubjectType,
-} from '@veo/auth';
+import { RedisRefreshTokenStore, type SubjectType } from '@veo/auth';
 import { createEnvelope } from '@veo/events';
 import {
   ConflictError,

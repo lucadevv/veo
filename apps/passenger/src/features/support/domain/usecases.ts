@@ -10,7 +10,7 @@ import {
   MIN_BODY_LENGTH,
   MIN_SUBJECT_LENGTH,
 } from './entities';
-import type { SupportRepository } from './supportRepository';
+import type {SupportRepository} from './supportRepository';
 
 /** Campo del formulario que falló la validación (mapea a una clave i18n de error). */
 export type TicketField = 'subject' | 'body';
@@ -43,7 +43,10 @@ export class CreateTicketUseCase {
     const subject = input.subject.trim();
     const body = input.body.trim();
 
-    if (subject.length < MIN_SUBJECT_LENGTH || subject.length > MAX_SUBJECT_LENGTH) {
+    if (
+      subject.length < MIN_SUBJECT_LENGTH ||
+      subject.length > MAX_SUBJECT_LENGTH
+    ) {
       throw new TicketValidationError('subject');
     }
     if (body.length < MIN_BODY_LENGTH || body.length > MAX_BODY_LENGTH) {
@@ -54,7 +57,7 @@ export class CreateTicketUseCase {
       category: input.category,
       subject,
       body,
-      ...(input.tripId ? { tripId: input.tripId } : {}),
+      ...(input.tripId ? {tripId: input.tripId} : {}),
     };
     return this.repository.createTicket(request);
   }

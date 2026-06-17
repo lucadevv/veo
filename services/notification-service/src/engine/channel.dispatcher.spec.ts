@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { NotificationChannel } from '@veo/shared-types';
 import { ChannelDispatcher } from './channel.dispatcher';
 import type { NotificationRecord, RenderedMessage } from './types';
-import type { PushMessage, PushResult, PushSender, TokenInvalidator } from '../ports/push/push.port';
+import type {
+  PushMessage,
+  PushResult,
+  PushSender,
+  TokenInvalidator,
+} from '../ports/push/push.port';
 import type { SmsSender } from '../ports/sms/sms.port';
 import type { EmailMessage, EmailSender } from '../ports/email/email.port';
 import type { WebhookMessage, WebhookSender } from '../ports/webhook/webhook.port';
@@ -40,7 +45,10 @@ class FakeWebhook implements WebhookSender {
   }
 }
 
-function record(channel: NotificationChannel, payload: Record<string, unknown>): NotificationRecord {
+function record(
+  channel: NotificationChannel,
+  payload: Record<string, unknown>,
+): NotificationRecord {
   return {
     id: 'n1',
     recipientId: 'u1',

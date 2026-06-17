@@ -1,5 +1,8 @@
-import type { TripActiveView, TripResource } from '@veo/api-client';
-import { buildReceipt, formatReceiptText } from '../src/features/trip/domain/receipt';
+import type {TripActiveView, TripResource} from '@veo/api-client';
+import {
+  buildReceipt,
+  formatReceiptText,
+} from '../src/features/trip/domain/receipt';
 
 const view: TripActiveView = {
   id: 't-1',
@@ -36,8 +39,8 @@ const snapshot: TripResource = {
   driverId: 'd-1',
   vehicleId: 'v-1',
   status: 'COMPLETED',
-  origin: { lat: -12.04, lon: -77.04 },
-  destination: { lat: -12.1, lon: -77.0 },
+  origin: {lat: -12.04, lon: -77.04},
+  destination: {lat: -12.1, lon: -77.0},
   fareCents: 2300,
   currency: 'PEN',
   surgeMultiplier: 1.3,
@@ -78,7 +81,9 @@ describe('buildReceipt', () => {
 
   it('expone surge solo cuando el multiplicador es > 1', () => {
     expect(buildReceipt(view, snapshot).surgeMultiplier).toBe(1.3);
-    expect(buildReceipt(view, { ...snapshot, surgeMultiplier: 1 }).surgeMultiplier).toBeUndefined();
+    expect(
+      buildReceipt(view, {...snapshot, surgeMultiplier: 1}).surgeMultiplier,
+    ).toBeUndefined();
   });
 
   it('omite con gracia los datos del snapshot cuando no hay snapshot', () => {
@@ -104,7 +109,10 @@ describe('formatReceiptText', () => {
   });
 
   it('omite la propina cuando es 0', () => {
-    const text = formatReceiptText(buildReceipt({ ...view, tipCents: 0 }, snapshot), labels);
+    const text = formatReceiptText(
+      buildReceipt({...view, tipCents: 0}, snapshot),
+      labels,
+    );
     expect(text).not.toContain('Propina:');
     expect(text).toContain('Total: S/ 23.00');
   });

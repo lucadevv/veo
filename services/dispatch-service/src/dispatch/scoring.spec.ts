@@ -33,9 +33,27 @@ describe('DispatchScorer · scoring de matching (BR-T06)', () => {
 
   it('ordena los candidatos de mejor a peor score', () => {
     const inputs: ScoreInput[] = [
-      { driverId: 'A', distanceMeters: 500, avgRating: 4.8, secondsSinceLastTrip: NO_TRIP, cancellationRate: 0 }, // 14.8
-      { driverId: 'B', distanceMeters: 1000, avgRating: 5.0, secondsSinceLastTrip: NO_TRIP, cancellationRate: 0 }, // 10
-      { driverId: 'C', distanceMeters: 200, avgRating: 3.0, secondsSinceLastTrip: NO_TRIP, cancellationRate: 0.5 }, // 25.5
+      {
+        driverId: 'A',
+        distanceMeters: 500,
+        avgRating: 4.8,
+        secondsSinceLastTrip: NO_TRIP,
+        cancellationRate: 0,
+      }, // 14.8
+      {
+        driverId: 'B',
+        distanceMeters: 1000,
+        avgRating: 5.0,
+        secondsSinceLastTrip: NO_TRIP,
+        cancellationRate: 0,
+      }, // 10
+      {
+        driverId: 'C',
+        distanceMeters: 200,
+        avgRating: 3.0,
+        secondsSinceLastTrip: NO_TRIP,
+        cancellationRate: 0.5,
+      }, // 25.5
     ];
     const ranked = scorer.rank(inputs);
     expect(ranked.map((r) => r.driverId)).toEqual(['C', 'A', 'B']);

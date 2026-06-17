@@ -23,7 +23,10 @@ export class DriverIncentiveDto {
   progressTrips!: number;
   @ApiProperty({ example: 2000, description: 'Bono en céntimos PEN (META_VIAJES)' })
   rewardCents!: number;
-  @ApiProperty({ example: 12000, description: 'Multiplicador en puntos básicos de %·100 (HORA_PICO)' })
+  @ApiProperty({
+    example: 12000,
+    description: 'Multiplicador en puntos básicos de %·100 (HORA_PICO)',
+  })
   multiplierBps!: number;
   @ApiProperty({ example: '2026-06-30T23:59:59.000Z' })
   expiresAt!: string;

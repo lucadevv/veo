@@ -11,7 +11,9 @@ async function main(): Promise<void> {
   await prisma.$queryRaw`SELECT 1`;
   const ratings = await prisma.rating.count();
   const aggregates = await prisma.ratingAggregate.count();
-  console.warn(`rating-service listo: ${ratings} calificaciones, ${aggregates} agregados. Sin datos de referencia que sembrar.`);
+  console.warn(
+    `rating-service listo: ${ratings} calificaciones, ${aggregates} agregados. Sin datos de referencia que sembrar.`,
+  );
 }
 
 main()

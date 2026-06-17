@@ -1,6 +1,6 @@
-import type { DebtView } from '@veo/api-client';
-import { useCallback, useState } from 'react';
-import { useMyDebts } from '../../../payments/presentation';
+import type {DebtView} from '@veo/api-client';
+import {useCallback, useState} from 'react';
+import {useMyDebts} from '../../../payments/presentation';
 
 export interface DebtGateController {
   /** El `DebtSheet` está visible (cualquiera de los dos orígenes: pedido bloqueado 403 / franja del home). */
@@ -46,7 +46,9 @@ export function useDebtGate(enabled: boolean): DebtGateController {
   const [debtSheetOpen, setDebtSheetOpen] = useState(false);
   const [debtFromBlockedRequest, setDebtFromBlockedRequest] = useState(false);
   const [requestAgainToken, setRequestAgainToken] = useState(0);
-  const [pendingActionPaymentId, setPendingActionPaymentId] = useState<string | null>(null);
+  const [pendingActionPaymentId, setPendingActionPaymentId] = useState<
+    string | null
+  >(null);
 
   const debtsQuery = useMyDebts(enabled);
   const hasDebt = debtsQuery.data?.hasDebt ?? false;
@@ -57,7 +59,8 @@ export function useDebtGate(enabled: boolean): DebtGateController {
   // PAGO POR COMPLETAR (PENDING_ACTION): el primer cobro PENDING con checkout vivo (no es deuda). Solo lo
   // ofrecemos en la franja si NO hay deuda (la deuda es lo accionable urgente y tiene prioridad). Es el
   // dead-end que resolvemos: un pago a medias al que ahora se puede VOLVER desde el home.
-  const firstPendingAction = debtView?.debts.find((d) => d.kind === 'PENDING_ACTION') ?? null;
+  const firstPendingAction =
+    debtView?.debts.find(d => d.kind === 'PENDING_ACTION') ?? null;
   const hasPendingAction = !hasDebt && firstPendingAction != null;
 
   const onDebtPending = useCallback(() => {
@@ -92,7 +95,7 @@ export function useDebtGate(enabled: boolean): DebtGateController {
     setDebtSheetOpen(false);
     setPendingActionPaymentId(null);
     if (debtFromBlockedRequest) {
-      setRequestAgainToken((n) => n + 1);
+      setRequestAgainToken(n => n + 1);
       setDebtFromBlockedRequest(false);
     }
   }, [debtFromBlockedRequest]);

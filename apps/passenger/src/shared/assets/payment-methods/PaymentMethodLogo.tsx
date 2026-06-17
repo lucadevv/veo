@@ -1,8 +1,8 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { Image, type ImageSourcePropType, StyleSheet, View } from 'react-native';
-import { CashIcon } from './CashIcon';
+import {Image, type ImageSourcePropType, StyleSheet, View} from 'react-native';
+import {CashIcon} from './CashIcon';
 import cardsLogo from './cards.png';
 import pagoEfectivoLogo from './pagoefectivo.png';
 import plinLogo from './plin.png';
@@ -53,7 +53,10 @@ const LOGO_SOURCE: Record<
  *    el cuadro. Se centra con `contain` y un padding interno sobre fondo neutro del DS, para que el
  *    isotipo no toque el borde ni se recorte. NO inventamos color de marca: usamos el `surface` del DS.
  */
-const LOGO_FIT: Record<Exclude<MobilePaymentMethod, 'CASH'>, 'fill' | 'inset'> = {
+const LOGO_FIT: Record<
+  Exclude<MobilePaymentMethod, 'CASH'>,
+  'fill' | 'inset'
+> = {
   YAPE: 'fill',
   PLIN: 'fill',
   CARD: 'inset',
@@ -97,11 +100,21 @@ export function PaymentMethodLogo({
   if (method === 'CASH') {
     // Efectivo: ícono propio del DS centrado, con el mismo respiro que los logos 'inset'.
     const inner = Math.max(0, size - INNER_PAD * 2);
-    content = <CashIcon size={inner} color={theme.colors.ink} fill={theme.colors.surface} />;
+    content = (
+      <CashIcon
+        size={inner}
+        color={theme.colors.ink}
+        fill={theme.colors.surface}
+      />
+    );
   } else if (LOGO_FIT[method] === 'fill') {
     // App-icon de marca: llena TODO el círculo (`cover`); el overflow lo recorta en círculo limpio.
     content = (
-      <Image source={LOGO_SOURCE[method]} style={{ width: size, height: size }} resizeMode="cover" />
+      <Image
+        source={LOGO_SOURCE[method]}
+        style={{width: size, height: size}}
+        resizeMode="cover"
+      />
     );
   } else {
     // Logo sobre fondo claro: centrado con `contain` y padding interno sobre el fondo neutro del DS.
@@ -109,7 +122,7 @@ export function PaymentMethodLogo({
     content = (
       <Image
         source={LOGO_SOURCE[method]}
-        style={{ width: inner, height: inner }}
+        style={{width: inner, height: inner}}
         resizeMode="contain"
       />
     );
@@ -120,8 +133,7 @@ export function PaymentMethodLogo({
       style={[styles.circle, circleStyle]}
       accessible={accessibilityLabel != null}
       accessibilityRole={accessibilityLabel != null ? 'image' : undefined}
-      accessibilityLabel={accessibilityLabel}
-    >
+      accessibilityLabel={accessibilityLabel}>
       {content}
     </View>
   );

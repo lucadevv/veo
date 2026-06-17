@@ -5,7 +5,8 @@ import { defineConfig } from 'vitest/config';
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = (name: string): string => resolve(here, '../../../packages', name, 'src/index.ts');
 /** Subpath export de un package @veo/* (p.ej. `@veo/events/nest` → packages/events/src/nest.ts). */
-const pkgSub = (name: string, sub: string): string => resolve(here, '../../../packages', name, `src/${sub}.ts`);
+const pkgSub = (name: string, sub: string): string =>
+  resolve(here, '../../../packages', name, `src/${sub}.ts`);
 
 /**
  * Resolución de los @veo/* hacia su código fuente TS (vite los transpila). Necesario porque

@@ -12,6 +12,7 @@
    - Sentry, Grafana Cloud, Datadog (si aplica), PagerDuty
 
 3. Clona y arranca (monorepo único):
+
    ```bash
    git clone git@github.com:lucadevv/veo.git
    cd veo

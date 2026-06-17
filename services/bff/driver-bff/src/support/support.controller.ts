@@ -14,7 +14,10 @@ export class SupportController {
 
   @Post()
   @ApiOperation({ summary: 'Crear un ticket de soporte (conductor)' })
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateTicketDto): Promise<SupportTicket> {
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateTicketDto,
+  ): Promise<SupportTicket> {
     return this.support.create(user, dto);
   }
 

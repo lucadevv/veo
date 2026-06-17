@@ -1,6 +1,9 @@
-import type { AppNotification as AppNotificationDto, HttpClient } from '@veo/api-client';
-import { HttpNotificationsRepository } from '../src/features/notifications/data/httpNotificationsRepository';
-import { ListNotificationsUseCase } from '../src/features/notifications/domain/usecases';
+import type {
+  AppNotification as AppNotificationDto,
+  HttpClient,
+} from '@veo/api-client';
+import {HttpNotificationsRepository} from '../src/features/notifications/data/httpNotificationsRepository';
+import {ListNotificationsUseCase} from '../src/features/notifications/domain/usecases';
 
 /** Doble mínimo de HttpClient: solo el verbo que usa el repositorio de avisos. */
 function makeHttp(overrides: Partial<HttpClient>): HttpClient {
@@ -27,10 +30,13 @@ function makeHttp(overrides: Partial<HttpClient>): HttpClient {
 describe('Centro de avisos · degradación honesta', () => {
   it('bandeja vacía en el backend → lista vacía (no inventa avisos)', async () => {
     const get = jest.fn().mockResolvedValue([]);
-    const repository = new HttpNotificationsRepository(makeHttp({ get }));
+    const repository = new HttpNotificationsRepository(makeHttp({get}));
 
     await expect(repository.list()).resolves.toEqual([]);
-    expect(get).toHaveBeenCalledWith('/notifications', expect.objectContaining({ schema: expect.anything() }));
+    expect(get).toHaveBeenCalledWith(
+      '/notifications',
+      expect.objectContaining({schema: expect.anything()}),
+    );
   });
 
   it('mapea category→kind y marca read:true (sin badge de no-leídos fingido)', async () => {
@@ -41,7 +47,9 @@ describe('Centro de avisos · degradación honesta', () => {
       body: 'Tu conductor pasó la verificación biométrica del turno.',
       createdAt: '2026-06-10T12:00:00.000Z',
     };
-    const repository = new HttpNotificationsRepository(makeHttp({ get: jest.fn().mockResolvedValue([dto]) }));
+    const repository = new HttpNotificationsRepository(
+      makeHttp({get: jest.fn().mockResolvedValue([dto])}),
+    );
 
     await expect(repository.list()).resolves.toEqual([
       {
@@ -57,13 +65,17 @@ describe('Centro de avisos · degradación honesta', () => {
 
   it('error del backend → propaga (no miente con una bandeja vacía)', async () => {
     const failure = new Error('network down');
-    const repository = new HttpNotificationsRepository(makeHttp({ get: jest.fn().mockRejectedValue(failure) }));
+    const repository = new HttpNotificationsRepository(
+      makeHttp({get: jest.fn().mockRejectedValue(failure)}),
+    );
 
     await expect(repository.list()).rejects.toBe(failure);
   });
 
   it('el caso de uso delega en el repositorio y propaga la lista', async () => {
-    const repository = new HttpNotificationsRepository(makeHttp({ get: jest.fn().mockResolvedValue([]) }));
+    const repository = new HttpNotificationsRepository(
+      makeHttp({get: jest.fn().mockResolvedValue([])}),
+    );
     const useCase = new ListNotificationsUseCase(repository);
 
     await expect(useCase.execute()).resolves.toEqual([]);

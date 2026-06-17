@@ -1,4 +1,4 @@
-import type { PanicTrigger } from '../domain/panicTrigger';
+import type {PanicTrigger} from '../domain/panicTrigger';
 
 /**
  * Detección de pánico por defecto (no-op) mientras no exista el módulo nativo. No detecta nada:

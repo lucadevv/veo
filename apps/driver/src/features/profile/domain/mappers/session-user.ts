@@ -1,5 +1,5 @@
-import type {MobileSessionUser} from '@veo/api-client';
-import type {DriverProfile} from '../entities';
+import type { MobileSessionUser } from '@veo/api-client';
+import type { DriverProfile } from '../entities';
 
 /**
  * Proyecta el perfil agregado del conductor al usuario mínimo de sesión (`MobileSessionUser`).

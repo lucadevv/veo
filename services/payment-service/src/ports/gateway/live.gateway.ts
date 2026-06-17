@@ -80,15 +80,19 @@ export class LivePaymentGateway implements PaymentGateway {
     if (LIVE_APPROVED_STATUSES.has(status)) {
       return { status: 'CONFIRMED', externalRef: body.transactionId };
     }
-    return { status: 'DECLINED', reason: body.declineReason ?? `gateway_status_${status || 'UNKNOWN'}` };
+    return {
+      status: 'DECLINED',
+      reason: body.declineReason ?? `gateway_status_${status || 'UNKNOWN'}`,
+    };
   }
 
   async getStatement(periodStart: Date, periodEnd: Date): Promise<GatewayStatementEntry[]> {
     const query = `?merchantId=${encodeURIComponent(this.opts.merchantId)}&from=${periodStart.toISOString()}&to=${periodEnd.toISOString()}`;
     const body = await this.request<StatementResponseBody>('GET', `/v1/settlements${query}`);
     return (body.entries ?? [])
-      .filter((e): e is { transactionId: string; amountCents: number } =>
-        typeof e.transactionId === 'string' && typeof e.amountCents === 'number',
+      .filter(
+        (e): e is { transactionId: string; amountCents: number } =>
+          typeof e.transactionId === 'string' && typeof e.amountCents === 'number',
       )
       .map((e) => ({ externalRef: e.transactionId, amountCents: e.amountCents }));
   }
@@ -108,7 +112,9 @@ export class LivePaymentGateway implements PaymentGateway {
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new ExternalServiceError(`Riel de pago respondió ${res.status}`, { body: text.slice(0, 500) });
+        throw new ExternalServiceError(`Riel de pago respondió ${res.status}`, {
+          body: text.slice(0, 500),
+        });
       }
       return (await res.json()) as T;
     } catch (err) {

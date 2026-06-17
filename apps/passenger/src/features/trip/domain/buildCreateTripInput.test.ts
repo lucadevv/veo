@@ -1,8 +1,8 @@
-import type { GeoPoint, MobilePaymentMethod, QuoteOption } from '@veo/api-client';
-import { buildCreateTripInput } from './buildCreateTripInput';
+import type {GeoPoint, MobilePaymentMethod, QuoteOption} from '@veo/api-client';
+import {buildCreateTripInput} from './buildCreateTripInput';
 
-const ORIGIN: GeoPoint = { lat: -12.0464, lon: -77.0428 };
-const DESTINATION: GeoPoint = { lat: -12.1027, lon: -77.0345 };
+const ORIGIN: GeoPoint = {lat: -12.0464, lon: -77.0428};
+const DESTINATION: GeoPoint = {lat: -12.1027, lon: -77.0345};
 const PAYMENT: MobilePaymentMethod = 'CASH';
 
 function option(over: Partial<QuoteOption> = {}): QuoteOption {
@@ -26,7 +26,7 @@ const base = {
   waypoints: [] as GeoPoint[],
   scheduledAt: null as number | null,
   promoCode: null as string | null,
-  childMode: { enabled: false, code: '' },
+  childMode: {enabled: false, code: ''},
 };
 
 describe('buildCreateTripInput', () => {
@@ -34,7 +34,7 @@ describe('buildCreateTripInput', () => {
     const out = buildCreateTripInput({
       ...base,
       selectedId: 'veo_moto',
-      selectedOption: option({ id: 'veo_moto', vehicleType: 'MOTO' }),
+      selectedOption: option({id: 'veo_moto', vehicleType: 'MOTO'}),
       selectedIsPuja: true,
       bidCents: 1800,
     });
@@ -48,7 +48,7 @@ describe('buildCreateTripInput', () => {
     const out = buildCreateTripInput({
       ...base,
       selectedId: 'veo_economico',
-      selectedOption: option({ id: 'veo_economico', vehicleType: 'CAR' }),
+      selectedOption: option({id: 'veo_economico', vehicleType: 'CAR'}),
       selectedIsPuja: false,
       bidCents: 9999, // presente en estado pero NO debe viajar en FIJO
     });
@@ -71,7 +71,7 @@ describe('buildCreateTripInput', () => {
     const fixed = buildCreateTripInput({
       ...base,
       selectedId: 'veo_economico',
-      selectedOption: option({ vehicleType: 'CAR' }),
+      selectedOption: option({vehicleType: 'CAR'}),
       selectedIsPuja: false,
       specialRequests: ['PET'] as never[],
     });
@@ -85,10 +85,10 @@ describe('buildCreateTripInput', () => {
       selectedOption: option(),
       selectedIsPuja: true,
       bidCents: 1800,
-      waypoints: [{ lat: -12.07, lon: -77.04 }],
+      waypoints: [{lat: -12.07, lon: -77.04}],
       scheduledAt: 1_900_000_000_000,
       promoCode: 'VEO10',
-      childMode: { enabled: true, code: '1234' },
+      childMode: {enabled: true, code: '1234'},
     });
     expect(out.waypoints).toHaveLength(1);
     expect(typeof out.scheduledFor).toBe('string');

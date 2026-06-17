@@ -23,7 +23,9 @@ export class ChatController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Enviar un mensaje al pasajero (viaje activo). Persiste + emite por socket' })
+  @ApiOperation({
+    summary: 'Enviar un mensaje al pasajero (viaje activo). Persiste + emite por socket',
+  })
   send(
     @Param('tripId', ParseUUIDPipe) tripId: string,
     @Body() dto: SendMessageDto,

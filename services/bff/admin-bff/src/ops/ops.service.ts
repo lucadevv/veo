@@ -16,12 +16,7 @@ import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
 import { canGrantRoles, type AdminRole } from '@veo/shared-types';
 import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api-client';
-import {
-  GRPC_TRIP,
-  GRPC_IDENTITY,
-  GRPC_FLEET,
-  REST_IDENTITY,
-} from '../infra/tokens';
+import { GRPC_TRIP, GRPC_IDENTITY, GRPC_FLEET, REST_IDENTITY } from '../infra/tokens';
 import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -75,7 +70,11 @@ export class OpsService {
 
   async listDrivers(query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
     const limit = query.limit ?? DEFAULT_LIMIT;
-    const page = await this.readModel.listDrivers({ status: query.status }, query.cursor ?? null, limit);
+    const page = await this.readModel.listDrivers(
+      { status: query.status },
+      query.cursor ?? null,
+      limit,
+    );
     return { items: page.items.map(driverRecordToApproval), nextCursor: page.nextCursor };
   }
 
@@ -92,10 +91,14 @@ export class OpsService {
 
     const [passenger, driver, vehicles] = await Promise.all([
       trip.passengerId
-        ? this.identityGrpc.call<UserReply>('GetUser', { id: trip.passengerId }, meta).catch(() => null)
+        ? this.identityGrpc
+            .call<UserReply>('GetUser', { id: trip.passengerId }, meta)
+            .catch(() => null)
         : Promise.resolve(null),
       trip.driverId
-        ? this.identityGrpc.call<DriverReply>('GetDriver', { id: trip.driverId }, meta).catch(() => null)
+        ? this.identityGrpc
+            .call<DriverReply>('GetDriver', { id: trip.driverId }, meta)
+            .catch(() => null)
         : Promise.resolve(null),
       // Placa del vehículo del conductor (fleet): best-effort, no debe tumbar el detalle si fleet falla.
       trip.driverId
@@ -137,7 +140,10 @@ export class OpsService {
     return this.identityRest.get<PendingDriver[]>('/drivers/pending-approval', { identity });
   }
 
-  async approveDriver(identity: AuthUser, driverId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
+  async approveDriver(
+    identity: AuthUser,
+    driverId: string,
+  ): Promise<{ id: string; backgroundCheckStatus: string }> {
     const res = await this.identityRest.post<{ id: string; backgroundCheckStatus: string }>(
       `/drivers/${driverId}/approve`,
       { identity },

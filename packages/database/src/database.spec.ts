@@ -27,7 +27,7 @@ describe('ReadWriteClient', () => {
     const db = new ReadWriteClient(FakeClient, { writeUrl: 'postgres://primary' });
     expect(db.read).toBe(db.write);
     await db.connect();
-    expect((db.write).connected).toBe(true);
+    expect(db.write.connected).toBe(true);
   });
 
   it('con readUrl distinta, crea cliente de réplica separado y conecta ambos', async () => {
@@ -36,11 +36,11 @@ describe('ReadWriteClient', () => {
       readUrl: 'postgres://replica',
     });
     expect(db.read).not.toBe(db.write);
-    expect((db.read).options?.datasourceUrl).toBe('postgres://replica');
+    expect(db.read.options?.datasourceUrl).toBe('postgres://replica');
     await db.connect();
-    expect((db.read).connected).toBe(true);
+    expect(db.read.connected).toBe(true);
     await db.disconnect();
-    expect((db.read).connected).toBe(false);
+    expect(db.read.connected).toBe(false);
   });
 });
 
@@ -73,7 +73,11 @@ describe('outbox', () => {
   });
 
   it('drainLocked publica los pendientes y los marca (advisory lock adquirido)', async () => {
-    const env = createEnvelope({ eventType: 'rating.created', producer: 'rating-service', payload: {} });
+    const env = createEnvelope({
+      eventType: 'rating.created',
+      producer: 'rating-service',
+      payload: {},
+    });
     let marked: string[] = [];
     const published: string[] = [];
     const fakePrisma = {
@@ -144,7 +148,10 @@ describe('tombstone (derecho al olvido BR-S06)', () => {
 describe('isUniqueViolation (P2002 estructural, cross-cliente-generado)', () => {
   /** Réplica de cómo el runtime generado de Prisma construye el error (name fijado en el ctor). */
   function prismaError(code: string, target?: unknown): Error {
-    const err = new Error('Unique constraint failed') as Error & { code: string; meta?: { target?: unknown } };
+    const err = new Error('Unique constraint failed') as Error & {
+      code: string;
+      meta?: { target?: unknown };
+    };
     err.name = 'PrismaClientKnownRequestError';
     err.code = code;
     if (target !== undefined) err.meta = { target };
@@ -166,7 +173,9 @@ describe('isUniqueViolation (P2002 estructural, cross-cliente-generado)', () => 
   it('con columna: matchea field camelCase, columna snake_case y nombre de constraint', () => {
     expect(isUniqueViolation(prismaError('P2002', ['dedupKey']), 'dedupKey')).toBe(true);
     expect(isUniqueViolation(prismaError('P2002', ['dedup_key']), 'dedupKey')).toBe(true);
-    expect(isUniqueViolation(prismaError('P2002', 'panic_events_dedup_key_key'), 'dedupKey')).toBe(true);
+    expect(isUniqueViolation(prismaError('P2002', 'panic_events_dedup_key_key'), 'dedupKey')).toBe(
+      true,
+    );
     expect(isUniqueViolation(prismaError('P2002', ['tripId']), 'dedupKey')).toBe(false);
   });
 

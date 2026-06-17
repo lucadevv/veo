@@ -25,12 +25,16 @@ export const ENERGY_PRICE_MAX_CENTS = 10_000;
 
 /** Precio de UNA fuente de energía. */
 export class EnergySourcePriceDto {
-  @ApiProperty({ enum: ENERGY_SOURCES, description: 'Fuente de energía (GASOLINE_95, DIESEL, ELECTRIC, …)' })
+  @ApiProperty({
+    enum: ENERGY_SOURCES,
+    description: 'Fuente de energía (GASOLINE_95, DIESEL, ELECTRIC, …)',
+  })
   @IsIn(ENERGY_SOURCES)
   sourceId!: EnergySource;
 
   @ApiProperty({
-    description: 'Precio por unidad (céntimos PEN/litro o céntimos PEN/kWh según la fuente). 0..10000.',
+    description:
+      'Precio por unidad (céntimos PEN/litro o céntimos PEN/kWh según la fuente). 0..10000.',
     minimum: 0,
     maximum: ENERGY_PRICE_MAX_CENTS,
   })
@@ -45,13 +49,16 @@ export class ReplaceEnergyCatalogDto {
   @ApiProperty({ type: [EnergySourcePriceDto], description: 'Precios por fuente (lista completa)' })
   @IsArray()
   @ArrayMaxSize(20)
-  @ArrayUnique((s: EnergySourcePriceDto) => s.sourceId, { message: 'las fuentes de energía deben ser únicas' })
+  @ArrayUnique((s: EnergySourcePriceDto) => s.sourceId, {
+    message: 'las fuentes de energía deben ser únicas',
+  })
   @ValidateNested({ each: true })
   @Type(() => EnergySourcePriceDto)
   sources!: EnergySourcePriceDto[];
 
   @ApiProperty({
-    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    description:
+      'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
     minimum: 0,
   })
   @IsInt()

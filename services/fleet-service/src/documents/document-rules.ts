@@ -7,10 +7,7 @@ import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 const MS_PER_DAY = 86_400_000;
 
 /** Estado derivable del vencimiento (lo recalcula el cron). El resto es revisión manual. */
-export type ExpiryStatus = Extract<
-  FleetDocumentStatus,
-  'VALID' | 'EXPIRING_SOON' | 'EXPIRED'
->;
+export type ExpiryStatus = Extract<FleetDocumentStatus, 'VALID' | 'EXPIRING_SOON' | 'EXPIRED'>;
 
 /** Documentos críticos: si vencen, el conductor se suspende (BR-I04). */
 export const CRITICAL_DOCUMENT_TYPES: readonly FleetDocumentType[] = [
@@ -68,7 +65,9 @@ export function isDocumentValid(status: FleetDocumentStatus): boolean {
 export function validCertificationsOf(
   docs: readonly { type: FleetDocumentType; status: FleetDocumentStatus }[],
 ): FleetDocumentType[] {
-  return docs.filter((d) => isCertification(d.type) && isDocumentValid(d.status)).map((d) => d.type);
+  return docs
+    .filter((d) => isCertification(d.type) && isDocumentValid(d.status))
+    .map((d) => d.type);
 }
 
 /** Días (fraccionarios) hasta el vencimiento. Negativo si ya pasó. */
@@ -105,7 +104,10 @@ export function deriveExpiryStatus(
  * Hito de alerta vigente para `daysRemaining` dado el set de hitos (30/15/7/1).
  * Devuelve el hito más ajustado (menor) ya alcanzado, o null si aún no entra en ninguno o ya venció.
  */
-export function dueExpiryMilestone(daysRemaining: number, milestones: readonly number[]): number | null {
+export function dueExpiryMilestone(
+  daysRemaining: number,
+  milestones: readonly number[],
+): number | null {
   if (daysRemaining <= 0) return null;
   const reached = milestones.filter((m) => daysRemaining <= m);
   if (reached.length === 0) return null;

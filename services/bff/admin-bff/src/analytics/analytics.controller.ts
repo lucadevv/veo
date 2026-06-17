@@ -21,7 +21,9 @@ export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get('overview')
-  @ApiOperation({ summary: 'KPIs del dashboard agregados en vivo desde trip/dispatch/panic/payment' })
+  @ApiOperation({
+    summary: 'KPIs del dashboard agregados en vivo desde trip/dispatch/panic/payment',
+  })
   overview(@CurrentUser() user: AuthenticatedUser): Promise<OverviewMetrics> {
     return this.analytics.overview(user);
   }

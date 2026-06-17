@@ -1,5 +1,5 @@
-import { type HttpClient, type PanicKey, panicKey } from '@veo/api-client';
-import type { PanicKeyRepository } from '../domain/panicKeyRepository';
+import {type HttpClient, type PanicKey, panicKey} from '@veo/api-client';
+import type {PanicKeyRepository} from '../domain/panicKeyRepository';
 
 /**
  * Implementación REAL de `PanicKeyRepository` contra el public-bff (`GET /auth/panic-key`).
@@ -11,6 +11,6 @@ export class HttpPanicKeyRepository implements PanicKeyRepository {
   constructor(private readonly http: HttpClient) {}
 
   fetchKey(): Promise<PanicKey> {
-    return this.http.get('/auth/panic-key', { schema: panicKey });
+    return this.http.get('/auth/panic-key', {schema: panicKey});
   }
 }

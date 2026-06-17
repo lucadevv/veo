@@ -39,10 +39,14 @@ export interface FuelSurchargeTx {
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
     create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
+    findUnique(args: {
+      where: { id: string };
+    }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
-    create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;
+    create(args: {
+      data: { aggregateId: string; eventType: string; envelope: unknown };
+    }): Promise<unknown>;
   };
 }
 
@@ -59,7 +63,9 @@ export class PrismaFuelSurchargeRepository implements FuelSurchargeRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async find(): Promise<PersistedFuelSurcharge | null> {
-    const row = await this.prisma.read.fuelSurchargeConfig.findUnique({ where: { id: FUEL_SINGLETON_ID } });
+    const row = await this.prisma.read.fuelSurchargeConfig.findUnique({
+      where: { id: FUEL_SINGLETON_ID },
+    });
     if (!row) return null;
     return {
       fuelPricePerLiterCents: row.fuelPricePerLiterCents,

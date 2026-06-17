@@ -9,7 +9,12 @@ import {
 } from './vehicle-rules';
 
 describe('pickActiveVehicle (vehículo activo server-authoritative)', () => {
-  const v = (id: string, docStatus: VehicleDocStatus, selectedAt: Date | null, createdAt: Date) => ({
+  const v = (
+    id: string,
+    docStatus: VehicleDocStatus,
+    selectedAt: Date | null,
+    createdAt: Date,
+  ) => ({
     id,
     docStatus,
     selectedAt,
@@ -29,13 +34,23 @@ describe('pickActiveVehicle (vehículo activo server-authoritative)', () => {
   });
 
   it('excluye vehículos con docs VENCIDOS (EXPIRED)', () => {
-    const expired = v('a', VehicleDocStatus.EXPIRED, new Date('2026-06-09'), new Date('2026-05-01'));
+    const expired = v(
+      'a',
+      VehicleDocStatus.EXPIRED,
+      new Date('2026-06-09'),
+      new Date('2026-05-01'),
+    );
     const valid = v('b', VehicleDocStatus.VALID, null, new Date('2026-01-01'));
     expect(pickActiveVehicle([expired, valid])?.id).toBe('b');
   });
 
   it('EXPIRING_SOON sigue siendo operable', () => {
-    const soon = v('a', VehicleDocStatus.EXPIRING_SOON, new Date('2026-06-09'), new Date('2026-05-01'));
+    const soon = v(
+      'a',
+      VehicleDocStatus.EXPIRING_SOON,
+      new Date('2026-06-09'),
+      new Date('2026-05-01'),
+    );
     expect(pickActiveVehicle([soon])?.id).toBe('a');
   });
 
@@ -73,11 +88,15 @@ describe('aggregateVehicleDocStatus', () => {
   });
 
   it('toma el peor estado (EXPIRED domina)', () => {
-    expect(aggregateVehicleDocStatus(['VALID', 'EXPIRING_SOON', 'EXPIRED'])).toBe(VehicleDocStatus.EXPIRED);
+    expect(aggregateVehicleDocStatus(['VALID', 'EXPIRING_SOON', 'EXPIRED'])).toBe(
+      VehicleDocStatus.EXPIRED,
+    );
   });
 
   it('EXPIRING_SOON si no hay vencidos pero sí próximos', () => {
-    expect(aggregateVehicleDocStatus(['VALID', 'EXPIRING_SOON'])).toBe(VehicleDocStatus.EXPIRING_SOON);
+    expect(aggregateVehicleDocStatus(['VALID', 'EXPIRING_SOON'])).toBe(
+      VehicleDocStatus.EXPIRING_SOON,
+    );
   });
 
   it('todos válidos → VALID', () => {

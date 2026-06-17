@@ -4,8 +4,8 @@ import {
   avatarUploadTicket,
   type HttpClient,
 } from '@veo/api-client';
-import { AvatarUploadError, type AvatarUploader } from '../domain/avatarUploader';
-import type { PickedImage } from '../domain/imagePickerService';
+import {AvatarUploadError, type AvatarUploader} from '../domain/avatarUploader';
+import type {PickedImage} from '../domain/imagePickerService';
 
 /** Endpoint del ticket prefirmado (el BFF ya tiene el guard de pasajero por el JWT global). */
 const AVATAR_PRESIGN_PATH = '/users/me/avatar/presign';
@@ -17,18 +17,18 @@ type AvatarDescriptor = AvatarUploadRequest;
 
 /** Lista blanca por MIME real del picker → (contentType canónico, extensión). */
 const MIME_MAP: Record<string, AvatarDescriptor> = {
-  'image/jpeg': { contentType: 'image/jpeg', ext: 'jpg' },
-  'image/jpg': { contentType: 'image/jpeg', ext: 'jpg' },
-  'image/png': { contentType: 'image/png', ext: 'png' },
-  'image/webp': { contentType: 'image/webp', ext: 'webp' },
+  'image/jpeg': {contentType: 'image/jpeg', ext: 'jpg'},
+  'image/jpg': {contentType: 'image/jpeg', ext: 'jpg'},
+  'image/png': {contentType: 'image/png', ext: 'png'},
+  'image/webp': {contentType: 'image/webp', ext: 'webp'},
 };
 
 /** Lista blanca por extensión de archivo → (contentType canónico, extensión). */
 const EXTENSION_MAP: Record<string, AvatarDescriptor> = {
-  jpg: { contentType: 'image/jpeg', ext: 'jpg' },
-  jpeg: { contentType: 'image/jpeg', ext: 'jpeg' },
-  png: { contentType: 'image/png', ext: 'png' },
-  webp: { contentType: 'image/webp', ext: 'webp' },
+  jpg: {contentType: 'image/jpeg', ext: 'jpg'},
+  jpeg: {contentType: 'image/jpeg', ext: 'jpeg'},
+  png: {contentType: 'image/png', ext: 'png'},
+  webp: {contentType: 'image/webp', ext: 'webp'},
 };
 
 /**
@@ -43,10 +43,11 @@ export class HttpAvatarUploader implements AvatarUploader {
   constructor(
     private readonly http: HttpClient,
     /** `fetch` para leer el archivo local y subir el binario (inyectable en tests). */
-    private readonly fetchImpl: typeof fetch = (input, init) => globalThis.fetch(input, init),
+    private readonly fetchImpl: typeof fetch = (input, init) =>
+      globalThis.fetch(input, init),
   ) {}
 
-  async uploadAvatar(file: PickedImage): Promise<{ photoUrl: string }> {
+  async uploadAvatar(file: PickedImage): Promise<{photoUrl: string}> {
     const descriptor = this.resolveDescriptor(file);
 
     // 1) Ticket prefirmado: ESTA llamada va por el cliente autenticado del BFF.
@@ -100,10 +101,10 @@ export class HttpAvatarUploader implements AvatarUploader {
     //    cliente autenticado del BFF.
     try {
       const confirmed = await this.http.post(AVATAR_CONFIRM_PATH, {
-        body: { key: ticket.key },
+        body: {key: ticket.key},
         schema: avatarUploadConfirmed,
       });
-      return { photoUrl: confirmed.publicUrl };
+      return {photoUrl: confirmed.publicUrl};
     } catch (error) {
       throw new AvatarUploadError('confirm', (error as Error).message);
     }
@@ -144,7 +145,10 @@ export class HttpAvatarUploader implements AvatarUploader {
     }
 
     if (!blob || blob.size === 0) {
-      throw new AvatarUploadError('read', `El archivo local ${uri} está vacío o es ilegible`);
+      throw new AvatarUploadError(
+        'read',
+        `El archivo local ${uri} está vacío o es ilegible`,
+      );
     }
 
     return blob;
@@ -158,11 +162,14 @@ export class HttpAvatarUploader implements AvatarUploader {
 
   /** Deriva el descriptor (contentType/ext) del archivo; prioriza el MIME y cae a la extensión. */
   private resolveDescriptor(file: PickedImage): AvatarDescriptor {
-    const byMime = file.mimeType ? MIME_MAP[file.mimeType.toLowerCase()] : undefined;
+    const byMime = file.mimeType
+      ? MIME_MAP[file.mimeType.toLowerCase()]
+      : undefined;
     if (byMime) {
       return byMime;
     }
-    const extension = this.extractExtension(file.fileName) ?? this.extractExtension(file.uri);
+    const extension =
+      this.extractExtension(file.fileName) ?? this.extractExtension(file.uri);
     const byExtension = extension ? EXTENSION_MAP[extension] : undefined;
     if (byExtension) {
       return byExtension;

@@ -18,7 +18,11 @@ export function AppCard({ app }: AppCardProps) {
   return (
     <article className="group relative overflow-hidden rounded-card border border-border bg-surface p-[26px] transition-[border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-border-strong">
       {/* Barra de acento superior */}
-      <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: accent.color }} aria-hidden="true" />
+      <span
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{ background: accent.color }}
+        aria-hidden="true"
+      />
 
       {/* Chip del ícono: relleno con el acento si es `solid`, fantasma si no */}
       <div
@@ -39,7 +43,9 @@ export function AppCard({ app }: AppCardProps) {
         </span>
       </h2>
 
-      <p className="mt-[9px] min-h-[42px] text-[14px] leading-[1.5] text-ink-muted">{app.description}</p>
+      <p className="mt-[9px] min-h-[42px] text-[14px] leading-[1.5] text-ink-muted">
+        {app.description}
+      </p>
 
       <FeatureChips features={app.features} />
 
@@ -48,9 +54,15 @@ export function AppCard({ app }: AppCardProps) {
           href={app.links.primary.href}
           className={cn(
             'flex h-12 flex-1 items-center justify-center gap-2 rounded-[13px] text-[14px] font-semibold transition-[filter,transform] active:scale-[.98]',
-            app.solid ? 'hover:brightness-105' : 'border border-border bg-surface-2 hover:border-border-strong',
+            app.solid
+              ? 'hover:brightness-105'
+              : 'border border-border bg-surface-2 hover:border-border-strong',
           )}
-          style={app.solid ? { background: accent.color, color: accent.onColor } : { color: accent.color }}
+          style={
+            app.solid
+              ? { background: accent.color, color: accent.onColor }
+              : { color: accent.color }
+          }
         >
           {app.links.primary.label}
         </a>

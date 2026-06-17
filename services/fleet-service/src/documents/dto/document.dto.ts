@@ -43,7 +43,10 @@ export enum ReviewDecision {
 }
 
 export class ReviewDocumentDto {
-  @ApiProperty({ enum: ReviewDecision, description: 'Resultado de la revisión manual del operador' })
+  @ApiProperty({
+    enum: ReviewDecision,
+    description: 'Resultado de la revisión manual del operador',
+  })
   @IsEnum(ReviewDecision)
   decision!: ReviewDecision;
 }

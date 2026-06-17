@@ -34,11 +34,7 @@ import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prism
 import type { Env } from '../config/env.schema';
 import { applyOfferingPricing, calculateFare } from './domain/fare';
 import { resolveTripOffering } from './domain/offering';
-import {
-  WaypointProposalStatus,
-  computeFareDelta,
-  isExpired,
-} from './domain/waypoint-proposal';
+import { WaypointProposalStatus, computeFareDelta, isExpired } from './domain/waypoint-proposal';
 import { readWaypoints } from './trip-view.mapper';
 import { MAX_WAYPOINTS } from './dto/trip.dto';
 import {
@@ -86,8 +82,7 @@ export class WaypointProposalService {
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
   ) {
-    this.ttlSeconds =
-      config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
+    this.ttlSeconds = config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
   }
 
   // ───────────────────────────── propose ─────────────────────────────
@@ -352,12 +347,20 @@ export class WaypointProposalService {
   async findExpiredCandidates(
     now: Date,
     limit: number,
-  ): Promise<(Pick<TripWaypointProposal, 'id' | 'tripId' | 'lat' | 'lon'> & { passengerId: string })[]> {
+  ): Promise<
+    (Pick<TripWaypointProposal, 'id' | 'tripId' | 'lat' | 'lon'> & { passengerId: string })[]
+  > {
     const rows = await this.prisma.read.tripWaypointProposal.findMany({
       where: { status: WaypointProposalStatus.PROPOSED, expiresAt: { lte: now } },
       orderBy: { expiresAt: 'asc' },
       take: limit,
-      select: { id: true, tripId: true, lat: true, lon: true, trip: { select: { passengerId: true } } },
+      select: {
+        id: true,
+        tripId: true,
+        lat: true,
+        lon: true,
+        trip: { select: { passengerId: true } },
+      },
     });
     return rows.map((r) => ({
       id: r.id,

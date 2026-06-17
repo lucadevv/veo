@@ -7,7 +7,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { CreditService } from '../src/credit/credit.service';
@@ -47,7 +51,11 @@ async function entryCount(userId: string): Promise<number> {
 describe('CreditService · acreditación de referido (idempotencia financiera)', () => {
   it('acredita rewardCents al saldo gastable + 1 entrada de ledger', async () => {
     const userId = '0192f8a0-0000-7000-8000-0000000000c1';
-    const applied = await credit.creditFromReferral({ userId, rewardCents: 1500, eventId: uuidv7() });
+    const applied = await credit.creditFromReferral({
+      userId,
+      rewardCents: 1500,
+      eventId: uuidv7(),
+    });
     expect(applied).toBe(true);
     expect(await balance(userId)).toBe(1500);
     expect(await entryCount(userId)).toBe(1);

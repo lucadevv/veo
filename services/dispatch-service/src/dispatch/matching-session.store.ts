@@ -49,7 +49,10 @@ export class MatchingSessionStore {
 
   /** Avanza el k-ring de búsqueda persistido (el advance expande al agotar los candidatos cercanos). */
   async bumpKRing(tripId: string, kRing: number): Promise<void> {
-    await this.prisma.write.dispatchSession.update({ where: { tripId }, data: { currentKRing: kRing } });
+    await this.prisma.write.dispatchSession.update({
+      where: { tripId },
+      data: { currentKRing: kRing },
+    });
   }
 
   /** Cierra la sesión a un terminal SOLO si seguía OPEN (CAS). Devuelve true si ESTA llamada la cerró. */

@@ -1,48 +1,57 @@
-import type { GeoPoint, TripHistoryItem, TripStatus } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@tanstack/react-query';
-import { Button, DriverCard, MapShell, Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
-import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
+import type {GeoPoint, TripHistoryItem, TripStatus} from '@veo/api-client';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useQuery} from '@tanstack/react-query';
+import {
+  Button,
+  DriverCard,
+  MapShell,
+  Text,
+  useReducedMotion,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import {useTranslation} from 'react-i18next';
+import {BackHandler, Pressable, StyleSheet, View} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
 } from '../../../../shared/presentation/components/DraggableSheet';
-import { decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
+import {decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
 import {
   formatDistance,
   formatDurationMinutes,
   formatShortDate,
   formatTimeOfDay,
 } from '../../../../shared/utils/format';
-import { TipCard } from '../../../payments/presentation';
-import { buildReceipt } from '../../domain/receipt';
-import { EnterView } from './motion';
-import { IconSearch } from './icons';
-import { TripFareCard } from './TripFareCard';
-import { TripReceiptCard } from './TripReceiptCard';
-import { TripRatingSection } from './TripRatingSection';
-import { TripRouteRail } from './TripRouteRail';
-import { TripStatusPill } from './TripStatusPill';
+import {TipCard} from '../../../payments/presentation';
+import {buildReceipt} from '../../domain/receipt';
+import {EnterView} from './motion';
+import {IconSearch} from './icons';
+import {TripFareCard} from './TripFareCard';
+import {TripReceiptCard} from './TripReceiptCard';
+import {TripRatingSection} from './TripRatingSection';
+import {TripRouteRail} from './TripRouteRail';
+import {TripStatusPill} from './TripStatusPill';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** Convierte el punto del contrato (`{lat,lng}`) al `GeoPoint` (`{lat,lon}`) que consume el mapa. */
-function toGeo(point: { lat: number; lng: number } | null | undefined): GeoPoint | null {
-  return point ? { lat: point.lat, lon: point.lng } : null;
+function toGeo(
+  point: {lat: number; lng: number} | null | undefined,
+): GeoPoint | null {
+  return point ? {lat: point.lat, lon: point.lng} : null;
 }
 
 const BACKDROP_OPACITY = 0.58;
@@ -78,9 +87,12 @@ export interface TripDetailSheetProps {
  * vistazo) y expandido casi-completo con recibo + calificación + propina + "Olvidé algo". Igual que el
  * Home, el peek es content-hugging (no pantalla a medias vacía).
  */
-export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.JSX.Element | null {
+export function TripDetailSheet({
+  trip,
+  onClose,
+}: TripDetailSheetProps): React.JSX.Element | null {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
@@ -96,7 +108,8 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
 
   // Snapshot LOCAL (solo aporta la POLYLINE y el surge del recibo: lo que ni el item ni el detalle traen).
   const snapshot = useMemo(
-    () => (tripId ? history.list().find((item) => item.id === tripId) ?? null : null),
+    () =>
+      tripId ? (history.list().find(item => item.id === tripId) ?? null) : null,
     [history, tripId],
   );
 
@@ -140,7 +153,9 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
     return () => sub.remove();
   }, [open, requestClose]);
 
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value * BACKDROP_OPACITY }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: progress.value * BACKDROP_OPACITY,
+  }));
 
   if (!trip) {
     return null;
@@ -163,10 +178,14 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
   // detalle del server manda; la semilla del historial pinta al instante hasta que llega (offline-first).
   const dateIso =
     (isCompleted
-      ? detail?.completedAt ?? trip.completedAt
-      : detail?.cancelledAt ?? trip.cancelledAt) ?? (detail?.requestedAt ?? trip.requestedAt);
+      ? (detail?.completedAt ?? trip.completedAt)
+      : (detail?.cancelledAt ?? trip.cancelledAt)) ??
+    detail?.requestedAt ??
+    trip.requestedAt;
   const tripDate = formatShortDate(dateIso);
-  const departureTime = formatTimeOfDay(detail?.requestedAt ?? trip.requestedAt);
+  const departureTime = formatTimeOfDay(
+    detail?.requestedAt ?? trip.requestedAt,
+  );
   const distanceText = formatDistance(trip.distanceMeters);
   const durationText = t('history.minutes', {
     minutes: formatDurationMinutes(trip.durationSeconds),
@@ -189,124 +208,135 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
       </Animated.View>
 
       <DraggableSheet
-          ref={sheetRef}
-          snapPoints={SNAP_POINTS}
-          maxContentFraction={PEEK_MAX_FRACTION}
-          bottomOffset={bottomInset}
-          // Arrastrar el sheet por debajo del peek = cerrar (índice 0 es el más bajo; un flick hacia abajo
-          // lo lleva ahí y el padre desmonta). No hay índice "cerrado" en el sheet: el host gobierna eso.
-          renderHeader={() => (
-            <View style={[styles.mapWrap, { marginHorizontal: theme.spacing.xl, marginTop: theme.spacing.xs }]}>
-              <MapShell rounded style={styles.map}>
-                <AppMap
-                  origin={originPoint}
-                  destination={destinationPoint}
-                  routeCoordinates={routeCoordinates.length > 1 ? routeCoordinates : undefined}
-                  fitToRoute={routeCoordinates.length > 1}
-                  fitEdgePadding={{ top: 28, bottom: 28, left: 28, right: 28 }}
-                  center={originPoint}
-                  interactive={false}
+        ref={sheetRef}
+        snapPoints={SNAP_POINTS}
+        maxContentFraction={PEEK_MAX_FRACTION}
+        bottomOffset={bottomInset}
+        // Arrastrar el sheet por debajo del peek = cerrar (índice 0 es el más bajo; un flick hacia abajo
+        // lo lleva ahí y el padre desmonta). No hay índice "cerrado" en el sheet: el host gobierna eso.
+        renderHeader={() => (
+          <View
+            style={[
+              styles.mapWrap,
+              {marginHorizontal: theme.spacing.xl, marginTop: theme.spacing.xs},
+            ]}>
+            <MapShell rounded style={styles.map}>
+              <AppMap
+                origin={originPoint}
+                destination={destinationPoint}
+                routeCoordinates={
+                  routeCoordinates.length > 1 ? routeCoordinates : undefined
+                }
+                fitToRoute={routeCoordinates.length > 1}
+                fitEdgePadding={{top: 28, bottom: 28, left: 28, right: 28}}
+                center={originPoint}
+                interactive={false}
+              />
+            </MapShell>
+          </View>
+        )}
+        renderScroll={ScrollComponent => (
+          <ScrollComponent
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              {
+                paddingHorizontal: theme.spacing.xl,
+                paddingTop: theme.spacing.lg,
+                paddingBottom: insets.bottom + theme.spacing.xl,
+                gap: theme.spacing.md,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}>
+            {/* Encabezado de autor: "Viaje del [fecha real]" + estado. Lee como el título de un recibo. */}
+            <EnterView index={0}>
+              <View style={styles.headerRow}>
+                <Text
+                  variant="title2"
+                  numberOfLines={1}
+                  style={styles.headerTitle}>
+                  {t('tripDetail.titleDated', {date: tripDate})}
+                </Text>
+                <TripStatusPill status={status} />
+              </View>
+            </EnterView>
+
+            {/* Riel origen→destino: hora real de salida · distancia · duración (sin direcciones falsas). */}
+            <EnterView index={1}>
+              <TripRouteRail
+                origin={t('history.departedAt', {time: departureTime})}
+                destination={`${distanceText} · ${durationText}`}
+              />
+            </EnterView>
+
+            {/* Conductor + vehículo (tarjeta canónica). Aparece cuando el detalle enriquece (best-effort). */}
+            {detail?.driver ? (
+              <EnterView index={2}>
+                <DriverCard
+                  // SEGURIDAD: nombre real del conductor; "Conductor" genérico solo si el backend no lo tiene.
+                  name={detail.driver.name ?? t('trip.driver')}
+                  rating={detail.driver.rating ?? undefined}
+                  vehicle={
+                    detail.vehicle
+                      ? `${detail.vehicle.make} ${detail.vehicle.model} · ${detail.vehicle.color}`
+                      : undefined
+                  }
+                  plate={detail.vehicle?.plate}
                 />
-              </MapShell>
-            </View>
-          )}
-          renderScroll={(ScrollComponent) => (
-            <ScrollComponent
-              style={styles.scroll}
-              contentContainerStyle={[
-                styles.scrollContent,
-                {
-                  paddingHorizontal: theme.spacing.xl,
-                  paddingTop: theme.spacing.lg,
-                  paddingBottom: insets.bottom + theme.spacing.xl,
-                  gap: theme.spacing.md,
-                },
-              ]}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Encabezado de autor: "Viaje del [fecha real]" + estado. Lee como el título de un recibo. */}
-              <EnterView index={0}>
-                <View style={styles.headerRow}>
-                  <Text variant="title2" numberOfLines={1} style={styles.headerTitle}>
-                    {t('tripDetail.titleDated', { date: tripDate })}
-                  </Text>
-                  <TripStatusPill status={status} />
-                </View>
               </EnterView>
+            ) : null}
 
-              {/* Riel origen→destino: hora real de salida · distancia · duración (sin direcciones falsas). */}
-              <EnterView index={1}>
-                <TripRouteRail
-                  origin={t('history.departedAt', { time: departureTime })}
-                  destination={`${distanceText} · ${durationText}`}
+            {/* Tarifa + método con logo canónico. Semilla del item: visible al instante. */}
+            <EnterView index={3}>
+              <TripFareCard
+                fareCents={trip.fareCents}
+                paymentMethod={trip.paymentMethod}
+              />
+            </EnterView>
+
+            {isCompleted && receipt ? (
+              <EnterView index={4}>
+                <TripReceiptCard receipt={receipt} />
+              </EnterView>
+            ) : null}
+
+            {/* Calificación integrada (read-only si ya calificaste; CTA → RatingBody que maneja el 409). */}
+            {isCompleted && detail?.driver ? (
+              <EnterView index={5}>
+                <TripRatingSection
+                  tripId={trip.id}
+                  driverId={detail.driver.id}
+                  embeddedStars={detail.myRatingStars}
+                  onRated={() => detailQuery.refetch()}
                 />
               </EnterView>
+            ) : null}
 
-              {/* Conductor + vehículo (tarjeta canónica). Aparece cuando el detalle enriquece (best-effort). */}
-              {detail?.driver ? (
-                <EnterView index={2}>
-                  <DriverCard
-                    // SEGURIDAD: nombre real del conductor; "Conductor" genérico solo si el backend no lo tiene.
-                    name={detail.driver.name ?? t('trip.driver')}
-                    rating={detail.driver.rating ?? undefined}
-                    vehicle={
-                      detail.vehicle
-                        ? `${detail.vehicle.make} ${detail.vehicle.model} · ${detail.vehicle.color}`
-                        : undefined
-                    }
-                    plate={detail.vehicle?.plate}
-                  />
-                </EnterView>
-              ) : null}
-
-              {/* Tarifa + método con logo canónico. Semilla del item: visible al instante. */}
-              <EnterView index={3}>
-                <TripFareCard fareCents={trip.fareCents} paymentMethod={trip.paymentMethod} />
+            {/* Propina (100% al conductor). Si ya hubo, muestra el estado enviado. */}
+            {isCompleted && detail?.driver ? (
+              <EnterView index={6}>
+                <TipCard tripId={trip.id} initialTipCents={detail.tipCents} />
               </EnterView>
+            ) : null}
 
-              {isCompleted && receipt ? (
-                <EnterView index={4}>
-                  <TripReceiptCard receipt={receipt} />
-                </EnterView>
-              ) : null}
-
-              {/* Calificación integrada (read-only si ya calificaste; CTA → RatingBody que maneja el 409). */}
-              {isCompleted && detail?.driver ? (
-                <EnterView index={5}>
-                  <TripRatingSection
-                    tripId={trip.id}
-                    driverId={detail.driver.id}
-                    embeddedStars={detail.myRatingStars}
-                    onRated={() => detailQuery.refetch()}
-                  />
-                </EnterView>
-              ) : null}
-
-              {/* Propina (100% al conductor). Si ya hubo, muestra el estado enviado. */}
-              {isCompleted && detail?.driver ? (
-                <EnterView index={6}>
-                  <TipCard tripId={trip.id} initialTipCents={detail.tipCents} />
-                </EnterView>
-              ) : null}
-
-              {/* Acción honesta y única: reportar un objeto olvidado (cierra el sheet y abre el ticket). */}
-              {isCompleted ? (
-                <EnterView index={7}>
-                  <Button
-                    label={t('lostItem.entry')}
-                    variant="secondary"
-                    fullWidth
-                    leftIcon={<IconSearch color={theme.colors.ink} size={18} />}
-                    onPress={() => {
-                      requestClose();
-                      navigation.navigate('LostItem', { tripId: trip.id });
-                    }}
-                  />
-                </EnterView>
-              ) : null}
-            </ScrollComponent>
-          )}
-        />
+            {/* Acción honesta y única: reportar un objeto olvidado (cierra el sheet y abre el ticket). */}
+            {isCompleted ? (
+              <EnterView index={7}>
+                <Button
+                  label={t('lostItem.entry')}
+                  variant="secondary"
+                  fullWidth
+                  leftIcon={<IconSearch color={theme.colors.ink} size={18} />}
+                  onPress={() => {
+                    requestClose();
+                    navigation.navigate('LostItem', {tripId: trip.id});
+                  }}
+                />
+              </EnterView>
+            ) : null}
+          </ScrollComponent>
+        )}
+      />
     </View>
   );
 }
@@ -316,11 +346,16 @@ const SNAP_POINTS = ['content', 0.92] as const;
 const PEEK_MAX_FRACTION = 0.6;
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: '#000000' },
-  mapWrap: { borderRadius: 18, overflow: 'hidden' },
-  map: { height: 168 },
-  scroll: { flex: 1 },
+  backdrop: {...StyleSheet.absoluteFill, backgroundColor: '#000000'},
+  mapWrap: {borderRadius: 18, overflow: 'hidden'},
+  map: {height: 168},
+  scroll: {flex: 1},
   scrollContent: {},
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  headerTitle: { flex: 1 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  headerTitle: {flex: 1},
 });

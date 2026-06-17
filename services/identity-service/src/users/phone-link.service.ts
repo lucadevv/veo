@@ -46,7 +46,9 @@ export class PhoneLinkService {
 
     const code = await this.otp.issue(phone);
     // Canal SMS existente (sandbox loguea el código). Reusa exactamente el copy del login OTP.
-    this.logger.warn(`[SANDBOX SMS] → ${phone}: Tu código VEO es ${code}. Válido 5 minutos. No lo compartas.`);
+    this.logger.warn(
+      `[SANDBOX SMS] → ${phone}: Tu código VEO es ${code}. Válido 5 minutos. No lo compartas.`,
+    );
     return { sent: true };
   }
 

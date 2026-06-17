@@ -3,7 +3,9 @@ import { IsIn, IsString, MinLength } from 'class-validator';
 
 /** POST /internal/devices → body. El userId llega por la identidad interna firmada. */
 export class RegisterDeviceDto {
-  @ApiProperty({ description: 'Token del dispositivo (FCM registration token o APNs device token)' })
+  @ApiProperty({
+    description: 'Token del dispositivo (FCM registration token o APNs device token)',
+  })
   @IsString()
   @MinLength(1)
   token!: string;

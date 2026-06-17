@@ -1,6 +1,6 @@
-import {useEffect} from 'react';
-import {PUBLISHER_TOKEN_UNAVAILABLE} from '../../domain/ports/trip-media-publisher';
-import {useTripMediaPublisher} from '../providers/TripMediaPublisherProvider';
+import { useEffect } from 'react';
+import { PUBLISHER_TOKEN_UNAVAILABLE } from '../../domain/ports/trip-media-publisher';
+import { useTripMediaPublisher } from '../providers/TripMediaPublisherProvider';
 
 /**
  * Controla el publisher de video del habitáculo durante el viaje activo: inicia la publicación a la
@@ -18,7 +18,7 @@ export function useTripPublisher(tripId: string, active: boolean): void {
       return;
     }
     publisher.start(tripId).catch((error: unknown) => {
-      const code = error instanceof Error ? (error as {code?: string}).code : undefined;
+      const code = error instanceof Error ? (error as { code?: string }).code : undefined;
       if (__DEV__ && code !== PUBLISHER_TOKEN_UNAVAILABLE) {
         console.warn('[VEO] Publisher de viaje no pudo iniciar:', error);
       }

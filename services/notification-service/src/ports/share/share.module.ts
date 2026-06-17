@@ -40,7 +40,9 @@ class GrpcTrustedContactsResolver implements TrustedContactsResolver {
     });
     const contacts = (reply.contacts ?? []).filter((c) => c.otpVerified && c.phone.length > 0);
     // Log sin PII (§0.7): solo el conteo, jamás teléfonos/nombres.
-    this.logger.debug(`GetTrustedContacts(${passengerId}) → ${contacts.length} contactos verificados`);
+    this.logger.debug(
+      `GetTrustedContacts(${passengerId}) → ${contacts.length} contactos verificados`,
+    );
     return contacts.map((c) => ({ id: c.id, phone: c.phone, name: c.name }));
   }
 }
@@ -49,7 +51,9 @@ const shareContactsResolverProvider: Provider = {
   provide: SHARE_CONTACTS_RESOLVER,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): TrustedContactsResolver =>
-    new GrpcTrustedContactsResolver(createGrpcClient('share', { url: config.getOrThrow<string>('SHARE_GRPC_URL') })),
+    new GrpcTrustedContactsResolver(
+      createGrpcClient('share', { url: config.getOrThrow<string>('SHARE_GRPC_URL') }),
+    ),
 };
 
 @Module({

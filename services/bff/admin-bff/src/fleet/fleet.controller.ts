@@ -39,7 +39,10 @@ export class FleetController {
 
   @Post('vehicles')
   @ApiOperation({ summary: 'Registra un vehículo' })
-  createVehicle(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateVehicleDto): Promise<unknown> {
+  createVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateVehicleDto,
+  ): Promise<unknown> {
     return this.fleet.createVehicle(user, dto);
   }
 
@@ -127,7 +130,9 @@ export class FleetController {
 
   @Post('vehicle-models/:id/approve')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Aprueba una solicitud de modelo completando la ficha técnica (PENDING→APPROVED)' })
+  @ApiOperation({
+    summary: 'Aprueba una solicitud de modelo completando la ficha técnica (PENDING→APPROVED)',
+  })
   approveModel(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

@@ -1,34 +1,53 @@
 import React from 'react';
-import {StyleSheet} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {driverTheme, useTheme} from '@veo/ui-kit';
-import type {MainTabParamList, RootStackParamList} from './types';
-import {useSessionStore} from '../core/session/sessionStore';
-import {LoginScreen, OnboardingScreen, SplashScreen, useOnboardingStore} from '../features/auth/presentation';
-import {RejectedScreen, UnderReviewScreen, VehiclesScreen, useRegistrationGate, useRegistrationStore} from '../features/registration/presentation';
-import {RegistrationNavigator} from './RegistrationNavigator';
-import {BiometricEnrollScreen, DashboardScreen, ShiftStartScreen} from '../features/shift/presentation';
-import {TripActiveScreen, TripHistoryScreen, TripIncomingScreen} from '../features/trips/presentation';
-import {BidsScreen} from '../features/bidding/presentation';
-import {EarningsScreen} from '../features/earnings/presentation';
-import {ProfileScreen} from '../features/profile/presentation';
-import {DocumentsScreen} from '../features/documents/presentation';
-import {IncentivesScreen} from '../features/ops/presentation';
-import {SupportScreen} from '../features/support/presentation';
-import {ChatScreen} from '../features/chat/presentation';
-import {RealtimeManager} from '../features/realtime/presentation';
-import {PushManager} from '../features/notifications/presentation';
-import {IconAccount, IconEarnings, IconMap, IconTrips} from '../shared/presentation/icons';
+import { StyleSheet } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { driverTheme, useTheme } from '@veo/ui-kit';
+import type { MainTabParamList, RootStackParamList } from './types';
+import { useSessionStore } from '../core/session/sessionStore';
+import {
+  LoginScreen,
+  OnboardingScreen,
+  SplashScreen,
+  useOnboardingStore,
+} from '../features/auth/presentation';
+import {
+  RejectedScreen,
+  UnderReviewScreen,
+  VehiclesScreen,
+  useRegistrationGate,
+  useRegistrationStore,
+} from '../features/registration/presentation';
+import { RegistrationNavigator } from './RegistrationNavigator';
+import {
+  BiometricEnrollScreen,
+  DashboardScreen,
+  ShiftStartScreen,
+} from '../features/shift/presentation';
+import {
+  TripActiveScreen,
+  TripHistoryScreen,
+  TripIncomingScreen,
+} from '../features/trips/presentation';
+import { BidsScreen } from '../features/bidding/presentation';
+import { EarningsScreen } from '../features/earnings/presentation';
+import { ProfileScreen } from '../features/profile/presentation';
+import { DocumentsScreen } from '../features/documents/presentation';
+import { IncentivesScreen } from '../features/ops/presentation';
+import { SupportScreen } from '../features/support/presentation';
+import { ChatScreen } from '../features/chat/presentation';
+import { RealtimeManager } from '../features/realtime/presentation';
+import { PushManager } from '../features/notifications/presentation';
+import { IconAccount, IconEarnings, IconMap, IconTrips } from '../shared/presentation/icons';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 const screenOptions = {
   headerShown: false,
-  contentStyle: {backgroundColor: driverTheme.colors.bg},
+  contentStyle: { backgroundColor: driverTheme.colors.bg },
 } as const;
 
 /**
@@ -37,7 +56,7 @@ const screenOptions = {
  */
 function MainTabs(): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   // El home-indicator (iPhone) y la barra de gestos (Android) viven en `insets.bottom`. Un `height`
   // fijo en `tabBarStyle` PISA el inset que React Navigation añade solo, dejando el tab bar pegado al
   // borde. Sumamos el inset al alto y al padding inferior: mantenemos el look compacto de 64px de
@@ -46,7 +65,7 @@ function MainTabs(): React.JSX.Element {
   return (
     <Tab.Navigator
       detachInactiveScreens={false}
-      screenOptions={({route}) => ({
+      screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.inkSubtle,
@@ -58,8 +77,8 @@ function MainTabs(): React.JSX.Element {
           paddingTop: 8,
           paddingBottom: 10 + insets.bottom,
         },
-        tabBarLabelStyle: {fontSize: 11, fontWeight: '600'},
-        tabBarIcon: ({color, focused}) => {
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ color, focused }) => {
           const size = 24;
           const sw = focused ? 2.4 : 2;
           switch (route.name) {
@@ -75,13 +94,30 @@ function MainTabs(): React.JSX.Element {
               return null;
           }
         },
-      })}>
+      })}
+    >
       {/* `name` es el ID de ruta (no se traduce, lo usa la navegación); la etiqueta visible va por
           `tabBarLabel` i18n. Antes el `name` se renderizaba como label → texto hardcodeado en el tab bar. */}
-      <Tab.Screen name="Inicio" component={DashboardScreen} options={{tabBarLabel: t('nav.home')}} />
-      <Tab.Screen name="Ganancias" component={EarningsScreen} options={{tabBarLabel: t('nav.earnings')}} />
-      <Tab.Screen name="Viajes" component={TripHistoryScreen} options={{tabBarLabel: t('nav.trips')}} />
-      <Tab.Screen name="Cuenta" component={ProfileScreen} options={{tabBarLabel: t('nav.account')}} />
+      <Tab.Screen
+        name="Inicio"
+        component={DashboardScreen}
+        options={{ tabBarLabel: t('nav.home') }}
+      />
+      <Tab.Screen
+        name="Ganancias"
+        component={EarningsScreen}
+        options={{ tabBarLabel: t('nav.earnings') }}
+      />
+      <Tab.Screen
+        name="Viajes"
+        component={TripHistoryScreen}
+        options={{ tabBarLabel: t('nav.trips') }}
+      />
+      <Tab.Screen
+        name="Cuenta"
+        component={ProfileScreen}
+        options={{ tabBarLabel: t('nav.account') }}
+      />
     </Tab.Navigator>
   );
 }
@@ -100,11 +136,11 @@ function MainTabs(): React.JSX.Element {
  * fallback de demo si la llamada falla y nunca se resolvió antes (ver `useRegistrationGate`).
  */
 export const RootNavigator = (): React.JSX.Element => {
-  const status = useSessionStore(s => s.status);
-  const onboardingCompleted = useOnboardingStore(s => s.completed);
-  const registrationStatus = useRegistrationStore(s => s.status);
+  const status = useSessionStore((s) => s.status);
+  const onboardingCompleted = useOnboardingStore((s) => s.completed);
+  const registrationStatus = useRegistrationStore((s) => s.status);
   // Resuelve el estado del alta desde el backend tras autenticar (no parpadea hacia el wizard).
-  const {resolving} = useRegistrationGate();
+  const { resolving } = useRegistrationGate();
 
   if (status === 'bootstrapping') {
     return <SplashScreen />;
@@ -112,7 +148,7 @@ export const RootNavigator = (): React.JSX.Element => {
 
   if (status === 'unauthenticated') {
     return (
-      <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
+      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         {onboardingCompleted ? (
           <Stack.Screen name="Login" component={LoginScreen} />
         ) : (
@@ -131,7 +167,7 @@ export const RootNavigator = (): React.JSX.Element => {
   // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
   if (registrationStatus === 'in_review') {
     return (
-      <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
+      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
       </Stack.Navigator>
     );
@@ -140,7 +176,7 @@ export const RootNavigator = (): React.JSX.Element => {
   // Alta RECHAZADA: pantalla propia con el motivo + corregir-y-reenviar (NO cae al wizard mudo).
   if (registrationStatus === 'rejected') {
     return (
-      <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
+      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         <Stack.Screen name="Rejected" component={RejectedScreen} />
       </Stack.Navigator>
     );
@@ -148,7 +184,7 @@ export const RootNavigator = (): React.JSX.Element => {
 
   if (registrationStatus === 'not_started' || registrationStatus === 'in_progress') {
     return (
-      <Stack.Navigator screenOptions={{...screenOptions, animation: 'fade'}}>
+      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         <Stack.Screen name="Registration" component={RegistrationNavigator} />
       </Stack.Navigator>
     );
@@ -167,15 +203,23 @@ export const RootNavigator = (): React.JSX.Element => {
         <Stack.Screen
           name="TripIncoming"
           component={TripIncomingScreen}
-          options={{gestureEnabled: false, animation: 'fade'}}
+          options={{ gestureEnabled: false, animation: 'fade' }}
         />
         <Stack.Screen
           name="TripActive"
           component={TripActiveScreen}
-          options={{gestureEnabled: false}}
+          options={{ gestureEnabled: false }}
         />
-        <Stack.Screen name="Bids" component={BidsScreen} options={{animation: 'slide_from_right'}} />
-        <Stack.Screen name="Chat" component={ChatScreen} options={{animation: 'slide_from_right'}} />
+        <Stack.Screen
+          name="Bids"
+          component={BidsScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Chat"
+          component={ChatScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
       </Stack.Navigator>
       <RealtimeManager />
       <PushManager />

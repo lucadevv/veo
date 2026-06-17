@@ -68,7 +68,11 @@ export function RefundDialog() {
         </DialogHeader>
         <div className="space-y-4">
           <Field label="ID de viaje">
-            <Input value={tripId} onChange={(e) => setTripId(e.target.value)} placeholder="UUID del viaje" />
+            <Input
+              value={tripId}
+              onChange={(e) => setTripId(e.target.value)}
+              placeholder="UUID del viaje"
+            />
           </Field>
           <Field label="Monto (S/)">
             <Input
@@ -86,7 +90,12 @@ export function RefundDialog() {
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
           </DialogClose>
-          <Button variant="primary" loading={refund.isPending} disabled={!valid} onClick={() => void submit()}>
+          <Button
+            variant="primary"
+            loading={refund.isPending}
+            disabled={!valid}
+            onClick={() => void submit()}
+          >
             Emitir reembolso
           </Button>
         </DialogFooter>

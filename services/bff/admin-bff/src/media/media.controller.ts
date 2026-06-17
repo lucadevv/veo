@@ -14,7 +14,12 @@ import {
   type SegmentView,
   type SignedMedia,
 } from './media.service';
-import { AccessRequestsQueryDto, LiveAccessDto, RequestAccessDto, SegmentsQueryDto } from './dto/media.dto';
+import {
+  AccessRequestsQueryDto,
+  LiveAccessDto,
+  RequestAccessDto,
+  SegmentsQueryDto,
+} from './dto/media.dto';
 
 /** Página con cursor; misma forma que `paginated()` del contrato admin-web. */
 interface Page<T> {
@@ -71,7 +76,9 @@ export class MediaController {
 
   @Get('access-requests/:id/stream')
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'URL firmada del video aprobado (requiere MFA fresca); incluye watermark' })
+  @ApiOperation({
+    summary: 'URL firmada del video aprobado (requiere MFA fresca); incluye watermark',
+  })
   stream(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<SignedMedia> {
     return this.media.streamRequest(user, id);
   }
@@ -79,7 +86,9 @@ export class MediaController {
   @Post('live/token')
   @HttpCode(200)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Token de cámara EN VIVO de un viaje (muro admin; doble-auth: rol + MFA fresca)' })
+  @ApiOperation({
+    summary: 'Token de cámara EN VIVO de un viaje (muro admin; doble-auth: rol + MFA fresca)',
+  })
   liveToken(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: LiveAccessDto,

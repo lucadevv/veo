@@ -29,7 +29,9 @@ import { DEDICATED_EVENT_TYPES } from './event-consumer.service';
 const PAX = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 /** Fila sintética sobre un contrato real del registro central (trip.started: schema simple). */
-function syntheticSpec(overrides: Partial<Parameters<typeof defineSpec<'trip.started', z.ZodTypeAny>>[1]> = {}) {
+function syntheticSpec(
+  overrides: Partial<Parameters<typeof defineSpec<'trip.started', z.ZodTypeAny>>[1]> = {},
+) {
   return defineSpec('trip.started', {
     recipient: (p) => p.passengerId,
     template: TEMPLATE_KEYS.TRIP_STARTED,
@@ -43,7 +45,13 @@ function startedEnvelope(payload: Record<string, unknown>): EventEnvelope<unknow
   return createEnvelope({
     eventType: 'trip.started',
     producer: 'test',
-    payload: { tripId: 'trip-1', driverId: 'drv-1', startedAt: '2026-06-11T00:00:00Z', passengerId: PAX, ...payload },
+    payload: {
+      tripId: 'trip-1',
+      driverId: 'drv-1',
+      startedAt: '2026-06-11T00:00:00Z',
+      passengerId: PAX,
+      ...payload,
+    },
   });
 }
 
@@ -52,7 +60,12 @@ function fakeCtx(targetsByUser: Record<string, DeviceTarget[]>) {
   const enqueued: EnqueueInput[] = [];
   const warns: string[] = [];
   const resolveTargets = vi.fn(
-    async (_eventType: string, userId: string | undefined, token?: string, platform?: 'android' | 'ios') => {
+    async (
+      _eventType: string,
+      userId: string | undefined,
+      token?: string,
+      platform?: 'android' | 'ios',
+    ) => {
       if (token) return [{ token, platform: platform ?? 'android' }];
       if (!userId) return [];
       return targetsByUser[userId] ?? [];
@@ -82,12 +95,20 @@ describe('runPushSpec · esqueleto común del registro', () => {
 
     expect(warns).toHaveLength(0);
     expect(enqueued).toHaveLength(2);
-    expect(enqueued.map((e) => e.dedupKey)).toEqual(['trip:trip-1:started:push:tok-1', 'trip:trip-1:started:push:tok-2']);
+    expect(enqueued.map((e) => e.dedupKey)).toEqual([
+      'trip:trip-1:started:push:tok-1',
+      'trip:trip-1:started:push:tok-2',
+    ]);
     const first = enqueued[0]!;
     expect(first.recipientId).toBe(PAX);
     expect(first.channel).toBe(NotificationChannel.PUSH);
     expect(first.template).toBe(TEMPLATE_KEYS.TRIP_STARTED);
-    expect(first.payload).toMatchObject({ to: 'tok-1', platform: 'android', vars: {}, data: { tripId: 'trip-1' } });
+    expect(first.payload).toMatchObject({
+      to: 'tok-1',
+      platform: 'android',
+      vars: {},
+      data: { tripId: 'trip-1' },
+    });
   });
 
   it('payload que no cumple el contrato del registro central → descarta sin warn ni enqueue', async () => {
@@ -95,14 +116,20 @@ describe('runPushSpec · esqueleto común del registro', () => {
     await runPushSpec(
       ctx,
       syntheticSpec(),
-      createEnvelope({ eventType: 'trip.started', producer: 'test', payload: { tripId: 'trip-1' } }),
+      createEnvelope({
+        eventType: 'trip.started',
+        producer: 'test',
+        payload: { tripId: 'trip-1' },
+      }),
     );
     expect(enqueued).toHaveLength(0);
     expect(warns).toHaveLength(0);
   });
 
   it('gate de producto `when=false` → ignora sin warn (decisión deliberada, no gap)', async () => {
-    const { ctx, enqueued, warns, resolveTargets } = fakeCtx({ [PAX]: [{ token: 'tok-1', platform: 'android' }] });
+    const { ctx, enqueued, warns, resolveTargets } = fakeCtx({
+      [PAX]: [{ token: 'tok-1', platform: 'android' }],
+    });
     await runPushSpec(ctx, syntheticSpec({ when: () => false }), startedEnvelope({}));
     expect(enqueued).toHaveLength(0);
     expect(warns).toHaveLength(0);
@@ -119,7 +146,11 @@ describe('runPushSpec · esqueleto común del registro', () => {
 
   it('hint de transporte: el token enriquecido del evento viaja a resolveTargets y gana', async () => {
     const { ctx, enqueued, resolveTargets } = fakeCtx({});
-    await runPushSpec(ctx, syntheticSpec(), startedEnvelope({ passengerPushToken: 'tok-EVENT', platform: 'ios' }));
+    await runPushSpec(
+      ctx,
+      syntheticSpec(),
+      startedEnvelope({ passengerPushToken: 'tok-EVENT', platform: 'ios' }),
+    );
     expect(resolveTargets).toHaveBeenCalledWith('trip.started', PAX, 'tok-EVENT', 'ios');
     expect(enqueued).toHaveLength(1);
     expect(enqueued[0]!.payload.to).toBe('tok-EVENT');
@@ -127,7 +158,10 @@ describe('runPushSpec · esqueleto común del registro', () => {
 
   it('recipientFallback: sin userId pero con token enriquecido, registra con el fallback histórico', async () => {
     const { ctx, enqueued } = fakeCtx({});
-    const spec = syntheticSpec({ recipient: () => undefined, recipientFallback: (p) => p.tripId as string });
+    const spec = syntheticSpec({
+      recipient: () => undefined,
+      recipientFallback: (p) => p.tripId as string,
+    });
     await runPushSpec(ctx, spec, startedEnvelope({ passengerPushToken: 'tok-EVENT' }));
     expect(enqueued).toHaveLength(1);
     expect(enqueued[0]!.recipientId).toBe('trip-1');
@@ -186,11 +220,14 @@ describe('PUSH_NOTIFICATION_SPECS · contrato (caza el drift en test-time)', () 
     expect(rows.length).toBeGreaterThan(0);
   });
 
-  it.each(rows)('%s · el schema es EXACTAMENTE el registrado en @veo/events (identidad, no copia)', (key, spec) => {
-    expect(spec.eventType).toBe(key); // la key del Record y la fila no divergen
-    expect(EVENT_SCHEMAS[spec.eventType]).toBeDefined();
-    expect(spec.schema).toBe(EVENT_SCHEMAS[spec.eventType]); // misma referencia: imposible re-declarar
-  });
+  it.each(rows)(
+    '%s · el schema es EXACTAMENTE el registrado en @veo/events (identidad, no copia)',
+    (key, spec) => {
+      expect(spec.eventType).toBe(key); // la key del Record y la fila no divergen
+      expect(EVENT_SCHEMAS[spec.eventType]).toBeDefined();
+      expect(spec.schema).toBe(EVENT_SCHEMAS[spec.eventType]); // misma referencia: imposible re-declarar
+    },
+  );
 
   it.each(rows)('%s · el template estático existe en el catálogo como PUSH', (_key, spec) => {
     if (typeof spec.template === 'function') return; // dinámicos: cubiertos por el chequeo del catálogo completo
@@ -207,7 +244,10 @@ describe('PUSH_NOTIFICATION_SPECS · contrato (caza el drift en test-time)', () 
   it('los handlers dedicados NO se solapan con el registro (un evento, un dueño)', () => {
     const registryKeys = new Set(Object.keys(PUSH_NOTIFICATION_SPECS));
     for (const dedicated of DEDICATED_EVENT_TYPES) {
-      expect(registryKeys.has(dedicated), `${dedicated} no puede estar en registro Y dedicado`).toBe(false);
+      expect(
+        registryKeys.has(dedicated),
+        `${dedicated} no puede estar en registro Y dedicado`,
+      ).toBe(false);
     }
   });
 });

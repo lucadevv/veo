@@ -8,7 +8,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { UnauthorizedError } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -30,8 +34,12 @@ let gateway: SandboxPaymentGateway;
 let payments: PaymentsService;
 let webhook: ProntoPagaWebhookService;
 
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -44,7 +52,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 function chargeYape() {
@@ -72,8 +83,19 @@ beforeAll(async () => {
   prisma = new PrismaClient({ datasourceUrl: db.databaseUrl });
   await prisma.$connect();
   prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000', pendingExternal: true, webhookSecret: SECRET });
-  payments = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  gateway = new SandboxPaymentGateway({
+    confirmDelayMs: 0,
+    declineSuffix: '0000',
+    pendingExternal: true,
+    webhookSecret: SECRET,
+  });
+  payments = new PaymentsService(
+    prismaService,
+    gateway,
+    noAffiliation,
+    noPromos,
+    makeConfig() as never,
+  );
   webhook = new ProntoPagaWebhookService(gateway, payments, noAffiliation);
 }, 180_000);
 
@@ -97,7 +119,11 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
 
   it('webhook success FIRMADO → CAPTURED + payment.captured en outbox', async () => {
     const p = await chargeYape();
-    const { body } = gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'success' });
+    const { body } = gateway.buildSignedWebhook({
+      uid: p.externalUid as string,
+      order: p.id,
+      status: 'success',
+    });
     await webhook.process(body, {});
 
     expect((await findPayment(p.id)).status).toBe('CAPTURED');
@@ -106,7 +132,11 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
 
   it('webhook IDEMPOTENTE: re-entregar el mismo success no recaptura ni duplica el evento', async () => {
     const p = await chargeYape();
-    const { body } = gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'success' });
+    const { body } = gateway.buildSignedWebhook({
+      uid: p.externalUid as string,
+      order: p.id,
+      status: 'success',
+    });
     await webhook.process(body, {});
     await webhook.process(body, {});
 
@@ -115,14 +145,23 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
 
   it('firma inválida → UnauthorizedError (401), el pago NO cambia', async () => {
     const p = await chargeYape();
-    const bad = JSON.stringify({ uid: p.externalUid, order: p.id, status: 'success', sign: 'firma-mala' });
+    const bad = JSON.stringify({
+      uid: p.externalUid,
+      order: p.id,
+      status: 'success',
+      sign: 'firma-mala',
+    });
     await expect(webhook.process(bad, {})).rejects.toBeInstanceOf(UnauthorizedError);
     expect((await findPayment(p.id)).status).toBe('PENDING');
   });
 
   it('webhook expired → FAILED reason expired', async () => {
     const p = await chargeYape();
-    const { body } = gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'expired' });
+    const { body } = gateway.buildSignedWebhook({
+      uid: p.externalUid as string,
+      order: p.id,
+      status: 'expired',
+    });
     await webhook.process(body, {});
     const stored = await findPayment(p.id);
     expect(stored.status).toBe('FAILED');
@@ -131,7 +170,11 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
 
   it('webhook rejected → DEBT', async () => {
     const p = await chargeYape();
-    const { body } = gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'rejected' });
+    const { body } = gateway.buildSignedWebhook({
+      uid: p.externalUid as string,
+      order: p.id,
+      status: 'rejected',
+    });
     await webhook.process(body, {});
     expect((await findPayment(p.id)).status).toBe('DEBT');
   });
@@ -153,11 +196,24 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
 
 describe('E2E ProntoPaga · tope Yape On File (2000 PEN/tx)', () => {
   it('cobro on-file > 2000 PEN degrada a QR (omite walletUid) → checkout con QR, no on-file', async () => {
-    const onFileGateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000', pendingExternal: true, webhookSecret: SECRET });
+    const onFileGateway = new SandboxPaymentGateway({
+      confirmDelayMs: 0,
+      declineSuffix: '0000',
+      pendingExternal: true,
+      webhookSecret: SECRET,
+    });
     const chargeSpy = vi.spyOn(onFileGateway, 'charge');
     // Afiliación ACTIVE: resolveActiveWalletUid devuelve un walletUid → intentaría on-file.
-    const activeAffiliation = { resolveActiveWalletUid: async () => 'WUID-ACTIVE' } as unknown as AffiliationsService;
-    const onFilePayments = new PaymentsService(prismaService, onFileGateway, activeAffiliation, noPromos, makeConfig() as never);
+    const activeAffiliation = {
+      resolveActiveWalletUid: async () => 'WUID-ACTIVE',
+    } as unknown as AffiliationsService;
+    const onFilePayments = new PaymentsService(
+      prismaService,
+      onFileGateway,
+      activeAffiliation,
+      noPromos,
+      makeConfig() as never,
+    );
 
     const p = await onFilePayments.charge({
       tripId: '0192f8a0-0000-7000-8000-000000000099',

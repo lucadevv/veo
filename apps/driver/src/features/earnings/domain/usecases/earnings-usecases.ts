@@ -1,5 +1,5 @@
-import type {EarningsRepository} from '../repositories/earnings-repository';
-import type {EarningsBreakdown, EarningsOverview, PayoutList} from '../entities';
+import type { EarningsRepository } from '../repositories/earnings-repository';
+import type { EarningsBreakdown, EarningsOverview, PayoutList } from '../entities';
 
 /** Caso de uso: resumen agregado de ganancias del conductor (incluye sus payouts). */
 export class GetEarningsSummaryUseCase {

@@ -1,4 +1,4 @@
-import { calendarDaysAgo } from '../../../shared/utils/format';
+import {calendarDaysAgo} from '../../../shared/utils/format';
 
 /**
  * Tramos temporales del historial (mata la monotonía de una lista plana). El orden de la unión ES el
@@ -49,7 +49,7 @@ export function groupTripsByTime<T extends TimeGroupable>(
   for (const trip of trips) {
     buckets[sectionFor(trip, now)].push(trip);
   }
-  return ORDER.map((id) => ({ id, data: buckets[id] })).filter(
-    (section) => section.data.length > 0,
+  return ORDER.map(id => ({id, data: buckets[id]})).filter(
+    section => section.data.length > 0,
   );
 }

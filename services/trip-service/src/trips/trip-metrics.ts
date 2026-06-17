@@ -43,7 +43,11 @@ const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor
 
 export const OFFERING_MODE_OVERRIDDEN_METRIC = 'pricing_offering_mode_overridden_total';
 
-function getOrCreateCounter(name: string, help: string, labelNames: readonly string[]): CounterLike {
+function getOrCreateCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[],
+): CounterLike {
   const existing = metricsRegistry.getSingleMetric(name) as CounterLike | undefined;
   if (existing) return existing;
   return new CounterClass({ name, help, labelNames, registers: [metricsRegistry] });

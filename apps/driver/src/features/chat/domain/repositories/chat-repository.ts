@@ -1,4 +1,4 @@
-import type {Message, SendMessageInput} from '../entities';
+import type { Message, SendMessageInput } from '../entities';
 
 /**
  * Contrato del repositorio de chat del viaje (capa domain). Implementación concreta en `data/`.

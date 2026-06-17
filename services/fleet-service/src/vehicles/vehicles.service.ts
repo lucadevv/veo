@@ -4,13 +4,35 @@
  */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { uuidv7, plateSchema, parseOrThrow, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
+import {
+  uuidv7,
+  plateSchema,
+  parseOrThrow,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
-import { deriveVehicleReviewStatus, isVehicleYearEligible, pickActiveVehicle } from './vehicle-rules';
+import {
+  deriveVehicleReviewStatus,
+  isVehicleYearEligible,
+  pickActiveVehicle,
+} from './vehicle-rules';
 import { validCertificationsOf } from '../documents/document-rules';
-import type { CreateVehicleDto, DriverVehicleResponse, RegisterDriverVehicleDto } from './dto/vehicle.dto';
-import { FleetOwnerType, Prisma, VehicleDocStatus, VehicleModelStatus, VehicleType, type Vehicle } from '../generated/prisma';
+import type {
+  CreateVehicleDto,
+  DriverVehicleResponse,
+  RegisterDriverVehicleDto,
+} from './dto/vehicle.dto';
+import {
+  FleetOwnerType,
+  Prisma,
+  VehicleDocStatus,
+  VehicleModelStatus,
+  VehicleType,
+  type Vehicle,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
 
@@ -29,10 +51,13 @@ export class VehiclesService {
     const plate = parseOrThrow(plateSchema, input.plate.trim().toUpperCase(), 'plate');
 
     if (!isVehicleYearEligible(input.year, this.minYear)) {
-      throw new ValidationError(`El vehículo debe ser del año ${this.minYear} o posterior (BR-D04)`, {
-        year: input.year,
-        minYear: this.minYear,
-      });
+      throw new ValidationError(
+        `El vehículo debe ser del año ${this.minYear} o posterior (BR-D04)`,
+        {
+          year: input.year,
+          minYear: this.minYear,
+        },
+      );
     }
 
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
@@ -64,7 +89,12 @@ export class VehiclesService {
    * Lista paginada de la flota para el operador (admin). Filtros opcionales por estado documental y
    * actividad. Paginación cursor por id (uuidv7 ⇒ orden temporal estable, sin offset costoso).
    */
-  async list(opts: { docStatus?: VehicleDocStatus; active?: boolean; cursor?: string; limit?: number }): Promise<Page<Vehicle>> {
+  async list(opts: {
+    docStatus?: VehicleDocStatus;
+    active?: boolean;
+    cursor?: string;
+    limit?: number;
+  }): Promise<Page<Vehicle>> {
     const limit = clampLimit(opts.limit);
     const where: Prisma.VehicleWhereInput = {};
     if (opts.docStatus) where.docStatus = opts.docStatus;
@@ -87,14 +117,20 @@ export class VehiclesService {
    * `driverId` es el **User.id** de identity (el `userId` del token propagado), NO el id de perfil
    * `Driver` de identity; fleet lo persiste tal cual en `Vehicle.driverId` (sin traducir).
    */
-  async registerForDriver(driverId: string, input: RegisterDriverVehicleDto): Promise<DriverVehicleResponse> {
+  async registerForDriver(
+    driverId: string,
+    input: RegisterDriverVehicleDto,
+  ): Promise<DriverVehicleResponse> {
     const plate = parseOrThrow(plateSchema, input.plate.trim().toUpperCase(), 'plate');
 
     if (!isVehicleYearEligible(input.year, this.minYear)) {
-      throw new ValidationError(`El vehículo debe ser del año ${this.minYear} o posterior (BR-D04)`, {
-        year: input.year,
-        minYear: this.minYear,
-      });
+      throw new ValidationError(
+        `El vehículo debe ser del año ${this.minYear} o posterior (BR-D04)`,
+        {
+          year: input.year,
+          minYear: this.minYear,
+        },
+      );
     }
 
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
@@ -151,9 +187,12 @@ export class VehiclesService {
    *    y se snapshotea make/model/vehicleType del spec (server-authoritative; ignora el texto libre).
    *  - SIN modelSpecId → texto libre legacy: exige make+model y usa el vehicleType del body.
    */
-  private async resolveModelSnapshot(
-    input: RegisterDriverVehicleDto,
-  ): Promise<{ make: string; model: string; vehicleType: VehicleType; modelSpecId: string | null }> {
+  private async resolveModelSnapshot(input: RegisterDriverVehicleDto): Promise<{
+    make: string;
+    model: string;
+    vehicleType: VehicleType;
+    modelSpecId: string | null;
+  }> {
     if (input.modelSpecId) {
       const spec = await this.prisma.read.vehicleModelSpec.findFirst({
         where: { id: input.modelSpecId, status: VehicleModelStatus.APPROVED },
@@ -163,7 +202,12 @@ export class VehiclesService {
           modelSpecId: input.modelSpecId,
         });
       }
-      return { make: spec.make, model: spec.model, vehicleType: spec.vehicleType, modelSpecId: spec.id };
+      return {
+        make: spec.make,
+        model: spec.model,
+        vehicleType: spec.vehicleType,
+        modelSpecId: spec.id,
+      };
     }
 
     const make = input.make?.trim();
@@ -203,12 +247,17 @@ export class VehiclesService {
       where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
     });
     const certifications = validCertificationsOf(docs);
-    const base: DriverVehicleResponse = { ...toDriverVehicleResponse(active, true), certifications };
+    const base: DriverVehicleResponse = {
+      ...toDriverVehicleResponse(active, true),
+      certifications,
+    };
     // B5-3 · enriquece SOLO el vehículo activo con seats/segment del modelSpec elegido, para que el
     // driver-bff los selle en el ping (eligibilidad de oferta en dispatch). Legacy sin modelSpecId →
     // sin attrs (degradación honesta: dispatch no restringe a ese conductor).
     if (!active.modelSpecId) return base;
-    const spec = await this.prisma.read.vehicleModelSpec.findUnique({ where: { id: active.modelSpecId } });
+    const spec = await this.prisma.read.vehicleModelSpec.findUnique({
+      where: { id: active.modelSpecId },
+    });
     if (!spec) return base;
     return { ...base, seats: spec.seats, segment: spec.segment ?? undefined };
   }

@@ -28,7 +28,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { OfferBoardService } from './offer-board.service';
 import { requireDriverId } from './require-driver-id';
-import { bidFieldsFromBoard, type Offer, type OfferBoard, type OffersView } from './offer-board.port';
+import {
+  bidFieldsFromBoard,
+  type Offer,
+  type OfferBoard,
+  type OffersView,
+} from './offer-board.port';
 import {
   AcceptOfferDto,
   OfferDto,
@@ -94,7 +99,9 @@ export class OfferBoardController {
   // ── Lado pasajero ───────────────────────────────────────────────────────────────────────────
 
   @Get(':tripId/offers')
-  @ApiOperation({ summary: 'Estado del board + ofertas del board (el pasajero las ve para elegir)' })
+  @ApiOperation({
+    summary: 'Estado del board + ofertas del board (el pasajero las ve para elegir)',
+  })
   async listOffers(@Param('tripId', ParseUUIDPipe) tripId: string): Promise<OffersViewDto> {
     const view: OffersView = await this.board.getOffersView(tripId);
     return {
@@ -116,7 +123,9 @@ export class OfferBoardController {
 
   @Post(':tripId/cancel')
   @HttpCode(200)
-  @ApiOperation({ summary: 'El pasajero cancela la puja → board CANCELLED + cierra el VIAJE (idempotente)' })
+  @ApiOperation({
+    summary: 'El pasajero cancela la puja → board CANCELLED + cierra el VIAJE (idempotente)',
+  })
   async cancel(@Param('tripId', ParseUUIDPipe) tripId: string): Promise<{ ok: true }> {
     // emitClosure: este es el cancel de la PUJA del pasajero → además de cerrar el board efímero, emite
     // dispatch.bid_cancelled por outbox para que trip cierre el VIAJE (REQUESTED → CANCELLED_BY_PASSENGER),

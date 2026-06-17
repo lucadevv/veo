@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, {Circle, Path, Rect} from 'react-native-svg';
 
 /**
  * Set de iconos del hub de cuenta (Profile / TripDetail) dibujados con `react-native-svg`. Portados
@@ -18,7 +18,7 @@ export interface GlyphProps {
 const STROKE = 2;
 
 /** Campana (notificaciones push). Mismo trazo 2px del set. */
-export function IconBell({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconBell({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -40,7 +40,10 @@ export function IconBell({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Verificación facial (escaneo de rostro). Espejo de `I.scan` del diseño. */
-export function IconFaceScan({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconFaceScan({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -63,27 +66,51 @@ export function IconFaceScan({ color, size = 22 }: GlyphProps): React.JSX.Elemen
 }
 
 /** Grupo de personas (contactos de confianza / control de cámara). Espejo de `I.users`. */
-export function IconUsers({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconUsers({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={9} cy={8} r={3.4} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Circle
+        cx={9}
+        cy={8}
+        r={3.4}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
       <Path
         d="M3.5 19.5a5.5 5.5 0 0 1 11 0"
         stroke={color}
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M16 5a3.3 3.3 0 0 1 0 6.3" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M17.5 14a5 5 0 0 1 3.2 5" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Path
+        d="M16 5a3.3 3.3 0 0 1 0 6.3"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M17.5 14a5 5 0 0 1 3.2 5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
 
 /** Niño/menor (modo niño). Espejo de `I.child`. */
-export function IconChild({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconChild({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={6.5} r={3} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Circle
+        cx={12}
+        cy={6.5}
+        r={3}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
       <Path
         d="M6 21v-2a6 6 0 0 1 12 0v2"
         stroke={color}
@@ -95,7 +122,7 @@ export function IconChild({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Cámara (control de cámara). Espejo de `I.cam` del diseño (lente sin relleno). */
-export function IconCamera({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconCamera({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -110,7 +137,7 @@ export function IconCamera({ color, size = 22 }: GlyphProps): React.JSX.Element 
 }
 
 /** Compartir (nodos conectados). Espejo de `I.share`. */
-export function IconShare({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconShare({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={6} cy={12} r={2.5} stroke={color} strokeWidth={STROKE} />
@@ -128,17 +155,25 @@ export function IconShare({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Tarjeta (métodos de pago). Espejo de `I.card`. */
-export function IconCard({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconCard({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={2.5} y={5} width={19} height={14} rx={2.5} stroke={color} strokeWidth={STROKE} />
+      <Rect
+        x={2.5}
+        y={5}
+        width={19}
+        height={14}
+        rx={2.5}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
       <Path d="M2.5 9.5h19" stroke={color} strokeWidth={STROKE} />
     </Svg>
   );
 }
 
 /** Pin de ubicación (lugares guardados). Espejo de `I.pin`. */
-export function IconPin({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconPin({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -153,21 +188,40 @@ export function IconPin({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Reloj (viajes programados). Espejo de `I.clock`. */
-export function IconClock({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconClock({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={STROKE} />
-      <Path d="M12 7v5l3 2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M12 7v5l3 2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Regalo (invita y gana). Espejo de `I.gift`. */
-export function IconGift({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconGift({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={3} y={8} width={18} height={13} rx={2} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M3 12h18M12 8v13" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Rect
+        x={3}
+        y={8}
+        width={18}
+        height={13}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M3 12h18M12 8v13"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
       <Path
         d="M12 8S10 3 7.5 4.5 9 8 12 8s2.5-2 4.5-3.5S12 8 12 8Z"
         stroke={color}
@@ -179,7 +233,7 @@ export function IconGift({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Ayuda (signo de interrogación en círculo). Espejo de `I.help`. */
-export function IconHelp({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconHelp({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={STROKE} />
@@ -195,39 +249,67 @@ export function IconHelp({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Botón de encendido/apagado (cerrar sesión). Espejo de `I.power`. */
-export function IconPower({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconPower({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 3v9" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
-      <Path d="M6.5 7a8 8 0 1 0 11 0" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M12 3v9"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M6.5 7a8 8 0 1 0 11 0"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Accesibilidad / globo de idioma (placeholder reutilizando `I.help` del diseño). */
-export function IconAccessibility({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconAccessibility({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
   return <IconHelp color={color} size={size} />;
 }
 
 /** Papelera (derecho al olvido · eliminar cuenta). Feather `trash-2`, mismo lenguaje de trazo. */
-export function IconTrash({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconTrash({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M4 7h16" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M4 7h16"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
       <Path
         d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"
         stroke={color}
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M9.5 7V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v2" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M10 11v6M14 11v6" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M9.5 7V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10 11v6M14 11v6"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Escudo de seguridad (identidad verificada). Espejo de `I.shield` (sin relleno). */
-export function IconShield({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconShield({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -241,16 +323,21 @@ export function IconShield({ color, size = 18 }: GlyphProps): React.JSX.Element 
 }
 
 /** Recibo/factura (TripDetail). Reutiliza el glyph de tarjeta del set. */
-export function IconReceipt({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconReceipt({color, size = 22}: GlyphProps): React.JSX.Element {
   return <IconCard color={color} size={size} />;
 }
 
 /** Lupa (buscar objeto olvidado, TripDetail). Espejo de `I.search`. */
-export function IconSearch({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconSearch({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={STROKE} />
-      <Path d="m20 20-3.2-3.2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="m20 20-3.2-3.2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }

@@ -32,7 +32,12 @@ import { mapProntoPagaStatus, normalizeWebhook } from './prontopaga.mapping';
 /** Catálogo del riel directo simulado: Yape/Plin (espeja al adapter `live`). */
 const DIRECT_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN']);
 /** Catálogo del modo agregador simulado: espeja a ProntoPaga (Yape/Plin/tarjeta/PagoEfectivo). */
-const AGGREGATOR_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO']);
+const AGGREGATOR_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set([
+  'YAPE',
+  'PLIN',
+  'CARD',
+  'PAGOEFECTIVO',
+]);
 
 interface LedgerEntry {
   externalRef: string;
@@ -79,7 +84,9 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
     }
 
     if (this.opts.declineSuffix && req.payerRef?.endsWith(this.opts.declineSuffix)) {
-      this.logger.warn(`[SANDBOX ${req.method}] cobro declinado (payerRef de prueba) tx=${req.paymentId}`);
+      this.logger.warn(
+        `[SANDBOX ${req.method}] cobro declinado (payerRef de prueba) tx=${req.paymentId}`,
+      );
       return { status: 'DECLINED', reason: 'INSUFFICIENT_FUNDS' };
     }
 
@@ -88,18 +95,25 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
 
     // Modo asíncrono: el cobro queda PENDIENTE y se completa por webhook (espeja ProntoPaga).
     if (this.opts.pendingExternal) {
-      this.logger.log(`[SANDBOX ${req.method}] cobro PENDIENTE externo tx=${externalRef} (espera webhook)`);
+      this.logger.log(
+        `[SANDBOX ${req.method}] cobro PENDIENTE externo tx=${externalRef} (espera webhook)`,
+      );
       const checkout = req.walletUid
         ? // On-file: sin checkout (el usuario aprueba en su app, confirma por webhook).
           undefined
-        : { qrCodeBase64: `data:image/png;base64,${Buffer.from(externalRef).toString('base64')}`, urlPay: `https://sandbox.local/pay/${externalRef}` };
+        : {
+            qrCodeBase64: `data:image/png;base64,${Buffer.from(externalRef).toString('base64')}`,
+            urlPay: `https://sandbox.local/pay/${externalRef}`,
+          };
       return { status: 'PENDING_EXTERNAL', externalRef, checkout };
     }
 
     if (!this.ledger.some((e) => e.externalRef === externalRef)) {
       this.ledger.push({ externalRef, amountCents: req.amountCents, at: new Date() });
     }
-    this.logger.log(`[SANDBOX ${req.method}] cobro confirmado tx=${externalRef} monto=${req.amountCents}`);
+    this.logger.log(
+      `[SANDBOX ${req.method}] cobro confirmado tx=${externalRef} monto=${req.amountCents}`,
+    );
     return { status: 'CONFIRMED', externalRef };
   }
 
@@ -113,7 +127,9 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
     const externalRefundId = `sbx_refund_${meta?.idempotencyKey ?? externalRef}`;
     if (!this.refunds.has(externalRefundId)) {
       this.refunds.set(externalRefundId, { externalRef, amountCents });
-      this.logger.log(`[SANDBOX] reverso confirmado ${externalRefundId} sobre tx=${externalRef} monto=${amountCents}`);
+      this.logger.log(
+        `[SANDBOX] reverso confirmado ${externalRefundId} sobre tx=${externalRef} monto=${amountCents}`,
+      );
     }
     return { status: 'ACCEPTED', externalRefundId };
   }
@@ -147,9 +163,15 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
    * Helper de PRUEBA: arma un body de webhook YA FIRMADO con el secret del adapter (para e2e/smoke).
    * No es parte del puerto; lo usan los tests y el script de boot-real.
    */
-  buildSignedWebhook(fields: Record<string, string | number>): { body: string; status: ReturnType<typeof mapProntoPagaStatus> } {
+  buildSignedWebhook(fields: Record<string, string | number>): {
+    body: string;
+    status: ReturnType<typeof mapProntoPagaStatus>;
+  } {
     const secret = this.opts.webhookSecret ?? '';
     const sign = signPayload(fields, secret);
-    return { body: JSON.stringify({ ...fields, sign }), status: mapProntoPagaStatus(String(fields.status ?? '')) };
+    return {
+      body: JSON.stringify({ ...fields, sign }),
+      status: mapProntoPagaStatus(String(fields.status ?? '')),
+    };
   }
 }

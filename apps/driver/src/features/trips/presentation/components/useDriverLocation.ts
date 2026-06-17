@@ -1,6 +1,6 @@
-import {useEffect, useState} from 'react';
-import type {GeoPoint} from '@veo/api-client';
-import {useLocationSource} from '../../../realtime/presentation/providers/LocationSourceProvider';
+import { useEffect, useState } from 'react';
+import type { GeoPoint } from '@veo/api-client';
+import { useLocationSource } from '../../../realtime/presentation/providers/LocationSourceProvider';
 
 /**
  * Ubicación en vivo del conductor para PINTAR el mapa (sólo presentación). Se suscribe a la fuente
@@ -17,8 +17,8 @@ export function useDriverLocation(): GeoPoint | null {
       setPoint(null);
       return;
     }
-    const unsubscribe = source.subscribe(sample => {
-      setPoint({lat: sample.lat, lon: sample.lon});
+    const unsubscribe = source.subscribe((sample) => {
+      setPoint({ lat: sample.lat, lon: sample.lon });
     });
     return unsubscribe;
   }, [source]);

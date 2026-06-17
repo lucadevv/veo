@@ -1,7 +1,10 @@
-import type { TripHistoryItem, TripHistoryPage } from '@veo/api-client';
-import { useInfiniteQuery, type UseInfiniteQueryResult } from '@tanstack/react-query';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import type {TripHistoryItem, TripHistoryPage} from '@veo/api-client';
+import {
+  useInfiniteQuery,
+  type UseInfiniteQueryResult,
+} from '@tanstack/react-query';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /** Clave de cache del historial paginado (una sola "lista infinita" por pasajero). */
 export const tripHistoryKey = ['trips', 'history'] as const;
@@ -43,17 +46,21 @@ export interface UseTripHistoryResult {
 export function useTripHistory(): UseTripHistoryResult {
   const getTripHistory = useDependency(TOKENS.getTripHistoryUseCase);
 
-  const query: UseInfiniteQueryResult<{ pages: TripHistoryPage[] }, Error> = useInfiniteQuery({
-    queryKey: tripHistoryKey,
-    queryFn: ({ pageParam }) =>
-      getTripHistory.execute({ cursor: pageParam ?? undefined, limit: PAGE_SIZE }),
-    initialPageParam: undefined as string | undefined,
-    // `null` (sin más) → undefined corta la paginación; un cursor opaco se re-pasa tal cual.
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
-    staleTime: 60_000,
-  });
+  const query: UseInfiniteQueryResult<{pages: TripHistoryPage[]}, Error> =
+    useInfiniteQuery({
+      queryKey: tripHistoryKey,
+      queryFn: ({pageParam}) =>
+        getTripHistory.execute({
+          cursor: pageParam ?? undefined,
+          limit: PAGE_SIZE,
+        }),
+      initialPageParam: undefined as string | undefined,
+      // `null` (sin más) → undefined corta la paginación; un cursor opaco se re-pasa tal cual.
+      getNextPageParam: last => last.nextCursor ?? undefined,
+      staleTime: 60_000,
+    });
 
-  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = query.data?.pages.flatMap(page => page.items) ?? [];
 
   return {
     items,

@@ -24,10 +24,10 @@ Este servicio está escrito en Go y **replica** la forma JSON del envelope (no i
 
 ## Publica
 
-| eventType | Topic | Key | Disparado por | Consumidores |
-|---|---|---|---|---|
+| eventType                 | Topic    | Key        | Disparado por                               | Consumidores          |
+| ------------------------- | -------- | ---------- | ------------------------------------------- | --------------------- |
 | `driver.location_updated` | `driver` | `driverId` | cada ping GPS (con throttling configurable) | dispatch, trip, share |
-| `driver.entered_zone` | `driver` | `driverId` | transición de entrada a una zona geofence | dispatch, ops |
+| `driver.entered_zone`     | `driver` | `driverId` | transición de entrada a una zona geofence   | dispatch, ops         |
 
 ### `driver.location_updated`
 
@@ -54,23 +54,23 @@ Este servicio está escrito en Go y **replica** la forma JSON del envelope (no i
 
 Ninguno por Kafka. La ingesta de posiciones llega por **MQTT** (no por el bus de eventos).
 
-| Fuente | Topic | Acción |
-|---|---|---|
-| MQTT | `veo/driver/+/location` | Procesa ping: presencia, histórico, geofencing, fan-out, evento |
+| Fuente | Topic                   | Acción                                                          |
+| ------ | ----------------------- | --------------------------------------------------------------- |
+| MQTT   | `veo/driver/+/location` | Procesa ping: presencia, histórico, geofencing, fan-out, evento |
 
 ## Contratos auxiliares (Redis)
 
 Keys que tracking **escribe** y otros servicios **leen**:
 
-| Key | Tipo | TTL | Escribe | Lee |
-|---|---|---|---|---|
+| Key                     | Tipo                                               | TTL | Escribe  | Lee      |
+| ----------------------- | -------------------------------------------------- | --- | -------- | -------- |
 | `driver:loc:{driverId}` | Hash `{lat,lon,status,speed,heading,h3,updatedAt}` | 60s | tracking | dispatch |
-| `h3:available:{cell}` | Set de `driverId` (H3 r9) | 60s | tracking | dispatch |
+| `h3:available:{cell}`   | Set de `driverId` (H3 r9)                          | 60s | tracking | dispatch |
 
 Key que tracking **lee** (la escribe trip-service) para el fan-out del stream:
 
-| Key | Tipo | Escribe | Lee |
-|---|---|---|---|
+| Key                    | Tipo              | Escribe      | Lee                                 |
+| ---------------------- | ----------------- | ------------ | ----------------------------------- |
 | `trip:driver:{tripId}` | String `driverId` | trip-service | tracking (`GET /tracking/{tripId}`) |
 
 ## Ajustes sugeridos al contrato compartido (`packages/events`)

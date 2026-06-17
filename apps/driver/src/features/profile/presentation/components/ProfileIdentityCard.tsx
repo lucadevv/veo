@@ -1,7 +1,7 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {Avatar, Card, Text, useTheme} from '@veo/ui-kit';
-import {IconStar} from '../../../../shared/presentation/icons';
+import { StyleSheet, View } from 'react-native';
+import { Avatar, Card, Text, useTheme } from '@veo/ui-kit';
+import { IconStar } from '../../../../shared/presentation/icons';
 
 export interface ProfileIdentityCardProps {
   /** Nombre/teléfono mostrado como identidad principal. */
@@ -44,7 +44,8 @@ export const ProfileIdentityCard = ({
                   borderColor: theme.colors.border,
                   borderRadius: theme.radii.pill,
                 },
-              ]}>
+              ]}
+            >
               <IconStar size={14} color={theme.colors.warn} filled strokeWidth={1.5} />
               <Text variant="label" color="ink" tabular>
                 {ratingValue}
@@ -64,9 +65,9 @@ export const ProfileIdentityCard = ({
 };
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', gap: 16},
-  info: {flex: 1, gap: 8},
-  metaRow: {flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap'},
+  row: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  info: { flex: 1, gap: 8 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   ratingChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -75,5 +76,5 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderWidth: 1,
   },
-  meta: {flexShrink: 1},
+  meta: { flexShrink: 1 },
 });

@@ -1,4 +1,4 @@
-import type {TFunction} from 'i18next';
+import type { TFunction } from 'i18next';
 
 /**
  * Humaniza un valor de enum del backend como FALLBACK honesto cuando no hay traducción:
@@ -16,7 +16,7 @@ function humanize(value: string): string {
  * Es la fuente única para que el perfil no exponga "AVAILABLE/VERIFIED/CLEARED/DRIVER_LICENSE/PENDING".
  */
 export function enumLabel(t: TFunction, ns: string, value: string): string {
-  return t(`${ns}.${value}`, {defaultValue: humanize(value)});
+  return t(`${ns}.${value}`, { defaultValue: humanize(value) });
 }
 
 /** Valores "buenos" (verde) de los estados del perfil. Evita comparar strings mágicos sueltos en la UI. */

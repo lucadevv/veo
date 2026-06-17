@@ -1,6 +1,6 @@
-import type { ReferralSummary } from './entities';
-import { MIN_REFERRAL_CODE_LENGTH, normalizeReferralCode } from './entities';
-import type { ReferralsRepository } from './referralsRepository';
+import type {ReferralSummary} from './entities';
+import {MIN_REFERRAL_CODE_LENGTH, normalizeReferralCode} from './entities';
+import type {ReferralsRepository} from './referralsRepository';
 
 /** Motivo por el que un código de referido es inválido (mapea a una clave i18n de error). */
 export type ReferralCodeReason = 'empty' | 'tooShort' | 'ownCode';

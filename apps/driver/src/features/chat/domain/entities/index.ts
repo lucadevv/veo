@@ -1,4 +1,4 @@
-import type {ChatMessage, ChatSenderRole, SendMessageRequest} from '@veo/api-client';
+import type { ChatMessage, ChatSenderRole, SendMessageRequest } from '@veo/api-client';
 
 /**
  * Entidades del dominio de chat del viaje (lado conductor, Ola 2A).

@@ -31,7 +31,10 @@ export class PassengerSocket {
         timeout: timeoutMs,
       });
       this.socket = socket;
-      const timer = setTimeout(() => reject(new Error('timeout conectando /passenger socket')), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error('timeout conectando /passenger socket')),
+        timeoutMs,
+      );
       socket.on('connect', () => {
         clearTimeout(timer);
         resolve();

@@ -56,7 +56,8 @@ async function resolveJwtKeys(config: ConfigService<Env, true>): Promise<JwtKeys
 const jwtProvider: Provider = {
   provide: JwtService,
   inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>) => resolveJwtKeys(config).then((keys) => new JwtService(keys)),
+  useFactory: (config: ConfigService<Env, true>) =>
+    resolveJwtKeys(config).then((keys) => new JwtService(keys)),
 };
 
 const internalSecretProvider: Provider = {

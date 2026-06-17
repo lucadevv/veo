@@ -31,7 +31,9 @@ export interface TestDatabase {
   teardown: () => Promise<void>;
 }
 
-export async function createTestDatabase(opts: CreateTestDatabaseOptions = {}): Promise<TestDatabase> {
+export async function createTestDatabase(
+  opts: CreateTestDatabaseOptions = {},
+): Promise<TestDatabase> {
   const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
   const container = await new PostgreSqlContainer(opts.image ?? 'postgis/postgis:16-3.4-alpine')
     .withDatabase('veo_test')

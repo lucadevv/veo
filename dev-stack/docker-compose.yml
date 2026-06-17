@@ -19,7 +19,7 @@ services:
       POSTGRES_PASSWORD: veo_dev
       POSTGRES_DB: veo
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
-    ports: ["5433:5432"]   # host 5433 → evita choque con otro Postgres local en 5432
+    ports: ["5433:5432"] # host 5433 → evita choque con otro Postgres local en 5432
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -53,8 +53,8 @@ services:
       CLICKHOUSE_PASSWORD: veo_dev
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports:
-      - "8123:8123"   # HTTP
-      - "9000:9000"   # Native
+      - "8123:8123" # HTTP
+      - "9000:9000" # Native
     volumes:
       - clickhouse-data:/var/lib/clickhouse
     ulimits:
@@ -101,8 +101,8 @@ services:
       MINIO_ROOT_USER: veo_dev
       MINIO_ROOT_PASSWORD: veo_dev_secret
     ports:
-      - "9002:9000"   # S3 API (host 9002 → MinIO 9000; evita choque con ClickHouse Native 9000)
-      - "9001:9001"   # Console
+      - "9002:9000" # S3 API (host 9002 → MinIO 9000; evita choque con ClickHouse Native 9000)
+      - "9001:9001" # Console
     volumes:
       - minio-data:/data
     healthcheck:
@@ -137,7 +137,7 @@ services:
     container_name: veo-mosquitto
     ports:
       - "1883:1883"
-      - "9883:9001"  # WebSocket
+      - "9883:9001" # WebSocket
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
@@ -151,17 +151,17 @@ services:
     environment:
       LIVEKIT_KEYS: "devkey: devsecret_change_in_production"
     ports:
-      - "7880:7880"   # WS signaling
-      - "7881:7881"   # TURN/TLS
-      - "7882:7882/udp"  # ICE/UDP
+      - "7880:7880" # WS signaling
+      - "7881:7881" # TURN/TLS
+      - "7882:7882/udp" # ICE/UDP
 
   # === Mailpit (SMTP catcher para email dev) ===
   mailpit:
     image: axllent/mailpit:latest
     container_name: veo-mailpit
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # UI
+      - "1025:1025" # SMTP
+      - "8025:8025" # UI
 
   # === Jaeger (tracing) ===
   jaeger:
@@ -171,8 +171,8 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
       - "16686:16686" # UI
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
 
   # === Prometheus + Grafana ===
   prometheus:
@@ -221,7 +221,7 @@ services:
     image: ghcr.io/project-osrm/osrm-backend:latest
     container_name: veo-osrm
     profiles: ["maps"]
-    platform: linux/amd64   # osrm-backend solo publica imagen amd64 (emulada en Apple Silicon)
+    platform: linux/amd64 # osrm-backend solo publica imagen amd64 (emulada en Apple Silicon)
     command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "8000", "/data/region.osrm"]
     ports:
       - "5005:5000"
@@ -238,9 +238,9 @@ services:
       IMPORT_WIKIPEDIA: "false"
       NOMINATIM_PASSWORD: veo_dev
     ports:
-      - "${NOMINATIM_PORT:-8081}:8080"   # default 8081 (contrato); override si el host lo tiene ocupado
+      - "${NOMINATIM_PORT:-8081}:8080" # default 8081 (contrato); override si el host lo tiene ocupado
     volumes:
-      - ./maps/nominatim/data:/nominatim/data   # rw: el entrypoint mediagis hace chown -R sobre /nominatim
+      - ./maps/nominatim/data:/nominatim/data # rw: el entrypoint mediagis hace chown -R sobre /nominatim
       - nominatim-data:/var/lib/postgresql/14/main
     shm_size: "1gb"
 

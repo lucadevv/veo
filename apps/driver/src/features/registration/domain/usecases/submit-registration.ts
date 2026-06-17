@@ -1,5 +1,5 @@
-import type {RegistrationRepository} from '../repositories/registration-repository';
-import type {RegistrationDraft, RegistrationSubmissionResult} from '../entities';
+import type { RegistrationRepository } from '../repositories/registration-repository';
+import type { RegistrationDraft, RegistrationSubmissionResult } from '../entities';
 
 /** Error de dominio: el borrador no está completo para enviarse. */
 export class IncompleteRegistrationError extends Error {
@@ -27,15 +27,15 @@ export class SubmitRegistrationUseCase {
 
 /** Verifica que el borrador tenga los campos obligatorios de los 4 pasos. */
 export function isDraftComplete(draft: RegistrationDraft): boolean {
-  const {personal, vehicle, faceCaptureRef} = draft;
+  const { personal, vehicle, faceCaptureRef } = draft;
   return Boolean(
     personal.fullName.trim() &&
-      personal.dni.trim() &&
-      personal.birthdate.trim() &&
-      vehicle.plate.trim() &&
-      vehicle.brand.trim() &&
-      vehicle.year.trim() &&
-      vehicle.model.trim() &&
-      faceCaptureRef,
+    personal.dni.trim() &&
+    personal.birthdate.trim() &&
+    vehicle.plate.trim() &&
+    vehicle.brand.trim() &&
+    vehicle.year.trim() &&
+    vehicle.model.trim() &&
+    faceCaptureRef,
   );
 }

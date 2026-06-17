@@ -1,8 +1,8 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { IconCheck } from '../../../auth/presentation/components/icons';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {IconCheck} from '../../../auth/presentation/components/icons';
 
 /** Claves de motivo (i18n en `ratings.reason.*`). Estables: viajan dentro del comentario al backend. */
 export type RatingReason =
@@ -27,7 +27,11 @@ const IMPROVE_REASONS: readonly RatingReason[] = [
 ];
 
 /** Elogios (5 estrellas). Espejo del bloque `r===5` del handoff `Rating`. */
-const PRAISE_REASONS: readonly RatingReason[] = ['GREAT_TREATMENT', 'PUNCTUAL', 'SAFE_DRIVING'];
+const PRAISE_REASONS: readonly RatingReason[] = [
+  'GREAT_TREATMENT',
+  'PUNCTUAL',
+  'SAFE_DRIVING',
+];
 
 /**
  * Chips de motivo condicionados a las estrellas (handoff `Rating`): si la nota es baja (1–4) ofrece
@@ -46,31 +50,32 @@ export function RatingReasonChips({
   onChange: (next: RatingReason[]) => void;
 }): React.JSX.Element | null {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   if (stars < 1) {
     return null;
   }
 
   const reasons = stars === 5 ? PRAISE_REASONS : IMPROVE_REASONS;
-  const label = stars === 5 ? t('ratings.praiseLabel') : t('ratings.improveLabel');
+  const label =
+    stars === 5 ? t('ratings.praiseLabel') : t('ratings.improveLabel');
 
   const toggle = (r: RatingReason): void =>
-    onChange(value.includes(r) ? value.filter((x) => x !== r) : [...value, r]);
+    onChange(value.includes(r) ? value.filter(x => x !== r) : [...value, r]);
 
   return (
-    <View style={{ gap: theme.spacing.xs, marginTop: theme.spacing.lg }}>
+    <View style={{gap: theme.spacing.xs, marginTop: theme.spacing.lg}}>
       <Text variant="footnote" color="inkMuted" align="center">
         {label}
       </Text>
-      <View style={[styles.row, { gap: theme.spacing.sm }]}>
-        {reasons.map((r) => {
+      <View style={[styles.row, {gap: theme.spacing.sm}]}>
+        {reasons.map(r => {
           const on = value.includes(r);
           return (
             <Pressable
               key={r}
               accessibilityRole="button"
-              accessibilityState={{ selected: on }}
+              accessibilityState={{selected: on}}
               onPress={() => toggle(r)}
               style={[
                 styles.chip,
@@ -79,10 +84,11 @@ export function RatingReasonChips({
                   paddingHorizontal: theme.spacing.md,
                   paddingVertical: theme.spacing.sm,
                   borderColor: on ? theme.colors.accent : theme.colors.border,
-                  backgroundColor: on ? theme.colors.surfaceElevated : 'transparent',
+                  backgroundColor: on
+                    ? theme.colors.surfaceElevated
+                    : 'transparent',
                 },
-              ]}
-            >
+              ]}>
               {on ? <IconCheck color={theme.colors.accent} size={14} /> : null}
               <Text variant="footnote" color={on ? 'accent' : 'ink'}>
                 {t(`ratings.reason.${r}`)}
@@ -100,10 +106,15 @@ export function reasonLabels(
   reasons: RatingReason[],
   translate: (key: string) => string,
 ): string[] {
-  return reasons.map((r) => translate(`ratings.reason.${r}`));
+  return reasons.map(r => translate(`ratings.reason.${r}`));
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
-  chip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 999 },
+  row: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center'},
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+  },
 });

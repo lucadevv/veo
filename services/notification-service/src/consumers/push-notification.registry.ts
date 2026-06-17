@@ -102,11 +102,15 @@ export interface PushNotificationSpec<T extends EventType = EventType> {
  * enrichment) y el motor solo invoca los callbacks con el payload ya validado por
  * `schema` + `enrichment`, así que la vista opaca nunca miente.
  */
-export function defineSpec<T extends EventType, E extends z.ZodTypeAny = z.ZodObject<Record<string, never>>>(
-  eventType: T,
-  def: PushSpecDefinition<T, E>,
-): PushNotificationSpec<T> {
-  return { eventType, schema: EVENT_SCHEMAS[eventType], ...def } as unknown as PushNotificationSpec<T>;
+export function defineSpec<
+  T extends EventType,
+  E extends z.ZodTypeAny = z.ZodObject<Record<string, never>>,
+>(eventType: T, def: PushSpecDefinition<T, E>): PushNotificationSpec<T> {
+  return {
+    eventType,
+    schema: EVENT_SCHEMAS[eventType],
+    ...def,
+  } as unknown as PushNotificationSpec<T>;
 }
 
 /* ────────────────────────────── constantes de dominio ────────────────────────────── */
@@ -175,7 +179,10 @@ export const PUSH_NOTIFICATION_SPECS = {
     recipientFallback: (p) => p.tripId,
     template: TEMPLATE_KEYS.TRIP_ACCEPTED,
     dedup: (p) => `trip:${p.tripId}:accepted`,
-    vars: (p) => ({ driverName: p.driverName ?? DEFAULT_DRIVER_NAME, etaMinutes: etaMinutes(p.etaSeconds) }),
+    vars: (p) => ({
+      driverName: p.driverName ?? DEFAULT_DRIVER_NAME,
+      etaMinutes: etaMinutes(p.etaSeconds),
+    }),
     data: (p) => ({ tripId: p.tripId, driverId: p.driverId, screen: PUSH_SCREEN.TripActive }),
   }),
 
@@ -208,11 +215,15 @@ export const PUSH_NOTIFICATION_SPECS = {
     recipient: (p) => p.passengerId,
     recipientFallback: (p) => p.tripId,
     template: (p) =>
-      p.waitWindowSeconds !== undefined ? TEMPLATE_KEYS.TRIP_ARRIVED_WAIT : TEMPLATE_KEYS.TRIP_ARRIVED,
+      p.waitWindowSeconds !== undefined
+        ? TEMPLATE_KEYS.TRIP_ARRIVED_WAIT
+        : TEMPLATE_KEYS.TRIP_ARRIVED,
     dedup: (p) => `trip:${p.tripId}:arrived`,
     vars: (p) => ({
       driverName: p.driverName ?? DEFAULT_DRIVER_NAME,
-      ...(p.waitWindowSeconds !== undefined ? { waitMinutes: Math.round(p.waitWindowSeconds / 60) } : {}),
+      ...(p.waitWindowSeconds !== undefined
+        ? { waitMinutes: Math.round(p.waitWindowSeconds / 60) }
+        : {}),
     }),
     data: (p) => ({ tripId: p.tripId, driverId: p.driverId, screen: PUSH_SCREEN.TripActive }),
   }),
@@ -264,7 +275,9 @@ export const PUSH_NOTIFICATION_SPECS = {
     recipient: (p) => p.passengerId,
     recipientFallback: (p) => p.tripId,
     template: (p) =>
-      p.by === 'PASSENGER' ? TEMPLATE_KEYS.TRIP_CANCELLED_BY_PASSENGER : TEMPLATE_KEYS.TRIP_CANCELLED_BY_DRIVER,
+      p.by === 'PASSENGER'
+        ? TEMPLATE_KEYS.TRIP_CANCELLED_BY_PASSENGER
+        : TEMPLATE_KEYS.TRIP_CANCELLED_BY_DRIVER,
     dedup: (p) => `trip:${p.tripId}:cancelled:${p.by}`,
     data: (p) => ({ tripId: p.tripId }),
   }),
@@ -351,7 +364,11 @@ export const PUSH_NOTIFICATION_SPECS = {
     template: TEMPLATE_KEYS.PAYMENT_PENALTY_RECORDED,
     dedup: (p) => `penalty:${p.penaltyId}:recorded`,
     vars: (p) => ({ amount: formatSoles(p.penaltyCents) }),
-    data: (p) => ({ tripId: p.tripId, penaltyId: p.penaltyId, screen: PUSH_SCREEN.CancellationPenalty }),
+    data: (p) => ({
+      tripId: p.tripId,
+      penaltyId: p.penaltyId,
+      screen: PUSH_SCREEN.CancellationPenalty,
+    }),
   }),
 
   /** payment.affiliation_activated → "Yape quedó vinculado". El destinatario (userId) viaja directo. */
@@ -382,7 +399,8 @@ export const PUSH_NOTIFICATION_SPECS = {
     template: TEMPLATE_KEYS.CHAT_MESSAGE,
     dedup: (p) => `chat:${p.messageId}`,
     vars: (p) => ({
-      preview: p.body.length > CHAT_PREVIEW_MAX ? `${p.body.slice(0, CHAT_PREVIEW_SLICE)}...` : p.body,
+      preview:
+        p.body.length > CHAT_PREVIEW_MAX ? `${p.body.slice(0, CHAT_PREVIEW_SLICE)}...` : p.body,
     }),
     data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.Chat }),
   }),
@@ -492,7 +510,9 @@ export async function runPushSpec(
     hint.data.platform,
   );
   if (targets.length === 0) {
-    ctx.warn(`${spec.eventType} (${dedupSegment}): sin token push del destinatario (evento ni almacén) → push omitido`);
+    ctx.warn(
+      `${spec.eventType} (${dedupSegment}): sin token push del destinatario (evento ni almacén) → push omitido`,
+    );
     return;
   }
 

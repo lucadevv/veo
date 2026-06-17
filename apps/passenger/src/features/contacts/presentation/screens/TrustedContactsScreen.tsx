@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
   Banner,
   BottomSheet,
@@ -11,15 +11,19 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import { ContactValidationError } from '../../domain/usecases';
-import { MAX_TRUSTED_CONTACTS, type TrustedContact } from '../../domain/entities';
-import { ContactLeadCircle } from '../components/ContactLeadCircle';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {ContactValidationError} from '../../domain/usecases';
+import {MAX_TRUSTED_CONTACTS, type TrustedContact} from '../../domain/entities';
+import {ContactLeadCircle} from '../components/ContactLeadCircle';
 
 /**
  * Contactos de confianza (BR-I06) contra el bff REAL `/contacts`. Lista, agrega (dispara OTP al
@@ -27,7 +31,7 @@ import { ContactLeadCircle } from '../components/ContactLeadCircle';
  */
 export function TrustedContactsScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const queryClient = useQueryClient();
 
   const listContacts = useDependency(TOKENS.listContactsUseCase);
@@ -46,18 +50,27 @@ export function TrustedContactsScreen(): React.JSX.Element {
   const [phone, setPhone] = useState('');
   const [relationship, setRelationship] = useState('');
   const [email, setEmail] = useState('');
-  const [fieldError, setFieldError] = useState<ContactValidationError['field'] | null>(null);
+  const [fieldError, setFieldError] = useState<
+    ContactValidationError['field'] | null
+  >(null);
 
   const [verifyTarget, setVerifyTarget] = useState<TrustedContact | null>(null);
   const [code, setCode] = useState('');
 
   const [removeTarget, setRemoveTarget] = useState<TrustedContact | null>(null);
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['contacts'] });
+  const invalidate = () =>
+    queryClient.invalidateQueries({queryKey: ['contacts']});
 
   const addMutation = useMutation({
-    mutationFn: () => addContact.execute({ name, phone, relationship, email: email || undefined }),
-    onSuccess: (contact) => {
+    mutationFn: () =>
+      addContact.execute({
+        name,
+        phone,
+        relationship,
+        email: email || undefined,
+      }),
+    onSuccess: contact => {
       invalidate();
       setAddOpen(false);
       setName('');
@@ -68,7 +81,7 @@ export function TrustedContactsScreen(): React.JSX.Element {
       // El bff envió OTP al contacto: abrimos la verificación.
       setVerifyTarget(contact);
     },
-    onError: (error) => {
+    onError: error => {
       if (error instanceof ContactValidationError) {
         setFieldError(error.field);
       }
@@ -111,14 +124,20 @@ export function TrustedContactsScreen(): React.JSX.Element {
             setAddOpen(true);
           }}
         />
-      }
-    >
-      <Text variant="callout" color="inkMuted" style={{ marginBottom: theme.spacing.lg }}>
+      }>
+      <Text
+        variant="callout"
+        color="inkMuted"
+        style={{marginBottom: theme.spacing.lg}}>
         {t('contacts.subtitle')}
       </Text>
 
       {atMax ? (
-        <Banner tone="info" title={t('contacts.maxReached')} style={{ marginBottom: theme.spacing.md }} />
+        <Banner
+          tone="info"
+          title={t('contacts.maxReached')}
+          style={{marginBottom: theme.spacing.md}}
+        />
       ) : null}
 
       {listQuery.isLoading ? (
@@ -126,10 +145,15 @@ export function TrustedContactsScreen(): React.JSX.Element {
       ) : listQuery.isError ? (
         <ErrorState onRetry={() => listQuery.refetch()} />
       ) : contacts.length === 0 ? (
-        <EmptyState title={t('contacts.empty')} subtitle={t('contacts.emptySubtitle')} />
+        <EmptyState
+          title={t('contacts.empty')}
+          subtitle={t('contacts.emptySubtitle')}
+        />
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: theme.spacing.sm }}>
-          {contacts.map((contact) => (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{gap: theme.spacing.sm}}>
+          {contacts.map(contact => (
             <Card key={contact.id} variant="outlined" padding="md">
               <ListItem
                 title={contact.name}
@@ -137,13 +161,22 @@ export function TrustedContactsScreen(): React.JSX.Element {
                 leading={<ContactLeadCircle />}
                 trailing={
                   <StatusPill
-                    label={contact.verified ? t('contacts.verified') : t('contacts.pending')}
+                    label={
+                      contact.verified
+                        ? t('contacts.verified')
+                        : t('contacts.pending')
+                    }
                     tone={contact.verified ? 'success' : 'warn'}
                     dot
                   />
                 }
               />
-              <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  gap: theme.spacing.sm,
+                  marginTop: theme.spacing.sm,
+                }}>
                 {!contact.verified ? (
                   <>
                     <Button
@@ -188,31 +221,39 @@ export function TrustedContactsScreen(): React.JSX.Element {
             loading={addMutation.isPending}
             onPress={() => addMutation.mutate()}
           />
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
-          {addMutation.isError && !(addMutation.error instanceof ContactValidationError) ? (
+        }>
+        <View style={{gap: theme.spacing.md}}>
+          {addMutation.isError &&
+          !(addMutation.error instanceof ContactValidationError) ? (
             <Banner tone="danger" title={t('contacts.addError')} />
           ) : null}
           <TextField
             label={t('contacts.nameLabel')}
             value={name}
             onChangeText={setName}
-            error={fieldError === 'name' ? t('contacts.invalidName') : undefined}
+            error={
+              fieldError === 'name' ? t('contacts.invalidName') : undefined
+            }
           />
           <TextField
             label={t('contacts.phoneLabel')}
             keyboardType="phone-pad"
             value={phone}
             onChangeText={setPhone}
-            error={fieldError === 'phone' ? t('contacts.invalidPhone') : undefined}
+            error={
+              fieldError === 'phone' ? t('contacts.invalidPhone') : undefined
+            }
           />
           <TextField
             label={t('contacts.relationshipLabel')}
             helperText={t('contacts.relationshipHelper')}
             value={relationship}
             onChangeText={setRelationship}
-            error={fieldError === 'relationship' ? t('contacts.invalidRelationship') : undefined}
+            error={
+              fieldError === 'relationship'
+                ? t('contacts.invalidRelationship')
+                : undefined
+            }
           />
           <TextField
             label={t('contacts.emailLabel')}
@@ -220,7 +261,9 @@ export function TrustedContactsScreen(): React.JSX.Element {
             autoCapitalize="none"
             value={email}
             onChangeText={setEmail}
-            error={fieldError === 'email' ? t('contacts.invalidEmail') : undefined}
+            error={
+              fieldError === 'email' ? t('contacts.invalidEmail') : undefined
+            }
           />
         </View>
       </BottomSheet>
@@ -238,18 +281,21 @@ export function TrustedContactsScreen(): React.JSX.Element {
             disabled={code.length !== 6}
             onPress={() => verifyMutation.mutate()}
           />
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
+        }>
+        <View style={{gap: theme.spacing.md}}>
           <Text variant="callout" color="inkMuted">
-            {t('contacts.verifyBody', { phone: verifyTarget?.phone ?? '' })}
+            {t('contacts.verifyBody', {phone: verifyTarget?.phone ?? ''})}
           </Text>
-          {verifyMutation.isError ? <Banner tone="danger" title={t('contacts.verifyError')} /> : null}
+          {verifyMutation.isError ? (
+            <Banner tone="danger" title={t('contacts.verifyError')} />
+          ) : null}
           <TextField
             label={t('contacts.otpLabel')}
             keyboardType="number-pad"
             value={code}
-            onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+            onChangeText={value =>
+              setCode(value.replace(/\D/g, '').slice(0, 6))
+            }
             maxLength={6}
           />
         </View>
@@ -261,7 +307,7 @@ export function TrustedContactsScreen(): React.JSX.Element {
         onClose={() => setRemoveTarget(null)}
         title={t('contacts.removeTitle')}
         footer={
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Button
               label={t('contacts.remove')}
               variant="danger"
@@ -269,10 +315,14 @@ export function TrustedContactsScreen(): React.JSX.Element {
               loading={removeMutation.isPending}
               onPress={() => removeMutation.mutate()}
             />
-            <Button label={t('actions.cancel')} variant="ghost" fullWidth onPress={() => setRemoveTarget(null)} />
+            <Button
+              label={t('actions.cancel')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setRemoveTarget(null)}
+            />
           </View>
-        }
-      >
+        }>
         <Text variant="callout" color="inkMuted">
           {t('contacts.removeBody')}
         </Text>

@@ -24,17 +24,17 @@
 
 Arrancá por el enum y dejá que typecheck/tests te griten el resto. En orden de dominó:
 
-| # | Archivo | Qué tocás | Quién te lo grita |
-|---|---|---|---|
-| 1 | `packages/shared-types/src/enums/index.ts` | `VehicleType` (alias `VehicleClass`): la clase nueva | — (acá empieza el dominó) |
-| 2 | `packages/shared-types/src/catalog/offerings.ts` | `OfferingId` nuevo + entrada en `OFFERINGS` + token en `OfferingIcon` | `as const satisfies Record<OfferingId, OfferingSpec>`: un id sin entrada NO compila |
-| 3 | `packages/shared-types/test/offerings.spec.ts` | snapshot del catálogo (ids/política) | el propio spec al correr `pnpm --filter @veo/shared-types test` |
-| 4 | `packages/api-client/src/mobile.ts` | `mobileVehicleType`: espejo LITERAL del enum (decisión Lote A: cero dependencia runtime en la app) | `packages/api-client/test/offerings-sync.contract.test.ts` — el spec de sync caza el olvido (la prueba de fuego lo demostró) |
-| 5 | `services/bff/public-bff/src/maps/offering-names.ts` | display name de la oferta | `Record<OfferingId, string>` exhaustivo: no compila sin la entrada |
-| 6 | `services/bff/public-bff/src/maps/dto/maps.dto.ts` + `fare.ts` | DTO del quote / ids de tarifa | typecheck + `maps.service.spec` / `fare.spec` (snapshot de ids; el spec "every PUJA" asierta el INVARIANTE de modo por oferta) |
-| 7 | `apps/passenger/src/shared/presentation/components/offeringGlyphs.tsx` | glyph/tono/ícono de la oferta (`Record<OfferingIcon, …>`) | typecheck del Record + `apps/passenger/__tests__/offeringGlyphs.test.ts` |
-| 8 | `apps/driver/src/shared/presentation/vehicle-class.ts` + `VehicleTypeSelector.tsx` (registration y shift) | clase visible para el conductor | typecheck + `vehicle-class.test.ts` |
-| 9 | `apps/passenger/src/i18n/locales/*` y `apps/driver/src/i18n/locales/*` | labels de la clase/oferta | specs de i18n/snapshots de las apps |
+| #   | Archivo                                                                                                   | Qué tocás                                                                                          | Quién te lo grita                                                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `packages/shared-types/src/enums/index.ts`                                                                | `VehicleType` (alias `VehicleClass`): la clase nueva                                               | — (acá empieza el dominó)                                                                                                      |
+| 2   | `packages/shared-types/src/catalog/offerings.ts`                                                          | `OfferingId` nuevo + entrada en `OFFERINGS` + token en `OfferingIcon`                              | `as const satisfies Record<OfferingId, OfferingSpec>`: un id sin entrada NO compila                                            |
+| 3   | `packages/shared-types/test/offerings.spec.ts`                                                            | snapshot del catálogo (ids/política)                                                               | el propio spec al correr `pnpm --filter @veo/shared-types test`                                                                |
+| 4   | `packages/api-client/src/mobile.ts`                                                                       | `mobileVehicleType`: espejo LITERAL del enum (decisión Lote A: cero dependencia runtime en la app) | `packages/api-client/test/offerings-sync.contract.test.ts` — el spec de sync caza el olvido (la prueba de fuego lo demostró)   |
+| 5   | `services/bff/public-bff/src/maps/offering-names.ts`                                                      | display name de la oferta                                                                          | `Record<OfferingId, string>` exhaustivo: no compila sin la entrada                                                             |
+| 6   | `services/bff/public-bff/src/maps/dto/maps.dto.ts` + `fare.ts`                                            | DTO del quote / ids de tarifa                                                                      | typecheck + `maps.service.spec` / `fare.spec` (snapshot de ids; el spec "every PUJA" asierta el INVARIANTE de modo por oferta) |
+| 7   | `apps/passenger/src/shared/presentation/components/offeringGlyphs.tsx`                                    | glyph/tono/ícono de la oferta (`Record<OfferingIcon, …>`)                                          | typecheck del Record + `apps/passenger/__tests__/offeringGlyphs.test.ts`                                                       |
+| 8   | `apps/driver/src/shared/presentation/vehicle-class.ts` + `VehicleTypeSelector.tsx` (registration y shift) | clase visible para el conductor                                                                    | typecheck + `vehicle-class.test.ts`                                                                                            |
+| 9   | `apps/passenger/src/i18n/locales/*` y `apps/driver/src/i18n/locales/*`                                    | labels de la clase/oferta                                                                          | specs de i18n/snapshots de las apps                                                                                            |
 
 > Los **eventos del wire** ya NO están en esta lista como paso manual: ver (c).
 
@@ -47,11 +47,11 @@ enum`). La prueba de fuego lo confirmó: este es el único paso 100 % silencioso
 
 Tocá el `enum VehicleType` en los TRES servicios que lo persisten:
 
-| Servicio | Archivo |
-|---|---|
-| trip-service | `services/trip-service/prisma/schema.prisma` (enum `VehicleType`, línea ~79) |
-| dispatch-service | `services/dispatch-service/prisma/schema.prisma` (línea ~29) |
-| fleet-service | `services/fleet-service/prisma/schema.prisma` (línea ~61) |
+| Servicio         | Archivo                                                                      |
+| ---------------- | ---------------------------------------------------------------------------- |
+| trip-service     | `services/trip-service/prisma/schema.prisma` (enum `VehicleType`, línea ~79) |
+| dispatch-service | `services/dispatch-service/prisma/schema.prisma` (línea ~29)                 |
+| fleet-service    | `services/fleet-service/prisma/schema.prisma` (línea ~61)                    |
 
 Y generá la migración POR SERVICIO (regenera además el client tipado — sin esto, los specs
 parametrizados por clase no typecheckean, porque `Trip.vehicleType` sigue siendo el enum viejo):

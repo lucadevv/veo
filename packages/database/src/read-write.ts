@@ -41,7 +41,9 @@ export class ReadWriteClient<T extends PrismaLike> {
   constructor(Ctor: PrismaClientCtor<T>, opts: ReadWriteOptions) {
     this.write = new Ctor({ datasourceUrl: opts.writeUrl, log: opts.log });
     this.splitEnabled = Boolean(opts.readUrl) && opts.readUrl !== opts.writeUrl;
-    this.read = this.splitEnabled ? new Ctor({ datasourceUrl: opts.readUrl, log: opts.log }) : this.write;
+    this.read = this.splitEnabled
+      ? new Ctor({ datasourceUrl: opts.readUrl, log: opts.log })
+      : this.write;
   }
 
   async connect(): Promise<void> {

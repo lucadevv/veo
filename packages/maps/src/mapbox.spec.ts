@@ -37,7 +37,7 @@ describe('MapboxMapsClient · autocomplete', () => {
             },
           },
           {
-            geometry: { type: 'Point', coordinates: [-77.03, -12.1 ] },
+            geometry: { type: 'Point', coordinates: [-77.03, -12.1] },
             properties: {
               name: 'Parque Kennedy',
               full_address: 'Parque Kennedy, Miraflores, Lima',
@@ -63,7 +63,9 @@ describe('MapboxMapsClient · autocomplete', () => {
     });
     // Forward v6 endpoint + sesgo por proximidad (lon,lat) + país + idioma + autocomplete.
     expect(requestedUrl).toContain('/search/geocode/v6/forward');
-    expect(requestedUrl).toContain(`proximity=${encodeURIComponent(`${MIRAFLORES.lon},${MIRAFLORES.lat}`)}`);
+    expect(requestedUrl).toContain(
+      `proximity=${encodeURIComponent(`${MIRAFLORES.lon},${MIRAFLORES.lat}`)}`,
+    );
     expect(requestedUrl).toContain('country=pe');
     expect(requestedUrl).toContain('language=es');
     expect(requestedUrl).toContain('autocomplete=true');
@@ -242,7 +244,9 @@ describe('MapboxMapsClient · etaBatch (Matrix v1)', () => {
     const fetchImpl = (async (url: string) => {
       calls += 1;
       requestedUrl = url;
-      return new Response(JSON.stringify({ code: 'Ok', durations: [[180], [300]] }), { status: 200 });
+      return new Response(JSON.stringify({ code: 'Ok', durations: [[180], [300]] }), {
+        status: 200,
+      });
     }) as unknown as typeof fetch;
     const client = new MapboxMapsClient({ accessToken: TOKEN, fetchImpl });
 

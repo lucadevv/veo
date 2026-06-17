@@ -1,5 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 import { VehicleType, type FleetDocumentType } from '@veo/shared-types';
 import type { VehicleReviewStatus } from '../vehicle-rules';
 
@@ -51,7 +63,10 @@ export class CreateVehicleDto {
   @IsString()
   fleetId?: string;
 
-  @ApiPropertyOptional({ description: 'Vencimiento del seguro (SOAT/póliza)', example: '2026-12-31T00:00:00.000Z' })
+  @ApiPropertyOptional({
+    description: 'Vencimiento del seguro (SOAT/póliza)',
+    example: '2026-12-31T00:00:00.000Z',
+  })
   @IsOptional()
   @IsISO8601()
   insuranceExpiresAt?: string;
@@ -90,7 +105,8 @@ export class RegisterDriverVehicleDto {
 
   @ApiPropertyOptional({
     example: 'Honda',
-    description: 'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
+    description:
+      'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
   })
   @IsOptional()
   @IsString()
@@ -99,14 +115,18 @@ export class RegisterDriverVehicleDto {
 
   @ApiPropertyOptional({
     example: 'CG 150',
-    description: 'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
+    description:
+      'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
   })
   @IsOptional()
   @IsString()
   @Length(1, 60)
   model?: string;
 
-  @ApiProperty({ example: 2021, description: `Año del vehículo (>= ${MIN_REASONABLE_YEAR}). BR-D04 (>=2017) se aplica en el servicio.` })
+  @ApiProperty({
+    example: 2021,
+    description: `Año del vehículo (>= ${MIN_REASONABLE_YEAR}). BR-D04 (>=2017) se aplica en el servicio.`,
+  })
   @IsInt()
   @Min(MIN_REASONABLE_YEAR)
   @Max(CURRENT_YEAR + 1)

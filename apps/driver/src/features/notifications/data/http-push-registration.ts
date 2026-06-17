@@ -1,5 +1,5 @@
-import type {HttpClient} from '@veo/api-client';
-import { registerDevice} from '@veo/api-client';
+import type { HttpClient } from '@veo/api-client';
+import { registerDevice } from '@veo/api-client';
 import {
   PushRegistrationUnavailableError,
   type DeviceTokenRegistration,
@@ -23,7 +23,7 @@ export class HttpPushRegistrationPort implements PushRegistrationPort {
   async registerDeviceToken(registration: DeviceTokenRegistration): Promise<void> {
     try {
       const body = registerDevice.parse(registration);
-      await this.http.post<void>('/notifications/device-token', {body});
+      await this.http.post<void>('/notifications/device-token', { body });
     } catch (error) {
       throw new PushRegistrationUnavailableError(
         error instanceof Error ? error.message : undefined,

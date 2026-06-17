@@ -18,7 +18,9 @@
   },
   "typesVersions": {
     "*": {
-      "nest": ["./dist/nest.d.ts"]
+      "nest": [
+        "./dist/nest.d.ts"
+      ]
     }
   },
   "scripts": {

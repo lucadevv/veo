@@ -14,10 +14,7 @@ const identity: AuthenticatedUser = { userId: 'usr-1', type: 'driver', roles: []
 /** Perfil de conductor de `usr-1`: el viaje referencia este `id` (drv-9), no el userId. */
 const DRIVER = { id: 'drv-9', userId: 'usr-1', found: true };
 
-function makeService(opts: {
-  driverFound?: boolean;
-  trip?: Record<string, unknown> | null;
-}) {
+function makeService(opts: { driverFound?: boolean; trip?: Record<string, unknown> | null }) {
   // GrpcGateway.call enruta por (service, method): identity→GetDriverByUser, trip→GetTrip.
   const grpc = {
     call: vi.fn((service: string) => {
@@ -28,7 +25,12 @@ function makeService(opts: {
     }),
   };
   const post = vi.fn(() =>
-    Promise.resolve({ roomName: 'cabin:trip-1', token: 'tok', url: 'wss://lk', expiresInSeconds: 3600 }),
+    Promise.resolve({
+      roomName: 'cabin:trip-1',
+      token: 'tok',
+      url: 'wss://lk',
+      expiresInSeconds: 3600,
+    }),
   );
   const rest = { client: vi.fn(() => ({ post })) };
   const service = new MediaService(grpc as never, rest as never);

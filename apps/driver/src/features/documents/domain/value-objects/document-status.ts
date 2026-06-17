@@ -1,5 +1,5 @@
-import type {DriverDocumentSimpleStatus} from '@veo/api-client';
-import type {StatusTone} from '@veo/ui-kit';
+import type { DriverDocumentSimpleStatus } from '@veo/api-client';
+import type { StatusTone } from '@veo/ui-kit';
 
 /**
  * Estado simple de un documento (en español, listo para UI). Re-exporta el tipo del contrato para

@@ -1,8 +1,8 @@
-import type { GeoPoint, NearbyVehicle } from '@veo/api-client';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import type {GeoPoint, NearbyVehicle} from '@veo/api-client';
+import {keepPreviousData, useQuery} from '@tanstack/react-query';
+import {useMemo} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /** Cada cuánto se re-consulta el ambiente de autitos (ms). 10s = vivo sin castigar batería/red. */
 const POLL_INTERVAL_MS = 10_000;
@@ -55,7 +55,8 @@ export function useNearbyVehicles(
 
   // El query consulta con la coord CUANTIZADA (misma celda → misma respuesta del backend redondeado).
   const queryPoint = useMemo<GeoPoint | null>(
-    () => (keyLat != null && keyLon != null ? { lat: keyLat, lon: keyLon } : null),
+    () =>
+      keyLat != null && keyLon != null ? {lat: keyLat, lon: keyLon} : null,
     [keyLat, keyLon],
   );
 
@@ -69,5 +70,5 @@ export function useNearbyVehicles(
     placeholderData: keepPreviousData,
   });
 
-  return { vehicles: query.data ?? [] };
+  return {vehicles: query.data ?? []};
 }

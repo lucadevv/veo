@@ -1,4 +1,4 @@
-import type {GeoPoint} from '@veo/api-client';
+import type { GeoPoint } from '@veo/api-client';
 
 /**
  * Helpers geográficos locales (sin `@veo/utils`, que usa `node:crypto`/`h3-js` no aptos para
@@ -13,7 +13,7 @@ export const LIMA_BBOX = {
 } as const;
 
 /** Centro aproximado de Lima (Plaza San Martín) para el encuadre inicial del mapa. */
-export const LIMA_CENTER: GeoPoint = {lat: -12.0464, lon: -77.0428};
+export const LIMA_CENTER: GeoPoint = { lat: -12.0464, lon: -77.0428 };
 
 /** Centro de Lima en orden GeoJSON [lng, lat] (el que consume MapLibre). */
 export const LIMA_CENTER_LNGLAT: [number, number] = [LIMA_CENTER.lon, LIMA_CENTER.lat];
@@ -37,10 +37,10 @@ export interface LngLatBounds {
  * Devuelve `null` si la lista está vacía (el llamador centra por defecto).
  */
 export function boundsOf(positions: ReadonlyArray<[number, number]>): LngLatBounds | null {
-  let acc: {minLng: number; maxLng: number; minLat: number; maxLat: number} | null = null;
+  let acc: { minLng: number; maxLng: number; minLat: number; maxLat: number } | null = null;
   for (const [lng, lat] of positions) {
     if (!acc) {
-      acc = {minLng: lng, maxLng: lng, minLat: lat, maxLat: lat};
+      acc = { minLng: lng, maxLng: lng, minLat: lat, maxLat: lat };
       continue;
     }
     if (lng < acc.minLng) acc.minLng = lng;
@@ -51,7 +51,7 @@ export function boundsOf(positions: ReadonlyArray<[number, number]>): LngLatBoun
   if (!acc) {
     return null;
   }
-  return {ne: [acc.maxLng, acc.maxLat], sw: [acc.minLng, acc.minLat]};
+  return { ne: [acc.maxLng, acc.maxLat], sw: [acc.minLng, acc.minLat] };
 }
 
 /** True si el punto está dentro del bounding box de Lima Metropolitana. */

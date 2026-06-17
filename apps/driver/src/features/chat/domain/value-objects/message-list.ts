@@ -1,4 +1,4 @@
-import type {Message} from '../entities';
+import type { Message } from '../entities';
 
 /** El conductor es siempre el rol DRIVER: sus burbujas van a la derecha en acento cian. */
 export function isOwnMessage(message: Message): boolean {
@@ -29,7 +29,7 @@ export function sortMessages(messages: readonly Message[]): Message[] {
  * la fuente de verdad) en lugar de duplicar la burbuja. Idempotente ante reentregas del socket.
  */
 export function upsertMessage(messages: readonly Message[], incoming: Message): Message[] {
-  const next = messages.filter(m => m.id !== incoming.id);
+  const next = messages.filter((m) => m.id !== incoming.id);
   next.push(incoming);
   return sortMessages(next);
 }
@@ -38,7 +38,10 @@ export function upsertMessage(messages: readonly Message[], incoming: Message): 
  * Fusiona el historial REST con los mensajes ya conocidos (los recibidos en vivo) sin duplicar por
  * `id`, dando prioridad a la copia entrante del historial. Devuelve la lista ordenada.
  */
-export function mergeMessages(existing: readonly Message[], history: readonly Message[]): Message[] {
+export function mergeMessages(
+  existing: readonly Message[],
+  history: readonly Message[],
+): Message[] {
   const byId = new Map<string, Message>();
   for (const m of existing) {
     byId.set(m.id, m);

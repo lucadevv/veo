@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { prefsStore } from '../../../../core/storage/mmkv';
+import {create} from 'zustand';
+import {prefsStore} from '../../../../core/storage/mmkv';
 
 /**
  * Estado de cliente (Zustand) del perfil del pasajero, CLAVEADO POR `userId`.
@@ -32,28 +32,28 @@ interface ProfileLocalState {
 export const useProfileLocalStore = create<ProfileLocalState>((set, get) => ({
   completedByUser: {},
 
-  hydrateUser: (userId) => {
+  hydrateUser: userId => {
     // Ya hidratado en esta sesión de proceso: no relee MMKV.
     if (get().completedByUser[userId] !== undefined) {
       return;
     }
     const completed = prefsStore.getBoolean(completedKey(userId)) ?? false;
-    set((state) => ({
-      completedByUser: { ...state.completedByUser, [userId]: completed },
+    set(state => ({
+      completedByUser: {...state.completedByUser, [userId]: completed},
     }));
   },
 
-  markCompleted: (userId) => {
+  markCompleted: userId => {
     prefsStore.setBoolean(completedKey(userId), true);
-    set((state) => ({
-      completedByUser: { ...state.completedByUser, [userId]: true },
+    set(state => ({
+      completedByUser: {...state.completedByUser, [userId]: true},
     }));
   },
 
-  resetUser: (userId) => {
+  resetUser: userId => {
     prefsStore.remove(completedKey(userId));
-    set((state) => ({
-      completedByUser: { ...state.completedByUser, [userId]: false },
+    set(state => ({
+      completedByUser: {...state.completedByUser, [userId]: false},
     }));
   },
 }));

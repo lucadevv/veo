@@ -62,7 +62,10 @@ class DocumentMatchesType implements ValidatorConstraintInterface {
  * El `clientName` siempre sale del PERFIL (nunca del body). El userId sale del JWT (anti-IDOR).
  */
 export class CreateYapeAffiliationDto {
-  @ApiPropertyOptional({ enum: DocumentType, description: 'Tipo de documento (DN|CE|PP). Opcional.' })
+  @ApiPropertyOptional({
+    enum: DocumentType,
+    description: 'Tipo de documento (DN|CE|PP). Opcional.',
+  })
   @IsOptional()
   @IsEnum(DocumentType, { message: 'documentType debe ser DN, CE o PP' })
   documentType?: DocumentType;
@@ -74,7 +77,10 @@ export class CreateYapeAffiliationDto {
    *  - PP (pasaporte): 6-12 alfanuméricos.
    * Requiere `documentType` presente (el validador per-tipo lo exige).
    */
-  @ApiPropertyOptional({ description: 'Número de documento (forma según documentType)', example: '12345678' })
+  @ApiPropertyOptional({
+    description: 'Número de documento (forma según documentType)',
+    example: '12345678',
+  })
   @IsOptional()
   @Validate(DocumentMatchesType)
   document?: string;

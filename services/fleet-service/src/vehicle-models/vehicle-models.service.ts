@@ -11,8 +11,17 @@ import { uuidv7, ConflictError, NotFoundError, ValidationError } from '@veo/util
 import { isUniqueViolation } from '@veo/database';
 import { VehicleSegment, EnergySource } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
-import { buildFleetEvent, FleetEventType, type VehicleModelReviewedPayload } from '../events/fleet-events';
-import { Prisma, VehicleModelStatus, VehicleType, type VehicleModelSpec } from '../generated/prisma';
+import {
+  buildFleetEvent,
+  FleetEventType,
+  type VehicleModelReviewedPayload,
+} from '../events/fleet-events';
+import {
+  Prisma,
+  VehicleModelStatus,
+  VehicleType,
+  type VehicleModelSpec,
+} from '../generated/prisma';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
 import type {
   ApproveVehicleModelDto,
@@ -78,7 +87,10 @@ export class VehicleModelsService {
    * conoce (make/model/años/tipo/asientos); el operador completa la ficha técnica al aprobar. Dedup por
    * (make, model, yearFrom): si ya existe, no se crea un duplicado — se informa según su estado.
    */
-  async requestModel(requestedBy: string, input: RequestVehicleModelDto): Promise<VehicleModelReviewView> {
+  async requestModel(
+    requestedBy: string,
+    input: RequestVehicleModelDto,
+  ): Promise<VehicleModelReviewView> {
     if (input.yearTo < input.yearFrom) {
       throw new ValidationError('El año "hasta" no puede ser menor que el año "desde"', {
         yearFrom: input.yearFrom,
@@ -171,7 +183,11 @@ export class VehicleModelsService {
    * corrige asientos. Transición PENDING_REVIEW → APPROVED (única válida); aprobar algo no-PENDING → 409.
    * Acá se cumple la invariante "APPROVED ⇒ ficha completa".
    */
-  async approve(id: string, verifiedBy: string, input: ApproveVehicleModelDto): Promise<VehicleModelReviewView> {
+  async approve(
+    id: string,
+    verifiedBy: string,
+    input: ApproveVehicleModelDto,
+  ): Promise<VehicleModelReviewView> {
     return this.transition(id, {
       segment: input.segment,
       energySource: input.energySource,
@@ -205,7 +221,10 @@ export class VehicleModelsService {
       if (res.count === 0) {
         const spec = await tx.vehicleModelSpec.findUnique({ where: { id } });
         if (!spec) throw new NotFoundError('Modelo de vehículo no encontrado', { id });
-        throw new ConflictError('El modelo ya fue revisado (no está pendiente)', { id, status: spec.status });
+        throw new ConflictError('El modelo ya fue revisado (no está pendiente)', {
+          id,
+          status: spec.status,
+        });
       }
 
       const row = await tx.vehicleModelSpec.findUniqueOrThrow({ where: { id } });
@@ -248,7 +267,9 @@ export class VehicleModelsService {
  * resolutivos (APPROVED/REJECTED) son un veredicto; cualquier otro ⇒ null (no se notifica). El switch
  * sobre el enum TIPADO `VehicleModelStatus` evita strings sueltos y es exhaustivo en compile-time.
  */
-function verdictForStatus(status: VehicleModelStatus): VehicleModelReviewedPayload['verdict'] | null {
+function verdictForStatus(
+  status: VehicleModelStatus,
+): VehicleModelReviewedPayload['verdict'] | null {
   switch (status) {
     case VehicleModelStatus.APPROVED:
       return 'APPROVED';

@@ -1,7 +1,7 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import type {GeoPoint} from '@veo/api-client';
-import {useRepositories} from '../../../../core/di/useDi';
-import {SHIFT_STATE_QUERY_KEY} from '../../../shift/presentation/hooks/useShift';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { GeoPoint } from '@veo/api-client';
+import { useRepositories } from '../../../../core/di/useDi';
+import { SHIFT_STATE_QUERY_KEY } from '../../../shift/presentation/hooks/useShift';
 import {
   AcceptOfferUseCase,
   AcceptTripUseCase,
@@ -33,12 +33,18 @@ const ROUTE_POSITION_PRECISION = 4;
 const quantize = (n: number) => Number(n.toFixed(ROUTE_POSITION_PRECISION));
 
 export const tripRouteQueryKey = (tripId: string, from?: GeoPoint) =>
-  ['trip', tripId, 'route', from ? quantize(from.lat) : null, from ? quantize(from.lon) : null] as const;
+  [
+    'trip',
+    tripId,
+    'route',
+    from ? quantize(from.lat) : null,
+    from ? quantize(from.lon) : null,
+  ] as const;
 export const offerQueryKey = (matchId: string) => ['offer', matchId] as const;
 
 /** Query: detalle de la oferta entrante. */
 export function useOffer(matchId: string) {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   return useQuery({
     queryKey: offerQueryKey(matchId),
     queryFn: () => new GetOfferUseCase(trips).execute(matchId),
@@ -54,7 +60,7 @@ export const ACTIVE_TRIP_QUERY_KEY = ['trip', 'active'] as const;
  * deriva del servidor al (re)arrancar. La consume `RealtimeManager` para volver al viaje + reanudar.
  */
 export function useActiveTrip() {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   return useQuery({
     queryKey: ACTIVE_TRIP_QUERY_KEY,
     queryFn: () => new GetActiveTripUseCase(trips).execute(),
@@ -63,7 +69,7 @@ export function useActiveTrip() {
 
 /** Query: viaje activo (lado conductor). Inactiva con `tripId` vacío (p. ej. sin viaje activo). */
 export function useTrip(tripId: string) {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   return useQuery({
     queryKey: tripQueryKey(tripId),
     queryFn: () => new GetTripUseCase(trips).execute(tripId),
@@ -82,10 +88,12 @@ export function useTrip(tripId: string) {
  * (recálculos del servidor / GPS quieto). Sin `from`: ruta desde el origen del viaje (degradación honesta).
  */
 export function useTripRoute(tripId: string, enabled: boolean, from?: GeoPoint) {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   // Cuantizamos ANTES de pasar al repo para que la posición enviada al BFF coincida con la de la
   // queryKey (misma celda ⇒ mismo fetch; sin esto la URL variaría con jitter sub-métrico que la key ignora).
-  const quantized: GeoPoint | undefined = from ? {lat: quantize(from.lat), lon: quantize(from.lon)} : undefined;
+  const quantized: GeoPoint | undefined = from
+    ? { lat: quantize(from.lat), lon: quantize(from.lon) }
+    : undefined;
   return useQuery({
     queryKey: tripRouteQueryKey(tripId, quantized),
     queryFn: () => new GetTripRouteUseCase(trips).execute(tripId, quantized),
@@ -97,7 +105,7 @@ export function useTripRoute(tripId: string, enabled: boolean, from?: GeoPoint) 
 
 /** Mutación: aceptar la oferta entrante (dispatch). */
 export function useAcceptOffer() {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   return useMutation({
     mutationFn: (matchId: string) => new AcceptOfferUseCase(trips).execute(matchId),
   });
@@ -105,7 +113,7 @@ export function useAcceptOffer() {
 
 /** Mutación: rechazar la oferta entrante (dispatch). */
 export function useRejectOffer() {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   return useMutation({
     mutationFn: (matchId: string) => new RejectOfferUseCase(trips).execute(matchId),
   });
@@ -117,17 +125,17 @@ export function useRejectOffer() {
  * Refresca la caché del viaje con el resultado del servidor.
  */
 export function useEnsureTripAccepted(tripId: string) {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => new EnsureTripAcceptedUseCase(trips).execute(tripId),
-    onSuccess: trip => {
+    onSuccess: (trip) => {
       if (trip) {
         queryClient.setQueryData(tripQueryKey(tripId), trip);
       } else {
-        queryClient.invalidateQueries({queryKey: tripQueryKey(tripId)});
+        queryClient.invalidateQueries({ queryKey: tripQueryKey(tripId) });
       }
-      queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
     },
   });
 }
@@ -137,12 +145,12 @@ export function useEnsureTripAccepted(tripId: string) {
  * viaje (con el resultado del servidor) e invalida el estado de turno (puede pasar a/desde ON_TRIP).
  */
 export function useTripActions(tripId: string) {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   const queryClient = useQueryClient();
 
   const onTrip = (trip: Trip) => {
     queryClient.setQueryData(tripQueryKey(tripId), trip);
-    queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY});
+    queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
   };
 
   const accept = useMutation({
@@ -162,7 +170,8 @@ export function useTripActions(tripId: string) {
     onSuccess: onTrip,
   });
   const complete = useMutation({
-    mutationFn: (input?: CompleteTripInput) => new CompleteTripUseCase(trips).execute(tripId, input),
+    mutationFn: (input?: CompleteTripInput) =>
+      new CompleteTripUseCase(trips).execute(tripId, input),
     onSuccess: onTrip,
   });
   const cancel = useMutation({
@@ -170,5 +179,5 @@ export function useTripActions(tripId: string) {
     onSuccess: onTrip,
   });
 
-  return {accept, arriving, arrived, start, complete, cancel};
+  return { accept, arriving, arrived, start, complete, cancel };
 }

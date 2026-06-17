@@ -42,7 +42,7 @@ export interface RegistrationRepository {
    * GET /drivers/vehicle-models — catálogo curado de modelos APROBADOS para el selector del alta (B5-2).
    * Filtra por tipo (un mototaxista solo ve motos). El catálogo es chico; la búsqueda fina es client-side.
    */
-  listVehicleModels(params: {vehicleType: VehicleType}): Promise<VehicleModelOption[]>;
+  listVehicleModels(params: { vehicleType: VehicleType }): Promise<VehicleModelOption[]>;
 
   /**
    * POST /drivers/vehicle-models — el conductor SOLICITA un modelo que no está en el catálogo (B5-2.c).

@@ -36,20 +36,28 @@ describe('DispatchModeStrategy.resolveCreation · tarifa + seq por modo', () => 
   };
 
   it('PUJA: el bid válido ES el fareCents y abre el ciclo (seq=1)', () => {
-    const out = registry.forMode(PricingMode.PUJA).resolveCreation({ ...baseInput, bidCents: 1500 });
+    const out = registry
+      .forMode(PricingMode.PUJA)
+      .resolveCreation({ ...baseInput, bidCents: 1500 });
     expect(out).toEqual({ fareCents: 1500, negotiationSeq: 1 });
   });
 
   it('PUJA: sin bid → ValidationError', () => {
-    expect(() => registry.forMode(PricingMode.PUJA).resolveCreation({ ...baseInput, bidCents: undefined })).toThrow();
+    expect(() =>
+      registry.forMode(PricingMode.PUJA).resolveCreation({ ...baseInput, bidCents: undefined }),
+    ).toThrow();
   });
 
   it('PUJA: bid bajo el piso → ValidationError', () => {
-    expect(() => registry.forMode(PricingMode.PUJA).resolveCreation({ ...baseInput, bidCents: 500 })).toThrow();
+    expect(() =>
+      registry.forMode(PricingMode.PUJA).resolveCreation({ ...baseInput, bidCents: 500 }),
+    ).toThrow();
   });
 
   it('FIXED: ignora el bid, calcula por ruta y NO negocia (seq=0)', () => {
-    const out = registry.forMode(PricingMode.FIXED).resolveCreation({ ...baseInput, bidCents: 99999 });
+    const out = registry
+      .forMode(PricingMode.FIXED)
+      .resolveCreation({ ...baseInput, bidCents: 99999 });
     expect(out.negotiationSeq).toBe(0);
     expect(out.fareCents).toBeGreaterThan(0); // tarifa por ruta, NO el bid
     expect(out.fareCents).not.toBe(99999);

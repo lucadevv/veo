@@ -11,7 +11,10 @@ import type { Env } from '../config/env.schema';
 
 /** Error de violación de UNIQUE que `isUniqueViolation(err, 'referralCode')` reconoce (P2002 estructural). */
 function uniqueViolation(): Error {
-  const err = new Error('Unique constraint failed') as Error & { code: string; meta: { target: string[] } };
+  const err = new Error('Unique constraint failed') as Error & {
+    code: string;
+    meta: { target: string[] };
+  };
   err.name = 'PrismaClientKnownRequestError';
   err.code = 'P2002';
   err.meta = { target: ['referral_code'] };

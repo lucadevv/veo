@@ -50,7 +50,10 @@ export function MapShell({
       <View style={styles.fill}>{children}</View>
 
       {loading ? (
-        <View style={[styles.center, { backgroundColor: theme.colors.surfaceElevated }]} pointerEvents="none">
+        <View
+          style={[styles.center, { backgroundColor: theme.colors.surfaceElevated }]}
+          pointerEvents="none"
+        >
           <Text variant="subhead" color="inkMuted">
             Cargando mapa…
           </Text>

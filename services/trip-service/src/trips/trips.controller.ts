@@ -51,7 +51,9 @@ export class TripsController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Crear y cotizar un viaje (→ REQUESTED). Idempotente vía Idempotency-Key.' })
+  @ApiOperation({
+    summary: 'Crear y cotizar un viaje (→ REQUESTED). Idempotente vía Idempotency-Key.',
+  })
   create(
     @Body() dto: CreateTripDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -69,7 +71,9 @@ export class TripsController {
   // NOTA: la ruta literal `/trips/scheduled` se declara ANTES de `/trips/:id` para que no la capture
   // el parámetro `:id`.
   @Get('scheduled')
-  @ApiOperation({ summary: 'Listar los viajes PROGRAMADOS de un pasajero (Ola 2B, estado SCHEDULED)' })
+  @ApiOperation({
+    summary: 'Listar los viajes PROGRAMADOS de un pasajero (Ola 2B, estado SCHEDULED)',
+  })
   listScheduled(@Query() query: ScheduledListQueryDto) {
     return this.query.listScheduled(query.passengerId);
   }
@@ -100,28 +104,46 @@ export class TripsController {
   @Post(':id/accept')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor acepta (→ ACCEPTED)' })
-  accept(@Param('id') id: string, @Body() dto: AcceptTripDto, @CurrentUser() user: AuthenticatedUser) {
+  accept(
+    @Param('id') id: string,
+    @Body() dto: AcceptTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.trips.acceptTrip(id, { ...dto, driverId: user.driverId });
   }
 
   @Post(':id/arriving')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor va en camino (→ ARRIVING)' })
-  arriving(@Param('id') id: string, @Body() dto: ArrivingTripDto, @CurrentUser() user: AuthenticatedUser) {
+  arriving(
+    @Param('id') id: string,
+    @Body() dto: ArrivingTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.trips.arriving(id, { ...dto, driverId: user.driverId });
   }
 
   @Post(':id/arrived')
   @HttpCode(200)
   @ApiOperation({ summary: 'El conductor llegó al recojo (→ ARRIVED)' })
-  arrived(@Param('id') id: string, @Body() dto: ArrivedTripDto, @CurrentUser() user: AuthenticatedUser) {
+  arrived(
+    @Param('id') id: string,
+    @Body() dto: ArrivedTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.trips.arrived(id, { ...dto, driverId: user.driverId });
   }
 
   @Post(':id/start')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Iniciar el viaje; valida código modo niño si aplica (→ IN_PROGRESS, BR-T07)' })
-  start(@Param('id') id: string, @Body() dto: StartTripDto, @CurrentUser() user: AuthenticatedUser) {
+  @ApiOperation({
+    summary: 'Iniciar el viaje; valida código modo niño si aplica (→ IN_PROGRESS, BR-T07)',
+  })
+  start(
+    @Param('id') id: string,
+    @Body() dto: StartTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.trips.start(id, { ...dto, driverId: user.driverId });
   }
 
@@ -132,14 +154,22 @@ export class TripsController {
       'Finalizar el viaje (→ COMPLETED). EFECTIVO: cashCollected=true ⇒ el conductor cobró en mano ' +
       '(driverConfirmed); solo aplica a viajes CASH (digital lo ignora). Emite trip.completed.',
   })
-  complete(@Param('id') id: string, @Body() dto: CompleteTripDto, @CurrentUser() user: AuthenticatedUser) {
+  complete(
+    @Param('id') id: string,
+    @Body() dto: CompleteTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.trips.complete(id, { ...dto, driverId: user.driverId });
   }
 
   @Post(':id/cancel')
   @HttpCode(200)
   @ApiOperation({ summary: 'Cancelar el viaje; calcula penalización (BR-T03)' })
-  cancel(@Param('id') id: string, @Body() dto: CancelTripDto, @CurrentUser() user: AuthenticatedUser) {
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     // Anti-IDOR: la rama PASAJERO usa user.userId (en el service); la rama CONDUCTOR usa el driverId
     // FIRMADO inyectado acá (pisa el del cliente). Para un pasajero, user.driverId es undefined → la rama
     // conductor no aplica de todos modos (by==='PASSENGER').
@@ -148,7 +178,9 @@ export class TripsController {
 
   @Post(':id/destination')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cambio de destino aprobado por el pasajero; recalcula tarifa (BR-T01)' })
+  @ApiOperation({
+    summary: 'Cambio de destino aprobado por el pasajero; recalcula tarifa (BR-T01)',
+  })
   changeDestination(@Param('id') id: string, @Body() dto: ChangeDestinationDto) {
     return this.trips.changeDestination(id, dto);
   }
@@ -185,7 +217,10 @@ export class TripsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     // Anti-IDOR: el driverId dueño se toma de la identidad FIRMADA (driver-bff lo deriva), no del cliente.
-    return this.waypoints.respondWaypoint(id, proposalId, { accept: dto.accept, driverId: user.driverId });
+    return this.waypoints.respondWaypoint(id, proposalId, {
+      accept: dto.accept,
+      driverId: user.driverId,
+    });
   }
 
   @Post(':id/rebid')
@@ -195,15 +230,25 @@ export class TripsController {
       'RE-PUJA del pasajero: reactiva la puja de un viaje REASSIGNING/EXPIRED a un nuevo bid ' +
       '(→ REQUESTED, board fresco). Ownership server-side; idempotente. ADR 010 #4/#12 · H6.4',
   })
-  rebid(@Param('id') id: string, @Body() dto: RebidTripDto, @CurrentUser() user: AuthenticatedUser) {
+  rebid(
+    @Param('id') id: string,
+    @Body() dto: RebidTripDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     // Anti-IDOR: el dueño es el userId FIRMADO (siempre presente vía InternalIdentityGuard), no el del body.
     return this.trips.rebid(id, user.userId, dto.bidCents);
   }
 
   @Delete(':id/schedule')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cancelar un viaje PROGRAMADO antes de activarse (Ola 2B; sin penalidad)' })
-  cancelSchedule(@Param('id') id: string, @Body() dto: CancelScheduledDto, @CurrentUser() user: AuthenticatedUser) {
+  @ApiOperation({
+    summary: 'Cancelar un viaje PROGRAMADO antes de activarse (Ola 2B; sin penalidad)',
+  })
+  cancelSchedule(
+    @Param('id') id: string,
+    @Body() dto: CancelScheduledDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     // Anti-IDOR: el dueño es el userId FIRMADO (siempre presente vía InternalIdentityGuard), no el del body.
     return this.scheduled.cancelScheduledTrip(id, user.userId);
   }

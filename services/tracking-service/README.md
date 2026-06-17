@@ -25,18 +25,18 @@ MQTT (veo/driver/+/location)
 
 Capas (cada paquete depende de abstracciones, no de infraestructura concreta):
 
-| Paquete | Responsabilidad |
-|---|---|
-| `internal/domain` | Entidades puras (`Ping`, `Point`, `PresenceStatus`) |
-| `internal/geo` | Cálculo de celdas H3 (uber/h3-go) |
-| `internal/presence` | Redis: presencia + hot index H3 |
+| Paquete             | Responsabilidad                                         |
+| ------------------- | ------------------------------------------------------- |
+| `internal/domain`   | Entidades puras (`Ping`, `Point`, `PresenceStatus`)     |
+| `internal/geo`      | Cálculo de celdas H3 (uber/h3-go)                       |
+| `internal/presence` | Redis: presencia + hot index H3                         |
 | `internal/geofence` | Point-in-polygon, membresía H3, Lima bbox, transiciones |
-| `internal/history` | ClickHouse: DDL + inserción por lotes |
-| `internal/events` | EventEnvelope (UUIDv7) + productor Kafka |
-| `internal/ingest` | MQTT + pipeline de orquestación |
-| `internal/api` | HTTP health/ready/metrics + SSE fan-out |
-| `internal/obs` | slog (redacción PII), Prometheus, OTel |
-| `internal/config` | Configuración por entorno |
+| `internal/history`  | ClickHouse: DDL + inserción por lotes                   |
+| `internal/events`   | EventEnvelope (UUIDv7) + productor Kafka                |
+| `internal/ingest`   | MQTT + pipeline de orquestación                         |
+| `internal/api`      | HTTP health/ready/metrics + SSE fan-out                 |
+| `internal/obs`      | slog (redacción PII), Prometheus, OTel                  |
+| `internal/config`   | Configuración por entorno                               |
 
 ## Desarrollo
 
@@ -57,23 +57,23 @@ go run ./cmd/server
 
 ## Variables de entorno
 
-| Variable | Default | Descripción |
-|---|---|---|
-| `TRACKING_HTTP_ADDR` | `:3004` | Dirección HTTP |
-| `MQTT_BROKER_URL` | `tcp://localhost:1883` | Broker MQTT |
-| `MQTT_USERNAME` / `MQTT_PASSWORD` | – | Credenciales MQTT |
-| `MQTT_TOPIC` | `veo/driver/+/location` | Patrón de suscripción |
-| `REDIS_URL` | `redis://localhost:6379` | Redis |
-| `KAFKA_BROKERS` | `localhost:9094` | Brokers Kafka (EXTERNAL) |
-| `CLICKHOUSE_ADDR` | `localhost:9000` | ClickHouse (protocolo nativo) |
-| `CLICKHOUSE_DB` | `veo_analytics` | Base de datos |
-| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | `veo` / `veo_dev` | Credenciales |
-| `PRESENCE_TTL` | `60s` | TTL de presencia |
-| `H3_RESOLUTION` | `9` | Resolución del hot index |
-| `LOCATION_PUBLISH_INTERVAL` | `1s` | Throttle de `driver.location_updated` por driver |
-| `TRACKING_ZONES_PATH` | – | JSON de zonas geofence (opcional) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | – | OTLP/HTTP; vacío = tracing off |
-| `LOG_LEVEL` | `info` | `debug\|info\|warn\|error` |
+| Variable                                  | Default                  | Descripción                                      |
+| ----------------------------------------- | ------------------------ | ------------------------------------------------ |
+| `TRACKING_HTTP_ADDR`                      | `:3004`                  | Dirección HTTP                                   |
+| `MQTT_BROKER_URL`                         | `tcp://localhost:1883`   | Broker MQTT                                      |
+| `MQTT_USERNAME` / `MQTT_PASSWORD`         | –                        | Credenciales MQTT                                |
+| `MQTT_TOPIC`                              | `veo/driver/+/location`  | Patrón de suscripción                            |
+| `REDIS_URL`                               | `redis://localhost:6379` | Redis                                            |
+| `KAFKA_BROKERS`                           | `localhost:9094`         | Brokers Kafka (EXTERNAL)                         |
+| `CLICKHOUSE_ADDR`                         | `localhost:9000`         | ClickHouse (protocolo nativo)                    |
+| `CLICKHOUSE_DB`                           | `veo_analytics`          | Base de datos                                    |
+| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | `veo` / `veo_dev`        | Credenciales                                     |
+| `PRESENCE_TTL`                            | `60s`                    | TTL de presencia                                 |
+| `H3_RESOLUTION`                           | `9`                      | Resolución del hot index                         |
+| `LOCATION_PUBLISH_INTERVAL`               | `1s`                     | Throttle de `driver.location_updated` por driver |
+| `TRACKING_ZONES_PATH`                     | –                        | JSON de zonas geofence (opcional)                |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`             | –                        | OTLP/HTTP; vacío = tracing off                   |
+| `LOG_LEVEL`                               | `info`                   | `debug\|info\|warn\|error`                       |
 
 ## Endpoints
 
@@ -96,8 +96,16 @@ curl -N http://localhost:3004/tracking/trip-123
 Topic: `veo/driver/{driverId}/location` · Payload:
 
 ```json
-{ "driverId": "drv-1", "tripId": "trip-9", "lat": -12.0464, "lon": -77.0428,
-  "speed": 8.3, "heading": 90, "accuracy": 5, "recordedAt": "2026-05-28T23:00:00Z" }
+{
+  "driverId": "drv-1",
+  "tripId": "trip-9",
+  "lat": -12.0464,
+  "lon": -77.0428,
+  "speed": 8.3,
+  "heading": 90,
+  "accuracy": 5,
+  "recordedAt": "2026-05-28T23:00:00Z"
+}
 ```
 
 ## Zonas de geofence

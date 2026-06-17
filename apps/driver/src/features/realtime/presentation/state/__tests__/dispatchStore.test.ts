@@ -1,8 +1,8 @@
-import {useDispatchStore} from '../dispatchStore';
+import { useDispatchStore } from '../dispatchStore';
 
 describe('dispatchStore', () => {
   beforeEach(() => {
-    useDispatchStore.setState({incomingOffer: null, activeTripId: null, connected: false});
+    useDispatchStore.setState({ incomingOffer: null, activeTripId: null, connected: false });
   });
 
   it('refleja el estado de conexión del socket /driver', () => {
@@ -14,7 +14,7 @@ describe('dispatchStore', () => {
   });
 
   it('registra y limpia la oferta entrante', () => {
-    const offer = {matchId: 'm1', tripId: 't1', expiresAt: '2026-01-01T00:00:00.000Z'};
+    const offer = { matchId: 'm1', tripId: 't1', expiresAt: '2026-01-01T00:00:00.000Z' };
     useDispatchStore.getState().setIncomingOffer(offer);
     expect(useDispatchStore.getState().incomingOffer).toEqual(offer);
 

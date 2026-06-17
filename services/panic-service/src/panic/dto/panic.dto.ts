@@ -32,7 +32,8 @@ export class TriggerPanicDto {
 
   @ApiProperty({
     format: 'uuid',
-    description: 'Clave de idempotencia (UUIDv7) generada por el cliente. El doble submit es no-op.',
+    description:
+      'Clave de idempotencia (UUIDv7) generada por el cliente. El doble submit es no-op.',
   })
   @IsUUID()
   dedupKey!: string;

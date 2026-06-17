@@ -1,4 +1,4 @@
-import type { NewTrustedContact, TrustedContact } from './entities';
+import type {NewTrustedContact, TrustedContact} from './entities';
 
 /**
  * Abstracción del repositorio de Contactos de Confianza (DIP). Implementación real contra el

@@ -4,9 +4,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "tsConfigPath": "tsconfig.json",
-    "assets": [
-      { "include": "generated/prisma/**/*", "outDir": "dist" }
-    ],
+    "assets": [{ "include": "generated/prisma/**/*", "outDir": "dist" }],
     "watchAssets": true
   }
 }

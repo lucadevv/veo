@@ -6,17 +6,26 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 
-const identity: AuthenticatedUser = { userId: 'u1', type: 'admin', roles: ['ADMIN'], sessionId: 's1' };
+const identity: AuthenticatedUser = {
+  userId: 'u1',
+  type: 'admin',
+  roles: ['ADMIN'],
+  sessionId: 's1',
+};
 
 /** Construye el servicio con los 4 colaboradores mockeados (rest, tripGrpc, audit, config). */
-function makeService(over: {
-  rest?: Partial<InternalRestClient>;
-  tripGrpc?: { call: ReturnType<typeof vi.fn> };
-  audit?: { record: ReturnType<typeof vi.fn> };
-} = {}) {
+function makeService(
+  over: {
+    rest?: Partial<InternalRestClient>;
+    tripGrpc?: { call: ReturnType<typeof vi.fn> };
+    audit?: { record: ReturnType<typeof vi.fn> };
+  } = {},
+) {
   const rest = over.rest ?? { get: vi.fn(), post: vi.fn() };
   const tripGrpc = over.tripGrpc ?? { call: vi.fn() };
-  const audit = over.audit ?? { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
+  const audit = over.audit ?? {
+    record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }),
+  };
   const config = { get: () => 'internal-secret' } as unknown as ConfigService<Env, true>;
   const svc = new MediaService(
     rest as unknown as InternalRestClient,

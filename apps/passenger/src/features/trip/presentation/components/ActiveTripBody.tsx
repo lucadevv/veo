@@ -1,16 +1,32 @@
-import { tripStatus, type TripActiveView, type TripStatus } from '@veo/api-client';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banner, BottomSheet, Button, Card, DriverCard, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Share, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
-import type { WaypointProposalController } from '../hooks/useWaypointProposal';
-import { TripStatusStrip } from './TripStatusStrip';
-import { IconCamera, IconRoute } from './icons';
-import { EnterView } from './motion';
+import {
+  tripStatus,
+  type TripActiveView,
+  type TripStatus,
+} from '@veo/api-client';
+import {useMutation, useQueryClient} from '@tanstack/react-query';
+import {
+  Banner,
+  BottomSheet,
+  Button,
+  Card,
+  DriverCard,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Share, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  formatDurationMinutes,
+  formatPEN,
+} from '../../../../shared/utils/format';
+import type {WaypointProposalController} from '../hooks/useWaypointProposal';
+import {TripStatusStrip} from './TripStatusStrip';
+import {IconCamera, IconRoute} from './icons';
+import {EnterView} from './motion';
 
 export interface ActiveTripBodyProps {
   tripId: string;
@@ -44,7 +60,7 @@ export function ActiveTripBody({
   addStop,
 }: ActiveTripBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const queryClient = useQueryClient();
   const cancelTrip = useDependency(TOKENS.cancelTripUseCase);
   const shareTrip = useDependency(TOKENS.shareTripUseCase);
@@ -54,15 +70,16 @@ export function ActiveTripBody({
   const [reason, setReason] = useState('');
 
   const isInProgress = status === tripStatus.enum.IN_PROGRESS;
-  const etaMinutes = etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
+  const etaMinutes =
+    etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
   const hasDriver = Boolean(trip.driver);
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelTrip.execute(tripId, reason.trim() || undefined),
-    onSuccess: (cancelled) => {
+    onSuccess: cancelled => {
       history.record(cancelled);
       setCancelOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['trip', tripId, 'active'] });
+      queryClient.invalidateQueries({queryKey: ['trip', tripId, 'active']});
       onCancelled();
     },
   });
@@ -72,14 +89,14 @@ export function ActiveTripBody({
       const link = await shareTrip.execute(tripId);
       await Share.share({
         title: t('trip.shareTitle'),
-        message: t('trip.shareMessage', { url: link.url }),
+        message: t('trip.shareMessage', {url: link.url}),
         url: link.url,
       });
     },
   });
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       {/* Franja de estado canónica: línea sutil de extremo a extremo con el vehículo del trip animado
           (se desliza → cuando el viaje está en movimiento; quieto con pulso al llegar) + etiqueta de
           estado. El ETA en vivo sigue en la DriverCard (no se duplica acá). */}
@@ -92,10 +109,16 @@ export function ActiveTripBody({
             name={trip.driver?.name ?? t('trip.driver')}
             rating={trip.driver?.rating ?? undefined}
             vehicle={
-              trip.vehicle ? `${trip.vehicle.make} ${trip.vehicle.model} · ${trip.vehicle.color}` : undefined
+              trip.vehicle
+                ? `${trip.vehicle.make} ${trip.vehicle.model} · ${trip.vehicle.color}`
+                : undefined
             }
             plate={trip.vehicle?.plate}
-            eta={etaMinutes != null ? t('trip.etaMinutes', { minutes: etaMinutes }) : undefined}
+            eta={
+              etaMinutes != null
+                ? t('trip.etaMinutes', {minutes: etaMinutes})
+                : undefined
+            }
           />
         </EnterView>
       ) : (
@@ -156,9 +179,16 @@ export function ActiveTripBody({
             disabled={shareMutation.isPending}
             onPress={() => shareMutation.mutate()}
           />
-          {shareMutation.isError ? <Banner tone="danger" title={t('trip.shareError')} /> : null}
+          {shareMutation.isError ? (
+            <Banner tone="danger" title={t('trip.shareError')} />
+          ) : null}
 
-          <Button label={t('trip.cancel')} variant="ghost" fullWidth onPress={() => setCancelOpen(true)} />
+          <Button
+            label={t('trip.cancel')}
+            variant="ghost"
+            fullWidth
+            onPress={() => setCancelOpen(true)}
+          />
         </>
       )}
 
@@ -167,7 +197,7 @@ export function ActiveTripBody({
         onClose={() => setCancelOpen(false)}
         title={t('trip.cancelTitle')}
         footer={
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Button
               label={t('trip.cancel')}
               variant="danger"
@@ -175,16 +205,27 @@ export function ActiveTripBody({
               loading={cancelMutation.isPending}
               onPress={() => cancelMutation.mutate()}
             />
-            <Button label={t('trip.keepTrip')} variant="ghost" fullWidth onPress={() => setCancelOpen(false)} />
+            <Button
+              label={t('trip.keepTrip')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setCancelOpen(false)}
+            />
           </View>
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
+        }>
+        <View style={{gap: theme.spacing.md}}>
           <Text variant="callout" color="inkMuted">
             {t('trip.cancelBody')}
           </Text>
-          {cancelMutation.isError ? <Banner tone="danger" title={t('states.errorBody')} /> : null}
-          <TextField label={t('trip.cancelReasonLabel')} value={reason} onChangeText={setReason} multiline />
+          {cancelMutation.isError ? (
+            <Banner tone="danger" title={t('states.errorBody')} />
+          ) : null}
+          <TextField
+            label={t('trip.cancelReasonLabel')}
+            value={reason}
+            onChangeText={setReason}
+            multiline
+          />
         </View>
       </BottomSheet>
     </View>
@@ -199,14 +240,18 @@ export function ActiveTripBody({
  *  - accepted/rejected/expired/error → banner del desenlace + "Entendido" (vuelve a idle).
  * El cálculo del precio es del SERVIDOR (la vista solo lo muestra; nunca lo computa).
  */
-function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): React.JSX.Element {
+function AddStopFlow({
+  addStop,
+}: {
+  addStop: WaypointProposalController;
+}): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const { phase, picking, pickedPoint, proposal, secondsLeft } = addStop;
+  const {t} = useTranslation();
+  const {phase, picking, pickedPoint, proposal, secondsLeft} = addStop;
 
   if (picking) {
     return (
-      <View style={{ gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.sm}}>
         <Banner
           tone="info"
           title={t('trip.addStopPickTitle')}
@@ -219,14 +264,26 @@ function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): Reac
           disabled={!pickedPoint}
           onPress={addStop.confirm}
         />
-        <Button label={t('trip.addStopCancel')} variant="ghost" fullWidth onPress={addStop.cancelPicking} />
+        <Button
+          label={t('trip.addStopCancel')}
+          variant="ghost"
+          fullWidth
+          onPress={addStop.cancelPicking}
+        />
       </View>
     );
   }
 
   if (phase === 'proposing') {
     return (
-      <Button label={t('trip.addStopProposing')} variant="primary" fullWidth loading disabled onPress={() => undefined} />
+      <Button
+        label={t('trip.addStopProposing')}
+        variant="primary"
+        fullWidth
+        loading
+        disabled
+        onPress={() => undefined}
+      />
     );
   }
 
@@ -234,7 +291,7 @@ function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): Reac
     return (
       <EnterView>
         <Card variant="outlined" padding="lg">
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Text variant="bodyStrong">{t('trip.addStopWaitingTitle')}</Text>
             <Text variant="footnote" color="inkMuted">
               {t('trip.addStopWaitingBody')}
@@ -242,17 +299,21 @@ function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): Reac
             {proposal.deltaFareCents > 0 ? (
               <View style={styles.fareRow}>
                 <Text variant="callout" color="inkMuted">
-                  {t('trip.addStopDelta', { amount: formatPEN(proposal.deltaFareCents) })}
+                  {t('trip.addStopDelta', {
+                    amount: formatPEN(proposal.deltaFareCents),
+                  })}
                 </Text>
               </View>
             ) : null}
             <View style={styles.fareRow}>
               <Text variant="callout" color="inkMuted">
-                {t('trip.addStopNewFare', { amount: formatPEN(proposal.newFareCents) })}
+                {t('trip.addStopNewFare', {
+                  amount: formatPEN(proposal.newFareCents),
+                })}
               </Text>
               {secondsLeft != null ? (
                 <Text variant="bodyStrong" tabular>
-                  {t('trip.addStopCountdown', { seconds: secondsLeft })}
+                  {t('trip.addStopCountdown', {seconds: secondsLeft})}
                 </Text>
               ) : null}
             </View>
@@ -265,30 +326,61 @@ function AddStopFlow({ addStop }: { addStop: WaypointProposalController }): Reac
   // Desenlaces terminales: banner + "Entendido" (cierra y reabilita "Agregar parada").
   const terminal = resolveTerminalBanner(phase);
   return (
-    <View style={{ gap: theme.spacing.sm }}>
-      <Banner tone={terminal.tone} title={t(terminal.title)} description={t(terminal.body)} />
-      <Button label={t('trip.addStopDismiss')} variant="ghost" fullWidth onPress={addStop.dismiss} />
+    <View style={{gap: theme.spacing.sm}}>
+      <Banner
+        tone={terminal.tone}
+        title={t(terminal.title)}
+        description={t(terminal.body)}
+      />
+      <Button
+        label={t('trip.addStopDismiss')}
+        variant="ghost"
+        fullWidth
+        onPress={addStop.dismiss}
+      />
     </View>
   );
 }
 
 /** Mapea la fase terminal a su banner (tono + claves i18n). Sin strings sueltos de UI. */
-function resolveTerminalBanner(
-  phase: WaypointProposalController['phase'],
-): { tone: 'success' | 'warn' | 'danger'; title: string; body: string } {
+function resolveTerminalBanner(phase: WaypointProposalController['phase']): {
+  tone: 'success' | 'warn' | 'danger';
+  title: string;
+  body: string;
+} {
   if (phase === 'accepted') {
-    return { tone: 'success', title: 'trip.addStopAcceptedTitle', body: 'trip.addStopAcceptedBody' };
+    return {
+      tone: 'success',
+      title: 'trip.addStopAcceptedTitle',
+      body: 'trip.addStopAcceptedBody',
+    };
   }
   if (phase === 'rejected') {
-    return { tone: 'warn', title: 'trip.addStopRejectedTitle', body: 'trip.addStopRejectedBody' };
+    return {
+      tone: 'warn',
+      title: 'trip.addStopRejectedTitle',
+      body: 'trip.addStopRejectedBody',
+    };
   }
   if (phase === 'expired') {
-    return { tone: 'warn', title: 'trip.addStopExpiredTitle', body: 'trip.addStopExpiredBody' };
+    return {
+      tone: 'warn',
+      title: 'trip.addStopExpiredTitle',
+      body: 'trip.addStopExpiredBody',
+    };
   }
   // error (POST falló)
-  return { tone: 'danger', title: 'trip.addStopError', body: 'trip.addStopError' };
+  return {
+    tone: 'danger',
+    title: 'trip.addStopError',
+    body: 'trip.addStopError',
+  };
 }
 
 const styles = StyleSheet.create({
-  fareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  fareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 });

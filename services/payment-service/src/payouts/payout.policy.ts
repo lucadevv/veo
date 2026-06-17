@@ -52,7 +52,11 @@ export function aggregatePayouts(rows: DriverEarningRow[], minCents: number): Ag
     // Neto = (bruto − comisión) + propinas + compensación de penalidad + bono de incentivo. Compensación
     // y bono entran NETOS (sin comisión ni bruto): no inflan grossCents/commissionCents, igual que la propina.
     acc.amountCents +=
-      row.grossCents - row.commissionCents + row.tipCents + (row.compensationCents ?? 0) + (row.incentiveCents ?? 0);
+      row.grossCents -
+      row.commissionCents +
+      row.tipCents +
+      (row.compensationCents ?? 0) +
+      (row.incentiveCents ?? 0);
     byDriver.set(row.driverId, acc);
   }
   return [...byDriver.values()]

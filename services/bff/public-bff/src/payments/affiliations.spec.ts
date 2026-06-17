@@ -30,7 +30,11 @@ function errorsOf(payload: unknown): string[] {
 }
 
 /** Perfil base devuelto por identity (GET y PATCH). */
-function profile(opts: { name?: string | null; documentType?: 'DN' | 'CE' | 'PP' | null; document?: string | null }) {
+function profile(opts: {
+  name?: string | null;
+  documentType?: 'DN' | 'CE' | 'PP' | null;
+  document?: string | null;
+}) {
   return {
     id: 'usr-1',
     phone: '999',
@@ -53,26 +57,49 @@ function makeService(opts: {
   paymentReturn?: unknown;
   paymentThrows?: Error;
 }) {
-  const getProfile = profile({ name: opts.profileName, documentType: opts.profileDocumentType, document: opts.profileDocument });
+  const getProfile = profile({
+    name: opts.profileName,
+    documentType: opts.profileDocumentType,
+    document: opts.profileDocument,
+  });
   const post = opts.paymentThrows
     ? vi.fn().mockRejectedValue(opts.paymentThrows)
-    : vi.fn().mockResolvedValue(opts.paymentReturn ?? { affiliationId: 'aff-1', status: 'PROCESS', deepLink: 'yape://approve/abc' });
+    : vi.fn().mockResolvedValue(
+        opts.paymentReturn ?? {
+          affiliationId: 'aff-1',
+          status: 'PROCESS',
+          deepLink: 'yape://approve/abc',
+        },
+      );
   const payment = {
     post,
     get: vi.fn().mockResolvedValue(opts.paymentReturn ?? { status: 'NONE' }),
-    delete: vi.fn().mockResolvedValue(opts.paymentReturn ?? { affiliationId: 'aff-1', status: 'REVOKED' }),
-  } as unknown as InternalRestClient & { post: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
+    delete: vi
+      .fn()
+      .mockResolvedValue(opts.paymentReturn ?? { affiliationId: 'aff-1', status: 'REVOKED' }),
+  } as unknown as InternalRestClient & {
+    post: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
   const identity = {
     get: vi.fn().mockResolvedValue(getProfile),
     patch: vi.fn().mockResolvedValue(opts.patchReturn ?? getProfile),
-  } as unknown as InternalRestClient & { get: ReturnType<typeof vi.fn>; patch: ReturnType<typeof vi.fn> };
+  } as unknown as InternalRestClient & {
+    get: ReturnType<typeof vi.fn>;
+    patch: ReturnType<typeof vi.fn>;
+  };
   const svc = new AffiliationsService(payment, identity);
   return { svc, payment, identity };
 }
 
 describe('AffiliationsService (UN TAP · documento en perfil)', () => {
   it('UN TAP: con document+name en el perfil afilia SIN body, leyendo todo del perfil', async () => {
-    const { svc, payment, identity } = makeService({ profileName: 'Juan Perez', profileDocumentType: 'DN', profileDocument: '12345678' });
+    const { svc, payment, identity } = makeService({
+      profileName: 'Juan Perez',
+      profileDocumentType: 'DN',
+      profileDocument: '12345678',
+    });
     const view = await svc.create(user, {});
     expect(view.status).toBe('PROCESS');
     expect(view.deepLink).toBe('yape://approve/abc');
@@ -84,7 +111,12 @@ describe('AffiliationsService (UN TAP · documento en perfil)', () => {
       '/affiliations/yape',
       expect.objectContaining({
         identity: user,
-        body: { document: '12345678', documentType: 'DN', clientName: 'Juan Perez', origin: 'MOBILE' },
+        body: {
+          document: '12345678',
+          documentType: 'DN',
+          clientName: 'Juan Perez',
+          origin: 'MOBILE',
+        },
       }),
     );
     const sent = payment.post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
@@ -111,11 +143,18 @@ describe('AffiliationsService (UN TAP · documento en perfil)', () => {
     expect(payment.post).toHaveBeenCalledWith(
       '/affiliations/yape',
       expect.objectContaining({
-        body: { document: '12345678', documentType: 'DN', clientName: 'Juan Perez', origin: 'MOBILE' },
+        body: {
+          document: '12345678',
+          documentType: 'DN',
+          clientName: 'Juan Perez',
+          origin: 'MOBILE',
+        },
       }),
     );
     // Orden: PATCH antes que POST.
-    expect(identity.patch.mock.invocationCallOrder[0]!).toBeLessThan(payment.post.mock.invocationCallOrder[0]!);
+    expect(identity.patch.mock.invocationCallOrder[0]!).toBeLessThan(
+      payment.post.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('si la afiliación FALLA, el documento IGUAL quedó guardado (guardar primero es correcto)', async () => {
@@ -125,7 +164,9 @@ describe('AffiliationsService (UN TAP · documento en perfil)', () => {
       patchReturn: profile({ name: 'Juan Perez', documentType: 'DN', document: '12345678' }),
       paymentThrows: new Error('proveedor caído'),
     });
-    await expect(svc.create(user, { documentType: 'DN', document: '12345678' })).rejects.toThrow('proveedor caído');
+    await expect(svc.create(user, { documentType: 'DN', document: '12345678' })).rejects.toThrow(
+      'proveedor caído',
+    );
     // El PATCH se ejecutó ANTES del fallo → el documento ya está persistido.
     expect(identity.patch).toHaveBeenCalledTimes(1);
   });
@@ -133,19 +174,33 @@ describe('AffiliationsService (UN TAP · documento en perfil)', () => {
   it('sin body y perfil SIN documento → 422 PROFILE_DOCUMENT_MISSING (code distinguible)', async () => {
     const { svc, payment } = makeService({ profileName: 'Juan Perez', profileDocument: null });
     await expect(svc.create(user, {})).rejects.toBeInstanceOf(ProfileDocumentMissingError);
-    await expect(svc.create(user, {})).rejects.toMatchObject({ code: 'PROFILE_DOCUMENT_MISSING', httpStatus: 422 });
+    await expect(svc.create(user, {})).rejects.toMatchObject({
+      code: 'PROFILE_DOCUMENT_MISSING',
+      httpStatus: 422,
+    });
     expect(payment.post).not.toHaveBeenCalled();
   });
 
   it('perfil SIN nombre → 422 PROFILE_NAME_MISSING (code distinto, no delega)', async () => {
-    const { svc, payment } = makeService({ profileName: null, profileDocumentType: 'DN', profileDocument: '12345678' });
+    const { svc, payment } = makeService({
+      profileName: null,
+      profileDocumentType: 'DN',
+      profileDocument: '12345678',
+    });
     await expect(svc.create(user, {})).rejects.toBeInstanceOf(ProfileNameMissingError);
-    await expect(svc.create(user, {})).rejects.toMatchObject({ code: 'PROFILE_NAME_MISSING', httpStatus: 422 });
+    await expect(svc.create(user, {})).rejects.toMatchObject({
+      code: 'PROFILE_NAME_MISSING',
+      httpStatus: 422,
+    });
     expect(payment.post).not.toHaveBeenCalled();
   });
 
   it('nombre solo en blanco → 422 PROFILE_NAME_MISSING (trim)', async () => {
-    const { svc } = makeService({ profileName: '   ', profileDocumentType: 'DN', profileDocument: '12345678' });
+    const { svc } = makeService({
+      profileName: '   ',
+      profileDocumentType: 'DN',
+      profileDocument: '12345678',
+    });
     await expect(svc.create(user, {})).rejects.toBeInstanceOf(ProfileNameMissingError);
   });
 
@@ -155,14 +210,23 @@ describe('AffiliationsService (UN TAP · documento en perfil)', () => {
     expect(none).toEqual({ status: 'NONE' });
     expect(payment.get).toHaveBeenCalledWith('/affiliations/yape', { identity: user });
 
-    const { svc: svc2 } = makeService({ paymentReturn: { affiliationId: 'aff-1', status: 'ACTIVE', wallet: 'YAPE', phoneMasked: '9****4321' } });
+    const { svc: svc2 } = makeService({
+      paymentReturn: {
+        affiliationId: 'aff-1',
+        status: 'ACTIVE',
+        wallet: 'YAPE',
+        phoneMasked: '9****4321',
+      },
+    });
     const active = await svc2.status(user);
     expect(active.phoneMasked).toBe('9****4321');
     expect(active).not.toHaveProperty('walletUid');
   });
 
   it('DELETE delega firmado y devuelve status REVOKED', async () => {
-    const { svc, payment } = makeService({ paymentReturn: { affiliationId: 'aff-1', status: 'REVOKED', wallet: 'YAPE' } });
+    const { svc, payment } = makeService({
+      paymentReturn: { affiliationId: 'aff-1', status: 'REVOKED', wallet: 'YAPE' },
+    });
     const view = await svc.revoke(user);
     expect(view.status).toBe('REVOKED');
     expect(payment.delete).toHaveBeenCalledWith('/affiliations/yape', { identity: user });
@@ -185,10 +249,14 @@ describe('CreateYapeAffiliationDto (validación · body OPCIONAL)', () => {
   });
 
   it('valida document SEGÚN documentType (cuando se envía)', () => {
-    expect(errorsOf({ ...VALID_BODY, documentType: 'DN', document: '123' })).toContain('documentMatchesType');
+    expect(errorsOf({ ...VALID_BODY, documentType: 'DN', document: '123' })).toContain(
+      'documentMatchesType',
+    );
     expect(errorsOf({ ...VALID_BODY, documentType: 'CE', document: '123456789' })).toHaveLength(0);
     expect(errorsOf({ ...VALID_BODY, documentType: 'PP', document: 'AB123456' })).toHaveLength(0);
-    expect(errorsOf({ ...VALID_BODY, documentType: 'PP', document: 'AB' })).toContain('documentMatchesType');
+    expect(errorsOf({ ...VALID_BODY, documentType: 'PP', document: 'AB' })).toContain(
+      'documentMatchesType',
+    );
   });
 
   it('rechaza document presente SIN documentType (no se puede validar la forma)', () => {

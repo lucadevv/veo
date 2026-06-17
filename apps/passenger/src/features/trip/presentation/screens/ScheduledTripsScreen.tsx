@@ -1,7 +1,7 @@
-import type { MapPoint, TripResource } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {MapPoint, TripResource} from '@veo/api-client';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
   Banner,
   BottomSheet,
@@ -12,16 +12,19 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { FlatList, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
-import { formatDateTime, formatPEN } from '../../../../shared/utils/format';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { EnterView } from '../components/motion';
-import { IconPlus } from '../components/icons';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {FlatList, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  EmptyState,
+  ScreenStateFallback,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {formatDateTime, formatPEN} from '../../../../shared/utils/format';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {EnterView} from '../components/motion';
+import {IconPlus} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -35,7 +38,7 @@ const SCHEDULED_QUERY_KEY = ['trips', 'scheduled'] as const;
  */
 export function ScheduledTripsScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
   const listScheduled = useDependency(TOKENS.listScheduledTripsUseCase);
   const cancelScheduled = useDependency(TOKENS.cancelScheduledTripUseCase);
@@ -63,7 +66,7 @@ export function ScheduledTripsScreen(): React.JSX.Element {
     mutationFn: (tripId: string) => cancelScheduled.execute(tripId),
     onSuccess: () => {
       setPendingCancel(null);
-      void queryClient.invalidateQueries({ queryKey: SCHEDULED_QUERY_KEY });
+      void queryClient.invalidateQueries({queryKey: SCHEDULED_QUERY_KEY});
     },
   });
 
@@ -72,7 +75,12 @@ export function ScheduledTripsScreen(): React.JSX.Element {
   }
 
   if (scheduledQuery.isError) {
-    return <ScreenStateFallback errorMessage={t('scheduled.loadError')} onRetry={() => scheduledQuery.refetch()} />;
+    return (
+      <ScreenStateFallback
+        errorMessage={t('scheduled.loadError')}
+        onRetry={() => scheduledQuery.refetch()}
+      />
+    );
   }
 
   const trips = scheduledQuery.data ?? [];
@@ -80,7 +88,10 @@ export function ScheduledTripsScreen(): React.JSX.Element {
   if (trips.length === 0) {
     return (
       <SafeScreen footer={scheduleButton}>
-        <EmptyState title={t('scheduled.empty')} subtitle={t('scheduled.emptySubtitle')} />
+        <EmptyState
+          title={t('scheduled.empty')}
+          subtitle={t('scheduled.emptySubtitle')}
+        />
       </SafeScreen>
     );
   }
@@ -89,11 +100,17 @@ export function ScheduledTripsScreen(): React.JSX.Element {
     <SafeScreen padded={false} footer={scheduleButton}>
       <FlatList
         data={trips}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.md }}
-        renderItem={({ item, index }) => (
+        keyExtractor={item => item.id}
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          gap: theme.spacing.md,
+        }}
+        renderItem={({item, index}) => (
           <EnterView index={index}>
-            <ScheduledTripCard trip={item} onCancel={() => setPendingCancel(item)} />
+            <ScheduledTripCard
+              trip={item}
+              onCancel={() => setPendingCancel(item)}
+            />
           </EnterView>
         )}
       />
@@ -103,7 +120,7 @@ export function ScheduledTripsScreen(): React.JSX.Element {
         onClose={() => setPendingCancel(null)}
         title={t('scheduled.cancelTitle')}
         footer={
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Button
               label={t('scheduled.cancelConfirm')}
               variant="danger"
@@ -122,13 +139,14 @@ export function ScheduledTripsScreen(): React.JSX.Element {
               onPress={() => setPendingCancel(null)}
             />
           </View>
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
+        }>
+        <View style={{gap: theme.spacing.md}}>
           <Text variant="callout" color="inkMuted">
             {t('scheduled.cancelBody')}
           </Text>
-          {cancelMutation.isError ? <Banner tone="danger" title={t('scheduled.cancelError')} /> : null}
+          {cancelMutation.isError ? (
+            <Banner tone="danger" title={t('scheduled.cancelError')} />
+          ) : null}
         </View>
       </BottomSheet>
     </SafeScreen>
@@ -141,9 +159,12 @@ interface ScheduledTripCardProps {
 }
 
 /** Tarjeta de un viaje programado: hora, trayecto (con etiquetas reales), tarifa estimada y cancelar. */
-function ScheduledTripCard({ trip, onCancel }: ScheduledTripCardProps): React.JSX.Element {
+function ScheduledTripCard({
+  trip,
+  onCancel,
+}: ScheduledTripCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const originLabel = usePlaceLabel(trip.origin);
   const destinationLabel = usePlaceLabel(trip.destination);
@@ -151,12 +172,19 @@ function ScheduledTripCard({ trip, onCancel }: ScheduledTripCardProps): React.JS
 
   return (
     <Card variant="outlined" padding="lg">
-      <View style={{ gap: theme.spacing.md }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      <View style={{gap: theme.spacing.md}}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
           <StatusPill
             label={
               trip.scheduledFor
-                ? t('schedule.scheduledFor', { when: formatDateTime(trip.scheduledFor) })
+                ? t('schedule.scheduledFor', {
+                    when: formatDateTime(trip.scheduledFor),
+                  })
                 : t('tripStatus.SCHEDULED')
             }
             tone="brand"
@@ -167,15 +195,18 @@ function ScheduledTripCard({ trip, onCancel }: ScheduledTripCardProps): React.JS
           </Text>
         </View>
 
-        <View style={{ gap: theme.spacing.xs }}>
+        <View style={{gap: theme.spacing.xs}}>
           <Text variant="footnote" color="inkSubtle">
-            {t('scheduled.route', { origin: originLabel, destination: destinationLabel })}
+            {t('scheduled.route', {
+              origin: originLabel,
+              destination: destinationLabel,
+            })}
           </Text>
           {stopCount > 0 ? (
             <Text variant="footnote" color="inkSubtle">
               {stopCount === 1
                 ? t('scheduled.stopsOne')
-                : t('scheduled.stopsMany', { count: stopCount })}
+                : t('scheduled.stopsMany', {count: stopCount})}
             </Text>
           ) : null}
           <Text variant="footnote" color="inkSubtle">
@@ -183,17 +214,22 @@ function ScheduledTripCard({ trip, onCancel }: ScheduledTripCardProps): React.JS
           </Text>
         </View>
 
-        <Button label={t('scheduled.cancel')} variant="secondary" size="sm" onPress={onCancel} />
+        <Button
+          label={t('scheduled.cancel')}
+          variant="secondary"
+          size="sm"
+          onPress={onCancel}
+        />
       </View>
     </Card>
   );
 }
 
 /** Etiqueta legible de un punto del viaje vía geocoding inverso real (cae al "punto en el mapa" mientras carga). */
-function usePlaceLabel(point: { lat: number; lon: number }): string {
-  const { t } = useTranslation();
+function usePlaceLabel(point: {lat: number; lon: number}): string {
+  const {t} = useTranslation();
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const mapPoint: MapPoint = { lat: point.lat, lng: point.lon };
+  const mapPoint: MapPoint = {lat: point.lat, lng: point.lon};
   const labelQuery = useQuery({
     queryKey: ['maps', 'reverse', mapPoint.lat, mapPoint.lng],
     queryFn: () => reverseGeocode.execute(mapPoint),

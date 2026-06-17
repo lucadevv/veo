@@ -47,7 +47,13 @@ export function RunPayoutsButton() {
  * visible solo sobre filas HELD. Gated por finance:payout (solo FINANCE — espejo del @Roles del bff);
  * el backend exige además step-up MFA si el total liberado supera S/5000 (BR-S07). Idempotente.
  */
-export function ReleaseHeldPayoutButton({ driverId, amountCents }: { driverId: string; amountCents: number }) {
+export function ReleaseHeldPayoutButton({
+  driverId,
+  amountCents,
+}: {
+  driverId: string;
+  amountCents: number;
+}) {
   const user = useSession();
   const { toast } = useToast();
   const release = useReleaseDriverPayouts();
@@ -70,7 +76,8 @@ export function ReleaseHeldPayoutButton({ driverId, amountCents }: { driverId: s
         toast({
           tone: 'success',
           title: 'Retención liberada',
-          description: 'Los payouts HELD del conductor fueron procesados y la retención se levantó.',
+          description:
+            'Los payouts HELD del conductor fueron procesados y la retención se levantó.',
         });
       }}
     />

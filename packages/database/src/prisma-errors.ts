@@ -44,7 +44,10 @@ export interface PrismaUniqueViolationError extends Error {
  *   throw err;
  * }
  */
-export function isUniqueViolation(err: unknown, column?: string): err is PrismaUniqueViolationError {
+export function isUniqueViolation(
+  err: unknown,
+  column?: string,
+): err is PrismaUniqueViolationError {
   if (!(err instanceof Error) || err.name !== PRISMA_KNOWN_REQUEST_ERROR_NAME) return false;
   const known = err as Partial<PrismaUniqueViolationError>;
   if (known.code !== PRISMA_UNIQUE_VIOLATION) return false;

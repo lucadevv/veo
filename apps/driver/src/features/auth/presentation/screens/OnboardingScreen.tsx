@@ -1,4 +1,4 @@
-import React, {useRef, useState} from 'react';
+import React, { useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -7,18 +7,18 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Svg, {Circle, Path, Rect} from 'react-native-svg';
-import {useTranslation} from 'react-i18next';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {Button, SafeScreen, Text, useTheme, useReducedMotion} from '@veo/ui-kit';
-import {Reveal} from '../../../../shared/presentation/components/motion';
-import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
-import {useOnboardingStore} from '../state/onboardingStore';
+import { Button, SafeScreen, Text, useTheme, useReducedMotion } from '@veo/ui-kit';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
+import { useOnboardingStore } from '../state/onboardingStore';
 
 interface SlideContent {
   key: string;
@@ -28,14 +28,52 @@ interface SlideContent {
 }
 
 /** Ilustración line-art de cada slide (motivo de ruta + ciudad, evitando figuras "dibujadas"). */
-function SlideArt({variant, color, ink}: {variant: SlideContent['art']; color: string; ink: string}): React.JSX.Element {
+function SlideArt({
+  variant,
+  color,
+  ink,
+}: {
+  variant: SlideContent['art'];
+  color: string;
+  ink: string;
+}): React.JSX.Element {
   return (
     <Svg width="100%" height={200} viewBox="0 0 320 200" fill="none">
       {/* Silueta de ciudad. */}
-      <Path d="M0 168h320" stroke={ink} strokeWidth={1.5} strokeOpacity={0.25} strokeLinecap="round" />
-      <Rect x={184} y={120} width={20} height={48} stroke={ink} strokeWidth={1.5} strokeOpacity={0.35} />
-      <Rect x={210} y={100} width={24} height={68} stroke={ink} strokeWidth={1.5} strokeOpacity={0.35} />
-      <Rect x={240} y={132} width={18} height={36} stroke={ink} strokeWidth={1.5} strokeOpacity={0.35} />
+      <Path
+        d="M0 168h320"
+        stroke={ink}
+        strokeWidth={1.5}
+        strokeOpacity={0.25}
+        strokeLinecap="round"
+      />
+      <Rect
+        x={184}
+        y={120}
+        width={20}
+        height={48}
+        stroke={ink}
+        strokeWidth={1.5}
+        strokeOpacity={0.35}
+      />
+      <Rect
+        x={210}
+        y={100}
+        width={24}
+        height={68}
+        stroke={ink}
+        strokeWidth={1.5}
+        strokeOpacity={0.35}
+      />
+      <Rect
+        x={240}
+        y={132}
+        width={18}
+        height={36}
+        stroke={ink}
+        strokeWidth={1.5}
+        strokeOpacity={0.35}
+      />
       {/* Ruta cian que sube hacia el pin. */}
       <Path
         d="M20 168 C 80 168, 70 96, 140 96 S 250 60, 280 30"
@@ -95,7 +133,7 @@ function SlideArt({variant, color, ink}: {variant: SlideContent['art']; color: s
 /** Chip de "Ganancias de hoy" mostrado sobre la ilustración del primer slide. */
 function EarningsChip(): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   return (
     <View
       style={[
@@ -107,7 +145,8 @@ function EarningsChip(): React.JSX.Element {
           padding: theme.spacing.lg,
           gap: theme.spacing.lg,
         },
-      ]}>
+      ]}
+    >
       <View style={styles.chipText}>
         <Text variant="footnote" color="inkMuted">
           {t('onboarding.earningsLabel')}
@@ -116,7 +155,7 @@ function EarningsChip(): React.JSX.Element {
           {t('onboarding.earningsValue')}
         </Text>
       </View>
-      <View style={[styles.chipArrow, {backgroundColor: theme.colors.accent}]}>
+      <View style={[styles.chipArrow, { backgroundColor: theme.colors.accent }]}>
         <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
           <Path
             d="M12 19V6M6 12l6-6 6 6"
@@ -132,7 +171,7 @@ function EarningsChip(): React.JSX.Element {
 }
 
 /** Punto de paginación animado (el activo se ensancha y colorea en cian). */
-function Dot({active}: {active: boolean}): React.JSX.Element {
+function Dot({ active }: { active: boolean }): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const value = useSharedValue(active ? 1 : 0);
@@ -151,7 +190,11 @@ function Dot({active}: {active: boolean}): React.JSX.Element {
 
   return (
     <Animated.View
-      style={[styles.dot, {backgroundColor: active ? theme.colors.accent : theme.colors.inkSubtle}, dotStyle]}
+      style={[
+        styles.dot,
+        { backgroundColor: active ? theme.colors.accent : theme.colors.inkSubtle },
+        dotStyle,
+      ]}
     />
   );
 }
@@ -162,10 +205,10 @@ function Dot({active}: {active: boolean}): React.JSX.Element {
  * conmuta al Login. La primera diapositiva replica el mockup (ganancias del día).
  */
 export const OnboardingScreen = (): React.JSX.Element => {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
-  const {width} = useWindowDimensions();
-  const complete = useOnboardingStore(s => s.complete);
+  const { width } = useWindowDimensions();
+  const complete = useOnboardingStore((s) => s.complete);
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
 
@@ -197,7 +240,7 @@ export const OnboardingScreen = (): React.JSX.Element => {
       complete();
       return;
     }
-    scrollRef.current?.scrollTo({x: width * (index + 1), animated: true});
+    scrollRef.current?.scrollTo({ x: width * (index + 1), animated: true });
     setIndex(index + 1);
   };
 
@@ -205,7 +248,9 @@ export const OnboardingScreen = (): React.JSX.Element => {
     <SafeScreen
       padded={false}
       footer={
-        <View style={[styles.footer, {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.lg}]}>
+        <View
+          style={[styles.footer, { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.lg }]}
+        >
           <Button label={t('onboarding.skip')} variant="ghost" onPress={complete} />
           <View style={styles.footerNext}>
             <Button
@@ -216,8 +261,9 @@ export const OnboardingScreen = (): React.JSX.Element => {
             />
           </View>
         </View>
-      }>
-      <View style={[styles.brand, {paddingTop: theme.spacing.sm}]}>
+      }
+    >
+      <View style={[styles.brand, { paddingTop: theme.spacing.sm }]}>
         <VeoWordmark size="sm" />
       </View>
 
@@ -227,14 +273,18 @@ export const OnboardingScreen = (): React.JSX.Element => {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScrollEnd}
-        style={styles.flex}>
-        {slides.map(slide => (
-          <View key={slide.key} style={[styles.slide, {width, paddingHorizontal: theme.spacing.xl}]}>
+        style={styles.flex}
+      >
+        {slides.map((slide) => (
+          <View
+            key={slide.key}
+            style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}
+          >
             <View style={styles.art}>
               <SlideArt variant={slide.art} color={theme.colors.accent} ink={theme.colors.ink} />
             </View>
             {slide.art === 'earnings' ? <EarningsChip /> : null}
-            <Reveal delay={60} style={[styles.copy, {gap: theme.spacing.sm}]}>
+            <Reveal delay={60} style={[styles.copy, { gap: theme.spacing.sm }]}>
               <Text variant="title1">{slide.title}</Text>
               <Text variant="body" color="inkMuted">
                 {slide.body}
@@ -244,7 +294,7 @@ export const OnboardingScreen = (): React.JSX.Element => {
         ))}
       </ScrollView>
 
-      <View style={[styles.dots, {gap: theme.spacing.sm}]}>
+      <View style={[styles.dots, { gap: theme.spacing.sm }]}>
         {slides.map((slide, i) => (
           <Dot key={slide.key} active={i === index} />
         ))}
@@ -254,16 +304,27 @@ export const OnboardingScreen = (): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  flex: {flex: 1},
-  brand: {alignItems: 'center'},
-  slide: {justifyContent: 'center', gap: 24},
-  art: {alignItems: 'center'},
+  flex: { flex: 1 },
+  brand: { alignItems: 'center' },
+  slide: { justifyContent: 'center', gap: 24 },
+  art: { alignItems: 'center' },
   copy: {},
-  chip: {flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch'},
-  chipText: {flex: 1, gap: 2},
-  chipArrow: {width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center'},
-  dots: {flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 16},
-  dot: {height: 8, borderRadius: 4},
-  footer: {flexDirection: 'row', alignItems: 'center'},
-  footerNext: {flex: 1},
+  chip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+  chipText: { flex: 1, gap: 2 },
+  chipArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  dot: { height: 8, borderRadius: 4 },
+  footer: { flexDirection: 'row', alignItems: 'center' },
+  footerNext: { flex: 1 },
 });

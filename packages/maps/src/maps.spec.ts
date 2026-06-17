@@ -226,10 +226,9 @@ describe('OsrmMapsClient', () => {
 
   it('A1 · etaBatch mapea un par null (OSRM sin ruta) al fallback de gran-círculo (no rompe el lote)', async () => {
     const fetchImpl = (async () =>
-      new Response(
-        JSON.stringify({ code: 'Ok', durations: [[180], [null]] }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
+      new Response(JSON.stringify({ code: 'Ok', durations: [[180], [null]] }), {
+        status: 200,
+      })) as unknown as typeof fetch;
     const client = new OsrmMapsClient({
       osrmBaseUrl: 'http://osrm:5000',
       nominatimBaseUrl: 'http://nominatim:8080',
@@ -275,8 +274,18 @@ describe('OsrmMapsClient', () => {
       requestedUrl = url;
       return new Response(
         JSON.stringify([
-          { lat: '-12.1133', lon: '-77.0290', display_name: 'Av. Larco, Miraflores, Lima', name: 'Av. Larco' },
-          { lat: '-12.1000', lon: '-77.0300', display_name: 'Parque Kennedy, Miraflores', name: 'Parque Kennedy' },
+          {
+            lat: '-12.1133',
+            lon: '-77.0290',
+            display_name: 'Av. Larco, Miraflores, Lima',
+            name: 'Av. Larco',
+          },
+          {
+            lat: '-12.1000',
+            lon: '-77.0300',
+            display_name: 'Parque Kennedy, Miraflores',
+            name: 'Parque Kennedy',
+          },
         ]),
         { status: 200 },
       );

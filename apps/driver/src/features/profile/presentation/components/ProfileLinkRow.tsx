@@ -1,8 +1,8 @@
-import React, {type ReactNode} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {Text, useTheme} from '@veo/ui-kit';
-import {IconChevronRight} from '../../../../shared/presentation/icons';
-import {PressableScale} from './motion';
+import React, { type ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { Text, useTheme } from '@veo/ui-kit';
+import { IconChevronRight } from '../../../../shared/presentation/icons';
+import { PressableScale } from './motion';
 
 export interface ProfileLinkRowProps {
   /** Ícono guía a la izquierda (ya dimensionado por el consumidor). */
@@ -31,20 +31,28 @@ export const ProfileLinkRow = ({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={[styles.row, {borderRadius: theme.radii.md}]}
-      pressedStyle={{backgroundColor: theme.colors.surfaceElevated}}>
+      style={[styles.row, { borderRadius: theme.radii.md }]}
+      pressedStyle={{ backgroundColor: theme.colors.surfaceElevated }}
+    >
       <View
         style={[
           styles.iconCircle,
-          {backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill},
-        ]}>
+          { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
+        ]}
+      >
         {icon}
       </View>
       <View
         style={[
           styles.body,
-          showDivider ? {borderBottomColor: theme.colors.border, borderBottomWidth: StyleSheet.hairlineWidth} : null,
-        ]}>
+          showDivider
+            ? {
+                borderBottomColor: theme.colors.border,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+              }
+            : null,
+        ]}
+      >
         <Text variant="bodyStrong" numberOfLines={1}>
           {label}
         </Text>
@@ -55,8 +63,8 @@ export const ProfileLinkRow = ({
 };
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 4},
-  iconCircle: {width: 40, height: 40, alignItems: 'center', justifyContent: 'center'},
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 4 },
+  iconCircle: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   body: {
     flex: 1,
     flexDirection: 'row',

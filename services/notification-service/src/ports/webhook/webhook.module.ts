@@ -39,7 +39,9 @@ export class WebhookHttpSender implements WebhookSender {
       if (!res.ok) throw new ExternalServiceError(`Webhook ${res.status}: ${await res.text()}`);
     } catch (err) {
       if (err instanceof ExternalServiceError) throw err;
-      throw new ExternalServiceError(`Webhook: ${err instanceof Error ? err.message : String(err)}`);
+      throw new ExternalServiceError(
+        `Webhook: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       clearTimeout(timer);
     }

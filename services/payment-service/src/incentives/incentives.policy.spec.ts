@@ -10,14 +10,22 @@ describe('incentives.policy', () => {
     it('activo dentro de la ventana', () => {
       expect(
         isActiveAt(
-          { active: true, startsAt: new Date('2026-05-30T00:00:00Z'), endsAt: new Date('2026-05-31T00:00:00Z') },
+          {
+            active: true,
+            startsAt: new Date('2026-05-30T00:00:00Z'),
+            endsAt: new Date('2026-05-31T00:00:00Z'),
+          },
           now,
         ),
       ).toBe(true);
     });
     it('inactivo antes de startsAt o después de endsAt', () => {
-      expect(isActiveAt({ active: true, startsAt: new Date('2026-05-31T00:00:00Z'), endsAt: null }, now)).toBe(false);
-      expect(isActiveAt({ active: true, startsAt: null, endsAt: new Date('2026-05-29T00:00:00Z') }, now)).toBe(false);
+      expect(
+        isActiveAt({ active: true, startsAt: new Date('2026-05-31T00:00:00Z'), endsAt: null }, now),
+      ).toBe(false);
+      expect(
+        isActiveAt({ active: true, startsAt: null, endsAt: new Date('2026-05-29T00:00:00Z') }, now),
+      ).toBe(false);
     });
   });
 
@@ -31,9 +39,24 @@ describe('incentives.policy', () => {
       expect(isWithinPeak({ peakStartMinute: 18 * 60, peakEndMinute: 21 * 60 }, at)).toBe(false);
     });
     it('soporta franjas que cruzan medianoche (22:00-02:00)', () => {
-      expect(isWithinPeak({ peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 }, new Date('2026-05-30T23:00:00'))).toBe(true);
-      expect(isWithinPeak({ peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 }, new Date('2026-05-30T01:00:00'))).toBe(true);
-      expect(isWithinPeak({ peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 }, new Date('2026-05-30T12:00:00'))).toBe(false);
+      expect(
+        isWithinPeak(
+          { peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 },
+          new Date('2026-05-30T23:00:00'),
+        ),
+      ).toBe(true);
+      expect(
+        isWithinPeak(
+          { peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 },
+          new Date('2026-05-30T01:00:00'),
+        ),
+      ).toBe(true);
+      expect(
+        isWithinPeak(
+          { peakStartMinute: 22 * 60, peakEndMinute: 2 * 60 },
+          new Date('2026-05-30T12:00:00'),
+        ),
+      ).toBe(false);
     });
     it('false si faltan límites', () => {
       expect(isWithinPeak({ peakStartMinute: null, peakEndMinute: null }, new Date())).toBe(false);
@@ -52,13 +75,23 @@ describe('incentives.policy', () => {
 
   describe('computeCompleted', () => {
     it('META_VIAJES: completed según progreso', () => {
-      const inc = { type: 'META_VIAJES' as const, targetTrips: 3, peakStartMinute: null, peakEndMinute: null };
+      const inc = {
+        type: 'META_VIAJES' as const,
+        targetTrips: 3,
+        peakStartMinute: null,
+        peakEndMinute: null,
+      };
       expect(computeCompleted(inc, { tripsCompleted: 3 }, new Date())).toBe(true);
       expect(computeCompleted(inc, { tripsCompleted: 1 }, new Date())).toBe(false);
       expect(computeCompleted(inc, null, new Date())).toBe(false);
     });
     it('HORA_PICO: completed según franja activa', () => {
-      const inc = { type: 'HORA_PICO' as const, targetTrips: 0, peakStartMinute: 18 * 60, peakEndMinute: 21 * 60 };
+      const inc = {
+        type: 'HORA_PICO' as const,
+        targetTrips: 0,
+        peakStartMinute: 18 * 60,
+        peakEndMinute: 21 * 60,
+      };
       expect(computeCompleted(inc, null, new Date('2026-05-30T19:00:00'))).toBe(true);
       expect(computeCompleted(inc, null, new Date('2026-05-30T09:00:00'))).toBe(false);
     });

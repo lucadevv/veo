@@ -1,22 +1,22 @@
-import {ApiError, type HttpClient} from '@veo/api-client';
-import {HttpPublisherTokenPort} from '../services/http-publisher-token';
-import {PublisherTokenUnavailableError} from '../../domain/ports/trip-media-publisher';
+import { ApiError, type HttpClient } from '@veo/api-client';
+import { HttpPublisherTokenPort } from '../services/http-publisher-token';
+import { PublisherTokenUnavailableError } from '../../domain/ports/trip-media-publisher';
 
 type Handler = (method: string, path: string, opts: any) => unknown;
 
 class FakeHttpClient {
-  calls: Array<{method: string; path: string; opts: any}> = [];
+  calls: Array<{ method: string; path: string; opts: any }> = [];
   constructor(private readonly handler: Handler) {}
   post(path: string, opts: any = {}) {
-    this.calls.push({method: 'POST', path, opts});
+    this.calls.push({ method: 'POST', path, opts });
     return Promise.resolve().then(() => this.handler('POST', path, opts));
   }
   get(path: string, opts: any = {}) {
-    this.calls.push({method: 'GET', path, opts});
+    this.calls.push({ method: 'GET', path, opts });
     return Promise.resolve().then(() => this.handler('GET', path, opts));
   }
   delete(path: string, opts: any = {}) {
-    this.calls.push({method: 'DELETE', path, opts});
+    this.calls.push({ method: 'DELETE', path, opts });
     return Promise.resolve().then(() => this.handler('DELETE', path, opts));
   }
 }
@@ -34,7 +34,11 @@ describe('HttpPublisherTokenPort', () => {
 
     const credentials = await port.fetchPublisherCredentials('trip abc');
 
-    expect(credentials).toEqual({url: 'wss://livekit.veo.pe', token: 'jwt-publish', room: 'trip-abc'});
+    expect(credentials).toEqual({
+      url: 'wss://livekit.veo.pe',
+      token: 'jwt-publish',
+      room: 'trip-abc',
+    });
     expect(fake.calls[0]?.path).toBe('/media/rooms/trip%20abc/publisher-token');
   });
 

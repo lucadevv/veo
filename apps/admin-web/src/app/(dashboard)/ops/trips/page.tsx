@@ -39,7 +39,9 @@ const columns: ColumnDef<TripSummary, unknown>[] = [
     accessorKey: 'passengerId',
     header: 'Pasajero',
     cell: ({ row }) => (
-      <span className="font-mono text-xs text-ink-muted">{row.original.passengerId.slice(0, 8)}</span>
+      <span className="font-mono text-xs text-ink-muted">
+        {row.original.passengerId.slice(0, 8)}
+      </span>
     ),
   },
   {
@@ -120,7 +122,10 @@ function TripsInner() {
       />
 
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 lg:px-6">
-        <div className="inline-flex rounded-md border border-border bg-surface-2 p-1" role="tablist">
+        <div
+          className="inline-flex rounded-md border border-border bg-surface-2 p-1"
+          role="tablist"
+        >
           {STATUS_FILTERS.map((f) => {
             const active = (filters.status ?? 'ALL') === f.value;
             return (

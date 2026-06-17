@@ -1,4 +1,4 @@
-import type { SavedPlace, SavedPlaceInput } from './entities';
+import type {SavedPlace, SavedPlaceInput} from './entities';
 
 /**
  * Abstracción del repositorio de Lugares guardados (DIP). Persistencia LOCAL (MMKV), sin red.

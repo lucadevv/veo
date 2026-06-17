@@ -34,11 +34,15 @@ function row(over: Partial<VehicleModelSpec> = {}): VehicleModelSpec {
 function makeService(rows: VehicleModelSpec[]) {
   const findMany = vi.fn().mockResolvedValue(rows);
   // findFirst respeta el where completo (id + status) — espeja el filtro APPROVED de getById.
-  const findFirst = vi.fn().mockImplementation(({ where }: { where: { id: string; status?: string } }) =>
-    Promise.resolve(
-      rows.find((r) => r.id === where.id && (where.status === undefined || r.status === where.status)) ?? null,
-    ),
-  );
+  const findFirst = vi
+    .fn()
+    .mockImplementation(({ where }: { where: { id: string; status?: string } }) =>
+      Promise.resolve(
+        rows.find(
+          (r) => r.id === where.id && (where.status === undefined || r.status === where.status),
+        ) ?? null,
+      ),
+    );
   const prisma = { read: { vehicleModelSpec: { findMany, findFirst } } };
   const service = new VehicleModelsService(prisma as never);
   return { service, findMany, findFirst };
@@ -139,13 +143,18 @@ function makeReviewService(rows: VehicleModelSpec[]) {
     const md = where.model?.equals?.toLowerCase();
     return Promise.resolve(
       store.find(
-        (r) => r.make.toLowerCase() === mk && r.model.toLowerCase() === md && r.yearFrom === where.yearFrom,
+        (r) =>
+          r.make.toLowerCase() === mk &&
+          r.model.toLowerCase() === md &&
+          r.yearFrom === where.yearFrom,
       ) ?? null,
     );
   });
-  const findUnique = vi.fn().mockImplementation(({ where }: { where: { id: string } }) =>
-    Promise.resolve(store.find((r) => r.id === where.id) ?? null),
-  );
+  const findUnique = vi
+    .fn()
+    .mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(store.find((r) => r.id === where.id) ?? null),
+    );
   const create = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
     captured.create = data;
     const created = row(data as Partial<VehicleModelSpec>);
@@ -153,13 +162,23 @@ function makeReviewService(rows: VehicleModelSpec[]) {
     return Promise.resolve(created);
   });
   // CAS: solo aplica si existe una fila con ese id Y el status del where (PENDING_REVIEW).
-  const updateMany = vi.fn().mockImplementation(({ where, data }: { where: { id: string; status: string }; data: Record<string, unknown> }) => {
-    captured.update = data;
-    const idx = store.findIndex((r) => r.id === where.id && r.status === where.status);
-    if (idx === -1) return Promise.resolve({ count: 0 });
-    store[idx] = { ...store[idx], ...data } as VehicleModelSpec;
-    return Promise.resolve({ count: 1 });
-  });
+  const updateMany = vi
+    .fn()
+    .mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where: { id: string; status: string };
+        data: Record<string, unknown>;
+      }) => {
+        captured.update = data;
+        const idx = store.findIndex((r) => r.id === where.id && r.status === where.status);
+        if (idx === -1) return Promise.resolve({ count: 0 });
+        store[idx] = { ...store[idx], ...data } as VehicleModelSpec;
+        return Promise.resolve({ count: 1 });
+      },
+    );
 
   const prisma = {
     read: { vehicleModelSpec: { findFirst, findUnique } },
@@ -209,7 +228,13 @@ describe('VehicleModelsService.requestModel · B5-2.c', () => {
 describe('VehicleModelsService.approve/reject · B5-2.c state machine', () => {
   it('approve PENDING→APPROVED completa la ficha técnica + verifiedBy', async () => {
     const { service, captured } = makeReviewService([
-      row({ id: 'p1', status: VehicleModelStatus.PENDING_REVIEW, segment: null, energySource: null, efficiency: null }),
+      row({
+        id: 'p1',
+        status: VehicleModelStatus.PENDING_REVIEW,
+        segment: null,
+        energySource: null,
+        efficiency: null,
+      }),
     ]);
     const view = await service.approve('p1', 'admin-9', {
       segment: VehicleSegment.MID,

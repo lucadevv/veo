@@ -38,7 +38,9 @@ const user: UserReply = {
   name: 'Khalid Ríos',
 };
 
-function docsWith(types: { type: string; status: string; expiresAt?: string }[]): DriverDocumentsReply {
+function docsWith(
+  types: { type: string; status: string; expiresAt?: string }[],
+): DriverDocumentsReply {
   return {
     driverId: 'drv-1',
     documents: types.map((t, i) => ({
@@ -209,7 +211,15 @@ describe('catálogo de modelos (B5-2 · selector del onboarding)', () => {
       nextCursor: null,
     });
     expect(views).toEqual([
-      { id: 'm1', make: 'Toyota', model: 'Yaris', yearFrom: 2017, yearTo: 2024, vehicleType: 'CAR', seats: 5 },
+      {
+        id: 'm1',
+        make: 'Toyota',
+        model: 'Yaris',
+        yearFrom: 2017,
+        yearTo: 2024,
+        vehicleType: 'CAR',
+        seats: 5,
+      },
     ]);
   });
 
@@ -224,6 +234,11 @@ describe('catálogo de modelos (B5-2 · selector del onboarding)', () => {
       model: 'Probox',
       status: 'PENDING_REVIEW',
     });
-    expect(view).toEqual({ id: 'req-1', make: 'Toyota', model: 'Probox', status: 'PENDING_REVIEW' });
+    expect(view).toEqual({
+      id: 'req-1',
+      make: 'Toyota',
+      model: 'Probox',
+      status: 'PENDING_REVIEW',
+    });
   });
 });

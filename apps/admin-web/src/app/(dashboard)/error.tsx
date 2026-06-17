@@ -52,9 +52,7 @@ export default function Error({
         </div>
 
         {error.digest ? (
-          <p className="mt-6 font-mono text-xs text-ink-muted">
-            Código de soporte: {error.digest}
-          </p>
+          <p className="mt-6 font-mono text-xs text-ink-muted">Código de soporte: {error.digest}</p>
         ) : null}
       </Card>
     </div>

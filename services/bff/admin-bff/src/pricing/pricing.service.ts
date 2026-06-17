@@ -11,7 +11,11 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { PricingMode, EnergySourcePrice, BidFloorOverride } from '@veo/shared-types';
 import { REST_TRIP } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBidFloorDto } from './dto/pricing.dto';
+import type {
+  ReplaceScheduleDto,
+  ReplaceFuelSurchargeDto,
+  ReplaceBidFloorDto,
+} from './dto/pricing.dto';
 import type { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 
 /** Vista del schedule devuelta por trip-service (proyección vigente o el default). */
@@ -68,10 +72,17 @@ export class PricingService {
   }
 
   /** pricing:manage — reemplaza wholesale el schedule. trip-service bump-ea version y emite el evento. */
-  async replaceSchedule(identity: AuthenticatedUser, dto: ReplaceScheduleDto): Promise<ModeScheduleView> {
+  async replaceSchedule(
+    identity: AuthenticatedUser,
+    dto: ReplaceScheduleDto,
+  ): Promise<ModeScheduleView> {
     const res = await this.rest.put<ModeScheduleView>(BASE, {
       identity,
-      body: { defaultMode: dto.defaultMode, rules: dto.rules, expectedVersion: dto.expectedVersion },
+      body: {
+        defaultMode: dto.defaultMode,
+        rules: dto.rules,
+        expectedVersion: dto.expectedVersion,
+      },
     });
     await this.audit.record(identity, {
       action: 'pricing.mode_schedule_replace',
@@ -142,16 +153,27 @@ export class PricingService {
   }
 
   /** pricing:manage — reemplaza el piso de la PUJA. trip-service bump-ea version y emite el evento. */
-  async replaceBidFloor(identity: AuthenticatedUser, dto: ReplaceBidFloorDto): Promise<BidFloorView> {
+  async replaceBidFloor(
+    identity: AuthenticatedUser,
+    dto: ReplaceBidFloorDto,
+  ): Promise<BidFloorView> {
     const res = await this.rest.put<BidFloorView>(BID_FLOOR_BASE, {
       identity,
-      body: { defaultFloorCents: dto.defaultFloorCents, overrides: dto.overrides, expectedVersion: dto.expectedVersion },
+      body: {
+        defaultFloorCents: dto.defaultFloorCents,
+        overrides: dto.overrides,
+        expectedVersion: dto.expectedVersion,
+      },
     });
     await this.audit.record(identity, {
       action: 'pricing.bid_floor_replace',
       resourceType: 'bid_floor_config',
       resourceId: String(res.version),
-      payload: { defaultFloorCents: dto.defaultFloorCents, overrideCount: dto.overrides.length, version: res.version },
+      payload: {
+        defaultFloorCents: dto.defaultFloorCents,
+        overrideCount: dto.overrides.length,
+        version: res.version,
+      },
     });
     return res;
   }

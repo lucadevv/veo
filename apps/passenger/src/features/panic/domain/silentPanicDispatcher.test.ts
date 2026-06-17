@@ -1,16 +1,16 @@
-import { ApiError, type PanicTriggerResult } from '@veo/api-client';
-import { NotImplementedError } from '../../../core/errors/notImplemented';
-import type { PanicEscalation } from './panicEscalation';
-import { SilentPanicDispatcher } from './silentPanicDispatcher';
-import type { TriggerPanicUseCase } from './usecases';
+import {ApiError, type PanicTriggerResult} from '@veo/api-client';
+import {NotImplementedError} from '../../../core/errors/notImplemented';
+import type {PanicEscalation} from './panicEscalation';
+import {SilentPanicDispatcher} from './silentPanicDispatcher';
+import type {TriggerPanicUseCase} from './usecases';
 
 /** Doble del use case: solo `execute`, que es lo único que toca el dispatcher. */
 function makeTrigger(execute: jest.Mock): TriggerPanicUseCase {
-  return { execute } as unknown as TriggerPanicUseCase;
+  return {execute} as unknown as TriggerPanicUseCase;
 }
 
-function makeEscalation(): PanicEscalation & { escalate: jest.Mock } {
-  return { escalate: jest.fn() };
+function makeEscalation(): PanicEscalation & {escalate: jest.Mock} {
+  return {escalate: jest.fn()};
 }
 
 const RESULT: PanicTriggerResult = {
@@ -39,7 +39,10 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
   it('confirmación al primer intento: un solo POST, sin reintentos ni escalamiento', async () => {
     const execute = jest.fn().mockResolvedValue(RESULT);
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     await jest.advanceTimersByTimeAsync(0);
@@ -55,7 +58,10 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
       .mockRejectedValueOnce(networkError())
       .mockResolvedValue(RESULT);
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     await jest.advanceTimersByTimeAsync(1_000); // primer backoff (1s)
@@ -68,9 +74,16 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
   });
 
   it('error determinista (4xx no retryable): NO reintenta a ciegas y escala de inmediato', async () => {
-    const execute = jest.fn().mockRejectedValue(new ApiError(400, 'VALIDATION_ERROR', 'payload inválido'));
+    const execute = jest
+      .fn()
+      .mockRejectedValue(
+        new ApiError(400, 'VALIDATION_ERROR', 'payload inválido'),
+      );
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     await jest.advanceTimersByTimeAsync(200_000);
@@ -81,9 +94,16 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
   });
 
   it('puerto nativo ausente (NotImplementedError): escala sin reintentar (el puerto no aparece solo)', async () => {
-    const execute = jest.fn().mockRejectedValue(new NotImplementedError('location.getCurrentPosition'));
+    const execute = jest
+      .fn()
+      .mockRejectedValue(
+        new NotImplementedError('location.getCurrentPosition'),
+      );
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     await jest.advanceTimersByTimeAsync(200_000);
@@ -95,7 +115,10 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
   it('red caída persistente: agota el presupuesto (~2 min de backoff) y deja de ser silencioso', async () => {
     const execute = jest.fn().mockRejectedValue(networkError());
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     // Con jitter determinista: intentos en t=0,1,3,7,15,31,61,91s; a los 91s la próxima espera
@@ -103,7 +126,7 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
     await jest.advanceTimersByTimeAsync(200_000);
 
     expect(execute).toHaveBeenCalledTimes(8);
-    const keys = execute.mock.calls.map((call) => (call as [string, string])[1]);
+    const keys = execute.mock.calls.map(call => (call as [string, string])[1]);
     expect(new Set(keys).size).toBe(1); // TODOS los reintentos reusan el mismo dedupKey
     expect(escalation.escalate).toHaveBeenCalledTimes(1);
     expect(escalation.escalate).toHaveBeenCalledWith('trip-1');
@@ -114,11 +137,17 @@ describe('SilentPanicDispatcher (entrega at-least-once del pánico silencioso)',
     const execute = jest
       .fn()
       .mockImplementationOnce(
-        () => new Promise<PanicTriggerResult>((resolve) => { resolveFirst = resolve; }),
+        () =>
+          new Promise<PanicTriggerResult>(resolve => {
+            resolveFirst = resolve;
+          }),
       )
       .mockResolvedValue(RESULT);
     const escalation = makeEscalation();
-    const dispatcher = new SilentPanicDispatcher(makeTrigger(execute), escalation);
+    const dispatcher = new SilentPanicDispatcher(
+      makeTrigger(execute),
+      escalation,
+    );
 
     dispatcher.dispatch('trip-1');
     dispatcher.dispatch('trip-1'); // en vuelo → ignorado

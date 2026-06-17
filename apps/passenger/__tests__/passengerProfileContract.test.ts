@@ -1,4 +1,4 @@
-import { passengerProfile } from '@veo/api-client';
+import {passengerProfile} from '@veo/api-client';
 
 /**
  * Regresión (bug 2026-06-06): `/users/me` devuelve `phone: null` para usuarios que entraron por

@@ -1,4 +1,4 @@
-import type { TripStatus } from '@veo/api-client';
+import type {TripStatus} from '@veo/api-client';
 
 /**
  * Clasificación del estado de un viaje para decidir la NAVEGACIÓN desde el historial (y para el tono de
@@ -10,12 +10,8 @@ import type { TripStatus } from '@veo/api-client';
  *            `DraggableSheet` SOBRE "Mis Viajes" (ver TripDetailSheet) — ya no es una pantalla aparte.
  * VIVO     = sigue en curso: se re-entra por el flujo unificado (sheet del Home), NUNCA por `TripActive`.
  */
-export const TERMINAL_TRIP_STATUSES: ReadonlySet<TripStatus> = new Set<TripStatus>([
-  'COMPLETED',
-  'CANCELLED',
-  'EXPIRED',
-  'FAILED',
-]);
+export const TERMINAL_TRIP_STATUSES: ReadonlySet<TripStatus> =
+  new Set<TripStatus>(['COMPLETED', 'CANCELLED', 'EXPIRED', 'FAILED']);
 
 /** `true` si el viaje ya terminó (cualquier estado terminal). */
 export function isTerminalTrip(status: TripStatus): boolean {

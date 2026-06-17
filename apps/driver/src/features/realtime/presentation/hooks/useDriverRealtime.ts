@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ChatMessage,
   DispatchMatchPayload,
@@ -7,8 +7,8 @@ import type {
   TipAddedPayload,
   WaypointProposedMsg,
 } from '@veo/api-client';
-import {useDi} from '../../../../core/di/useDi';
-import type {DriverSocket} from '../../../../core/realtime/socket';
+import { useDi } from '../../../../core/di/useDi';
+import type { DriverSocket } from '../../../../core/realtime/socket';
 
 export interface DriverRealtimeHandlers {
   /**
@@ -78,7 +78,10 @@ function readScheduledFlag(msg: DriverEventEnvelope<DispatchOfferedPayload>): bo
   return payload.scheduled === true || envelope.scheduled === true;
 }
 
-export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHandlers): DriverSocket | null {
+export function useDriverRealtime(
+  enabled: boolean,
+  handlers: DriverRealtimeHandlers,
+): DriverSocket | null {
   const di = useDi();
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -93,13 +96,15 @@ export function useDriverRealtime(enabled: boolean, handlers: DriverRealtimeHand
     // Toda excepción lanzada dentro de un callback de socket.io es NO capturada y, en build Release
     // (sin LogBox), tumba la app. Por eso cada listener envuelve su handler: un evento malformado o
     // "pelado" (sin `payload`, o de una forma inesperada) se ignora en silencio en vez de crashear.
-    const safe = <T>(fn: (msg: T) => void) => (msg: T) => {
-      try {
-        fn(msg);
-      } catch {
-        // Evento fuera de contrato: degradar sin delatar nada (regla #2) y sin tumbar la app.
-      }
-    };
+    const safe =
+      <T>(fn: (msg: T) => void) =>
+      (msg: T) => {
+        try {
+          fn(msg);
+        } catch {
+          // Evento fuera de contrato: degradar sin delatar nada (regla #2) y sin tumbar la app.
+        }
+      };
 
     const onOffer = safe((msg: DriverEventEnvelope<DispatchOfferedPayload>) => {
       if (!msg?.payload?.matchId || !msg.payload.tripId) {

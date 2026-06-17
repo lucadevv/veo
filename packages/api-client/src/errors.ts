@@ -27,7 +27,8 @@ export class ApiError extends Error {
   }
 
   static fromResponse(status: number, body: ApiErrorBody | string | null): ApiError {
-    if (typeof body === 'string') return new ApiError(status, 'HTTP_ERROR', body || `HTTP ${status}`);
+    if (typeof body === 'string')
+      return new ApiError(status, 'HTTP_ERROR', body || `HTTP ${status}`);
     const code = body?.error?.code ?? 'HTTP_ERROR';
     const message = body?.error?.message ?? body?.message ?? `HTTP ${status}`;
     return new ApiError(status, code, message, body?.error?.details);

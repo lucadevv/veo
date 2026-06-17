@@ -67,7 +67,11 @@ function makePrisma(rows: TripRow[]) {
       }: {
         data: { aggregateId: string; eventType: string; envelope: OutboxRow['envelope'] };
       }) => {
-        outbox.push({ aggregateId: data.aggregateId, eventType: data.eventType, envelope: data.envelope });
+        outbox.push({
+          aggregateId: data.aggregateId,
+          eventType: data.eventType,
+          envelope: data.envelope,
+        });
         return {};
       },
     },
@@ -90,10 +94,7 @@ function makePrisma(rows: TripRow[]) {
 function makeService(rows: TripRow[]) {
   const { prisma, updateManyCalls, outbox } = makePrisma(rows);
   // El ctor real recibe (PrismaService, MapsClient); aquí solo ejercitamos la purga.
-  const service = new TripsService(
-    prisma as never,
-    {} as never,
-  );
+  const service = new TripsService(prisma as never, {} as never);
   return { service, updateManyCalls, outbox };
 }
 
@@ -225,9 +226,11 @@ describe('UserDeletedConsumer', () => {
     const rows = [buildRow('user-1')];
     const { consumer } = makeConsumer(rows);
 
-    await (consumer as unknown as {
-      onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
-    }).onUserDeleted(envelope({ userId: 'user-1', at: '2026-06-04T00:00:00.000Z' }));
+    await (
+      consumer as unknown as {
+        onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
+      }
+    ).onUserDeleted(envelope({ userId: 'user-1', at: '2026-06-04T00:00:00.000Z' }));
 
     expect(rows[0]!.originLat).toBe(0);
     expect(rows[0]!.routePolyline).toBeNull();
@@ -237,9 +240,11 @@ describe('UserDeletedConsumer', () => {
     const rows = [buildRow('user-1')];
     const { consumer, updateManyCalls } = makeConsumer(rows);
 
-    await (consumer as unknown as {
-      onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
-    }).onUserDeleted(envelope({ wrong: 'shape' }));
+    await (
+      consumer as unknown as {
+        onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
+      }
+    ).onUserDeleted(envelope({ wrong: 'shape' }));
 
     expect(updateManyCalls).toHaveLength(0);
     expect(rows[0]!.originLat).toBe(-12.0464);
@@ -250,13 +255,17 @@ describe('UserDeletedConsumer', () => {
     const { consumer } = makeConsumer(rows);
     const evt = envelope({ userId: 'user-1', at: '2026-06-04T00:00:00.000Z' });
 
-    await (consumer as unknown as {
-      onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
-    }).onUserDeleted(evt);
+    await (
+      consumer as unknown as {
+        onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
+      }
+    ).onUserDeleted(evt);
     const snapshot = { ...rows[0] };
-    await (consumer as unknown as {
-      onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
-    }).onUserDeleted(evt);
+    await (
+      consumer as unknown as {
+        onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
+      }
+    ).onUserDeleted(evt);
 
     expect(rows[0]).toEqual(snapshot);
   });

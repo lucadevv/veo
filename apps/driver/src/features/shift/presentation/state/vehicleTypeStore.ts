@@ -1,11 +1,7 @@
-import {create} from 'zustand';
-import {prefsStore, type KeyValueStore} from '../../../../core/storage/mmkv';
-import {PrefKey} from '../../../../core/storage/keys';
-import {
-  DEFAULT_VEHICLE_TYPE,
-  parseVehicleType,
-  type VehicleType,
-} from '../../domain';
+import { create } from 'zustand';
+import { prefsStore, type KeyValueStore } from '../../../../core/storage/mmkv';
+import { PrefKey } from '../../../../core/storage/keys';
+import { DEFAULT_VEHICLE_TYPE, parseVehicleType, type VehicleType } from '../../domain';
 
 /**
  * Tipo de vehículo activo del conductor (Auto | Moto), persistido en preferencias (MMKV).
@@ -25,11 +21,11 @@ export function readPersistedVehicleType(store: KeyValueStore): VehicleType {
   return parseVehicleType(store.getString(PrefKey.VehicleType));
 }
 
-export const useVehicleTypeStore = create<VehicleTypeState>(set => ({
+export const useVehicleTypeStore = create<VehicleTypeState>((set) => ({
   vehicleType: readPersistedVehicleType(prefsStore),
-  setVehicleType: type => {
+  setVehicleType: (type) => {
     prefsStore.setString(PrefKey.VehicleType, type);
-    set({vehicleType: type});
+    set({ vehicleType: type });
   },
 }));
 

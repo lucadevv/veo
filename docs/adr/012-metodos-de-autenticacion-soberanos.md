@@ -55,16 +55,16 @@ APNs de Apple) desde un puerto, con cliente propio (`fcm-client.ts`, `apns-clien
 
 ### 1.2 Matriz método × soberanía (la decisión, de más a menos soberano)
 
-| Método | Soberanía | Cómo se soberaniza (riel inevitable + self-hosted) | Secretos/Infra | Estado |
-|---|---|---|---|---|
-| **Teléfono + OTP** | ✅ Soberano | SMPP 3.4 directo al operador (`SmsSmppSender`). Riel: operador SMS. | `SMPP_*` | **construido** (falta cablear live) |
-| **Correo + contraseña** | ✅ 100% soberano | SMTP propio (`EmailSmtpSender`, nodemailer) + hash **argon2id** (patrón `AdminUser`). Sin terceros. | `SMTP_*` | a construir |
-| **Google (OAuth2/OIDC)** | ✅ Soberano (tras puerto) | Implementamos el cliente OAuth y **verificamos el `id_token` contra el JWKS público de Google** (`jose`). Sin Auth0/Firebase. Riel: IdP de Google (= FCM). | `GOOGLE_CLIENT_ID/SECRET` | a construir |
+| Método                                | Soberanía                           | Cómo se soberaniza (riel inevitable + self-hosted)                                                                                                                                                                                                                          | Secretos/Infra                          | Estado                                         |
+| ------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------- |
+| **Teléfono + OTP**                    | ✅ Soberano                         | SMPP 3.4 directo al operador (`SmsSmppSender`). Riel: operador SMS.                                                                                                                                                                                                         | `SMPP_*`                                | **construido** (falta cablear live)            |
+| **Correo + contraseña**               | ✅ 100% soberano                    | SMTP propio (`EmailSmtpSender`, nodemailer) + hash **argon2id** (patrón `AdminUser`). Sin terceros.                                                                                                                                                                         | `SMTP_*`                                | a construir                                    |
+| **Google (OAuth2/OIDC)**              | ✅ Soberano (tras puerto)           | Implementamos el cliente OAuth y **verificamos el `id_token` contra el JWKS público de Google** (`jose`). Sin Auth0/Firebase. Riel: IdP de Google (= FCM).                                                                                                                  | `GOOGLE_CLIENT_ID/SECRET`               | a construir                                    |
 | **WhatsApp (entrega OTP, PRINCIPAL)** | ⚠️ **Excepción §0.7** (no soberano) | Canal **principal** de entrega del OTP (no es método de login): Meta Cloud API tras un puerto `WhatsAppSender`, **mismo trato que FCM/APNs**. Se manda por WhatsApp primero; **si falla → cae a SMS automático**. NO usar emuladores Evolution/OpenWA (violan ToS, banean). | `WHATSAPP_*` (Meta) + template aprobado | a construir (puerto; live necesita creds Meta) |
-| **SMS (entrega OTP, FALLBACK)** | ✅ Soberano | Red de respaldo del OTP: SMPP 3.4 directo al operador (`SmsSmppSender`). Solo entra si WhatsApp no entrega. | `SMPP_*` del operador | **construido** (falta cablear live) |
-| ~~Facebook (OAuth2)~~ | — | **Fuera de scope** (a futuro). Su uso viene cayendo; se prioriza Google. | — | diferido |
-| ~~OTP por llamada (voz)~~ | — | **Fuera de scope** (a futuro). Soberanizable (Asterisk+SIP+TTS Piper) pero infra pesada; ya hay fallback (WhatsApp/correo). | — | diferido |
-| **Re-login biométrico** | ✅ Soberano | Face ID/huella local (Secure Enclave/Keystore), refresh local. + gate de turno con `biometric-service` propio (ONNX). | — | **construido** |
+| **SMS (entrega OTP, FALLBACK)**       | ✅ Soberano                         | Red de respaldo del OTP: SMPP 3.4 directo al operador (`SmsSmppSender`). Solo entra si WhatsApp no entrega.                                                                                                                                                                 | `SMPP_*` del operador                   | **construido** (falta cablear live)            |
+| ~~Facebook (OAuth2)~~                 | —                                   | **Fuera de scope** (a futuro). Su uso viene cayendo; se prioriza Google.                                                                                                                                                                                                    | —                                       | diferido                                       |
+| ~~OTP por llamada (voz)~~             | —                                   | **Fuera de scope** (a futuro). Soberanizable (Asterisk+SIP+TTS Piper) pero infra pesada; ya hay fallback (WhatsApp/correo).                                                                                                                                                 | —                                       | diferido                                       |
+| **Re-login biométrico**               | ✅ Soberano                         | Face ID/huella local (Secure Enclave/Keystore), refresh local. + gate de turno con `biometric-service` propio (ONNX).                                                                                                                                                       | —                                       | **construido**                                 |
 
 > **Regla de oro:** ningún método introduce un SaaS de auth (Auth0/Firebase/Clerk/Cognito). Donde hay un riel
 > inevitable (Google/Meta IdP, operador SMS/voz), el conector lo escribimos nosotros tras un puerto + sandbox.
@@ -208,7 +208,7 @@ Cada lote: puerto+sandbox primero (anda en dev sin secretos), luego adapter live
 
 ---
 
-*Decisión RATIFICADA: multi-método (Google + correo + teléfono) vía `puerto+sandbox+adapter` (§0.7). OTP por SMS
+_Decisión RATIFICADA: multi-método (Google + correo + teléfono) vía `puerto+sandbox+adapter` (§0.7). OTP por SMS
 (soberano) + WhatsApp (única excepción §0.7, acotada a entrega, tras puerto). Facebook y llamada diferidos. La UI ya
 está (Lote A); falta el backend por método + la tabla `AuthMethod`. Próximo: tasks → apply, lote por lote, empezando
-por `AuthMethod` + correo (100% soberano, infra SMTP lista).*
+por `AuthMethod` + correo (100% soberano, infra SMTP lista)._

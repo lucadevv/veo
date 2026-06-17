@@ -1,7 +1,7 @@
-import type {MobileSessionUser} from '@veo/api-client';
-import {prefsStore} from '../../storage/mmkv';
-import {useSessionStore} from '../sessionStore';
-import {useRegistrationStore} from '../../../features/registration/presentation/state/registrationStore';
+import type { MobileSessionUser } from '@veo/api-client';
+import { prefsStore } from '../../storage/mmkv';
+import { useSessionStore } from '../sessionStore';
+import { useRegistrationStore } from '../../../features/registration/presentation/state/registrationStore';
 
 /** Clave MMKV donde el wizard de alta persiste su progreso (espeja `registrationStore`). */
 const REGISTRATION_PREF_KEY = 'pref.registration.v1';
@@ -12,14 +12,21 @@ function makeRegistrationDirty(): void {
     status: 'approved',
     statusResolvedFromBackend: true,
     currentStep: 4,
-    personal: {fullName: 'Carlos Quispe Mamani', dni: '70123456', birthdate: '15/08/1990'},
-    vehicle: {type: 'CAR', plate: 'ABC-123', year: '2021', modelSpecId: 'spec-1', brand: 'Honda', model: 'CB 190R'},
-    documents: [{type: 'LICENSE', status: 'uploaded'}],
-    faceCapture: {ref: 'face-ref-123', score: 0.99, capturedAt: '2026-05-30T10:00:00.000Z'},
+    personal: { fullName: 'Carlos Quispe Mamani', dni: '70123456', birthdate: '15/08/1990' },
+    vehicle: {
+      type: 'CAR',
+      plate: 'ABC-123',
+      year: '2021',
+      modelSpecId: 'spec-1',
+      brand: 'Honda',
+      model: 'CB 190R',
+    },
+    documents: [{ type: 'LICENSE', status: 'uploaded' }],
+    faceCapture: { ref: 'face-ref-123', score: 0.99, capturedAt: '2026-05-30T10:00:00.000Z' },
   });
 }
 
-const sampleUser = {id: 'drv-1', phone: '+51999999999'} as unknown as MobileSessionUser;
+const sampleUser = { id: 'drv-1', phone: '+51999999999' } as unknown as MobileSessionUser;
 
 describe('sessionStore · reset de alta en cierre de sesión', () => {
   beforeEach(() => {
@@ -46,7 +53,7 @@ describe('sessionStore · reset de alta en cierre de sesión', () => {
     expect(reg.statusResolvedFromBackend).toBe(false);
     expect(reg.currentStep).toBe(1);
     // Sin fuga de PII de la cuenta anterior.
-    expect(reg.personal).toEqual({fullName: '', dni: '', birthdate: ''});
+    expect(reg.personal).toEqual({ fullName: '', dni: '', birthdate: '' });
     expect(reg.faceCapture).toBeNull();
     // La clave persistida del alta se borra del almacén de preferencias.
     expect(removeSpy).toHaveBeenCalledWith(REGISTRATION_PREF_KEY);
@@ -64,7 +71,7 @@ describe('sessionStore · reset de alta en cierre de sesión', () => {
     const reg = useRegistrationStore.getState();
     expect(reg.status).toBe('not_started');
     expect(reg.statusResolvedFromBackend).toBe(false);
-    expect(reg.personal).toEqual({fullName: '', dni: '', birthdate: ''});
+    expect(reg.personal).toEqual({ fullName: '', dni: '', birthdate: '' });
     expect(removeSpy).toHaveBeenCalledWith(REGISTRATION_PREF_KEY);
     expect(useSessionStore.getState().status).toBe('unauthenticated');
     expect(useSessionStore.getState().expired).toBe(true);

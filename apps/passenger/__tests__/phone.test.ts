@@ -1,4 +1,4 @@
-import { isValidPeruPhone, normalizePeruPhone } from '../src/shared/utils/phone';
+import {isValidPeruPhone, normalizePeruPhone} from '../src/shared/utils/phone';
 
 describe('normalizePeruPhone', () => {
   it('antepone 51 a un número local de 9 dígitos', () => {

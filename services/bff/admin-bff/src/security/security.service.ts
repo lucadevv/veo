@@ -51,8 +51,14 @@ export class SecurityService {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
-  async listPanics(identity: AuthenticatedUser, query: ListPanicsQueryDto): Promise<Page<PanicSummary>> {
-    const list = await this.rest.get<PanicEntity[]>('/panic', { identity, query: { status: query.status } });
+  async listPanics(
+    identity: AuthenticatedUser,
+    query: ListPanicsQueryDto,
+  ): Promise<Page<PanicSummary>> {
+    const list = await this.rest.get<PanicEntity[]>('/panic', {
+      identity,
+      query: { status: query.status },
+    });
     // panic-service devuelve un array; el contrato admin es paginado. Sin cursor downstream → nextCursor null.
     return { items: list.map(toPanicSummary), nextCursor: null };
   }
@@ -64,7 +70,11 @@ export class SecurityService {
 
   async ack(identity: AuthenticatedUser, id: string): Promise<PanicDetail> {
     const p = await this.rest.post<PanicEntity>(`/panic/${id}/ack`, { identity });
-    await this.audit.record(identity, { action: 'panic.ack', resourceType: 'panic', resourceId: id });
+    await this.audit.record(identity, {
+      action: 'panic.ack',
+      resourceType: 'panic',
+      resourceId: id,
+    });
     return this.enrichPanicDetail(identity, p);
   }
 
@@ -73,10 +83,15 @@ export class SecurityService {
    * no trae driverId → se resuelve por el viaje (GetTrip), y los nombres por identity (GetUser/GetDriver).
    * fail-safe: si cualquier lookup cae, degrada a null (el detalle de pánico NUNCA debe romperse).
    */
-  private async enrichPanicDetail(identity: AuthenticatedUser, p: PanicEntity): Promise<PanicDetail> {
+  private async enrichPanicDetail(
+    identity: AuthenticatedUser,
+    p: PanicEntity,
+  ): Promise<PanicDetail> {
     const base = toPanicDetail(p);
     const meta = grpcIdentityMetadata(identity, this.secret);
-    const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: p.tripId }, meta).catch(() => null);
+    const trip = await this.tripGrpc
+      .call<TripReply>('GetTrip', { id: p.tripId }, meta)
+      .catch(() => null);
     const driverId = trip?.found ? trip.driverId || null : null;
     const [passenger, driver] = await Promise.all([
       this.identityGrpc.call<UserReply>('GetUser', { id: p.passengerId }, meta).catch(() => null),
@@ -92,7 +107,11 @@ export class SecurityService {
     };
   }
 
-  async resolve(identity: AuthenticatedUser, id: string, dto: ResolvePanicDto): Promise<PanicDetail> {
+  async resolve(
+    identity: AuthenticatedUser,
+    id: string,
+    dto: ResolvePanicDto,
+  ): Promise<PanicDetail> {
     const p = await this.rest.post<PanicEntity>(`/panic/${id}/resolve`, {
       identity,
       body: { resolution: dto.resolution },

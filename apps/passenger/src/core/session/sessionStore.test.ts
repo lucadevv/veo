@@ -1,5 +1,5 @@
-import { useSessionStore } from './sessionStore';
-import { initSecureStorage, secureStore } from '../storage/mmkv';
+import {useSessionStore} from './sessionStore';
+import {initSecureStorage, secureStore} from '../storage/mmkv';
 
 /**
  * Máquina de estados de auth: el MOTIVO de cierre decide el estado resultante, que es lo que el
@@ -10,7 +10,7 @@ import { initSecureStorage, secureStore } from '../storage/mmkv';
 const SESSION = {
   accessToken: 'access-1',
   refreshToken: 'refresh-1',
-  user: { id: 'u1', phone: '+51999999999' } as never,
+  user: {id: 'u1', phone: '+51999999999'} as never,
 };
 
 // El almacén seguro ahora se crea ASYNC (instancia MMKV con la clave del Keychain) en

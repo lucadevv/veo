@@ -252,7 +252,9 @@ export const energyCatalogView = z.object({
 export type EnergyCatalogView = z.infer<typeof energyCatalogView>;
 
 export const replaceEnergyCatalogRequest = z.object({
-  sources: z.array(z.object({ sourceId: z.string(), pricePerUnitCents: z.number().int().nonnegative() })),
+  sources: z.array(
+    z.object({ sourceId: z.string(), pricePerUnitCents: z.number().int().nonnegative() }),
+  ),
   expectedVersion: z.number().int().nonnegative(),
 });
 export type ReplaceEnergyCatalogRequest = z.infer<typeof replaceEnergyCatalogRequest>;

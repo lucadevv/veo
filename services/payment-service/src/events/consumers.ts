@@ -155,7 +155,9 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
         penaltyCents,
         reason,
       });
-      this.logger.log(`Penalidad de cancelación del viaje ${tripId}: ${res.penaltyId} (${res.status})`);
+      this.logger.log(
+        `Penalidad de cancelación del viaje ${tripId}: ${res.penaltyId} (${res.status})`,
+      );
     } catch (err) {
       if (isPermanentDataError(err)) {
         this.logger.error(
@@ -200,7 +202,11 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       return;
     }
     try {
-      await this.credit.creditFromReferral({ userId: referrerUserId, rewardCents, eventId: env.eventId });
+      await this.credit.creditFromReferral({
+        userId: referrerUserId,
+        rewardCents,
+        eventId: env.eventId,
+      });
     } catch (err) {
       if (isPermanentDataError(err)) {
         this.logger.error(

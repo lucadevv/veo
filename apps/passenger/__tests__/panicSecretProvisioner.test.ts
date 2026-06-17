@@ -1,9 +1,9 @@
-import type { PanicKey } from '@veo/api-client';
-import { KeychainPanicSecretProvisioner } from '../src/features/panic/data/keychainPanicSecretProvisioner';
-import type { PanicKeyRepository } from '../src/features/panic/domain/panicKeyRepository';
-import { PanicKeyVersionMismatchError } from '../src/features/panic/domain/panicSecretProvisioner';
-import type { PanicSecretStore } from '../src/features/panic/domain/panicSecretStore';
-import { PANIC_SIGNATURE_VERSION } from '../src/features/panic/domain/panicSignature';
+import type {PanicKey} from '@veo/api-client';
+import {KeychainPanicSecretProvisioner} from '../src/features/panic/data/keychainPanicSecretProvisioner';
+import type {PanicKeyRepository} from '../src/features/panic/domain/panicKeyRepository';
+import {PanicKeyVersionMismatchError} from '../src/features/panic/domain/panicSecretProvisioner';
+import type {PanicSecretStore} from '../src/features/panic/domain/panicSecretStore';
+import {PANIC_SIGNATURE_VERSION} from '../src/features/panic/domain/panicSignature';
 
 class FakeKeyRepository implements PanicKeyRepository {
   constructor(private readonly key: PanicKey) {}
@@ -22,7 +22,10 @@ class FakeSecretStore implements PanicSecretStore {
 }
 
 describe('KeychainPanicSecretProvisioner', () => {
-  const validKey: PanicKey = { secret: 'shared-hmac-secret', version: PANIC_SIGNATURE_VERSION };
+  const validKey: PanicKey = {
+    secret: 'shared-hmac-secret',
+    version: PANIC_SIGNATURE_VERSION,
+  };
 
   it('ensureProvisioned descarga y persiste el secreto cuando no existe', async () => {
     const keyRepo = new FakeKeyRepository(validKey);
@@ -58,11 +61,16 @@ describe('KeychainPanicSecretProvisioner', () => {
   });
 
   it('falla en alto si la versión del mensaje canónico no coincide (no firma mal)', async () => {
-    const keyRepo = new FakeKeyRepository({ secret: 's', version: 'panic.trigger:v2' });
+    const keyRepo = new FakeKeyRepository({
+      secret: 's',
+      version: 'panic.trigger:v2',
+    });
     const store = new FakeSecretStore(null);
     const provisioner = new KeychainPanicSecretProvisioner(keyRepo, store);
 
-    await expect(provisioner.refresh()).rejects.toBeInstanceOf(PanicKeyVersionMismatchError);
+    await expect(provisioner.refresh()).rejects.toBeInstanceOf(
+      PanicKeyVersionMismatchError,
+    );
     expect(store.setSecret).not.toHaveBeenCalled();
   });
 });

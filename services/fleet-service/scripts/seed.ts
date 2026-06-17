@@ -3,7 +3,12 @@
  * Uso: DATABASE_URL=... pnpm db:seed
  */
 import { uuidv7 } from '@veo/utils';
-import { PrismaClient, FleetOwnerType, FleetDocumentType, FleetDocumentStatus } from '../src/generated/prisma';
+import {
+  PrismaClient,
+  FleetOwnerType,
+  FleetDocumentType,
+  FleetDocumentStatus,
+} from '../src/generated/prisma';
 
 const prisma = new PrismaClient();
 

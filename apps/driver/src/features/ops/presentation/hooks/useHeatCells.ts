@@ -1,10 +1,6 @@
-import {useMemo} from 'react';
-import type {HeatCell} from '../../../../shared/presentation/components/AppMap';
-import {
-  intensityToOpacity,
-  intensityToRadiusMeters,
-  type DemandHeatmap,
-} from '../../domain';
+import { useMemo } from 'react';
+import type { HeatCell } from '../../../../shared/presentation/components/AppMap';
+import { intensityToOpacity, intensityToRadiusMeters, type DemandHeatmap } from '../../domain';
 
 /**
  * Lógica pura: convierte las celdas crudas del mapa de calor a `HeatCell[]` con el estilo
@@ -22,11 +18,9 @@ export function toHeatCells(heatmap: DemandHeatmap | null | undefined): HeatCell
   return heatmap.cells
     .filter(
       (cell): cell is (typeof heatmap.cells)[number] =>
-        cell != null &&
-        Number.isFinite(cell.centroidLng) &&
-        Number.isFinite(cell.centroidLat),
+        cell != null && Number.isFinite(cell.centroidLng) && Number.isFinite(cell.centroidLat),
     )
-    .map(cell => ({
+    .map((cell) => ({
       id: cell.h3,
       coordinate: [cell.centroidLng, cell.centroidLat],
       opacity: intensityToOpacity(cell.intensity),

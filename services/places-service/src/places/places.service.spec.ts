@@ -12,11 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PlaceKind, type SavedPlace } from '../generated/prisma';
 import { PlacesService } from './places.service';
-import {
-  FavoritesLimitError,
-  PlaceNotFoundError,
-  PlaceValidationError,
-} from './places.errors';
+import { FavoritesLimitError, PlaceNotFoundError, PlaceValidationError } from './places.errors';
 
 const MAX_FAVORITES = 20;
 const MAX_LABEL = 40;
@@ -51,9 +47,8 @@ class FakeSavedPlaceDelegate {
 
   async count(args: { where: { userId: string; kind?: PlaceKind } }): Promise<number> {
     const { userId, kind } = args.where;
-    return this.rows.filter(
-      (r) => r.userId === userId && (kind === undefined || r.kind === kind),
-    ).length;
+    return this.rows.filter((r) => r.userId === userId && (kind === undefined || r.kind === kind))
+      .length;
   }
 
   async create(args: {
@@ -141,8 +136,7 @@ class FakePrisma {
 function makeService(): PlacesService {
   const prisma = new FakePrisma();
   const config = {
-    getOrThrow: (key: string): number =>
-      key === 'MAX_FAVORITES' ? MAX_FAVORITES : MAX_LABEL,
+    getOrThrow: (key: string): number => (key === 'MAX_FAVORITES' ? MAX_FAVORITES : MAX_LABEL),
   };
   // El ctor sólo usa prisma.read/write y config.getOrThrow → los falsos bastan (sin Nest DI).
   return new PlacesService(prisma as never, config as never);
@@ -292,7 +286,11 @@ describe('PlacesService · update/remove con aislamiento por userId', () => {
   it('update que cambia un favorito a HOME mantiene la unicidad de HOME', async () => {
     const svc = makeService();
     await svc.save(USER, { kind: PlaceKind.HOME, label: 'Casa', ...validPoint });
-    const fav = await svc.save(USER, { kind: PlaceKind.FAVORITE, label: 'futuro hogar', ...validPoint });
+    const fav = await svc.save(USER, {
+      kind: PlaceKind.FAVORITE,
+      label: 'futuro hogar',
+      ...validPoint,
+    });
 
     await svc.update(USER, fav.id, { kind: PlaceKind.HOME, label: 'Casa real', ...validPoint });
 

@@ -45,7 +45,10 @@ export async function checkStack(): Promise<GateResult> {
   if (forced === 'skip') return { ready: false, reason: 'E2E_GOLDEN=skip' };
 
   if (!dockerAvailable() && forced !== 'force') {
-    return { ready: false, reason: 'Docker no disponible (se necesita para el dev-stack y el fixture de aprobación)' };
+    return {
+      ready: false,
+      reason: 'Docker no disponible (se necesita para el dev-stack y el fixture de aprobación)',
+    };
   }
 
   const pg = parseHostPort(INFRA.postgresUrlBase, 5433);

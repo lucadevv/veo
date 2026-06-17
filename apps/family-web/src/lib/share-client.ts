@@ -7,7 +7,10 @@ import { classifyError, classifyView, type ShareState } from './share-state';
  * Lanza en estados transitorios (red / 5xx) para que React Query reintente;
  * devuelve un estado terminal (invalid/expired/revoked/ended/active) en los demás casos.
  */
-export async function fetchShareStateClient(token: string, signal?: AbortSignal): Promise<ShareState> {
+export async function fetchShareStateClient(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ShareState> {
   const client = new HttpClient({ baseUrl: publicEnv.bffUrl, credentials: 'omit', retries: 0 });
   try {
     const view = await client.get<FamilyTrackingView>(

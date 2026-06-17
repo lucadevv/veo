@@ -1,17 +1,32 @@
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, Button, Card, hexAlpha, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import type { TrustedContact } from '../../../contacts/domain/entities';
-import { IconCamera, IconChild, IconLock, IconUsers } from '../components/icons';
-import { Toggle } from '../components/Toggle';
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  Card,
+  hexAlpha,
+  SafeScreen,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import type {TrustedContact} from '../../../contacts/domain/entities';
+import {IconCamera, IconChild, IconLock, IconUsers} from '../components/icons';
+import {Toggle} from '../components/Toggle';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'CameraControl'>;
@@ -29,10 +44,10 @@ type Params = RouteProp<RootStackParamList, 'CameraControl'>;
  */
 export function CameraControlScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { params } = useRoute<Params>();
-  const { tripId } = params;
+  const {params} = useRoute<Params>();
+  const {tripId} = params;
 
   const listContacts = useDependency(TOKENS.listContactsUseCase);
   const getPreference = useDependency(TOKENS.getCameraSharePreferenceUseCase);
@@ -90,14 +105,14 @@ export function CameraControlScreen(): React.JSX.Element {
   }
 
   // Solo contactos VERIFICADOS pueden autorizarse a ver la cámara (regla de seguridad del diseño).
-  const verifiedContacts = (contactsQuery.data ?? []).filter((c) => c.verified);
+  const verifiedContacts = (contactsQuery.data ?? []).filter(c => c.verified);
 
   const toggleContact = (contact: TrustedContact): void => {
     if (!shareWithFamily) {
       return; // los contactos solo son togglables con el master encendido.
     }
     setSaved(false);
-    setAllowed((prev) => {
+    setAllowed(prev => {
       const next = new Set(prev);
       if (next.has(contact.id)) {
         next.delete(contact.id);
@@ -120,9 +135,10 @@ export function CameraControlScreen(): React.JSX.Element {
           loading={saveMutation.isPending}
           onPress={() => saveMutation.mutate()}
         />
-      }
-    >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: theme.spacing.md }}>
+      }>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{gap: theme.spacing.md}}>
         <Text variant="callout" color="inkMuted">
           {t('cameraControl.intro')}
         </Text>
@@ -133,7 +149,14 @@ export function CameraControlScreen(): React.JSX.Element {
         {/* Master toggle: compartir cámara con la familia. */}
         <Card variant="outlined" padding="lg">
           <View style={styles.row}>
-            <View style={[styles.lead, { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill }]}>
+            <View
+              style={[
+                styles.lead,
+                {
+                  backgroundColor: theme.colors.surfaceElevated,
+                  borderRadius: theme.radii.pill,
+                },
+              ]}>
               <IconCamera color={theme.colors.accent} size={20} />
             </View>
             <View style={styles.flex}>
@@ -145,7 +168,7 @@ export function CameraControlScreen(): React.JSX.Element {
             <Toggle
               on={shareWithFamily}
               accessibilityLabel={t('cameraControl.masterTitle')}
-              onChange={(next) => {
+              onChange={next => {
                 setSaved(false);
                 setShareWithFamily(next);
                 if (!next) {
@@ -161,7 +184,10 @@ export function CameraControlScreen(): React.JSX.Element {
         <Text variant="subhead" color="inkMuted">
           {t('cameraControl.whoCanView')}
         </Text>
-        <Card variant="outlined" padding="md" style={{ opacity: shareWithFamily ? 1 : 0.4 }}>
+        <Card
+          variant="outlined"
+          padding="md"
+          style={{opacity: shareWithFamily ? 1 : 0.4}}>
           {verifiedContacts.length === 0 ? (
             <View style={styles.emptyRow}>
               <Text variant="footnote" color="inkMuted" align="center">
@@ -175,10 +201,18 @@ export function CameraControlScreen(): React.JSX.Element {
                 style={[
                   styles.row,
                   styles.contactRow,
-                  index > 0 ? { borderTopWidth: 1, borderTopColor: theme.colors.border } : null,
-                ]}
-              >
-                <View style={[styles.lead, { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill }]}>
+                  index > 0
+                    ? {borderTopWidth: 1, borderTopColor: theme.colors.border}
+                    : null,
+                ]}>
+                <View
+                  style={[
+                    styles.lead,
+                    {
+                      backgroundColor: theme.colors.surfaceElevated,
+                      borderRadius: theme.radii.pill,
+                    },
+                  ]}>
                   <IconUsers color={theme.colors.ink} size={18} />
                 </View>
                 <View style={styles.flex}>
@@ -199,12 +233,20 @@ export function CameraControlScreen(): React.JSX.Element {
         </Card>
 
         {/* Control parental (card tintada accent). */}
-        <Card variant="outlined" padding="lg" style={{ backgroundColor: accentTint, borderColor: accentBorder }}>
+        <Card
+          variant="outlined"
+          padding="lg"
+          style={{backgroundColor: accentTint, borderColor: accentBorder}}>
           <View style={[styles.row, styles.alignTop]}>
             <IconChild color={theme.colors.accent} size={20} />
             <View style={styles.flex}>
-              <Text variant="bodyStrong">{t('cameraControl.parentalTitle')}</Text>
-              <Text variant="footnote" color="inkMuted" style={{ marginTop: theme.spacing.xxs }}>
+              <Text variant="bodyStrong">
+                {t('cameraControl.parentalTitle')}
+              </Text>
+              <Text
+                variant="footnote"
+                color="inkMuted"
+                style={{marginTop: theme.spacing.xxs}}>
                 {t('cameraControl.parentalBody')}
               </Text>
             </View>
@@ -212,25 +254,34 @@ export function CameraControlScreen(): React.JSX.Element {
         </Card>
 
         {/* Nota de cifrado (footer). */}
-        <View style={[styles.row, styles.alignTop, { paddingHorizontal: theme.spacing.xxs }]}>
+        <View
+          style={[
+            styles.row,
+            styles.alignTop,
+            {paddingHorizontal: theme.spacing.xxs},
+          ]}>
           <IconLock color={theme.colors.inkSubtle} size={16} />
           <Text variant="footnote" color="inkSubtle" style={styles.flex}>
             {t('cameraControl.encryptionNote')}
           </Text>
         </View>
 
-        {saved ? <Banner tone="success" title={t('cameraControl.saved')} /> : null}
-        {saveMutation.isError ? <Banner tone="danger" title={t('cameraControl.saveError')} /> : null}
+        {saved ? (
+          <Banner tone="success" title={t('cameraControl.saved')} />
+        ) : null}
+        {saveMutation.isError ? (
+          <Banner tone="danger" title={t('cameraControl.saveError')} />
+        ) : null}
       </ScrollView>
     </SafeScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  alignTop: { alignItems: 'flex-start' },
-  contactRow: { paddingVertical: 12 },
-  emptyRow: { paddingVertical: 16, alignItems: 'center' },
-  lead: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  flex: { flex: 1 },
+  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  alignTop: {alignItems: 'flex-start'},
+  contactRow: {paddingVertical: 12},
+  emptyRow: {paddingVertical: 16, alignItems: 'center'},
+  lead: {width: 40, height: 40, alignItems: 'center', justifyContent: 'center'},
+  flex: {flex: 1},
 });

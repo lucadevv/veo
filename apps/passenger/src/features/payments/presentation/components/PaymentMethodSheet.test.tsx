@@ -1,26 +1,30 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { ThemeProvider } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {ThemeProvider} from '@veo/ui-kit';
 import React from 'react';
-import { Text } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import TestRenderer, { act } from 'react-test-renderer';
+import {Text} from 'react-native';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+import TestRenderer, {act} from 'react-test-renderer';
 import '../../../../i18n';
 
 // `useReducedMotion` (ui-kit) usa AccessibilityInfo.isReduceMotionEnabled()/addEventListener; el
 // preset de RN no los implementa (devuelven undefined → `.then`/`.remove` revientan). Stub seguros.
 {
-  const { AccessibilityInfo } = jest.requireActual('react-native');
-  jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
-  jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const {AccessibilityInfo} = jest.requireActual('react-native');
+  jest
+    .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+    .mockResolvedValue(false);
+  jest
+    .spyOn(AccessibilityInfo, 'addEventListener')
+    .mockReturnValue({remove: jest.fn()});
 }
 
-import { PaymentMethodRow } from './PaymentMethodRow';
-import { PaymentMethodSheet } from './PaymentMethodSheet';
+import {PaymentMethodRow} from './PaymentMethodRow';
+import {PaymentMethodSheet} from './PaymentMethodSheet';
 
 /** Métricas de SafeArea fijas (sin capa nativa en Jest) para que `BottomSheet` use insets reales. */
 const INITIAL_METRICS = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+  frame: {x: 0, y: 0, width: 390, height: 844},
+  insets: {top: 47, left: 0, right: 0, bottom: 34},
 };
 
 function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
@@ -39,13 +43,17 @@ function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
 function texts(renderer: TestRenderer.ReactTestRenderer): string[] {
   return renderer.root
     .findAllByType(Text)
-    .flatMap((n) => (Array.isArray(n.props.children) ? n.props.children : [n.props.children]))
+    .flatMap(n =>
+      Array.isArray(n.props.children) ? n.props.children : [n.props.children],
+    )
     .filter((c): c is string => typeof c === 'string');
 }
 
 describe('PaymentMethodRow', () => {
   it('muestra el nombre es-PE del método elegido y la etiqueta de la fila', () => {
-    const renderer = render(<PaymentMethodRow method="CASH" onPress={() => {}} />);
+    const renderer = render(
+      <PaymentMethodRow method="CASH" onPress={() => {}} />,
+    );
     const all = texts(renderer);
     expect(all).toContain('Efectivo');
     expect(all).toContain('Método de pago');
@@ -54,8 +62,10 @@ describe('PaymentMethodRow', () => {
 
   it('dispara onPress al tocar la fila', () => {
     const onPress = jest.fn();
-    const renderer = render(<PaymentMethodRow method="YAPE" onPress={onPress} />);
-    const pressable = renderer.root.findByProps({ accessibilityRole: 'button' });
+    const renderer = render(
+      <PaymentMethodRow method="YAPE" onPress={onPress} />,
+    );
+    const pressable = renderer.root.findByProps({accessibilityRole: 'button'});
     act(() => {
       pressable.props.onPress();
     });
@@ -63,17 +73,23 @@ describe('PaymentMethodRow', () => {
   });
 
   it('muestra la señal "Automático" solo cuando el método es YAPE y autoActive', () => {
-    const renderer = render(<PaymentMethodRow method="YAPE" autoActive onPress={() => {}} />);
+    const renderer = render(
+      <PaymentMethodRow method="YAPE" autoActive onPress={() => {}} />,
+    );
     expect(texts(renderer)).toContain('Automático');
   });
 
   it('NO muestra la señal "Automático" si el método no es YAPE (aunque autoActive)', () => {
-    const renderer = render(<PaymentMethodRow method="CASH" autoActive onPress={() => {}} />);
+    const renderer = render(
+      <PaymentMethodRow method="CASH" autoActive onPress={() => {}} />,
+    );
     expect(texts(renderer)).not.toContain('Automático');
   });
 
   it('NO muestra la señal "Automático" en YAPE si la afiliación no está activa', () => {
-    const renderer = render(<PaymentMethodRow method="YAPE" onPress={() => {}} />);
+    const renderer = render(
+      <PaymentMethodRow method="YAPE" onPress={() => {}} />,
+    );
     expect(texts(renderer)).not.toContain('Automático');
   });
 });
@@ -91,7 +107,13 @@ describe('PaymentMethodSheet', () => {
     );
     const all = texts(renderer);
     expect(all).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
+      expect.arrayContaining([
+        'Yape',
+        'Plin',
+        'Efectivo',
+        'Tarjeta',
+        'PagoEfectivo',
+      ]),
     );
   });
 
@@ -123,8 +145,8 @@ describe('PaymentMethodSheet', () => {
       />,
     );
     const pe = renderer.root
-      .findAllByProps({ accessibilityRole: 'radio' })
-      .find((r) => r.props.accessibilityLabel === 'PagoEfectivo');
+      .findAllByProps({accessibilityRole: 'radio'})
+      .find(r => r.props.accessibilityLabel === 'PagoEfectivo');
     act(() => {
       pe?.props.onPress();
     });
@@ -144,12 +166,16 @@ describe('PaymentMethodSheet', () => {
     );
     // El rol/estado se propaga a nodos host hijos: deduplicamos por el accessibilityLabel (nombre
     // del método, único por fila) para contar filas reales y cuáles quedan marcadas como seleccionadas.
-    const rows = renderer.root.findAllByProps({ accessibilityRole: 'radio' });
-    const labels = new Set(rows.map((r) => r.props.accessibilityLabel));
+    const rows = renderer.root.findAllByProps({accessibilityRole: 'radio'});
+    const labels = new Set(rows.map(r => r.props.accessibilityLabel));
     const selectedLabels = new Set(
-      rows.filter((r) => r.props.accessibilityState?.selected === true).map((r) => r.props.accessibilityLabel),
+      rows
+        .filter(r => r.props.accessibilityState?.selected === true)
+        .map(r => r.props.accessibilityLabel),
     );
-    expect(labels).toEqual(new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']));
+    expect(labels).toEqual(
+      new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
+    );
     expect([...selectedLabels]).toEqual(['Plin']);
   });
 
@@ -165,8 +191,8 @@ describe('PaymentMethodSheet', () => {
       />,
     );
     const yape = renderer.root
-      .findAllByProps({ accessibilityRole: 'radio' })
-      .find((r) => r.props.accessibilityLabel === 'Yape');
+      .findAllByProps({accessibilityRole: 'radio'})
+      .find(r => r.props.accessibilityLabel === 'Yape');
     act(() => {
       yape?.props.onPress();
     });
@@ -199,14 +225,14 @@ describe('PaymentMethodSheet', () => {
       />,
     );
     // Marca el toggle "Recordar como mi método predeterminado"…
-    const remember = renderer.root.findByProps({ accessibilityRole: 'checkbox' });
+    const remember = renderer.root.findByProps({accessibilityRole: 'checkbox'});
     act(() => {
       remember.props.onPress();
     });
     // …y al elegir Plin, la elección viaja con remember=true (el llamador hará setDefault).
     const plin = renderer.root
-      .findAllByProps({ accessibilityRole: 'radio' })
-      .find((r) => r.props.accessibilityLabel === 'Plin');
+      .findAllByProps({accessibilityRole: 'radio'})
+      .find(r => r.props.accessibilityLabel === 'Plin');
     act(() => {
       plin?.props.onPress();
     });

@@ -113,11 +113,15 @@ export class PricingScheduleService {
       } else if (input.expectedVersion === 0) {
         const existing = await tx.pricingModeSchedule.findUnique({ where: { id: SINGLETON_ID } });
         if (existing) {
-          throw new ConflictError(`el schedule ya fue inicializado (v${existing.version}); recargá y reintentá`);
+          throw new ConflictError(
+            `el schedule ya fue inicializado (v${existing.version}); recargá y reintentá`,
+          );
         }
         row = await tx.pricingModeSchedule.create({ data: { id: SINGLETON_ID, ...data } });
       } else {
-        throw new ConflictError(`el schedule cambió (esperabas v${input.expectedVersion}); recargá y reintentá`);
+        throw new ConflictError(
+          `el schedule cambió (esperabas v${input.expectedVersion}); recargá y reintentá`,
+        );
       }
       // Outbox EN LA MISMA TX (FOUNDATION §6): audit + consumidores futuros del cambio de schedule.
       await tx.outboxEvent.create({

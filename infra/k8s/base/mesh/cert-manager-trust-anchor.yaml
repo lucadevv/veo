@@ -25,7 +25,7 @@ spec:
   isCA: true
   commonName: root.linkerd.cluster.local
   secretName: linkerd-trust-anchor
-  duration: 87600h   # 10 años (CA raíz)
+  duration: 87600h # 10 años (CA raíz)
   renewBefore: 8760h
   privateKey:
     algorithm: ECDSA

@@ -1,20 +1,34 @@
-import type { ChatMessage } from '@veo/api-client';
-import type { ChatRepository } from '../src/features/chat/domain/chatRepository';
+import type {ChatMessage} from '@veo/api-client';
+import type {ChatRepository} from '../src/features/chat/domain/chatRepository';
 import {
   isChatActive,
   isOwnMessage,
   mergeMessages,
 } from '../src/features/chat/domain/entities';
-import { ChatMessageError, SendMessageUseCase } from '../src/features/chat/domain/usecases';
+import {
+  ChatMessageError,
+  SendMessageUseCase,
+} from '../src/features/chat/domain/usecases';
 
-function msg(id: string, createdAt: string, role: ChatMessage['senderRole'] = 'DRIVER'): ChatMessage {
-  return { id, tripId: 't-1', senderId: 's', senderRole: role, body: id, createdAt };
+function msg(
+  id: string,
+  createdAt: string,
+  role: ChatMessage['senderRole'] = 'DRIVER',
+): ChatMessage {
+  return {
+    id,
+    tripId: 't-1',
+    senderId: 's',
+    senderRole: role,
+    body: id,
+    createdAt,
+  };
 }
 
 describe('isOwnMessage', () => {
   it('reconoce los mensajes del pasajero como propios', () => {
-    expect(isOwnMessage({ senderRole: 'PASSENGER' })).toBe(true);
-    expect(isOwnMessage({ senderRole: 'DRIVER' })).toBe(false);
+    expect(isOwnMessage({senderRole: 'PASSENGER'})).toBe(true);
+    expect(isOwnMessage({senderRole: 'DRIVER'})).toBe(false);
   });
 });
 
@@ -30,7 +44,10 @@ describe('isChatActive', () => {
 
 describe('mergeMessages', () => {
   it('deduplica por id y ordena por createdAt ascendente', () => {
-    const history = [msg('a', '2026-05-30T10:00:00.000Z'), msg('b', '2026-05-30T10:01:00.000Z')];
+    const history = [
+      msg('a', '2026-05-30T10:00:00.000Z'),
+      msg('b', '2026-05-30T10:01:00.000Z'),
+    ];
     const incoming = [
       msg('b', '2026-05-30T10:01:00.000Z'), // duplicado
       msg('c', '2026-05-30T09:59:00.000Z'), // anterior
@@ -38,15 +55,16 @@ describe('mergeMessages', () => {
 
     const merged = mergeMessages(history, incoming);
 
-    expect(merged.map((m) => m.id)).toEqual(['c', 'a', 'b']);
+    expect(merged.map(m => m.id)).toEqual(['c', 'a', 'b']);
   });
 });
 
 describe('SendMessageUseCase', () => {
   class FakeChatRepository implements ChatRepository {
     list = jest.fn(async (): Promise<ChatMessage[]> => []);
-    send = jest.fn(async (_tripId: string, _body: string): Promise<ChatMessage> =>
-      msg('new', '2026-05-30T10:02:00.000Z', 'PASSENGER'),
+    send = jest.fn(
+      async (_tripId: string, _body: string): Promise<ChatMessage> =>
+        msg('new', '2026-05-30T10:02:00.000Z', 'PASSENGER'),
     );
   }
 

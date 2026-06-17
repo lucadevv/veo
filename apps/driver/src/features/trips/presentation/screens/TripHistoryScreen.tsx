@@ -1,11 +1,11 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {SafeScreen, Text} from '@veo/ui-kit';
-import {TripsEmptyState} from '../components/TripsEmptyState';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { SafeScreen, Text } from '@veo/ui-kit';
+import { TripsEmptyState } from '../components/TripsEmptyState';
 
 /** Encabezado simple de la pestaña Viajes (sin retroceso: es un tab, no una pila). */
-function TripsHeader({title}: {title: string}): React.JSX.Element {
+function TripsHeader({ title }: { title: string }): React.JSX.Element {
   return (
     <View style={styles.header}>
       <Text variant="title1" numberOfLines={1}>
@@ -27,7 +27,7 @@ function TripsHeader({title}: {title: string}): React.JSX.Element {
  * descripción sí reutiliza la clave honesta `trips.historyUnavailable`.
  */
 export const TripHistoryScreen = (): React.JSX.Element => {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   return (
     <SafeScreen header={<TripsHeader title={t('trips.historyTitle')} />}>
       <TripsEmptyState
@@ -39,5 +39,5 @@ export const TripHistoryScreen = (): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  header: {paddingTop: 8, paddingBottom: 12},
+  header: { paddingTop: 8, paddingBottom: 12 },
 });

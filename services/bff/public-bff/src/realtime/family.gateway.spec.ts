@@ -47,19 +47,30 @@ describe('FamilyGateway handshake', () => {
   });
 
   it('rechaza y desconecta si falta el token', async () => {
-    const gateway = new FamilyGateway({ get: vi.fn() } as unknown as InternalRestClient, new RealtimeStateService());
+    const gateway = new FamilyGateway(
+      { get: vi.fn() } as unknown as InternalRestClient,
+      new RealtimeStateService(),
+    );
     const socket = fakeSocket(undefined);
     await gateway.handleConnection(socket as never);
-    expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 'TOKEN_REQUIRED' }));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({ code: 'TOKEN_REQUIRED' }),
+    );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('rechaza y desconecta si share-service invalida el token', async () => {
-    const shareRest = { get: vi.fn().mockRejectedValue(new Error('forbidden')) } as unknown as InternalRestClient;
+    const shareRest = {
+      get: vi.fn().mockRejectedValue(new Error('forbidden')),
+    } as unknown as InternalRestClient;
     const gateway = new FamilyGateway(shareRest, new RealtimeStateService());
     const socket = fakeSocket('tok-revocado');
     await gateway.handleConnection(socket as never);
-    expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 'TOKEN_INVALID' }));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({ code: 'TOKEN_INVALID' }),
+    );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 });

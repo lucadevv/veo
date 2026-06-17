@@ -23,7 +23,10 @@ export class CreateNotificationDto {
   @IsEnum(NotificationChannel)
   channel!: NotificationChannel;
 
-  @ApiProperty({ description: 'Clave de la plantilla i18n a renderizar.', example: 'trip.assigned' })
+  @ApiProperty({
+    description: 'Clave de la plantilla i18n a renderizar.',
+    example: 'trip.assigned',
+  })
   @IsString()
   @MinLength(1)
   template!: string;
@@ -50,7 +53,11 @@ export class CreateNotificationDto {
   @MaxLength(255)
   dedupKey?: string;
 
-  @ApiPropertyOptional({ description: 'Máximo de intentos para esta notificación.', minimum: 1, maximum: 20 })
+  @ApiPropertyOptional({
+    description: 'Máximo de intentos para esta notificación.',
+    minimum: 1,
+    maximum: 20,
+  })
   @IsOptional()
   @IsInt()
   @Min(1)

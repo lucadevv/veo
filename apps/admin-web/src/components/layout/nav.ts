@@ -38,14 +38,24 @@ export const NAV: NavGroup[] = [
       { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
       { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
       { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },
-      { href: '/ops/dispatch-radius', label: 'Radios de dispatch', icon: Radar, permission: 'dispatch:view' },
+      {
+        href: '/ops/dispatch-radius',
+        label: 'Radios de dispatch',
+        icon: Radar,
+        permission: 'dispatch:view',
+      },
     ],
   },
   {
     title: 'Seguridad',
     items: [
       { href: '/security/panics', label: 'Pánicos', icon: ShieldAlert, permission: 'panics:view' },
-      { href: '/security/live-wall', label: 'Cámaras en vivo', icon: Cctv, permission: 'live:view' },
+      {
+        href: '/security/live-wall',
+        label: 'Cámaras en vivo',
+        icon: Cctv,
+        permission: 'live:view',
+      },
       { href: '/media', label: 'Video', icon: Video, permission: 'media:view' },
     ],
   },
@@ -56,9 +66,25 @@ export const NAV: NavGroup[] = [
   {
     title: 'Finanzas',
     items: [
-      { href: '/finance', label: 'Liquidaciones', icon: Banknote, permission: 'finance:view', exact: true },
-      { href: '/finance/pricing', label: 'Modo de pricing', icon: Coins, permission: 'pricing:view' },
-      { href: '/finance/catalog', label: 'Catálogo de ofertas', icon: Tags, permission: 'catalog:view' },
+      {
+        href: '/finance',
+        label: 'Liquidaciones',
+        icon: Banknote,
+        permission: 'finance:view',
+        exact: true,
+      },
+      {
+        href: '/finance/pricing',
+        label: 'Modo de pricing',
+        icon: Coins,
+        permission: 'pricing:view',
+      },
+      {
+        href: '/finance/catalog',
+        label: 'Catálogo de ofertas',
+        icon: Tags,
+        permission: 'catalog:view',
+      },
     ],
   },
   {

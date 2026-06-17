@@ -7,11 +7,11 @@ Todos los eventos publicados salen por el **patrón outbox** (FOUNDATION §6): s
 
 ## Publica
 
-| Topic | eventType | Payload (schema) | Disparado por | Consumidores previstos |
-|---|---|---|---|---|
-| `rating` | `rating.created` | `{ ratingId, tripId, driverId, stars }` | `POST /ratings` (cada calificación creada) | identity/dispatch (rating del conductor), analítica |
-| `driver` | `driver.flagged` | `{ driverId, rollingAvg, reason }` | Transición a flag del conductor (BR-D01) | identity-service (review/suspensión), panel admin |
-| `passenger` | `passenger.flagged` | `{ passengerId, rollingAvg, reason }` | Transición a flag del pasajero (BR-I05) | identity-service (re-verificación) |
+| Topic       | eventType           | Payload (schema)                        | Disparado por                              | Consumidores previstos                              |
+| ----------- | ------------------- | --------------------------------------- | ------------------------------------------ | --------------------------------------------------- |
+| `rating`    | `rating.created`    | `{ ratingId, tripId, driverId, stars }` | `POST /ratings` (cada calificación creada) | identity/dispatch (rating del conductor), analítica |
+| `driver`    | `driver.flagged`    | `{ driverId, rollingAvg, reason }`      | Transición a flag del conductor (BR-D01)   | identity-service (review/suspensión), panel admin   |
+| `passenger` | `passenger.flagged` | `{ passengerId, rollingAvg, reason }`   | Transición a flag del pasajero (BR-I05)    | identity-service (re-verificación)                  |
 
 Notas de contrato:
 
@@ -28,8 +28,8 @@ Notas de contrato:
 
 ## Consume
 
-| Topic | eventType | Acción | Reintentos |
-|---|---|---|---|
+| Topic  | eventType        | Acción                                                            | Reintentos                                                                                                                                   |
+| ------ | ---------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `trip` | `trip.completed` | Marca el viaje como elegible para calificación (gate post-viaje). | Consumidor con arranque resiliente (reintenta cada 5 s si el topic/broker no está listo). Offsets gestionados por el group `rating-service`. |
 
 Nota: el payload actual de `trip.completed` (`{ tripId, fareCents, distanceMeters, durationSeconds }`)

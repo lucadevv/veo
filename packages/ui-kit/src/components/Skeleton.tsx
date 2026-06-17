@@ -25,7 +25,13 @@ export interface SkeletonProps {
  * Placeholder de carga con shimmer (pulso de color entre `skeleton` y `skeletonHighlight`).
  * Respeta reduce-motion (bloque estático). Reserva espacio para evitar layout shift (CLS).
  */
-export function Skeleton({ width = '100%', height = 16, variant = 'rect', radius, style }: SkeletonProps) {
+export function Skeleton({
+  width = '100%',
+  height = 16,
+  variant = 'rect',
+  radius,
+  style,
+}: SkeletonProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(0);

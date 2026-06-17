@@ -1,5 +1,5 @@
-import {VehicleClass} from '@veo/shared-types';
-import {IconCar, IconMoto} from '../icons';
+import { VehicleClass } from '@veo/shared-types';
+import { IconCar, IconMoto } from '../icons';
 import {
   FALLBACK_VEHICLE_GLYPH,
   FALLBACK_VEHICLE_LABEL_KEY,

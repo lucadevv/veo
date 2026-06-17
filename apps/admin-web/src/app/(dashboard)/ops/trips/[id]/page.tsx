@@ -49,19 +49,29 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
               <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <Detail label="Tarifa" value={money(trip.fareCents)} mono />
                 <Detail label="Método de pago" value={trip.paymentMethod ?? '—'} />
-                <Detail label="Pasajero" value={trip.passengerName ?? trip.passengerId.slice(0, 8)} />
-                <Detail label="Conductor" value={trip.driverName ?? trip.driverId?.slice(0, 8) ?? '—'} />
+                <Detail
+                  label="Pasajero"
+                  value={trip.passengerName ?? trip.passengerId.slice(0, 8)}
+                />
+                <Detail
+                  label="Conductor"
+                  value={trip.driverName ?? trip.driverId?.slice(0, 8) ?? '—'}
+                />
                 {/* Alerta solo si el conductor está suspendido (identity DriverReply.suspendedAt); si es null no se renderiza nada. */}
                 {trip.driverSuspendedAt != null && (
                   <div className="col-span-2">
-                    <Badge tone="warn">Conductor suspendido el {dateTime(trip.driverSuspendedAt)}</Badge>
+                    <Badge tone="warn">
+                      Conductor suspendido el {dateTime(trip.driverSuspendedAt)}
+                    </Badge>
                   </div>
                 )}
                 <Detail label="Placa" value={trip.vehiclePlate ?? '—'} mono />
                 <Detail label="ETA" value={duration(trip.etaSeconds)} />
                 <Detail
                   label="Distancia"
-                  value={trip.distanceMeters ? `${(trip.distanceMeters / 1000).toFixed(1)} km` : '—'}
+                  value={
+                    trip.distanceMeters ? `${(trip.distanceMeters / 1000).toFixed(1)} km` : '—'
+                  }
                 />
                 <Detail label="Creado" value={dateTime(trip.createdAt)} />
               </CardContent>
@@ -114,11 +124,30 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
 function buildMarkers(trip: TripDetail | undefined): MapMarker[] {
   if (!trip) return [];
   const out: MapMarker[] = [];
-  if (trip.origin) out.push({ id: 'origin', lon: trip.origin.lon, lat: trip.origin.lat, kind: 'trip', label: 'Origen' });
+  if (trip.origin)
+    out.push({
+      id: 'origin',
+      lon: trip.origin.lon,
+      lat: trip.origin.lat,
+      kind: 'trip',
+      label: 'Origen',
+    });
   if (trip.destination)
-    out.push({ id: 'dest', lon: trip.destination.lon, lat: trip.destination.lat, kind: 'trip', label: 'Destino' });
+    out.push({
+      id: 'dest',
+      lon: trip.destination.lon,
+      lat: trip.destination.lat,
+      kind: 'trip',
+      label: 'Destino',
+    });
   if (trip.driverLocation)
-    out.push({ id: 'driver', lon: trip.driverLocation.lon, lat: trip.driverLocation.lat, kind: 'driver', label: 'Conductor' });
+    out.push({
+      id: 'driver',
+      lon: trip.driverLocation.lon,
+      lat: trip.driverLocation.lat,
+      kind: 'driver',
+      label: 'Conductor',
+    });
   return out;
 }
 

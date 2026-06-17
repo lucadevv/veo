@@ -36,7 +36,9 @@ async function bootstrap(): Promise<void> {
   });
 
   // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+  );
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('public-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('public-bff'));
   // /api/v1 para la API; health y metrics quedan fuera del prefijo.
@@ -45,7 +47,9 @@ async function bootstrap(): Promise<void> {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('public-bff')
-    .setDescription('BFF del pasajero · agrega identity, trip, dispatch, payment, panic, share, rating · VEO')
+    .setDescription(
+      'BFF del pasajero · agrega identity, trip, dispatch, payment, panic, share, rating · VEO',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();

@@ -47,6 +47,7 @@ pnpm e2e:golden
 ```
 
 Eso ejecuta `e2e/scripts/run-golden.sh`, que:
+
 1. levanta la infra mínima del dev-stack si no está corriendo (`postgres redis kafka`);
 2. corre la suite vitest, que a su vez **compila** `@veo/*` + los 7 proyectos a `dist`, **arranca**
    identity/trip/dispatch/payment/panic + public-bff/driver-bff en background (`start:prod`), espera
@@ -60,14 +61,14 @@ pnpm --filter @veo/e2e e2e:golden        # = vitest run golden-path
 
 ### Flags útiles (env)
 
-| Variable | Efecto |
-|---|---|
-| `E2E_GOLDEN=force` | corre aunque el detector de infra dude (CI con stack garantizado). |
-| `E2E_GOLDEN=skip` | omite la suite siempre. |
-| `E2E_SKIP_BUILD=1` | no recompila los servicios/BFFs (úsalo solo si su `dist` ya está fresco). |
-| `E2E_SERVICE_LOG_LEVEL=info` | sube el log de los servicios arrancados (default `warn`). |
-| `E2E_KEEP_INFRA=1` | el wrapper no apaga el dev-stack al terminar (lo deja arriba igualmente por defecto). |
-| `E2E_DATABASE_URL_BASE`, `E2E_REDIS_URL`, `E2E_KAFKA_BROKER`, `E2E_PG_CONTAINER` | overrides de infra. |
+| Variable                                                                         | Efecto                                                                                |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `E2E_GOLDEN=force`                                                               | corre aunque el detector de infra dude (CI con stack garantizado).                    |
+| `E2E_GOLDEN=skip`                                                                | omite la suite siempre.                                                               |
+| `E2E_SKIP_BUILD=1`                                                               | no recompila los servicios/BFFs (úsalo solo si su `dist` ya está fresco).             |
+| `E2E_SERVICE_LOG_LEVEL=info`                                                     | sube el log de los servicios arrancados (default `warn`).                             |
+| `E2E_KEEP_INFRA=1`                                                               | el wrapper no apaga el dev-stack al terminar (lo deja arriba igualmente por defecto). |
+| `E2E_DATABASE_URL_BASE`, `E2E_REDIS_URL`, `E2E_KAFKA_BROKER`, `E2E_PG_CONTAINER` | overrides de infra.                                                                   |
 
 ## Gate de auto-omisión
 

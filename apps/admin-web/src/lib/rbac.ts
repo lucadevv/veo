@@ -40,15 +40,8 @@ export type Permission =
   | 'audit:view'
   | 'audit:verify';
 
-const {
-  SUPPORT_L1,
-  SUPPORT_L2,
-  COMPLIANCE_SUPERVISOR,
-  DISPATCHER,
-  FINANCE,
-  ADMIN,
-  SUPERADMIN,
-} = AdminRole;
+const { SUPPORT_L1, SUPPORT_L2, COMPLIANCE_SUPERVISOR, DISPATCHER, FINANCE, ADMIN, SUPERADMIN } =
+  AdminRole;
 
 /**
  * Permiso → roles permitidos por el servidor. Cada entrada cita el controller/@Roles de admin-bff

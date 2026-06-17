@@ -1,18 +1,18 @@
-import React, {useState} from 'react';
-import {FlatList, RefreshControl, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {SafeScreen, Skeleton, useTheme} from '@veo/ui-kit';
-import type {RootStackParamList} from '../../../../navigation/types';
-import {StateView} from '../../../../shared/presentation/components/StateView';
-import {TopBar} from '../../../../shared/presentation/components/TopBar';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {isOnShift} from '../../../shift/domain';
-import {useShiftState} from '../../../shift/presentation/hooks/useShift';
-import type {OpenBid} from '../../domain';
-import {useOpenBids} from '../hooks/useBids';
-import {BidCard} from '../components/BidCard';
-import {CounterOfferSheet} from '../components/CounterOfferSheet';
+import React, { useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeScreen, Skeleton, useTheme } from '@veo/ui-kit';
+import type { RootStackParamList } from '../../../../navigation/types';
+import { StateView } from '../../../../shared/presentation/components/StateView';
+import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isOnShift } from '../../../shift/domain';
+import { useShiftState } from '../../../shift/presentation/hooks/useShift';
+import type { OpenBid } from '../../domain';
+import { useOpenBids } from '../hooks/useBids';
+import { BidCard } from '../components/BidCard';
+import { CounterOfferSheet } from '../components/CounterOfferSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Bids'>;
 
@@ -22,8 +22,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Bids'>;
  * Gate de turno: sin turno activo NO se consulta el backend (respondería []/403), se muestra el gate.
  * Cuatro estados: cargando · lista · vacío · error. Degradación honesta (sin data inventada).
  */
-export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const BidsScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const shift = useShiftState();
   const onShift = shift.data ? isOnShift(shift.data.status) : false;
@@ -33,7 +33,9 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
   // La puja abierta en el sheet desapareció de la lista viva (otro conductor la tomó / venció / se canceló):
   // el board ya no está OPEN-cercano. Se lo pasamos al sheet para mostrar "ya no disponible" sin yank abrupto.
   const selectedGone =
-    selected !== null && bids.data !== undefined && !bids.data.some(b => b.tripId === selected.tripId);
+    selected !== null &&
+    bids.data !== undefined &&
+    !bids.data.some((b) => b.tripId === selected.tripId);
 
   const header = <TopBar title={t('trips.bid.screenTitle')} onBack={() => navigation.goBack()} />;
 
@@ -42,7 +44,7 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
     content = (
       <StateView
         title={t('trips.bid.offline')}
-        action={{label: t('trips.bid.goOnline'), onPress: () => navigation.goBack()}}
+        action={{ label: t('trips.bid.goOnline'), onPress: () => navigation.goBack() }}
       />
     );
   } else if (bids.isLoading) {
@@ -58,7 +60,7 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
       <StateView
         title={t('errors.generic')}
         description={toErrorMessage(bids.error, t)}
-        action={{label: t('common.retry'), onPress: () => bids.refetch()}}
+        action={{ label: t('common.retry'), onPress: () => bids.refetch() }}
       />
     );
   } else if (!bids.data || bids.data.length === 0) {
@@ -67,7 +69,7 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
     content = (
       <FlatList
         data={bids.data}
-        keyExtractor={item => item.tripId}
+        keyExtractor={(item) => item.tripId}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -77,7 +79,7 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
             tintColor={theme.colors.accent}
           />
         }
-        renderItem={({item}) => <BidCard bid={item} onPress={() => setSelected(item)} />}
+        renderItem={({ item }) => <BidCard bid={item} onPress={() => setSelected(item)} />}
       />
     );
   }
@@ -91,5 +93,5 @@ export const BidsScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  list: {gap: 12, paddingVertical: 16},
+  list: { gap: 12, paddingVertical: 16 },
 });

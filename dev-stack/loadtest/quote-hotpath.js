@@ -63,19 +63,23 @@ export const options = {
 // Ruta real de Lima (Av. Tomás Valle → zona este), ~la misma del e2e en el simulador.
 const BODY = JSON.stringify({
   origin: { lat: -12.0264, lng: -77.0581 },
-  destination: { lat: -12.0850, lng: -76.9772 },
+  destination: { lat: -12.085, lng: -76.9772 },
 });
 
 export function setup() {
   if (TOKENS.length === 0) {
-    throw new Error('Faltan tokens: COUNT=120 node dev-stack/loadtest/mint-token.mjs > dev-stack/loadtest/tokens.json');
+    throw new Error(
+      'Faltan tokens: COUNT=120 node dev-stack/loadtest/mint-token.mjs > dev-stack/loadtest/tokens.json',
+    );
   }
   // Smoke de 1 request antes de la rampa: si el token/stack no sirven, fallamos rápido y claro.
   const res = http.post(QUOTE_URL, BODY, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKENS[0]}` },
   });
   if (res.status !== 200 && res.status !== 201) {
-    throw new Error(`smoke del quote falló: HTTP ${res.status} — ${res.body && res.body.slice(0, 200)}`);
+    throw new Error(
+      `smoke del quote falló: HTTP ${res.status} — ${res.body && res.body.slice(0, 200)}`,
+    );
   }
 }
 

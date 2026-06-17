@@ -1,5 +1,5 @@
-import {HttpClient, mobileRefreshResult} from '@veo/api-client';
-import {env} from '../config/env';
+import { HttpClient, mobileRefreshResult } from '@veo/api-client';
+import { env } from '../config/env';
 
 /**
  * Puerto (abstracción) que el cliente HTTP necesita para leer/escribir los tokens de sesión.
@@ -9,7 +9,7 @@ import {env} from '../config/env';
 export interface SessionTokenPort {
   getAccessToken(): string | null;
   getRefreshToken(): string | null;
-  setTokens(tokens: {accessToken: string; refreshToken: string}): void;
+  setTokens(tokens: { accessToken: string; refreshToken: string }): void;
   clearSession(): void;
 }
 
@@ -27,8 +27,8 @@ async function refreshAccessToken(port: SessionTokenPort): Promise<string | null
       try {
         const res = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-          body: JSON.stringify({refreshToken}),
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ refreshToken }),
         });
         if (!res.ok) {
           return null;
@@ -66,7 +66,7 @@ export function createDriverHttpClient(port: SessionTokenPort): HttpClient {
       firstHeaders.set('Authorization', `Bearer ${access}`);
     }
 
-    const first = await fetch(input, {...init, headers: firstHeaders});
+    const first = await fetch(input, { ...init, headers: firstHeaders });
     if (first.status !== 401) {
       return first;
     }
@@ -79,13 +79,13 @@ export function createDriverHttpClient(port: SessionTokenPort): HttpClient {
 
     const retryHeaders = new Headers(init?.headers ?? undefined);
     retryHeaders.set('Authorization', `Bearer ${newAccess}`);
-    return fetch(input, {...init, headers: retryHeaders});
+    return fetch(input, { ...init, headers: retryHeaders });
   };
 
   return new HttpClient({
     baseUrl: env.DRIVER_BFF_URL,
     credentials: 'omit',
-    headers: {'Accept-Language': 'es-PE'},
+    headers: { 'Accept-Language': 'es-PE' },
     fetchImpl: authFetch,
   });
 }

@@ -148,7 +148,11 @@ export class DriversService {
       const envelope = createEnvelope({
         eventType: 'driver.verified',
         producer: 'identity-service',
-        payload: { driverId: driver.id, userId: driver.userId, verifiedAt: new Date().toISOString() },
+        payload: {
+          driverId: driver.id,
+          userId: driver.userId,
+          verifiedAt: new Date().toISOString(),
+        },
       });
       await tx.outboxEvent.create({
         data: {
@@ -419,8 +423,7 @@ export class DriversService {
     }
 
     const session = await this.consumeSession(input.sessionRef, userId);
-    const passed =
-      session.livenessPassed && session.matchPassed && session.score >= this.minScore;
+    const passed = session.livenessPassed && session.matchPassed && session.score >= this.minScore;
 
     const biometricCheckData = {
       userId,
@@ -440,7 +443,12 @@ export class DriversService {
       const envelope = createEnvelope({
         eventType: 'biometric.failed',
         producer: 'identity-service',
-        payload: { driverId: d.id, score: session.score, attempt: fails + 1, at: new Date().toISOString() },
+        payload: {
+          driverId: d.id,
+          score: session.score,
+          attempt: fails + 1,
+          at: new Date().toISOString(),
+        },
       });
       await this.prisma.write.$transaction(async (tx) => {
         await tx.biometricCheck.create({ data: biometricCheckData });

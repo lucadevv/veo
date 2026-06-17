@@ -3,7 +3,7 @@ import type {
   RequestPhoneLinkResult,
   UpdatePassengerProfile,
 } from '@veo/api-client';
-import type { AccountDeletionRequest } from './entities';
+import type {AccountDeletionRequest} from './entities';
 
 /** Abstracción del repositorio de Perfil del pasajero (DIP). */
 export interface ProfileRepository {

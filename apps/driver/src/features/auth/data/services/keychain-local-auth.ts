@@ -1,5 +1,5 @@
 import * as Keychain from 'react-native-keychain';
-import type {LocalAuthService} from '../../domain/ports/local-auth-service';
+import type { LocalAuthService } from '../../domain/ports/local-auth-service';
 
 /** Servicio (namespace) del refresh token en el almacén seguro del SO. */
 const REFRESH_SERVICE = 'veo.driver.refresh';
@@ -34,7 +34,7 @@ export class KeychainLocalAuthService implements LocalAuthService {
 
   async hasStoredToken(): Promise<boolean> {
     try {
-      return await Keychain.hasGenericPassword({service: REFRESH_SERVICE});
+      return await Keychain.hasGenericPassword({ service: REFRESH_SERVICE });
     } catch {
       return false;
     }
@@ -58,7 +58,7 @@ export class KeychainLocalAuthService implements LocalAuthService {
 
   async clear(): Promise<void> {
     try {
-      await Keychain.resetGenericPassword({service: REFRESH_SERVICE});
+      await Keychain.resetGenericPassword({ service: REFRESH_SERVICE });
     } catch {
       // Idempotente: si no había token, no hay nada que limpiar.
     }

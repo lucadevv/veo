@@ -77,16 +77,18 @@ export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
       <section>
         <h2 className="text-sm font-medium text-ink-muted">Ofertas de servicio</h2>
         <p className="mt-1 text-sm text-ink-subtle">
-          El pasajero ve, cotiza y pide solo con lo configurado acá. El modo se restringe a lo que cada
-          oferta permite; el precio sale de la fórmula (distancia/tiempo) y estos valores lo escalan. El
-          cambio es global y queda auditado.
+          El pasajero ve, cotiza y pide solo con lo configurado acá. El modo se restringe a lo que
+          cada oferta permite; el precio sale de la fórmula (distancia/tiempo) y estos valores lo
+          escalan. El cambio es global y queda auditado.
         </p>
 
         {activeCount === 0 ? (
           <p
             role="alert"
-            className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
-            Ninguna oferta habilitada: los pasajeros no podrán pedir un viaje hasta que actives al menos una.
+            className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
+          >
+            Ninguna oferta habilitada: los pasajeros no podrán pedir un viaje hasta que actives al
+            menos una.
           </p>
         ) : null}
 
@@ -143,7 +145,8 @@ function OfferingRow({
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
-  const minFareCents = minFareSoles.trim() === '' ? undefined : Math.round(Number(minFareSoles) * 100);
+  const minFareCents =
+    minFareSoles.trim() === '' ? undefined : Math.round(Number(minFareSoles) * 100);
   const multInvalid = multNum !== undefined && (!Number.isFinite(multNum) || multNum <= 0);
   const minFareInvalid =
     minFareCents !== undefined && (!Number.isFinite(minFareCents) || minFareCents < 0);
@@ -217,7 +220,8 @@ function OfferingRow({
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value)}
-              className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink hover:border-border-strong focus-visible:outline-none">
+              className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink hover:border-border-strong focus-visible:outline-none"
+            >
               <option value={AUTO}>Automático (según horario)</option>
               {offering.allowedModes.map((m) => (
                 <option key={m} value={m}>
@@ -227,7 +231,11 @@ function OfferingRow({
             </select>
           </Field>
 
-          <Field label="Multiplicador" hint="Vacío = valor de código" error={multInvalid ? 'Debe ser > 0' : undefined}>
+          <Field
+            label="Multiplicador"
+            hint="Vacío = valor de código"
+            error={multInvalid ? 'Debe ser > 0' : undefined}
+          >
             <Input
               type="number"
               inputMode="decimal"
@@ -242,7 +250,8 @@ function OfferingRow({
           <Field
             label="Tarifa mínima (S/)"
             hint="Vacío = valor de código"
-            error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}>
+            error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}
+          >
             <Input
               type="number"
               inputMode="decimal"

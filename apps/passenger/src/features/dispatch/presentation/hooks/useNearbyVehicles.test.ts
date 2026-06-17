@@ -1,4 +1,4 @@
-import { quantizeCoord } from './useNearbyVehicles';
+import {quantizeCoord} from './useNearbyVehicles';
 
 describe('quantizeCoord · estabilidad del queryKey del polling de ambiente', () => {
   it('redondea a 3 decimales (~111m)', () => {

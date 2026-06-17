@@ -1,1 +1,1 @@
-export {HttpDocumentsRepository} from './repositories/http-documents-repository';
+export { HttpDocumentsRepository } from './repositories/http-documents-repository';

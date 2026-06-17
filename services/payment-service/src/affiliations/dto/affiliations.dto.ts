@@ -28,7 +28,10 @@ export class CreateYapeAffiliationDto {
   @Length(2, 200)
   clientName!: string;
 
-  @ApiPropertyOptional({ enum: ['WEB', 'MOBILE'], description: 'Origen del cliente (default MOBILE)' })
+  @ApiPropertyOptional({
+    enum: ['WEB', 'MOBILE'],
+    description: 'Origen del cliente (default MOBILE)',
+  })
   @IsOptional()
   @IsEnum({ WEB: 'WEB', MOBILE: 'MOBILE' })
   origin?: 'WEB' | 'MOBILE';

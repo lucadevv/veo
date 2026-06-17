@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  Activity,
-  Ban,
-  CheckCircle2,
-  Clock,
-  ShieldAlert,
-  UserCheck,
-  Wallet,
-} from 'lucide-react';
+import { Activity, Ban, CheckCircle2, Clock, ShieldAlert, UserCheck, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsOverview } from '@/lib/api/schemas';
 import { duration, money, number } from '@/lib/formatters';

@@ -10,15 +10,16 @@
  * Tear-down: mata todo el árbol de procesos (nest start lanza hijos) por process group.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, createWriteStream, existsSync, mkdirSync, rmSync, type WriteStream } from 'node:fs';
-import { resolve } from 'node:path';
 import {
-  REPO_ROOT,
-  commonEnv,
-  bffSpecs,
-  serviceSpecs,
-  type ServiceSpec,
-} from './config.js';
+  cpSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  type WriteStream,
+} from 'node:fs';
+import { resolve } from 'node:path';
+import { REPO_ROOT, commonEnv, bffSpecs, serviceSpecs, type ServiceSpec } from './config.js';
 import { pingHealth, waitFor } from './wait.js';
 
 const LOG_DIR = resolve(REPO_ROOT, 'e2e', '.logs');
@@ -51,7 +52,14 @@ export class Orchestrator {
     }
     const filters = this.all.flatMap((s) => ['--filter', s.filter]);
     // `--force` evita que la caché de turbo "salte" un build cuyo dist acabamos de borrar.
-    await this.runOnce('build-stack', 'pnpm', ['exec', 'turbo', 'run', 'build', '--force', ...filters]);
+    await this.runOnce('build-stack', 'pnpm', [
+      'exec',
+      'turbo',
+      'run',
+      'build',
+      '--force',
+      ...filters,
+    ]);
 
     // `nest build`/tsc solo compila los .ts; el cliente Prisma generado (src/generated, ya en JS) no
     // se copia a dist, así que `require('../generated/prisma')` falla en runtime. Lo copiamos nosotros.

@@ -20,7 +20,8 @@ export function initialBidCents(
   suggestedCents: number | undefined,
   floorCents: number,
 ): number {
-  const base = suggestedCents !== undefined ? roundToSolCents(suggestedCents) : floorCents;
+  const base =
+    suggestedCents !== undefined ? roundToSolCents(suggestedCents) : floorCents;
   return Math.max(floorCents, base);
 }
 

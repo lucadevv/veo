@@ -18,7 +18,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -148,7 +152,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     expect(payout.commissionCents).toBe(0); // ni la comisión
     expect(payout.status).toBe('PROCESSED');
 
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).not.toBeNull();
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
@@ -161,7 +167,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const svc = makeService(redis);
 
     await svc.runPayouts(PERIOD_START, PERIOD_END);
-    const firstPaidAt = (await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } })).paidAt;
+    const firstPaidAt = (
+      await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } })
+    ).paidAt;
 
     const second = await svc.runPayouts(PERIOD_START, PERIOD_END);
     expect(second.processed).toBe(0); // ya existía el Payout del período
@@ -169,7 +177,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const payouts = await prisma.payout.findMany({ where: { driverId } });
     expect(payouts).toHaveLength(1); // UNIQUE(driverId, periodStart, periodEnd) sin duplicar
 
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).toEqual(firstPaidAt); // no se re-marcó (mismo timestamp)
     expect(progress.paidInPayoutId).toBe(payouts[0]!.id);
   });
@@ -184,7 +194,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     expect(summary.processed).toBe(0);
 
     expect(await prisma.payout.findMany({ where: { driverId } })).toHaveLength(0);
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).toBeNull(); // el peor bug evitado: marcado-pagado-pero-no-pagado
     expect(progress.paidInPayoutId).toBeNull();
   });
@@ -218,7 +230,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     expect(payout.grossCents).toBe(5000); // solo la tarifa
     expect(payout.commissionCents).toBe(1000);
     expect(payout.amountCents).toBe(6000); // 4000 neto viaje + 2000 bono
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
 
@@ -235,7 +249,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
 
     const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
     expect(payout.amountCents).toBe(7000);
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).not.toBeNull();
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
@@ -254,7 +270,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
     expect(payout.status).toBe('HELD');
     expect(payout.amountCents).toBe(6000); // el bono está dentro del monto retenido
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidInPayoutId).toBe(payout.id); // ligado al Payout (se libera al resolver el review)
   });
 });

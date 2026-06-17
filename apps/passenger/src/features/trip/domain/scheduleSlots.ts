@@ -1,4 +1,4 @@
-import { MAX_SCHEDULE_HORIZON_MS, MIN_SCHEDULE_LEAD_MS } from './scheduling';
+import {MAX_SCHEDULE_HORIZON_MS, MIN_SCHEDULE_LEAD_MS} from './scheduling';
 
 /**
  * Generadores PUROS de opciones para el selector de fecha/hora de un viaje programado (Ola 2B).
@@ -21,7 +21,11 @@ export const TIME_SLOT_STEP_MIN = 15;
 
 /** Devuelve el epoch de las 00:00 locales del día de `date`. */
 function startOfLocalDay(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
 }
 
 /**
@@ -56,7 +60,10 @@ export function scheduleDayOptions(now: Date = new Date()): DayOption[] {
  * Horarios válidos (epoch ms) para el día cuyo inicio es `startOfDay`, en pasos de
  * `TIME_SLOT_STEP_MIN`. Solo se incluyen los que caen en la ventana [now+15min, now+7días].
  */
-export function timeSlotsForDay(startOfDay: number, now: Date = new Date()): number[] {
+export function timeSlotsForDay(
+  startOfDay: number,
+  now: Date = new Date(),
+): number[] {
   const slots: number[] = [];
   const earliest = now.getTime() + MIN_SCHEDULE_LEAD_MS;
   const latest = now.getTime() + MAX_SCHEDULE_HORIZON_MS;

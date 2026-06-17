@@ -28,7 +28,9 @@ export class PricingController {
   constructor(private readonly pricing: PricingService) {}
 
   @Get('mode-schedule')
-  @ApiOperation({ summary: 'Schedule de modo de pricing vigente (o el default PUJA). pricing:view. ADR 011' })
+  @ApiOperation({
+    summary: 'Schedule de modo de pricing vigente (o el default PUJA). pricing:view. ADR 011',
+  })
   getSchedule(@CurrentUser() user: AuthenticatedUser): Promise<ModeScheduleView> {
     return this.pricing.getSchedule(user);
   }
@@ -37,7 +39,9 @@ export class PricingController {
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'REEMPLAZA wholesale el schedule de modo. pricing:manage (ADMIN/SUPERADMIN/FINANCE).' })
+  @ApiOperation({
+    summary: 'REEMPLAZA wholesale el schedule de modo. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
+  })
   replaceSchedule(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ReplaceScheduleDto,
@@ -55,7 +59,10 @@ export class PricingController {
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'REEMPLAZA el recargo de combustible por km. pricing:manage (ADMIN/SUPERADMIN/FINANCE).' })
+  @ApiOperation({
+    summary:
+      'REEMPLAZA el recargo de combustible por km. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
+  })
   replaceFuelSurcharge(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ReplaceFuelSurchargeDto,
@@ -73,7 +80,10 @@ export class PricingController {
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'REEMPLAZA wholesale los precios de energía. pricing:manage (ADMIN/SUPERADMIN/FINANCE). B5' })
+  @ApiOperation({
+    summary:
+      'REEMPLAZA wholesale los precios de energía. pricing:manage (ADMIN/SUPERADMIN/FINANCE). B5',
+  })
   replaceEnergyCatalog(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ReplaceEnergyCatalogDto,
@@ -82,7 +92,10 @@ export class PricingController {
   }
 
   @Get('bid-floor')
-  @ApiOperation({ summary: 'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). pricing:view. ADR 010 §9.3' })
+  @ApiOperation({
+    summary:
+      'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). pricing:view. ADR 010 §9.3',
+  })
   getBidFloor(@CurrentUser() user: AuthenticatedUser): Promise<BidFloorView> {
     return this.pricing.getBidFloor(user);
   }
@@ -91,7 +104,10 @@ export class PricingController {
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'REEMPLAZA el piso de la PUJA (default + overrides por oferta). pricing:manage (ADMIN/SUPERADMIN/FINANCE). ADR 010 §9.3' })
+  @ApiOperation({
+    summary:
+      'REEMPLAZA el piso de la PUJA (default + overrides por oferta). pricing:manage (ADMIN/SUPERADMIN/FINANCE). ADR 010 §9.3',
+  })
   replaceBidFloor(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ReplaceBidFloorDto,

@@ -38,7 +38,12 @@ export class DocumentsController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ): Promise<Page<FleetDocument>> {
-    return this.documents.list({ status, ownerId, cursor, limit: limit ? Number(limit) : undefined });
+    return this.documents.list({
+      status,
+      ownerId,
+      cursor,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @UseGuards(RolesGuard)

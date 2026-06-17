@@ -1,8 +1,8 @@
-import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
+import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { IconStarFilled } from './icons';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {IconStarFilled} from './icons';
 
 export interface TripRatingTagProps {
   /** Estrellas dadas (1–5) si el viaje YA fue calificado; `null` = aún sin calificar (nudge). */
@@ -18,9 +18,12 @@ export interface TripRatingTagProps {
  *  - YA calificado → "★ N" compacto y discreto: cierra el bucle sin gritar.
  * El color nunca es el único indicador (siempre hay texto/ícono). Solo aplica a viajes completados.
  */
-export function TripRatingTag({ stars, loading = false }: TripRatingTagProps): React.JSX.Element | null {
+export function TripRatingTag({
+  stars,
+  loading = false,
+}: TripRatingTagProps): React.JSX.Element | null {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   if (loading) {
     return null;
@@ -29,10 +32,17 @@ export function TripRatingTag({ stars, loading = false }: TripRatingTagProps): R
   if (stars == null) {
     return (
       <View
-        style={[styles.nudge, { backgroundColor: hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.18 : 0.12) }]}
+        style={[
+          styles.nudge,
+          {
+            backgroundColor: hexAlpha(
+              theme.colors.brand,
+              theme.scheme === 'dark' ? 0.18 : 0.12,
+            ),
+          },
+        ]}
         accessibilityRole="text"
-        accessibilityLabel={t('history.rateNudge')}
-      >
+        accessibilityLabel={t('history.rateNudge')}>
         <IconStarFilled color={theme.colors.brand} size={12} />
         <Text variant="label" color="brand" numberOfLines={1}>
           {t('history.rateNudge')}
@@ -45,8 +55,7 @@ export function TripRatingTag({ stars, loading = false }: TripRatingTagProps): R
     <View
       style={styles.score}
       accessibilityRole="text"
-      accessibilityLabel={t('history.ratedValue', { stars })}
-    >
+      accessibilityLabel={t('history.ratedValue', {stars})}>
       <IconStarFilled color={theme.colors.warn} size={13} />
       <Text variant="subhead" color="inkMuted" tabular>
         {stars}
@@ -65,5 +74,5 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
-  score: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  score: {flexDirection: 'row', alignItems: 'center', gap: 4},
 });

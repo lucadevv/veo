@@ -6,7 +6,11 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { PayoutView } from '@veo/api-client';
-import { FinanceService, type ReleaseHeldPayoutsResult, type RunPayoutsResult } from './finance.service';
+import {
+  FinanceService,
+  type ReleaseHeldPayoutsResult,
+  type RunPayoutsResult,
+} from './finance.service';
 import { PayoutsQueryDto, RunPayoutsDto, RefundDto } from './dto/finance.dto';
 
 @ApiTags('finance')
@@ -29,7 +33,10 @@ export class FinanceController {
   @Roles(AdminRole.FINANCE)
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Ejecuta el batch de payouts del periodo (solo FINANCE)' })
-  runPayouts(@CurrentUser() user: AuthenticatedUser, @Body() dto: RunPayoutsDto): Promise<RunPayoutsResult> {
+  runPayouts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RunPayoutsDto,
+  ): Promise<RunPayoutsResult> {
     return this.finance.runPayouts(user, dto);
   }
 
@@ -39,7 +46,9 @@ export class FinanceController {
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Libera los payouts HELD de un conductor y levanta su retención (solo FINANCE)' })
+  @ApiOperation({
+    summary: 'Libera los payouts HELD de un conductor y levanta su retención (solo FINANCE)',
+  })
   releaseDriverPayouts(
     @CurrentUser() user: AuthenticatedUser,
     @Param('driverId', ParseUUIDPipe) driverId: string,

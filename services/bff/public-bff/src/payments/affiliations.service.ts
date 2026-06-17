@@ -41,7 +41,10 @@ export class AffiliationsService {
    * lo usa; si no, lee el perfil. Resuelve el nombre del perfil y delega con origin=MOBILE (sin phone). El
    * payment-service devuelve {affiliationId, status, deepLink?}; el deepLink pasa TAL CUAL. walletUid no viene.
    */
-  async create(user: AuthenticatedUser, dto: CreateYapeAffiliationDto): Promise<YapeAffiliationView> {
+  async create(
+    user: AuthenticatedUser,
+    dto: CreateYapeAffiliationDto,
+  ): Promise<YapeAffiliationView> {
     // (a) Si el body trae el documento → guardarlo PRIMERO en el perfil (decisión: persistir antes de
     // afiliar, para que el dato quede aunque la afiliación falle). El identity-service re-valida la forma.
     let profile: UserProfile;
@@ -64,7 +67,9 @@ export class AffiliationsService {
     const document = profile.document?.trim();
     const documentType = profile.documentType;
     if (!document || !documentType) {
-      throw new ProfileDocumentMissingError('Cargá tu documento en el perfil antes de afiliar Yape');
+      throw new ProfileDocumentMissingError(
+        'Cargá tu documento en el perfil antes de afiliar Yape',
+      );
     }
 
     return this.paymentRest.post<YapeAffiliationView>(YAPE_AFFILIATION_PATH, {

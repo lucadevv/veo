@@ -1,6 +1,6 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import {StyleSheet, View} from 'react-native';
 
 export interface TripRouteRailProps {
   /** Texto del extremo de ORIGEN (hora de salida, o etiqueta de punto si se conoce). */
@@ -31,10 +31,13 @@ export function TripRouteRail({
   const theme = useTheme();
   return (
     <View style={styles.root}>
-      <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <View style={[styles.originDot, { borderColor: theme.colors.brand }]} />
-        <View style={[styles.line, { backgroundColor: theme.colors.border }]} />
-        <View style={[styles.destDot, { backgroundColor: theme.colors.ink }]} />
+      <View
+        style={styles.rail}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants">
+        <View style={[styles.originDot, {borderColor: theme.colors.brand}]} />
+        <View style={[styles.line, {backgroundColor: theme.colors.border}]} />
+        <View style={[styles.destDot, {backgroundColor: theme.colors.ink}]} />
       </View>
       <View style={styles.labels}>
         <View style={styles.endpoint}>
@@ -65,12 +68,12 @@ export function TripRouteRail({
 const DOT = 11;
 
 const styles = StyleSheet.create({
-  root: { flexDirection: 'row', gap: 12 },
-  rail: { width: DOT, alignItems: 'center', paddingTop: 5 },
-  originDot: { width: DOT, height: DOT, borderRadius: DOT / 2, borderWidth: 2.5 },
-  line: { width: 2, flex: 1, marginVertical: 3, minHeight: 18 },
-  destDot: { width: DOT, height: DOT, borderRadius: 2 },
-  labels: { flex: 1, justifyContent: 'space-between', gap: 14 },
-  endpoint: { gap: 1 },
+  root: {flexDirection: 'row', gap: 12},
+  rail: {width: DOT, alignItems: 'center', paddingTop: 5},
+  originDot: {width: DOT, height: DOT, borderRadius: DOT / 2, borderWidth: 2.5},
+  line: {width: 2, flex: 1, marginVertical: 3, minHeight: 18},
+  destDot: {width: DOT, height: DOT, borderRadius: 2},
+  labels: {flex: 1, justifyContent: 'space-between', gap: 14},
+  endpoint: {gap: 1},
   destEndpoint: {},
 });

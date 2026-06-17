@@ -14,7 +14,13 @@ import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry, type DriverVehicleAttrs } from '../hot-index/hot-index.port';
+import {
+  HOT_INDEX,
+  EXCLUSION_REGISTRY,
+  type HotIndex,
+  type ExclusionRegistry,
+  type DriverVehicleAttrs,
+} from '../hot-index/hot-index.port';
 import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { MatchingService } from './matching.service';
@@ -97,7 +103,9 @@ export class DispatchService {
         // Lo traducimos a 409 limpio (no un 500). Helper ESTRUCTURAL (@veo/database): el `instanceof` del
         // cliente generado por servicio no matchearía cross-cliente. En el secuencial este path no se da.
         if (isUniqueViolation(err, 'trip_id')) {
-          throw new ConflictError('La emergencia ya fue tomada por otro conductor', { tripId: match.tripId });
+          throw new ConflictError('La emergencia ya fue tomada por otro conductor', {
+            tripId: match.tripId,
+          });
         }
         throw err;
       }
@@ -111,7 +119,12 @@ export class DispatchService {
         eventType: 'dispatch.match_found',
         producer: 'dispatch-service',
         // vehicleId adjunto (si se resolvió) → trip-service lo persiste en el viaje (trazabilidad).
-        payload: { tripId: match.tripId, driverId: match.driverId, vehicleId: vehicleId ?? undefined, scoreMs },
+        payload: {
+          tripId: match.tripId,
+          driverId: match.driverId,
+          vehicleId: vehicleId ?? undefined,
+          scoreMs,
+        },
         // dedupKey DETERMINISTA (no uuidv7 aleatorio): un retry HTTP del accept NO duplica el match_found.
         dedupKey: `match_found:${match.tripId}:${match.driverId}`,
       });

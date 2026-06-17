@@ -53,10 +53,13 @@ export default function OpsPage() {
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[1fr_400px]">
         <div className="relative min-h-[320px] border-b border-border lg:border-b-0">
-          <MapView markers={markers} onMarkerClick={(id) => {
-            const panic = panics.find((p) => `panic-${p.panicId}` === id);
-            if (panic) router.push(`/security/panics/${panic.panicId}`);
-          }} />
+          <MapView
+            markers={markers}
+            onMarkerClick={(id) => {
+              const panic = panics.find((p) => `panic-${p.panicId}` === id);
+              if (panic) router.push(`/security/panics/${panic.panicId}`);
+            }}
+          />
         </div>
 
         <aside className="flex min-h-0 flex-col overflow-y-auto border-t border-border bg-bg p-4 lg:border-l lg:border-t-0">

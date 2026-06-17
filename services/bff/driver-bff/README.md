@@ -15,31 +15,38 @@ Swagger: **`/docs`**.
 ## Endpoints (REST/JSON, bajo `/api/v1`)
 
 ### Auth (passthrough a identity, PÚBLICO, solo rate-limit)
+
 - `POST /auth/otp/request` · `POST /auth/otp/verify` (fuerza `type=driver`) · `POST /auth/refresh` · `POST /auth/logout`
 
 ### Sesión / onboarding del conductor (JWT driver)
+
 - `POST /drivers/onboard`
 - `POST /drivers/shift/start` · `POST /drivers/shift/end` · `POST /drivers/shift/pause`
 - `GET  /drivers/me` → agrega gRPC `identity.GetDriverByUser` + `identity.GetUser` + `rating.GetAggregate`
-  + `fleet.GetDriverDocuments` (estado de cumplimiento de documentos).
+  - `fleet.GetDriverDocuments` (estado de cumplimiento de documentos).
 
 ### Ofertas de dispatch (JWT driver)
+
 - `GET  /dispatch/surge?lat&lon` (gRPC `GetSurge`)
 - `GET  /dispatch/offers/:matchId` (gRPC `GetMatch`)
 - `POST /dispatch/offers/:matchId/accept` · `POST /dispatch/offers/:matchId/reject` (REST)
 
 ### Viajes — lado conductor (JWT driver)
+
 - `GET  /trips/:id` (gRPC `GetTrip`) · `GET /trips/:id/state` (gRPC `GetTripState`)
 - `POST /trips/:id/accept` · `/arriving` · `/arrived` · `/start` · `/complete` · `/cancel` (REST; `cancel` fija `by=DRIVER`)
 
 ### Pagos / payouts (JWT driver)
+
 - `GET /payouts` (filtrado al `driverId` del conductor autenticado; REST a payouts)
 - `GET /payments/:id` (gRPC `GetPayment`)
 
 ### Notificaciones (JWT driver)
+
 - `GET /notifications?limit` (filtradas a `recipientId = userId`; REST a notification)
 
 ### Operación
+
 - `GET /health` (liveness) · `GET /health/ready` (Redis + identity) · `GET /metrics` (Prometheus)
 
 ## Socket.IO
@@ -54,11 +61,11 @@ Swagger: **`/docs`**.
 Consumidor (`groupId=driver-bff`) sobre los topics **`dispatch`** y **`trip`**; valida el payload con
 `EVENT_SCHEMAS` de `@veo/events` y enruta al conductor:
 
-| eventType | topic | Socket.IO |
-|---|---|---|
-| `dispatch.offered` | dispatch | `dispatch:offer` |
-| `dispatch.match_found` | dispatch | `dispatch:match` |
-| `trip.assigned/accepted/arriving/arrived/started/completed/cancelled` | trip | `trip:update` |
+| eventType                                                             | topic    | Socket.IO        |
+| --------------------------------------------------------------------- | -------- | ---------------- |
+| `dispatch.offered`                                                    | dispatch | `dispatch:offer` |
+| `dispatch.match_found`                                                | dispatch | `dispatch:match` |
+| `trip.assigned/accepted/arriving/arrived/started/completed/cancelled` | trip     | `trip:update`    |
 
 El `driverId` se toma del payload; si falta (p.ej. `trip.cancelled`) se resuelve por gRPC `trip.GetTrip`.
 

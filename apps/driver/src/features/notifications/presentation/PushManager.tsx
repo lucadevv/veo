@@ -1,7 +1,7 @@
-import {useEffect} from 'react';
-import {useDi} from '../../../core/di/useDi';
-import {HttpPushRegistrationPort} from '../data/http-push-registration';
-import {fcmPushService} from '../data/fcm-push-service';
+import { useEffect } from 'react';
+import { useDi } from '../../../core/di/useDi';
+import { HttpPushRegistrationPort } from '../data/http-push-registration';
+import { fcmPushService } from '../data/fcm-push-service';
 
 /**
  * Inicializa el push del conductor mientras la sesión está activa: pide permisos, obtiene el token,
@@ -12,14 +12,14 @@ import {fcmPushService} from '../data/fcm-push-service';
  * la app. Ningún handler muestra alertas (regla #2: UI engañosa).
  */
 export const PushManager = (): null => {
-  const {httpClient} = useDi();
+  const { httpClient } = useDi();
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let active = true;
     fcmPushService
       .start(new HttpPushRegistrationPort(httpClient))
-      .then(unsubscribe => {
+      .then((unsubscribe) => {
         if (active) {
           cleanup = unsubscribe;
         } else {

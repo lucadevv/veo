@@ -1,5 +1,5 @@
-import type {ShiftRepository} from '../repositories/shift-repository';
-import type {ShiftStartResult, ShiftState, ShiftStatusResult} from '../entities';
+import type { ShiftRepository } from '../repositories/shift-repository';
+import type { ShiftStartResult, ShiftState, ShiftStatusResult } from '../entities';
 
 /** Coordenadas opcionales del dispositivo al iniciar turno (las provee la oleada nativa de GPS). */
 export interface ShiftStartGeo {
@@ -15,7 +15,7 @@ export class StartShiftUseCase {
   constructor(private readonly shift: ShiftRepository) {}
 
   execute(sessionRef: string, geo: ShiftStartGeo = {}): Promise<ShiftStartResult> {
-    return this.shift.start({sessionRef, geoLat: geo.geoLat, geoLon: geo.geoLon});
+    return this.shift.start({ sessionRef, geoLat: geo.geoLat, geoLon: geo.geoLon });
   }
 }
 

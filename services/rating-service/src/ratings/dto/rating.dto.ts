@@ -12,7 +12,10 @@ export class CreateRatingDto {
   @IsUUID()
   ratedId!: string;
 
-  @ApiProperty({ enum: SubjectRole, description: 'Rol del sujeto calificado (define umbrales de flag)' })
+  @ApiProperty({
+    enum: SubjectRole,
+    description: 'Rol del sujeto calificado (define umbrales de flag)',
+  })
   @IsEnum(SubjectRole)
   ratedRole!: SubjectRole;
 

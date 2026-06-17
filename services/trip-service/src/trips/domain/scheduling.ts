@@ -31,10 +31,13 @@ export function assertScheduleWindow(scheduledFor: Date, now: Date): Date {
     throw new ValidationError('scheduledFor no es una fecha válida', { scheduledFor });
   }
   if (delta < MIN_LEAD_MS) {
-    throw new ValidationError('El viaje programado debe ser con al menos 15 minutos de antelación', {
-      scheduledFor: scheduledFor.toISOString(),
-      minLeadMinutes: MIN_LEAD_MS / 60000,
-    });
+    throw new ValidationError(
+      'El viaje programado debe ser con al menos 15 minutos de antelación',
+      {
+        scheduledFor: scheduledFor.toISOString(),
+        minLeadMinutes: MIN_LEAD_MS / 60000,
+      },
+    );
   }
   if (delta > MAX_HORIZON_MS) {
     throw new ValidationError('El viaje programado no puede ser a más de 7 días', {
@@ -46,6 +49,10 @@ export function assertScheduleWindow(scheduledFor: Date, now: Date): Date {
 }
 
 /** ¿El viaje programado ya debe activarse? (faltan ≤ lead time para la hora). */
-export function isDueForActivation(scheduledFor: Date, now: Date, leadMs = ACTIVATION_LEAD_MS): boolean {
+export function isDueForActivation(
+  scheduledFor: Date,
+  now: Date,
+  leadMs = ACTIVATION_LEAD_MS,
+): boolean {
   return scheduledFor.getTime() - now.getTime() <= leadMs;
 }

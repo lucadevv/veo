@@ -54,14 +54,20 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ segment: '', energySource: '', efficiency: '', seats: String(model.seats) });
+  const [form, setForm] = useState({
+    segment: '',
+    energySource: '',
+    efficiency: '',
+    seats: String(model.seats),
+  });
 
   // `model.status` es el enum tipado del contrato; el literal se chequea contra el union (typo = error TS).
   if (!can(user, 'fleet:review') || model.status !== 'PENDING_REVIEW') {
     return <span className="text-xs text-ink-subtle">—</span>;
   }
 
-  const valid = form.segment && form.energySource && Number(form.efficiency) > 0 && Number(form.seats) > 0;
+  const valid =
+    form.segment && form.energySource && Number(form.efficiency) > 0 && Number(form.seats) > 0;
 
   async function approve() {
     setError(null);
@@ -76,7 +82,11 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
         efficiency: Number(form.efficiency),
         seats: Number(form.seats),
       });
-      toast({ tone: 'success', title: 'Modelo aprobado', description: `${model.make} ${model.model}` });
+      toast({
+        tone: 'success',
+        title: 'Modelo aprobado',
+        description: `${model.make} ${model.model}`,
+      });
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo aprobar el modelo.');
@@ -96,9 +106,12 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Aprobar {model.make} {model.model}</DialogTitle>
+            <DialogTitle>
+              Aprobar {model.make} {model.model}
+            </DialogTitle>
             <DialogDescription>
-              Completá la ficha técnica de fábrica. El conductor solo indicó marca, modelo, años y asientos.
+              Completá la ficha técnica de fábrica. El conductor solo indicó marca, modelo, años y
+              asientos.
             </DialogDescription>
           </DialogHeader>
 
@@ -107,7 +120,8 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
               <select
                 className={selectClass}
                 value={form.segment}
-                onChange={(e) => setForm((f) => ({ ...f, segment: e.target.value }))}>
+                onChange={(e) => setForm((f) => ({ ...f, segment: e.target.value }))}
+              >
                 <option value="" disabled>
                   Elegí el segmento
                 </option>
@@ -123,7 +137,8 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
               <select
                 className={selectClass}
                 value={form.energySource}
-                onChange={(e) => setForm((f) => ({ ...f, energySource: e.target.value }))}>
+                onChange={(e) => setForm((f) => ({ ...f, energySource: e.target.value }))}
+              >
                 <option value="" disabled>
                   Elegí la energía
                 </option>

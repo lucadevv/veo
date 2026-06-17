@@ -48,11 +48,16 @@ class FakeRepo implements BidFloorRepository {
           return Promise.resolve({ version: this.config.version, updatedAt: new Date(0) });
         },
         findUnique: () =>
-          Promise.resolve(this.config ? { version: this.config.version, updatedAt: new Date(0) } : null),
+          Promise.resolve(
+            this.config ? { version: this.config.version, updatedAt: new Date(0) } : null,
+          ),
       },
       outboxEvent: {
         create: (args) => {
-          this.outboxEvents.push({ aggregateId: args.data.aggregateId, eventType: args.data.eventType });
+          this.outboxEvents.push({
+            aggregateId: args.data.aggregateId,
+            eventType: args.data.eventType,
+          });
           return Promise.resolve({});
         },
       },
@@ -67,7 +72,12 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
     expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_MOTO)).toBe(700);
     expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_CONFORT)).toBe(700);
     const cfg = await service.getConfig();
-    expect(cfg).toEqual({ defaultFloorCents: 700, overrides: [], version: 0, updatedAt: new Date(0).toISOString() });
+    expect(cfg).toEqual({
+      defaultFloorCents: 700,
+      overrides: [],
+      version: 0,
+      updatedAt: new Date(0).toISOString(),
+    });
   });
 
   it('CLAVE · resolve per-oferta: override de la oferta GANA; sin override cae al default', async () => {
@@ -87,7 +97,12 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
   });
 
   it('replace (expectedVersion correcta) bumpea version, emite el evento en la misma tx e invalida cache', async () => {
-    const repo = new FakeRepo({ defaultFloorCents: 700, overrides: [], version: 4, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      defaultFloorCents: 700,
+      overrides: [],
+      version: 4,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new BidFloorService(repo, 0);
     const out = await service.replace({
       defaultFloorCents: 700,
@@ -95,18 +110,28 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
       expectedVersion: 4,
     });
     expect(out.version).toBe(5);
-    expect(repo.outboxEvents).toEqual([{ aggregateId: 'GLOBAL', eventType: 'pricing.bid_floor_updated' }]);
+    expect(repo.outboxEvents).toEqual([
+      { aggregateId: 'GLOBAL', eventType: 'pricing.bid_floor_updated' },
+    ]);
     // El cambio se ve de inmediato (cache invalidado): la moto ahora resuelve a 300.
     expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_MOTO)).toBe(300);
   });
 
   it('primera escritura (sin fila previa, expectedVersion 0) arranca en version 1', async () => {
     const service = new BidFloorService(new FakeRepo(null), 0);
-    expect((await service.replace({ defaultFloorCents: 700, overrides: [], expectedVersion: 0 })).version).toBe(1);
+    expect(
+      (await service.replace({ defaultFloorCents: 700, overrides: [], expectedVersion: 0 }))
+        .version,
+    ).toBe(1);
   });
 
   it('CAS · expectedVersion STALE → ConflictError (otro admin cambió el config; sin lost update)', async () => {
-    const repo = new FakeRepo({ defaultFloorCents: 700, overrides: [], version: 7, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      defaultFloorCents: 700,
+      overrides: [],
+      version: 7,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new BidFloorService(repo, 0);
     await expect(
       service.replace({ defaultFloorCents: 500, overrides: [], expectedVersion: 6 }),
@@ -116,7 +141,12 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
   });
 
   it('CAS · primer write pero la fila ya existe (expectedVersion 0 stale) → ConflictError', async () => {
-    const repo = new FakeRepo({ defaultFloorCents: 700, overrides: [], version: 3, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      defaultFloorCents: 700,
+      overrides: [],
+      version: 3,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new BidFloorService(repo, 0);
     await expect(
       service.replace({ defaultFloorCents: 500, overrides: [], expectedVersion: 0 }),
@@ -126,7 +156,12 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
 
   it('#3 observabilidad: un replace EXITOSO bumpea veo_pricing_config_changed_total{kind=bid_floor}; un conflicto NO', async () => {
     const before = await readPricingChanged('bid_floor');
-    const repo = new FakeRepo({ defaultFloorCents: 700, overrides: [], version: 4, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      defaultFloorCents: 700,
+      overrides: [],
+      version: 4,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new BidFloorService(repo, 0);
     await service.replace({ defaultFloorCents: 700, overrides: [], expectedVersion: 4 });
     expect(await readPricingChanged('bid_floor')).toBe(before + 1);

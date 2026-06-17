@@ -1,18 +1,11 @@
-import type {GeoPoint} from '@veo/api-client';
-import {
-  Camera,
-  CircleLayer,
-  LineLayer,
-  MapView,
-  MarkerView,
-  ShapeSource,
-} from '@rnmapbox/maps';
-import {driverMapRoute, RoutePin} from '@veo/ui-kit';
-import React, {useMemo} from 'react';
-import {StyleSheet} from 'react-native';
-import {boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat} from '../../utils/geo';
-import {veoDarkMapboxStyleJSON} from './mapbox/veoDarkStyle';
-import {NavPuck} from './NavPuck';
+import type { GeoPoint } from '@veo/api-client';
+import { Camera, CircleLayer, LineLayer, MapView, MarkerView, ShapeSource } from '@rnmapbox/maps';
+import { driverMapRoute, RoutePin } from '@veo/ui-kit';
+import React, { useMemo } from 'react';
+import { StyleSheet } from 'react-native';
+import { boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat } from '../../utils/geo';
+import { veoDarkMapboxStyleJSON } from './mapbox/veoDarkStyle';
+import { NavPuck } from './NavPuck';
 
 /** Celda de demanda a pintar sobre el mapa (centroide + estilo ya derivado de la intensidad). */
 export interface HeatCell {
@@ -106,7 +99,7 @@ function AppMapComponent({
     return {
       type: 'Feature',
       properties: {},
-      geometry: {type: 'LineString', coordinates: routeCoordinates as [number, number][]},
+      geometry: { type: 'LineString', coordinates: routeCoordinates as [number, number][] },
     };
   }, [routeCoordinates]);
 
@@ -122,21 +115,21 @@ function AppMapComponent({
     // ninguna, devolvemos null para no montar la `ShapeSource`.
     const features = heatCells
       .filter(
-        cell =>
+        (cell) =>
           Array.isArray(cell.coordinate) &&
           Number.isFinite(cell.coordinate[0]) &&
           Number.isFinite(cell.coordinate[1]),
       )
-      .map(cell => ({
+      .map((cell) => ({
         type: 'Feature' as const,
         id: cell.id,
-        properties: {opacity: cell.opacity, radiusMeters: cell.radiusMeters},
-        geometry: {type: 'Point' as const, coordinates: cell.coordinate as [number, number]},
+        properties: { opacity: cell.opacity, radiusMeters: cell.radiusMeters },
+        geometry: { type: 'Point' as const, coordinates: cell.coordinate as [number, number] },
       }));
     if (features.length === 0) {
       return null;
     }
-    return {type: 'FeatureCollection', features};
+    return { type: 'FeatureCollection', features };
   }, [heatCells]);
 
   // Encuadre: si se pide ajustar a la ruta, calcula bounds de ruta + markers.
@@ -179,7 +172,8 @@ function AppMapComponent({
       rotateEnabled={interactive}
       scrollEnabled={interactive}
       zoomEnabled={interactive}
-      pitchEnabled={false}>
+      pitchEnabled={false}
+    >
       {navigating ? (
         // NAVEGACIÓN (Waze): cámara siguiendo al conductor, orientada al rumbo (heading-up), inclinada
         // y con zoom de calle. Se re-anima en cada muestra de GPS (centerCoordinate/heading cambian).
@@ -193,7 +187,7 @@ function AppMapComponent({
         />
       ) : bounds ? (
         <Camera
-          bounds={{ne: bounds.ne, sw: bounds.sw}}
+          bounds={{ ne: bounds.ne, sw: bounds.sw }}
           padding={{
             paddingLeft: FIT_PADDING,
             paddingRight: FIT_PADDING,
@@ -258,7 +252,7 @@ function AppMapComponent({
       ) : null}
 
       {isValidPoint(driver) ? (
-        <MarkerView coordinate={toLngLat(driver)} anchor={{x: 0.5, y: 0.5}} allowOverlap>
+        <MarkerView coordinate={toLngLat(driver)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
           {/* En navegación: puck direccional (la cámara heading-up hace que apunte al rumbo de viaje).
               Fuera de navegación: anillo pulsante de presencia. */}
           {navigating ? <NavPuck /> : <RoutePin variant="user" pulse />}
@@ -266,7 +260,7 @@ function AppMapComponent({
       ) : null}
 
       {isValidPoint(origin) ? (
-        <MarkerView coordinate={toLngLat(origin)} anchor={{x: 0.5, y: 0.5}} allowOverlap>
+        <MarkerView coordinate={toLngLat(origin)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
           <RoutePin variant="origin" />
         </MarkerView>
       ) : null}
@@ -277,15 +271,16 @@ function AppMapComponent({
           <MarkerView
             key={`wp:${wp.lat}:${wp.lon}:${i}`}
             coordinate={toLngLat(wp)}
-            anchor={{x: 0.5, y: 0.5}}
-            allowOverlap>
+            anchor={{ x: 0.5, y: 0.5 }}
+            allowOverlap
+          >
             <RoutePin variant="stop" size={13} />
           </MarkerView>
         ) : null,
       )}
 
       {isValidPoint(destination) ? (
-        <MarkerView coordinate={toLngLat(destination)} anchor={{x: 0.5, y: 1}} allowOverlap>
+        <MarkerView coordinate={toLngLat(destination)} anchor={{ x: 0.5, y: 1 }} allowOverlap>
           <RoutePin variant="destination" />
         </MarkerView>
       ) : null}

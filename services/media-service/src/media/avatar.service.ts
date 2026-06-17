@@ -112,10 +112,13 @@ export class AvatarService {
     const sizeBytes = await this.storage.getObjectSize(input.key, this.bucket);
 
     if (sizeBytes <= 0) {
-      throw new ValidationError('No se encontró el objeto subido (sube el binario antes de confirmar)', {
-        field: 'key',
-        key: input.key,
-      });
+      throw new ValidationError(
+        'No se encontró el objeto subido (sube el binario antes de confirmar)',
+        {
+          field: 'key',
+          key: input.key,
+        },
+      );
     }
 
     if (sizeBytes > this.maxBytes) {
@@ -173,7 +176,10 @@ export class AvatarService {
   /** Garantiza que la key pertenezca al usuario autenticado (no se confirma la key de otro). */
   private assertOwnsKey(userId: string, key: string): void {
     if (!key.startsWith(`avatars/${userId}/`)) {
-      throw new ValidationError('La key no pertenece al usuario autenticado', { field: 'key', key });
+      throw new ValidationError('La key no pertenece al usuario autenticado', {
+        field: 'key',
+        key,
+      });
     }
   }
 }

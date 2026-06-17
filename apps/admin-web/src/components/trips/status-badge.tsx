@@ -47,9 +47,6 @@ export function TripStatusBadge({ status }: { status: AdminTripStatus }) {
  */
 export function isActiveTrip(status: AdminTripStatus): boolean {
   return (
-    status !== 'COMPLETED' &&
-    status !== 'CANCELLED' &&
-    status !== 'FAILED' &&
-    status !== 'EXPIRED'
+    status !== 'COMPLETED' && status !== 'CANCELLED' && status !== 'FAILED' && status !== 'EXPIRED'
   );
 }

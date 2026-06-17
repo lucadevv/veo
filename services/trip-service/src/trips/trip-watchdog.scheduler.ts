@@ -74,7 +74,10 @@ export class TripWatchdogScheduler {
           else if (target === 'FAILED') failed++;
         } catch (err) {
           // Un fallo aislado no detiene el barrido; el viaje se reintenta al siguiente tick.
-          this.logger.error({ err, tripId: c.id }, 'watchdog: no se pudo barrer el viaje estancado');
+          this.logger.error(
+            { err, tripId: c.id },
+            'watchdog: no se pudo barrer el viaje estancado',
+          );
         }
       }
       if (expired > 0 || failed > 0) {

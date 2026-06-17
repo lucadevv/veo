@@ -28,7 +28,10 @@ export class SecurityController {
 
   @Get('panics')
   @ApiOperation({ summary: 'Listado de incidentes de pánico (filtro por estado)' })
-  list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListPanicsQueryDto): Promise<Page<PanicSummary>> {
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListPanicsQueryDto,
+  ): Promise<Page<PanicSummary>> {
     return this.security.listPanics(user, query);
   }
 
@@ -49,7 +52,9 @@ export class SecurityController {
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Resuelve / marca falsa alarma (compliance/admin) — acción crítica, exige MFA fresca' })
+  @ApiOperation({
+    summary: 'Resuelve / marca falsa alarma (compliance/admin) — acción crítica, exige MFA fresca',
+  })
   resolve(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

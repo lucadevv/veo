@@ -1,11 +1,11 @@
-import {ApiError, type HttpClient} from '@veo/api-client';
-import {HttpPushRegistrationPort} from '../http-push-registration';
-import {PushRegistrationUnavailableError} from '../../domain/ports/push';
+import { ApiError, type HttpClient } from '@veo/api-client';
+import { HttpPushRegistrationPort } from '../http-push-registration';
+import { PushRegistrationUnavailableError } from '../../domain/ports/push';
 
 type Handler = (method: string, path: string, opts: any) => unknown;
 
 class FakeHttpClient {
-  calls: Array<{method: string; path: string; opts: any}> = [];
+  calls: Array<{ method: string; path: string; opts: any }> = [];
   constructor(private readonly handler: Handler = () => undefined) {}
   post(path: string, opts: any = {}) {
     return this.run('POST', path, opts);
@@ -17,7 +17,7 @@ class FakeHttpClient {
     return this.run('GET', path, opts);
   }
   private async run(method: string, path: string, opts: any) {
-    this.calls.push({method, path, opts});
+    this.calls.push({ method, path, opts });
     return this.handler(method, path, opts);
   }
 }
@@ -29,12 +29,12 @@ describe('HttpPushRegistrationPort', () => {
     const fake = new FakeHttpClient();
     const port = new HttpPushRegistrationPort(asHttp(fake));
 
-    await port.registerDeviceToken({token: 'tok-123', platform: 'android'});
+    await port.registerDeviceToken({ token: 'tok-123', platform: 'android' });
 
     expect(fake.calls[0]).toMatchObject({
       method: 'POST',
       path: '/notifications/device-token',
-      opts: {body: {token: 'tok-123', platform: 'android'}},
+      opts: { body: { token: 'tok-123', platform: 'android' } },
     });
   });
 
@@ -53,7 +53,7 @@ describe('HttpPushRegistrationPort', () => {
     const port = new HttpPushRegistrationPort(asHttp(fake));
 
     await expect(
-      port.registerDeviceToken({token: 't', platform: 'web' as never}),
+      port.registerDeviceToken({ token: 't', platform: 'web' as never }),
     ).rejects.toBeInstanceOf(PushRegistrationUnavailableError);
     expect(fake.calls).toHaveLength(0);
   });

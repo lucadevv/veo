@@ -1,7 +1,7 @@
-import React, {useEffect, useMemo, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, BottomSheet, Button, Text, TextField, useTheme} from '@veo/ui-kit';
+import React, { useEffect, useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, BottomSheet, Button, Text, TextField, useTheme } from '@veo/ui-kit';
 
 /** Resultado del formulario: número del documento + vencimiento ISO opcional. */
 export interface RegistrationDocumentInput {
@@ -25,7 +25,7 @@ export interface RegistrationDocumentSheetProps {
 }
 
 /** Acepta `AAAA-MM-DD` y valida que sea un día real; devuelve el ISO o null. */
-function parseExpiry(raw: string): {iso: string} | null {
+function parseExpiry(raw: string): { iso: string } | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!match) {
     return null;
@@ -42,7 +42,7 @@ function parseExpiry(raw: string): {iso: string} | null {
   ) {
     return null;
   }
-  return {iso: date.toISOString()};
+  return { iso: date.toISOString() };
 }
 
 /**
@@ -59,7 +59,7 @@ export function RegistrationDocumentSheet({
   errorMessage,
   onSubmit,
 }: RegistrationDocumentSheetProps): React.JSX.Element {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
 
   const [documentNumber, setDocumentNumber] = useState('');
@@ -109,7 +109,7 @@ export function RegistrationDocumentSheet({
     }
     onSubmit({
       documentNumber: documentNumber.trim(),
-      ...(parsed ? {expiresAtIso: parsed.iso} : {}),
+      ...(parsed ? { expiresAtIso: parsed.iso } : {}),
     });
   };
 
@@ -128,8 +128,9 @@ export function RegistrationDocumentSheet({
             onPress={handleSubmit}
           />
         </View>
-      }>
-      <View style={[styles.body, {gap: theme.spacing.lg}]}>
+      }
+    >
+      <View style={[styles.body, { gap: theme.spacing.lg }]}>
         <TextField
           label={t('registration.documents.numberLabel')}
           value={documentNumber}
@@ -162,6 +163,6 @@ export function RegistrationDocumentSheet({
 }
 
 const styles = StyleSheet.create({
-  body: {paddingBottom: 8},
-  footer: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
+  body: { paddingBottom: 8 },
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
 });

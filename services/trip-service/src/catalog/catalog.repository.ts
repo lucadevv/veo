@@ -34,7 +34,9 @@ export interface CatalogTx {
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
     create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
+    findUnique(args: {
+      where: { id: string };
+    }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
     create(args: {

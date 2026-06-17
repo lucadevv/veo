@@ -197,7 +197,11 @@ describe('ErasureConsumer · trip.pii_erased', () => {
     const { deletes, invoke } = setup();
 
     await invoke(
-      tripErasedEnvelope({ tripId: 'trip-1', passengerId: 'usr-1', at: '2026-06-10T00:00:00.000Z' }),
+      tripErasedEnvelope({
+        tripId: 'trip-1',
+        passengerId: 'usr-1',
+        at: '2026-06-10T00:00:00.000Z',
+      }),
     );
 
     expect(deletes).toHaveLength(1);

@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import type { Token } from './container';
-import { container } from './registry';
+import {useMemo} from 'react';
+import type {Token} from './container';
+import {container} from './registry';
 
 /**
  * Hook de consumo del contenedor desde la capa de presentación.

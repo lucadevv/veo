@@ -1,5 +1,5 @@
-import {create} from 'zustand';
-import type {WaypointProposedMsg} from '@veo/api-client';
+import { create } from 'zustand';
+import type { WaypointProposedMsg } from '@veo/api-client';
 
 /**
  * Estado transitorio de la PARADA propuesta por el pasajero (socket `waypoint:proposed`, Lote C4). Vive
@@ -15,8 +15,8 @@ export interface WaypointProposalState {
   clearProposal(): void;
 }
 
-export const useWaypointProposalStore = create<WaypointProposalState>(set => ({
+export const useWaypointProposalStore = create<WaypointProposalState>((set) => ({
   proposal: null,
-  setProposal: proposal => set({proposal}),
-  clearProposal: () => set({proposal: null}),
+  setProposal: (proposal) => set({ proposal }),
+  clearProposal: () => set({ proposal: null }),
 }));

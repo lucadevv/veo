@@ -15,7 +15,9 @@ const prisma = new PrismaClient();
 
 async function main(): Promise<void> {
   const secret = process.env.SHARE_LINK_SECRET ?? 'dev-share-link-secret-change-me';
-  const baseUrl = (process.env.SHARE_PUBLIC_BASE_URL ?? 'http://localhost:3011/api/v1/public/share').replace(/\/$/, '');
+  const baseUrl = (
+    process.env.SHARE_PUBLIC_BASE_URL ?? 'http://localhost:3011/api/v1/public/share'
+  ).replace(/\/$/, '');
 
   const passengerId = uuidv7();
   const tripId = uuidv7();

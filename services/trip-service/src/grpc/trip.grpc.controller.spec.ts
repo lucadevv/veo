@@ -111,7 +111,9 @@ describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () 
   });
 
   it('colapsa la polyline ausente a "" (proto3): la app degrada a línea recta origen→destino', async () => {
-    const reply = await makeController(buildTrip({ routePolyline: null })).getTrip({ id: 'trip-1' });
+    const reply = await makeController(buildTrip({ routePolyline: null })).getTrip({
+      id: 'trip-1',
+    });
     expect(reply.routePolyline).toBe('');
   });
 
@@ -175,7 +177,10 @@ describe('TripGrpcController · CloseTripByPassenger (anti-IDOR: identidad FIRMA
     const ctrl = makeController(null, { closeByPassenger });
     const meta = signedMeta({ userId: 'pax-real', type: 'passenger', roles: [], sessionId: 's1' });
 
-    const reply = await ctrl.closeTripByPassenger({ id: 'trip-1', passengerId: 'pax-FORJADO' }, meta);
+    const reply = await ctrl.closeTripByPassenger(
+      { id: 'trip-1', passengerId: 'pax-FORJADO' },
+      meta,
+    );
 
     // El dueño es el de la firma (pax-real), NO el del cuerpo (pax-FORJADO) → un payload falsificado no cierra ajenos.
     expect(closeByPassenger).toHaveBeenCalledWith('trip-1', 'pax-real');

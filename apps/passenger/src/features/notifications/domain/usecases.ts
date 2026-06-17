@@ -1,5 +1,5 @@
-import type { AppNotification } from './entities';
-import type { NotificationsRepository } from './notificationsRepository';
+import type {AppNotification} from './entities';
+import type {NotificationsRepository} from './notificationsRepository';
 
 /** Lista los avisos del centro de notificaciones del pasajero, más recientes primero. */
 export class ListNotificationsUseCase {

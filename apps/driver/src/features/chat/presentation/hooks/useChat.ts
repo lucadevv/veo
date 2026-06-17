@@ -1,8 +1,8 @@
-import {useEffect} from 'react';
-import {useMutation, useQuery} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
-import {GetMessagesUseCase, SendMessageUseCase, type Message} from '../../domain';
-import {selectMessages, selectUnread, useChatStore} from '../state/chatStore';
+import { useEffect } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
+import { GetMessagesUseCase, SendMessageUseCase, type Message } from '../../domain';
+import { selectMessages, selectUnread, useChatStore } from '../state/chatStore';
 
 /** Clave de caché del historial de chat de un viaje. */
 export const chatHistoryQueryKey = (tripId: string) => ['chat', tripId, 'history'] as const;
@@ -12,8 +12,8 @@ export const chatHistoryQueryKey = (tripId: string) => ['chat', tripId, 'history
  * la UI renderiza, así que el historial y los mensajes del socket conviven sin duplicarse.
  */
 export function useChatHistory(tripId: string) {
-  const {chat} = useRepositories();
-  const hydrate = useChatStore(s => s.hydrate);
+  const { chat } = useRepositories();
+  const hydrate = useChatStore((s) => s.hydrate);
 
   const query = useQuery({
     queryKey: chatHistoryQueryKey(tripId),
@@ -35,8 +35,8 @@ export function useChatHistory(tripId: string) {
  * que de todos modos será idempotente (mismo `id`).
  */
 export function useSendMessage(tripId: string) {
-  const {chat} = useRepositories();
-  const appendOwn = useChatStore(s => s.appendOwn);
+  const { chat } = useRepositories();
+  const appendOwn = useChatStore((s) => s.appendOwn);
 
   return useMutation({
     mutationFn: (body: string) => new SendMessageUseCase(chat).execute(tripId, body),
@@ -56,6 +56,6 @@ export function useChatUnread(tripId: string): number {
 
 /** Marca el chat del viaje como leído (al abrir/estar en la conversación). */
 export function useMarkChatRead(tripId: string): () => void {
-  const markRead = useChatStore(s => s.markRead);
+  const markRead = useChatStore((s) => s.markRead);
   return () => markRead(tripId);
 }

@@ -87,13 +87,19 @@ export class DriverProjectionService {
       const total = completed + cancelled;
       map.set(r.driverId, {
         avgRating: Number(r.avgRating.toString()),
-        secondsSinceLastTrip: r.lastTripAt ? Math.max(1, (now - r.lastTripAt.getTime()) / 1000) : NO_TRIP_SECONDS,
+        secondsSinceLastTrip: r.lastTripAt
+          ? Math.max(1, (now - r.lastTripAt.getTime()) / 1000)
+          : NO_TRIP_SECONDS,
         cancellationRate: total > 0 ? cancelled / total : 0,
       });
     }
     for (const id of driverIds) {
       if (!map.has(id)) {
-        map.set(id, { avgRating: DEFAULT_RATING, secondsSinceLastTrip: NO_TRIP_SECONDS, cancellationRate: 0 });
+        map.set(id, {
+          avgRating: DEFAULT_RATING,
+          secondsSinceLastTrip: NO_TRIP_SECONDS,
+          cancellationRate: 0,
+        });
       }
     }
     return map;

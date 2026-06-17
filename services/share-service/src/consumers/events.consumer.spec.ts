@@ -45,7 +45,9 @@ function build(verified: ContactRow[]) {
       emitted: true,
     }),
   );
-  const revokeAllForTrip: ReturnType<typeof vi.fn> = vi.fn(async (_tripId: string) => ({ revoked: 1 }));
+  const revokeAllForTrip: ReturnType<typeof vi.fn> = vi.fn(async (_tripId: string) => ({
+    revoked: 1,
+  }));
   const share = { createPanicFanout, revokeAllForTrip } as unknown as ShareService;
 
   const consumer = new EventsConsumer(share, contacts, snapshots, config);
@@ -69,7 +71,9 @@ function panicEnvelope() {
 
 /** Accede a un handler (privado) por tipo de evento tipándolo via index sin usar any. */
 function handlerFor(consumer: EventsConsumer, eventType: string) {
-  const handlers = (consumer as unknown as { handlers(): Record<string, (e: unknown) => Promise<void>> }).handlers();
+  const handlers = (
+    consumer as unknown as { handlers(): Record<string, (e: unknown) => Promise<void>> }
+  ).handlers();
   return handlers[eventType]!;
 }
 
@@ -85,7 +89,13 @@ function terminalEnvelope(eventType: 'trip.completed' | 'trip.cancelled' | 'trip
       ? { ...base, fareCents: 1500, distanceMeters: 4200, durationSeconds: 900 }
       : eventType === 'trip.cancelled'
         ? { ...base, by: 'PASSENGER' as const, penaltyCents: 0 }
-        : { ...base, passengerId: 'pax-1', fromStatus: 'IN_PROGRESS', staleMinutes: 30, at: new Date().toISOString() };
+        : {
+            ...base,
+            passengerId: 'pax-1',
+            fromStatus: 'IN_PROGRESS',
+            staleMinutes: 30,
+            at: new Date().toISOString(),
+          };
   return createEnvelope({ eventType, producer: 'trip-service', payload });
 }
 
@@ -102,13 +112,21 @@ describe('EventsConsumer.handlePanic · delega el fan-out (no SMS inline)', () =
     expect(createPanicFanout).toHaveBeenCalledOnce();
     const [tripId, input] = createPanicFanout.mock.calls[0]!;
     expect(tripId).toBe('trip-1');
-    expect(input).toMatchObject({ panicId: 'pn-1', passengerId: 'pax-1', contactIds: ['c1', 'c2'] });
+    expect(input).toMatchObject({
+      panicId: 'pn-1',
+      passengerId: 'pax-1',
+      contactIds: ['c1', 'c2'],
+    });
     // El argumento del fan-out lleva SOLO IDs: ningún teléfono/nombre.
     expect(JSON.stringify(input)).not.toMatch(/\+51|Ana|Beto/);
   });
 
   it('cap BR-S05: a lo sumo 4 contactIds delegados', async () => {
-    const many = Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, phone: `+519${i}`, name: `N${i}` }));
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      id: `c${i}`,
+      phone: `+519${i}`,
+      name: `N${i}`,
+    }));
     const { consumer, createPanicFanout } = build(many);
 
     await panicHandler(consumer)(panicEnvelope());
@@ -125,7 +143,9 @@ describe('EventsConsumer.handlePanic · delega el fan-out (no SMS inline)', () =
 
   it('si createPanicFanout falla → RELANZA (Kafka reintenta; no ACKea a ciegas)', async () => {
     const { consumer, share } = build([{ id: 'c1', phone: '+51911111111', name: 'Ana' }]);
-    (share.createPanicFanout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db caída'));
+    (share.createPanicFanout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('db caída'),
+    );
     await expect(panicHandler(consumer)(panicEnvelope())).rejects.toThrow('db caída');
   });
 });

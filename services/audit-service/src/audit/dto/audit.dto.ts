@@ -1,17 +1,11 @@
-import {
-  IsInt,
-  IsObject,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { IsInt, IsObject, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RecordAuditDto {
-  @ApiPropertyOptional({ description: 'Actor que ejecutó la acción. Por defecto, la identidad interna.' })
+  @ApiPropertyOptional({
+    description: 'Actor que ejecutó la acción. Por defecto, la identidad interna.',
+  })
   @IsOptional()
   @IsString()
   actorId?: string;
@@ -98,7 +92,10 @@ export class AuditEntryResponse {
   @ApiProperty({ type: Object }) payload!: Record<string, unknown>;
   @ApiProperty({ nullable: true }) prevHash!: string | null;
   @ApiProperty() hash!: string;
-  @ApiProperty({ nullable: true, description: 'Clave del objeto WORM en S3 (null si aún no replicado).' })
+  @ApiProperty({
+    nullable: true,
+    description: 'Clave del objeto WORM en S3 (null si aún no replicado).',
+  })
   s3ObjectKey!: string | null;
   @ApiProperty() createdAt!: string;
 }

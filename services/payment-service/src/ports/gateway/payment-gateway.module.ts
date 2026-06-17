@@ -32,7 +32,10 @@ const gatewayProvider: Provider = {
 
       case 'prontopaga':
         // Degradación honesta: el constructor LANZA si faltan secretKey + (token|user/pass). No cobra a ciegas.
-        Logger.log('PaymentGateway en modo PRONTOPAGA (agregador PE: Yape/Plin/tarjeta/PagoEfectivo)', 'PaymentGatewayModule');
+        Logger.log(
+          'PaymentGateway en modo PRONTOPAGA (agregador PE: Yape/Plin/tarjeta/PagoEfectivo)',
+          'PaymentGatewayModule',
+        );
         return new ProntoPagaGateway({
           baseUrl: config.getOrThrow<string>('PRONTOPAGA_BASE_URL'),
           secretKey: config.get<string>('PRONTOPAGA_SECRET_KEY') ?? '',
@@ -43,7 +46,10 @@ const gatewayProvider: Provider = {
         });
 
       case 'sandbox':
-        Logger.log('PaymentGateway en modo SANDBOX (riel determinista en proceso)', 'PaymentGatewayModule');
+        Logger.log(
+          'PaymentGateway en modo SANDBOX (riel determinista en proceso)',
+          'PaymentGatewayModule',
+        );
         return new SandboxPaymentGateway({
           confirmDelayMs: config.getOrThrow<number>('SANDBOX_CONFIRM_DELAY_MS'),
           declineSuffix: config.getOrThrow<string>('SANDBOX_DECLINE_SUFFIX'),

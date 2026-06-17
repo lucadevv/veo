@@ -103,7 +103,8 @@ export function OperatorActions({ operator }: { operator: PendingOperator }) {
                     checked
                       ? 'border-accent bg-accent/10 text-ink'
                       : 'border-border text-ink-muted hover:border-border-strong'
-                  }`}>
+                  }`}
+                >
                   <span>{role.label}</span>
                   {checked ? <Check className="size-4 text-accent" aria-hidden /> : null}
                 </button>

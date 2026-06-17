@@ -1,5 +1,5 @@
-import type {Theme as NavigationTheme} from '@react-navigation/native';
-import {driverTheme} from '@veo/ui-kit';
+import type { Theme as NavigationTheme } from '@react-navigation/native';
+import { driverTheme } from '@veo/ui-kit';
 
 /**
  * Tema de React Navigation derivado del tema de diseño `driverTheme` (`@veo/ui-kit`).
@@ -8,7 +8,7 @@ import {driverTheme} from '@veo/ui-kit';
  * conductor, regla #6 de CLAUDE.md). Aquí solo proyectamos sus tokens al contrato que exige
  * React Navigation, para no duplicar paletas ni desincronizar la marca.
  */
-const {colors} = driverTheme;
+const { colors } = driverTheme;
 
 export const navigationTheme: NavigationTheme = {
   dark: true,

@@ -9,7 +9,9 @@ import { FleetService } from './fleet.service';
 function makeService(restOver: Record<string, unknown> = {}) {
   const rest = {
     get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-    put: vi.fn().mockResolvedValue({ id: 'm1', make: 'Toyota', model: 'Probox', status: 'APPROVED' }),
+    put: vi
+      .fn()
+      .mockResolvedValue({ id: 'm1', make: 'Toyota', model: 'Probox', status: 'APPROVED' }),
     post: vi.fn(),
     ...restOver,
   };
@@ -23,13 +25,24 @@ const operator = { userId: 'op-1', type: 'admin', roles: ['ADMIN'] } as never;
 describe('FleetService.approveModel · B5-2.c', () => {
   it('proxya a PUT /vehicle-models/:id/approve con la ficha y AUDITA la acción', async () => {
     const { svc, rest, audit } = makeService();
-    await svc.approveModel(operator, 'm1', { segment: 'MID', energySource: 'DIESEL', efficiency: 12 } as never);
-    expect(rest.put).toHaveBeenCalledWith('/vehicle-models/m1/approve', expect.objectContaining({
-      body: { segment: 'MID', energySource: 'DIESEL', efficiency: 12 },
-    }));
+    await svc.approveModel(operator, 'm1', {
+      segment: 'MID',
+      energySource: 'DIESEL',
+      efficiency: 12,
+    } as never);
+    expect(rest.put).toHaveBeenCalledWith(
+      '/vehicle-models/m1/approve',
+      expect.objectContaining({
+        body: { segment: 'MID', energySource: 'DIESEL', efficiency: 12 },
+      }),
+    );
     expect(audit.record).toHaveBeenCalledWith(
       operator,
-      expect.objectContaining({ action: 'vehicle_model.approve', resourceType: 'vehicle_model', resourceId: 'm1' }),
+      expect.objectContaining({
+        action: 'vehicle_model.approve',
+        resourceType: 'vehicle_model',
+        resourceId: 'm1',
+      }),
     );
   });
 });
@@ -38,10 +51,17 @@ describe('FleetService.rejectModel · B5-2.c', () => {
   it('proxya a PUT /vehicle-models/:id/reject y AUDITA la acción', async () => {
     const { svc, rest, audit } = makeService();
     await svc.rejectModel(operator, 'm9');
-    expect(rest.put).toHaveBeenCalledWith('/vehicle-models/m9/reject', expect.objectContaining({ body: {} }));
+    expect(rest.put).toHaveBeenCalledWith(
+      '/vehicle-models/m9/reject',
+      expect.objectContaining({ body: {} }),
+    );
     expect(audit.record).toHaveBeenCalledWith(
       operator,
-      expect.objectContaining({ action: 'vehicle_model.reject', resourceType: 'vehicle_model', resourceId: 'm9' }),
+      expect.objectContaining({
+        action: 'vehicle_model.reject',
+        resourceType: 'vehicle_model',
+        resourceId: 'm9',
+      }),
     );
   });
 });
@@ -50,8 +70,11 @@ describe('FleetService.listModelReview · B5-2.c', () => {
   it('pasa el filtro de estado a fleet GET /vehicle-models/review', async () => {
     const { svc, rest } = makeService();
     await svc.listModelReview(operator, { status: 'REJECTED', limit: 10 } as never);
-    expect(rest.get).toHaveBeenCalledWith('/vehicle-models/review', expect.objectContaining({
-      query: expect.objectContaining({ status: 'REJECTED', limit: 10 }),
-    }));
+    expect(rest.get).toHaveBeenCalledWith(
+      '/vehicle-models/review',
+      expect.objectContaining({
+        query: expect.objectContaining({ status: 'REJECTED', limit: 10 }),
+      }),
+    );
   });
 });

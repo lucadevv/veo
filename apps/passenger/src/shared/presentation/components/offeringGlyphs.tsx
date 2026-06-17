@@ -1,9 +1,13 @@
-import { OfferingIcon, VehicleClass } from '@veo/shared-types';
-import { passengerMapRoute, themes, type Text } from '@veo/ui-kit';
+import {OfferingIcon, VehicleClass} from '@veo/shared-types';
+import {passengerMapRoute, themes, type Text} from '@veo/ui-kit';
 import React from 'react';
-import Svg, { Path, Rect } from 'react-native-svg';
+import Svg, {Path, Rect} from 'react-native-svg';
 import i18n from '../../../i18n';
-import { IconCar, IconMoto, type GlyphProps } from '../../../features/trip/presentation/components/icons';
+import {
+  IconCar,
+  IconMoto,
+  type GlyphProps,
+} from '../../../features/trip/presentation/components/icons';
 
 /**
  * EL registro token→glyph de la app (ADR 013 §1.6 · UI data-driven). Único lugar donde un token de
@@ -39,7 +43,11 @@ export interface MapGlyphProps {
 }
 
 /** Auto top-down: cuerpo redondeado + franja de parabrisas/luneta insinuada. */
-function CarMapGlyph({ size, bodyColor, glassColor }: MapGlyphProps): React.JSX.Element {
+function CarMapGlyph({
+  size,
+  bodyColor,
+  glassColor,
+}: MapGlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
       {/* Cuerpo: cápsula vertical con capó y baúl curvos, cintura apenas marcada. */}
@@ -73,7 +81,11 @@ function CarMapGlyph({ size, bodyColor, glassColor }: MapGlyphProps): React.JSX.
  * Moto-taxi top-down: cuerpo más angosto + un travesaño (manubrio insinuado). Variante BARATA de la
  * misma familia (mismo viewBox, mismos tokens), legible al mismo tamaño que el auto.
  */
-function MotoMapGlyph({ size, bodyColor, glassColor }: MapGlyphProps): React.JSX.Element {
+function MotoMapGlyph({
+  size,
+  bodyColor,
+  glassColor,
+}: MapGlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
       {/* Cuerpo angosto (carrocería de mototaxi). */}
@@ -170,7 +182,8 @@ export const OFFERING_GLYPHS: Record<OfferingIcon, OfferingGlyph> = {
  * Fallback EXPLÍCITO del registro (entrada del DISEÑO, ADR 013 §1.6): un token desconocido —server
  * más nuevo que la app mandando `ambulance`— degrada al glyph genérico de auto, jamás rompe.
  */
-export const FALLBACK_OFFERING_GLYPH: OfferingGlyph = OFFERING_GLYPHS[OfferingIcon.CAR];
+export const FALLBACK_OFFERING_GLYPH: OfferingGlyph =
+  OFFERING_GLYPHS[OfferingIcon.CAR];
 
 /**
  * Mapeo clase→token para datos que NO traen `icon` (historial viejo, nearby, quote de server viejo).
@@ -192,9 +205,14 @@ function isKnownIcon(token: string): token is OfferingIcon {
  *  2. si no, la clase de vehículo vía `VEHICLE_CLASS_ICON` (datos que no traen icon);
  *  3. sin nada (ambiente sin tipo) → fallback CAR (el default histórico del mapa).
  */
-export function offeringGlyph(source: { icon?: string; vehicleType?: VehicleClass }): OfferingGlyph {
+export function offeringGlyph(source: {
+  icon?: string;
+  vehicleType?: VehicleClass;
+}): OfferingGlyph {
   if (source.icon !== undefined) {
-    return isKnownIcon(source.icon) ? OFFERING_GLYPHS[source.icon] : FALLBACK_OFFERING_GLYPH;
+    return isKnownIcon(source.icon)
+      ? OFFERING_GLYPHS[source.icon]
+      : FALLBACK_OFFERING_GLYPH;
   }
   if (source.vehicleType !== undefined) {
     // Mismo guard que el camino `icon`: el tipo dice VehicleClass, pero un caller futuro no-zod
@@ -211,7 +229,10 @@ export function offeringGlyph(source: { icon?: string; vehicleType?: VehicleClas
  * (`offering.veo_moto.name` → "VEO Moto"); si no —server más nuevo que la app, o server viejo sin
  * `labelKey`— cae al `name` resuelto server-side (compat garantizada por el BFF).
  */
-export function offeringDisplayName(option: { labelKey?: string; name: string }): string {
+export function offeringDisplayName(option: {
+  labelKey?: string;
+  name: string;
+}): string {
   if (option.labelKey !== undefined && i18n.exists(option.labelKey)) {
     return i18n.t(option.labelKey);
   }

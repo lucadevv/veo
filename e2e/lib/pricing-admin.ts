@@ -54,7 +54,9 @@ function signAdminIdentity(): { header: string; signature: string } {
     issuedAt: Date.now(),
   };
   const header = Buffer.from(JSON.stringify(identity)).toString('base64url');
-  const signature = createHmac('sha256', SECRETS.internalIdentitySecret).update(header).digest('hex');
+  const signature = createHmac('sha256', SECRETS.internalIdentitySecret)
+    .update(header)
+    .digest('hex');
   return { header, signature };
 }
 
@@ -83,7 +85,9 @@ export async function putModeSchedule(
   const text = await res.text();
   const body = text ? safeJson(text) : undefined;
   if (!res.ok) {
-    throw new Error(`PUT mode-schedule → ${res.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+    throw new Error(
+      `PUT mode-schedule → ${res.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`,
+    );
   }
   return { status: res.status, body };
 }
@@ -99,7 +103,10 @@ export async function getModeSchedule(): Promise<{ status: number; body: unknown
 }
 
 /** GET /internal/pricing/resolve?lat&lon — el modo { mode } para (lat,lon, AHORA). */
-export async function resolveMode(lat: number, lon: number): Promise<{ status: number; mode?: string }> {
+export async function resolveMode(
+  lat: number,
+  lon: number,
+): Promise<{ status: number; mode?: string }> {
   const url = new URL(`${TRIP_BASE}/internal/pricing/resolve`);
   url.searchParams.set('lat', String(lat));
   url.searchParams.set('lon', String(lon));

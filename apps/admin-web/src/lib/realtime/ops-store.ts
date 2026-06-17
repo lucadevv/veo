@@ -24,14 +24,11 @@ export const useOpsStore = create<OpsState>((set) => ({
   trips: {},
   panics: [],
   setStatus: (status) => set({ status }),
-  upsertDriver: (msg) =>
-    set((s) => ({ drivers: { ...s.drivers, [msg.driverId]: msg } })),
+  upsertDriver: (msg) => set((s) => ({ drivers: { ...s.drivers, [msg.driverId]: msg } })),
   upsertTrip: (msg) => set((s) => ({ trips: { ...s.trips, [msg.tripId]: msg } })),
   addPanic: (msg) =>
     set((s) =>
-      s.panics.some((p) => p.panicId === msg.panicId)
-        ? s
-        : { panics: [msg, ...s.panics] },
+      s.panics.some((p) => p.panicId === msg.panicId) ? s : { panics: [msg, ...s.panics] },
     ),
   updatePanic: (panicId, status) =>
     set((s) => ({

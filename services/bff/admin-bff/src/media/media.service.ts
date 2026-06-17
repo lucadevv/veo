@@ -262,7 +262,10 @@ export class MediaService {
   }
 
   async segments(identity: AuthenticatedUser, tripId: string): Promise<SegmentView[]> {
-    const res = await this.rest.get<SegmentView[]>('/media/segments', { identity, query: { tripId } });
+    const res = await this.rest.get<SegmentView[]>('/media/segments', {
+      identity,
+      query: { tripId },
+    });
     // Listar qué segmentos de video de cabina existen para un viaje (incl. flags hasPanic/hasIncident)
     // es una lectura sensible: debe quedar en la pista de rendición de cuentas (Ley 29733), igual que
     // requestAccess/streamRequest. fail-closed: si el audit falla, el listado falla.

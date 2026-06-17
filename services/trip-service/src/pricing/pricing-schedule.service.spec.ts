@@ -107,7 +107,11 @@ describe('PricingScheduleService.replaceSchedule · PUT', () => {
     expect(result.rules).toHaveLength(1);
     const ev = outbox.find((e) => e.eventType === 'pricing.mode_schedule_updated');
     expect(ev).toBeTruthy();
-    const payload = ev?.envelope.payload as { version: number; rules: unknown[]; defaultMode: string };
+    const payload = ev?.envelope.payload as {
+      version: number;
+      rules: unknown[];
+      defaultMode: string;
+    };
     expect(payload.version).toBe(4);
     expect(payload.rules).toHaveLength(1);
     expect(payload.defaultMode).toBe(PricingMode.PUJA);
@@ -116,7 +120,11 @@ describe('PricingScheduleService.replaceSchedule · PUT', () => {
   it('primera escritura (sin fila previa, expectedVersion 0) → version 1', async () => {
     const { repo } = makeRepo(null);
     const svc = new PricingScheduleService(repo);
-    const result = await svc.replaceSchedule({ defaultMode: PricingMode.FIXED, rules: [], expectedVersion: 0 });
+    const result = await svc.replaceSchedule({
+      defaultMode: PricingMode.FIXED,
+      rules: [],
+      expectedVersion: 0,
+    });
     expect(result.version).toBe(1);
   });
 

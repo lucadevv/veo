@@ -62,7 +62,9 @@ export class PaymentsService {
   /** Lista los payouts del conductor autenticado (filtrado por su driverId resuelto). */
   async listMyPayouts(identity: AuthenticatedUser): Promise<unknown> {
     const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
-    return this.rest.client('payouts').get('/payouts', { identity: signedIdentity, query: { driverId } });
+    return this.rest
+      .client('payouts')
+      .get('/payouts', { identity: signedIdentity, query: { driverId } });
   }
 
   /**
@@ -79,7 +81,8 @@ export class PaymentsService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new NotFoundError('No existe un perfil de conductor para este usuario');
+    if (!driver.found)
+      throw new NotFoundError('No existe un perfil de conductor para este usuario');
     return { identity: { ...identity, driverId: driver.id }, driverId: driver.id };
   }
 }

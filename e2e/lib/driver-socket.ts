@@ -73,7 +73,10 @@ export class DriverSocket {
         timeout: timeoutMs,
       });
       this.socket = socket;
-      const timer = setTimeout(() => reject(new Error('timeout conectando /driver socket')), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error('timeout conectando /driver socket')),
+        timeoutMs,
+      );
       socket.on('connect', () => {
         clearTimeout(timer);
         resolve();

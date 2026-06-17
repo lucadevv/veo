@@ -14,7 +14,12 @@ describe('aggregatePayouts (BR-P05)', () => {
       { driverId: 'd1', grossCents: 3000, commissionCents: 600, tipCents: 0 },
     ];
     const [p] = aggregatePayouts(rows, 0);
-    expect(p).toEqual({ driverId: 'd1', grossCents: 5000, commissionCents: 1000, amountCents: 4300 });
+    expect(p).toEqual({
+      driverId: 'd1',
+      grossCents: 5000,
+      commissionCents: 1000,
+      amountCents: 4300,
+    });
   });
 
   it('excluye conductores bajo el mínimo liquidable (S/50 = 5000)', () => {
@@ -33,7 +38,12 @@ describe('aggregatePayouts (BR-P05)', () => {
     ];
     const [p] = aggregatePayouts(rows, 0);
     // grossCents/commissionCents = SOLO la tarifa; amountCents = 1600 + 400 (comp) = 2000.
-    expect(p).toEqual({ driverId: 'd1', grossCents: 2000, commissionCents: 400, amountCents: 2000 });
+    expect(p).toEqual({
+      driverId: 'd1',
+      grossCents: 2000,
+      commissionCents: 400,
+      amountCents: 2000,
+    });
   });
 
   it('el bono de incentivo entra NETO al amount, sin inflar bruto ni comisión', () => {
@@ -43,29 +53,65 @@ describe('aggregatePayouts (BR-P05)', () => {
     ];
     const [p] = aggregatePayouts(rows, 0);
     // grossCents/commissionCents = SOLO la tarifa; amountCents = 1600 + 1500 (bono) = 3100.
-    expect(p).toEqual({ driverId: 'd1', grossCents: 2000, commissionCents: 400, amountCents: 3100 });
+    expect(p).toEqual({
+      driverId: 'd1',
+      grossCents: 2000,
+      commissionCents: 400,
+      amountCents: 3100,
+    });
   });
 
   it('bono + compensación coexisten, ambos netos y sumados (semánticas separadas)', () => {
     const rows = [
-      { driverId: 'd1', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 400, incentiveCents: 1500 },
+      {
+        driverId: 'd1',
+        grossCents: 0,
+        commissionCents: 0,
+        tipCents: 0,
+        compensationCents: 400,
+        incentiveCents: 1500,
+      },
     ];
     const [p] = aggregatePayouts(rows, 0);
     expect(p).toEqual({ driverId: 'd1', grossCents: 0, commissionCents: 0, amountCents: 1900 });
   });
 
   it('un bono solo puede alcanzar el mínimo liquidable por sí mismo (back-pay de un histórico)', () => {
-    const rows = [{ driverId: 'only-bonus', grossCents: 0, commissionCents: 0, tipCents: 0, incentiveCents: 5000 }];
+    const rows = [
+      {
+        driverId: 'only-bonus',
+        grossCents: 0,
+        commissionCents: 0,
+        tipCents: 0,
+        incentiveCents: 5000,
+      },
+    ];
     const [p] = aggregatePayouts(rows, 5000);
-    expect(p).toEqual({ driverId: 'only-bonus', grossCents: 0, commissionCents: 0, amountCents: 5000 });
+    expect(p).toEqual({
+      driverId: 'only-bonus',
+      grossCents: 0,
+      commissionCents: 0,
+      amountCents: 5000,
+    });
   });
 
   it('F2.3 · una compensación de penalidad sola puede alcanzar el mínimo liquidable por sí misma', () => {
     const rows = [
-      { driverId: 'only-penalty', grossCents: 0, commissionCents: 0, tipCents: 0, compensationCents: 5000 },
+      {
+        driverId: 'only-penalty',
+        grossCents: 0,
+        commissionCents: 0,
+        tipCents: 0,
+        compensationCents: 5000,
+      },
     ];
     const [p] = aggregatePayouts(rows, 5000);
-    expect(p).toEqual({ driverId: 'only-penalty', grossCents: 0, commissionCents: 0, amountCents: 5000 });
+    expect(p).toEqual({
+      driverId: 'only-penalty',
+      grossCents: 0,
+      commissionCents: 0,
+      amountCents: 5000,
+    });
   });
 
   it('es determinista (ordenado por driverId)', () => {
@@ -101,7 +147,9 @@ describe('máquina de estados del payout (S4)', () => {
   it('PROCESSED es terminal: no vuelve a HELD ni a PENDING', () => {
     expect(canTransitionPayout('PROCESSED', 'HELD')).toBe(false);
     expect(canTransitionPayout('PROCESSED', 'PENDING')).toBe(false);
-    expect(() => assertPayoutTransition('PROCESSED', 'HELD')).toThrow('Transición de payout inválida');
+    expect(() => assertPayoutTransition('PROCESSED', 'HELD')).toThrow(
+      'Transición de payout inválida',
+    );
   });
 
   it('HELD no puede caer a FAILED en silencio (liberar = pagar, no fallar)', () => {

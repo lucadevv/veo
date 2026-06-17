@@ -1,9 +1,9 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { StatusPill, Text, useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { PaymentMethodLogo } from '../../../../shared/assets/payment-methods';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {PaymentMethodLogo} from '../../../../shared/assets/payment-methods';
 
 /**
  * Variante visual y SEMÁNTICA del picker:
@@ -97,15 +97,15 @@ export function PaymentMethodPicker({
   disabled = false,
 }: PaymentMethodPickerProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // Toggle "recordar como predeterminado". Se reinicia al montar (una decisión por apertura): el caller
   // remonta/oculta el picker al cerrar el sheet, así que el estado nunca se arrastra entre aperturas.
   const [remember, setRemember] = React.useState(false);
 
   return (
-    <View style={{ gap: theme.spacing.sm }}>
-      {methods.map((method) => (
+    <View style={{gap: theme.spacing.sm}}>
+      {methods.map(method => (
         <PaymentMethodPickerRow
           key={method}
           method={method}
@@ -115,7 +115,11 @@ export function PaymentMethodPicker({
           yapeAutoActive={yapeAutoActive}
           isCurrent={currentMethod === method}
           // "Sugerido" SOLO en `compact` y SOLO si no es el método actual (no se sugiere el ya iniciado).
-          isSuggested={variant === 'compact' && highlightedMethod === method && currentMethod !== method}
+          isSuggested={
+            variant === 'compact' &&
+            highlightedMethod === method &&
+            currentMethod !== method
+          }
           disabled={disabled}
           onPress={() => onSelect(method, rememberToggle ? remember : false)}
         />
@@ -124,7 +128,7 @@ export function PaymentMethodPicker({
       {rememberToggle ? (
         <RememberToggle
           checked={remember}
-          onToggle={() => setRemember((v) => !v)}
+          onToggle={() => setRemember(v => !v)}
           label={t('payments.rememberDefault')}
         />
       ) : null}
@@ -169,16 +173,20 @@ function PaymentMethodPickerRow({
   onPress,
 }: PaymentMethodPickerRowProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // Borde/anillo de acento: en `full` lo enciende el radio elegido (`selected`); en `compact` lo
   // enciende el SUGERIDO (`isSuggested`). Unifica el realce visual sin mezclar las dos semánticas.
   const accented = selected || isSuggested;
   const isYapeAuto = method === 'YAPE' && yapeAutoActive;
   // Nombre distinguido LÉXICAMENTE: Yape vinculado ("Yape · automático") vs one-shot ("Yape" a secas).
-  const name = isYapeAuto ? t('payments.nameYapeAuto') : t(`payments.method.${method}`);
+  const name = isYapeAuto
+    ? t('payments.nameYapeAuto')
+    : t(`payments.method.${method}`);
   // Subtítulo: Yape vinculado describe el cobro automático; el resto su hint canónico es-PE.
-  const hint = isYapeAuto ? t('payments.hintYapeAuto') : t(`payments.hint.${method}`);
+  const hint = isYapeAuto
+    ? t('payments.hintYapeAuto')
+    : t(`payments.hint.${method}`);
 
   // SEMÁNTICA por variante: `compact` (completar un cobro) → fila de ACCIÓN (`button`), sin radio;
   // `full` (selector al pedir) → `radio` con estado seleccionado. Es explícito, no inferido por fila.
@@ -189,11 +197,11 @@ function PaymentMethodPickerRow({
     <Pressable
       // `radio` cuando es un SELECTOR (al pedir); `button` cuando es una ACCIÓN de cambio (pago en curso).
       accessibilityRole={action ? 'button' : 'radio'}
-      accessibilityState={action ? { disabled: rowDisabled } : { selected }}
+      accessibilityState={action ? {disabled: rowDisabled} : {selected}}
       accessibilityLabel={t(`payments.method.${method}`)}
       disabled={rowDisabled}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({pressed}) => [
         styles.row,
         {
           minHeight: 56,
@@ -203,27 +211,38 @@ function PaymentMethodPickerRow({
           borderRadius: theme.radii.md,
           borderWidth: accented ? 2 : 1,
           borderColor: accented ? theme.colors.accent : theme.colors.border,
-          backgroundColor: accented ? theme.colors.surfaceElevated : theme.colors.surface,
+          backgroundColor: accented
+            ? theme.colors.surfaceElevated
+            : theme.colors.surface,
           opacity: isCurrent ? 0.4 : rowDisabled ? 0.45 : pressed ? 0.7 : 1,
         },
-      ]}
-    >
+      ]}>
       {/* Logo circular CANÓNICO; cuando la fila está elegida/sugerida, un anillo de acento lo rodea. */}
-      <View style={[styles.leadRing, { borderColor: accented ? theme.colors.accent : 'transparent' }]}>
+      <View
+        style={[
+          styles.leadRing,
+          {borderColor: accented ? theme.colors.accent : 'transparent'},
+        ]}>
         <PaymentMethodLogo method={method} size={36} />
       </View>
 
       <View style={styles.body}>
-        <View style={[styles.nameRow, { gap: theme.spacing.xs }]}>
+        <View style={[styles.nameRow, {gap: theme.spacing.xs}]}>
           <Text variant="bodyStrong" numberOfLines={1}>
             {name}
           </Text>
           {/* Pill del PREDETERMINADO: siempre visible cuál es "con qué pagas siempre" (solo `full`). */}
-          {isDefault ? <StatusPill label={t('payments.defaultHere')} tone="neutral" /> : null}
+          {isDefault ? (
+            <StatusPill label={t('payments.defaultHere')} tone="neutral" />
+          ) : null}
           {/* Pill del SUGERIDO (variante `compact` · resolver): orienta hacia el método recomendado. */}
-          {isSuggested ? <StatusPill label={t('payments.suggested')} tone="success" /> : null}
+          {isSuggested ? (
+            <StatusPill label={t('payments.suggested')} tone="success" />
+          ) : null}
           {/* Badge del Yape VINCULADO (On-File): refleja el cobro automático. NUNCA en el one-shot. */}
-          {isYapeAuto ? <StatusPill label={t('payments.autoBadge')} tone="success" dot /> : null}
+          {isYapeAuto ? (
+            <StatusPill label={t('payments.autoBadge')} tone="success" dot />
+          ) : null}
         </View>
         <Text variant="footnote" color="inkMuted" numberOfLines={1}>
           {hint}
@@ -235,11 +254,19 @@ function PaymentMethodPickerRow({
         <View
           style={[
             styles.radioOuter,
-            { borderColor: selected ? theme.colors.accent : theme.colors.borderStrong },
-          ]}
-        >
+            {
+              borderColor: selected
+                ? theme.colors.accent
+                : theme.colors.borderStrong,
+            },
+          ]}>
           {selected ? (
-            <View style={[styles.radioInner, { backgroundColor: theme.colors.accent }]} />
+            <View
+              style={[
+                styles.radioInner,
+                {backgroundColor: theme.colors.accent},
+              ]}
+            />
           ) : null}
         </View>
       )}
@@ -254,26 +281,37 @@ interface RememberToggleProps {
 }
 
 /** Toggle "recordar como predeterminado": checkbox dibujado sin dependencia de iconos. Hit-target ≥44pt. */
-function RememberToggle({ checked, onToggle, label }: RememberToggleProps): React.JSX.Element {
+function RememberToggle({
+  checked,
+  onToggle,
+  label,
+}: RememberToggleProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
+      accessibilityState={{checked}}
       accessibilityLabel={label}
       onPress={onToggle}
-      style={({ pressed }) => [styles.rememberRow, { gap: theme.spacing.sm, opacity: pressed ? 0.7 : 1 }]}
-    >
+      style={({pressed}) => [
+        styles.rememberRow,
+        {gap: theme.spacing.sm, opacity: pressed ? 0.7 : 1},
+      ]}>
       <View
         style={[
           styles.checkbox,
           {
-            borderColor: checked ? theme.colors.accent : theme.colors.borderStrong,
+            borderColor: checked
+              ? theme.colors.accent
+              : theme.colors.borderStrong,
             backgroundColor: checked ? theme.colors.accent : 'transparent',
           },
-        ]}
-      >
-        {checked ? <View style={[styles.checkMark, { borderColor: theme.colors.surface }]} /> : null}
+        ]}>
+        {checked ? (
+          <View
+            style={[styles.checkMark, {borderColor: theme.colors.surface}]}
+          />
+        ) : null}
       </View>
       <Text variant="footnote" color="inkMuted" style={styles.rememberLabel}>
         {label}
@@ -283,11 +321,16 @@ function RememberToggle({ checked, onToggle, label }: RememberToggleProps): Reac
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center' },
+  row: {flexDirection: 'row', alignItems: 'center'},
   // Anillo de 2px alrededor del logo circular (acento cuando la fila está elegida, transparente si no).
-  leadRing: { borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, gap: 2 },
-  nameRow: { flexDirection: 'row', alignItems: 'center' },
+  leadRing: {
+    borderRadius: 22,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  body: {flex: 1, gap: 2},
+  nameRow: {flexDirection: 'row', alignItems: 'center'},
   radioOuter: {
     width: 20,
     height: 20,
@@ -296,9 +339,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioInner: { width: 10, height: 10, borderRadius: 5 },
-  rememberRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
-  rememberLabel: { flex: 1 },
+  radioInner: {width: 10, height: 10, borderRadius: 5},
+  rememberRow: {flexDirection: 'row', alignItems: 'center', minHeight: 44},
+  rememberLabel: {flex: 1},
   checkbox: {
     width: 22,
     height: 22,
@@ -313,7 +356,7 @@ const styles = StyleSheet.create({
     height: 11,
     borderRightWidth: 2,
     borderBottomWidth: 2,
-    transform: [{ rotate: '45deg' }],
+    transform: [{rotate: '45deg'}],
     marginTop: -2,
   },
 });

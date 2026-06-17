@@ -14,13 +14,21 @@ import {
 
 describe('BR-T01 · máquina de transiciones de la propuesta de parada', () => {
   it('PROPOSED transiciona a ACCEPTED, REJECTED y EXPIRED', () => {
-    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.ACCEPTED)).toBe(true);
-    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.REJECTED)).toBe(true);
-    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.EXPIRED)).toBe(true);
+    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.ACCEPTED)).toBe(
+      true,
+    );
+    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.REJECTED)).toBe(
+      true,
+    );
+    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.EXPIRED)).toBe(
+      true,
+    );
   });
 
   it('PROPOSED no transiciona a sí mismo', () => {
-    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.PROPOSED)).toBe(false);
+    expect(canTransition(WaypointProposalStatus.PROPOSED, WaypointProposalStatus.PROPOSED)).toBe(
+      false,
+    );
   });
 
   it('los estados terminales no transicionan a ningún lado', () => {

@@ -11,9 +11,7 @@ import type { AppNotificationView } from './dto/notification.dto';
 
 @Injectable()
 export class NotificationsService {
-  constructor(
-    @Inject(REST_NOTIFICATION) private readonly notificationRest: InternalRestClient,
-  ) {}
+  constructor(@Inject(REST_NOTIFICATION) private readonly notificationRest: InternalRestClient) {}
 
   /** Lista los avisos in-app del pasajero autenticado (PUSH renderizado, más recientes primero). */
   async list(user: AuthenticatedUser, limit?: number): Promise<AppNotificationView[]> {

@@ -3,7 +3,13 @@
  * Los consumidores (BFFs, dispatch) importan de acá; PROHIBIDO re-declarar estos shapes a mano.
  */
 export type { UserReply, DriverReply } from './identity.js';
-export type { GeoPoint, TripReply, TripStateReply, TripHistoryItem, PassengerTripsReply } from './trip.js';
+export type {
+  GeoPoint,
+  TripReply,
+  TripStateReply,
+  TripHistoryItem,
+  PassengerTripsReply,
+} from './trip.js';
 export type { MatchReply, SurgeReply, NearbyDriver, NearbyDriversReply } from './dispatch.js';
 export type { PaymentReply, UserCreditReply } from './payment.js';
 export type { PanicReply } from './panic.js';

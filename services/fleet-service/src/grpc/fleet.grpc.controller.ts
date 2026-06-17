@@ -116,7 +116,10 @@ export class FleetGrpcController {
 
   /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
   @GrpcMethod('FleetService', 'GetDriverVehicles')
-  async getDriverVehicles({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverVehiclesReply> {
+  async getDriverVehicles(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverVehiclesReply> {
     this.requireIdentity(metadata);
     const vehicles = await this.prisma.read.vehicle.findMany({
       where: { driverId: id },
@@ -126,7 +129,10 @@ export class FleetGrpcController {
   }
 
   @GrpcMethod('FleetService', 'GetDriverDocuments')
-  async getDriverDocuments({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverDocumentsReply> {
+  async getDriverDocuments(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocumentsReply> {
     this.requireIdentity(metadata);
     const docs = await this.prisma.read.fleetDocument.findMany({
       where: { ownerType: FleetOwnerType.DRIVER, ownerId: id },

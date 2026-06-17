@@ -1,5 +1,5 @@
-import type {RegistrationRepository} from '../repositories/registration-repository';
-import type {VehicleData, VehicleRegisterInput, VehicleView} from '../entities';
+import type { RegistrationRepository } from '../repositories/registration-repository';
+import type { VehicleData, VehicleRegisterInput, VehicleView } from '../entities';
 
 /**
  * Código de error de validación por campo del vehículo. El dominio NO conoce i18n: emite códigos
@@ -22,8 +22,8 @@ export interface VehicleErrors {
 
 /** Resultado de validar/mapear los datos del wizard al body del contrato. */
 export type VehicleValidation =
-  | {ok: true; request: VehicleRegisterInput}
-  | {ok: false; errors: VehicleErrors};
+  | { ok: true; request: VehicleRegisterInput }
+  | { ok: false; errors: VehicleErrors };
 
 /** Año mínimo aceptado por el contrato (`registerVehicleRequest.year`). fleet aplica BR-D04 (>=2017). */
 const MIN_VEHICLE_YEAR = 2005;
@@ -54,16 +54,15 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
 
   const year = Number(vehicle.year.trim());
   const maxYear = new Date().getUTCFullYear() + 1;
-  const isValidYear =
-    Number.isInteger(year) && year >= MIN_VEHICLE_YEAR && year <= maxYear;
+  const isValidYear = Number.isInteger(year) && year >= MIN_VEHICLE_YEAR && year <= maxYear;
   if (!isValidYear) {
     errors.year = 'year_invalid';
   }
 
   if (errors.plate || errors.model || errors.year) {
-    return {ok: false, errors};
+    return { ok: false, errors };
   }
-  return {ok: true, request: {vehicleType: vehicle.type, plate, year, modelSpecId}};
+  return { ok: true, request: { vehicleType: vehicle.type, plate, year, modelSpecId } };
 }
 
 /**

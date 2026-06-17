@@ -26,16 +26,16 @@ vencimiento e inspecciones técnicas. HTTP `:3012` · gRPC `0.0.0.0:50062` · sc
 
 ## Endpoints (prefijo `/api/v1`)
 
-| Método | Ruta | RBAC | Descripción |
-|---|---|---|---|
-| POST | `/vehicles` | COMPLIANCE_SUPERVISOR / ADMIN | Registrar vehículo (BR-D04) |
-| GET | `/vehicles/:id` | interno | Obtener vehículo |
-| POST | `/documents` | interno | Subir documento (→ PENDING_REVIEW) |
-| GET | `/documents?ownerId=` | interno | Documentos de un dueño |
-| POST | `/documents/:id/review` | COMPLIANCE_SUPERVISOR / ADMIN | Revisión manual VALID/REJECTED |
-| POST | `/inspections` | COMPLIANCE_SUPERVISOR / ADMIN | Registrar inspección técnica |
-| GET | `/inspections?vehicleId=` | interno | Inspecciones de un vehículo |
-| GET | `/fleet/expirations?days=` | COMPLIANCE_SUPERVISOR / ADMIN | Documentos por vencer / vencidos |
+| Método | Ruta                       | RBAC                          | Descripción                        |
+| ------ | -------------------------- | ----------------------------- | ---------------------------------- |
+| POST   | `/vehicles`                | COMPLIANCE_SUPERVISOR / ADMIN | Registrar vehículo (BR-D04)        |
+| GET    | `/vehicles/:id`            | interno                       | Obtener vehículo                   |
+| POST   | `/documents`               | interno                       | Subir documento (→ PENDING_REVIEW) |
+| GET    | `/documents?ownerId=`      | interno                       | Documentos de un dueño             |
+| POST   | `/documents/:id/review`    | COMPLIANCE_SUPERVISOR / ADMIN | Revisión manual VALID/REJECTED     |
+| POST   | `/inspections`             | COMPLIANCE_SUPERVISOR / ADMIN | Registrar inspección técnica       |
+| GET    | `/inspections?vehicleId=`  | interno                       | Inspecciones de un vehículo        |
+| GET    | `/fleet/expirations?days=` | COMPLIANCE_SUPERVISOR / ADMIN | Documentos por vencer / vencidos   |
 
 Todas protegidas por `InternalIdentityGuard` (+ `RolesGuard` donde aplica RBAC).
 

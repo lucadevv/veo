@@ -36,17 +36,25 @@ export class OfferingOverrideDto {
   @IsBoolean()
   enabled!: boolean;
 
-  @ApiPropertyOptional({ enum: PRICING_MODES, description: 'B2: pin del modo (PUJA/FIXED). ∉ allowedModes → se ignora.' })
+  @ApiPropertyOptional({
+    enum: PRICING_MODES,
+    description: 'B2: pin del modo (PUJA/FIXED). ∉ allowedModes → se ignora.',
+  })
   @IsOptional()
   @IsIn(PRICING_MODES)
   mode?: PricingMode;
 
-  @ApiPropertyOptional({ description: 'B2: override del multiplicador (> 0). Ausente → el de código.' })
+  @ApiPropertyOptional({
+    description: 'B2: override del multiplicador (> 0). Ausente → el de código.',
+  })
   @IsOptional()
   @IsPositive()
   multiplier?: number;
 
-  @ApiPropertyOptional({ description: 'B2: override de tarifa mínima en céntimos PEN (0..100000). Ausente → la de código.' })
+  @ApiPropertyOptional({
+    description:
+      'B2: override de tarifa mínima en céntimos PEN (0..100000). Ausente → la de código.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -56,7 +64,10 @@ export class OfferingOverrideDto {
 
 /** Body del PUT /catalog — reemplazo wholesale del overlay. */
 export class ReplaceCatalogDto {
-  @ApiProperty({ type: [OfferingOverrideDto], description: 'Overrides por oferta (lista completa)' })
+  @ApiProperty({
+    type: [OfferingOverrideDto],
+    description: 'Overrides por oferta (lista completa)',
+  })
   @IsArray()
   @ArrayMaxSize(100)
   @ArrayUnique((o: OfferingOverrideDto) => o.id, { message: 'los ids de oferta deben ser únicos' })
@@ -65,7 +76,8 @@ export class ReplaceCatalogDto {
   overrides!: OfferingOverrideDto[];
 
   @ApiProperty({
-    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    description:
+      'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
     minimum: 0,
   })
   @IsInt()

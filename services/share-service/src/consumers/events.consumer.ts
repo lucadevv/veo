@@ -86,7 +86,9 @@ export class EventsConsumer extends KafkaConsumerBootstrap {
     const p = envelope.payload as { tripId: string };
     const { revoked } = await this.share.revokeAllForTrip(p.tripId);
     if (revoked > 0) {
-      this.logger.log(`Viaje ${p.tripId} terminado: ${revoked} enlace(s) de seguimiento revocado(s)`);
+      this.logger.log(
+        `Viaje ${p.tripId} terminado: ${revoked} enlace(s) de seguimiento revocado(s)`,
+      );
     }
   }
 
@@ -108,7 +110,9 @@ export class EventsConsumer extends KafkaConsumerBootstrap {
 
     const verified = await this.contacts.listVerified(p.passengerId);
     if (verified.length === 0) {
-      this.logger.warn(`Pánico ${p.panicId}: el pasajero ${p.passengerId} no tiene contactos verificados`);
+      this.logger.warn(
+        `Pánico ${p.panicId}: el pasajero ${p.passengerId} no tiene contactos verificados`,
+      );
       return;
     }
 
@@ -124,16 +128,22 @@ export class EventsConsumer extends KafkaConsumerBootstrap {
         { ttlSeconds: this.panicLinkTtlSeconds, maxUses: this.panicLinkMaxUses },
       );
       if (result.emitted) {
-        this.logger.log(`Pánico ${p.panicId}: fan-out delegado a notification (${contactIds.length} contactos)`);
+        this.logger.log(
+          `Pánico ${p.panicId}: fan-out delegado a notification (${contactIds.length} contactos)`,
+        );
       } else {
-        this.logger.debug(`Pánico ${p.panicId}: enlace/fan-out ya existían (redelivery), no se re-delega`);
+        this.logger.debug(
+          `Pánico ${p.panicId}: enlace/fan-out ya existían (redelivery), no se re-delega`,
+        );
       }
     } catch (err) {
       // El catch cubre SOLO la creación del enlace + encolado del evento (transacción). Si falla, NO
       // ACKeamos a ciegas: relanzamos para que Kafka reintente (la idempotencia por dedupKey del enlace
       // evita duplicar). El SMS ya no vive acá, así que un fallo del proveedor no puede perderse.
       const msg = isDomainError(err) ? err.message : String(err);
-      this.logger.error(`Pánico ${p.panicId}: no se pudo crear el enlace ni delegar el fan-out: ${msg}`);
+      this.logger.error(
+        `Pánico ${p.panicId}: no se pudo crear el enlace ni delegar el fan-out: ${msg}`,
+      );
       throw err;
     }
   }

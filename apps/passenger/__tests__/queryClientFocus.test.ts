@@ -7,7 +7,7 @@
  * `setEventListener` registra un listener de AppState que, al volver a "active", llama al `handleFocus`
  * que React Query nos pasa con `true`, y con `false` al ir a background.
  */
-import { AppState } from 'react-native';
+import {AppState} from 'react-native';
 
 describe('queryClient · focusManager ↔ AppState', () => {
   afterEach(() => {
@@ -16,24 +16,28 @@ describe('queryClient · focusManager ↔ AppState', () => {
   });
 
   it('al volver a "active" propaga focused=true (y false en background)', () => {
-    let querySetup: ((handleFocus: (focused: boolean) => void) => () => void) | undefined;
+    let querySetup:
+      | ((handleFocus: (focused: boolean) => void) => () => void)
+      | undefined;
     let appStateHandler: ((s: string) => void) | undefined;
 
     const addSpy = jest
       .spyOn(AppState, 'addEventListener')
       .mockImplementation((event: string, handler: (s: string) => void) => {
         if (event === 'change') appStateHandler = handler;
-        return { remove: jest.fn() } as never;
+        return {remove: jest.fn()} as never;
       });
 
     // Aislamos el registro de módulos para que el queryClient y el focusManager espiado compartan la
     // MISMA instancia de @tanstack/react-query (el spy debe aplicar al singleton que ve el módulo).
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- spy sobre el singleton aislado
-      const { focusManager } = require('@tanstack/react-query');
-      jest.spyOn(focusManager, 'setEventListener').mockImplementation((setup: typeof querySetup) => {
-        querySetup = setup;
-      });
+      const {focusManager} = require('@tanstack/react-query');
+      jest
+        .spyOn(focusManager, 'setEventListener')
+        .mockImplementation((setup: typeof querySetup) => {
+          querySetup = setup;
+        });
       // Cargar el módulo dispara el wiring (focusManager.setEventListener → AppState.addEventListener).
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- carga aislada del módulo bajo test
       require('../src/core/query/queryClient');

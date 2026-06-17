@@ -9,7 +9,12 @@ import { decodeCursor } from './domain/history';
 import type { Trip } from '../generated/prisma';
 
 /** Construye una fila Trip mínima para el historial. */
-function trip(id: string, passengerId: string, requestedAt: string, over: Partial<Trip> = {}): Trip {
+function trip(
+  id: string,
+  passengerId: string,
+  requestedAt: string,
+  over: Partial<Trip> = {},
+): Trip {
   return {
     id,
     passengerId,
@@ -145,7 +150,11 @@ describe('TripQueryService.listPassengerTrips · historial keyset', () => {
   it('expone los ESTADOS REALES (COMPLETED/CANCELLED/EXPIRED), no todo REQUESTED', async () => {
     const rows = [
       trip('c1', 'pax-1', '2026-06-03T10:00:00.000Z', { status: 'COMPLETED' }),
-      trip('x1', 'pax-1', '2026-06-02T10:00:00.000Z', { status: 'EXPIRED', driverId: null, completedAt: null }),
+      trip('x1', 'pax-1', '2026-06-02T10:00:00.000Z', {
+        status: 'EXPIRED',
+        driverId: null,
+        completedAt: null,
+      }),
       trip('k1', 'pax-1', '2026-06-01T10:00:00.000Z', {
         status: 'CANCELLED_BY_PASSENGER',
         completedAt: null,

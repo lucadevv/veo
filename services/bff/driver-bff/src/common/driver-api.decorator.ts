@@ -11,8 +11,5 @@ import { DriverTypeGuard } from './guards/driver-type.guard';
 import { RateLimitGuard } from './guards/rate-limit.guard';
 
 export function DriverApi(): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    UseGuards(JwtAuthGuard, DriverTypeGuard, RateLimitGuard),
-    ApiBearerAuth(),
-  );
+  return applyDecorators(UseGuards(JwtAuthGuard, DriverTypeGuard, RateLimitGuard), ApiBearerAuth());
 }

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, {useCallback} from 'react';
 import {
   Pressable,
   type PressableProps,
@@ -11,7 +11,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
 
 export interface PressableScaleProps extends Omit<PressableProps, 'style'> {
   children: React.ReactNode;
@@ -42,11 +42,11 @@ export function PressableScale({
   const target = scaleTo ?? theme.motion.scale.press;
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+    transform: [{scale: scale.value}],
   }));
 
   const handlePressIn = useCallback<NonNullable<PressableProps['onPressIn']>>(
-    (event) => {
+    event => {
       if (!reduced && !disabled) {
         scale.value = withTiming(target, {
           duration: theme.motion.duration.fast,
@@ -59,7 +59,7 @@ export function PressableScale({
   );
 
   const handlePressOut = useCallback<NonNullable<PressableProps['onPressOut']>>(
-    (event) => {
+    event => {
       if (!reduced && !disabled) {
         scale.value = withTiming(1, {
           duration: theme.motion.exit.base,
@@ -78,8 +78,7 @@ export function PressableScale({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       style={style as ViewStyle}
-      {...rest}
-    >
+      {...rest}>
       <Animated.View style={[styles.content, animatedStyle, contentStyle]}>
         {children}
       </Animated.View>
@@ -88,5 +87,5 @@ export function PressableScale({
 }
 
 const styles = StyleSheet.create({
-  content: { alignSelf: 'stretch' },
+  content: {alignSelf: 'stretch'},
 });

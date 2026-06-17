@@ -11,7 +11,7 @@ import {
   type ReversePlace,
   reversePlace,
 } from '@veo/api-client';
-import type { MapsRepository } from '../domain/mapsRepository';
+import type {MapsRepository} from '../domain/mapsRepository';
 
 /** Implementación de `MapsRepository` contra el public-bff (`/maps/*`). */
 export class HttpMapsRepository implements MapsRepository {
@@ -21,7 +21,7 @@ export class HttpMapsRepository implements MapsRepository {
     return this.http.get('/maps/autocomplete', {
       query: {
         q: query,
-        ...(near ? { lat: near.lat, lng: near.lng } : {}),
+        ...(near ? {lat: near.lat, lng: near.lng} : {}),
       },
       schema: placeSuggestionList,
     });
@@ -29,16 +29,16 @@ export class HttpMapsRepository implements MapsRepository {
 
   reverse(point: MapPoint): Promise<ReversePlace> {
     return this.http.get('/maps/reverse', {
-      query: { lat: point.lat, lng: point.lng },
+      query: {lat: point.lat, lng: point.lng},
       schema: reversePlace,
     });
   }
 
   quote(request: QuoteRequest): Promise<QuoteResult> {
-    return this.http.post('/maps/quote', { body: request, schema: quoteResult });
+    return this.http.post('/maps/quote', {body: request, schema: quoteResult});
   }
 
   catalog(): Promise<CatalogResult> {
-    return this.http.get('/maps/catalog', { schema: catalogResult });
+    return this.http.get('/maps/catalog', {schema: catalogResult});
   }
 }

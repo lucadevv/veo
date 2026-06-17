@@ -29,7 +29,10 @@ import type { PaymentMethod } from '@veo/shared-types';
 export const PAYMENT_GATEWAY = Symbol('PAYMENT_GATEWAY');
 
 /** Métodos digitales enrutables al gateway (CASH se confirma bilateral, fuera del puerto). */
-export type GatewayPaymentMethod = Extract<PaymentMethod, 'YAPE' | 'PLIN' | 'CARD' | 'PAGOEFECTIVO'>;
+export type GatewayPaymentMethod = Extract<
+  PaymentMethod,
+  'YAPE' | 'PLIN' | 'CARD' | 'PAGOEFECTIVO'
+>;
 
 /**
  * Flujo de cobro que el adapter IMPLEMENTA y DECLARA (el dominio despacha preguntándole al puerto,
@@ -183,7 +186,10 @@ export interface WebhookResult {
  * Firma INVÁLIDA → lanza UnauthorizedError (el controller responde 401 sin detalles).
  */
 export interface WebhookVerifier {
-  verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>): WebhookResult;
+  verifyWebhook(
+    rawBody: string,
+    headers: Record<string, string | string[] | undefined>,
+  ): WebhookResult;
 }
 
 export interface RefundResult {

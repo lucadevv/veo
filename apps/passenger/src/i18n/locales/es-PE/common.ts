@@ -131,10 +131,13 @@ export const common = {
     oauthErrorUnknown: 'Algo salió mal. Inténtalo de nuevo en un momento.',
     /** Aviso de degradación honesta para métodos sin backend. */
     comingSoonTitle: 'Próximamente',
-    comingSoonGoogle: 'El ingreso con Google estará disponible pronto. Por ahora, entra con tu teléfono.',
-    comingSoonEmail: 'El ingreso con correo estará disponible pronto. Por ahora, entra con tu teléfono.',
+    comingSoonGoogle:
+      'El ingreso con Google estará disponible pronto. Por ahora, entra con tu teléfono.',
+    comingSoonEmail:
+      'El ingreso con correo estará disponible pronto. Por ahora, entra con tu teléfono.',
     comingSoonCall: 'Recibir el código por llamada estará disponible pronto.',
-    comingSoonWhatsapp: 'El envío del código por WhatsApp estará disponible pronto.',
+    comingSoonWhatsapp:
+      'El envío del código por WhatsApp estará disponible pronto.',
     back: 'Volver',
     phoneTitle: 'Ingresa tu número',
     phoneSubtitle: 'Te enviamos un código por SMS.',
@@ -164,7 +167,8 @@ export const common = {
     otpHelpWhatsapp: 'Enviar por WhatsApp',
     otpHelpEmail: 'Mejor entro con correo',
     otpHelpResend: 'Reenviar SMS',
-    errorRequest: 'No pudimos enviar el código. Verifica tu número e inténtalo de nuevo.',
+    errorRequest:
+      'No pudimos enviar el código. Verifica tu número e inténtalo de nuevo.',
     errorRequestHint: 'Revisa tu conexión e inténtalo de nuevo.',
     errorVerify: 'Código incorrecto o vencido. Inténtalo de nuevo.',
     changeNumber: 'Cambiar número',
@@ -174,7 +178,8 @@ export const common = {
       'Por tu seguridad cerramos la sesión. Vuelve a iniciar sesión para verificar tu identidad y continuar.',
     expiredAction: 'Volver a iniciar sesión',
     biometricTitle: 'Desbloquea VEO',
-    biometricSubtitle: 'Usa tu rostro o huella para continuar tu sesión de forma segura.',
+    biometricSubtitle:
+      'Usa tu rostro o huella para continuar tu sesión de forma segura.',
     biometricUnlock: 'Desbloquear',
     biometricReason: 'Verifica tu identidad para continuar tu sesión',
     biometricError: 'No pudimos verificar tu identidad. Inténtalo de nuevo.',
@@ -213,13 +218,15 @@ export const common = {
       verifyCta: 'Verificar',
       /** Olvidé mi contraseña → enviar código. */
       forgotTitle: '¿Olvidaste tu contraseña?',
-      forgotSubtitle: 'Ingresa tu correo y te enviaremos un código para restablecerla.',
+      forgotSubtitle:
+        'Ingresa tu correo y te enviaremos un código para restablecerla.',
       forgotSendCta: 'Enviar código',
       forgotSent:
         'Si ese correo está registrado, te enviamos un código. Revisa tu bandeja y el spam.',
       /** Restablecer contraseña → código + nueva contraseña. */
       resetTitle: 'Crea una nueva contraseña',
-      resetSubtitle: 'Ingresa el código que enviamos a {{email}} y tu nueva contraseña.',
+      resetSubtitle:
+        'Ingresa el código que enviamos a {{email}} y tu nueva contraseña.',
       resetCodeLabel: 'Código de verificación',
       resetCta: 'Guardar contraseña',
       resetDone: 'Tu contraseña se actualizó. Inicia sesión con la nueva.',
@@ -229,9 +236,11 @@ export const common = {
       codeExpiry: 'El código expirará pronto. Si no llega, reenvíalo.',
       /** Errores (Banner danger) por caso (caminos infelices). */
       errorInvalidCredentials: 'Correo o contraseña incorrectos.',
-      errorNotVerified: 'Verifica tu correo para continuar. Te reenviamos el código.',
+      errorNotVerified:
+        'Verifica tu correo para continuar. Te reenviamos el código.',
       errorAlreadyExists: 'Ese correo ya está registrado. Inicia sesión.',
-      errorWeakPassword: 'Esa contraseña no es válida. Usa al menos 12 caracteres y algo no obvio.',
+      errorWeakPassword:
+        'Esa contraseña no es válida. Usa al menos 12 caracteres y algo no obvio.',
       errorInvalidCode: 'Código incorrecto o vencido. Inténtalo de nuevo.',
       errorNetwork: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
       errorUnknown: 'Algo salió mal. Inténtalo de nuevo.',
@@ -241,18 +250,21 @@ export const common = {
   /** Completar perfil tras verificar el OTP (usuario nuevo / sin perfil). */
   profileSetup: {
     title: 'Cuéntanos quién eres',
-    subtitle: 'Tu nombre es lo único que necesitamos: tu conductor sabrá a quién recoger.',
+    subtitle:
+      'Tu nombre es lo único que necesitamos: tu conductor sabrá a quién recoger.',
     photoAction: 'Agregar foto de perfil',
     photoSheetTitle: 'Foto de perfil',
     photoFromCamera: 'Tomar foto',
     photoFromLibrary: 'Elegir de la galería',
     photoRemove: 'Quitar foto',
-    photoPermission: 'Necesitamos tu permiso para usar la cámara o tus fotos. Actívalo en Ajustes.',
+    photoPermission:
+      'Necesitamos tu permiso para usar la cámara o tus fotos. Actívalo en Ajustes.',
     photoError: 'No pudimos abrir el selector de fotos. Inténtalo de nuevo.',
     photoUploading: 'Subiendo tu foto…',
     photoUploadError: 'No pudimos subir tu foto. Inténtalo de nuevo.',
     photoUnsupported: 'Ese formato no va. Usa una imagen JPG, PNG o WebP.',
-    photoTooLarge: 'Esa imagen pesa demasiado (máx. 5 MB). Elige una más liviana.',
+    photoTooLarge:
+      'Esa imagen pesa demasiado (máx. 5 MB). Elige una más liviana.',
     photoUploadRetry: 'Reintentar',
     nameLabel: 'Nombre completo',
     namePlaceholder: 'Ej.: María Fernanda Ríos',
@@ -263,9 +275,11 @@ export const common = {
     /** Microcopy de la fila de correo de solo lectura: el correo ya vino de la cuenta (Apple/Google).
      *  Genérico elegante a propósito: la data del perfil no expone el proveedor. */
     emailFromAccount: 'Lo tomamos de tu cuenta',
-    privacyNote: 'Tus datos están protegidos y solo los usamos para que viajes mejor.',
+    privacyNote:
+      'Tus datos están protegidos y solo los usamos para que viajes mejor.',
     submit: 'Empezar a viajar',
-    invalidName: 'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
+    invalidName:
+      'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
     invalidEmail: 'Revisa tu correo, parece que le falta algo.',
     saveError: 'No pudimos guardar tu perfil. Inténtalo de nuevo.',
   },
@@ -362,7 +376,8 @@ export const common = {
   reassign: {
     title: 'Tu conductor canceló',
     body: 'No te preocupes: estamos buscando otro conductor al mismo precio ({{price}}). Sin cargo para ti.',
-    bodyNoPrice: 'No te preocupes: estamos buscando otro conductor al mismo precio. Sin cargo para ti.',
+    bodyNoPrice:
+      'No te preocupes: estamos buscando otro conductor al mismo precio. Sin cargo para ti.',
     note: 'Tu viaje vuelve al tablero de ofertas. Elige al nuevo conductor que mejor te convenga.',
     continue: 'Ver conductores disponibles',
     cancel: 'Cancelar y volver al inicio',
@@ -375,13 +390,16 @@ export const common = {
   scheduleNew: {
     entry: 'Programar nuevo viaje',
     cta: 'Elegir destino',
-    intro: 'Programa un viaje para después. Te buscaremos conductor a tiempo y confirmaremos la tarifa al activarse.',
+    intro:
+      'Programa un viaje para después. Te buscaremos conductor a tiempo y confirmaremos la tarifa al activarse.',
     step1Title: 'Elige tu destino',
-    step1Body: 'Busca a dónde quieres ir; tu origen se toma de tu ubicación actual.',
+    step1Body:
+      'Busca a dónde quieres ir; tu origen se toma de tu ubicación actual.',
     step2Title: 'Revisa tu trayecto',
     step2Body: 'Verás la ruta y la tarifa estimada antes de confirmar.',
     step3Title: 'Elige día y hora',
-    step3Body: 'Programa con al menos 15 minutos de anticipación y hasta 7 días en adelante.',
+    step3Body:
+      'Programa con al menos 15 minutos de anticipación y hasta 7 días en adelante.',
     note: 'Te buscaremos conductor unos minutos antes. La tarifa se confirma al activarse el viaje.',
   },
 
@@ -391,7 +409,8 @@ export const common = {
    */
   lostItem: {
     entry: 'Olvidé algo',
-    intro: 'Cuéntanos qué olvidaste en el viaje. VEO avisa al conductor y media el contacto por ti.',
+    intro:
+      'Cuéntanos qué olvidaste en el viaje. VEO avisa al conductor y media el contacto por ti.',
     whatLabel: '¿Qué olvidaste?',
     items: {
       phone: 'Celular',
@@ -402,13 +421,18 @@ export const common = {
     },
     subject: 'Objeto olvidado: {{item}}',
     descriptionLabel: 'Descríbelo',
-    descriptionPlaceholder: 'Color, dónde estaba, cualquier detalle que ayude a encontrarlo…',
-    invalidDescription: 'Cuéntanos un poco más (al menos 10 caracteres) para ayudar a encontrarlo.',
-    privacyNote: 'Por seguridad, tu número se mantiene oculto. VEO media el contacto con el conductor.',
-    mediationNote: 'Nuestro equipo gestiona el reporte y te responde por la app.',
+    descriptionPlaceholder:
+      'Color, dónde estaba, cualquier detalle que ayude a encontrarlo…',
+    invalidDescription:
+      'Cuéntanos un poco más (al menos 10 caracteres) para ayudar a encontrarlo.',
+    privacyNote:
+      'Por seguridad, tu número se mantiene oculto. VEO media el contacto con el conductor.',
+    mediationNote:
+      'Nuestro equipo gestiona el reporte y te responde por la app.',
     submit: 'Avisar al conductor',
     sentTitle: 'Reporte enviado',
-    sentBody: 'Avisamos a tu conductor sobre tu objeto. Te responderemos por la app con las novedades.',
+    sentBody:
+      'Avisamos a tu conductor sobre tu objeto. Te responderemos por la app con las novedades.',
     error: 'No pudimos enviar tu reporte. Inténtalo de nuevo.',
   },
 
@@ -450,7 +474,8 @@ export const common = {
     /** Gate de seguridad: el pasajero debe verificar su identidad antes del primer viaje. */
     kycRequired: 'Verifica tu identidad para pedir tu primer viaje.',
     /** ADR 013 · Fase B: la oferta elegida se deshabilitó entre el quote y el create (carrera). */
-    offeringUnavailable: 'Esta oferta ya no está disponible. Actualizamos las opciones.',
+    offeringUnavailable:
+      'Esta oferta ya no está disponible. Actualizamos las opciones.',
     eta: 'ETA {{minutes}} min',
     /** Tipos de vehículo en las opciones de tarifa (Ola 2B · tier moto-taxi). */
     vehicle: {
@@ -471,17 +496,17 @@ export const common = {
    * (compat server-side): si la app no conoce una clave (oferta más nueva), cae al `name` del quote.
    */
   offering: {
-    veo_moto: { name: 'VEO Moto' },
-    veo_economico: { name: 'VEO Económico' },
-    veo_confort: { name: 'VEO Confort' },
-    veo_xl: { name: 'VEO XL' },
+    veo_moto: {name: 'VEO Moto'},
+    veo_economico: {name: 'VEO Económico'},
+    veo_confort: {name: 'VEO Confort'},
+    veo_xl: {name: 'VEO XL'},
     // B5-vert · verticales especiales + EV: codeadas pero OCULTAS (defaultEnabled:false). El i18n nativo
     // existe para cuando el admin las habilite (la feature pagable); mientras estén ocultas el quote no las
     // cotiza, así que estas claves no se renderizan. Mismos textos que OFFERING_DISPLAY_NAMES del public-bff.
-    veo_economico_ev: { name: 'VEO Económico Eléctrico' },
-    veo_ambulance: { name: 'VEO Ambulancia' },
-    veo_tow: { name: 'VEO Grúa' },
-    veo_mechanic: { name: 'VEO Mecánico' },
+    veo_economico_ev: {name: 'VEO Económico Eléctrico'},
+    veo_ambulance: {name: 'VEO Ambulancia'},
+    veo_tow: {name: 'VEO Grúa'},
+    veo_mechanic: {name: 'VEO Mecánico'},
   },
 
   /** PUJA · "proponé tu precio" (ADR 010 · regateo inverso). */
@@ -520,9 +545,11 @@ export const common = {
     waitingBody: 'Te avisamos apenas alguien responda tu oferta.',
     /** Al llegar el countdown a 0 esperamos el EXPIRED real del backend (spinner honesto, sin botón roto). */
     takingLongTitle: 'Esto está tardando…',
-    takingLongBody: 'Seguimos esperando respuesta. En unos segundos te mostramos cómo seguir.',
+    takingLongBody:
+      'Seguimos esperando respuesta. En unos segundos te mostramos cómo seguir.',
     noneTitle: 'Sin ofertas por ahora',
-    noneBody: 'Nadie respondió tu oferta. Puedes intentar con una tarifa más alta.',
+    noneBody:
+      'Nadie respondió tu oferta. Puedes intentar con una tarifa más alta.',
     cancel: 'Cancelar la búsqueda',
     reconnecting: 'Reconectando…',
     actionError: 'No pudimos completar la acción. Inténtalo de nuevo.',
@@ -546,7 +573,8 @@ export const common = {
     title: 'No hubo ofertas esta vez',
     body: 'Nadie aceptó tu oferta de {{price}}. Ofrece un poco más para conseguir conductor.',
     /** Mientras el piso (oferta actual) aún no llegó: explicación honesta sin precio. */
-    bodyNoPrice: 'Nadie aceptó tu oferta. Ofrece un poco más para conseguir conductor.',
+    bodyNoPrice:
+      'Nadie aceptó tu oferta. Ofrece un poco más para conseguir conductor.',
     rebid: 'Re-pujar · {{price}}',
     /** Re-pujar antes de saber el piso: sin precio (el botón se habilita al llegar la oferta actual). */
     rebidNoPrice: 'Re-pujar',
@@ -558,7 +586,8 @@ export const common = {
      * 409 de estado tras agotar los reintentos: el backend aún está cerrando la búsqueda anterior (el
      * sweeper expira el board recién a los ~60s + margen). Mensaje honesto, NO error críptico.
      */
-    closingSearch: 'Todavía estamos cerrando la búsqueda anterior. Inténtalo de nuevo en unos segundos.',
+    closingSearch:
+      'Todavía estamos cerrando la búsqueda anterior. Inténtalo de nuevo en unos segundos.',
   },
 
   /** Paradas intermedias del trayecto (Ola 2B · paradas múltiples, máx 3). */
@@ -590,7 +619,8 @@ export const common = {
     tooSoon: 'Programa con al menos 15 minutos de anticipación.',
     tooFar: 'Solo puedes programar hasta 7 días en adelante.',
     confirmedTitle: 'Viaje programado',
-    confirmedBody: 'Tu viaje quedó programado para {{when}}. Lo verás en “Mis viajes programados”.',
+    confirmedBody:
+      'Tu viaje quedó programado para {{when}}. Lo verás en “Mis viajes programados”.',
     viewScheduled: 'Ver mis viajes programados',
   },
 
@@ -630,12 +660,14 @@ export const common = {
     etaMinutes: '{{minutes}} min',
     etaUnknown: 'Calculando…',
     searchingTitle: 'Buscando tu conductor',
-    searchingBody: 'Estamos contactando a los conductores cercanos. Te avisaremos al asignar uno.',
+    searchingBody:
+      'Estamos contactando a los conductores cercanos. Te avisaremos al asignar uno.',
     plate: 'Placa',
     rating: '{{stars}} ★',
     cancel: 'Cancelar viaje',
     cancelTitle: '¿Cancelar el viaje?',
-    cancelBody: 'Si cancelas podría aplicarse una penalidad según el estado del viaje.',
+    cancelBody:
+      'Si cancelas podría aplicarse una penalidad según el estado del viaje.',
     cancelReasonLabel: 'Motivo (opcional)',
     keepTrip: 'Mantener viaje',
     changeDestination: 'Cambiar destino',
@@ -651,13 +683,16 @@ export const common = {
     waitingDriver: 'Buscando un conductor para ti…',
     arrived: 'Tu conductor llegó',
     completedTitle: 'Viaje completado',
-    failedBody: 'El viaje se interrumpió y no pudo completarse. No se te cobró.',
+    failedBody:
+      'El viaje se interrumpió y no pudo completarse. No se te cobró.',
     payNow: 'Pagar viaje',
     rateNow: 'Calificar conductor',
     share: 'Compartir viaje',
     shareTitle: 'Sigue mi viaje en VEO',
-    shareMessage: 'Estoy en un viaje con VEO. Sigue mi recorrido en vivo aquí: {{url}}',
-    shareError: 'No pudimos generar el enlace para compartir. Inténtalo de nuevo.',
+    shareMessage:
+      'Estoy en un viaje con VEO. Sigue mi recorrido en vivo aquí: {{url}}',
+    shareError:
+      'No pudimos generar el enlace para compartir. Inténtalo de nuevo.',
     // Enlace de seguimiento ACTIVO (kill-switch): mientras el enlace vive, el pasajero puede dejar de
     // compartir su ubicación al instante. Honesto: el efecto lo aplica el server (revoca el enlace).
     sharingActive: 'Compartiendo ubicación',
@@ -680,16 +715,20 @@ export const common = {
     addStopCancel: 'Cancelar',
     addStopProposing: 'Enviando tu propuesta…',
     addStopWaitingTitle: 'Esperando al conductor',
-    addStopWaitingBody: 'Le propusimos tu parada. Si la acepta, se actualizan la ruta y la tarifa.',
+    addStopWaitingBody:
+      'Le propusimos tu parada. Si la acepta, se actualizan la ruta y la tarifa.',
     addStopCountdown: 'Vence en {{seconds}} s',
     addStopDelta: 'Costo adicional {{amount}}',
     addStopNewFare: 'Nueva tarifa {{amount}}',
     addStopAcceptedTitle: 'Parada agregada',
-    addStopAcceptedBody: 'Tu conductor aceptó. La ruta y la tarifa ya se actualizaron.',
+    addStopAcceptedBody:
+      'Tu conductor aceptó. La ruta y la tarifa ya se actualizaron.',
     addStopRejectedTitle: 'Parada rechazada',
-    addStopRejectedBody: 'Tu conductor no agregó la parada. El viaje continúa igual.',
+    addStopRejectedBody:
+      'Tu conductor no agregó la parada. El viaje continúa igual.',
     addStopExpiredTitle: 'La propuesta venció',
-    addStopExpiredBody: 'No recibimos respuesta a tiempo. Puedes intentarlo de nuevo.',
+    addStopExpiredBody:
+      'No recibimos respuesta a tiempo. Puedes intentarlo de nuevo.',
     addStopError: 'No pudimos enviar tu propuesta. Inténtalo de nuevo.',
     addStopDismiss: 'Entendido',
   },
@@ -717,8 +756,10 @@ export const common = {
     controlButton: 'Control de cámara · ¿quién puede ver?',
     openFullscreen: 'Ver cámara en pantalla completa',
     connecting: 'Conectando con la cámara…',
-    error: 'La cámara en vivo no está disponible en este momento. La grabación del viaje sigue activa.',
-    noPermission: 'El video en vivo no está disponible para este viaje todavía.',
+    error:
+      'La cámara en vivo no está disponible en este momento. La grabación del viaje sigue activa.',
+    noPermission:
+      'El video en vivo no está disponible para este viaje todavía.',
   },
 
   /** Control de cámara · privacidad (Ola 2A). Persistencia LOCAL por hueco de backend. */
@@ -761,7 +802,8 @@ export const common = {
   history: {
     /** Vacío CON ALMA: el dueño detesta los vacíos genéricos. Copy cálido en tuteo + CTA a pedir viaje. */
     emptyTitle: 'Aún no tienes viajes',
-    emptyBody: 'Tu primer recorrido con VEO aparecerá aquí, con su recibo y todo.',
+    emptyBody:
+      'Tu primer recorrido con VEO aparecerá aquí, con su recibo y todo.',
     emptyCta: 'Pide tu primer VEO',
     serverNote: 'Estás al día. Aquí está todo tu historial con VEO.',
     loadingMore: 'Cargando más viajes…',
@@ -806,7 +848,8 @@ export const common = {
     close: 'Cerrar',
     back: 'Volver al viaje',
     errorNoTrip: 'Solo puedes activar el pánico durante un viaje en curso.',
-    errorLocation: 'No pudimos obtener tu ubicación. Se habilita en la app instalada.',
+    errorLocation:
+      'No pudimos obtener tu ubicación. Se habilita en la app instalada.',
     errorSign: 'La firma de seguridad se habilita en la app instalada.',
     errorGeneric: 'No pudimos enviar la alerta. Inténtalo de nuevo.',
     // Escalamiento del disparo SILENCIOSO fallido (SilentPanicDispatcher agotó reintentos):
@@ -837,7 +880,8 @@ export const common = {
     resend: 'Reenviar código',
     remove: 'Eliminar contacto',
     removeTitle: '¿Eliminar contacto?',
-    removeBody: 'Podría aplicarse un periodo de espera de 24 h antes de poder volver a agregarlo.',
+    removeBody:
+      'Podría aplicarse un periodo de espera de 24 h antes de poder volver a agregarlo.',
     verified: 'Verificado',
     pending: 'Pendiente de verificar',
     maxReached: 'Alcanzaste el máximo de 3 contactos.',
@@ -850,18 +894,21 @@ export const common = {
   },
 
   childMode: {
-    subtitle: 'Activa un código que el conductor deberá confirmar al iniciar el viaje del menor.',
+    subtitle:
+      'Activa un código que el conductor deberá confirmar al iniciar el viaje del menor.',
     enable: 'Activar modo niño',
     codeLabel: 'Código de modo niño',
     codeHelper: 'De 4 a 6 dígitos. No lo compartas con el conductor.',
     invalidCode: 'El código debe tener entre 4 y 6 dígitos.',
     active: 'Modo niño activado',
     inactive: 'Modo niño desactivado',
-    explanation: 'El código nunca se muestra al conductor; el sistema valida un hash en el servidor.',
+    explanation:
+      'El código nunca se muestra al conductor; el sistema valida un hash en el servidor.',
     /** Línea del desglose de tarifa (precio FIJO): "Recargo modo niño". El monto va aparte. */
     feeLine: 'Recargo modo niño',
     /** Aviso del recargo al activar el toggle (solo informa; el recargo aplica en viajes de precio fijo). */
-    feeNotice: 'En viajes de precio fijo se suma un recargo de {{amount}}. En modo puja no hay recargo.',
+    feeNotice:
+      'En viajes de precio fijo se suma un recargo de {{amount}}. En modo puja no hay recargo.',
   },
 
   kyc: {
@@ -870,12 +917,14 @@ export const common = {
     subtitle:
       'Es una prueba de vida: vas a seguir un movimiento simple con tu rostro (no es una foto). Rápido y seguro. Mantén buena luz y quítate gorra o lentes.',
     /** Texto del intro idle, sobre el ícono, antes de abrir la cámara. */
-    introHint: 'Vamos a confirmar que eres una persona real con un movimiento guiado.',
+    introHint:
+      'Vamos a confirmar que eres una persona real con un movimiento guiado.',
     start: 'Iniciar verificación',
     capture: 'Verificar',
     retry: 'Reintentar',
     capturing: 'Verificando',
-    livenessHint: 'Sigue la instrucción en pantalla y mantén el rostro dentro del óvalo.',
+    livenessHint:
+      'Sigue la instrucción en pantalla y mantén el rostro dentro del óvalo.',
     /** Guía en vivo (detección facial real). */
     centerFace: 'Centra tu rostro dentro del óvalo',
     faceDetected: 'Rostro detectado',
@@ -890,26 +939,31 @@ export const common = {
     challengeErrorBody:
       'No pudimos obtener la acción a realizar. Revisa tu conexión e inténtalo de nuevo.',
     challengeExpiredTitle: 'La verificación expiró',
-    challengeExpiredBody: 'Pasó demasiado tiempo. Vuelve a iniciar para obtener una nueva acción.',
+    challengeExpiredBody:
+      'Pasó demasiado tiempo. Vuelve a iniciar para obtener una nueva acción.',
     captureUnavailableTitle: 'Captura no disponible',
     captureUnavailableBody:
       'Este dispositivo aún no puede capturar la foto para la verificación. Vuelve a intentarlo más tarde.',
     permissionBlockedTitle: 'Permiso de cámara desactivado',
     permissionBlockedBody:
       'Activa el permiso de cámara para VEO en los ajustes del sistema para continuar.',
-    cameraError: 'No pudimos abrir la cámara. Revisa el permiso e inténtalo de nuevo.',
+    cameraError:
+      'No pudimos abrir la cámara. Revisa el permiso e inténtalo de nuevo.',
     submitErrorTitle: 'No se pudo enviar',
     submitErrorBody: 'No pudimos enviar tu verificación. Inténtalo de nuevo.',
-    submitErrorPending: 'La verificación de identidad aún no está disponible. Inténtalo más tarde.',
+    submitErrorPending:
+      'La verificación de identidad aún no está disponible. Inténtalo más tarde.',
     submitErrorEmpty: 'No capturamos una imagen válida. Vuelve a intentarlo.',
     rejectionReason: 'Motivo',
     resultApprovedTitle: 'Identidad verificada',
-    resultApprovedBody: 'Tu identidad fue confirmada. ¡Ya puedes viajar con VEO!',
+    resultApprovedBody:
+      'Tu identidad fue confirmada. ¡Ya puedes viajar con VEO!',
     resultPendingTitle: 'Verificación en revisión',
     resultPendingBody:
       'Recibimos tu verificación y la estamos revisando. Te avisaremos cuando esté lista.',
     resultRejectedTitle: 'No pudimos verificarte',
-    resultRejectedBody: 'Tu verificación no pasó. Revisa la iluminación y vuelve a intentarlo.',
+    resultRejectedBody:
+      'Tu verificación no pasó. Revisa la iluminación y vuelve a intentarlo.',
   },
 
   payments: {
@@ -971,7 +1025,8 @@ export const common = {
     /** Selector de método PARA ESTE VIAJE (al pedir): la elección no pisa el default del perfil. */
     rowLabel: 'Método de pago',
     selectTitle: 'Método de pago',
-    selectSubtitle: 'Elige cómo pagar este viaje. No cambia tu método predeterminado.',
+    selectSubtitle:
+      'Elige cómo pagar este viaje. No cambia tu método predeterminado.',
     /**
      * TASK 2 · Pista del método PREDETERMINADO dentro del selector: la fila que coincide con tu
      * predeterminado lleva esta marca, para que SIEMPRE se vea cuál es "con qué pagas siempre".
@@ -990,7 +1045,8 @@ export const common = {
     /** Agregar tarjeta — sin backend (/cards). Degradación honesta: nunca simula guardar. */
     addCard: 'Agregar tarjeta',
     addCardComingSoonTitle: 'Próximamente',
-    addCardComingSoon: 'Agregar una tarjeta estará disponible pronto. Por ahora paga con Yape, Plin o efectivo.',
+    addCardComingSoon:
+      'Agregar una tarjeta estará disponible pronto. Por ahora paga con Yape, Plin o efectivo.',
     payTitle: 'Pago del viaje',
     amount: 'Monto a pagar',
     tip: 'Propina (opcional)',
@@ -1023,7 +1079,8 @@ export const common = {
 
       /** Sheet de vinculación (la joya): título + 2 líneas con el consent integrado al copy. */
       linkTitle: 'Vincula tu Yape',
-      linkIntro1: 'Se cobra solo al terminar cada viaje, sin abrir la app de pago.',
+      linkIntro1:
+        'Se cobra solo al terminar cada viaje, sin abrir la app de pago.',
       linkIntro2: 'Lo desactivas cuando quieras desde aquí mismo.',
       /** Único campo del sheet: documento + selector de tipo discreto. */
       docTypeDN: 'DNI',
@@ -1033,18 +1090,22 @@ export const common = {
       documentHelperDN: '8 dígitos.',
       documentHelperOther: 'Tal como figura en tu documento.',
       /** Nota bajo el campo de documento (primera vez): se persiste en el perfil para el próximo tap. */
-      documentSavedNote: 'Lo guardamos en tu perfil; la próxima vez vinculas con un solo toque.',
+      documentSavedNote:
+        'Lo guardamos en tu perfil; la próxima vez vinculas con un solo toque.',
       /** 502 transitorio del gateway (Cloudflare del sandbox) que persiste tras el reintento automático. */
-      upstreamBusy: 'El servicio de Yape está ocupado. Inténtalo en un momento.',
+      upstreamBusy:
+        'El servicio de Yape está ocupado. Inténtalo en un momento.',
       openYape: 'Abrir Yape',
       submitting: 'Abriendo…',
       cancel: 'Cancelar',
       close: 'Cerrar',
       /** Esperando aprobación en la app Yape (tras el deepLink). */
       waitingTitle: 'Confirma en tu app de Yape',
-      waitingBody: 'Abre Yape y aprueba la vinculación. Esta pantalla se actualiza sola.',
+      waitingBody:
+        'Abre Yape y aprueba la vinculación. Esta pantalla se actualiza sola.',
       waitingTimeoutTitle: 'Seguimos esperando',
-      waitingTimeoutBody: 'Vuelve cuando confirmes en Yape; se activará automáticamente.',
+      waitingTimeoutBody:
+        'Vuelve cuando confirmes en Yape; se activará automáticamente.',
       /**
        * No se pudo ABRIR Yape automáticamente (openURL rechazó el deepLink de afiliación). Copy HONESTO:
        * no culpamos al usuario (en sandbox el esquema no está registrado aunque tenga Yape instalada).
@@ -1061,15 +1122,18 @@ export const common = {
        * pagas siempre). El usuario decide; ningún cambio silencioso de su preferencia.
        */
       askDefaultTitle: 'Yape quedó vinculado',
-      askDefaultBody: '¿Quieres usarlo como tu método predeterminado para tus próximos viajes?',
+      askDefaultBody:
+        '¿Quieres usarlo como tu método predeterminado para tus próximos viajes?',
       askDefaultYes: 'Sí, usar Yape',
       askDefaultNo: 'Ahora no',
       /** Tras elegir "Sí": confirmación breve de que el predeterminado quedó en Yape. */
       askDefaultDoneTitle: 'Yape es tu método predeterminado',
-      askDefaultDoneBody: 'Lo cambias cuando quieras desde tus métodos de pago.',
+      askDefaultDoneBody:
+        'Lo cambias cuando quieras desde tus métodos de pago.',
       /** Tras "Ahora no": el vínculo quedó, pero el predeterminado no se tocó. */
       askDefaultKeptTitle: 'Yape vinculado',
-      askDefaultKeptBody: 'Tu método predeterminado sigue igual. Eliges Yape cuando lo necesites.',
+      askDefaultKeptBody:
+        'Tu método predeterminado sigue igual. Eliges Yape cuando lo necesites.',
 
       /** Sheet de gestión del Yape vinculado (tap en la fila): predeterminado + desvincular. */
       manageTitle: 'Tu Yape',
@@ -1085,10 +1149,12 @@ export const common = {
 
       /** Estado PROCESS (la pantalla, fuera del sheet). */
       processTitle: 'Vinculación en proceso',
-      processBody: 'Estamos confirmando tu Yape. Te avisaremos cuando esté lista.',
+      processBody:
+        'Estamos confirmando tu Yape. Te avisaremos cuando esté lista.',
       /** Estado EXPIRED → venció, reintentar. */
       expiredTitle: 'La vinculación venció',
-      expiredBody: 'Venció antes de confirmarse. Prueba de nuevo cuando quieras.',
+      expiredBody:
+        'Venció antes de confirmarse. Prueba de nuevo cuando quieras.',
       retry: 'Vincular de nuevo',
       /** 422: el perfil no tiene nombre → CTA al perfil (no error de campo). */
       profileIncompleteTitle: 'Completa tu nombre primero',
@@ -1129,24 +1195,30 @@ export const common = {
     /** Efectivo. */
     cashTitle: 'Paga en efectivo',
     cashBody: 'Entrega {{amount}} al conductor. Él confirma al recibir.',
-    cashBanner: '¿Sin cambio exacto? Avísale al conductor; también puedes pagar la diferencia con Yape.',
+    cashBanner:
+      '¿Sin cambio exacto? Avísale al conductor; también puedes pagar la diferencia con Yape.',
     confirmCash: 'Confirmar efectivo',
     confirmingCash: 'Confirmando…',
     /** Efectivo confirmado por el pasajero pero el conductor aún no confirma (confirmación bilateral). */
     cashAwaitingDriverTitle: 'Esperando al conductor',
-    cashAwaitingDriverBody: 'Confirmaste el pago. El conductor debe confirmar que lo recibió para cerrar el cobro.',
+    cashAwaitingDriverBody:
+      'Confirmaste el pago. El conductor debe confirmar que lo recibió para cerrar el cobro.',
     confirmLater: 'Confirmar después',
     /** Cobro fallido / deuda — estado honesto, nunca data falsa. */
     failedTitle: 'No pudimos procesar el cobro',
-    failedBody: 'Lo intentaremos de nuevo automáticamente. No se te cobró dos veces.',
+    failedBody:
+      'Lo intentaremos de nuevo automáticamente. No se te cobró dos veces.',
     debtTitle: 'Pago pendiente',
-    debtBody: 'El cobro quedó pendiente. Lo regularizaremos en tu próximo viaje.',
+    debtBody:
+      'El cobro quedó pendiente. Lo regularizaremos en tu próximo viaje.',
     /** Cobro reembolsado TOTAL — estado honesto, neutral: ni "pagado" ni propina. */
     refundedTitle: 'Este viaje fue reembolsado',
-    refundedBody: 'Se te devolvió {{amount}}. No hay nada que pagar por este viaje.',
+    refundedBody:
+      'Se te devolvió {{amount}}. No hay nada que pagar por este viaje.',
     /** Cobro reembolsado PARCIAL — honesto: NO es "pagado" pleno; se devolvió parte del importe. */
     partialRefundTitle: 'Reembolso parcial',
-    partialRefundBody: 'Se te devolvió parte del importe de este viaje. Revisa el detalle abajo.',
+    partialRefundBody:
+      'Se te devolvió parte del importe de este viaje. Revisa el detalle abajo.',
     /** Propina post-viaje (solo si tipCents === 0). 100% va al conductor. */
     tipPrompt: 'Propina (opcional · 100% al conductor)',
     /**
@@ -1154,7 +1226,8 @@ export const common = {
      * (Yape/tarjeta), no se suma al efectivo. Copy honesto para no mentir: si querés, dale efectivo
      * extra al conductor en mano; estos chips son la vía digital.
      */
-    tipPromptCash: 'Propina (opcional · 100% al conductor). Por aquí la dejas con Yape o tarjeta; en efectivo, dásela en mano.',
+    tipPromptCash:
+      'Propina (opcional · 100% al conductor). Por aquí la dejas con Yape o tarjeta; en efectivo, dásela en mano.',
     tipNone: 'Sin propina',
     tipSending: 'Enviando…',
     /** Acciones de cierre. */
@@ -1184,7 +1257,8 @@ export const common = {
       /** Vencimiento del checkout. */
       expiresAt: 'Vence el {{date}}',
       expiredTitle: 'El código venció',
-      expiredBody: 'Este pago caducó. Reintenta para generar uno nuevo o paga tu viaje en efectivo.',
+      expiredBody:
+        'Este pago caducó. Reintenta para generar uno nuevo o paga tu viaje en efectivo.',
       /** Hint común mientras esperamos la confirmación. */
       waitingHint: 'Cuando completes el pago, esta pantalla se actualiza sola.',
       /**
@@ -1194,7 +1268,8 @@ export const common = {
        */
       openYapeFailedTitle: 'No pudimos abrir Yape automáticamente',
       openYapeFailedBody: 'Completa el pago desde el navegador.',
-      openYapeFailedBodyNoWeb: 'Copia el enlace de pago y ábrelo en tu app de Yape.',
+      openYapeFailedBodyNoWeb:
+        'Copia el enlace de pago y ábrelo en tu app de Yape.',
       /** Fallback web cuando el deepLink no abre pero hay una urlPay hospedada. */
       payInBrowser: 'Pagar desde el navegador',
       /** Salida cuando el deepLink no abrió y NO hay web: copiar el enlace de pago (Clipboard). */
@@ -1244,7 +1319,8 @@ export const common = {
     continueBody: 'Tu pago quedó pendiente. Termínalo para cerrarlo.',
     /** El pago por completar ya no tiene checkout vivo (capturó o venció): honesto. */
     pendingGoneTitle: 'Este pago ya no está pendiente',
-    pendingGoneBody: 'No hay nada que completar. Si pagaste, ya quedó registrado.',
+    pendingGoneBody:
+      'No hay nada que completar. Si pagaste, ya quedó registrado.',
 
     /**
      * RESOLVER CON SELECTOR (DEBT en fase idle). Encabezado honesto + selector de método SIEMPRE:
@@ -1253,7 +1329,8 @@ export const common = {
      */
     resolveTitle: 'Resuelve el pago de tu viaje',
     /** Subtítulo del selector de resolución: invita a elegir, sin culpar por el cobro fallido. */
-    resolveSubtitle: 'Elige cómo quieres pagarlo. Te sugerimos tu método de siempre.',
+    resolveSubtitle:
+      'Elige cómo quieres pagarlo. Te sugerimos tu método de siempre.',
     /** CTA primario del selector de resolución, parametrizado con el método elegido. */
     payWith: 'Pagar con {{method}}',
     /** CTA primario en vuelo (esperando la respuesta del cobro con el método elegido). */
@@ -1273,7 +1350,8 @@ export const common = {
     transientBody: 'Inténtalo en un momento.',
     /** TODOS los digitales fallaron (el usuario probó y ninguno anduvo): honesto + escape claro, sin bucle. */
     allMethodsFailedTitle: 'Ningún método pudo procesar tu pago',
-    allMethodsFailedBody: 'Vuelve más tarde para resolverlo. No te cobramos nada todavía.',
+    allMethodsFailedBody:
+      'Vuelve más tarde para resolverlo. No te cobramos nada todavía.',
     tryLater: 'Volver más tarde',
 
     /**
@@ -1288,20 +1366,24 @@ export const common = {
     changeMethodCta: 'Pagar con otro método',
     /** Título del selector de cambio (solo digitales). */
     changeMethodTitle: 'Elige otro método',
-    changeMethodSubtitle: 'Cambias cómo pagar este viaje. El efectivo no aplica aquí.',
+    changeMethodSubtitle:
+      'Cambias cómo pagar este viaje. El efectivo no aplica aquí.',
     /** En vuelo, mientras el server arma el checkout del método nuevo. */
     changingMethod: 'Cambiando…',
     /** 422: el método elegido no aplica (CASH). Red de seguridad de contrato. */
     changeMethodNotApplicableTitle: 'Ese método no aplica',
-    changeMethodNotApplicableBody: 'Elige Yape, Plin, tarjeta o PagoEfectivo para este pago.',
+    changeMethodNotApplicableBody:
+      'Elige Yape, Plin, tarjeta o PagoEfectivo para este pago.',
     /** 409: el pago ya no es cambiable (capturó/venció): honesto, deja cerrar. */
     changeMethodGoneTitle: 'Este pago ya no se puede cambiar',
-    changeMethodGoneBody: 'Cambió de estado mientras tanto. Si ya pagaste, quedó registrado.',
+    changeMethodGoneBody:
+      'Cambió de estado mientras tanto. Si ya pagaste, quedó registrado.',
     /** Error genérico de red al cambiar de método. */
     changeMethodError: 'No pudimos cambiar el método. Inténtalo de nuevo.',
     /** El re-cobro falló (el riel rechazó otra vez): estado honesto, deja reintentar. */
     retryFailedTitle: 'No pudimos completar el cobro',
-    retryFailedBody: 'El pago no se pudo procesar. Inténtalo de nuevo en un momento.',
+    retryFailedBody:
+      'El pago no se pudo procesar. Inténtalo de nuevo en un momento.',
     /** Error genérico de red al saldar. */
     error: 'No pudimos procesar el pago. Inténtalo de nuevo.',
     /** Franja sutil del home (señal pasiva) · DEUDA: monto + acción para resolver (tono warn). */
@@ -1396,7 +1478,8 @@ export const common = {
   /** Lugares guardados (Casa, Trabajo, favoritos) — local, sin backend. */
   places: {
     title: 'Lugares guardados',
-    subtitle: 'Guarda tus sitios frecuentes y fíjalos como destino con un toque.',
+    subtitle:
+      'Guarda tus sitios frecuentes y fíjalos como destino con un toque.',
     home: 'Casa',
     work: 'Trabajo',
     favorites: 'Favoritos',
@@ -1418,7 +1501,8 @@ export const common = {
     removeBody: 'Dejará de aparecer en tus accesos rápidos.',
     invalidLabel: 'Ingresa un nombre (1 a 40 caracteres).',
     invalidPoint: 'Elige una dirección válida.',
-    localNote: 'Tus lugares se sincronizan con tu cuenta y están disponibles sin conexión.',
+    localNote:
+      'Tus lugares se sincronizan con tu cuenta y están disponibles sin conexión.',
     addHomeHint: 'Toca para guardar tu Casa.',
     addWorkHint: 'Toca para guardar tu Trabajo.',
   },
@@ -1460,11 +1544,13 @@ export const common = {
 
     /** SHEET de celular (altas por correo/Google/Apple sin teléfono). */
     phoneSheetTitle: 'Agrega tu celular',
-    phoneSheetIntro: 'Te mandamos un código por SMS para confirmar que es tuyo.',
+    phoneSheetIntro:
+      'Te mandamos un código por SMS para confirmar que es tuyo.',
     phoneFieldLabel: 'Número de celular',
     phoneFieldPrefix: '+51',
     phoneFieldPlaceholder: '9XX XXX XXX',
-    phoneInvalid: 'Ingresa un celular peruano válido (9 dígitos, empieza con 9).',
+    phoneInvalid:
+      'Ingresa un celular peruano válido (9 dígitos, empieza con 9).',
     phoneSendCode: 'Enviar código',
     phoneSending: 'Enviando…',
     /** Paso del código (reusa el OtpField del auth). */
@@ -1479,10 +1565,12 @@ export const common = {
     phoneAddedTitle: '¡Listo, celular confirmado!',
     phoneAddedBody: 'Ya puedes recibir avisos de tus viajes por SMS.',
     /** Degradación HONESTA si el backend del celular aún no responde (construcción paralela). */
-    phoneUnavailable: 'Por ahora no pudimos enviar el código. Inténtalo en un ratito.',
+    phoneUnavailable:
+      'Por ahora no pudimos enviar el código. Inténtalo en un ratito.',
 
     emailPlaceholder: 'tu@correo.com',
-    invalidName: 'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
+    invalidName:
+      'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
     invalidEmail: 'Revisa tu correo, parece que le falta algo.',
     /** Documento de identidad en el perfil (habilita la vinculación de Yape de un toque). */
     invalidDocument: 'Revisa tu documento para el tipo que elegiste.',
@@ -1508,7 +1596,8 @@ export const common = {
     cameraControl: 'Control de cámara',
     cameraControlSub: 'Quién ve tu cámara',
     shareTrip: 'Compartir mi viaje',
-    shareTripSub: 'Durante tu viaje puedes compartirlo con tu familia para que te sigan en tiempo real.',
+    shareTripSub:
+      'Durante tu viaje puedes compartirlo con tu familia para que te sigan en tiempo real.',
     // Preferencias
     tripHistory: 'Mis viajes',
     paymentMethods: 'Métodos de pago',
@@ -1525,7 +1614,8 @@ export const common = {
     // Promociones (opt-in marketing)
     sectionPromotions: 'Promociones',
     promotions: 'Promociones y novedades',
-    promotionsSub: 'Ofertas y avisos de VEO. Puedes desactivarlo cuando quieras.',
+    promotionsSub:
+      'Ofertas y avisos de VEO. Puedes desactivarlo cuando quieras.',
     // Cuenta
     accessibility: 'Accesibilidad e idioma',
     help: 'Ayuda',
@@ -1569,7 +1659,8 @@ export const common = {
   /** "Invita y gana" — programa de referidos (GET /referrals/me, POST /referrals/redeem). */
   referrals: {
     title: 'Invita y gana',
-    subtitle: 'Comparte tu código. Cuando tu amigo viaje, ambos ganan crédito en VEO.',
+    subtitle:
+      'Comparte tu código. Cuando tu amigo viaje, ambos ganan crédito en VEO.',
     yourCode: 'Tu código',
     copy: 'Copiar',
     copied: '¡Copiado!',
@@ -1586,7 +1677,8 @@ export const common = {
     redeemPlaceholder: 'Ingresa su código',
     redeem: 'Canjear código',
     redeemHint: 'Solo puedes canjear un código una vez.',
-    redeemSuccess: '¡Código canjeado! Tu crédito se aplicará a tu próximo viaje.',
+    redeemSuccess:
+      '¡Código canjeado! Tu crédito se aplicará a tu próximo viaje.',
     redeemError: 'No pudimos canjear el código. Inténtalo de nuevo.',
     codeError: {
       empty: 'Ingresa un código.',
@@ -1661,7 +1753,8 @@ export const common = {
     attached: 'Adjuntado',
     submit: 'Enviar solicitud',
     sent: 'Solicitud enviada',
-    sentBody: 'Recibimos tu reporte. Te responderemos a la brevedad y podrás seguir su estado en "Mis solicitudes".',
+    sentBody:
+      'Recibimos tu reporte. Te responderemos a la brevedad y podrás seguir su estado en "Mis solicitudes".',
     sendError: 'No pudimos enviar tu solicitud. Inténtalo de nuevo.',
     invalidSubject: 'El asunto debe tener al menos 4 caracteres.',
     invalidBody: 'El mensaje debe tener al menos 10 caracteres.',

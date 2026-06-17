@@ -23,7 +23,9 @@ export class DispatchConfigController {
   constructor(private readonly dispatch: DispatchConfigService) {}
 
   @Get('radius-config')
-  @ApiOperation({ summary: 'Config de radios (k-rings) vigente (o el DEFAULT). ADMIN/SUPERADMIN/DISPATCHER.' })
+  @ApiOperation({
+    summary: 'Config de radios (k-rings) vigente (o el DEFAULT). ADMIN/SUPERADMIN/DISPATCHER.',
+  })
   getRadiusConfig(@CurrentUser() user: AuthenticatedUser): Promise<RadiusConfigView> {
     return this.dispatch.getRadiusConfig(user);
   }
@@ -33,7 +35,8 @@ export class DispatchConfigController {
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.DISPATCHER)
   @RequireStepUpMfa()
   @ApiOperation({
-    summary: 'REEMPLAZA la config de radios (bump version) + emite el evento. ADMIN/SUPERADMIN/DISPATCHER.',
+    summary:
+      'REEMPLAZA la config de radios (bump version) + emite el evento. ADMIN/SUPERADMIN/DISPATCHER.',
   })
   replaceRadiusConfig(
     @CurrentUser() user: AuthenticatedUser,

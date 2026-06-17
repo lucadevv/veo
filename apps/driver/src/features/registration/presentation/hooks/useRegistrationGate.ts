@@ -1,11 +1,11 @@
-import {useEffect} from 'react';
-import {useQuery} from '@tanstack/react-query';
-import {ApiError} from '@veo/api-client';
-import {useRepositories} from '../../../../core/di/useDi';
-import {useSessionStore} from '../../../../core/session/sessionStore';
-import {GetProfileUseCase} from '../../../profile/domain';
-import {mapProfileToRegistrationStatus} from '../../domain';
-import {useRegistrationStore} from '../state/registrationStore';
+import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ApiError } from '@veo/api-client';
+import { useRepositories } from '../../../../core/di/useDi';
+import { useSessionStore } from '../../../../core/session/sessionStore';
+import { GetProfileUseCase } from '../../../profile/domain';
+import { mapProfileToRegistrationStatus } from '../../domain';
+import { useRegistrationStore } from '../state/registrationStore';
 
 /** `true` si el error es un 404 del backend: el conductor aún no existe (alta no iniciada). */
 function isNotFound(error: unknown): boolean {
@@ -35,11 +35,11 @@ export interface RegistrationGate {
  * podríamos endurecer el fallback (p. ej. forzar re-login o reintento visible).
  */
 export function useRegistrationGate(): RegistrationGate {
-  const {profile} = useRepositories();
-  const sessionStatus = useSessionStore(s => s.status);
-  const applyBackendStatus = useRegistrationStore(s => s.applyBackendStatus);
-  const forceWizard = useRegistrationStore(s => s.forceWizard);
-  const resolvedFromBackend = useRegistrationStore(s => s.statusResolvedFromBackend);
+  const { profile } = useRepositories();
+  const sessionStatus = useSessionStore((s) => s.status);
+  const applyBackendStatus = useRegistrationStore((s) => s.applyBackendStatus);
+  const forceWizard = useRegistrationStore((s) => s.forceWizard);
+  const resolvedFromBackend = useRegistrationStore((s) => s.statusResolvedFromBackend);
 
   const query = useQuery({
     queryKey: REGISTRATION_GATE_QUERY_KEY,
@@ -51,7 +51,7 @@ export function useRegistrationGate(): RegistrationGate {
       error instanceof ApiError && error.retryable && failureCount < 2,
   });
 
-  const {data, error, isError} = query;
+  const { data, error, isError } = query;
   useEffect(() => {
     if (data) {
       // Sincroniza el cache del servidor → store de dominio mediante una acción (no setState suelto).
@@ -68,10 +68,7 @@ export function useRegistrationGate(): RegistrationGate {
   // query sigue en vuelo (sin error). Ante error sin resolución previa, dejamos de cargar y se usa
   // el `status` local como fallback de demo (salvo el 404, que ya fuerza wizard arriba).
   const resolving =
-    sessionStatus === 'authenticated' &&
-    !resolvedFromBackend &&
-    query.isLoading &&
-    !query.isError;
+    sessionStatus === 'authenticated' && !resolvedFromBackend && query.isLoading && !query.isError;
 
-  return {resolving};
+  return { resolving };
 }

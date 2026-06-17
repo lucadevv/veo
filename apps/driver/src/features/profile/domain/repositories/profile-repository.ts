@@ -1,4 +1,4 @@
-import type {DriverProfile, OnboardInput} from '../entities';
+import type { DriverProfile, OnboardInput } from '../entities';
 
 /**
  * Contrato del repositorio de perfil (capa domain). Implementación concreta en `data/`.

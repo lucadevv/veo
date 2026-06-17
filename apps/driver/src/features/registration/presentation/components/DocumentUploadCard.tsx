@@ -1,10 +1,10 @@
-import React, {type ReactNode} from 'react';
-import {ActivityIndicator, Pressable, StyleSheet, View} from 'react-native';
-import Svg, {Circle, Path} from 'react-native-svg';
-import {Text, useTheme} from '@veo/ui-kit';
-import {hexAlpha} from './color';
-import {IconAlert, IconCheck} from '../../../../shared/presentation/icons';
-import type {DocumentUploadStatus} from '../../domain';
+import React, { type ReactNode } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { Text, useTheme } from '@veo/ui-kit';
+import { hexAlpha } from './color';
+import { IconAlert, IconCheck } from '../../../../shared/presentation/icons';
+import type { DocumentUploadStatus } from '../../domain';
 
 /** Tono semántico del chip de estado del documento. */
 export type DocumentCardTone = 'success' | 'warn' | 'danger' | 'neutral' | 'accent';
@@ -16,7 +16,7 @@ export interface DocumentServerState {
 }
 
 /** Glifo de cámara (chip "Pendiente"). Inline para no depender del set global. */
-function CameraGlyph({color, size = 14}: {color: string; size?: number}): React.JSX.Element {
+function CameraGlyph({ color, size = 14 }: { color: string; size?: number }): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -60,7 +60,12 @@ function toneColor(tone: DocumentCardTone, theme: ReturnType<typeof useTheme>): 
  * real (vigente/por_vencer/vencido/en_revision/rechazado) con su tono; si no, usa el estado local
  * (Subido/Pendiente) del avance del wizard.
  */
-function StatusChip({status, uploadedLabel, pendingLabel, serverState}: StatusChipProps): React.JSX.Element {
+function StatusChip({
+  status,
+  uploadedLabel,
+  pendingLabel,
+  serverState,
+}: StatusChipProps): React.JSX.Element {
   const theme = useTheme();
 
   if (serverState) {
@@ -76,9 +81,10 @@ function StatusChip({status, uploadedLabel, pendingLabel, serverState}: StatusCh
             borderRadius: theme.radii.pill,
             gap: theme.spacing.xs,
           },
-        ]}>
+        ]}
+      >
         <StatusGlyph tone={serverState.tone} color={tint} />
-        <Text variant="caption" style={{color: tint}}>
+        <Text variant="caption" style={{ color: tint }}>
           {serverState.label}
         </Text>
       </View>
@@ -98,7 +104,8 @@ function StatusChip({status, uploadedLabel, pendingLabel, serverState}: StatusCh
           borderRadius: theme.radii.pill,
           gap: theme.spacing.xs,
         },
-      ]}>
+      ]}
+    >
       {uploaded ? (
         <IconCheck size={14} color={tint} strokeWidth={2.6} />
       ) : (
@@ -112,7 +119,13 @@ function StatusChip({status, uploadedLabel, pendingLabel, serverState}: StatusCh
 }
 
 /** Glifo del chip según el tono del estado del servidor. */
-function StatusGlyph({tone, color}: {tone: DocumentCardTone; color: string}): React.JSX.Element {
+function StatusGlyph({
+  tone,
+  color,
+}: {
+  tone: DocumentCardTone;
+  color: string;
+}): React.JSX.Element {
   if (tone === 'success') {
     return <IconCheck size={14} color={color} strokeWidth={2.6} />;
   }
@@ -159,10 +172,10 @@ export function DocumentUploadCard({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{busy}}
+      accessibilityState={{ busy }}
       disabled={busy}
       onPress={onPress}
-      style={({pressed}) => [
+      style={({ pressed }) => [
         styles.card,
         {
           backgroundColor: theme.colors.surface,
@@ -173,12 +186,14 @@ export function DocumentUploadCard({
           gap: theme.spacing.md,
           opacity: pressed || busy ? 0.9 : 1,
         },
-      ]}>
+      ]}
+    >
       <View
         style={[
           styles.iconBox,
-          {backgroundColor: hexAlpha(theme.colors.accent, 0.14), borderRadius: theme.radii.md},
-        ]}>
+          { backgroundColor: hexAlpha(theme.colors.accent, 0.14), borderRadius: theme.radii.md },
+        ]}
+      >
         {icon}
       </View>
       <Text variant="bodyStrong" style={styles.label} numberOfLines={1}>
@@ -199,9 +214,9 @@ export function DocumentUploadCard({
 }
 
 const styles = StyleSheet.create({
-  card: {flexDirection: 'row', alignItems: 'center', borderWidth: 1, alignSelf: 'stretch'},
-  iconBox: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
-  label: {flex: 1},
-  chip: {flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5},
-  chipBordered: {borderWidth: 1},
+  card: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, alignSelf: 'stretch' },
+  iconBox: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  label: { flex: 1 },
+  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
+  chipBordered: { borderWidth: 1 },
 });

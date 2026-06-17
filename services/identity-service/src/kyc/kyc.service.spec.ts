@@ -96,9 +96,9 @@ describe('KycService.verify · KYC del pasajero (liveness OK → VERIFIED)', () 
       bioPass,
       config,
     );
-    await expect(
-      svc.verify('u1', { challengeId: 'c1', frames: ['f1'] }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.verify('u1', { challengeId: 'c1', frames: ['f1'] })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
   });
 });
 

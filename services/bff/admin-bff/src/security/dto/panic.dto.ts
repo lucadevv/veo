@@ -1,5 +1,13 @@
 /** DTOs de los endpoints de seguridad (pánico). */
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 const PANIC_STATUSES = ['TRIGGERED', 'ACKNOWLEDGED', 'RESOLVED', 'FALSE_ALARM'] as const;
 

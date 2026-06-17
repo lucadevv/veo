@@ -18,7 +18,9 @@ export class PublicShareController {
 
   @Public()
   @Get(':token/video')
-  @ApiOperation({ summary: 'Autorización de video del habitáculo (LiveKit) para el enlace familiar' })
+  @ApiOperation({
+    summary: 'Autorización de video del habitáculo (LiveKit) para el enlace familiar',
+  })
   video(@Param('token') token: string): Promise<FamilyVideoGrant> {
     return this.share.videoGrant(token);
   }

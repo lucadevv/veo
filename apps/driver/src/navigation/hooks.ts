@@ -1,8 +1,8 @@
-import {useNavigation} from '@react-navigation/native';
-import type {CompositeNavigationProp} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
-import type {MainTabParamList, RootStackParamList} from './types';
+import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { MainTabParamList, RootStackParamList } from './types';
 
 /**
  * Navegación compuesta del conductor: combina el bottom tab navigator (`MainTabParamList`) con el

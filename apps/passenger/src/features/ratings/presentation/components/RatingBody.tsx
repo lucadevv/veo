@@ -1,14 +1,18 @@
-import { ApiError, type RatingView } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { RatingReasonChips, reasonLabels, type RatingReason } from './RatingReasonChips';
-import { StarRating } from './StarRating';
-import { SuccessCheck } from './motion';
+import {ApiError, type RatingView} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {Banner, Button, Text, TextField, useTheme} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  RatingReasonChips,
+  reasonLabels,
+  type RatingReason,
+} from './RatingReasonChips';
+import {StarRating} from './StarRating';
+import {SuccessCheck} from './motion';
 
 export interface RatingBodyProps {
   tripId: string;
@@ -22,9 +26,13 @@ export interface RatingBodyProps {
  * pantalla —estrellas 1-5, motivos, comentario— pero SIN navegación: el rating es SALTEABLE ("Ahora no")
  * y, enviado o no, avisa por `onDone` para cerrar el viaje y volver al home.
  */
-export function RatingBody({ tripId, driverId, onDone }: RatingBodyProps): React.JSX.Element {
+export function RatingBody({
+  tripId,
+  driverId,
+  onDone,
+}: RatingBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const submitRating = useDependency(TOKENS.submitRatingUseCase);
 
@@ -52,7 +60,7 @@ export function RatingBody({ tripId, driverId, onDone }: RatingBodyProps): React
         ratedId: driverId,
         ratedRole: 'DRIVER',
         stars,
-        ...(body ? { comment: body } : {}),
+        ...(body ? {comment: body} : {}),
       });
     },
   });
@@ -68,24 +76,33 @@ export function RatingBody({ tripId, driverId, onDone }: RatingBodyProps): React
   // 409 = el viaje YA fue calificado (rating idempotente / doble-tap / re-entrada tras cerrar la app).
   // No es un error que mostrar: es el ESTADO de éxito disfrazado. Lo tratamos igual que un envío OK
   // (mensaje "ya calificaste") para que el flujo siga a onDone normal, sin banner rojo confuso.
-  const alreadyRated = mutation.error instanceof ApiError && mutation.error.status === 409;
+  const alreadyRated =
+    mutation.error instanceof ApiError && mutation.error.status === 409;
 
   if (mutation.isSuccess || alreadyRated) {
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <SuccessCheck />
-        <Banner tone="success" title={t(alreadyRated ? 'ratings.alreadyRated' : 'ratings.thanks')} />
+        <Banner
+          tone="success"
+          title={t(alreadyRated ? 'ratings.alreadyRated' : 'ratings.thanks')}
+        />
         {/* Cierre canónico del ciclo (handoff screens-pass): check + "¡Gracias!" + "Volver al inicio".
             La salida se lee como tal —no un genérico "Cerrar"— porque cierra el viaje y devuelve al home. */}
-        <Button label={t('ratings.backHome')} variant="primary" fullWidth onPress={onDone} />
+        <Button
+          label={t('ratings.backHome')}
+          variant="primary"
+          fullWidth
+          onPress={onDone}
+        />
       </View>
     );
   }
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       <Text variant="body" color="inkMuted" align="center">
-        {t('ratings.subtitle', { driver: t('trip.driver') })}
+        {t('ratings.subtitle', {driver: t('trip.driver')})}
       </Text>
 
       <StarRating value={stars} onChange={handleStars} />
@@ -98,7 +115,9 @@ export function RatingBody({ tripId, driverId, onDone }: RatingBodyProps): React
         </Text>
       ) : null}
 
-      {mutation.isError ? <Banner tone="danger" title={t('ratings.error')} /> : null}
+      {mutation.isError ? (
+        <Banner tone="danger" title={t('ratings.error')} />
+      ) : null}
 
       <TextField
         label={t('ratings.commentLabel')}
@@ -109,14 +128,21 @@ export function RatingBody({ tripId, driverId, onDone }: RatingBodyProps): React
         maxLength={1000}
       />
 
-      <View style={{ gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.sm}}>
         <Button
-          label={mutation.isPending ? t('ratings.submitting') : t('ratings.submit')}
+          label={
+            mutation.isPending ? t('ratings.submitting') : t('ratings.submit')
+          }
           fullWidth
           loading={mutation.isPending}
           onPress={submit}
         />
-        <Button label={t('ratings.skip')} variant="ghost" fullWidth onPress={onDone} />
+        <Button
+          label={t('ratings.skip')}
+          variant="ghost"
+          fullWidth
+          onPress={onDone}
+        />
       </View>
     </View>
   );

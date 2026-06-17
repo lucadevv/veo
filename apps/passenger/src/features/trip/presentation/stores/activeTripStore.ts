@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 export interface ActiveTripState {
   /**
@@ -33,14 +33,16 @@ export interface ActiveTripState {
  * a propósito (sin MMKV): la fuente de verdad es el server — al arrancar/enfocar se rehidrata vía
  * `GET /trips/active`, así nunca queda un id colgado de una sesión vieja.
  */
-export const useActiveTripStore = create<ActiveTripState>((set) => ({
+export const useActiveTripStore = create<ActiveTripState>(set => ({
   activeTripId: null,
   activeShareId: null,
   shareExpiresAt: null,
-  setActiveTripId: (activeTripId) => set({ activeTripId }),
-  setActiveShare: (activeShareId, shareExpiresAt) => set({ activeShareId, shareExpiresAt }),
-  clearShare: () => set({ activeShareId: null, shareExpiresAt: null }),
+  setActiveTripId: activeTripId => set({activeTripId}),
+  setActiveShare: (activeShareId, shareExpiresAt) =>
+    set({activeShareId, shareExpiresAt}),
+  clearShare: () => set({activeShareId: null, shareExpiresAt: null}),
   // El `clear` del viaje DEBE arrastrar el enlace: si no, un share viejo quedaría colgado al
   // arrancar un viaje nuevo (regresión del lifecycle → botón de revoke apuntando a un link ajeno).
-  clear: () => set({ activeTripId: null, activeShareId: null, shareExpiresAt: null }),
+  clear: () =>
+    set({activeTripId: null, activeShareId: null, shareExpiresAt: null}),
 }));

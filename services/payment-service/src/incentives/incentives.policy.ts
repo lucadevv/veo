@@ -5,7 +5,10 @@
 import type { Incentive, IncentiveProgress } from '../generated/prisma';
 
 /** ¿El incentivo está vigente en `now` (activo y dentro de [startsAt, endsAt])? */
-export function isActiveAt(incentive: Pick<Incentive, 'active' | 'startsAt' | 'endsAt'>, now: Date): boolean {
+export function isActiveAt(
+  incentive: Pick<Incentive, 'active' | 'startsAt' | 'endsAt'>,
+  now: Date,
+): boolean {
   if (!incentive.active) return false;
   if (incentive.startsAt && now < incentive.startsAt) return false;
   if (incentive.endsAt && now > incentive.endsAt) return false;
@@ -36,7 +39,11 @@ export function isMetaCompleted(
   incentive: Pick<Incentive, 'type' | 'targetTrips'>,
   tripsCompleted: number,
 ): boolean {
-  return incentive.type === 'META_VIAJES' && incentive.targetTrips > 0 && tripsCompleted >= incentive.targetTrips;
+  return (
+    incentive.type === 'META_VIAJES' &&
+    incentive.targetTrips > 0 &&
+    tripsCompleted >= incentive.targetTrips
+  );
 }
 
 /** Estado "completed" expuesto a la app: meta cumplida (META_VIAJES) o franja activa (HORA_PICO). */

@@ -4,15 +4,7 @@
  *  - GET  /audit         consultar entradas (RBAC COMPLIANCE_SUPERVISOR / SUPERADMIN).
  *  - GET  /audit/verify  verificar integridad de la cadena en un rango (RBAC).
  */
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   InternalIdentityGuard,
@@ -54,7 +46,8 @@ export class AuditController {
     @Req() req: HttpRequest,
   ): Promise<AuditEntryResponse> {
     const actorId = dto.actorId ?? user?.userId;
-    if (!actorId) throw new ValidationError('actorId requerido (sin identidad interna ni en el body)');
+    if (!actorId)
+      throw new ValidationError('actorId requerido (sin identidad interna ni en el body)');
     const entry = await this.audit.recordSync({
       actorId,
       action: dto.action,

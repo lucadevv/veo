@@ -1,5 +1,5 @@
 import * as Keychain from 'react-native-keychain';
-import type { LocalAuthService } from '../domain/localAuthService';
+import type {LocalAuthService} from '../domain/localAuthService';
 
 /** Servicio del "candado biométrico": una entrada protegida por biometría que fuerza el prompt. */
 const BIOMETRIC_GATE_SERVICE = 'pe.veo.passenger.biometric.gate';
@@ -26,17 +26,23 @@ export class KeychainLocalAuthService implements LocalAuthService {
 
   /** Garantiza que exista la entrada protegida por biometría (no prompt­ea al escribir). */
   private async ensureGate(): Promise<void> {
-    const exists = await Keychain.hasGenericPassword({ service: BIOMETRIC_GATE_SERVICE });
+    const exists = await Keychain.hasGenericPassword({
+      service: BIOMETRIC_GATE_SERVICE,
+    });
     if (exists) {
       return;
     }
-    await Keychain.setGenericPassword(BIOMETRIC_GATE_ACCOUNT, BIOMETRIC_GATE_TOKEN, {
-      service: BIOMETRIC_GATE_SERVICE,
-      accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-      // Android: clave en Keystore que exige autenticación biométrica para descifrar.
-      storage: Keychain.STORAGE_TYPE.AES_GCM,
-    });
+    await Keychain.setGenericPassword(
+      BIOMETRIC_GATE_ACCOUNT,
+      BIOMETRIC_GATE_TOKEN,
+      {
+        service: BIOMETRIC_GATE_SERVICE,
+        accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY,
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        // Android: clave en Keystore que exige autenticación biométrica para descifrar.
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      },
+    );
   }
 
   async authenticate(reason: string): Promise<boolean> {
@@ -44,11 +50,14 @@ export class KeychainLocalAuthService implements LocalAuthService {
       await this.ensureGate();
       const credentials = await Keychain.getGenericPassword({
         service: BIOMETRIC_GATE_SERVICE,
-        authenticationPrompt: { title: reason },
+        authenticationPrompt: {title: reason},
       });
       // Solo se considera superado si la lectura biométrica devolvió la entrada esperada.
-      return Boolean(credentials) && credentials !== false &&
-        credentials.password === BIOMETRIC_GATE_TOKEN;
+      return (
+        Boolean(credentials) &&
+        credentials !== false &&
+        credentials.password === BIOMETRIC_GATE_TOKEN
+      );
     } catch {
       // Cancelación del usuario, lockout o fallo del hardware: no superado.
       return false;

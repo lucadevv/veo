@@ -59,7 +59,9 @@ function makeService(
     totalCents: 0,
   },
 ) {
-  const post = vi.fn().mockResolvedValue({ id: 'trip-1', passengerId: 'usr-1', status: 'REQUESTED' });
+  const post = vi
+    .fn()
+    .mockResolvedValue({ id: 'trip-1', passengerId: 'usr-1', status: 'REQUESTED' });
   const tripRest = { post } as unknown as InternalRestClient;
   // identityGrpc.call('GetUser', …) → estado de verificación del pasajero.
   const identityGrpc = { call: vi.fn().mockResolvedValue({ found: true, kycStatus }) } as never;
@@ -197,7 +199,14 @@ describe('TripsService.createTrip — gate de deuda (BR-P02)', () => {
     const { svc, post } = makeService('VERIFIED', {
       hasDebt: true,
       totalCents: 800,
-      debts: [{ tripId: 'trip-cancelled', amountCents: 800, kind: 'CANCELLATION_PENALTY', penaltyId: 'pen-1' }],
+      debts: [
+        {
+          tripId: 'trip-cancelled',
+          amountCents: 800,
+          kind: 'CANCELLATION_PENALTY',
+          penaltyId: 'pen-1',
+        },
+      ],
     });
     await expect(svc.createTrip(user, baseDto(), 'idem-penalty')).rejects.toMatchObject({
       code: 'DEBT_PENDING',
@@ -214,7 +223,12 @@ describe('TripsService.createTrip — gate de deuda (BR-P02)', () => {
       totalCents: 1800,
       debts: [
         { tripId: 'trip-debt', amountCents: 1000, kind: 'DEBT' },
-        { tripId: 'trip-penalty', amountCents: 800, kind: 'CANCELLATION_PENALTY', penaltyId: 'pen-2' },
+        {
+          tripId: 'trip-penalty',
+          amountCents: 800,
+          kind: 'CANCELLATION_PENALTY',
+          penaltyId: 'pen-2',
+        },
       ],
     });
     await expect(svc.createTrip(user, baseDto(), 'idem-debt-plus-penalty')).rejects.toMatchObject({
@@ -226,9 +240,7 @@ describe('TripsService.createTrip — gate de deuda (BR-P02)', () => {
 
   it('cache HIT "sin deuda" → NO reconsulta payment (hot-path)', async () => {
     const { svc, post, debtGet, redis } = makeService('VERIFIED', { hasDebt: false });
-    (redis.get).mockImplementation(async (key: string) =>
-      key === 'debt:none:usr-1' ? '1' : null,
-    );
+    redis.get.mockImplementation(async (key: string) => (key === 'debt:none:usr-1' ? '1' : null));
     await svc.createTrip(user, baseDto(), 'idem-cache-hit');
     expect(debtGet).not.toHaveBeenCalled(); // no pegó a payment para la deuda
     expect(post).toHaveBeenCalledOnce();

@@ -1,4 +1,4 @@
-import type { PanicKey } from '@veo/api-client';
+import type {PanicKey} from '@veo/api-client';
 
 /**
  * Abstracción de obtención de la CLAVE HMAC de pánico (DIP).

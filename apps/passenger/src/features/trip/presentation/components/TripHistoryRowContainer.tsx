@@ -1,7 +1,7 @@
-import type { TripHistoryItem, TripStatus } from '@veo/api-client';
+import type {TripHistoryItem, TripStatus} from '@veo/api-client';
 import React from 'react';
-import { useMyTripRating } from '../../../ratings/presentation/useMyTripRating';
-import { TripHistoryRow } from './TripHistoryRow';
+import {useMyTripRating} from '../../../ratings/presentation/useMyTripRating';
+import {TripHistoryRow} from './TripHistoryRow';
 
 export interface TripHistoryRowContainerProps {
   trip: TripHistoryItem;
@@ -21,7 +21,7 @@ export function TripHistoryRowContainer({
   const status = trip.status.toUpperCase() as TripStatus;
   const rateable = status === 'COMPLETED' && trip.driverId != null;
 
-  const ratingQuery = useMyTripRating(trip.id, { enabled: rateable });
+  const ratingQuery = useMyTripRating(trip.id, {enabled: rateable});
 
   return (
     <TripHistoryRow

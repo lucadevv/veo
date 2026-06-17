@@ -12,11 +12,23 @@ function authHeaders(userId: string): Record<string, string> {
     { userId, type: 'passenger', roles: [], sessionId: 's1' },
     SECRET,
   );
-  return { 'content-type': 'application/json', 'x-veo-identity': header, 'x-veo-identity-sig': signature };
+  return {
+    'content-type': 'application/json',
+    'x-veo-identity': header,
+    'x-veo-identity-sig': signature,
+  };
 }
 
-async function post(path: string, userId: string, body: unknown): Promise<{ status: number; json: unknown }> {
-  const res = await fetch(BASE + path, { method: 'POST', headers: authHeaders(userId), body: JSON.stringify(body) });
+async function post(
+  path: string,
+  userId: string,
+  body: unknown,
+): Promise<{ status: number; json: unknown }> {
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: authHeaders(userId),
+    body: JSON.stringify(body),
+  });
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 async function get(path: string, userId: string): Promise<{ status: number; json: unknown }> {
@@ -33,15 +45,30 @@ async function main(): Promise<void> {
   for (let i = 0; i < stars.length; i++) {
     const tripId = uuidv7();
     const raterId = uuidv7();
-    const r = await post('/ratings', raterId, { tripId, ratedId: driverId, ratedRole: 'DRIVER', stars: stars[i] });
+    const r = await post('/ratings', raterId, {
+      tripId,
+      ratedId: driverId,
+      ratedRole: 'DRIVER',
+      stars: stars[i],
+    });
     console.log(`POST rating ${i + 1} (stars=${stars[i]}) → ${r.status}`);
     if (r.status !== 201) console.log('  body:', JSON.stringify(r.json));
   }
 
   // Duplicado por viaje
   const dupTrip = uuidv7();
-  const r1 = await post('/ratings', uuidv7(), { tripId: dupTrip, ratedId: driverId, ratedRole: 'DRIVER', stars: 5 });
-  const r2 = await post('/ratings', uuidv7(), { tripId: dupTrip, ratedId: driverId, ratedRole: 'DRIVER', stars: 1 });
+  const r1 = await post('/ratings', uuidv7(), {
+    tripId: dupTrip,
+    ratedId: driverId,
+    ratedRole: 'DRIVER',
+    stars: 5,
+  });
+  const r2 = await post('/ratings', uuidv7(), {
+    tripId: dupTrip,
+    ratedId: driverId,
+    ratedRole: 'DRIVER',
+    stars: 1,
+  });
   console.log(`Duplicado mismo trip → primero ${r1.status}, segundo ${r2.status} (esperado 409)`);
 
   // Agregado vía REST

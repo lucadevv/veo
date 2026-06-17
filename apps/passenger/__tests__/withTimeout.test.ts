@@ -1,4 +1,4 @@
-import { TimeoutError, withTimeout } from '../src/shared/utils/withTimeout';
+import {TimeoutError, withTimeout} from '../src/shared/utils/withTimeout';
 
 /**
  * `withTimeout` es el mecanismo que evita el peor modo de falla del pánico: un `getCurrentPosition()`
@@ -15,10 +15,12 @@ describe('withTimeout', () => {
   it('RECHAZA con TimeoutError si la promesa cuelga más allá del tope', async () => {
     // Promesa que nunca resuelve: simula el GPS colgado en la ruta de pánico.
     const nunca = new Promise<string>(() => {});
-    await expect(withTimeout(nunca, 20, 'GPS lento')).rejects.toBeInstanceOf(TimeoutError);
-    await expect(withTimeout(new Promise<string>(() => {}), 20, 'GPS lento')).rejects.toThrow(
-      'GPS lento',
+    await expect(withTimeout(nunca, 20, 'GPS lento')).rejects.toBeInstanceOf(
+      TimeoutError,
     );
+    await expect(
+      withTimeout(new Promise<string>(() => {}), 20, 'GPS lento'),
+    ).rejects.toThrow('GPS lento');
   });
 
   it('propaga el error propio de la promesa (no lo enmascara como timeout)', async () => {

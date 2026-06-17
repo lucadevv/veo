@@ -1,10 +1,10 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import type {TFunction} from 'i18next';
-import type {DriverEarningsBreakdown} from '@veo/api-client';
-import {Text, useTheme} from '@veo/ui-kit';
-import {IconTrips} from '../../../../shared/presentation/icons';
-import {formatPEN} from '../../../../shared/presentation/format';
+import { StyleSheet, View } from 'react-native';
+import type { TFunction } from 'i18next';
+import type { DriverEarningsBreakdown } from '@veo/api-client';
+import { Text, useTheme } from '@veo/ui-kit';
+import { IconTrips } from '../../../../shared/presentation/icons';
+import { formatPEN } from '../../../../shared/presentation/format';
 
 export interface BreakdownCardProps {
   /** Título del período (ej. "Hoy" / "Esta semana"). */
@@ -22,7 +22,11 @@ export interface BreakdownCardProps {
  * Solo usa los campos reales del contrato `DriverEarningsBreakdown`:
  * `grossCents`, `commissionCents`, `tipCents`, `netCents`, `tripCount`.
  */
-export function BreakdownCard({periodLabel, breakdown, t}: BreakdownCardProps): React.JSX.Element {
+export function BreakdownCard({
+  periodLabel,
+  breakdown,
+  t,
+}: BreakdownCardProps): React.JSX.Element {
   const theme = useTheme();
 
   return (
@@ -35,7 +39,8 @@ export function BreakdownCard({periodLabel, breakdown, t}: BreakdownCardProps): 
           padding: theme.spacing['2xl'],
           gap: theme.spacing.lg,
         },
-      ]}>
+      ]}
+    >
       {/* Encabezado: período + nº de viajes compacto. */}
       <View style={styles.head}>
         <Text variant="subhead" color="inkMuted" style={styles.flex}>
@@ -49,17 +54,18 @@ export function BreakdownCard({periodLabel, breakdown, t}: BreakdownCardProps): 
               borderRadius: theme.radii.pill,
               gap: theme.spacing.xs,
             },
-          ]}>
+          ]}
+        >
           <IconTrips size={14} color={theme.colors.inkSubtle} strokeWidth={2} />
           <Text variant="label" color="inkSubtle" tabular>
-            {t('earnings.tripCount', {count: breakdown.tripCount})}
+            {t('earnings.tripCount', { count: breakdown.tripCount })}
           </Text>
         </View>
       </View>
 
       {/* Métrica protagonista: NETO con tinte cian y numerales tabulares. */}
       <View style={styles.netBlock}>
-        <View style={[styles.accentRule, {backgroundColor: theme.colors.accent}]} />
+        <View style={[styles.accentRule, { backgroundColor: theme.colors.accent }]} />
         <Text variant="footnote" color="inkSubtle">
           {t('earnings.net')}
         </Text>
@@ -68,7 +74,7 @@ export function BreakdownCard({periodLabel, breakdown, t}: BreakdownCardProps): 
         </Text>
       </View>
 
-      <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
 
       {/* Líneas que componen el neto (denso, una por fila). */}
       <View style={styles.lines}>
@@ -100,7 +106,7 @@ interface BreakdownLineProps {
 }
 
 /** Fila etiqueta–monto del desglose. Privada de la tarjeta. */
-function BreakdownLine({label, value, valueColor}: BreakdownLineProps): React.JSX.Element {
+function BreakdownLine({ label, value, valueColor }: BreakdownLineProps): React.JSX.Element {
   return (
     <View style={styles.line}>
       <Text variant="callout" color="inkMuted" style={styles.flex} numberOfLines={1}>
@@ -114,13 +120,18 @@ function BreakdownLine({label, value, valueColor}: BreakdownLineProps): React.JS
 }
 
 const styles = StyleSheet.create({
-  flex: {flex: 1},
-  card: {alignSelf: 'stretch'},
-  head: {flexDirection: 'row', alignItems: 'center'},
-  tripChip: {flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4},
-  netBlock: {gap: 4},
-  accentRule: {width: 36, height: 3, borderRadius: 999, marginBottom: 6},
-  divider: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  lines: {gap: 10},
-  line: {flexDirection: 'row', alignItems: 'center'},
+  flex: { flex: 1 },
+  card: { alignSelf: 'stretch' },
+  head: { flexDirection: 'row', alignItems: 'center' },
+  tripChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  netBlock: { gap: 4 },
+  accentRule: { width: 36, height: 3, borderRadius: 999, marginBottom: 6 },
+  divider: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  lines: { gap: 10 },
+  line: { flexDirection: 'row', alignItems: 'center' },
 });

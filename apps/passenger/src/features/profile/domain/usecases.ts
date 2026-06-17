@@ -3,12 +3,12 @@ import type {
   RequestPhoneLinkResult,
   UpdatePassengerProfile,
 } from '@veo/api-client';
-import type { AuthRepository } from '../../auth/domain/authRepository';
-import type { AvatarUploader } from '../../../shared/media/domain/avatarUploader';
-import type { PickedImage } from '../../../shared/media/domain/imagePickerService';
-import type { AccountDeletionRequest } from './entities';
-import type { ProfileRepository } from './profileRepository';
-import { isPeruMobileValid } from './phoneVerification';
+import type {AuthRepository} from '../../auth/domain/authRepository';
+import type {AvatarUploader} from '../../../shared/media/domain/avatarUploader';
+import type {PickedImage} from '../../../shared/media/domain/imagePickerService';
+import type {AccountDeletionRequest} from './entities';
+import type {ProfileRepository} from './profileRepository';
+import {isPeruMobileValid} from './phoneVerification';
 
 /** Error de validación local del celular ANTES de tocar la red (se enruta a la UI del sheet). */
 export class PhoneValidationError extends Error {
@@ -51,8 +51,8 @@ export class UploadAvatarUseCase {
   ) {}
 
   async execute(file: PickedImage): Promise<PassengerProfile> {
-    const { photoUrl } = await this.uploader.uploadAvatar(file);
-    return this.repository.updateMe({ photoUrl });
+    const {photoUrl} = await this.uploader.uploadAvatar(file);
+    return this.repository.updateMe({photoUrl});
   }
 }
 

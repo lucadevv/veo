@@ -1,9 +1,9 @@
-import {create} from 'zustand';
-import type {MobileSessionUser} from '@veo/api-client';
+import { create } from 'zustand';
+import type { MobileSessionUser } from '@veo/api-client';
 // Type-only (se borra en runtime → NO reintroduce el ciclo): tipa el require perezoso de resetRegistration.
 import type * as RegistrationStore from '../../features/registration/presentation/state/registrationStore';
-import {prefsStore, secureStore} from '../storage/mmkv';
-import {SecureKey} from '../storage/keys';
+import { prefsStore, secureStore } from '../storage/mmkv';
+import { SecureKey } from '../storage/keys';
 
 /**
  * Clave de preferencias donde el wizard de alta persiste su progreso (espeja la constante del
@@ -25,7 +25,7 @@ const REGISTRATION_PREF_KEY = 'pref.registration.v1';
  */
 function resetRegistration(): void {
   // require lazy A PROPÓSITO (ver doc arriba): rompe el ciclo core↔feature en tiempo de módulo.
-  const {useRegistrationStore} =
+  const { useRegistrationStore } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../../features/registration/presentation/state/registrationStore') as typeof RegistrationStore;
   useRegistrationStore.getState().reset();
@@ -50,7 +50,7 @@ export interface SessionState {
   /** Rehidrata tokens/usuario desde el almacén cifrado al arrancar la app. */
   hydrate(): void;
   /** Establece sesión completa tras verificar OTP (tokens + usuario). */
-  setSession(payload: {tokens: SessionTokens; user: MobileSessionUser}): void;
+  setSession(payload: { tokens: SessionTokens; user: MobileSessionUser }): void;
   /** Actualiza solo los tokens (usado por el refresh del cliente HTTP). */
   setTokens(tokens: SessionTokens): void;
   /** Actualiza el usuario de sesión (p. ej. tras refrescar el perfil del conductor). */
@@ -66,7 +66,7 @@ export interface SessionState {
  * Los tokens se persisten en el almacén MMKV cifrado; el estado en memoria refleja lo persistido.
  * Se consume desde React con `useSessionStore(...)` y fuera de React con `useSessionStore.getState()`.
  */
-export const useSessionStore = create<SessionState>(set => ({
+export const useSessionStore = create<SessionState>((set) => ({
   status: 'bootstrapping',
   accessToken: null,
   refreshToken: null,
@@ -86,7 +86,7 @@ export const useSessionStore = create<SessionState>(set => ({
     });
   },
 
-  setSession: ({tokens, user}) => {
+  setSession: ({ tokens, user }) => {
     secureStore.setString(SecureKey.AccessToken, tokens.accessToken);
     secureStore.setString(SecureKey.RefreshToken, tokens.refreshToken);
     secureStore.setObject(SecureKey.SessionUser, user);
@@ -99,15 +99,15 @@ export const useSessionStore = create<SessionState>(set => ({
     });
   },
 
-  setTokens: tokens => {
+  setTokens: (tokens) => {
     secureStore.setString(SecureKey.AccessToken, tokens.accessToken);
     secureStore.setString(SecureKey.RefreshToken, tokens.refreshToken);
-    set({accessToken: tokens.accessToken, refreshToken: tokens.refreshToken});
+    set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
   },
 
-  setUser: user => {
+  setUser: (user) => {
     secureStore.setObject(SecureKey.SessionUser, user);
-    set({user});
+    set({ user });
   },
 
   clearSession: () => {
@@ -116,7 +116,13 @@ export const useSessionStore = create<SessionState>(set => ({
     secureStore.remove(SecureKey.SessionUser);
     // Limpia el alta para que el siguiente conductor arranque limpio (sin PII ni status heredados).
     resetRegistration();
-    set({accessToken: null, refreshToken: null, user: null, expired: false, status: 'unauthenticated'});
+    set({
+      accessToken: null,
+      refreshToken: null,
+      user: null,
+      expired: false,
+      status: 'unauthenticated',
+    });
   },
 
   expireSession: () => {
@@ -125,6 +131,12 @@ export const useSessionStore = create<SessionState>(set => ({
     secureStore.remove(SecureKey.SessionUser);
     // También en expiración: una sesión expirada no debe dejar el progreso del alta accesible.
     resetRegistration();
-    set({accessToken: null, refreshToken: null, user: null, expired: true, status: 'unauthenticated'});
+    set({
+      accessToken: null,
+      refreshToken: null,
+      user: null,
+      expired: true,
+      status: 'unauthenticated',
+    });
   },
 }));

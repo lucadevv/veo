@@ -4,12 +4,7 @@
  * así que aquí no hay excepción de pánico; sí se exceptúan health/metrics.
  * Algoritmo: sorted set por clave; se purgan entradas fuera de ventana y se cuenta el resto.
  */
-import {
-  Injectable,
-  Inject,
-  type CanActivate,
-  type ExecutionContext,
-} from '@nestjs/common';
+import { Injectable, Inject, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import type Redis from 'ioredis';

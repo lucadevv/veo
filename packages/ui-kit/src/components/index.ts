@@ -1,7 +1,12 @@
 export { Text, type TextProps } from './Text';
 export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button';
 export { Card, type CardProps, type CardVariant } from './Card';
-export { IconButton, type IconButtonProps, type IconButtonVariant, type IconButtonSize } from './IconButton';
+export {
+  IconButton,
+  type IconButtonProps,
+  type IconButtonVariant,
+  type IconButtonSize,
+} from './IconButton';
 export { StatusPill, type StatusPillProps, type StatusTone } from './StatusPill';
 export { Avatar, type AvatarProps, type AvatarSize } from './Avatar';
 export { Banner, type BannerProps, type BannerTone } from './Banner';

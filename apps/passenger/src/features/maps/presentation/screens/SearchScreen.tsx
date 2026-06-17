@@ -1,7 +1,11 @@
-import type { MapPoint, PlaceSuggestion } from '@veo/api-client';
-import { type RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@tanstack/react-query';
+import type {MapPoint, PlaceSuggestion} from '@veo/api-client';
+import {
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useQuery} from '@tanstack/react-query';
 import {
   Banner,
   IconButton,
@@ -13,27 +17,31 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { FlatList, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { useCurrentLocation } from '../../../trip/presentation/hooks/useCurrentLocation';
-import { SavedPlacesShortcuts } from '../../../places/presentation';
-import type { SavedPlace } from '../../../places/domain/entities';
-import type { RoutePlace } from '../../domain/entities';
-import { useAutocomplete } from '../hooks/useAutocomplete';
-import { EnterView } from '../components/motion';
-import { IconClose, IconPin, IconTarget } from '../../../trip/presentation/components/icons';
-import { useRideDraftStore } from '../stores/rideDraftStore';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {FlatList, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {SavedPlacesShortcuts} from '../../../places/presentation';
+import type {SavedPlace} from '../../../places/domain/entities';
+import type {RoutePlace} from '../../domain/entities';
+import {useAutocomplete} from '../hooks/useAutocomplete';
+import {EnterView} from '../components/motion';
+import {
+  IconClose,
+  IconPin,
+  IconTarget,
+} from '../../../trip/presentation/components/icons';
+import {useRideDraftStore} from '../stores/rideDraftStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** Convierte una sugerencia del bff en un lugar de ruta (punto + etiqueta). */
 function toRoutePlace(suggestion: PlaceSuggestion): RoutePlace {
   return {
-    point: { lat: suggestion.lat, lng: suggestion.lng },
+    point: {lat: suggestion.lat, lng: suggestion.lng},
     title: suggestion.title,
     subtitle: suggestion.subtitle,
   };
@@ -50,28 +58,29 @@ function toRoutePlace(suggestion: PlaceSuggestion): RoutePlace {
  */
 export function SearchScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
   // Origen del flujo: define a dónde se vuelve al fijar ambos extremos. Default 'quote' = camino legacy
   // (no rompe ScheduleNew ni callers viejos); el sheet pasa 'sheet' para volver a la cotización in-sheet.
-  const flow = useRoute<RouteProp<RootStackParamList, 'Search'>>().params?.flow ?? 'quote';
+  const flow =
+    useRoute<RouteProp<RootStackParamList, 'Search'>>().params?.flow ?? 'quote';
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const { point: myLocation } = useCurrentLocation();
+  const {point: myLocation} = useCurrentLocation();
 
-  const origin = useRideDraftStore((s) => s.origin);
-  const destination = useRideDraftStore((s) => s.destination);
-  const editing = useRideDraftStore((s) => s.editing);
-  const setOrigin = useRideDraftStore((s) => s.setOrigin);
-  const setDestination = useRideDraftStore((s) => s.setDestination);
-  const setWaypoint = useRideDraftStore((s) => s.setWaypoint);
-  const setEditing = useRideDraftStore((s) => s.setEditing);
+  const origin = useRideDraftStore(s => s.origin);
+  const destination = useRideDraftStore(s => s.destination);
+  const editing = useRideDraftStore(s => s.editing);
+  const setOrigin = useRideDraftStore(s => s.setOrigin);
+  const setDestination = useRideDraftStore(s => s.setDestination);
+  const setWaypoint = useRideDraftStore(s => s.setWaypoint);
+  const setEditing = useRideDraftStore(s => s.setEditing);
 
   const [query, setQuery] = useState('');
 
   // Punto del dispositivo en formato de la API de mapas (lng), para sesgo y origen por defecto.
   const myPoint = useMemo<MapPoint | null>(
-    () => (myLocation ? { lat: myLocation.lat, lng: myLocation.lon } : null),
+    () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
     [myLocation],
   );
 
@@ -87,19 +96,19 @@ export function SearchScreen(): React.JSX.Element {
   useEffect(() => {
     if (!origin && reverseQuery.data) {
       setOrigin({
-        point: { lat: reverseQuery.data.lat, lng: reverseQuery.data.lng },
+        point: {lat: reverseQuery.data.lat, lng: reverseQuery.data.lng},
         title: reverseQuery.data.title,
         subtitle: reverseQuery.data.subtitle,
       });
     }
   }, [origin, reverseQuery.data, setOrigin]);
 
-  const { suggestions, loading, error, active } = useAutocomplete(query, myPoint);
+  const {suggestions, loading, error, active} = useAutocomplete(query, myPoint);
 
   // Cambia el punto en edición (origen/destino/parada) y limpia el texto de búsqueda.
   const focusEndpoint = useCallback(
     (target: 'origin' | 'destination') => {
-      setEditing({ kind: target });
+      setEditing({kind: target});
       setQuery('');
     },
     [setEditing],
@@ -140,7 +149,16 @@ export function SearchScreen(): React.JSX.Element {
         focusEndpoint('origin');
       }
     },
-    [editing, origin, destination, setOrigin, setDestination, setWaypoint, resolveFlow, focusEndpoint],
+    [
+      editing,
+      origin,
+      destination,
+      setOrigin,
+      setDestination,
+      setWaypoint,
+      resolveFlow,
+      focusEndpoint,
+    ],
   );
 
   // Fija un lugar guardado (Casa/Trabajo/favorito) en el extremo en edición con un toque.
@@ -149,7 +167,7 @@ export function SearchScreen(): React.JSX.Element {
       applyPlace({
         point: place.point,
         title: place.label,
-        ...(place.subtitle ? { subtitle: place.subtitle } : {}),
+        ...(place.subtitle ? {subtitle: place.subtitle} : {}),
       });
     },
     [applyPlace],
@@ -158,7 +176,7 @@ export function SearchScreen(): React.JSX.Element {
   const useCurrentAsOrigin = useCallback(() => {
     if (reverseQuery.data) {
       applyPlace({
-        point: { lat: reverseQuery.data.lat, lng: reverseQuery.data.lng },
+        point: {lat: reverseQuery.data.lat, lng: reverseQuery.data.lng},
         title: reverseQuery.data.title,
         subtitle: reverseQuery.data.subtitle,
       });
@@ -173,12 +191,16 @@ export function SearchScreen(): React.JSX.Element {
     editing.kind === 'origin'
       ? t('home.origin')
       : editing.kind === 'waypoint'
-        ? t('waypoints.stopLabel', { index: editing.index + 1 })
+        ? t('waypoints.stopLabel', {index: editing.index + 1})
         : t('home.destination');
 
   return (
     <SafeScreen padded={false}>
-      <View style={[styles.header, { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md }]}>
+      <View
+        style={[
+          styles.header,
+          {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md},
+        ]}>
         <View style={styles.titleRow}>
           <Text variant="title2">{t('maps.searchTitle')}</Text>
           <IconButton
@@ -215,15 +237,17 @@ export function SearchScreen(): React.JSX.Element {
 
       <FlatList
         data={suggestions}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingHorizontal: theme.spacing.xl,
           paddingBottom: theme.spacing.xl,
         }}
         ListHeaderComponent={
-          <View style={{ gap: theme.spacing.md }}>
-            {error ? <Banner tone="danger" title={t('maps.searchError')} /> : null}
+          <View style={{gap: theme.spacing.md}}>
+            {error ? (
+              <Banner tone="danger" title={t('maps.searchError')} />
+            ) : null}
             {showCurrentLocationRow ? (
               <ListItem
                 title={t('maps.useCurrentLocation')}
@@ -241,10 +265,12 @@ export function SearchScreen(): React.JSX.Element {
               leading={<IconPin color={theme.colors.accent} size={20} />}
             />
             {/* Accesos rápidos a lugares guardados (fijan el extremo en edición con un toque). */}
-            {!active ? <SavedPlacesShortcuts onSelect={applySavedPlace} /> : null}
+            {!active ? (
+              <SavedPlacesShortcuts onSelect={applySavedPlace} />
+            ) : null}
           </View>
         }
-        renderItem={({ item, index }) => (
+        renderItem={({item, index}) => (
           <EnterView index={index} offsetY={6}>
             <ListItem
               title={item.title}
@@ -256,7 +282,7 @@ export function SearchScreen(): React.JSX.Element {
         )}
         ListEmptyComponent={
           loading ? (
-            <View style={{ gap: theme.spacing.md, paddingTop: theme.spacing.md }}>
+            <View style={{gap: theme.spacing.md, paddingTop: theme.spacing.md}}>
               <Skeleton variant="text" height={20} />
               <Skeleton variant="text" height={20} />
               <Skeleton variant="text" height={20} />
@@ -266,8 +292,7 @@ export function SearchScreen(): React.JSX.Element {
               variant="footnote"
               color="inkSubtle"
               align="center"
-              style={{ paddingTop: theme.spacing.xl }}
-            >
+              style={{paddingTop: theme.spacing.xl}}>
               {active ? t('maps.noResults') : t('maps.typeMore')}
             </Text>
           )
@@ -278,6 +303,10 @@ export function SearchScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 8 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  header: {paddingTop: 8},
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 });

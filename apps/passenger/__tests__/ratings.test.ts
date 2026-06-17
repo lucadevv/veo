@@ -4,8 +4,11 @@ import type {
   RatingSubmitRequest,
   RatingView,
 } from '@veo/api-client';
-import type { RatingsRepository } from '../src/features/ratings/domain/ratingsRepository';
-import { RatingValidationError, SubmitRatingUseCase } from '../src/features/ratings/domain/usecases';
+import type {RatingsRepository} from '../src/features/ratings/domain/ratingsRepository';
+import {
+  RatingValidationError,
+  SubmitRatingUseCase,
+} from '../src/features/ratings/domain/usecases';
 
 class FakeRatingsRepository implements RatingsRepository {
   submit = jest.fn(
@@ -19,7 +22,9 @@ class FakeRatingsRepository implements RatingsRepository {
       createdAt: '2026-05-29T10:00:00.000Z',
     }),
   );
-  getAggregate = jest.fn(async (): Promise<RatingAggregateView> => ({} as RatingAggregateView));
+  getAggregate = jest.fn(
+    async (): Promise<RatingAggregateView> => ({}) as RatingAggregateView,
+  );
   getMyRatingForTrip = jest.fn(async (): Promise<MyRatingView | null> => null);
 }
 
@@ -45,8 +50,12 @@ describe('SubmitRatingUseCase', () => {
     const repo = new FakeRatingsRepository();
     const useCase = new SubmitRatingUseCase(repo);
 
-    expect(() => useCase.execute({ ...base, stars: 0 })).toThrow(RatingValidationError);
-    expect(() => useCase.execute({ ...base, stars: 6 })).toThrow(RatingValidationError);
+    expect(() => useCase.execute({...base, stars: 0})).toThrow(
+      RatingValidationError,
+    );
+    expect(() => useCase.execute({...base, stars: 6})).toThrow(
+      RatingValidationError,
+    );
     expect(repo.submit).not.toHaveBeenCalled();
   });
 });

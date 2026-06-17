@@ -75,10 +75,14 @@ export class AccessService {
     }
 
     if (input.segmentId) {
-      const seg = await this.prisma.read.mediaSegment.findUnique({ where: { id: input.segmentId } });
+      const seg = await this.prisma.read.mediaSegment.findUnique({
+        where: { id: input.segmentId },
+      });
       if (!seg) throw new NotFoundError('Segmento de video no encontrado');
     } else {
-      const any = await this.prisma.read.mediaSegment.findFirst({ where: { tripId: input.tripId } });
+      const any = await this.prisma.read.mediaSegment.findFirst({
+        where: { tripId: input.tripId },
+      });
       if (!any) throw new NotFoundError('No hay video grabado para el viaje');
     }
 

@@ -1,4 +1,4 @@
-import { OfferingIcon, VehicleClass } from '@veo/shared-types';
+import {OfferingIcon, VehicleClass} from '@veo/shared-types';
 import {
   FALLBACK_OFFERING_GLYPH,
   OFFERING_GLYPHS,
@@ -16,33 +16,37 @@ import {
  */
 describe('OFFERING_GLYPHS · registro token→glyph (ADR 013 §1.6)', () => {
   it('token conocido del quote resuelve SU entrada del registro', () => {
-    expect(offeringGlyph({ icon: OfferingIcon.MOTO })).toBe(OFFERING_GLYPHS[OfferingIcon.MOTO]);
-    expect(offeringGlyph({ icon: OfferingIcon.CAR })).toBe(OFFERING_GLYPHS[OfferingIcon.CAR]);
+    expect(offeringGlyph({icon: OfferingIcon.MOTO})).toBe(
+      OFFERING_GLYPHS[OfferingIcon.MOTO],
+    );
+    expect(offeringGlyph({icon: OfferingIcon.CAR})).toBe(
+      OFFERING_GLYPHS[OfferingIcon.CAR],
+    );
   });
 
   it('el icon del quote MANDA sobre la clase (data-driven: el server elige el glyph)', () => {
-    expect(offeringGlyph({ icon: OfferingIcon.MOTO, vehicleType: VehicleClass.CAR })).toBe(
-      OFFERING_GLYPHS[OfferingIcon.MOTO],
-    );
+    expect(
+      offeringGlyph({icon: OfferingIcon.MOTO, vehicleType: VehicleClass.CAR}),
+    ).toBe(OFFERING_GLYPHS[OfferingIcon.MOTO]);
   });
 
   it('token DESCONOCIDO (server nuevo + app vieja) cae al fallback EXPLÍCITO de auto', () => {
     // B5-4: 'ambulance' YA es un token conocido (vertical agregada). Usamos uno genuinamente futuro
     // que esta app aún no tiene en su registro para probar la degradación al fallback.
-    expect(offeringGlyph({ icon: 'helicopter' })).toBe(FALLBACK_OFFERING_GLYPH);
+    expect(offeringGlyph({icon: 'helicopter'})).toBe(FALLBACK_OFFERING_GLYPH);
     expect(FALLBACK_OFFERING_GLYPH).toBe(OFFERING_GLYPHS[OfferingIcon.CAR]);
   });
 
   it('un token hostil tipo __proto__ NO devuelve basura del prototype: fallback', () => {
-    expect(offeringGlyph({ icon: '__proto__' })).toBe(FALLBACK_OFFERING_GLYPH);
-    expect(offeringGlyph({ icon: 'constructor' })).toBe(FALLBACK_OFFERING_GLYPH);
+    expect(offeringGlyph({icon: '__proto__'})).toBe(FALLBACK_OFFERING_GLYPH);
+    expect(offeringGlyph({icon: 'constructor'})).toBe(FALLBACK_OFFERING_GLYPH);
   });
 
   it('sin `icon` (historial viejo, nearby) resuelve por clase de vehículo', () => {
-    expect(offeringGlyph({ vehicleType: VehicleClass.MOTO })).toBe(
+    expect(offeringGlyph({vehicleType: VehicleClass.MOTO})).toBe(
       OFFERING_GLYPHS[OfferingIcon.MOTO],
     );
-    expect(offeringGlyph({ vehicleType: VehicleClass.CAR })).toBe(
+    expect(offeringGlyph({vehicleType: VehicleClass.CAR})).toBe(
       OFFERING_GLYPHS[OfferingIcon.CAR],
     );
   });
@@ -74,25 +78,45 @@ describe('OFFERING_GLYPHS · registro token→glyph (ADR 013 §1.6)', () => {
 
 describe('offeringDisplayName · labelKey del quote → i18n de la app (fallback name del server)', () => {
   it('labelKey conocido resuelve en el i18n de la app', () => {
-    expect(offeringDisplayName({ labelKey: 'offering.veo_moto.name', name: 'lo que diga el server' }))
-      .toBe('VEO Moto');
-    expect(offeringDisplayName({ labelKey: 'offering.veo_xl.name', name: 'x' })).toBe('VEO XL');
+    expect(
+      offeringDisplayName({
+        labelKey: 'offering.veo_moto.name',
+        name: 'lo que diga el server',
+      }),
+    ).toBe('VEO Moto');
+    expect(
+      offeringDisplayName({labelKey: 'offering.veo_xl.name', name: 'x'}),
+    ).toBe('VEO XL');
   });
 
   it('labelKey DESCONOCIDO (oferta más nueva que la app) cae al name resuelto server-side', () => {
     expect(
-      offeringDisplayName({ labelKey: 'offering.veo_futura.name', name: 'VEO Futura' }),
+      offeringDisplayName({
+        labelKey: 'offering.veo_futura.name',
+        name: 'VEO Futura',
+      }),
     ).toBe('VEO Futura');
   });
 
   it('B5-vert · las verticales (ocultas) resuelven su nombre NATIVO en el i18n de la app', () => {
-    expect(offeringDisplayName({ labelKey: 'offering.veo_ambulance.name', name: 'x' })).toBe('VEO Ambulancia');
-    expect(offeringDisplayName({ labelKey: 'offering.veo_tow.name', name: 'x' })).toBe('VEO Grúa');
-    expect(offeringDisplayName({ labelKey: 'offering.veo_mechanic.name', name: 'x' })).toBe('VEO Mecánico');
-    expect(offeringDisplayName({ labelKey: 'offering.veo_economico_ev.name', name: 'x' })).toBe('VEO Económico Eléctrico');
+    expect(
+      offeringDisplayName({labelKey: 'offering.veo_ambulance.name', name: 'x'}),
+    ).toBe('VEO Ambulancia');
+    expect(
+      offeringDisplayName({labelKey: 'offering.veo_tow.name', name: 'x'}),
+    ).toBe('VEO Grúa');
+    expect(
+      offeringDisplayName({labelKey: 'offering.veo_mechanic.name', name: 'x'}),
+    ).toBe('VEO Mecánico');
+    expect(
+      offeringDisplayName({
+        labelKey: 'offering.veo_economico_ev.name',
+        name: 'x',
+      }),
+    ).toBe('VEO Económico Eléctrico');
   });
 
   it('sin labelKey (server viejo) usa el name del quote — compat intacta', () => {
-    expect(offeringDisplayName({ name: 'VEO Económico' })).toBe('VEO Económico');
+    expect(offeringDisplayName({name: 'VEO Económico'})).toBe('VEO Económico');
   });
 });

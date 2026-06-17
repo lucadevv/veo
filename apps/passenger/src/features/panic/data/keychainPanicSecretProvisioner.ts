@@ -1,10 +1,10 @@
-import type { PanicKeyRepository } from '../domain/panicKeyRepository';
-import type { PanicSecretStore } from '../domain/panicSecretStore';
+import type {PanicKeyRepository} from '../domain/panicKeyRepository';
+import type {PanicSecretStore} from '../domain/panicSecretStore';
 import {
   PanicKeyVersionMismatchError,
   type PanicSecretProvisioner,
 } from '../domain/panicSecretProvisioner';
-import { PANIC_SIGNATURE_VERSION } from '../domain/panicSignature';
+import {PANIC_SIGNATURE_VERSION} from '../domain/panicSignature';
 
 /**
  * Aprovisionador REAL del secreto HMAC de pánico.
@@ -30,7 +30,10 @@ export class KeychainPanicSecretProvisioner implements PanicSecretProvisioner {
   async refresh(): Promise<void> {
     const key = await this.keyRepository.fetchKey();
     if (key.version !== PANIC_SIGNATURE_VERSION) {
-      throw new PanicKeyVersionMismatchError(PANIC_SIGNATURE_VERSION, key.version);
+      throw new PanicKeyVersionMismatchError(
+        PANIC_SIGNATURE_VERSION,
+        key.version,
+      );
     }
     await this.secretStore.setSecret(key.secret);
   }

@@ -59,7 +59,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
   ) {
     super({
       clientId: KAFKA_CLIENT_ID,
-      brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(',').map((b) => b.trim()),
+      brokers: config
+        .getOrThrow<string>('KAFKA_BROKERS')
+        .split(',')
+        .map((b) => b.trim()),
       groupId: config.getOrThrow<string>('KAFKA_GROUP_ID'),
     });
     this.log = createLogger('driver-bff-kafka');
@@ -113,7 +116,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
       });
       domainEventsTotal.inc({ event: envelope.eventType, result: 'emitted' });
     } catch (err) {
-      this.log.warn({ err, eventType: envelope.eventType }, 'no se pudo enrutar el evento al conductor');
+      this.log.warn(
+        { err, eventType: envelope.eventType },
+        'no se pudo enrutar el evento al conductor',
+      );
       domainEventsTotal.inc({ event: envelope.eventType, result: 'error' });
     }
   }
@@ -187,7 +193,12 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
 
     const tripId = payload.tripId;
     if (typeof tripId !== 'string' || tripId.length === 0) return undefined;
-    const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id: tripId }, SYSTEM_IDENTITY);
+    const trip = await this.grpc.call<TripReply>(
+      'trip',
+      'GetTrip',
+      { id: tripId },
+      SYSTEM_IDENTITY,
+    );
     return trip.found && trip.driverId ? trip.driverId : undefined;
   }
 }

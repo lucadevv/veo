@@ -1,5 +1,5 @@
-import { createNavigationContainerRef } from '@react-navigation/native';
-import type { RootStackParamList } from './types';
+import {createNavigationContainerRef} from '@react-navigation/native';
+import type {RootStackParamList} from './types';
 
 /**
  * Ref global del NavigationContainer. Permite navegar DESDE FUERA de React (handlers de push FCM, que

@@ -48,7 +48,7 @@ const DEFAULT_INTERVAL_MS = 100;
 export function planForChallenge(action: string): FrameCapturePlan {
   const normalized = action.trim().toUpperCase();
   const frameCount = FRAME_COUNT_BY_ACTION[normalized] ?? DEFAULT_FRAME_COUNT;
-  return {frameCount, intervalMs: DEFAULT_INTERVAL_MS, action};
+  return { frameCount, intervalMs: DEFAULT_INTERVAL_MS, action };
 }
 
 /** Código de error cuando el módulo nativo de captura no está enlazado. */

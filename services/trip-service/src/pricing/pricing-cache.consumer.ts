@@ -73,10 +73,14 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
   /** TODOS los eventos del group, en un solo record (único punto de registro · regla de oro). */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
-      'pricing.mode_schedule_updated': (envelope) => this.onConfigUpdated('pricing.mode_schedule_updated', envelope),
-      'pricing.bid_floor_updated': (envelope) => this.onConfigUpdated('pricing.bid_floor_updated', envelope),
-      'fuel.surcharge_updated': (envelope) => this.onConfigUpdated('fuel.surcharge_updated', envelope),
-      'energy.catalog_updated': (envelope) => this.onConfigUpdated('energy.catalog_updated', envelope),
+      'pricing.mode_schedule_updated': (envelope) =>
+        this.onConfigUpdated('pricing.mode_schedule_updated', envelope),
+      'pricing.bid_floor_updated': (envelope) =>
+        this.onConfigUpdated('pricing.bid_floor_updated', envelope),
+      'fuel.surcharge_updated': (envelope) =>
+        this.onConfigUpdated('fuel.surcharge_updated', envelope),
+      'energy.catalog_updated': (envelope) =>
+        this.onConfigUpdated('energy.catalog_updated', envelope),
       'catalog.updated': (envelope) => this.onConfigUpdated('catalog.updated', envelope),
     };
   }
@@ -91,7 +95,10 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
    * (at-least-once) solo vuelve a invalidar un cache ya vacío → inofensivo. No lanza: invalidar no
    * puede fallar, así que no hay nada que reintentar ni que mandar a DLQ.
    */
-  private async onConfigUpdated(eventType: PricingCacheEvent, envelope: EventEnvelope<unknown>): Promise<void> {
+  private async onConfigUpdated(
+    eventType: PricingCacheEvent,
+    envelope: EventEnvelope<unknown>,
+  ): Promise<void> {
     switch (eventType) {
       case 'pricing.mode_schedule_updated':
         this.schedule.invalidateCache();
@@ -109,7 +116,9 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
         this.catalog.invalidateCache();
         break;
     }
-    this.logger.debug(`${eventType} (eventId=${envelope.eventId}) → cache de ${PRICING_CACHE_EVENTS[eventType]} invalidado`);
+    this.logger.debug(
+      `${eventType} (eventId=${envelope.eventId}) → cache de ${PRICING_CACHE_EVENTS[eventType]} invalidado`,
+    );
     return Promise.resolve();
   }
 }

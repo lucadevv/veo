@@ -1,6 +1,10 @@
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
-import { enablePush, getPushPermission, type PushPermission } from '../../../../services/messaging';
+import {useFocusEffect} from '@react-navigation/native';
+import {useCallback, useState} from 'react';
+import {
+  enablePush,
+  getPushPermission,
+  type PushPermission,
+} from '../../../../services/messaging';
 
 export type PushPermissionUi = PushPermission | 'loading';
 
@@ -40,5 +44,5 @@ export function usePushPermission(): UsePushPermission {
     return next;
   }, []);
 
-  return { status, enable, refresh };
+  return {status, enable, refresh};
 }

@@ -38,7 +38,9 @@ const DISPATCH = 'http://localhost:3003/api/v1';
 const TRIP = 'http://localhost:3002/api/v1';
 const SECRET = process.env.INTERNAL_IDENTITY_SECRET;
 if (!SECRET) {
-  throw new Error('Falta INTERNAL_IDENTITY_SECRET (pasalo desde dev-stack/secrets/internal-identity-secret.txt)');
+  throw new Error(
+    'Falta INTERNAL_IDENTITY_SECRET (pasalo desde dev-stack/secrets/internal-identity-secret.txt)',
+  );
 }
 
 // Identidad interna del conductor (lo que el driver-bff firmaría: type driver + driverId resuelto).
@@ -59,7 +61,11 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-async function api(method: string, url: string, body?: unknown): Promise<{ status: number; json: unknown }> {
+async function api(
+  method: string,
+  url: string,
+  body?: unknown,
+): Promise<{ status: number; json: unknown }> {
   const res = await fetch(url, {
     method,
     headers: authHeaders(),
@@ -75,10 +81,14 @@ async function api(method: string, url: string, body?: unknown): Promise<{ statu
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const log = (...a: unknown[]): void => console.log(`[sim ${new Date().toISOString().slice(11, 19)}]`, ...a);
+const log = (...a: unknown[]): void =>
+  console.log(`[sim ${new Date().toISOString().slice(11, 19)}]`, ...a);
 
 const producer = new KafkaEventProducer(
-  createKafka({ clientId: 'sim-driver', brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9094').split(',') }),
+  createKafka({
+    clientId: 'sim-driver',
+    brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9094').split(','),
+  }),
 );
 
 async function pingLocation(): Promise<void> {
@@ -88,7 +98,13 @@ async function pingLocation(): Promise<void> {
       producer: 'sim-driver',
       // `h3`/`at` los exige el schema, pero dispatch RECALCULA el h3 desde `point` (ingestLocation →
       // toH3(point)); el h3 del evento se ignora → placeholder válido como string basta.
-      payload: { driverId: DRIVER_ID, point: POINT, h3: 'sim', at: new Date().toISOString(), vehicleType: 'CAR' },
+      payload: {
+        driverId: DRIVER_ID,
+        point: POINT,
+        h3: 'sim',
+        at: new Date().toISOString(),
+        vehicleType: 'CAR',
+      },
     }),
     DRIVER_ID,
   );
@@ -118,7 +134,9 @@ async function progressTrip(tripId: string): Promise<void> {
   // CIERRA el dominó del CASH en dev → el viaje CASH queda PENDING solo a la espera de que el PASAJERO
   // confirme "pagué" en la app, y al confirmar → CAPTURED (nunca queda un efectivo pending colgado).
   await api('POST', `${TRIP}/trips/${tripId}/complete`, { cashCollected: true });
-  log('  → COMPLETED ✅ (cashCollected=true: si el viaje es CASH, falta solo que el pasajero confirme)');
+  log(
+    '  → COMPLETED ✅ (cashCollected=true: si el viaje es CASH, falta solo que el pasajero confirme)',
+  );
 }
 
 /** Tras ofertar, vigila el estado del viaje; cuando lo asignan a este conductor, lo progresa. */
@@ -153,7 +171,9 @@ async function pollAndOffer(): Promise<void> {
   for (const bid of json as Array<{ tripId: string; bidCents: number; vehicleType: string }>) {
     if (offered.has(bid.tripId)) continue;
     offered.add(bid.tripId);
-    log(`puja abierta ${bid.tripId} (S/${(bid.bidCents / 100).toFixed(2)}) → ofertando ACCEPT_PRICE`);
+    log(
+      `puja abierta ${bid.tripId} (S/${(bid.bidCents / 100).toFixed(2)}) → ofertando ACCEPT_PRICE`,
+    );
     // OJO: el GET /bids/open devuelve `bidCents`, pero el submit (SubmitOfferDto) espera `priceCents`
     // (ACCEPT_PRICE == el bid del pasajero). Mandar `bidCents` acá → ValidationPipe 400.
     const r = await api('POST', `${DISPATCH}/bids/${bid.tripId}/offers`, {
@@ -167,7 +187,9 @@ async function pollAndOffer(): Promise<void> {
 
 async function main(): Promise<void> {
   await producer.connect();
-  log(`conductor "Carlos" online · driverId=${DRIVER_ID} · vehicleId=${VEHICLE_ID} · ${POINT.lat},${POINT.lon}`);
+  log(
+    `conductor "Carlos" online · driverId=${DRIVER_ID} · vehicleId=${VEHICLE_ID} · ${POINT.lat},${POINT.lon}`,
+  );
   await pingLocation();
   log('ubicación publicada. Pedí un viaje desde la app — ofertaré y completaré el viaje.');
   setInterval(() => void pingLocation(), 15000);

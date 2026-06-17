@@ -1,8 +1,8 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {IconButton, Text, useTheme} from '@veo/ui-kit';
-import {IconMessage} from '../../../../shared/presentation/icons';
-import {useChatUnread} from '../hooks/useChat';
+import { StyleSheet, View } from 'react-native';
+import { IconButton, Text, useTheme } from '@veo/ui-kit';
+import { IconMessage } from '../../../../shared/presentation/icons';
+import { useChatUnread } from '../hooks/useChat';
 
 export interface ChatButtonProps {
   tripId: string;
@@ -17,7 +17,12 @@ export interface ChatButtonProps {
  * del store de chat (alimentado por el `chat:message` del socket aunque el chat esté cerrado). El
  * badge solo aparece con ≥1 no leído y satura a "9+".
  */
-export const ChatButton = ({tripId, onPress, accessibilityLabel, disabled}: ChatButtonProps): React.JSX.Element => {
+export const ChatButton = ({
+  tripId,
+  onPress,
+  accessibilityLabel,
+  disabled,
+}: ChatButtonProps): React.JSX.Element => {
   const theme = useTheme();
   const unread = useChatUnread(tripId);
   const a11y = unread > 0 ? `${accessibilityLabel} (${unread})` : accessibilityLabel;
@@ -35,7 +40,11 @@ export const ChatButton = ({tripId, onPress, accessibilityLabel, disabled}: Chat
       {unread > 0 ? (
         <View
           pointerEvents="none"
-          style={[styles.badge, {backgroundColor: theme.colors.accent, borderColor: theme.colors.bg}]}>
+          style={[
+            styles.badge,
+            { backgroundColor: theme.colors.accent, borderColor: theme.colors.bg },
+          ]}
+        >
           <Text variant="caption" color="onAccent" tabular style={styles.badgeText}>
             {unread > 9 ? '9+' : String(unread)}
           </Text>
@@ -46,7 +55,7 @@ export const ChatButton = ({tripId, onPress, accessibilityLabel, disabled}: Chat
 };
 
 const styles = StyleSheet.create({
-  wrap: {position: 'relative'},
+  wrap: { position: 'relative' },
   badge: {
     position: 'absolute',
     top: -4,
@@ -59,5 +68,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: {fontSize: 11, lineHeight: 14, fontWeight: '700'},
+  badgeText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
 });

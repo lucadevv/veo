@@ -27,7 +27,12 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { processEventOnce, schemaForEvent, type EventEnvelope, type EventHandler } from '@veo/events';
+import {
+  processEventOnce,
+  schemaForEvent,
+  type EventEnvelope,
+  type EventHandler,
+} from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import type Redis from 'ioredis';
 import { REDIS } from '../infra/redis';
@@ -77,7 +82,9 @@ export class MediaEventConsumer extends KafkaConsumerBootstrap {
     if (schema) {
       const parsed = schema.safeParse(envelope.payload);
       if (!parsed.success) {
-        this.logger.warn(`Payload inválido para ${envelope.eventType} (eventId=${envelope.eventId})`);
+        this.logger.warn(
+          `Payload inválido para ${envelope.eventType} (eventId=${envelope.eventId})`,
+        );
         return;
       }
     }

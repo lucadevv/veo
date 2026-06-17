@@ -1,8 +1,5 @@
 import * as Keychain from 'react-native-keychain';
-import {
-  BOOTSTRAP_ENCRYPTION_KEY,
-  initSecureStorage,
-} from '../secure-encryption-key';
+import { BOOTSTRAP_ENCRYPTION_KEY, initSecureStorage } from '../secure-encryption-key';
 
 /**
  * Override local del mock de `react-native-keychain`: el mock global (jest.setup.js) no expone
@@ -12,9 +9,9 @@ import {
 jest.mock('react-native-keychain', () => ({
   __esModule: true,
   getGenericPassword: jest.fn(() => Promise.resolve(false)),
-  setGenericPassword: jest.fn(() => Promise.resolve({service: 'test'})),
-  ACCESSIBLE: {AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock'},
-  STORAGE_TYPE: {AES_GCM_NO_AUTH: 'KeystoreAESGCM_NoAuth'},
+  setGenericPassword: jest.fn(() => Promise.resolve({ service: 'test' })),
+  ACCESSIBLE: { AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock' },
+  STORAGE_TYPE: { AES_GCM_NO_AUTH: 'KeystoreAESGCM_NoAuth' },
 }));
 
 const getMock = Keychain.getGenericPassword as jest.Mock;

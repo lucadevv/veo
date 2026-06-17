@@ -19,7 +19,13 @@ const internalSecretProvider: Provider = {
 
 @Global()
 @Module({
-  providers: [PrismaService, redisProvider, internalSecretProvider, InternalIdentityGuard, outboxRelayProvider],
+  providers: [
+    PrismaService,
+    redisProvider,
+    internalSecretProvider,
+    InternalIdentityGuard,
+    outboxRelayProvider,
+  ],
   exports: [PrismaService, REDIS, INTERNAL_IDENTITY_SECRET, InternalIdentityGuard],
 })
 export class CoreModule {}

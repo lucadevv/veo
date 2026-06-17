@@ -2,12 +2,23 @@
  * JwtAuthGuard — valida el access token (Bearer) y adjunta el usuario al request.
  * Se monta en los BFFs (decisión: validación en el gateway). Respeta @Public().
  */
-import { Injectable, Inject, Optional, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Optional,
+  type CanActivate,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UnauthorizedError } from '@veo/utils';
 import { IS_PUBLIC_KEY } from '../decorators.js';
 import { EXPECTED_SUBJECT_TYPE, JWT_SERVICE } from '../tokens.js';
-import { type JwtService, type RequestWithUser, type SubjectType, toAuthenticatedUser } from '../jwt.js';
+import {
+  type JwtService,
+  type RequestWithUser,
+  type SubjectType,
+  toAuthenticatedUser,
+} from '../jwt.js';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {

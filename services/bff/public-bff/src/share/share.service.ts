@@ -19,7 +19,12 @@ import {
   REST_SHARE,
   REST_TRIP,
 } from '../infra/downstream.tokens';
-import { type LiveKitConfig, liveKitEnabled, liveKitRoomForTrip, mintViewerToken } from './livekit-token';
+import {
+  type LiveKitConfig,
+  liveKitEnabled,
+  liveKitRoomForTrip,
+  mintViewerToken,
+} from './livekit-token';
 import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { AggregateReply, DriverReply, VehicleReply } from '../infra/grpc-types';
 import { RealtimeStateService } from '../realtime/realtime-state.service';
@@ -103,7 +108,11 @@ export class ShareService {
       return assembleMaskedPanicView(downstream.tripId, shareTokenExpiryIso(token));
     }
 
-    const { driver, aggregate, vehicle } = await this.loadDriver(downstream.driverId, trip?.vehicleId ?? null, meta);
+    const { driver, aggregate, vehicle } = await this.loadDriver(
+      downstream.driverId,
+      trip?.vehicleId ?? null,
+      meta,
+    );
 
     const live = this.state.getLocation(downstream.tripId);
     const driverLocation: GeoPoint | null =
@@ -208,7 +217,11 @@ export class ShareService {
     driverId: string | null,
     vehicleId: string | null,
     meta: Record<string, string>,
-  ): Promise<{ driver: DriverReply | null; aggregate: AggregateReply | null; vehicle: VehicleReply | null }> {
+  ): Promise<{
+    driver: DriverReply | null;
+    aggregate: AggregateReply | null;
+    vehicle: VehicleReply | null;
+  }> {
     if (!driverId) return { driver: null, aggregate: null, vehicle: null };
     const [driver, aggregate, vehicle] = await Promise.all([
       this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta).catch(() => null),

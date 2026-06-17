@@ -1,7 +1,7 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import Svg, {Circle} from 'react-native-svg';
-import {Text, useTheme} from '@veo/ui-kit';
+import { StyleSheet, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import { Text, useTheme } from '@veo/ui-kit';
 
 export interface CountdownRingProps {
   /** Segundos restantes a mostrar al centro del anillo. */
@@ -39,7 +39,7 @@ export function CountdownRing({
   const progressColor = expired ? theme.colors.danger : theme.colors.accent;
 
   return (
-    <View style={[styles.wrap, {width: size, height: size}]}>
+    <View style={[styles.wrap, { width: size, height: size }]}>
       <Svg width={size} height={size} style={styles.svg}>
         <Circle
           cx={center}
@@ -71,8 +71,8 @@ export function CountdownRing({
 }
 
 const styles = StyleSheet.create({
-  wrap: {alignItems: 'center', justifyContent: 'center'},
+  wrap: { alignItems: 'center', justifyContent: 'center' },
   // El SVG arranca a las 3:00; lo rotamos -90° para que el arco comience arriba (12:00).
-  svg: {transform: [{rotate: '-90deg'}]},
-  center: {...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center'},
+  svg: { transform: [{ rotate: '-90deg' }] },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
 });

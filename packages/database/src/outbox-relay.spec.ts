@@ -77,7 +77,10 @@ function fakeProducer(): {
   return fake;
 }
 
-function fakeLogger(): OutboxRelayLogger & { debug: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } {
+function fakeLogger(): OutboxRelayLogger & {
+  debug: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+} {
   return { debug: vi.fn(), error: vi.fn() };
 }
 

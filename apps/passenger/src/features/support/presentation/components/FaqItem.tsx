@@ -1,4 +1,4 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {
   LayoutAnimation,
@@ -10,7 +10,10 @@ import {
 } from 'react-native';
 
 // Habilita LayoutAnimation en Android (no-op en iOS). Llamada una sola vez al cargar el módulo.
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
@@ -26,27 +29,33 @@ export interface FaqItemProps {
  * Transición de altura sutil con LayoutAnimation (sin librería extra) y chevron que rota.
  * El color nunca es el único indicador: el chevron y el peso del texto marcan el estado abierto.
  */
-export function FaqItem({ question, answer, expanded, onToggle }: FaqItemProps): React.JSX.Element {
+export function FaqItem({
+  question,
+  answer,
+  expanded,
+  onToggle,
+}: FaqItemProps): React.JSX.Element {
   const theme = useTheme();
 
   const toggle = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.create(160, 'easeInEaseOut', 'opacity'));
+    LayoutAnimation.configureNext(
+      LayoutAnimation.create(160, 'easeInEaseOut', 'opacity'),
+    );
     onToggle();
   };
 
   return (
-    <View style={[styles.wrapper, { borderBottomColor: theme.colors.border }]}>
+    <View style={[styles.wrapper, {borderBottomColor: theme.colors.border}]}>
       <Pressable
         onPress={toggle}
         accessibilityRole="button"
-        accessibilityState={{ expanded }}
+        accessibilityState={{expanded}}
         accessibilityLabel={question}
-        style={({ pressed }) => [
+        style={({pressed}) => [
           styles.header,
-          { paddingVertical: theme.spacing.lg },
-          pressed ? { opacity: 0.6 } : null,
-        ]}
-      >
+          {paddingVertical: theme.spacing.lg},
+          pressed ? {opacity: 0.6} : null,
+        ]}>
         <View style={styles.questionText}>
           <Text variant="callout" color={expanded ? 'ink' : 'inkMuted'}>
             {question}
@@ -55,14 +64,13 @@ export function FaqItem({ question, answer, expanded, onToggle }: FaqItemProps):
         <Text
           variant="callout"
           color={expanded ? 'accent' : 'inkSubtle'}
-          style={[styles.chevron, expanded ? styles.chevronOpen : null]}
-        >
+          style={[styles.chevron, expanded ? styles.chevronOpen : null]}>
           ⌄
         </Text>
       </Pressable>
 
       {expanded ? (
-        <View style={{ paddingBottom: theme.spacing.lg }}>
+        <View style={{paddingBottom: theme.spacing.lg}}>
           <Text variant="footnote" color="inkMuted">
             {answer}
           </Text>
@@ -73,9 +81,9 @@ export function FaqItem({ question, answer, expanded, onToggle }: FaqItemProps):
 }
 
 const styles = StyleSheet.create({
-  wrapper: { borderBottomWidth: StyleSheet.hairlineWidth },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  questionText: { flex: 1 },
-  chevron: { transform: [{ rotate: '0deg' }] },
-  chevronOpen: { transform: [{ rotate: '180deg' }] },
+  wrapper: {borderBottomWidth: StyleSheet.hairlineWidth},
+  header: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  questionText: {flex: 1},
+  chevron: {transform: [{rotate: '0deg'}]},
+  chevronOpen: {transform: [{rotate: '180deg'}]},
 });

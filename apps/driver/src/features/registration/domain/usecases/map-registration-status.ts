@@ -1,5 +1,5 @@
-import type {DriverProfileView} from '@veo/api-client';
-import type {RegistrationStatus} from '../entities';
+import type { DriverProfileView } from '@veo/api-client';
+import type { RegistrationStatus } from '../entities';
 
 /**
  * Estados crudos (identity/fleet) que consideramos RECHAZO definitivo del KYC o de antecedentes.
@@ -39,7 +39,7 @@ function isApproved(raw: string): boolean {
  *     alta. El store decide si conserva el progreso local (`in_progress`) o arranca el wizard.
  */
 export function mapProfileToRegistrationStatus(profile: DriverProfileView): RegistrationStatus {
-  const {kycStatus, backgroundCheckStatus, compliance, documents} = profile;
+  const { kycStatus, backgroundCheckStatus, compliance, documents } = profile;
 
   // 1) Rechazo de identidad/antecedentes: el conductor debe corregir.
   if (isRejected(kycStatus) || isRejected(backgroundCheckStatus)) {
@@ -58,7 +58,7 @@ export function mapProfileToRegistrationStatus(profile: DriverProfileView): Regi
   }
 
   // 3) Cumple documentación pero falta validación (docs en revisión o KYC/antecedentes pendientes).
-  const hasDocsInReview = documents.some(doc => !doc.ok);
+  const hasDocsInReview = documents.some((doc) => !doc.ok);
   if (compliance.compliant || hasDocsInReview || !identityClear) {
     return 'in_review';
   }

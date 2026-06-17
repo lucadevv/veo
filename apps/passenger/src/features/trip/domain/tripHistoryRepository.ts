@@ -1,4 +1,4 @@
-import type { TripResource } from '@veo/api-client';
+import type {TripResource} from '@veo/api-client';
 
 /**
  * Snapshot LOCAL de viajes del pasajero en MMKV (DIP).

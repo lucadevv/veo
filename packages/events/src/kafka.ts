@@ -48,7 +48,9 @@ export class KafkaEventProducer {
     if (schema) schema.parse(envelope.payload);
     await this.producer.send({
       topic: topicForEvent(envelope.eventType),
-      messages: [{ key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } }],
+      messages: [
+        { key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } },
+      ],
     });
   }
 }

@@ -167,7 +167,13 @@ export type DriverSummary = z.infer<typeof driverSummary>;
  * @veo/shared-types. Tiparlo (no `z.string()`) hace que comparar contra un literal fuera del set sea
  * error de compilación, no un magic string mudo (ej. el tab muerto `PENDING` vs `PENDING_REVIEW`).
  */
-export const fleetDocumentStatus = z.enum(['PENDING_REVIEW', 'VALID', 'EXPIRING_SOON', 'EXPIRED', 'REJECTED']);
+export const fleetDocumentStatus = z.enum([
+  'PENDING_REVIEW',
+  'VALID',
+  'EXPIRING_SOON',
+  'EXPIRED',
+  'REJECTED',
+]);
 
 export const fleetDocumentView = z.object({
   id: z.string(),

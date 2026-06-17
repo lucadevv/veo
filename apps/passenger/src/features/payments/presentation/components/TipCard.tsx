@@ -1,14 +1,14 @@
-import type { PaymentView } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, Card, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { parseTipToCents } from '../../domain/usecases';
-import { formatPEN } from '../../../../shared/utils/format';
-import { Animated, usePressScale } from './motion';
+import type {PaymentView} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {Banner, Button, Card, Text, TextField, useTheme} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {parseTipToCents} from '../../domain/usecases';
+import {formatPEN} from '../../../../shared/utils/format';
+import {Animated, usePressScale} from './motion';
 
 /** Propinas rápidas sugeridas (céntimos PEN). */
 const QUICK_TIPS_CENTS = [200, 500, 1000] as const;
@@ -28,9 +28,13 @@ export interface TipCardProps {
  * idempotencia la garantiza el bff, así que reintentos no duplican. Reutilizable en Rating y
  * TripDetail. Feedback inmediato al tocar (chip seleccionado), transición de éxito y errores en Banner.
  */
-export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps): React.JSX.Element {
+export function TipCard({
+  tripId,
+  initialTipCents = 0,
+  onTipped,
+}: TipCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const addTip = useDependency(TOKENS.addTipUseCase);
 
@@ -43,11 +47,13 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
 
   const mutation = useMutation<PaymentView, Error, number>({
     mutationFn: (cents: number) => addTip.execute(tripId, cents),
-    onSuccess: (payment) => onTipped?.(payment),
+    onSuccess: payment => onTipped?.(payment),
   });
 
   // Propina ya enviada (en esta sesión o acumulada del viaje): estado de confirmación.
-  const sentCents = mutation.data?.tipCents ?? (initialTipCents > 0 ? initialTipCents : undefined);
+  const sentCents =
+    mutation.data?.tipCents ??
+    (initialTipCents > 0 ? initialTipCents : undefined);
 
   if (sentCents) {
     return (
@@ -55,7 +61,7 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
         <Banner
           tone="success"
           title={t('tips.sentTitle')}
-          description={t('tips.sentBody', { amount: formatPEN(sentCents) })}
+          description={t('tips.sentBody', {amount: formatPEN(sentCents)})}
         />
       </Card>
     );
@@ -66,12 +72,19 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
   return (
     <Card variant="outlined" padding="lg">
       <Text variant="title3">{t('tips.title')}</Text>
-      <Text variant="footnote" color="inkMuted" style={{ marginTop: theme.spacing.xs }}>
+      <Text
+        variant="footnote"
+        color="inkMuted"
+        style={{marginTop: theme.spacing.xs}}>
         {t('tips.subtitle')}
       </Text>
 
-      <View style={[styles.chips, { gap: theme.spacing.sm, marginTop: theme.spacing.lg }]}>
-        {QUICK_TIPS_CENTS.map((cents) => (
+      <View
+        style={[
+          styles.chips,
+          {gap: theme.spacing.sm, marginTop: theme.spacing.lg},
+        ]}>
+        {QUICK_TIPS_CENTS.map(cents => (
           <TipChip
             key={cents}
             label={formatPEN(cents)}
@@ -92,7 +105,7 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
       </View>
 
       {selected === 'custom' ? (
-        <View style={{ marginTop: theme.spacing.md }}>
+        <View style={{marginTop: theme.spacing.md}}>
           <TextField
             label={t('tips.customLabel')}
             keyboardType="decimal-pad"
@@ -104,7 +117,11 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
       ) : null}
 
       {mutation.isError ? (
-        <Banner tone="danger" title={t('tips.error')} style={{ marginTop: theme.spacing.md }} />
+        <Banner
+          tone="danger"
+          title={t('tips.error')}
+          style={{marginTop: theme.spacing.md}}
+        />
       ) : null}
 
       <Button
@@ -114,7 +131,7 @@ export function TipCard({ tripId, initialTipCents = 0, onTipped }: TipCardProps)
         loading={mutation.isPending}
         disabled={!canSend}
         onPress={() => mutation.mutate(tipCents)}
-        style={{ marginTop: theme.spacing.lg }}
+        style={{marginTop: theme.spacing.lg}}
       />
     </Card>
   );
@@ -128,18 +145,22 @@ interface TipChipProps {
 }
 
 /** Chip de propina: borde lima al estar activo + feedback de press (scale 0.97). Respeta reduce-motion. */
-function TipChip({ label, active, onPress, tabular = false }: TipChipProps): React.JSX.Element {
+function TipChip({
+  label,
+  active,
+  onPress,
+  tabular = false,
+}: TipChipProps): React.JSX.Element {
   const theme = useTheme();
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale();
+  const {animatedStyle, onPressIn, onPressOut} = usePressScale();
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: active }}
+      accessibilityState={{selected: active}}
       onPress={onPress}
       onPressIn={onPressIn}
-      onPressOut={onPressOut}
-    >
+      onPressOut={onPressOut}>
       <Animated.View
         style={[
           styles.chip,
@@ -150,11 +171,15 @@ function TipChip({ label, active, onPress, tabular = false }: TipChipProps): Rea
             paddingHorizontal: theme.spacing.lg,
             borderColor: active ? theme.colors.accent : theme.colors.border,
             borderWidth: active ? 2 : 1,
-            backgroundColor: active ? theme.colors.surfaceElevated : theme.colors.surface,
+            backgroundColor: active
+              ? theme.colors.surfaceElevated
+              : theme.colors.surface,
           },
-        ]}
-      >
-        <Text variant="bodyStrong" color={active ? 'accent' : 'ink'} tabular={tabular}>
+        ]}>
+        <Text
+          variant="bodyStrong"
+          color={active ? 'accent' : 'ink'}
+          tabular={tabular}>
           {label}
         </Text>
       </Animated.View>
@@ -163,6 +188,6 @@ function TipChip({ label, active, onPress, tabular = false }: TipChipProps): Rea
 }
 
 const styles = StyleSheet.create({
-  chips: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { alignItems: 'center', justifyContent: 'center' },
+  chips: {flexDirection: 'row', flexWrap: 'wrap'},
+  chip: {alignItems: 'center', justifyContent: 'center'},
 });

@@ -158,7 +158,9 @@ export function buildDriverVehicleModel(m: FleetVehicleModelReply): DriverVehicl
 }
 
 /** Mapea la página del catálogo (GET /drivers/vehicle-models) a la lista del selector. */
-export function buildDriverVehicleModels(page: FleetVehicleModelPageReply): DriverVehicleModelView[] {
+export function buildDriverVehicleModels(
+  page: FleetVehicleModelPageReply,
+): DriverVehicleModelView[] {
   return (page.items ?? []).map(buildDriverVehicleModel);
 }
 

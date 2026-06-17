@@ -1,6 +1,6 @@
-import type {ChatRepository} from '../repositories/chat-repository';
-import type {Message} from '../entities';
-import {sortMessages} from '../value-objects/message-list';
+import type { ChatRepository } from '../repositories/chat-repository';
+import type { Message } from '../entities';
+import { sortMessages } from '../value-objects/message-list';
 
 /**
  * Caso de uso: cargar el historial del chat de un viaje. Normaliza el orden cronológico ascendente
@@ -29,6 +29,6 @@ export class SendMessageUseCase {
     if (trimmed.length === 0) {
       return Promise.reject(new Error('EMPTY_MESSAGE'));
     }
-    return this.chat.sendMessage(tripId, {body: trimmed});
+    return this.chat.sendMessage(tripId, { body: trimmed });
   }
 }

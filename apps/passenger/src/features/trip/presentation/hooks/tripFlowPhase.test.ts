@@ -6,52 +6,90 @@ import {
 } from './tripFlowPhase';
 
 describe('resolveTripPhase', () => {
-  const base = { hasDestination: false, activeTripId: null, status: null, offerCount: 0 } as const;
+  const base = {
+    hasDestination: false,
+    activeTripId: null,
+    status: null,
+    offerCount: 0,
+  } as const;
 
   it('sin destino ni viaje → idle', () => {
     expect(resolveTripPhase(base)).toBe('idle');
   });
 
   it('destino elegido, sin viaje → quoting', () => {
-    expect(resolveTripPhase({ ...base, hasDestination: true })).toBe('quoting');
+    expect(resolveTripPhase({...base, hasDestination: true})).toBe('quoting');
   });
 
   it('viaje creado, puja abierta sin ofertas → searching', () => {
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'REQUESTED', offerCount: 0 })).toBe(
-      'searching',
-    );
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'MATCHING', offerCount: 0 })).toBe(
-      'searching',
-    );
+    expect(
+      resolveTripPhase({
+        ...base,
+        activeTripId: 't1',
+        status: 'REQUESTED',
+        offerCount: 0,
+      }),
+    ).toBe('searching');
+    expect(
+      resolveTripPhase({
+        ...base,
+        activeTripId: 't1',
+        status: 'MATCHING',
+        offerCount: 0,
+      }),
+    ).toBe('searching');
   });
 
   it('puja abierta con ofertas → offers', () => {
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'REQUESTED', offerCount: 2 })).toBe(
-      'offers',
-    );
+    expect(
+      resolveTripPhase({
+        ...base,
+        activeTripId: 't1',
+        status: 'REQUESTED',
+        offerCount: 2,
+      }),
+    ).toBe('offers');
   });
 
   it('mapea estados crudos fuera del enum (EXPIRED/REASSIGNING/FAILED)', () => {
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'EXPIRED' })).toBe('noOffers');
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'REASSIGNING' })).toBe('reassigning');
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'FAILED' })).toBe('ended');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'EXPIRED'}),
+    ).toBe('noOffers');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'REASSIGNING'}),
+    ).toBe('reassigning');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'FAILED'}),
+    ).toBe('ended');
   });
 
   it('viaje activo: asignado/en camino → enRoute; llegó → arrived; en curso → inProgress', () => {
     for (const s of ['ASSIGNED', 'ACCEPTED', 'ARRIVING'] as const) {
-      expect(resolveTripPhase({ ...base, activeTripId: 't1', status: s })).toBe('enRoute');
+      expect(resolveTripPhase({...base, activeTripId: 't1', status: s})).toBe(
+        'enRoute',
+      );
     }
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'ARRIVED' })).toBe('arrived');
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'IN_PROGRESS' })).toBe('inProgress');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'ARRIVED'}),
+    ).toBe('arrived');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'IN_PROGRESS'}),
+    ).toBe('inProgress');
   });
 
   it('completado → completed; cancelado → ended', () => {
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'COMPLETED' })).toBe('completed');
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'CANCELLED' })).toBe('ended');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'COMPLETED'}),
+    ).toBe('completed');
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'CANCELLED'}),
+    ).toBe('ended');
   });
 
   it('viaje activo con estado desconocido → searching (no rompe)', () => {
-    expect(resolveTripPhase({ ...base, activeTripId: 't1', status: 'WAT' })).toBe('searching');
+    expect(resolveTripPhase({...base, activeTripId: 't1', status: 'WAT'})).toBe(
+      'searching',
+    );
   });
 });
 

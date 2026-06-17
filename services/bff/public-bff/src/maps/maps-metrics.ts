@@ -29,7 +29,11 @@ type CounterCtor = new (cfg: {
 
 const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor }).constructor;
 
-function getOrCreateCounter(name: string, help: string, labelNames: readonly string[]): CounterLike {
+function getOrCreateCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[],
+): CounterLike {
   const existing = metricsRegistry.getSingleMetric(name) as CounterLike | undefined;
   if (existing) return existing;
   return new CounterClass({ name, help, labelNames, registers: [metricsRegistry] });

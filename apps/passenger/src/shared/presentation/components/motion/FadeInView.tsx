@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import type { ViewStyle } from 'react-native';
+import React, {useEffect} from 'react';
+import type {ViewStyle} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -7,7 +7,7 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
 
 /** Tope de pasos de stagger para que listas largas no acumulen retrasos perceptibles. */
 const MAX_STAGGER_STEPS = 8;
@@ -60,8 +60,10 @@ export function FadeInView({
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * offsetY }],
+    transform: [{translateY: (1 - progress.value) * offsetY}],
   }));
 
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+  );
 }

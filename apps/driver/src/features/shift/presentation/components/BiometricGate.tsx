@@ -1,8 +1,8 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {Banner, Button, IconButton, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import {IconChevronLeft, IconShield} from '../../../../shared/presentation/icons';
-import {Appear, Pulse} from './motion';
+import { StyleSheet, View } from 'react-native';
+import { Banner, Button, IconButton, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
+import { Appear, Pulse } from './motion';
 
 /** Aviso de resultado del flujo biométrico (mismo contrato que `Banner`). */
 export interface BiometricGateBanner {
@@ -77,8 +77,9 @@ export const BiometricGate = ({
           disabled={disabled}
           onPress={onCapture}
         />
-      }>
-      <View style={[styles.body, {paddingTop: theme.spacing['3xl']}]}>
+      }
+    >
+      <View style={[styles.body, { paddingTop: theme.spacing['3xl'] }]}>
         {/* Escudo en círculo de superficie con halo cian que respira (lenguaje Midnight Motion).
             El halo se acelera/intensifica durante la captura y el escudo late solo en ese momento;
             la lógica biométrica no cambia. */}
@@ -89,21 +90,26 @@ export const BiometricGate = ({
             minOpacity={0.06}
             maxOpacity={loading ? 0.26 : 0.16}
             maxScale={loading ? 1.18 : 1.1}
-            style={[styles.haloGlow, {backgroundColor: theme.colors.accent}]}>
+            style={[styles.haloGlow, { backgroundColor: theme.colors.accent }]}
+          >
             {null}
           </Pulse>
           <Pulse active={loading} period={1100} minOpacity={1} maxScale={1.04}>
             <View
               style={[
                 styles.iconCircle,
-                {backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.accent},
-              ]}>
+                { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.accent },
+              ]}
+            >
               <IconShield size={52} color={theme.colors.accent} strokeWidth={1.8} />
             </View>
           </Pulse>
         </View>
 
-        <Appear delay={80} style={[styles.copy, {marginTop: theme.spacing['2xl'], gap: theme.spacing.sm}]}>
+        <Appear
+          delay={80}
+          style={[styles.copy, { marginTop: theme.spacing['2xl'], gap: theme.spacing.sm }]}
+        >
           <Text variant="title2" align="center">
             {heading}
           </Text>
@@ -113,7 +119,7 @@ export const BiometricGate = ({
         </Appear>
 
         {banner ? (
-          <Appear style={{marginTop: theme.spacing['2xl']}}>
+          <Appear style={{ marginTop: theme.spacing['2xl'] }}>
             <Banner tone={banner.tone} title={banner.title} description={banner.description} />
           </Appear>
         ) : null}
@@ -126,9 +132,9 @@ const HALO = 132;
 const ICON_CIRCLE = 104;
 
 const styles = StyleSheet.create({
-  header: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8},
-  headerTitle: {flexShrink: 1},
-  body: {flex: 1, alignItems: 'center'},
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  headerTitle: { flexShrink: 1 },
+  body: { flex: 1, alignItems: 'center' },
   haloWrap: {
     width: HALO,
     height: HALO,
@@ -149,6 +155,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  copy: {alignItems: 'center'},
-  bodyText: {maxWidth: 320},
+  copy: { alignItems: 'center' },
+  bodyText: { maxWidth: 320 },
 });

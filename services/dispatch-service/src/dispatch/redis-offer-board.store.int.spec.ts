@@ -20,7 +20,11 @@ import type { OfferBoard } from './offer-board.port';
 const ORIGIN = { lat: -12.0464, lon: -77.0428 };
 const ORIGIN_CELL = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
 
-function board(tripId: string, expiresAt: number, status: OfferBoard['status'] = 'OPEN'): OfferBoard {
+function board(
+  tripId: string,
+  expiresAt: number,
+  status: OfferBoard['status'] = 'OPEN',
+): OfferBoard {
   return {
     tripId,
     passengerId: 'p1',
@@ -85,7 +89,15 @@ describe('RedisOfferBoardStore · integración H8 (Redis real)', () => {
     const expiresAt = now - 1_000;
     await store.saveBoard(board('t1', expiresAt), 90);
     await store.saveOffer(
-      { tripId: 't1', driverId: 'd1', kind: 'ACCEPT_PRICE', priceCents: 700, etaSeconds: 0, status: 'PENDING', updatedAt: now },
+      {
+        tripId: 't1',
+        driverId: 'd1',
+        kind: 'ACCEPT_PRICE',
+        priceCents: 700,
+        etaSeconds: 0,
+        status: 'PENDING',
+        updatedAt: now,
+      },
       90,
     );
 
@@ -123,7 +135,9 @@ describe('RedisOfferBoardStore · integración H8 (Redis real)', () => {
 
     // Reconciler: dentro del grace (cutoff < claimedAt) NO lo devuelve; pasado el grace SÍ.
     expect(await store.matchedUnemittedBoards(claimedAt - 1)).toHaveLength(0);
-    expect((await store.matchedUnemittedBoards(claimedAt + 1)).map((b) => b.tripId)).toEqual(['m1']);
+    expect((await store.matchedUnemittedBoards(claimedAt + 1)).map((b) => b.tripId)).toEqual([
+      'm1',
+    ]);
 
     // markMatchEmitted lo saca del matched-zset.
     await store.markMatchEmitted('m1');
@@ -134,7 +148,13 @@ describe('RedisOfferBoardStore · integración H8 (Redis real)', () => {
     const now = Date.now();
     await store.saveBoard(board('a1', now + 60_000), 90);
     const off = (driverId: string, status: 'PENDING' | 'STALE') => ({
-      tripId: 'a1', driverId, kind: 'ACCEPT_PRICE' as const, priceCents: 700, etaSeconds: 0, status, updatedAt: now,
+      tripId: 'a1',
+      driverId,
+      kind: 'ACCEPT_PRICE' as const,
+      priceCents: 700,
+      etaSeconds: 0,
+      status,
+      updatedAt: now,
     });
     await store.saveOffer(off('d1', 'PENDING'), 90); // ganador
     await store.saveOffer(off('d2', 'PENDING'), 90); // → LAPSED
@@ -151,11 +171,27 @@ describe('RedisOfferBoardStore · integración H8 (Redis real)', () => {
     const now = Date.now();
     await store.saveBoard(board('a2', now + 60_000), 90);
     await store.saveOffer(
-      { tripId: 'a2', driverId: 'd1', kind: 'ACCEPT_PRICE', priceCents: 700, etaSeconds: 0, status: 'PENDING', updatedAt: now },
+      {
+        tripId: 'a2',
+        driverId: 'd1',
+        kind: 'ACCEPT_PRICE',
+        priceCents: 700,
+        etaSeconds: 0,
+        status: 'PENDING',
+        updatedAt: now,
+      },
       90,
     );
     await store.saveOffer(
-      { tripId: 'a2', driverId: 'd2', kind: 'COUNTER', priceCents: 900, etaSeconds: 0, status: 'PENDING', updatedAt: now },
+      {
+        tripId: 'a2',
+        driverId: 'd2',
+        kind: 'COUNTER',
+        priceCents: 900,
+        etaSeconds: 0,
+        status: 'PENDING',
+        updatedAt: now,
+      },
       90,
     );
     const changed = await store.lapseAndAccept('a2', null);

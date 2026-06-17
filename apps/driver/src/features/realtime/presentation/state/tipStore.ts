@@ -1,4 +1,4 @@
-import {create} from 'zustand';
+import { create } from 'zustand';
 
 /** Propina recibida en vivo (socket `payment:tip`). El 100% es del conductor. */
 export interface ReceivedTip {
@@ -19,8 +19,8 @@ export interface TipState {
   clearTip(): void;
 }
 
-export const useTipStore = create<TipState>(set => ({
+export const useTipStore = create<TipState>((set) => ({
   lastTip: null,
-  setTip: tip => set({lastTip: tip}),
-  clearTip: () => set({lastTip: null}),
+  setTip: (tip) => set({ lastTip: tip }),
+  clearTip: () => set({ lastTip: null }),
 }));

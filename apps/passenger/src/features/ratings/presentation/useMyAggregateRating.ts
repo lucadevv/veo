@@ -1,7 +1,7 @@
-import type { RatingAggregateView } from '@veo/api-client';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { TOKENS } from '../../../core/di/tokens';
-import { useDependency } from '../../../core/di/useDependency';
+import type {RatingAggregateView} from '@veo/api-client';
+import {useQuery, type UseQueryResult} from '@tanstack/react-query';
+import {TOKENS} from '../../../core/di/tokens';
+import {useDependency} from '../../../core/di/useDependency';
 
 /** Clave de cache del agregado rolling 30d de un sujeto (pasajero o conductor). */
 export const myAggregateRatingKey = (subjectId: string): readonly string[] => [
@@ -21,7 +21,7 @@ function isNotFoundError(err: unknown): boolean {
     typeof err === 'object' &&
     err !== null &&
     'status' in err &&
-    (err as { status?: unknown }).status === 404
+    (err as {status?: unknown}).status === 404
   );
 }
 

@@ -2,7 +2,14 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { PaymentsService } from './payments.service';
-import { CashConfirmDto, ChangeMethodDto, ChargeDto, SettlePenaltyDto, type DebtView, type PaymentView } from './dto/payments.dto';
+import {
+  CashConfirmDto,
+  ChangeMethodDto,
+  ChargeDto,
+  SettlePenaltyDto,
+  type DebtView,
+  type PaymentView,
+} from './dto/payments.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth()
@@ -32,14 +39,18 @@ export class PaymentsController {
 
   // ── Deudas del pasajero (banner de la app): cobros en DEBT. Va ANTES de `@Get(':id')`. ──
   @Get('debts')
-  @ApiOperation({ summary: 'Deudas pendientes del pasajero autenticado (cobros en DEBT) para el banner de la app' })
+  @ApiOperation({
+    summary: 'Deudas pendientes del pasajero autenticado (cobros en DEBT) para el banner de la app',
+  })
   debts(@CurrentUser() user: AuthenticatedUser): Promise<DebtView> {
     return this.payments.getMyDebts(user);
   }
 
   // ── Saldo de crédito gastable del pasajero (redención de referidos · Ola 2A). ANTES de `@Get(':id')`. ──
   @Get('credit')
-  @ApiOperation({ summary: 'Saldo de crédito gastable del pasajero (referidos) para mostrar en la app' })
+  @ApiOperation({
+    summary: 'Saldo de crédito gastable del pasajero (referidos) para mostrar en la app',
+  })
   credit(@CurrentUser() user: AuthenticatedUser): Promise<{ balanceCents: number }> {
     return this.payments.getUserCredit(user);
   }
@@ -64,7 +75,9 @@ export class PaymentsController {
   // ── Saldar deuda (BR-P02): re-cobra un cobro en DEBT del pasajero. Ownership 404 anti-enumeración. ──
   @Post(':id/retry-charge')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Re-cobra un cobro en DEBT del pasajero (saldar deuda). 404 si el cobro no es suyo' })
+  @ApiOperation({
+    summary: 'Re-cobra un cobro en DEBT del pasajero (saldar deuda). 404 si el cobro no es suyo',
+  })
   retryCharge(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -77,7 +90,10 @@ export class PaymentsController {
   // CASH→400 (DTO). Tras saldar, invalida el cache "sin deuda" del gate. ──
   @Post('penalties/:id/settle')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Paga una penalidad de cancelación PENDING del pasajero por un método digital. 404 si no es suya; 409 si fue perdonada' })
+  @ApiOperation({
+    summary:
+      'Paga una penalidad de cancelación PENDING del pasajero por un método digital. 404 si no es suya; 409 si fue perdonada',
+  })
   settlePenalty(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -91,7 +107,10 @@ export class PaymentsController {
   // servicio→422. El método es del Payment (cómo se liquida AHORA), no del Trip (histórico). ──
   @Post(':id/method')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cambia el método de un pago pendiente del pasajero entre métodos digitales y re-cobra. 404 si no es suyo; 409 si ya capturado' })
+  @ApiOperation({
+    summary:
+      'Cambia el método de un pago pendiente del pasajero entre métodos digitales y re-cobra. 404 si no es suyo; 409 si ya capturado',
+  })
   changeMethod(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

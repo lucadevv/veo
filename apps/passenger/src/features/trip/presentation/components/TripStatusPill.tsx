@@ -1,7 +1,7 @@
-import type { TripStatus } from '@veo/api-client';
-import { StatusPill, type StatusTone } from '@veo/ui-kit';
+import type {TripStatus} from '@veo/api-client';
+import {StatusPill, type StatusTone} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
 
 /** Mapea el estado del viaje a un tono del kit (el color nunca es el único indicador: hay texto). */
 const STATUS_TONE: Record<TripStatus, StatusTone> = {
@@ -29,8 +29,12 @@ const LIVE_STATUSES: ReadonlySet<TripStatus> = new Set<TripStatus>([
 ]);
 
 /** Pastilla de estado del viaje con etiqueta i18n y tono semántico. */
-export function TripStatusPill({ status }: { status: TripStatus }): React.JSX.Element {
-  const { t } = useTranslation();
+export function TripStatusPill({
+  status,
+}: {
+  status: TripStatus;
+}): React.JSX.Element {
+  const {t} = useTranslation();
   return (
     <StatusPill
       label={t(`tripStatus.${status}`)}

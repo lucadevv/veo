@@ -15,7 +15,10 @@ describe('logger · redacción PII', () => {
       { redact: { paths: PII_REDACT_PATHS, censor: '[REDACTED]' } },
       { write: (s: string) => void lines.push(s) },
     );
-    log.info({ phone: '999888777', email: 'lucia@veo.pe', user: { phone: '111' }, token: 'abc' }, 'evento');
+    log.info(
+      { phone: '999888777', email: 'lucia@veo.pe', user: { phone: '111' }, token: 'abc' },
+      'evento',
+    );
     const out = JSON.parse(lines[0]!) as Record<string, unknown>;
     expect(out.phone).toBe('[REDACTED]');
     expect(out.email).toBe('[REDACTED]');

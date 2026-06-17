@@ -72,13 +72,14 @@ export function LiveAccessDialog({
             Ver cabina en vivo
           </DialogTitle>
           <DialogDescription>
-            Mirar una cabina en vivo accede a datos sensibles y queda auditado. Indica el motivo y verifica
-            tu segundo factor.
+            Mirar una cabina en vivo accede a datos sensibles y queda auditado. Indica el motivo y
+            verifica tu segundo factor.
           </DialogDescription>
         </DialogHeader>
         <Field
           label={`Motivo (mín. ${MIN_REASON} caracteres)`}
-          error={!reasonOk && reason.length > 0 ? 'Describe el motivo con más detalle.' : undefined}>
+          error={!reasonOk && reason.length > 0 ? 'Describe el motivo con más detalle.' : undefined}
+        >
           <Input
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -104,7 +105,8 @@ export function LiveAccessDialog({
             variant="primary"
             loading={pending}
             disabled={!reasonOk || code.length < 6}
-            onClick={() => void submit()}>
+            onClick={() => void submit()}
+          >
             Abrir cámara
           </Button>
         </DialogFooter>

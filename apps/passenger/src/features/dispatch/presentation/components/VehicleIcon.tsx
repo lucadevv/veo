@@ -3,7 +3,7 @@ import {
   MAP_GLYPH_DEFAULTS,
   offeringGlyph,
 } from '../../../../shared/presentation/components/offeringGlyphs';
-import type { NearbyVehicleType } from '../../domain/dispatchRepository';
+import type {NearbyVehicleType} from '../../domain/dispatchRepository';
 
 /**
  * Vehículo de AMBIENTE visto DESDE ARRIBA (top-down) para el mapa del pasajero "Midnight Motion".
@@ -36,6 +36,6 @@ export function VehicleIcon({
   bodyColor = MAP_GLYPH_DEFAULTS.bodyColor,
   glassColor = MAP_GLYPH_DEFAULTS.glassColor,
 }: VehicleIconProps): React.JSX.Element {
-  const { MapGlyph } = offeringGlyph({ vehicleType });
+  const {MapGlyph} = offeringGlyph({vehicleType});
   return <MapGlyph size={size} bodyColor={bodyColor} glassColor={glassColor} />;
 }

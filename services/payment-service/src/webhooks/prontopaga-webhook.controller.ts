@@ -30,7 +30,9 @@ export class ProntoPagaWebhookController {
   @Public()
   @Post()
   @HttpCode(200)
-  @ApiOperation({ summary: 'Webhook de ProntoPaga (firma HMAC verificada). Idempotente. Pago o afiliación.' })
+  @ApiOperation({
+    summary: 'Webhook de ProntoPaga (firma HMAC verificada). Idempotente. Pago o afiliación.',
+  })
   async handle(@Req() req: RawBodyRequest): Promise<{ ok: true }> {
     // El raw body es la fuente de verdad para la firma. Sin él no podemos verificar → 401.
     const raw = req.rawBody?.toString('utf8');

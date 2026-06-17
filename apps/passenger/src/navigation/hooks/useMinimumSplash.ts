@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import {useEffect, useRef, useState} from 'react';
 
 /** Piso por defecto (ms) que el splash de marca permanece visible aunque la sesión resuelva al instante. */
 export const DEFAULT_MIN_SPLASH_MS = 1900;

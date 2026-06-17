@@ -1,4 +1,12 @@
-import { IsEmail, IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
 import { DocumentType } from '../../payments/dto/affiliations.dto';
 

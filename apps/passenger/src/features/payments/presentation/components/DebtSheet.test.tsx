@@ -1,14 +1,14 @@
-import type { DebtView, PaymentView } from '@veo/api-client';
-import { NavigationContainer } from '@react-navigation/native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider } from '@veo/ui-kit';
+import type {DebtView, PaymentView} from '@veo/api-client';
+import {NavigationContainer} from '@react-navigation/native';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {ThemeProvider} from '@veo/ui-kit';
 import React from 'react';
-import { Text } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import TestRenderer, { act } from 'react-test-renderer';
+import {Text} from 'react-native';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+import TestRenderer, {act} from 'react-test-renderer';
 import '../../../../i18n';
-import { TOKENS } from '../../../../core/di/tokens';
-import { container } from '../../../../core/di/registry';
+import {TOKENS} from '../../../../core/di/tokens';
+import {container} from '../../../../core/di/registry';
 import type {
   ChangePaymentMethodUseCase,
   GetPaymentUseCase,
@@ -18,11 +18,11 @@ import {
   PaymentMethodNotApplicableError,
   PaymentNotChangeableError,
 } from '../../domain/usecases';
-import { usePaymentPrefsStore } from '../stores/paymentPrefsStore';
-import { DebtSheet, classifyResolveFailure } from './DebtSheet';
+import {usePaymentPrefsStore} from '../stores/paymentPrefsStore';
+import {DebtSheet, classifyResolveFailure} from './DebtSheet';
 
 /** Deuda con una sola entrada (la más común): monto + un `reason` opcional para el mensaje honesto. */
-function debtView(over?: { reason?: string; amountCents?: number }): DebtView {
+function debtView(over?: {reason?: string; amountCents?: number}): DebtView {
   const amountCents = over?.amountCents ?? 4200;
   return {
     hasDebt: true,
@@ -42,14 +42,18 @@ function debtView(over?: { reason?: string; amountCents?: number }): DebtView {
 
 // `useReducedMotion` (ui-kit) usa AccessibilityInfo; el preset de RN no lo implementa. Stubs seguros.
 {
-  const { AccessibilityInfo } = jest.requireActual('react-native');
-  jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
-  jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const {AccessibilityInfo} = jest.requireActual('react-native');
+  jest
+    .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+    .mockResolvedValue(false);
+  jest
+    .spyOn(AccessibilityInfo, 'addEventListener')
+    .mockReturnValue({remove: jest.fn()});
 }
 
 const INITIAL_METRICS = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+  frame: {x: 0, y: 0, width: 390, height: 844},
+  insets: {top: 47, left: 0, right: 0, bottom: 34},
 };
 
 function paymentView(over: Partial<PaymentView>): PaymentView {
@@ -81,24 +85,30 @@ function registerDeps(opts: {
 }): void {
   container.register(
     TOKENS.getPaymentUseCase,
-    () => ({ execute: opts.getPayment }) as unknown as GetPaymentUseCase,
+    () => ({execute: opts.getPayment}) as unknown as GetPaymentUseCase,
   );
   container.register(
     TOKENS.retryChargeUseCase,
     () =>
-      ({ execute: opts.retryCharge ?? jest.fn() }) as unknown as RetryChargeUseCase,
+      ({
+        execute: opts.retryCharge ?? jest.fn(),
+      }) as unknown as RetryChargeUseCase,
   );
   container.register(
     TOKENS.changePaymentMethodUseCase,
     () =>
-      ({ execute: opts.changeMethod ?? jest.fn() }) as unknown as ChangePaymentMethodUseCase,
+      ({
+        execute: opts.changeMethod ?? jest.fn(),
+      }) as unknown as ChangePaymentMethodUseCase,
   );
 }
 
 let activeClient: QueryClient | null = null;
 
 function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({
+    defaultOptions: {queries: {retry: false, gcTime: 0}},
+  });
   activeClient = client;
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
@@ -118,7 +128,7 @@ function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
 async function flush(times = 4): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
     });
   }
 }
@@ -126,7 +136,9 @@ async function flush(times = 4): Promise<void> {
 function texts(renderer: TestRenderer.ReactTestRenderer): string[] {
   return renderer.root
     .findAllByType(Text)
-    .flatMap((n) => (Array.isArray(n.props.children) ? n.props.children : [n.props.children]))
+    .flatMap(n =>
+      Array.isArray(n.props.children) ? n.props.children : [n.props.children],
+    )
     .filter((c): c is string => typeof c === 'string');
 }
 
@@ -139,9 +151,11 @@ afterEach(() => {
 
 describe('DebtSheet · modo PAGO POR COMPLETAR (PENDING_ACTION)', () => {
   it('carga el cobro FRESCO por id y abre DIRECTO el checkout (sin retry-charge)', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'PENDING' }));
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'PENDING'}));
     const retryCharge = jest.fn();
-    registerDeps({ getPayment, retryCharge });
+    registerDeps({getPayment, retryCharge});
 
     const renderer = render(
       <DebtSheet
@@ -170,8 +184,10 @@ describe('DebtSheet · modo PAGO POR COMPLETAR (PENDING_ACTION)', () => {
   });
 
   it('si el cobro ya CAPTURÓ entre medio → muestra el éxito (no un checkout muerto)', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'CAPTURED' }));
-    registerDeps({ getPayment });
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'CAPTURED'}));
+    registerDeps({getPayment});
 
     const renderer = render(
       <DebtSheet
@@ -191,8 +207,10 @@ describe('DebtSheet · modo PAGO POR COMPLETAR (PENDING_ACTION)', () => {
   it('si el cobro ya no tiene checkout vivo (PENDING sin medios) → estado honesto, no checkout', async () => {
     const getPayment = jest
       .fn()
-      .mockResolvedValue(paymentView({ status: 'PENDING', deepLink: null, externalUid: null }));
-    registerDeps({ getPayment });
+      .mockResolvedValue(
+        paymentView({status: 'PENDING', deepLink: null, externalUid: null}),
+      );
+    registerDeps({getPayment});
 
     const renderer = render(
       <DebtSheet
@@ -216,16 +234,18 @@ async function pressByLabel(
   label: string,
 ): Promise<void> {
   const btn = renderer.root
-    .findAllByProps({ accessibilityRole: 'button' })
+    .findAllByProps({accessibilityRole: 'button'})
     .find(
-      (b) =>
+      b =>
         typeof b.props.accessibilityLabel === 'string' &&
         b.props.accessibilityLabel.includes(label) &&
         typeof b.props.onPress === 'function' &&
         !b.props.accessibilityState?.disabled,
     );
   if (!btn) {
-    throw new Error(`No se encontró un botón habilitado con label que incluya "${label}"`);
+    throw new Error(
+      `No se encontró un botón habilitado con label que incluya "${label}"`,
+    );
   }
   await act(async () => {
     btn.props.onPress();
@@ -236,10 +256,18 @@ async function pressByLabel(
 
 describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
   it('"Pagar con otro método" abre el selector con SOLO digitales (sin Efectivo)', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'PENDING' }));
-    registerDeps({ getPayment });
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'PENDING'}));
+    registerDeps({getPayment});
     const renderer = render(
-      <DebtSheet visible debt={null} pendingActionPaymentId="pay-pa" onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={null}
+        pendingActionPaymentId="pay-pa"
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -248,14 +276,18 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
     const out = texts(renderer);
     expect(out).toContain('Elige otro método');
     // Digitales presentes…
-    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']));
+    expect(out).toEqual(
+      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
+    );
     // …y Efectivo NUNCA (no se puede cambiar a efectivo un cobro digital pendiente).
     expect(out).not.toContain('Efectivo');
     act(() => renderer.unmount());
   });
 
   it('elegir Plin → POST cambia el método y re-renderiza con el checkout NUEVO (web → "Pagar ahora")', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'PENDING' }));
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'PENDING'}));
     // El server devuelve el cobro con el checkout NUEVO del método elegido (Plin → QR/web).
     const changeMethod = jest.fn().mockResolvedValue(
       paymentView({
@@ -265,9 +297,15 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
         checkoutUrl: 'https://pay.veo.pe/plin/abc',
       }),
     );
-    registerDeps({ getPayment, changeMethod });
+    registerDeps({getPayment, changeMethod});
     const renderer = render(
-      <DebtSheet visible debt={null} pendingActionPaymentId="pay-pa" onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={null}
+        pendingActionPaymentId="pay-pa"
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
     await pressByLabel(renderer, 'Pagar con otro método');
@@ -283,11 +321,21 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
   });
 
   it('409 (ya no cambiable) → estado honesto "este pago ya no está pendiente"', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'PENDING' }));
-    const changeMethod = jest.fn().mockRejectedValue(new PaymentNotChangeableError());
-    registerDeps({ getPayment, changeMethod });
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'PENDING'}));
+    const changeMethod = jest
+      .fn()
+      .mockRejectedValue(new PaymentNotChangeableError());
+    registerDeps({getPayment, changeMethod});
     const renderer = render(
-      <DebtSheet visible debt={null} pendingActionPaymentId="pay-pa" onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={null}
+        pendingActionPaymentId="pay-pa"
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
     await pressByLabel(renderer, 'Pagar con otro método');
@@ -298,11 +346,21 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
   });
 
   it('422 (método no aplica) → banner honesto, el selector sigue abierto para reintentar', async () => {
-    const getPayment = jest.fn().mockResolvedValue(paymentView({ status: 'PENDING' }));
-    const changeMethod = jest.fn().mockRejectedValue(new PaymentMethodNotApplicableError());
-    registerDeps({ getPayment, changeMethod });
+    const getPayment = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'PENDING'}));
+    const changeMethod = jest
+      .fn()
+      .mockRejectedValue(new PaymentMethodNotApplicableError());
+    registerDeps({getPayment, changeMethod});
     const renderer = render(
-      <DebtSheet visible debt={null} pendingActionPaymentId="pay-pa" onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={null}
+        pendingActionPaymentId="pay-pa"
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
     await pressByLabel(renderer, 'Pagar con otro método');
@@ -323,9 +381,14 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
   });
 
   it('muestra el selector SIEMPRE (canónico, digitales sin Efectivo) y destaca el DEFAULT digital', async () => {
-    registerDeps({ getPayment: jest.fn() });
+    registerDeps({getPayment: jest.fn()});
     const renderer = render(
-      <DebtSheet visible debt={debtView()} onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={debtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -334,7 +397,9 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     expect(out).toContain('Resuelve el pago de tu viaje');
     expect(out).toContain('S/ 42.00');
     // El selector canónico con TODOS los digitales y SIN Efectivo (no aplica a un pago ya hecho).
-    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']));
+    expect(out).toEqual(
+      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
+    );
     expect(out).not.toContain('Efectivo');
     // El SUGERIDO es el predeterminado del perfil (YAPE) → pill "Sugerido" + el CTA lo refleja.
     expect(out).toContain('Sugerido');
@@ -344,9 +409,14 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
 
   it('cuando el default es CASH (no aplica), sugiere el primer digital (YAPE) y NO ofrece Efectivo', async () => {
     usePaymentPrefsStore.getState().setDefault('CASH');
-    registerDeps({ getPayment: jest.fn() });
+    registerDeps({getPayment: jest.fn()});
     const renderer = render(
-      <DebtSheet visible debt={debtView()} onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={debtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -365,9 +435,14 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
         checkoutUrl: 'https://pay.veo.pe/plin/abc',
       }),
     );
-    registerDeps({ getPayment: jest.fn(), changeMethod });
+    registerDeps({getPayment: jest.fn(), changeMethod});
     const renderer = render(
-      <DebtSheet visible debt={debtView()} onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={debtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -385,11 +460,20 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
 
   it('elegir el método ORIGINAL (changeMethod no-op → sigue DEBT) → cae a retryCharge', async () => {
     // El backend hace no-op cuando el método == original: devuelve el pago aún en DEBT.
-    const changeMethod = jest.fn().mockResolvedValue(paymentView({ method: 'YAPE', status: 'DEBT' }));
-    const retryCharge = jest.fn().mockResolvedValue(paymentView({ method: 'YAPE', status: 'CAPTURED' }));
-    registerDeps({ getPayment: jest.fn(), changeMethod, retryCharge });
+    const changeMethod = jest
+      .fn()
+      .mockResolvedValue(paymentView({method: 'YAPE', status: 'DEBT'}));
+    const retryCharge = jest
+      .fn()
+      .mockResolvedValue(paymentView({method: 'YAPE', status: 'CAPTURED'}));
+    registerDeps({getPayment: jest.fn(), changeMethod, retryCharge});
     const renderer = render(
-      <DebtSheet visible debt={debtView()} onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={debtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -404,13 +488,17 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
 
   it('si el cobro vuelve a DEBT con reason capability → mensaje HONESTO por-método (no el genérico)', async () => {
     // changeMethod devuelve DEBT, retryCharge también DEBT (no saldó). El reason de la deuda es capability.
-    const changeMethod = jest.fn().mockResolvedValue(paymentView({ method: 'YAPE', status: 'DEBT' }));
-    const retryCharge = jest.fn().mockResolvedValue(paymentView({ method: 'YAPE', status: 'DEBT' }));
-    registerDeps({ getPayment: jest.fn(), changeMethod, retryCharge });
+    const changeMethod = jest
+      .fn()
+      .mockResolvedValue(paymentView({method: 'YAPE', status: 'DEBT'}));
+    const retryCharge = jest
+      .fn()
+      .mockResolvedValue(paymentView({method: 'YAPE', status: 'DEBT'}));
+    registerDeps({getPayment: jest.fn(), changeMethod, retryCharge});
     const renderer = render(
       <DebtSheet
         visible
-        debt={debtView({ reason: 'method_unavailable:YAPE' })}
+        debt={debtView({reason: 'method_unavailable:YAPE'})}
         onClose={() => {}}
         onSettled={() => {}}
       />,
@@ -427,13 +515,22 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
 
   it('si TODOS los digitales fallan → mensaje honesto + escape claro (sin bucle infinito)', async () => {
     // Cada intento vuelve a DEBT (no saldó) por cualquier método.
-    const changeMethod = jest.fn().mockImplementation((_id, method) =>
-      Promise.resolve(paymentView({ method, status: 'DEBT' })),
-    );
-    const retryCharge = jest.fn().mockResolvedValue(paymentView({ method: 'YAPE', status: 'DEBT' }));
-    registerDeps({ getPayment: jest.fn(), changeMethod, retryCharge });
+    const changeMethod = jest
+      .fn()
+      .mockImplementation((_id, method) =>
+        Promise.resolve(paymentView({method, status: 'DEBT'})),
+      );
+    const retryCharge = jest
+      .fn()
+      .mockResolvedValue(paymentView({method: 'YAPE', status: 'DEBT'}));
+    registerDeps({getPayment: jest.fn(), changeMethod, retryCharge});
     const renderer = render(
-      <DebtSheet visible debt={debtView()} onClose={() => {}} onSettled={() => {}} />,
+      <DebtSheet
+        visible
+        debt={debtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
     );
     await flush();
 
@@ -461,12 +558,16 @@ describe('classifyResolveFailure · lectura defensiva del motivo', () => {
       kind: 'methodUnavailable',
       method: 'PAGOEFECTIVO',
     });
-    expect(classifyResolveFailure('PAGOEFECTIVO_UNAVAILABLE')?.kind).toBe('methodUnavailable');
+    expect(classifyResolveFailure('PAGOEFECTIVO_UNAVAILABLE')?.kind).toBe(
+      'methodUnavailable',
+    );
   });
 
   it('motivos transitorios / desconocidos → transient (reintentable)', () => {
     expect(classifyResolveFailure('gateway_error')?.kind).toBe('transient');
-    expect(classifyResolveFailure('yape_insufficient_funds')?.kind).toBe('transient');
+    expect(classifyResolveFailure('yape_insufficient_funds')?.kind).toBe(
+      'transient',
+    );
     expect(classifyResolveFailure('unknown')?.kind).toBe('transient');
   });
 

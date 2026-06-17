@@ -6,10 +6,14 @@ import {
   savedPlace,
   savedPlaceList,
 } from '@veo/api-client';
-import type { KeyValueStore } from '../../../core/storage/mmkv';
-import { uuidv4 } from '../../../shared/utils/uuid';
-import type { SavedPlace, SavedPlaceInput, SavedPlaceKind } from '../domain/entities';
-import type { PlacesRepository } from '../domain/placesRepository';
+import type {KeyValueStore} from '../../../core/storage/mmkv';
+import {uuidv4} from '../../../shared/utils/uuid';
+import type {
+  SavedPlace,
+  SavedPlaceInput,
+  SavedPlaceKind,
+} from '../domain/entities';
+import type {PlacesRepository} from '../domain/placesRepository';
 
 /**
  * Clave del CACHÉ local (MMKV, prefs) que respalda al repo HTTP. Lo `Mirror` del servidor: la fuente
@@ -19,7 +23,11 @@ import type { PlacesRepository } from '../domain/placesRepository';
 const CACHE_KEY = 'places.http.cache';
 
 /** Orden de presentación (Casa, Trabajo y al final favoritos), igual que el server-side. */
-const KIND_ORDER: Record<SavedPlaceKind, number> = { HOME: 0, WORK: 1, FAVORITE: 2 };
+const KIND_ORDER: Record<SavedPlaceKind, number> = {
+  HOME: 0,
+  WORK: 1,
+  FAVORITE: 2,
+};
 
 /**
  * Error de dominio para el tope de favoritos (HTTP 409 RESOURCE_EXHAUSTED del BFF). El puerto es
@@ -107,23 +115,23 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
 
   update(id: string, input: SavedPlaceInput): SavedPlace {
     const current = this.readCache();
-    const existing = current.find((p) => p.id === id);
+    const existing = current.find(p => p.id === id);
     const updated: SavedPlace = {
       id,
       kind: input.kind,
       label: input.label,
       point: input.point,
       createdAt: existing?.createdAt ?? this.now(),
-      ...(input.subtitle ? { subtitle: input.subtitle } : {}),
+      ...(input.subtitle ? {subtitle: input.subtitle} : {}),
     };
-    this.writeCache(current.map((p) => (p.id === id ? updated : p)));
+    this.writeCache(current.map(p => (p.id === id ? updated : p)));
     void this.pushUpdate(id, input, updated);
     return updated;
   }
 
   remove(id: string): void {
     const previous = this.readCache();
-    this.writeCache(previous.filter((p) => p.id !== id));
+    this.writeCache(previous.filter(p => p.id !== id));
     void this.pushRemove(id, previous);
   }
 
@@ -132,7 +140,7 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
   /** GET /places → rehidrata el caché con la verdad del servidor (read-through). */
   private async hydrateFromServer(): Promise<void> {
     try {
-      const dtos = await this.http.get('/places', { schema: savedPlaceList });
+      const dtos = await this.http.get('/places', {schema: savedPlaceList});
       this.writeCache(dtos.map(toDomain));
       this.hooks.onCacheUpdated?.();
     } catch {
@@ -141,7 +149,10 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
   }
 
   /** POST /places → reemplaza el favorito/único optimista por el recurso real; 409 = tope favoritos. */
-  private async pushSave(input: SavedPlaceInput, optimistic: SavedPlace): Promise<void> {
+  private async pushSave(
+    input: SavedPlaceInput,
+    optimistic: SavedPlace,
+  ): Promise<void> {
     try {
       const dto = await this.http.post('/places', {
         body: toBody(input),
@@ -184,14 +195,14 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
 
   /** Reemplaza una entrada optimista (por id) por el recurso real del servidor en el caché. */
   private replaceOptimistic(optimisticId: string, real: SavedPlace): void {
-    const next = this.readCache().map((p) => (p.id === optimisticId ? real : p));
+    const next = this.readCache().map(p => (p.id === optimisticId ? real : p));
     this.writeCache(next);
     this.hooks.onCacheUpdated?.();
   }
 
   /** Elimina del caché una entrada optimista que el servidor rechazó. */
   private rollback(optimisticId: string): void {
-    this.writeCache(this.readCache().filter((p) => p.id !== optimisticId));
+    this.writeCache(this.readCache().filter(p => p.id !== optimisticId));
     this.hooks.onCacheUpdated?.();
   }
 
@@ -209,7 +220,9 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
       this.hooks.onReconcileError?.(new PlacesFavoritesLimitError());
       return;
     }
-    this.hooks.onReconcileError?.(error instanceof Error ? error : new Error('Error al sincronizar'));
+    this.hooks.onReconcileError?.(
+      error instanceof Error ? error : new Error('Error al sincronizar'),
+    );
   }
 
   /** Construye la versión optimista local (id provisional + createdAt local hasta confirmar). */
@@ -220,14 +233,19 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
       label: input.label,
       point: input.point,
       createdAt: this.now(),
-      ...(input.subtitle ? { subtitle: input.subtitle } : {}),
+      ...(input.subtitle ? {subtitle: input.subtitle} : {}),
     };
   }
 
   /** Aplica al caché la semántica de creación: HOME/WORK son únicos (reemplazan); FAVORITE agrega. */
-  private applyLocalSave(current: SavedPlace[], place: SavedPlace): SavedPlace[] {
+  private applyLocalSave(
+    current: SavedPlace[],
+    place: SavedPlace,
+  ): SavedPlace[] {
     const rest =
-      place.kind === 'FAVORITE' ? current : current.filter((p) => p.kind !== place.kind);
+      place.kind === 'FAVORITE'
+        ? current
+        : current.filter(p => p.kind !== place.kind);
     return [...rest, place];
   }
 }
@@ -240,9 +258,9 @@ function toDomain(dto: SavedPlaceDto): SavedPlace {
     id: dto.id,
     kind: dto.kind,
     label: dto.label,
-    point: { lat: dto.lat, lng: dto.lng },
+    point: {lat: dto.lat, lng: dto.lng},
     createdAt: dto.createdAt,
-    ...(dto.subtitle ? { subtitle: dto.subtitle } : {}),
+    ...(dto.subtitle ? {subtitle: dto.subtitle} : {}),
   };
 }
 
@@ -253,6 +271,6 @@ function toBody(input: SavedPlaceInput) {
     label: input.label,
     lat: input.point.lat,
     lng: input.point.lng,
-    ...(input.subtitle ? { subtitle: input.subtitle } : {}),
+    ...(input.subtitle ? {subtitle: input.subtitle} : {}),
   });
 }

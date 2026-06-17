@@ -83,6 +83,8 @@ describe('share-link · estado autoritativo (BD)', () => {
   });
 
   it('rechaza un enlace que agotó sus usos', () => {
-    expect(() => assertShareLinkUsable({ ...base, usedCount: 3, maxUses: 3 })).toThrow(ForbiddenError);
+    expect(() => assertShareLinkUsable({ ...base, usedCount: 3, maxUses: 3 })).toThrow(
+      ForbiddenError,
+    );
   });
 });

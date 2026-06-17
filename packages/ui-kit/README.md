@@ -13,7 +13,9 @@ import { ThemeProvider, SafeScreen, Button } from '@veo/ui-kit';
 
 export default function App() {
   return (
-    <ThemeProvider name="passenger"> {/* o "driver" (modo noche) */}
+    <ThemeProvider name="passenger">
+      {' '}
+      {/* o "driver" (modo noche) */}
       <SafeScreen>
         <Button label="Confirmar recogida" variant="primary" onPress={confirm} />
       </SafeScreen>

@@ -32,7 +32,11 @@ export class CreditService {
    * Acredita `rewardCents` al saldo gastable de `userId` por un referido. IDEMPOTENTE por `eventId`.
    * Devuelve `true` si acreditó, `false` si el evento ya estaba aplicado (re-entrega) o no hay nada que sumar.
    */
-  async creditFromReferral(input: { userId: string; rewardCents: number; eventId: string }): Promise<boolean> {
+  async creditFromReferral(input: {
+    userId: string;
+    rewardCents: number;
+    eventId: string;
+  }): Promise<boolean> {
     const { userId, rewardCents, eventId } = input;
     // Defensivo: el schema garantiza rewardCents int, pero un 0/negativo no es una acreditación.
     if (rewardCents <= 0) return false;
@@ -62,7 +66,9 @@ export class CreditService {
           data: { balanceCents: { increment: rewardCents } },
         });
       });
-      this.logger.log(`Crédito de referido acreditado: user=${userId} +${rewardCents}c (event=${eventId})`);
+      this.logger.log(
+        `Crédito de referido acreditado: user=${userId} +${rewardCents}c (event=${eventId})`,
+      );
       return true;
     } catch (err) {
       if (isUniqueViolation(err, 'sourceRef')) {
@@ -103,7 +109,9 @@ export class CreditService {
       // CAS miss → otra escritura concurrente bajó el saldo; reintentamos con el valor fresco.
     }
 
-    this.logger.warn(`spendForCharge: CAS agotó ${MAX_SPEND_ATTEMPTS} intentos (user=${userId}); cobro sin crédito`);
+    this.logger.warn(
+      `spendForCharge: CAS agotó ${MAX_SPEND_ATTEMPTS} intentos (user=${userId}); cobro sin crédito`,
+    );
     return 0;
   }
 
@@ -132,12 +140,20 @@ export class CreditService {
         });
         if (dec.count === 0) return false;
         await tx.userCreditEntry.create({
-          data: { id: uuidv7(), userId, deltaCents: -applied, source: CreditSource.TRIP_REDEMPTION, sourceRef },
+          data: {
+            id: uuidv7(),
+            userId,
+            deltaCents: -applied,
+            source: CreditSource.TRIP_REDEMPTION,
+            sourceRef,
+          },
         });
         return true;
       });
       if (ok) {
-        this.logger.log(`Crédito aplicado al cobro: user=${userId} -${applied}c (sourceRef=${sourceRef})`);
+        this.logger.log(
+          `Crédito aplicado al cobro: user=${userId} -${applied}c (sourceRef=${sourceRef})`,
+        );
         return { settled: true, applied };
       }
       return { settled: false, applied: 0 }; // CAS miss → el caller reintenta

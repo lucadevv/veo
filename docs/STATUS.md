@@ -67,6 +67,7 @@ VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaff
 **Soberanía tecnológica** (`FOUNDATION §0.7`): soberanía = **control del DATO/CÓMPUTO sensible** (seguridad +
 privacidad Ley 29733), NO "cero proveedores". El dato sensible se self-hostea; los rieles de transporte externos
 inevitables se usan tras puerto propio y sin PII en el payload. Reescribe el blueprint:
+
 - Biometría → **`biometric-service` propio** (Python/FastAPI + ONNX), NO FaceTec/Onfido. **(soberano)**
 - Video WebRTC → **LiveKit self-hosted**, NO LiveKit Cloud. El video nunca sale de la infra. **(soberano)**
 - Mapas/routing → **OSM propio** (OSRM/Valhalla + Nominatim) vía `@veo/maps`, NO Google Maps para el dato. **(soberano)**
@@ -87,6 +88,7 @@ docker compose -f dev-stack/docker-compose.yml up -d postgres redis kafka   # in
 ```
 
 **Quirks ya resueltos en `dev-stack/docker-compose.yml`** (importantes):
+
 - **Postgres en host `5433`** (no 5432 — choca con otro proyecto local). `DATABASE_URL=postgresql://veo:veo_dev@localhost:5433/veo`.
 - **MinIO/S3 en host `9002`** (9000 choca con ClickHouse).
 - **Kafka = `apache/kafka:3.9.0`** (el tag bitnami original fue retirado). Broker externo `localhost:9094`.
@@ -115,18 +117,20 @@ Comandos: `pnpm --filter @veo/<x> typecheck|test|build`, `pnpm --filter @veo/<sv
 ## 4. Hecho ✅
 
 ### Paquetes compartidos (`packages/`) — todos compilados a `dist` + tests verdes
-| Paquete | Qué provee | Tests |
-|---|---|---|
-| `@veo/shared-types` | interfaces de dominio + enums (pre-existente) | — |
-| `@veo/shared-config` | eslint/tsconfig/jest/prettier presets (pre-existente) | — |
-| `@veo/utils` | DomainError (jerarquía), uuidv7, dinero PEN, geo/H3, crypto (HMAC + hash-chain audit), result, validación peruana | 11 |
-| `@veo/events` | EventEnvelope, **40 schemas Zod** + registro central, KafkaEventProducer/Consumer, outbox (drainOutbox, OutboxStore) | 4 |
-| `@veo/maps` | fachada OSM: `OsrmMapsClient` (OSRM `/route` + Nominatim) y `LocalMapsEngine` (estimación dev/CI), `RedisMapsCache`/`InMemoryMapsCache`, `createMapsClient` por `VEO_MAPS_MODE` | ✔ |
-| `@veo/auth` | JWT **ES256** (jose), **RedisRefreshTokenStore** (rotación+reuse detection), guards (JwtAuthGuard, **InternalIdentityGuard**, RolesGuard, StepUpMfaGuard), decorators (@CurrentUser/@Roles/@Public/@RequireStepUpMfa), **TOTP**, identidad interna HMAC BFF→servicio, `generateDevKeyPairPem` | 8 |
-| `@veo/observability` | logger pino (redacción PII), bootstrapOtel, métricas prom-client + MetricsController, **AllExceptionsFilter**, LoggingInterceptor, HealthController (liveness+readiness) | 7 |
-| `@veo/database` | **ReadWriteClient** (split primary/replica), outbox Prisma (`enqueueOutbox`, `PrismaOutboxStore`, `OUTBOX_PRISMA_MODEL`), **tombstone** (+`deletedPlaceholder`), `createTestDatabase` (testcontainers, en `@veo/database/testing`) | 5 |
+
+| Paquete              | Qué provee                                                                                                                                                                                                                                                                                    | Tests |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `@veo/shared-types`  | interfaces de dominio + enums (pre-existente)                                                                                                                                                                                                                                                 | —     |
+| `@veo/shared-config` | eslint/tsconfig/jest/prettier presets (pre-existente)                                                                                                                                                                                                                                         | —     |
+| `@veo/utils`         | DomainError (jerarquía), uuidv7, dinero PEN, geo/H3, crypto (HMAC + hash-chain audit), result, validación peruana                                                                                                                                                                             | 11    |
+| `@veo/events`        | EventEnvelope, **40 schemas Zod** + registro central, KafkaEventProducer/Consumer, outbox (drainOutbox, OutboxStore)                                                                                                                                                                          | 4     |
+| `@veo/maps`          | fachada OSM: `OsrmMapsClient` (OSRM `/route` + Nominatim) y `LocalMapsEngine` (estimación dev/CI), `RedisMapsCache`/`InMemoryMapsCache`, `createMapsClient` por `VEO_MAPS_MODE`                                                                                                               | ✔     |
+| `@veo/auth`          | JWT **ES256** (jose), **RedisRefreshTokenStore** (rotación+reuse detection), guards (JwtAuthGuard, **InternalIdentityGuard**, RolesGuard, StepUpMfaGuard), decorators (@CurrentUser/@Roles/@Public/@RequireStepUpMfa), **TOTP**, identidad interna HMAC BFF→servicio, `generateDevKeyPairPem` | 8     |
+| `@veo/observability` | logger pino (redacción PII), bootstrapOtel, métricas prom-client + MetricsController, **AllExceptionsFilter**, LoggingInterceptor, HealthController (liveness+readiness)                                                                                                                      | 7     |
+| `@veo/database`      | **ReadWriteClient** (split primary/replica), outbox Prisma (`enqueueOutbox`, `PrismaOutboxStore`, `OUTBOX_PRISMA_MODEL`), **tombstone** (+`deletedPlaceholder`), `createTestDatabase` (testcontainers, en `@veo/database/testing`)                                                            | 5     |
 
 ### `services/identity-service` — COMPLETO (plantilla de referencia) · typecheck verde · 12 tests
+
 - **Prisma** schema "identity" (User, Driver, AdminUser, BiometricCheck, OutboxEvent) + **2 migraciones aplicadas**.
 - **Auth**: login teléfono+OTP por **SMS** (pasajero/conductor), JWT ES256, refresh rotación, logout.
 - **Admin**: auto-registro→aprobación (RBAC), login email+password (**argon2id**) + **TOTP** (enroll/confirm), **step-up MFA** (BR-S07); secreto TOTP cifrado AES-256-GCM (`src/common/secret-box.ts`).
@@ -139,13 +143,16 @@ Comandos: `pnpm --filter @veo/<x> typecheck|test|build`, `pnpm --filter @veo/<sv
 - **Seed**: `pnpm db:seed` crea SUPERADMIN (`admin@veo.pe`, ACTIVE).
 
 ### Documentación / contrato
+
 - `docs/FOUNDATION.md` reescrito con soberanía (§0.7, §9), servicios nuevos (§2), convención dist (§1), y §14 con TODAS las decisiones.
 - `dev-stack` corregido (puertos + imagen Kafka + schema fleet).
 
 ---
 
 ### Ola 1 — microservicios ✅ COMPLETOS (typecheck/lint/test verdes)
+
 Cada NestJS: `prisma/schema.prisma` + migración aplicada + dominio (state machine/reglas BR) + eventos outbox→Kafka + gRPC + puertos externos (sandbox+live) + vitest + health/métricas/OTel + `/api/v1`.
+
 - `trip-service` (3002) — máquina de estados (BR-T02), tarifa (BR-T05), cancelaciones (BR-T03), modo niño bcrypt (BR-T07). **153 tests** (124 de la state machine). Schema `trip`.
 - `dispatch-service` (3003) — matching **H3 + scoring** (BR-T06), surge, prioridad pánico, Redis hot index. **14 tests**. Schema `dispatch`.
 - `tracking-service` (3004, **Go**) — ingesta GPS, presencia, geofencing H3, fan-out, Kafka/Redis/ClickHouse. `go build`+`go test` verde.
@@ -161,40 +168,52 @@ Cada NestJS: `prisma/schema.prisma` + migración aplicada + dominio (state machi
 - **`@veo/maps`** — fachada OSM (OSRM + Nominatim) con `LocalMapsEngine` para dev/CI y cache Redis. Consumido por trip/dispatch.
 
 ### Paquetes de contrato Olas 2/3 (nuevos, compilados a `dist`)
+
 - **`@veo/api-client`** — contrato tipado BFF↔web. `HttpClient` (fetch, retries, normalización a `ApiError`), schemas Zod de las vistas agregadas (`familyTrackingView`, `tripSummary/Detail`, `panicSummary/Detail`, `driverSummary/Approval`, flota, payouts, auditoría, `analyticsOverview`), contrato **auth admin** (`adminTokens | totpEnrollChallenge`, `wsTicket`, refresh, step-up), `familyVideoGrant`, y mapas de eventos **Socket.IO** (`/family` por token de share, `/ops` por ticket efímero).
 - **`@veo/rpc`** — toolkit BFF→servicio: factoría de clientes **gRPC** (lecturas), `InternalRestClient` que **firma la identidad con HMAC** (`@veo/auth`) para comandos, normalización `DownstreamError`, y los **11 `.proto`** empaquetados. (Decisión: híbrido gRPC-lecturas + REST-interno-comandos para no reescribir los servicios de Ola 1.)
 
 ### Ola 2 — BFFs ✅ COMPLETOS (typecheck/lint/test verdes)
+
 Cada BFF: JWT ES256 global (`@veo/auth`), identidad interna firmada HMAC aguas abajo (nunca reenvía el JWT), `/api/v1`, Swagger, rate-limit Redis, health/métricas/OTel, validación Zod del entorno al boot.
+
 - `public-bff` (4001) — viajes pasajero (agregados gRPC), surge, pagos, **pánico (sin rate-limit)**, share + **vista familiar pública** (`/public/share/:token`) y **video del habitáculo** (`/public/share/:token/video`, mint de token viewer **LiveKit self-hosted** firmado con `node:crypto`, solo durante viaje en curso), contactos, ratings. Socket.IO `/family`. **40 tests**.
 - `driver-bff` (4002) — turno/estado conductor, aceptación de viajes, ubicación, ganancias. Socket.IO `/driver` (Bearer). **25 tests** (+2 contrato auto-skip).
 - `admin-bff` (4003) — autoridad de auth admin (proxy a identity: login + enrolamiento/step-up TOTP, refresh, `/auth/session`, **`/auth/ws-ticket`** efímero), ops/seguridad/flota/finanzas/media/auditoría con **RBAC `@Roles`** (enum `AdminRole`), **read-model CQRS en Redis** (listados que los servicios no exponen) alimentado por Kafka. Socket.IO `/ops` (**acepta ticket efímero o Bearer**; pánico se difunde a todos). **43 tests**.
 
 ### Ola 3 — Web ✅ COMPLETAS (typecheck/lint/build verdes)
+
 Next.js 14 (App Router) + Tailwind con preset/tokens OKLCH de `@veo/shared-config` + `@veo/api-client`. Sistema de diseño en `docs/DESIGN.md` (destilado de las skills UI/UX, con anti-patrones "AI slop" prohibidos).
+
 - `admin-web` (5xxx) — panel de operación denso. Sesión vía **route handlers server-side con cookies httpOnly+Secure** (el JWT admin nunca llega al navegador); el WS `/ops` usa **ticket efímero** acuñado server-side. RBAC de presentación alineado a los `@Roles` del bff. MapLibre. **6 tests** unitarios + Playwright e2e (`test:e2e`).
 - `family-web` (5100) — vista familiar cálida desde link firmado (sin login/sin app). Seguimiento en vivo (Socket.IO `/family`), mapa MapLibre, **video del habitáculo** vía LiveKit (degrada a "sin video" si el bff no autoriza). Playwright e2e (`test:e2e`).
 
 ### Ola 4 — Apps móviles ✅ COMPLETAS (typecheck/lint/Jest + builds nativos Android/iOS verdes)
+
 React Native 0.75.4 (New Architecture, Hermes). Clean Architecture feature-first + DI container, React Query + Zustand, i18n es-PE, MMKV, navegación tipada, `@veo/ui-kit` (sistema de diseño móvil propio: tema **cálido/seguro** pasajero, **noche/denso** conductor; ver `docs/DESIGN-MOBILE.md`) y `@veo/api-client` (contratos soberanos). Consumo `file:` de `@veo/*` con `.npmrc node-linker=hoisted` para el autolinking de RN.
+
 - `veo-passenger-app` (`pe.veo.passenger`, minSdk 24) — onboarding/auth OTP, Home (MapLibre/OSM + cotización + request), viaje activo (seguimiento Socket.IO `/passenger` + **visor de video LiveKit**), **pánico** (detector nativo 3× volumen Android/iOS, sin UI; `PanicSigner` HMAC con **clave real provisionada** vía `GET /auth/panic-key` + rotación ante 401), contactos de confianza, modo niño, pagos, ratings, perfil + borrado de cuenta, **KYC facial (liveness activo)**. Nativo: LocationProvider (background-geolocation), re-login biométrico (Keychain/Keystore), push FCM/APNs (`POST /devices`), **`VeoKycFrameGrabber` (Camera2/AVFoundation)** + detector de pánico por volumen. **Jest 87/87.**
 - `veo-driver-app` (`pe.veo.driver`, minSdk 26) — auth, **inicio de turno con gate biométrico real** (challenge→frame-grabber nativo Camera2/AVFoundation→verify→`sessionRef`→shift/start; enrolamiento facial), dashboard de turno, viaje activo (mapa + modo niño), ganancias, perfil. Nativo: GPS continuo→Socket.IO `/driver` (soberano, **MQTT retirado**), Foreground Service Android, **publisher LiveKit** (`{url,token,room}`, sustituye WHIP), re-login biométrico, push (`POST /notifications/device-token`). **Jest 51/51.**
 
 ### Sesión de endurecimiento + KYC pasajero E2E (2026-05-30)
+
 Auditoría completa de ambas apps (typecheck/lint/Jest verdes) + correcciones de flujo y un flujo KYC nuevo de punta a punta:
+
 - **Apps — fixes:** push FCM/APNs ahora se inicializa tras login/cold-start (`RootNavigator`); re-entrada a viaje en curso desde el historial (`TripHistory`→`TripActive` para estados no terminales); `lock()` del candado biométrico en logout; conductor: guarda runtime del `LocationSource` (no carga eager si el binario nativo no está) y **timeout en la captura biométrica iOS** (evita cuelgue eterno); categoría de tarifa cableada E2E (`@veo/api-client` `createTripRequest.category` → trip-service migración + DTO + evento → public-bff → `RouteQuoteScreen`).
 - **Seguridad MMKV:** la `encryptionKey` del store de tokens ahora se deriva de Keychain/Keystore (`secure-encryption-key.ts`, `recrypt`) en ambas apps; se agregó `react-native-get-random-values` (CSPRNG, import primero en `index.js`). **`pod install` pendiente en iOS** por la nueva dep.
 - **KYC pasajero E2E (decisión cliente: liveness OK → `kycStatus VERIFIED`):** `@veo/events` evento `user.kyc_verified`; identity-service módulo `kyc/` (`POST /users/kyc/challenge` + `/verify` con `InternalIdentityGuard`, llama a biometric-service `/v1/embed`+`/v1/verify`, en liveness OK setea `users.kyc_status=VERIFIED` + `face_embedding` + `kyc_verified_at` + outbox) **+ migración Prisma aplicada al dev-stack**; public-bff módulo `kyc/` (`POST /api/v1/kyc/challenge` + `/verifications`, JWT pasajero, firma HMAC a identity, aplana frames→base64[]); app feature `kyc/` con **liveness activo** (pide reto, muestra la instrucción, captura con `VeoKycFrameGrabber`, envía challengeId). Tests verdes: events 6, identity 23, public-bff 65, app 87.
 
 ### dev-stack ampliado (Olas 2/3)
+
 `docker-compose.yml` añade bajo perfil `maps`: **tileserver-gl** (tiles vectoriales OSM), **osrm-backend** (routing), **nominatim** (geocoding); + **livekit** (`--dev`, WS 7880) ya presente. `dev-stack/maps/prepare.sh` automatiza la preparación de datos OSM (Perú por defecto). Para habilitar el video en dev: `LIVEKIT_API_KEY=devkey`, `LIVEKIT_API_SECRET=devsecret_change_in_production` en el public-bff (por defecto el video queda deshabilitado y la web degrada limpio).
 
 ## 5. Pendiente ⬜ (por olas)
 
 ### Ola 5 — Infra & cierre (`veo-infra`)
+
 Terraform (RDS por servicio crítico: identity/payment/panic/audit), EKS, ArgoCD, **CI por repo** (GitHub Actions: lint+typecheck+test+build), e2e, observabilidad prod, mTLS interno.
 
 ### Deuda técnica / TODOs conocidos
+
 - **git**: inicializar los 4 repos cuando el cliente lo pida (commits Conventional con scope).
 - **E2E cross-servicio orquestado** (viaje→dispatch→pago→pánico con varios servicios arriba a la vez contra el dev-stack): **pendiente**. Hoy cada servicio tiene su e2e individual contra infra real; falta el flujo extremo-a-extremo multi-servicio. Es el siguiente paso de validación recomendado.
 - **E2E en vivo de Olas 2/3**: los tests de **contrato BFF↔gRPC** (`driver-bff`/`public-bff`) se auto-omiten cuando el downstream no responde, y los **Playwright web↔BFF** (`admin-web`/`family-web`, `test:e2e`) requieren el BFF arriba. Falta una corrida con el stack completo levantado (servicios Ola 1 + BFFs + perfil `maps` + livekit). La verificación estática (build/typecheck/lint/test 35/35) ya está verde.
@@ -211,7 +230,7 @@ Terraform (RDS por servicio crítico: identity/payment/panic/audit), EKS, ArgoCD
 1. Levanta infra (§2) y `pnpm install`.
 2. Compila la fundación: `pnpm --filter '@veo/*' build`.
 3. Para un servicio nuevo de la Ola 1: **copia la estructura de `services/identity-service`** (config zod, infra Core/Prisma/Redis/Outbox, puertos sandbox+live, módulos de dominio, gRPC, main con OTel+filtros+/api/v1, vitest.config). Respeta `FOUNDATION` (anatomía §10, DoD §12).
-4. Modelo de datos y reglas: blueprint §08 (datos) y §04 (reglas BR-*). Eventos: `FOUNDATION §6` / `@veo/events` registro.
+4. Modelo de datos y reglas: blueprint §08 (datos) y §04 (reglas BR-\*). Eventos: `FOUNDATION §6` / `@veo/events` registro.
 5. Migración: `migrate diff … --script` + `migrate deploy` (§3.3).
 6. Verifica: `pnpm --filter @veo/<svc> typecheck && test`.
 

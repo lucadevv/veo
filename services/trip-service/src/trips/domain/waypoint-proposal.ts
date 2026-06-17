@@ -65,10 +65,7 @@ export const WAYPOINT_PROPOSAL_TERMINAL: ReadonlySet<WaypointProposalStatus> = n
 );
 
 /** ¿Es válida la transición `from → to`? */
-export function canTransition(
-  from: WaypointProposalStatus,
-  to: WaypointProposalStatus,
-): boolean {
+export function canTransition(from: WaypointProposalStatus, to: WaypointProposalStatus): boolean {
   return WAYPOINT_PROPOSAL_TRANSITIONS[from].includes(to);
 }
 
@@ -81,10 +78,7 @@ export function isTerminal(status: WaypointProposalStatus): boolean {
  * Verifica que `from → to` sea válida; si no, lanza InvalidWaypointProposalTransition.
  * Es la guarda que toda mutación de estado de la propuesta debe invocar.
  */
-export function assertTransition(
-  from: WaypointProposalStatus,
-  to: WaypointProposalStatus,
-): void {
+export function assertTransition(from: WaypointProposalStatus, to: WaypointProposalStatus): void {
   if (!canTransition(from, to)) {
     throw new InvalidWaypointProposalTransition(from, to);
   }

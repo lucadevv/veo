@@ -1,30 +1,30 @@
-import type {HttpClient} from '@veo/api-client';
-import {createDriverHttpClient, type SessionTokenPort} from '../network/http';
-import {createDriverSocket, type DriverSocket} from '../realtime/socket';
-import {useSessionStore} from '../session/sessionStore';
+import type { HttpClient } from '@veo/api-client';
+import { createDriverHttpClient, type SessionTokenPort } from '../network/http';
+import { createDriverSocket, type DriverSocket } from '../realtime/socket';
+import { useSessionStore } from '../session/sessionStore';
 
-import type {AuthRepository, LocalAuthService} from '../../features/auth/domain';
-import {HttpAuthRepository, keychainLocalAuthService} from '../../features/auth/data';
-import type {ShiftRepository, ForegroundServicePort} from '../../features/shift/domain';
-import {HttpShiftRepository, nativeForegroundService} from '../../features/shift/data';
-import type {TripsRepository} from '../../features/trips/domain';
-import {HttpTripsRepository} from '../../features/trips/data';
-import type {BiddingRepository} from '../../features/bidding/domain';
-import {HttpBiddingRepository} from '../../features/bidding/data';
-import type {EarningsRepository} from '../../features/earnings/domain';
-import {HttpEarningsRepository} from '../../features/earnings/data';
-import type {ProfileRepository} from '../../features/profile/domain';
-import {HttpProfileRepository} from '../../features/profile/data';
-import type {DocumentsRepository} from '../../features/documents/domain';
-import {HttpDocumentsRepository} from '../../features/documents/data';
-import type {RegistrationRepository} from '../../features/registration/domain';
-import {HttpRegistrationRepository} from '../../features/registration/data';
-import type {ChatRepository} from '../../features/chat/domain';
-import {HttpChatRepository} from '../../features/chat/data';
-import type {OpsRepository} from '../../features/ops/domain';
-import {HttpOpsRepository} from '../../features/ops/data';
-import type {SupportRepository} from '../../features/support/domain';
-import {HttpSupportRepository} from '../../features/support/data';
+import type { AuthRepository, LocalAuthService } from '../../features/auth/domain';
+import { HttpAuthRepository, keychainLocalAuthService } from '../../features/auth/data';
+import type { ShiftRepository, ForegroundServicePort } from '../../features/shift/domain';
+import { HttpShiftRepository, nativeForegroundService } from '../../features/shift/data';
+import type { TripsRepository } from '../../features/trips/domain';
+import { HttpTripsRepository } from '../../features/trips/data';
+import type { BiddingRepository } from '../../features/bidding/domain';
+import { HttpBiddingRepository } from '../../features/bidding/data';
+import type { EarningsRepository } from '../../features/earnings/domain';
+import { HttpEarningsRepository } from '../../features/earnings/data';
+import type { ProfileRepository } from '../../features/profile/domain';
+import { HttpProfileRepository } from '../../features/profile/data';
+import type { DocumentsRepository } from '../../features/documents/domain';
+import { HttpDocumentsRepository } from '../../features/documents/data';
+import type { RegistrationRepository } from '../../features/registration/domain';
+import { HttpRegistrationRepository } from '../../features/registration/data';
+import type { ChatRepository } from '../../features/chat/domain';
+import { HttpChatRepository } from '../../features/chat/data';
+import type { OpsRepository } from '../../features/ops/domain';
+import { HttpOpsRepository } from '../../features/ops/data';
+import type { SupportRepository } from '../../features/support/domain';
+import { HttpSupportRepository } from '../../features/support/data';
 
 /**
  * Repositorios registrados, tipados por su INTERFAZ de dominio (no por la implementación).
@@ -65,7 +65,7 @@ export interface AppContainer {
 const sessionTokenPort: SessionTokenPort = {
   getAccessToken: () => useSessionStore.getState().accessToken,
   getRefreshToken: () => useSessionStore.getState().refreshToken,
-  setTokens: tokens => useSessionStore.getState().setTokens(tokens),
+  setTokens: (tokens) => useSessionStore.getState().setTokens(tokens),
   // El cliente HTTP llama a `clearSession` cuando el refresh falla: lo tratamos como EXPIRACIÓN
   // (no logout) para que la capa de presentación muestre la pantalla de re-login.
   clearSession: () => useSessionStore.getState().expireSession(),

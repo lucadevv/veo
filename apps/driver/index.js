@@ -13,13 +13,13 @@ import 'intl-pluralrules';
 // módulo, así que el global debe existir ANTES de cualquier import que arrastre livekit-client.
 import './src/core/polyfills/dom-exception';
 import 'react-native-gesture-handler';
-import {registerGlobals} from 'react-native-webrtc';
-import {AppRegistry} from 'react-native';
+import { registerGlobals } from 'react-native-webrtc';
+import { AppRegistry } from 'react-native';
 import App from './App';
-import {name as appName} from './app.json';
-import {registerPushBackgroundHandler} from './src/features/notifications/data';
-import {initSecureStorage} from './src/core/storage/mmkv';
-import {initMapbox} from './src/core/maps/mapbox';
+import { name as appName } from './app.json';
+import { registerPushBackgroundHandler } from './src/features/notifications/data';
+import { initSecureStorage } from './src/core/storage/mmkv';
+import { initMapbox } from './src/core/maps/mapbox';
 
 // Globals WebRTC que necesita `livekit-client` (publisher del habitáculo). Debe ejecutarse a nivel de
 // módulo, antes de montar la app, fuera de React (no se carga en Jest, que no importa index.js).

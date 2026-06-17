@@ -32,7 +32,9 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('audit-service')
-    .setDescription('Log de auditoría inmutable (append-only, hash chain, S3 Object Lock) · VEO · Ley 29733')
+    .setDescription(
+      'Log de auditoría inmutable (append-only, hash chain, S3 Object Lock) · VEO · Ley 29733',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
@@ -51,7 +53,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3009);
   await app.listen(port);
-  logger.info(`audit-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50059'})`);
+  logger.info(
+    `audit-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50059'})`,
+  );
 }
 
 bootstrap().catch((err) => {

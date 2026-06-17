@@ -1,7 +1,7 @@
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -9,9 +9,9 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { FadeInView } from '../../../../shared/presentation/components/motion';
-import { RouteMotif } from '../../../../shared/presentation/components/RouteMotif';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
+import {FadeInView} from '../../../../shared/presentation/components/motion';
+import {RouteMotif} from '../../../../shared/presentation/components/RouteMotif';
+import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
 
 const LOADER_TRACK = 120;
 const LOADER_SEGMENT = 44;
@@ -24,9 +24,9 @@ const LOADER_SEGMENT = 44;
  */
 export function SplashScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
-  const { width } = useWindowDimensions();
+  const {width} = useWindowDimensions();
 
   const motifWidth = Math.min(width * 0.66, 280);
 
@@ -49,7 +49,10 @@ export function SplashScreen(): React.JSX.Element {
       return;
     }
     sweep.value = withRepeat(
-      withTiming(1, { duration: 900, easing: Easing.bezier(...theme.motion.easing.inOut) }),
+      withTiming(1, {
+        duration: 900,
+        easing: Easing.bezier(...theme.motion.easing.inOut),
+      }),
       -1,
       true,
     );
@@ -57,23 +60,34 @@ export function SplashScreen(): React.JSX.Element {
 
   const heroStyle = useAnimatedStyle(() => ({
     opacity: enter.value,
-    transform: [{ scale: 0.92 + enter.value * 0.08 }],
+    transform: [{scale: 0.92 + enter.value * 0.08}],
   }));
 
   const loaderStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: sweep.value * (LOADER_TRACK - LOADER_SEGMENT) }],
+    transform: [{translateX: sweep.value * (LOADER_TRACK - LOADER_SEGMENT)}],
   }));
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.bg }]}>
+    <View style={[styles.container, {backgroundColor: theme.colors.bg}]}>
       <View style={styles.hero}>
         <Animated.View style={[styles.heroGroup, heroStyle]}>
           <VeoWordmark size="xl" color="ink" />
-          <RouteMotif width={motifWidth} height={64} animated style={styles.motif} />
+          <RouteMotif
+            width={motifWidth}
+            height={64}
+            animated
+            style={styles.motif}
+          />
         </Animated.View>
 
-        <FadeInView delay={reduced ? 0 : theme.motion.duration.slow} offsetY={8}>
-          <Text variant="callout" color="inkMuted" align="center" style={styles.tagline}>
+        <FadeInView
+          delay={reduced ? 0 : theme.motion.duration.slow}
+          offsetY={8}>
+          <Text
+            variant="callout"
+            color="inkMuted"
+            align="center"
+            style={styles.tagline}>
             {t('splashTagline')}
           </Text>
         </FadeInView>
@@ -83,21 +97,31 @@ export function SplashScreen(): React.JSX.Element {
         <View
           style={[
             styles.loaderTrack,
-            { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
-          ]}
-        >
+            {
+              backgroundColor: theme.colors.surfaceElevated,
+              borderRadius: theme.radii.pill,
+            },
+          ]}>
           {reduced ? (
             <View
               style={[
                 styles.loaderSegment,
-                { width: LOADER_SEGMENT, backgroundColor: theme.colors.accent, borderRadius: theme.radii.pill },
+                {
+                  width: LOADER_SEGMENT,
+                  backgroundColor: theme.colors.accent,
+                  borderRadius: theme.radii.pill,
+                },
               ]}
             />
           ) : (
             <Animated.View
               style={[
                 styles.loaderSegment,
-                { width: LOADER_SEGMENT, backgroundColor: theme.colors.accent, borderRadius: theme.radii.pill },
+                {
+                  width: LOADER_SEGMENT,
+                  backgroundColor: theme.colors.accent,
+                  borderRadius: theme.radii.pill,
+                },
                 loaderStyle,
               ]}
             />
@@ -109,12 +133,17 @@ export function SplashScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
-  hero: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  heroGroup: { alignItems: 'center' },
-  motif: { marginTop: -18 },
-  tagline: { marginTop: 8 },
-  loaderWrap: { position: 'absolute', bottom: 64 },
-  loaderTrack: { width: LOADER_TRACK, height: 5, overflow: 'hidden' },
-  loaderSegment: { height: 5 },
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  hero: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  heroGroup: {alignItems: 'center'},
+  motif: {marginTop: -18},
+  tagline: {marginTop: 8},
+  loaderWrap: {position: 'absolute', bottom: 64},
+  loaderTrack: {width: LOADER_TRACK, height: 5, overflow: 'hidden'},
+  loaderSegment: {height: 5},
 });

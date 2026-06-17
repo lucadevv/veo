@@ -107,7 +107,12 @@ export class JwtService {
   async signAccessToken(claims: AccessTokenClaims): Promise<string> {
     // `email` se incluye solo si viene seteado (operadores). Omitirlo cuando es undefined evita
     // un claim `email: null` ruidoso en tokens de pasajero/conductor.
-    const payload: JWTPayload = { typ: claims.typ, roles: claims.roles, sid: claims.sid, mfaAt: claims.mfaAt };
+    const payload: JWTPayload = {
+      typ: claims.typ,
+      roles: claims.roles,
+      sid: claims.sid,
+      mfaAt: claims.mfaAt,
+    };
     if (claims.email !== undefined) payload.email = claims.email;
     return new SignJWT(payload)
       .setProtectedHeader({ alg: JWT_ALG })

@@ -1,4 +1,4 @@
-import { ApiError } from '@veo/api-client';
+import {ApiError} from '@veo/api-client';
 import {
   appleAuth,
   type AppleRequestResponse,
@@ -9,14 +9,14 @@ import {
   isSuccessResponse,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
-import { useMutation } from '@tanstack/react-query';
-import { useCallback } from 'react';
-import { Platform } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { configureGoogleSignin } from '../../infra/googleSignin';
-import { useBiometricGateStore } from '../stores/biometricGateStore';
+import {useMutation} from '@tanstack/react-query';
+import {useCallback} from 'react';
+import {Platform} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {configureGoogleSignin} from '../../infra/googleSignin';
+import {useBiometricGateStore} from '../stores/biometricGateStore';
 
 /**
  * Estado clasificado de un error de login social, para mapear el mensaje en la UI.
@@ -61,8 +61,8 @@ export function useOAuthFlow() {
   const loginWithAppleUseCase = useDependency(TOKENS.loginWithAppleUseCase);
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
-  const setSession = useSessionStore((state) => state.setSession);
-  const unlockBiometricGate = useBiometricGateStore((state) => state.unlock);
+  const setSession = useSessionStore(state => state.setSession);
+  const unlockBiometricGate = useBiometricGateStore(state => state.unlock);
 
   /** Persiste la sesión tras el login social (idéntico al flujo de correo/OTP). */
   const persistSession = useCallback(
@@ -81,11 +81,19 @@ export function useOAuthFlow() {
       // Drena la cola durable de consentimiento (best-effort): el onboarding la encoló antes del login.
       void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta al disparar.
-      void panicSecretProvisioner.ensureProvisioned().catch((error) => {
-        console.warn('[panic] aprovisionamiento del secreto tras login falló:', error);
+      void panicSecretProvisioner.ensureProvisioned().catch(error => {
+        console.warn(
+          '[panic] aprovisionamiento del secreto tras login falló:',
+          error,
+        );
       });
     },
-    [setSession, unlockBiometricGate, panicSecretProvisioner, syncPendingConsent],
+    [
+      setSession,
+      unlockBiometricGate,
+      panicSecretProvisioner,
+      syncPendingConsent,
+    ],
   );
 
   const googleMutation = useMutation<OAuthAttempt, Error, void>({
@@ -94,7 +102,9 @@ export function useOAuthFlow() {
       // En Android exige Google Play Services antes de abrir el flujo (no-op en iOS).
       if (Platform.OS === 'android') {
         try {
-          await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+          await GoogleSignin.hasPlayServices({
+            showPlayServicesUpdateDialog: true,
+          });
         } catch (error) {
           throw new OAuthUnavailableError(
             isErrorWithCode(error) ? error.code : 'PLAY_SERVICES_NOT_AVAILABLE',
@@ -107,7 +117,7 @@ export function useOAuthFlow() {
         const response = await GoogleSignin.signIn();
         if (!isSuccessResponse(response)) {
           // El usuario cerró el sheet nativo: cancelación limpia, sin error.
-          return { cancelled: true };
+          return {cancelled: true};
         }
         const token = response.data.idToken;
         if (!token) {
@@ -116,8 +126,11 @@ export function useOAuthFlow() {
         idToken = token;
       } catch (error) {
         // SIGN_IN_CANCELLED puede llegar como excepción tipada (no como respuesta `cancelled`).
-        if (isErrorWithCode(error) && error.code === statusCodes.SIGN_IN_CANCELLED) {
-          return { cancelled: true };
+        if (
+          isErrorWithCode(error) &&
+          error.code === statusCodes.SIGN_IN_CANCELLED
+        ) {
+          return {cancelled: true};
         }
         if (
           isErrorWithCode(error) &&
@@ -128,9 +141,9 @@ export function useOAuthFlow() {
         throw error;
       }
 
-      const tokens = await loginWithGoogleUseCase.execute({ idToken });
+      const tokens = await loginWithGoogleUseCase.execute({idToken});
       persistSession(tokens);
-      return { cancelled: false };
+      return {cancelled: false};
     },
   });
 
@@ -149,7 +162,7 @@ export function useOAuthFlow() {
       } catch (error) {
         // El usuario canceló el sheet de Apple: cancelación limpia, sin error.
         if (isAppleCancellation(error)) {
-          return { cancelled: true };
+          return {cancelled: true};
         }
         throw error;
       }
@@ -159,9 +172,9 @@ export function useOAuthFlow() {
         throw new Error('Apple no devolvió identityToken');
       }
 
-      const tokens = await loginWithAppleUseCase.execute({ identityToken });
+      const tokens = await loginWithAppleUseCase.execute({identityToken});
       persistSession(tokens);
-      return { cancelled: false };
+      return {cancelled: false};
     },
   });
 
@@ -189,8 +202,11 @@ function isAppleCancellation(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) {
     return false;
   }
-  const code = (error as { code: unknown }).code;
-  return code === appleAuth.Error.CANCELED || code === String(appleAuth.Error.CANCELED);
+  const code = (error as {code: unknown}).code;
+  return (
+    code === appleAuth.Error.CANCELED ||
+    code === String(appleAuth.Error.CANCELED)
+  );
 }
 
 /** Clasifica un error de login social → `OAuthErrorKind` para el Banner. */

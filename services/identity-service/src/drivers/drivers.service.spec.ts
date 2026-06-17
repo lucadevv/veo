@@ -157,7 +157,12 @@ describe('DriversService.verifyBiometric · minteo de sessionRef (BR-I02)', () =
 
 describe('DriversService.enrollFace · enrolamiento (BR-I02)', () => {
   it('guarda el embedding de referencia', async () => {
-    const svc = new DriversService(makePrisma(okDriver) as never, makeRedis() as never, bio, config);
+    const svc = new DriversService(
+      makePrisma(okDriver) as never,
+      makeRedis() as never,
+      bio,
+      config,
+    );
     const out = await svc.enrollFace('u1', { photo: 'Zm90bw==' });
     expect(out.enrolled).toBe(true);
   });
@@ -212,7 +217,11 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
   it('estado fuente inválido en la tx (ej. ya SUSPENDED) → InvalidStatusTransition, auditoría PERSISTE', async () => {
     // La fila fresca NO está suspendida (suspendedAt null) pero su currentStatus no es fuente válida hacia
     // AVAILABLE → el CAS no matchea, el re-read no halla suspensión y assertTransition lanza el 409 tipado.
-    const prisma = makePrisma(okDriver, { ...okDriver, currentStatus: 'SUSPENDED', suspendedAt: null });
+    const prisma = makePrisma(okDriver, {
+      ...okDriver,
+      currentStatus: 'SUSPENDED',
+      suspendedAt: null,
+    });
     const svc = new DriversService(
       prisma as never,
       makeRedis({ sessions: session('ok') }) as never,
@@ -249,7 +258,12 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
   });
 
   it('rechaza si el sessionRef no existe o expiró', async () => {
-    const svc = new DriversService(makePrisma(okDriver) as never, makeRedis() as never, bio, config);
+    const svc = new DriversService(
+      makePrisma(okDriver) as never,
+      makeRedis() as never,
+      bio,
+      config,
+    );
     await expect(svc.startShift('u1', { sessionRef: 'missing' })).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
@@ -352,7 +366,10 @@ describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', (
     const tx = {
       driver: {
         findUnique: async () => driver,
-        updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        updateMany: async (args: {
+          where: Record<string, unknown>;
+          data: Record<string, unknown>;
+        }) => {
           updateManyCalls.push(args);
           return { count: alreadySuspended ? 0 : 1 };
         },
@@ -375,7 +392,10 @@ describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', (
   }
 
   it('suspende un conductor no suspendido: CAS escribe suspendedAt y emite driver.suspended por outbox', async () => {
-    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma({ ...okDriver, suspendedAt: null });
+    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma({
+      ...okDriver,
+      suspendedAt: null,
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await svc.suspend('d1', 'Conducta peligrosa reportada');
     expect(updateManyCalls).toHaveLength(1);
@@ -383,8 +403,13 @@ describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', (
     expect(updateManyCalls[0]?.data.suspendedAt).toBeInstanceOf(Date);
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.suspended');
-    const envelope = outbox[0]?.envelope as { payload: { driverId: string; reason: string; suspendedAt: string } };
-    expect(envelope.payload).toMatchObject({ driverId: 'd1', reason: 'Conducta peligrosa reportada' });
+    const envelope = outbox[0]?.envelope as {
+      payload: { driverId: string; reason: string; suspendedAt: string };
+    };
+    expect(envelope.payload).toMatchObject({
+      driverId: 'd1',
+      reason: 'Conducta peligrosa reportada',
+    });
     expect(typeof envelope.payload.suspendedAt).toBe('string');
   });
 
@@ -623,7 +648,10 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reject('d1', 'motivo')).resolves.toBeUndefined();
     expect(driverWrites).toHaveLength(1);
-    expect(driverWrites[0]).toMatchObject({ backgroundCheckStatus: 'REJECTED', rejectionReason: 'motivo' });
+    expect(driverWrites[0]).toMatchObject({
+      backgroundCheckStatus: 'REJECTED',
+      rejectionReason: 'motivo',
+    });
   });
 
   it('reject: 404 si el conductor no existe (la lectura vive dentro de la tx)', async () => {

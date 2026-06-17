@@ -1,4 +1,4 @@
-import type { ReferralSummary } from './entities';
+import type {ReferralSummary} from './entities';
 
 /**
  * Abstracción del repositorio de Referidos (DIP). Implementación real contra el public-bff

@@ -1,6 +1,9 @@
-import { ApiError, type HttpClient, type OfferList } from '@veo/api-client';
-import { HttpTripRepository } from '../src/features/trip/data/httpTripRepository';
-import { AcceptOfferUseCase, ListOffersUseCase } from '../src/features/trip/domain/usecases';
+import {ApiError, type HttpClient, type OfferList} from '@veo/api-client';
+import {HttpTripRepository} from '../src/features/trip/data/httpTripRepository';
+import {
+  AcceptOfferUseCase,
+  ListOffersUseCase,
+} from '../src/features/trip/domain/usecases';
 
 /** Fake mínimo del HttpClient con los cuatro verbos. */
 function fakeHttp(overrides: Partial<HttpClient>): HttpClient {
@@ -16,7 +19,7 @@ function fakeHttp(overrides: Partial<HttpClient>): HttpClient {
 const TRIP_ID = 'trip-1';
 
 const openBoard: OfferList = {
-  board: { status: 'OPEN', expiresAt: 1_900_000_000_000 },
+  board: {status: 'OPEN', expiresAt: 1_900_000_000_000},
   offers: [
     {
       tripId: TRIP_ID,
@@ -32,7 +35,7 @@ const openBoard: OfferList = {
 describe('HttpTripRepository · listOffers (contrato nuevo { board, offers })', () => {
   it('pega a /trips/:id/offers con el schema offerList y devuelve el envelope { board, offers }', async () => {
     const get = jest.fn(async () => openBoard);
-    const repo = new HttpTripRepository(fakeHttp({ get }));
+    const repo = new HttpTripRepository(fakeHttp({get}));
 
     const result = await repo.listOffers(TRIP_ID);
 
@@ -47,12 +50,22 @@ describe('HttpTripRepository · listOffers (contrato nuevo { board, offers })', 
   });
 
   it('un board CERRADO trae offers [] (nunca ofertas zombies de una puja muerta)', async () => {
-    for (const status of ['CANCELLED', 'EXPIRED', 'CLOSED_MATCHED', 'GONE'] as const) {
+    for (const status of [
+      'CANCELLED',
+      'EXPIRED',
+      'CLOSED_MATCHED',
+      'GONE',
+    ] as const) {
       const closed: OfferList = {
-        board: { status, expiresAt: status === 'GONE' ? null : 1_900_000_000_000 },
+        board: {
+          status,
+          expiresAt: status === 'GONE' ? null : 1_900_000_000_000,
+        },
         offers: [],
       };
-      const repo = new HttpTripRepository(fakeHttp({ get: jest.fn(async () => closed) }));
+      const repo = new HttpTripRepository(
+        fakeHttp({get: jest.fn(async () => closed)}),
+      );
 
       const result = await repo.listOffers(TRIP_ID);
 
@@ -64,7 +77,7 @@ describe('HttpTripRepository · listOffers (contrato nuevo { board, offers })', 
 
 describe('ListOffersUseCase · pasa el envelope tal cual (la re-derivación vive en el hook)', () => {
   it('devuelve el { board, offers } del repositorio sin transformarlo', async () => {
-    const repo = { listOffers: jest.fn(async () => openBoard) };
+    const repo = {listOffers: jest.fn(async () => openBoard)};
     const usecase = new ListOffersUseCase(repo as never);
 
     await expect(usecase.execute(TRIP_ID)).resolves.toEqual(openBoard);
@@ -81,7 +94,9 @@ describe('AcceptOfferUseCase · oferta zombie (board cerrado) → el server resp
     };
     const usecase = new AcceptOfferUseCase(repo as never);
 
-    await expect(usecase.execute(TRIP_ID, 'd-1')).rejects.toMatchObject({ status: 409 });
+    await expect(usecase.execute(TRIP_ID, 'd-1')).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it('propaga el ApiError 404 (la oferta ya no existe) sin tragárselo', async () => {
@@ -92,6 +107,8 @@ describe('AcceptOfferUseCase · oferta zombie (board cerrado) → el server resp
     };
     const usecase = new AcceptOfferUseCase(repo as never);
 
-    await expect(usecase.execute(TRIP_ID, 'd-1')).rejects.toMatchObject({ status: 404 });
+    await expect(usecase.execute(TRIP_ID, 'd-1')).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });

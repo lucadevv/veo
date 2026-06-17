@@ -2,17 +2,17 @@
 
 ## Publica (vía outbox → Kafka)
 
-| eventType | Topic | Schema (`@veo/events`) | Disparado por | Consumidores |
-|---|---|---|---|---|
-| `share.link_generated` | `share` | `{ shareId, tripId, expiresAt }` | Creación de enlace (REST `POST /share/:tripId`) y flujo de pánico (BR-S05) | notification-service, audit-service |
-| `share.viewed` | `share` | `{ shareId, at }` | Apertura de la página pública `GET /public/share/:token` | audit-service, trip/safety analytics |
+| eventType              | Topic   | Schema (`@veo/events`)           | Disparado por                                                              | Consumidores                         |
+| ---------------------- | ------- | -------------------------------- | -------------------------------------------------------------------------- | ------------------------------------ |
+| `share.link_generated` | `share` | `{ shareId, tripId, expiresAt }` | Creación de enlace (REST `POST /share/:tripId`) y flujo de pánico (BR-S05) | notification-service, audit-service  |
+| `share.viewed`         | `share` | `{ shareId, at }`                | Apertura de la página pública `GET /public/share/:token`                   | audit-service, trip/safety analytics |
 
 ## Consume
 
-| eventType | Topic | Acción | Reintentos |
-|---|---|---|---|
-| `trip.started` | `trip` | Actualiza el read-model `trip_snapshots` (estado `IN_PROGRESS`, driver, inicio) | Reintento del consumer group (offset no commiteado ante error) |
-| `panic.triggered` | `panic` | BR-S05: guarda ubicación aproximada en `trip_snapshots`, genera enlaces de seguimiento para los contactos de confianza verificados del pasajero, publica `share.link_generated` y envía el SMS con el enlace | Reintento del consumer group |
+| eventType         | Topic   | Acción                                                                                                                                                                                                       | Reintentos                                                     |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `trip.started`    | `trip`  | Actualiza el read-model `trip_snapshots` (estado `IN_PROGRESS`, driver, inicio)                                                                                                                              | Reintento del consumer group (offset no commiteado ante error) |
+| `panic.triggered` | `panic` | BR-S05: guarda ubicación aproximada en `trip_snapshots`, genera enlaces de seguimiento para los contactos de confianza verificados del pasajero, publica `share.link_generated` y envía el SMS con el enlace | Reintento del consumer group                                   |
 
 ## Garantías
 

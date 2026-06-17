@@ -1,11 +1,11 @@
-import {getContainer, resetContainer} from '../container';
+import { getContainer, resetContainer } from '../container';
 
 describe('AppContainer (DI)', () => {
   beforeEach(() => resetContainer());
 
   it('registra un repositorio por cada feature, expuesto por su interfaz', () => {
     const container = getContainer();
-    const {auth, shift, trips, earnings, profile, documents, registration, chat, ops, support} =
+    const { auth, shift, trips, earnings, profile, documents, registration, chat, ops, support } =
       container.repositories;
 
     expect(typeof auth.requestOtp).toBe('function');

@@ -1,8 +1,8 @@
-import type { GeoPoint } from '@veo/api-client';
-import { useEffect, useState } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useRideDraftStore } from '../../../maps/presentation/stores/rideDraftStore';
+import type {GeoPoint} from '@veo/api-client';
+import {useEffect, useState} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
 
 export interface PickupPinController {
   /**
@@ -22,9 +22,12 @@ export interface PickupPinController {
  * @param enabled `pickupMode`: Home idle (no buscando, no en cotización/viaje) — lo compone la pantalla
  *   desde el descriptor de fase + el eje local del sheet.
  */
-export function usePickupPin(enabled: boolean, myLocation: GeoPoint | null): PickupPinController {
+export function usePickupPin(
+  enabled: boolean,
+  myLocation: GeoPoint | null,
+): PickupPinController {
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const setOrigin = useRideDraftStore((s) => s.setOrigin);
+  const setOrigin = useRideDraftStore(s => s.setOrigin);
 
   // Centro VIVO que reporta el AppMap al hacer pan (throttle interno 120ms).
   const [pickupCenter, setPickupCenter] = useState<GeoPoint | null>(null);
@@ -39,10 +42,10 @@ export function usePickupPin(enabled: boolean, myLocation: GeoPoint | null): Pic
     if (!enabled || !pickupCenter) return;
     const id = setTimeout(() => {
       void reverseGeocode
-        .execute({ lat: pickupCenter.lat, lng: pickupCenter.lon })
-        .then((place) =>
+        .execute({lat: pickupCenter.lat, lng: pickupCenter.lon})
+        .then(place =>
           setOrigin({
-            point: { lat: pickupCenter.lat, lng: pickupCenter.lon },
+            point: {lat: pickupCenter.lat, lng: pickupCenter.lon},
             title: place.title,
             subtitle: place.subtitle,
           }),
@@ -52,5 +55,5 @@ export function usePickupPin(enabled: boolean, myLocation: GeoPoint | null): Pic
     return () => clearTimeout(id);
   }, [enabled, pickupCenter, reverseGeocode, setOrigin]);
 
-  return { initialCenter: pickupInitial, onCenterChange: setPickupCenter };
+  return {initialCenter: pickupInitial, onCenterChange: setPickupCenter};
 }

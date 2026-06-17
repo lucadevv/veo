@@ -13,10 +13,10 @@ import 'intl-pluralrules';
 // módulo, así que el global debe existir ANTES del bootstrap nativo (que arrastra livekit-client).
 import './src/core/polyfills/dom-exception';
 import 'react-native-gesture-handler';
-import { AppRegistry } from 'react-native';
+import {AppRegistry} from 'react-native';
 // Bootstrap de la capa NATIVA (WebRTC globals, visor LiveKit, handler push background).
 import './src/bootstrap/native';
 import App from './src/App';
-import { name as appName } from './app.json';
+import {name as appName} from './app.json';
 
 AppRegistry.registerComponent(appName, () => App);

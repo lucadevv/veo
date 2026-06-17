@@ -1,6 +1,6 @@
-import type { TripResource } from '@veo/api-client';
-import type { KeyValueStore } from '../src/core/storage/mmkv';
-import { LocalTripHistoryRepository } from '../src/features/trip/data/localTripHistoryRepository';
+import type {TripResource} from '@veo/api-client';
+import type {KeyValueStore} from '../src/core/storage/mmkv';
+import {LocalTripHistoryRepository} from '../src/features/trip/data/localTripHistoryRepository';
 
 /** KeyValueStore en memoria para tests (sin MMKV nativo). */
 class MemoryStore implements KeyValueStore {
@@ -42,8 +42,8 @@ function trip(id: string, requestedAt: string): TripResource {
     driverId: null,
     vehicleId: null,
     status: 'COMPLETED',
-    origin: { lat: -12.04, lon: -77.04 },
-    destination: { lat: -12.1, lon: -77.0 },
+    origin: {lat: -12.04, lon: -77.04},
+    destination: {lat: -12.1, lon: -77.0},
     fareCents: 1500,
     currency: 'PEN',
     surgeMultiplier: 1,

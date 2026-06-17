@@ -19,7 +19,11 @@ describe('resolveTripOffering · precedencia ADR 013 §2', () => {
     try {
       resolveTripOffering('veo_fantasma', undefined);
     } catch (err) {
-      expect(err).toMatchObject({ code: 'UNKNOWN_OFFERING', httpStatus: 400, details: { category: 'veo_fantasma' } });
+      expect(err).toMatchObject({
+        code: 'UNKNOWN_OFFERING',
+        httpStatus: 400,
+        details: { category: 'veo_fantasma' },
+      });
     }
   });
 

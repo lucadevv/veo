@@ -24,7 +24,10 @@ export class InspectionsController {
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post()
   @ApiOperation({ summary: 'Registrar inspección técnica (BR-D04: trimestral)' })
-  create(@Body() dto: CreateInspectionDto, @CurrentUser() user: AuthenticatedUser): Promise<Inspection> {
+  create(
+    @Body() dto: CreateInspectionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<Inspection> {
     return this.inspections.create(dto, user.userId);
   }
 

@@ -92,7 +92,9 @@ describe('override de precio + modo por oferta (B2)', () => {
     };
     const eco = resolveCatalog(overlay).find((o) => o.id === OfferingId.VEO_ECONOMICO);
     expect(eco?.pricing.multiplier).toBe(1.5); // override
-    expect(eco?.pricing.minFareCents).toBe(OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents); // code
+    expect(eco?.pricing.minFareCents).toBe(
+      OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents,
+    ); // code
   });
 
   it('sin override de precio → pricing de código intacto', () => {
@@ -138,7 +140,10 @@ describe('override de precio + modo por oferta (B2)', () => {
   });
 
   it('resolveOfferingModeWithPin: pin inválido (∉ allowedModes) → se ignora, manda el schedule', () => {
-    const fixedOnly = { ...OFFERINGS[OfferingId.VEO_MOTO], allowedModes: [PricingMode.FIXED] as const };
+    const fixedOnly = {
+      ...OFFERINGS[OfferingId.VEO_MOTO],
+      allowedModes: [PricingMode.FIXED] as const,
+    };
     // pin PUJA inválido → ignora el pin; schedule pide FIXED (∈ allowedModes) → FIXED.
     expect(resolveOfferingModeWithPin(fixedOnly, PricingMode.PUJA, PricingMode.FIXED)).toEqual({
       mode: PricingMode.FIXED,
@@ -151,13 +156,23 @@ describe('isVehicleEligibleForOffering (B5-3 · eligibilidad computada)', () => 
   const YEAR = 2026;
   // El consumidor (dispatch) lee `requires` vía el tipo OfferingSpec (opcional), no el literal exacto.
   const reqOf = (id: OfferingId) => (OFFERINGS[id] as OfferingSpec).requires;
-  const economyOld: VehicleEligibilityAttrs = { seats: 5, segment: VehicleSegment.ECONOMY, year: 2015 };
+  const economyOld: VehicleEligibilityAttrs = {
+    seats: 5,
+    segment: VehicleSegment.ECONOMY,
+    year: 2015,
+  };
   const midNew: VehicleEligibilityAttrs = { seats: 5, segment: VehicleSegment.MID, year: 2022 };
-  const premiumVan: VehicleEligibilityAttrs = { seats: 7, segment: VehicleSegment.PREMIUM, year: 2023 };
+  const premiumVan: VehicleEligibilityAttrs = {
+    seats: 7,
+    segment: VehicleSegment.PREMIUM,
+    year: 2023,
+  };
 
   it('sin requires (económico) → cualquier vehículo de la clase es elegible', () => {
     expect(reqOf(OfferingId.VEO_ECONOMICO)).toBeUndefined();
-    expect(isVehicleEligibleForOffering(reqOf(OfferingId.VEO_ECONOMICO), economyOld, YEAR)).toBe(true);
+    expect(isVehicleEligibleForOffering(reqOf(OfferingId.VEO_ECONOMICO), economyOld, YEAR)).toBe(
+      true,
+    );
   });
 
   it('confort exige segmento ≥ MID: un ECONOMY no califica, MID/PREMIUM sí', () => {
@@ -169,8 +184,20 @@ describe('isVehicleEligibleForOffering (B5-3 · eligibilidad computada)', () => 
 
   it('confort exige antigüedad ≤ 8 años: un MID viejo (2015) no califica aunque el segmento alcance', () => {
     const confort = reqOf(OfferingId.VEO_CONFORT);
-    expect(isVehicleEligibleForOffering(confort, { seats: 5, segment: VehicleSegment.MID, year: 2015 }, YEAR)).toBe(false);
-    expect(isVehicleEligibleForOffering(confort, { seats: 5, segment: VehicleSegment.MID, year: 2018 }, YEAR)).toBe(true);
+    expect(
+      isVehicleEligibleForOffering(
+        confort,
+        { seats: 5, segment: VehicleSegment.MID, year: 2015 },
+        YEAR,
+      ),
+    ).toBe(false);
+    expect(
+      isVehicleEligibleForOffering(
+        confort,
+        { seats: 5, segment: VehicleSegment.MID, year: 2018 },
+        YEAR,
+      ),
+    ).toBe(true);
   });
 
   it('xl exige 6+ asientos: un sedán de 5 no califica, una van de 7 sí', () => {
@@ -181,7 +208,13 @@ describe('isVehicleEligibleForOffering (B5-3 · eligibilidad computada)', () => 
 
   it('xl NO exige segmento: una van ECONOMY de 6 asientos califica', () => {
     const xl = reqOf(OfferingId.VEO_XL);
-    expect(isVehicleEligibleForOffering(xl, { seats: 6, segment: VehicleSegment.ECONOMY, year: 2020 }, YEAR)).toBe(true);
+    expect(
+      isVehicleEligibleForOffering(
+        xl,
+        { seats: 6, segment: VehicleSegment.ECONOMY, year: 2020 },
+        YEAR,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -213,11 +246,17 @@ describe('hasRequiredCertifications (B5-3.2 · certs del conductor, FAIL-CLOSED)
   });
 
   it('cada vertical exige SU propia certificación (ambulancia/grúa/mecánico no se mezclan)', () => {
-    expect(reqOf(OfferingId.VEO_AMBULANCE)?.certifications).toEqual([FleetDocumentType.AMBULANCE_OPERATOR]);
+    expect(reqOf(OfferingId.VEO_AMBULANCE)?.certifications).toEqual([
+      FleetDocumentType.AMBULANCE_OPERATOR,
+    ]);
     expect(reqOf(OfferingId.VEO_TOW)?.certifications).toEqual([FleetDocumentType.TOW_OPERATOR]);
-    expect(reqOf(OfferingId.VEO_MECHANIC)?.certifications).toEqual([FleetDocumentType.MECHANIC_CERT]);
+    expect(reqOf(OfferingId.VEO_MECHANIC)?.certifications).toEqual([
+      FleetDocumentType.MECHANIC_CERT,
+    ]);
     // La grúa NO se cubre con la cert de ambulancia: cruzar credenciales no habilita.
-    expect(hasRequiredCertifications(reqOf(OfferingId.VEO_TOW), [FleetDocumentType.AMBULANCE_OPERATOR])).toBe(false);
+    expect(
+      hasRequiredCertifications(reqOf(OfferingId.VEO_TOW), [FleetDocumentType.AMBULANCE_OPERATOR]),
+    ).toBe(false);
   });
 });
 
@@ -236,13 +275,25 @@ describe('isEligibleForOffering (B5-3.2 · vehículo ∧ conductor)', () => {
 
   it('ambulancia: conductor CON cert válida + vehículo OK → elegible', () => {
     expect(
-      isEligibleForOffering(reqOf(OfferingId.VEO_AMBULANCE), van, [FleetDocumentType.AMBULANCE_OPERATOR], YEAR),
+      isEligibleForOffering(
+        reqOf(OfferingId.VEO_AMBULANCE),
+        van,
+        [FleetDocumentType.AMBULANCE_OPERATOR],
+        YEAR,
+      ),
     ).toBe(true);
   });
 
   it('xl: conductor con cert sobrante pero vehículo de 5 asientos → NO elegible (el attr veta primero)', () => {
     const sedan: VehicleEligibilityAttrs = { seats: 5, segment: VehicleSegment.MID, year: 2022 };
-    expect(isEligibleForOffering(reqOf(OfferingId.VEO_XL), sedan, [FleetDocumentType.AMBULANCE_OPERATOR], YEAR)).toBe(false);
+    expect(
+      isEligibleForOffering(
+        reqOf(OfferingId.VEO_XL),
+        sedan,
+        [FleetDocumentType.AMBULANCE_OPERATOR],
+        YEAR,
+      ),
+    ).toBe(false);
   });
 });
 

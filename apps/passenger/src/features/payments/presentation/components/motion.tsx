@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect } from 'react';
-import { StyleSheet, type ViewStyle } from 'react-native';
+import React, {useCallback, useEffect} from 'react';
+import {StyleSheet, type ViewStyle} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
 
 const MAX_STAGGER_STEPS = 6;
 
@@ -21,7 +21,13 @@ export interface EnterViewProps {
 }
 
 /** Entrada con fade + desplazamiento sutil (ease-out). Respeta reduce-motion. */
-export function EnterView({ children, index = 0, delay, offsetY = 10, style }: EnterViewProps) {
+export function EnterView({
+  children,
+  index = 0,
+  delay,
+  offsetY = 10,
+  style,
+}: EnterViewProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(0);
@@ -44,10 +50,12 @@ export function EnterView({ children, index = 0, delay, offsetY = 10, style }: E
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * offsetY }],
+    transform: [{translateY: (1 - progress.value) * offsetY}],
   }));
 
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+  );
 }
 
 /**
@@ -60,7 +68,9 @@ export function usePressScale(scaleTo?: number) {
   const scale = useSharedValue(1);
   const target = scaleTo ?? theme.motion.scale.press;
 
-  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{scale: scale.value}],
+  }));
 
   const onPressIn = useCallback(() => {
     if (reduced) return;
@@ -78,7 +88,7 @@ export function usePressScale(scaleTo?: number) {
     });
   }, [reduced, theme, scale]);
 
-  return { animatedStyle, onPressIn, onPressOut };
+  return {animatedStyle, onPressIn, onPressOut};
 }
 
 export interface SuccessCheckProps {
@@ -89,7 +99,7 @@ export interface SuccessCheckProps {
  * Sello de éxito: círculo `success` con check tipográfico que entra con resorte (scale 0.6→1 + fade).
  * Confirma una acción puntual (pago/propina enviada). Respeta reduce-motion (estado final inmediato).
  */
-export function SuccessCheck({ size = 72 }: SuccessCheckProps) {
+export function SuccessCheck({size = 72}: SuccessCheckProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(0);
@@ -104,7 +114,7 @@ export function SuccessCheck({ size = 72 }: SuccessCheckProps) {
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ scale: 0.6 + progress.value * 0.4 }],
+    transform: [{scale: 0.6 + progress.value * 0.4}],
   }));
 
   return (
@@ -113,10 +123,14 @@ export function SuccessCheck({ size = 72 }: SuccessCheckProps) {
       importantForAccessibility="no-hide-descendants"
       style={[
         styles.check,
-        { width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.success },
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: theme.colors.success,
+        },
         animatedStyle,
-      ]}
-    >
+      ]}>
       <Text variant="title1" color="onSuccess">
         ✓
       </Text>
@@ -125,8 +139,8 @@ export function SuccessCheck({ size = 72 }: SuccessCheckProps) {
 }
 
 const styles = StyleSheet.create({
-  check: { alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  check: {alignItems: 'center', justifyContent: 'center', alignSelf: 'center'},
 });
 
 /** Reexport para envolver contenido presionable con estilo animado. */
-export { Animated };
+export {Animated};

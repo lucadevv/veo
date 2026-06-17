@@ -69,7 +69,8 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
                     : canManage
                       ? 'border-border hover:border-border-strong'
                       : 'border-border opacity-70'
-                }`}>
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-2 font-semibold text-ink">
                     <Icon className="size-5 text-ink-muted" aria-hidden />
@@ -122,14 +123,16 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
         <h2 className="text-sm font-medium text-ink-muted">Franjas horarias</h2>
         {schedule.rules.length === 0 ? (
           <p className="mt-1 text-sm text-ink-subtle">
-            Sin franjas: rige siempre el modo por defecto. El editor de franjas por horario llega próximamente.
+            Sin franjas: rige siempre el modo por defecto. El editor de franjas por horario llega
+            próximamente.
           </p>
         ) : (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {schedule.rules.map((rule) => (
               <li
                 key={`${rule.dayMask}-${rule.startMinute}-${rule.endMinute}-${rule.mode}`}
-                className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                className="flex items-center justify-between gap-4 px-4 py-3 text-sm"
+              >
                 <span className="text-ink">{formatDayMask(rule.dayMask)}</span>
                 <span className="tabular text-ink-muted">
                   {formatWindow(rule.startMinute, rule.endMinute)}
@@ -143,7 +146,9 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
 
       <p className="text-xs text-ink-subtle">
         Versión {schedule.version}
-        {schedule.updatedAt ? ` · actualizado ${dateTime(schedule.updatedAt)}` : ' · sin cambios aún'}
+        {schedule.updatedAt
+          ? ` · actualizado ${dateTime(schedule.updatedAt)}`
+          : ' · sin cambios aún'}
       </p>
     </div>
   );

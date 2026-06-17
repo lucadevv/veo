@@ -29,7 +29,7 @@ src/
 - `driver:loc:{id}` → `{lat,lon,h3,updatedAt}` con TTL (`DRIVER_LOC_TTL_SECONDS`, 60s).
 - `h3:available:{cell}` → SET de `driverId` disponibles en esa celda H3 (res 9).
 - Mover un conductor entre celdas es **atómico** (script LUA: `SREM` celda vieja + `SADD` celda nueva
-  + refresh de `loc`).
+  - refresh de `loc`).
 - `dispatch:excluded:drivers` → SET de exclusión por pánico.
 
 ### Algoritmo de matching (BR-T06) — EVENT-DRIVEN, sin estado en proceso

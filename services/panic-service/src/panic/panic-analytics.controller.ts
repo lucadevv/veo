@@ -19,7 +19,8 @@ export class PanicAnalyticsController {
 
   @Get('open-count')
   @ApiOperation({
-    summary: 'KPI dashboard: cantidad de pánicos ABIERTOS (TRIGGERED + ACKNOWLEDGED, no resueltos).',
+    summary:
+      'KPI dashboard: cantidad de pánicos ABIERTOS (TRIGGERED + ACKNOWLEDGED, no resueltos).',
   })
   async openCount(): Promise<{ openPanics: number }> {
     return { openPanics: await this.panic.countOpen() };

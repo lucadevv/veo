@@ -1,8 +1,8 @@
-import {useEffect} from 'react';
-import type {DriverLocationReport} from '@veo/api-client';
-import type {DriverSocket} from '../../../../core/realtime/socket';
-import {currentVehicleType} from '../../../shift/presentation/state/vehicleTypeStore';
-import {useLocationSource} from '../providers/LocationSourceProvider';
+import { useEffect } from 'react';
+import type { DriverLocationReport } from '@veo/api-client';
+import type { DriverSocket } from '../../../../core/realtime/socket';
+import { currentVehicleType } from '../../../shift/presentation/state/vehicleTypeStore';
+import { useLocationSource } from '../providers/LocationSourceProvider';
 
 /**
  * Publica el GPS del conductor por el socket `/driver` (evento `location`).
@@ -23,7 +23,7 @@ export function useLocationPublisher(socket: DriverSocket | null, enabled: boole
     if (!socket || !enabled || !source.available) {
       return;
     }
-    const unsubscribe = source.subscribe(sample => {
+    const unsubscribe = source.subscribe((sample) => {
       const report: DriverLocationReport = {
         lat: sample.lat,
         lon: sample.lon,

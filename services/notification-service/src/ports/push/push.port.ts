@@ -41,7 +41,11 @@ export type PushTargetKind = (typeof PushTargetKind)[keyof typeof PushTargetKind
  * FCM que entrega a N suscriptores (APNs no tiene topics → solo el riel FCM los soporta).
  */
 export type PushTarget =
-  | { readonly kind: typeof PushTargetKind.Token; readonly token: string; readonly platform: PushPlatform }
+  | {
+      readonly kind: typeof PushTargetKind.Token;
+      readonly token: string;
+      readonly platform: PushPlatform;
+    }
   | { readonly kind: typeof PushTargetKind.Topic; readonly topic: string }
   | { readonly kind: typeof PushTargetKind.Condition; readonly condition: string };
 
@@ -61,7 +65,11 @@ export interface PushMessage {
 export type PushResult =
   | { readonly outcome: typeof PushOutcome.Accepted; readonly providerMessageId?: string }
   | { readonly outcome: typeof PushOutcome.InvalidToken; readonly reason: string }
-  | { readonly outcome: typeof PushOutcome.RateLimited; readonly retryAfterMs?: number; readonly reason: string }
+  | {
+      readonly outcome: typeof PushOutcome.RateLimited;
+      readonly retryAfterMs?: number;
+      readonly reason: string;
+    }
   | { readonly outcome: typeof PushOutcome.Transient; readonly reason: string };
 
 /**

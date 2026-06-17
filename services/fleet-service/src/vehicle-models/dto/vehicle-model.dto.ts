@@ -38,7 +38,10 @@ export class ListVehicleModelsQuery {
   @IsUUID()
   cursor?: string;
 
-  @ApiPropertyOptional({ description: `Tamaño de página (1..${VEHICLE_MODEL_MAX_LIMIT}).`, type: Number })
+  @ApiPropertyOptional({
+    description: `Tamaño de página (1..${VEHICLE_MODEL_MAX_LIMIT}).`,
+    type: Number,
+  })
   @IsOptional()
   // El pipe del fleet-service es transform:true SIN enableImplicitConversion → un query param llega como
   // string; sin @Type(() => Number) el "50" falla @IsInt() y devuelve 400 (rompía la cola de revisión).
@@ -90,7 +93,10 @@ export class RequestVehicleModelDto {
   @Max(MODEL_MAX_YEAR)
   yearFrom!: number;
 
-  @ApiProperty({ example: 2024, description: `Año hasta (>= yearFrom, <= ${MODEL_MAX_YEAR}); el servicio valida el rango.` })
+  @ApiProperty({
+    example: 2024,
+    description: `Año hasta (>= yearFrom, <= ${MODEL_MAX_YEAR}); el servicio valida el rango.`,
+  })
   @IsInt()
   @Min(MODEL_MIN_YEAR)
   @Max(MODEL_MAX_YEAR)
@@ -116,17 +122,26 @@ export class ApproveVehicleModelDto {
   @IsEnum(VehicleSegment)
   segment!: VehicleSegment;
 
-  @ApiProperty({ enum: EnergySource, description: 'GASOLINE_95 | GASOLINE_84 | DIESEL | GNV | ELECTRIC.' })
+  @ApiProperty({
+    enum: EnergySource,
+    description: 'GASOLINE_95 | GASOLINE_84 | DIESEL | GNV | ELECTRIC.',
+  })
   @IsEnum(EnergySource)
   energySource!: EnergySource;
 
-  @ApiProperty({ example: 17, description: `Rendimiento km por unidad (${EFFICIENCY_MIN}..${EFFICIENCY_MAX}).` })
+  @ApiProperty({
+    example: 17,
+    description: `Rendimiento km por unidad (${EFFICIENCY_MIN}..${EFFICIENCY_MAX}).`,
+  })
   @IsInt()
   @Min(EFFICIENCY_MIN)
   @Max(EFFICIENCY_MAX)
   efficiency!: number;
 
-  @ApiPropertyOptional({ example: 5, description: `Corrige los asientos del conductor si hace falta (${SEATS_MIN}..${SEATS_MAX}).` })
+  @ApiPropertyOptional({
+    example: 5,
+    description: `Corrige los asientos del conductor si hace falta (${SEATS_MIN}..${SEATS_MAX}).`,
+  })
   @IsOptional()
   @IsInt()
   @Min(SEATS_MIN)
@@ -138,7 +153,8 @@ export class ApproveVehicleModelDto {
 export class ListReviewQuery {
   @ApiPropertyOptional({
     enum: VehicleModelStatus,
-    description: 'Estado a listar (default PENDING_REVIEW). El operador puede auditar APPROVED/REJECTED.',
+    description:
+      'Estado a listar (default PENDING_REVIEW). El operador puede auditar APPROVED/REJECTED.',
   })
   @IsOptional()
   @IsEnum(VehicleModelStatus)
@@ -149,7 +165,10 @@ export class ListReviewQuery {
   @IsUUID()
   cursor?: string;
 
-  @ApiPropertyOptional({ description: `Tamaño de página (1..${VEHICLE_MODEL_MAX_LIMIT}).`, type: Number })
+  @ApiPropertyOptional({
+    description: `Tamaño de página (1..${VEHICLE_MODEL_MAX_LIMIT}).`,
+    type: Number,
+  })
   @IsOptional()
   // El pipe del fleet-service es transform:true SIN enableImplicitConversion → un query param llega como
   // string; sin @Type(() => Number) el "50" falla @IsInt() y devuelve 400 (rompía la cola de revisión).

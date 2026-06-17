@@ -1,4 +1,4 @@
-import type { MapPoint } from '@veo/api-client';
+import type {MapPoint} from '@veo/api-client';
 
 // Entidades de dominio de Mapas (contrato soberano en @veo/api-client).
 export type {

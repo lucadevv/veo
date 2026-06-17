@@ -1,4 +1,4 @@
-import type { TripActiveView, TripResource } from '@veo/api-client';
+import type {TripActiveView, TripResource} from '@veo/api-client';
 import {
   formatDistance,
   formatDurationMinutes,
@@ -32,7 +32,9 @@ export interface TripReceipt {
 }
 
 /** Etiqueta legible de un punto geográfico (lat, lon) con 5 decimales. */
-function pointLabel(point: { lat: number; lon: number } | null | undefined): string | undefined {
+function pointLabel(
+  point: {lat: number; lon: number} | null | undefined,
+): string | undefined {
   if (!point) {
     return undefined;
   }
@@ -62,22 +64,28 @@ export function buildReceipt(
     : undefined;
 
   const surgeMultiplier =
-    snapshot && snapshot.surgeMultiplier > 1 ? snapshot.surgeMultiplier : undefined;
+    snapshot && snapshot.surgeMultiplier > 1
+      ? snapshot.surgeMultiplier
+      : undefined;
 
   return {
     baseFareCents,
     tipCents,
     totalCents,
-    ...(surgeMultiplier ? { surgeMultiplier } : {}),
+    ...(surgeMultiplier ? {surgeMultiplier} : {}),
     paymentMethod: trip.paymentMethod,
-    ...(snapshot ? { date: formatDateTime(snapshot.completedAt ?? snapshot.requestedAt) } : {}),
+    ...(snapshot
+      ? {date: formatDateTime(snapshot.completedAt ?? snapshot.requestedAt)}
+      : {}),
     distanceMeters: trip.distanceMeters,
     durationSeconds: trip.durationSeconds,
-    ...(driverLabel ? { driverLabel } : {}),
-    ...(vehicleLabel ? { vehicleLabel } : {}),
-    ...(pointLabel(snapshot?.origin) ? { originLabel: pointLabel(snapshot?.origin) } : {}),
+    ...(driverLabel ? {driverLabel} : {}),
+    ...(vehicleLabel ? {vehicleLabel} : {}),
+    ...(pointLabel(snapshot?.origin)
+      ? {originLabel: pointLabel(snapshot?.origin)}
+      : {}),
     ...(pointLabel(snapshot?.destination)
-      ? { destinationLabel: pointLabel(snapshot?.destination) }
+      ? {destinationLabel: pointLabel(snapshot?.destination)}
       : {}),
   };
 }
@@ -103,7 +111,10 @@ export interface ReceiptShareLabels {
  * Texto limpio del recibo para `Share.share` (RN nativo). Pura: la presentación inyecta las
  * etiquetas i18n. Omite con gracia las líneas sin dato (no muestra "undefined").
  */
-export function formatReceiptText(receipt: TripReceipt, labels: ReceiptShareLabels): string {
+export function formatReceiptText(
+  receipt: TripReceipt,
+  labels: ReceiptShareLabels,
+): string {
   const lines: string[] = [`🧾 ${labels.title}`, ''];
 
   if (receipt.date) {
@@ -116,7 +127,9 @@ export function formatReceiptText(receipt: TripReceipt, labels: ReceiptShareLabe
     lines.push(`${labels.vehicle}: ${receipt.vehicleLabel}`);
   }
   if (receipt.originLabel && receipt.destinationLabel) {
-    lines.push(`${labels.route}: ${receipt.originLabel} → ${receipt.destinationLabel}`);
+    lines.push(
+      `${labels.route}: ${receipt.originLabel} → ${receipt.destinationLabel}`,
+    );
   }
 
   lines.push('');

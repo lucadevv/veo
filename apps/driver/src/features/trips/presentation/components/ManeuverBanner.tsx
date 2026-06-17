@@ -1,12 +1,8 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {Text, useTheme} from '@veo/ui-kit';
-import {IconManeuver, type ManeuverGlyphName} from '../../../../shared/presentation/icons';
-import {
-  formatManeuverDistance,
-  maneuverGlyph,
-  type TripRouteStep,
-} from '../../domain';
+import { StyleSheet, View } from 'react-native';
+import { Text, useTheme } from '@veo/ui-kit';
+import { IconManeuver, type ManeuverGlyphName } from '../../../../shared/presentation/icons';
+import { formatManeuverDistance, maneuverGlyph, type TripRouteStep } from '../../domain';
 
 export interface ManeuverBannerProps {
   /** Próxima maniobra a ejecutar (primer paso restante de la ruta). */
@@ -22,7 +18,7 @@ export interface ManeuverBannerProps {
  * sobre superficie elevada, una sola línea de instrucción truncada. Sin animación de entrada para
  * no parpadear al recalcular la ruta (respeta reduce-motion por defecto).
  */
-export function ManeuverBanner({step, remaining}: ManeuverBannerProps): React.JSX.Element {
+export function ManeuverBanner({ step, remaining }: ManeuverBannerProps): React.JSX.Element {
   const theme = useTheme();
   const glyph: ManeuverGlyphName = maneuverGlyph(step.maneuver);
 
@@ -40,12 +36,14 @@ export function ManeuverBanner({step, remaining}: ManeuverBannerProps): React.JS
           gap: theme.spacing.lg,
           ...theme.elevation.level2,
         },
-      ]}>
+      ]}
+    >
       <View
         style={[
           styles.iconWrap,
-          {backgroundColor: theme.colors.bg, borderRadius: theme.radii.md},
-        ]}>
+          { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md },
+        ]}
+      >
         <IconManeuver glyph={glyph} size={36} color={theme.colors.accent} strokeWidth={2.2} />
       </View>
       <View style={styles.body}>
@@ -60,8 +58,9 @@ export function ManeuverBanner({step, remaining}: ManeuverBannerProps): React.JS
         <View
           style={[
             styles.counter,
-            {backgroundColor: theme.colors.bg, borderRadius: theme.radii.pill},
-          ]}>
+            { backgroundColor: theme.colors.bg, borderRadius: theme.radii.pill },
+          ]}
+        >
           <Text variant="footnote" color="inkSubtle" tabular>
             {remaining}
           </Text>
@@ -72,8 +71,14 @@ export function ManeuverBanner({step, remaining}: ManeuverBannerProps): React.JS
 }
 
 const styles = StyleSheet.create({
-  card: {flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth},
-  iconWrap: {width: 56, height: 56, alignItems: 'center', justifyContent: 'center'},
-  body: {flex: 1, gap: 2},
-  counter: {minWidth: 28, height: 28, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center'},
+  card: { flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth },
+  iconWrap: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  body: { flex: 1, gap: 2 },
+  counter: {
+    minWidth: 28,
+    height: 28,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

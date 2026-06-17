@@ -20,7 +20,9 @@ export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Catálogo efectivo (ofertas + enabled + version). catalog:view. ADR 013' })
+  @ApiOperation({
+    summary: 'Catálogo efectivo (ofertas + enabled + version). catalog:view. ADR 013',
+  })
   getCatalog(@CurrentUser() user: AuthenticatedUser): Promise<CatalogView> {
     return this.catalog.getCatalog(user);
   }

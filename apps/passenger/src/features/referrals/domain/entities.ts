@@ -1,5 +1,5 @@
 // Entidades de dominio de Referidos (Ola 2A). Contrato soberano en `@veo/api-client`.
-export type { ReferralSummary } from '@veo/api-client';
+export type {ReferralSummary} from '@veo/api-client';
 
 /**
  * Longitud mínima razonable de un código de referido para canjear. El bff es la autoridad final

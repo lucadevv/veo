@@ -1,5 +1,5 @@
-import type {ProfileRepository} from '../repositories/profile-repository';
-import type {DriverProfile} from '../entities';
+import type { ProfileRepository } from '../repositories/profile-repository';
+import type { DriverProfile } from '../entities';
 
 /** Caso de uso: obtener el perfil agregado del conductor autenticado. */
 export class GetProfileUseCase {

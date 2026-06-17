@@ -1,8 +1,8 @@
-import { ApiError } from '@veo/api-client';
-import { NotImplementedError } from '../../../core/errors/notImplemented';
-import { uuidv7 } from '../../../shared/utils/uuid';
-import type { PanicEscalation } from './panicEscalation';
-import type { TriggerPanicUseCase } from './usecases';
+import {ApiError} from '@veo/api-client';
+import {NotImplementedError} from '../../../core/errors/notImplemented';
+import {uuidv7} from '../../../shared/utils/uuid';
+import type {PanicEscalation} from './panicEscalation';
+import type {TriggerPanicUseCase} from './usecases';
 
 /** Espera antes del PRIMER reintento; crece exponencialmente (`BACKOFF_FACTOR`). */
 const INITIAL_RETRY_DELAY_MS = 1_000;
@@ -34,7 +34,7 @@ function isRetryable(error: unknown): boolean {
 /** Espera `ms` con jitter parejo (½·ms .. ms) para no sincronizar reintentos de muchos devices. */
 function backoffDelay(ms: number): Promise<void> {
   const jittered = ms / 2 + Math.random() * (ms / 2);
-  return new Promise((resolve) => setTimeout(resolve, jittered));
+  return new Promise(resolve => setTimeout(resolve, jittered));
 }
 
 /**
@@ -93,7 +93,10 @@ export class SilentPanicDispatcher {
         await this.triggerPanic.execute(tripId, dedupKey);
         return; // Confirmado por el server (creado o deduplicado): la alerta NO se perdió.
       } catch (error) {
-        console.warn(`[panic] disparo silencioso falló (intento ${attempt}):`, error);
+        console.warn(
+          `[panic] disparo silencioso falló (intento ${attempt}):`,
+          error,
+        );
         if (!isRetryable(error) || Date.now() + delayMs > deadline) {
           // Determinista o presupuesto agotado: dejar de ser silencioso (nunca éxito falso).
           this.escalation.escalate(tripId);

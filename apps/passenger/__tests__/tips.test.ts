@@ -4,7 +4,7 @@ import type {
   ChargeRequest,
   PaymentView,
 } from '@veo/api-client';
-import type { PaymentsRepository } from '../src/features/payments/domain/paymentsRepository';
+import type {PaymentsRepository} from '../src/features/payments/domain/paymentsRepository';
 import {
   AddTipUseCase,
   MAX_TIP_CENTS,
@@ -13,14 +13,17 @@ import {
 } from '../src/features/payments/domain/usecases';
 
 class FakePaymentsRepository implements PaymentsRepository {
-  charge = jest.fn(async (_input: ChargeRequest): Promise<PaymentView> => ({} as PaymentView));
-  getPayment = jest.fn(async (): Promise<PaymentView> => ({} as PaymentView));
+  charge = jest.fn(
+    async (_input: ChargeRequest): Promise<PaymentView> => ({}) as PaymentView,
+  );
+  getPayment = jest.fn(async (): Promise<PaymentView> => ({}) as PaymentView);
   confirmCash = jest.fn(
-    async (_id: string, _input: CashConfirmRequest): Promise<PaymentView> => ({} as PaymentView),
+    async (_id: string, _input: CashConfirmRequest): Promise<PaymentView> =>
+      ({}) as PaymentView,
   );
   addTip = jest.fn(
     async (tripId: string, input: AddTipRequest): Promise<PaymentView> =>
-      ({ tripId, tipCents: input.tipCents } as PaymentView),
+      ({tripId, tipCents: input.tipCents}) as PaymentView,
   );
 }
 
@@ -48,7 +51,7 @@ describe('AddTipUseCase', () => {
 
     const result = await useCase.execute(TRIP, 500);
 
-    expect(repo.addTip).toHaveBeenCalledWith(TRIP, { tipCents: 500 });
+    expect(repo.addTip).toHaveBeenCalledWith(TRIP, {tipCents: 500});
     expect(result.tipCents).toBe(500);
   });
 
@@ -59,7 +62,9 @@ describe('AddTipUseCase', () => {
     expect(() => useCase.execute(TRIP, 0)).toThrow(TipValidationError);
     expect(() => useCase.execute(TRIP, -100)).toThrow(TipValidationError);
     expect(() => useCase.execute(TRIP, 12.5)).toThrow(TipValidationError);
-    expect(() => useCase.execute(TRIP, MAX_TIP_CENTS + 1)).toThrow(TipValidationError);
+    expect(() => useCase.execute(TRIP, MAX_TIP_CENTS + 1)).toThrow(
+      TipValidationError,
+    );
     expect(repo.addTip).not.toHaveBeenCalled();
   });
 });

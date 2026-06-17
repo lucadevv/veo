@@ -28,7 +28,9 @@ describe('Validación de DTOs', () => {
   });
 
   it('OnboardDto exige fecha ISO-8601 de vencimiento', () => {
-    expect(errorsFor(OnboardDto, { licenseNumber: 'A1-123', licenseExpiresAt: '2027-01-01' })).toEqual([]);
+    expect(
+      errorsFor(OnboardDto, { licenseNumber: 'A1-123', licenseExpiresAt: '2027-01-01' }),
+    ).toEqual([]);
     expect(
       errorsFor(OnboardDto, { licenseNumber: 'A1-123', licenseExpiresAt: 'no-fecha' }).length,
     ).toBeGreaterThan(0);

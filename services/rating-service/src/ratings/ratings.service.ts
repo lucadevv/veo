@@ -53,7 +53,13 @@ export class RatingsService {
   /** Crea la calificación, publica `rating.created` y recalcula el agregado del sujeto (misma tx). */
   async create(
     raterId: string,
-    input: { tripId: string; ratedId: string; ratedRole: SubjectRole; stars: number; comment?: string },
+    input: {
+      tripId: string;
+      ratedId: string;
+      ratedRole: SubjectRole;
+      stars: number;
+      comment?: string;
+    },
   ): Promise<RatingEntity> {
     // Gate fail-closed (cierre de auditoría): un viaje solo se califica si EXISTE, está COMPLETED y el
     // rater participó, calificando a su CONTRAPARTE. Se valida ANTES de tocar la DB. Si trip-service no
@@ -233,10 +239,20 @@ export class RatingsService {
     reason: FlagReason,
   ): Promise<void> {
     if (role === 'DRIVER') {
-      await this.enqueue(tx, 'driver.flagged', { driverId: subjectId, rollingAvg, reason }, subjectId);
+      await this.enqueue(
+        tx,
+        'driver.flagged',
+        { driverId: subjectId, rollingAvg, reason },
+        subjectId,
+      );
     } else {
       // NOTA: `passenger.flagged` aún no está en EVENT_SCHEMAS de @veo/events (ver README/docs).
-      await this.enqueue(tx, 'passenger.flagged', { passengerId: subjectId, rollingAvg, reason }, subjectId);
+      await this.enqueue(
+        tx,
+        'passenger.flagged',
+        { passengerId: subjectId, rollingAvg, reason },
+        subjectId,
+      );
     }
   }
 

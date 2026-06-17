@@ -1,4 +1,4 @@
-import type { PaymentView } from '@veo/api-client';
+import type {PaymentView} from '@veo/api-client';
 import {
   assertNever,
   hasCheckout,
@@ -42,14 +42,16 @@ function makePayment(overrides: Partial<PaymentView> = {}): PaymentView {
 describe('interpretPaymentOutcome · matriz status × método × checkout', () => {
   it('CAPTURED → settled, sin importar el método', () => {
     for (const method of ['CASH', 'YAPE', 'CARD']) {
-      expect(interpretPaymentOutcome(makePayment({ status: 'CAPTURED', method }))).toEqual({
+      expect(
+        interpretPaymentOutcome(makePayment({status: 'CAPTURED', method})),
+      ).toEqual({
         kind: 'settled',
       });
     }
   });
 
   it('PENDING + CASH → cashPending (la confirmación bilateral BR-P03, nunca checkout)', () => {
-    expect(interpretPaymentOutcome(makePayment({ method: 'CASH' }))).toEqual({
+    expect(interpretPaymentOutcome(makePayment({method: 'CASH'}))).toEqual({
       kind: 'cashPending',
     });
   });
@@ -57,52 +59,69 @@ describe('interpretPaymentOutcome · matriz status × método × checkout', () =
   it('PENDING digital con checkout VIVO (externalUid + medio) → checkoutPending', () => {
     expect(
       interpretPaymentOutcome(
-        makePayment({ externalUid: 'pp-uid-1', deepLink: 'yape://pay/abc' }),
+        makePayment({externalUid: 'pp-uid-1', deepLink: 'yape://pay/abc'}),
       ),
-    ).toEqual({ kind: 'checkoutPending' });
+    ).toEqual({kind: 'checkoutPending'});
   });
 
   it('PENDING digital SIN checkout (sandbox / cobro en vuelo) → processing', () => {
-    expect(interpretPaymentOutcome(makePayment())).toEqual({ kind: 'processing' });
+    expect(interpretPaymentOutcome(makePayment())).toEqual({
+      kind: 'processing',
+    });
   });
 
   it('PENDING digital con medios pero SIN externalUid → processing (espejo del server: no accionable)', () => {
     // payment-service exige `externalUid != null` ADEMÁS del medio para clasificar PENDING_ACTION:
     // un PENDING con medios huérfanos no es un checkout vivo y NO debe abrir "Completa tu pago".
     expect(
-      interpretPaymentOutcome(makePayment({ externalUid: null, deepLink: 'yape://pay/abc' })),
-    ).toEqual({ kind: 'processing' });
+      interpretPaymentOutcome(
+        makePayment({externalUid: null, deepLink: 'yape://pay/abc'}),
+      ),
+    ).toEqual({kind: 'processing'});
   });
 
   it('DEBT → debt con el failureReason ESTRUCTURADO del contrato', () => {
     expect(
       interpretPaymentOutcome(
-        makePayment({ status: 'DEBT', failureReason: 'method_unavailable:PAGOEFECTIVO' }),
+        makePayment({
+          status: 'DEBT',
+          failureReason: 'method_unavailable:PAGOEFECTIVO',
+        }),
       ),
-    ).toEqual({ kind: 'debt', failureReason: 'method_unavailable:PAGOEFECTIVO' });
+    ).toEqual({kind: 'debt', failureReason: 'method_unavailable:PAGOEFECTIVO'});
   });
 
   it('DEBT sin razón informada → debt con failureReason null (honesto, sin inventar)', () => {
-    expect(interpretPaymentOutcome(makePayment({ status: 'DEBT', failureReason: null }))).toEqual({
+    expect(
+      interpretPaymentOutcome(
+        makePayment({status: 'DEBT', failureReason: null}),
+      ),
+    ).toEqual({
       kind: 'debt',
       failureReason: null,
     });
     // El contrato lo marca opcional (compat con backends viejos): ausente también es null.
     expect(
-      interpretPaymentOutcome(makePayment({ status: 'DEBT', failureReason: undefined })),
-    ).toEqual({ kind: 'debt', failureReason: null });
+      interpretPaymentOutcome(
+        makePayment({status: 'DEBT', failureReason: undefined}),
+      ),
+    ).toEqual({kind: 'debt', failureReason: null});
   });
 
   it('FAILED → failed (estado honesto terminal)', () => {
-    expect(interpretPaymentOutcome(makePayment({ status: 'FAILED' }))).toEqual({ kind: 'failed' });
+    expect(interpretPaymentOutcome(makePayment({status: 'FAILED'}))).toEqual({
+      kind: 'failed',
+    });
   });
 
   it('REFUNDED → refunded total; PARTIALLY_REFUNDED → refunded parcial (NUNCA "Pagado")', () => {
-    expect(interpretPaymentOutcome(makePayment({ status: 'REFUNDED' }))).toEqual({
+    expect(interpretPaymentOutcome(makePayment({status: 'REFUNDED'}))).toEqual({
       kind: 'refunded',
       partial: false,
     });
-    expect(interpretPaymentOutcome(makePayment({ status: 'PARTIALLY_REFUNDED' }))).toEqual({
+    expect(
+      interpretPaymentOutcome(makePayment({status: 'PARTIALLY_REFUNDED'})),
+    ).toEqual({
       kind: 'refunded',
       partial: true,
     });
@@ -118,7 +137,9 @@ describe('interpretPaymentOutcome · matriz status × método × checkout', () =
       DEBT: 'debt',
     };
     for (const status of Object.keys(expected) as PaymentView['status'][]) {
-      expect(interpretPaymentOutcome(makePayment({ status })).kind).toBe(expected[status]);
+      expect(interpretPaymentOutcome(makePayment({status})).kind).toBe(
+        expected[status],
+      );
     }
   });
 });
@@ -126,23 +147,23 @@ describe('interpretPaymentOutcome · matriz status × método × checkout', () =
 describe('isCashPayment · normaliza el método UNA vez en el borde', () => {
   it('acepta el casing raro del wire (method es string laxo en el contrato)', () => {
     for (const method of ['CASH', 'cash', 'Cash']) {
-      expect(isCashPayment(makePayment({ method }))).toBe(true);
+      expect(isCashPayment(makePayment({method}))).toBe(true);
     }
   });
 
   it('cualquier método digital → false', () => {
     for (const method of ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO']) {
-      expect(isCashPayment(makePayment({ method }))).toBe(false);
+      expect(isCashPayment(makePayment({method}))).toBe(false);
     }
   });
 });
 
 describe('hasCheckout · cualquiera de los 4 medios habilita la rama', () => {
   it.each([
-    ['deepLink', { deepLink: 'yape://pay/abc' }],
-    ['checkoutUrl', { checkoutUrl: 'https://pago.example/abc' }],
-    ['qrCode', { qrCode: 'data:image/png;base64,abc' }],
-    ['cip', { cip: '12345678' }],
+    ['deepLink', {deepLink: 'yape://pay/abc'}],
+    ['checkoutUrl', {checkoutUrl: 'https://pago.example/abc'}],
+    ['qrCode', {qrCode: 'data:image/png;base64,abc'}],
+    ['cip', {cip: '12345678'}],
   ] as const)('con solo %s → true', (_medium, overrides) => {
     expect(hasCheckout(makePayment(overrides))).toBe(true);
   });
@@ -154,7 +175,7 @@ describe('hasCheckout · cualquiera de los 4 medios habilita la rama', () => {
 
 describe('isPaymentSettled · la pregunta de los polls', () => {
   it('solo CAPTURED corta el poll', () => {
-    expect(isPaymentSettled(makePayment({ status: 'CAPTURED' }))).toBe(true);
+    expect(isPaymentSettled(makePayment({status: 'CAPTURED'}))).toBe(true);
     for (const status of [
       'PENDING',
       'FAILED',
@@ -162,7 +183,7 @@ describe('isPaymentSettled · la pregunta de los polls', () => {
       'PARTIALLY_REFUNDED',
       'DEBT',
     ] as const) {
-      expect(isPaymentSettled(makePayment({ status }))).toBe(false);
+      expect(isPaymentSettled(makePayment({status}))).toBe(false);
     }
   });
 });
@@ -170,11 +191,15 @@ describe('isPaymentSettled · la pregunta de los polls', () => {
 describe('assertNever · el gate de exhaustividad en runtime', () => {
   it('lanza con el estado no contemplado en el mensaje', () => {
     // Solo un wire roto llega acá (el compilador sella los switch): se fuerza con un cast.
-    expect(() => assertNever('PAID' as never)).toThrow('Estado de pago no contemplado: PAID');
+    expect(() => assertNever('PAID' as never)).toThrow(
+      'Estado de pago no contemplado: PAID',
+    );
   });
 
   it('un status fuera del contrato forzado en el wire revienta en runtime (no cae a un recibo falso)', () => {
-    const broken = makePayment({ status: 'EXOTIC' as PaymentView['status'] });
-    expect(() => interpretPaymentOutcome(broken)).toThrow('Estado de pago no contemplado: EXOTIC');
+    const broken = makePayment({status: 'EXOTIC' as PaymentView['status']});
+    expect(() => interpretPaymentOutcome(broken)).toThrow(
+      'Estado de pago no contemplado: EXOTIC',
+    );
   });
 });

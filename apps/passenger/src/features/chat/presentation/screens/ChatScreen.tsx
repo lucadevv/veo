@@ -1,9 +1,16 @@
-import type { ChatMessage } from '@veo/api-client';
-import { useRoute, type RouteProp } from '@react-navigation/native';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, IconButton, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import type {ChatMessage} from '@veo/api-client';
+import {useRoute, type RouteProp} from '@react-navigation/native';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {
+  Banner,
+  IconButton,
+  SafeScreen,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -12,14 +19,17 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { usePassengerTripSocket } from '../../../trip/presentation/hooks/usePassengerTripSocket';
-import { isChatActive, mergeMessages } from '../../domain/entities';
-import { MessageBubble } from '../components/MessageBubble';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {usePassengerTripSocket} from '../../../trip/presentation/hooks/usePassengerTripSocket';
+import {isChatActive, mergeMessages} from '../../domain/entities';
+import {MessageBubble} from '../components/MessageBubble';
 
 type Params = RouteProp<RootStackParamList, 'Chat'>;
 
@@ -34,16 +44,16 @@ const QUICK_REPLY_KEYS = ['leaving', 'atDoor', 'onMyWay', 'waiting'] as const;
  */
 export function ChatScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const insets = useSafeAreaInsets();
-  const { params } = useRoute<Params>();
-  const { tripId } = params;
+  const {params} = useRoute<Params>();
+  const {tripId} = params;
 
   const listMessages = useDependency(TOKENS.listMessagesUseCase);
   const sendMessage = useDependency(TOKENS.sendMessageUseCase);
 
   const live = usePassengerTripSocket(tripId);
-  const { acknowledgeMessages } = live;
+  const {acknowledgeMessages} = live;
 
   const historyQuery = useQuery({
     queryKey: ['chat', tripId, 'messages'],
@@ -57,9 +67,11 @@ export function ChatScreen(): React.JSX.Element {
 
   const sendMutation = useMutation({
     mutationFn: (body: string) => sendMessage.execute(tripId, body),
-    onSuccess: (message) => {
-      setSentMessages((prev) =>
-        prev.some((existing) => existing.id === message.id) ? prev : [...prev, message],
+    onSuccess: message => {
+      setSentMessages(prev =>
+        prev.some(existing => existing.id === message.id)
+          ? prev
+          : [...prev, message],
       );
       setDraft('');
     },
@@ -67,26 +79,32 @@ export function ChatScreen(): React.JSX.Element {
 
   // Lista única y estable: historial + enviados + entrantes del socket, deduplicados y ordenados.
   const messages = useMemo(
-    () => mergeMessages(historyQuery.data ?? [], [...sentMessages, ...live.incomingMessages]),
+    () =>
+      mergeMessages(historyQuery.data ?? [], [
+        ...sentMessages,
+        ...live.incomingMessages,
+      ]),
     [historyQuery.data, sentMessages, live.incomingMessages],
   );
 
   // Drena los entrantes ya integrados para no reprocesarlos y mantener limpio el badge de no leídos.
   useEffect(() => {
     if (live.incomingMessages.length > 0) {
-      acknowledgeMessages(live.incomingMessages.map((message) => message.id));
+      acknowledgeMessages(live.incomingMessages.map(message => message.id));
     }
   }, [live.incomingMessages, acknowledgeMessages]);
 
   // Autoscroll al final cuando llega/sale un mensaje (ease del propio FlatList; respeta el sistema).
   useEffect(() => {
     if (messages.length > 0) {
-      listRef.current?.scrollToEnd({ animated: true });
+      listRef.current?.scrollToEnd({animated: true});
     }
   }, [messages.length]);
 
   const liveStatusKnown = live.status !== null || live.ended;
-  const active = liveStatusKnown ? isChatActive(live.ended ? 'COMPLETED' : live.status) : true;
+  const active = liveStatusKnown
+    ? isChatActive(live.ended ? 'COMPLETED' : live.status)
+    : true;
 
   const onSend = useCallback(
     (body: string) => {
@@ -100,7 +118,7 @@ export function ChatScreen(): React.JSX.Element {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: ChatMessage }) => <MessageBubble message={item} />,
+    ({item}: {item: ChatMessage}) => <MessageBubble message={item} />,
     [],
   );
 
@@ -125,12 +143,11 @@ export function ChatScreen(): React.JSX.Element {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + theme.spacing.xl}
-      >
+        keyboardVerticalOffset={insets.top + theme.spacing.xl}>
         <FlatList
           ref={listRef}
           data={messages}
-          keyExtractor={(item) => item.id}
+          keyExtractor={item => item.id}
           renderItem={renderItem}
           contentContainerStyle={{
             padding: theme.spacing.xl,
@@ -138,7 +155,7 @@ export function ChatScreen(): React.JSX.Element {
             flexGrow: 1,
           }}
           ListEmptyComponent={
-            <View style={[styles.empty, { gap: theme.spacing.xs }]}>
+            <View style={[styles.empty, {gap: theme.spacing.xs}]}>
               <Text variant="bodyStrong" align="center">
                 {t('chat.empty')}
               </Text>
@@ -151,7 +168,7 @@ export function ChatScreen(): React.JSX.Element {
         />
 
         {!active ? (
-          <View style={{ padding: theme.spacing.xl, paddingTop: 0 }}>
+          <View style={{padding: theme.spacing.xl, paddingTop: 0}}>
             <Banner
               tone="info"
               title={t('chat.disabledTitle')}
@@ -170,17 +187,16 @@ export function ChatScreen(): React.JSX.Element {
                 paddingBottom: insets.bottom + theme.spacing.md,
                 gap: theme.spacing.sm,
               },
-            ]}
-          >
+            ]}>
             {/* Plantillas rápidas: chips horizontales discretos. */}
-            <View style={[styles.quickRow, { gap: theme.spacing.xs }]}>
-              {QUICK_REPLY_KEYS.map((key) => (
+            <View style={[styles.quickRow, {gap: theme.spacing.xs}]}>
+              {QUICK_REPLY_KEYS.map(key => (
                 <Pressable
                   key={key}
                   onPress={() => onSend(t(`chat.quick.${key}`))}
                   disabled={sendMutation.isPending}
                   accessibilityRole="button"
-                  style={({ pressed }) => [
+                  style={({pressed}) => [
                     styles.chip,
                     {
                       backgroundColor: theme.colors.surface,
@@ -190,8 +206,7 @@ export function ChatScreen(): React.JSX.Element {
                       paddingHorizontal: theme.spacing.md,
                       opacity: pressed ? 0.7 : 1,
                     },
-                  ]}
-                >
+                  ]}>
                   <Text variant="footnote" color="inkMuted">
                     {t(`chat.quick.${key}`)}
                   </Text>
@@ -203,7 +218,7 @@ export function ChatScreen(): React.JSX.Element {
               <Banner tone="danger" title={t('chat.sendError')} />
             ) : null}
 
-            <View style={[styles.inputRow, { gap: theme.spacing.sm }]}>
+            <View style={[styles.inputRow, {gap: theme.spacing.sm}]}>
               <View style={styles.flex}>
                 <TextField
                   label={t('chat.title')}
@@ -237,10 +252,10 @@ export function ChatScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth },
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { borderWidth: StyleSheet.hairlineWidth },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  flex: {flex: 1},
+  empty: {flex: 1, justifyContent: 'center', alignItems: 'center'},
+  composer: {borderTopWidth: StyleSheet.hairlineWidth},
+  quickRow: {flexDirection: 'row', flexWrap: 'wrap'},
+  chip: {borderWidth: StyleSheet.hairlineWidth},
+  inputRow: {flexDirection: 'row', alignItems: 'flex-end'},
 });

@@ -1,18 +1,24 @@
-import React, {useEffect} from 'react';
-import {type LayoutChangeEvent, StyleSheet, View, type StyleProp, type ViewStyle} from 'react-native';
+import React, { useEffect } from 'react';
+import {
+  type LayoutChangeEvent,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {useReducedMotion, useTheme} from '@veo/ui-kit';
+import { useReducedMotion, useTheme } from '@veo/ui-kit';
 
 /**
  * `Appear` ahora es CANÓNICO del design system (`@veo/ui-kit`) — se re-exporta acá para no tocar los
  * imports de las pantallas. `AnimatedBar` (barra de progreso del heatmap/incentivos) es específico de ops.
  */
-export {Appear} from '@veo/ui-kit';
+export { Appear } from '@veo/ui-kit';
 
 export interface AnimatedBarProps {
   /** Fracción de relleno (0..1). */
@@ -68,22 +74,25 @@ export function AnimatedBar({
   const fillStyle = useAnimatedStyle(() => {
     const p = Math.max(progress.value, 0.0001);
     return {
-      transform: [{translateX: -(width.value * (1 - p)) / 2}, {scaleX: p}],
+      transform: [{ translateX: -(width.value * (1 - p)) / 2 }, { scaleX: p }],
     };
   });
 
   return (
     <View
       accessibilityRole="progressbar"
-      accessibilityValue={percent !== undefined ? {min: 0, max: 100, now: percent} : undefined}
+      accessibilityValue={percent !== undefined ? { min: 0, max: 100, now: percent } : undefined}
       onLayout={onLayout}
-      style={[styles.track, {backgroundColor: trackColor, height, borderRadius: radius}, style]}>
-      <Animated.View style={[styles.fill, {backgroundColor: color, borderRadius: radius}, fillStyle]} />
+      style={[styles.track, { backgroundColor: trackColor, height, borderRadius: radius }, style]}
+    >
+      <Animated.View
+        style={[styles.fill, { backgroundColor: color, borderRadius: radius }, fillStyle]}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  track: {width: '100%', overflow: 'hidden'},
-  fill: {...StyleSheet.absoluteFill},
+  track: { width: '100%', overflow: 'hidden' },
+  fill: { ...StyleSheet.absoluteFill },
 });

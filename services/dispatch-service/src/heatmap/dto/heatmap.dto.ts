@@ -14,7 +14,10 @@ export class HeatmapQueryDto {
   @IsLongitude()
   lng!: number;
 
-  @ApiPropertyOptional({ example: 2500, description: 'Radio de búsqueda en metros (default 2500, máx 10000)' })
+  @ApiPropertyOptional({
+    example: 2500,
+    description: 'Radio de búsqueda en metros (default 2500, máx 10000)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsPositive()
@@ -32,7 +35,10 @@ export class HeatmapCellDto {
   @ApiProperty({ example: -77.0428 })
   centroidLng!: number;
 
-  @ApiProperty({ example: 0.75, description: 'Intensidad normalizada 0..1 (1 = celda más caliente)' })
+  @ApiProperty({
+    example: 0.75,
+    description: 'Intensidad normalizada 0..1 (1 = celda más caliente)',
+  })
   intensity!: number;
 }
 

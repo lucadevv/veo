@@ -1,7 +1,7 @@
-import { ApiError } from '@veo/api-client';
-import type { CurrentConsent } from '@veo/api-client';
-import type { PendingConsent, PendingConsentStore } from './pendingConsent';
-import type { RecordConsentUseCase } from './usecases';
+import {ApiError} from '@veo/api-client';
+import type {CurrentConsent} from '@veo/api-client';
+import type {PendingConsent, PendingConsentStore} from './pendingConsent';
+import type {RecordConsentUseCase} from './usecases';
 
 /** Espera antes del PRIMER reintento; crece exponencialmente (`BACKOFF_FACTOR`). */
 const INITIAL_RETRY_DELAY_MS = 1_000;
@@ -18,7 +18,7 @@ const RETRY_BUDGET_MS = 60_000;
 
 /** Espera no bloqueante por defecto (inyectable para tests). */
 function defaultDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -108,7 +108,7 @@ export class SyncPendingConsentUseCase {
         return;
       } catch (error) {
         // Persistimos el contador de intentos para diagnóstico aunque esta pasada no entregue.
-        this.store.save({ ...pending, attempts });
+        this.store.save({...pending, attempts});
         if (!isRetryableNow(error) || Date.now() + delayMs > deadline) {
           // Determinista (401 pre-login) o presupuesto agotado: queda `Pending` para el próximo
           // disparador (login / boot / foreground). NUNCA se pierde el consentimiento.

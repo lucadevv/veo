@@ -1,5 +1,5 @@
-import {create} from 'zustand';
-import {prefsStore} from '../../../../core/storage/mmkv';
+import { create } from 'zustand';
+import { prefsStore } from '../../../../core/storage/mmkv';
 
 /** Clave de preferencias para recordar que el conductor ya vio el onboarding. */
 const ONBOARDING_PREF_KEY = 'pref.onboardingCompleted.v1';
@@ -16,10 +16,10 @@ export interface OnboardingState {
  * persiste en MMKV (preferencias, no sensible) para que solo se muestre la primera vez. El
  * `RootNavigator` conmuta por este flag antes del Login para quien no lo ha visto.
  */
-export const useOnboardingStore = create<OnboardingState>(set => ({
+export const useOnboardingStore = create<OnboardingState>((set) => ({
   completed: prefsStore.getString(ONBOARDING_PREF_KEY) === 'true',
   complete: () => {
     prefsStore.setString(ONBOARDING_PREF_KEY, 'true');
-    set({completed: true});
+    set({ completed: true });
   },
 }));

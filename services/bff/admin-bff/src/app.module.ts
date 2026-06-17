@@ -2,7 +2,13 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule, MetricsModule } from '@veo/observability';
-import { EXPECTED_SUBJECT_TYPE, JwtAuthGuard, RolesGuard, StepUpMfaGuard, type SubjectType } from '@veo/auth';
+import {
+  EXPECTED_SUBJECT_TYPE,
+  JwtAuthGuard,
+  RolesGuard,
+  StepUpMfaGuard,
+  type SubjectType,
+} from '@veo/auth';
 import { validateEnv } from './config/env.schema';
 import { InfraModule } from './infra/infra.module';
 import { AuthCoreModule } from './auth/auth-core.module';

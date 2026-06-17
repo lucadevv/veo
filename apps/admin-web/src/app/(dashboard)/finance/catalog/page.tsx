@@ -21,7 +21,10 @@ export default function CatalogPage() {
   if (!can(user, 'catalog:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Catálogo de ofertas" breadcrumbs={[{ label: 'Finanzas' }, { label: 'Catálogo' }]} />
+        <PageHeader
+          title="Catálogo de ofertas"
+          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Catálogo' }]}
+        />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}

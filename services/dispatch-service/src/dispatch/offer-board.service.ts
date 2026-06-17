@@ -112,8 +112,12 @@ const dedupOfferAccepted = (tripId: string, driverId: string): string =>
   `${DEDUP_PREFIX.OFFER_ACCEPTED}:${tripId}:${driverId}`;
 const dedupMatchFound = (tripId: string, driverId: string): string =>
   `${DEDUP_PREFIX.MATCH_FOUND}:${tripId}:${driverId}`;
-const dedupOfferMade = (tripId: string, driverId: string, kind: OfferKind, priceCents: number): string =>
-  `${DEDUP_PREFIX.OFFER_MADE}:${tripId}:${driverId}:${kind}:${priceCents}`;
+const dedupOfferMade = (
+  tripId: string,
+  driverId: string,
+  kind: OfferKind,
+  priceCents: number,
+): string => `${DEDUP_PREFIX.OFFER_MADE}:${tripId}:${driverId}:${kind}:${priceCents}`;
 const dedupNoOffers = (tripId: string, windowEpoch: string): string =>
   `${DEDUP_PREFIX.NO_OFFERS}:${tripId}:${windowEpoch}`;
 const dedupOfferWithdrawn = (tripId: string, driverId: string): string =>
@@ -181,7 +185,9 @@ export class OfferBoardService {
     // `bidCents` recién abierto es la ÚNICA referencia de precio.
     await this.store.clearOffers(bid.tripId);
     await this.store.saveBoard(board, bid.windowSec + OfferBoardService.TTL_MARGIN_SECONDS);
-    this.logger.log(`board abierto trip=${bid.tripId} bid=${bid.bidCents} window=${bid.windowSec}s`);
+    this.logger.log(
+      `board abierto trip=${bid.tripId} bid=${bid.bidCents} window=${bid.windowSec}s`,
+    );
     await this.broadcast(board);
   }
 
@@ -257,7 +263,9 @@ export class OfferBoardService {
         board.origin,
       );
     } catch (err) {
-      this.logger.warn(`ETA en lote no disponible en broadcast trip=${board.tripId}: ${String(err)}`);
+      this.logger.warn(
+        `ETA en lote no disponible en broadcast trip=${board.tripId}: ${String(err)}`,
+      );
     }
     await Promise.all(
       candidates.map((cand, i) => {
@@ -281,7 +289,9 @@ export class OfferBoardService {
         ).catch((err) => this.logger.warn(`broadcast a ${cand.driverId} falló: ${String(err)}`));
       }),
     );
-    this.logger.log(`bid trip=${board.tripId} difundido a ${candidates.length} conductores elegibles`);
+    this.logger.log(
+      `bid trip=${board.tripId} difundido a ${candidates.length} conductores elegibles`,
+    );
   }
 
   // ── Submit de oferta (conductor) ─────────────────────────────────────────────────────────────
@@ -341,7 +351,8 @@ export class OfferBoardService {
       status: OfferStatus.PENDING,
       updatedAt: Date.now(),
     };
-    const ttl = Math.max(1, Math.ceil((board.expiresAt - Date.now()) / 1000)) +
+    const ttl =
+      Math.max(1, Math.ceil((board.expiresAt - Date.now()) / 1000)) +
       OfferBoardService.TTL_MARGIN_SECONDS;
     // Escritura ATÓMICA: el HSET ocurre SOLO si el board sigue OPEN dentro del mismo script. Cierra el
     // edge de la oferta-tras-cierre (entre el getBoard inicial y este punto el board pudo cerrarse).
@@ -453,7 +464,9 @@ export class OfferBoardService {
         { tripId, driverId, reason: 'stale' },
         dedupOfferWithdrawn(tripId, driverId),
       ).catch((err: unknown) =>
-        this.logger.warn(`offer_withdrawn no emitido trip=${tripId} driver=${driverId}: ${String(err)}`),
+        this.logger.warn(
+          `offer_withdrawn no emitido trip=${tripId} driver=${driverId}: ${String(err)}`,
+        ),
       );
       this.logger.log(`oferta rancia trip=${tripId} driver=${driverId} → STALE (board sigue OPEN)`);
       throw new ConflictError('La oferta elegida ya no está disponible (conductor no elegible)', {
@@ -493,7 +506,12 @@ export class OfferBoardService {
           producer: 'dispatch-service',
           // H13 — estampa el seq del CICLO del board: trip lo exige en applyAgreedFare para descartar una
           // redelivery de un ciclo viejo (la tarifa rancia del conductor anterior no debe escribirse).
-          payload: { tripId, driverId, priceCents: chosen.priceCents, negotiationSeq: board.negotiationSeq },
+          payload: {
+            tripId,
+            driverId,
+            priceCents: chosen.priceCents,
+            negotiationSeq: board.negotiationSeq,
+          },
           dedupKey: acceptedDedup,
         });
         await tx.outboxEvent.create({
@@ -555,21 +573,21 @@ export class OfferBoardService {
           `accept trip=${tripId} driver=${driverId}: P2002 (match/evento ya materializado) → no-op idempotente`,
         );
       } else {
-      // Acción COMPENSATORIA: la tx durable falló → des-reclamar el board (CLOSED_MATCHED → OPEN) para
-      // que el pasajero pueda reintentar. Best-effort + logueado: si el revert también falla, el board
-      // queda CLOSED_MATCHED sin match (residual del hard-crash, lo cubre el reconciler del barrido).
-      try {
-        await this.store.revertClaim(tripId);
-        this.logger.warn(
-          `accept trip=${tripId} driver=${driverId}: outbox tx falló → board revertido a OPEN (reintentable)`,
-        );
-      } catch (revertErr) {
-        this.logger.error(
-          `accept trip=${tripId} driver=${driverId}: outbox tx falló Y el revert del board falló ` +
-            `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
-        );
-      }
-      throw txErr;
+        // Acción COMPENSATORIA: la tx durable falló → des-reclamar el board (CLOSED_MATCHED → OPEN) para
+        // que el pasajero pueda reintentar. Best-effort + logueado: si el revert también falla, el board
+        // queda CLOSED_MATCHED sin match (residual del hard-crash, lo cubre el reconciler del barrido).
+        try {
+          await this.store.revertClaim(tripId);
+          this.logger.warn(
+            `accept trip=${tripId} driver=${driverId}: outbox tx falló → board revertido a OPEN (reintentable)`,
+          );
+        } catch (revertErr) {
+          this.logger.error(
+            `accept trip=${tripId} driver=${driverId}: outbox tx falló Y el revert del board falló ` +
+              `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
+          );
+        }
+        throw txErr;
       }
     }
 
@@ -577,9 +595,11 @@ export class OfferBoardService {
     // re-emite match_found para boards CLOSED_MATCHED sin esta marca — el residual del crash entre el
     // claim y este punto). Best-effort: si falla, el board sigue CLOSED_MATCHED sin la marca y el
     // reconciler re-emitiría un match_found idempotente (mismo dedupKey) — inofensivo.
-    await this.store.markMatchEmitted(tripId).catch((err) =>
-      this.logger.warn(`no se pudo marcar matchEmitted trip=${tripId}: ${String(err)}`),
-    );
+    await this.store
+      .markMatchEmitted(tripId)
+      .catch((err) =>
+        this.logger.warn(`no se pudo marcar matchEmitted trip=${tripId}: ${String(err)}`),
+      );
 
     // Recién AHORA flipeamos el estado efímero de las ofertas (elegida ACCEPTED, resto LAPSED): el match
     // ya es durable, así que estas escrituras son cosméticas (alimentan la vista del pasajero) y un fallo
@@ -587,7 +607,9 @@ export class OfferBoardService {
     // de N×setOfferStatus (cada uno HGET+HSET); best-effort, un fallo acá no afecta el match durable.
     await this.store
       .lapseAndAccept(tripId, driverId)
-      .catch((err) => this.logger.warn(`lapseAndAccept trip=${tripId} falló (cosmético): ${String(err)}`));
+      .catch((err) =>
+        this.logger.warn(`lapseAndAccept trip=${tripId} falló (cosmético): ${String(err)}`),
+      );
 
     // markBusy se mantiene acá (Lote separado): el claim atómico ya garantiza que solo este camino
     // llega hasta acá, así que no hay carrera de doble-markBusy para este board.
@@ -661,7 +683,8 @@ export class OfferBoardService {
     const now = Date.now();
     const candidates = await this.store.boardsInCells(cells);
     return candidates.filter(
-      (b) => b.status === BoardStatus.OPEN && b.expiresAt > now && b.vehicleType === loc.vehicleType,
+      (b) =>
+        b.status === BoardStatus.OPEN && b.expiresAt > now && b.vehicleType === loc.vehicleType,
     );
   }
 
@@ -696,7 +719,9 @@ export class OfferBoardService {
       // Higiene: el board se canceló → ninguna oferta de esta ventana debe sobrevivir en el HASH.
       await this.store
         .clearOffers(tripId)
-        .catch((err) => this.logger.warn(`clearOffers (cancel) trip=${tripId} falló: ${String(err)}`));
+        .catch((err) =>
+          this.logger.warn(`clearOffers (cancel) trip=${tripId} falló: ${String(err)}`),
+        );
       this.logger.log(`board trip=${tripId} CANCELLED por el pasajero`);
     }
     // Cierre del VIAJE (no solo del board): SIEMPRE que el llamador sea el cancel de la PUJA del pasajero,
@@ -750,10 +775,16 @@ export class OfferBoardService {
       // en vez de N×setOfferStatus. Best-effort/cosmético (H7): no toca el board ni el outbox.
       await this.store
         .lapseAndAccept(tripId, null)
-        .catch((err) => this.logger.warn(`lapseAndAccept (sweep) trip=${tripId} falló: ${String(err)}`));
+        .catch((err) =>
+          this.logger.warn(`lapseAndAccept (sweep) trip=${tripId} falló: ${String(err)}`),
+        );
       // La dedupKey se ata a la ventana del board (windowEpoch = expiresAt, devuelto por el Lua). Un
       // reopen abre otra ventana → otro epoch → un no_offers legítimo posterior no queda deduplicado.
-      await this.expire(tripId, reason, res.windowEpoch !== null ? String(res.windowEpoch) : `gone`);
+      await this.expire(
+        tripId,
+        reason,
+        res.windowEpoch !== null ? String(res.windowEpoch) : `gone`,
+      );
       closed++;
     }
     return closed;
@@ -776,7 +807,9 @@ export class OfferBoardService {
     // H8 — SOLO los matched cuyo claim es MÁS VIEJO que el grace (range-read sobre el zset `board:matched`),
     // no todos los matched. Un board recién matcheado (que el happy-path está por drenar con markMatchEmitted)
     // queda FUERA del rango → el reconciliador solo toca los genuinamente atascados (residual hard-crash).
-    const pending = await this.store.matchedUnemittedBoards(now - OfferBoardService.RECONCILE_GRACE_MS);
+    const pending = await this.store.matchedUnemittedBoards(
+      now - OfferBoardService.RECONCILE_GRACE_MS,
+    );
     let reemitted = 0;
 
     // Finding #1 (N+1) — el loop itera BOARDS efímeros (Redis), NO filas DispatchMatch: el
@@ -832,7 +865,12 @@ export class OfferBoardService {
             producer: 'dispatch-service',
             // H13 — el re-emit del reconciliador estampa el MISMO seq del ciclo del board (idempotente por
             // dedupKey): el offer_accepted reconciliado del crash queda atado a su ciclo, igual que el original.
-            payload: { tripId: board.tripId, driverId, priceCents, negotiationSeq: board.negotiationSeq },
+            payload: {
+              tripId: board.tripId,
+              driverId,
+              priceCents,
+              negotiationSeq: board.negotiationSeq,
+            },
             dedupKey: acceptedDedup,
           });
           await tx.outboxEvent.create({
@@ -935,7 +973,9 @@ export class OfferBoardService {
     } catch (err) {
       // Re-emit del MISMO evento (misma dedupKey ya insertada): no-op idempotente, no burbujea.
       if (!isUniqueViolation(err)) throw err;
-      this.logger.debug(`emit ${eventType} dedupKey=${dedupKey}: P2002 (ya encolado) → no-op idempotente`);
+      this.logger.debug(
+        `emit ${eventType} dedupKey=${dedupKey}: P2002 (ya encolado) → no-op idempotente`,
+      );
       return;
     }
     domainEventsTotal.inc({ event: eventType, result: 'published' });

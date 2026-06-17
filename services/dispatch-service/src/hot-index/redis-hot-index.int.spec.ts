@@ -89,9 +89,21 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     const pool = new DriverPool(hotIndex, exclusion);
     const cellC = toH3(C, DISPATCH_H3_RESOLUTION);
     // Celda C aislada: solo estos 3 (con attrs completos, así el filtro NO degrada a "elegible").
-    await hotIndex.upsertLocation('c-mid', C, VehicleClass.CAR, { seats: 5, segment: VehicleSegment.MID, vehicleYear: 2022 });
-    await hotIndex.upsertLocation('c-eco', C, VehicleClass.CAR, { seats: 5, segment: VehicleSegment.ECONOMY, vehicleYear: 2022 });
-    await hotIndex.upsertLocation('c-van', C, VehicleClass.CAR, { seats: 7, segment: VehicleSegment.ECONOMY, vehicleYear: 2022 });
+    await hotIndex.upsertLocation('c-mid', C, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.MID,
+      vehicleYear: 2022,
+    });
+    await hotIndex.upsertLocation('c-eco', C, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await hotIndex.upsertLocation('c-van', C, VehicleClass.CAR, {
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
 
     // Confort (segment ≥ MID, ≤8 años): solo c-mid (los ECONOMY no califican).
     const confort = await pool.eligible([cellC], VehicleClass.CAR, {

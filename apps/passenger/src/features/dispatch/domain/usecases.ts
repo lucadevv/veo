@@ -1,5 +1,5 @@
-import type { GeoPoint, NearbyVehicle } from '@veo/api-client';
-import type { DispatchRepository, NearbyVehicleType } from './dispatchRepository';
+import type {GeoPoint, NearbyVehicle} from '@veo/api-client';
+import type {DispatchRepository, NearbyVehicleType} from './dispatchRepository';
 
 /**
  * Vehículos cercanos ANÓNIMOS para pintar como AMBIENTE del mapa del pasajero (idle/searching).
@@ -11,7 +11,10 @@ import type { DispatchRepository, NearbyVehicleType } from './dispatchRepository
 export class GetNearbyVehiclesUseCase {
   constructor(private readonly repository: DispatchRepository) {}
 
-  async execute(coords: GeoPoint, vehicleType?: NearbyVehicleType): Promise<NearbyVehicle[]> {
+  async execute(
+    coords: GeoPoint,
+    vehicleType?: NearbyVehicleType,
+  ): Promise<NearbyVehicle[]> {
     try {
       const view = await this.repository.getNearbyVehicles(coords, vehicleType);
       return view.vehicles;

@@ -56,7 +56,11 @@ const fakeConfig = (over: Record<string, unknown> = {}) =>
       })[k],
   }) as unknown as ConfigService<Record<string, unknown>, true>;
 
-const fakeScheduler = { addInterval: vi.fn(), deleteInterval: vi.fn(), doesExist: vi.fn(() => false) } as unknown as SchedulerRegistry;
+const fakeScheduler = {
+  addInterval: vi.fn(),
+  deleteInterval: vi.fn(),
+  doesExist: vi.fn(() => false),
+} as unknown as SchedulerRegistry;
 const fakeRedis = { set: vi.fn(), del: vi.fn() } as unknown as Redis;
 
 function build(
@@ -64,7 +68,9 @@ function build(
   byUid: Record<string, PaymentStatusDetail>,
   applyImpl?: PaymentsService['applyWebhookResult'],
 ) {
-  const applyWebhookResult = vi.fn(applyImpl ?? (async () => ({ applied: true, status: 'CAPTURED' })));
+  const applyWebhookResult = vi.fn(
+    applyImpl ?? (async () => ({ applied: true, status: 'CAPTURED' })),
+  );
   const payments = { applyWebhookResult } as unknown as PaymentsService;
   const svc = new PaymentPollService(
     makeFakePrisma(rows),
@@ -83,30 +89,31 @@ describe('PaymentPollService.pollOnce · poll fallback', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('CONFIRMED → llama applyWebhookResult con el camino idempotente y cuenta el aplicado', async () => {
-    const { svc, applyWebhookResult } = build(
-      [{ id: 'pay-1', externalUid: 'U1' }],
-      { U1: { found: true, status: 'CONFIRMED', rawStatus: 'success' } },
-    );
+    const { svc, applyWebhookResult } = build([{ id: 'pay-1', externalUid: 'U1' }], {
+      U1: { found: true, status: 'CONFIRMED', rawStatus: 'success' },
+    });
     const res = await svc.pollOnce();
-    expect(applyWebhookResult).toHaveBeenCalledWith({ paymentId: 'pay-1', externalUid: 'U1', status: 'CONFIRMED' });
+    expect(applyWebhookResult).toHaveBeenCalledWith({
+      paymentId: 'pay-1',
+      externalUid: 'U1',
+      status: 'CONFIRMED',
+    });
     expect(res).toEqual({ scanned: 1, applied: 1 });
   });
 
   it('PENDING → NO aplica (el cobro sigue en curso)', async () => {
-    const { svc, applyWebhookResult } = build(
-      [{ id: 'pay-1', externalUid: 'U1' }],
-      { U1: { found: true, status: 'PENDING', rawStatus: 'created' } },
-    );
+    const { svc, applyWebhookResult } = build([{ id: 'pay-1', externalUid: 'U1' }], {
+      U1: { found: true, status: 'PENDING', rawStatus: 'created' },
+    });
     const res = await svc.pollOnce();
     expect(applyWebhookResult).not.toHaveBeenCalled();
     expect(res).toEqual({ scanned: 1, applied: 0 });
   });
 
   it('found=false (uid no reconocido) → NO aplica y no rompe', async () => {
-    const { svc, applyWebhookResult } = build(
-      [{ id: 'pay-1', externalUid: 'U1' }],
-      { U1: { found: false, status: 'PENDING' } },
-    );
+    const { svc, applyWebhookResult } = build([{ id: 'pay-1', externalUid: 'U1' }], {
+      U1: { found: false, status: 'PENDING' },
+    });
     const res = await svc.pollOnce();
     expect(applyWebhookResult).not.toHaveBeenCalled();
     expect(res.applied).toBe(0);
@@ -122,7 +129,11 @@ describe('PaymentPollService.pollOnce · poll fallback', () => {
     );
     const res = await svc.pollOnce();
     expect(applyWebhookResult).toHaveBeenCalledTimes(1);
-    expect(applyWebhookResult).toHaveBeenCalledWith({ paymentId: 'pay-ok', externalUid: 'U2', status: 'CONFIRMED' });
+    expect(applyWebhookResult).toHaveBeenCalledWith({
+      paymentId: 'pay-ok',
+      externalUid: 'U2',
+      status: 'CONFIRMED',
+    });
     expect(res).toEqual({ scanned: 2, applied: 1 });
   });
 
@@ -142,7 +153,11 @@ describe('PaymentPollService · activación', () => {
       fakeRedis,
       makeGateway({}),
       {} as unknown as PaymentsService,
-      { addInterval, deleteInterval: vi.fn(), doesExist: vi.fn(() => false) } as unknown as SchedulerRegistry,
+      {
+        addInterval,
+        deleteInterval: vi.fn(),
+        doesExist: vi.fn(() => false),
+      } as unknown as SchedulerRegistry,
       fakeConfig({ VEO_PAYMENT_MODE: 'sandbox' }),
     );
     svc.onModuleInit();
@@ -152,17 +167,21 @@ describe('PaymentPollService · activación', () => {
   it('en modo prontopaga con gateway que consulta → registra el intervalo', () => {
     const addInterval = vi.fn();
     const handles: NodeJS.Timeout[] = [];
-    const setIntervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((() => {
+    const setIntervalSpy = vi.spyOn(global, 'setInterval').mockImplementation(() => {
       const h = 1 as unknown as NodeJS.Timeout;
       handles.push(h);
       return h;
-    }));
+    });
     const svc = new PaymentPollService(
       makeFakePrisma([]),
       fakeRedis,
       makeGateway({}),
       {} as unknown as PaymentsService,
-      { addInterval, deleteInterval: vi.fn(), doesExist: vi.fn(() => false) } as unknown as SchedulerRegistry,
+      {
+        addInterval,
+        deleteInterval: vi.fn(),
+        doesExist: vi.fn(() => false),
+      } as unknown as SchedulerRegistry,
       fakeConfig(),
     );
     svc.onModuleInit();

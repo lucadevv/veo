@@ -75,14 +75,18 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
    */
   onModuleInit(): void {
     if (!this.active) {
-      this.logger.log(`Poll fallback ProntoPaga INACTIVO (mode=${this.paymentMode}, enabled=${this.enabled})`);
+      this.logger.log(
+        `Poll fallback ProntoPaga INACTIVO (mode=${this.paymentMode}, enabled=${this.enabled})`,
+      );
       return;
     }
     const handle = setInterval(() => {
       void this.tick();
     }, this.intervalMs);
     this.scheduler.addInterval(POLL_INTERVAL_NAME, handle);
-    this.logger.log(`Poll fallback ProntoPaga ACTIVO: cada ${this.intervalMs}ms, ventana ${this.maxAgeMin}min, batch ${this.batch}`);
+    this.logger.log(
+      `Poll fallback ProntoPaga ACTIVO: cada ${this.intervalMs}ms, ventana ${this.maxAgeMin}min, batch ${this.batch}`,
+    );
   }
 
   onModuleDestroy(): void {
@@ -112,7 +116,9 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
           await this.pollOnce();
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'error';
-          this.logger.warn(`Poll fallback ProntoPaga: tick con error (continúa el próximo): ${msg}`);
+          this.logger.warn(
+            `Poll fallback ProntoPaga: tick con error (continúa el próximo): ${msg}`,
+          );
         } finally {
           this.running = false;
         }
@@ -150,7 +156,9 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
       try {
         const detail = await this.gateway.getPaymentStatus(uid);
         if (!detail.found) {
-          this.logger.debug(`Poll: proveedor no reconoce uid=${uid} (pago=${p.id}); se reintenta luego`);
+          this.logger.debug(
+            `Poll: proveedor no reconoce uid=${uid} (pago=${p.id}); se reintenta luego`,
+          );
           continue;
         }
         if (detail.status === 'PENDING') continue; // sigue en curso: nada que aplicar
@@ -171,7 +179,8 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Poll: consulta falló pago=${p.id}: ${msg}`);
       }
     }
-    if (applied > 0) this.logger.log(`Poll fallback ProntoPaga: ${applied}/${pending.length} pagos resueltos`);
+    if (applied > 0)
+      this.logger.log(`Poll fallback ProntoPaga: ${applied}/${pending.length} pagos resueltos`);
     return { scanned: pending.length, applied };
   }
 }

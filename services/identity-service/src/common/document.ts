@@ -9,7 +9,11 @@
  *   - CE (carné ext): 9-12 dígitos.
  *   - PP (pasaporte): 6-12 alfanuméricos.
  */
-import { registerDecorator, type ValidationOptions, type ValidationArguments } from 'class-validator';
+import {
+  registerDecorator,
+  type ValidationOptions,
+  type ValidationArguments,
+} from 'class-validator';
 
 /**
  * Tipos de documento aceptados (espeja el enum Prisma `DocumentType`). Const-object como FUENTE TIPADA:

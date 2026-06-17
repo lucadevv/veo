@@ -1,5 +1,5 @@
-import React, {useEffect} from 'react';
-import {StyleSheet, View} from 'react-native';
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -7,9 +7,9 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import {useTheme, useReducedMotion} from '@veo/ui-kit';
-import {useTranslation} from 'react-i18next';
-import {REGISTRATION_TOTAL_STEPS} from '../state/registrationStore';
+import { useTheme, useReducedMotion } from '@veo/ui-kit';
+import { useTranslation } from 'react-i18next';
+import { REGISTRATION_TOTAL_STEPS } from '../state/registrationStore';
 
 interface RegistrationProgressProps {
   /** Paso actual (1..total). */
@@ -18,7 +18,7 @@ interface RegistrationProgressProps {
 }
 
 /** Un segmento de la barra: pista oscura con relleno cian que crece de izquierda a derecha. */
-function Segment({filled, index}: {filled: boolean; index: number}): React.JSX.Element {
+function Segment({ filled, index }: { filled: boolean; index: number }): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const fill = useSharedValue(filled ? 1 : 0);
@@ -26,7 +26,7 @@ function Segment({filled, index}: {filled: boolean; index: number}): React.JSX.E
   useEffect(() => {
     const target = filled ? 1 : 0;
     if (reduced) {
-      fill.value = withTiming(target, {duration: theme.motion.duration.base});
+      fill.value = withTiming(target, { duration: theme.motion.duration.base });
       return;
     }
     // Escalonado sutil por índice para que el avance "barra" se lea como progreso, no como flash.
@@ -47,12 +47,13 @@ function Segment({filled, index}: {filled: boolean; index: number}): React.JSX.E
     <View
       style={[
         styles.track,
-        {backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill},
-      ]}>
+        { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
+      ]}
+    >
       <Animated.View
         style={[
           styles.fill,
-          {backgroundColor: theme.colors.accent, borderRadius: theme.radii.pill},
+          { backgroundColor: theme.colors.accent, borderRadius: theme.radii.pill },
           fillStyle,
         ]}
       />
@@ -70,15 +71,16 @@ export function RegistrationProgress({
   total = REGISTRATION_TOTAL_STEPS,
 }: RegistrationProgressProps): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <View
       accessibilityRole="progressbar"
-      accessibilityLabel={t('registration.progressLabel', {current, total})}
-      accessibilityValue={{min: 1, max: total, now: current}}
-      style={[styles.row, {gap: theme.spacing.sm}]}>
-      {Array.from({length: total}).map((_, index) => (
+      accessibilityLabel={t('registration.progressLabel', { current, total })}
+      accessibilityValue={{ min: 1, max: total, now: current }}
+      style={[styles.row, { gap: theme.spacing.sm }]}
+    >
+      {Array.from({ length: total }).map((_, index) => (
         <Segment key={index} index={index} filled={index < current} />
       ))}
     </View>
@@ -86,7 +88,7 @@ export function RegistrationProgress({
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignSelf: 'stretch'},
-  track: {flex: 1, height: 5, overflow: 'hidden'},
-  fill: {height: '100%'},
+  row: { flexDirection: 'row', alignSelf: 'stretch' },
+  track: { flex: 1, height: 5, overflow: 'hidden' },
+  fill: { height: '100%' },
 });

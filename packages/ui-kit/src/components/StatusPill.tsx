@@ -39,7 +39,13 @@ const toneToColor: Record<StatusTone, keyof ThemeColors> = {
  * Etiqueta de estado compacta. El color nunca es el único indicador: usa texto y, opcionalmente,
  * un punto (con pulso para "en vivo"). Fondo tintado del tono, texto del tono para contraste.
  */
-export function StatusPill({ label, tone = 'neutral', dot = false, live = false, style }: StatusPillProps) {
+export function StatusPill({
+  label,
+  tone = 'neutral',
+  dot = false,
+  live = false,
+  style,
+}: StatusPillProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const toneColor = theme.colors[toneToColor[tone]];
@@ -74,7 +80,9 @@ export function StatusPill({ label, tone = 'neutral', dot = false, live = false,
       ]}
     >
       {showDot ? (
-        <Animated.View style={[styles.dot, { backgroundColor: toneColor }, live ? dotStyle : null]} />
+        <Animated.View
+          style={[styles.dot, { backgroundColor: toneColor }, live ? dotStyle : null]}
+        />
       ) : null}
       <Text variant="label" color={toneToColor[tone]} numberOfLines={1}>
         {label}

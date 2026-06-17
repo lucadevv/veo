@@ -38,7 +38,12 @@ export class EnergyCatalogService {
   private readonly logger = new Logger(EnergyCatalogService.name);
 
   /** Cache in-proc de un slot (singleton). SOLO lecturas exitosas; el PUT lo invalida. */
-  private cache: { sources: EnergySourcePrice[]; version: number; updatedAt: string; expiresAt: number } | null = null;
+  private cache: {
+    sources: EnergySourcePrice[];
+    version: number;
+    updatedAt: string;
+    expiresAt: number;
+  } | null = null;
 
   constructor(
     @Inject(ENERGY_CATALOG_REPO) private readonly repo: EnergyCatalogRepository,
@@ -48,7 +53,11 @@ export class EnergyCatalogService {
   ) {}
 
   /** Carga el catálogo del repo (cacheado un slot). Miss/vencido → lee; cachea solo lecturas exitosas. */
-  private async load(): Promise<{ sources: EnergySourcePrice[]; version: number; updatedAt: string }> {
+  private async load(): Promise<{
+    sources: EnergySourcePrice[];
+    version: number;
+    updatedAt: string;
+  }> {
     const now = Date.now();
     if (this.cache && this.cache.expiresAt > now) return this.cache;
 
@@ -102,19 +111,28 @@ export class EnergyCatalogService {
 
       let row: { version: number; updatedAt: Date };
       if (updated.count === 1) {
-        const persisted = await tx.energyCatalog.findUnique({ where: { id: ENERGY_CATALOG_SINGLETON_ID } });
-        if (!persisted) throw new ConflictError('el catálogo de energía desapareció durante el reemplazo');
+        const persisted = await tx.energyCatalog.findUnique({
+          where: { id: ENERGY_CATALOG_SINGLETON_ID },
+        });
+        if (!persisted)
+          throw new ConflictError('el catálogo de energía desapareció durante el reemplazo');
         row = persisted;
       } else if (expectedVersion === 0) {
-        const existing = await tx.energyCatalog.findUnique({ where: { id: ENERGY_CATALOG_SINGLETON_ID } });
+        const existing = await tx.energyCatalog.findUnique({
+          where: { id: ENERGY_CATALOG_SINGLETON_ID },
+        });
         if (existing) {
-          throw new ConflictError(`el catálogo de energía ya fue inicializado (v${existing.version}); recargá y reintentá`);
+          throw new ConflictError(
+            `el catálogo de energía ya fue inicializado (v${existing.version}); recargá y reintentá`,
+          );
         }
         row = await tx.energyCatalog.create({
           data: { id: ENERGY_CATALOG_SINGLETON_ID, sources: sourcesJson, version: nextVersion },
         });
       } else {
-        throw new ConflictError(`el catálogo de energía cambió (esperabas v${expectedVersion}); recargá y reintentá`);
+        throw new ConflictError(
+          `el catálogo de energía cambió (esperabas v${expectedVersion}); recargá y reintentá`,
+        );
       }
 
       await tx.outboxEvent.create({
@@ -124,7 +142,11 @@ export class EnergyCatalogService {
           envelope: createEnvelope({
             eventType: 'energy.catalog_updated',
             producer: PRODUCER,
-            payload: { sources: sourcesJson, version: row.version, updatedAt: row.updatedAt.toISOString() },
+            payload: {
+              sources: sourcesJson,
+              version: row.version,
+              updatedAt: row.updatedAt.toISOString(),
+            },
           }),
         },
       });

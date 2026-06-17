@@ -81,7 +81,9 @@ export class VerifyBiometricDto {
 
 /** POST /drivers/me/documents → body. Registra/actualiza un documento del conductor (BR-I04). */
 export class AddDocumentDto {
-  @ApiProperty({ description: 'Tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | BACKGROUND_CHECK)' })
+  @ApiProperty({
+    description: 'Tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | BACKGROUND_CHECK)',
+  })
   @IsString()
   type!: string;
 
@@ -174,7 +176,10 @@ export interface DriverPersonalData {
  * a fleet POST /api/v1/drivers/vehicles; el driverId lo resuelve fleet desde la identidad propagada.
  */
 export class RegisterVehicleDto {
-  @ApiProperty({ enum: VehicleType, description: 'Tipo de vehículo. CAR = automóvil; MOTO = moto-taxi.' })
+  @ApiProperty({
+    enum: VehicleType,
+    description: 'Tipo de vehículo. CAR = automóvil; MOTO = moto-taxi.',
+  })
   @IsEnum(VehicleType)
   vehicleType!: VehicleType;
 
@@ -192,19 +197,28 @@ export class RegisterVehicleDto {
   @IsUUID()
   modelSpecId?: string;
 
-  @ApiPropertyOptional({ example: 'Honda', description: 'Marca (texto libre). Requerida solo sin modelSpecId.' })
+  @ApiPropertyOptional({
+    example: 'Honda',
+    description: 'Marca (texto libre). Requerida solo sin modelSpecId.',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 60)
   make?: string;
 
-  @ApiPropertyOptional({ example: 'CG 150', description: 'Modelo (texto libre). Requerido solo sin modelSpecId.' })
+  @ApiPropertyOptional({
+    example: 'CG 150',
+    description: 'Modelo (texto libre). Requerido solo sin modelSpecId.',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 60)
   model?: string;
 
-  @ApiProperty({ example: 2021, description: `Año del vehículo (>= ${MIN_REASONABLE_VEHICLE_YEAR}). BR-D04 (>=2017) lo aplica fleet.` })
+  @ApiProperty({
+    example: 2021,
+    description: `Año del vehículo (>= ${MIN_REASONABLE_VEHICLE_YEAR}). BR-D04 (>=2017) lo aplica fleet.`,
+  })
   @IsInt()
   @Min(MIN_REASONABLE_VEHICLE_YEAR)
   @Max(CURRENT_YEAR + 1)

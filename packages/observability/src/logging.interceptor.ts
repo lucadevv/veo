@@ -56,7 +56,8 @@ export class LoggingInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: () => this.record(http.getResponse<ResLike>().statusCode ?? 200, method, route, start),
+        next: () =>
+          this.record(http.getResponse<ResLike>().statusCode ?? 200, method, route, start),
         error: (err) => this.record(statusFromError(err), method, route, start),
       }),
     );
@@ -66,6 +67,9 @@ export class LoggingInterceptor implements NestInterceptor {
     const seconds = Number(process.hrtime.bigint() - start) / 1e9;
     httpRequestDuration.observe({ method, route, status: String(status) }, seconds);
     const traceId = trace.getActiveSpan()?.spanContext().traceId;
-    this.logger.info({ method, route, status, durationMs: Math.round(seconds * 1000), traceId }, 'request');
+    this.logger.info(
+      { method, route, status, durationMs: Math.round(seconds * 1000), traceId },
+      'request',
+    );
   }
 }

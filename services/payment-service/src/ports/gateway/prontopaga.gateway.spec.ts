@@ -9,10 +9,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { ExternalServiceError, GatewayCapabilityUnavailableError } from '@veo/utils';
 import { ProntoPagaGateway } from './prontopaga.gateway';
-import type {
-  ProntoPagaHttpClient,
-  ProntoPagaHttpRequest,
-} from './prontopaga.http-client';
+import type { ProntoPagaHttpClient, ProntoPagaHttpRequest } from './prontopaga.http-client';
 
 const OPTS = {
   baseUrl: 'https://sandbox.prontopaga.com',
@@ -21,7 +18,12 @@ const OPTS = {
   webhookBaseUrl: 'http://localhost:3005',
 };
 
-interface Call { url: string; method?: string; body: Record<string, unknown>; headers: Record<string, string> }
+interface Call {
+  url: string;
+  method?: string;
+  body: Record<string, unknown>;
+  headers: Record<string, string>;
+}
 
 /**
  * Mock del ProntoPagaHttpClient: captura requests y devuelve un JSON fijo con status configurable.
@@ -107,13 +109,17 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
     const calls = setClient({ uid: 'WUID-1', status: 'ACCEPTED', phoneNumber: '999881234' });
     const detail = await gateway.showYapeSubscription('WUID-1');
     expect(detail.status).toBe('ACCEPTED');
-    expect(calls.some((c) => c.url.endsWith('/api/payment/yape/subscription/WUID-1/show'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/api/payment/yape/subscription/WUID-1/show'))).toBe(
+      true,
+    );
   });
 
   it('cancelYapeSubscription pega a /subscription/cancel/{walletUID}', async () => {
     const calls = setClient({ message: 'ok' });
     await gateway.cancelYapeSubscription('WUID-1');
-    expect(calls.some((c) => c.url.endsWith('/api/payment/yape/subscription/cancel/WUID-1'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/api/payment/yape/subscription/cancel/WUID-1'))).toBe(
+      true,
+    );
   });
 
   // ── Shape REAL del sandbox (confirmado por smoke 2026-06-07) ──
@@ -139,24 +145,49 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
       uid: '01KTH60XTWA40Q23ED1WE7V40Z',
       reference: '17808406915474',
       status: 'created',
-      yape: { id: '1bf9fc6c', deepLink: 'yapeapp:oneshot/v1/opt1.js?consentId=abc&partnerCode=SANDBOX' },
+      yape: {
+        id: '1bf9fc6c',
+        deepLink: 'yapeapp:oneshot/v1/opt1.js?consentId=abc&partnerCode=SANDBOX',
+      },
     });
-    const res = await gateway.charge({ paymentId: 'pay-y', tripId: 't', amountCents: 1000, method: 'YAPE' });
+    const res = await gateway.charge({
+      paymentId: 'pay-y',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'YAPE',
+    });
     expect(res.status).toBe('PENDING_EXTERNAL');
     expect(res.externalRef).toBe('01KTH60XTWA40Q23ED1WE7V40Z');
-    expect(res.checkout?.deepLink).toBe('yapeapp:oneshot/v1/opt1.js?consentId=abc&partnerCode=SANDBOX');
+    expect(res.checkout?.deepLink).toBe(
+      'yapeapp:oneshot/v1/opt1.js?consentId=abc&partnerCode=SANDBOX',
+    );
   });
 
   it('charge sigue leyendo deepLink top-level si el método lo trae así (compat)', async () => {
     setClient({ uid: 'tx-top', deepLink: 'yape://top-level', urlPay: 'https://pp/x' });
-    const res = await gateway.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'YAPE' });
+    const res = await gateway.charge({
+      paymentId: 'p',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'YAPE',
+    });
     expect(res.checkout?.deepLink).toBe('yape://top-level');
     expect(res.checkout?.urlPay).toBe('https://pp/x');
   });
 
   it('charge mapea `cip` (pe_service_payment / PagoEfectivo del sandbox real)', async () => {
-    setClient({ uid: '01KTH5ZK12BGNVFF2N6KFJZGN7', reference: '17808406472800', cip: '57529129', urlPay: 'https://pp/cip' });
-    const res = await gateway.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'PAGOEFECTIVO' });
+    setClient({
+      uid: '01KTH5ZK12BGNVFF2N6KFJZGN7',
+      reference: '17808406472800',
+      cip: '57529129',
+      urlPay: 'https://pp/cip',
+    });
+    const res = await gateway.charge({
+      paymentId: 'p',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'PAGOEFECTIVO',
+    });
     expect(res.checkout?.cip).toBe('57529129');
   });
 
@@ -200,7 +231,10 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
   it('charge: 403 con HTML de Cloudflare → error REINTENTABLE (failureReason explícito)', async () => {
     const g = new ProntoPagaGateway(
       OPTS,
-      rawClient(403, '<!DOCTYPE html><title>Just a moment...</title>Attention Required! | Cloudflare'),
+      rawClient(
+        403,
+        '<!DOCTYPE html><title>Just a moment...</title>Attention Required! | Cloudflare',
+      ),
     );
     await expect(
       g.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'YAPE' }),
@@ -288,7 +322,10 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
   it('CF-403 NO se confunde con capability: sigue siendo error REINTENTABLE de Cloudflare', async () => {
     const g = new ProntoPagaGateway(
       OPTS,
-      rawClient(403, '<!DOCTYPE html><title>Just a moment...</title>Attention Required! | Cloudflare'),
+      rawClient(
+        403,
+        '<!DOCTYPE html><title>Just a moment...</title>Attention Required! | Cloudflare',
+      ),
     );
     // CF-403 → ExternalServiceError reintentable, NUNCA GatewayCapabilityUnavailableError.
     await expect(
@@ -315,13 +352,21 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
       OPTS,
       rawClient(400, '{"message":"The payment gateway is not enabled for commerce."}'),
     );
-    const res = await g.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'PAGOEFECTIVO' });
+    const res = await g.charge({
+      paymentId: 'p',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'PAGOEFECTIVO',
+    });
     expect(res.status).toBe('DECLINED');
     expect(res.failureKind).toBe('capability_unavailable');
   });
 
   it('charge: 400 "gateway is not enabled" (variante) → también capability_unavailable', async () => {
-    const g = new ProntoPagaGateway(OPTS, rawClient(400, '{"message":"The payment gateway is not enabled."}'));
+    const g = new ProntoPagaGateway(
+      OPTS,
+      rawClient(400, '{"message":"The payment gateway is not enabled."}'),
+    );
     const res = await g.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'PLIN' });
     expect(res.status).toBe('DECLINED');
     expect(res.failureKind).toBe('capability_unavailable');
@@ -332,7 +377,10 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
     // de afiliación; antes de este fix caía como ExternalServiceError genérico → failureReason crudo.
     const g = new ProntoPagaGateway(
       OPTS,
-      rawClient(400, '{"error":{"paymentMethod":"paymentMethod, not available for this commerce."}}'),
+      rawClient(
+        400,
+        '{"error":{"paymentMethod":"paymentMethod, not available for this commerce."}}',
+      ),
     );
     const res = await g.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'PLIN' });
     expect(res.status).toBe('DECLINED');
@@ -341,14 +389,24 @@ describe('ProntoPagaGateway · contrato HTTP', () => {
 
   it('charge: PENDING_EXTERNAL normal NO trae failureKind (no hubo fallo)', async () => {
     setClient({ uid: 'u1', urlPay: 'https://pay' });
-    const res = await gateway.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'CARD' });
+    const res = await gateway.charge({
+      paymentId: 'p',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'CARD',
+    });
     expect(res.status).toBe('PENDING_EXTERNAL');
     expect(res.failureKind).toBeUndefined();
   });
 
   it('charge: sin uid → DECLINED normal (declined), SIN failureKind capability', async () => {
     setClient({ message: 'rechazado' });
-    const res = await gateway.charge({ paymentId: 'p', tripId: 't', amountCents: 1000, method: 'YAPE' });
+    const res = await gateway.charge({
+      paymentId: 'p',
+      tripId: 't',
+      amountCents: 1000,
+      method: 'YAPE',
+    });
     expect(res.status).toBe('DECLINED');
     expect(res.failureKind).toBeUndefined();
   });
@@ -384,7 +442,9 @@ describe('ProntoPagaGateway · refund (S5 · reverso REAL contra el proveedor)',
     expect(call.body.amount).toBe('12.50');
     expect(call.body.reference).toBe('tx-abc');
     // La RUTA clasifica el callback como reverso (el payload no trae marcador de tipo confiable).
-    expect(call.body.urlCallbackRefund).toBe('http://localhost:3005/api/v1/webhooks/prontopaga/refund');
+    expect(call.body.urlCallbackRefund).toBe(
+      'http://localhost:3005/api/v1/webhooks/prontopaga/refund',
+    );
     // ProntoPaga no documenta campo de idempotencia: la key NO viaja al proveedor.
     expect(call.body).not.toHaveProperty('idempotencyKey');
     // El reverso es ASÍNCRONO: aceptado a la espera del callback, con el uid para correlacionar.
@@ -392,7 +452,11 @@ describe('ProntoPagaGateway · refund (S5 · reverso REAL contra el proveedor)',
   });
 
   it('refund: rechazo REAL del proveedor (status rejected) → REJECTED con motivo', async () => {
-    const { client } = mockHttp({ uid: 'rev-2', status: 'rejected', message: 'monto excede el cobro' });
+    const { client } = mockHttp({
+      uid: 'rev-2',
+      status: 'rejected',
+      message: 'monto excede el cobro',
+    });
     const g = new ProntoPagaGateway(OPTS, client);
 
     const res = await g.refund('tx-abc', 1000);

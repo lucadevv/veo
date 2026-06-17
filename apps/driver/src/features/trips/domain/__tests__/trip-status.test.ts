@@ -1,4 +1,4 @@
-import {isTripActive, isTripTerminal, parseTripStatus} from '../value-objects/trip-status';
+import { isTripActive, isTripTerminal, parseTripStatus } from '../value-objects/trip-status';
 
 describe('trip-status', () => {
   it('parsea estados válidos del contrato', () => {
