@@ -5,7 +5,7 @@
   "globalEnv": ["NODE_ENV", "CI"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["codegen", "^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**", "build/**"],
       "env": ["NODE_ENV"]
     },
@@ -15,15 +15,15 @@
       "dependsOn": ["^build"]
     },
     "lint": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["codegen", "^build"],
       "outputs": []
     },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["codegen", "^build"],
       "outputs": []
     },
     "test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["codegen", "^build"],
       "outputs": ["coverage/**"],
       "env": ["NODE_ENV"]
     },
