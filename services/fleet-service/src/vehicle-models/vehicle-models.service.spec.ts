@@ -157,7 +157,7 @@ function makeReviewService(rows: VehicleModelSpec[]) {
     );
   const create = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
     captured.create = data;
-    const created = row(data as Partial<VehicleModelSpec>);
+    const created = row(data);
     store.push(created);
     return Promise.resolve(created);
   });

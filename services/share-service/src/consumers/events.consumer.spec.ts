@@ -8,9 +8,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope, KafkaEventConsumer } from '@veo/events';
 import { EventsConsumer } from './events.consumer';
-import { ShareService } from '../share/share.service';
-import { ContactsService } from '../contacts/contacts.service';
-import { TripSnapshotService } from '../read-model/trip-snapshot.service';
+import { type ShareService } from '../share/share.service';
+import { type ContactsService } from '../contacts/contacts.service';
+import { type TripSnapshotService } from '../read-model/trip-snapshot.service';
 import type { Env } from '../config/env.schema';
 
 // El bootstrap Kafka real no debe abrir sockets en el test.
@@ -194,7 +194,7 @@ describe('EventsConsumer · auto-revoke al terminar el viaje (kill-switch R3)', 
 
   it('idempotente: sin enlaces vivos (revoked=0) no rompe', async () => {
     const { consumer, revokeAllForTrip } = build([]);
-    (revokeAllForTrip as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ revoked: 0 });
+    (revokeAllForTrip).mockResolvedValueOnce({ revoked: 0 });
     await expect(
       handlerFor(consumer, 'trip.completed')(terminalEnvelope('trip.completed')),
     ).resolves.toBeUndefined();

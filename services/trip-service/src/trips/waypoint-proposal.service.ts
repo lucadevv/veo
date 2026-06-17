@@ -245,7 +245,7 @@ export class WaypointProposalService {
     const proposal = await this.prisma.read.tripWaypointProposal.findUnique({
       where: { id: proposalId },
     });
-    if (!proposal || proposal.tripId !== tripId) {
+    if (proposal?.tripId !== tripId) {
       throw new NotFoundError('Propuesta de parada no encontrada', { proposalId });
     }
     // Idempotencia: solo PROPOSED es respondible. Una ya resuelta (ACCEPTED/REJECTED/EXPIRED) → 409 claro.
@@ -308,7 +308,7 @@ export class WaypointProposalService {
       await tx.trip.update({
         where: { id: tripId },
         data: {
-          waypoints: waypointsJson as unknown as Prisma.InputJsonValue,
+          waypoints: waypointsJson,
           fareCents: proposal.newFareCents,
           distanceMeters: route.distanceMeters,
           durationSeconds: route.durationSeconds,
@@ -381,7 +381,7 @@ export class WaypointProposalService {
       where: { id: proposalId },
       include: { trip: { select: { passengerId: true } } },
     });
-    if (!proposal || proposal.status !== WaypointProposalStatus.PROPOSED) return false;
+    if (proposal?.status !== WaypointProposalStatus.PROPOSED) return false;
     if (!isExpired(proposal.expiresAt, now)) return false;
 
     const applied = await this.prisma.write.$transaction(async (tx) => {

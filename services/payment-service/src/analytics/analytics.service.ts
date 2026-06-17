@@ -79,7 +79,7 @@ export class AnalyticsService {
    */
   private async revenuePerHour(now: Date): Promise<RevenueHourBucket[]> {
     const since = new Date(now.getTime() - HOURS_24_MS);
-    const rows = await this.prisma.read.$queryRaw<Array<{ bucket: Date; revenue_cents: bigint }>>(
+    const rows = await this.prisma.read.$queryRaw<{ bucket: Date; revenue_cents: bigint }[]>(
       Prisma.sql`
         SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC') AS bucket,
                SUM("amount_cents")::bigint                          AS revenue_cents

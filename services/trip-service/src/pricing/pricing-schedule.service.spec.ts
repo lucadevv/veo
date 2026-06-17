@@ -32,7 +32,7 @@ function makeRepo(initial: PersistedSchedule | null) {
     pricingModeSchedule: {
       // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE.
       updateMany: async ({ where, data }) => {
-        if (row && row.version === where.version) {
+        if (row?.version === where.version) {
           writeData(data);
           return { count: 1 };
         }

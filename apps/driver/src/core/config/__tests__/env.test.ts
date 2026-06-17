@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 /**
  * Cobertura de la resolución de URLs del driver-bff (:4002): defaults, auto-derive del host de Metro
  * (`metroDevHost`, vía getDevServer en new-arch + scriptURL en arq vieja) y self-heal de IP LAN stale.

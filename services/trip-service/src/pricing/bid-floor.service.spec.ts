@@ -27,7 +27,7 @@ class FakeRepo implements BidFloorRepository {
       bidFloorConfig: {
         // CAS: solo "actualiza" si la fila existe Y su versión coincide con el WHERE.
         updateMany: (args) => {
-          if (this.config && this.config.version === args.where.version) {
+          if (this.config?.version === args.where.version) {
             this.config = {
               defaultFloorCents: args.data.defaultFloorCents as number,
               overrides: args.data.overrides as PersistedBidFloor['overrides'],

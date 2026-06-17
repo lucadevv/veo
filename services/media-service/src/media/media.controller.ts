@@ -156,7 +156,7 @@ export class MediaController {
   })
   listAccessRequests(@Query() query: ListAccessRequestsQueryDto): Promise<VideoAccessRequest[]> {
     return this.access.listAccessRequests({
-      status: query.status as VideoAccessStatus | undefined,
+      status: query.status,
     });
   }
 

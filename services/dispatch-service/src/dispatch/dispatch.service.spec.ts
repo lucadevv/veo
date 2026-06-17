@@ -70,7 +70,7 @@ function makeService(
     prisma as never,
     hotIndex as never,
     exclusion as never,
-    fleet as never,
+    fleet,
     identity as never,
     matching as never,
   );

@@ -20,7 +20,7 @@ class FakeRepo implements OfferingCatalogRepository {
       offeringCatalog: {
         // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE (espejo del UPDATE ... WHERE version=).
         updateMany: (args) => {
-          if (this.overlay && this.overlay.version === args.where.version) {
+          if (this.overlay?.version === args.where.version) {
             this.overlay = {
               overrides: (args.data.overrides as PersistedOverlay['overrides']) ?? [],
               version: args.data.version as number,

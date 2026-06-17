@@ -57,7 +57,7 @@ function buildPrisma(initial?: SnapshotRow) {
                 lastLocationAt: null,
                 status: 'UNKNOWN',
                 ...create,
-              } as SnapshotRow);
+              });
           store.set(where.tripId, next);
           return next;
         },

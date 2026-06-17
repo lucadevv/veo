@@ -67,7 +67,7 @@ function build(rows: FakeRefundRow[], configOver: Record<string, unknown> = {}) 
     prisma,
     fakeRedis,
     fakeGateway,
-    fakeConfig(configOver) as never,
+    fakeConfig(configOver),
   );
   return { svc, refund };
 }
@@ -172,7 +172,7 @@ function buildCash(rows: FakeCashRow[], configOver: Record<string, unknown> = {}
     prisma,
     fakeRedis,
     fakeGateway,
-    fakeConfig(configOver) as never,
+    fakeConfig(configOver),
   );
   return { svc, payment };
 }

@@ -125,9 +125,9 @@ describe('ShareService.createPanicFanout · delega el fan-out durable (B1, anti-
     // Dos eventos en la MISMA tx: share.link_generated + panic.fanout_requested.
     expect(prisma.tx.outboxEvent.create).toHaveBeenCalledTimes(2);
 
-    type OutboxArg = {
+    interface OutboxArg {
       data: { eventType: string; envelope: { payload: Record<string, unknown> } };
-    };
+    }
     const calls = prisma.tx.outboxEvent.create.mock.calls as unknown as OutboxArg[][];
     const fanoutCall = calls.find((c) => c[0]?.data.eventType === 'panic.fanout_requested');
     expect(fanoutCall).toBeDefined();

@@ -69,10 +69,10 @@ function tripErasedEnvelope(payload: unknown, eventId = 'evt-1'): EventEnvelope<
   };
 }
 
-type ErasureConsumerInternals = {
+interface ErasureConsumerInternals {
   onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
   onTripErased(e: EventEnvelope<unknown>): Promise<void>;
-};
+}
 
 function makeConsumer(chat: ChatService) {
   const consumer = new ErasureConsumer(chat, makeRedis() as never, config);

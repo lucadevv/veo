@@ -24,7 +24,7 @@ function matchReply(): MatchReply {
     outcome: 'OFFERED',
     offeredAt: '2026-01-01T00:00:00.000Z',
     respondedAt: '',
-  } as unknown as MatchReply;
+  };
 }
 
 function makeService(opts: { driverFound?: boolean; match?: MatchReply } = {}) {

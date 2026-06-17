@@ -117,7 +117,7 @@ export class TripSnapshotService {
     await this.prisma.write.$transaction(async (tx) => {
       const current = await tx.tripSnapshot.findUnique({ where: { tripId } });
       // No enmascarado (sin fila, o ya restaurado): nada que desenmascarar.
-      if (!current || current.status !== PANIC_SNAPSHOT_STATUS) return;
+      if (current?.status !== PANIC_SNAPSHOT_STATUS) return;
       await tx.tripSnapshot.update({
         where: { tripId },
         data: {

@@ -173,7 +173,7 @@ describe('TripGrpcController · CloseTripByPassenger (anti-IDOR: identidad FIRMA
   });
 
   it('cierra con el userId de la identidad FIRMADA, IGNORANDO el passengerId del payload (forjado)', async () => {
-    const closeByPassenger = vi.fn().mockResolvedValue(view as never);
+    const closeByPassenger = vi.fn().mockResolvedValue(view);
     const ctrl = makeController(null, { closeByPassenger });
     const meta = signedMeta({ userId: 'pax-real', type: 'passenger', roles: [], sessionId: 's1' });
 

@@ -50,7 +50,7 @@ import {z} from 'zod';
 export function metroDevHost(): string | null {
   const urls: unknown[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const getDevServer =
       require('react-native/Libraries/Core/Devtools/getDevServer')
         .default as () => {url?: string; bundleLoadedFromServer?: boolean};

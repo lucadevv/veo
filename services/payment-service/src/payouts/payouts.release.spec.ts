@@ -58,7 +58,7 @@ function makePrisma(rows: FakePayout[]) {
           data: Partial<FakePayout>;
         }) => {
           const p = payouts.get(where.id);
-          if (!p || p.status !== where.status) return { count: 0 };
+          if (p?.status !== where.status) return { count: 0 };
           Object.assign(p, data);
           return { count: 1 };
         },

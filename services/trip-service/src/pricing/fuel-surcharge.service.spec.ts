@@ -30,7 +30,7 @@ class FakeRepo implements FuelSurchargeRepository {
       fuelSurchargeConfig: {
         // CAS: solo "actualiza" si la fila existe Y su versión coincide con el WHERE (espejo del UPDATE ... WHERE version=).
         updateMany: (args) => {
-          if (this.config && this.config.version === args.where.version) {
+          if (this.config?.version === args.where.version) {
             this.config = {
               fuelPricePerLiterCents: args.data.fuelPricePerLiterCents as number,
               kmPerLiter: args.data.kmPerLiter as number,

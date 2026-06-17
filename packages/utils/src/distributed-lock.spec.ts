@@ -12,7 +12,7 @@ function makeRedis(reply: string | null = 'OK'): {
 } {
   const set = vi.fn(async () => reply);
   const del = vi.fn(async () => 1);
-  return { redis: { set, del } as unknown as DistributedLockClient, set, del };
+  return { redis: { set, del }, set, del };
 }
 
 describe('withDistributedLock · adquisición', () => {

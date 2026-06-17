@@ -269,7 +269,7 @@ export class VehiclesService {
    */
   async setActiveVehicle(driverId: string, vehicleId: string): Promise<DriverVehicleResponse> {
     const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: vehicleId } });
-    if (!vehicle || vehicle.driverId !== driverId) {
+    if (vehicle?.driverId !== driverId) {
       throw new NotFoundError('Vehículo no encontrado');
     }
     if (vehicle.docStatus === VehicleDocStatus.EXPIRED) {

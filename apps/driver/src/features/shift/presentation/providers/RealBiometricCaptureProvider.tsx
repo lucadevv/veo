@@ -19,7 +19,7 @@ import { BiometricCaptureProvider } from './BiometricCaptureProvider';
  */
 function selectFrameGrabber(): BiometricFrameGrabber {
   if (__DEV__ && !nativeBiometricFrameGrabberLinked) {
-    // eslint-disable-next-line no-console
+     
     console.warn(
       '[VEO][dev] Frame-grabber biométrico nativo no enlazado (simulador): usando stub sintético. ' +
         'El backend debe estar en VEO_BIOMETRIC_MODE=sandbox. Esto NO ocurre en builds de release.',

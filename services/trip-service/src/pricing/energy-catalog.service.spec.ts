@@ -24,7 +24,7 @@ class FakeRepo implements EnergyCatalogRepository {
       energyCatalog: {
         // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE.
         updateMany: (args) => {
-          if (this.config && this.config.version === args.where.version) {
+          if (this.config?.version === args.where.version) {
             this.config = {
               sources: args.data.sources as EnergySourcePrice[],
               version: args.data.version as number,
