@@ -89,9 +89,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+      # Pin a versión estable (NO @master): @master tuvo una regresión del input `path`
+      # ("must be a literal path") que rompía el step. v0.36.0 es el último release estable.
+      - uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
           severity: "CRITICAL,HIGH"
           exit-code: "1"
+          # Excepciones REVISADAS (CVEs upstream sin fix usable / migración mayor, verificados NO
+          # explotables) con justificación + expired_at. trivy NO auto-detecta el .yaml → se pasa explícito.
+          trivyignores: ".trivyignore.yaml"
