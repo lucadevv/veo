@@ -157,7 +157,7 @@ const envSchema = z.object({
   // embebido en el bundle (`veoDarkStyle`); esta URL queda como fallback opcional.
   PUBLIC_MAP_STYLE_URL: z.string().url(),
   // Token PÚBLICO de Mapbox (`pk.`). Lo consume `Mapbox.setAccessToken` en el bootstrap nativo.
-  // Público por diseño (va al cliente), pero NO se commitea: vive en `env/dev.secret.env`.
+  // Público por diseño (va al cliente), pero NO se commitea: vive en `env/development.secret.env`.
   // Opcional para no romper el arranque en tests/builds sin mapa configurado.
   MAPBOX_ACCESS_TOKEN: z.string().optional().default(''),
   LIVEKIT_URL: z.string().default(''),

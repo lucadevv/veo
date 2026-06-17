@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gen-missing-secrets.sh · Genera los dev.secret.env de los servicios FUERA del boot-passenger.
+# gen-missing-secrets.sh · Genera los development.secret.env de los servicios FUERA del boot-passenger.
 # Idempotente: si el file ya existe, NO lo pisa. Reusa los secretos compartidos de dev-stack/secrets/.
 set -euo pipefail
 
@@ -27,21 +27,21 @@ write_if_absent() { # <path> <content>
 }
 
 # --- services NestJS simples ---
-write_if_absent "$SVCS/audit-service/env/dev.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET"
-write_if_absent "$SVCS/chat-service/env/dev.secret.env"  "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET"
-write_if_absent "$SVCS/media-service/env/dev.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET
+write_if_absent "$SVCS/audit-service/env/development.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET"
+write_if_absent "$SVCS/chat-service/env/development.secret.env"  "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET"
+write_if_absent "$SVCS/media-service/env/development.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET
 LIVEKIT_API_SECRET=$LIVEKIT_SECRET"
-write_if_absent "$SVCS/panic-service/env/dev.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET
+write_if_absent "$SVCS/panic-service/env/development.secret.env" "INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET
 PANIC_HMAC_SECRET=$PANIC_HMAC"
-write_if_absent "$SVCS/share-service/env/dev.secret.env" "SHARE_LINK_SECRET=$SHARE_LINK
+write_if_absent "$SVCS/share-service/env/development.secret.env" "SHARE_LINK_SECRET=$SHARE_LINK
 INTERNAL_IDENTITY_SECRET=$INTERNAL_SECRET"
-write_if_absent "$SVCS/tracking-service/env/dev.secret.env" "CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASS
+write_if_absent "$SVCS/tracking-service/env/development.secret.env" "CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASS
 MQTT_USERNAME=
 MQTT_PASSWORD="
 
 # --- BFFs (PEM multilínea quoted, como public-bff) ---
 gen_bff_secret() { # <bff> <extra-line>
-  local f="$SVCS/bff/$1/env/dev.secret.env"
+  local f="$SVCS/bff/$1/env/development.secret.env"
   if [[ -f "$f" ]]; then echo "  · ya existe: ${f#$ROOT/}"; return; fi
   { printf 'VEO_JWT_PUBLIC_PEM="'; cat "$PUBLIC_PEM"; printf '"\n';
     printf 'VEO_INTERNAL_IDENTITY_SECRET=%s\n' "$INTERNAL_SECRET";

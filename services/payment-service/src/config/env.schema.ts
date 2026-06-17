@@ -76,11 +76,11 @@ export const envSchema = z.object({
   // ── ProntoPaga (VEO_PAYMENT_MODE=prontopaga) · agregador de pagos Perú ──
   /// Base de la API (tracked). Default sandbox público de ProntoPaga.
   PRONTOPAGA_BASE_URL: z.string().default('https://sandbox.prontopaga.com'),
-  /// secretKey para firmar el body (HMAC-SHA256). Vacío en tracked; real en dev.secret.env.
+  /// secretKey para firmar el body (HMAC-SHA256). Vacío en tracked; real en development.secret.env.
   PRONTOPAGA_SECRET_KEY: z.string().optional(),
-  /// Token estático del sandbox público (alternativa a username/password). En dev.secret.env.
+  /// Token estático del sandbox público (alternativa a username/password). En development.secret.env.
   PRONTOPAGA_API_TOKEN: z.string().optional(),
-  /// Credenciales de sign-in (alternativa al token estático). En dev.secret.env.
+  /// Credenciales de sign-in (alternativa al token estático). En development.secret.env.
   PRONTOPAGA_USERNAME: z.string().optional(),
   PRONTOPAGA_PASSWORD: z.string().optional(),
   /// Base pública para armar urlConfirmation del webhook (`${base}/api/v1/webhooks/prontopaga`).
