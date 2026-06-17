@@ -50,8 +50,10 @@ import {z} from 'zod';
 export function metroDevHost(): string | null {
   const urls: unknown[] = [];
   try {
-     
+    // getDevServer es un módulo INTERNO de RN expuesto solo como CommonJS (no hay import ESM) y solo
+    // existe en dev (por eso el try/catch). El require dinámico es deliberado, no un workaround.
     const getDevServer =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('react-native/Libraries/Core/Devtools/getDevServer')
         .default as () => {url?: string; bundleLoadedFromServer?: boolean};
     const info = getDevServer();

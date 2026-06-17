@@ -194,7 +194,7 @@ describe('EventsConsumer · auto-revoke al terminar el viaje (kill-switch R3)', 
 
   it('idempotente: sin enlaces vivos (revoked=0) no rompe', async () => {
     const { consumer, revokeAllForTrip } = build([]);
-    (revokeAllForTrip).mockResolvedValueOnce({ revoked: 0 });
+    revokeAllForTrip.mockResolvedValueOnce({ revoked: 0 });
     await expect(
       handlerFor(consumer, 'trip.completed')(terminalEnvelope('trip.completed')),
     ).resolves.toBeUndefined();

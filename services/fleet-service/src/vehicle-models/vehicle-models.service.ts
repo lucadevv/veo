@@ -296,6 +296,8 @@ function toView(spec: VehicleModelSpec): VehicleModelSpecView {
     seats: spec.seats,
     segment: spec.segment as VehicleSegment,
     energySource: spec.energySource as EnergySource,
+    // Invariante documentado arriba: solo se proyectan filas APPROVED, cuya ficha técnica está completa.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     efficiency: spec.efficiency!,
   };
 }

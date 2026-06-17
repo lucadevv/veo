@@ -63,12 +63,7 @@ const fakeConfig = (over: Record<string, unknown> = {}) =>
 
 function build(rows: FakeRefundRow[], configOver: Record<string, unknown> = {}) {
   const { prisma, refund } = makeFakePrisma(rows);
-  const svc = new ReconciliationService(
-    prisma,
-    fakeRedis,
-    fakeGateway,
-    fakeConfig(configOver),
-  );
+  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
   return { svc, refund };
 }
 
@@ -168,12 +163,7 @@ function makeFakeCashPrisma(rows: FakeCashRow[]) {
 
 function buildCash(rows: FakeCashRow[], configOver: Record<string, unknown> = {}) {
   const { prisma, payment } = makeFakeCashPrisma(rows);
-  const svc = new ReconciliationService(
-    prisma,
-    fakeRedis,
-    fakeGateway,
-    fakeConfig(configOver),
-  );
+  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
   return { svc, payment };
 }
 

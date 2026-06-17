@@ -258,7 +258,8 @@ export class PayoutsService {
     });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
-    return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
+    const last = items[items.length - 1];
+    return { items, nextCursor: hasMore && last ? last.id : null };
   }
 
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */

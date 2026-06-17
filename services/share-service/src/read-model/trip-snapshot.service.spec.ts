@@ -49,7 +49,7 @@ function buildPrisma(initial?: SnapshotRow) {
           const existing = store.get(where.tripId);
           const next = existing
             ? { ...existing, ...update }
-            : ({
+            : {
                 prePanicStatus: null,
                 passengerId: null,
                 lastLat: null,
@@ -57,7 +57,7 @@ function buildPrisma(initial?: SnapshotRow) {
                 lastLocationAt: null,
                 status: 'UNKNOWN',
                 ...create,
-              });
+              };
           store.set(where.tripId, next);
           return next;
         },

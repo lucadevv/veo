@@ -19,7 +19,7 @@ import {
   ListSegmentsQueryDto,
   RejectAccessRequestDto,
 } from './dto/media.dto';
-import type { VideoAccessRequest, VideoAccessStatus } from '../generated/prisma';
+import type { VideoAccessRequest } from '../generated/prisma';
 
 interface SegmentView {
   id: string;

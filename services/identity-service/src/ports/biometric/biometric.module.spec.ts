@@ -25,7 +25,7 @@ describe('BiometricServiceClient timeout', () => {
     // fetch que respeta el AbortSignal: rechaza con AbortError cuando el timeout dispara, igual
     // que undici. NUNCA resuelve por su cuenta → solo el abort puede destrabarlo.
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
-      const signal = (init)?.signal;
+      const signal = init?.signal;
       return new Promise<Response>((_resolve, reject) => {
         signal?.addEventListener('abort', () => {
           const err = new Error('The operation was aborted');
@@ -56,8 +56,8 @@ describe('BiometricServiceClient timeout', () => {
     let receivedSignal: AbortSignal | undefined;
     let receivedHeaders: Record<string, string> | undefined;
     vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
-      receivedSignal = (init)?.signal ?? undefined;
-      receivedHeaders = (init)?.headers as Record<string, string>;
+      receivedSignal = init?.signal ?? undefined;
+      receivedHeaders = init?.headers as Record<string, string>;
       return Promise.resolve(
         new Response(
           JSON.stringify({

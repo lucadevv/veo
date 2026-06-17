@@ -38,7 +38,8 @@ export function VehicleModelSelector({
   const [mode, setMode] = useState<'pick' | 'request'>('pick');
 
   const modelsQuery = useVehicleModels(vehicleType);
-  const models = modelsQuery.data ?? [];
+  // Memoizado: `data ?? []` crearía un array nuevo en cada render (rompiendo el useMemo de `filtered`).
+  const models = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
 
   // Búsqueda client-side (catálogo chico): filtra por marca o modelo, case-insensitive.
   const filtered = useMemo(() => filterVehicleModels(models, search), [models, search]);
