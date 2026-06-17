@@ -5,6 +5,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { GeocodeResult, MapsClient, RouteResult } from '@veo/maps';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import {
+  isPujaMode,
   OFFERING_LIST,
   OFFERINGS,
   OfferingId,
@@ -12,6 +13,7 @@ import {
   type OfferingSpec,
 } from '@veo/shared-types';
 import { MapsService } from './maps.service';
+import { catalogDegradedTotal } from './maps-metrics';
 import { categoryFareCents, DEFAULT_BID_FLOOR_CENTS } from './fare';
 import type { Env } from '../config/env.schema';
 
@@ -19,20 +21,80 @@ import type { Env } from '../config/env.schema';
 const USER: AuthenticatedUser = { userId: 'p1', type: 'passenger', roles: [], sessionId: 's1' };
 
 /** ConfigService falso: solo devuelve el piso de la PUJA. */
-function fakeConfig(bidFloorCents = DEFAULT_BID_FLOOR_CENTS): ConfigService<Env, true> {
-  return { getOrThrow: () => bidFloorCents } as unknown as ConfigService<Env, true>;
+function fakeConfig(bidFloorCents = DEFAULT_BID_FLOOR_CENTS, energyModelEnabled = false): ConfigService<Env, true> {
+  // Key-aware: el flag B5-1.d devuelve su booleano; el resto cae al bidFloorCents (back-compat de los specs).
+  return {
+    getOrThrow: (key: string) => (key === 'PRICING_ENERGY_MODEL_ENABLED' ? energyModelEnabled : bidFloorCents),
+  } as unknown as ConfigService<Env, true>;
 }
 
 /**
- * Doble del cliente REST interno hacia trip-service. Devuelve un `{ mode }` fijo o, si se le pasa un
- * error, lo lanza (para probar la degradación). Registra la última query (lat/lon del origen).
+ * Doble del cliente REST interno hacia trip-service. Distingue endpoints:
+ *  - `/internal/pricing/resolve` → devuelve `{ mode }` fijo (o lanza el Error, para probar la degradación)
+ *    y registra la última query (lat/lon del origen).
+ *  - `/internal/catalog` → devuelve el catálogo efectivo; `disabledIds` permite simular el overlay del
+ *    admin (ofertas apagadas) para testear el filtrado del quote (B1c).
  */
 class FakeTripRest {
   lastQuery?: Record<string, unknown>;
   constructor(
     private readonly result: { mode: 'PUJA' | 'FIXED' } | Error = { mode: 'FIXED' },
+    private readonly disabledIds: readonly string[] = [],
+    private readonly catalogError?: Error,
+    // B2: override EFECTIVO por oferta (lo que trip-service ya resolvió: pricing + pin de modo).
+    private readonly catalogOverrides: Partial<
+      Record<OfferingId, { multiplier?: number; minFareCents?: number; modePin?: PricingMode }>
+    > = {},
+    // B3: recargo de combustible por km que devuelve /internal/pricing/fuel-surcharge.
+    private readonly fuelPerKmCents = 0,
+    // B4: simula el endpoint de fuel CAÍDO (degradación honesta: el quote cae a 0 recargo, no rompe).
+    private readonly fuelError?: Error,
+    // ADR 010 §9.3: config del piso de la PUJA que devuelve /internal/pricing/bid-floor (default + overrides
+    // por oferta). Default = piso global S/7 sin overrides (= comportamiento previo de los specs).
+    private readonly bidFloor: {
+      defaultFloorCents: number;
+      overrides: { zone: string; offeringId: string; floorCents: number }[];
+    } = { defaultFloorCents: 700, overrides: [] },
+    // Simula el endpoint del piso CAÍDO (degradación honesta: el quote cae a DEFAULT_BID_FLOOR_CONFIG).
+    private readonly bidFloorError?: Error,
   ) {}
-  async get<T>(_path: string, req: { query?: Record<string, unknown> }): Promise<T> {
+  async get<T>(path: string, req: { query?: Record<string, unknown> }): Promise<T> {
+    if (path.includes('/internal/pricing/energy-catalog')) {
+      // B5 · catálogo de energía: GASOLINE_95 al precio que espeja el fuel global (shadow-compare del quote).
+      return { sources: [{ sourceId: 'GASOLINE_95', unit: 'LITER', pricePerUnitCents: 0 }], version: 1, updatedAt: new Date(0).toISOString() } as T;
+    }
+    if (path.includes('/internal/pricing/bid-floor')) {
+      if (this.bidFloorError) throw this.bidFloorError; // simula el piso CAÍDO (degradación)
+      return { ...this.bidFloor, version: 1, updatedAt: new Date(0).toISOString() } as T;
+    }
+    if (path.includes('/internal/pricing/fuel-surcharge')) {
+      if (this.fuelError) throw this.fuelError; // simula el recargo CAÍDO (degradación)
+      return { perKmCents: this.fuelPerKmCents } as T; // B4 · el derivado precio÷rendimiento
+    }
+    if (path.includes('/internal/catalog')) {
+      if (this.catalogError) throw this.catalogError; // simula el catálogo CAÍDO (degradación)
+      return {
+        version: 1,
+        updatedAt: new Date(0).toISOString(),
+        offerings: OFFERING_LIST.map((o) => {
+          const ov = this.catalogOverrides[o.id];
+          return {
+            id: o.id,
+            labelKey: o.labelKey,
+            icon: o.icon,
+            vehicleClass: o.vehicleClass,
+            // B5-4: el catálogo efectivo refleja resolveCatalog(null) = defaultEnabled (las verticales
+            // nacen ocultas). Un id en disabledIds simula que el admin la apagó explícitamente.
+            enabled: o.defaultEnabled && !this.disabledIds.includes(o.id),
+            pricing: {
+              multiplier: ov?.multiplier ?? o.pricing.multiplier,
+              minFareCents: ov?.minFareCents ?? o.pricing.minFareCents,
+            },
+            modePin: ov?.modePin,
+          };
+        }),
+      } as T;
+    }
     this.lastQuery = req.query;
     if (this.result instanceof Error) throw this.result;
     return this.result as T;
@@ -188,6 +250,10 @@ const ROUTE: RouteResult = {
 const ORIGIN = { lat: -12.0464, lng: -77.0428 };
 const DESTINATION = { lat: -12.1211, lng: -77.0297 };
 
+// B5-4: las ofertas VISIBLES por default (las 3 RIDE + moto). Las verticales (ambulancia/grúa/mecánico/EV)
+// nacen ocultas (defaultEnabled:false) → no aparecen en el quote salvo que el admin las habilite.
+const VISIBLE_IDS = OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => o.id);
+
 describe('MapsService.quote', () => {
   it('modo FIXED: ruta + opciones con priceCents firme; SIN bidFloor/suggested', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
@@ -199,7 +265,7 @@ describe('MapsService.quote', () => {
     expect(out.distanceMeters).toBe(5000);
     expect(out.durationSeconds).toBe(600);
     expect(out.geometry).toEqual(ROUTE.geometry);
-    expect(out.options).toHaveLength(OFFERING_LIST.length);
+    expect(out.options).toHaveLength(VISIBLE_IDS.length);
     // Modo resuelto por trip-service y propagado en la respuesta.
     expect(out.mode).toBe('FIXED');
     // En FIXED no se exponen pista de puja.
@@ -293,10 +359,162 @@ describe('MapsService.quote', () => {
     // El sugerido es la tarifa que SERÍA fija con la categoría ancla (VEO Económico, mult 1.0).
     expect(out.suggestedCents).toBe(categoryFareCents(5000, 600, 1.0));
     // Las categorías siguen presentes (la app puede mostrarlas como referencia).
-    expect(out.options).toHaveLength(OFFERING_LIST.length);
+    expect(out.options).toHaveLength(VISIBLE_IDS.length);
     // ADR 013: con el catálogo actual (todas las ofertas permiten ambos modos) la intersección es
     // no-op → cada opción refleja el modo del schedule (PUJA).
     expect(out.options.every((o) => o.mode === 'PUJA')).toBe(true);
+  });
+
+  it('A2 · PUJA: cada oferta lleva SU piso y SU sugerido per-oferta (= su propia tarifa fija, no el ancla)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const service = buildService(fake, new FakeTripRest({ mode: 'PUJA' }), fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    // Catálogo actual: todas las ofertas permiten PUJA → todas resuelven PUJA.
+    const pujaOptions = out.options.filter((o) => isPujaMode(o.mode));
+    expect(pujaOptions).toHaveLength(out.options.length);
+
+    // El sugerido per-oferta ES la tarifa que SERÍA fija de ESA oferta (= su priceCents). Antes el
+    // sugerido era SIEMPRE el del ancla VEO Económico (bug); así se prueba que ya NO lo es, y que el
+    // piso (display) viaja por oferta.
+    for (const o of pujaOptions) {
+      expect(o.suggestedCents).toBe(o.priceCents);
+      expect(o.bidFloorCents).toBe(700);
+    }
+
+    // Y DIFIEREN entre ofertas (moto ×0.55 < económico ×1.0): no todas anclan al precio del auto.
+    const moto = out.options.find((o) => o.id === OfferingId.VEO_MOTO);
+    const economico = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(moto?.suggestedCents).toBeLessThan(economico?.suggestedCents ?? 0);
+  });
+
+  it('ADR 010 §9.3 · PUJA: el piso es PER-OFERTA (override del admin gana; sin override cae al default)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    // Config del admin: moto S/3 (300), confort S/9 (900); el resto (económico/xl) cae al default S/7.
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, 0, undefined, {
+      defaultFloorCents: 700,
+      overrides: [
+        { zone: 'GLOBAL', offeringId: OfferingId.VEO_MOTO, floorCents: 300 },
+        { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
+      ],
+    });
+    const service = buildService(fake, tripRest, fakeConfig());
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    const floorOf = (id: OfferingId) => out.options.find((o) => o.id === id)?.bidFloorCents;
+    expect(floorOf(OfferingId.VEO_MOTO)).toBe(300); // override
+    expect(floorOf(OfferingId.VEO_CONFORT)).toBe(900); // override
+    expect(floorOf(OfferingId.VEO_ECONOMICO)).toBe(700); // sin override → default
+    expect(floorOf(OfferingId.VEO_XL)).toBe(700); // sin override → default
+  });
+
+  it('ADR 010 §9.3 · piso CAÍDO (trip-service no responde) → degrada al default S/7 (no rompe el quote)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, 0, undefined, undefined, new Error('boom'));
+    const service = buildService(fake, tripRest, fakeConfig());
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    expect(out.bidFloorCents).toBe(DEFAULT_BID_FLOOR_CENTS);
+    for (const o of out.options) expect(o.bidFloorCents).toBe(DEFAULT_BID_FLOOR_CENTS);
+  });
+
+  it('A2 · FIXED: las ofertas NO llevan piso ni sugerido per-oferta', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const service = buildService(fake, new FakeTripRest({ mode: 'FIXED' }), fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    for (const o of out.options) {
+      expect(o.bidFloorCents).toBeUndefined();
+      expect(o.suggestedCents).toBeUndefined();
+    }
+  });
+
+  it('B1c · el quote EXCLUYE las ofertas deshabilitadas por el admin (overlay del catálogo)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    // El admin apagó Moto y XL en el overlay → el quote no debe cotizarlas.
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [OfferingId.VEO_MOTO, OfferingId.VEO_XL]);
+    const service = buildService(fake, tripRest, fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    const ids = out.options.map((o) => o.id);
+    expect(ids).not.toContain(OfferingId.VEO_MOTO);
+    expect(ids).not.toContain(OfferingId.VEO_XL);
+    expect(ids).toContain(OfferingId.VEO_ECONOMICO);
+    expect(ids).toContain(OfferingId.VEO_CONFORT);
+  });
+
+  it('B2 · el override de multiplier del admin cambia el priceCents de la oferta en el quote', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    // admin puso multiplier 2.0 en económico (código = 1.0) → el quote debe mostrar el precio efectivo.
+    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], undefined, {
+      [OfferingId.VEO_ECONOMICO]: { multiplier: 2.0 },
+    });
+    const service = buildService(fake, tripRest, fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 2.0, 500)); // efectivo, no el de código (1.0)
+    // Otra oferta sin override conserva su pricing de código.
+    const moto = out.options.find((o) => o.id === OfferingId.VEO_MOTO);
+    expect(moto?.priceCents).toBe(categoryFareCents(5000, 600, 0.55, 300));
+  });
+
+  it('B3 · el recargo de combustible (admin) se refleja en el priceCents del quote', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    // fuel 40 céntimos/km. economico mult 1.0, minFare 500.
+    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], undefined, {}, 40);
+    const service = buildService(fake, tripRest, fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, 500, 40)); // con recargo
+    // Sin recargo daría menos: prueba que el fuel efectivamente sube el precio.
+    expect(eco!.priceCents).toBeGreaterThan(categoryFareCents(5000, 600, 1.0, 500, 0));
+  });
+
+  it('B4 · degradación HONESTA: si el endpoint de fuel CAE, el quote cotiza con 0 recargo (no rompe ni inventa)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    // fuel-surcharge CAÍDO: fetchFuelPerKmCents catchea → 0. El resto del quote sigue normal.
+    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], undefined, {}, 0, new Error('fuel-surcharge caído'));
+    const service = buildService(fake, tripRest, fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    // Degradación honesta: la tarifa es la de SIN recargo (0), no un crash ni un precio inventado.
+    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, 500, 0));
+    expect(out.options.length).toBeGreaterThan(0); // el quote NO se rompe por la caída del fuel
+  });
+
+  it('B2 · el pin de modo del admin GANA en el quote (schedule PUJA, pin FIXED → opción FIXED)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {
+      [OfferingId.VEO_ECONOMICO]: { modePin: PricingMode.FIXED },
+    });
+    const service = buildService(fake, tripRest, fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe(PricingMode.FIXED); // pin gana
+    expect(out.options.find((o) => o.id === OfferingId.VEO_MOTO)?.mode).toBe(PricingMode.PUJA); // sin pin → schedule
+  });
+
+  it('B1c · admin APAGÓ todo (vacío legítimo) → quote SIN opciones (≠ catálogo caído, que mostraría todas)', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const allIds = OFFERING_LIST.map((o) => o.id);
+    const service = buildService(fake, new FakeTripRest({ mode: 'PUJA' }, allIds), fakeConfig(700));
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    // Vacío LEGÍTIMO (admin apagó todas) → options=[]. Distinto del catálogo CAÍDO (degradación → todas).
+    expect(out.options).toHaveLength(0);
   });
 
   it('degradación HONESTA: si el resolve falla, cae a PUJA (no muestra un precio fijo sin confirmar)', async () => {
@@ -310,6 +528,39 @@ describe('MapsService.quote', () => {
     expect(out.mode).toBe('PUJA');
     expect(out.bidFloorCents).toBe(DEFAULT_BID_FLOOR_CENTS);
     expect(out.suggestedCents).toBe(categoryFareCents(5000, 600, 1.0));
+  });
+
+  // #2 · observabilidad de la degradación del catálogo (veo_catalog_degraded_total{site}).
+  async function readCatalogDegraded(site: string): Promise<number> {
+    const { values } = await catalogDegradedTotal.get();
+    return values.filter((v) => v.labels.site === site).reduce((s, v) => s + v.value, 0);
+  }
+
+  it('#2 · catálogo CAÍDO en el quote → bumpea veo_catalog_degraded_total{site=quote} + cotiza las VISIBLES', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], new Error('catálogo caído'));
+    const service = buildService(fake, tripRest, fakeConfig(700));
+    const before = await readCatalogDegraded('quote');
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    // Degradación honesta: cotiza las visibles por default (B5-4: NO filtra las RIDE, pero TAMPOCO leakea
+    // las verticales ocultas aunque el catálogo esté caído) + la métrica lo hace visible a Ops.
+    expect(out.options.map((o) => o.id)).toEqual(VISIBLE_IDS);
+    expect(await readCatalogDegraded('quote')).toBe(before + 1);
+  });
+
+  it('#2 · catálogo CAÍDO en la teaser → bumpea veo_catalog_degraded_total{site=teaser} + cae a las VISIBLES', async () => {
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], new Error('catálogo caído'));
+    const service = buildService(fake, tripRest);
+    const before = await readCatalogDegraded('teaser');
+
+    const out = await service.catalog(USER);
+
+    // B5-4: la teaser degradada muestra las visibles por default, NO las verticales ocultas.
+    expect(out.offerings.map((o) => o.id)).toEqual(VISIBLE_IDS);
+    expect(await readCatalogDegraded('teaser')).toBe(before + 1);
   });
 });
 
@@ -337,8 +588,8 @@ describe('MapsService.quote · catálogo de offerings (ADR 013)', () => {
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
 
-    // Mismos ids y MISMO orden que el catálogo (OFFERING_LIST ya viene ordenado por sortOrder).
-    expect(out.options.map((o) => o.id)).toEqual(OFFERING_LIST.map((o) => o.id));
+    // Mismos ids VISIBLES y MISMO orden que el catálogo (B5-4: las verticales ocultas no entran al quote).
+    expect(out.options.map((o) => o.id)).toEqual(VISIBLE_IDS);
     const sortOrders = OFFERING_LIST.map((o) => o.sortOrder);
     expect(sortOrders).toEqual([...sortOrders].sort((a, b) => a - b));
   });

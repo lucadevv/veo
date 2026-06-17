@@ -36,6 +36,13 @@ type FontWeight = NonNullable<TextStyle['fontWeight']>;
 export const fontFamily = {
   /** Títulos / héroe: Clash Display Bold. */
   display: 'ClashDisplay-Bold',
+  /**
+   * Display serif editorial: Fraunces 72pt SemiBold (óptico 72pt, OFL).
+   * Nombre PostScript REAL leído de la tabla `name` (fc-scan): `Fraunces72pt-SemiBold`.
+   * Cara única. Convive con `display` grotesk (NO lo reemplaza): se usa solo en variants
+   * `displayEditorial`/`titleEditorial` para títulos héroe de tono editorial.
+   */
+  displaySerif: 'Fraunces72pt-SemiBold',
   /** Cuerpo (peso 400). Alias histórico de `textRegular`. */
   text: 'Outfit-Regular',
   textRegular: 'Outfit-Regular',
@@ -87,12 +94,31 @@ export const textStyles = {
     fontWeight: fontWeight.bold,
     letterSpacing: -1,
   },
+  /**
+   * Display editorial (serif): mismo tamaño/altura/peso que `display`, pero Fraunces serif y
+   * tracking más suelto (-0.5 vs -1): las serif piden menos compresión que la grotesk apretada.
+   */
+  displayEditorial: {
+    fontFamily: fontFamily.displaySerif,
+    fontSize: fontSize['4xl'],
+    lineHeight: 52,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -0.5,
+  },
   title1: {
     fontFamily: fontFamily.display,
     fontSize: fontSize['2xl'],
     lineHeight: 38,
     fontWeight: fontWeight.bold,
     letterSpacing: -0.6,
+  },
+  /** Título editorial (serif): paralelo a `title1` con Fraunces y tracking más suelto (-0.3). */
+  titleEditorial: {
+    fontFamily: fontFamily.displaySerif,
+    fontSize: fontSize['2xl'],
+    lineHeight: 38,
+    fontWeight: fontWeight.bold,
+    letterSpacing: -0.3,
   },
   title2: {
     fontFamily: fontFamily.display,

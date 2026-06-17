@@ -13,6 +13,10 @@ const REQUIRED_KEYS = [
   'profile.addName',
   'profile.editProfile',
   'profile.identityConfirmed',
+  // Calificación recibida (protagonista de la cabecera)
+  'profile.ratingNone',
+  'profile.ratingCountOne',
+  'profile.ratingCountMany',
   // Verificación con voz propia (sin verificar)
   'profile.verifyCardTitle',
   'profile.verifyCardBody',

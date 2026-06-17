@@ -8,8 +8,11 @@ import { dateTime } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
-import { ErrorState } from '@/components/ui/states';
+import { Lock } from 'lucide-react';
+import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
+import { useSession } from '@/lib/session-context';
+import { can } from '@/lib/rbac';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PendingDriverActions } from '@/components/drivers/pending-driver-actions';
 import { RejectedDriverActions } from '@/components/drivers/rejected-driver-actions';
@@ -121,12 +124,27 @@ const rejectedColumns: ColumnDef<DriverApproval, unknown>[] = [
 ];
 
 export default function DriversPage() {
+  const user = useSession();
   const [tab, setTab] = useState('PENDING');
   // La cola de pendientes viene de identity (pending-approval), NO del read-model (que solo tiene ACTIVE/SUSPENDED).
   const pending = useDriversPending();
   // El read-model sirve la flota verificada (ACTIVE) y el listado completo (ALL), paginado por cursor.
   const fleet = useDrivers(tab === 'PENDING' ? 'ACTIVE' : tab);
   const fleetRows = fleet.data?.pages.flatMap((p) => p.items) ?? [];
+
+  if (!can(user, 'drivers:view')) {
+    return (
+      <div className="flex h-full flex-col">
+        <PageHeader title="Conductores" breadcrumbs={[{ label: 'Operación' }, { label: 'Conductores' }]} />
+        <EmptyState
+          className="flex-1"
+          icon={<Lock className="size-6" aria-hidden />}
+          title="Acceso restringido"
+          description="Necesitas el rol correspondiente para ver los conductores."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

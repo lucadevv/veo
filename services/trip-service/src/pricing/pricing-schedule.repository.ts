@@ -20,14 +20,20 @@ export interface PersistedSchedule extends PricingModeSchedule {
   updatedAt: string;
 }
 
-/** Cliente de transacción mínimo aceptado por `replace` (para encolar el outbox en la MISMA tx). */
+/**
+ * Cliente de transacción mínimo aceptado por `replace` (para encolar el outbox en la MISMA tx).
+ * Optimistic locking (CAS): `updateMany` con `version` en el WHERE → el predicado se evalúa bajo lock al
+ * escribir, así dos PUT concurrentes NO pueden ambos bumpear desde la misma versión (el 2º ve count=0).
+ * `create` cubre el primer write (sin fila); `findUnique` relee la fila escrita para el `updatedAt`.
+ */
 export interface ScheduleTx {
   pricingModeSchedule: {
-    upsert(args: {
-      where: { id: string };
-      create: Record<string, unknown>;
-      update: Record<string, unknown>;
-    }): Promise<{ version: number; updatedAt: Date }>;
+    updateMany(args: {
+      where: { id: string; version: number };
+      data: Record<string, unknown>;
+    }): Promise<{ count: number }>;
+    create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
+    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
     create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;

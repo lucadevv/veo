@@ -25,6 +25,18 @@ import { processEventOnce, type DedupRedis, type EventDedupOptions } from './ded
 import { schemaForEvent, type EventPayload, type EventType } from './schemas.js';
 import type { EventEnvelope } from './envelope.js';
 
+/**
+ * Reintentos del bootstrap del consumer Kafka. Incidente real: audit-service (suscrito a MUCHOS
+ * topics) moría en boot ante un error TRANSITORIO de Kafka — típicamente KafkaJSProtocolError
+ * UNKNOWN_TOPIC_OR_PARTITION (retriable, metadata stale tras un restart de broker) o un error de
+ * conexión — porque onModuleInit rechazaba, Nest abortaba el bootstrap y main.ts hacía process.exit(1),
+ * recuperándose recién en un reintento MANUAL. Backoff exponencial en `startWithRetry` lo hace
+ * resiliente. NO son números mágicos: viven acá, tipados y comentados.
+ */
+const BOOTSTRAP_MAX_ATTEMPTS = 10;
+const BOOTSTRAP_BASE_DELAY_MS = 500;
+const BOOTSTRAP_MAX_DELAY_MS = 10_000;
+
 export interface KafkaConsumerBootstrapOptions {
   /** clientId de kafkajs (el nombre del servicio). */
   clientId: string;
@@ -70,8 +82,36 @@ export abstract class KafkaConsumerBootstrap implements OnModuleInit, OnModuleDe
     for (const [eventType, handler] of Object.entries(handlers)) {
       this.consumer.on(eventType, handler);
     }
-    await this.consumer.start(this.fromBeginning);
+    await this.startWithRetry();
     this.logger.log(this.subscriptionLog(Object.keys(handlers)));
+  }
+
+  /**
+   * Arranca el consumer reintentando errores TRANSITORIOS de Kafka (UNKNOWN_TOPIC_OR_PARTITION por
+   * metadata stale tras un restart de broker, errores de conexión) con backoff exponencial, en vez de
+   * tumbar el proceso al primer fallo. Tras BOOTSTRAP_MAX_ATTEMPTS relanza (un fallo persistente —
+   * misconfig real — SÍ debe surgir). `consumer.start()` es seguro de reintentar: connect() es idempotente
+   * y re-suscribir/re-run no duplica. Incidente real: audit-service moría en boot por un UNKNOWN transitorio.
+   */
+  private async startWithRetry(): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.consumer.start(this.fromBeginning);
+        if (attempt > 1) this.logger.log(`Consumer Kafka conectado tras ${attempt} intento(s)`);
+        return;
+      } catch (err) {
+        if (attempt >= BOOTSTRAP_MAX_ATTEMPTS) {
+          this.logger.error({ err }, `Bootstrap del consumer Kafka falló tras ${attempt} intentos`);
+          throw err;
+        }
+        const delay = Math.min(BOOTSTRAP_BASE_DELAY_MS * 2 ** (attempt - 1), BOOTSTRAP_MAX_DELAY_MS);
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Bootstrap del consumer Kafka falló (intento ${attempt}/${BOOTSTRAP_MAX_ATTEMPTS}), reintento en ${delay}ms: ${message}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

@@ -18,6 +18,7 @@ import { FinanceModule } from './finance/finance.module';
 import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PricingModule } from './pricing/pricing.module';
+import { CatalogModule } from './catalog/catalog.module';
 import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
     MediaModule,
     AnalyticsModule,
     PricingModule,
+    CatalogModule,
     DispatchConfigModule,
   ],
   providers: [

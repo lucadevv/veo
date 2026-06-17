@@ -40,8 +40,11 @@ export const envSchema = z.object({
   // Token público de Mapbox (`pk....`). Obligatorio solo cuando VEO_MAPS_MODE=mapbox.
   MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
-  // ── Pricing (ADR 011 M4). Piso de la PUJA que el quote expone en modo PUJA (espeja trip-service). ──
-  BID_FLOOR_CENTS: z.coerce.number().int().positive().default(700),
+  // ── Pricing (ADR 011 M4). El piso de la PUJA ya NO vive en env: el quote lo trae de trip-service
+  // (GET /internal/pricing/bid-floor) y lo resuelve per-oferta con resolveBidFloorCents (ADR 010 §9.3). ──
+  // B5-1.d · FLIP del modelo de energía en el quote. OFF (default) = fórmula vieja (fuel global); ON =
+  // fórmula nueva (energía pass-through por oferta · multiplier solo posición). Espeja trip-service.
+  PRICING_ENERGY_MODEL_ENABLED: z.string().default('false').transform((v) => v === 'true'),
 
   // ── gRPC downstream (lecturas) ──
   IDENTITY_GRPC_URL: z.string().default('localhost:50051'),

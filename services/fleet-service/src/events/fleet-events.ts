@@ -17,6 +17,7 @@ export const FleetEventType = {
   DRIVER_SUSPENDED: 'fleet.driver_suspended',
   VEHICLE_SUSPENDED: 'fleet.vehicle_suspended',
   VEHICLE_REGISTERED: 'fleet.vehicle_registered',
+  VEHICLE_MODEL_REVIEWED: 'fleet.vehicle_model_reviewed',
 } as const;
 export type FleetEventType = (typeof FleetEventType)[keyof typeof FleetEventType];
 
@@ -63,12 +64,27 @@ export interface VehicleRegisteredPayload {
   registeredAt: string;
 }
 
+/**
+ * El operador APRUEBA o RECHAZA un modelo de vehículo solicitado por un conductor. El veredicto viaja
+ * al conductor (`requestedBy`) como push. `verdict` es el estado FINAL de la transición, tipado al enum
+ * del contrato — no un string suelto.
+ */
+export interface VehicleModelReviewedPayload {
+  modelId: string;
+  requestedBy: string;
+  verdict: 'APPROVED' | 'REJECTED';
+  make: string;
+  model: string;
+  reviewedAt: string;
+}
+
 type FleetPayload =
   | DocumentExpiringPayload
   | DocumentExpiredPayload
   | DriverSuspendedPayload
   | VehicleSuspendedPayload
-  | VehicleRegisteredPayload;
+  | VehicleRegisteredPayload
+  | VehicleModelReviewedPayload;
 
 /** Construye el envelope de un evento de fleet listo para encolar en el outbox. */
 export function buildFleetEvent<T extends FleetPayload>(

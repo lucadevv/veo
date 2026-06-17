@@ -141,37 +141,28 @@ export interface ConsentSelection {
 }
 
 /**
- * Registra el consentimiento Ley N.° 29733 en el backend (append-only) en modo BEST-EFFORT:
- * la fuente de verdad es el row servidor, NO el flag local. Reintenta una vez con backoff suave
- * ante fallos transitorios (red/5xx); si tras el reintento sigue fallando, NO lanza: devuelve
- * `null` para que el onboarding no bloquee la navegación (el flag local queda solo como caché).
+ * Registra el consentimiento Ley N.° 29733 en el backend (append-only). Hace UN solo POST y PROPAGA
+ * el error: la durabilidad (reintento con backoff + dedupKey idempotente) ya NO vive acá sino en la
+ * cola durable (`SyncPendingConsentUseCase`), respetando SRP — este caso de uso solo arma el request
+ * y delega en el repositorio.
+ *
+ * El `dedupKey` (UUIDv7) es opcional: lo aporta la cola durable para que todos sus reintentos reusen
+ * la MISMA clave (el POST es idempotente por ella). Llamadores best-effort sin cola propia (p. ej. el
+ * toggle de marketing en ajustes) pueden generar uno propio o no enviarlo (append-only puro).
  */
 export class RecordConsentUseCase {
-  constructor(
-    private readonly repository: ConsentRepository,
-    /** Inyectable para tests; en producción usa el default real. */
-    private readonly delayMs: (ms: number) => Promise<void> = defaultDelay,
-  ) {}
+  constructor(private readonly repository: ConsentRepository) {}
 
-  async execute(selection: ConsentSelection): Promise<ConsentRecorded | null> {
+  execute(selection: ConsentSelection, dedupKey?: string): Promise<ConsentRecorded> {
     const request: RecordConsentRequest = {
       dataProcessing: selection.dataProcessing,
       inCabinCamera: selection.inCabinCamera,
       location: selection.location,
       marketing: selection.marketing,
       policyVersion: CONSENT_POLICY_VERSION,
+      ...(dedupKey !== undefined ? { dedupKey } : {}),
     };
-    try {
-      return await this.repository.record(request);
-    } catch {
-      // Reintento suave único: cubre cortes de red puntuales sin bloquear el onboarding.
-      try {
-        await this.delayMs(800);
-        return await this.repository.record(request);
-      } catch {
-        return null;
-      }
-    }
+    return this.repository.record(request);
   }
 }
 
@@ -182,9 +173,4 @@ export class GetConsentUseCase {
   execute(): Promise<CurrentConsent> {
     return this.repository.getCurrent();
   }
-}
-
-/** Espera no bloqueante por defecto (reintento suave). */
-function defaultDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

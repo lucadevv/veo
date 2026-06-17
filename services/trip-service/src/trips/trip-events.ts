@@ -75,6 +75,9 @@ export async function emitTripRequested(
         childMode: trip.childMode,
         // Ola 2B: dispatch filtra el matching por tipo de vehículo (MOTO solo a conductores MOTO).
         vehicleType: trip.vehicleType,
+        // B5-3: oferta del viaje (offeringId). dispatch resuelve sus requisitos de eligibilidad
+        // (confort=segment≥MID, xl=6 asientos) para filtrar el pool. Sin esto el wire queda mudo.
+        category: trip.category ?? undefined,
         // Ola 2B: si el viaje proviene de una reserva, dispatch puede incluirlo como "reservado".
         scheduled,
         // Ola 2B: paradas intermedias por el riel de eventos (dispatch ya no queda ciego; [] si es directo).

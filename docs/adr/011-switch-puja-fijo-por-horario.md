@@ -165,6 +165,10 @@ if (mode === 'PUJA') {
    ignora (overrides por zona = follow-up no-breaking).
 2. **Modo por defecto** (ninguna regla matchea / sin config / proyección no cargada): **PUJA.** VEO es puja;
    el fijo es la excepción programada. Degradación → puja.
+   > **ENMIENDA B5 (2026-06-16):** postura de producto **INVERTIDA** a pedido del cliente. El default del
+   > sistema pasa a ser **FIXED (precio fijo)**; la **PUJA es la excepción programada** por horario en el
+   > panel admin. `DEFAULT_SCHEDULE.defaultMode = FIXED` y la degradación honesta cae a FIXED. El mecanismo
+   > (schedule + reglas por horario, resolve-once-persist-forever) NO cambia — solo el valor por defecto.
 3. **Forma del schedule**: **día-de-semana (`dayMask`) + rango horario** (`startMinute`/`endMinute` en hora
    local de Lima). Cubre pico-laboral vs finde.
 4. **Quién edita**: permiso **`pricing:manage`** → roles **ADMIN, SUPERADMIN, FINANCE** (el pricing es

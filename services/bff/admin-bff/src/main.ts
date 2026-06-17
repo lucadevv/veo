@@ -19,8 +19,9 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.use(helmet());
-  app.enableCors({ origin: process.env.ADMIN_WEB_ORIGIN ?? 'http://localhost:5000', credentials: true });
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.enableCors({ origin: process.env.ADMIN_WEB_ORIGIN ?? 'http://localhost:5001', credentials: true });
+  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   // Filter canónico de @veo/rpc (DownstreamError + DomainError/HttpException → modelo de error
   // público). Admin con defaults: conserva status/code del downstream (más detalle para operación).
   app.useGlobalFilters(new BffExceptionsFilter(createLogger('admin-bff')));

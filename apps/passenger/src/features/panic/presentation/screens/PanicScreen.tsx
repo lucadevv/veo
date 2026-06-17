@@ -2,7 +2,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { PanicTriggerResult } from '@veo/api-client';
 import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { Banner, Button, Card, hexAlpha, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
@@ -10,7 +10,6 @@ import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import { NotImplementedError } from '../../../../core/errors/notImplemented';
 import type { RootStackParamList } from '../../../../navigation/types';
-import { hexAlpha } from '../components/color';
 import { IconCheck, IconShield } from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

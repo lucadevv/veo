@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsString, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 /**
  * POST /users/me/consents → body. Aceptación de consentimientos del pasajero (Ley 29733).
@@ -27,6 +27,11 @@ export class RecordConsentDto {
   @MinLength(1)
   @MaxLength(40)
   policyVersion!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Clave de idempotencia (UUIDv7) del cliente; el doble submit con la misma key es no-op' })
+  @IsOptional()
+  @IsUUID()
+  dedupKey?: string;
 }
 
 /** Datos que el servicio reenvía a identity-service (sin la ip, que añade el BFF). */
@@ -36,6 +41,8 @@ export interface RecordConsentInput {
   location: boolean;
   marketing: boolean;
   policyVersion: string;
+  /** Clave de idempotencia (UUIDv7) del cliente; reenviar la misma key es no-op (espeja panic). */
+  dedupKey?: string;
 }
 
 /** Consentimiento (append-only). Respuesta de POST (201) y de GET (vigente; `null` si nunca registró). */

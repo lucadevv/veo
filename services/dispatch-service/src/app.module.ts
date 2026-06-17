@@ -16,6 +16,7 @@ import { HotIndexModule } from './hot-index/hot-index.module';
 import { MapsModule } from './ports/maps/maps.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { HeatmapModule } from './heatmap/heatmap.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { DispatchGrpcController } from './grpc/dispatch.grpc.controller';
 
@@ -46,6 +47,7 @@ const readinessProvider: Provider = {
     MapsModule,
     DispatchModule,
     HeatmapModule,
+    AnalyticsModule,
     MessagingModule,
   ],
   controllers: [HealthController, MetricsController, DispatchGrpcController],

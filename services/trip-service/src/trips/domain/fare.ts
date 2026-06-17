@@ -1,10 +1,13 @@
 /**
  * BR-T05 — Cálculo de tarifa (lógica de dominio pura, sin I/O).
  *
- *   tarifa = (BASE + POR_KM·km + POR_MIN·min) · surge   [+ FEE_NIÑO si childMode]
+ *   tarifa = (BASE + (POR_KM + FUEL_POR_KM)·km + POR_MIN·min) · surge   [+ FEE_NIÑO si childMode]
  *
  * Todo en céntimos PEN usando los helpers de @veo/utils. km y min se derivan de la ruta
  * que entrega @veo/maps (distanceMeters, durationSeconds). surge ∈ [1.0, 2.0] (default 1.0).
+ * B3 · FUEL_POR_KM = recargo de combustible por km (admin-editable, default 0): se pliega al POR_KM
+ * porque el combustible es un costo POR DISTANCIA; así escala con surge y con el multiplier de la oferta
+ * (una moto ×0.55 consume menos que un XL ×1.6 — el multiplier ya aproxima el consumo por clase).
  */
 import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
 import { CHILD_MODE_FEE_CENTS, type OfferingPricingPolicy } from '@veo/shared-types';
@@ -25,22 +28,42 @@ export { CHILD_MODE_FEE_CENTS };
 export const MIN_SURGE = 1.0;
 export const MAX_SURGE = 2.0;
 
+/**
+ * B4 · deriva el recargo de combustible POR KM (céntimos PEN) del precio del combustible y el rendimiento:
+ *
+ *   recargo/km = precio_por_litro (céntimos) ÷ rendimiento (km por litro)
+ *
+ * Es la fórmula estándar de costo de combustible por km. El admin ingresa el PRECIO (lo que ve en el grifo
+ * y cambia seguido); el rendimiento es ~constante (vehículo de referencia). DEGRADACIÓN HONESTA: rendimiento
+ * ≤ 0 o no-finito → 0 (sin recargo, NO división por cero). El per-km derivado luego se pliega al per-km de
+ * la tarifa y escala con el multiplier de la oferta (una moto consume menos que un XL).
+ * DEUDA: rendimiento GLOBAL (vehículo de referencia) · per-clase (moto ~40 / auto ~12 / XL ~8 km/L) sería más exacto · gatillo: si el multiplier deja de aproximar bien el consumo por clase (Tier 3)
+ */
+export function deriveFuelPerKmCents(pricePerLiterCents: number, kmPerLiter: number): number {
+  if (!Number.isFinite(pricePerLiterCents) || pricePerLiterCents < 0) return 0;
+  if (!Number.isFinite(kmPerLiter) || kmPerLiter <= 0) return 0;
+  return Math.round(pricePerLiterCents / kmPerLiter);
+}
+
 export interface FareInput {
   distanceMeters: number;
   durationSeconds: number;
   /** Multiplicador de demanda calculado por dispatch (1.0–2.0). Default 1.0. */
   surgeMultiplier?: number;
   childMode?: boolean;
+  /** B3 · recargo de combustible por km (céntimos PEN ≥ 0), admin-editable. Default 0 (sin recargo). */
+  fuelPerKmCents?: number;
 }
 
 /**
  * Calcula la tarifa total en céntimos PEN. Lanza ValidationError si los insumos son inválidos
- * (distancia/duración negativas o surge fuera de rango).
+ * (distancia/duración negativas, surge fuera de rango o fuel per km negativo).
  */
 export function calculateFare(input: FareInput): Money {
   const { distanceMeters, durationSeconds } = input;
   const surge = input.surgeMultiplier ?? 1.0;
   const childMode = input.childMode ?? false;
+  const fuelPerKmCents = input.fuelPerKmCents ?? 0;
 
   if (distanceMeters < 0 || !Number.isFinite(distanceMeters)) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -51,11 +74,17 @@ export function calculateFare(input: FareInput): Money {
   if (surge < MIN_SURGE || surge > MAX_SURGE) {
     throw new ValidationError('surgeMultiplier fuera de rango [1.0, 2.0]', { surge });
   }
+  if (fuelPerKmCents < 0 || !Number.isFinite(fuelPerKmCents)) {
+    throw new ValidationError('fuelPerKmCents inválido (≥ 0)', { fuelPerKmCents });
+  }
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
 
-  const subtotalCents = Math.round(BASE_FARE_CENTS + PER_KM_CENTS * km + PER_MIN_CENTS * min);
+  // B3 · el recargo de combustible se pliega al costo POR KM (ver cabecera): es costo por distancia.
+  const subtotalCents = Math.round(
+    BASE_FARE_CENTS + (PER_KM_CENTS + fuelPerKmCents) * km + PER_MIN_CENTS * min,
+  );
   const surged = scaleMoney(money(subtotalCents), surge);
   return childMode ? addMoney(surged, money(CHILD_MODE_FEE_CENTS)) : surged;
 }
@@ -74,4 +103,78 @@ export function calculateFare(input: FareInput): Money {
 export function applyOfferingPricing(base: Money, pricing: OfferingPricingPolicy): Money {
   const scaled = scaleMoney(base, pricing.multiplier);
   return money(Math.max(scaled.cents, pricing.minFareCents), base.currency);
+}
+
+/**
+ * B5-1 · fórmula NUEVA (energía pass-through · multiplier SOLO posicionamiento). Reemplaza al par
+ * calculateFare+applyOfferingPricing, separando los 3 conceptos que el modelo viejo conflacionaba:
+ *
+ *   servicio   = BASE + POR_KM·km + POR_MIN·min          (la matemática base, sin energía)
+ *   posicionado= servicio × multiplier                    (el multiplier escala SOLO el servicio)
+ *   conEnergía = posicionado + energyPerKm·km             (la energía es COSTO PASS-THROUGH, no marcada-up)
+ *   tarifa     = max(round(conEnergía × surge), minFare)  [+ FEE_NIÑO flat si childMode]
+ *
+ * `energyPerKmCents` = costo de energía por km DERIVADO de EnergyCatalog (precio ÷ rendimiento de la
+ * oferta), inyectado por el caller (B5-1.b). NO se activa hasta el flip (B5-1.d); por ahora solo la usa
+ * el shadow-compare. El fee de niño pasa a ser FLAT (antes lo escalaban multiplier y surge — otra
+ * conflación que este modelo corrige). Lanza ValidationError con los mismos guards que calculateFare.
+ */
+export function calculateOfferingFare(
+  input: FareInput,
+  pricing: OfferingPricingPolicy,
+  energyPerKmCents = 0,
+): Money {
+  const { distanceMeters, durationSeconds } = input;
+  const surge = input.surgeMultiplier ?? 1.0;
+  const childMode = input.childMode ?? false;
+
+  if (distanceMeters < 0 || !Number.isFinite(distanceMeters)) {
+    throw new ValidationError('distanceMeters inválida', { distanceMeters });
+  }
+  if (durationSeconds < 0 || !Number.isFinite(durationSeconds)) {
+    throw new ValidationError('durationSeconds inválida', { durationSeconds });
+  }
+  if (surge < MIN_SURGE || surge > MAX_SURGE) {
+    throw new ValidationError('surgeMultiplier fuera de rango [1.0, 2.0]', { surge });
+  }
+  if (energyPerKmCents < 0 || !Number.isFinite(energyPerKmCents)) {
+    throw new ValidationError('energyPerKmCents inválido (≥ 0)', { energyPerKmCents });
+  }
+
+  const km = distanceMeters / 1000;
+  const min = durationSeconds / 60;
+
+  const service = BASE_FARE_CENTS + PER_KM_CENTS * km + PER_MIN_CENTS * min;
+  const positioned = service * pricing.multiplier; // posicionamiento (NO toca la energía)
+  const withEnergy = positioned + energyPerKmCents * km; // energía pass-through
+  const surged = Math.round(withEnergy * surge);
+  const firm = Math.max(surged, pricing.minFareCents);
+  return childMode ? money(firm + CHILD_MODE_FEE_CENTS) : money(firm);
+}
+
+/** Delta del shadow-compare entre el modelo viejo y el nuevo (B5-1). */
+export interface FareShadowDelta {
+  oldCents: number;
+  newCents: number;
+  deltaCents: number;
+}
+
+/**
+ * B5-1 · compara la tarifa VIEJA (calculateFare+applyOfferingPricing, fuel plegado al per-km y escalado
+ * por el multiplier) contra la NUEVA (calculateOfferingFare, energía pass-through). Devuelve ambos +
+ * el delta, para LOGUEAR antes de activar el flip (B5-1.d) — así medimos el impacto de precio sin
+ * romper nada. Puro, sin I/O.
+ */
+export function shadowCompareFare(
+  input: FareInput,
+  pricing: OfferingPricingPolicy,
+  oldFuelPerKmCents: number,
+  newEnergyPerKmCents: number,
+): FareShadowDelta {
+  const oldCents = applyOfferingPricing(
+    calculateFare({ ...input, fuelPerKmCents: oldFuelPerKmCents }),
+    pricing,
+  ).cents;
+  const newCents = calculateOfferingFare(input, pricing, newEnergyPerKmCents).cents;
+  return { oldCents, newCents, deltaCents: newCents - oldCents };
 }

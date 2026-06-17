@@ -1,4 +1,5 @@
 import type {
+  CatalogResult,
   MapPoint,
   PlaceSuggestionList,
   QuoteRequest,
@@ -18,4 +19,6 @@ export interface MapsRepository {
   reverse(point: MapPoint): Promise<ReversePlace>;
   /** POST /maps/quote → ruta real + opciones de tarifa por categoría (previsualización). */
   quote(request: QuoteRequest): Promise<QuoteResult>;
+  /** GET /maps/catalog → catálogo ACTIVO (ofertas habilitadas por el admin; sin ruta → sin precio). */
+  catalog(): Promise<CatalogResult>;
 }

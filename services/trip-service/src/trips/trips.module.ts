@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MapsModule } from '../ports/maps/maps.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
@@ -16,7 +17,7 @@ import { ScheduledTripsScheduler } from './scheduled-trips.scheduler';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
 
 @Module({
-  imports: [MapsModule, PricingModule],
+  imports: [MapsModule, PricingModule, CatalogModule],
   providers: [
     TripsService,
     TripQueryService,

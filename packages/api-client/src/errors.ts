@@ -139,3 +139,16 @@ export function activeTripIdFromError(err: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * Código del trip-service (409, vía BFF) cuando la oferta elegida fue DESHABILITADA por el admin entre el
+ * quote y el create (overlay del catálogo, ADR 013 · Fase B). El quote ya no la cotiza; este 409 cubre la
+ * carrera. La app lo refleja refrescando el quote (la oferta apagada desaparece de la lista) + un mensaje
+ * claro. Contrato server-side; no hardcodear el string.
+ */
+export const OFFERING_UNAVAILABLE_CODE = 'OFFERING_UNAVAILABLE';
+
+/** true si el error es "la oferta ya no está disponible" (409 `OFFERING_UNAVAILABLE`, ADR 013 · Fase B). */
+export function isOfferingUnavailableError(err: unknown): boolean {
+  return err instanceof ApiError && err.code === OFFERING_UNAVAILABLE_CODE;
+}

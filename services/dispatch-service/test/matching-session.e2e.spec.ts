@@ -11,7 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
 import { uuidv7, toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleType, OfferingId, FleetDocumentType } from '@veo/shared-types';
 import { PrismaClient, DispatchOutcome, DispatchSessionStatus } from '../src/generated/prisma';
 import { MatchingService } from '../src/dispatch/matching.service';
 import { DispatchService } from '../src/dispatch/dispatch.service';
@@ -339,5 +339,110 @@ describe('Reconciler de timeout durable (D2.3: sweepExpiredOffers, reemplaza el 
 
     const [a, b] = await Promise.all([matching.sweepExpiredOffers(), matching.sweepExpiredOffers()]);
     expect(a + b).toBe(1); // exactamente una réplica reclamó la oferta vencida
+  });
+});
+
+describe('Broadcast EMERGENCY (ambulancia · B5-vert: oferta SIMULTÁNEA, primero que acepta gana)', () => {
+  const AMB = OfferingId.VEO_AMBULANCE; // flow EMERGENCY + requires.certifications=[AMBULANCE_OPERATOR]
+  const certs = { certifications: [FleetDocumentType.AMBULANCE_OPERATOR] };
+
+  async function withdrawnEvents(tripId: string) {
+    return prisma.outboxEvent.findMany({ where: { aggregateId: tripId, eventType: 'dispatch.offer_withdrawn' } });
+  }
+
+  it('startSession EMERGENCY oferta a TODOS los conductores certificados a la vez (broadcast, no uno)', async () => {
+    const tripId = uuidv7();
+    const drivers = [uuidv7(), uuidv7(), uuidv7()];
+    for (const d of drivers) await hotIndex.seed(d, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR, category: AMB });
+
+    const offers = await prisma.dispatchMatch.findMany({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    expect(offers).toHaveLength(3); // broadcast: 3 ofertas vivas a la vez (el secuencial daría 1)
+    expect(offered.sort()).toEqual([...drivers].sort()); // entregadas a los 3
+  });
+
+  it('FAIL-CLOSED en el broadcast: un conductor SIN cert no recibe la oferta de ambulancia', async () => {
+    const tripId = uuidv7();
+    const withCert = uuidv7();
+    const noCert = uuidv7();
+    await hotIndex.seed(withCert, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+    await hotIndex.seed(noCert, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR); // sin certs
+
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR, category: AMB });
+
+    const offers = await prisma.dispatchMatch.findMany({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    expect(offers.map((o) => o.driverId)).toEqual([withCert]); // solo el certificado
+  });
+
+  it('el primero que acepta gana: sesión MATCHED + las hermanas → TIMEOUT + offer_withdrawn(taken)', async () => {
+    const tripId = uuidv7();
+    const drivers = [uuidv7(), uuidv7(), uuidv7()];
+    for (const d of drivers) await hotIndex.seed(d, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR, category: AMB });
+
+    const all = await prisma.dispatchMatch.findMany({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    const winner = all[0]!;
+    await dispatch.accept(winner.id, winner.driverId);
+
+    // El ganador queda ACCEPTED; la sesión MATCHED.
+    expect((await prisma.dispatchMatch.findUniqueOrThrow({ where: { id: winner.id } })).outcome).toBe(
+      DispatchOutcome.ACCEPTED,
+    );
+    expect((await prisma.dispatchSession.findUnique({ where: { tripId } }))?.status).toBe(
+      DispatchSessionStatus.MATCHED,
+    );
+    // Las 2 hermanas: retiradas a TIMEOUT, ninguna queda OFFERED.
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.OFFERED } })).toBe(0);
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.TIMEOUT } })).toBe(2);
+    // Y se avisó a los 2 perdedores con offer_withdrawn(reason: taken).
+    const withdrawn = await withdrawnEvents(tripId);
+    expect(withdrawn).toHaveLength(2);
+    const losers = all.filter((m) => m.id !== winner.id).map((m) => m.driverId).sort();
+    expect(withdrawn.map((e) => (e.envelope as { payload: { driverId: string } }).payload.driverId).sort()).toEqual(losers);
+    expect((withdrawn[0]!.envelope as { payload: { reason: string } }).payload.reason).toBe('taken');
+  });
+
+  it('EMERGENCY sin aceptación: todas las ofertas del broadcast expiran y sin más candidatos → TIMED_OUT honesto', async () => {
+    const tripId = uuidv7();
+    const drivers = [uuidv7(), uuidv7()];
+    for (const d of drivers) await hotIndex.seed(d, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR, category: AMB });
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.OFFERED } })).toBe(2);
+
+    // Simula el paso del tiempo: backdatea la ronda + las 2 ofertas para que venzan (>12s) sin salir de la ronda.
+    await prisma.dispatchSession.update({ where: { tripId }, data: { createdAt: new Date(Date.now() - 60_000) } });
+    await prisma.dispatchMatch.updateMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+      data: { offeredAt: new Date(Date.now() - 30_000) },
+    });
+
+    await matching.sweepExpiredOffers(); // marca las 2 TIMEOUT y re-invoca offerNext → offerBroadcast
+    // Sin candidatos NUEVOS (los 2 ya intentados) y sin ofertas vivas → cierre honesto.
+    expect((await prisma.dispatchSession.findUnique({ where: { tripId } }))?.status).toBe(
+      DispatchSessionStatus.TIMED_OUT,
+    );
+    expect(await noOffersEvents(tripId)).toHaveLength(1);
+  });
+
+  it('CARRERA real: dos aceptan ofertas distintas del MISMO viaje a la vez → solo UNO gana (índice UNIQUE PARCIAL)', async () => {
+    const tripId = uuidv7();
+    const d1 = uuidv7();
+    const d2 = uuidv7();
+    await hotIndex.seed(d1, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+    await hotIndex.seed(d2, ORIGIN.lat, ORIGIN.lon, CENTER, VehicleType.CAR, certs);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR, category: AMB });
+
+    const offers = await prisma.dispatchMatch.findMany({ where: { tripId, outcome: DispatchOutcome.OFFERED } });
+    expect(offers).toHaveLength(2);
+
+    // Ambos aceptan SU oferta concurrentemente: el índice UNIQUE PARCIAL (tripId WHERE ACCEPTED) deja UNO.
+    const results = await Promise.allSettled(offers.map((o) => dispatch.accept(o.id, o.driverId)));
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1); // exactamente un ganador
+    expect(rejected).toHaveLength(1); // el otro → ConflictError (P2002 traducido)
+    // En la DB: exactamente UN ACCEPTED para el viaje.
+    expect(await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.ACCEPTED } })).toBe(1);
   });
 });

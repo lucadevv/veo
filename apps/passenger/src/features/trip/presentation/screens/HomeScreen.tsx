@@ -189,7 +189,7 @@ export function HomeScreen(): React.JSX.Element {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('screens.profile')}
-                onPress={() => navigation.navigate('Main', { screen: 'Profile' })}
+                onPress={() => navigation.navigate('Profile')}
               >
                 <Avatar
                   uri={profileQuery.data?.photoUrl ?? undefined}

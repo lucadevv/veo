@@ -19,6 +19,7 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { IncentivesModule } from './incentives/incentives.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { EventsModule } from './events/events.module';
 import { PaymentGrpcController } from './grpc/payment.grpc.controller';
 
@@ -52,6 +53,7 @@ const readinessProvider: Provider = {
     IncentivesModule,
     PayoutsModule,
     ReconciliationModule,
+    AnalyticsModule,
     EventsModule,
   ],
   controllers: [HealthController, MetricsController, PaymentGrpcController],

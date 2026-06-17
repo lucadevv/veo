@@ -96,7 +96,7 @@ export function OffersBoardScreen(): React.JSX.Element {
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelBid.execute(tripId),
-    onSuccess: () => goOnce(() => navigation.navigate('Main', { screen: 'Home' })),
+    onSuccess: () => goOnce(() => navigation.navigate('Home')),
   });
 
   const expired = status === 'EXPIRED';

@@ -13,13 +13,49 @@ import {
 } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
+import { OfferingUnavailableError } from './trips.errors';
 import { emitTripRequested, emitBidPosted } from './trip-events';
-import { offeringModeOverriddenTotal } from './trip-metrics';
+import { offeringModeOverriddenTotal, catalogDegradedTotal } from './trip-metrics';
 import type { TripOfferingResolution } from './domain/offering';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
+
+/** Lee el total de veo_catalog_degraded_total para un `site` (suma de sus labels). #2 observabilidad. */
+async function readCatalogDegraded(site: string): Promise<number> {
+  const { values } = await catalogDegradedTotal.get();
+  return values.filter((v) => v.labels.site === site).reduce((s, v) => s + v.value, 0);
+}
+
+/**
+ * Doble de CatalogService.resolveOffering (B2): devuelve una oferta EFECTIVA a medida (enabled + pricing
+ * efectivo + modePin), o lanza para simular el catálogo caído. `as never` porque createTrip solo usa
+ * resolveOffering del puerto.
+ */
+function fakeCatalog(opts: {
+  enabled?: boolean;
+  multiplier?: number;
+  minFareCents?: number;
+  modePin?: PricingMode;
+  throws?: boolean;
+}) {
+  return {
+    resolveOffering: async (id: string) => {
+      if (opts.throws) throw new Error('catálogo caído');
+      const base = OFFERINGS[id as OfferingId] ?? OFFERINGS[OfferingId.VEO_ECONOMICO];
+      return {
+        ...base,
+        enabled: opts.enabled ?? true,
+        pricing: {
+          multiplier: opts.multiplier ?? base.pricing.multiplier,
+          minFareCents: opts.minFareCents ?? base.pricing.minFareCents,
+        },
+        modePin: opts.modePin,
+      };
+    },
+  } as never;
+}
 
 /** Identidad autenticada de prueba. cancel() usa user.userId como dueño (anti-IDOR), no el dto. */
 function userOf(userId: string, type: 'passenger' | 'driver' = 'passenger'): AuthenticatedUser {
@@ -337,6 +373,102 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const bid = prisma._outbox.find((e) => e.eventType === 'trip.bid_posted');
     expect((bid?.envelope.payload as { waypoints?: unknown }).waypoints).toEqual(stops);
   });
+
+  it('ADR 013 · Fase B · oferta DESHABILITADA en el catálogo → OfferingUnavailableError (409)', async () => {
+    const prisma = makePrisma(null);
+    // Catálogo que reporta la oferta como apagada (admin la deshabilitó entre el quote y el create).
+    const disabledCatalog = fakeCatalog({ enabled: false });
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, disabledCatalog);
+    await expect(svc.createTrip({ ...baseCreateDto })).rejects.toBeInstanceOf(OfferingUnavailableError);
+    // No persistió el viaje (rechazó antes de crear).
+    expect(prisma._store).toBeNull();
+  });
+
+  it('ADR 013 · Fase B · catálogo HABILITA la oferta → createTrip procede normal', async () => {
+    const prisma = makePrisma(null);
+    const enabledCatalog = fakeCatalog({ enabled: true });
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, enabledCatalog);
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.status).toBe(TripStatus.REQUESTED);
+  });
+
+  it('ADR 013 · Fase B · degradación honesta: si el catálogo FALLA, createTrip PERMITE el viaje', async () => {
+    const prisma = makePrisma(null);
+    const brokenCatalog = fakeCatalog({ throws: true });
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, brokenCatalog);
+    const before = await readCatalogDegraded('create');
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.status).toBe(TripStatus.REQUESTED);
+    // #2 observabilidad: la degradación silenciosa para el usuario es VISIBLE para Ops.
+    expect(await readCatalogDegraded('create')).toBe(before + 1);
+  });
+
+  it('B5-4 · una VERTICAL oculta (defaultEnabled:false) NO se crea ni con el catálogo CAÍDO (no leak)', async () => {
+    const prisma = makePrisma(null);
+    const brokenCatalog = fakeCatalog({ throws: true });
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, brokenCatalog);
+    // Request crafteado: category de una vertical oculta + catálogo caído. La UI nunca la ofrece; el
+    // server tampoco la deja crear (sin confirmar que el admin la habilitó) → 409, sin persistir.
+    await expect(
+      svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_AMBULANCE }),
+    ).rejects.toBeInstanceOf(OfferingUnavailableError);
+    expect(prisma._store).toBeNull();
+  });
+
+  it('B2 · el admin PINEA el modo de la oferta → GANA sobre el schedule (pin FIXED vs schedule PUJA)', async () => {
+    const prisma = makePrisma(null);
+    // schedule pide PUJA; el admin pineó FIXED para esta oferta → gana FIXED (sin bid, NO lanza).
+    const svc = new TripsService(
+      prisma as never,
+      maps,
+      undefined,
+      fakeResolver('PUJA'),
+      undefined,
+      undefined,
+      fakeCatalog({ modePin: PricingMode.FIXED }),
+    );
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.status).toBe(TripStatus.REQUESTED);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true); // FIXED
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false); // no PUJA
+  });
+
+  it('B2 · el override de multiplier del admin sube la tarifa FIXED (×2.0 → fareCents 3000)', async () => {
+    const prisma = makePrisma(null);
+    // FIXED por default (sin resolver, sin bid). calculateFare(5000m,600s)=1500; ×2.0=3000 (> minFare 500).
+    const svc = new TripsService(
+      prisma as never,
+      maps,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      fakeCatalog({ multiplier: 2.0 }),
+    );
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.fareCents).toBe(3000);
+  });
+
+  it('B3 · el recargo de combustible (admin) sube la tarifa FIXED (+40 céntimos/km → fareCents 1700)', async () => {
+    const prisma = makePrisma(null);
+    // FIXED por default. calculateFare(5000m,600s, fuel 40) = 600 + (120+40)*5 + 30*10 = 1700; ×1.0 económico.
+    const fuel = { getPerKmCents: async () => 40 } as never;
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, undefined, fuel);
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.fareCents).toBe(1700);
+  });
+
+  it('B3 · degradación honesta: si el servicio de combustible FALLA, createTrip cobra sin recargo (1500)', async () => {
+    const prisma = makePrisma(null);
+    const fuel = {
+      getPerKmCents: async () => {
+        throw new Error('fuel config caído');
+      },
+    } as never;
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, undefined, undefined, fuel);
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(view.fareCents).toBe(1500); // sin recargo, no aborta
+  });
 });
 
 describe('ScheduledTripService · Ola 2B viajes programados (activación / cancelación)', () => {
@@ -384,6 +516,63 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED, passengerId: 'pax-1' }));
     const svc = new ScheduledTripService(prisma as never);
     await expect(svc.cancelScheduledTrip('trip-1', 'pax-1')).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  // ADR 013 · Fase B — la oferta del programado se deshabilita entre la reserva y la activación.
+  it('activateScheduledTrip · oferta DESHABILITADA → EXPIRED + trip.expired (no abre dispatch)', async () => {
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED', passengerId: 'pax-1' }),
+    );
+    const catalog = { isEnabled: async () => false };
+    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    await svc.activateScheduledTrip('trip-1');
+    expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
+  });
+
+  it('activateScheduledTrip · catálogo CAÍDO → activa igual (degradación honesta, no aborta el viaje)', async () => {
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED' }),
+    );
+    const catalog = {
+      isEnabled: async () => {
+        throw new Error('catalog down');
+      },
+    };
+    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    const before = await readCatalogDegraded('activate');
+    await svc.activateScheduledTrip('trip-1');
+    expect(prisma._store?.status).toBe(TripStatus.REQUESTED);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(false);
+    // #2 observabilidad: catálogo caído al activar → métrica visible (site=activate).
+    expect(await readCatalogDegraded('activate')).toBe(before + 1);
+  });
+
+  it('activateScheduledTrip · oferta REMOVIDA del código (resolve lanza) → EXPIRED (sin poison-loop)', async () => {
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), category: 'veo_removido', passengerId: 'pax-1' }),
+    );
+    const catalog = { isEnabled: async () => true };
+    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    await svc.activateScheduledTrip('trip-1'); // no debe lanzar
+    expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
+  });
+
+  it('activateScheduledTrip · oferta HABILITADA → activa normal (SCHEDULED → REQUESTED)', async () => {
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED' }),
+    );
+    const catalog = { isEnabled: async () => true };
+    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    await svc.activateScheduledTrip('trip-1');
+    expect(prisma._store?.status).toBe(TripStatus.REQUESTED);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(false);
   });
 });
 
@@ -1698,6 +1887,17 @@ describe('CONTRATO producer↔schema · parametrizado POR CLASE (gap 3 de la pru
       expect((event!.envelope.payload as { vehicleType?: string }).vehicleType).toBe(vehicleClass);
     },
   );
+
+  it('trip.requested · B5-3: la `category` (oferta) viaja en el payload del outbox (dispatch filtra eligibilidad)', async () => {
+    const prisma = makePrisma(null);
+    await prisma.write.$transaction(async (tx) => {
+      await emitTripRequested(tx as never, buildTrip({ category: 'veo_confort' }), origin, destination);
+    });
+    const event = prisma._outbox.find((e) => e.eventType === 'trip.requested');
+    // Sin esto el wire de eligibilidad queda mudo (dispatch nunca resuelve los requisitos de la oferta).
+    expect((event!.envelope.payload as { category?: string }).category).toBe('veo_confort');
+    expect(EVENT_SCHEMAS['trip.requested'].safeParse(event!.envelope.payload).success).toBe(true);
+  });
 
   it.each(vehicleClasses)(
     'trip.bid_posted · el payload REAL de emitBidPosted con clase %s pasa el schema registrado',

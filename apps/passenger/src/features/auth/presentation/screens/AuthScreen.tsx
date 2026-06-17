@@ -1,4 +1,4 @@
-import { Banner, Button, IconButton, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { Banner, Button, IconButton, SafeScreen, spacing, Text, useTheme } from '@veo/ui-kit';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Platform, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
@@ -63,13 +63,6 @@ function oauthErrorCopy(kind: OAuthErrorKind): string | null {
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 30;
 const PHONE_DIGITS = 9;
-
-/** Agrupa los 9 dígitos peruanos en bloques 3·3·3 para la lectura del número. */
-function formatPhone(digits: string): string {
-  return digits.replace(/(\d{3})(\d{0,3})(\d{0,3})/, (_, a, b, c) =>
-    [a, b, c].filter(Boolean).join(' '),
-  );
-}
 
 /** Enmascara el teléfono para el subtítulo del OTP: "+51 ··· 321". */
 function maskPhone(digits: string): string {
@@ -251,7 +244,7 @@ export function AuthScreen(): React.JSX.Element {
         </View>
 
         <FadeInView style={styles.headerCopy} offsetY={12}>
-          <Text variant="display">{t('auth.startTitle')}</Text>
+          <Text variant="displayEditorial">{t('auth.startTitle')}</Text>
           <Text variant="body" color="inkMuted" style={styles.subtitle}>
             {t('auth.startSubtitle')}
           </Text>
@@ -383,7 +376,7 @@ export function AuthScreen(): React.JSX.Element {
         </View>
 
         <FadeInView style={styles.headerCopy} offsetY={12}>
-          <Text variant="display">{t('auth.phoneTitle')}</Text>
+          <Text variant="displayEditorial">{t('auth.phoneTitle')}</Text>
           <Text variant="body" color="inkMuted" style={styles.subtitle}>
             {t('auth.phoneSubtitle')}
           </Text>
@@ -393,6 +386,7 @@ export function AuthScreen(): React.JSX.Element {
           <Banner
             tone="danger"
             title={t('auth.errorRequest')}
+            description={t('auth.errorRequestHint')}
             style={{ marginBottom: theme.spacing.lg }}
           />
         ) : null}
@@ -420,7 +414,7 @@ export function AuthScreen(): React.JSX.Element {
           </View>
           <TextInput
             accessibilityLabel={t('auth.phoneLabel')}
-            value={formatPhone(phone)}
+            value={phone}
             onChangeText={(v) => setPhone(v.replace(/\D/g, '').slice(0, PHONE_DIGITS))}
             onFocus={() => setPhoneFocused(true)}
             onBlur={() => setPhoneFocused(false)}
@@ -479,7 +473,7 @@ export function AuthScreen(): React.JSX.Element {
       </View>
 
       <FadeInView style={styles.otpCopy} offsetY={12}>
-        <Text variant="display" align="center">
+        <Text variant="displayEditorial" align="center">
           {t('auth.otpTitle')}
         </Text>
         <Text variant="body" color="inkMuted" align="center" style={styles.subtitle}>
@@ -592,32 +586,32 @@ const styles = StyleSheet.create({
     height: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
-    marginBottom: 24,
+    marginTop: spacing['2xl'],
+    marginBottom: spacing['2xl'],
     // Glow lima (route-glow del diseño).
     shadowOpacity: 0.6,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
   },
-  startActions: { marginTop: 24 },
-  startHint: { marginTop: 16, lineHeight: 17 },
-  phoneBack: { marginTop: 4, marginBottom: 8, alignItems: 'flex-start' },
+  startActions: { marginTop: spacing['2xl'] },
+  startHint: { marginTop: spacing.lg, lineHeight: 17 },
+  phoneBack: { marginTop: spacing.xs, marginBottom: spacing.sm, alignItems: 'flex-start' },
   keypad: { marginTop: 18 },
-  helpTrigger: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 16, marginTop: 14 },
-  phoneHeader: { height: 96, justifyContent: 'center', marginTop: 8, marginBottom: 24 },
+  helpTrigger: { alignSelf: 'center', paddingVertical: spacing.md, paddingHorizontal: spacing.lg, marginTop: 14 },
+  phoneHeader: { height: 96, justifyContent: 'center', marginTop: spacing.sm, marginBottom: spacing['2xl'] },
   brandBadge: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
   phoneMotif: { position: 'absolute', right: -8, top: 4 },
-  headerCopy: { gap: 8, marginBottom: 28 },
+  headerCopy: { gap: spacing.sm, marginBottom: 28 },
   subtitle: {},
   phoneField: { flexDirection: 'row', alignItems: 'center', minHeight: 64, paddingHorizontal: 18 },
   prefix: { paddingRight: 14, marginRight: 14, borderRightWidth: StyleSheet.hairlineWidth },
   phoneInput: { flex: 1, fontSize: 22, fontWeight: '600', letterSpacing: 1, paddingVertical: 14 },
   helper: { marginTop: 10 },
-  otpHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  otpHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
   backButton: { width: 48 },
-  otpBrand: { alignItems: 'center', gap: 2 },
-  otpCopy: { gap: 8, marginTop: 24, marginBottom: 28 },
+  otpBrand: { alignItems: 'center', gap: spacing.xxs },
+  otpCopy: { gap: spacing.sm, marginTop: spacing['2xl'], marginBottom: 28 },
   expiry: { marginTop: 18 },
   otpActions: { marginTop: 18 },
   otpActionRow: {

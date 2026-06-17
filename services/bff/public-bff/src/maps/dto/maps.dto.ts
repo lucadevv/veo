@@ -148,6 +148,17 @@ export interface QuoteOption {
   labelKey: string;
   /** ADR 013 (additive) · token de ícono (`car` | `moto`) que la app resuelve en su registro token→glyph. */
   icon: string;
+  /**
+   * ADR 013 (A2 · additive) · SOLO si la oferta resuelve PUJA: piso de la zona (céntimos PEN), para
+   * DISPLAY. El autoritativo lo re-resuelve trip-service en createTrip (la app no lo envía). Ausente en
+   * FIXED. DEUDA: hoy es el piso global único; per-oferta/per-zona = Tier 2 (ADR 011 §9.3).
+   */
+  bidFloorCents?: number;
+  /**
+   * ADR 013 (A2 · additive) · SOLO si la oferta resuelve PUJA: sugerido = la tarifa que sería fija DE
+   * ESTA oferta (= su `priceCents`). Ausente en FIXED.
+   */
+  suggestedCents?: number;
 }
 
 /**
@@ -171,4 +182,22 @@ export interface QuoteResult {
   mode: PricingMode;
   bidFloorCents?: number;
   suggestedCents?: number;
+}
+
+/** Una oferta del catálogo para la teaser del Home (B1c): tokens de display, sin ruta/precio. */
+export interface OfferingTeaserItem {
+  id: string;
+  /** Nombre resuelto server-side (compat apps viejas; las nuevas resuelven `labelKey`). */
+  name: string;
+  /** Token i18n del nombre (`offering.veo_moto.name`). */
+  labelKey: string;
+  /** Token de ícono (`car` | `moto`) que la app resuelve en su registro token→glyph. */
+  icon: string;
+  /** Clase de vehículo (wire histórico): 'CAR' | 'MOTO'. */
+  vehicleType: 'CAR' | 'MOTO';
+}
+
+/** GET /maps/catalog → catálogo ACTIVO (solo ofertas habilitadas por el admin). Sin ruta. */
+export interface CatalogResult {
+  offerings: OfferingTeaserItem[];
 }

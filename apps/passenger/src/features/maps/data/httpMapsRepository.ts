@@ -1,4 +1,6 @@
 import {
+  type CatalogResult,
+  catalogResult,
   type HttpClient,
   type MapPoint,
   type PlaceSuggestionList,
@@ -34,5 +36,9 @@ export class HttpMapsRepository implements MapsRepository {
 
   quote(request: QuoteRequest): Promise<QuoteResult> {
     return this.http.post('/maps/quote', { body: request, schema: quoteResult });
+  }
+
+  catalog(): Promise<CatalogResult> {
+    return this.http.get('/maps/catalog', { schema: catalogResult });
   }
 }

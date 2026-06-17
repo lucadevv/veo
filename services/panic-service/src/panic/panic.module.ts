@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { S3EvidenceModule } from '../ports/s3-evidence/s3-evidence.module';
 import { PanicService } from './panic.service';
 import { PanicController } from './panic.controller';
+import { PanicAnalyticsController } from './panic-analytics.controller';
 import { PANIC_HMAC_SECRET } from './panic.hmac';
 import type { Env } from '../config/env.schema';
 
@@ -15,7 +16,7 @@ const hmacSecretProvider: Provider = {
 @Module({
   imports: [S3EvidenceModule],
   providers: [PanicService, hmacSecretProvider],
-  controllers: [PanicController],
+  controllers: [PanicController, PanicAnalyticsController],
   exports: [PanicService],
 })
 export class PanicModule {}

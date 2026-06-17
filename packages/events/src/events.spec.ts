@@ -365,3 +365,26 @@ describe("poison · clasificación de errores de consumidor Kafka", () => {
     expect(isPermanentDataError(undefined)).toBe(false);
   });
 });
+
+describe('driver.location_updated · certificaciones del conductor (B5-3.2)', () => {
+  const base: EventPayload<'driver.location_updated'> = {
+    driverId: 'd1',
+    point: { lat: -12.1, lon: -77.0 },
+    h3: '8928308280fffff',
+    at: new Date().toISOString(),
+  };
+
+  it('acepta un ping SIN certifications (compat: ofertas sin certs requeridas)', () => {
+    expect(EVENT_SCHEMAS['driver.location_updated'].safeParse(base).success).toBe(true);
+  });
+
+  it('acepta certifications con valores del enum FleetDocumentType', () => {
+    const ok = { ...base, certifications: ['AMBULANCE_OPERATOR', 'TOW_OPERATOR'] };
+    expect(EVENT_SCHEMAS['driver.location_updated'].safeParse(ok).success).toBe(true);
+  });
+
+  it('rechaza una certificación fuera del enum (no es un FleetDocumentType)', () => {
+    const bad = { ...base, certifications: ['HELICOPTER_PILOT'] };
+    expect(EVENT_SCHEMAS['driver.location_updated'].safeParse(bad).success).toBe(false);
+  });
+});

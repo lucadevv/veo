@@ -27,6 +27,7 @@ export function useAuthFlow() {
   const requestOtpUseCase = useDependency(TOKENS.requestOtpUseCase);
   const verifyOtpUseCase = useDependency(TOKENS.verifyOtpUseCase);
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
+  const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
   const setSession = useSessionStore((state) => state.setSession);
   const unlockBiometricGate = useBiometricGateStore((state) => state.unlock);
 
@@ -49,6 +50,9 @@ export function useAuthFlow() {
       });
       // Login fresco: el usuario acaba de autenticarse, no exigir biometría en esta sesión.
       unlockBiometricGate();
+      // Drena la cola durable de consentimiento (best-effort): el onboarding capturó la aceptación
+      // ANTES del login (sin sesión → quedó Pending). Ahora que hay JWT, el POST puede confirmar.
+      void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta perezosamente al
       // disparar el pánico. No bloquea el login.
       void panicSecretProvisioner.ensureProvisioned().catch((error) => {

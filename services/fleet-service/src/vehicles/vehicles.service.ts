@@ -8,8 +8,9 @@ import { uuidv7, plateSchema, parseOrThrow, ConflictError, NotFoundError, Valida
 import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import { deriveVehicleReviewStatus, isVehicleYearEligible, pickActiveVehicle } from './vehicle-rules';
+import { validCertificationsOf } from '../documents/document-rules';
 import type { CreateVehicleDto, DriverVehicleResponse, RegisterDriverVehicleDto } from './dto/vehicle.dto';
-import { Prisma, VehicleDocStatus, type Vehicle } from '../generated/prisma';
+import { FleetOwnerType, Prisma, VehicleDocStatus, VehicleModelStatus, VehicleType, type Vehicle } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
 
@@ -99,16 +100,21 @@ export class VehiclesService {
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
     if (existing) throw new ConflictError('Ya existe un vehículo con esa placa', { plate });
 
+    // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec
+    // (server-authoritative); si no, caen al texto libre. Resuelto ANTES de la transacción.
+    const snapshot = await this.resolveModelSnapshot(input);
+
     const vehicle = await this.prisma.write.$transaction(async (tx) => {
       const created = await tx.vehicle.create({
         data: {
           id: uuidv7(),
           plate,
-          make: input.make.trim(),
-          model: input.model.trim(),
+          make: snapshot.make,
+          model: snapshot.model,
           year: input.year,
           color: input.color?.trim() ?? '',
-          vehicleType: input.vehicleType,
+          vehicleType: snapshot.vehicleType,
+          modelSpecId: snapshot.modelSpecId,
           driverId,
           // Onboarding: pendiente de verificación, no se activa automáticamente.
           active: false,
@@ -139,6 +145,38 @@ export class VehiclesService {
     return toDriverVehicleResponse(vehicle, active?.id === vehicle.id);
   }
 
+  /**
+   * Resuelve marca/modelo/tipo del alta. Dos caminos (B5-2):
+   *  - CON modelSpecId → el conductor eligió un modelo del CATÁLOGO: se valida que exista y esté APPROVED
+   *    y se snapshotea make/model/vehicleType del spec (server-authoritative; ignora el texto libre).
+   *  - SIN modelSpecId → texto libre legacy: exige make+model y usa el vehicleType del body.
+   */
+  private async resolveModelSnapshot(
+    input: RegisterDriverVehicleDto,
+  ): Promise<{ make: string; model: string; vehicleType: VehicleType; modelSpecId: string | null }> {
+    if (input.modelSpecId) {
+      const spec = await this.prisma.read.vehicleModelSpec.findFirst({
+        where: { id: input.modelSpecId, status: VehicleModelStatus.APPROVED },
+      });
+      if (!spec) {
+        throw new ValidationError('El modelo seleccionado no existe o no está aprobado', {
+          modelSpecId: input.modelSpecId,
+        });
+      }
+      return { make: spec.make, model: spec.model, vehicleType: spec.vehicleType, modelSpecId: spec.id };
+    }
+
+    const make = input.make?.trim();
+    const model = input.model?.trim();
+    if (!make || !model) {
+      throw new ValidationError('Indicá la marca y el modelo, o elegí un modelo del catálogo', {
+        make: make ?? null,
+        model: model ?? null,
+      });
+    }
+    return { make, model, vehicleType: input.vehicleType, modelSpecId: null };
+  }
+
   /** Rehidrata los vehículos del conductor (más recientes primero), marcando cuál es el ACTIVO. */
   async listForDriver(driverId: string): Promise<DriverVehicleResponse[]> {
     const vehicles = await this.prisma.read.vehicle.findMany({
@@ -157,7 +195,22 @@ export class VehiclesService {
   async getActiveVehicle(driverId: string): Promise<DriverVehicleResponse | null> {
     const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId } });
     const active = pickActiveVehicle(vehicles);
-    return active ? toDriverVehicleResponse(active, true) : null;
+    if (!active) return null;
+    // B5-3.2 · certificaciones de operador VIGENTES del conductor (del MISMO driverId; ownerType DRIVER).
+    // El driver-bff las sella en el ping y dispatch gatea las verticales FAIL-CLOSED. Índice [ownerType,
+    // ownerId]; el endpoint lo cachea el driver-bff (TTL 20s), no es hot-path directo.
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
+    });
+    const certifications = validCertificationsOf(docs);
+    const base: DriverVehicleResponse = { ...toDriverVehicleResponse(active, true), certifications };
+    // B5-3 · enriquece SOLO el vehículo activo con seats/segment del modelSpec elegido, para que el
+    // driver-bff los selle en el ping (eligibilidad de oferta en dispatch). Legacy sin modelSpecId →
+    // sin attrs (degradación honesta: dispatch no restringe a ese conductor).
+    if (!active.modelSpecId) return base;
+    const spec = await this.prisma.read.vehicleModelSpec.findUnique({ where: { id: active.modelSpecId } });
+    if (!spec) return base;
+    return { ...base, seats: spec.seats, segment: spec.segment ?? undefined };
   }
 
   /**

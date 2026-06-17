@@ -10,15 +10,23 @@ import { KafkaEventProducer, createEnvelope, createKafka, type EventPayload } fr
 import { toH3 } from '@veo/utils';
 import { createLogger, type Logger } from '@veo/observability';
 import type { DriverLocationReport } from '@veo/api-client';
-import type { VehicleClass } from '@veo/shared-types';
+import type { FleetDocumentType, VehicleClass, VehicleSegment } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
 
 /**
  * Reporte con la clase de vehículo YA SELLADA server-authoritative (el gateway la resuelve contra
  * fleet ANTES de publicar). Exigirla acá por tipo (ADR 013 · Lote D) elimina el viejo `?? 'CAR'`
  * del publisher: un caller nuevo no puede olvidarse de sellar la clase y caer silencioso a CAR.
+ * B5-3 · suma los attrs de eligibilidad del vehículo activo (opcionales: el modelo legacy/texto-libre
+ * no los aporta ⇒ dispatch no restringe a ese conductor).
  */
-type SealedLocationReport = DriverLocationReport & { vehicleType: VehicleClass };
+type SealedLocationReport = DriverLocationReport & {
+  vehicleType: VehicleClass;
+  seats?: number;
+  segment?: VehicleSegment;
+  vehicleYear?: number;
+  certifications?: FleetDocumentType[];
+};
 
 @Injectable()
 export class LocationPublisherService implements OnModuleInit, OnModuleDestroy {
@@ -60,6 +68,13 @@ export class LocationPublisherService implements OnModuleInit, OnModuleDestroy {
         heading: report.heading ?? null,
         // Clase de vehículo activa del conductor, sellada por el gateway. dispatch filtra el matching.
         vehicleType: report.vehicleType,
+        // B5-3 · attrs de eligibilidad del vehículo activo (del modelSpec). Opcionales: dispatch los usa
+        // para filtrar por oferta; si faltan (legacy), degrada a "elegible".
+        seats: report.seats,
+        segment: report.segment,
+        vehicleYear: report.vehicleYear,
+        // B5-3.2 · certs vigentes del conductor; dispatch gatea las verticales fail-closed.
+        certifications: report.certifications,
       };
       const envelope = createEnvelope({
         eventType: 'driver.location_updated',

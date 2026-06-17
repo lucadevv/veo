@@ -16,9 +16,10 @@ import {
   VehicleValidationError,
   type VehicleData,
   type VehicleErrors,
+  type VehicleModelOption,
   type VehicleView,
 } from '../../domain';
-import {RegistrationField, VehicleTypeSelector} from '../components';
+import {RegistrationField, VehicleModelSelector, VehicleTypeSelector} from '../components';
 import {
   ACTIVE_VEHICLE_QUERY_KEY,
   REGISTRATION_VEHICLES_QUERY_KEY,
@@ -30,7 +31,7 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Vehicles'>;
 
-const EMPTY_FORM: VehicleData = {type: VehicleType.CAR, plate: '', brand: '', year: '', model: ''};
+const EMPTY_FORM: VehicleData = {type: VehicleType.CAR, plate: '', year: '', modelSpecId: '', brand: '', model: ''};
 
 /** El status `ACTIVE` (vehicle-rules de fleet) = verificado por el operador; el resto, en revisión. */
 const VERIFIED_STATUS = 'ACTIVE';
@@ -64,6 +65,17 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
     if (errors[field]) setErrors(prev => ({...prev, [field]: undefined}));
   };
 
+  /** Cambiar el tipo invalida el modelo elegido (el catálogo se filtra por tipo). */
+  const onChangeType = (type: VehicleType) => {
+    setForm(prev => ({...prev, type, modelSpecId: '', brand: '', model: ''}));
+  };
+
+  /** El conductor eligió un modelo del catálogo: guarda id + etiqueta y limpia el error de modelo. */
+  const onPickModel = (model: VehicleModelOption) => {
+    setForm(prev => ({...prev, modelSpecId: model.id, brand: model.make, model: model.model}));
+    if (errors.model) setErrors(prev => ({...prev, model: undefined}));
+  };
+
   const fieldError = (field: keyof VehicleErrors): string | undefined => {
     const code = errors[field];
     return code ? t(`registration.vehicle.errors.${code}`) : undefined;
@@ -71,9 +83,8 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
 
   const canRegister =
     form.plate.trim().length > 0 &&
-    form.brand.trim().length > 0 &&
     form.year.trim().length > 0 &&
-    form.model.trim().length > 0 &&
+    form.modelSpecId.trim().length > 0 &&
     !register.isPending;
 
   const onRegister = async () => {
@@ -155,8 +166,15 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
         <Text variant="headline" style={styles.section}>
           {t('vehicles.addTitle')}
         </Text>
-        <VehicleTypeSelector value={form.type} onChange={type => setForm(prev => ({...prev, type}))} />
+        <VehicleTypeSelector value={form.type} onChange={onChangeType} />
         <View style={styles.form}>
+          {/* B5-2: el modelo se ELIGE del catálogo curado (filtrado por tipo), no a texto libre. */}
+          <VehicleModelSelector
+            vehicleType={form.type}
+            value={{modelSpecId: form.modelSpecId, brand: form.brand, model: form.model}}
+            onChange={onPickModel}
+            error={fieldError('model')}
+          />
           <RegistrationField
             label={t('registration.vehicle.plateLabel')}
             placeholder={t('registration.vehicle.platePlaceholder')}
@@ -166,36 +184,14 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             maxLength={8}
             error={fieldError('plate')}
           />
-          <View style={styles.row}>
-            <View style={styles.flex}>
-              <RegistrationField
-                label={t('registration.vehicle.brandLabel')}
-                placeholder={t('registration.vehicle.brandPlaceholder')}
-                value={form.brand}
-                onChangeText={text => update({brand: text}, 'brand')}
-                autoCapitalize="words"
-                error={fieldError('brand')}
-              />
-            </View>
-            <View style={styles.flex}>
-              <RegistrationField
-                label={t('registration.vehicle.yearLabel')}
-                placeholder={t('registration.vehicle.yearPlaceholder')}
-                value={form.year}
-                onChangeText={text => update({year: text}, 'year')}
-                keyboardType="number-pad"
-                maxLength={4}
-                error={fieldError('year')}
-              />
-            </View>
-          </View>
           <RegistrationField
-            label={t('registration.vehicle.modelLabel')}
-            placeholder={t('registration.vehicle.modelPlaceholder')}
-            value={form.model}
-            onChangeText={text => update({model: text}, 'model')}
-            autoCapitalize="characters"
-            error={fieldError('model')}
+            label={t('registration.vehicle.yearLabel')}
+            placeholder={t('registration.vehicle.yearPlaceholder')}
+            value={form.year}
+            onChangeText={text => update({year: text}, 'year')}
+            keyboardType="number-pad"
+            maxLength={4}
+            error={fieldError('year')}
           />
           {serverError ? (
             <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(serverError, t)} />
@@ -221,7 +217,5 @@ const styles = StyleSheet.create({
   vehicleInfo: {flex: 1},
   section: {marginTop: 12},
   form: {gap: 16, marginTop: 8},
-  row: {flexDirection: 'row', gap: 16},
-  flex: {flex: 1},
   spaced: {marginTop: 12},
 });

@@ -4,6 +4,7 @@ import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { MapsService } from './maps.service';
 import {
   AutocompleteQueryDto,
+  type CatalogResult,
   type PlaceSuggestion,
   QuoteRequestDto,
   type QuoteResult,
@@ -45,5 +46,14 @@ export class MapsController {
     @Body() dto: QuoteRequestDto,
   ): Promise<QuoteResult> {
     return this.maps.quote(dto, user);
+  }
+
+  @Get('catalog')
+  @ApiOperation({
+    summary:
+      'Catálogo ACTIVO de ofertas para la teaser del Home (solo las habilitadas por el admin, sin ruta). B1c',
+  })
+  catalog(@CurrentUser() user: AuthenticatedUser): Promise<CatalogResult> {
+    return this.maps.catalog(user);
   }
 }

@@ -7,7 +7,7 @@ import { getAccessToken } from './cookies';
  * Read-only: apto para Server Components (no rota tokens). Devuelve null si no hay sesión válida.
  */
 export async function getSession(): Promise<SessionUser | null> {
-  const access = getAccessToken();
+  const access = await getAccessToken();
   if (!access) return null;
   try {
     const res = await fetch(`${adminBffUrl()}/auth/session`, {

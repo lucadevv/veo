@@ -13,8 +13,18 @@ port_in_use() { lsof -ti "tcp:$1" -sTCP:LISTEN >/dev/null 2>&1; }
 start_node() { # <name> <dir> <port>
   local name="$1" dir="$ROOT/$2" port="$3"
   if port_in_use "$port"; then echo "  · $name ya corre en $port"; return; fi
-  ( cd "$dir" && set -a && . env/dev.env 2>/dev/null && . env/dev.secret.env 2>/dev/null && set +a \
-    && nohup node dist/main.js > "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid" )
+  # Migraciones automáticas al boot (idempotente): aplica las pendientes ANTES de arrancar — mata el
+  # drift de schema. Si falla, NO arranca (fail-fast honesto, no a medias). node queda en background.
+  if ! (
+    cd "$dir"
+    set -a; . env/dev.env 2>/dev/null; . env/dev.secret.env 2>/dev/null; set +a
+    if [ -d prisma/migrations ]; then
+      npx prisma migrate deploy > "$LOGS/$name.log" 2>&1 || exit 1
+    fi
+    nohup node dist/main.js >> "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid"
+  ); then
+    echo "  ✗ $name migrate deploy FALLÓ — NO arrancó (ver $LOGS/$name.log)"; return
+  fi
   echo "  ▶ $name lanzado (puerto $port, log $LOGS/$name.log)"
 }
 

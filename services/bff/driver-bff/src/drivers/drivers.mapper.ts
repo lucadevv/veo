@@ -15,7 +15,9 @@ import type {
   DriverDocumentDetail,
   DriverDocumentSimpleStatus,
   DriverDocumentView,
+  DriverModelRequestView,
   DriverProfileView,
+  DriverVehicleModelView,
   DriverVehicleView,
 } from './dto/drivers.dto';
 import type { FleetDocumentReply } from '../common/grpc-replies';
@@ -121,6 +123,59 @@ export function buildDriverVehicleFromGrpc(v: VehicleReply): DriverVehicleView {
 /** Mapea la lista de vehículos del conductor (GET /drivers/vehicles). */
 export function buildDriverVehicles(vehicles: VehicleReply[]): DriverVehicleView[] {
   return vehicles.map(buildDriverVehicleFromGrpc);
+}
+
+/**
+ * Respuesta REST de fleet GET /api/v1/vehicle-models (catálogo curado, paginado por cursor). Se declara
+ * aquí para no acoplar al fleet-service. La app no pagina el catálogo (es chico); el BFF pide una página
+ * amplia y devuelve sus items.
+ */
+export interface FleetVehicleModelReply {
+  id: string;
+  make: string;
+  model: string;
+  yearFrom: number;
+  yearTo: number;
+  vehicleType: string;
+  seats: number;
+}
+export interface FleetVehicleModelPageReply {
+  items: FleetVehicleModelReply[];
+  nextCursor: string | null;
+}
+
+/** Mapea un modelo del catálogo de fleet a la vista del selector del onboarding (mapeo explícito). */
+export function buildDriverVehicleModel(m: FleetVehicleModelReply): DriverVehicleModelView {
+  return {
+    id: m.id,
+    make: m.make,
+    model: m.model,
+    yearFrom: m.yearFrom,
+    yearTo: m.yearTo,
+    vehicleType: m.vehicleType,
+    seats: m.seats,
+  };
+}
+
+/** Mapea la página del catálogo (GET /drivers/vehicle-models) a la lista del selector. */
+export function buildDriverVehicleModels(page: FleetVehicleModelPageReply): DriverVehicleModelView[] {
+  return (page.items ?? []).map(buildDriverVehicleModel);
+}
+
+/**
+ * Respuesta REST de fleet POST /vehicle-models (solicitud creada): el spec completo en revisión. Para el
+ * conductor solo importa confirmar que quedó pendiente, así que se proyecta a lo mínimo.
+ */
+export interface FleetVehicleModelRequestReply {
+  id: string;
+  make: string;
+  model: string;
+  status: string;
+}
+
+/** Mapea la solicitud creada en fleet a la confirmación que ve el conductor. */
+export function buildDriverModelRequest(m: FleetVehicleModelRequestReply): DriverModelRequestView {
+  return { id: m.id, make: m.make, model: m.model, status: m.status };
 }
 
 export function buildDriverProfile(

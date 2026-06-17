@@ -21,11 +21,18 @@ export class MatchingSessionStore {
    * inicio de ESTA ronda: el advance solo cuenta como "ya ofertados" los matches con offeredAt ≥ createdAt,
    * así un re-bid vuelve a ofertar a conductores de rondas previas (paridad con el matcher viejo).
    */
-  start(input: { tripId: string; origin: LatLon; vehicleType: VehicleClass }): Promise<DispatchSession> {
+  start(input: {
+    tripId: string;
+    origin: LatLon;
+    vehicleType: VehicleClass;
+    category?: string;
+  }): Promise<DispatchSession> {
     const data = {
       originLat: input.origin.lat,
       originLon: input.origin.lon,
       vehicleType: input.vehicleType,
+      // B5-3 · oferta del viaje, para que el advance resuelva sus requisitos de eligibilidad.
+      category: input.category ?? null,
       status: DispatchSessionStatus.OPEN,
       currentKRing: 1,
     };

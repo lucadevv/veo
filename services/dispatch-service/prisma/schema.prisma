@@ -92,6 +92,9 @@ model DispatchSession {
   originLon    Float                 @map("origin_lon")
   /// El advance re-rankea SOLO conductores de este tipo (un viaje MOTO no se ofrece a un CAR).
   vehicleType  VehicleType           @default(CAR) @map("vehicle_type")
+  /// B5-3 · oferta del viaje (offeringId, ej. veo_confort): el advance resuelve sus requisitos de
+  /// eligibilidad (segment/seats/antigüedad) para filtrar el pool. Null/desconocido ⇒ sin requisitos extra.
+  category     String?               @map("category")
   /// k-ring actual de la búsqueda (1..maxKRing): el advance expande cuando se agotan los cercanos.
   currentKRing Int                   @default(1) @map("current_k_ring")
   createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz

@@ -13,4 +13,10 @@ export const OFFERING_DISPLAY_NAMES: Record<OfferingId, string> = {
   [OfferingId.VEO_ECONOMICO]: 'VEO Económico',
   [OfferingId.VEO_CONFORT]: 'VEO Confort',
   [OfferingId.VEO_XL]: 'VEO XL',
+  // B5-4 · verticales especiales + EV: codeadas pero ocultas (defaultEnabled:false). El nombre existe
+  // para cuando el admin las habilite (el quote no las cotiza mientras estén deshabilitadas).
+  [OfferingId.VEO_ECONOMICO_EV]: 'VEO Económico Eléctrico',
+  [OfferingId.VEO_AMBULANCE]: 'VEO Ambulancia',
+  [OfferingId.VEO_TOW]: 'VEO Grúa',
+  [OfferingId.VEO_MECHANIC]: 'VEO Mecánico',
 };

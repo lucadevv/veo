@@ -180,9 +180,9 @@ export function flushPendingDeepLink(): void {
   if (!routeNames.includes(target.screen)) return;
   clearPendingDeepLink();
   // Estrechamos el union del target (TS no co-estrecha screen+params en una sola llamada): el HOME del
-  // sheet (Main/Home, puja EXPIRED) vs. las pantallas de viaje legacy (params `{ tripId }`).
-  if (target.screen === 'Main') {
-    navigationRef.navigate(target.screen, target.params);
+  // sheet (ruta directa `Home`, sin params, puja EXPIRED) vs. las pantallas de viaje legacy (`{ tripId }`).
+  if (target.screen === 'Home') {
+    navigationRef.navigate(target.screen);
   } else {
     navigationRef.navigate(target.screen, target.params as { tripId: string });
   }

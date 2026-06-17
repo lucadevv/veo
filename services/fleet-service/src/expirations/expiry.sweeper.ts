@@ -179,19 +179,27 @@ export class ExpirySweeper {
       if (vehicles.length === 0) break;
       cursorId = vehicles[vehicles.length - 1]?.id;
 
-      for (const vehicle of vehicles) {
-        const docs = await this.prisma.read.fleetDocument.findMany({
-          where: {
-            ownerType: FleetOwnerType.VEHICLE,
-            ownerId: vehicle.id,
-            type: { in: [...VEHICLE_REQUIRED_DOCUMENT_TYPES] },
-            status: {
-              in: [FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED],
-            },
+      const vehicleIds = vehicles.map((v) => v.id);
+      const docsByVehicle = new Map<string, ('VALID' | 'EXPIRING_SOON' | 'EXPIRED')[]>();
+      const allDocs = await this.prisma.read.fleetDocument.findMany({
+        where: {
+          ownerType: FleetOwnerType.VEHICLE,
+          ownerId: { in: vehicleIds },
+          type: { in: [...VEHICLE_REQUIRED_DOCUMENT_TYPES] },
+          status: {
+            in: [FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED],
           },
-          select: { status: true },
-        });
-        const statuses = docs.map((d) => d.status as 'VALID' | 'EXPIRING_SOON' | 'EXPIRED');
+        },
+        select: { ownerId: true, status: true },
+      });
+      for (const d of allDocs) {
+        const arr = docsByVehicle.get(d.ownerId) ?? [];
+        arr.push(d.status as 'VALID' | 'EXPIRING_SOON' | 'EXPIRED');
+        docsByVehicle.set(d.ownerId, arr);
+      }
+
+      for (const vehicle of vehicles) {
+        const statuses = [...(docsByVehicle.get(vehicle.id) ?? [])];
         statuses.push(deriveExpiryStatus(vehicle.insuranceExpiresAt, now, this.warningDays));
         const newDocStatus = aggregateVehicleDocStatus(statuses);
 

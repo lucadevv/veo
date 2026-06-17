@@ -8,6 +8,7 @@ import {
   Radar,
   ScrollText,
   ShieldAlert,
+  Tags,
   Truck,
   UserCog,
   Users,
@@ -57,6 +58,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/finance', label: 'Liquidaciones', icon: Banknote, permission: 'finance:view', exact: true },
       { href: '/finance/pricing', label: 'Modo de pricing', icon: Coins, permission: 'pricing:view' },
+      { href: '/finance/catalog', label: 'Catálogo de ofertas', icon: Tags, permission: 'catalog:view' },
     ],
   },
   {

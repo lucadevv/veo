@@ -14,6 +14,6 @@ export async function POST() {
   } catch {
     // Aunque falle la revocación remota, limpiamos localmente para cerrar sesión.
   }
-  clearSessionCookies();
+  await clearSessionCookies();
   return NextResponse.json({ status: 'ok' });
 }

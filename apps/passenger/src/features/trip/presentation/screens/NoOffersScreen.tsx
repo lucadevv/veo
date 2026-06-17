@@ -56,7 +56,7 @@ export function NoOffersScreen(): React.JSX.Element {
   // falla la red igual liberamos al pasajero al Home (el watchdog del backend cierra el viaje EXPIRED).
   const cancelMutation = useMutation({
     mutationFn: () => cancelBid.execute(tripId),
-    onSettled: () => navigation.navigate('Main', { screen: 'Home' }),
+    onSettled: () => navigation.navigate('Home'),
   });
 
   if (tripQuery.isError) {

@@ -147,6 +147,7 @@ export const common = {
     otpTitle: 'Verifica tu número',
     otpSubtitle: 'Ingresa el código que enviamos al {{phone}}',
     otpLabel: 'Código de verificación',
+    otpProgress: '{{current}} de {{length}}',
     invalidOtp: 'El código debe tener 6 dígitos.',
     otpExpiry: 'El código expirará en 5 minutos.',
     verify: 'Verificar',
@@ -164,6 +165,7 @@ export const common = {
     otpHelpEmail: 'Mejor entro con correo',
     otpHelpResend: 'Reenviar SMS',
     errorRequest: 'No pudimos enviar el código. Verifica tu número e inténtalo de nuevo.',
+    errorRequestHint: 'Revisa tu conexión e inténtalo de nuevo.',
     errorVerify: 'Código incorrecto o vencido. Inténtalo de nuevo.',
     changeNumber: 'Cambiar número',
     /** Pantalla de sesión expirada (refresh JWT vencido/revocado). */
@@ -272,12 +274,26 @@ export const common = {
     title: '¿A dónde vamos?',
     greeting: 'Hola',
     whereTo: '¿A dónde vamos?',
+    /** Título héroe editorial del Home idle (ancla visual grande, arriba con aire). */
+    heroTitle: '¿A dónde vamos?',
     yourLocation: 'Tu ubicación',
     pickupLabel: 'Recojo',
+    /** Placeholder de la fila de origen cuando aún no hay ubicación resuelta (GPS sin fix). */
+    definePickup: 'Define tu punto de recojo',
     adjustPickup: 'Ajustar',
+    /** Botón circular que permuta origen ↔ destino en la tarjeta de ruta del Home. */
+    swapRoute: 'Intercambiar origen y destino',
+    /** Tarjeta del último conductor con quien viajaste (atajo de confianza). */
+    lastDriverTitle: 'Tu último conductor',
+    /** Título de la sección teaser del catálogo de servicios (informativa, sin precio, en el Home idle). */
+    servicesTitle: 'Nuestros servicios',
     shortcutHome: 'Casa',
     shortcutWork: 'Trabajo',
     shortcutRecent: 'Recientes',
+    /** Título de la sección "Tus últimos viajes" del Home idle (últimos 3 viajes reales). */
+    recentTripsTitle: 'Tus últimos viajes',
+    /** Etiqueta accesible de una fila de últimos viajes: destino + metadatos (día · distancia · duración). */
+    recentTripRowLabel: 'Pedir de nuevo a {{destination}}. {{meta}}',
     /** Título de la sección de favoritos guardados en el cuerpo del sheet. */
     savedTitle: 'Guardados',
     /** Enlace "ver todas" → pantallas de gestión (lugares guardados / historial). */
@@ -433,6 +449,8 @@ export const common = {
     selectOption: 'Selecciona una categoría para continuar.',
     /** Gate de seguridad: el pasajero debe verificar su identidad antes del primer viaje. */
     kycRequired: 'Verifica tu identidad para pedir tu primer viaje.',
+    /** ADR 013 · Fase B: la oferta elegida se deshabilitó entre el quote y el create (carrera). */
+    offeringUnavailable: 'Esta oferta ya no está disponible. Actualizamos las opciones.',
     eta: 'ETA {{minutes}} min',
     /** Tipos de vehículo en las opciones de tarifa (Ola 2B · tier moto-taxi). */
     vehicle: {
@@ -457,6 +475,13 @@ export const common = {
     veo_economico: { name: 'VEO Económico' },
     veo_confort: { name: 'VEO Confort' },
     veo_xl: { name: 'VEO XL' },
+    // B5-vert · verticales especiales + EV: codeadas pero OCULTAS (defaultEnabled:false). El i18n nativo
+    // existe para cuando el admin las habilite (la feature pagable); mientras estén ocultas el quote no las
+    // cotiza, así que estas claves no se renderizan. Mismos textos que OFFERING_DISPLAY_NAMES del public-bff.
+    veo_economico_ev: { name: 'VEO Económico Eléctrico' },
+    veo_ambulance: { name: 'VEO Ambulancia' },
+    veo_tow: { name: 'VEO Grúa' },
+    veo_mechanic: { name: 'VEO Mecánico' },
   },
 
   /** PUJA · "proponé tu precio" (ADR 010 · regateo inverso). */
@@ -1415,6 +1440,12 @@ export const common = {
     /** Microcopy fino junto al nombre cuando la identidad está confirmada (no una pill gritona). */
     identityConfirmed: 'Identidad confirmada',
 
+    /** CALIFICACIÓN RECIBIDA · protagonista de la cabecera (estrella + score). Estado vacío HONESTO:
+        sin calificaciones todavía NO se inventa un rating falso ni estrellas en 0. */
+    ratingNone: 'Aún sin calificaciones',
+    ratingCountOne: '1 viaje',
+    ratingCountMany: '{{count}} viajes',
+
     /** VERIFICACIÓN con voz propia · card de invitación (sin verificar). NADA de "Verificar identidad". */
     verifyCardTitle: 'Confirma que eres tú',
     verifyCardBody: 'Un paso rápido que cuida tus viajes y los de tu familia.',
@@ -1479,6 +1510,7 @@ export const common = {
     shareTrip: 'Compartir mi viaje',
     shareTripSub: 'Durante tu viaje puedes compartirlo con tu familia para que te sigan en tiempo real.',
     // Preferencias
+    tripHistory: 'Mis viajes',
     paymentMethods: 'Métodos de pago',
     savedPlaces: 'Lugares guardados',
     referrals: 'Invita y gana',

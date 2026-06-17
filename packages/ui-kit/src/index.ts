@@ -9,6 +9,9 @@
 // Tokens y temas
 export * from './tokens';
 
+// Utilidad de color de tokens: aplica alpha a un hex (#RRGGBB -> #RRGGBBAA)
+export { hexAlpha } from './components/internal/color';
+
 // Tema en runtime: provider, hook y utilidades de a11y/estilos
 export * from './theme';
 

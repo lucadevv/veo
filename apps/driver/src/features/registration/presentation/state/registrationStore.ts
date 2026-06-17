@@ -34,7 +34,7 @@ interface PersistedRegistration {
 }
 
 const emptyPersonal: PersonalData = {fullName: '', dni: '', birthdate: ''};
-const emptyVehicle: VehicleData = {type: VehicleType.MOTO, plate: '', brand: '', year: '', model: ''};
+const emptyVehicle: VehicleData = {type: VehicleType.MOTO, plate: '', year: '', modelSpecId: '', brand: '', model: ''};
 const initialDocuments: RegistrationDocument[] = [
   {type: 'LICENSE', status: 'pending'},
   {type: 'SOAT', status: 'pending'},

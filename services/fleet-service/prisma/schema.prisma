@@ -23,6 +23,13 @@ enum FleetDocumentType {
   BACKGROUND_CHECK
   ITV
 
+  // B5-3.2 · certificaciones de operador de las verticales especiales (conductor). Misma maquinaria
+  // FleetDocument (vencimiento + review). NO críticas: su vencimiento NO suspende, solo deshabilita la
+  // vertical (que además está oculta). Espejo del FleetDocumentType de @veo/shared-types.
+  AMBULANCE_OPERATOR
+  TOW_OPERATOR
+  MECHANIC_CERT
+
   @@schema("fleet")
 }
 
@@ -65,6 +72,17 @@ enum VehicleType {
   @@schema("fleet")
 }
 
+/// B5-2 · estado del modelo en el catálogo curado. APPROVED = curado por el operador (usable en el
+/// onboarding); PENDING_REVIEW = solicitado por un conductor cuyo modelo no estaba (espera ficha del
+/// operador); REJECTED = rechazado. Espeja el lifecycle de FleetDocumentStatus (manual: PENDING→APPROVED/REJECTED).
+enum VehicleModelStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+
+  @@schema("fleet")
+}
+
 /// Vehículo de la flota (BR-D04: año >= 2017; SOAT e ITV vigentes; inspección trimestral).
 model Vehicle {
   id                 String           @id @db.Uuid
@@ -83,6 +101,11 @@ model Vehicle {
   /// Null para la flota cargada por el operador. Sin FK cross-schema (la identidad vive en identity).
   driverId           String?          @map("driver_id") @db.Uuid
   docStatus          VehicleDocStatus @default(VALID) @map("doc_status")
+  /// B5-2 · modelo del catálogo curado (VehicleModelSpec) que el conductor ELIGIÓ en el onboarding.
+  /// Referencia BLANDA al catálogo (mismo schema, sin FK dura — espeja el estilo de driverId/fleetId):
+  /// el catálogo puede evolucionar sin bloquear el vehículo. make/model se snapshotean en el alta desde
+  /// el spec (histórico estable). Null = vehículo legacy/operador cargado a texto libre (pre-catálogo).
+  modelSpecId        String?          @map("model_spec_id") @db.Uuid
   insuranceExpiresAt DateTime?        @map("insurance_expires_at") @db.Timestamptz
   active             Boolean          @default(true)
   /// Cuándo el conductor SELECCIONÓ este vehículo como su activo (el que opera). El vehículo activo
@@ -98,7 +121,44 @@ model Vehicle {
   @@index([fleetId])
   @@index([driverId])
   @@index([docStatus])
+  @@index([modelSpecId])
   @@map("vehicles")
+  @@schema("fleet")
+}
+
+/// B5-2 · CATÁLOGO CURADO de modelos de vehículo: la fuente de seats/segment/combustible/eficiencia por
+/// make+model+rango de años. El conductor ELIGE de acá en el onboarding (no tipea make/model libre);
+/// modelos nuevos entran PENDING_REVIEW y el operador los aprueba con la ficha de fábrica. La eficiencia
+/// per-modelo es para la ECONOMÍA DEL CONDUCTOR (cuánto gasta); la tarifa del pasajero usa la referencia
+/// POR CLASE de la oferta (el quote no conoce el vehículo). `segment`/`energySource` se persisten como
+/// String (validados en el borde contra los enums de @veo/shared-types VehicleSegment/EnergySource).
+model VehicleModelSpec {
+  id           String             @id @db.Uuid
+  make         String
+  model        String
+  yearFrom     Int                @map("year_from")
+  yearTo       Int                @map("year_to")
+  /// Tipo/forma del vehículo (CAR|MOTO hoy; VAN/TRUCK llegan con las verticales especiales, B5-4).
+  vehicleType  VehicleType        @default(CAR) @map("vehicle_type")
+  seats        Int
+  /// VehicleSegment (@veo/shared-types): ECONOMY|MID|PREMIUM. NULL en una solicitud PENDING (el operador
+  /// lo completa al aprobar). Invariante (B5-2.c): status=APPROVED ⇒ no-null (forzado en la transición).
+  segment      String?
+  /// EnergySource (@veo/shared-types): GASOLINE_95|DIESEL|ELECTRIC|GNV|GASOLINE_84. NULL en PENDING.
+  energySource String?            @map("energy_source")
+  /// Rendimiento en km por unidad de energía (km/L o km/kWh). Lo pone el operador al aprobar. NULL en PENDING.
+  efficiency   Int?
+  status       VehicleModelStatus @default(PENDING_REVIEW)
+  /// User.id (identity) del conductor que solicitó el alta (null para los seedeados/curados por operador).
+  requestedBy  String?            @map("requested_by") @db.Uuid
+  verifiedBy   String?            @map("verified_by") @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// Un modelo es único por make+model+añoDesde (evita duplicados al curar/solicitar).
+  @@unique([make, model, yearFrom])
+  @@index([status])
+  @@map("vehicle_model_specs")
   @@schema("fleet")
 }
 

@@ -1,11 +1,10 @@
 import type { GeoPoint, MapPoint, OfferView, TripResource } from '@veo/api-client';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RoutePin, useTheme } from '@veo/ui-kit';
+import { RoutePin, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
@@ -32,8 +31,7 @@ import { useWaypointProposal } from '../hooks/useWaypointProposal';
 import { useOfferBoard } from '../hooks/useOfferBoard';
 import { useHydrateActiveTrip } from '../hooks/useHydrateActiveTrip';
 import { useDebtGate } from '../hooks/useDebtGate';
-import { usePickupPin } from '../hooks/usePickupPin';
-import { useRecentDestinations } from '../hooks/useRecentDestinations';
+import { useLastDriver } from '../hooks/useLastDriver';
 import { resolveTripPhase, mapModeForPhase, isLiveSocketPhase } from '../hooks/tripFlowPhase';
 import {
   resolvePickupMode,
@@ -80,8 +78,18 @@ export function RequestFlowScreen(): React.JSX.Element {
   const theme = useTheme();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  // Alto del tab bar: el sheet ancla por encima de él (no queda tapado el fondo del contenido).
-  const tabBarHeight = useBottomTabBarHeight();
+  // TEARDOWN del contexto GL del mapa (CRÍTICO, sin tabs): el Home es la pantalla RAÍZ del stack y al
+  // pushear otra encima (Profile/Search/Notifications/Chat/...) NO se desmonta — quedaría montado con su
+  // `MapView` (@rnmapbox/maps) reteniendo el contexto GL/Metal nativo, que solo se libera en el `deinit`
+  // de la vista al DESMONTARSE. Antes, el tab navigator con `detachInactiveScreens` desmontaba el Home al
+  // cambiar de tab y cortaba el leak; al quitar los tabs hay que replicar ESE desmontaje. `useIsFocused`
+  // es false cuando el Home pierde foco (otra pantalla arriba) → abajo renderizamos el `AppMap` SOLO si
+  // `isFocused`, de modo que al perder foco el mapa se desmonta (libera el contexto) y al volver remonta.
+  // Sin esto: tras N navegaciones/reloads se acumulan contextos GL huérfanos → mapa negro.
+  const isFocused = useIsFocused();
+  // Sin tab bar, el sheet ancla contra el inset inferior del safe-area (home indicator), no contra el
+  // alto del tab bar (que ya no existe). Mantiene la matemática de fracciones del sheet correcta.
+  const bottomInset = insets.bottom;
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
   const getProfile = useDependency(TOKENS.getProfileUseCase);
@@ -95,6 +103,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   const setOrigin = useRideDraftStore((s) => s.setOrigin);
   const setDestination = useRideDraftStore((s) => s.setDestination);
   const setEditing = useRideDraftStore((s) => s.setEditing);
+  const swapRoute = useRideDraftStore((s) => s.swap);
   const resetDraft = useRideDraftStore((s) => s.reset);
   const savedPlaces = useSavedPlacesStore((s) => s.places);
 
@@ -293,13 +302,21 @@ export function RequestFlowScreen(): React.JSX.Element {
     }
   }, [origin, reverseQuery.data, setOrigin]);
 
-  // MODELO CABIFY · recojo con PIN en el Home: las DOS máquinas (fase × flow del sheet) se componen en el
-  // descriptor (`resolvePickupMode`); el hook posee el seguimiento centro→reverse-geocode→origen.
-  const pickupMode = resolvePickupMode(phase, flow);
-  const pickup = usePickupPin(pickupMode, myLocation);
+  // Modo del mapa por fase (única evaluación): idle → SIN mapa (content-first, fondo sólido);
+  // route/trip → mapa persistente de fondo. Se computa una vez y gobierna tanto el render del mapa como
+  // el del contenido idle full-screen vs el bottom-sheet.
+  const mapMode = mapModeForPhase(phase);
 
-  // RECIENTES desde el BACKEND REAL con fallback al snapshot local (degradación honesta).
-  const recents = useRecentDestinations();
+  // MODELO CABIFY · recojo con PIN: el descriptor declara la elegibilidad por fase+flow (`resolvePickupMode`),
+  // PERO el pin solo tiene sentido CON un mapa interactivo de fondo (arrastrás el mapa y el origen sigue al
+  // centro). En el home CONTENT-FIRST ya NO hay mapa idle (única fase elegible), así que el pin nunca aplica:
+  // el origen se siembra con la ubicación etiquetada (reverseQuery), sin pin que arrastrar. Si en el futuro
+  // alguna fase con mapa habilita el pickup, gatearlo acá con `mapMode !== 'idle'`.
+  const pickupMode = resolvePickupMode(phase, flow) && mapMode !== 'idle';
+
+  // ÚLTIMO conductor para la tarjeta de confianza del Home idle. `null` si no hay viaje con conductor
+  // (degradación honesta: la tarjeta no se renderiza, no se inventa un conductor).
+  const { driver: lastDriver } = useLastDriver();
 
   // Autocompletado real (debounce + sesgo por ubicación), activo solo cuando hay texto.
   const { suggestions, loading: searchLoading, error: searchError, active } = useAutocomplete(query, myPoint);
@@ -311,6 +328,14 @@ export function RequestFlowScreen(): React.JSX.Element {
     setFlow('searching');
     sheetRef.current?.snapToIndex(FULL_INDEX);
   }, [setEditing]);
+
+  // Editar el ORIGEN desde el Home idle: marca el origen en edición y abre la búsqueda DEDICADA
+  // (`Search`, flow 'sheet' → al fijar vuelve acá con el borrador actualizado). Es el MISMO gesto que
+  // usa la cotización (`QuotingBody.editOrigin`): el origen deja de ser un display de solo lectura.
+  const editOrigin = useCallback(() => {
+    setEditing({ kind: 'origin' });
+    navigation.navigate('Search', { flow: 'sheet' });
+  }, [setEditing, navigation]);
 
   // Sale de búsqueda y vuelve al peek (X o arrastrar hasta abajo).
   const exitSearch = useCallback(() => {
@@ -426,10 +451,7 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   // "Ver todas" → pantallas de gestión existentes (lugares guardados / historial de viajes).
   const goSavedPlaces = useCallback(() => navigation.navigate('SavedPlaces'), [navigation]);
-  const goTripHistory = useCallback(
-    () => navigation.navigate('Main', { screen: 'TripHistory' }),
-    [navigation],
-  );
+  const goTripHistory = useCallback(() => navigation.navigate('TripHistory'), [navigation]);
 
   // Encuadre del mapa memoizado (mismo objeto para route y trip mode): un literal inline se recreaba en
   // cada render y rompía el React.memo del AppMap. Solo cambia con el safe-area top o el alto del peek.
@@ -466,11 +488,15 @@ export function RequestFlowScreen(): React.JSX.Element {
     onOpenDebtFromHome: debtGate.openDebtFromHome,
     onOpenPendingFromHome: debtGate.openPendingFromHome,
     savedPlaces,
-    recents,
     onSelectDestination: selectDestination,
     onSeeAllSaved: goSavedPlaces,
     onSeeAllRecents: goTripHistory,
     onEnterSearch: enterSearch,
+    onEditOrigin: editOrigin,
+    onSwapRoute: swapRoute,
+    currentLocationTitle: origin?.title ?? reverseQuery.data?.title,
+    destinationValue: destination?.title ?? undefined,
+    lastDriver,
     query,
     onQueryChange: setQuery,
     onExitSearch: exitSearch,
@@ -488,9 +514,13 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
-      {/* MAPA PERSISTENTE ÚNICO: nunca se desmonta; reacciona a la fase (idle=pin / route=ruta / trip=auto). */}
+      {/* MAPA: persistente MIENTRAS el Home está enfocado, SOLO en las fases de pedido/viaje (route=ruta /
+          trip=auto). En `idle` NO se renderiza mapa: el home es CONTENT-FIRST (fondo sólido `theme.colors.bg`
+          del root + contenido full-screen). El guard `isFocused` lo DESMONTA al pushear otra pantalla encima
+          (ver arriba el teardown del contexto GL): al volver, remonta. El borrador del viaje vive en Zustand
+          y sobrevive al desmonte, así que no se pierde nada del flujo. */}
       <View style={StyleSheet.absoluteFill}>
-        {mapModeForPhase(phase) === 'route' ? (
+        {!isFocused ? null : mapMode === 'route' ? (
           <AppMap
             origin={originGeo}
             destination={destinationGeo}
@@ -506,7 +536,7 @@ export function RequestFlowScreen(): React.JSX.Element {
             fitEdgePadding={fitEdgePadding}
             interactive={false}
           />
-        ) : mapModeForPhase(phase) === 'trip' ? (
+        ) : mapMode === 'trip' ? (
           <AppMap
             // En viaje en curso el marker de origen es ruido (ya pasamos por la recogida); en pre-pickup
             // SÍ ayuda (lo declara el descriptor). El director decide el encuadre; los markers de
@@ -545,16 +575,51 @@ export function RequestFlowScreen(): React.JSX.Element {
             interactive
           />
         ) : (
-          <AppMap
-            center={pickup.initialCenter ?? myLocation}
-            onCenterChange={pickupMode ? pickup.onCenterChange : undefined}
-            userPoint={myLocation}
-            nearbyVehicles={nearbyVehicles}
-            interactive
-            bottomInset={peekHeight}
-          />
+          // `idle`: SIN mapa. El home es content-first (fondo sólido del root); el mapa aparece recién al
+          // elegir destino → quoting (modo `route`). El contenido idle se renderiza full-screen más abajo.
+          null
         )}
       </View>
+
+      {/* CONTENIDO IDLE · CONTENT-FIRST (sin mapa): ocupa la PANTALLA COMPLETA bajo el HomeTopBar, NO un
+          bottom-sheet peek (que flotaría sobre el fondo sólido). Header FIJO (buscador "¿A dónde vamos?" +
+          chips) + Body scrollable (favoritos/recientes) — los MISMOS slots del descriptor que usa el sheet en
+          route/trip; solo cambia el CONTENEDOR. Va ANTES del HomeTopBar para que ese overlay absoluto quede
+          ENCIMA y siga siendo tappable (campana/avatar/pill); el contenido arranca debajo vía paddingTop. */}
+      {mapMode === 'idle' ? (
+        <View
+          style={[
+            styles.idleScreen,
+            {
+              // El HomeTopBar es un overlay absoluto anclado en `insets.top + spacing.sm`, alto ≈ TOUCH_TARGET
+              // (pill/avatar). El contenido idle arranca debajo de él, con un respiro (spacing.md), y deja el
+              // home indicator abajo (bottomInset).
+              paddingTop: insets.top + theme.spacing.sm + TOUCH_TARGET + theme.spacing.md,
+              paddingBottom: bottomInset,
+            },
+          ]}
+        >
+          {SheetHeader ? (
+            <View style={{ paddingHorizontal: theme.spacing.xl }}>
+              <SheetHeader ctx={ctx} />
+            </View>
+          ) : null}
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={[
+              styles.sheetContent,
+              {
+                paddingHorizontal: theme.spacing.xl,
+                paddingBottom: theme.spacing.xl,
+                gap: theme.spacing.md,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            <SheetBody ctx={ctx} />
+          </ScrollView>
+        </View>
+      ) : null}
 
       {/* MODELO CABIFY · pin FIJO al centro = punto de RECOJO (solo Home idle). No intercepta gestos
           (pointerEvents none) → el mapa se arrastra DEBAJO; el origen sigue al centro vía onCenterChange. */}
@@ -575,7 +640,7 @@ export function RequestFlowScreen(): React.JSX.Element {
           profileName={profileQuery.data?.name ?? null}
           profilePhotoUrl={profileQuery.data?.photoUrl ?? null}
           onOpenNotifications={() => navigation.navigate('Notifications')}
-          onOpenProfile={() => navigation.navigate('Main', { screen: 'Profile' })}
+          onOpenProfile={() => navigation.navigate('Profile')}
         />
       ) : (
         <TripTopBar
@@ -585,35 +650,38 @@ export function RequestFlowScreen(): React.JSX.Element {
         />
       )}
 
-      {/* BOTTOMSHEET ARRASTRABLE anclado abajo. HEADER FIJO y BODY SCROLLABLE: ambos los declara el
-          descriptor de la fase (Header null = la fase trae su cuerpo autocontenido, sin chrome del home). */}
-      <DraggableSheet
-        ref={sheetRef}
-        snapPoints={SNAP_POINTS}
-        maxContentFraction={PEEK_MAX_FRACTION}
-        onSnap={handleSnap}
-        onPeekHeightChange={setPeekHeight}
-        bottomOffset={tabBarHeight}
-        renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
-        renderScroll={(ScrollComponent) => (
-          <ScrollComponent
-            style={styles.sheetScroll}
-            contentContainerStyle={[
-              styles.sheetContent,
-              {
-                paddingHorizontal: theme.spacing.xl,
-                // Respiro al final del scroll (el sheet ancla en bottom:0 y el área útil ya descuenta el
-                // tab bar vía bottomOffset, así que no hace falta sumar su alto acá).
-                paddingBottom: theme.spacing.xl,
-                gap: theme.spacing.md,
-              },
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
-            <SheetBody ctx={ctx} />
-          </ScrollComponent>
-        )}
-      />
+      {/* CONTENIDO route/trip: BOTTOMSHEET ARRASTRABLE anclado abajo (sobre el mapa). El contenido idle NO
+          vive acá (es content-first full-screen, se renderiza ANTES del HomeTopBar; ver arriba). HEADER FIJO
+          y BODY SCROLLABLE: ambos los declara el descriptor (Header null = cuerpo autocontenido). */}
+      {mapMode !== 'idle' ? (
+        <DraggableSheet
+          ref={sheetRef}
+          snapPoints={SNAP_POINTS}
+          maxContentFraction={PEEK_MAX_FRACTION}
+          onSnap={handleSnap}
+          onPeekHeightChange={setPeekHeight}
+          bottomOffset={bottomInset}
+          renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
+          renderScroll={(ScrollComponent) => (
+            <ScrollComponent
+              style={styles.sheetScroll}
+              contentContainerStyle={[
+                styles.sheetContent,
+                {
+                  paddingHorizontal: theme.spacing.xl,
+                  // Respiro al final del scroll (el sheet ancla en bottom:0 y el área útil ya descuenta el
+                  // tab bar vía bottomOffset, así que no hace falta sumar su alto acá).
+                  paddingBottom: theme.spacing.xl,
+                  gap: theme.spacing.md,
+                },
+              ]}
+              showsVerticalScrollIndicator={false}
+            >
+              <SheetBody ctx={ctx} />
+            </ScrollComponent>
+          )}
+        />
+      ) : null}
 
       {/* DEUDA (BR-P02): un único sheet para los dos orígenes (pedido bloqueado 403 / franja del home).
           Saldar → CAPTURED reabre el camino: si vino de un pedido, re-intentamos solo (requestAgainToken). */}
@@ -644,6 +712,11 @@ const styles = StyleSheet.create({
   // Capa del pin de recojo (modelo Cabify): centra el pin en el centro GEOMÉTRICO del mapa — que es lo que
   // reporta onCenterChange — sobre el mapa y bajo el chrome. No intercepta gestos (pointerEvents none).
   pickupPinLayer: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  // Layout CONTENT-FIRST de la fase idle: ocupa toda la pantalla (flex:1 dentro del root) bajo el HomeTopBar
+  // (sin mapa de fondo). El header (buscador "¿A dónde vamos?" + chips) queda fijo arriba y la lista
+  // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
+  // HomeTopBar absoluto que flota encima.
+  idleScreen: { flex: 1 },
   sheetScroll: { flex: 1 },
   sheetContent: { paddingTop: 4 },
 });

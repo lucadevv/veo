@@ -2,6 +2,11 @@
  * ClickHouseService — cliente mínimo a la interfaz HTTP de ClickHouse (sin dependencias nuevas).
  * Ejecuta SQL y devuelve filas JSON. Si la consulta falla (p.ej. tabla inexistente), lanza para que
  * el llamador degrade la métrica a 0/empty con un flag (no inventar datos).
+ *
+ * DEUDA: sin uso hoy — el overview migró a agregación OLTP (trip/dispatch/panic/payment). Se retiene para
+ * analytics GPS/OLAP (activeDrivers/pings + serie histórica por hora desde gps_pings). · techo: no está
+ * wired a ningún controller · gatillo: cuando tracking-service (Go) + ClickHouse estén arriba y se quiera
+ * el panel de GPS histórico → re-wire en un AnalyticsModule (o borrar si se descarta esa capacidad).
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';

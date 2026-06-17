@@ -27,7 +27,9 @@ describe('OFFERING_GLYPHS · registro token→glyph (ADR 013 §1.6)', () => {
   });
 
   it('token DESCONOCIDO (server nuevo + app vieja) cae al fallback EXPLÍCITO de auto', () => {
-    expect(offeringGlyph({ icon: 'ambulance' })).toBe(FALLBACK_OFFERING_GLYPH);
+    // B5-4: 'ambulance' YA es un token conocido (vertical agregada). Usamos uno genuinamente futuro
+    // que esta app aún no tiene en su registro para probar la degradación al fallback.
+    expect(offeringGlyph({ icon: 'helicopter' })).toBe(FALLBACK_OFFERING_GLYPH);
     expect(FALLBACK_OFFERING_GLYPH).toBe(OFFERING_GLYPHS[OfferingIcon.CAR]);
   });
 
@@ -79,8 +81,15 @@ describe('offeringDisplayName · labelKey del quote → i18n de la app (fallback
 
   it('labelKey DESCONOCIDO (oferta más nueva que la app) cae al name resuelto server-side', () => {
     expect(
-      offeringDisplayName({ labelKey: 'offering.veo_ambulancia.name', name: 'VEO Ambulancia' }),
-    ).toBe('VEO Ambulancia');
+      offeringDisplayName({ labelKey: 'offering.veo_futura.name', name: 'VEO Futura' }),
+    ).toBe('VEO Futura');
+  });
+
+  it('B5-vert · las verticales (ocultas) resuelven su nombre NATIVO en el i18n de la app', () => {
+    expect(offeringDisplayName({ labelKey: 'offering.veo_ambulance.name', name: 'x' })).toBe('VEO Ambulancia');
+    expect(offeringDisplayName({ labelKey: 'offering.veo_tow.name', name: 'x' })).toBe('VEO Grúa');
+    expect(offeringDisplayName({ labelKey: 'offering.veo_mechanic.name', name: 'x' })).toBe('VEO Mecánico');
+    expect(offeringDisplayName({ labelKey: 'offering.veo_economico_ev.name', name: 'x' })).toBe('VEO Económico Eléctrico');
   });
 
   it('sin labelKey (server viejo) usa el name del quote — compat intacta', () => {

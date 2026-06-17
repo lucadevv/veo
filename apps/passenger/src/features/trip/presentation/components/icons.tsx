@@ -182,6 +182,24 @@ export function IconRoute({ color, size = 18 }: GlyphProps): React.JSX.Element {
   );
 }
 
+/**
+ * Intercambiar (dos flechas verticales opuestas): permuta ORIGEN ↔ DESTINO. Vive en el botón
+ * circular entre las dos filas de la tarjeta de ruta del Home (mismo gesto que `rideDraftStore.swap`).
+ */
+export function IconSwapVertical({ color, size = 18 }: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 4v15m0 0-3-3m3 3 3-3M17 20V5m0 0-3 3m3-3 3 3"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Compartir (nodos conectados). Espejo de `I.share`. */
 export function IconShare({ color, size = 18 }: GlyphProps): React.JSX.Element {
   return (

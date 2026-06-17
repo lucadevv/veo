@@ -13,6 +13,7 @@ import { CoreModule } from './infra/core.module';
 import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { TripsModule } from './trips/trips.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { TripGrpcController } from './grpc/trip.grpc.controller';
 
 const readinessProvider: Provider = {
@@ -39,6 +40,7 @@ const readinessProvider: Provider = {
     ScheduleModule.forRoot(),
     CoreModule,
     TripsModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController, MetricsController, TripGrpcController],
   providers: [readinessProvider],

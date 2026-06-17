@@ -1,0 +1,277 @@
+'use client';
+
+import { useState } from 'react';
+import { Check, X } from 'lucide-react';
+import { ApiError } from '@veo/api-client';
+import type { CatalogOffering, CatalogOverride, CatalogView, PricingMode } from '@/lib/api/schemas';
+import { offeringLabel, withOverride } from '@/lib/catalog';
+import { dateTime } from '@/lib/formatters';
+import { useReplaceCatalog } from '@/lib/api/queries';
+import { can } from '@/lib/rbac';
+import { useSession } from '@/lib/session-context';
+import { useToast } from '@/components/ui/toast';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Field } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
+
+/** Valor del select "Automático" (sin pin → manda el schedule global). */
+const AUTO = '';
+
+/** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
+const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio fijo' };
+
+/**
+ * Panel del catálogo de ofertas (ADR 013 · Fase B). El admin prende/apaga cada oferta y, por oferta,
+ * pinea el MODO (PUJA/FIXED, restringido a lo que la oferta permite — la UI refleja el invariante) y
+ * ajusta el PRECIO (multiplicador + tarifa mínima; la tarifa sale de la fórmula, esto la escala/pisa).
+ * El pasajero ve/cotiza/crea SOLO con lo configurado (server-driven). Cambios wholesale que PRESERVAN
+ * el resto del overlay; el admin-bff + trip-service re-autorizan y re-validan server-side (la UI no autoriza).
+ */
+export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
+  const user = useSession();
+  const canManage = can(user, 'catalog:manage');
+  const { toast } = useToast();
+  const replace = useReplaceCatalog();
+
+  const overrideOf = (id: string): CatalogOverride | undefined =>
+    catalog.overrides.find((o) => o.id === id);
+
+  async function commit(next: CatalogOverride, msg: string) {
+    try {
+      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409.
+      await replace.mutateAsync({
+        overrides: withOverride(catalog.overrides, next),
+        expectedVersion: catalog.version,
+      });
+      toast({ tone: 'success', title: msg });
+    } catch (err) {
+      // 409 = otro admin cambió el catálogo. El hook re-sincroniza (onSettled) → el panel muestra lo vigente.
+      const conflict = err instanceof ApiError && err.status === 409;
+      toast({
+        tone: conflict ? 'info' : 'danger',
+        title: conflict
+          ? 'El catálogo lo cambió otro admin. Recargamos lo vigente — revisá y reintentá.'
+          : `No se pudo guardar el catálogo${err instanceof Error ? `: ${err.message}` : ''}`,
+      });
+    }
+  }
+
+  async function setEnabled(id: string, enabled: boolean) {
+    const ov = overrideOf(id); // preserva modo/precio al togglear
+    await commit(
+      { id, enabled, mode: ov?.mode, multiplier: ov?.multiplier, minFareCents: ov?.minFareCents },
+      `${offeringLabel(id)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
+    );
+  }
+
+  async function savePricing(next: CatalogOverride) {
+    await commit(next, `${offeringLabel(next.id)}: precio y modo actualizados`);
+  }
+
+  const activeCount = catalog.offerings.filter((o) => o.enabled).length;
+
+  return (
+    <div className="flex flex-col gap-6 pt-4">
+      <section>
+        <h2 className="text-sm font-medium text-ink-muted">Ofertas de servicio</h2>
+        <p className="mt-1 text-sm text-ink-subtle">
+          El pasajero ve, cotiza y pide solo con lo configurado acá. El modo se restringe a lo que cada
+          oferta permite; el precio sale de la fórmula (distancia/tiempo) y estos valores lo escalan. El
+          cambio es global y queda auditado.
+        </p>
+
+        {activeCount === 0 ? (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+            Ninguna oferta habilitada: los pasajeros no podrán pedir un viaje hasta que actives al menos una.
+          </p>
+        ) : null}
+
+        <ul className="mt-4 divide-y divide-border rounded-lg border border-border">
+          {catalog.offerings.map((o) => (
+            <OfferingRow
+              key={o.id}
+              offering={o}
+              override={overrideOf(o.id)}
+              canManage={canManage}
+              pending={replace.isPending}
+              onSetEnabled={setEnabled}
+              onSavePricing={savePricing}
+            />
+          ))}
+        </ul>
+
+        {!canManage ? (
+          <p className="mt-3 text-xs text-ink-subtle">
+            Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el catálogo.
+          </p>
+        ) : null}
+      </section>
+
+      <p className="text-xs text-ink-subtle">
+        Versión {catalog.version}
+        {catalog.updatedAt ? ` · actualizado ${dateTime(catalog.updatedAt)}` : ' · sin cambios aún'}
+      </p>
+    </div>
+  );
+}
+
+/** Una fila del catálogo: estado + (si canManage) editor de modo + precio con draft local y guardado dirty. */
+function OfferingRow({
+  offering,
+  override,
+  canManage,
+  pending,
+  onSetEnabled,
+  onSavePricing,
+}: {
+  offering: CatalogOffering;
+  override: CatalogOverride | undefined;
+  canManage: boolean;
+  pending: boolean;
+  onSetEnabled: (id: string, enabled: boolean) => Promise<void>;
+  onSavePricing: (next: CatalogOverride) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<string>(override?.mode ?? AUTO);
+  const [multiplier, setMultiplier] = useState<string>(override?.multiplier?.toString() ?? '');
+  const [minFareSoles, setMinFareSoles] = useState<string>(
+    override?.minFareCents != null ? (override.minFareCents / 100).toFixed(2) : '',
+  );
+
+  // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
+  const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
+  const minFareCents = minFareSoles.trim() === '' ? undefined : Math.round(Number(minFareSoles) * 100);
+  const multInvalid = multNum !== undefined && (!Number.isFinite(multNum) || multNum <= 0);
+  const minFareInvalid =
+    minFareCents !== undefined && (!Number.isFinite(minFareCents) || minFareCents < 0);
+
+  const dirty =
+    (mode || AUTO) !== (override?.mode ?? AUTO) ||
+    (multNum ?? null) !== (override?.multiplier ?? null) ||
+    (minFareCents ?? null) !== (override?.minFareCents ?? null);
+
+  function save() {
+    void onSavePricing({
+      id: offering.id,
+      enabled: offering.enabled,
+      mode: (mode as PricingMode) || undefined,
+      multiplier: multNum,
+      minFareCents,
+    });
+  }
+
+  return (
+    <li className="flex flex-col gap-3 px-4 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col">
+          <span className="font-medium text-ink">{offeringLabel(offering.id)}</span>
+          <span className="text-xs text-ink-subtle">
+            {offering.vehicleClass} · efectivo ×{offering.pricing.multiplier} · mín S/
+            {(offering.pricing.minFareCents / 100).toFixed(2)}
+            {offering.modePin ? ` · modo ${MODE_LABEL[offering.modePin]}` : ' · modo automático'}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {offering.enabled ? (
+            <Badge tone="success" className="gap-1">
+              <Check className="size-3.5" aria-hidden /> Habilitada
+            </Badge>
+          ) : (
+            <Badge tone="neutral" className="gap-1">
+              <X className="size-3.5" aria-hidden /> Deshabilitada
+            </Badge>
+          )}
+
+          {canManage ? (
+            pending ? (
+              <Button variant={offering.enabled ? 'ghost' : 'primary'} size="sm" disabled>
+                {offering.enabled ? 'Deshabilitar' : 'Habilitar'}
+              </Button>
+            ) : (
+              <StepUpDialog
+                trigger={
+                  <Button variant={offering.enabled ? 'ghost' : 'primary'} size="sm">
+                    {offering.enabled ? 'Deshabilitar' : 'Habilitar'}
+                  </Button>
+                }
+                title={`${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`}
+                description={
+                  offering.enabled
+                    ? `Los pasajeros dejarán de ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
+                    : `Los pasajeros volverán a ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
+                }
+                onVerified={() => onSetEnabled(offering.id, !offering.enabled)}
+              />
+            )
+          ) : null}
+        </div>
+      </div>
+
+      {canManage ? (
+        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+          <Field label="Modo" hint="Restringido a lo que la oferta permite">
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink hover:border-border-strong focus-visible:outline-none">
+              <option value={AUTO}>Automático (según horario)</option>
+              {offering.allowedModes.map((m) => (
+                <option key={m} value={m}>
+                  {MODE_LABEL[m]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Multiplicador" hint="Vacío = valor de código" error={multInvalid ? 'Debe ser > 0' : undefined}>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.05"
+              min="0"
+              placeholder={offering.pricing.multiplier.toString()}
+              value={multiplier}
+              onChange={(e) => setMultiplier(e.target.value)}
+            />
+          </Field>
+
+          <Field
+            label="Tarifa mínima (S/)"
+            hint="Vacío = valor de código"
+            error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.50"
+              min="0"
+              placeholder={(offering.pricing.minFareCents / 100).toFixed(2)}
+              value={minFareSoles}
+              onChange={(e) => setMinFareSoles(e.target.value)}
+            />
+          </Field>
+
+          {!dirty || multInvalid || minFareInvalid || pending ? (
+            <Button variant="primary" size="sm" disabled>
+              Guardar
+            </Button>
+          ) : (
+            <StepUpDialog
+              title={`Guardar precio de ${offeringLabel(offering.id)}`}
+              description="Esta acción cambia el catálogo global y queda auditada."
+              trigger={
+                <Button variant="primary" size="sm">
+                  Guardar
+                </Button>
+              }
+              onVerified={save}
+            />
+          )}
+        </div>
+      ) : null}
+    </li>
+  );
+}

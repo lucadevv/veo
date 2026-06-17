@@ -10,13 +10,15 @@
 import type Redis from 'ioredis';
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
 import { VehicleClass } from '@veo/shared-types';
-import type { DriverLocation, HotIndex } from './hot-index.port';
+import type { DriverLocation, DriverVehicleAttrs, HotIndex } from './hot-index.port';
 
 const LOC_PREFIX = 'driver:loc:';
 const BUSY_PREFIX = 'driver:busy:';
 const AVAIL_PREFIX = 'h3:available:';
 /// Margen amplio para el flag de ocupado; se limpia explícitamente al completar/cancelar el viaje.
 const BUSY_TTL_SECONDS = 7_200;
+/// Tamaño de página del SCAN para contar locs vivas: lotes grandes ⇒ menos round-trips, sin bloquear Redis.
+const ONLINE_SCAN_COUNT = 1_000;
 
 /**
  * KEYS[1]=set celda vieja, KEYS[2]=set celda nueva, KEYS[3]=loc, KEYS[4]=busy
@@ -57,6 +59,7 @@ export class RedisHotIndex implements HotIndex {
     driverId: string,
     point: LatLon,
     vehicleType: VehicleClass,
+    attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
     const prev = await this.getLocation(driverId);
@@ -67,6 +70,12 @@ export class RedisHotIndex implements HotIndex {
       lon: point.lon,
       h3,
       vehicleType,
+      // B5-3 · attrs de eligibilidad (opcionales): solo se incluyen las claves presentes (un ping sin
+      // ellos no escribe undefined que ensucie el JSON). Si faltan, el pool degrada a "elegible".
+      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
+      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
+      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
       updatedAt: Date.now(),
     };
     await this.redis.eval(
@@ -159,6 +168,27 @@ export class RedisHotIndex implements HotIndex {
       out.push(RedisHotIndex.parseLocation(raw));
     }
     return out;
+  }
+
+  async countOnline(): Promise<number> {
+    // Conteo por SCAN (cursor, NO `KEYS`/`DBSIZE`): KEYS bloquea el hilo único de Redis en O(N) sobre
+    // TODO el keyspace; SCAN itera en lotes de `ONLINE_SCAN_COUNT` sin bloquear. Contamos las claves
+    // `driver:loc:*` —presencia = "en línea"— en vez de unir los N SETs por celda (esos son solo los
+    // disponibles y dejarían fuera a los ocupados, que siguen online). Un solo barrido, sin N+1.
+    let cursor = '0';
+    let count = 0;
+    do {
+      const [next, keys] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        `${LOC_PREFIX}*`,
+        'COUNT',
+        ONLINE_SCAN_COUNT,
+      );
+      cursor = next;
+      count += keys.length;
+    } while (cursor !== '0');
+    return count;
   }
 
   /**

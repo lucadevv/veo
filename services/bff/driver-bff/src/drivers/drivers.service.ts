@@ -5,6 +5,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '@veo/utils';
+import { createLogger, type Logger } from '@veo/observability';
 import type { AuthenticatedUser } from '@veo/auth';
 import type {
   DriverBiometricChallenge,
@@ -28,26 +29,43 @@ import type {
 import {
   buildDriverDocument,
   buildDriverDocuments,
+  buildDriverModelRequest,
   buildDriverProfile,
   buildDriverVehicleFromRest,
+  buildDriverVehicleModels,
   buildDriverVehicles,
   type FleetDriverVehicleReply,
+  type FleetVehicleModelPageReply,
+  type FleetVehicleModelRequestReply,
 } from './drivers.mapper';
 import type {
   DriverDocumentDetail,
+  DriverModelRequestView,
   DriverPersonalData,
   DriverProfileView,
+  DriverVehicleModelView,
   DriverVehicleView,
   EnrollFaceDto,
+  ListVehicleModelsQuery,
   OnboardDto,
   RegisterVehicleDto,
+  RequestVehicleModelDto,
   StartShiftDto,
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
 } from './dto/drivers.dto';
 
+/**
+ * Página amplia del catálogo: hoy es chico (decenas de modelos) y entra en una tirada; la app no pagina.
+ * Si alguna vez supera este tope para un filtro, la lista se TRUNCA — `listVehicleModels` lo loguea
+ * (no silencioso) y el conductor puede acotar con `q`. Si se vuelve recurrente, paginar en la UI.
+ */
+const VEHICLE_MODELS_PAGE_LIMIT = 100;
+
 @Injectable()
 export class DriversService {
+  private readonly logger: Logger = createLogger('driver-bff:drivers');
+
   constructor(
     private readonly grpc: GrpcGateway,
     private readonly rest: RestGateway,
@@ -96,6 +114,44 @@ export class DriversService {
       .client('fleet')
       .post<FleetDriverVehicleReply>('/drivers/vehicles', { identity, body: dto });
     return buildDriverVehicleFromRest(created);
+  }
+
+  /**
+   * Catálogo curado de modelos APROBADOS para el selector del onboarding (B5-2) → fleet por REST interno.
+   * El conductor elige de acá en vez de tipear marca/modelo libre. Filtros opcionales: vehicleType, q.
+   */
+  async listVehicleModels(
+    identity: AuthenticatedUser,
+    query: ListVehicleModelsQuery,
+  ): Promise<DriverVehicleModelView[]> {
+    const page = await this.rest.client('fleet').get<FleetVehicleModelPageReply>('/vehicle-models', {
+      identity,
+      query: { vehicleType: query.vehicleType, q: query.q, limit: VEHICLE_MODELS_PAGE_LIMIT },
+    });
+    // Truncación NO silenciosa: si fleet devuelve nextCursor, hay más modelos que el tope de una página.
+    // Hoy el catálogo es chico y no debería pasar; si pasa, es señal de que la app necesita paginar/buscar.
+    if (page.nextCursor) {
+      this.logger.warn(
+        { vehicleType: query.vehicleType, q: query.q, limit: VEHICLE_MODELS_PAGE_LIMIT },
+        'catálogo de modelos truncado: hay más de una página; el selector solo verá los primeros (usar q o paginar)',
+      );
+    }
+    return buildDriverVehicleModels(page);
+  }
+
+  /**
+   * El conductor SOLICITA un modelo que no está en el catálogo (B5-2.c) → fleet POST /vehicle-models.
+   * fleet resuelve el requestedBy desde la identidad propagada; queda PENDING_REVIEW hasta que el operador
+   * lo apruebe completando la ficha técnica. El conductor solo recibe la confirmación.
+   */
+  async requestVehicleModel(
+    identity: AuthenticatedUser,
+    dto: RequestVehicleModelDto,
+  ): Promise<DriverModelRequestView> {
+    const created = await this.rest
+      .client('fleet')
+      .post<FleetVehicleModelRequestReply>('/vehicle-models', { identity, body: dto });
+    return buildDriverModelRequest(created);
   }
 
   /**

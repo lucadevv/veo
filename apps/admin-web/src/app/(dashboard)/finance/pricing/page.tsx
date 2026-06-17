@@ -1,13 +1,16 @@
 'use client';
 
 import { Lock } from 'lucide-react';
-import { useModeSchedule } from '@/lib/api/queries';
+import { useModeSchedule, useFuelSurcharge, useEnergyCatalog, useBidFloor } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
+import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
+import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
+import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
 /**
  * Modo de pricing global (PUJA↔FIJO · ADR 011). Vive bajo Finanzas: es decisión comercial/financiera.
@@ -16,6 +19,9 @@ import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 export default function PricingPage() {
   const user = useSession();
   const query = useModeSchedule();
+  const fuelQuery = useFuelSurcharge();
+  const energyQuery = useEnergyCatalog();
+  const bidFloorQuery = useBidFloor();
 
   if (!can(user, 'pricing:view')) {
     return (
@@ -48,6 +54,33 @@ export default function PricingPage() {
           </div>
         ) : (
           <ModeSchedulePanel schedule={query.data} />
+        )}
+
+        {/* B3 · recargo de combustible (mismo gate pricing:view; carga independiente del schedule). */}
+        {fuelQuery.isError ? (
+          <ErrorState onRetry={() => void fuelQuery.refetch()} />
+        ) : fuelQuery.isLoading || !fuelQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <FuelSurchargePanel config={fuelQuery.data} />
+        )}
+
+        {/* B5 · precios de energía multi-fuente (mismo gate pricing:view; carga independiente). */}
+        {energyQuery.isError ? (
+          <ErrorState onRetry={() => void energyQuery.refetch()} />
+        ) : energyQuery.isLoading || !energyQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <EnergyCatalogPanel config={energyQuery.data} />
+        )}
+
+        {/* ADR 010 §9.3 · piso de la PUJA per-oferta (mismo gate pricing:view; carga independiente). */}
+        {bidFloorQuery.isError ? (
+          <ErrorState onRetry={() => void bidFloorQuery.refetch()} />
+        ) : bidFloorQuery.isLoading || !bidFloorQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <BidFloorPanel config={bidFloorQuery.data} />
         )}
       </div>
     </div>

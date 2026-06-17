@@ -35,7 +35,7 @@ export function KpiGrid({ data }: { data: AnalyticsOverview }) {
     { label: 'Completados hoy', value: number(data.completedToday), icon: CheckCircle2 },
     { label: 'Cancelados hoy', value: number(data.cancelledToday), icon: Ban },
     { label: 'Recaudación hoy', value: money(data.revenueTodayCents), icon: Wallet },
-    { label: 'ETA promedio', value: duration(data.avgEtaSeconds), icon: Clock },
+    { label: 'Duración promedio', value: duration(data.avgDurationSeconds), icon: Clock },
   ];
 
   return (

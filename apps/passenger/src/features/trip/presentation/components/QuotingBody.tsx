@@ -11,12 +11,13 @@ import {
   isActiveTripExistsError,
   isDebtPendingError,
   isKycRequiredError,
+  isOfferingUnavailableError,
 } from '@veo/api-client';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Banner, Button, RideOptionRow, Skeleton, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import { CHILD_MODE_FEE_CENTS } from '@veo/shared-types';
+import { CHILD_MODE_FEE_CENTS, isFixedMode, isPujaMode } from '@veo/shared-types';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
@@ -32,6 +33,7 @@ import { ScheduleSheet } from './ScheduleSheet';
 import { initialBidCents, stepBidCents } from '../../../../shared/utils/bid';
 import { uuidv4 } from '../../../../shared/utils/uuid';
 import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
+import { buildCreateTripInput } from '../../domain/buildCreateTripInput';
 import { mapKycStatus } from '../../../kyc/domain/entities';
 import { KycGate } from './KycGate';
 import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
@@ -177,39 +179,56 @@ export function QuotingBody({
     staleTime: 60_000,
   });
 
+  // Selecciona la primera oferta al llegar el quote, Y RE-SELECCIONA si la elegida ya no está en la lista
+  // (re-quote que devuelve menos ofertas, o el admin apagó la elegida → B1c la filtra). Sin esta segunda
+  // rama, `selectedId` quedaría stale (apuntando a una oferta inexistente) → `selectedOption` null →
+  // createTrip mandaría una category apagada → 409 OFFERING_UNAVAILABLE en loop. Acá se auto-corrige.
   useEffect(() => {
-    const first = quoteQuery.data?.options[0];
-    if (first && !selectedId) {
+    const options = quoteQuery.data?.options ?? [];
+    const first = options[0];
+    if (!first) return;
+    const stillValid = selectedId !== null && options.some((o) => o.id === selectedId);
+    if (!stillValid) {
       setSelectedId(first.id);
+      setAppliedPromo(null); // la selección cambió → el cupón previsualizado ya no es fiable
     }
   }, [quoteQuery.data, selectedId]);
 
   const quote = quoteQuery.data;
-  const isPuja = quote?.mode === 'PUJA';
-  const bidFloorCents = quote?.bidFloorCents ?? 0;
-  const suggestedCents = quote?.suggestedCents;
+  // Oferta seleccionada: la UI REACTIVA se proyecta de ELLA, no de un modo global. El selector se muestra
+  // SIEMPRE; el panel de abajo (puja vs precio fijo) y el bid dependen de la oferta elegida (server-driven).
+  const selectedOption = useMemo(
+    () => quote?.options.find((option) => option.id === selectedId) ?? null,
+    [quote, selectedId],
+  );
+  // Modo EFECTIVO de la oferta elegida (ADR 013 §1.3: el modo POR oferta; fallback al top-level del quote
+  // para server viejo). Predicados de DOMINIO — sin string mágico (§4-ter).
+  const selectedIsPuja = isPujaMode(selectedOption?.mode ?? quote?.mode);
+  const selectedIsFixed = isFixedMode(selectedOption?.mode ?? quote?.mode);
+  // Piso + sugerido PER-OFERTA (A2): cada oferta PUJA trae lo suyo; fallback al top-level (server viejo).
+  const selectedBidFloorCents = selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
+  const selectedSuggestedCents = selectedOption?.suggestedCents ?? quote?.suggestedCents;
 
-  // Re-ancla el bid cuando la RUTA cambia (agregar/quitar parada → nueva tarifa sugerida): el precio
-  // OFRECIDO sigue al nuevo estimado, en vez de quedar clavado en el de la ruta anterior. Antes se
-  // seteaba UNA sola vez (`bidCents === null`) → al agregar una parada el bid no se movía ("el precio no
-  // se actualiza"). Se re-ancla SOLO cuando cambia `suggestedCents` (= cambió la ruta/distancia),
-  // preservando los ajustes manuales del usuario MIENTRAS la ruta no cambie.
+  // Re-ancla el bid cuando cambia el sugerido de la oferta ELEGIDA: al cambiar la RUTA (agregar/quitar
+  // parada → nueva tarifa) O al cambiar de oferta (Moto→Económico tienen sugeridos distintos), el precio
+  // OFRECIDO sigue al nuevo sugerido en vez de quedar clavado. Se re-ancla SOLO cuando cambia
+  // `selectedSuggestedCents`, preservando los ajustes manuales mientras la oferta y la ruta no cambien.
   const lastSuggestedRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!isPuja || !quote) return;
-    if (suggestedCents !== lastSuggestedRef.current) {
-      lastSuggestedRef.current = suggestedCents;
-      setBidCents(initialBidCents(suggestedCents, bidFloorCents));
+    if (!selectedIsPuja || !selectedOption) return;
+    if (selectedSuggestedCents !== lastSuggestedRef.current) {
+      lastSuggestedRef.current = selectedSuggestedCents;
+      setBidCents(initialBidCents(selectedSuggestedCents, selectedBidFloorCents));
     }
-  }, [isPuja, quote, suggestedCents, bidFloorCents]);
+  }, [selectedIsPuja, selectedOption, selectedSuggestedCents, selectedBidFloorCents]);
 
   const decrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? bidFloorCents, -1, bidFloorCents)),
-    [bidFloorCents],
+    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents)),
+    [selectedBidFloorCents],
   );
   const incrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? bidFloorCents, 1, bidFloorCents)),
-    [bidFloorCents],
+    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents)),
+    [selectedBidFloorCents],
   );
 
   // Reporta la ruta del quote al mapa persistente (la dibuja el AppMap de la pantalla unificada).
@@ -221,16 +240,8 @@ export function QuotingBody({
     onRouteChange(routeCoordinates);
   }, [routeCoordinates, onRouteChange]);
 
-  const selectedOption = useMemo(
-    () => quoteQuery.data?.options.find((option) => option.id === selectedId) ?? null,
-    [quoteQuery.data, selectedId],
-  );
   const selectedFareCents = selectedOption?.priceCents ?? 0;
-
-  // Modo de pricing EFECTIVO de la opción elegida: el de la opción (ADR 013 §1.3) con fallback al
-  // top-level del quote (server viejo / ancla VEO Económico). El recargo de modo niño aplica SOLO en
-  // FIJO (en PUJA el bid ES el precio): este flag decide si mostramos el desglose del recargo.
-  const selectedIsFixed = (selectedOption?.mode ?? quote?.mode) === 'FIXED';
+  // El recargo de modo niño aplica SOLO en FIJO (en PUJA el bid ES el precio): decide si mostrar el desglose.
   const showChildFee = childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
   const childTotalCents = selectedFareCents + CHILD_MODE_FEE_CENTS;
 
@@ -277,21 +288,20 @@ export function QuotingBody({
   const createMutation = useMutation({
     mutationFn: () =>
       createTrip.execute(
-        {
+        buildCreateTripInput({
           origin: toGeoPoint(origin!.point),
           destination: toGeoPoint(destination!.point),
           paymentMethod: tripPaymentMethod,
-          ...(!isPuja && selectedId ? { category: selectedId } : {}),
-          ...(!isPuja && selectedOption ? { vehicleType: selectedOption.vehicleType } : {}),
-          ...(isPuja && bidCents !== null ? { bidCents } : {}),
-          ...(isPuja && specialRequests.length > 0 ? { specialRequests } : {}),
-          ...(quoteWaypoints.length > 0
-            ? { waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)) }
-            : {}),
-          ...(scheduledAt !== null ? { scheduledFor: new Date(scheduledAt).toISOString() } : {}),
-          ...(appliedPromo ? { promoCode: appliedPromo.code } : {}),
-          ...(childMode.enabled ? { childMode: true, childCode: childMode.code || undefined } : {}),
-        },
+          selectedId,
+          selectedOption,
+          selectedIsPuja,
+          bidCents,
+          specialRequests,
+          waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)),
+          scheduledAt,
+          promoCode: appliedPromo?.code ?? null,
+          childMode: { enabled: childMode.enabled, code: childMode.code },
+        }),
         idempotencyKey,
       ),
     onSuccess: (trip) => {
@@ -318,6 +328,13 @@ export function QuotingBody({
       const activeTripId = activeTripIdFromError(error);
       if (activeTripId) {
         onActiveTripExists(activeTripId);
+        return;
+      }
+      // 409 OFFERING_UNAVAILABLE (ADR 013 · Fase B): el admin apagó la oferta entre el quote y el create.
+      // Refrescamos el quote → la oferta apagada desaparece de la lista (B1c filtra por enabled); el banner
+      // de abajo muestra el mensaje claro. La UI refleja el catálogo del backend, no decide.
+      if (isOfferingUnavailableError(error)) {
+        void quoteQuery.refetch();
       }
     },
   });
@@ -326,7 +343,8 @@ export function QuotingBody({
   const canConfirm =
     !createMutation.isPending &&
     ready &&
-    (isPuja ? bidCents !== null && bidCents >= bidFloorCents : Boolean(selectedId));
+    Boolean(selectedId) &&
+    (selectedIsPuja ? bidCents !== null && bidCents >= selectedBidFloorCents : true);
 
   // RE-INTENTO automático tras saldar la deuda: cuando el token cambia (no en el primer render), re-dispara
   // el create solo si hay datos válidos y no hay otro pedido en vuelo. El `createMutation` se referencia por
@@ -356,7 +374,7 @@ export function QuotingBody({
     ? t('quote.requesting')
     : scheduledAt !== null
       ? t('schedule.confirm')
-      : isPuja && bidCents !== null
+      : selectedIsPuja && bidCents !== null
         ? t('puja.searchDriver', { price: formatPEN(bidCents) })
         : t('quote.confirm');
 
@@ -375,7 +393,7 @@ export function QuotingBody({
       />
 
       <View style={styles.titleRow}>
-        <Text variant="title3">{isPuja ? t('puja.title') : t('quote.title')}</Text>
+        <Text variant="title3">{t('quote.title')}</Text>
         {quoteQuery.data ? (
           <Text variant="footnote" color="inkMuted" tabular>
             {formatDistance(quoteQuery.data.distanceMeters)} ·{' '}
@@ -401,20 +419,11 @@ export function QuotingBody({
             {t('quote.calculating')}
           </Text>
         </View>
-      ) : isPuja ? (
-        bidCents !== null ? (
-          <View style={{ gap: theme.spacing.lg }}>
-            <BidPanel
-              bidCents={bidCents}
-              suggestedCents={suggestedCents}
-              floorCents={bidFloorCents}
-              onDecrement={decrementBid}
-              onIncrement={incrementBid}
-            />
-            <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
-          </View>
-        ) : null
       ) : (
+        // UI REACTIVA (server-driven): el selector de ofertas se muestra SIEMPRE (elegís Moto/Eco/Confort/
+        // XL en cualquier modo). Debajo de la elegida aparece el panel que CORRESPONDE A SU modo: si la
+        // oferta resuelve PUJA → proponés tu precio (piso/sugerido PROPIOS de la oferta); si es FIJO → el
+        // precio firme ya está en la fila y el desglose va más abajo. Nada de un modo global que decide todo.
         <View style={{ gap: theme.spacing.sm }}>
           {options.map((option, index) => (
             <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
@@ -429,6 +438,19 @@ export function QuotingBody({
               />
             </SelectionBump>
           ))}
+
+          {selectedIsPuja && selectedOption && bidCents !== null ? (
+            <View style={{ gap: theme.spacing.lg, marginTop: theme.spacing.xs }}>
+              <BidPanel
+                bidCents={bidCents}
+                suggestedCents={selectedSuggestedCents}
+                floorCents={selectedBidFloorCents}
+                onDecrement={decrementBid}
+                onIncrement={incrementBid}
+              />
+              <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -500,9 +522,9 @@ export function QuotingBody({
         />
       )}
 
-      {selectedOption || (isPuja && bidCents !== null) ? (
+      {selectedOption ? (
         <PromoField
-          fareCents={isPuja && bidCents !== null ? bidCents : selectedFareCents}
+          fareCents={selectedIsPuja && bidCents !== null ? bidCents : selectedFareCents}
           applied={appliedPromo}
           onApplied={setAppliedPromo}
           onCleared={() => setAppliedPromo(null)}
@@ -516,7 +538,13 @@ export function QuotingBody({
       !isDebtPendingError(createMutation.error) ? (
         <Banner
           tone="danger"
-          title={isKycRequiredError(createMutation.error) ? t('quote.kycRequired') : t('home.quoteError')}
+          title={
+            isKycRequiredError(createMutation.error)
+              ? t('quote.kycRequired')
+              : isOfferingUnavailableError(createMutation.error)
+                ? t('quote.offeringUnavailable')
+                : t('home.quoteError')
+          }
         />
       ) : null}
 

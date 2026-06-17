@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleType, type FleetDocumentType } from '@veo/shared-types';
 import type { VehicleReviewStatus } from '../vehicle-rules';
 
 const CURRENT_YEAR = new Date().getUTCFullYear();
@@ -79,15 +79,32 @@ export class RegisterDriverVehicleDto {
   @Matches(PLATE_PATTERN, { message: 'Placa inválida (formato XXX-XXX)' })
   plate!: string;
 
-  @ApiProperty({ example: 'Honda' })
-  @IsString()
-  @Length(1, 60)
-  make!: string;
+  @ApiPropertyOptional({
+    description:
+      'Id del modelo del catálogo (VehicleModelSpec APPROVED) que el conductor eligió. Si viene, ' +
+      'make/model/vehicleType se snapshotean del spec (server-authoritative) e ignoran los de texto libre.',
+  })
+  @IsOptional()
+  @IsUUID()
+  modelSpecId?: string;
 
-  @ApiProperty({ example: 'CG 150' })
+  @ApiPropertyOptional({
+    example: 'Honda',
+    description: 'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 60)
-  model!: string;
+  make?: string;
+
+  @ApiPropertyOptional({
+    example: 'CG 150',
+    description: 'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  model?: string;
 
   @ApiProperty({ example: 2021, description: `Año del vehículo (>= ${MIN_REASONABLE_YEAR}). BR-D04 (>=2017) se aplica en el servicio.` })
   @IsInt()
@@ -114,6 +131,19 @@ export interface DriverVehicleResponse {
   status: VehicleReviewStatus;
   /** true si este es el vehículo ACTIVO (el que el conductor opera; server-authoritative). */
   isActive: boolean;
+  /**
+   * B5-3 · atributos de eligibilidad del modelo elegido (asientos/segmento). SOLO se llenan en la consulta
+   * del vehículo ACTIVO (getActiveVehicle), para que el driver-bff los selle en el ping y dispatch filtre
+   * por oferta. Ausentes si el vehículo es legacy/texto-libre (sin modelSpecId) ⇒ degradación honesta.
+   */
+  seats?: number;
+  segment?: string;
+  /**
+   * B5-3.2 · certificaciones de operador VIGENTES del conductor (no del vehículo). SOLO se llenan en la
+   * consulta del vehículo ACTIVO, para que el driver-bff las selle en el ping y dispatch gatee las verticales
+   * (ambulancia exige AMBULANCE_OPERATOR) FAIL-CLOSED. Vacío si el conductor no tiene certs vigentes.
+   */
+  certifications?: FleetDocumentType[];
 }
 
 /** Body para seleccionar el vehículo ACTIVO del conductor (PATCH /drivers/vehicles/active). */

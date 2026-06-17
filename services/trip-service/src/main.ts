@@ -24,7 +24,8 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.use(helmet());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.useGlobalFilters(new AllExceptionsFilter(createLogger('trip-service')));
   app.useGlobalInterceptors(new LoggingInterceptor('trip-service'));
   // health/metrics quedan fuera del prefijo para sondas de orquestador (k8s/docker).

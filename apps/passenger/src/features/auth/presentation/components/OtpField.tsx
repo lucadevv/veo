@@ -8,6 +8,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { useTranslation } from 'react-i18next';
 import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
 
 export interface OtpFieldProps {
@@ -93,6 +94,7 @@ export function OtpField({
   errorNonce = 0,
   accessibilityLabel,
 }: OtpFieldProps): React.JSX.Element {
+  const { t } = useTranslation();
   const reduced = useReducedMotion();
   const theme = useTheme();
   const inputRef = useRef<TextInput>(null);
@@ -137,6 +139,7 @@ export function OtpField({
           autoFocus
           caretHidden
           accessibilityLabel={accessibilityLabel}
+          accessibilityValue={{ text: t('auth.otpProgress', { current: value.length, length }) }}
           style={styles.hiddenInput}
         />
       </Animated.View>

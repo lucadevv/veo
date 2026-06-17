@@ -122,3 +122,6 @@ apps/*/vendor/
 .trazabilidad/
 # Logs del harness e2e
 e2e/.logs/
+
+# Load-test: tokens JWT generados localmente (NO commitear)
+dev-stack/loadtest/tokens.json

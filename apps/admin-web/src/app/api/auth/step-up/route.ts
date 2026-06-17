@@ -37,7 +37,7 @@ export async function POST(req: Request) {
 
   const result = stepUpResult.safeParse(body);
   if (result.success) {
-    setAccessCookie(result.data.accessToken);
+    await setAccessCookie(result.data.accessToken);
   }
   return NextResponse.json({ status: 'ok' });
 }

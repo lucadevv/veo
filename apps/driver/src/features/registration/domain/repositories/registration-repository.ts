@@ -9,7 +9,11 @@ import type {
   RegistrationDraft,
   RegistrationSubmissionResult,
   ResubmitResult,
+  VehicleModelOption,
+  VehicleModelRequestInput,
+  VehicleModelRequestResult,
   VehicleRegisterInput,
+  VehicleType,
   VehicleView,
 } from '../entities';
 
@@ -33,6 +37,18 @@ export interface RegistrationRepository {
 
   /** POST /drivers/vehicles — alta self-service del vehículo (queda PENDING_REVIEW). */
   registerVehicle(input: VehicleRegisterInput): Promise<VehicleView>;
+
+  /**
+   * GET /drivers/vehicle-models — catálogo curado de modelos APROBADOS para el selector del alta (B5-2).
+   * Filtra por tipo (un mototaxista solo ve motos). El catálogo es chico; la búsqueda fina es client-side.
+   */
+  listVehicleModels(params: {vehicleType: VehicleType}): Promise<VehicleModelOption[]>;
+
+  /**
+   * POST /drivers/vehicle-models — el conductor SOLICITA un modelo que no está en el catálogo (B5-2.c).
+   * Queda PENDING_REVIEW hasta que el operador lo apruebe; el conductor recibe la confirmación.
+   */
+  requestVehicleModel(input: VehicleModelRequestInput): Promise<VehicleModelRequestResult>;
 
   /** GET /drivers/vehicles — vehículos del conductor (rehidratación; más recientes primero). */
   listVehicles(): Promise<VehicleView[]>;

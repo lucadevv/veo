@@ -2,6 +2,7 @@ export {RegistrationProgress} from './RegistrationProgress';
 export {RegistrationHeader} from './RegistrationHeader';
 export {RegistrationField, type RegistrationFieldProps} from './RegistrationField';
 export {VehicleTypeSelector} from './VehicleTypeSelector';
+export {VehicleModelSelector} from './VehicleModelSelector';
 export {VehicleStatusCard} from './VehicleStatusCard';
 export {
   DocumentUploadCard,

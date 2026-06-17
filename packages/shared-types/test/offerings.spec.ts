@@ -19,13 +19,21 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
    * apps en la calle y con los datos ya guardados. Si este test rompe, NO "ajustes el assert":
    * estás rompiendo el contrato. Agregar una oferta nueva = AGREGAR un id acá.
    */
-  it('los ids del catálogo son exactamente los 4 del contrato (inmutables)', () => {
-    expect(Object.keys(OFFERINGS).sort()).toEqual(
-      ['veo_confort', 'veo_economico', 'veo_moto', 'veo_xl'].sort(),
-    );
-    expect(Object.values(OfferingId).sort()).toEqual(
-      ['veo_confort', 'veo_economico', 'veo_moto', 'veo_xl'].sort(),
-    );
+  it('los ids del catálogo son el contrato (4 RIDE visibles + 4 verticales ocultas · B5-4)', () => {
+    // Las 4 RIDE son INMUTABLES (contrato con apps en la calle + Trip.category persistido). Las 4
+    // verticales (EV/ambulancia/grúa/mecánico) se AGREGARON codeadas pero ocultas (defaultEnabled:false).
+    const expected = [
+      'veo_moto',
+      'veo_economico',
+      'veo_confort',
+      'veo_xl',
+      'veo_economico_ev',
+      'veo_ambulance',
+      'veo_tow',
+      'veo_mechanic',
+    ].sort();
+    expect(Object.keys(OFFERINGS).sort()).toEqual(expected);
+    expect(Object.values(OfferingId).sort()).toEqual(expected);
   });
 
   it('cada entrada es coherente: la key es el id de su spec', () => {
@@ -79,6 +87,11 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
       OfferingId.VEO_ECONOMICO,
       OfferingId.VEO_CONFORT,
       OfferingId.VEO_XL,
+      // B5-4 · verticales por sortOrder (ocultas: defaultEnabled:false, no aparecen en el quote).
+      OfferingId.VEO_ECONOMICO_EV,
+      OfferingId.VEO_AMBULANCE,
+      OfferingId.VEO_TOW,
+      OfferingId.VEO_MECHANIC,
     ]);
   });
 });

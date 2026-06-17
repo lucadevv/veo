@@ -28,6 +28,18 @@ export interface DispatchCreationInput {
   route: { distanceMeters: number; durationSeconds: number };
   surge: number;
   childMode: boolean;
+  /** B3 · recargo de combustible por km (céntimos PEN, admin-editable). Solo FIXED lo aplica; default 0. */
+  fuelPerKmCents?: number;
+  /**
+   * B5-1.d · costo de energía por km DERIVADO de EnergyCatalog (precio fuente ÷ rendimiento de la oferta).
+   * Solo se usa si `energyModelEnabled` (el FLIP). Default 0.
+   */
+  energyPerKmCents?: number;
+  /**
+   * B5-1.d · FLIP: si true, FIXED usa la fórmula NUEVA (calculateOfferingFare: energía pass-through,
+   * multiplier solo posición); si false (default), la vieja (fuel plegado al per-km ×multiplier).
+   */
+  energyModelEnabled?: boolean;
   /**
    * ADR 013 §1.7 · política de pricing de la OFERTA (del catálogo de @veo/shared-types, fuente única —
    * NO se duplica la tabla acá). FIXED la APLICA a la tarifa firme: max(round(calculateFare ×

@@ -26,7 +26,15 @@ import {
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import type { AuthenticatedUser } from '@veo/auth';
-import { PricingMode, TripStatus, resolveOfferingMode } from '@veo/shared-types';
+import {
+  PricingMode,
+  TripStatus,
+  resolveOfferingModeWithPin,
+  findOffering,
+  OfferingId,
+  type OfferingSpec,
+  type OfferingPricingPolicy,
+} from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import type Redis from 'ioredis';
 import { PrismaService } from '../infra/prisma.service';
@@ -39,17 +47,21 @@ import {
   PricingMode as PrismaPricingMode,
 } from '../generated/prisma';
 import { assertTransition, InvalidTripTransition, LIVE_STATES, transitionSources } from './domain/trip-state-machine';
-import { ActiveTripExistsError } from './trips.errors';
-import { calculateFare } from './domain/fare';
+import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
+import { CatalogService } from '../catalog/catalog.service';
+import { calculateFare, shadowCompareFare, deriveFuelPerKmCents } from './domain/fare';
+import { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
-import { bumpOfferingModeOverridden } from './trip-metrics';
+import { bumpOfferingModeOverridden, bumpCatalogDegraded } from './trip-metrics';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
+import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
+import { BidFloorService } from '../pricing/bid-floor.service';
 import type { Env } from '../config/env.schema';
 import type {
   AcceptTripDto,
@@ -167,6 +179,27 @@ export class TripsService {
   /** Registry de estrategias por modo de despacho (open/closed). Self-default sin DI para tests legacy. */
   private readonly dispatchModes: DispatchModeRegistry;
 
+  /**
+   * Catálogo de ofertas (ADR 013 · Fase B). `@Optional()`: si no se inyecta (tests legacy que construyen
+   * el servicio sin él), `null` ⇒ createTrip NO valida el `enabled` (permite, comportamiento previo). En
+   * producción CatalogModule lo provee (importado en TripsModule). Degradación honesta: ante un error del
+   * catálogo, createTrip PERMITE el viaje (no se bloquea un pedido por una lectura de config caída — mismo
+   * criterio que el quote, que degrada a "todas las ofertas").
+   */
+  private readonly catalog: CatalogService | null;
+  /** Recargo de combustible global (B3). `@Optional()`: tests legacy degradan a 0 (sin recargo). */
+  private readonly fuel: FuelSurchargeService | null;
+  /**
+   * Piso de la PUJA per-(zona, oferta) (ADR 010 §9.3). `@Optional()`: si no se inyecta (tests legacy que
+   * construyen el servicio sin él), `null` ⇒ resolveBidFloorCents degrada al piso global de env
+   * (`this.bidFloorCents`) — comportamiento previo. En producción PricingModule lo provee.
+   */
+  private readonly bidFloor: BidFloorService | null;
+  /** B5-1 · catálogo de energía multi-fuente. `@Optional()`: si no está, el shadow-compare se saltea (no rompe). */
+  private readonly energyCatalog: EnergyCatalogService | null;
+  /** B5-1.d · FLIP del modelo de energía (default false). ON = fórmula nueva autoritativa (energía pass-through). */
+  private readonly energyModelEnabled: boolean;
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
@@ -174,6 +207,10 @@ export class TripsService {
     @Optional() modeResolver?: PricingScheduleService,
     @Optional() @Inject(REDIS) redis?: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'>,
     @Optional() dispatchModes?: DispatchModeRegistry,
+    @Optional() catalog?: CatalogService,
+    @Optional() fuel?: FuelSurchargeService,
+    @Optional() energyCatalog?: EnergyCatalogService,
+    @Optional() bidFloor?: BidFloorService,
   ) {
     this.bidFloorCents = config?.get('BID_FLOOR_CENTS') ?? DEFAULT_BID_FLOOR_CENTS;
     this.bidMaxCents = config?.get('BID_MAX_CENTS') ?? DEFAULT_BID_MAX_CENTS;
@@ -182,6 +219,120 @@ export class TripsService {
     this.modeResolver = modeResolver ?? null;
     this.redis = redis ?? null;
     this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
+    this.catalog = catalog ?? null;
+    this.fuel = fuel ?? null;
+    this.energyCatalog = energyCatalog ?? null;
+    this.bidFloor = bidFloor ?? null;
+    this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
+  }
+
+  /**
+   * ADR 013 · Fase B — resuelve la oferta EFECTIVA para CREAR en UNA lectura del catálogo: valida que esté
+   * HABILITADA (defensa en profundidad de la carrera "el admin la apagó entre el quote y el create"; el
+   * gate primario es que el quote ya no la cotiza) y devuelve el pricing + pin de modo EFECTIVOS (overlay
+   * del admin, B2). DEGRADACIÓN HONESTA: sin catálogo inyectado (tests legacy) o si la lectura FALLA, usa
+   * el pricing de CÓDIGO sin pin y PERMITE el viaje — no se bloquea un pedido por una lectura de config
+   * (mismo criterio que el quote degradando a todas). Oferta deshabilitada → OfferingUnavailableError (409).
+   */
+  private async resolveEffectiveOffering(
+    base: OfferingSpec,
+  ): Promise<{ pricing: OfferingPricingPolicy; modePin?: PricingMode }> {
+    if (!this.catalog) return { pricing: base.pricing };
+    let resolved;
+    try {
+      resolved = await this.catalog.resolveOffering(base.id);
+    } catch (err) {
+      // B5-4: las verticales ocultas (defaultEnabled:false) NUNCA se crean, ni en degradación — sin
+      // confirmar que el admin las habilitó, permitir una ambulancia/grúa por catálogo caído sería el
+      // leak inverso al de la UI. Las visibles por default SÍ se permiten (degradación honesta previa).
+      if (!base.defaultEnabled) throw new OfferingUnavailableError(base.id);
+      this.logger.warn(
+        `catálogo no disponible al resolver '${base.id}' (${(err as Error).message}); ` +
+          `uso el pricing de código y permito el viaje (degradación honesta · ADR 013)`,
+      );
+      bumpCatalogDegraded('create');
+      return { pricing: base.pricing };
+    }
+    if (resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
+    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing de código.
+    if (!resolved) return { pricing: base.pricing };
+    return { pricing: resolved.pricing, modePin: resolved.modePin };
+  }
+
+  /**
+   * B3 · recargo de combustible por km vigente (céntimos PEN). DEGRADACIÓN HONESTA: sin servicio inyectado
+   * (tests legacy) o si la lectura FALLA → 0 (sin recargo). NO se bloquea un viaje por una lectura de
+   * config caída; mejor cobrar la tarifa base que rechazar el pedido (mismo criterio que el catálogo).
+   */
+  private async resolveFuelPerKmCents(): Promise<number> {
+    if (!this.fuel) return 0;
+    try {
+      return await this.fuel.getPerKmCents();
+    } catch (err) {
+      this.logger.warn(
+        `recargo de combustible no disponible (${(err as Error).message}); ` +
+          `uso 0 (degradación honesta · B3)`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * B5-1.b · SHADOW-COMPARE (NO cambia el precio cobrado). Computa el delta entre la tarifa VIEJA
+   * (fuel global plegado y escalado por el multiplier) y la NUEVA (energía PASS-THROUGH, derivada del
+   * EnergyCatalog por la fuente de referencia de la oferta) y lo LOGUEA. Sirve para MEDIR el impacto de
+   * B5-1 en producción-dev ANTES del flip (B5-1.d). Nunca rompe el create: sin EnergyCatalog inyectado,
+   * fuente no cargada o cualquier falla → se saltea (degradación honesta). El precio autoritativo sigue
+   * siendo el viejo.
+   */
+  /**
+   * B5 · costo de energía por km de una oferta = precio(fuente del EnergyCatalog) ÷ rendimiento de la
+   * oferta. 0 si no hay catálogo inyectado / fuente no cargada / falla (degradación honesta). Lo usan el
+   * shadow-compare (flag OFF) y la tarifa autoritativa nueva (flag ON · B5-1.d).
+   */
+  private async resolveEnergyPerKmCents(offering: OfferingSpec): Promise<number> {
+    if (!this.energyCatalog) return 0;
+    try {
+      const price = await this.energyCatalog.getPriceFor(offering.referenceEnergySourceId);
+      if (price === null) return 0; // fuente no cargada → sin recargo (degradación honesta)
+      return deriveFuelPerKmCents(price, offering.referenceEfficiency);
+    } catch (err) {
+      this.logger.warn(`energía no disponible (${(err as Error).message}); uso 0 (degradación honesta · B5)`);
+      return 0;
+    }
+  }
+
+  private async shadowLogFareDelta(
+    offering: OfferingSpec,
+    route: { distanceMeters: number; durationSeconds: number },
+    surge: number,
+    childMode: boolean,
+    pricing: OfferingPricingPolicy,
+    oldFuelPerKmCents: number,
+    authoritativeFareCents: number,
+  ): Promise<void> {
+    if (!this.energyCatalog) return;
+    try {
+      const energyPerKmCents = await this.resolveEnergyPerKmCents(offering);
+      const delta = shadowCompareFare(
+        {
+          distanceMeters: route.distanceMeters,
+          durationSeconds: route.durationSeconds,
+          surgeMultiplier: surge,
+          childMode,
+        },
+        pricing,
+        oldFuelPerKmCents,
+        energyPerKmCents,
+      );
+      this.logger.log(
+        `B5-1 shadow · oferta=${offering.id} energia=${offering.referenceEnergySourceId} ` +
+          `energyPerKm=${energyPerKmCents} viejo=${delta.oldCents} nuevo=${delta.newCents} ` +
+          `delta=${delta.deltaCents} (autoritativo=viejo=${authoritativeFareCents}, sin flip)`,
+      );
+    } catch (err) {
+      this.logger.warn(`B5-1 shadow-compare falló (${(err as Error).message}); ignorado`);
+    }
   }
 
   /**
@@ -205,12 +356,18 @@ export class TripsService {
   }
 
   /**
-   * Piso del bid para una zona (ADR 010 §9.3). Decisión RATIFICADA: el piso canónico es Admin·Pricing
-   * POR ZONA (motor de tarifas expone floor(zona)). Ese motor AÚN NO existe/está expuesto, así que
-   * degradamos HONESTAMENTE al piso GLOBAL de config (BID_FLOOR_CENTS, default S/7). El parámetro
-   * `origin` queda como punto de extensión: cuando exista el floor por zona, se resuelve aquí.
+   * Piso del bid para (zona, oferta) (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
+   * admin maneja en caliente (default + overrides por oferta), vía el resolver PURO `resolveBidFloorCents`
+   * (@veo/shared-types) — el MISMO que el public-bff usa para el display del quote (consistencia por
+   * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `toZone`).
+   * DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env (`this.bidFloorCents`).
    */
-  private resolveBidFloorCents(_origin: LatLon): number {
+  private async resolveBidFloorCents(origin: LatLon, offeringId: OfferingId | null): Promise<number> {
+    if (this.bidFloor) {
+      // Sin oferta conocida (viaje legacy con `category` null) → la oferta fue la ancla económico (el default
+      // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual).
+      return this.bidFloor.resolve(toZone(origin), offeringId ?? OfferingId.VEO_ECONOMICO);
+    }
     return this.bidFloorCents;
   }
 
@@ -280,6 +437,10 @@ export class TripsService {
           `gana la oferta (pool ${offering.vehicleClass}) (ADR 013 §2)`,
       );
     }
+    // ADR 013 · Fase B — resuelve la oferta EFECTIVA (overlay del admin) en UNA lectura: valida que esté
+    // HABILITADA (defensa en profundidad: el quote ya no cotiza las apagadas; cubre la carrera
+    // admin-apaga-entre-quote-y-create) y trae el pricing + pin de modo efectivos (B2). Degrada honesto.
+    const { pricing: effectivePricing, modePin } = await this.resolveEffectiveOffering(offering);
     // ADR 013 · Trip.vehicleType DERIVA de la oferta (no del dto suelto): dispatch filtra por el pool
     // certificable de la oferta elegida.
     const vehicleType: PrismaVehicleType = offering.vehicleClass;
@@ -307,7 +468,10 @@ export class TripsService {
     // si lo permite. Conflicto (modo fuera de allowedModes) → gana la oferta con su modo PREFERIDO
     // (allowedModes[0]) + warn + counter (observabilidad: el flip del admin NUNCA hace negociar a una
     // oferta que no negocia). Con las 4 ofertas actuales [PUJA, FIXED] la intersección es no-op.
-    const { mode, overridden } = resolveOfferingMode(offering, scheduledMode);
+    // B2: si el admin PINEÓ un modo para esta oferta (overlay, ya validado ∈ allowedModes), GANA sobre el
+    // schedule. Sin pin → intersección schedule ∩ oferta (comportamiento previo). El veto de la oferta
+    // (overridden) sigue siendo observable.
+    const { mode, overridden } = resolveOfferingModeWithPin(offering, modePin, scheduledMode);
     if (overridden) {
       this.logger.warn(
         `createTrip: el schedule pidió ${scheduledMode} pero la oferta ${offering.id} solo permite ` +
@@ -321,14 +485,38 @@ export class TripsService {
     //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
     //    política de la oferta — max(round(calculateFare × multiplier), minFareCents); seq=0.
     // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
+    // B3 · recargo de combustible por km (admin, hot-editable). Solo FIXED lo aplica (plegado al per-km);
+    // PUJA lo ignora (el bid ES la tarifa). Degradación honesta: catálogo de fuel ausente/caído → 0.
+    const fuelPerKmCents = await this.resolveFuelPerKmCents();
+    // B5-1.d · con el FLIP activo, la energía por oferta (precio fuente ÷ rendimiento) es el insumo
+    // autoritativo; con el flag OFF queda en 0 y manda el fuel viejo. Solo se resuelve si hace falta.
+    const energyPerKmCents = this.energyModelEnabled ? await this.resolveEnergyPerKmCents(offering) : 0;
+    // Piso AUTORITATIVO de la puja para ESTA oferta (ADR 010 §9.3): config del admin per-(zona, oferta).
+    const bidFloorCents = await this.resolveBidFloorCents(origin, offering.id);
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
       bidCents: dto.bidCents,
-      floorCents: this.resolveBidFloorCents(origin),
+      floorCents: bidFloorCents,
       route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
       surge,
       childMode: dto.childMode ?? false,
-      pricing: offering.pricing,
+      fuelPerKmCents,
+      energyPerKmCents,
+      energyModelEnabled: this.energyModelEnabled,
+      pricing: effectivePricing,
     });
+    // B5-1.b · shadow-compare SOLO cuando el flag está OFF (solo FIXED; en PUJA el bid ES el precio).
+    // Con el flag ON la fórmula nueva ya es autoritativa → no hay nada que "shadowear".
+    if (mode === PricingMode.FIXED && !this.energyModelEnabled) {
+      await this.shadowLogFareDelta(
+        offering,
+        { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
+        surge,
+        dto.childMode ?? false,
+        effectivePricing,
+        fuelPerKmCents,
+        fareCents,
+      );
+    }
     const currency = 'PEN';
 
     // ADR 011 · el modo RESUELTO se CONGELA en la fila del viaje. Reasignación / activación de
@@ -1268,12 +1456,14 @@ export class TripsService {
       });
     }
 
-    // Gate AUTORITATIVO de la puja (espeja createTrip): piso de zona ≤ bid ≤ techo (anti-overflow int4).
+    // Gate AUTORITATIVO de la puja (espeja createTrip): piso (zona, oferta) ≤ bid ≤ techo (anti-overflow int4).
+    // El piso es el de la oferta del viaje (`trip.category`); legacy sin categoría → ancla económico.
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
-    const floor = this.resolveBidFloorCents(origin);
+    const offeringId = findOffering(trip.category ?? '')?.id ?? null;
+    const floor = await this.resolveBidFloorCents(origin, offeringId);
     if (bidCents < floor) {
       throw new ValidationError(
-        `El bid (${bidCents}) es menor al piso de la zona (${floor}) (ADR 010 §9.3)`,
+        `El bid (${bidCents}) es menor al piso de la oferta (${floor}) (ADR 010 §9.3)`,
         { bidCents, floorCents: floor },
       );
     }

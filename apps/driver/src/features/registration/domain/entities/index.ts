@@ -11,11 +11,14 @@ import type {
   DriverDocument,
   DriverDocumentSimpleStatus,
   DriverOnboardRequest,
+  DriverModelRequestView,
   DriverPersonalData,
   DriverPersonalDataRequest,
   DriverResubmitResult,
+  DriverVehicleModelView,
   DriverVehicleView,
   RegisterVehicleRequest,
+  RequestVehicleModelRequest,
 } from '@veo/api-client';
 
 /**
@@ -38,6 +41,12 @@ export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
 export type VehicleRegisterInput = RegisterVehicleRequest;
 export type VehicleView = DriverVehicleView;
+/** Modelo del catálogo curado que el conductor elige en el alta (= driverVehicleModelView · B5-2). */
+export type VehicleModelOption = DriverVehicleModelView;
+/** Body para solicitar un modelo nuevo que no está en el catálogo (= requestVehicleModelRequest · B5-2.c). */
+export type VehicleModelRequestInput = RequestVehicleModelRequest;
+/** Confirmación de que la solicitud de modelo quedó en revisión (= driverModelRequestView · B5-2.c). */
+export type VehicleModelRequestResult = DriverModelRequestView;
 /** Resultado de `POST /drivers/me/resubmit` (reenvío a revisión tras rechazo): estado de antecedentes. */
 export type ResubmitResult = DriverResubmitResult;
 
@@ -59,12 +68,20 @@ export interface PersonalData {
   birthdate: string;
 }
 
-/** Paso 2: datos del vehículo. */
+/**
+ * Paso 2: datos del vehículo. B5-2: el conductor ELIGE marca/modelo del catálogo curado (no texto
+ * libre). `modelSpecId` es el id del modelo elegido (lo que viaja al backend); `brand`/`model` son la
+ * etiqueta de presentación de ese modelo (para mostrar la elección y rehidratar). Vacíos hasta elegir.
+ */
 export interface VehicleData {
   type: VehicleType;
   plate: string;
-  brand: string;
   year: string;
+  /** Id del VehicleModelSpec elegido del catálogo (lo que se envía en `POST /drivers/vehicles`). */
+  modelSpecId: string;
+  /** Marca del modelo elegido — solo presentación (el backend la snapshotea del spec). */
+  brand: string;
+  /** Modelo elegido — solo presentación. */
   model: string;
 }
 

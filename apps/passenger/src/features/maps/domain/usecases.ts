@@ -1,4 +1,5 @@
 import type {
+  CatalogResult,
   MapPoint,
   PlaceSuggestionList,
   QuoteRequest,
@@ -39,5 +40,14 @@ export class QuoteRideUseCase {
 
   execute(request: QuoteRequest): Promise<QuoteResult> {
     return this.repository.quote(request);
+  }
+}
+
+/** Catálogo ACTIVO de ofertas (server-driven · B1f): las que el admin tiene habilitadas, para la teaser. */
+export class GetCatalogUseCase {
+  constructor(private readonly repository: MapsRepository) {}
+
+  execute(): Promise<CatalogResult> {
+    return this.repository.catalog();
   }
 }

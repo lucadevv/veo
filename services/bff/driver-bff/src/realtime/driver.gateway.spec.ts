@@ -25,7 +25,8 @@ function makeGateway(opts: {
   // Resolver del tipo activo: por defecto devuelve el `fallback` (lo que vino en el ping), así las
   // aserciones de tipo de los tests existentes no cambian. Su lógica real se testea aparte (fleet).
   const activeVehicleType = {
-    resolve: vi.fn((_identity: unknown, fallback: VehicleClass) => Promise.resolve(fallback)),
+    // B5-3: resolve devuelve el vehículo activo resuelto ({vehicleType, +attrs de eligibilidad opcionales}).
+    resolve: vi.fn((_identity: unknown, fallback: VehicleClass) => Promise.resolve({ vehicleType: fallback })),
   };
   const config = { getOrThrow: () => '' };
   const gateway = new DriverGateway(

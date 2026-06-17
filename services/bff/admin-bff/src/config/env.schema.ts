@@ -10,8 +10,8 @@ export const envSchema = z.object({
   PORT: z.coerce.number().default(4003),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
-  // CORS: origen del admin-web (Next.js). En prod, dominio real.
-  ADMIN_WEB_ORIGIN: z.string().default('http://localhost:5000'),
+  // CORS: origen del admin-web (Next.js). En prod, dominio real. Dev = 5001 (el 5000 lo ocupa AirPlay de macOS).
+  ADMIN_WEB_ORIGIN: z.string().default('http://localhost:5001'),
 
   // JWT ES256 — el BFF es VALIDADOR (clave pública). El issuer/audience deben coincidir con identity-service.
   VEO_JWT_PUBLIC_PEM: z.string().optional(),
@@ -52,9 +52,9 @@ export const envSchema = z.object({
   FLEET_GRPC_URL: z.string().default('localhost:50062'),
 
   // ── REST interno firmado (COMANDOS) — todos /api/v1 ──
-  IDENTITY_URL: z.string().default('http://localhost:3001/api/v1'),
-  TRIP_URL: z.string().default('http://localhost:3002/api/v1'),
-  DISPATCH_URL: z.string().default('http://localhost:3003/api/v1'),
+  IDENTITY_URL: z.string().default('http://localhost:3091/api/v1'),
+  TRIP_URL: z.string().default('http://localhost:3092/api/v1'),
+  DISPATCH_URL: z.string().default('http://localhost:3093/api/v1'),
   PAYMENT_URL: z.string().default('http://localhost:3005/api/v1'),
   PANIC_URL: z.string().default('http://localhost:3006/api/v1'),
   MEDIA_URL: z.string().default('http://localhost:3007/api/v1'),

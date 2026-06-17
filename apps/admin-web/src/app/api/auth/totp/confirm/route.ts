@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     );
   }
 
-  setAccessCookie(tokens.data.accessToken);
-  setRefreshCookie(tokens.data.refreshToken);
+  await setAccessCookie(tokens.data.accessToken);
+  await setRefreshCookie(tokens.data.refreshToken);
   return NextResponse.json({ status: 'authenticated' });
 }

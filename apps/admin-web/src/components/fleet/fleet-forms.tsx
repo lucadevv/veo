@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { useCreateDocument, useCreateInspection, useCreateVehicle } from '@/lib/api/queries';
+import { FleetDocumentType } from '@veo/shared-types';
+import { useCatalog, useCreateDocument, useCreateInspection, useCreateVehicle } from '@/lib/api/queries';
+import { certificationTypesForEnabledOfferings, documentTypeLabel } from '@/lib/certifications';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,6 +125,7 @@ export function CreateVehicleDialog() {
 /* ── Alta de documento ── */
 export function CreateDocumentDialog() {
   const create = useCreateDocument();
+  const catalog = useCatalog();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -130,11 +133,20 @@ export function CreateDocumentDialog() {
   const [form, setForm] = useState({
     ownerType: 'DRIVER' as 'DRIVER' | 'VEHICLE',
     ownerId: '',
-    type: 'LICENSE_A1' as (typeof DOCUMENT_TYPES)[number],
+    type: FleetDocumentType.LICENSE_A1 as FleetDocumentType,
     documentNumber: '',
     issuedAt: '',
     expiresAt: '',
   });
+
+  // B5-vert · GATE "oculto hasta vender": al catálogo base le sumamos SOLO las certificaciones que exige
+  // una vertical HABILITADA (ambulancia apagada ⇒ su credencial no aparece). Reflejo de UX, no autorización:
+  // el backend acepta cualquier FleetDocumentType. Mientras las verticales estén ocultas, el dropdown queda
+  // EXACTAMENTE como hoy (solo los 5 docs base).
+  const documentTypes = useMemo<FleetDocumentType[]>(
+    () => [...DOCUMENT_TYPES, ...certificationTypesForEnabledOfferings(catalog.data?.offerings ?? [])],
+    [catalog.data],
+  );
 
   const valid = form.ownerId.trim() && form.documentNumber.trim();
 
@@ -152,7 +164,7 @@ export function CreateDocumentDialog() {
       });
       toast({ tone: 'success', title: 'Documento registrado (pendiente de revisión)' });
       setOpen(false);
-      setForm({ ownerType: 'DRIVER', ownerId: '', type: 'LICENSE_A1', documentNumber: '', issuedAt: '', expiresAt: '' });
+      setForm({ ownerType: 'DRIVER', ownerId: '', type: FleetDocumentType.LICENSE_A1, documentNumber: '', issuedAt: '', expiresAt: '' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo registrar el documento.');
     } finally {
@@ -186,10 +198,10 @@ export function CreateDocumentDialog() {
             <select
               className={selectClass}
               value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value as (typeof DOCUMENT_TYPES)[number] })}>
-              {DOCUMENT_TYPES.map((t) => (
+              onChange={(e) => setForm({ ...form, type: e.target.value as FleetDocumentType })}>
+              {documentTypes.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {documentTypeLabel(t)}
                 </option>
               ))}
             </select>

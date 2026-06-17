@@ -21,17 +21,27 @@ import {
   expiringDocumentView,
   fleetDocumentView,
   inspectionView,
+  vehicleModelReviewView,
+  type ApproveVehicleModelRequest,
   type LiveAccessRequest,
   liveViewerToken,
   mediaAccessRequestView,
+  catalogView,
   modeScheduleView,
+  fuelSurchargeView,
+  energyCatalogView,
+  bidFloorView,
+  type ReplaceBidFloorRequest,
   operatorApproval,
   paginated,
   pendingDriver,
   pendingOperator,
   panicDetail,
   type AdminRoleValue,
+  type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
+  type ReplaceFuelSurchargeRequest,
+  type ReplaceEnergyCatalogRequest,
   panicSummary,
   payoutView,
   runPayoutsResult,
@@ -56,10 +66,15 @@ export const qk = {
   inspections: ['inspections'] as const,
   expiring: ['fleet-expiring'] as const,
   documents: (status: string) => ['fleet-documents', status] as const,
+  modelReview: (status: string) => ['vehicle-model-review', status] as const,
   payouts: (status: string) => ['payouts', status] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
+  fuelSurcharge: ['fuel-surcharge'] as const,
+  energyCatalog: ['energy-catalog'] as const,
+  bidFloor: ['bid-floor'] as const,
+  catalog: ['catalog'] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
 };
 
@@ -316,6 +331,49 @@ export function useDocumentReview() {
   });
 }
 
+/* ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ── */
+const modelReviewPage = paginated(vehicleModelReviewView);
+
+/** Cola de modelos solicitados a revisar (default PENDING_REVIEW). */
+export function useModelReview(status: string) {
+  return useInfiniteQuery({
+    queryKey: qk.modelReview(status),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/fleet/vehicle-models/review', {
+        schema: modelReviewPage,
+        signal,
+        query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/**
+ * Aprobar/rechazar una solicitud de modelo. La UI habla approve/reject; el bff traduce al endpoint
+ * (POST /fleet/vehicle-models/:id/approve|reject) y el fleet-service revalida + audita.
+ */
+export function useModelReviewAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; decision: 'approve' } & ApproveVehicleModelRequest | { id: string; decision: 'reject' }) =>
+      input.decision === 'approve'
+        ? apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
+            body: {
+              segment: input.segment,
+              energySource: input.energySource,
+              efficiency: input.efficiency,
+              ...(input.seats !== undefined ? { seats: input.seats } : {}),
+            },
+            schema: vehicleModelReviewView,
+          })
+        : apiClient().post(`/fleet/vehicle-models/${input.id}/reject`, { schema: vehicleModelReviewView }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
+    },
+  });
+}
+
 /** Alta de vehículo (operador). El bff/fleet-service revalidan BR-D04 (año mínimo, placa única). */
 export function useCreateVehicle() {
   const qc = useQueryClient();
@@ -434,8 +492,96 @@ export function useReplaceSchedule() {
     // `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma server-side: la UI solo refleja.
     mutationFn: (input: ReplaceScheduleRequest) =>
       apiClient().put('/pricing/mode-schedule', { body: input, schema: modeScheduleView }),
-    onSuccess: () => {
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.modeSchedule });
+    },
+  });
+}
+
+/* ── Pricing: recargo de combustible por km (global · B3 · ADMIN/SUPERADMIN/FINANCE) ── */
+export function useFuelSurcharge() {
+  return useQuery({
+    queryKey: qk.fuelSurcharge,
+    queryFn: ({ signal }) =>
+      apiClient().get('/pricing/fuel-surcharge', { schema: fuelSurchargeView, signal }),
+  });
+}
+
+export function useReplaceFuelSurcharge() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma: la UI solo refleja.
+    mutationFn: (input: ReplaceFuelSurchargeRequest) =>
+      apiClient().put('/pricing/fuel-surcharge', { body: input, schema: fuelSurchargeView }),
+    // onSettled (no onSuccess): re-sincroniza con el server tras éxito O conflicto (409 CAS) — así el panel
+    // muestra la versión/valores vigentes aunque otro admin haya cambiado el config mientras editabas.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.fuelSurcharge });
+    },
+  });
+}
+
+/* ── Pricing: piso de la PUJA per-(zona, oferta) (ADR 010 §9.3 · ADMIN/SUPERADMIN/FINANCE) ── */
+export function useBidFloor() {
+  return useQuery({
+    queryKey: qk.bidFloor,
+    queryFn: ({ signal }) => apiClient().get('/pricing/bid-floor', { schema: bidFloorView, signal }),
+  });
+}
+
+export function useReplaceBidFloor() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` + step-up MFA, y trip-service re-firma: la UI solo refleja.
+    mutationFn: (input: ReplaceBidFloorRequest) =>
+      apiClient().put('/pricing/bid-floor', { body: input, schema: bidFloorView }),
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.bidFloor });
+    },
+  });
+}
+
+/* ── Pricing: catálogo de precios de energía por fuente (B5 · ADMIN/SUPERADMIN/FINANCE) ── */
+export function useEnergyCatalog() {
+  return useQuery({
+    queryKey: qk.energyCatalog,
+    queryFn: ({ signal }) =>
+      apiClient().get('/pricing/energy-catalog', { schema: energyCatalogView, signal }),
+  });
+}
+
+export function useReplaceEnergyCatalog() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma: la UI solo refleja.
+    mutationFn: (input: ReplaceEnergyCatalogRequest) =>
+      apiClient().put('/pricing/energy-catalog', { body: input, schema: energyCatalogView }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.energyCatalog });
+    },
+  });
+}
+
+/* ── Catálogo de ofertas: enabled por oferta, overlay singleton (ADMIN/SUPERADMIN/FINANCE) ── */
+export function useCatalog() {
+  return useQuery({
+    queryKey: qk.catalog,
+    queryFn: ({ signal }) => apiClient().get('/catalog', { schema: catalogView, signal }),
+  });
+}
+
+export function useReplaceCatalog() {
+  const qc = useQueryClient();
+  return useMutation({
+    // PUT reemplaza el overlay wholesale (enabled por oferta). El admin-bff revalida
+    // `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma server-side: la UI solo refleja.
+    mutationFn: (input: ReplaceCatalogRequest) =>
+      apiClient().put('/catalog', { body: input, schema: catalogView }),
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.catalog });
     },
   });
 }

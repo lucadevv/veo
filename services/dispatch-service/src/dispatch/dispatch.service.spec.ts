@@ -38,6 +38,8 @@ function makeService(opts: {
   const findUnique = vi.fn(async () => row);
   const updateMany = vi.fn(async () => ({ count: opts.claimCount ?? 1 }));
   const create = vi.fn(async () => undefined);
+  // Flujo STANDARD: sin ofertas hermanas (broadcast EMERGENCY) ⇒ retractSiblingOffers es no-op acá.
+  const findMany = vi.fn(async () => [] as { id: string; driverId: string }[]);
 
   // write.$transaction ejecuta el callback con un tx que comparte los mismos mocks de tabla.
   const tx = {
@@ -45,7 +47,7 @@ function makeService(opts: {
     outboxEvent: { create },
   };
   const prisma = {
-    read: { dispatchMatch: { findUnique } },
+    read: { dispatchMatch: { findUnique, findMany } },
     write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
   };
 

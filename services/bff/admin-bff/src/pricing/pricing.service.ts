@@ -8,10 +8,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
-import type { PricingMode } from '@veo/shared-types';
+import type { PricingMode, EnergySourcePrice, BidFloorOverride } from '@veo/shared-types';
 import { REST_TRIP } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { ReplaceScheduleDto } from './dto/pricing.dto';
+import type { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBidFloorDto } from './dto/pricing.dto';
+import type { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 
 /** Vista del schedule devuelta por trip-service (proyección vigente o el default). */
 export interface ModeScheduleView {
@@ -21,7 +22,38 @@ export interface ModeScheduleView {
   updatedAt: string | null;
 }
 
+/** Vista del recargo de combustible devuelta por trip-service (B4): precio + rendimiento + per-km derivado. */
+export interface FuelSurchargeView {
+  fuelPricePerLiterCents: number;
+  kmPerLiter: number;
+  perKmCents: number;
+  version: number;
+  updatedAt: string;
+}
+
+/**
+ * Vista del catálogo de energía devuelta por trip-service (B5): precios por fuente + version.
+ * `sources` usa el contrato compartido EnergySourcePrice[] (@veo/shared-types) — MISMA forma que produce
+ * trip-service, sin re-declararla inline acá (evita divergencia productor↔consumidor).
+ */
+export interface EnergyCatalogView {
+  sources: EnergySourcePrice[];
+  version: number;
+  updatedAt: string;
+}
+
+/** Vista del piso de la PUJA devuelta por trip-service (ADR 010 §9.3): default + overrides por (zona, oferta). */
+export interface BidFloorView {
+  defaultFloorCents: number;
+  overrides: BidFloorOverride[];
+  version: number;
+  updatedAt: string;
+}
+
 const BASE = '/internal/pricing/mode-schedule';
+const FUEL_BASE = '/internal/pricing/fuel-surcharge';
+const ENERGY_BASE = '/internal/pricing/energy-catalog';
+const BID_FLOOR_BASE = '/internal/pricing/bid-floor';
 
 @Injectable()
 export class PricingService {
@@ -39,13 +71,87 @@ export class PricingService {
   async replaceSchedule(identity: AuthenticatedUser, dto: ReplaceScheduleDto): Promise<ModeScheduleView> {
     const res = await this.rest.put<ModeScheduleView>(BASE, {
       identity,
-      body: { defaultMode: dto.defaultMode, rules: dto.rules },
+      body: { defaultMode: dto.defaultMode, rules: dto.rules, expectedVersion: dto.expectedVersion },
     });
     await this.audit.record(identity, {
       action: 'pricing.mode_schedule_replace',
       resourceType: 'pricing_mode_schedule',
       resourceId: String(res.version),
       payload: { defaultMode: dto.defaultMode, ruleCount: dto.rules.length, version: res.version },
+    });
+    return res;
+  }
+
+  /** pricing:view — lee el recargo de combustible por km vigente (o 0 si no hay config). B3 */
+  getFuelSurcharge(identity: AuthenticatedUser): Promise<FuelSurchargeView> {
+    return this.rest.get<FuelSurchargeView>(FUEL_BASE, { identity });
+  }
+
+  /** pricing:manage — reemplaza el recargo de combustible. trip-service bump-ea version y emite el evento. */
+  async replaceFuelSurcharge(
+    identity: AuthenticatedUser,
+    dto: ReplaceFuelSurchargeDto,
+  ): Promise<FuelSurchargeView> {
+    const res = await this.rest.put<FuelSurchargeView>(FUEL_BASE, {
+      identity,
+      body: {
+        fuelPricePerLiterCents: dto.fuelPricePerLiterCents,
+        kmPerLiter: dto.kmPerLiter,
+        expectedVersion: dto.expectedVersion,
+      },
+    });
+    await this.audit.record(identity, {
+      action: 'pricing.fuel_surcharge_replace',
+      resourceType: 'fuel_surcharge_config',
+      resourceId: String(res.version),
+      payload: {
+        fuelPricePerLiterCents: dto.fuelPricePerLiterCents,
+        kmPerLiter: dto.kmPerLiter,
+        version: res.version,
+      },
+    });
+    return res;
+  }
+
+  /** pricing:view — lee el catálogo de precios de energía vigente (B5). */
+  getEnergyCatalog(identity: AuthenticatedUser): Promise<EnergyCatalogView> {
+    return this.rest.get<EnergyCatalogView>(ENERGY_BASE, { identity });
+  }
+
+  /** pricing:manage — reemplaza los precios de energía. trip-service bump-ea version y emite el evento. B5 */
+  async replaceEnergyCatalog(
+    identity: AuthenticatedUser,
+    dto: ReplaceEnergyCatalogDto,
+  ): Promise<EnergyCatalogView> {
+    const res = await this.rest.put<EnergyCatalogView>(ENERGY_BASE, {
+      identity,
+      body: { sources: dto.sources, expectedVersion: dto.expectedVersion },
+    });
+    await this.audit.record(identity, {
+      action: 'pricing.energy_catalog_replace',
+      resourceType: 'energy_catalog',
+      resourceId: String(res.version),
+      payload: { sourceCount: dto.sources.length, version: res.version },
+    });
+    return res;
+  }
+
+  /** pricing:view — lee el piso de la PUJA vigente (default + overrides por oferta, o el default S/7). */
+  getBidFloor(identity: AuthenticatedUser): Promise<BidFloorView> {
+    return this.rest.get<BidFloorView>(BID_FLOOR_BASE, { identity });
+  }
+
+  /** pricing:manage — reemplaza el piso de la PUJA. trip-service bump-ea version y emite el evento. */
+  async replaceBidFloor(identity: AuthenticatedUser, dto: ReplaceBidFloorDto): Promise<BidFloorView> {
+    const res = await this.rest.put<BidFloorView>(BID_FLOOR_BASE, {
+      identity,
+      body: { defaultFloorCents: dto.defaultFloorCents, overrides: dto.overrides, expectedVersion: dto.expectedVersion },
+    });
+    await this.audit.record(identity, {
+      action: 'pricing.bid_floor_replace',
+      resourceType: 'bid_floor_config',
+      resourceId: String(res.version),
+      payload: { defaultFloorCents: dto.defaultFloorCents, overrideCount: dto.overrides.length, version: res.version },
     });
     return res;
   }

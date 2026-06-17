@@ -4,9 +4,9 @@
  * - REST interno firmado HMAC para COMANDOS (InternalRestClient de @veo/rpc).
  * Todos se construyen desde la config validada; sin estado global ni hardcodeo.
  */
-import { Global, Module, type Provider, type OnApplicationShutdown, Injectable, Inject } from '@nestjs/common';
+import { Global, Module, type Provider, type OnApplicationShutdown, Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import { createRedisClient, type Redis } from '@veo/redis';
 import { createGrpcClient, InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
 import type { Env } from '../config/env.schema';
 import {
@@ -69,7 +69,7 @@ const redisProvider: Provider = {
   provide: REDIS,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): Redis =>
-    new Redis(config.get('REDIS_URL', { infer: true }), { maxRetriesPerRequest: null, lazyConnect: false }),
+    createRedisClient(config.get('REDIS_URL', { infer: true }), { logger: new Logger('Redis'), lazyConnect: false }),
 };
 
 function grpcProvider(token: symbol, service: Parameters<typeof createGrpcClient>[0], urlKey: keyof Env): Provider {

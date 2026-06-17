@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { ConsentsService, type ConsentView } from './consents.service';
 
@@ -30,6 +30,11 @@ class RecordConsentDto {
   @IsString()
   @MaxLength(64)
   ip?: string;
+
+  /** Clave de idempotencia (UUIDv7) del cliente; el doble submit con la misma key es no-op. */
+  @IsOptional()
+  @IsUUID()
+  dedupKey?: string;
 }
 
 @ApiTags('users-consents')
@@ -56,6 +61,7 @@ export class ConsentsController {
       marketing: dto.marketing,
       policyVersion: dto.policyVersion,
       ip: dto.ip ?? null,
+      dedupKey: dto.dedupKey,
     });
   }
 }

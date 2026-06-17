@@ -5,7 +5,7 @@
  */
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
 import { VehicleClass } from '@veo/shared-types';
-import type { DriverLocation, ExclusionRegistry, HotIndex } from './hot-index.port';
+import type { DriverLocation, DriverVehicleAttrs, ExclusionRegistry, HotIndex } from './hot-index.port';
 
 export class InMemoryHotIndex implements HotIndex {
   private readonly locations = new Map<string, DriverLocation>();
@@ -15,6 +15,7 @@ export class InMemoryHotIndex implements HotIndex {
     driverId: string,
     point: LatLon,
     vehicleType: VehicleClass,
+    attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
     const loc: DriverLocation = {
       driverId,
@@ -22,21 +23,37 @@ export class InMemoryHotIndex implements HotIndex {
       lon: point.lon,
       h3: toH3(point, DISPATCH_H3_RESOLUTION),
       vehicleType,
+      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
+      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
+      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
       updatedAt: Date.now(),
     };
     this.locations.set(driverId, loc);
     return loc;
   }
 
-  /** Atajo de test: ubica a un conductor directamente en una celda H3 conocida. */
+  /** Atajo de test: ubica a un conductor directamente en una celda H3 conocida (+ attrs de eligibilidad). */
   async seed(
     driverId: string,
     lat: number,
     lon: number,
     h3: string,
     vehicleType: VehicleClass = VehicleClass.CAR,
+    attrs?: DriverVehicleAttrs,
   ): Promise<void> {
-    this.locations.set(driverId, { driverId, lat, lon, h3, vehicleType, updatedAt: Date.now() });
+    this.locations.set(driverId, {
+      driverId,
+      lat,
+      lon,
+      h3,
+      vehicleType,
+      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
+      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
+      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
+      updatedAt: Date.now(),
+    });
   }
 
   /** Atajo de test: vacía el índice por completo (aislamiento entre casos). */
@@ -76,6 +93,11 @@ export class InMemoryHotIndex implements HotIndex {
     // Mismo contrato que RedisHotIndex.availableSample: a lo sumo `limit`, sin garantía de cercanía.
     const all = await this.candidates(cells);
     return all.slice(0, limit);
+  }
+
+  async countOnline(): Promise<number> {
+    // Mismo contrato que RedisHotIndex.countOnline: presencia de loc = "en línea" (disponible u ocupado).
+    return this.locations.size;
   }
 }
 

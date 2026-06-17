@@ -94,7 +94,8 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // consumidor: el desenlace avanza por ESTADO en DB (offerNext desde el reject del conductor / el
     // reconciler de timeout), no por un await-loop con estado en proceso.
     void this.matching
-      .startSession({ tripId: p.tripId, origin: p.origin, requiredVehicleType })
+      // B5-3 · category (offeringId) → el matching resuelve los requisitos de eligibilidad de la oferta.
+      .startSession({ tripId: p.tripId, origin: p.origin, requiredVehicleType, category: p.category })
       .catch((err) => this.logger.error(`matching falló para trip ${p.tripId}: ${String(err)}`));
   }
 
@@ -147,7 +148,15 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // La clase de vehículo activa se proyecta en el hot index para el filtrado del matching. El
     // default CAR es SOLO para pings legacy pre-Ola 2B aún en el topic (campo opcional por compat
     // N-2 en el schema); driver-bff hoy SIEMPRE sella la clase server-authoritative en el evento.
-    await this.dispatch.ingestLocation(p.driverId, p.point, p.vehicleType ?? VehicleClass.CAR);
+    // B5-3 · attrs de eligibilidad (opcionales): si el ping los trae, dispatch los proyecta en el hot
+    // index para filtrar por oferta (confort/xl). Un ping sin ellos no restringe (degradación segura).
+    await this.dispatch.ingestLocation(p.driverId, p.point, p.vehicleType ?? VehicleClass.CAR, {
+      seats: p.seats,
+      segment: p.segment,
+      vehicleYear: p.vehicleYear,
+      // B5-3.2 · certs vigentes del conductor para gatear las verticales (fail-closed en el pool).
+      certifications: p.certifications,
+    });
     domainEventsTotal.inc({ event: 'driver.location_updated', result: 'consumed' });
   }
 

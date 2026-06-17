@@ -13,6 +13,7 @@ import { CoreModule } from './infra/core.module';
 import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { VehiclesModule } from './vehicles/vehicles.module';
+import { VehicleModelsModule } from './vehicle-models/vehicle-models.module';
 import { DocumentsModule } from './documents/documents.module';
 import { InspectionsModule } from './inspections/inspections.module';
 import { FleetGrpcController } from './grpc/fleet.grpc.controller';
@@ -41,6 +42,7 @@ const readinessProvider: Provider = {
     ScheduleModule.forRoot(),
     CoreModule,
     VehiclesModule,
+    VehicleModelsModule,
     DocumentsModule,
     InspectionsModule,
   ],

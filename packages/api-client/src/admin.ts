@@ -75,7 +75,7 @@ export const analyticsOverview = z.object({
   completedToday: z.number().int(),
   cancelledToday: z.number().int(),
   revenueTodayCents: z.number().int(),
-  avgEtaSeconds: z.number().nullable(),
+  avgDurationSeconds: z.number().nullable(),
   series: z.array(overviewSeriesPoint),
 });
 export type AnalyticsOverview = z.infer<typeof analyticsOverview>;
@@ -201,12 +201,151 @@ export const modeScheduleView = z.object({
 });
 export type ModeScheduleView = z.infer<typeof modeScheduleView>;
 
-/** Body del PUT /pricing/mode-schedule: REEMPLAZA wholesale (default + reglas). */
+/** Body del PUT /pricing/mode-schedule: REEMPLAZA wholesale (default + reglas). `expectedVersion` = CAS. */
 export const replaceScheduleRequest = z.object({
   defaultMode: pricingMode,
   rules: z.array(pricingModeRule),
+  expectedVersion: z.number().int().nonnegative(),
 });
 export type ReplaceScheduleRequest = z.infer<typeof replaceScheduleRequest>;
+
+/**
+ * Config de combustible vigente (GET /pricing/fuel-surcharge · B4): el admin ingresa precio/litro +
+ * rendimiento; `perKmCents` es el recargo/km DERIVADO (precio ÷ rendimiento) que el sistema aplica.
+ */
+export const fuelSurchargeView = z.object({
+  fuelPricePerLiterCents: z.number().int().nonnegative(),
+  kmPerLiter: z.number().int().nonnegative(),
+  perKmCents: z.number().int().nonnegative(),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type FuelSurchargeView = z.infer<typeof fuelSurchargeView>;
+
+/**
+ * Body del PUT /pricing/fuel-surcharge (B4): precio del combustible/litro + rendimiento km/litro.
+ * `expectedVersion` = optimistic locking (CAS): la versión que el panel cargó; el server reemplaza solo si
+ * sigue vigente, si otro admin la movió responde 409 (el panel recarga y reintenta). 0 = primer write.
+ */
+export const replaceFuelSurchargeRequest = z.object({
+  fuelPricePerLiterCents: z.number().int().nonnegative(),
+  kmPerLiter: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().nonnegative(),
+});
+
+/**
+ * Catálogo de precios de energía por fuente (B5). El admin edita el precio por unidad (céntimos/litro o
+ * /kWh según la fuente); la `unit` la deriva el server. `expectedVersion` = optimistic locking (CAS).
+ */
+export const energySourcePrice = z.object({
+  sourceId: z.string(),
+  unit: z.string(),
+  pricePerUnitCents: z.number().int().nonnegative(),
+});
+export type EnergySourcePrice = z.infer<typeof energySourcePrice>;
+
+export const energyCatalogView = z.object({
+  sources: z.array(energySourcePrice),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type EnergyCatalogView = z.infer<typeof energyCatalogView>;
+
+export const replaceEnergyCatalogRequest = z.object({
+  sources: z.array(z.object({ sourceId: z.string(), pricePerUnitCents: z.number().int().nonnegative() })),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceEnergyCatalogRequest = z.infer<typeof replaceEnergyCatalogRequest>;
+export type ReplaceFuelSurchargeRequest = z.infer<typeof replaceFuelSurchargeRequest>;
+
+/* ── Piso de la PUJA (bid floor) per-(zona, oferta) · ADR 010 §9.3 ── */
+
+/** Un override del piso para una (zona, oferta). `zone`/`offeringId` viajan como string (enums del dominio). */
+export const bidFloorOverride = z.object({
+  zone: z.string(),
+  offeringId: z.string(),
+  floorCents: z.number().int().nonnegative(),
+});
+export type BidFloorOverride = z.infer<typeof bidFloorOverride>;
+
+/** Piso vigente (GET /pricing/bid-floor): piso por defecto + overrides por (zona, oferta) + versión. */
+export const bidFloorView = z.object({
+  defaultFloorCents: z.number().int().nonnegative(),
+  overrides: z.array(bidFloorOverride),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type BidFloorView = z.infer<typeof bidFloorView>;
+
+/**
+ * Body del PUT /pricing/bid-floor (ADR 010 §9.3): piso por defecto + overrides por (zona, oferta).
+ * `expectedVersion` = optimistic locking (CAS); si otro admin la movió → 409 (el panel recarga). 0 = primer write.
+ */
+export const replaceBidFloorRequest = z.object({
+  defaultFloorCents: z.number().int().positive(),
+  overrides: z.array(bidFloorOverride),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceBidFloorRequest = z.infer<typeof replaceBidFloorRequest>;
+
+// ── Catálogo de ofertas (ADR 013 · Fase B/B1) ──────────────────────────────────────────────────────
+
+// `pricingMode` ('PUJA'|'FIXED') se reutiliza de ./mobile (fuente única del enum), ya importado arriba.
+
+/** Política de pricing EFECTIVA de una oferta (base de código ⟕ override del admin). */
+export const offeringPricing = z.object({
+  multiplier: z.number().positive(),
+  minFareCents: z.number().int().nonnegative(),
+});
+export type OfferingPricing = z.infer<typeof offeringPricing>;
+
+/**
+ * Una oferta del catálogo efectivo (GET /catalog): tokens de display + estado configurable. B2 suma
+ * `allowedModes` (el panel restringe el select del modo a esto — la UI refleja el invariante de producto),
+ * `pricing` EFECTIVO (lo que se cobra hoy) y `modePin` (modo pineado por el admin, o ausente = manda el schedule).
+ */
+export const catalogOffering = z.object({
+  id: z.string(),
+  labelKey: z.string(),
+  icon: z.string(),
+  vehicleClass: z.enum(['CAR', 'MOTO']),
+  sortOrder: z.number().int(),
+  enabled: z.boolean(),
+  allowedModes: z.array(pricingMode),
+  pricing: offeringPricing,
+  modePin: pricingMode.optional(),
+});
+export type CatalogOffering = z.infer<typeof catalogOffering>;
+
+/**
+ * Override CRUDO de una oferta (lo que el admin tiene seteado explícitamente). B1: enabled. B2: mode
+ * (pin), multiplier, minFareCents (opcionales; ausentes → el valor de código). Es el shape que viaja en
+ * AMBOS sentidos: GET /catalog lo devuelve (overlay actual) y PUT /catalog lo reemplaza wholesale.
+ */
+export const catalogOverride = z.object({
+  id: z.string(),
+  enabled: z.boolean(),
+  mode: pricingMode.optional(),
+  multiplier: z.number().positive().optional(),
+  minFareCents: z.number().int().nonnegative().optional(),
+});
+export type CatalogOverride = z.infer<typeof catalogOverride>;
+
+/** Catálogo efectivo (GET /catalog): ofertas EFECTIVAS (display) + overlay CRUDO (edición) + versión. */
+export const catalogView = z.object({
+  version: z.number().int(),
+  updatedAt: z.string(),
+  offerings: z.array(catalogOffering),
+  overrides: z.array(catalogOverride),
+});
+export type CatalogView = z.infer<typeof catalogView>;
+
+/** Body del PUT /catalog: REEMPLAZA wholesale el overlay. trip-service RE-VALIDA + ignora pins inválidos. `expectedVersion` = CAS. */
+export const replaceCatalogRequest = z.object({
+  overrides: z.array(catalogOverride),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceCatalogRequest = z.infer<typeof replaceCatalogRequest>;
 
 /* ── Dispatch: config de RADIOS (k-rings) singleton global ── */
 
@@ -259,6 +398,46 @@ export const inspectionView = z.object({
   result: z.string().nullable(),
 });
 export type InspectionView = z.infer<typeof inspectionView>;
+
+/* ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ── */
+/** Estado de revisión de un modelo (espeja VehicleModelStatus de fleet-service). Tipado → sin magic strings. */
+export const vehicleModelStatus = z.enum(['PENDING_REVIEW', 'APPROVED', 'REJECTED']);
+export type VehicleModelStatus = z.infer<typeof vehicleModelStatus>;
+
+/**
+ * Un modelo en la cola de revisión. Los campos técnicos (segment/energySource/efficiency) vienen NULL
+ * mientras la solicitud está PENDING_REVIEW (el operador los completa al aprobar). `requestedBy` = quién
+ * lo solicitó (User.id del conductor, o null si lo curó el operador); `verifiedBy` = quién lo resolvió.
+ */
+export const vehicleModelReviewView = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  yearFrom: z.number().int(),
+  yearTo: z.number().int(),
+  vehicleType: z.string(),
+  seats: z.number().int(),
+  segment: z.string().nullable(),
+  energySource: z.string().nullable(),
+  efficiency: z.number().int().nullable(),
+  status: vehicleModelStatus,
+  requestedBy: z.string().nullable(),
+  verifiedBy: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type VehicleModelReviewView = z.infer<typeof vehicleModelReviewView>;
+
+/**
+ * Aprobación de una solicitud de modelo: el operador completa la ficha técnica (y corrige asientos si hace
+ * falta). El fleet-service valida segment/energySource contra los enums de dominio y mueve PENDING→APPROVED.
+ */
+export const approveVehicleModelRequest = z.object({
+  segment: z.enum(['ECONOMY', 'MID', 'PREMIUM']),
+  energySource: z.enum(['GASOLINE_95', 'GASOLINE_84', 'DIESEL', 'GNV', 'ELECTRIC']),
+  efficiency: z.number().int().min(1).max(1000),
+  seats: z.number().int().min(1).max(20).optional(),
+});
+export type ApproveVehicleModelRequest = z.infer<typeof approveVehicleModelRequest>;
 
 /* ── Flota: requests de alta (admin) ── */
 /** Alta de vehículo por el operador. `year` acotado; el fleet-service revalida BR-D04 (año mínimo + placa). */

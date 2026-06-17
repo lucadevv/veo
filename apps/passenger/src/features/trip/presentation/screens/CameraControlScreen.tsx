@@ -1,7 +1,7 @@
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, Button, Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { Banner, Button, Card, hexAlpha, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -10,7 +10,6 @@ import { useDependency } from '../../../../core/di/useDependency';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
 import type { TrustedContact } from '../../../contacts/domain/entities';
-import { hexAlpha } from '../components/color';
 import { IconCamera, IconChild, IconLock, IconUsers } from '../components/icons';
 import { Toggle } from '../components/Toggle';
 

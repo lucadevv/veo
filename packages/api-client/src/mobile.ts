@@ -524,6 +524,20 @@ export const quoteOption = z.object({
    * romper el parse de una app vieja (su registro cae al glyph genérico).
    */
   icon: z.string().optional(),
+  /**
+   * ADR 013 (A2 · additive) · SOLO si ESTA oferta resuelve PUJA: piso de la zona en céntimos PEN. El bid
+   * del pasajero no puede bajar de acá. Es PREVIEW/display — el piso autoritativo lo re-resuelve
+   * trip-service al crear el viaje (la app NUNCA lo envía). Opcional: ausente si la oferta es FIXED, o si
+   * el server es viejo (fallback: `quoteResult.bidFloorCents` top-level).
+   */
+  bidFloorCents: z.number().int().optional(),
+  /**
+   * ADR 013 (A2 · additive) · SOLO si ESTA oferta resuelve PUJA: ancla sugerida = la tarifa que SERÍA
+   * fija DE ESTA oferta (su `priceCents`, calculado con SU multiplicador) — antes el sugerido era siempre
+   * el del ancla VEO Económico (bug: en Moto/Confort anclaba al precio del auto). Opcional: ausente en
+   * FIXED o server viejo (fallback: `quoteResult.suggestedCents` top-level).
+   */
+  suggestedCents: z.number().int().optional(),
 });
 export type QuoteOption = z.infer<typeof quoteOption>;
 
@@ -548,12 +562,43 @@ export const quoteResult = z.object({
    * oferta VEO Económico (compat); el modo POR oferta viaja en `options[].mode` (additive).
    */
   mode: pricingMode,
-  /** Solo PUJA: piso de la oferta en la zona (céntimos PEN). El bid del pasajero no puede ser menor. */
+  /**
+   * Solo PUJA · COMPAT/fallback (ancla VEO Económico): piso de la zona en céntimos PEN. A partir de A2
+   * el piso PREFERIDO viaja POR oferta en `options[].bidFloorCents`; este top-level queda para apps
+   * viejas. El bid del pasajero no puede ser menor.
+   */
   bidFloorCents: z.number().int().optional(),
-  /** Solo PUJA: ancla sugerida (céntimos PEN) = la tarifa que sería fija, como referencia del bid. */
+  /**
+   * Solo PUJA · COMPAT/fallback (ancla VEO Económico): ancla sugerida en céntimos PEN. A partir de A2 el
+   * sugerido PREFERIDO viaja POR oferta en `options[].suggestedCents` (cada oferta sugiere SU tarifa);
+   * este top-level queda para apps viejas.
+   */
   suggestedCents: z.number().int().optional(),
 });
 export type QuoteResult = z.infer<typeof quoteResult>;
+
+/**
+ * GET /maps/catalog → catálogo ACTIVO de ofertas para la teaser del Home (B1f · server-driven). Solo las
+ * ofertas que el admin tiene HABILITADAS (ADR 013 · Fase B); SIN ruta → sin precio. La app resuelve el
+ * `labelKey` en su i18n y el `icon` en su registro token→glyph (igual que en el quote).
+ */
+export const offeringTeaserItem = z.object({
+  id: z.string(),
+  /** Nombre resuelto server-side (compat; las apps nuevas usan `labelKey`). */
+  name: z.string(),
+  labelKey: z.string(),
+  /** Token de ícono ABIERTO (`car` | `moto` | futuro `ambulance`…): un token nuevo NO rompe el parse. */
+  icon: z.string(),
+  // NOTA: NO validamos `vehicleType` acá — la teaser pinta el glyph desde `icon` y el nombre desde
+  // `labelKey`, no usa la clase de vehículo. zod descarta el campo extra que mande el server (no validar
+  // lo que no se consume, §5-bis). Así, además, una clase nueva (Fase C) NO rompe el parse de la teaser.
+});
+export type OfferingTeaserItem = z.infer<typeof offeringTeaserItem>;
+
+export const catalogResult = z.object({
+  offerings: z.array(offeringTeaserItem),
+});
+export type CatalogResult = z.infer<typeof catalogResult>;
 
 /* ── Crear/cotizar viaje (POST /trips) ── */
 
@@ -1554,6 +1599,12 @@ export const recordConsentRequest = z.object({
   marketing: z.boolean(),
   /** Versión de la política de privacidad aceptada (ej. "2026-05-01"). */
   policyVersion: z.string().min(1).max(40),
+  /**
+   * Clave de idempotencia (UUIDv7) emitida por el cliente. Reenviar la MISMA dedupKey (reintento de
+   * red) devuelve el row ya registrado en vez de duplicarlo. Opcional por backward-compat: los
+   * clientes viejos que no la envían siguen en modo append-only puro (espeja el dedupKey de panic).
+   */
+  dedupKey: z.string().uuid().optional(),
 });
 export type RecordConsentRequest = z.infer<typeof recordConsentRequest>;
 
@@ -1836,17 +1887,73 @@ export type DriverPersonalData = z.infer<typeof driverPersonalData>;
  * proxya a fleet (REST interno firmado); fleet resuelve el driverId desde la identidad propagada.
  * El vehículo queda pendiente de verificación (status=PENDING_REVIEW).
  */
-export const registerVehicleRequest = z.object({
+export const registerVehicleRequest = z
+  .object({
+    vehicleType: mobileVehicleType,
+    /** Placa peruana XXX-XXX (guion opcional). fleet la normaliza y revalida. */
+    plate: z.string().min(1),
+    /**
+     * B5-2: id del modelo del catálogo (VehicleModelSpec APPROVED) elegido en el onboarding. Si viene,
+     * fleet snapshotea make/model/vehicleType del spec e ignora el texto libre.
+     */
+    modelSpecId: z.string().uuid().optional(),
+    /** Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo. */
+    make: z.string().min(1).max(60).optional(),
+    /** Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo. */
+    model: z.string().min(1).max(60).optional(),
+    /** Año del vehículo (>= 2005). BR-D04 (>= 2017) lo aplica fleet-service. */
+    year: z.number().int().min(2005).max(new Date().getUTCFullYear() + 1),
+    color: z.string().min(1).max(30).optional(),
+  })
+  .refine((v) => Boolean(v.modelSpecId) || (Boolean(v.make) && Boolean(v.model)), {
+    message: 'Elegí un modelo del catálogo (modelSpecId) o indicá marca y modelo',
+    path: ['modelSpecId'],
+  });
+export type RegisterVehicleRequest = z.infer<typeof registerVehicleRequest>;
+
+/* ── Catálogo de modelos para el selector del onboarding (GET /drivers/vehicle-models · B5-2) ── */
+
+/**
+ * Modelo del catálogo curado que el conductor puede ELEGIR. La app lo muestra (marca/modelo/rango de
+ * años/asientos) y manda su `id` como `modelSpecId` al registrar. No incluye campos de revisión.
+ */
+export const driverVehicleModelView = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  yearFrom: z.number().int(),
+  yearTo: z.number().int(),
   vehicleType: mobileVehicleType,
-  /** Placa peruana XXX-XXX (guion opcional). fleet la normaliza y revalida. */
-  plate: z.string().min(1),
+  seats: z.number().int(),
+});
+export type DriverVehicleModelView = z.infer<typeof driverVehicleModelView>;
+
+/** GET /drivers/vehicle-models → catálogo de modelos aprobados (filtrable por vehicleType y q). */
+export const driverVehicleModelList = z.array(driverVehicleModelView);
+export type DriverVehicleModelList = z.infer<typeof driverVehicleModelList>;
+
+/**
+ * POST /drivers/vehicle-models → body. El conductor SOLICITA un modelo que no está en el catálogo (B5-2.c).
+ * Trae solo lo que conoce; el operador completa la ficha técnica al aprobar. Queda PENDING_REVIEW.
+ */
+export const requestVehicleModelRequest = z.object({
   make: z.string().min(1).max(60),
   model: z.string().min(1).max(60),
-  /** Año del vehículo (>= 2005). BR-D04 (>= 2017) lo aplica fleet-service. */
-  year: z.number().int().min(2005).max(new Date().getUTCFullYear() + 1),
-  color: z.string().min(1).max(30).optional(),
+  yearFrom: z.number().int().min(1990).max(new Date().getUTCFullYear() + 1),
+  yearTo: z.number().int().min(1990).max(new Date().getUTCFullYear() + 1),
+  vehicleType: mobileVehicleType,
+  seats: z.number().int().min(1).max(20),
 });
-export type RegisterVehicleRequest = z.infer<typeof registerVehicleRequest>;
+export type RequestVehicleModelRequest = z.infer<typeof requestVehicleModelRequest>;
+
+/** Respuesta del alta de solicitud: lo mínimo para confirmarle al conductor que quedó en revisión. */
+export const driverModelRequestView = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  status: z.string(),
+});
+export type DriverModelRequestView = z.infer<typeof driverModelRequestView>;
 
 /**
  * Vehículo del conductor (POST /drivers/vehicles y GET /drivers/vehicles).

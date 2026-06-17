@@ -1,8 +1,8 @@
-import { Banner, Button, IconButton, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
+import { Banner, Button, IconButton, SafeScreen, spacing, Text, TextField, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { FadeInView } from '../../../../shared/presentation/components/motion';
+import { StyleSheet, View } from 'react-native';
+import { FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
 import { OtpField } from '../components/OtpField';
 import { OtpKeypad } from '../components/OtpKeypad';
 import { IconChevronLeft } from '../components/icons';
@@ -554,17 +554,17 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
       </View>
 
       {!isRegister ? (
-        <Pressable
+        <PressableScale
           accessibilityRole="button"
           accessibilityLabel={t('auth.email.forgotCta')}
           hitSlop={8}
           onPress={goToForgot}
-          style={styles.forgotLink}
+          contentStyle={styles.forgotLink}
         >
           <Text variant="subhead" color="accent">
             {t('auth.email.forgotCta')}
           </Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
     </SafeScreen>
   );
@@ -580,12 +580,13 @@ interface SegmentTabProps {
 function SegmentTab({ label, active, onPress }: SegmentTabProps): React.JSX.Element {
   const theme = useTheme();
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="tab"
       accessibilityLabel={label}
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      style={[
+      style={styles.segmentTabPressable}
+      contentStyle={[
         styles.segmentTab,
         {
           backgroundColor: active ? theme.colors.surfaceElevated : 'transparent',
@@ -596,7 +597,7 @@ function SegmentTab({ label, active, onPress }: SegmentTabProps): React.JSX.Elem
       <Text variant="bodyStrong" color={active ? 'ink' : 'inkMuted'}>
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -613,13 +614,13 @@ function ResendRow({ cooldown, busy, onResend, labelIdle, labelWaiting }: Resend
   const theme = useTheme();
   const disabled = cooldown > 0 || busy;
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={cooldown > 0 ? labelWaiting : labelIdle}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onResend}
-      style={[
+      contentStyle={[
         styles.resendRow,
         {
           borderColor: theme.colors.border,
@@ -631,30 +632,30 @@ function ResendRow({ cooldown, busy, onResend, labelIdle, labelWaiting }: Resend
       <Text variant="bodyStrong" color="inkMuted" tabular>
         {cooldown > 0 ? labelWaiting : labelIdle}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
-  backRow: { marginTop: 4, marginBottom: 8, alignItems: 'flex-start' },
-  copy: { gap: 8, marginTop: 8, marginBottom: 24 },
+  backRow: { marginTop: spacing.xs, marginBottom: spacing.sm, alignItems: 'flex-start' },
+  copy: { gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing['2xl'] },
   subtitle: {},
   fields: { gap: 18 },
-  fieldLabel: { marginBottom: 8 },
+  fieldLabel: { marginBottom: spacing.sm },
   segment: {
     flexDirection: 'row',
-    padding: 4,
-    gap: 4,
+    padding: spacing.xs,
+    gap: spacing.xs,
     borderWidth: 1,
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
+  segmentTabPressable: { flex: 1 },
   segmentTab: {
-    flex: 1,
-    minHeight: 44,
+    minHeight: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  forgotLink: { alignSelf: 'flex-start', marginTop: 16, paddingVertical: 8 },
+  forgotLink: { alignSelf: 'flex-start', marginTop: spacing.lg, paddingVertical: spacing.sm },
   keypad: { marginTop: 18 },
   expiry: { marginTop: 18 },
   resetPassword: { marginTop: 18 },

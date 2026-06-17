@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /** Metadatos de presentación de cada k-ring editable. El contrato sólo tiene dos radios. */
 const RINGS: readonly {
@@ -134,21 +134,24 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
 
       <div className="flex items-center gap-3">
         {canManage ? (
-          <ConfirmDialog
-            trigger={
-              <Button type="button" disabled={!valid || !dirty || update.isPending} loading={update.isPending}>
-                Guardar radios
-              </Button>
-            }
-            title="Actualizar radios de dispatch"
-            description={`El feed de mapa pasará a k=${values.nearbyKRing} (${kRingLabel(
-              values.nearbyKRing,
-            )}) y las pujas a k=${values.matchKRing} (${kRingLabel(
-              values.matchKRing,
-            )}). Afecta a TODO el despacho nuevo y queda auditado.`}
-            confirmLabel="Actualizar radios"
-            onConfirm={save}
-          />
+          !valid || !dirty || update.isPending ? (
+            <Button type="button" disabled loading={update.isPending}>
+              Guardar radios
+            </Button>
+          ) : (
+            <StepUpDialog
+              trigger={
+                <Button type="button">Guardar radios</Button>
+              }
+              title="Actualizar radios de dispatch"
+              description={`El feed de mapa pasará a k=${values.nearbyKRing} (${kRingLabel(
+                values.nearbyKRing,
+              )}) y las pujas a k=${values.matchKRing} (${kRingLabel(
+                values.matchKRing,
+              )}). Esta acción cambia el despacho global y queda auditada.`}
+              onVerified={save}
+            />
+          )
         ) : (
           <p className="text-xs text-ink-subtle">
             Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar los radios.

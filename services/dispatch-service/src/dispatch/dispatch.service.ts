@@ -8,12 +8,13 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
+import { isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, type LatLon } from '@veo/utils';
 import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry } from '../hot-index/hot-index.port';
+import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry, type DriverVehicleAttrs } from '../hot-index/hot-index.port';
 import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { MatchingService } from './matching.service';
@@ -83,10 +84,23 @@ export class DispatchService {
       // Guard ATÓMICO (no check-then-act): outcome + driverId van en el WHERE. Dos accepts concurrentes del
       // MISMO dueño → solo UNO matchea OFFERED y gana; el que llega tarde ve count=0 → 409 Conflict
       // (idempotencia honesta). El driverId en el WHERE es defensa en profundidad sobre el ownership-check.
-      const claimed = await tx.dispatchMatch.updateMany({
-        where: { id: matchId, driverId, outcome: DispatchOutcome.OFFERED },
-        data: { outcome: DispatchOutcome.ACCEPTED, respondedAt },
-      });
+      let claimed: { count: number };
+      try {
+        claimed = await tx.dispatchMatch.updateMany({
+          where: { id: matchId, driverId, outcome: DispatchOutcome.OFFERED },
+          data: { outcome: DispatchOutcome.ACCEPTED, respondedAt },
+        });
+      } catch (err) {
+        // BROADCAST EMERGENCY (B5-vert): dos conductores aceptan ofertas DISTINTAS del MISMO viaje casi a la
+        // vez; ambos pasan su CAS de match (matchIds distintos OFFERED), pero el índice UNIQUE PARCIAL
+        // (trip_id WHERE outcome='ACCEPTED') deja que solo UNO quede ACCEPTED — el 2º viola el unique.
+        // Lo traducimos a 409 limpio (no un 500). Helper ESTRUCTURAL (@veo/database): el `instanceof` del
+        // cliente generado por servicio no matchearía cross-cliente. En el secuencial este path no se da.
+        if (isUniqueViolation(err, 'trip_id')) {
+          throw new ConflictError('La emergencia ya fue tomada por otro conductor', { tripId: match.tripId });
+        }
+        throw err;
+      }
       if (claimed.count === 0) {
         // count===0 acá = el DUEÑO ya validado llega tarde sobre un match ya respondido/expirado → 409.
         // NO se confunde con el 404-no-dueño de arriba: ese ya cortó antes del CAS.
@@ -114,8 +128,46 @@ export class DispatchService {
     await this.hotIndex.markBusy(view.driverId);
     // Cierra la sesión de matching (MATCHED) → el advance/reconciler ya no la tocan. Antes: respond() in-process.
     await this.matching.markMatched(view.tripId);
+    // BROADCAST EMERGENCY (B5-vert): retira las ofertas HERMANAS vivas (las otras N-1 del broadcast) y avisa
+    // a los perdedores. En el flujo STANDARD no hay hermanas (1 OFFERED/viaje) ⇒ no-op. Idempotente.
+    await this.retractSiblingOffers(view.tripId, view.id);
     domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     return view;
+  }
+
+  /**
+   * Retira las ofertas HERMANAS vivas de un viaje tras un accept ganador (broadcast EMERGENCY). El ganador ya
+   * cerró la sesión; estas ya no pueden aceptarse (el índice UNIQUE PARCIAL lo impide). Cada una: CAS a
+   * TIMEOUT (idempotente — si el sweep o un reject la tomó, count=0 y se salta) + `dispatch.offer_withdrawn`
+   * (reason: taken) por outbox, para que la app del conductor retire la tarjeta. STANDARD: sin hermanas, no-op.
+   */
+  private async retractSiblingOffers(tripId: string, winnerMatchId: string): Promise<void> {
+    const siblings = await this.prisma.read.dispatchMatch.findMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED, id: { not: winnerMatchId } },
+      select: { id: true, driverId: true },
+    });
+    for (const sib of siblings) {
+      await this.prisma.write.$transaction(async (tx) => {
+        const claimed = await tx.dispatchMatch.updateMany({
+          where: { id: sib.id, outcome: DispatchOutcome.OFFERED },
+          data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
+        });
+        if (claimed.count === 0) return; // el sweep / un reject concurrente ya la cerró
+        const envelope = createEnvelope({
+          eventType: 'dispatch.offer_withdrawn',
+          producer: 'dispatch-service',
+          payload: { tripId, driverId: sib.driverId, reason: 'taken' },
+          dedupKey: `offer_withdrawn:${tripId}:${sib.driverId}`,
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: tripId,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+      });
+    }
   }
 
   async reject(matchId: string, driverId: string): Promise<MatchView> {
@@ -153,8 +205,13 @@ export class DispatchService {
    * la clase de vehículo activa del conductor y se persiste en el hot index para filtrar el matching.
    * OBLIGATORIA (ADR 013 · Lote D): el default legacy vive en el borde Kafka, no acá.
    */
-  async ingestLocation(driverId: string, point: LatLon, vehicleType: VehicleClass): Promise<void> {
-    await this.hotIndex.upsertLocation(driverId, point, vehicleType);
+  async ingestLocation(
+    driverId: string,
+    point: LatLon,
+    vehicleType: VehicleClass,
+    attrs?: DriverVehicleAttrs,
+  ): Promise<void> {
+    await this.hotIndex.upsertLocation(driverId, point, vehicleType, attrs);
   }
 
   /**

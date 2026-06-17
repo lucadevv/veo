@@ -1,4 +1,4 @@
-import { Button, Text, useReducedMotion, useTheme } from '@veo/ui-kit';
+import { Button, spacing, Text, useReducedMotion, useTheme } from '@veo/ui-kit';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -21,6 +21,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
+import { uuidv7 } from '../../../../shared/utils/uuid';
+import { CONSENT_POLICY_VERSION } from '../../domain/usecases';
+import { PendingConsentStatus } from '../../domain/pendingConsent';
 import { AnimatedDots, FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
 import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
@@ -170,7 +173,8 @@ export function OnboardingScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const complete = useOnboardingStore((state) => state.complete);
-  const recordConsent = useDependency(TOKENS.recordConsentUseCase);
+  const pendingConsentStore = useDependency(TOKENS.pendingConsentStore);
+  const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
 
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const scrollX = useSharedValue(0);
@@ -203,21 +207,31 @@ export function OnboardingScreen(): React.JSX.Element {
   );
 
   /**
-   * Acepta y continúa: registra el consentimiento Ley N.° 29733 en el backend (BEST-EFFORT,
-   * fuente de verdad servidor) sin bloquear la navegación, y persiste el flag local como caché.
-   * `recordConsent.execute` no lanza (reintenta suave y degrada a `null`), así que el onboarding
-   * avanza siempre; el `RootNavigator` conmuta de stack al cambiar `completed`.
+   * Acepta y continúa: ENCOLA el consentimiento Ley N.° 29733 en la cola durable (MMKV) con un
+   * `dedupKey` UUIDv7 único, dispara un primer intento de entrega (best-effort) y completa el
+   * onboarding sin bloquear la navegación. El onboarding ocurre ANTES del login, así que este primer
+   * flush suele fallar (sin sesión / 401): la aceptación queda `Pending` y se entrega tras el login
+   * (y como red, en boot/foreground). El `RootNavigator` conmuta de stack al cambiar `completed`.
    */
   const onAccept = useCallback(() => {
-    void recordConsent.execute({
-      dataProcessing: data,
-      inCabinCamera: camera,
-      location,
-      // Marketing es opt-in EXPLÍCITO posterior (ajustes), no se asume en el onboarding (Ley 29733).
-      marketing: false,
+    pendingConsentStore.save({
+      status: PendingConsentStatus.Pending,
+      selection: {
+        dataProcessing: data,
+        inCabinCamera: camera,
+        location,
+        // Marketing es opt-in EXPLÍCITO posterior (ajustes), no se asume en el onboarding (Ley 29733).
+        marketing: false,
+      },
+      policyVersion: CONSENT_POLICY_VERSION,
+      // dedupKey ÚNICO de esta aceptación, COMPARTIDO por todos sus reintentos (idempotencia server-side).
+      dedupKey: uuidv7(),
+      capturedAt: new Date().toISOString(),
+      attempts: 0,
     });
+    void syncPendingConsent.flush();
     complete();
-  }, [recordConsent, data, camera, location, complete]);
+  }, [pendingConsentStore, syncPendingConsent, data, camera, location, complete]);
 
   const isLast = page === SLIDE_COUNT - 1;
 
@@ -266,7 +280,7 @@ export function OnboardingScreen(): React.JSX.Element {
             <Text variant="label" color="accent" style={styles.eyebrow}>
               {t('onboarding.safety.eyebrow')}
             </Text>
-            <Text variant="display" style={styles.slideTitle}>
+            <Text variant="displayEditorial" style={styles.slideTitle}>
               {t('onboarding.safety.title')}
             </Text>
             <Text variant="body" color="inkMuted" align="center" style={styles.slideBody}>
@@ -278,7 +292,7 @@ export function OnboardingScreen(): React.JSX.Element {
         {/* ── Slide 2 · Auto (solo servicio, sin precio) ──────────────── */}
         <View style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}>
           <View style={styles.copy}>
-            <Text variant="title1" style={styles.slideTitleLeft}>
+            <Text variant="titleEditorial" style={styles.slideTitleLeft}>
               {t('onboarding.price.title')}
             </Text>
             <Text variant="body" color="inkMuted" style={styles.slideBodyLeft}>
@@ -297,7 +311,7 @@ export function OnboardingScreen(): React.JSX.Element {
         {/* ── Slide 3 · Consentimientos (Ley N.° 29733) ───────────────── */}
         <View style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}>
           <View style={styles.copy}>
-            <Text variant="title1" align="center" style={styles.slideTitle}>
+            <Text variant="titleEditorial" align="center" style={styles.slideTitle}>
               {t('onboarding.consent.title')}
             </Text>
             <Text variant="body" color="inkMuted" align="center" style={styles.slideBody}>
@@ -411,14 +425,14 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: 'flex-end' },
   stepPill: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3 },
   // El contenido se ancla ABAJO (sobre el refuerzo del velo) — la foto respira arriba.
-  slide: { flex: 1, justifyContent: 'flex-end', paddingBottom: 24 },
+  slide: { flex: 1, justifyContent: 'flex-end', paddingBottom: spacing['2xl'] },
   copy: { gap: 10 },
   eyebrow: { textTransform: 'uppercase', textAlign: 'center' },
   slideTitle: { textAlign: 'center' },
   slideTitleLeft: {},
   slideBody: { maxWidth: 320, alignSelf: 'center' },
   slideBodyLeft: {},
-  consentSection: { marginTop: 14, marginBottom: 8 },
+  consentSection: { marginTop: 14, marginBottom: spacing.sm },
   consentRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
   consentBox: {
     width: 26,
@@ -435,8 +449,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderWidth: 1,
   },
-  vehicleInfo: { gap: 2 },
+  vehicleInfo: { gap: spacing.xxs },
   footer: {},
   actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  nextButton: { flex: 1, marginLeft: 16 },
+  nextButton: { flex: 1, marginLeft: spacing.lg },
 });

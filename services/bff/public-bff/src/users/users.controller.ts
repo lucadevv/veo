@@ -76,6 +76,7 @@ export class UsersController {
         location: dto.location,
         marketing: dto.marketing,
         policyVersion: dto.policyVersion,
+        dedupKey: dto.dedupKey,
       },
       ip || null,
     );

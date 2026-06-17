@@ -11,7 +11,10 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { FleetDocumentType, FleetDocumentStatus } from '@veo/shared-types';
+import { FleetDocumentType, FleetDocumentStatus, VehicleSegment, EnergySource } from '@veo/shared-types';
+
+/** Estados de revisión del catálogo de modelos (espeja VehicleModelStatus de fleet-service). */
+const VEHICLE_MODEL_STATUSES = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const;
 
 export class CreateVehicleDto {
   @IsString()
@@ -140,4 +143,31 @@ export class ExpirationsQueryDto {
   @Min(1)
   @Max(365)
   days?: number;
+}
+
+/** Cola de revisión del catálogo de modelos (B5-2.c). Filtro por estado (default PENDING_REVIEW en fleet). */
+export class ListModelReviewQueryDto extends PaginatedQueryDto {
+  @IsOptional()
+  @IsIn(VEHICLE_MODEL_STATUSES)
+  status?: (typeof VEHICLE_MODEL_STATUSES)[number];
+}
+
+/** Aprobación de una solicitud de modelo: el operador completa la ficha técnica (B5-2.c). */
+export class ApproveVehicleModelDto {
+  @IsIn(Object.values(VehicleSegment))
+  segment!: VehicleSegment;
+
+  @IsIn(Object.values(EnergySource))
+  energySource!: EnergySource;
+
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  efficiency!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  seats?: number;
 }

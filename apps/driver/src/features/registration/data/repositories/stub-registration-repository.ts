@@ -11,6 +11,9 @@ import {
   type RegistrationRepository,
   type RegistrationSubmissionResult,
   type ResubmitResult,
+  type VehicleModelOption,
+  type VehicleModelRequestInput,
+  type VehicleModelRequestResult,
   type VehicleRegisterInput,
   type VehicleView,
 } from '../../domain';
@@ -43,13 +46,31 @@ export class StubRegistrationRepository implements RegistrationRepository {
     return {
       id: `dev-vehicle-${Date.now()}`,
       plate: input.plate,
-      make: input.make,
-      model: input.model,
+      // B5-2: con modelSpecId el backend snapshotea make/model del catálogo; el stub no tiene catálogo,
+      // así que cae a lo que venga o a un placeholder plausible.
+      make: input.make ?? 'Catálogo',
+      model: input.model ?? 'Modelo',
       year: input.year,
       vehicleType: input.vehicleType,
       status: 'PENDING_REVIEW',
       docStatus: 'PENDING_REVIEW',
     };
+  }
+
+  async listVehicleModels(params: {vehicleType: VehicleType}): Promise<VehicleModelOption[]> {
+    await delay(200);
+    // Catálogo de muestra para el flujo de UI local (sin backend). Filtra por tipo como el real.
+    const all: VehicleModelOption[] = [
+      {id: 'dev-yaris', make: 'Toyota', model: 'Yaris', yearFrom: 2017, yearTo: 2024, vehicleType: VehicleType.CAR, seats: 5},
+      {id: 'dev-i10', make: 'Hyundai', model: 'i10', yearFrom: 2018, yearTo: 2024, vehicleType: VehicleType.CAR, seats: 5},
+      {id: 'dev-bajaj', make: 'Bajaj', model: 'RE', yearFrom: 2018, yearTo: 2024, vehicleType: VehicleType.MOTO, seats: 3},
+    ];
+    return all.filter(m => m.vehicleType === params.vehicleType);
+  }
+
+  async requestVehicleModel(input: VehicleModelRequestInput): Promise<VehicleModelRequestResult> {
+    await delay(400);
+    return {id: `dev-model-req-${Date.now()}`, make: input.make, model: input.model, status: 'PENDING_REVIEW'};
   }
 
   async listVehicles(): Promise<VehicleView[]> {

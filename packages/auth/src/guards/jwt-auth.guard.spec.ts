@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { UnauthorizedError } from '@veo/utils';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard.js';
 import type { SubjectType } from '../jwt.js';
 
 function context(authHeader?: string) {

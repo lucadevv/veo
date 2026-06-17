@@ -150,6 +150,7 @@ export class AdminService {
       roles: admin.roles as AdminRole[],
       sid: 'stepup', // el sid real lo mantiene el refresh; este token solo eleva MFA
       mfaAt: Math.floor(Date.now() / 1000),
+      email: admin.email, // operador staff: email legible para watermark/audit (BR-S02)
     });
     return { accessToken };
   }
@@ -180,8 +181,9 @@ export class AdminService {
       roles: roles as AdminRole[],
       sid: sessionId,
       mfaAt: Math.floor(Date.now() / 1000),
+      email, // operador staff: email legible para watermark/audit (BR-S02)
     });
-    const refreshToken = await this.jwt.signRefreshToken({ sub: id, sid: sessionId, jti: newJti });
+    const refreshToken = await this.jwt.signRefreshToken({ sub: id, sid: sessionId, jti: newJti, typ: 'admin' });
     return { accessToken, refreshToken, admin: { id, email, roles } };
   }
 }

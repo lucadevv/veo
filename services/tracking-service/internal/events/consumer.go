@@ -6,9 +6,47 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 )
+
+// Backoff del read-loop de los consumers ante errores PERSISTENTES de FetchMessage (p.ej. broker
+// inalcanzable / EOF). Sin esto el loop hace `continue` instantáneo y, con un error persistente, inunda
+// el log (millones de líneas) y tumba el proceso. Crece exponencialmente hasta un techo; se resetea al
+// primer fetch exitoso.
+//
+// El EOF al arranque es TRANSITORIO (kafka todavía no listo cuando el servicio levanta): el backoff lo
+// absorbe y los consumers se recuperan solos al conectar. Verificado en vivo: con kafka arriba hay 0 EOF
+// y tracking produce/consume OK (ready-check kafka=up, publish driver.location_updated). Sin el backoff,
+// ese transitorio inundaba el log (millones de líneas) y tumbaba el proceso.
+const (
+	readBackoffInitial = 250 * time.Millisecond
+	readBackoffMax     = 5 * time.Second
+)
+
+// nextReadBackoff devuelve el siguiente backoff (exponencial, capeado). cur==0 ⇒ el inicial.
+func nextReadBackoff(cur time.Duration) time.Duration {
+	if cur <= 0 {
+		return readBackoffInitial
+	}
+	if next := cur * 2; next < readBackoffMax {
+		return next
+	}
+	return readBackoffMax
+}
+
+// sleepCtx duerme d o hasta que ctx se cancele. Devuelve false si se canceló (el loop debe salir).
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
 
 // Eraser borra el histórico GPS de un conductor (derecho al olvido, Ley 29733).
 // history.Store lo satisface; el consumer depende de esta abstracción (DIP).
@@ -63,6 +101,7 @@ func (c *ErasureConsumer) run(ctx context.Context) {
 		slog.String("topic", c.reader.Config().Topic),
 		slog.String("group", c.reader.Config().GroupID),
 	)
+	var backoff time.Duration
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
@@ -70,9 +109,15 @@ func (c *ErasureConsumer) run(ctx context.Context) {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, kafka.ErrGroupClosed) {
 				return
 			}
-			c.log.Warn("kafka: error leyendo mensaje", slog.Any("err", err))
+			backoff = nextReadBackoff(backoff)
+			c.log.Warn("kafka: error leyendo mensaje; reintento con backoff",
+				slog.Any("err", err), slog.Duration("backoff", backoff))
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
 			continue
 		}
+		backoff = 0 // fetch exitoso: resetea el backoff
 
 		if err := c.handle(ctx, msg.Value); err != nil {
 			// No commiteamos el offset → Kafka reentrega el mensaje (retry).

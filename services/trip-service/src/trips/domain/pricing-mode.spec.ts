@@ -76,9 +76,9 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
     expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(PricingMode.FIXED);
   });
 
-  it('DEFAULT_SCHEDULE (sin schedule cargado) → PUJA (degradación honesta §8.2)', () => {
+  it('DEFAULT_SCHEDULE (sin schedule cargado) → FIXED (B5: default de sistema = precio fijo)', () => {
     expect(resolveMode(DEFAULT_SCHEDULE, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(
-      PricingMode.PUJA,
+      PricingMode.FIXED,
     );
   });
 

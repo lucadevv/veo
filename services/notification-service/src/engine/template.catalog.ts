@@ -36,6 +36,8 @@ export const TEMPLATE_KEYS = {
   PAYMENT_CENTRAL_ALERT: 'payment.central_alert',
   CHAT_MESSAGE: 'chat.message',
   CONTACT_OTP: 'contact.otp',
+  VEHICLE_MODEL_APPROVED: 'fleet.vehicle_model_approved',
+  VEHICLE_MODEL_REJECTED: 'fleet.vehicle_model_rejected',
 } as const;
 
 /** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
@@ -291,5 +293,21 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: null,
     body: 'Tu codigo VEO para verificar tu contacto de confianza es {{code}}. Valido 5 minutos. No lo compartas.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador APRUEBA el modelo que solicitó: ya puede operar con él.
+    key: TEMPLATE_KEYS.VEHICLE_MODEL_APPROVED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Modelo aprobado',
+    body: 'Tu {{make}} {{model}} ya esta habilitado para trabajar.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador RECHAZA el modelo que solicitó.
+    key: TEMPLATE_KEYS.VEHICLE_MODEL_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Modelo rechazado',
+    body: 'Tu solicitud de {{make}} {{model}} no fue aprobada. Contacta a soporte.',
   },
 ];

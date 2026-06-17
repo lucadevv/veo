@@ -1,8 +1,7 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
-import { hexAlpha } from './color';
 import { IconStarFilled } from './icons';
 
 export interface TripRatingTagProps {

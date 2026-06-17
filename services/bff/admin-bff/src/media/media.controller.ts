@@ -1,13 +1,26 @@
 /**
- * VIDEO (doble-auth) — solicitud de acceso, aprobación con step-up MFA, y listado de segmentos.
- * RBAC: compliance/admin. La aprobación exige @RequireStepUpMfa() (StepUpMfaGuard).
+ * VIDEO (doble-auth) — solicitud de acceso, decisión (approve con step-up MFA / reject solo-rol),
+ * stream firmado (step-up MFA), listado de segmentos y token de cámara EN VIVO.
+ * RBAC: compliance/admin a nivel clase. approve y stream exigen @RequireStepUpMfa() (StepUpMfaGuard).
  */
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { MediaService, type ApprovedAccess, type LiveViewerToken, type SegmentView } from './media.service';
-import { LiveAccessDto, RequestAccessDto, SegmentsQueryDto } from './dto/media.dto';
+import {
+  MediaService,
+  type LiveViewerToken,
+  type MediaAccessRequestView,
+  type SegmentView,
+  type SignedMedia,
+} from './media.service';
+import { AccessRequestsQueryDto, LiveAccessDto, RequestAccessDto, SegmentsQueryDto } from './dto/media.dto';
+
+/** Página con cursor; misma forma que `paginated()` del contrato admin-web. */
+interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
 
 @ApiTags('media')
 @Controller('media')
@@ -15,21 +28,52 @@ import { LiveAccessDto, RequestAccessDto, SegmentsQueryDto } from './dto/media.d
 export class MediaController {
   constructor(private readonly media: MediaService) {}
 
-  @Post('access')
+  @Get('access-requests')
+  @ApiOperation({ summary: 'Lista las solicitudes de acceso a video (opcional por estado)' })
+  async listRequests(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: AccessRequestsQueryDto,
+  ): Promise<Page<MediaAccessRequestView>> {
+    // media-service devuelve un array; el contrato admin es paginado. Sin cursor downstream → nextCursor null.
+    const items = await this.media.listRequests(user, query.status);
+    return { items, nextCursor: null };
+  }
+
+  @Post('access-requests')
   @ApiOperation({ summary: 'Solicita acceso a video de un viaje (queda PENDING)' })
   requestAccess(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RequestAccessDto,
-  ): Promise<{ id: string; status: string }> {
+  ): Promise<MediaAccessRequestView> {
     return this.media.requestAccess(user, dto);
   }
 
-  @Post('access/:id/approve')
+  @Post('access-requests/:id/approve')
   @HttpCode(200)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Aprueba el acceso (requiere MFA fresca); devuelve URL firmada + watermark' })
-  approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<ApprovedAccess> {
-    return this.media.approveAccess(user, id);
+  @ApiOperation({ summary: 'Aprueba el acceso (requiere MFA fresca)' })
+  approve(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MediaAccessRequestView> {
+    return this.media.approveRequest(user, id);
+  }
+
+  @Post('access-requests/:id/reject')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Rechaza el acceso (solo rol, sin step-up)' })
+  reject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MediaAccessRequestView> {
+    return this.media.rejectRequest(user, id);
+  }
+
+  @Get('access-requests/:id/stream')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'URL firmada del video aprobado (requiere MFA fresca); incluye watermark' })
+  stream(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<SignedMedia> {
+    return this.media.streamRequest(user, id);
   }
 
   @Post('live/token')
