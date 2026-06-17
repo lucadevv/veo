@@ -1,24 +1,31 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { ThemeProvider } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {ThemeProvider} from '@veo/ui-kit';
 import React from 'react';
-import { Text } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import TestRenderer, { act } from 'react-test-renderer';
+import {Text} from 'react-native';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+import TestRenderer, {act} from 'react-test-renderer';
 import '../../../../i18n';
 
 // `useReducedMotion` (ui-kit) usa AccessibilityInfo; el preset de RN no lo implementa. Stubs seguros.
 {
-  const { AccessibilityInfo } = jest.requireActual('react-native');
-  jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
-  jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  const {AccessibilityInfo} = jest.requireActual('react-native');
+  jest
+    .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+    .mockResolvedValue(false);
+  jest
+    .spyOn(AccessibilityInfo, 'addEventListener')
+    .mockReturnValue({remove: jest.fn()});
 }
 
-import { PaymentMethodPicker } from './PaymentMethodPicker';
-import { DIGITAL_PAYMENT_METHODS, PAYMENT_METHODS } from '../stores/paymentPrefsStore';
+import {PaymentMethodPicker} from './PaymentMethodPicker';
+import {
+  DIGITAL_PAYMENT_METHODS,
+  PAYMENT_METHODS,
+} from '../stores/paymentPrefsStore';
 
 const INITIAL_METRICS = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+  frame: {x: 0, y: 0, width: 390, height: 844},
+  insets: {top: 47, left: 0, right: 0, bottom: 34},
 };
 
 function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
@@ -37,7 +44,9 @@ function render(node: React.ReactElement): TestRenderer.ReactTestRenderer {
 function texts(renderer: TestRenderer.ReactTestRenderer): string[] {
   return renderer.root
     .findAllByType(Text)
-    .flatMap((n) => (Array.isArray(n.props.children) ? n.props.children : [n.props.children]))
+    .flatMap(n =>
+      Array.isArray(n.props.children) ? n.props.children : [n.props.children],
+    )
     .filter((c): c is string => typeof c === 'string');
 }
 
@@ -52,9 +61,11 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={() => {}}
       />,
     );
-    const rows = renderer.root.findAllByProps({ accessibilityRole: 'radio' });
-    const labels = new Set(rows.map((r) => r.props.accessibilityLabel));
-    expect(labels).toEqual(new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']));
+    const rows = renderer.root.findAllByProps({accessibilityRole: 'radio'});
+    const labels = new Set(rows.map(r => r.props.accessibilityLabel));
+    expect(labels).toEqual(
+      new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
+    );
   });
 
   it('marca como seleccionada SOLO la fila del método actual', () => {
@@ -67,11 +78,11 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={() => {}}
       />,
     );
-    const rows = renderer.root.findAllByProps({ accessibilityRole: 'radio' });
+    const rows = renderer.root.findAllByProps({accessibilityRole: 'radio'});
     const selected = new Set(
       rows
-        .filter((r) => r.props.accessibilityState?.selected === true)
-        .map((r) => r.props.accessibilityLabel),
+        .filter(r => r.props.accessibilityState?.selected === true)
+        .map(r => r.props.accessibilityLabel),
     );
     expect([...selected]).toEqual(['Plin']);
   });
@@ -89,8 +100,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
       />,
     );
     const plin = renderer.root
-      .findAllByProps({ accessibilityRole: 'radio' })
-      .find((r) => r.props.accessibilityLabel === 'Plin');
+      .findAllByProps({accessibilityRole: 'radio'})
+      .find(r => r.props.accessibilityLabel === 'Plin');
     act(() => plin?.props.onPress());
     expect(onSelect).toHaveBeenCalledWith('PLIN', false);
   });
@@ -107,11 +118,11 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={onSelect}
       />,
     );
-    const remember = renderer.root.findByProps({ accessibilityRole: 'checkbox' });
+    const remember = renderer.root.findByProps({accessibilityRole: 'checkbox'});
     act(() => remember.props.onPress());
     const plin = renderer.root
-      .findAllByProps({ accessibilityRole: 'radio' })
-      .find((r) => r.props.accessibilityLabel === 'Plin');
+      .findAllByProps({accessibilityRole: 'radio'})
+      .find(r => r.props.accessibilityLabel === 'Plin');
     act(() => plin?.props.onPress());
     expect(onSelect).toHaveBeenCalledWith('PLIN', true);
   });
@@ -166,7 +177,9 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={() => {}}
       />,
     );
-    expect(renderer.root.findAllByProps({ accessibilityRole: 'checkbox' })).toHaveLength(0);
+    expect(
+      renderer.root.findAllByProps({accessibilityRole: 'checkbox'}),
+    ).toHaveLength(0);
   });
 });
 
@@ -181,12 +194,18 @@ describe('PaymentMethodPicker · variante compact (cambiar método de un cobro)'
       />,
     );
     const out = texts(renderer);
-    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']));
+    expect(out).toEqual(
+      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
+    );
     // Efectivo NUNCA en el set digital.
     expect(out).not.toContain('Efectivo');
     // Sin radio (filas de acción), sin checkbox de recordar, sin pill de predeterminado.
-    expect(renderer.root.findAllByProps({ accessibilityRole: 'radio' })).toHaveLength(0);
-    expect(renderer.root.findAllByProps({ accessibilityRole: 'checkbox' })).toHaveLength(0);
+    expect(
+      renderer.root.findAllByProps({accessibilityRole: 'radio'}),
+    ).toHaveLength(0);
+    expect(
+      renderer.root.findAllByProps({accessibilityRole: 'checkbox'}),
+    ).toHaveLength(0);
     expect(out).not.toContain('Tu predeterminado');
   });
 
@@ -201,8 +220,8 @@ describe('PaymentMethodPicker · variante compact (cambiar método de un cobro)'
       />,
     );
     const yape = renderer.root
-      .findAllByProps({ accessibilityRole: 'button' })
-      .find((r) => r.props.accessibilityLabel === 'Yape');
+      .findAllByProps({accessibilityRole: 'button'})
+      .find(r => r.props.accessibilityLabel === 'Yape');
     expect(yape?.props.accessibilityState?.disabled).toBe(true);
   });
 
@@ -217,8 +236,8 @@ describe('PaymentMethodPicker · variante compact (cambiar método de un cobro)'
       />,
     );
     const plin = renderer.root
-      .findAllByProps({ accessibilityRole: 'button' })
-      .find((r) => r.props.accessibilityLabel === 'Plin');
+      .findAllByProps({accessibilityRole: 'button'})
+      .find(r => r.props.accessibilityLabel === 'Plin');
     act(() => plin?.props.onPress());
     expect(onSelect).toHaveBeenCalledWith('PLIN', false);
   });

@@ -1,6 +1,6 @@
-import { type HttpClient, promoValidationView } from '@veo/api-client';
-import type { PromoValidationView } from '../domain/entities';
-import type { PromosRepository } from '../domain/promosRepository';
+import {type HttpClient, promoValidationView} from '@veo/api-client';
+import type {PromoValidationView} from '../domain/entities';
+import type {PromosRepository} from '../domain/promosRepository';
 
 /**
  * Implementación REAL de `PromosRepository` contra el public-bff (`POST /promos/validate`, Ola 2A).
@@ -11,7 +11,7 @@ export class HttpPromosRepository implements PromosRepository {
 
   validate(code: string, fareCents: number): Promise<PromoValidationView> {
     return this.http.post('/promos/validate', {
-      body: { code, fareCents },
+      body: {code, fareCents},
       schema: promoValidationView,
     });
   }

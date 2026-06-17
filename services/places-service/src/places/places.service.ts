@@ -15,11 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../infra/prisma.service';
 import { PlaceKind, Prisma, type SavedPlace } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
-import {
-  FavoritesLimitError,
-  PlaceNotFoundError,
-  PlaceValidationError,
-} from './places.errors';
+import { FavoritesLimitError, PlaceNotFoundError, PlaceValidationError } from './places.errors';
 
 /** Entrada de creación/edición (sin id ni userId: el userId viene del contexto autenticado). */
 export interface SavePlaceInput {

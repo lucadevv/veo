@@ -32,9 +32,7 @@ type NamedStyles<T> = { [P in keyof T]: ViewStyle | TextStyle | ImageStyle };
  * Crea estilos dependientes del tema y los memoiza por instancia de tema.
  * Uso: `const styles = useThemedStyles((t) => ({ box: { backgroundColor: t.colors.surface } }))`.
  */
-export function useThemedStyles<T extends NamedStyles<T>>(
-  factory: (theme: Theme) => T,
-): T {
+export function useThemedStyles<T extends NamedStyles<T>>(factory: (theme: Theme) => T): T {
   const theme = useTheme();
   // Memoiza por tema: el factory es puro (sólo lee tokens), así evitamos recrear estilos por render.
   return useMemo(() => StyleSheet.create(factory(theme)), [theme]);

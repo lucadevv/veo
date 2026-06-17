@@ -1,10 +1,10 @@
-import type { PaymentView } from '@veo/api-client';
-import { Banner, Button, Card, Text, useTheme } from '@veo/ui-kit';
+import type {PaymentView} from '@veo/api-client';
+import {Banner, Button, Card, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Clipboard, Image, StyleSheet, View } from 'react-native';
-import { formatDateTime } from '../../../../shared/utils/format';
-import { openExternalUrl } from '../../../../shared/utils/linking';
+import {useTranslation} from 'react-i18next';
+import {Clipboard, Image, StyleSheet, View} from 'react-native';
+import {formatDateTime} from '../../../../shared/utils/format';
+import {openExternalUrl} from '../../../../shared/utils/linking';
 
 // La pregunta "¿trae checkout?" vive en el DOMINIO (`hasCheckout` de `domain/paymentOutcome`): acá
 // solo se RENDERIZAN los medios. La copia local murió con la migración a `PaymentOutcome`.
@@ -51,7 +51,7 @@ export function CheckoutInstructions({
   header,
 }: CheckoutInstructionsProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const [copied, setCopied] = React.useState(false);
   // Copia del ENLACE de pago (deepLink) — estado propio para no confundirse con el "copiar CIP".
   const [payLinkCopied, setPayLinkCopied] = React.useState(false);
@@ -78,7 +78,7 @@ export function CheckoutInstructions({
   // Vencido → estado honesto, sin botones de pago que ya no sirven.
   if (isCheckoutExpired(payment)) {
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Banner
           tone="warn"
           title={t('settlement.checkout.expiredTitle')}
@@ -96,7 +96,7 @@ export function CheckoutInstructions({
   }
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       {header ?? (
         <>
           <Text variant="title3">{t('settlement.checkout.title')}</Text>
@@ -181,9 +181,9 @@ export function CheckoutInstructions({
       {/* qrCode → imagen (data-URI base64) con instrucción y accessibilityLabel. */}
       {payment.qrCode ? (
         <Card variant="outlined" padding="lg">
-          <View style={{ gap: theme.spacing.md, alignItems: 'center' }}>
+          <View style={{gap: theme.spacing.md, alignItems: 'center'}}>
             <Image
-              source={{ uri: payment.qrCode }}
+              source={{uri: payment.qrCode}}
               style={styles.qr}
               resizeMode="contain"
               accessible
@@ -199,18 +199,26 @@ export function CheckoutInstructions({
       {/* cip → código CIP grande, copiable (Clipboard) + dónde pagarlo. */}
       {payment.cip ? (
         <Card variant="outlined" padding="lg">
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Text variant="footnote" color="inkMuted">
               {t('settlement.checkout.cipLabel')}
             </Text>
-            <Text variant="title2" tabular selectable accessibilityLabel={payment.cip}>
+            <Text
+              variant="title2"
+              tabular
+              selectable
+              accessibilityLabel={payment.cip}>
               {payment.cip}
             </Text>
             <Text variant="footnote" color="inkMuted">
               {t('settlement.checkout.cipInstruction')}
             </Text>
             <Button
-              label={copied ? t('settlement.checkout.cipCopied') : t('settlement.checkout.copy')}
+              label={
+                copied
+                  ? t('settlement.checkout.cipCopied')
+                  : t('settlement.checkout.copy')
+              }
               variant="secondary"
               fullWidth
               onPress={() => {
@@ -227,7 +235,9 @@ export function CheckoutInstructions({
       {/* Vencimiento + hint de actualización automática. */}
       {payment.checkoutExpiresAt ? (
         <Text variant="footnote" color="inkMuted" align="center">
-          {t('settlement.checkout.expiresAt', { date: formatDateTime(payment.checkoutExpiresAt) })}
+          {t('settlement.checkout.expiresAt', {
+            date: formatDateTime(payment.checkoutExpiresAt),
+          })}
         </Text>
       ) : null}
       <Text variant="footnote" color="inkMuted" align="center">
@@ -238,5 +248,5 @@ export function CheckoutInstructions({
 }
 
 const styles = StyleSheet.create({
-  qr: { width: 220, height: 220, borderRadius: 12 },
+  qr: {width: 220, height: 220, borderRadius: 12},
 });

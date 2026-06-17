@@ -1,4 +1,4 @@
-import type {EarningsBreakdown, EarningsPeriodBreakdown} from '../entities';
+import type { EarningsBreakdown, EarningsPeriodBreakdown } from '../entities';
 
 /**
  * Neto esperado de un período según el modelo de negocio VEO: bruto − comisión + propinas.
@@ -31,10 +31,10 @@ export interface BreakdownLineItem {
 /** Devuelve las líneas del desglose en orden de lectura: bruto, comisión, propinas, neto. */
 export function breakdownLines(b: EarningsPeriodBreakdown): BreakdownLineItem[] {
   return [
-    {key: 'gross', cents: b.grossCents},
-    {key: 'commission', cents: b.commissionCents},
-    {key: 'tips', cents: b.tipCents},
-    {key: 'net', cents: b.netCents},
+    { key: 'gross', cents: b.grossCents },
+    { key: 'commission', cents: b.commissionCents },
+    { key: 'tips', cents: b.tipCents },
+    { key: 'net', cents: b.netCents },
   ];
 }
 

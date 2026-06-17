@@ -1,5 +1,5 @@
-import type { CreateYapeAffiliation, YapeAffiliationView } from '@veo/api-client';
-import type { AffiliationRepository } from './affiliationRepository';
+import type {CreateYapeAffiliation, YapeAffiliationView} from '@veo/api-client';
+import type {AffiliationRepository} from './affiliationRepository';
 import {
   AffiliationValidationError,
   CreateYapeAffiliationUseCase,
@@ -29,9 +29,15 @@ function makeRepo(view: YapeAffiliationView): {
       }
       return Promise.resolve(view);
     }),
-    revokeYapeAffiliation: jest.fn().mockResolvedValue({ ...view, status: 'REVOKED' }),
+    revokeYapeAffiliation: jest
+      .fn()
+      .mockResolvedValue({...view, status: 'REVOKED'}),
   };
-  return { repo, lastCreate: () => lastCreate, createCalledWithNoArg: () => calledWithNoArg };
+  return {
+    repo,
+    lastCreate: () => lastCreate,
+    createCalledWithNoArg: () => calledWithNoArg,
+  };
 }
 
 const PROCESS_VIEW: YapeAffiliationView = {
@@ -49,11 +55,11 @@ const validInput: CreateYapeAffiliation = {
 
 describe('CreateYapeAffiliationUseCase · validación', () => {
   it('rechaza un DNI que no tiene 8 dígitos (campo document)', async () => {
-    const { repo } = makeRepo(PROCESS_VIEW);
+    const {repo} = makeRepo(PROCESS_VIEW);
     const useCase = new CreateYapeAffiliationUseCase(repo);
     expect.assertions(3);
     try {
-      await useCase.execute({ ...validInput, document: '123' });
+      await useCase.execute({...validInput, document: '123'});
     } catch (err) {
       expect(err).toBeInstanceOf(AffiliationValidationError);
       expect((err as AffiliationValidationError).field).toBe('document');
@@ -62,39 +68,42 @@ describe('CreateYapeAffiliationUseCase · validación', () => {
   });
 
   it('acepta una entrada válida, normaliza (trim) y NO agrega teléfono ni nombre', async () => {
-    const { repo, lastCreate } = makeRepo(PROCESS_VIEW);
+    const {repo, lastCreate} = makeRepo(PROCESS_VIEW);
     const useCase = new CreateYapeAffiliationUseCase(repo);
-    const view = await useCase.execute({ documentType: 'DN', document: ' 12345678 ' });
+    const view = await useCase.execute({
+      documentType: 'DN',
+      document: ' 12345678 ',
+    });
     expect(view.status).toBe('PROCESS');
     // El BFF resuelve el nombre del perfil y fija origin: la app SOLO manda documento + tipo.
-    expect(lastCreate()).toEqual({ documentType: 'DN', document: '12345678' });
+    expect(lastCreate()).toEqual({documentType: 'DN', document: '12345678'});
   });
 
   it('acepta CE alfanumérico de 9–12 (no exige 8 dígitos como el DNI)', async () => {
-    const { repo } = makeRepo(PROCESS_VIEW);
+    const {repo} = makeRepo(PROCESS_VIEW);
     const useCase = new CreateYapeAffiliationUseCase(repo);
     await expect(
-      useCase.execute({ documentType: 'CE', document: 'X12345678' }),
-    ).resolves.toMatchObject({ status: 'PROCESS' });
+      useCase.execute({documentType: 'CE', document: 'X12345678'}),
+    ).resolves.toMatchObject({status: 'PROCESS'});
   });
 });
 
 describe('CreateYapeAffiliationUseCase · flujo de UN TAP (body opcional)', () => {
   it('sin argumento → invoca al repo SIN body (el server resuelve documento+nombre del perfil)', async () => {
-    const { repo, createCalledWithNoArg } = makeRepo(PROCESS_VIEW);
+    const {repo, createCalledWithNoArg} = makeRepo(PROCESS_VIEW);
     const useCase = new CreateYapeAffiliationUseCase(repo);
-    await expect(useCase.execute()).resolves.toMatchObject({ status: 'PROCESS' });
+    await expect(useCase.execute()).resolves.toMatchObject({status: 'PROCESS'});
     // UN TAP: el usecase NO valida nada localmente y delega el body vacío al repo.
     expect(createCalledWithNoArg()).toBe(true);
   });
 
   it('con documento parcial (solo tipo, sin número) → trata como UN TAP (body vacío)', async () => {
-    const { repo, createCalledWithNoArg } = makeRepo(PROCESS_VIEW);
+    const {repo, createCalledWithNoArg} = makeRepo(PROCESS_VIEW);
     const useCase = new CreateYapeAffiliationUseCase(repo);
     // `document` ausente ⇒ no es "primera vez con documento": va por el flujo de un tap.
     await expect(
-      useCase.execute({ documentType: 'DN' } as CreateYapeAffiliation),
-    ).resolves.toMatchObject({ status: 'PROCESS' });
+      useCase.execute({documentType: 'DN'} as CreateYapeAffiliation),
+    ).resolves.toMatchObject({status: 'PROCESS'});
     expect(createCalledWithNoArg()).toBe(true);
   });
 });
@@ -121,14 +130,14 @@ describe('isDocumentValid · reglas por tipo (DN 8 díg · CE 9–12 · PP 6–1
 
 describe('GetYapeAffiliationUseCase / RevokeYapeAffiliationUseCase', () => {
   it('lee el estado de la afiliación', async () => {
-    const { repo } = makeRepo({ status: 'NONE' });
+    const {repo} = makeRepo({status: 'NONE'});
     const useCase = new GetYapeAffiliationUseCase(repo);
-    await expect(useCase.execute()).resolves.toEqual({ status: 'NONE' });
+    await expect(useCase.execute()).resolves.toEqual({status: 'NONE'});
   });
 
   it('revoca y devuelve REVOKED', async () => {
-    const { repo } = makeRepo(PROCESS_VIEW);
+    const {repo} = makeRepo(PROCESS_VIEW);
     const useCase = new RevokeYapeAffiliationUseCase(repo);
-    await expect(useCase.execute()).resolves.toMatchObject({ status: 'REVOKED' });
+    await expect(useCase.execute()).resolves.toMatchObject({status: 'REVOKED'});
   });
 });

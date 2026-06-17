@@ -4,8 +4,8 @@ import {
   formatPEN,
   formatShortDate,
 } from '../src/shared/utils/format';
-import { decodePolyline } from '../src/shared/utils/polyline';
-import { uuidv4 } from '../src/shared/utils/uuid';
+import {decodePolyline} from '../src/shared/utils/polyline';
+import {uuidv4} from '../src/shared/utils/uuid';
 
 describe('format', () => {
   it('formatea céntimos PEN a soles', () => {
@@ -25,7 +25,9 @@ describe('format', () => {
   });
 
   it('formatea fecha corta es-PE', () => {
-    expect(formatShortDate('2026-05-29T10:00:00.000Z')).toMatch(/\d{2}\/\d{2}\/2026/);
+    expect(formatShortDate('2026-05-29T10:00:00.000Z')).toMatch(
+      /\d{2}\/\d{2}\/2026/,
+    );
   });
 });
 

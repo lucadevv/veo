@@ -12,19 +12,24 @@
 **Decisores:** @persona1, @persona2
 
 ## Contexto
+
 ¿Qué problema resolvemos? ¿Qué restricciones aplican?
 
 ## Decisión
+
 ¿Qué decidimos hacer?
 
 ## Alternativas consideradas
+
 - Opción A — pros / contras
 - Opción B — pros / contras
 
 ## Consecuencias
+
 ¿Qué pasa cuando aplicamos esto? Positivo y negativo.
 
 ## Referencias
+
 Links, PRs, papers.
 ```
 
@@ -37,14 +42,14 @@ Links, PRs, papers.
 
 ## ADRs vigentes
 
-| # | Título | Estado |
-|---|---|---|
-| [001](./001-monorepo-pnpm-turborepo.md) | Monorepo con pnpm + Turborepo | Aceptado |
-| [002](./002-nestjs-backend-default.md) | NestJS como framework backend por defecto | Aceptado |
-| [003](./003-react-native-mobile.md) | React Native para apps móviles | Aceptado |
+| #                                         | Título                                       | Estado   |
+| ----------------------------------------- | -------------------------------------------- | -------- |
+| [001](./001-monorepo-pnpm-turborepo.md)   | Monorepo con pnpm + Turborepo                | Aceptado |
+| [002](./002-nestjs-backend-default.md)    | NestJS como framework backend por defecto    | Aceptado |
+| [003](./003-react-native-mobile.md)       | React Native para apps móviles               | Aceptado |
 | [004](./004-postgres-redis-clickhouse.md) | Postgres + Redis + ClickHouse stack de datos | Aceptado |
-| [005](./005-kafka-eventos-dominio.md) | Kafka como event bus de dominio | Aceptado |
-| [006](./006-livekit-webrtc.md) | LiveKit autohospedado para WebRTC | Aceptado |
-| [007](./007-eks-no-fargate.md) | EKS sobre ECS Fargate | Aceptado |
-| [008](./008-h3-dispatch.md) | H3 hex tiles para dispatch geoespacial | Aceptado |
-| [009](./009-multi-repo-strategy.md) | Estrategia multi-repo (split inicial) | Aceptado |
+| [005](./005-kafka-eventos-dominio.md)     | Kafka como event bus de dominio              | Aceptado |
+| [006](./006-livekit-webrtc.md)            | LiveKit autohospedado para WebRTC            | Aceptado |
+| [007](./007-eks-no-fargate.md)            | EKS sobre ECS Fargate                        | Aceptado |
+| [008](./008-h3-dispatch.md)               | H3 hex tiles para dispatch geoespacial       | Aceptado |
+| [009](./009-multi-repo-strategy.md)       | Estrategia multi-repo (split inicial)        | Aceptado |

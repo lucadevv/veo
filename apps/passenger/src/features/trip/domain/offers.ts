@@ -1,4 +1,4 @@
-import type { OfferMadeMsg, OfferView } from '@veo/api-client';
+import type {OfferMadeMsg, OfferView} from '@veo/api-client';
 
 /** Convierte una oferta EN VIVO (socket) al shape de OfferView; las ofertas en vivo están PENDING. */
 function liveToView(msg: OfferMadeMsg): OfferView {
@@ -26,7 +26,8 @@ export function mergeOffers(
   // el refetch REST, que igual los dropea cuando pasan a STALE).
   const excluded = new Set(withdrawn);
   const byDriver = new Map<string, OfferView>();
-  for (const o of rest) if (!excluded.has(o.driverId)) byDriver.set(o.driverId, o);
+  for (const o of rest)
+    if (!excluded.has(o.driverId)) byDriver.set(o.driverId, o);
   for (const m of live) {
     if (excluded.has(m.driverId)) continue;
     const liveView = liveToView(m);

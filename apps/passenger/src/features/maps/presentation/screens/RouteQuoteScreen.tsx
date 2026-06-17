@@ -5,11 +5,11 @@ import type {
   QuoteOption,
   SpecialRequest,
 } from '@veo/api-client';
-import { isKycRequiredError } from '@veo/api-client';
-import { isPujaMode } from '@veo/shared-types';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import {isKycRequiredError} from '@veo/api-client';
+import {isPujaMode} from '@veo/shared-types';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Banner,
   Button,
@@ -20,41 +20,50 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, StatusBar, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, StatusBar, StyleSheet, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {
   offeringDisplayName,
   offeringGlyph,
 } from '../../../../shared/presentation/components/offeringGlyphs';
-import { formatDateTime, formatDistance, formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
-import { useChildModeStore } from '../../../childMode/presentation/stores/childModeStore';
-import { usePaymentPrefsStore } from '../../../payments/presentation/stores/paymentPrefsStore';
-import { PaymentMethodRow, PaymentMethodSheet, useIsYapeAutoActive } from '../../../payments/presentation';
-import { PromoField, type AppliedPromo } from '../../../promos/presentation';
-import { ScheduleSheet } from '../../../trip/presentation/components/ScheduleSheet';
-import { initialBidCents, stepBidCents } from '../../../../shared/utils/bid';
-import { uuidv4 } from '../../../../shared/utils/uuid';
-import { isWaypointSet, type RoutePlace } from '../../domain/entities';
-import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
-import { buildCreateTripInput } from '../../../trip/domain/buildCreateTripInput';
-import { RoutePointsList } from '../components/RoutePointsList';
-import { SpecialRequestChips } from '../components/SpecialRequestChips';
-import { VehicleIcon } from '../components/VehicleIcon';
-import { SelectionBump } from '../components/motion';
-import { IconArrowLeft } from '../../../trip/presentation/components/icons';
-import { useRideDraftStore } from '../stores/rideDraftStore';
+import {
+  formatDateTime,
+  formatDistance,
+  formatDurationMinutes,
+  formatPEN,
+} from '../../../../shared/utils/format';
+import {useChildModeStore} from '../../../childMode/presentation/stores/childModeStore';
+import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
+import {
+  PaymentMethodRow,
+  PaymentMethodSheet,
+  useIsYapeAutoActive,
+} from '../../../payments/presentation';
+import {PromoField, type AppliedPromo} from '../../../promos/presentation';
+import {ScheduleSheet} from '../../../trip/presentation/components/ScheduleSheet';
+import {initialBidCents, stepBidCents} from '../../../../shared/utils/bid';
+import {uuidv4} from '../../../../shared/utils/uuid';
+import {isWaypointSet, type RoutePlace} from '../../domain/entities';
+import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
+import {buildCreateTripInput} from '../../../trip/domain/buildCreateTripInput';
+import {RoutePointsList} from '../components/RoutePointsList';
+import {SpecialRequestChips} from '../components/SpecialRequestChips';
+import {VehicleIcon} from '../components/VehicleIcon';
+import {SelectionBump} from '../components/motion';
+import {IconArrowLeft} from '../../../trip/presentation/components/icons';
+import {useRideDraftStore} from '../stores/rideDraftStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** Convierte el punto de la API de mapas (lng) al `GeoPoint` de dominio (lon). */
 function toGeoPoint(point: MapPoint): GeoPoint {
-  return { lat: point.lat, lon: point.lng };
+  return {lat: point.lat, lon: point.lng};
 }
 
 /**
@@ -70,7 +79,7 @@ function toGeoPoint(point: MapPoint): GeoPoint {
  */
 export function RouteQuoteScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   // Alto real del panel flotante (medido por onLayout) para reservar ese espacio abajo al encuadrar
@@ -78,25 +87,30 @@ export function RouteQuoteScreen(): React.JSX.Element {
   // cada render). Reservamos también arriba el área del botón de atrás + notch.
   const [panelHeight, setPanelHeight] = useState(0);
   const mapFitPadding = useMemo(
-    () => ({ top: insets.top + 56, bottom: panelHeight + 24, left: 48, right: 48 }),
+    () => ({
+      top: insets.top + 56,
+      bottom: panelHeight + 24,
+      left: 48,
+      right: 48,
+    }),
     [insets.top, panelHeight],
   );
 
   const quoteRide = useDependency(TOKENS.quoteRideUseCase);
   const createTrip = useDependency(TOKENS.createTripUseCase);
   const history = useDependency(TOKENS.tripHistoryRepository);
-  const defaultMethod = usePaymentPrefsStore((s) => s.defaultMethod);
-  const setDefaultMethod = usePaymentPrefsStore((s) => s.setDefault);
+  const defaultMethod = usePaymentPrefsStore(s => s.defaultMethod);
+  const setDefaultMethod = usePaymentPrefsStore(s => s.setDefault);
   const yapeAutoActive = useIsYapeAutoActive();
   const childMode = useChildModeStore();
 
-  const origin = useRideDraftStore((s) => s.origin);
-  const destination = useRideDraftStore((s) => s.destination);
-  const waypoints = useRideDraftStore((s) => s.waypoints);
-  const setEditing = useRideDraftStore((s) => s.setEditing);
-  const addWaypoint = useRideDraftStore((s) => s.addWaypoint);
-  const removeWaypoint = useRideDraftStore((s) => s.removeWaypoint);
-  const reset = useRideDraftStore((s) => s.reset);
+  const origin = useRideDraftStore(s => s.origin);
+  const destination = useRideDraftStore(s => s.destination);
+  const waypoints = useRideDraftStore(s => s.waypoints);
+  const setEditing = useRideDraftStore(s => s.setEditing);
+  const addWaypoint = useRideDraftStore(s => s.addWaypoint);
+  const removeWaypoint = useRideDraftStore(s => s.removeWaypoint);
+  const reset = useRideDraftStore(s => s.reset);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
@@ -108,7 +122,8 @@ export function RouteQuoteScreen(): React.JSX.Element {
   // PUJA · solicitudes especiales (mascota/equipaje/silla); el conductor las ve antes de aceptar (BE-2).
   const [specialRequests, setSpecialRequests] = useState<SpecialRequest[]>([]);
   // Método de pago PARA ESTE VIAJE: sembrado del default del perfil al montar (lazy). No pisa el default.
-  const [tripPaymentMethod, setTripPaymentMethod] = useState<MobilePaymentMethod>(() => defaultMethod);
+  const [tripPaymentMethod, setTripPaymentMethod] =
+    useState<MobilePaymentMethod>(() => defaultMethod);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
 
   const ready = Boolean(origin && destination);
@@ -119,13 +134,13 @@ export function RouteQuoteScreen(): React.JSX.Element {
     [waypoints],
   );
   const quoteWaypoints = useMemo<MapPoint[]>(
-    () => setWaypoints.map((stop) => stop.point),
+    () => setWaypoints.map(stop => stop.point),
     [setWaypoints],
   );
 
   // Clave de cotización: incluye las paradas para refrescar al agregarlas/quitarlas.
   const waypointsKey = useMemo(
-    () => quoteWaypoints.map((p) => `${p.lat},${p.lng}`).join('|'),
+    () => quoteWaypoints.map(p => `${p.lat},${p.lng}`).join('|'),
     [quoteWaypoints],
   );
 
@@ -153,7 +168,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
       quoteRide.execute({
         origin: origin!.point,
         destination: destination!.point,
-        ...(quoteWaypoints.length > 0 ? { waypoints: quoteWaypoints } : {}),
+        ...(quoteWaypoints.length > 0 ? {waypoints: quoteWaypoints} : {}),
       }),
     enabled: ready,
     staleTime: 60_000,
@@ -171,15 +186,17 @@ export function RouteQuoteScreen(): React.JSX.Element {
   // y el bid dependen de la oferta ELEGIDA, no de un modo global. La app refleja, no decide.
   const quote = quoteQuery.data;
   const selectedOption = useMemo(
-    () => quote?.options.find((option) => option.id === selectedId) ?? null,
+    () => quote?.options.find(option => option.id === selectedId) ?? null,
     [quote, selectedId],
   );
   // Modo EFECTIVO de la oferta elegida (ADR 013 §1.3; fallback al top-level del quote). Predicado de
   // dominio — sin string mágico (§4-ter).
   const selectedIsPuja = isPujaMode(selectedOption?.mode ?? quote?.mode);
   // Piso + sugerido PER-OFERTA (A2): cada oferta PUJA trae lo suyo; fallback al top-level (server viejo).
-  const selectedBidFloorCents = selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
-  const selectedSuggestedCents = selectedOption?.suggestedCents ?? quote?.suggestedCents;
+  const selectedBidFloorCents =
+    selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
+  const selectedSuggestedCents =
+    selectedOption?.suggestedCents ?? quote?.suggestedCents;
 
   // Re-ancla el bid al sugerido de la oferta ELEGIDA: cambia al cambiar la ruta (nueva tarifa) O al
   // cambiar de oferta (Moto→Económico tienen sugeridos distintos), preservando ajustes manuales mientras
@@ -189,16 +206,29 @@ export function RouteQuoteScreen(): React.JSX.Element {
     if (!selectedIsPuja || !selectedOption) return;
     if (selectedSuggestedCents !== lastSuggestedRef.current) {
       lastSuggestedRef.current = selectedSuggestedCents;
-      setBidCents(initialBidCents(selectedSuggestedCents, selectedBidFloorCents));
+      setBidCents(
+        initialBidCents(selectedSuggestedCents, selectedBidFloorCents),
+      );
     }
-  }, [selectedIsPuja, selectedOption, selectedSuggestedCents, selectedBidFloorCents]);
+  }, [
+    selectedIsPuja,
+    selectedOption,
+    selectedSuggestedCents,
+    selectedBidFloorCents,
+  ]);
 
   const decrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents)),
+    () =>
+      setBidCents(b =>
+        stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents),
+      ),
     [selectedBidFloorCents],
   );
   const incrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents)),
+    () =>
+      setBidCents(b =>
+        stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents),
+      ),
     [selectedBidFloorCents],
   );
 
@@ -220,16 +250,16 @@ export function RouteQuoteScreen(): React.JSX.Element {
 
   // Navega al buscador para fijar/editar un punto del trayecto.
   const editOrigin = useCallback(() => {
-    setEditing({ kind: 'origin' });
+    setEditing({kind: 'origin'});
     navigation.navigate('Search');
   }, [navigation, setEditing]);
   const editDestination = useCallback(() => {
-    setEditing({ kind: 'destination' });
+    setEditing({kind: 'destination'});
     navigation.navigate('Search');
   }, [navigation, setEditing]);
   const editWaypoint = useCallback(
     (index: number) => {
-      setEditing({ kind: 'waypoint', index });
+      setEditing({kind: 'waypoint', index});
       navigation.navigate('Search');
     },
     [navigation, setEditing],
@@ -251,15 +281,15 @@ export function RouteQuoteScreen(): React.JSX.Element {
           selectedIsPuja,
           bidCents,
           specialRequests,
-          waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)),
+          waypoints: setWaypoints.map(stop => toGeoPoint(stop.point)),
           scheduledAt,
           promoCode: appliedPromo?.code ?? null,
-          childMode: { enabled: childMode.enabled, code: childMode.code },
+          childMode: {enabled: childMode.enabled, code: childMode.code},
         }),
         // IK · una key por intento: el reintento dedupea server-side (no crea dos boards).
         idempotencyKey,
       ),
-    onSuccess: (trip) => {
+    onSuccess: trip => {
       history.record(trip);
       childMode.reset();
       const wasScheduled = scheduledAt !== null;
@@ -273,12 +303,12 @@ export function RouteQuoteScreen(): React.JSX.Element {
       // ofertas; si es FIXED, al seguimiento. Usar el modo del viaje (no el del quote) reconcilia un flip
       // de política entre cotizar y crear.
       if (isPujaMode(trip.dispatchMode)) {
-        navigation.navigate('OffersBoard', { tripId: trip.id });
+        navigation.navigate('OffersBoard', {tripId: trip.id});
         return;
       }
-      navigation.navigate('TripActive', { tripId: trip.id });
+      navigation.navigate('TripActive', {tripId: trip.id});
     },
-    onError: (error) => {
+    onError: error => {
       // Gate de seguridad server-side: si el BFF exige verificación facial (403 KYC_REQUIRED), la UI
       // REFLEJA derivando a la verificación. Tras verificar, el pasajero vuelve y reintenta el pedido.
       if (isKycRequiredError(error)) {
@@ -292,14 +322,19 @@ export function RouteQuoteScreen(): React.JSX.Element {
     !createMutation.isPending &&
     ready &&
     Boolean(selectedId) &&
-    (selectedIsPuja ? bidCents !== null && bidCents >= selectedBidFloorCents : true);
+    (selectedIsPuja
+      ? bidCents !== null && bidCents >= selectedBidFloorCents
+      : true);
 
   const formatEta = (option: QuoteOption): string =>
-    t('trip.etaMinutes', { minutes: formatDurationMinutes(option.etaSeconds) });
+    t('trip.etaMinutes', {minutes: formatDurationMinutes(option.etaSeconds)});
 
   // Subtítulo de la opción: etiqueta del tipo de vehículo (del registro de glyphs, ADR 013 §1.6)
   // y, en la más barata, el sello.
-  const optionDescription = (option: QuoteOption, cheapest: boolean): string => {
+  const optionDescription = (
+    option: QuoteOption,
+    cheapest: boolean,
+  ): string => {
     const vehicle = t(offeringGlyph(option).vehicleLabelKey);
     return cheapest ? `${vehicle} · ${t('quote.cheapest')}` : vehicle;
   };
@@ -309,13 +344,17 @@ export function RouteQuoteScreen(): React.JSX.Element {
     : scheduledAt !== null
       ? t('schedule.confirm')
       : selectedIsPuja && bidCents !== null
-        ? t('puja.searchDriver', { price: formatPEN(bidCents) })
+        ? t('puja.searchDriver', {price: formatPEN(bidCents)})
         : t('quote.confirm');
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
+    <View style={[styles.root, {backgroundColor: theme.colors.bg}]}>
       {/* Barra de estado clara sobre el mapa oscuro full-bleed. */}
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
 
       {/* MAPA FULL-BLEED: ocupa toda la pantalla (también bajo la barra de estado), inmersivo. El
           panel inferior y el botón de atrás FLOTAN encima → el mapa se ve a través de las esquinas
@@ -324,7 +363,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
         <AppMap
           origin={origin ? toGeoPoint(origin.point) : null}
           destination={destination ? toGeoPoint(destination.point) : null}
-          waypoints={setWaypoints.map((stop) => toGeoPoint(stop.point))}
+          waypoints={setWaypoints.map(stop => toGeoPoint(stop.point))}
           routeCoordinates={routeCoordinates}
           fitToRoute={Boolean(routeCoordinates)}
           fitEdgePadding={mapFitPadding}
@@ -332,7 +371,11 @@ export function RouteQuoteScreen(): React.JSX.Element {
         />
       </View>
 
-      <View style={[styles.backButton, { top: insets.top + theme.spacing.sm, left: theme.spacing.lg }]}>
+      <View
+        style={[
+          styles.backButton,
+          {top: insets.top + theme.spacing.sm, left: theme.spacing.lg},
+        ]}>
         <IconButton
           accessibilityLabel={t('actions.back')}
           variant="surface"
@@ -342,7 +385,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
       </View>
 
       <View
-        onLayout={(e) => setPanelHeight(e.nativeEvent.layout.height)}
+        onLayout={e => setPanelHeight(e.nativeEvent.layout.height)}
         style={[
           styles.sheet,
           {
@@ -352,9 +395,10 @@ export function RouteQuoteScreen(): React.JSX.Element {
             borderColor: theme.colors.border,
             paddingBottom: insets.bottom + theme.spacing.md,
           },
-        ]}
-      >
-        <View style={[styles.grabber, { backgroundColor: theme.colors.borderStrong }]} />
+        ]}>
+        <View
+          style={[styles.grabber, {backgroundColor: theme.colors.borderStrong}]}
+        />
 
         <ScrollView
           style={styles.optionsScroll}
@@ -363,8 +407,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
             paddingTop: theme.spacing.sm,
             gap: theme.spacing.md,
           }}
-          showsVerticalScrollIndicator={false}
-        >
+          showsVerticalScrollIndicator={false}>
           {/* Trayecto editable: origen → paradas → destino (+ agregar parada). */}
           <RoutePointsList
             origin={origin}
@@ -382,7 +425,11 @@ export function RouteQuoteScreen(): React.JSX.Element {
             {quoteQuery.data ? (
               <Text variant="footnote" color="inkMuted" tabular>
                 {formatDistance(quoteQuery.data.distanceMeters)} ·{' '}
-                {t('trip.etaMinutes', { minutes: formatDurationMinutes(quoteQuery.data.durationSeconds) })}
+                {t('trip.etaMinutes', {
+                  minutes: formatDurationMinutes(
+                    quoteQuery.data.durationSeconds,
+                  ),
+                })}
               </Text>
             ) : null}
           </View>
@@ -391,16 +438,24 @@ export function RouteQuoteScreen(): React.JSX.Element {
             <Banner
               tone="danger"
               title={t('quote.error')}
-              action={{ label: t('actions.retry'), onPress: () => quoteQuery.refetch() }}
+              action={{
+                label: t('actions.retry'),
+                onPress: () => quoteQuery.refetch(),
+              }}
             />
           ) : null}
 
-          {quoteQuery.isLoading || (ready && !quoteQuery.data && !quoteQuery.isError) ? (
-            <View style={{ gap: theme.spacing.sm }}>
+          {quoteQuery.isLoading ||
+          (ready && !quoteQuery.data && !quoteQuery.isError) ? (
+            <View style={{gap: theme.spacing.sm}}>
               <Skeleton variant="rect" height={64} />
               <Skeleton variant="rect" height={64} />
               <Skeleton variant="rect" height={64} />
-              <Text variant="footnote" color="inkSubtle" align="center" style={{ marginTop: theme.spacing.sm }}>
+              <Text
+                variant="footnote"
+                color="inkSubtle"
+                align="center"
+                style={{marginTop: theme.spacing.sm}}>
                 {t('quote.calculating')}
               </Text>
             </View>
@@ -408,15 +463,23 @@ export function RouteQuoteScreen(): React.JSX.Element {
             // UI REACTIVA (igual que QuotingBody): el selector se muestra SIEMPRE; debajo de la oferta
             // elegida, si resuelve PUJA → panel de oferta (piso/sugerido PROPIOS); si es FIJO → el precio
             // firme está en la fila. Así el flujo programado TAMBIÉN puede pujar una Moto.
-            <View style={{ gap: theme.spacing.sm }}>
+            <View style={{gap: theme.spacing.sm}}>
               {options.map((option, index) => (
-                <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
+                <SelectionBump
+                  key={option.id}
+                  index={index}
+                  selected={option.id === selectedId}>
                   <RideOptionRow
                     name={offeringDisplayName(option)}
                     price={formatPEN(option.priceCents)}
                     eta={formatEta(option)}
                     description={optionDescription(option, index === 0)}
-                    icon={<VehicleIcon icon={option.icon} vehicleType={option.vehicleType} />}
+                    icon={
+                      <VehicleIcon
+                        icon={option.icon}
+                        vehicleType={option.vehicleType}
+                      />
+                    }
                     selected={option.id === selectedId}
                     onPress={() => selectChanged(option.id)}
                   />
@@ -424,7 +487,8 @@ export function RouteQuoteScreen(): React.JSX.Element {
               ))}
 
               {selectedIsPuja && selectedOption && bidCents !== null ? (
-                <View style={{ gap: theme.spacing.lg, marginTop: theme.spacing.xs }}>
+                <View
+                  style={{gap: theme.spacing.lg, marginTop: theme.spacing.xs}}>
                   <BidPanel
                     bidCents={bidCents}
                     suggestedCents={selectedSuggestedCents}
@@ -432,19 +496,29 @@ export function RouteQuoteScreen(): React.JSX.Element {
                     onDecrement={decrementBid}
                     onIncrement={incrementBid}
                   />
-                  <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
+                  <SpecialRequestChips
+                    value={specialRequests}
+                    onChange={setSpecialRequests}
+                  />
                 </View>
               ) : null}
             </View>
           )}
         </ScrollView>
 
-        <View style={{ paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.md, gap: theme.spacing.sm }}>
+        <View
+          style={{
+            paddingHorizontal: theme.spacing.xl,
+            paddingTop: theme.spacing.md,
+            gap: theme.spacing.sm,
+          }}>
           {/* Resumen de programación o atajo para programar. */}
           {scheduledAt !== null ? (
             <View style={styles.scheduleRow}>
               <StatusPill
-                label={t('schedule.scheduledFor', { when: formatDateTime(new Date(scheduledAt).toISOString()) })}
+                label={t('schedule.scheduledFor', {
+                  when: formatDateTime(new Date(scheduledAt).toISOString()),
+                })}
                 tone="brand"
                 dot
               />
@@ -467,7 +541,11 @@ export function RouteQuoteScreen(): React.JSX.Element {
 
           {selectedOption ? (
             <PromoField
-              fareCents={selectedIsPuja && bidCents !== null ? bidCents : selectedFareCents}
+              fareCents={
+                selectedIsPuja && bidCents !== null
+                  ? bidCents
+                  : selectedFareCents
+              }
               applied={appliedPromo}
               onApplied={setAppliedPromo}
               onCleared={() => setAppliedPromo(null)}
@@ -500,8 +578,14 @@ export function RouteQuoteScreen(): React.JSX.Element {
             disabled={!canConfirm}
             onPress={() => createMutation.mutate()}
           />
-          {!selectedId && options.length === 0 && !quoteQuery.isLoading ? null : !selectedId ? (
-            <Text variant="footnote" color="inkSubtle" align="center" style={{ marginTop: theme.spacing.sm }}>
+          {!selectedId &&
+          options.length === 0 &&
+          !quoteQuery.isLoading ? null : !selectedId ? (
+            <Text
+              variant="footnote"
+              color="inkSubtle"
+              align="center"
+              style={{marginTop: theme.spacing.sm}}>
               {t('quote.selectOption')}
             </Text>
           ) : null}
@@ -527,7 +611,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
       <ScheduleSheet
         visible={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
-        onConfirm={(epochMs) => {
+        onConfirm={epochMs => {
           setScheduledAt(epochMs);
           setScheduleOpen(false);
         }}
@@ -537,8 +621,8 @@ export function RouteQuoteScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  backButton: { position: 'absolute' },
+  root: {flex: 1},
+  backButton: {position: 'absolute'},
   // Panel FLOTANTE sobre el mapa full-bleed: anclado abajo, ocupa el ancho y deja ver el mapa a
   // través de las esquinas superiores redondeadas.
   sheet: {
@@ -550,8 +634,23 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     maxHeight: '64%',
   },
-  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, marginBottom: 12 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  optionsScroll: { flexGrow: 0 },
-  scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  grabber: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 12,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  optionsScroll: {flexGrow: 0},
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
 });

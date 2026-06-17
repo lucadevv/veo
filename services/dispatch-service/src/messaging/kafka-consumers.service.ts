@@ -95,7 +95,12 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // reconciler de timeout), no por un await-loop con estado en proceso.
     void this.matching
       // B5-3 · category (offeringId) → el matching resuelve los requisitos de eligibilidad de la oferta.
-      .startSession({ tripId: p.tripId, origin: p.origin, requiredVehicleType, category: p.category })
+      .startSession({
+        tripId: p.tripId,
+        origin: p.origin,
+        requiredVehicleType,
+        category: p.category,
+      })
       .catch((err) => this.logger.error(`matching falló para trip ${p.tripId}: ${String(err)}`));
   }
 
@@ -175,7 +180,8 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     }
     try {
       const driverId = await this.dispatch.excludeDriverForPanic(p.tripId);
-      if (driverId) this.logger.warn(`pánico en trip ${p.tripId}: conductor ${driverId} excluido del pool`);
+      if (driverId)
+        this.logger.warn(`pánico en trip ${p.tripId}: conductor ${driverId} excluido del pool`);
       domainEventsTotal.inc({ event: 'panic.triggered', result: 'consumed' });
     } catch (err) {
       if (isPermanentDataError(err)) {

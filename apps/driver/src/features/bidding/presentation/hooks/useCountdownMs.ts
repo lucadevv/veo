@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import { useEffect, useState } from 'react';
 
 /**
  * Segundos restantes (≥ 0) hasta `targetMs` (epoch en milisegundos). Espejo del `useCountdown` de

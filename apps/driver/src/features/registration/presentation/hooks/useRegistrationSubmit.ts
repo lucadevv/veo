@@ -1,7 +1,7 @@
-import {useMutation} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
-import {SubmitRegistrationUseCase} from '../../domain';
-import {useRegistrationStore} from '../state/registrationStore';
+import { useMutation } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
+import { SubmitRegistrationUseCase } from '../../domain';
+import { useRegistrationStore } from '../state/registrationStore';
 
 /**
  * Mutación de cierre del alta: compone el borrador del store, lo valida vía el caso de uso y delega
@@ -15,12 +15,12 @@ import {useRegistrationStore} from '../state/registrationStore';
  * a sus endpoints reales con sus propios hooks; este `submit` solo siembra el estado inicial del alta.
  */
 export function useRegistrationSubmit() {
-  const {registration} = useRepositories();
-  const buildDraft = useRegistrationStore(s => s.buildDraft);
-  const setStatus = useRegistrationStore(s => s.setStatus);
+  const { registration } = useRepositories();
+  const buildDraft = useRegistrationStore((s) => s.buildDraft);
+  const setStatus = useRegistrationStore((s) => s.setStatus);
 
   return useMutation({
     mutationFn: () => new SubmitRegistrationUseCase(registration).execute(buildDraft()),
-    onSuccess: result => setStatus(result.status),
+    onSuccess: (result) => setStatus(result.status),
   });
 }

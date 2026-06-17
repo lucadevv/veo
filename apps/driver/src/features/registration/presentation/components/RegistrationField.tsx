@@ -1,8 +1,11 @@
-import React, {type ReactNode, useState} from 'react';
-import {StyleSheet, TextInput, type TextInputProps, View, type ViewStyle} from 'react-native';
-import {Text, useTheme} from '@veo/ui-kit';
+import React, { type ReactNode, useState } from 'react';
+import { StyleSheet, TextInput, type TextInputProps, View, type ViewStyle } from 'react-native';
+import { Text, useTheme } from '@veo/ui-kit';
 
-export interface RegistrationFieldProps extends Omit<TextInputProps, 'style' | 'placeholderTextColor'> {
+export interface RegistrationFieldProps extends Omit<
+  TextInputProps,
+  'style' | 'placeholderTextColor'
+> {
   /** Etiqueta dentro de la caja (arriba), nunca placeholder-only. */
   label: string;
   /** Ícono de la derecha (ya coloreado por el consumidor). */
@@ -33,8 +36,8 @@ export function RegistrationField({
   const borderColor = error
     ? theme.colors.danger
     : focused
-    ? theme.colors.accent
-    : theme.colors.border;
+      ? theme.colors.accent
+      : theme.colors.border;
 
   return (
     <View style={styles.wrap}>
@@ -50,7 +53,8 @@ export function RegistrationField({
             paddingVertical: theme.spacing.md,
           },
           containerStyle,
-        ]}>
+        ]}
+      >
         <View style={styles.texts}>
           <Text variant="footnote" color="inkMuted">
             {label}
@@ -58,11 +62,11 @@ export function RegistrationField({
           <TextInput
             accessibilityLabel={label}
             placeholderTextColor={theme.colors.inkSubtle}
-            onFocus={e => {
+            onFocus={(e) => {
               setFocused(true);
               onFocus?.(e);
             }}
-            onBlur={e => {
+            onBlur={(e) => {
               setFocused(false);
               onBlur?.(e);
             }}
@@ -86,7 +90,8 @@ export function RegistrationField({
           color="danger"
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
-          style={styles.error}>
+          style={styles.error}
+        >
           {error}
         </Text>
       ) : null}
@@ -95,10 +100,10 @@ export function RegistrationField({
 }
 
 const styles = StyleSheet.create({
-  wrap: {alignSelf: 'stretch', gap: 6},
-  box: {flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch'},
-  texts: {flex: 1, gap: 2},
-  input: {padding: 0, marginTop: 2, minHeight: 28},
-  icon: {alignItems: 'center', justifyContent: 'center'},
-  error: {paddingHorizontal: 4},
+  wrap: { alignSelf: 'stretch', gap: 6 },
+  box: { flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch' },
+  texts: { flex: 1, gap: 2 },
+  input: { padding: 0, marginTop: 2, minHeight: 28 },
+  icon: { alignItems: 'center', justifyContent: 'center' },
+  error: { paddingHorizontal: 4 },
 });

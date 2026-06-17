@@ -14,11 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
 import { TripWatchdogService } from './trip-watchdog.service';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
-import {
-  resolveStalledTarget,
-  WATCHED_STATES,
-  type WatchdogThresholds,
-} from './domain/watchdog';
+import { resolveStalledTarget, WATCHED_STATES, type WatchdogThresholds } from './domain/watchdog';
 import { Prisma, type Trip } from '../generated/prisma';
 
 const NOW = new Date('2026-06-04T12:00:00.000Z');
@@ -115,7 +111,10 @@ function makePrisma(initial: Trip[]) {
     },
     tripEvent: {
       create: async ({ data }: { data: { eventType: string; payload: unknown } }) => {
-        tripEvents.push({ eventType: data.eventType, payload: data.payload as CapturedEvent['payload'] });
+        tripEvents.push({
+          eventType: data.eventType,
+          payload: data.payload as CapturedEvent['payload'],
+        });
         return {};
       },
     },
@@ -130,8 +129,10 @@ function makePrisma(initial: Trip[]) {
     },
   };
 
-  const matchesCandidate = (t: Trip, where: { status: { in: TripStatus[] }; updatedAt: { lte: Date } }) =>
-    where.status.in.includes(t.status) && t.updatedAt.getTime() <= where.updatedAt.lte.getTime();
+  const matchesCandidate = (
+    t: Trip,
+    where: { status: { in: TripStatus[] }; updatedAt: { lte: Date } },
+  ) => where.status.in.includes(t.status) && t.updatedAt.getTime() <= where.updatedAt.lte.getTime();
 
   const prisma = {
     read: {
@@ -178,12 +179,19 @@ function mins(n: number): Date {
 
 describe('watchdog · resolveStalledTarget (dominio puro)', () => {
   it('REQUESTED vencido → EXPIRED; fresco → null', () => {
-    expect(resolveStalledTarget(TripStatus.REQUESTED, mins(11), NOW, THRESHOLDS)).toBe(TripStatus.EXPIRED);
+    expect(resolveStalledTarget(TripStatus.REQUESTED, mins(11), NOW, THRESHOLDS)).toBe(
+      TripStatus.EXPIRED,
+    );
     expect(resolveStalledTarget(TripStatus.REQUESTED, mins(9), NOW, THRESHOLDS)).toBeNull();
   });
 
   it('pre-recojo asignado (ASSIGNED/ACCEPTED/ARRIVING/ARRIVED) vencido → EXPIRED', () => {
-    for (const s of [TripStatus.ASSIGNED, TripStatus.ACCEPTED, TripStatus.ARRIVING, TripStatus.ARRIVED]) {
+    for (const s of [
+      TripStatus.ASSIGNED,
+      TripStatus.ACCEPTED,
+      TripStatus.ARRIVING,
+      TripStatus.ARRIVED,
+    ]) {
       expect(resolveStalledTarget(s, mins(16), NOW, THRESHOLDS)).toBe(TripStatus.EXPIRED);
       expect(resolveStalledTarget(s, mins(14), NOW, THRESHOLDS)).toBeNull();
     }
@@ -191,17 +199,26 @@ describe('watchdog · resolveStalledTarget (dominio puro)', () => {
 
   it('REASSIGNING vencido (sin ofertas tras re-abrir) → EXPIRED (robustez #4); fresco → null', () => {
     expect(WATCHED_STATES).toContain(TripStatus.REASSIGNING);
-    expect(resolveStalledTarget(TripStatus.REASSIGNING, mins(16), NOW, THRESHOLDS)).toBe(TripStatus.EXPIRED);
+    expect(resolveStalledTarget(TripStatus.REASSIGNING, mins(16), NOW, THRESHOLDS)).toBe(
+      TripStatus.EXPIRED,
+    );
     expect(resolveStalledTarget(TripStatus.REASSIGNING, mins(14), NOW, THRESHOLDS)).toBeNull();
   });
 
   it('IN_PROGRESS vencido → FAILED; fresco → null', () => {
-    expect(resolveStalledTarget(TripStatus.IN_PROGRESS, mins(6 * 60 + 1), NOW, THRESHOLDS)).toBe(TripStatus.FAILED);
+    expect(resolveStalledTarget(TripStatus.IN_PROGRESS, mins(6 * 60 + 1), NOW, THRESHOLDS)).toBe(
+      TripStatus.FAILED,
+    );
     expect(resolveStalledTarget(TripStatus.IN_PROGRESS, mins(60), NOW, THRESHOLDS)).toBeNull();
   });
 
   it('estados terminales / SCHEDULED no se vigilan', () => {
-    for (const s of [TripStatus.COMPLETED, TripStatus.EXPIRED, TripStatus.FAILED, TripStatus.SCHEDULED]) {
+    for (const s of [
+      TripStatus.COMPLETED,
+      TripStatus.EXPIRED,
+      TripStatus.FAILED,
+      TripStatus.SCHEDULED,
+    ]) {
       expect(WATCHED_STATES).not.toContain(s);
       expect(resolveStalledTarget(s, mins(9999), NOW, THRESHOLDS)).toBeNull();
     }
@@ -253,7 +270,11 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
   });
 
   it('REASSIGNING estancado (re-puja sin ofertas) → EXPIRED y encola trip.expired (robustez #4)', async () => {
-    const trip = buildTrip({ id: 't-reassign', status: TripStatus.REASSIGNING, updatedAt: mins(20) });
+    const trip = buildTrip({
+      id: 't-reassign',
+      status: TripStatus.REASSIGNING,
+      updatedAt: mins(20),
+    });
     const { prisma, scheduler } = makeScheduler([trip]);
 
     await scheduler.tick(NOW);
@@ -289,7 +310,12 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
   it('barrido mixto: expira pre-recojo, falla en curso, respeta el fresco', async () => {
     const trips = [
       buildTrip({ id: 'a', status: TripStatus.ASSIGNED, driverId: 'd', updatedAt: mins(20) }),
-      buildTrip({ id: 'b', status: TripStatus.IN_PROGRESS, driverId: 'd', updatedAt: mins(7 * 60) }),
+      buildTrip({
+        id: 'b',
+        status: TripStatus.IN_PROGRESS,
+        driverId: 'd',
+        updatedAt: mins(7 * 60),
+      }),
       buildTrip({ id: 'c', status: TripStatus.ARRIVED, driverId: 'd', updatedAt: mins(5) }), // fresco
     ];
     const { prisma, scheduler } = makeScheduler(trips);

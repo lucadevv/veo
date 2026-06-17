@@ -37,7 +37,11 @@ describe('RatingsService.getMyRatingForTrip', () => {
 
     const view = await svc.getMyRatingForTrip(user, 'trip-1');
 
-    expect(view).toEqual({ stars: 5, comment: '¡Excelente!', createdAt: '2026-06-07T12:00:00.000Z' });
+    expect(view).toEqual({
+      stars: 5,
+      comment: '¡Excelente!',
+      createdAt: '2026-06-07T12:00:00.000Z',
+    });
     // El contrato a la app es mínimo: NO filtra raterId/ratedId/id (no los necesita y son ruido/PII).
     expect(view).not.toHaveProperty('raterId');
     expect(view).not.toHaveProperty('id');

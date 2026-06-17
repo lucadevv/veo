@@ -169,7 +169,12 @@ export class RecordingService {
       defaultDays: this.defaultDays,
       incidentDays: this.incidentDays,
     });
-    const retentionDays = retentionDaysFor(open.hasPanic, open.hasIncident, this.defaultDays, this.incidentDays);
+    const retentionDays = retentionDaysFor(
+      open.hasPanic,
+      open.hasIncident,
+      this.defaultDays,
+      this.incidentDays,
+    );
 
     await this.prisma.write.$transaction(async (tx) => {
       await tx.mediaSegment.update({
@@ -200,7 +205,9 @@ export class RecordingService {
         where: { id: open.id },
         data: { hasPanic: true, retentionUntil: null },
       });
-      this.logger.warn(`Pánico trip=${tripId}: retención escalada a indefinida (segment=${open.id})`);
+      this.logger.warn(
+        `Pánico trip=${tripId}: retención escalada a indefinida (segment=${open.id})`,
+      );
       return { segmentId: open.id, forced: false };
     }
 

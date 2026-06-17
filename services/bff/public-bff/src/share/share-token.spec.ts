@@ -4,7 +4,12 @@ import { ValidationError } from '@veo/utils';
 import { parseShareToken, shareTokenExpiryIso } from './share-token';
 
 /** Replica el formato real de share-service: base64url("<shareId>.<expiresAtMs>.<nonce>") + "." + sig. */
-function makeToken(shareId: string, expiresAtMs: number, nonce = 'nonce', sig = 'deadbeef'): string {
+function makeToken(
+  shareId: string,
+  expiresAtMs: number,
+  nonce = 'nonce',
+  sig = 'deadbeef',
+): string {
   const body = `${shareId}.${expiresAtMs}.${nonce}`;
   const bodyB64 = Buffer.from(body, 'utf8').toString('base64url');
   return `${bodyB64}.${sig}`;

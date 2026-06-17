@@ -10,13 +10,16 @@
 type EnvModule = typeof import('../env');
 
 /** Acceso tipado a la global `__DEV__` que inyecta React Native en runtime. */
-const devGlobal = globalThis as typeof globalThis & { __DEV__?: boolean };
+const devGlobal = globalThis as typeof globalThis & {__DEV__?: boolean};
 
-type SourceCodeHolder = { SourceCode?: { scriptURL?: unknown } };
+type SourceCodeHolder = {SourceCode?: {scriptURL?: unknown}};
 
 /** Setea `NativeModules.SourceCode.scriptURL` en una instancia de react-native. */
-function setScriptURL(rn: typeof import('react-native'), scriptURL: unknown): void {
-  (rn.NativeModules as SourceCodeHolder).SourceCode = { scriptURL };
+function setScriptURL(
+  rn: typeof import('react-native'),
+  scriptURL: unknown,
+): void {
+  (rn.NativeModules as SourceCodeHolder).SourceCode = {scriptURL};
 }
 
 /**
@@ -32,12 +35,14 @@ jest.mock(
     __esModule: true,
     default: () => {
       if (mockDevServerUrl == null) {
-        throw new Error('getDevServer no disponible (test: arquitectura vieja)');
+        throw new Error(
+          'getDevServer no disponible (test: arquitectura vieja)',
+        );
       }
-      return { url: mockDevServerUrl, bundleLoadedFromServer: true };
+      return {url: mockDevServerUrl, bundleLoadedFromServer: true};
     },
   }),
-  { virtual: true },
+  {virtual: true},
 );
 
 /**
@@ -65,7 +70,10 @@ function loadEnv(opts: {
   mockDevServerUrl = opts.devServerUrl ?? null;
 
   // Instancia externa (registro restaurado tras el isolate): la lee `metroDevHost()` lazy.
-  setScriptURL(require('react-native') as typeof import('react-native'), opts.scriptURL);
+  setScriptURL(
+    require('react-native') as typeof import('react-native'),
+    opts.scriptURL,
+  );
 
   let mod!: EnvModule;
   jest.isolateModules(() => {
@@ -76,7 +84,10 @@ function loadEnv(opts: {
 
     // Instancia aislada: la leen los defaults top-level de `env.ts` al importarse
     // (sin spread del módulo entero: eso fuerza getters perezosos que explotan en jest).
-    setScriptURL(require('react-native') as typeof import('react-native'), opts.scriptURL);
+    setScriptURL(
+      require('react-native') as typeof import('react-native'),
+      opts.scriptURL,
+    );
 
     mod = require('../env') as EnvModule;
   });
@@ -87,38 +98,39 @@ function loadEnv(opts: {
 
 describe('metroDevHost', () => {
   it('parsea el host de un scriptURL http de Metro (device físico)', () => {
-    const { metroDevHost } = loadEnv({
-      scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios&dev=true',
+    const {metroDevHost} = loadEnv({
+      scriptURL:
+        'http://192.168.18.227:8081/index.bundle?platform=ios&dev=true',
     });
     expect(metroDevHost()).toBe('192.168.18.227');
   });
 
   it('parsea hostname (no IP) y soporta https', () => {
-    const { metroDevHost } = loadEnv({
+    const {metroDevHost} = loadEnv({
       scriptURL: 'https://my-mac.local:8081/index.bundle?platform=android',
     });
     expect(metroDevHost()).toBe('my-mac.local');
   });
 
   it('devuelve null para un scriptURL file:// (release, sin host)', () => {
-    const { metroDevHost } = loadEnv({
+    const {metroDevHost} = loadEnv({
       scriptURL: 'file:///var/containers/Bundle/Application/main.jsbundle',
     });
     expect(metroDevHost()).toBeNull();
   });
 
   it('devuelve null para basura / scriptURL ausente', () => {
-    expect(loadEnv({ scriptURL: 'no-soy-una-url' }).metroDevHost()).toBeNull();
-    expect(loadEnv({ scriptURL: undefined }).metroDevHost()).toBeNull();
-    expect(loadEnv({ scriptURL: '' }).metroDevHost()).toBeNull();
-    expect(loadEnv({ scriptURL: 123 }).metroDevHost()).toBeNull();
+    expect(loadEnv({scriptURL: 'no-soy-una-url'}).metroDevHost()).toBeNull();
+    expect(loadEnv({scriptURL: undefined}).metroDevHost()).toBeNull();
+    expect(loadEnv({scriptURL: ''}).metroDevHost()).toBeNull();
+    expect(loadEnv({scriptURL: 123}).metroDevHost()).toBeNull();
   });
 });
 
 describe('metroDevHost · new-arch (getDevServer, con scriptURL=null)', () => {
   it('deriva el host de getDevServer cuando scriptURL es null (bridgeless)', () => {
     // El caso REAL del bug: RCTNewArchEnabled=true → scriptURL null, pero getDevServer da el host.
-    const { metroDevHost } = loadEnv({
+    const {metroDevHost} = loadEnv({
       scriptURL: null,
       devServerUrl: 'http://localhost:8081/',
     });
@@ -126,7 +138,7 @@ describe('metroDevHost · new-arch (getDevServer, con scriptURL=null)', () => {
   });
 
   it('device físico new-arch: getDevServer trae la IP de la Mac', () => {
-    const { metroDevHost } = loadEnv({
+    const {metroDevHost} = loadEnv({
       scriptURL: null,
       devServerUrl: 'http://192.168.18.238:8081/',
     });
@@ -134,7 +146,7 @@ describe('metroDevHost · new-arch (getDevServer, con scriptURL=null)', () => {
   });
 
   it('getDevServer tiene PRECEDENCIA sobre scriptURL si ambos están', () => {
-    const { metroDevHost } = loadEnv({
+    const {metroDevHost} = loadEnv({
       scriptURL: 'http://192.168.18.227:8081/index.bundle',
       devServerUrl: 'http://192.168.18.238:8081/',
     });
@@ -144,7 +156,7 @@ describe('metroDevHost · new-arch (getDevServer, con scriptURL=null)', () => {
 
 describe('env · precedencia de resolución (dev)', () => {
   it('metro-derived: sin override, deriva las URLs del host de Metro', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
       config: {},
     });
@@ -156,7 +168,7 @@ describe('env · precedencia de resolución (dev)', () => {
   });
 
   it('Config (.env) GANA al metro-derived: staging/prod no se ven afectados', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       // Aunque haya host de Metro, el override explícito del .env tiene prioridad.
       scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
       config: {
@@ -173,7 +185,7 @@ describe('env · precedencia de resolución (dev)', () => {
   });
 
   it('fallback: sin host de Metro y sin override → localhost', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       scriptURL: 'file:///main.jsbundle',
       config: {},
     });
@@ -184,9 +196,11 @@ describe('env · precedencia de resolución (dev)', () => {
 
 describe('env · auto-sanado de IP LAN stale (dev)', () => {
   it('override a IP LAN privada distinta del host VIVO de Metro → usa el host de Metro (el bug "sin conexión")', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     // El .env quedó con una IP baked (192.168.18.227) pero el DHCP rotó la Mac a .238.
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
       config: {
         PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1',
@@ -205,17 +219,17 @@ describe('env · auto-sanado de IP LAN stale (dev)', () => {
   });
 
   it('override a IP LAN IGUAL al host de Metro → se respeta el override tal cual (no hay nada stale)', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
-      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:9999/custom/api' },
+      config: {PUBLIC_BFF_URL: 'http://192.168.18.227:9999/custom/api'},
     });
     expect(env.publicBffUrl).toBe('http://192.168.18.227:9999/custom/api');
   });
 
   it('override NO-LAN (dominio staging) GANA aunque haya host de Metro: nunca se auto-sana', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
-      config: { PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1' },
+      config: {PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1'},
     });
     expect(env.publicBffUrl).toBe('https://api.veo.pe/passenger/api/v1');
   });
@@ -223,11 +237,13 @@ describe('env · auto-sanado de IP LAN stale (dev)', () => {
   it('REGRESIÓN new-arch (el bug real): scriptURL=null + getDevServer localhost + .env IP stale → localhost', () => {
     // Bridgeless (RCTNewArchEnabled): scriptURL es null, así que el auto-derive DEBE venir de
     // getDevServer. Sin esto, metroHost=null → el self-heal no dispara → gana la .227 muerta.
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { env } = loadEnv({
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const {env} = loadEnv({
       scriptURL: null,
       devServerUrl: 'http://localhost:8081/',
-      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1' },
+      config: {PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1'},
     });
     expect(env.publicBffUrl).toBe('http://localhost:4001/api/v1');
     expect(warn).toHaveBeenCalled();
@@ -235,10 +251,10 @@ describe('env · auto-sanado de IP LAN stale (dev)', () => {
   });
 
   it('release (!__DEV__): NUNCA se auto-sana — el override del .env manda siempre', () => {
-    const { env } = loadEnv({
+    const {env} = loadEnv({
       dev: false,
       scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
-      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1' },
+      config: {PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1'},
     });
     expect(env.publicBffUrl).toBe('http://192.168.18.227:4001/api/v1');
   });

@@ -1,10 +1,5 @@
 import { adminBffUrl } from './env';
-import {
-  getAccessToken,
-  getRefreshToken,
-  setAccessCookie,
-  setRefreshCookie,
-} from './cookies';
+import { getAccessToken, getRefreshToken, setAccessCookie, setRefreshCookie } from './cookies';
 
 /**
  * Cliente server-side hacia el admin-bff. El access token vive en una cookie httpOnly

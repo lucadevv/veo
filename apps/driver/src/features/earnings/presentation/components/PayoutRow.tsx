@@ -1,7 +1,7 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {StatusPill, Text, useTheme, type StatusTone} from '@veo/ui-kit';
-import {IconReceipt} from '../../../../shared/presentation/icons';
+import { StyleSheet, View } from 'react-native';
+import { StatusPill, Text, useTheme, type StatusTone } from '@veo/ui-kit';
+import { IconReceipt } from '../../../../shared/presentation/icons';
 
 export interface PayoutRowProps {
   /** Monto de la liquidación ya formateado (formatPEN). */
@@ -31,9 +31,9 @@ export function PayoutRow({
   return (
     <View>
       {showDivider ? (
-        <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+        <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
       ) : null}
-      <View style={[styles.row, {paddingVertical: theme.spacing.md, gap: theme.spacing.lg}]}>
+      <View style={[styles.row, { paddingVertical: theme.spacing.md, gap: theme.spacing.lg }]}>
         <View
           style={[
             styles.icon,
@@ -42,7 +42,8 @@ export function PayoutRow({
               borderRadius: theme.radii.md,
               borderColor: theme.colors.border,
             },
-          ]}>
+          ]}
+        >
           <IconReceipt size={20} color={theme.colors.accent} strokeWidth={2} />
         </View>
         <View style={styles.body}>
@@ -60,8 +61,8 @@ export function PayoutRow({
 }
 
 const styles = StyleSheet.create({
-  divider: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  row: {flexDirection: 'row', alignItems: 'center'},
+  divider: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  row: { flexDirection: 'row', alignItems: 'center' },
   icon: {
     width: 40,
     height: 40,
@@ -69,5 +70,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  body: {flex: 1, gap: 2},
+  body: { flex: 1, gap: 2 },
 });

@@ -1,12 +1,7 @@
 /** Tests de los mappers/agregadores de viajes (puros, sin I/O). */
 import { describe, it, expect } from 'vitest';
 import { ExternalServiceError } from '@veo/utils';
-import {
-  buildDriverView,
-  buildTripDetail,
-  buildVehicleView,
-  toTripStatus,
-} from './trip-views';
+import { buildDriverView, buildTripDetail, buildVehicleView, toTripStatus } from './trip-views';
 import type { AggregateReply, DriverReply, TripReply, VehicleReply } from '../infra/grpc-types';
 
 const driver: DriverReply = {

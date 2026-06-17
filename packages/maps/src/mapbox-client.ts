@@ -22,7 +22,12 @@ import type {
   RouteWithStepsResult,
 } from './types.js';
 import { polylineToGeoJson } from './polyline.js';
-import { buildInstruction, OsrmManeuverModifier, OsrmManeuverType, type OsrmStepManeuver } from './steps.js';
+import {
+  buildInstruction,
+  OsrmManeuverModifier,
+  OsrmManeuverType,
+  type OsrmStepManeuver,
+} from './steps.js';
 
 type FetchImpl = typeof fetch;
 

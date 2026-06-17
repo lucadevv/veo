@@ -1,11 +1,15 @@
-import { ApiError, type CreateYapeAffiliation, type HttpClient } from '@veo/api-client';
+import {
+  ApiError,
+  type CreateYapeAffiliation,
+  type HttpClient,
+} from '@veo/api-client';
 import {
   AffiliationDocumentMissingError,
   AffiliationProfileIncompleteError,
   AffiliationUnsupportedError,
   AffiliationUpstreamUnavailableError,
 } from '../domain/affiliationUsecases';
-import { HttpAffiliationRepository } from './httpAffiliationRepository';
+import {HttpAffiliationRepository} from './httpAffiliationRepository';
 
 /** Doble mínimo de HttpClient: solo los verbos que usa el repo de afiliación. */
 function makeHttp(overrides: Partial<HttpClient>): HttpClient {
@@ -27,19 +31,27 @@ const input: CreateYapeAffiliation = {
 describe('HttpAffiliationRepository', () => {
   it('GET devuelve la vista de afiliación tal cual', async () => {
     const http = makeHttp({
-      get: jest.fn().mockResolvedValue({ status: 'ACTIVE', phoneMasked: '9*****678' }),
+      get: jest
+        .fn()
+        .mockResolvedValue({status: 'ACTIVE', phoneMasked: '9*****678'}),
     });
     const repo = new HttpAffiliationRepository(http);
-    await expect(repo.getYapeAffiliation()).resolves.toMatchObject({ status: 'ACTIVE' });
+    await expect(repo.getYapeAffiliation()).resolves.toMatchObject({
+      status: 'ACTIVE',
+    });
     expect(http.get).toHaveBeenCalledWith(
       '/payments/affiliations/yape',
-      expect.objectContaining({ schema: expect.anything() }),
+      expect.objectContaining({schema: expect.anything()}),
     );
   });
 
   it('POST propaga el deepLink del alta (PROCESS)', async () => {
-    const view = { status: 'PROCESS', deepLink: 'yape://approve/x', affiliationId: 'x' };
-    const http = makeHttp({ post: jest.fn().mockResolvedValue(view) });
+    const view = {
+      status: 'PROCESS',
+      deepLink: 'yape://approve/x',
+      affiliationId: 'x',
+    };
+    const http = makeHttp({post: jest.fn().mockResolvedValue(view)});
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation(input)).resolves.toMatchObject({
       status: 'PROCESS',
@@ -48,23 +60,29 @@ describe('HttpAffiliationRepository', () => {
   });
 
   it('UN TAP: sin argumento manda body VACÍO {} (el server arma todo del perfil)', async () => {
-    const view = { status: 'PROCESS', deepLink: 'yape://approve/x', affiliationId: 'x' };
+    const view = {
+      status: 'PROCESS',
+      deepLink: 'yape://approve/x',
+      affiliationId: 'x',
+    };
     const post = jest.fn().mockResolvedValue(view);
-    const repo = new HttpAffiliationRepository(makeHttp({ post }));
-    await expect(repo.createYapeAffiliation()).resolves.toMatchObject({ status: 'PROCESS' });
+    const repo = new HttpAffiliationRepository(makeHttp({post}));
+    await expect(repo.createYapeAffiliation()).resolves.toMatchObject({
+      status: 'PROCESS',
+    });
     expect(post).toHaveBeenCalledWith(
       '/payments/affiliations/yape',
-      expect.objectContaining({ body: {} }),
+      expect.objectContaining({body: {}}),
     );
   });
 
   it('primera vez: manda el documento en el body (el server lo persiste en el perfil)', async () => {
-    const post = jest.fn().mockResolvedValue({ status: 'PROCESS' });
-    const repo = new HttpAffiliationRepository(makeHttp({ post }));
+    const post = jest.fn().mockResolvedValue({status: 'PROCESS'});
+    const repo = new HttpAffiliationRepository(makeHttp({post}));
     await repo.createYapeAffiliation(input);
     expect(post).toHaveBeenCalledWith(
       '/payments/affiliations/yape',
-      expect.objectContaining({ body: input }),
+      expect.objectContaining({body: input}),
     );
   });
 
@@ -72,7 +90,9 @@ describe('HttpAffiliationRepository', () => {
     const http = makeHttp({
       post: jest
         .fn()
-        .mockRejectedValue(new ApiError(422, 'PROFILE_DOCUMENT_MISSING', 'falta documento')),
+        .mockRejectedValue(
+          new ApiError(422, 'PROFILE_DOCUMENT_MISSING', 'falta documento'),
+        ),
     });
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation()).rejects.toBeInstanceOf(
@@ -82,7 +102,11 @@ describe('HttpAffiliationRepository', () => {
 
   it('traduce 422 PROFILE_NAME_MISSING a AffiliationProfileIncompleteError (CTA al perfil)', async () => {
     const http = makeHttp({
-      post: jest.fn().mockRejectedValue(new ApiError(422, 'PROFILE_NAME_MISSING', 'falta nombre')),
+      post: jest
+        .fn()
+        .mockRejectedValue(
+          new ApiError(422, 'PROFILE_NAME_MISSING', 'falta nombre'),
+        ),
     });
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation()).rejects.toBeInstanceOf(
@@ -94,7 +118,9 @@ describe('HttpAffiliationRepository', () => {
     const http = makeHttp({
       post: jest
         .fn()
-        .mockRejectedValue(new ApiError(502, 'UPSTREAM_UNAVAILABLE', 'gateway ocupado')),
+        .mockRejectedValue(
+          new ApiError(502, 'UPSTREAM_UNAVAILABLE', 'gateway ocupado'),
+        ),
     });
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation()).rejects.toBeInstanceOf(
@@ -105,9 +131,14 @@ describe('HttpAffiliationRepository', () => {
   it('traduce 422 GATEWAY_CAPABILITY_UNAVAILABLE a AffiliationUnsupportedError (capacidad no habilitada, NO reintentable)', async () => {
     const http = makeHttp({
       post: jest.fn().mockRejectedValue(
-        new ApiError(422, 'GATEWAY_CAPABILITY_UNAVAILABLE', 'capacidad no habilitada', {
-          capability: 'YAPE_ON_FILE',
-        }),
+        new ApiError(
+          422,
+          'GATEWAY_CAPABILITY_UNAVAILABLE',
+          'capacidad no habilitada',
+          {
+            capability: 'YAPE_ON_FILE',
+          },
+        ),
       ),
     });
     const repo = new HttpAffiliationRepository(http);
@@ -123,7 +154,11 @@ describe('HttpAffiliationRepository', () => {
   it('NO confunde el capability 422 con los 422 de perfil: PROFILE_* siguen a sus errores propios', async () => {
     const docMissing = new HttpAffiliationRepository(
       makeHttp({
-        post: jest.fn().mockRejectedValue(new ApiError(422, 'PROFILE_DOCUMENT_MISSING', 'falta doc')),
+        post: jest
+          .fn()
+          .mockRejectedValue(
+            new ApiError(422, 'PROFILE_DOCUMENT_MISSING', 'falta doc'),
+          ),
       }),
     );
     await expect(docMissing.createYapeAffiliation()).rejects.toBeInstanceOf(
@@ -131,7 +166,11 @@ describe('HttpAffiliationRepository', () => {
     );
     const nameMissing = new HttpAffiliationRepository(
       makeHttp({
-        post: jest.fn().mockRejectedValue(new ApiError(422, 'PROFILE_NAME_MISSING', 'falta nombre')),
+        post: jest
+          .fn()
+          .mockRejectedValue(
+            new ApiError(422, 'PROFILE_NAME_MISSING', 'falta nombre'),
+          ),
       }),
     );
     await expect(nameMissing.createYapeAffiliation()).rejects.toBeInstanceOf(
@@ -143,7 +182,9 @@ describe('HttpAffiliationRepository', () => {
     const http = makeHttp({
       post: jest
         .fn()
-        .mockRejectedValue(new ApiError(409, 'AFFILIATION_UNSUPPORTED', 'gateway no soporta')),
+        .mockRejectedValue(
+          new ApiError(409, 'AFFILIATION_UNSUPPORTED', 'gateway no soporta'),
+        ),
     });
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation(input)).rejects.toBeInstanceOf(
@@ -155,7 +196,9 @@ describe('HttpAffiliationRepository', () => {
     const http = makeHttp({
       post: jest
         .fn()
-        .mockRejectedValue(new ApiError(422, 'PROFILE_INCOMPLETE', 'completá tu nombre')),
+        .mockRejectedValue(
+          new ApiError(422, 'PROFILE_INCOMPLETE', 'completá tu nombre'),
+        ),
     });
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation(input)).rejects.toBeInstanceOf(
@@ -165,20 +208,22 @@ describe('HttpAffiliationRepository', () => {
 
   it('propaga otros errores HTTP sin envolverlos (p. ej. 500)', async () => {
     const boom = new ApiError(500, 'INTERNAL', 'boom');
-    const http = makeHttp({ post: jest.fn().mockRejectedValue(boom) });
+    const http = makeHttp({post: jest.fn().mockRejectedValue(boom)});
     const repo = new HttpAffiliationRepository(http);
     await expect(repo.createYapeAffiliation(input)).rejects.toBe(boom);
   });
 
   it('DELETE revoca contra el endpoint de afiliación', async () => {
     const http = makeHttp({
-      delete: jest.fn().mockResolvedValue({ status: 'REVOKED' }),
+      delete: jest.fn().mockResolvedValue({status: 'REVOKED'}),
     });
     const repo = new HttpAffiliationRepository(http);
-    await expect(repo.revokeYapeAffiliation()).resolves.toMatchObject({ status: 'REVOKED' });
+    await expect(repo.revokeYapeAffiliation()).resolves.toMatchObject({
+      status: 'REVOKED',
+    });
     expect(http.delete).toHaveBeenCalledWith(
       '/payments/affiliations/yape',
-      expect.objectContaining({ schema: expect.anything() }),
+      expect.objectContaining({schema: expect.anything()}),
     );
   });
 });

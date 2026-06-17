@@ -1,16 +1,28 @@
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { PanicTriggerResult } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, Card, hexAlpha, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {PanicTriggerResult} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  Card,
+  hexAlpha,
+  SafeScreen,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { NotImplementedError } from '../../../../core/errors/notImplemented';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { IconCheck, IconShield } from '../components/icons';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {NotImplementedError} from '../../../../core/errors/notImplemented';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {IconCheck, IconShield} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'Panic'>;
@@ -35,9 +47,9 @@ const BADGE = 84;
  */
 export function PanicScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { params } = useRoute<Params>();
+  const {params} = useRoute<Params>();
   const trigger = useDependency(TOKENS.triggerPanicUseCase);
 
   const mutation = useMutation<PanicTriggerResult, Error, void>({
@@ -52,9 +64,15 @@ export function PanicScreen(): React.JSX.Element {
   if (mutation.isSuccess) {
     return (
       <SafeScreen
-        footer={<Button label={t('panic.back')} fullWidth size="lg" onPress={() => navigation.goBack()} />}
-      >
-        <View style={[styles.center, { gap: theme.spacing.lg }]}>
+        footer={
+          <Button
+            label={t('panic.back')}
+            fullWidth
+            size="lg"
+            onPress={() => navigation.goBack()}
+          />
+        }>
+        <View style={[styles.center, {gap: theme.spacing.lg}]}>
           <View
             style={[
               styles.badge,
@@ -63,8 +81,7 @@ export function PanicScreen(): React.JSX.Element {
                 borderColor: hexAlpha(theme.colors.success, 0.4),
                 borderRadius: theme.radii.pill,
               },
-            ]}
-          >
+            ]}>
             <IconCheck color={theme.colors.success} size={40} />
           </View>
           <Text variant="display" color="success" align="center">
@@ -81,7 +98,10 @@ export function PanicScreen(): React.JSX.Element {
               {mutation.data.panicId}
             </Text>
             {mutation.data.deduplicated ? (
-              <Text variant="footnote" color="inkMuted" style={{ marginTop: theme.spacing.sm }}>
+              <Text
+                variant="footnote"
+                color="inkMuted"
+                style={{marginTop: theme.spacing.sm}}>
                 {t('panic.deduplicated')}
               </Text>
             ) : null}
@@ -94,7 +114,7 @@ export function PanicScreen(): React.JSX.Element {
   return (
     <SafeScreen
       footer={
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Button
             label={mutation.isPending ? t('panic.sending') : t('panic.trigger')}
             variant="danger"
@@ -114,9 +134,8 @@ export function PanicScreen(): React.JSX.Element {
             onPress={() => navigation.goBack()}
           />
         </View>
-      }
-    >
-      <View style={[styles.center, { gap: theme.spacing.lg }]}>
+      }>
+      <View style={[styles.center, {gap: theme.spacing.lg}]}>
         <View
           style={[
             styles.badge,
@@ -125,8 +144,7 @@ export function PanicScreen(): React.JSX.Element {
               borderColor: hexAlpha(theme.colors.danger, 0.4),
               borderRadius: theme.radii.pill,
             },
-          ]}
-        >
+          ]}>
           <IconShield color={theme.colors.danger} size={40} />
         </View>
         <Text variant="display" color="danger" align="center">
@@ -156,7 +174,7 @@ export function PanicScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: {flex: 1, justifyContent: 'center', alignItems: 'center'},
   badge: {
     width: BADGE,
     height: BADGE,

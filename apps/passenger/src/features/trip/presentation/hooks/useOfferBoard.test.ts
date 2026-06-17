@@ -1,5 +1,5 @@
-import { resolveBoardOverride, TERMINAL_BOARD_STATUS } from './useOfferBoard';
-import type { OfferBoardState } from './useOfferBoard';
+import {resolveBoardOverride, TERMINAL_BOARD_STATUS} from './useOfferBoard';
+import type {OfferBoardState} from './useOfferBoard';
 
 /**
  * Regla de diseño (audit/puja-cancel-zombie): la fase `noOffers` sale EXCLUSIVAMENTE de la verdad del
@@ -8,7 +8,10 @@ import type { OfferBoardState } from './useOfferBoard';
  * `{ board: GONE }` aunque la puja recién empieza. Sólo la cancelación EXPLÍCITA (CANCELLED) re-deriva.
  */
 describe('resolveBoardOverride · el board re-deriva la fase SOLO ante cancelación explícita', () => {
-  const board = (status: OfferBoardState['status'], expiresAt: number | null = null): OfferBoardState => ({
+  const board = (
+    status: OfferBoardState['status'],
+    expiresAt: number | null = null,
+  ): OfferBoardState => ({
     status,
     expiresAt,
   });

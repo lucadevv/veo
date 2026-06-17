@@ -1,5 +1,5 @@
-import {ApiError} from '@veo/api-client';
-import {isBidGoneError} from '../bid-errors';
+import { ApiError } from '@veo/api-client';
+import { isBidGoneError } from '../bid-errors';
 
 describe('isBidGoneError', () => {
   it('true cuando la puja ya no está: 409 (board cerrado) y 404 (board inexistente)', () => {

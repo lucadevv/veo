@@ -39,7 +39,11 @@ describe('FixedDispatchStrategy · B5-1.d FLIP', () => {
   });
 
   it('flag ON sin precio de energía cargado → solo servicio posicionado (energía 0)', () => {
-    const out = strategy.resolveCreation({ ...baseInput, energyModelEnabled: true, energyPerKmCents: 0 });
+    const out = strategy.resolveCreation({
+      ...baseInput,
+      energyModelEnabled: true,
+      energyPerKmCents: 0,
+    });
     expect(out.fareCents).toBe(2400); // 1500×1.6, sin energía
   });
 });

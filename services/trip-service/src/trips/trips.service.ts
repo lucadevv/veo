@@ -48,7 +48,12 @@ import {
   VehicleType as PrismaVehicleType,
   PricingMode as PrismaPricingMode,
 } from '../generated/prisma';
-import { assertTransition, InvalidTripTransition, LIVE_STATES, transitionSources } from './domain/trip-state-machine';
+import {
+  assertTransition,
+  InvalidTripTransition,
+  LIVE_STATES,
+  transitionSources,
+} from './domain/trip-state-machine';
 import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
 import { calculateFare, shadowCompareFare, deriveFuelPerKmCents } from './domain/fare';
@@ -299,7 +304,9 @@ export class TripsService {
       if (price === null) return 0; // fuente no cargada → sin recargo (degradación honesta)
       return deriveFuelPerKmCents(price, offering.referenceEfficiency);
     } catch (err) {
-      this.logger.warn(`energía no disponible (${(err as Error).message}); uso 0 (degradación honesta · B5)`);
+      this.logger.warn(
+        `energía no disponible (${(err as Error).message}); uso 0 (degradación honesta · B5)`,
+      );
       return 0;
     }
   }
@@ -342,7 +349,11 @@ export class TripsService {
    * inyectado → server-resolved desde el schedule admin (zona, ahora). Sin resolver (tests legacy) →
    * derivación M1-compatible bidCents-driven. El resultado se CONGELA en Trip.dispatchMode.
    */
-  private async resolveDispatchMode(zone: ZoneKey, now: Date, hasBid: boolean): Promise<PricingMode> {
+  private async resolveDispatchMode(
+    zone: ZoneKey,
+    now: Date,
+    hasBid: boolean,
+  ): Promise<PricingMode> {
     if (this.modeResolver) return this.modeResolver.resolve(zone, now);
     return hasBid ? PricingMode.PUJA : PricingMode.FIXED;
   }
@@ -364,7 +375,10 @@ export class TripsService {
    * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `toZone`).
    * DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env (`this.bidFloorCents`).
    */
-  private async resolveBidFloorCents(origin: LatLon, offeringId: OfferingId | null): Promise<number> {
+  private async resolveBidFloorCents(
+    origin: LatLon,
+    offeringId: OfferingId | null,
+  ): Promise<number> {
     if (this.bidFloor) {
       // Sin oferta conocida (viaje legacy con `category` null) → la oferta fue la ancla económico (el default
       // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual).
@@ -465,7 +479,11 @@ export class TripsService {
     // `scheduledFor` es null → resolvemos con `now` (sin cambio de comportamiento).
     const now = new Date();
     const resolveAt = scheduledFor ?? now;
-    const scheduledMode = await this.resolveDispatchMode(toZone(origin), resolveAt, dto.bidCents !== undefined);
+    const scheduledMode = await this.resolveDispatchMode(
+      toZone(origin),
+      resolveAt,
+      dto.bidCents !== undefined,
+    );
     // ADR 013 §1.3 · la oferta ACOTA al schedule: el admin PROPONE (scheduledMode) y la oferta decide
     // si lo permite. Conflicto (modo fuera de allowedModes) → gana la oferta con su modo PREFERIDO
     // (allowedModes[0]) + warn + counter (observabilidad: el flip del admin NUNCA hace negociar a una
@@ -492,7 +510,9 @@ export class TripsService {
     const fuelPerKmCents = await this.resolveFuelPerKmCents();
     // B5-1.d · con el FLIP activo, la energía por oferta (precio fuente ÷ rendimiento) es el insumo
     // autoritativo; con el flag OFF queda en 0 y manda el fuel viejo. Solo se resuelve si hace falta.
-    const energyPerKmCents = this.energyModelEnabled ? await this.resolveEnergyPerKmCents(offering) : 0;
+    const energyPerKmCents = this.energyModelEnabled
+      ? await this.resolveEnergyPerKmCents(offering)
+      : 0;
     // Piso AUTORITATIVO de la puja para ESTA oferta (ADR 010 §9.3): config del admin per-(zona, oferta).
     const bidFloorCents = await this.resolveBidFloorCents(origin, offering.id);
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
@@ -535,7 +555,8 @@ export class TripsService {
           originLon: origin.lon,
           destLat: destination.lat,
           destLon: destination.lon,
-          waypoints: waypoints.length > 0 ? (waypoints as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          waypoints:
+            waypoints.length > 0 ? (waypoints as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           scheduledFor,
           vehicleType,
           // ADR 011: modo de despacho congelado del viaje (PUJA si hubo bid, FIXED si tarifa por ruta).
@@ -762,7 +783,12 @@ export class TripsService {
           producer: PRODUCER,
           // passengerId ENRIQUECIDO: notification-service resuelve el token del pasajero (push "tu
           // conductor confirmó") sin un join cross-servicio.
-          payload: { tripId: id, driverId: this.requireDriver(trip), etaSeconds, passengerId: trip.passengerId },
+          payload: {
+            tripId: id,
+            driverId: this.requireDriver(trip),
+            etaSeconds,
+            passengerId: trip.passengerId,
+          },
         }),
         id,
       );
@@ -831,7 +857,12 @@ export class TripsService {
           // passengerId ENRIQUECIDO: push "tu conductor llegó". waitWindowSeconds NO se emite: el
           // dominio aún no modela una ventana de espera del conductor (gap honesto; el schema la soporta
           // como opcional para cuando exista, y el consumidor la incluye en el push solo si viaja).
-          payload: { tripId: id, driverId: this.requireDriver(trip), at: at.toISOString(), passengerId: trip.passengerId },
+          payload: {
+            tripId: id,
+            driverId: this.requireDriver(trip),
+            at: at.toISOString(),
+            passengerId: trip.passengerId,
+          },
         }),
         id,
       );
@@ -870,11 +901,11 @@ export class TripsService {
       }
 
       if (!dto.childCode) {
-        throw new ValidationError('Este viaje requiere el código de modo niño para iniciar (BR-T07)');
+        throw new ValidationError(
+          'Este viaje requiere el código de modo niño para iniciar (BR-T07)',
+        );
       }
-      const ok = trip.childCodeHash
-        ? bcrypt.compareSync(dto.childCode, trip.childCodeHash)
-        : false;
+      const ok = trip.childCodeHash ? bcrypt.compareSync(dto.childCode, trip.childCodeHash) : false;
       if (!ok) {
         // B · registra el intento fallido (atómico) y, si alcanza el tope, echa el candado de 15 min.
         // El nº de intento VIAJA en el evento (contrato del registro central): para la alerta al
@@ -901,7 +932,9 @@ export class TripsService {
             id,
           );
         });
-        throw new ValidationError('Código de modo niño incorrecto; el viaje no puede iniciar (BR-T07)');
+        throw new ValidationError(
+          'Código de modo niño incorrecto; el viaje no puede iniciar (BR-T07)',
+        );
       }
       // B · código correcto → resetea contador y candado (Redis): el viaje pudo iniciar limpio.
       await this.resetChildCodeAttempts(id);
@@ -1089,7 +1122,11 @@ export class TripsService {
         penaltyCents,
       });
       const next = await tx.trip.findUniqueOrThrow({ where: { id } });
-      await recordTripEvent(tx, id, 'trip.cancelled', { by: dto.by, penaltyCents, reason: dto.reason });
+      await recordTripEvent(tx, id, 'trip.cancelled', {
+        by: dto.by,
+        penaltyCents,
+        reason: dto.reason,
+      });
       await enqueueOutbox(
         tx,
         createEnvelope({
@@ -1300,7 +1337,9 @@ export class TripsService {
       );
       return;
     }
-    this.logger.log(`PUJA: viaje ${tripId} fareCents ${trip.fareCents} → ${priceCents} (precio acordado)`);
+    this.logger.log(
+      `PUJA: viaje ${tripId} fareCents ${trip.fareCents} → ${priceCents} (precio acordado)`,
+    );
   }
 
   /**
@@ -1412,12 +1451,20 @@ export class TripsService {
         createEnvelope({
           eventType: 'trip.cancelled',
           producer: PRODUCER,
-          payload: { tripId, by: 'PASSENGER', reason: 'bid_cancelled', penaltyCents: 0, passengerId: trip.passengerId },
+          payload: {
+            tripId,
+            by: 'PASSENGER',
+            reason: 'bid_cancelled',
+            penaltyCents: 0,
+            passengerId: trip.passengerId,
+          },
         }),
         tripId,
       );
     });
-    this.logger.log(`PUJA: viaje ${tripId} ${trip.status} → CANCELLED_BY_PASSENGER (bid_cancelled)`);
+    this.logger.log(
+      `PUJA: viaje ${tripId} ${trip.status} → CANCELLED_BY_PASSENGER (bid_cancelled)`,
+    );
   }
 
   /** Estados desde los que el pasajero puede RE-PUJAR (H6.4): puja muerta/estancada que reactivar. */
@@ -1453,9 +1500,12 @@ export class TripsService {
     }
 
     if (!TripsService.REBIDDABLE.has(trip.status)) {
-      throw new ConflictError('El viaje no admite re-puja en el estado actual (solo REASSIGNING/EXPIRED)', {
-        status: trip.status,
-      });
+      throw new ConflictError(
+        'El viaje no admite re-puja en el estado actual (solo REASSIGNING/EXPIRED)',
+        {
+          status: trip.status,
+        },
+      );
     }
 
     // Gate AUTORITATIVO de la puja (espeja createTrip): piso (zona, oferta) ≤ bid ≤ techo (anti-overflow int4).
@@ -1528,7 +1578,9 @@ export class TripsService {
 
     if (updated === null) {
       // Doble-tap: releemos el viaje ya reactivado (idempotente, no re-emitimos eventos).
-      this.logger.log(`PUJA: re-bid duplicado de viaje ${tripId} (ya reactivado); no-op idempotente`);
+      this.logger.log(
+        `PUJA: re-bid duplicado de viaje ${tripId} (ya reactivado); no-op idempotente`,
+      );
       return toTripView(await this.mustFind(tripId));
     }
 
@@ -1674,5 +1726,4 @@ export class TripsService {
     if (!trip.assignedAt) return null;
     return new Date(trip.assignedAt.getTime() + trip.durationSeconds * 1000);
   }
-
 }

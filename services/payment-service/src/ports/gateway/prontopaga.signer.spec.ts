@@ -22,7 +22,12 @@ describe('buildSignBase · cadena a firmar (docs/sign-transactions)', () => {
   });
 
   it('omite valores undefined/null (no viajan en el JSON, no entran en la firma)', () => {
-    const base = buildSignBase({ amount: '10.00', walletUID: undefined, deepLink: null, country: 'PE' });
+    const base = buildSignBase({
+      amount: '10.00',
+      walletUID: undefined,
+      deepLink: null,
+      country: 'PE',
+    });
     expect(base).toBe('amount10.00countryPE');
   });
 });
@@ -30,7 +35,9 @@ describe('buildSignBase · cadena a firmar (docs/sign-transactions)', () => {
 describe('signPayload · HMAC-SHA256 con secretKey', () => {
   it('coincide con el cálculo manual de referencia', () => {
     const payload = { amount: '25.50', country: 'PE', currency: 'PEN' };
-    const expected = createHmac('sha256', SECRET).update('amount25.50countryPEcurrencyPEN').digest('hex');
+    const expected = createHmac('sha256', SECRET)
+      .update('amount25.50countryPEcurrencyPEN')
+      .digest('hex');
     expect(signPayload(payload, SECRET)).toBe(expected);
   });
 

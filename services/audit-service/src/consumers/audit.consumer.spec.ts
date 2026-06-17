@@ -7,12 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import {
-  createEnvelope,
-  KafkaEventConsumer,
-  topicForEvent,
-  type EventEnvelope,
-} from '@veo/events';
+import { createEnvelope, KafkaEventConsumer, topicForEvent, type EventEnvelope } from '@veo/events';
 import { AuditConsumer } from './audit.consumer';
 import { type AuditService, type EventAuditMapping } from '../audit/audit.service';
 import { validateEnv, type Env } from '../config/env.schema';
@@ -115,15 +110,26 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
     });
     vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
     recordFromEvent = vi.fn(async () => ({ created: true }));
-    await new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig()).onModuleInit();
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
   });
 
   afterEach(() => vi.restoreAllMocks());
 
   it('registra TODAS las transiciones del ciclo de vida', () => {
     for (const t of [
-      'trip.assigned', 'trip.accepted', 'trip.arriving', 'trip.arrived', 'trip.started',
-      'trip.completed', 'trip.cancelled', 'trip.expired', 'trip.failed', 'trip.child_code_failed',
+      'trip.assigned',
+      'trip.accepted',
+      'trip.arriving',
+      'trip.arrived',
+      'trip.started',
+      'trip.completed',
+      'trip.cancelled',
+      'trip.expired',
+      'trip.failed',
+      'trip.child_code_failed',
     ]) {
       expect(handlers.has(t), `falta handler ${t}`).toBe(true);
     }
@@ -164,7 +170,13 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
     const envelope = createEnvelope({
       eventType: 'trip.expired',
       producer: 'trip-service',
-      payload: { tripId: 't-1', passengerId: 'pax-1', fromStatus: 'REQUESTED', staleMinutes: 12, at: new Date().toISOString() },
+      payload: {
+        tripId: 't-1',
+        passengerId: 'pax-1',
+        fromStatus: 'REQUESTED',
+        staleMinutes: 12,
+        at: new Date().toISOString(),
+      },
     });
     await handlers.get('trip.expired')!(envelope);
     const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
@@ -188,13 +200,22 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
     });
     vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
     recordFromEvent = vi.fn(async () => ({ created: true }));
-    await new AuditConsumer({ recordFromEvent } as unknown as AuditService, makeConfig()).onModuleInit();
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
   });
 
   afterEach(() => vi.restoreAllMocks());
 
   it('registra handlers para los 5 eventos de compliance', () => {
-    for (const t of ['media.access_granted', 'user.kyc_verified', 'user.email_verified', 'trip.pii_erased', 'panic.resolved']) {
+    for (const t of [
+      'media.access_granted',
+      'user.kyc_verified',
+      'user.email_verified',
+      'trip.pii_erased',
+      'panic.resolved',
+    ]) {
       expect(handlers.has(t), `falta handler ${t}`).toBe(true);
     }
   });
@@ -206,7 +227,11 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
       payload: { userId: 'u-321', email: 'pax@veo.pe', verifiedAt: new Date().toISOString() },
     });
     await handlers.get('user.email_verified')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('user.email_verified'));
     expect(mapping).toEqual({ actorId: 'u-321', resourceType: 'user', resourceId: 'u-321' });
   });
@@ -332,7 +357,11 @@ describe('AuditConsumer · recompensas/créditos (Ley 29733: traza de movimiento
       },
     });
     await handlers.get('user.referred')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('user.referred'));
     expect(mapping).toEqual({ actorId: 'u-ref', resourceType: 'referral', resourceId: 'u-new' });
   });

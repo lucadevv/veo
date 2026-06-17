@@ -1,4 +1,4 @@
-import type {FaceCapture, FaceCaptureService} from '../../domain';
+import type { FaceCapture, FaceCaptureService } from '../../domain';
 
 /**
  * Implementación STUB del puerto de captura facial del registro (solo desarrollo).
@@ -23,7 +23,7 @@ export class StubFaceCaptureService implements FaceCaptureService {
 }
 
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Instancia compartida del stub (wiring local mientras no exista el módulo nativo/DI). */

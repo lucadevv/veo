@@ -9,7 +9,10 @@ import { createRedisClient } from './index.js';
 
 describe('createRedisClient — factory resiliente (sin red, lazyConnect)', () => {
   it('aplica la config no-negociable: maxRetriesPerRequest null + enableReadyCheck + retryStrategy con techo + keyPrefix', () => {
-    const client = createRedisClient('redis://localhost:6379', { lazyConnect: true, keyPrefix: 'veo:test:' });
+    const client = createRedisClient('redis://localhost:6379', {
+      lazyConnect: true,
+      keyPrefix: 'veo:test:',
+    });
     try {
       expect(client.options.maxRetriesPerRequest).toBeNull(); // reintento indefinido (no mata el proceso)
       expect(client.options.enableReadyCheck).toBe(true);

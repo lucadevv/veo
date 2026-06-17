@@ -1,5 +1,5 @@
-import {create} from 'zustand';
-import {prefsStore} from '../../../../core/storage/mmkv';
+import { create } from 'zustand';
+import { prefsStore } from '../../../../core/storage/mmkv';
 import {
   VehicleType,
   type FaceCapture,
@@ -33,12 +33,19 @@ interface PersistedRegistration {
   statusResolvedFromBackend: boolean;
 }
 
-const emptyPersonal: PersonalData = {fullName: '', dni: '', birthdate: ''};
-const emptyVehicle: VehicleData = {type: VehicleType.MOTO, plate: '', year: '', modelSpecId: '', brand: '', model: ''};
+const emptyPersonal: PersonalData = { fullName: '', dni: '', birthdate: '' };
+const emptyVehicle: VehicleData = {
+  type: VehicleType.MOTO,
+  plate: '',
+  year: '',
+  modelSpecId: '',
+  brand: '',
+  model: '',
+};
 const initialDocuments: RegistrationDocument[] = [
-  {type: 'LICENSE', status: 'pending'},
-  {type: 'SOAT', status: 'pending'},
-  {type: 'VEHICLE_REGISTRATION', status: 'pending'},
+  { type: 'LICENSE', status: 'pending' },
+  { type: 'SOAT', status: 'pending' },
+  { type: 'VEHICLE_REGISTRATION', status: 'pending' },
 ];
 
 export interface RegistrationState {
@@ -104,8 +111,15 @@ const persisted = loadPersisted();
 export const useRegistrationStore = create<RegistrationState>((set, get) => {
   /** Persiste el estado relevante del store en MMKV. */
   const persist = (): void => {
-    const {status, statusResolvedFromBackend, currentStep, personal, vehicle, documents, faceCapture} =
-      get();
+    const {
+      status,
+      statusResolvedFromBackend,
+      currentStep,
+      personal,
+      vehicle,
+      documents,
+      faceCapture,
+    } = get();
     const snapshot: PersistedRegistration = {
       status,
       statusResolvedFromBackend,
@@ -127,34 +141,34 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     documents: persisted?.documents ?? initialDocuments,
     faceCapture: persisted?.faceCapture ?? null,
 
-    setPersonal: data => {
-      set(state => ({personal: {...state.personal, ...data}}));
+    setPersonal: (data) => {
+      set((state) => ({ personal: { ...state.personal, ...data } }));
       persist();
     },
 
-    setVehicleType: type => {
-      set(state => ({vehicle: {...state.vehicle, type}}));
+    setVehicleType: (type) => {
+      set((state) => ({ vehicle: { ...state.vehicle, type } }));
       persist();
     },
 
-    setVehicle: data => {
-      set(state => ({vehicle: {...state.vehicle, ...data}}));
+    setVehicle: (data) => {
+      set((state) => ({ vehicle: { ...state.vehicle, ...data } }));
       persist();
     },
 
     setDocumentStatus: (type, status) => {
-      set(state => ({
-        documents: state.documents.map(doc => (doc.type === type ? {...doc, status} : doc)),
+      set((state) => ({
+        documents: state.documents.map((doc) => (doc.type === type ? { ...doc, status } : doc)),
       }));
       persist();
     },
 
-    setFaceCapture: capture => {
-      set({faceCapture: capture});
+    setFaceCapture: (capture) => {
+      set({ faceCapture: capture });
       persist();
     },
 
-    setCurrentStep: step => {
+    setCurrentStep: (step) => {
       set({
         currentStep: Math.min(Math.max(step, 1), REGISTRATION_TOTAL_STEPS),
         status: 'in_progress',
@@ -162,22 +176,22 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       persist();
     },
 
-    setStatus: status => {
-      set({status});
+    setStatus: (status) => {
+      set({ status });
       persist();
     },
 
-    applyBackendStatus: status => {
+    applyBackendStatus: (status) => {
       const current = get().status;
       if (status === 'not_started') {
         // El backend dice "faltan documentos" (wizard). Solo reiniciamos si veníamos de un estado
         // ya resuelto (approved/in_review) que ahora el servidor contradice; si el conductor estaba
         // avanzando localmente, conservamos su progreso (`in_progress`).
         const next = current === 'approved' || current === 'in_review' ? 'not_started' : current;
-        set({status: next, statusResolvedFromBackend: true});
+        set({ status: next, statusResolvedFromBackend: true });
       } else {
         // approved / in_review / rejected: el backend manda.
-        set({status, statusResolvedFromBackend: true});
+        set({ status, statusResolvedFromBackend: true });
       }
       persist();
     },
@@ -189,12 +203,12 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       // del wizard limpio (`not_started`). Importante para no atrapar a un conductor nuevo en tabs
       // por un `approved` espurio que hubiera sobrevivido a un logout previo (bug de fuga de PII).
       const next = current === 'in_progress' ? 'in_progress' : 'not_started';
-      set({status: next, statusResolvedFromBackend: true});
+      set({ status: next, statusResolvedFromBackend: true });
       persist();
     },
 
     buildDraft: () => {
-      const {personal, vehicle, documents, faceCapture} = get();
+      const { personal, vehicle, documents, faceCapture } = get();
       return {
         personal,
         vehicle,

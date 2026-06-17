@@ -1,9 +1,9 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { BottomSheet, Text, useTheme } from '@veo/ui-kit';
-import { PressableScale } from '../../../../shared/presentation/components/motion';
-import { IconClock, IconMail, IconPhone, IconWhatsapp } from './icons';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {BottomSheet, Text, useTheme} from '@veo/ui-kit';
+import {PressableScale} from '../../../../shared/presentation/components/motion';
+import {IconClock, IconMail, IconPhone, IconWhatsapp} from './icons';
 
 /** Verde de marca de WhatsApp (color explícito del diseño, no es un token de tema). */
 const WHATSAPP_GREEN = '#25D366';
@@ -46,13 +46,19 @@ export function OtpHelpSheet({
   resending,
 }: OtpHelpSheetProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
-  const Row = ({ icon, label, accessibilityLabel, disabled, onPress }: RowProps) => (
+  const Row = ({
+    icon,
+    label,
+    accessibilityLabel,
+    disabled,
+    onPress,
+  }: RowProps) => (
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: Boolean(disabled) }}
+      accessibilityState={{disabled: Boolean(disabled)}}
       disabled={disabled}
       onPress={onPress}
       contentStyle={[
@@ -63,8 +69,7 @@ export function OtpHelpSheet({
           borderRadius: theme.radii.md,
           opacity: disabled ? 0.55 : 1,
         },
-      ]}
-    >
+      ]}>
       <View style={styles.rowIcon}>{icon}</View>
       <Text variant="bodyStrong" color="ink">
         {label}
@@ -79,12 +84,15 @@ export function OtpHelpSheet({
       : t('auth.otpHelpResend');
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('auth.otpHelpTitle')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('auth.otpHelpTitle')}>
       <Text variant="callout" color="inkMuted" style={styles.subtitle}>
         {t('auth.otpHelpSubtitle')}
       </Text>
 
-      <View style={{ gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.sm}}>
         <Row
           icon={<IconPhone color={theme.colors.ink} size={20} />}
           label={t('auth.otpHelpCall')}
@@ -103,7 +111,7 @@ export function OtpHelpSheet({
         <PressableScale
           accessibilityRole="button"
           accessibilityLabel={resendLabel}
-          accessibilityState={{ disabled: resendDisabled }}
+          accessibilityState={{disabled: resendDisabled}}
           disabled={resendDisabled}
           onPress={() => {
             onResend();
@@ -116,8 +124,7 @@ export function OtpHelpSheet({
               borderRadius: theme.radii.md,
               opacity: resendDisabled ? 0.55 : 1,
             },
-          ]}
-        >
+          ]}>
           <View style={styles.rowIcon}>
             <IconClock color={theme.colors.accent} size={20} />
           </View>
@@ -131,7 +138,7 @@ export function OtpHelpSheet({
 }
 
 const styles = StyleSheet.create({
-  subtitle: { marginBottom: 16 },
+  subtitle: {marginBottom: 16},
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -140,5 +147,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderWidth: 1,
   },
-  rowIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
+  rowIcon: {width: 24, alignItems: 'center', justifyContent: 'center'},
 });

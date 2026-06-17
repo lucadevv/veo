@@ -1,7 +1,13 @@
-import type { PromoValidationView } from '@veo/api-client';
-import { applyDiscount, normalizePromoCode } from '../src/features/promos/domain/entities';
-import type { PromosRepository } from '../src/features/promos/domain/promosRepository';
-import { PromoInputError, ValidatePromoUseCase } from '../src/features/promos/domain/usecases';
+import type {PromoValidationView} from '@veo/api-client';
+import {
+  applyDiscount,
+  normalizePromoCode,
+} from '../src/features/promos/domain/entities';
+import type {PromosRepository} from '../src/features/promos/domain/promosRepository';
+import {
+  PromoInputError,
+  ValidatePromoUseCase,
+} from '../src/features/promos/domain/usecases';
 
 class FakePromosRepository implements PromosRepository {
   validate = jest.fn(

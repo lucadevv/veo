@@ -15,7 +15,14 @@
  * una muestra representativa. Así el costo Redis+CPU queda acotado, no escala con la densidad de la zona.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { toH3, neighbors, distanceMeters, isWithinLima, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
+import {
+  toH3,
+  neighbors,
+  distanceMeters,
+  isWithinLima,
+  DISPATCH_H3_RESOLUTION,
+  type LatLon,
+} from '@veo/utils';
 import { VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal, createLogger, type Logger } from '@veo/observability';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
@@ -61,11 +68,15 @@ export class NearbyDriversService {
     // descarta NaN: toda comparación con NaN es false). Degradación honesta: devolvemos vacío, no crash.
     if (!isWithinLima(origin)) {
       domainEventsTotal.inc({ event: 'dispatch.nearby_drivers', result: 'invalid' });
-      this.logger.warn({ lat: origin.lat, lon: origin.lon }, 'nearby: origen inválido/fuera de Lima → vacío');
+      this.logger.warn(
+        { lat: origin.lat, lon: origin.lon },
+        'nearby: origen inválido/fuera de Lima → vacío',
+      );
       return [];
     }
     // vehicleType del cliente: solo se respeta si es un valor REAL del enum; si no, se ignora (todos).
-    const vt = vehicleType && VEHICLE_CLASSES.has(vehicleType) ? (vehicleType as VehicleClass) : undefined;
+    const vt =
+      vehicleType && VEHICLE_CLASSES.has(vehicleType) ? (vehicleType as VehicleClass) : undefined;
 
     const startedAt = Date.now();
     // Radio del feed EDITABLE en runtime por el admin (config singleton, cacheado). Sin config → DEFAULT.
@@ -74,10 +85,19 @@ export class NearbyDriversService {
     const sample = await this.hotIndex.availableSample(cells, SAMPLE_LIMIT);
     const byType = vt ? sample.filter((l) => l.vehicleType === vt) : sample;
     const out = byType
-      .map((l) => ({ lat: l.lat, lon: l.lon, vehicleType: l.vehicleType, d: distanceMeters(l, origin) }))
+      .map((l) => ({
+        lat: l.lat,
+        lon: l.lon,
+        vehicleType: l.vehicleType,
+        d: distanceMeters(l, origin),
+      }))
       .sort((a, b) => a.d - b.d)
       .slice(0, MAX_NEARBY)
-      .map(({ lat, lon, vehicleType: t }) => ({ lat: round(lat), lon: round(lon), vehicleType: t }));
+      .map(({ lat, lon, vehicleType: t }) => ({
+        lat: round(lat),
+        lon: round(lon),
+        vehicleType: t,
+      }));
 
     // #2 — observabilidad del hot-path: métrica de resultado + log estructurado con latencia y señal de
     // densidad (`capped`=la muestra tocó el tope → zona saturada, a vigilar para subir SAMPLE_LIMIT o

@@ -1,9 +1,9 @@
-import React, {useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import type {CompositeScreenProps} from '@react-navigation/native';
-import type {BottomTabScreenProps} from '@react-navigation/bottom-tabs';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Banner,
   BottomSheet,
@@ -16,10 +16,10 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import {DriverStatus} from '@veo/shared-types';
-import type {MainTabParamList, RootStackParamList} from '../../../../navigation/types';
-import {StateView} from '../../../../shared/presentation/components/StateView';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
+import { DriverStatus } from '@veo/shared-types';
+import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { StateView } from '../../../../shared/presentation/components/StateView';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
 import {
   IconClock,
   IconDocument,
@@ -28,11 +28,11 @@ import {
   IconReceipt,
   IconShield,
 } from '../../../../shared/presentation/icons';
-import {useLogout, useProfile} from '../hooks/useProfile';
-import {BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel} from '../labels';
-import {ProfileIdentityCard} from '../components/ProfileIdentityCard';
-import {ProfileLinkRow} from '../components/ProfileLinkRow';
-import {Appear} from '../components/motion';
+import { useLogout, useProfile } from '../hooks/useProfile';
+import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
+import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
+import { ProfileLinkRow } from '../components/ProfileLinkRow';
+import { Appear } from '../components/motion';
 
 /**
  * `Cuenta` es una tab del navegador inferior, pero sus enlaces secundarios viven en el stack raíz
@@ -44,10 +44,10 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
-  const {data, isLoading, isError, error, refetch} = useProfile();
+  const { data, isLoading, isError, error, refetch } = useProfile();
   const logout = useLogout();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -58,7 +58,8 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
         <View style={styles.header}>
           <Text variant="title1">Cuenta</Text>
         </View>
-      }>
+      }
+    >
       {isLoading ? (
         <View style={styles.section}>
           <Skeleton height={96} radius={theme.radii.lg} />
@@ -69,7 +70,7 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
         <StateView
           title={t('errors.generic')}
           description={toErrorMessage(error, t)}
-          action={{label: t('common.retry'), onPress: () => refetch()}}
+          action={{ label: t('common.retry'), onPress: () => refetch() }}
         />
       ) : (
         <View style={styles.section}>
@@ -79,7 +80,9 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
               name={data.phone}
               online={data.currentStatus === DriverStatus.AVAILABLE}
               ratingValue={data.averageRating.toFixed(1)}
-              ratingMeta={data.rating ? t('profile.ratingCount', {count: data.rating.count30d}) : undefined}
+              ratingMeta={
+                data.rating ? t('profile.ratingCount', { count: data.rating.count30d }) : undefined
+              }
             />
           </Appear>
 
@@ -88,7 +91,9 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
             {!data.compliance.compliant ? (
               <Banner
                 tone="warn"
-                title={t('profile.complianceMissing', {items: data.compliance.missing.join(', ')})}
+                title={t('profile.complianceMissing', {
+                  items: data.compliance.missing.join(', '),
+                })}
               />
             ) : (
               <Banner tone="success" title={t('profile.complianceOk')} />
@@ -103,7 +108,13 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
             <Card>
               <ListItem
                 title={t('profile.currentStatus')}
-                trailing={<StatusPill label={enumLabel(t, 'profile.driverStatus', data.currentStatus)} tone="neutral" dot />}
+                trailing={
+                  <StatusPill
+                    label={enumLabel(t, 'profile.driverStatus', data.currentStatus)}
+                    tone="neutral"
+                    dot
+                  />
+                }
               />
               <ListItem
                 title={t('profile.kyc')}
@@ -120,7 +131,9 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
                 trailing={
                   <StatusPill
                     label={enumLabel(t, 'profile.bgCheckStatus', data.backgroundCheckStatus)}
-                    tone={data.backgroundCheckStatus === BACKGROUND_CHECK_CLEARED ? 'success' : 'warn'}
+                    tone={
+                      data.backgroundCheckStatus === BACKGROUND_CHECK_CLEARED ? 'success' : 'warn'
+                    }
                     dot
                   />
                 }
@@ -139,7 +152,7 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
                   {t('profile.noDocuments')}
                 </Text>
               ) : (
-                data.documents.map(doc => (
+                data.documents.map((doc) => (
                   <ListItem
                     key={doc.type}
                     title={enumLabel(t, 'profile.docType', doc.type)}
@@ -159,43 +172,43 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
 
           {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
           <Appear delay={200}>
-          <Card padding="sm">
-            <ProfileLinkRow
-              icon={<IconDocument size={20} color={theme.colors.accent} />}
-              label={t('documents.title')}
-              onPress={() => navigation.navigate('Documents')}
-              showDivider
-            />
-            <ProfileLinkRow
-              icon={<IconShield size={20} color={theme.colors.accent} />}
-              label={t('shift.enrollAction')}
-              onPress={() => navigation.navigate('BiometricEnroll')}
-              showDivider
-            />
-            <ProfileLinkRow
-              icon={<IconReceipt size={20} color={theme.colors.accent} />}
-              label={t('earnings.title')}
-              onPress={() => navigation.navigate('Ganancias')}
-              showDivider
-            />
-            <ProfileLinkRow
-              icon={<IconGift size={20} color={theme.colors.accent} />}
-              label={t('ops.incentives.title')}
-              onPress={() => navigation.navigate('Incentives')}
-              showDivider
-            />
-            <ProfileLinkRow
-              icon={<IconClock size={20} color={theme.colors.accent} />}
-              label={t('trips.historyTitle')}
-              onPress={() => navigation.navigate('Viajes')}
-              showDivider
-            />
-            <ProfileLinkRow
-              icon={<IconLifebuoy size={20} color={theme.colors.accent} />}
-              label={t('support.title')}
-              onPress={() => navigation.navigate('Support')}
-            />
-          </Card>
+            <Card padding="sm">
+              <ProfileLinkRow
+                icon={<IconDocument size={20} color={theme.colors.accent} />}
+                label={t('documents.title')}
+                onPress={() => navigation.navigate('Documents')}
+                showDivider
+              />
+              <ProfileLinkRow
+                icon={<IconShield size={20} color={theme.colors.accent} />}
+                label={t('shift.enrollAction')}
+                onPress={() => navigation.navigate('BiometricEnroll')}
+                showDivider
+              />
+              <ProfileLinkRow
+                icon={<IconReceipt size={20} color={theme.colors.accent} />}
+                label={t('earnings.title')}
+                onPress={() => navigation.navigate('Ganancias')}
+                showDivider
+              />
+              <ProfileLinkRow
+                icon={<IconGift size={20} color={theme.colors.accent} />}
+                label={t('ops.incentives.title')}
+                onPress={() => navigation.navigate('Incentives')}
+                showDivider
+              />
+              <ProfileLinkRow
+                icon={<IconClock size={20} color={theme.colors.accent} />}
+                label={t('trips.historyTitle')}
+                onPress={() => navigation.navigate('Viajes')}
+                showDivider
+              />
+              <ProfileLinkRow
+                icon={<IconLifebuoy size={20} color={theme.colors.accent} />}
+                label={t('support.title')}
+                onPress={() => navigation.navigate('Support')}
+              />
+            </Card>
           </Appear>
 
           <Appear delay={250}>
@@ -216,7 +229,11 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
         title={t('profile.logoutConfirmTitle')}
         footer={
           <View style={styles.sheetFooter}>
-            <Button label={t('common.cancel')} variant="secondary" onPress={() => setConfirmOpen(false)} />
+            <Button
+              label={t('common.cancel')}
+              variant="secondary"
+              onPress={() => setConfirmOpen(false)}
+            />
             <Button
               label={t('profile.logout')}
               variant="danger"
@@ -226,7 +243,8 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
               }}
             />
           </View>
-        }>
+        }
+      >
         <Text variant="callout" color="inkMuted">
           {t('profile.logoutConfirmBody')}
         </Text>
@@ -236,8 +254,8 @@ export const ProfileScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  header: {paddingTop: 8, paddingBottom: 4},
-  section: {gap: 16, paddingTop: 8},
-  sectionLabel: {marginBottom: 8},
-  sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
+  header: { paddingTop: 8, paddingBottom: 4 },
+  section: { gap: 16, paddingTop: 8 },
+  sectionLabel: { marginBottom: 8 },
+  sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
 });

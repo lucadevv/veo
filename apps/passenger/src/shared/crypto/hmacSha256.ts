@@ -30,7 +30,8 @@ function rotr(value: number, bits: number): number {
 /** SHA-256 de un arreglo de bytes; devuelve 32 bytes. */
 function sha256(message: Uint8Array): Uint8Array {
   const h = new Uint32Array([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+    0x1f83d9ab, 0x5be0cd19,
   ]);
 
   // Padding: 1 bit + ceros + longitud en bits (64 bits big-endian).
@@ -51,7 +52,8 @@ function sha256(message: Uint8Array): Uint8Array {
       w[i] = dv.getUint32(offset + i * 4, false);
     }
     for (let i = 16; i < 64; i += 1) {
-      const s0 = rotr(w[i - 15]!, 7) ^ rotr(w[i - 15]!, 18) ^ (w[i - 15]! >>> 3);
+      const s0 =
+        rotr(w[i - 15]!, 7) ^ rotr(w[i - 15]!, 18) ^ (w[i - 15]! >>> 3);
       const s1 = rotr(w[i - 2]!, 17) ^ rotr(w[i - 2]!, 19) ^ (w[i - 2]! >>> 10);
       w[i] = (w[i - 16]! + s0 + w[i - 7]! + s1) >>> 0;
     }
@@ -122,7 +124,11 @@ function utf8Bytes(input: string): Uint8Array {
         0x80 | (code & 0x3f),
       );
     } else {
-      result.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      result.push(
+        0xe0 | (code >> 12),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
     }
   }
   return Uint8Array.from(result);

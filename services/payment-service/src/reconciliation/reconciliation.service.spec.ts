@@ -36,12 +36,19 @@ function makeFakePrisma(rows: FakeRefundRow[]) {
     count: vi.fn(async (_args: { where: RefundWhere }) => rows.length),
     findMany: vi.fn(async ({ take }: { where: RefundWhere; take: number }) => rows.slice(0, take)),
   };
-  const client = { refund, payment: { findMany: vi.fn(async () => []) }, reconciliationRun: { create: vi.fn() } };
+  const client = {
+    refund,
+    payment: { findMany: vi.fn(async () => []) },
+    reconciliationRun: { create: vi.fn() },
+  };
   return { prisma: { read: client, write: client } as unknown as PrismaService, refund };
 }
 
 const fakeRedis = { set: vi.fn(), del: vi.fn() } as unknown as Redis;
-const fakeGateway = { charge: vi.fn(), getStatement: vi.fn(async () => []) } as unknown as PaymentGateway;
+const fakeGateway = {
+  charge: vi.fn(),
+  getStatement: vi.fn(async () => []),
+} as unknown as PaymentGateway;
 
 const fakeConfig = (over: Record<string, unknown> = {}) =>
   ({
@@ -56,7 +63,7 @@ const fakeConfig = (over: Record<string, unknown> = {}) =>
 
 function build(rows: FakeRefundRow[], configOver: Record<string, unknown> = {}) {
   const { prisma, refund } = makeFakePrisma(rows);
-  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver) as never);
+  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
   return { svc, refund };
 }
 
@@ -86,7 +93,9 @@ describe('ReconciliationService.sweepStalePendingRefunds · red de seguridad S5'
     await svc.sweepStalePendingRefunds(NOW);
     const where = refund.count.mock.calls[0]![0].where;
     expect(where.status).toBe('PENDING');
-    expect(where.createdAt.lt.toISOString()).toBe(new Date(NOW.getTime() - 30 * 60_000).toISOString());
+    expect(where.createdAt.lt.toISOString()).toBe(
+      new Date(NOW.getTime() - 30 * 60_000).toISOString(),
+    );
   });
 
   it('con refunds viejos → alerted=true + alerta accionable por refund (id/pago/monto/uid/edad) + resumen', async () => {
@@ -144,13 +153,17 @@ function makeFakeCashPrisma(rows: FakeCashRow[]) {
     count: vi.fn(async (_args: { where: CashWhere }) => rows.length),
     findMany: vi.fn(async ({ take }: { where: CashWhere; take: number }) => rows.slice(0, take)),
   };
-  const client = { payment, refund: { count: vi.fn(async () => 0) }, reconciliationRun: { create: vi.fn() } };
+  const client = {
+    payment,
+    refund: { count: vi.fn(async () => 0) },
+    reconciliationRun: { create: vi.fn() },
+  };
   return { prisma: { read: client, write: client } as unknown as PrismaService, payment };
 }
 
 function buildCash(rows: FakeCashRow[], configOver: Record<string, unknown> = {}) {
   const { prisma, payment } = makeFakeCashPrisma(rows);
-  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver) as never);
+  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
   return { svc, payment };
 }
 
@@ -179,7 +192,9 @@ describe('ReconciliationService.sweepStaleCashPending · red de seguridad del ef
     const where = payment.count.mock.calls[0]![0].where;
     expect(where.status).toBe('PENDING');
     expect(where.method).toBe('CASH');
-    expect(where.createdAt.lt.toISOString()).toBe(new Date(NOW.getTime() - 120 * 60_000).toISOString());
+    expect(where.createdAt.lt.toISOString()).toBe(
+      new Date(NOW.getTime() - 120 * 60_000).toISOString(),
+    );
   });
 
   it('con efectivo viejo → alerted=true + alerta accionable (pago/viaje/monto/conductor/pasajero/edad) + resumen', async () => {

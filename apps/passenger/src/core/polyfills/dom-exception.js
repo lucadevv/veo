@@ -11,8 +11,8 @@
  */
 import 'text-encoding-polyfill';
 
-if (typeof global.DOMException === 'undefined') {
-  global.DOMException = class DOMException extends Error {
+if (typeof globalThis.DOMException === 'undefined') {
+  globalThis.DOMException = class DOMException extends Error {
     constructor(message, name) {
       super(message);
       this.name = name ?? 'Error';

@@ -12,7 +12,7 @@ function makeRedis(reply: string | null = 'OK'): {
 } {
   const set = vi.fn(async () => reply);
   const del = vi.fn(async () => 1);
-  return { redis: { set, del } as unknown as DistributedLockClient, set, del };
+  return { redis: { set, del }, set, del };
 }
 
 describe('withDistributedLock · adquisición', () => {
@@ -51,7 +51,9 @@ describe('withDistributedLock · liberación', () => {
 
   it('releaseOnSettle: libera con DEL al terminar fn con éxito', async () => {
     const { redis, del } = makeRedis('OK');
-    await withDistributedLock(redis, 'veo:test:lock', 600, async () => undefined, { releaseOnSettle: true });
+    await withDistributedLock(redis, 'veo:test:lock', 600, async () => undefined, {
+      releaseOnSettle: true,
+    });
     expect(del).toHaveBeenCalledTimes(1);
     expect(del).toHaveBeenCalledWith('veo:test:lock');
   });
@@ -60,9 +62,15 @@ describe('withDistributedLock · liberación', () => {
     const { redis, del } = makeRedis('OK');
     const boom = new Error('barrido falló');
     await expect(
-      withDistributedLock(redis, 'veo:test:lock', 600, async () => {
-        throw boom;
-      }, { releaseOnSettle: true }),
+      withDistributedLock(
+        redis,
+        'veo:test:lock',
+        600,
+        async () => {
+          throw boom;
+        },
+        { releaseOnSettle: true },
+      ),
     ).rejects.toThrow(boom);
     expect(del).toHaveBeenCalledTimes(1);
     expect(del).toHaveBeenCalledWith('veo:test:lock');

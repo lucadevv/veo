@@ -1,4 +1,7 @@
-export interface GeoPoint { lat: number; lon: number; }
+export interface GeoPoint {
+  lat: number;
+  lon: number;
+}
 export interface User {
   id: string;
   phone: string;

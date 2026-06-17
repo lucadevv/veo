@@ -69,10 +69,10 @@ function tripErasedEnvelope(payload: unknown, eventId = 'evt-1'): EventEnvelope<
   };
 }
 
-type ErasureConsumerInternals = {
+interface ErasureConsumerInternals {
   onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
   onTripErased(e: EventEnvelope<unknown>): Promise<void>;
-};
+}
 
 function makeConsumer(chat: ChatService) {
   const consumer = new ErasureConsumer(chat, makeRedis() as never, config);
@@ -197,7 +197,11 @@ describe('ErasureConsumer · trip.pii_erased', () => {
     const { deletes, invoke } = setup();
 
     await invoke(
-      tripErasedEnvelope({ tripId: 'trip-1', passengerId: 'usr-1', at: '2026-06-10T00:00:00.000Z' }),
+      tripErasedEnvelope({
+        tripId: 'trip-1',
+        passengerId: 'usr-1',
+        at: '2026-06-10T00:00:00.000Z',
+      }),
     );
 
     expect(deletes).toHaveLength(1);

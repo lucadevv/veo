@@ -33,15 +33,15 @@ el texto encima es **NEGRO** (`--on-brand`/`--on-accent` = `#000`).
 
 Tokens semánticos (definidos como CSS vars OKLCH en `tokens.css`, derivados del Brand Book):
 
-| Token | Rol |
-|---|---|
-| `--bg` / `--surface` / `--surface-2` | lienzo negro / tarjetas / capas elevadas (`#000` · `#0E0E11` · `#1C1C22`) |
-| `--ink` / `--ink-muted` / `--ink-subtle` | texto primario / secundario / terciario (`#F4F6F8` · `#CFD3DA` · `#8A909C`) |
-| `--border` / `--border-strong` | divisores y bordes (`#17171B` · `#2A2A30`) |
-| `--brand` / `--on-brand` | VEO Cyan de marca + texto NEGRO sobre marca |
-| `--accent` / `--on-accent` | VEO Cyan de acción + texto NEGRO sobre acento |
-| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (texto NEGRO encima) |
-| `--focus` | anillo de foco VEO Cyan (3px, offset 2px) |
+| Token                                               | Rol                                                                         |
+| --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `--bg` / `--surface` / `--surface-2`                | lienzo negro / tarjetas / capas elevadas (`#000` · `#0E0E11` · `#1C1C22`)   |
+| `--ink` / `--ink-muted` / `--ink-subtle`            | texto primario / secundario / terciario (`#F4F6F8` · `#CFD3DA` · `#8A909C`) |
+| `--border` / `--border-strong`                      | divisores y bordes (`#17171B` · `#2A2A30`)                                  |
+| `--brand` / `--on-brand`                            | VEO Cyan de marca + texto NEGRO sobre marca                                 |
+| `--accent` / `--on-accent`                          | VEO Cyan de acción + texto NEGRO sobre acento                               |
+| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (texto NEGRO encima)                                   |
+| `--focus`                                           | anillo de foco VEO Cyan (3px, offset 2px)                                   |
 
 En Tailwind se consumen como `bg-surface`, `text-ink`, `text-ink-muted`, `border-border`, `bg-brand`, `text-accent`, etc.
 **Prohibido** `text-gray-400` sobre el lienzo negro; usar `text-ink-muted` (calibrado para contraste ≥4.5:1).
@@ -96,11 +96,13 @@ Iconos: **lucide-react** (un solo set, stroke 1.5–2, tamaños token `icon-sm 1
 ## 5. Motion (emil-design-eng)
 
 Curvas custom (en `tokens.css`):
+
 ```
 --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 ```
+
 - Duraciones: press 100–160ms · tooltip 125–200ms · dropdown 150–250ms · modal/drawer 200–400ms. **UI < 300ms.**
 - `ease-out` para entrar (feedback inmediato); nunca `ease-in` en UI. Exit ~60–70% del enter.
 - Solo `transform`/`opacity`. Stagger de listas 30–60ms. Animar 1–2 elementos clave por vista.
@@ -112,6 +114,7 @@ Curvas custom (en `tokens.css`):
 ## 6. Direcciones por app
 
 ### admin-web — Dashboard de operación/seguridad (sobrio, data-first)
+
 - Densidad de información alta pero ordenada: sidebar de navegación (≥1024px), top bar con contexto + búsqueda + estado de sesión.
 - Jerarquía por tipografía/peso/espaciado, no por color. Acento cian solo en estados activos, acciones primarias y alertas.
 - Tablas densas con tabular-nums, filtros persistentes, drill-down con breadcrumb. Gráficas `recharts` con leyenda, tooltip, estado vacío, colores accesibles (no solo rojo/verde).
@@ -119,6 +122,7 @@ Curvas custom (en `tokens.css`):
 - Modo oscuro de primera clase (centro de control). Sobriedad: cero gradientes decorativos, cero glassmorphism.
 
 ### family-web — Página pública (cálida, tranquilizadora, sin login)
+
 - Acceso por **link firmado** (`/t/[token]`), sin login, sin app. Mobile-first (la familia abre desde el móvil).
 - Foco emocional: "tu familiar está seguro y en camino". Mapa en vivo grande + estado del viaje claro + datos del conductor/vehículo + botón de ayuda/llamar visible.
 - Paleta cálida en acentos (no en el body), tono calmado, tipografía generosa y legible, mucho aire. Indicador "EN VIVO" sutil pero presente.
@@ -129,6 +133,7 @@ Curvas custom (en `tokens.css`):
 ## 7. Bans absolutos (match-and-refuse)
 
 Si vas a escribir algo de esto, reescribe el elemento:
+
 - Side-stripe borders (border-left/right de color >1px en cards/alerts).
 - Texto con gradiente (`background-clip: text`).
 - Glassmorphism por defecto / blur decorativo.

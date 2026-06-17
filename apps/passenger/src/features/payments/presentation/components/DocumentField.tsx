@@ -1,8 +1,8 @@
-import type { DocumentType } from '@veo/api-client';
-import { Text, TextField, useTheme } from '@veo/ui-kit';
+import type {DocumentType} from '@veo/api-client';
+import {Text, TextField, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
 
 /** Tipos de documento soportados (orden de presentación: DNI primero, el más común en Perú). */
 export const DOCUMENT_TYPES: readonly DocumentType[] = ['DN', 'CE', 'PP'];
@@ -36,7 +36,7 @@ export function DocumentField({
   note,
 }: DocumentFieldProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const labelFor = (dt: DocumentType): string =>
     dt === 'DN'
@@ -46,20 +46,20 @@ export function DocumentField({
         : t('payments.auto.docTypePP');
 
   return (
-    <View style={{ gap: theme.spacing.sm }}>
+    <View style={{gap: theme.spacing.sm}}>
       {/* Selector de tipo de documento: segmento chico discreto, accesible como radios. */}
-      <View style={[styles.segment, { gap: theme.spacing.xs }]}>
-        {DOCUMENT_TYPES.map((dt) => {
+      <View style={[styles.segment, {gap: theme.spacing.xs}]}>
+        {DOCUMENT_TYPES.map(dt => {
           const on = dt === documentType;
           const label = labelFor(dt);
           return (
             <Pressable
               key={dt}
               accessibilityRole="radio"
-              accessibilityState={{ selected: on }}
+              accessibilityState={{selected: on}}
               accessibilityLabel={label}
               onPress={() => onChangeDocumentType(dt)}
-              style={({ pressed }) => [
+              style={({pressed}) => [
                 styles.segmentItem,
                 {
                   paddingVertical: theme.spacing.xs,
@@ -67,11 +67,12 @@ export function DocumentField({
                   borderRadius: theme.radii.md,
                   borderWidth: on ? 2 : 1,
                   borderColor: on ? theme.colors.accent : theme.colors.border,
-                  backgroundColor: on ? theme.colors.surfaceElevated : theme.colors.surface,
+                  backgroundColor: on
+                    ? theme.colors.surfaceElevated
+                    : theme.colors.surface,
                   opacity: pressed ? 0.7 : 1,
                 },
-              ]}
-            >
+              ]}>
               <Text variant="subhead" color={on ? 'accent' : 'inkMuted'}>
                 {label}
               </Text>
@@ -106,6 +107,6 @@ export function DocumentField({
 }
 
 const styles = StyleSheet.create({
-  segment: { flexDirection: 'row', flexWrap: 'wrap' },
-  segmentItem: { alignItems: 'center', justifyContent: 'center', minHeight: 44 },
+  segment: {flexDirection: 'row', flexWrap: 'wrap'},
+  segmentItem: {alignItems: 'center', justifyContent: 'center', minHeight: 44},
 });

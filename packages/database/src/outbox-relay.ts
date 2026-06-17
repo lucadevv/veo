@@ -71,9 +71,7 @@ export class OutboxRelay {
     this.logger = options.logger;
     this.producer =
       options.producer ??
-      new KafkaEventProducer(
-        createKafka({ clientId: options.clientId, brokers: options.brokers }),
-      );
+      new KafkaEventProducer(createKafka({ clientId: options.clientId, brokers: options.brokers }));
     // OutboxStore sobre el write client (la escritura de dominio pobló el outbox en la misma tx).
     this.store = new PrismaOutboxStore(options.prisma, options.schema);
     this.tickMs = options.tickMs ?? OUTBOX_RELAY_TICK_MS;

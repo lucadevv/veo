@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  calculateCancellationPenalty,
-  CANCELLATION_PENALTY_CENTS,
-} from './cancellation';
+import { calculateCancellationPenalty, CANCELLATION_PENALTY_CENTS } from './cancellation';
 
 const base = new Date('2026-05-28T12:00:00.000Z');
 const minutes = (n: number) => new Date(base.getTime() + n * 60_000);

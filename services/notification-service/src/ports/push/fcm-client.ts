@@ -55,7 +55,10 @@ const TRANSIENT_CODES = new Set<string>([
   FcmErrorCode.ThirdPartyAuthError,
 ]);
 /** Códigos de cuota/throttling → reintentar respetando Retry-After. */
-const RATE_LIMITED_CODES = new Set<string>([FcmErrorCode.QuotaExceeded, FcmErrorCode.ResourceExhausted]);
+const RATE_LIMITED_CODES = new Set<string>([
+  FcmErrorCode.QuotaExceeded,
+  FcmErrorCode.ResourceExhausted,
+]);
 
 export interface FcmConfig {
   projectId: string;
@@ -112,7 +115,10 @@ export class FcmClient implements PushTransport {
     const accessToken = await this.auth.getAccessToken();
     if (!accessToken) {
       // Falla de credenciales propias (no del riel): transitoria, reintentable.
-      return { outcome: PushOutcome.Transient, reason: 'FCM: no se pudo obtener access token OAuth2' };
+      return {
+        outcome: PushOutcome.Transient,
+        reason: 'FCM: no se pudo obtener access token OAuth2',
+      };
     }
 
     // Bloque `apns`/`android` EXPLÍCITO: fuerza entrega visible y prioridad alta (sin esto, la entrega
@@ -123,7 +129,10 @@ export class FcmClient implements PushTransport {
       notification: { title: msg.title, body: msg.body },
       ...(msg.data ? { data: msg.data } : {}),
       apns: {
-        headers: { 'apns-priority': ApnsHeader.PriorityImmediate, 'apns-push-type': ApnsHeader.PushTypeAlert },
+        headers: {
+          'apns-priority': ApnsHeader.PriorityImmediate,
+          'apns-push-type': ApnsHeader.PushTypeAlert,
+        },
         payload: { aps: { sound: PUSH_SOUND_DEFAULT } },
       },
       android: { priority: ANDROID_PRIORITY_HIGH, notification: { sound: PUSH_SOUND_DEFAULT } },
@@ -138,7 +147,10 @@ export class FcmClient implements PushTransport {
       });
     } catch (err) {
       // Error de RED (no respuesta del riel): transitorio.
-      return { outcome: PushOutcome.Transient, reason: `FCM red: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        outcome: PushOutcome.Transient,
+        reason: `FCM red: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
 
     if (res.ok) {

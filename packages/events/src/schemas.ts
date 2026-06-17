@@ -17,7 +17,9 @@ const geo = z.object({ lat: z.number(), lon: z.number() });
 const vehicleClassSchema = z.enum(Object.values(VehicleClass) as [VehicleClass, ...VehicleClass[]]);
 /// Segmento del vehículo (B5-3) derivado del enum canónico VehicleSegment. Viaja en el ping de ubicación
 /// para que dispatch filtre la eligibilidad por oferta (confort exige ≥ MID) sin consultar fleet en el hot-path.
-const vehicleSegmentSchema = z.enum(Object.values(VehicleSegment) as [VehicleSegment, ...VehicleSegment[]]);
+const vehicleSegmentSchema = z.enum(
+  Object.values(VehicleSegment) as [VehicleSegment, ...VehicleSegment[]],
+);
 /// B5-3.2 · certificaciones de operador de las verticales (conductor) derivadas del enum canónico
 /// FleetDocumentType. Viajan en el ping para que dispatch gatee la eligibilidad de las verticales
 /// (ambulancia exige AMBULANCE_OPERATOR) FAIL-CLOSED, sin consultar fleet en el hot-path.
@@ -31,15 +33,28 @@ const fleetDocumentTypeSchema = z.enum(
 const pricingMode = z.enum(['PUJA', 'FIXED']);
 
 /* ── identity ── */
-export const userRegistered = z.object({ userId: z.string(), phone: z.string(), kycStatus: z.string() });
-export const driverVerified = z.object({ driverId: z.string(), userId: z.string(), verifiedAt: z.string() });
+export const userRegistered = z.object({
+  userId: z.string(),
+  phone: z.string(),
+  kycStatus: z.string(),
+});
+export const driverVerified = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  verifiedAt: z.string(),
+});
 /// El operador RECHAZÓ los antecedentes del conductor (espejo de driver.verified). identity-service lo
 /// emite por OUTBOX en la MISMA tx que persiste Driver.backgroundCheckStatus=REJECTED + rejectionReason.
 /// Downstream: audit (traza inmutable de la decisión) y admin-bff (proyecta el motivo en el read-model
 /// para que el panel lo muestre). `reason` = motivo del rechazo (texto del operador); "" si no se dio uno
 /// (degradación honesta, nunca un motivo falso). El conductor lo VE en la app (RejectedScreen) vía GET
 /// /drivers/me, no por este evento. `rejectedAt` ISO-8601 del momento del rechazo.
-export const driverRejected = z.object({ driverId: z.string(), userId: z.string(), reason: z.string(), rejectedAt: z.string() });
+export const driverRejected = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  reason: z.string(),
+  rejectedAt: z.string(),
+});
 /// El operador SUSPENDIÓ manualmente al conductor desde el panel (acción admin, espejo de driver.rejected
 /// pero del lado de la SUSPENSIÓN). identity-service lo emite por OUTBOX en la MISMA tx que el CAS de
 /// `Driver.suspendedAt` (así nunca hay suspensión sin evento ni evento sin suspensión). Downstream:
@@ -47,19 +62,49 @@ export const driverRejected = z.object({ driverId: z.string(), userId: z.string(
 /// para que el panel lo refleje). Distinto de `fleet.driver_suspended` (suspensión AUTOMÁTICA por documento
 /// crítico vencido, que emite fleet-service): este lo origina un operador. `reason` = motivo del operador
 /// (texto libre, ""→honesto si no se dio). `suspendedAt` ISO-8601 del momento efectivo de la suspensión.
-export const driverSuspended = z.object({ driverId: z.string(), reason: z.string(), suspendedAt: z.string() });
-export const userKycVerified = z.object({ userId: z.string(), kycStatus: z.string(), verifiedAt: z.string() });
+export const driverSuspended = z.object({
+  driverId: z.string(),
+  reason: z.string(),
+  suspendedAt: z.string(),
+});
+export const userKycVerified = z.object({
+  userId: z.string(),
+  kycStatus: z.string(),
+  verifiedAt: z.string(),
+});
 /// El usuario confirmó la titularidad de su correo (ADR-012, método correo+contraseña). identity-service
 /// lo emite en la MISMA tx que marca el AuthMethod.emailVerified=true. Downstream: onboarding/CRM.
-export const userEmailVerified = z.object({ userId: z.string(), email: z.string(), verifiedAt: z.string() });
-export const biometricFailed = z.object({ driverId: z.string(), score: z.number(), attempt: z.number(), at: z.string() });
-export const userDeletionRequested = z.object({ userId: z.string(), requestedAt: z.string(), graceUntil: z.string() });
+export const userEmailVerified = z.object({
+  userId: z.string(),
+  email: z.string(),
+  verifiedAt: z.string(),
+});
+export const biometricFailed = z.object({
+  driverId: z.string(),
+  score: z.number(),
+  attempt: z.number(),
+  at: z.string(),
+});
+export const userDeletionRequested = z.object({
+  userId: z.string(),
+  requestedAt: z.string(),
+  graceUntil: z.string(),
+});
 /// Borrado EFECTIVO de la cuenta (BR-S06 derecho al olvido): el sweeper aplicó el tombstone vencida
 /// la gracia. Señal de cascada para que los consumidores downstream purguen su PII del usuario.
 /// `driverId` presente si el usuario tenía perfil de conductor. Distinto de user.deletion_requested
 /// (que se emite al SOLICITAR el borrado, no al ejecutarlo).
-export const userDeleted = z.object({ userId: z.string(), driverId: z.string().optional(), at: z.string() });
-export const adminRoleChanged = z.object({ adminUserId: z.string(), roles: z.array(z.string()), changedBy: z.string(), at: z.string() });
+export const userDeleted = z.object({
+  userId: z.string(),
+  driverId: z.string().optional(),
+  at: z.string(),
+});
+export const adminRoleChanged = z.object({
+  adminUserId: z.string(),
+  roles: z.array(z.string()),
+  changedBy: z.string(),
+  at: z.string(),
+});
 
 /* ── referrals (identity) ── (Ola 2A) */
 export const userReferred = z.object({
@@ -99,17 +144,43 @@ export const tripRequested = z.object({
   /// join cross-servicio) para poder contemplarlas en el matching/oferta. Omitible por compat N-2 (= []).
   waypoints: z.array(geo).max(3).optional(),
 });
-export const tripAssigned = z.object({ tripId: z.string(), driverId: z.string(), vehicleId: z.string() });
+export const tripAssigned = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string(),
+});
 /// `passengerId` ENRIQUECIDO (opcional, compat N-2): trip-service lo añade al outbox para que
 /// notification-service resuelva el token del pasajero (push "tu conductor confirmó") sin un join
 /// cross-servicio. Ausente en eventos viejos → el consumidor degrada honesto (omite el push).
-export const tripAccepted = z.object({ tripId: z.string(), driverId: z.string(), etaSeconds: z.number().int(), passengerId: z.string().optional() });
-export const tripArriving = z.object({ tripId: z.string(), driverId: z.string(), etaSeconds: z.number().int(), at: z.string(), passengerId: z.string().optional() });
+export const tripAccepted = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  etaSeconds: z.number().int(),
+  passengerId: z.string().optional(),
+});
+export const tripArriving = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  etaSeconds: z.number().int(),
+  at: z.string(),
+  passengerId: z.string().optional(),
+});
 /// `waitWindowSeconds` ENRIQUECIDO (opcional): ventana de espera del conductor en el punto de recojo
 /// antes de poder cobrar penalidad/cancelar. notification-service la incluye en el push "tu conductor
 /// llegó" si viaja. `passengerId` ídem accepted/arriving.
-export const tripArrived = z.object({ tripId: z.string(), driverId: z.string(), at: z.string(), passengerId: z.string().optional(), waitWindowSeconds: z.number().int().optional() });
-export const tripStarted = z.object({ tripId: z.string(), driverId: z.string(), startedAt: z.string(), passengerId: z.string().optional() });
+export const tripArrived = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  at: z.string(),
+  passengerId: z.string().optional(),
+  waitWindowSeconds: z.number().int().optional(),
+});
+export const tripStarted = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  startedAt: z.string(),
+  passengerId: z.string().optional(),
+});
 export const tripCompleted = z.object({
   tripId: z.string(),
   fareCents: z.number().int(),
@@ -240,7 +311,12 @@ export const tripPiiErased = z.object({
 });
 
 /* ── dispatch ── (BR-T06) */
-export const dispatchMatchFound = z.object({ tripId: z.string(), driverId: z.string(), vehicleId: z.string().optional(), scoreMs: z.number() });
+export const dispatchMatchFound = z.object({
+  tripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string().optional(),
+  scoreMs: z.number(),
+});
 // `dispatch.offered` lo COMPARTEN dos flujos: el matcher FIXED (ofrece UN viaje concreto a un conductor) y
 // el broadcast de PUJA (`offer-board.broadcast` difunde una puja abierta a los elegibles). Los campos de puja
 // van OPCIONALES porque el camino FIXED emite SIN ellos; el conductor branchea por presencia de `bidCents`
@@ -454,11 +530,24 @@ export const driverLocationUpdated = z.object({
   /// vertical, su ausencia = inelegible (fail-closed, a diferencia de los attrs del vehículo que son fail-open).
   certifications: z.array(fleetDocumentTypeSchema).optional(),
 });
-export const driverEnteredZone = z.object({ driverId: z.string(), zoneId: z.string(), at: z.string() });
+export const driverEnteredZone = z.object({
+  driverId: z.string(),
+  zoneId: z.string(),
+  at: z.string(),
+});
 
 /* ── media ── (BR-S01 cámara) */
-export const mediaRecordingStarted = z.object({ tripId: z.string(), roomName: z.string(), startedAt: z.string() });
-export const mediaArchived = z.object({ tripId: z.string(), s3Key: z.string(), bytes: z.number().int(), retentionDays: z.number().int() });
+export const mediaRecordingStarted = z.object({
+  tripId: z.string(),
+  roomName: z.string(),
+  startedAt: z.string(),
+});
+export const mediaArchived = z.object({
+  tripId: z.string(),
+  s3Key: z.string(),
+  bytes: z.number().int(),
+  retentionDays: z.number().int(),
+});
 export const mediaAccessGranted = z.object({
   requestId: z.string(),
   tripId: z.string(),
@@ -503,7 +592,12 @@ export const paymentCaptured = z.object({
   /// notification-service mande el push "pago confirmado · S/X.XX" al pasajero. Ausente → omite el push.
   passengerId: z.string().optional(),
 });
-export const paymentFailed = z.object({ paymentId: z.string(), tripId: z.string(), reason: z.string(), willRetry: z.boolean() });
+export const paymentFailed = z.object({
+  paymentId: z.string(),
+  tripId: z.string(),
+  reason: z.string(),
+  willRetry: z.boolean(),
+});
 /// PROPINA añadida a un viaje YA cobrado (BR-P04): el 100% va al CONDUCTOR, fuera de comisión.
 /// payment-service la emite por OUTBOX desde `addTip` (en la MISMA transacción que el incremento de
 /// `tipCents`, así nunca hay propina sumada sin evento ni evento sin propina). El driver-bff la consume
@@ -566,7 +660,12 @@ export const cancellationPenaltyCollected = z.object({
   settlementPaymentId: z.string(),
 });
 
-export const payoutProcessed = z.object({ payoutId: z.string(), driverId: z.string(), amountCents: z.number().int(), period: z.string() });
+export const payoutProcessed = z.object({
+  payoutId: z.string(),
+  driverId: z.string(),
+  amountCents: z.number().int(),
+  period: z.string(),
+});
 
 /* ── afiliación de wallet / Yape On File (payment) ── (Ola pagos PE)
  * Notificaciones futuras (push "tu Yape quedó afiliado"). SIN PII: solo ids + phone enmascarado. */
@@ -668,18 +767,47 @@ export const panicFanoutRequested = z
 
 /* ── notification ── */
 /** Honesto: el RIEL (FCM/APNs/SMS…) ACEPTÓ el mensaje. NO garantiza recepción en el device. */
-export const notificationSent = z.object({ notificationId: z.string(), channel: z.enum(['PUSH', 'SMS', 'EMAIL', 'WEBHOOK']), to: z.string() });
+export const notificationSent = z.object({
+  notificationId: z.string(),
+  channel: z.enum(['PUSH', 'SMS', 'EMAIL', 'WEBHOOK']),
+  to: z.string(),
+});
 /** Reservado para entrega REAL confirmada por receipt (FCM BigQuery export / futuro). Hoy NO se emite. */
-export const notificationDelivered = z.object({ notificationId: z.string(), channel: z.enum(['PUSH', 'SMS', 'EMAIL', 'WEBHOOK']), to: z.string() });
-export const notificationFailed = z.object({ notificationId: z.string(), channel: z.string(), error: z.string() });
+export const notificationDelivered = z.object({
+  notificationId: z.string(),
+  channel: z.enum(['PUSH', 'SMS', 'EMAIL', 'WEBHOOK']),
+  to: z.string(),
+});
+export const notificationFailed = z.object({
+  notificationId: z.string(),
+  channel: z.string(),
+  error: z.string(),
+});
 
 /* ── rating ── (BR-D01 / BR-I05) */
-export const ratingCreated = z.object({ ratingId: z.string(), tripId: z.string(), driverId: z.string(), stars: z.number().int().min(1).max(5) });
-export const driverFlagged = z.object({ driverId: z.string(), rollingAvg: z.number(), reason: z.string() });
-export const passengerFlagged = z.object({ passengerId: z.string(), rollingAvg: z.number(), reason: z.string() });
+export const ratingCreated = z.object({
+  ratingId: z.string(),
+  tripId: z.string(),
+  driverId: z.string(),
+  stars: z.number().int().min(1).max(5),
+});
+export const driverFlagged = z.object({
+  driverId: z.string(),
+  rollingAvg: z.number(),
+  reason: z.string(),
+});
+export const passengerFlagged = z.object({
+  passengerId: z.string(),
+  rollingAvg: z.number(),
+  reason: z.string(),
+});
 
 /* ── share ── (pilar 4) */
-export const shareLinkGenerated = z.object({ shareId: z.string(), tripId: z.string(), expiresAt: z.string() });
+export const shareLinkGenerated = z.object({
+  shareId: z.string(),
+  tripId: z.string(),
+  expiresAt: z.string(),
+});
 export const shareViewed = z.object({ shareId: z.string(), at: z.string() });
 
 /* ── chat ── (Ola 2A: chat in-app conductor↔pasajero) */
@@ -726,8 +854,18 @@ export const fleetDocumentExpired = z.object({
   expiresAt: z.string(),
   critical: z.boolean(),
 });
-export const fleetDriverSuspended = z.object({ driverId: z.string(), reason: z.string(), documentId: z.string().optional(), documentType: z.string().optional(), suspendedAt: z.string() });
-export const fleetVehicleSuspended = z.object({ vehicleId: z.string(), reason: z.string(), suspendedAt: z.string() });
+export const fleetDriverSuspended = z.object({
+  driverId: z.string(),
+  reason: z.string(),
+  documentId: z.string().optional(),
+  documentType: z.string().optional(),
+  suspendedAt: z.string(),
+});
+export const fleetVehicleSuspended = z.object({
+  vehicleId: z.string(),
+  reason: z.string(),
+  suspendedAt: z.string(),
+});
 export const fleetVehicleRegistered = z.object({
   vehicleId: z.string(),
   driverId: z.string(),
@@ -737,7 +875,7 @@ export const fleetVehicleRegistered = z.object({
 });
 export const fleetVehicleModelReviewed = z.object({
   modelId: z.string(),
-  requestedBy: z.string(),        // userId del conductor que solicitó el modelo (destinatario del push)
+  requestedBy: z.string(), // userId del conductor que solicitó el modelo (destinatario del push)
   verdict: z.enum(['APPROVED', 'REJECTED']),
   make: z.string(),
   model: z.string(),

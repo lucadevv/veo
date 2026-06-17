@@ -22,7 +22,8 @@ export class EarningsController {
 
   @Get('breakdown')
   @ApiOperation({
-    summary: 'Desglose de ganancias hoy/semana (bruto, comisión, propinas, neto, nº viajes) (BR-P05)',
+    summary:
+      'Desglose de ganancias hoy/semana (bruto, comisión, propinas, neto, nº viajes) (BR-P05)',
   })
   breakdown(@CurrentUser() user: AuthenticatedUser): Promise<DriverEarningsSummary> {
     return this.earnings.breakdown(user);

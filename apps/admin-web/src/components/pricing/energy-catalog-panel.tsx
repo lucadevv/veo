@@ -43,7 +43,9 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
 
   // Estado editable: precio en SOLES por fuente (se persiste en céntimos). Clave = sourceId.
   const [prices, setPrices] = useState<Record<string, string>>(() =>
-    Object.fromEntries(config.sources.map((s) => [s.sourceId, (s.pricePerUnitCents / 100).toFixed(2)])),
+    Object.fromEntries(
+      config.sources.map((s) => [s.sourceId, (s.pricePerUnitCents / 100).toFixed(2)]),
+    ),
   );
 
   const centsOf = (sourceId: string): number => {
@@ -61,7 +63,10 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   async function save() {
     try {
       await replace.mutateAsync({
-        sources: config.sources.map((s) => ({ sourceId: s.sourceId, pricePerUnitCents: centsOf(s.sourceId) })),
+        sources: config.sources.map((s) => ({
+          sourceId: s.sourceId,
+          pricePerUnitCents: centsOf(s.sourceId),
+        })),
         expectedVersion: config.version,
       });
       toast({ tone: 'success', title: 'Precios de energía actualizados' });
@@ -82,8 +87,9 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
         <Zap className="size-4" aria-hidden /> Precios de energía
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        Ingresá el precio de cada fuente de energía (lo que ves en el grifo o la tarifa de kWh). El sistema
-        deriva el recargo por km de cada servicio según su rendimiento. El cambio es global y queda auditado.
+        Ingresá el precio de cada fuente de energía (lo que ves en el grifo o la tarifa de kWh). El
+        sistema deriva el recargo por km de cada servicio según su rendimiento. El cambio es global
+        y queda auditado.
       </p>
 
       {config.sources.length === 0 ? (
@@ -95,7 +101,8 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
               key={s.sourceId}
               label={`${SOURCE_LABEL[s.sourceId] ?? s.sourceId} (${UNIT_LABEL[s.unit] ?? s.unit})`}
               hint={`Actual: S/${(s.pricePerUnitCents / 100).toFixed(2)}`}
-              error={invalidOf(s.sourceId) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}>
+              error={invalidOf(s.sourceId) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
+            >
               <Input
                 type="number"
                 inputMode="decimal"

@@ -105,9 +105,11 @@ describe('UserDeletedConsumer', () => {
       config,
     );
     const invoke = (e: EventEnvelope<unknown>) =>
-      (consumer as unknown as {
-        onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
-      }).onUserDeleted(e);
+      (
+        consumer as unknown as {
+          onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
+        }
+      ).onUserDeleted(e);
     return { consumer, devices, notifications, tickets, invoke };
   }
 

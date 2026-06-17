@@ -38,18 +38,24 @@ export class OfferingOverrideDto {
 
   @ApiPropertyOptional({
     enum: PRICING_MODES,
-    description: 'B2: pin del modo de pricing. Si ∉ allowedModes de la oferta, se ignora (la oferta veta).',
+    description:
+      'B2: pin del modo de pricing. Si ∉ allowedModes de la oferta, se ignora (la oferta veta).',
   })
   @IsOptional()
   @IsIn(PRICING_MODES)
   mode?: PricingMode;
 
-  @ApiPropertyOptional({ description: 'B2: override del multiplicador (> 0). Ausente → el de código.' })
+  @ApiPropertyOptional({
+    description: 'B2: override del multiplicador (> 0). Ausente → el de código.',
+  })
   @IsOptional()
   @IsPositive()
   multiplier?: number;
 
-  @ApiPropertyOptional({ description: 'B2: override de la tarifa mínima en céntimos PEN (0..100000). Ausente → la de código.' })
+  @ApiPropertyOptional({
+    description:
+      'B2: override de la tarifa mínima en céntimos PEN (0..100000). Ausente → la de código.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -59,7 +65,10 @@ export class OfferingOverrideDto {
 
 /** Body del PUT /internal/catalog — reemplazo wholesale del overlay. */
 export class ReplaceCatalogDto {
-  @ApiProperty({ type: [OfferingOverrideDto], description: 'Overrides por oferta (lista completa)' })
+  @ApiProperty({
+    type: [OfferingOverrideDto],
+    description: 'Overrides por oferta (lista completa)',
+  })
   @IsArray()
   @ArrayMaxSize(100)
   // Una oferta NO puede aparecer dos veces (el overlay se keyea por id; un duplicado sería ambiguo).

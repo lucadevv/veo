@@ -80,7 +80,9 @@ export class PaymentsService {
     // retryCharge/changeMethod. Sin esto, cualquier id devolvía monto/método/externalRef de un pago ajeno.
     let owner: { passengerId?: string | null };
     try {
-      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, { identity: user });
+      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, {
+        identity: user,
+      });
     } catch {
       throw new NotFoundError('Pago no encontrado');
     }
@@ -128,7 +130,11 @@ export class PaymentsService {
    */
   async getUserCredit(user: AuthenticatedUser): Promise<{ balanceCents: number }> {
     const meta = grpcIdentityMetadata(user, this.secret);
-    const reply = await this.paymentGrpc.call<UserCreditReply>('GetUserCredit', { userId: user.userId }, meta);
+    const reply = await this.paymentGrpc.call<UserCreditReply>(
+      'GetUserCredit',
+      { userId: user.userId },
+      meta,
+    );
     return { balanceCents: reply.balanceCents };
   }
 
@@ -170,7 +176,11 @@ export class PaymentsService {
    * (`toPaymentView` → `blankToNull`), idéntico a `getPayment`/`getPaymentByTrip`. Así el shape del 200
    * del confirm es el contrato que la app espera y el estado bilateral ya viene reflejado en el Payment.
    */
-  async confirmCash(user: AuthenticatedUser, id: string, dto: CashConfirmDto): Promise<PaymentView> {
+  async confirmCash(
+    user: AuthenticatedUser,
+    id: string,
+    dto: CashConfirmDto,
+  ): Promise<PaymentView> {
     await this.paymentRest.post<unknown>(`/payments/${id}/cash/confirm`, {
       identity: user,
       body: { party: 'passenger', confirmed: dto.confirmed ?? true },
@@ -185,7 +195,9 @@ export class PaymentsService {
    * el passengerId sale de la identidad firmada en payment-service (no se pasa parámetro → anti-IDOR).
    */
   async getMyDebts(user: AuthenticatedUser): Promise<DebtView> {
-    const summary = await this.paymentRest.get<DebtSummaryReply>('/payments/debt', { identity: user });
+    const summary = await this.paymentRest.get<DebtSummaryReply>('/payments/debt', {
+      identity: user,
+    });
     return {
       hasDebt: summary.hasDebt,
       totalCents: summary.totalCents,
@@ -214,7 +226,9 @@ export class PaymentsService {
     // 1) Ownership: leemos el Payment (con passengerId) por REST interno. Ajeno/inexistente → 404.
     let owner: { passengerId?: string | null };
     try {
-      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, { identity: user });
+      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, {
+        identity: user,
+      });
     } catch {
       throw new NotFoundError('Pago no encontrado');
     }
@@ -242,11 +256,19 @@ export class PaymentsService {
    * invalidamos el cache "sin deuda" del gate (la penalidad pudo pasar a COLLECTED → el gate se libera).
    * Devuelve el PaymentView del cobro de liquidación (sandbox→CAPTURED; prontopaga→PENDING con checkout).
    */
-  async settlePenalty(user: AuthenticatedUser, penaltyId: string, method: string, payerRef?: string): Promise<PaymentView> {
-    const settlement = await this.paymentRest.post<PaymentReply>(`/payments/penalties/${penaltyId}/settle`, {
-      identity: user,
-      body: { method, payerRef },
-    });
+  async settlePenalty(
+    user: AuthenticatedUser,
+    penaltyId: string,
+    method: string,
+    payerRef?: string,
+  ): Promise<PaymentView> {
+    const settlement = await this.paymentRest.post<PaymentReply>(
+      `/payments/penalties/${penaltyId}/settle`,
+      {
+        identity: user,
+        body: { method, payerRef },
+      },
+    );
     // El estado de deuda cambió (penalidad bloqueante → potencialmente COLLECTED). El gate reconsulta.
     try {
       await this.redis.del(`debt:none:${user.userId}`);
@@ -270,7 +292,9 @@ export class PaymentsService {
     // 1) Ownership: leemos el Payment (con passengerId) por REST interno. Ajeno/inexistente → 404.
     let owner: { passengerId?: string | null };
     try {
-      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, { identity: user });
+      owner = await this.paymentRest.get<{ passengerId?: string | null }>(`/payments/${id}`, {
+        identity: user,
+      });
     } catch {
       throw new NotFoundError('Pago no encontrado');
     }

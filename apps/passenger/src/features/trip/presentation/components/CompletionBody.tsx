@@ -1,12 +1,12 @@
-import type { TripActiveView } from '@veo/api-client';
-import { Text, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { SettlementBody } from '../../../payments/presentation/components/SettlementBody';
-import { RatingBody } from '../../../ratings/presentation/components/RatingBody';
+import type {TripActiveView} from '@veo/api-client';
+import {Text, useTheme} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {SettlementBody} from '../../../payments/presentation/components/SettlementBody';
+import {RatingBody} from '../../../ratings/presentation/components/RatingBody';
 
 export interface CompletionBodyProps {
   tripId: string;
@@ -31,9 +31,13 @@ type Step = 'settle' | 'rate';
  * confirmó y elige "Confirmar después" (`onDeferred`), NO se cierra: se limpia el store para volver al
  * home, pero al re-enfocar `useHydrateActiveTrip` re-adopta el settlement pendiente y re-ofrece el cierre.
  */
-export function CompletionBody({ tripId, trip, onDone }: CompletionBodyProps): React.JSX.Element {
+export function CompletionBody({
+  tripId,
+  trip,
+  onDone,
+}: CompletionBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const closeTrip = useDependency(TOKENS.closeTripUseCase);
   const driverId = trip.driver?.id ?? null;
   const [step, setStep] = useState<Step>('settle');
@@ -53,7 +57,7 @@ export function CompletionBody({ tripId, trip, onDone }: CompletionBodyProps): R
   };
 
   return (
-    <View style={{ gap: theme.spacing.lg }}>
+    <View style={{gap: theme.spacing.lg}}>
       <Text variant="title3">{t('trip.completedTitle')}</Text>
       {step === 'settle' ? (
         <SettlementBody
@@ -67,7 +71,11 @@ export function CompletionBody({ tripId, trip, onDone }: CompletionBodyProps): R
           canFinish={driverId != null}
         />
       ) : driverId ? (
-        <RatingBody tripId={tripId} driverId={driverId} onDone={finishAndClose} />
+        <RatingBody
+          tripId={tripId}
+          driverId={driverId}
+          onDone={finishAndClose}
+        />
       ) : null}
     </View>
   );

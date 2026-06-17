@@ -49,14 +49,21 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const [overrideSoles, setOverrideSoles] = useState<Record<string, string>>(initialOverrides);
 
   const defaultCents = defaultSoles.trim() === '' ? 0 : Math.round(Number(defaultSoles) * 100);
-  const defaultInvalid = !Number.isFinite(defaultCents) || defaultCents < 1 || defaultCents > MAX_SOLES * 100;
+  const defaultInvalid =
+    !Number.isFinite(defaultCents) || defaultCents < 1 || defaultCents > MAX_SOLES * 100;
 
   // Overrides EFECTIVOS: las filas con valor numérico válido > 0 (vacío = sin override → cae al default).
   const overrides = PUJA_OFFERINGS.flatMap((o) => {
     const raw = overrideSoles[o.id]?.trim() ?? '';
     if (raw === '') return [];
     const cents = Math.round(Number(raw) * 100);
-    return [{ offeringId: o.id, cents, valid: Number.isFinite(cents) && cents >= 1 && cents <= MAX_SOLES * 100 }];
+    return [
+      {
+        offeringId: o.id,
+        cents,
+        valid: Number.isFinite(cents) && cents >= 1 && cents <= MAX_SOLES * 100,
+      },
+    ];
   });
   const anyOverrideInvalid = overrides.some((o) => !o.valid);
   const invalid = defaultInvalid || anyOverrideInvalid;
@@ -66,7 +73,11 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
       await replace.mutateAsync({
         defaultFloorCents: defaultCents,
         // expectedVersion = la que cargamos (CAS): si otro admin la movió, el server responde 409.
-        overrides: overrides.map((o) => ({ zone: GLOBAL_ZONE, offeringId: o.offeringId, floorCents: o.cents })),
+        overrides: overrides.map((o) => ({
+          zone: GLOBAL_ZONE,
+          offeringId: o.offeringId,
+          floorCents: o.cents,
+        })),
         expectedVersion: config.version,
       });
       toast({
@@ -90,16 +101,17 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
         <Gavel className="size-4" aria-hidden /> Piso de la puja (por oferta)
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        El mínimo que un pasajero puede ofertar en modo PUJA. Definí un piso por defecto y, opcionalmente, un
-        piso distinto por oferta (ej. moto más bajo que confort). Dejá una oferta vacía para que use el
-        default. El cambio es inmediato, server-side y queda auditado.
+        El mínimo que un pasajero puede ofertar en modo PUJA. Definí un piso por defecto y,
+        opcionalmente, un piso distinto por oferta (ej. moto más bajo que confort). Dejá una oferta
+        vacía para que use el default. El cambio es inmediato, server-side y queda auditado.
       </p>
 
       <div className="mt-4 max-w-2xl space-y-3">
         <Field
           label="Piso por defecto (S/)"
           hint={`Actual: S/${centsToSoles(config.defaultFloorCents)}`}
-          error={defaultInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}>
+          error={defaultInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
+        >
           <Input
             type="number"
             inputMode="decimal"
@@ -113,18 +125,22 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
         </Field>
 
         <div className="rounded-lg border border-line/60 p-3">
-          <p className="text-xs font-medium text-ink-muted">Overrides por oferta (vacío = usa el default)</p>
+          <p className="text-xs font-medium text-ink-muted">
+            Overrides por oferta (vacío = usa el default)
+          </p>
           <div className="mt-2 grid gap-2">
             {PUJA_OFFERINGS.map((o) => {
               const val = overrideSoles[o.id] ?? '';
               const cents = val.trim() === '' ? 0 : Math.round(Number(val) * 100);
               const rowInvalid =
-                val.trim() !== '' && (!Number.isFinite(cents) || cents < 1 || cents > MAX_SOLES * 100);
+                val.trim() !== '' &&
+                (!Number.isFinite(cents) || cents < 1 || cents > MAX_SOLES * 100);
               return (
                 <Field
                   key={o.id}
                   label={offeringLabel(o.id)}
-                  error={rowInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}>
+                  error={rowInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
+                >
                   <Input
                     type="number"
                     inputMode="decimal"
@@ -133,7 +149,9 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
                     max={MAX_SOLES}
                     placeholder={`default S/${centsToSoles(defaultCents || config.defaultFloorCents)}`}
                     value={val}
-                    onChange={(e) => setOverrideSoles((prev) => ({ ...prev, [o.id]: e.target.value }))}
+                    onChange={(e) =>
+                      setOverrideSoles((prev) => ({ ...prev, [o.id]: e.target.value }))
+                    }
                     disabled={!canManage}
                   />
                 </Field>
@@ -170,7 +188,9 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
 
       <p className="mt-3 text-xs text-ink-subtle">
         Versión {config.version}
-        {config.updatedAt && config.version > 0 ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
+        {config.updatedAt && config.version > 0
+          ? ` · actualizado ${dateTime(config.updatedAt)}`
+          : ' · sin cambios aún'}
       </p>
     </section>
   );

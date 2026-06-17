@@ -1,14 +1,14 @@
-import { ApiError } from '@veo/api-client';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, Button, Text, useTheme } from '@veo/ui-kit';
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
-import { formatPEN } from '../../../../shared/utils/format';
-import { BID_STEP_CENTS, stepBidCents } from '../../../../shared/utils/bid';
+import {ApiError} from '@veo/api-client';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {Banner, Button, Text, useTheme} from '@veo/ui-kit';
+import React, {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
+import {formatPEN} from '../../../../shared/utils/format';
+import {BID_STEP_CENTS, stepBidCents} from '../../../../shared/utils/bid';
 
 /**
  * F2 · Re-puja RESILIENTE a la carrera de cierre. Aún con la fase derivada del backend (F1), un tap
@@ -23,10 +23,13 @@ const REBID_RETRY_BACKOFF_MS = [1200, 2200] as const;
 
 /** true si el error es el 409 de estado del rebid (trip aún REQUESTED, board sin expirar todavía). */
 function isRebidStateConflict(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 409 && err.code === 'CONFLICT';
+  return (
+    err instanceof ApiError && err.status === 409 && err.code === 'CONFLICT'
+  );
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms));
 
 export interface NoOffersBodyProps {
   /** Viaje EXPIRED (la puja cerró sin ofertas) que se puede RE-PUJAR (EXPIRED → REQUESTED). */
@@ -59,9 +62,13 @@ export interface NoOffersBodyProps {
  * actual (piso de la re-puja) se trae best-effort vía `getActiveTrip`; mientras llega, el botón
  * "Re-pujar" se muestra SIN precio y deshabilitado, pero el pasajero NUNCA queda atrapado (Salir manda).
  */
-export function NoOffersBody({ tripId, onRebid, onExit }: NoOffersBodyProps): React.JSX.Element {
+export function NoOffersBody({
+  tripId,
+  onRebid,
+  onExit,
+}: NoOffersBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const tripRepository = useDependency(TOKENS.tripRepository);
   const rebid = useDependency(TOKENS.rebidUseCase);
@@ -111,17 +118,18 @@ export function NoOffersBody({ tripId, onRebid, onExit }: NoOffersBodyProps): Re
   });
 
   // Distingue el mensaje: 409 persistente (cerrando la búsqueda anterior) vs error genuino (red/server).
-  const rebidConflict = rebidMutation.isError && isRebidStateConflict(rebidMutation.error);
+  const rebidConflict =
+    rebidMutation.isError && isRebidStateConflict(rebidMutation.error);
 
   const fareReady = currentBidCents !== undefined && bidCents !== null;
 
   return (
-    <View style={{ gap: theme.spacing.lg }}>
-      <View style={{ gap: theme.spacing.xs }}>
+    <View style={{gap: theme.spacing.lg}}>
+      <View style={{gap: theme.spacing.xs}}>
         <Text variant="title3">{t('noOffers.title')}</Text>
         <Text variant="callout" color="inkMuted">
           {fareReady
-            ? t('noOffers.body', { price: formatPEN(currentBidCents) })
+            ? t('noOffers.body', {price: formatPEN(currentBidCents)})
             : t('noOffers.bodyNoPrice')}
         </Text>
       </View>
@@ -132,26 +140,42 @@ export function NoOffersBody({ tripId, onRebid, onExit }: NoOffersBodyProps): Re
         <BidPanel
           bidCents={bidCents}
           floorCents={currentBidCents}
-          onDecrement={() => setBidCents((b) => stepBidCents(b ?? currentBidCents, -1, currentBidCents))}
-          onIncrement={() => setBidCents((b) => stepBidCents(b ?? currentBidCents, 1, currentBidCents))}
+          onDecrement={() =>
+            setBidCents(b =>
+              stepBidCents(b ?? currentBidCents, -1, currentBidCents),
+            )
+          }
+          onIncrement={() =>
+            setBidCents(b =>
+              stepBidCents(b ?? currentBidCents, 1, currentBidCents),
+            )
+          }
         />
       ) : null}
 
       {rebidMutation.isError ? (
         <Banner
           tone={rebidConflict ? 'warn' : 'danger'}
-          title={rebidConflict ? t('noOffers.closingSearch') : t('noOffers.error')}
+          title={
+            rebidConflict ? t('noOffers.closingSearch') : t('noOffers.error')
+          }
         />
       ) : null}
 
-      <View style={{ gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.sm}}>
         <Button
-          label={fareReady ? t('noOffers.rebid', { price: formatPEN(bidCents) }) : t('noOffers.rebidNoPrice')}
+          label={
+            fareReady
+              ? t('noOffers.rebid', {price: formatPEN(bidCents)})
+              : t('noOffers.rebidNoPrice')
+          }
           variant="primary"
           fullWidth
           loading={rebidMutation.isPending}
           disabled={!fareReady || rebidMutation.isPending}
-          onPress={() => (bidCents !== null ? rebidMutation.mutate(bidCents) : undefined)}
+          onPress={() =>
+            bidCents !== null ? rebidMutation.mutate(bidCents) : undefined
+          }
         />
         {/* SIEMPRE visible y accionable, sin depender de ninguna query: el pasajero nunca queda atrapado. */}
         <Button

@@ -10,12 +10,12 @@ ocurren en la misma transacción Postgres; el `OutboxRelay` los drena a Kafka.
 
 ## Publica
 
-| Topic | eventType | Disparado por | Consumidores previstos |
-|---|---|---|---|
-| fleet | `fleet.document.expiring` | Cron `ExpirySweeper` al alcanzar un hito 30/15/7/1 días | notification-service (alerta al conductor/operador) |
-| fleet | `fleet.document.expired` | Cron / revisión cuando un documento vence | notification-service, identity-service |
-| fleet | `fleet.driver.suspended` | Documento crítico (Licencia A1 / SOAT / Tarjeta) EXPIRED de un conductor | identity-service (marca `DriverStatus=SUSPENDED`), notification-service |
-| fleet | `fleet.vehicle.suspended` | docStatus del vehículo cae a EXPIRED (SOAT/ITV/seguro vencidos) | dispatch-service (excluye el vehículo), notification-service |
+| Topic | eventType                 | Disparado por                                                            | Consumidores previstos                                                  |
+| ----- | ------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| fleet | `fleet.document.expiring` | Cron `ExpirySweeper` al alcanzar un hito 30/15/7/1 días                  | notification-service (alerta al conductor/operador)                     |
+| fleet | `fleet.document.expired`  | Cron / revisión cuando un documento vence                                | notification-service, identity-service                                  |
+| fleet | `fleet.driver.suspended`  | Documento crítico (Licencia A1 / SOAT / Tarjeta) EXPIRED de un conductor | identity-service (marca `DriverStatus=SUSPENDED`), notification-service |
+| fleet | `fleet.vehicle.suspended` | docStatus del vehículo cae a EXPIRED (SOAT/ITV/seguro vencidos)          | dispatch-service (excluye el vehículo), notification-service            |
 
 ### Payloads propuestos
 
@@ -100,8 +100,8 @@ export const fleetVehicleSuspended = z.object({
 
 ## Consume
 
-| Topic | eventType | Acción | Reintentos |
-|---|---|---|---|
+| Topic    | eventType                                    | Acción                                                        | Reintentos                   |
+| -------- | -------------------------------------------- | ------------------------------------------------------------- | ---------------------------- |
 | identity | `driver.verified` (opcional, fase posterior) | Pre-crear el checklist de documentos requeridos del conductor | reintenta vía consumer group |
 
 > Hoy `fleet-service` NO consume eventos (el alta de documentos es por API). El consumo de

@@ -36,6 +36,8 @@ export async function loginViaUi(page: Page): Promise<boolean> {
     await page.getByRole('button', { name: 'Verificar y entrar' }).click();
   }
 
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 8000 }).catch(() => undefined);
+  await page
+    .waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 8000 })
+    .catch(() => undefined);
   return !page.url().includes('/login');
 }

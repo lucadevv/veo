@@ -141,14 +141,21 @@ export class ScheduledTripService {
         staleMinutes: 0,
         at: at.toISOString(),
       };
-      await recordTripEvent(tx, trip.id, 'trip.expired', { ...payload, reason: 'offering_disabled', offeringId, scheduled: true });
+      await recordTripEvent(tx, trip.id, 'trip.expired', {
+        ...payload,
+        reason: 'offering_disabled',
+        offeringId,
+        scheduled: true,
+      });
       await enqueueOutbox(
         tx,
         createEnvelope({ eventType: 'trip.expired', producer: PRODUCER, payload }),
         trip.id,
       );
     });
-    this.logger.warn(`Viaje programado ${trip.id} EXPIRADO: oferta '${offeringId}' deshabilitada por el admin`);
+    this.logger.warn(
+      `Viaje programado ${trip.id} EXPIRADO: oferta '${offeringId}' deshabilitada por el admin`,
+    );
   }
 
   /**
@@ -179,13 +186,23 @@ export class ScheduledTripService {
           penaltyCents: 0, // sin penalidad por cancelar una reserva con antelación
         },
       });
-      await recordTripEvent(tx, id, 'trip.cancelled', { by: 'PASSENGER', penaltyCents: 0, scheduled: true });
+      await recordTripEvent(tx, id, 'trip.cancelled', {
+        by: 'PASSENGER',
+        penaltyCents: 0,
+        scheduled: true,
+      });
       await enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'trip.cancelled',
           producer: PRODUCER,
-          payload: { tripId: id, by: 'PASSENGER', reason: 'scheduled_cancelled', penaltyCents: 0, passengerId: trip.passengerId },
+          payload: {
+            tripId: id,
+            by: 'PASSENGER',
+            reason: 'scheduled_cancelled',
+            penaltyCents: 0,
+            passengerId: trip.passengerId,
+          },
         }),
         id,
       );

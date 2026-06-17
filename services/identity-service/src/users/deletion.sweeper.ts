@@ -50,7 +50,11 @@ export class DeletionSweeper {
    * Anonimiza una cuenta y todo su rastro biométrico, y encola la señal de cascada — todo en la
    * MISMA transacción para que el tombstone y el evento sean atómicos (outbox-in-tx, FOUNDATION §6).
    */
-  private async tombstoneUser(userId: string, driverId: string | undefined, now: Date): Promise<void> {
+  private async tombstoneUser(
+    userId: string,
+    driverId: string | undefined,
+    now: Date,
+  ): Promise<void> {
     await this.prisma.write.$transaction(async (tx) => {
       // User: PII de contacto + biométrica (faceEmbedding de referencia del pasajero verificado).
       await tx.user.update({

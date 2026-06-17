@@ -37,16 +37,12 @@ const dbForbidden = {
 };
 
 function makeService(): PanicService {
-  return new PanicService(
-    dbForbidden as never,
-    new PanicMetrics(),
-    evidence,
-    SECRET,
-    config,
-  );
+  return new PanicService(dbForbidden as never, new PanicMetrics(), evidence, SECRET, config);
 }
 
-function validInput(overrides: Partial<{ tripId: string; dedupKey: string; lat: number; lon: number }> = {}) {
+function validInput(
+  overrides: Partial<{ tripId: string; dedupKey: string; lat: number; lon: number }> = {},
+) {
   const tripId = overrides.tripId ?? uuidv7();
   const dedupKey = overrides.dedupKey ?? uuidv7();
   const lat = overrides.lat ?? -12.0464;
@@ -66,10 +62,7 @@ describe('PanicService.trigger · guardas previas a la DB (BR-S04)', () => {
   it('rechaza una firma con secreto incorrecto sin tocar la base de datos', async () => {
     const svc = makeService();
     const input = validInput();
-    input.signature = signHmac(
-      buildPanicSignatureMessage(input),
-      'secreto-equivocado',
-    );
+    input.signature = signHmac(buildPanicSignatureMessage(input), 'secreto-equivocado');
     await expect(svc.trigger(input)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 

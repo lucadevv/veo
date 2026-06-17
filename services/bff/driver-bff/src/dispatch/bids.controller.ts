@@ -12,11 +12,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { DriverApi } from '../common/driver-api.decorator';
 import { DispatchService } from './dispatch.service';
-import {
-  SubmitOfferDto,
-  type OpenBidView,
-  type SubmittedOfferView,
-} from './dto/dispatch.dto';
+import { SubmitOfferDto, type OpenBidView, type SubmittedOfferView } from './dto/dispatch.dto';
 
 @ApiTags('bids')
 @DriverApi()
@@ -32,7 +28,9 @@ export class BidsController {
 
   @Post(':tripId/offer')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Enviar oferta/contraoferta a una puja (gate de elegibilidad downstream)' })
+  @ApiOperation({
+    summary: 'Enviar oferta/contraoferta a una puja (gate de elegibilidad downstream)',
+  })
   offer(
     @Param('tripId', ParseUUIDPipe) tripId: string,
     @Body() dto: SubmitOfferDto,

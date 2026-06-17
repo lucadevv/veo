@@ -1,4 +1,4 @@
-import {DriverStatus} from '@veo/shared-types';
+import { DriverStatus } from '@veo/shared-types';
 
 /**
  * Estado del turno del conductor, normalizado desde el `currentStatus` crudo que devuelve

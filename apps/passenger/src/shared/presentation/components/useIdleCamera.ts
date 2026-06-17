@@ -1,7 +1,7 @@
-import type { GeoPoint } from '@veo/api-client';
-import { type RefObject, useCallback, useEffect, useRef } from 'react';
-import { LIMA_ZOOM, toLngLat } from '../../utils/geo';
-import type { DirectedCameraRef } from './useDirectedCamera';
+import type {GeoPoint} from '@veo/api-client';
+import {type RefObject, useCallback, useEffect, useRef} from 'react';
+import {LIMA_ZOOM, toLngLat} from '../../utils/geo';
+import type {DirectedCameraRef} from './useDirectedCamera';
 
 /** Duración de la animación al recentrar a demanda (ms). Suave, sin tirón. */
 const RECENTER_ANIM_MS = 500;
@@ -27,19 +27,24 @@ export function useIdleCamera(
   cameraRef: RefObject<DirectedCameraRef | null>,
   point: GeoPoint | null | undefined,
   bottomInset: number,
-): { recenter: () => void } {
+): {recenter: () => void} {
   const centeredRef = useRef(false);
   const bottomInsetRef = useRef(bottomInset);
   bottomInsetRef.current = bottomInset;
 
   const moveTo = useCallback(
-    (p: GeoPoint, opts: { zoom?: number; animMs: number }): void => {
+    (p: GeoPoint, opts: {zoom?: number; animMs: number}): void => {
       const cam = cameraRef.current;
       if (!cam) return;
       cam.setCamera({
         centerCoordinate: toLngLat(p),
-        ...(opts.zoom != null ? { zoomLevel: opts.zoom } : {}),
-        padding: { paddingTop: 0, paddingBottom: bottomInsetRef.current, paddingLeft: 0, paddingRight: 0 },
+        ...(opts.zoom != null ? {zoomLevel: opts.zoom} : {}),
+        padding: {
+          paddingTop: 0,
+          paddingBottom: bottomInsetRef.current,
+          paddingLeft: 0,
+          paddingRight: 0,
+        },
         animationDuration: opts.animMs,
         animationMode: 'easeTo',
       });
@@ -52,14 +57,14 @@ export function useIdleCamera(
   useEffect(() => {
     if (centeredRef.current || !isValidPoint(point)) return;
     centeredRef.current = true;
-    moveTo(point, { zoom: LIMA_ZOOM, animMs: 0 });
+    moveTo(point, {zoom: LIMA_ZOOM, animMs: 0});
   }, [point, moveTo]);
 
   // Botón "recentrarme": vuelve a mi ubicación conservando el zoom actual (no lo OMITimos a propósito).
   const recenter = useCallback(() => {
     if (!isValidPoint(point)) return;
-    moveTo(point, { animMs: RECENTER_ANIM_MS });
+    moveTo(point, {animMs: RECENTER_ANIM_MS});
   }, [point, moveTo]);
 
-  return { recenter };
+  return {recenter};
 }

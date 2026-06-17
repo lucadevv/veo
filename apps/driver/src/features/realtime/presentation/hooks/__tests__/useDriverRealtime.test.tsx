@@ -1,9 +1,9 @@
 import React from 'react';
-import TestRenderer, {act} from 'react-test-renderer';
-import {DiProvider} from '../../../../../core/di/useDi';
-import type {AppContainer} from '../../../../../core/di/container';
-import type {DriverSocket} from '../../../../../core/realtime/socket';
-import {useDriverRealtime, type DriverRealtimeHandlers} from '../useDriverRealtime';
+import TestRenderer, { act } from 'react-test-renderer';
+import { DiProvider } from '../../../../../core/di/useDi';
+import type { AppContainer } from '../../../../../core/di/container';
+import type { DriverSocket } from '../../../../../core/realtime/socket';
+import { useDriverRealtime, type DriverRealtimeHandlers } from '../useDriverRealtime';
 
 /**
  * Socket falso controlable: emula el ciclo de vida de socket.io (connect/disconnect re-emiten el
@@ -41,9 +41,9 @@ function createFakeSocket(): FakeSocketHandle {
     emit: jest.fn(),
   };
   const fire = (event: string, arg?: unknown): void => {
-    listeners.get(event)?.forEach(cb => cb(arg));
+    listeners.get(event)?.forEach((cb) => cb(arg));
   };
-  return {socket, fire};
+  return { socket, fire };
 }
 
 /** Handlers no-op espiables: el test solo observa connect/disconnect/resync. */
@@ -61,7 +61,7 @@ function makeHandlers(overrides: Partial<DriverRealtimeHandlers> = {}): DriverRe
   };
 }
 
-function HookHost({handlers}: {handlers: DriverRealtimeHandlers}): null {
+function HookHost({ handlers }: { handlers: DriverRealtimeHandlers }): null {
   useDriverRealtime(true, handlers);
   return null;
 }
@@ -83,7 +83,7 @@ describe('useDriverRealtime · resync on reconnect', () => {
   }
 
   it('NO resincroniza en la primera conexión (las queries ya cargan fresco al montar)', () => {
-    const {socket, fire} = createFakeSocket();
+    const { socket, fire } = createFakeSocket();
     const handlers = makeHandlers();
     mount(handlers, socket as unknown as DriverSocket);
 
@@ -94,7 +94,7 @@ describe('useDriverRealtime · resync on reconnect', () => {
   });
 
   it('resincroniza en la RECONEXIÓN (segundo connect tras un disconnect)', () => {
-    const {socket, fire} = createFakeSocket();
+    const { socket, fire } = createFakeSocket();
     const handlers = makeHandlers();
     mount(handlers, socket as unknown as DriverSocket);
 
@@ -106,7 +106,7 @@ describe('useDriverRealtime · resync on reconnect', () => {
   });
 
   it('refleja el estado de conexión al caerse y al volver', () => {
-    const {socket, fire} = createFakeSocket();
+    const { socket, fire } = createFakeSocket();
     const handlers = makeHandlers();
     mount(handlers, socket as unknown as DriverSocket);
 
@@ -118,7 +118,7 @@ describe('useDriverRealtime · resync on reconnect', () => {
   });
 
   it('quita los listeners y marca desconectado al desmontar (cleanup)', () => {
-    const {socket, fire} = createFakeSocket();
+    const { socket, fire } = createFakeSocket();
     const handlers = makeHandlers();
     const tree = mount(handlers, socket as unknown as DriverSocket);
 

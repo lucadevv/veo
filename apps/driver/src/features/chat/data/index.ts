@@ -1,1 +1,1 @@
-export {HttpChatRepository} from './repositories/http-chat-repository';
+export { HttpChatRepository } from './repositories/http-chat-repository';

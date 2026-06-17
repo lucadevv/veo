@@ -1,4 +1,4 @@
-import {ApiError} from '@veo/api-client';
+import { ApiError } from '@veo/api-client';
 
 /**
  * true si el error significa que la puja YA NO ESTÁ (otro conductor la tomó / venció / se canceló): el

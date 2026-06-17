@@ -8,7 +8,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -28,8 +32,12 @@ let prisma: PrismaClient;
 let svc: PaymentsService;
 let credit: CreditService;
 
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -42,7 +50,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 async function seedCredit(userId: string, cents: number): Promise<void> {
@@ -71,7 +82,14 @@ beforeAll(async () => {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
   credit = new CreditService(prismaService);
-  svc = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never, credit);
+  svc = new PaymentsService(
+    prismaService,
+    gateway,
+    noAffiliation,
+    noPromos,
+    makeConfig() as never,
+    credit,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -128,8 +146,16 @@ describe('Redención de crédito en el cobro (Lote B · dinero en céntimos)', (
   it('spendForCharge directo es idempotente por chargeDedupKey (devuelve el mismo monto, gasta una vez)', async () => {
     await seedCredit(PAX, 1000);
     const dedup = `trip-${uuidv7()}`;
-    const a = await credit.spendForCharge({ userId: PAX, maxApplicableCents: 800, chargeDedupKey: dedup });
-    const b = await credit.spendForCharge({ userId: PAX, maxApplicableCents: 800, chargeDedupKey: dedup });
+    const a = await credit.spendForCharge({
+      userId: PAX,
+      maxApplicableCents: 800,
+      chargeDedupKey: dedup,
+    });
+    const b = await credit.spendForCharge({
+      userId: PAX,
+      maxApplicableCents: 800,
+      chargeDedupKey: dedup,
+    });
     expect(a).toBe(800);
     expect(b).toBe(800); // mismo monto, no re-gasta
     expect(await balance(PAX)).toBe(200); // 1000 − 800, una sola vez

@@ -1,9 +1,9 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {Text, useTheme} from '@veo/ui-kit';
-import type {Message} from '../../domain';
-import {isOwnMessage} from '../../domain';
-import {BubbleAppear} from './motion';
+import { StyleSheet, View } from 'react-native';
+import { Text, useTheme } from '@veo/ui-kit';
+import type { Message } from '../../domain';
+import { isOwnMessage } from '../../domain';
+import { BubbleAppear } from './motion';
 
 /** Hora corta (HH:mm) es-PE de un ISO; vacío si la fecha es inválida. */
 function formatTime(iso: string): string {
@@ -11,7 +11,7 @@ function formatTime(iso: string): string {
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return date.toLocaleTimeString('es-PE', {hour: '2-digit', minute: '2-digit', hour12: false});
+  return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export interface MessageBubbleProps {
@@ -23,7 +23,7 @@ export interface MessageBubbleProps {
  * las del pasajero a la izquierda sobre `surface`. Una sola esquina "pegada" al lado del autor
  * (radio reducido) ancla visualmente la burbuja a su columna sin recurrir a colas/triángulos.
  */
-export const MessageBubble = React.memo(({message}: MessageBubbleProps): React.JSX.Element => {
+export const MessageBubble = React.memo(({ message }: MessageBubbleProps): React.JSX.Element => {
   const theme = useTheme();
   const own = isOwnMessage(message);
   const time = formatTime(message.createdAt);
@@ -44,7 +44,13 @@ export const MessageBubble = React.memo(({message}: MessageBubbleProps): React.J
           {message.body}
         </Text>
         {time ? (
-          <Text variant="caption" color={own ? 'onAccent' : 'inkSubtle'} align="right" tabular style={styles.time}>
+          <Text
+            variant="caption"
+            color={own ? 'onAccent' : 'inkSubtle'}
+            align="right"
+            tabular
+            style={styles.time}
+          >
             {time}
           </Text>
         ) : null}
@@ -56,9 +62,9 @@ export const MessageBubble = React.memo(({message}: MessageBubbleProps): React.J
 MessageBubble.displayName = 'MessageBubble';
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', marginVertical: 3},
-  rowOwn: {justifyContent: 'flex-end'},
-  rowOther: {justifyContent: 'flex-start'},
-  bubble: {maxWidth: '82%', paddingHorizontal: 14, paddingVertical: 9},
-  time: {marginTop: 3, opacity: 0.85},
+  row: { flexDirection: 'row', marginVertical: 3 },
+  rowOwn: { justifyContent: 'flex-end' },
+  rowOther: { justifyContent: 'flex-start' },
+  bubble: { maxWidth: '82%', paddingHorizontal: 14, paddingVertical: 9 },
+  time: { marginTop: 3, opacity: 0.85 },
 });

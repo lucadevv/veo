@@ -29,7 +29,9 @@ function makeGuard(tokenTyp: SubjectType, expectedType?: SubjectType) {
 describe('JwtAuthGuard · expectedType', () => {
   it('rechaza un token de otro typ cuando expectedType está configurado (admin-bff → admin)', async () => {
     const guard = makeGuard('passenger', 'admin');
-    await expect(guard.canActivate(context('Bearer tok'))).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(guard.canActivate(context('Bearer tok'))).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('acepta el token del typ esperado', async () => {

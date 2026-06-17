@@ -1,4 +1,4 @@
-import { tripStatus, type TripStatus } from '@veo/api-client';
+import {tripStatus, type TripStatus} from '@veo/api-client';
 
 /**
  * FASE del flujo de viaje unificado: la única fuente de verdad de "qué muestra el sheet sobre el mapa

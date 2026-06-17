@@ -47,7 +47,11 @@ function makePrisma() {
   const outbox: { eventType: string }[] = [];
   const tx = {
     mediaSegment: {
-      create: async ({ data }: { data: Partial<Seg> & { id: string; tripId: string; startedAt: Date; s3Key: string } }) => {
+      create: async ({
+        data,
+      }: {
+        data: Partial<Seg> & { id: string; tripId: string; startedAt: Date; s3Key: string };
+      }) => {
         const seg: Seg = {
           endedAt: null,
           egressId: null,
@@ -133,7 +137,12 @@ function makeSpyStorage(): { storage: StoragePort; deletes: string[] } {
 describe('RecordingService.issueRoomToken · token de cámara (BR-S01)', () => {
   it('emite un token para la room del viaje', async () => {
     const { prisma } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     const res = await svc.issueRoomToken({ tripId: 'trip-1', identity: 'user-1' });
     expect(res.roomName).toBe(roomNameForTrip('trip-1'));
     expect(res.token).toContain('trip-1');
@@ -162,7 +171,12 @@ describe('RecordingService.issueViewerToken · espectador PURO del muro admin', 
 describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
   it('crea un segmento con retención por defecto y emite media.recording_started', async () => {
     const { prisma, segments, outbox } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     const startedAt = new Date('2026-05-28T20:00:00.000Z');
 
     const res = await svc.startForTrip('trip-1', startedAt);
@@ -175,7 +189,12 @@ describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
 
   it('es idempotente: no duplica la grabación si ya hay una en curso', async () => {
     const { prisma, segments } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     const startedAt = new Date('2026-05-28T20:00:00.000Z');
     await svc.startForTrip('trip-1', startedAt);
     const second = await svc.startForTrip('trip-1', startedAt);
@@ -187,7 +206,12 @@ describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
 describe('RecordingService.onPanic · force-start y retención indefinida (BR-S01/S03)', () => {
   it('fuerza el inicio de grabación si no había ninguna (viaje en ARRIVING)', async () => {
     const { prisma, segments } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
 
     const res = await svc.onPanic('trip-9', new Date('2026-05-28T21:00:00.000Z'));
 
@@ -199,7 +223,12 @@ describe('RecordingService.onPanic · force-start y retención indefinida (BR-S0
 
   it('si ya grababa, solo escala la retención a indefinida', async () => {
     const { prisma, segments } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
 
     const res = await svc.onPanic('trip-1', new Date('2026-05-28T20:10:00.000Z'));
@@ -214,7 +243,12 @@ describe('RecordingService.onPanic · force-start y retención indefinida (BR-S0
 describe('RecordingService.finishForTrip · archivado (BR-S01)', () => {
   it('finaliza el segmento abierto y emite media.archived', async () => {
     const { prisma, segments, outbox } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
 
     const res = await svc.finishForTrip('trip-1', new Date('2026-05-28T20:30:00.000Z'));
@@ -227,7 +261,12 @@ describe('RecordingService.finishForTrip · archivado (BR-S01)', () => {
 
   it('no hace nada si no hay segmento abierto', async () => {
     const { prisma } = makePrisma();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), makeSpyStorage().storage, config);
+    const svc = new RecordingService(
+      prisma as never,
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+    );
     const res = await svc.finishForTrip('trip-empty', new Date());
     expect(res.archived).toBe(false);
   });

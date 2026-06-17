@@ -33,7 +33,9 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('panic-service')
-    .setDescription('Botón de pánico: idempotencia (BR-S04), publicación confiable (BR-S05), evidencia S3 Object Lock · VEO')
+    .setDescription(
+      'Botón de pánico: idempotencia (BR-S04), publicación confiable (BR-S05), evidencia S3 Object Lock · VEO',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
@@ -52,7 +54,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3006);
   await app.listen(port);
-  logger.info(`panic-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50056'})`);
+  logger.info(
+    `panic-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50056'})`,
+  );
 }
 
 bootstrap().catch((err) => {

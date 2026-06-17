@@ -1,6 +1,6 @@
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {Pressable, StyleSheet} from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -42,11 +42,15 @@ export function Toggle({
   const progress = useSharedValue(on ? 1 : 0);
 
   useEffect(() => {
-    progress.value = reduced ? (on ? 1 : 0) : withTiming(on ? 1 : 0, { duration: 160 });
+    progress.value = reduced
+      ? on
+        ? 1
+        : 0
+      : withTiming(on ? 1 : 0, {duration: 160});
   }, [on, reduced, progress]);
 
   const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: progress.value * THUMB_TRAVEL }],
+    transform: [{translateX: progress.value * THUMB_TRAVEL}],
   }));
 
   const trackStyle = useAnimatedStyle(() => ({
@@ -57,24 +61,22 @@ export function Toggle({
   return (
     <Pressable
       accessibilityRole="switch"
-      accessibilityState={{ checked: on, disabled }}
+      accessibilityState={{checked: on, disabled}}
       accessibilityLabel={accessibilityLabel}
       disabled={disabled || !onChange}
       hitSlop={8}
       onPress={() => onChange?.(!on)}
-      style={{ opacity: disabled ? 0.5 : 1 }}
-    >
+      style={{opacity: disabled ? 0.5 : 1}}>
       <Animated.View
-        style={[
-          styles.track,
-          { borderColor: theme.colors.border },
-          trackStyle,
-        ]}
-      >
+        style={[styles.track, {borderColor: theme.colors.border}, trackStyle]}>
         <Animated.View
           style={[
             styles.thumb,
-            { backgroundColor: on ? theme.colors.onAccent : theme.colors.inkMuted },
+            {
+              backgroundColor: on
+                ? theme.colors.onAccent
+                : theme.colors.inkMuted,
+            },
             thumbStyle,
           ]}
         />

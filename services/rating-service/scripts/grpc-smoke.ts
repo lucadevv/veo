@@ -19,13 +19,32 @@ async function main(): Promise<void> {
   const agg = await prisma.ratingAggregate.findFirst();
   if (!agg) throw new Error('no hay agregados; corre primero e2e-smoke.ts');
 
-  const def = loadSync(join(__dirname, '../proto/rating.proto'), { keepCase: false, longs: String, defaults: true });
+  const def = loadSync(join(__dirname, '../proto/rating.proto'), {
+    keepCase: false,
+    longs: String,
+    defaults: true,
+  });
   const pkg = loadPackageDefinition(def) as unknown as {
-    veo: { rating: { v1: { RatingService: new (addr: string, creds: ReturnType<typeof credentials.createInsecure>) => {
-      GetAggregate: (req: { subjectId: string }, cb: (err: Error | null, res: AggregateReply) => void) => void;
-    } } } };
+    veo: {
+      rating: {
+        v1: {
+          RatingService: new (
+            addr: string,
+            creds: ReturnType<typeof credentials.createInsecure>,
+          ) => {
+            GetAggregate: (
+              req: { subjectId: string },
+              cb: (err: Error | null, res: AggregateReply) => void,
+            ) => void;
+          };
+        };
+      };
+    };
   };
-  const client = new pkg.veo.rating.v1.RatingService('localhost:50060', credentials.createInsecure());
+  const client = new pkg.veo.rating.v1.RatingService(
+    'localhost:50060',
+    credentials.createInsecure(),
+  );
 
   await new Promise<void>((resolve, reject) => {
     client.GetAggregate({ subjectId: agg.subjectId }, (err, res) => {

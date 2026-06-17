@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {Pressable, StyleSheet, TextInput, View} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -8,8 +8,8 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { useTranslation } from 'react-i18next';
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
+import {useTranslation} from 'react-i18next';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
 
 export interface OtpFieldProps {
   value: string;
@@ -29,7 +29,7 @@ interface BoxProps {
 }
 
 /** Casilla individual del OTP: caret lima parpadeante cuando está activa y vacía. */
-function OtpBox({ char, active, hasError }: BoxProps): React.JSX.Element {
+function OtpBox({char, active, hasError}: BoxProps): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const caret = useSharedValue(1);
@@ -40,13 +40,16 @@ function OtpBox({ char, active, hasError }: BoxProps): React.JSX.Element {
       return;
     }
     caret.value = withRepeat(
-      withTiming(0, { duration: 520, easing: Easing.bezier(...theme.motion.easing.inOut) }),
+      withTiming(0, {
+        duration: 520,
+        easing: Easing.bezier(...theme.motion.easing.inOut),
+      }),
       -1,
       true,
     );
   }, [active, char, reduced, caret, theme]);
 
-  const caretStyle = useAnimatedStyle(() => ({ opacity: caret.value }));
+  const caretStyle = useAnimatedStyle(() => ({opacity: caret.value}));
 
   const borderColor = hasError
     ? theme.colors.danger
@@ -66,15 +69,18 @@ function OtpBox({ char, active, hasError }: BoxProps): React.JSX.Element {
           borderWidth: active || hasError ? 2 : 1,
           borderRadius: theme.radii.md,
         },
-      ]}
-    >
+      ]}>
       {char ? (
         <Text variant="title1" tabular>
           {char}
         </Text>
       ) : active ? (
         <Animated.View
-          style={[styles.caret, { backgroundColor: theme.colors.accent }, caretStyle]}
+          style={[
+            styles.caret,
+            {backgroundColor: theme.colors.accent},
+            caretStyle,
+          ]}
         />
       ) : null}
     </View>
@@ -94,7 +100,7 @@ export function OtpField({
   errorNonce = 0,
   accessibilityLabel,
 }: OtpFieldProps): React.JSX.Element {
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
   const theme = useTheme();
   const inputRef = useRef<TextInput>(null);
@@ -107,24 +113,35 @@ export function OtpField({
       return;
     }
     shake.value = withSequence(
-      withTiming(-8, { duration: 50 }),
-      withTiming(8, { duration: 50 }),
-      withTiming(-6, { duration: 50 }),
-      withTiming(6, { duration: 50 }),
-      withTiming(0, { duration: 50 }),
+      withTiming(-8, {duration: 50}),
+      withTiming(8, {duration: 50}),
+      withTiming(-6, {duration: 50}),
+      withTiming(6, {duration: 50}),
+      withTiming(0, {duration: 50}),
     );
   }, [errorNonce, reduced, shake]);
 
-  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: shake.value }] }));
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: shake.value}],
+  }));
 
   return (
     <Pressable onPress={() => inputRef.current?.focus()}>
-      <Animated.View style={[styles.row, { gap: theme.spacing.sm }, rowStyle]}>
-        {Array.from({ length }).map((_, index) => {
+      <Animated.View style={[styles.row, {gap: theme.spacing.sm}, rowStyle]}>
+        {Array.from({length}).map((_, index) => {
           const char = value[index] ?? '';
           const active =
-            focused && (index === value.length || (value.length >= length && index === length - 1));
-          return <OtpBox key={index} char={char} active={active} hasError={hasError} />;
+            focused &&
+            (index === value.length ||
+              (value.length >= length && index === length - 1));
+          return (
+            <OtpBox
+              key={index}
+              char={char}
+              active={active}
+              hasError={hasError}
+            />
+          );
         })}
         <TextInput
           ref={inputRef}
@@ -139,7 +156,9 @@ export function OtpField({
           autoFocus
           caretHidden
           accessibilityLabel={accessibilityLabel}
-          accessibilityValue={{ text: t('auth.otpProgress', { current: value.length, length }) }}
+          accessibilityValue={{
+            text: t('auth.otpProgress', {current: value.length, length}),
+          }}
           style={styles.hiddenInput}
         />
       </Animated.View>
@@ -148,8 +167,13 @@ export function OtpField({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  box: { flex: 1, aspectRatio: 0.82, alignItems: 'center', justifyContent: 'center' },
-  caret: { width: 2, height: 28, borderRadius: 1 },
-  hiddenInput: { ...StyleSheet.absoluteFill, opacity: 0 },
+  row: {flexDirection: 'row', justifyContent: 'space-between'},
+  box: {
+    flex: 1,
+    aspectRatio: 0.82,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  caret: {width: 2, height: 28, borderRadius: 1},
+  hiddenInput: {...StyleSheet.absoluteFill, opacity: 0},
 });

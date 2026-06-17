@@ -1,5 +1,5 @@
-import type {DriverProfile} from '../entities';
-import {profileToSessionUser} from '../mappers/session-user';
+import type { DriverProfile } from '../entities';
+import { profileToSessionUser } from '../mappers/session-user';
 
 const PROFILE: DriverProfile = {
   driverId: 'drv-1',
@@ -12,7 +12,7 @@ const PROFILE: DriverProfile = {
   averageRating: 4.8,
   rating: null,
   documents: [],
-  compliance: {compliant: true, requiredTypes: [], missing: []},
+  compliance: { compliant: true, requiredTypes: [], missing: [] },
 };
 
 describe('profileToSessionUser', () => {

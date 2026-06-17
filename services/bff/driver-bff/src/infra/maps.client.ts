@@ -27,11 +27,16 @@ export class FallbackMapsClient implements MapsClient {
     this.fallback = new LocalMapsEngine();
   }
 
-  async route(origin: LatLon, destination: LatLon, waypoints?: readonly LatLon[]): Promise<RouteResult> {
+  async route(
+    origin: LatLon,
+    destination: LatLon,
+    waypoints?: readonly LatLon[],
+  ): Promise<RouteResult> {
     try {
       return await this.primary.route(origin, destination, waypoints);
     } catch (err) {
-      if (err instanceof ExternalServiceError) return this.fallback.route(origin, destination, waypoints);
+      if (err instanceof ExternalServiceError)
+        return this.fallback.route(origin, destination, waypoints);
       throw err;
     }
   }
@@ -117,6 +122,9 @@ export function buildMapsClient(input: BuildMapsClientInput): MapsClient {
     }
     return new FallbackMapsClient(new MapboxMapsClient({ accessToken: input.mapboxAccessToken }));
   }
-  const osrm = new OsrmMapsClient({ osrmBaseUrl: input.osrmUrl, nominatimBaseUrl: input.nominatimUrl });
+  const osrm = new OsrmMapsClient({
+    osrmBaseUrl: input.osrmUrl,
+    nominatimBaseUrl: input.nominatimUrl,
+  });
   return new FallbackMapsClient(osrm);
 }

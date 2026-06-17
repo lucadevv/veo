@@ -5,17 +5,14 @@
  * un string suelto.
  */
 import { Type } from 'class-transformer';
-import {
-  ArrayMaxSize,
-  IsArray,
-  IsIn,
-  IsInt,
-  Max,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, Max, Min, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { BID_FLOOR_MAX_CENTS, GLOBAL_ZONE, OfferingId, type PricingZoneKey } from '@veo/shared-types';
+import {
+  BID_FLOOR_MAX_CENTS,
+  GLOBAL_ZONE,
+  OfferingId,
+  type PricingZoneKey,
+} from '@veo/shared-types';
 
 /** Valores permitidos (enums tipados, no literales sueltos). */
 const ZONES = [GLOBAL_ZONE] as const satisfies readonly PricingZoneKey[];
@@ -45,7 +42,8 @@ export class BidFloorOverrideDto {
 /** Body del PUT /internal/pricing/bid-floor — reemplazo wholesale del piso (default + overrides). */
 export class ReplaceBidFloorDto {
   @ApiProperty({
-    description: 'Piso por defecto en céntimos PEN cuando no hay override para la (zona, oferta) (1..100000)',
+    description:
+      'Piso por defecto en céntimos PEN cuando no hay override para la (zona, oferta) (1..100000)',
     minimum: 1,
     maximum: BID_FLOOR_MAX_CENTS,
   })
@@ -54,7 +52,10 @@ export class ReplaceBidFloorDto {
   @Max(BID_FLOOR_MAX_CENTS)
   defaultFloorCents!: number;
 
-  @ApiProperty({ type: [BidFloorOverrideDto], description: 'Pisos por (zona, oferta). Sin override → el default.' })
+  @ApiProperty({
+    type: [BidFloorOverrideDto],
+    description: 'Pisos por (zona, oferta). Sin override → el default.',
+  })
   @IsArray()
   @ArrayMaxSize(64)
   @ValidateNested({ each: true })

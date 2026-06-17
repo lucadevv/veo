@@ -1,4 +1,4 @@
-import type { KeyValueStore } from '../../../core/storage/mmkv';
+import type {KeyValueStore} from '../../../core/storage/mmkv';
 import {
   type PendingConsent,
   PendingConsentStatus,

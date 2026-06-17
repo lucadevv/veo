@@ -1,4 +1,4 @@
-import type { GeoPoint } from '@veo/api-client';
+import type {GeoPoint} from '@veo/api-client';
 
 /** Mensaje canónico a firmar (BR-S04). El orden/serialización lo define el módulo nativo. */
 export interface PanicSignaturePayload {

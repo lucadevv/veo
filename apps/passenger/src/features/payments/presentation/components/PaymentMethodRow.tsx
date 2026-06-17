@@ -1,9 +1,9 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { StatusPill, Text, useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { PaymentMethodLogo } from '../../../../shared/assets/payment-methods';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {PaymentMethodLogo} from '../../../../shared/assets/payment-methods';
 
 export interface PaymentMethodRowProps {
   /** Método elegido PARA ESTE VIAJE (inicializado del default del perfil). */
@@ -32,7 +32,7 @@ export function PaymentMethodRow({
   autoActive = false,
 }: PaymentMethodRowProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // Señal sutil solo cuando el método es YAPE y el cobro automático está activo (reflejo, no decisión).
   // Es el Yape VINCULADO (On-File). El one-shot (Yape sin afiliación) NO lleva esta señal (TASK 4).
@@ -40,17 +40,19 @@ export function PaymentMethodRow({
   const showAutoBadge = isYapeAuto;
   // Nombre distinguido LÉXICAMENTE (TASK 4): "Yape · automático" cuando hay afiliación; "Yape" a secas
   // (one-shot, QR al final) cuando no. El resto de métodos usan su nombre canónico.
-  const methodName = isYapeAuto ? t('payments.nameYapeAuto') : t(`payments.method.${method}`);
+  const methodName = isYapeAuto
+    ? t('payments.nameYapeAuto')
+    : t(`payments.method.${method}`);
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${t('payments.rowLabel')}: ${t(`payments.method.${method}`)}`}
       accessibilityHint={t('actions.change')}
-      accessibilityState={{ disabled }}
+      accessibilityState={{disabled}}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({pressed}) => [
         styles.row,
         {
           minHeight: 56,
@@ -63,8 +65,7 @@ export function PaymentMethodRow({
           backgroundColor: theme.colors.surface,
           opacity: disabled ? 0.45 : pressed ? 0.7 : 1,
         },
-      ]}
-    >
+      ]}>
       {/* Logo circular consistente (el componente dibuja su propio círculo). */}
       <PaymentMethodLogo method={method} size={36} />
 
@@ -72,7 +73,7 @@ export function PaymentMethodRow({
         <Text variant="footnote" color="inkMuted" numberOfLines={1}>
           {t('payments.rowLabel')}
         </Text>
-        <View style={[styles.nameRow, { gap: theme.spacing.xs }]}>
+        <View style={[styles.nameRow, {gap: theme.spacing.xs}]}>
           <Text variant="bodyStrong" numberOfLines={1}>
             {methodName}
           </Text>
@@ -90,7 +91,7 @@ export function PaymentMethodRow({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center' },
-  body: { flex: 1, gap: 2 },
-  nameRow: { flexDirection: 'row', alignItems: 'center' },
+  row: {flexDirection: 'row', alignItems: 'center'},
+  body: {flex: 1, gap: 2},
+  nameRow: {flexDirection: 'row', alignItems: 'center'},
 });

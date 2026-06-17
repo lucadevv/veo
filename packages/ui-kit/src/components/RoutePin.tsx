@@ -54,7 +54,13 @@ export function RoutePin({ variant = 'origin', size = 16, pulse = false, style }
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.brand },
+            {
+              position: 'absolute',
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              backgroundColor: theme.colors.brand,
+            },
             haloStyle,
           ]}
         />

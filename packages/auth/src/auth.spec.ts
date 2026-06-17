@@ -26,7 +26,13 @@ beforeAll(async () => {
 describe('JwtService (ES256)', () => {
   it('firma y verifica access token con claims', async () => {
     const jwt = new JwtService(keys);
-    const token = await jwt.signAccessToken({ sub: 'u1', typ: 'admin', roles: ['FINANCE'], sid: 's1', mfaAt: 1000 });
+    const token = await jwt.signAccessToken({
+      sub: 'u1',
+      typ: 'admin',
+      roles: ['FINANCE'],
+      sid: 's1',
+      mfaAt: 1000,
+    });
     const claims = await jwt.verifyAccess(token);
     expect(claims.sub).toBe('u1');
     expect(claims.roles).toEqual(['FINANCE']);
@@ -92,7 +98,12 @@ describe('assertDriverOwnsResource (anti-IDOR)', () => {
   });
 
   it('no aplica a identidades admin (gobernadas por RBAC en su propio camino)', () => {
-    const admin: AuthenticatedUser = { userId: 'a1', type: 'admin', roles: ['FINANCE'], sessionId: 's1' };
+    const admin: AuthenticatedUser = {
+      userId: 'a1',
+      type: 'admin',
+      roles: ['FINANCE'],
+      sessionId: 's1',
+    };
     expect(() => assertDriverOwnsResource(admin, 'cualquier-driver')).not.toThrow();
   });
 

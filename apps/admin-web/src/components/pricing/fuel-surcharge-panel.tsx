@@ -31,7 +31,9 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const { toast } = useToast();
   const replace = useReplaceFuelSurcharge();
 
-  const [priceSoles, setPriceSoles] = useState<string>((config.fuelPricePerLiterCents / 100).toFixed(2));
+  const [priceSoles, setPriceSoles] = useState<string>(
+    (config.fuelPricePerLiterCents / 100).toFixed(2),
+  );
   const [kmPerLiter, setKmPerLiter] = useState<string>(String(config.kmPerLiter));
 
   const priceCents = priceSoles.trim() === '' ? 0 : Math.round(Number(priceSoles) * 100);
@@ -77,15 +79,16 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
         Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de
-        referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la tarifa
-        (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.
+        referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la
+        tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.
       </p>
 
       <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">
         <Field
           label="Precio del combustible (S/ por litro)"
           hint={`Actual: S/${(config.fuelPricePerLiterCents / 100).toFixed(2)}`}
-          error={priceInvalid ? `Entre 0 y ${MAX_SOLES_PER_LITER}` : undefined}>
+          error={priceInvalid ? `Entre 0 y ${MAX_SOLES_PER_LITER}` : undefined}
+        >
           <Input
             type="number"
             inputMode="decimal"
@@ -101,7 +104,8 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         <Field
           label="Rendimiento (km por litro)"
           hint="Vehículo de referencia; 0 = sin recargo"
-          error={kmInvalid ? `Entre 0 y ${MAX_KM_PER_LITER}` : undefined}>
+          error={kmInvalid ? `Entre 0 y ${MAX_KM_PER_LITER}` : undefined}
+        >
           <Input
             type="number"
             inputMode="numeric"
@@ -137,7 +141,9 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
       {/* Preview en vivo del recargo derivado (lo que se suma por km, antes del multiplier de cada oferta). */}
       <p className="mt-3 text-sm text-ink">
         Recargo derivado:{' '}
-        <span className="font-medium text-accent">S/{(derivedPerKmCents / 100).toFixed(2)} por km</span>{' '}
+        <span className="font-medium text-accent">
+          S/{(derivedPerKmCents / 100).toFixed(2)} por km
+        </span>{' '}
         <span className="text-ink-subtle">
           (vigente: S/{(config.perKmCents / 100).toFixed(2)}/km)
         </span>

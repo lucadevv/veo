@@ -53,7 +53,11 @@ export class InspectionsService {
    * Lista paginada de inspecciones para el operador (admin), opcionalmente filtrada por vehículo.
    * Paginación cursor por id (uuidv7 ⇒ orden temporal estable).
    */
-  async list(opts: { vehicleId?: string; cursor?: string; limit?: number }): Promise<Page<Inspection>> {
+  async list(opts: {
+    vehicleId?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<Page<Inspection>> {
     const limit = clampLimit(opts.limit);
     const where: Prisma.InspectionWhereInput = {};
     if (opts.vehicleId) where.vehicleId = opts.vehicleId;

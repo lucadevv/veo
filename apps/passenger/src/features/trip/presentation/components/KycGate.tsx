@@ -1,9 +1,9 @@
-import { Button, Card, StatusPill, Text, useTheme } from '@veo/ui-kit';
+import {Button, Card, StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import type { KycStatus } from '../../../kyc/domain/entities';
-import { IconShield } from './icons';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import type {KycStatus} from '../../../kyc/domain/entities';
+import {IconShield} from './icons';
 
 export interface KycGateProps {
   /** Estado de verificación del pasajero (dominio). El gate solo se muestra si NO es 'approved'. */
@@ -23,22 +23,32 @@ export interface KycGateProps {
  * Mismo lenguaje visual que la card "Confirmá que sos vos" del Perfil (lente de fidelidad): Card + ícono
  * de escudo + título + motivo + CTA acento.
  */
-export function KycGate({ status, onVerify }: KycGateProps): React.JSX.Element {
+export function KycGate({status, onVerify}: KycGateProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const pending = status === 'pending';
 
   return (
     <Card variant="filled" padding="lg">
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        }}>
         <IconShield color={theme.colors.accent} size={20} />
-        <Text variant="headline" style={{ flex: 1 }}>
+        <Text variant="headline" style={{flex: 1}}>
           {pending ? t('trip.kycPendingTitle') : t('trip.kycGateTitle')}
         </Text>
-        {pending ? <StatusPill label={t('trip.kycPendingPill')} tone="warn" dot /> : null}
+        {pending ? (
+          <StatusPill label={t('trip.kycPendingPill')} tone="warn" dot />
+        ) : null}
       </View>
 
-      <Text variant="footnote" color="inkMuted" style={{ marginTop: theme.spacing.xs }}>
+      <Text
+        variant="footnote"
+        color="inkMuted"
+        style={{marginTop: theme.spacing.xs}}>
         {pending ? t('trip.kycPendingBody') : t('trip.kycGateBody')}
       </Text>
 
@@ -48,7 +58,7 @@ export function KycGate({ status, onVerify }: KycGateProps): React.JSX.Element {
           variant="accent"
           fullWidth
           onPress={onVerify}
-          style={{ marginTop: theme.spacing.md }}
+          style={{marginTop: theme.spacing.md}}
         />
       ) : null}
     </Card>

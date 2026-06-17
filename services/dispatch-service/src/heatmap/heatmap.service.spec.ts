@@ -23,14 +23,17 @@ function makeRedis() {
         expires.push(key);
         return 1;
       },
-      mget: async (...keys: string[]) => keys.map((k) => (store.has(k) ? String(store.get(k)) : null)),
+      mget: async (...keys: string[]) =>
+        keys.map((k) => (store.has(k) ? String(store.get(k)) : null)),
     },
   };
 }
 
 function makeService() {
   const { redis, store, expires } = makeRedis();
-  const config = new ConfigService<Env, true>({ HEATMAP_WINDOW_SECONDS: 900 } as Partial<Env> as Env);
+  const config = new ConfigService<Env, true>({
+    HEATMAP_WINDOW_SECONDS: 900,
+  } as Partial<Env> as Env);
   const service = new HeatmapService(redis as never, config);
   return { service, store, expires };
 }
@@ -55,7 +58,10 @@ describe('HeatmapService', () => {
     // Una celda vecina cercana (centro de una celda adyacente): 1 solicitud.
     const center = toH3(POINT, DISPATCH_H3_RESOLUTION);
     const neighborCentroid = fromH3(center); // mismo punto → misma celda; usamos un punto desplazado
-    await service.recordDemand({ lat: neighborCentroid.lat + 0.002, lon: neighborCentroid.lon + 0.002 });
+    await service.recordDemand({
+      lat: neighborCentroid.lat + 0.002,
+      lon: neighborCentroid.lon + 0.002,
+    });
 
     const view = await service.heatmap(POINT, 3000);
     expect(view.cells.length).toBeGreaterThanOrEqual(1);

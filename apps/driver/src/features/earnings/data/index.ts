@@ -1,1 +1,1 @@
-export {HttpEarningsRepository} from './repositories/http-earnings-repository';
+export { HttpEarningsRepository } from './repositories/http-earnings-repository';

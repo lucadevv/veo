@@ -67,44 +67,46 @@ function makePrisma() {
       );
       return m ? { ...m } : null;
     }),
-    create: vi.fn(async ({ data }: { data: Partial<MethodRow> & { userId: string; type: string } }) => {
-      // Emulamos los constraints reales del schema (@@unique([type,email]) y
-      // @@unique([type,oauthSubject])): si chocan, lanzamos P2002 como lo haría Prisma.
-      const email = data.email ?? null;
-      const oauthSubject = data.oauthSubject ?? null;
-      if (email !== null && methods.some((x) => x.type === data.type && x.email === email)) {
-        const err = new Error('Unique constraint failed') as Error & {
-          code: string;
-          meta: { target: string[] };
+    create: vi.fn(
+      async ({ data }: { data: Partial<MethodRow> & { userId: string; type: string } }) => {
+        // Emulamos los constraints reales del schema (@@unique([type,email]) y
+        // @@unique([type,oauthSubject])): si chocan, lanzamos P2002 como lo haría Prisma.
+        const email = data.email ?? null;
+        const oauthSubject = data.oauthSubject ?? null;
+        if (email !== null && methods.some((x) => x.type === data.type && x.email === email)) {
+          const err = new Error('Unique constraint failed') as Error & {
+            code: string;
+            meta: { target: string[] };
+          };
+          err.code = 'P2002';
+          err.meta = { target: ['type', 'email'] };
+          throw err;
+        }
+        if (
+          oauthSubject !== null &&
+          methods.some((x) => x.type === data.type && x.oauthSubject === oauthSubject)
+        ) {
+          const err = new Error('Unique constraint failed') as Error & {
+            code: string;
+            meta: { target: string[] };
+          };
+          err.code = 'P2002';
+          err.meta = { target: ['type', 'oauth_subject'] };
+          throw err;
+        }
+        const row: MethodRow = {
+          id: nextId('am'),
+          userId: data.userId,
+          type: data.type,
+          email,
+          oauthSubject,
+          emailVerified: data.emailVerified ?? false,
+          verified: data.verified ?? false,
         };
-        err.code = 'P2002';
-        err.meta = { target: ['type', 'email'] };
-        throw err;
-      }
-      if (
-        oauthSubject !== null &&
-        methods.some((x) => x.type === data.type && x.oauthSubject === oauthSubject)
-      ) {
-        const err = new Error('Unique constraint failed') as Error & {
-          code: string;
-          meta: { target: string[] };
-        };
-        err.code = 'P2002';
-        err.meta = { target: ['type', 'oauth_subject'] };
-        throw err;
-      }
-      const row: MethodRow = {
-        id: nextId('am'),
-        userId: data.userId,
-        type: data.type,
-        email,
-        oauthSubject,
-        emailVerified: data.emailVerified ?? false,
-        verified: data.verified ?? false,
-      };
-      methods.push(row);
-      return { ...row };
-    }),
+        methods.push(row);
+        return { ...row };
+      },
+    ),
   };
 
   const user = {
@@ -145,7 +147,12 @@ function makePrisma() {
 function makeVerifier(identity: AppleIdentity | UnauthorizedError): OAuthVerifier {
   return {
     verifyGoogleIdToken: vi.fn(
-      async (): Promise<GoogleIdentity> => ({ sub: 'unused', email: null, emailVerified: false, name: null }),
+      async (): Promise<GoogleIdentity> => ({
+        sub: 'unused',
+        email: null,
+        emailVerified: false,
+        name: null,
+      }),
     ),
     verifyAppleIdToken: vi.fn(async () => {
       if (identity instanceof UnauthorizedError) throw identity;

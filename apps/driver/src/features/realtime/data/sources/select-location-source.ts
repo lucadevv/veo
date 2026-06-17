@@ -1,7 +1,7 @@
-import type {LocationSource} from '../../domain/location-source';
-import {backgroundGeolocationSource} from './background-geolocation-source';
-import {stubLocationSource} from './stub-location-source';
-import {DevFallbackLocationSource} from './dev-fallback-location-source';
+import type { LocationSource } from '../../domain/location-source';
+import { backgroundGeolocationSource } from './background-geolocation-source';
+import { stubLocationSource } from './stub-location-source';
+import { DevFallbackLocationSource } from './dev-fallback-location-source';
 
 /**
  * Elige la fuente de GPS.

@@ -1,5 +1,5 @@
-import type { TripVideoGrant } from '@veo/api-client';
-import type { ComponentType } from 'react';
+import type {TripVideoGrant} from '@veo/api-client';
+import type {ComponentType} from 'react';
 
 /**
  * Estado de la conexión del visor en vivo (distinto del indicador REC: REC refleja que la grabación

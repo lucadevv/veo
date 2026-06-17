@@ -86,7 +86,11 @@ export class BidFloorService {
     }));
 
     const result = await this.repo.runInTx(async (tx) => {
-      const data = { defaultFloorCents: input.defaultFloorCents, overrides: overridesJson, version: nextVersion };
+      const data = {
+        defaultFloorCents: input.defaultFloorCents,
+        overrides: overridesJson,
+        version: nextVersion,
+      };
       // Optimistic locking (CAS): el UPDATE solo pega si la versión vigente sigue siendo `expectedVersion`
       // (predicado bajo lock) → dos PUT concurrentes no se pisan (el 2º ve count=0 → 409, sin lost update).
       const updated = await tx.bidFloorConfig.updateMany({
@@ -96,17 +100,25 @@ export class BidFloorService {
 
       let row: { version: number; updatedAt: Date };
       if (updated.count === 1) {
-        const persisted = await tx.bidFloorConfig.findUnique({ where: { id: BID_FLOOR_SINGLETON_ID } });
+        const persisted = await tx.bidFloorConfig.findUnique({
+          where: { id: BID_FLOOR_SINGLETON_ID },
+        });
         if (!persisted) throw new ConflictError('el piso de puja desapareció durante el reemplazo');
         row = persisted;
       } else if (input.expectedVersion === 0) {
-        const existing = await tx.bidFloorConfig.findUnique({ where: { id: BID_FLOOR_SINGLETON_ID } });
+        const existing = await tx.bidFloorConfig.findUnique({
+          where: { id: BID_FLOOR_SINGLETON_ID },
+        });
         if (existing) {
-          throw new ConflictError(`el piso de puja ya fue inicializado (v${existing.version}); recargá y reintentá`);
+          throw new ConflictError(
+            `el piso de puja ya fue inicializado (v${existing.version}); recargá y reintentá`,
+          );
         }
         row = await tx.bidFloorConfig.create({ data: { id: BID_FLOOR_SINGLETON_ID, ...data } });
       } else {
-        throw new ConflictError(`el piso de puja cambió (esperabas v${input.expectedVersion}); recargá y reintentá`);
+        throw new ConflictError(
+          `el piso de puja cambió (esperabas v${input.expectedVersion}); recargá y reintentá`,
+        );
       }
       // Outbox EN LA MISMA TX (FOUNDATION §6): audit + invalidación de cache cross-réplica (PricingCacheConsumer).
       await tx.outboxEvent.create({

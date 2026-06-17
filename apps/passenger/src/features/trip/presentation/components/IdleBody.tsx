@@ -1,13 +1,13 @@
-import { Card, ListItem, useTheme } from '@veo/ui-kit';
+import {Card, ListItem, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import type { RoutePlace } from '../../../maps/domain/entities';
-import type { SavedPlace } from '../../../places/domain/entities';
-import { IconStar } from './icons';
-import { placeToRoute } from './routePlace';
-import { RecentTripsSection } from './RecentTripsSection';
-import { SectionHeader } from './SectionHeader';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import type {RoutePlace} from '../../../maps/domain/entities';
+import type {SavedPlace} from '../../../places/domain/entities';
+import {IconStar} from './icons';
+import {placeToRoute} from './routePlace';
+import {RecentTripsSection} from './RecentTripsSection';
+import {SectionHeader} from './SectionHeader';
 
 export interface IdleBodyProps {
   savedPlaces: SavedPlace[];
@@ -31,16 +31,20 @@ export function IdleBody({
   onSeeAllRecents,
 }: IdleBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const favorites = savedPlaces.filter((p) => p.kind === 'FAVORITE');
+  const {t} = useTranslation();
+  const favorites = savedPlaces.filter(p => p.kind === 'FAVORITE');
 
   return (
     <>
       {favorites.length > 0 ? (
-        <View style={{ gap: theme.spacing.sm }}>
-          <SectionHeader title={t('home.savedTitle')} actionLabel={t('home.seeAll')} onAction={onSeeAllSaved} />
+        <View style={{gap: theme.spacing.sm}}>
+          <SectionHeader
+            title={t('home.savedTitle')}
+            actionLabel={t('home.seeAll')}
+            onAction={onSeeAllSaved}
+          />
           <Card variant="filled" padding="sm">
-            {favorites.map((place) => (
+            {favorites.map(place => (
               <ListItem
                 key={place.id}
                 title={place.label}

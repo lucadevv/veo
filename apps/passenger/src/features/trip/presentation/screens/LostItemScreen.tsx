@@ -1,16 +1,28 @@
-import { type RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { SupportTicket } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, Card, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { TicketValidationError } from '../../../support/domain/usecases';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { IconLock, IconShield } from '../components/icons';
+import {
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {SupportTicket} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  Card,
+  SafeScreen,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {TicketValidationError} from '../../../support/domain/usecases';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {IconLock, IconShield} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'LostItem'>;
@@ -30,9 +42,9 @@ type ItemKey = (typeof ITEM_KEYS)[number];
  */
 export function LostItemScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { tripId } = useRoute<Params>().params;
+  const {tripId} = useRoute<Params>().params;
 
   const createTicket = useDependency(TOKENS.createTicketUseCase);
 
@@ -44,11 +56,11 @@ export function LostItemScreen(): React.JSX.Element {
     mutationFn: () =>
       createTicket.execute({
         category: 'DRIVER',
-        subject: t('lostItem.subject', { item: t(`lostItem.items.${item}`) }),
+        subject: t('lostItem.subject', {item: t(`lostItem.items.${item}`)}),
         body: description,
         tripId,
       }),
-    onError: (error) => {
+    onError: error => {
       if (error instanceof TicketValidationError) {
         setBodyError(true);
       }
@@ -62,7 +74,11 @@ export function LostItemScreen(): React.JSX.Element {
       padded={false}
       footer={
         sent ? (
-          <Button label={t('actions.close')} fullWidth onPress={() => navigation.goBack()} />
+          <Button
+            label={t('actions.close')}
+            fullWidth
+            onPress={() => navigation.goBack()}
+          />
         ) : (
           <Button
             label={t('lostItem.submit')}
@@ -71,48 +87,59 @@ export function LostItemScreen(): React.JSX.Element {
             onPress={() => createMutation.mutate()}
           />
         )
-      }
-    >
+      }>
       <ScrollView
-        contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.lg }}
-        showsVerticalScrollIndicator={false}
-      >
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          gap: theme.spacing.lg,
+        }}
+        showsVerticalScrollIndicator={false}>
         {sent ? (
-          <Banner tone="success" title={t('lostItem.sentTitle')} description={t('lostItem.sentBody')} />
+          <Banner
+            tone="success"
+            title={t('lostItem.sentTitle')}
+            description={t('lostItem.sentBody')}
+          />
         ) : (
           <>
             <Text variant="callout" color="inkMuted">
               {t('lostItem.intro')}
             </Text>
 
-            {createMutation.isError && !(createMutation.error instanceof TicketValidationError) ? (
+            {createMutation.isError &&
+            !(createMutation.error instanceof TicketValidationError) ? (
               <Banner tone="danger" title={t('lostItem.error')} />
             ) : null}
 
             {/* Tipo de objeto (chips). Estado por borde + fondo, no solo color. */}
-            <View style={{ gap: theme.spacing.sm }}>
+            <View style={{gap: theme.spacing.sm}}>
               <Text variant="footnote" color="inkMuted">
                 {t('lostItem.whatLabel')}
               </Text>
               <View style={styles.chipRow}>
-                {ITEM_KEYS.map((value) => {
+                {ITEM_KEYS.map(value => {
                   const selected = value === item;
                   return (
                     <Pressable
                       key={value}
                       onPress={() => setItem(value)}
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{selected}}
                       style={[
                         styles.chip,
                         {
                           borderRadius: theme.radii.pill,
-                          borderColor: selected ? theme.colors.accent : theme.colors.border,
-                          backgroundColor: selected ? theme.colors.accent : 'transparent',
+                          borderColor: selected
+                            ? theme.colors.accent
+                            : theme.colors.border,
+                          backgroundColor: selected
+                            ? theme.colors.accent
+                            : 'transparent',
                         },
-                      ]}
-                    >
-                      <Text variant="footnote" color={selected ? 'onAccent' : 'inkMuted'}>
+                      ]}>
+                      <Text
+                        variant="footnote"
+                        color={selected ? 'onAccent' : 'inkMuted'}>
                         {t(`lostItem.items.${value}`)}
                       </Text>
                     </Pressable>
@@ -125,7 +152,7 @@ export function LostItemScreen(): React.JSX.Element {
               label={t('lostItem.descriptionLabel')}
               placeholder={t('lostItem.descriptionPlaceholder')}
               value={description}
-              onChangeText={(value) => {
+              onChangeText={value => {
                 setDescription(value);
                 if (bodyError) {
                   setBodyError(false);
@@ -160,8 +187,12 @@ export function LostItemScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth },
-  noteRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  flex: { flex: 1 },
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  noteRow: {flexDirection: 'row', gap: 10, alignItems: 'flex-start'},
+  flex: {flex: 1},
 });

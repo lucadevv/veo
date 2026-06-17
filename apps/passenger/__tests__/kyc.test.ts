@@ -42,7 +42,9 @@ const challenge = (overrides: Partial<KycChallenge> = {}): KycChallenge => ({
 class FakeKycRepository implements KycRepository {
   requestChallenge = jest.fn(async (): Promise<KycChallenge> => challenge());
   submit = jest.fn(
-    async (_input: KycSubmission): Promise<KycSubmissionResult> => ({ status: 'pending' }),
+    async (_input: KycSubmission): Promise<KycSubmissionResult> => ({
+      status: 'pending',
+    }),
   );
 }
 
@@ -116,26 +118,38 @@ describe('kycContract (parseo del contrato local)', () => {
   });
 
   it('valida un request con challengeId y frames bien formados', () => {
-    const parsed = kycSubmitRequest.safeParse({ challengeId: 'chal-1', frames: [frame()] });
+    const parsed = kycSubmitRequest.safeParse({
+      challengeId: 'chal-1',
+      frames: [frame()],
+    });
     expect(parsed.success).toBe(true);
   });
 
   it('rechaza un request sin challengeId', () => {
-    expect(kycSubmitRequest.safeParse({ frames: [frame()] }).success).toBe(false);
-    expect(kycSubmitRequest.safeParse({ challengeId: '', frames: [frame()] }).success).toBe(false);
+    expect(kycSubmitRequest.safeParse({frames: [frame()]}).success).toBe(false);
+    expect(
+      kycSubmitRequest.safeParse({challengeId: '', frames: [frame()]}).success,
+    ).toBe(false);
   });
 
   it('rechaza un request sin frames', () => {
-    expect(kycSubmitRequest.safeParse({ challengeId: 'chal-1', frames: [] }).success).toBe(false);
+    expect(
+      kycSubmitRequest.safeParse({challengeId: 'chal-1', frames: []}).success,
+    ).toBe(false);
   });
 
   it('rechaza un frame con base64 vacío o dimensiones no positivas', () => {
     expect(
-      kycSubmitRequest.safeParse({ challengeId: 'chal-1', frames: [frame({ base64Jpeg: '' })] })
-        .success,
+      kycSubmitRequest.safeParse({
+        challengeId: 'chal-1',
+        frames: [frame({base64Jpeg: ''})],
+      }).success,
     ).toBe(false);
     expect(
-      kycSubmitRequest.safeParse({ challengeId: 'chal-1', frames: [frame({ width: 0 })] }).success,
+      kycSubmitRequest.safeParse({
+        challengeId: 'chal-1',
+        frames: [frame({width: 0})],
+      }).success,
     ).toBe(false);
   });
 
@@ -150,7 +164,9 @@ describe('kycContract (parseo del contrato local)', () => {
   });
 
   it('rechaza una respuesta sin status', () => {
-    expect(kycSubmitResponse.safeParse({ verificationId: 'kyc-1' }).success).toBe(false);
+    expect(kycSubmitResponse.safeParse({verificationId: 'kyc-1'}).success).toBe(
+      false,
+    );
   });
 });
 
@@ -163,7 +179,7 @@ describe('RequestKycChallengeUseCase', () => {
 
     expect(repo.requestChallenge).toHaveBeenCalledTimes(1);
     expect(result).toEqual(
-      expect.objectContaining({ challengeId: 'chal-1', action: 'BLINK' }),
+      expect.objectContaining({challengeId: 'chal-1', action: 'BLINK'}),
     );
   });
 });
@@ -178,7 +194,9 @@ describe('SubmitKycUseCase', () => {
     expect(repo.submit).toHaveBeenCalledWith(
       expect.objectContaining({
         challengeId: 'chal-7',
-        frames: expect.arrayContaining([expect.objectContaining({ base64Jpeg: 'AAAA' })]),
+        frames: expect.arrayContaining([
+          expect.objectContaining({base64Jpeg: 'AAAA'}),
+        ]),
       }),
     );
   });
@@ -203,9 +221,9 @@ describe('SubmitKycUseCase', () => {
     const repo = new FakeKycRepository();
     const useCase = new SubmitKycUseCase(repo);
 
-    expect(() => useCase.execute('chal-1', [frame({ base64Jpeg: '   ' })])).toThrow(
-      KycValidationError,
-    );
+    expect(() =>
+      useCase.execute('chal-1', [frame({base64Jpeg: '   '})]),
+    ).toThrow(KycValidationError);
     expect(repo.submit).not.toHaveBeenCalled();
   });
 
@@ -213,7 +231,10 @@ describe('SubmitKycUseCase', () => {
     const repo = new FakeKycRepository();
     const useCase = new SubmitKycUseCase(repo);
 
-    await useCase.execute('chal-1', Array.from({ length: MAX_KYC_FRAMES + 3 }, () => frame()));
+    await useCase.execute(
+      'chal-1',
+      Array.from({length: MAX_KYC_FRAMES + 3}, () => frame()),
+    );
 
     const submitted = repo.submit.mock.calls[0][0];
     expect(submitted.frames).toHaveLength(MAX_KYC_FRAMES);
@@ -222,12 +243,15 @@ describe('SubmitKycUseCase', () => {
 
   it('propaga el resultado del repositorio (status mapeado por la capa data)', async () => {
     const repo = new FakeKycRepository();
-    repo.submit.mockResolvedValueOnce({ status: 'approved', verificationId: 'kyc-9' });
+    repo.submit.mockResolvedValueOnce({
+      status: 'approved',
+      verificationId: 'kyc-9',
+    });
     const useCase = new SubmitKycUseCase(repo);
 
     const result = await useCase.execute('chal-1', [frame()]);
 
-    expect(result).toEqual({ status: 'approved', verificationId: 'kyc-9' });
+    expect(result).toEqual({status: 'approved', verificationId: 'kyc-9'});
   });
 });
 

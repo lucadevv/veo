@@ -50,8 +50,21 @@ describe('SupportService', () => {
 
   it('lista solo los tickets del usuario', async () => {
     const service = makeService();
-    await service.create({ userId: 'u1', role: 'DRIVER', category: 'TRIP', subject: 'aaa', body: 'x', tripId: undefined });
-    await service.create({ userId: 'u2', role: 'PASSENGER', category: 'OTHER', subject: 'bbb', body: 'y' });
+    await service.create({
+      userId: 'u1',
+      role: 'DRIVER',
+      category: 'TRIP',
+      subject: 'aaa',
+      body: 'x',
+      tripId: undefined,
+    });
+    await service.create({
+      userId: 'u2',
+      role: 'PASSENGER',
+      category: 'OTHER',
+      subject: 'bbb',
+      body: 'y',
+    });
     const mine = await service.listByUser('u1');
     expect(mine).toHaveLength(1);
     expect(mine[0]?.category).toBe('TRIP');

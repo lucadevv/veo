@@ -1,6 +1,6 @@
 import React from 'react';
-import {Pressable, StyleSheet, View} from 'react-native';
-import {Text, useTheme} from '@veo/ui-kit';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text, useTheme } from '@veo/ui-kit';
 
 export interface SegmentedTabItem {
   /** Clave estable del segmento. */
@@ -21,7 +21,7 @@ export interface SegmentedTabsProps {
  * press por opacidad (no scale: cambia de estado con frecuencia). Accesible como botones con
  * `selected`. La transición de color es instantánea para respetar reduce-motion sin esfuerzo.
  */
-export function SegmentedTabs({items, value, onChange}: SegmentedTabsProps): React.JSX.Element {
+export function SegmentedTabs({ items, value, onChange }: SegmentedTabsProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <View
@@ -32,17 +32,18 @@ export function SegmentedTabs({items, value, onChange}: SegmentedTabsProps): Rea
           borderColor: theme.colors.border,
           borderRadius: theme.radii.pill,
         },
-      ]}>
-      {items.map(item => {
+      ]}
+    >
+      {items.map((item) => {
         const selected = item.key === value;
         return (
           <Pressable
             key={item.key}
             accessibilityRole="button"
-            accessibilityState={{selected}}
+            accessibilityState={{ selected }}
             accessibilityLabel={item.label}
             onPress={() => onChange(item.key)}
-            style={({pressed}) => [
+            style={({ pressed }) => [
               styles.segment,
               {
                 borderRadius: theme.radii.pill,
@@ -50,7 +51,8 @@ export function SegmentedTabs({items, value, onChange}: SegmentedTabsProps): Rea
                 borderColor: selected ? theme.colors.accent : 'transparent',
                 opacity: pressed ? 0.85 : 1,
               },
-            ]}>
+            ]}
+          >
             <Text variant="footnote" color={selected ? 'accent' : 'inkMuted'} numberOfLines={1}>
               {item.label}
             </Text>

@@ -1,6 +1,6 @@
-import type { TripResource } from '@veo/api-client';
-import type { KeyValueStore } from '../../../core/storage/mmkv';
-import type { TripHistoryRepository } from '../domain/tripHistoryRepository';
+import type {TripResource} from '@veo/api-client';
+import type {KeyValueStore} from '../../../core/storage/mmkv';
+import type {TripHistoryRepository} from '../domain/tripHistoryRepository';
 
 /** Clave de persistencia y tope de viajes guardados (evita crecer sin límite). */
 const KEY = 'trips.history';
@@ -15,7 +15,7 @@ export class LocalTripHistoryRepository implements TripHistoryRepository {
 
   record(trip: TripResource): void {
     const current = this.list();
-    const next = [trip, ...current.filter((item) => item.id !== trip.id)]
+    const next = [trip, ...current.filter(item => item.id !== trip.id)]
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
       .slice(0, MAX_ENTRIES);
     this.store.setJSON(KEY, next);

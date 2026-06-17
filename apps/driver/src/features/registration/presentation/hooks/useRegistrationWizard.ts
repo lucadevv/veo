@@ -1,5 +1,5 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
 import {
   RegisterVehicleUseCase,
   UpdatePersonalDataUseCase,
@@ -18,7 +18,7 @@ export const REGISTRATION_VEHICLES_QUERY_KEY = ['registration', 'vehicles'] as c
  * (abstracción `RegistrationRepository`). Lanza `PersonalDataValidationError` con errores por campo.
  */
 export function useUpdatePersonalData() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   return useMutation({
     mutationFn: (personal: PersonalData) =>
       new UpdatePersonalDataUseCase(registration).execute(personal),
@@ -31,10 +31,9 @@ export function useUpdatePersonalData() {
  * `PENDING_REVIEW`. Lanza `VehicleValidationError` con errores por campo.
  */
 export function useRegisterVehicle() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   return useMutation({
-    mutationFn: (vehicle: VehicleData) =>
-      new RegisterVehicleUseCase(registration).execute(vehicle),
+    mutationFn: (vehicle: VehicleData) => new RegisterVehicleUseCase(registration).execute(vehicle),
   });
 }
 
@@ -43,7 +42,7 @@ export function useRegisterVehicle() {
  * mostrar el vehículo ya registrado y su estado (`status`/`docStatus`, p. ej. PENDING_REVIEW).
  */
 export function useDriverVehicles() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   return useQuery({
     queryKey: REGISTRATION_VEHICLES_QUERY_KEY,
     queryFn: () => registration.listVehicles(),
@@ -58,10 +57,10 @@ export const VEHICLE_MODELS_QUERY_KEY = ['registration', 'vehicle-models'] as co
  * el selector del alta (B5-2). El catálogo es chico; la búsqueda fina la hace el selector client-side.
  */
 export function useVehicleModels(vehicleType: VehicleType) {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   return useQuery({
     queryKey: [...VEHICLE_MODELS_QUERY_KEY, vehicleType],
-    queryFn: () => registration.listVehicleModels({vehicleType}),
+    queryFn: () => registration.listVehicleModels({ vehicleType }),
   });
 }
 
@@ -71,12 +70,12 @@ export function useVehicleModels(vehicleType: VehicleType) {
  * PENDING_REVIEW: NO se puede elegir aún (solo APPROVED se listan).
  */
 export function useRequestVehicleModel() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: VehicleModelRequestInput) => registration.requestVehicleModel(input),
     onSuccess: (_result, input) => {
-      queryClient.invalidateQueries({queryKey: [...VEHICLE_MODELS_QUERY_KEY, input.vehicleType]});
+      queryClient.invalidateQueries({ queryKey: [...VEHICLE_MODELS_QUERY_KEY, input.vehicleType] });
     },
   });
 }
@@ -90,7 +89,7 @@ export const ACTIVE_VEHICLE_QUERY_KEY = ['registration', 'active-vehicle'] as co
  * la app refleja esto (no un toggle local). Alimenta el selector de turno y el pill del header.
  */
 export function useActiveVehicle() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   return useQuery({
     queryKey: ACTIVE_VEHICLE_QUERY_KEY,
     queryFn: () => registration.getActiveVehicle(),
@@ -102,13 +101,13 @@ export function useActiveVehicle() {
  * servidor valida pertenencia + docs vigentes. Al éxito invalida el activo y la lista (cambia `isActive`).
  */
 export function useSetActiveVehicle() {
-  const {registration} = useRepositories();
+  const { registration } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (vehicleId: string) => registration.setActiveVehicle(vehicleId),
     onSuccess: () => {
-      queryClient.invalidateQueries({queryKey: ACTIVE_VEHICLE_QUERY_KEY});
-      queryClient.invalidateQueries({queryKey: REGISTRATION_VEHICLES_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: ACTIVE_VEHICLE_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: REGISTRATION_VEHICLES_QUERY_KEY });
     },
   });
 }

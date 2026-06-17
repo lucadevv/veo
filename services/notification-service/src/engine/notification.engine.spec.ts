@@ -52,11 +52,16 @@ class InMemoryStore implements NotificationStore {
       .slice(0, limit);
   }
   async findDue(now: Date, limit: number): Promise<NotificationRecord[]> {
-    return [...this.records.values()]
-      .filter((r) => r.status === 'PENDING' && r.nextAttemptAt !== null && r.nextAttemptAt <= now)
-      // Igual que el repo real: prioridad DESC primero, luego FIFO por nextAttemptAt.
-      .sort((a, b) => b.priority - a.priority || a.nextAttemptAt!.getTime() - b.nextAttemptAt!.getTime())
-      .slice(0, limit);
+    return (
+      [...this.records.values()]
+        .filter((r) => r.status === 'PENDING' && r.nextAttemptAt !== null && r.nextAttemptAt <= now)
+        // Igual que el repo real: prioridad DESC primero, luego FIFO por nextAttemptAt.
+        .sort(
+          (a, b) =>
+            b.priority - a.priority || a.nextAttemptAt!.getTime() - b.nextAttemptAt!.getTime(),
+        )
+        .slice(0, limit)
+    );
   }
   async markSent(id: string, args: { attempts: number }): Promise<void> {
     const r = this.records.get(id);
@@ -99,7 +104,8 @@ class FlakyDispatcher implements MessageDispatcher {
   constructor(private readonly failTimes: number) {}
   async dispatch(): Promise<DispatchResult> {
     this.calls += 1;
-    if (this.calls <= this.failTimes) return { status: 'transient', reason: `fallo simulado #${this.calls}` };
+    if (this.calls <= this.failTimes)
+      return { status: 'transient', reason: `fallo simulado #${this.calls}` };
     return { status: 'sent' };
   }
 }
@@ -144,8 +150,18 @@ describe('NotificationEngine · dedup', () => {
 
   it('sin dedupKey crea filas independientes', async () => {
     const { store, engine } = build(new FlakyDispatcher(0));
-    await engine.enqueue({ recipientId: 'u1', channel: NotificationChannel.SMS, template: 't', payload: { to: 'a' } });
-    await engine.enqueue({ recipientId: 'u1', channel: NotificationChannel.SMS, template: 't', payload: { to: 'a' } });
+    await engine.enqueue({
+      recipientId: 'u1',
+      channel: NotificationChannel.SMS,
+      template: 't',
+      payload: { to: 'a' },
+    });
+    await engine.enqueue({
+      recipientId: 'u1',
+      channel: NotificationChannel.SMS,
+      template: 't',
+      payload: { to: 'a' },
+    });
     expect(store.records.size).toBe(2);
   });
 });
@@ -153,7 +169,13 @@ describe('NotificationEngine · dedup', () => {
 describe('NotificationEngine · dedup en carrera (insert concurrente)', () => {
   it('si el create choca por unique (otra réplica insertó la dedupKey), devuelve la existente sin relanzar', async () => {
     const store = new InMemoryStore();
-    const engine = new NotificationEngine(store, renderer, new FlakyDispatcher(0), policy, () => FIXED_NOW);
+    const engine = new NotificationEngine(
+      store,
+      renderer,
+      new FlakyDispatcher(0),
+      policy,
+      () => FIXED_NOW,
+    );
     // Simula la carrera: el primer findByDedupKey ve null, pero entre eso y el create OTRA réplica inserta
     // la misma dedupKey → este create choca con el @unique.
     const original = store.create.bind(store);
@@ -180,7 +202,13 @@ describe('NotificationEngine · dedup en carrera (insert concurrente)', () => {
 
   it('si el create falla por OTRA razón (sin dedup existente), relanza', async () => {
     const store = new InMemoryStore();
-    const engine = new NotificationEngine(store, renderer, new FlakyDispatcher(0), policy, () => FIXED_NOW);
+    const engine = new NotificationEngine(
+      store,
+      renderer,
+      new FlakyDispatcher(0),
+      policy,
+      () => FIXED_NOW,
+    );
     store.create = async () => {
       throw new Error('db caída');
     };
@@ -355,7 +383,10 @@ describe('NotificationEngine · pánico durable (REGRESIÓN del SMS perdido)', (
       priority: NotificationPriority.Critical,
       // dedupKey por contactId (NO por teléfono): idempotente y sin PII.
       dedupKey: 'panic:pn1:sms:contact-1',
-      payload: { to: '+51987654321', vars: { name: 'Ana', shareLink: 'https://veo.pe/s/x', lat: -12, lon: -77 } },
+      payload: {
+        to: '+51987654321',
+        vars: { name: 'Ana', shareLink: 'https://veo.pe/s/x', lat: -12, lon: -77 },
+      },
     });
 
     // 1er intento: el proveedor falla → en el modelo viejo el SMS se PERDÍA acá.

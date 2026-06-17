@@ -85,7 +85,10 @@ export class FleetService {
   }
 
   /** Lista paginada de la flota (admin). Proxy a fleet-service + proyección a vehicleView del contrato. */
-  async listVehicles(identity: AuthenticatedUser, query: ListVehiclesQueryDto): Promise<Page<VehicleView>> {
+  async listVehicles(
+    identity: AuthenticatedUser,
+    query: ListVehiclesQueryDto,
+  ): Promise<Page<VehicleView>> {
     const page = await this.rest.get<Page<Vehicle>>('/vehicles', {
       identity,
       query: { docStatus: query.status, cursor: query.cursor, limit: query.limit },
@@ -94,16 +97,27 @@ export class FleetService {
   }
 
   /** Lista paginada de documentos (admin), filtrable por estado. Proyección a fleetDocumentView. */
-  async listDocuments(identity: AuthenticatedUser, query: ListDocumentsQueryDto): Promise<Page<FleetDocumentView>> {
+  async listDocuments(
+    identity: AuthenticatedUser,
+    query: ListDocumentsQueryDto,
+  ): Promise<Page<FleetDocumentView>> {
     const page = await this.rest.get<Page<FleetDocument>>('/documents', {
       identity,
-      query: { status: query.status, ownerId: query.ownerId, cursor: query.cursor, limit: query.limit },
+      query: {
+        status: query.status,
+        ownerId: query.ownerId,
+        cursor: query.cursor,
+        limit: query.limit,
+      },
     });
     return { items: page.items.map(toFleetDocumentView), nextCursor: page.nextCursor };
   }
 
   /** Lista paginada de inspecciones (admin), filtro opcional por vehículo. Proyección a inspectionView. */
-  async listInspections(identity: AuthenticatedUser, query: ListInspectionsQueryDto): Promise<Page<InspectionView>> {
+  async listInspections(
+    identity: AuthenticatedUser,
+    query: ListInspectionsQueryDto,
+  ): Promise<Page<InspectionView>> {
     const page = await this.rest.get<Page<Inspection>>('/inspections', {
       identity,
       query: { vehicleId: query.vehicleId, cursor: query.cursor, limit: query.limit },
@@ -111,7 +125,10 @@ export class FleetService {
     return { items: page.items.map(toInspectionView), nextCursor: page.nextCursor };
   }
 
-  async createDocument(identity: AuthenticatedUser, dto: CreateDocumentDto): Promise<FleetDocumentView> {
+  async createDocument(
+    identity: AuthenticatedUser,
+    dto: CreateDocumentDto,
+  ): Promise<FleetDocumentView> {
     const doc = await this.rest.post<FleetDocument>('/documents', { identity, body: dto });
     await this.audit.record(identity, {
       action: 'document.create',
@@ -140,7 +157,10 @@ export class FleetService {
     return toFleetDocumentView(doc);
   }
 
-  async createInspection(identity: AuthenticatedUser, dto: CreateInspectionDto): Promise<Inspection> {
+  async createInspection(
+    identity: AuthenticatedUser,
+    dto: CreateInspectionDto,
+  ): Promise<Inspection> {
     const ins = await this.rest.post<Inspection>('/inspections', { identity, body: dto });
     await this.audit.record(identity, {
       action: 'inspection.create',

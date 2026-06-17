@@ -10,7 +10,12 @@
  */
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService, JWT_SERVICE, INTERNAL_IDENTITY_SECRET, generateDevKeyPairPem } from '@veo/auth';
+import {
+  JwtService,
+  JWT_SERVICE,
+  INTERNAL_IDENTITY_SECRET,
+  generateDevKeyPairPem,
+} from '@veo/auth';
 import { LOGGER, type Logger } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 

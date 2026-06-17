@@ -24,7 +24,12 @@ const DISPATCH_URL = process.env.DISPATCH_URL ?? 'http://localhost:3003';
 const SECRET = process.env.VEO_INTERNAL_IDENTITY_SECRET ?? 'dev-internal-secret-change-me';
 
 const configStub = { getOrThrow: (key: string): string => ENV[key] ?? '' };
-const identity: AuthenticatedUser = { userId: uuidv7(), type: 'driver', roles: [], sessionId: 'contract' };
+const identity: AuthenticatedUser = {
+  userId: uuidv7(),
+  type: 'driver',
+  roles: [],
+  sessionId: 'contract',
+};
 
 async function ping(url: string): Promise<boolean> {
   const ctrl = new AbortController();

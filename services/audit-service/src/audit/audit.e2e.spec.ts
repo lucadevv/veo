@@ -6,7 +6,11 @@
  *  - detección de tampering a nivel de storage (deshabilitando triggers y alterando una fila).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { createEnvelope } from '@veo/events';
 import { PrismaClient } from '../generated/prisma';
 import { type PrismaService } from '../infra/prisma.service';
@@ -70,10 +74,25 @@ describe('append-only hash chain (Postgres real)', () => {
     const envelope = createEnvelope({
       eventType: 'panic.triggered',
       producer: 'panic-service',
-      payload: { panicId: 'p1', tripId: 't1', passengerId: 'u1', geo: { lat: -12, lon: -77 }, dedupKey: 'd1', triggeredAt: new Date().toISOString() },
+      payload: {
+        panicId: 'p1',
+        tripId: 't1',
+        passengerId: 'u1',
+        geo: { lat: -12, lon: -77 },
+        dedupKey: 'd1',
+        triggeredAt: new Date().toISOString(),
+      },
     });
-    const first = await service.recordFromEvent(envelope, 'panic', { actorId: 'u1', resourceType: 'panic', resourceId: 'p1' });
-    const second = await service.recordFromEvent(envelope, 'panic', { actorId: 'u1', resourceType: 'panic', resourceId: 'p1' });
+    const first = await service.recordFromEvent(envelope, 'panic', {
+      actorId: 'u1',
+      resourceType: 'panic',
+      resourceId: 'p1',
+    });
+    const second = await service.recordFromEvent(envelope, 'panic', {
+      actorId: 'u1',
+      resourceType: 'panic',
+      resourceId: 'p1',
+    });
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
     expect(await repo.count()).toBe(before + 1);

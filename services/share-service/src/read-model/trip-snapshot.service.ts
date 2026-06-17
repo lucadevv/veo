@@ -27,9 +27,20 @@ export class TripSnapshotService {
   ): Promise<void> {
     await this.prisma.write.tripSnapshot.upsert({
       where: { tripId },
-      create: { tripId, status: 'IN_PROGRESS', driverId, startedAt, passengerId: passengerId ?? null },
+      create: {
+        tripId,
+        status: 'IN_PROGRESS',
+        driverId,
+        startedAt,
+        passengerId: passengerId ?? null,
+      },
       // Si un evento legacy viene sin passengerId, NO pisamos con null uno ya proyectado (p.ej. por panic.triggered).
-      update: { status: 'IN_PROGRESS', driverId, startedAt, ...(passengerId ? { passengerId } : {}) },
+      update: {
+        status: 'IN_PROGRESS',
+        driverId,
+        startedAt,
+        ...(passengerId ? { passengerId } : {}),
+      },
     });
   }
 
@@ -54,7 +65,9 @@ export class TripSnapshotService {
       // el estado real guardado (que sería "PANIC", inservible para desenmascarar). Si no hay fila previa
       // (panic antes que trip.started), no hay nada que preservar → prePanicStatus queda null.
       const prePanicStatus =
-        current && current.status !== PANIC_SNAPSHOT_STATUS ? current.status : current?.prePanicStatus ?? null;
+        current && current.status !== PANIC_SNAPSHOT_STATUS
+          ? current.status
+          : (current?.prePanicStatus ?? null);
       await tx.tripSnapshot.upsert({
         where: { tripId },
         create: {
@@ -104,7 +117,7 @@ export class TripSnapshotService {
     await this.prisma.write.$transaction(async (tx) => {
       const current = await tx.tripSnapshot.findUnique({ where: { tripId } });
       // No enmascarado (sin fila, o ya restaurado): nada que desenmascarar.
-      if (!current || current.status !== PANIC_SNAPSHOT_STATUS) return;
+      if (current?.status !== PANIC_SNAPSHOT_STATUS) return;
       await tx.tripSnapshot.update({
         where: { tripId },
         data: {

@@ -1,7 +1,14 @@
-import { Banner, Button, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import {
+  Banner,
+  Button,
+  SafeScreen,
+  Skeleton,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
 
 /**
  * Estados transversales (carga / error / vacío) construidos con `@veo/ui-kit`. Toda vista con
@@ -9,12 +16,14 @@ import { StyleSheet, View } from 'react-native';
  */
 
 /** Bloque de carga con skeletons (reserva espacio, anti-CLS). */
-export function LoadingState({ lines = 3 }: { lines?: number }): React.JSX.Element {
+export function LoadingState({lines = 3}: {lines?: number}): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={[styles.container, { gap: theme.spacing.md }]} accessibilityLabel="Cargando">
+    <View
+      style={[styles.container, {gap: theme.spacing.md}]}
+      accessibilityLabel="Cargando">
       <Skeleton height={28} width="60%" />
-      {Array.from({ length: lines }).map((_, index) => (
+      {Array.from({length: lines}).map((_, index) => (
         <Skeleton key={index} height={56} radius={theme.radii.md} />
       ))}
     </View>
@@ -29,12 +38,22 @@ export function ErrorState({
   message?: string;
   onRetry?: () => void;
 }): React.JSX.Element {
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const theme = useTheme();
   return (
-    <View style={[styles.container, { gap: theme.spacing.md }]}>
-      <Banner tone="danger" title={t('states.errorTitle')} description={message ?? t('states.errorBody')} />
-      {onRetry ? <Button label={t('actions.retry')} variant="secondary" onPress={onRetry} /> : null}
+    <View style={[styles.container, {gap: theme.spacing.md}]}>
+      <Banner
+        tone="danger"
+        title={t('states.errorTitle')}
+        description={message ?? t('states.errorBody')}
+      />
+      {onRetry ? (
+        <Button
+          label={t('actions.retry')}
+          variant="secondary"
+          onPress={onRetry}
+        />
+      ) : null}
     </View>
   );
 }
@@ -49,7 +68,11 @@ export function EmptyState({
 }): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={[styles.centered, { gap: theme.spacing.sm, padding: theme.spacing['3xl'] }]}>
+    <View
+      style={[
+        styles.centered,
+        {gap: theme.spacing.sm, padding: theme.spacing['3xl']},
+      ]}>
       <Text variant="title3" align="center">
         {title}
       </Text>
@@ -83,12 +106,16 @@ export function ScreenStateFallback({
 }): React.JSX.Element {
   return (
     <SafeScreen>
-      {loading ? <LoadingState lines={loadingLines} /> : <ErrorState message={errorMessage} onRetry={onRetry} />}
+      {loading ? (
+        <LoadingState lines={loadingLines} />
+      ) : (
+        <ErrorState message={errorMessage} onRetry={onRetry} />
+      )}
     </SafeScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { alignSelf: 'stretch' },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  container: {alignSelf: 'stretch'},
+  centered: {flex: 1, alignItems: 'center', justifyContent: 'center'},
 });

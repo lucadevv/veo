@@ -20,7 +20,10 @@ import {
  * del sistema (Android Photo Picker), por lo que no exige permiso de almacenamiento.
  */
 export class NativeImagePickerService implements ImagePickerService {
-  async pick(source: ImageSource, options?: ImagePickOptions): Promise<PickedImage | null> {
+  async pick(
+    source: ImageSource,
+    options?: ImagePickOptions,
+  ): Promise<PickedImage | null> {
     const common = {
       mediaType: 'photo' as const,
       maxWidth: options?.maxWidth ?? 1024,
@@ -31,8 +34,12 @@ export class NativeImagePickerService implements ImagePickerService {
 
     const response =
       source === 'camera'
-        ? await launchCamera({ ...common, saveToPhotos: false, cameraType: 'front' })
-        : await launchImageLibrary({ ...common, selectionLimit: 1 });
+        ? await launchCamera({
+            ...common,
+            saveToPhotos: false,
+            cameraType: 'front',
+          })
+        : await launchImageLibrary({...common, selectionLimit: 1});
 
     return this.mapResponse(response);
   }

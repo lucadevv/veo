@@ -1,4 +1,4 @@
-import type { GeoPoint } from '@veo/api-client';
+import type {GeoPoint} from '@veo/api-client';
 
 /**
  * Helpers geográficos locales (sin `@veo/utils`, que usa `node:crypto`/`h3-js` no aptos para
@@ -13,10 +13,13 @@ export const LIMA_BBOX = {
 } as const;
 
 /** Centro aproximado de Lima (Plaza San Martín) para el encuadre inicial del mapa. */
-export const LIMA_CENTER: GeoPoint = { lat: -12.0464, lon: -77.0428 };
+export const LIMA_CENTER: GeoPoint = {lat: -12.0464, lon: -77.0428};
 
 /** Centro de Lima en orden GeoJSON [lng, lat] (el que consume MapLibre). */
-export const LIMA_CENTER_LNGLAT: [number, number] = [LIMA_CENTER.lon, LIMA_CENTER.lat];
+export const LIMA_CENTER_LNGLAT: [number, number] = [
+  LIMA_CENTER.lon,
+  LIMA_CENTER.lat,
+];
 
 /** Zoom inicial razonable para encuadrar el área metropolitana en MapLibre. */
 export const LIMA_ZOOM = 12;
@@ -36,11 +39,18 @@ export interface LngLatBounds {
  * Calcula el bounding box que contiene todas las posiciones [lng, lat] dadas.
  * Devuelve `null` si la lista está vacía (el llamador centra por defecto).
  */
-export function boundsOf(positions: ReadonlyArray<[number, number]>): LngLatBounds | null {
-  let acc: { minLng: number; maxLng: number; minLat: number; maxLat: number } | null = null;
+export function boundsOf(
+  positions: ReadonlyArray<[number, number]>,
+): LngLatBounds | null {
+  let acc: {
+    minLng: number;
+    maxLng: number;
+    minLat: number;
+    maxLat: number;
+  } | null = null;
   for (const [lng, lat] of positions) {
     if (!acc) {
-      acc = { minLng: lng, maxLng: lng, minLat: lat, maxLat: lat };
+      acc = {minLng: lng, maxLng: lng, minLat: lat, maxLat: lat};
       continue;
     }
     if (lng < acc.minLng) acc.minLng = lng;
@@ -51,7 +61,7 @@ export function boundsOf(positions: ReadonlyArray<[number, number]>): LngLatBoun
   if (!acc) {
     return null;
   }
-  return { ne: [acc.maxLng, acc.maxLat], sw: [acc.minLng, acc.minLat] };
+  return {ne: [acc.maxLng, acc.maxLat], sw: [acc.minLng, acc.minLat]};
 }
 
 /** Radio medio de la Tierra en metros (esférico, suficiente para distancias urbanas). */
@@ -70,7 +80,8 @@ export function distanceMeters(a: GeoPoint, b: GeoPoint): number {
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
   const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 

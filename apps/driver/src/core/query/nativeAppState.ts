@@ -1,5 +1,5 @@
-import {AppState, Platform, type AppStateStatus} from 'react-native';
-import {focusManager} from '@tanstack/react-query';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
+import { focusManager } from '@tanstack/react-query';
 
 /**
  * Cablea el `focusManager` de React Query al `AppState` de React Native.

@@ -11,7 +11,7 @@
  * transporta la `zone`, así que el día que `toZone()` resuelva zonas reales el piso por zona funciona sin
  * tocar este resolver ni los consumidores (Tier 2, no-breaking).
  */
-import { OfferingId } from './offerings.js';
+import { type OfferingId } from './offerings.js';
 
 /**
  * Clave de zona de pricing. MVP: SIEMPRE 'GLOBAL' (Tier 1) — espeja `ZoneKey` de trip-service. Tier 2

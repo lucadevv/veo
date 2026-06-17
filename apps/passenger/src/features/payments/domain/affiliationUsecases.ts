@@ -3,7 +3,7 @@ import type {
   DocumentType,
   YapeAffiliationView,
 } from '@veo/api-client';
-import type { AffiliationRepository } from './affiliationRepository';
+import type {AffiliationRepository} from './affiliationRepository';
 
 /**
  * CAPACIDAD no habilitada para el comercio: el proveedor (ProntoPaga) no tiene activado el producto de
@@ -15,7 +15,9 @@ import type { AffiliationRepository } from './affiliationRepository';
  */
 export class AffiliationUnsupportedError extends Error {
   constructor() {
-    super('La vinculación de Yape todavía no está disponible. La estamos activando.');
+    super(
+      'La vinculación de Yape todavía no está disponible. La estamos activando.',
+    );
     this.name = 'AffiliationUnsupportedError';
   }
 }
@@ -78,7 +80,10 @@ export class AffiliationValidationError extends Error {
  * no exhaustiva (el BFF hace la dura). Compartida entre el alta de Yape y la edición del documento en el
  * perfil para que el usuario tenga el mismo feedback en ambos lugares (exportada, single source of truth).
  */
-export function isDocumentValid(documentType: DocumentType, document: string): boolean {
+export function isDocumentValid(
+  documentType: DocumentType,
+  document: string,
+): boolean {
   const value = document.trim();
   if (documentType === 'DN') {
     return /^\d{8}$/.test(value);

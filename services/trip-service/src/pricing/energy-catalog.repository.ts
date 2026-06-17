@@ -41,10 +41,14 @@ export interface EnergyCatalogTx {
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
     create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
+    findUnique(args: {
+      where: { id: string };
+    }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
-    create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;
+    create(args: {
+      data: { aggregateId: string; eventType: string; envelope: unknown };
+    }): Promise<unknown>;
   };
 }
 
@@ -93,7 +97,11 @@ function parseSources(raw: Prisma.JsonValue): EnergySourcePrice[] {
     const { sourceId, pricePerUnitCents } = rec;
     if (typeof sourceId !== 'string' || !(sourceId in ENERGY_SOURCE_UNIT)) continue;
     if (seen.has(sourceId)) continue; // una fuente no puede aparecer dos veces (ambiguo)
-    if (typeof pricePerUnitCents !== 'number' || !Number.isInteger(pricePerUnitCents) || pricePerUnitCents < 0) {
+    if (
+      typeof pricePerUnitCents !== 'number' ||
+      !Number.isInteger(pricePerUnitCents) ||
+      pricePerUnitCents < 0
+    ) {
       continue;
     }
     const src = sourceId as EnergySource;

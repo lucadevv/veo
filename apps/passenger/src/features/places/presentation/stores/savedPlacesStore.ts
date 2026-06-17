@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { TOKENS } from '../../../../core/di/tokens';
-import { container } from '../../../../core/di';
-import type { SavedPlace, SavedPlaceInput } from '../../domain/entities';
+import {create} from 'zustand';
+import {TOKENS} from '../../../../core/di/tokens';
+import {container} from '../../../../core/di';
+import type {SavedPlace, SavedPlaceInput} from '../../domain/entities';
 
 /**
  * Estado reactivo de los Lugares guardados (Zustand) respaldado por el repositorio LOCAL (MMKV).
@@ -24,19 +24,19 @@ const saver = () => container.resolve(TOKENS.savePlaceUseCase);
 const updater = () => container.resolve(TOKENS.updatePlaceUseCase);
 const remover = () => container.resolve(TOKENS.removePlaceUseCase);
 
-export const useSavedPlacesStore = create<SavedPlacesState>((set) => ({
+export const useSavedPlacesStore = create<SavedPlacesState>(set => ({
   places: list().execute(),
-  refresh: () => set({ places: list().execute() }),
-  save: (input) => {
+  refresh: () => set({places: list().execute()}),
+  save: input => {
     saver().execute(input);
-    set({ places: list().execute() });
+    set({places: list().execute()});
   },
   update: (id, input) => {
     updater().execute(id, input);
-    set({ places: list().execute() });
+    set({places: list().execute()});
   },
-  remove: (id) => {
+  remove: id => {
     remover().execute(id);
-    set({ places: list().execute() });
+    set({places: list().execute()});
   },
 }));

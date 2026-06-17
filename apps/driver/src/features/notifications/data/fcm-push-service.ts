@@ -1,4 +1,4 @@
-import {Platform} from 'react-native';
+import { Platform } from 'react-native';
 import type {
   DevicePlatform,
   PushMessage,
@@ -26,7 +26,7 @@ interface MessagingInstance {
 /** Módulo estático de messaging (factory + enum de autorización). */
 interface MessagingModule {
   (): MessagingInstance;
-  AuthorizationStatus: {AUTHORIZED: number; PROVISIONAL: number};
+  AuthorizationStatus: { AUTHORIZED: number; PROVISIONAL: number };
 }
 
 /**
@@ -53,7 +53,7 @@ function loadMessaging(): MessagingModule | null {
 /** true si el mensaje parece relacionado con pánico del pasajero (no debe mostrarse). */
 function isPanicMessage(message: PushMessage): boolean {
   const type = (message.data?.type ?? '').toLowerCase();
-  return PANIC_DATA_HINTS.some(hint => type.includes(hint));
+  return PANIC_DATA_HINTS.some((hint) => type.includes(hint));
 }
 
 /**
@@ -93,19 +93,17 @@ export class FcmPushService implements PushService {
       if (token) {
         this.currentToken = token;
         // Registro real contra el driver-bff; el fallo se degrada en log (no rompe la app).
-        await register
-          .registerDeviceToken({token, platform})
-          .catch((error: unknown) => {
-            if (__DEV__) {
-              console.warn('[VEO] No se pudo registrar el device token:', error);
-            }
-          });
+        await register.registerDeviceToken({ token, platform }).catch((error: unknown) => {
+          if (__DEV__) {
+            console.warn('[VEO] No se pudo registrar el device token:', error);
+          }
+        });
       }
 
       // Re-registra el token cuando FCM lo rota.
       const unsubscribeRefresh = messaging().onTokenRefresh((next: string) => {
         this.currentToken = next;
-        register.registerDeviceToken({token: next, platform}).catch(() => undefined);
+        register.registerDeviceToken({ token: next, platform }).catch(() => undefined);
       });
 
       // Foreground: solo procesamos mensajes inocuos; los de pánico se ignoran (sin UI).
@@ -119,14 +117,16 @@ export class FcmPushService implements PushService {
       });
 
       // App abierta desde la notificación (quita/background→foreground): mismo filtro de pánico.
-      const unsubscribeOpened = messaging().onNotificationOpenedApp((remoteMessage: PushMessage) => {
-        if (isPanicMessage(remoteMessage)) {
-          return;
-        }
-        if (__DEV__) {
-          console.warn('[VEO] Push abrió la app:', remoteMessage?.data);
-        }
-      });
+      const unsubscribeOpened = messaging().onNotificationOpenedApp(
+        (remoteMessage: PushMessage) => {
+          if (isPanicMessage(remoteMessage)) {
+            return;
+          }
+          if (__DEV__) {
+            console.warn('[VEO] Push abrió la app:', remoteMessage?.data);
+          }
+        },
+      );
 
       // Notificación que arrancó la app desde estado "quit".
       messaging()
@@ -159,7 +159,9 @@ export class FcmPushService implements PushService {
       if (!messaging) {
         return;
       }
-      token = await messaging().getToken().catch(() => null);
+      token = await messaging()
+        .getToken()
+        .catch(() => null);
     }
     if (!token) {
       return;

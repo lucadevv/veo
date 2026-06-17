@@ -1,13 +1,21 @@
-import { useMutation } from '@tanstack/react-query';
-import { Banner, Button, IconButton, StatusPill, Text, TextField, useTheme } from '@veo/ui-kit';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { formatPEN } from '../../../../shared/utils/format';
-import { applyDiscount } from '../../domain/entities';
-import { PromoInputError } from '../../domain/usecases';
+import {useMutation} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  IconButton,
+  StatusPill,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {formatPEN} from '../../../../shared/utils/format';
+import {applyDiscount} from '../../domain/entities';
+import {PromoInputError} from '../../domain/usecases';
 
 /** Cupón aplicado con éxito: lo que el padre necesita para enviar `promoCode` y mostrar el total. */
 export interface AppliedPromo {
@@ -32,9 +40,14 @@ export interface PromoFieldProps {
  * El estado del cupón APLICADO se eleva al padre (RouteQuoteScreen), que envía `promoCode` al crear
  * el viaje. Aquí solo vive el estado efímero del input y el resultado de la última validación.
  */
-export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFieldProps): React.JSX.Element {
+export function PromoField({
+  fareCents,
+  applied,
+  onApplied,
+  onCleared,
+}: PromoFieldProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const validatePromo = useDependency(TOKENS.validatePromoUseCase);
 
@@ -43,9 +56,9 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
 
   const validateMutation = useMutation({
     mutationFn: () => validatePromo.execute(code, fareCents),
-    onSuccess: (result) => {
+    onSuccess: result => {
       if (result.valid) {
-        onApplied({ code: result.code, discountCents: result.discountCents });
+        onApplied({code: result.code, discountCents: result.discountCents});
         setOpen(false);
         setCode('');
       }
@@ -56,9 +69,21 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
   if (applied) {
     const newTotal = applyDiscount(fareCents, applied.discountCents);
     return (
-      <View style={[styles.appliedCard, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg, padding: theme.spacing.md }]}>
+      <View
+        style={[
+          styles.appliedCard,
+          {
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radii.lg,
+            padding: theme.spacing.md,
+          },
+        ]}>
         <View style={styles.appliedHeader}>
-          <StatusPill label={t('promo.appliedTitle', { code: applied.code })} tone="accent" dot />
+          <StatusPill
+            label={t('promo.appliedTitle', {code: applied.code})}
+            tone="accent"
+            dot
+          />
           <IconButton
             accessibilityLabel={t('promo.remove')}
             variant="plain"
@@ -71,7 +96,7 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
             }
           />
         </View>
-        <View style={[styles.totalRow, { marginTop: theme.spacing.sm }]}>
+        <View style={[styles.totalRow, {marginTop: theme.spacing.sm}]}>
           <Text variant="footnote" color="inkMuted">
             {t('promo.discount')}
           </Text>
@@ -102,21 +127,29 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
   }
 
   const result = validateMutation.data;
-  const isInvalid = validateMutation.isSuccess && result ? !result.valid : false;
-  const inputError = validateMutation.error instanceof PromoInputError ? validateMutation.error.reason : null;
+  const isInvalid =
+    validateMutation.isSuccess && result ? !result.valid : false;
+  const inputError =
+    validateMutation.error instanceof PromoInputError
+      ? validateMutation.error.reason
+      : null;
   const isNetworkError = Boolean(validateMutation.error) && inputError === null;
 
   return (
-    <View style={{ gap: theme.spacing.sm }}>
-      {isInvalid ? <Banner tone="warn" title={result?.reason ?? t('promo.invalid')} /> : null}
-      {isNetworkError ? <Banner tone="danger" title={t('promo.error')} /> : null}
+    <View style={{gap: theme.spacing.sm}}>
+      {isInvalid ? (
+        <Banner tone="warn" title={result?.reason ?? t('promo.invalid')} />
+      ) : null}
+      {isNetworkError ? (
+        <Banner tone="danger" title={t('promo.error')} />
+      ) : null}
       <TextField
         label={t('promo.label')}
         placeholder={t('promo.placeholder')}
         autoCapitalize="characters"
         autoCorrect={false}
         value={code}
-        onChangeText={(value) => {
+        onChangeText={value => {
           setCode(value);
           if (validateMutation.isError || validateMutation.isSuccess) {
             validateMutation.reset();
@@ -125,7 +158,11 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
         error={inputError === 'emptyCode' ? t('promo.emptyCode') : undefined}
         rightIcon={
           <Button
-            label={validateMutation.isPending ? t('promo.applying') : t('promo.apply')}
+            label={
+              validateMutation.isPending
+                ? t('promo.applying')
+                : t('promo.apply')
+            }
             variant="accent"
             size="sm"
             loading={validateMutation.isPending}
@@ -140,6 +177,14 @@ export function PromoField({ fareCents, applied, onApplied, onCleared }: PromoFi
 
 const styles = StyleSheet.create({
   appliedCard: {},
-  appliedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  totalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  appliedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 });

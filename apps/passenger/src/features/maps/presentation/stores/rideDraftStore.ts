@@ -1,15 +1,15 @@
-import { create } from 'zustand';
-import type { RoutePlace } from '../../domain/entities';
-import { MAX_WAYPOINTS } from '../../domain/entities';
+import {create} from 'zustand';
+import type {RoutePlace} from '../../domain/entities';
+import {MAX_WAYPOINTS} from '../../domain/entities';
 
 /**
  * Qué punto del trayecto edita el buscador. Además de origen y destino, puede editar una PARADA
  * intermedia por índice (Ola 2B · paradas múltiples).
  */
 export type RouteEndpointKind =
-  | { kind: 'origin' }
-  | { kind: 'destination' }
-  | { kind: 'waypoint'; index: number };
+  | {kind: 'origin'}
+  | {kind: 'destination'}
+  | {kind: 'waypoint'; index: number};
 
 export interface RideDraftState {
   /** Origen elegido (por defecto se siembra con la ubicación actual). */
@@ -42,46 +42,52 @@ export interface RideDraftState {
  * el origen/destino elegidos y qué campo se edita. La cotización (estado de servidor) la maneja
  * React Query en la pantalla de ruta.
  */
-export const useRideDraftStore = create<RideDraftState>((set) => ({
+export const useRideDraftStore = create<RideDraftState>(set => ({
   origin: null,
   destination: null,
   waypoints: [],
-  editing: { kind: 'destination' },
+  editing: {kind: 'destination'},
 
-  setOrigin: (origin) => set({ origin }),
-  setDestination: (destination) => set({ destination }),
-  setEditing: (editing) => set({ editing }),
+  setOrigin: origin => set({origin}),
+  setDestination: destination => set({destination}),
+  setEditing: editing => set({editing}),
 
   addWaypoint: () =>
-    set((state) => {
+    set(state => {
       if (state.waypoints.length >= MAX_WAYPOINTS) {
         return state;
       }
       const index = state.waypoints.length;
       // Marcador vacío hasta que el buscador fije la dirección; queda en edición.
-      const placeholder: RoutePlace = { point: { lat: 0, lng: 0 }, title: '' };
+      const placeholder: RoutePlace = {point: {lat: 0, lng: 0}, title: ''};
       return {
         waypoints: [...state.waypoints, placeholder],
-        editing: { kind: 'waypoint', index },
+        editing: {kind: 'waypoint', index},
       };
     }),
 
   setWaypoint: (index, place) =>
-    set((state) => {
+    set(state => {
       if (index < 0 || index >= state.waypoints.length) {
         return state;
       }
       const next = state.waypoints.slice();
       next[index] = place;
-      return { waypoints: next };
+      return {waypoints: next};
     }),
 
-  removeWaypoint: (index) =>
-    set((state) => ({
+  removeWaypoint: index =>
+    set(state => ({
       waypoints: state.waypoints.filter((_, i) => i !== index),
     })),
 
-  swap: () => set((state) => ({ origin: state.destination, destination: state.origin })),
+  swap: () =>
+    set(state => ({origin: state.destination, destination: state.origin})),
   reset: () =>
-    set({ origin: null, destination: null, waypoints: [], editing: { kind: 'destination' } }),
+    set({
+      origin: null,
+      destination: null,
+      waypoints: [],
+      editing: {kind: 'destination'},
+    }),
 }));

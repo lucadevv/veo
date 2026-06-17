@@ -1,7 +1,7 @@
-import {useMutation, useQueryClient} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
-import {useRegistrationStore} from '../state/registrationStore';
-import {REGISTRATION_GATE_QUERY_KEY} from './useRegistrationGate';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
+import { useRegistrationStore } from '../state/registrationStore';
+import { REGISTRATION_GATE_QUERY_KEY } from './useRegistrationGate';
 
 /**
  * Reenvío a revisión tras un rechazo (resubmit). El conductor RECHAZADO corrigió sus datos y vuelve a
@@ -14,15 +14,15 @@ import {REGISTRATION_GATE_QUERY_KEY} from './useRegistrationGate';
  * resultado. La aprobación final NUNCA se decide localmente.
  */
 export function useResubmitRegistration() {
-  const {registration} = useRepositories();
-  const setStatus = useRegistrationStore(s => s.setStatus);
+  const { registration } = useRepositories();
+  const setStatus = useRegistrationStore((s) => s.setStatus);
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () => registration.resubmit(),
     onSuccess: () => {
       setStatus('in_review');
-      void queryClient.invalidateQueries({queryKey: REGISTRATION_GATE_QUERY_KEY});
+      void queryClient.invalidateQueries({ queryKey: REGISTRATION_GATE_QUERY_KEY });
     },
   });
 }

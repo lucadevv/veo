@@ -104,7 +104,10 @@ export abstract class KafkaConsumerBootstrap implements OnModuleInit, OnModuleDe
           this.logger.error({ err }, `Bootstrap del consumer Kafka falló tras ${attempt} intentos`);
           throw err;
         }
-        const delay = Math.min(BOOTSTRAP_BASE_DELAY_MS * 2 ** (attempt - 1), BOOTSTRAP_MAX_DELAY_MS);
+        const delay = Math.min(
+          BOOTSTRAP_BASE_DELAY_MS * 2 ** (attempt - 1),
+          BOOTSTRAP_MAX_DELAY_MS,
+        );
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
           `Bootstrap del consumer Kafka falló (intento ${attempt}/${BOOTSTRAP_MAX_ATTEMPTS}), reintento en ${delay}ms: ${message}`,

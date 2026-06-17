@@ -18,6 +18,7 @@ Para eso el **SERVIDOR** debe resolver el modo desde `{zona, hora, config-admin}
 lo que mande el cliente.
 
 **Lo que YA está (el 60%, la parte cara):**
+
 - **Dos motores funcionando** detrás de **dos eventos**: PUJA (`trip.bid_posted` → OfferBoard) y FIJO
   (`trip.requested` → matching secuencial). Strangler-fig limpio (ver ADR 010).
 - **El punto de fork único**: `trips.service.ts:195`. Reemplazar la condición es todo el cableado de lógica.
@@ -30,6 +31,7 @@ persistir el modo en el viaje.
 ## 1. Decisión arquitectónica
 
 ### 1.1 Patrón: `ModeResolver` (NO Strategy)
+
 La selección es una decisión de **enum de 2 vías por data** (zona, hora, config). Eso es un
 **resolver que devuelve un enum + el `if/else` que YA existe** — NO objetos Strategy (sería ceremonia: los
 dos comportamientos ya viven como dos métodos y dos consumers). **Se reserva Strategy para un 3er modo**
@@ -41,6 +43,7 @@ resolvePricingMode(zone: ZoneKey, now: Date): 'PUJA' | 'FIXED'
 ```
 
 ### 1.2 La regla de oro: **resolve-once-persist-forever**
+
 > El modo se resuelve **UNA vez, en `createTrip`**, y el viaje **lo carga toda su vida** en una columna
 > `Trip.dispatchMode`. La reasignación y la activación de programados leen el modo **DEL VIAJE**, NUNCA
 > re-resuelven de la config actual.
@@ -53,12 +56,12 @@ inmutable en su modo. Sin esto, un flip de config a media-vida corrompe viajes e
 
 ## 2. Dominio (PLAYBOOK §2)
 
-| Entidad | Dueño | Qué es |
-|---|---|---|
-| `PricingMode` | shared-types | `'PUJA' \| 'FIXED'` |
-| `Trip.dispatchMode` | trip-service | el modo CONGELADO del viaje (columna nueva) |
+| Entidad               | Dueño         | Qué es                                                             |
+| --------------------- | ------------- | ------------------------------------------------------------------ |
+| `PricingMode`         | shared-types  | `'PUJA' \| 'FIXED'`                                                |
+| `Trip.dispatchMode`   | trip-service  | el modo CONGELADO del viaje (columna nueva)                        |
 | `PricingModeSchedule` | admin (nuevo) | reglas `{ dayMask, startMinute, endMinute, mode }` + `defaultMode` |
-| `ZoneKey` | maps/shared | clave de zona (MVP: global; futuro: celda H3 / zona nombrada) |
+| `ZoneKey`             | maps/shared   | clave de zona (MVP: global; futuro: celda H3 / zona nombrada)      |
 
 - **Schedule (MVP Tier 1 — global por horario):** una lista de reglas horarias + un `defaultMode`. La
   primera regla que matchea `(día, hora)` gana; si ninguna → `defaultMode`. Aplica a toda la ciudad.
@@ -88,11 +91,11 @@ PASAJERO pide quote            │                                          │
   → no puede ser la fuente). trip-service es el resolver, así que co-locar el schedule ahí evita un hop de
   red por cada `createTrip` y la ceremonia de un event-projection (§4-bis: no metas proyección si UN solo
   servicio consume la config). trip-service expone endpoints internos `GET/PUT /internal/pricing/mode-schedule`
-  + `GET /internal/pricing/resolve`. `admin-bff` (módulo `pricing` nuevo) es un **proxy CRUD con RBAC**
-  (`pricing:manage`/`view`) hacia esos endpoints — la UI refleja, el gate va server-side (admin-bff Y
-  re-validado en el endpoint interno de trip). El evento `pricing.mode_schedule_updated` se emite en el PUT
-  (audit + consumidores futuros), pero NO es load-bearing: el resolver lee la tabla local de trip-service.
-  Degradación honesta: sin schedule cargado → `defaultMode` (PUJA).
+  - `GET /internal/pricing/resolve`. `admin-bff` (módulo `pricing` nuevo) es un **proxy CRUD con RBAC**
+    (`pricing:manage`/`view`) hacia esos endpoints — la UI refleja, el gate va server-side (admin-bff Y
+    re-validado en el endpoint interno de trip). El evento `pricing.mode_schedule_updated` se emite en el PUT
+    (audit + consumidores futuros), pero NO es load-bearing: el resolver lee la tabla local de trip-service.
+    Degradación honesta: sin schedule cargado → `defaultMode` (PUJA).
 - **El pasajero aprende el modo** vía el quote (`GET /maps/quote` devuelve `mode`): si FIXED → muestra la
   tarifa fija; si PUJA → muestra "proponé tu precio" con piso/sugerido. La UI refleja, NO autoriza — el
   modo autoritativo se RE-RESUELVE en `createTrip` (el quote es una pista; entre quote y create pudo cambiar).
@@ -124,24 +127,24 @@ if (mode === 'PUJA') {
 
 ## 5. Caminos infelices (PLAYBOOK §5.3)
 
-| ¿Y si…? | Resultado |
-|---|---|
-| no hay config/proyección todavía | `defaultMode` (degradación honesta, no crash) |
-| el admin flipea el modo con viajes en vuelo | los en vuelo conservan su `dispatchMode` (persist-once); solo los NUEVOS toman el modo nuevo |
-| el pasajero manda `bidCents` pero el modo es FIXED | se IGNORA el bid; tarifa calculada (la app ya mostró fijo vía el quote) |
-| el pasajero NO manda bid pero el modo es PUJA | el quote ya pidió el bid; si falta → 400 "falta tu oferta" (no se asume un precio) |
-| zona desconocida (MVP global) | usa el schedule global |
-| reasignación tras flip de config | re-abre en el modo del VIAJE, no en el de la config actual |
+| ¿Y si…?                                            | Resultado                                                                                    |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| no hay config/proyección todavía                   | `defaultMode` (degradación honesta, no crash)                                                |
+| el admin flipea el modo con viajes en vuelo        | los en vuelo conservan su `dispatchMode` (persist-once); solo los NUEVOS toman el modo nuevo |
+| el pasajero manda `bidCents` pero el modo es FIXED | se IGNORA el bid; tarifa calculada (la app ya mostró fijo vía el quote)                      |
+| el pasajero NO manda bid pero el modo es PUJA      | el quote ya pidió el bid; si falta → 400 "falta tu oferta" (no se asume un precio)           |
+| zona desconocida (MVP global)                      | usa el schedule global                                                                       |
+| reasignación tras flip de config                   | re-abre en el modo del VIAJE, no en el de la config actual                                   |
 
 ---
 
 ## 6. Acceso (matriz, capa 2+3)
 
-| Capacidad | ROL | Regla server-side |
-|---|---|---|
-| Ver el schedule de modo | admin (cualquier sub-rol con `pricing:view`) | — |
-| Editar el schedule (crear/borrar reglas, default) | admin con `pricing:manage` (¿FINANCE? ¿ADMIN/SUPERADMIN?) | RBAC en admin-bff + re-valida en el service |
-| Resolver el modo (lectura) | interno | trip-service desde su proyección; public-bff vía trip |
+| Capacidad                                         | ROL                                                       | Regla server-side                                     |
+| ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------- |
+| Ver el schedule de modo                           | admin (cualquier sub-rol con `pricing:view`)              | —                                                     |
+| Editar el schedule (crear/borrar reglas, default) | admin con `pricing:manage` (¿FINANCE? ¿ADMIN/SUPERADMIN?) | RBAC en admin-bff + re-valida en el service           |
+| Resolver el modo (lectura)                        | interno                                                   | trip-service desde su proyección; public-bff vía trip |
 
 > La UI del admin refleja; el gate de `pricing:manage` va server-side. El pasajero NO elige el modo.
 
@@ -174,9 +177,9 @@ if (mode === 'PUJA') {
 4. **Quién edita**: permiso **`pricing:manage`** → roles **ADMIN, SUPERADMIN, FINANCE** (el pricing es
    decisión financiera/comercial). `pricing:view` para lectura.
 
-*(El persist-once en `Trip.dispatchMode` NO es pregunta — es la regla de oro, va sí o sí.)*
+_(El persist-once en `Trip.dispatchMode` NO es pregunta — es la regla de oro, va sí o sí.)_
 
 ---
 
-*Decisión: ModeResolver (no Strategy) + persist-once en el Trip. El 60% (dos motores + fork) ya está;
-falta el resolver + config admin + zona + persistir. Próximo: ratificar §8 → tasks → apply.*
+_Decisión: ModeResolver (no Strategy) + persist-once en el Trip. El 60% (dos motores + fork) ya está;
+falta el resolver + config admin + zona + persistir. Próximo: ratificar §8 → tasks → apply._

@@ -24,10 +24,7 @@ export class EmailCodeService {
   private readonly resetTtl: number;
   private readonly maxAttempts: number;
 
-  constructor(
-    @Inject(REDIS) redis: Redis,
-    config: ConfigService<Env, true>,
-  ) {
+  constructor(@Inject(REDIS) redis: Redis, config: ConfigService<Env, true>) {
     this.codes = new VerificationCodeService(redis);
     this.verifyTtl = config.getOrThrow<number>('EMAIL_VERIFY_TTL_SECONDS');
     this.resetTtl = config.getOrThrow<number>('PWD_RESET_TTL_SECONDS');

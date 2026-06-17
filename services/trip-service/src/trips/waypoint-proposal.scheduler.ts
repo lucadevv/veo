@@ -42,7 +42,10 @@ export class WaypointProposalScheduler {
           if (await this.proposals.expireProposal(c.id, now)) expired++;
         } catch (err) {
           // Un fallo aislado no detiene el barrido; la propuesta se reintenta al siguiente tick.
-          this.logger.error({ err, proposalId: c.id }, 'waypoint sweeper: no se pudo expirar la propuesta');
+          this.logger.error(
+            { err, proposalId: c.id },
+            'waypoint sweeper: no se pudo expirar la propuesta',
+          );
         }
       }
       if (expired > 0) this.logger.log(`waypoint sweeper: ${expired} propuesta(s) → EXPIRED`);

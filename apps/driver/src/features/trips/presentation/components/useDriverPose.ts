@@ -1,6 +1,6 @@
-import {useEffect, useState} from 'react';
-import type {GeoPoint} from '@veo/api-client';
-import {useLocationSource} from '../../../realtime/presentation/providers/LocationSourceProvider';
+import { useEffect, useState } from 'react';
+import type { GeoPoint } from '@veo/api-client';
+import { useLocationSource } from '../../../realtime/presentation/providers/LocationSourceProvider';
 
 /** Pose del conductor para la cámara de navegación: ubicación + rumbo (heading-up). */
 export interface DriverPose {
@@ -26,8 +26,8 @@ export function useDriverPose(): DriverPose | null {
       setPose(null);
       return;
     }
-    const unsubscribe = source.subscribe(sample => {
-      setPose({point: {lat: sample.lat, lon: sample.lon}, heading: sample.heading ?? null});
+    const unsubscribe = source.subscribe((sample) => {
+      setPose({ point: { lat: sample.lat, lon: sample.lon }, heading: sample.heading ?? null });
     });
     return unsubscribe;
   }, [source]);

@@ -44,21 +44,45 @@ jobs:
           - { service: driver-bff, context: ., dockerfile: services/bff/driver-bff/Dockerfile }
           - { service: public-bff, context: ., dockerfile: services/bff/public-bff/Dockerfile }
           - { service: chat-service, context: ., dockerfile: services/chat-service/Dockerfile }
-          - { service: dispatch-service, context: ., dockerfile: services/dispatch-service/Dockerfile }
+          - {
+              service: dispatch-service,
+              context: .,
+              dockerfile: services/dispatch-service/Dockerfile,
+            }
           - { service: fleet-service, context: ., dockerfile: services/fleet-service/Dockerfile }
-          - { service: identity-service, context: ., dockerfile: services/identity-service/Dockerfile }
+          - {
+              service: identity-service,
+              context: .,
+              dockerfile: services/identity-service/Dockerfile,
+            }
           - { service: media-service, context: ., dockerfile: services/media-service/Dockerfile }
-          - { service: notification-service, context: ., dockerfile: services/notification-service/Dockerfile }
+          - {
+              service: notification-service,
+              context: .,
+              dockerfile: services/notification-service/Dockerfile,
+            }
           - { service: panic-service, context: ., dockerfile: services/panic-service/Dockerfile }
-          - { service: payment-service, context: ., dockerfile: services/payment-service/Dockerfile }
+          - {
+              service: payment-service,
+              context: .,
+              dockerfile: services/payment-service/Dockerfile,
+            }
           - { service: places-service, context: ., dockerfile: services/places-service/Dockerfile }
           - { service: rating-service, context: ., dockerfile: services/rating-service/Dockerfile }
           - { service: share-service, context: ., dockerfile: services/share-service/Dockerfile }
           - { service: trip-service, context: ., dockerfile: services/trip-service/Dockerfile }
           # Go (contexto propio)
-          - { service: tracking-service, context: services/tracking-service, dockerfile: services/tracking-service/Dockerfile }
+          - {
+              service: tracking-service,
+              context: services/tracking-service,
+              dockerfile: services/tracking-service/Dockerfile,
+            }
           # Python (contexto propio)
-          - { service: biometric-service, context: services/biometric-service, dockerfile: services/biometric-service/Dockerfile }
+          - {
+              service: biometric-service,
+              context: services/biometric-service,
+              dockerfile: services/biometric-service/Dockerfile,
+            }
     steps:
       - uses: actions/checkout@v4
 

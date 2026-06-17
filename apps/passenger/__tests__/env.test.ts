@@ -1,4 +1,4 @@
-import { env } from '../src/core/config/env';
+import {env} from '../src/core/config/env';
 
 describe('env', () => {
   it('expone la base REST del public-bff con el prefijo /api/v1', () => {

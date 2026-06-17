@@ -16,7 +16,9 @@ export class AdminIdentityGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<RequestWithUser>();
     const user = req.user;
     if (user?.type !== 'admin') {
-      throw new ForbiddenError('Solo una identidad admin puede editar la config de radios de dispatch');
+      throw new ForbiddenError(
+        'Solo una identidad admin puede editar la config de radios de dispatch',
+      );
     }
     return true;
   }

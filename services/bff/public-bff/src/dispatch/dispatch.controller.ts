@@ -13,10 +13,7 @@ export class DispatchController {
 
   @Get('surge')
   @ApiOperation({ summary: 'Multiplicador de surge en una ubicación' })
-  surge(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: SurgeQueryDto,
-  ): Promise<SurgeView> {
+  surge(@CurrentUser() user: AuthenticatedUser, @Query() query: SurgeQueryDto): Promise<SurgeView> {
     return this.dispatch.getSurge(user, query.lat, query.lon);
   }
 

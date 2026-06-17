@@ -47,7 +47,10 @@ export class ActiveVehicleTypeResolver {
    * vehículo operable (204): en ese caso devolvemos solo el tipo, SIN attrs (degradación honesta). La
    * clave de cache es el `userId` (lo que fleet usa como `driver_id`).
    */
-  async resolve(identity: AuthenticatedUser, fallback: VehicleClass): Promise<ResolvedActiveVehicle> {
+  async resolve(
+    identity: AuthenticatedUser,
+    fallback: VehicleClass,
+  ): Promise<ResolvedActiveVehicle> {
     const key = identity.userId;
     const now = Date.now();
     const cached = this.cache.get(key);

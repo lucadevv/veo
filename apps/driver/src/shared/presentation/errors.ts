@@ -1,5 +1,5 @@
-import {ApiError} from '@veo/api-client';
-import type {TFunction} from 'i18next';
+import { ApiError } from '@veo/api-client';
+import type { TFunction } from 'i18next';
 
 /**
  * Traduce cualquier error a un mensaje accionable para el conductor.

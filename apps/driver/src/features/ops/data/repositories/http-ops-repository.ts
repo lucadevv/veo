@@ -1,11 +1,6 @@
-import type {HttpClient} from '@veo/api-client';
-import { driverIncentiveList, heatmapView} from '@veo/api-client';
-import type {
-  DemandHeatmap,
-  HeatmapQuery,
-  IncentiveList,
-  OpsRepository,
-} from '../../domain';
+import type { HttpClient } from '@veo/api-client';
+import { driverIncentiveList, heatmapView } from '@veo/api-client';
+import type { DemandHeatmap, HeatmapQuery, IncentiveList, OpsRepository } from '../../domain';
 
 /** Radio por defecto (m) del mapa de calor si el llamador no especifica uno. */
 const DEFAULT_HEATMAP_RADIUS = 3000;
@@ -26,6 +21,6 @@ export class HttpOpsRepository implements OpsRepository {
   }
 
   listIncentives(): Promise<IncentiveList> {
-    return this.http.get('/incentives', {schema: driverIncentiveList});
+    return this.http.get('/incentives', { schema: driverIncentiveList });
   }
 }

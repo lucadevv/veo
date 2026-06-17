@@ -7,7 +7,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ValidationError } from '@veo/utils';
 import { VehicleType as SharedVehicleType } from '@veo/shared-types';
-import { VehicleDocStatus, VehicleModelStatus, VehicleType, type Vehicle } from '../generated/prisma';
+import {
+  VehicleDocStatus,
+  VehicleModelStatus,
+  VehicleType,
+  type Vehicle,
+} from '../generated/prisma';
 import { VehiclesService } from './vehicles.service';
 
 function specRow(over: Record<string, unknown> = {}) {
@@ -47,14 +52,19 @@ function makeService(opts: { spec?: ReturnType<typeof specRow> | null } = {}) {
     } as unknown as Vehicle;
     return Promise.resolve(vehicle);
   });
-  const tx = { vehicle: { create: txCreate }, outboxEvent: { create: vi.fn().mockResolvedValue({}) } };
+  const tx = {
+    vehicle: { create: txCreate },
+    outboxEvent: { create: vi.fn().mockResolvedValue({}) },
+  };
 
   const findFirst = vi.fn().mockResolvedValue(opts.spec ?? null);
   const prisma = {
     read: {
       vehicle: {
         findUnique: vi.fn().mockResolvedValue(null), // no duplicado de placa
-        findMany: vi.fn().mockImplementation(() => Promise.resolve(created.data ? [created.data] : [])),
+        findMany: vi
+          .fn()
+          .mockImplementation(() => Promise.resolve(created.data ? [created.data] : [])),
       },
       vehicleModelSpec: { findFirst },
     },
@@ -146,15 +156,23 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
         fleetDocument: { findMany: vi.fn().mockResolvedValue(docs) },
       },
     };
-    return { service: new VehiclesService(prisma as never, { getOrThrow: () => 2017 } as never), prisma };
+    return {
+      service: new VehiclesService(prisma as never, { getOrThrow: () => 2017 } as never),
+      prisma,
+    };
   }
 
   it('CON modelSpecId: agrega seats/segment del spec al vehículo activo', async () => {
-    const { service, prisma } = make([vehicleRow({ modelSpecId: 'spec-1' })], { seats: 7, segment: 'PREMIUM' });
+    const { service, prisma } = make([vehicleRow({ modelSpecId: 'spec-1' })], {
+      seats: 7,
+      segment: 'PREMIUM',
+    });
     const active = await service.getActiveVehicle('driver-1');
     expect(active?.seats).toBe(7);
     expect(active?.segment).toBe('PREMIUM');
-    expect(prisma.read.vehicleModelSpec.findUnique).toHaveBeenCalledWith({ where: { id: 'spec-1' } });
+    expect(prisma.read.vehicleModelSpec.findUnique).toHaveBeenCalledWith({
+      where: { id: 'spec-1' },
+    });
   });
 
   it('SIN modelSpecId (legacy): no consulta el catálogo, sin attrs (degradación)', async () => {

@@ -119,7 +119,10 @@ export class UsersService {
   }
 
   async cancelDeletion(userId: string): Promise<void> {
-    await this.prisma.write.user.update({ where: { id: userId }, data: { deletionRequestedAt: null } });
+    await this.prisma.write.user.update({
+      where: { id: userId },
+      data: { deletionRequestedAt: null },
+    });
   }
 
   private view(user: {

@@ -74,7 +74,9 @@ export class SurgeService {
   }
 
   private async findActiveZone(point: LatLon, cell: string): Promise<ZoneRow | null> {
-    const zones = (await this.prisma.read.surgeZone.findMany({ where: { active: true } })) as ZoneRow[];
+    const zones = (await this.prisma.read.surgeZone.findMany({
+      where: { active: true },
+    })) as ZoneRow[];
     return zones.find((z) => SurgeService.contains(z, point, cell)) ?? null;
   }
 
@@ -93,7 +95,15 @@ export class SurgeService {
     const cell = toH3(point, DISPATCH_H3_RESOLUTION);
     const zone = await this.findActiveZone(point, cell);
     if (!zone) {
-      return { multiplier: MIN_MULTIPLIER, zoneId: null, zoneName: null, active: false, demand: 0, supply: 0, ratio: 0 };
+      return {
+        multiplier: MIN_MULTIPLIER,
+        zoneId: null,
+        zoneName: null,
+        active: false,
+        demand: 0,
+        supply: 0,
+        ratio: 0,
+      };
     }
 
     const demand = Number((await this.redis.get(`${DEMAND_PREFIX}${zone.id}`)) ?? 0);
@@ -104,7 +114,9 @@ export class SurgeService {
 
     const surged = ratio > threshold;
     const configured = Number(zone.multiplier.toString());
-    const multiplier = surged ? Math.min(MAX_MULTIPLIER, Math.max(MIN_MULTIPLIER, configured)) : MIN_MULTIPLIER;
+    const multiplier = surged
+      ? Math.min(MAX_MULTIPLIER, Math.max(MIN_MULTIPLIER, configured))
+      : MIN_MULTIPLIER;
 
     return {
       multiplier,

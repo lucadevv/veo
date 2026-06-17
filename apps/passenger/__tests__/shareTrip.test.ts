@@ -14,9 +14,9 @@ import type {
   TripStateView,
   TripVideoGrant,
 } from '@veo/api-client';
-import { HttpTripRepository } from '../src/features/trip/data/httpTripRepository';
-import type { TripRepository } from '../src/features/trip/domain/tripRepository';
-import { ShareTripUseCase } from '../src/features/trip/domain/usecases';
+import {HttpTripRepository} from '../src/features/trip/data/httpTripRepository';
+import type {TripRepository} from '../src/features/trip/domain/tripRepository';
+import {ShareTripUseCase} from '../src/features/trip/domain/usecases';
 
 const SHARE_LINK: CreatedShareLink = {
   shareId: 'share-1',
@@ -31,23 +31,53 @@ const SHARE_LINK: CreatedShareLink = {
 /** TripRepository mínimo que solo implementa `shareTrip`; el resto lanza si se invoca por error. */
 class FakeTripRepository implements TripRepository {
   shareTrip = jest.fn(
-    async (_id: string, _input?: ShareTripRequest): Promise<CreatedShareLink> => SHARE_LINK,
+    async (_id: string, _input?: ShareTripRequest): Promise<CreatedShareLink> =>
+      SHARE_LINK,
   );
-  getSurge = jest.fn(async (_c: GeoPoint): Promise<SurgeQuote> => ({ multiplier: 1, zoneId: 'z', active: false }));
-  createTrip = jest.fn(async (_input: CreateTripRequest): Promise<TripResource> => ({} as TripResource));
-  getActiveTrip = jest.fn(async (_id: string): Promise<TripActiveView> => ({} as TripActiveView));
-  getTripState = jest.fn(async (_id: string): Promise<TripStateView> => ({ id: 'x', status: 'REQUESTED' }));
-  cancelTrip = jest.fn(async (_id: string, _i: CancelTripRequest): Promise<TripResource> => ({} as TripResource));
-  changeDestination = jest.fn(async (_id: string, _d: GeoPoint): Promise<TripResource> => ({} as TripResource));
-  getVideoGrant = jest.fn(async (_id: string): Promise<TripVideoGrant> => ({ url: 'u', token: 't' }));
+  getSurge = jest.fn(
+    async (_c: GeoPoint): Promise<SurgeQuote> => ({
+      multiplier: 1,
+      zoneId: 'z',
+      active: false,
+    }),
+  );
+  createTrip = jest.fn(
+    async (_input: CreateTripRequest): Promise<TripResource> =>
+      ({}) as TripResource,
+  );
+  getActiveTrip = jest.fn(
+    async (_id: string): Promise<TripActiveView> => ({}) as TripActiveView,
+  );
+  getTripState = jest.fn(
+    async (_id: string): Promise<TripStateView> => ({
+      id: 'x',
+      status: 'REQUESTED',
+    }),
+  );
+  cancelTrip = jest.fn(
+    async (_id: string, _i: CancelTripRequest): Promise<TripResource> =>
+      ({}) as TripResource,
+  );
+  changeDestination = jest.fn(
+    async (_id: string, _d: GeoPoint): Promise<TripResource> =>
+      ({}) as TripResource,
+  );
+  getVideoGrant = jest.fn(
+    async (_id: string): Promise<TripVideoGrant> => ({url: 'u', token: 't'}),
+  );
   listScheduledTrips = jest.fn(async (): Promise<ScheduledTripList> => []);
-  cancelScheduledTrip = jest.fn(async (_id: string): Promise<void> => undefined);
+  cancelScheduledTrip = jest.fn(
+    async (_id: string): Promise<void> => undefined,
+  );
   listOffers = jest.fn(async (_id: string): Promise<OfferList> => []);
   acceptOffer = jest.fn(
-    async (_id: string, _d: string): Promise<OfferView> => ({} as OfferView),
+    async (_id: string, _d: string): Promise<OfferView> => ({}) as OfferView,
   );
   cancelBid = jest.fn(async (_id: string): Promise<void> => undefined);
-  rebid = jest.fn(async (_id: string, _b: number): Promise<TripResource> => ({} as TripResource));
+  rebid = jest.fn(
+    async (_id: string, _b: number): Promise<TripResource> =>
+      ({}) as TripResource,
+  );
 }
 
 describe('ShareTripUseCase', () => {
@@ -88,13 +118,13 @@ describe('ShareTripUseCase', () => {
 describe('HttpTripRepository.shareTrip', () => {
   it('hace POST /share/:tripId con el body y valida la respuesta con el schema', async () => {
     const post = jest.fn(async () => SHARE_LINK);
-    const http = { post } as unknown as HttpClient;
+    const http = {post} as unknown as HttpClient;
     const repository = new HttpTripRepository(http);
 
-    const link = await repository.shareTrip('trip-1', { maxUses: 10 });
+    const link = await repository.shareTrip('trip-1', {maxUses: 10});
 
     expect(post).toHaveBeenCalledWith('/share/trip-1', {
-      body: { maxUses: 10 },
+      body: {maxUses: 10},
       schema: expect.anything(),
     });
     expect(link).toEqual(SHARE_LINK);
@@ -102,7 +132,7 @@ describe('HttpTripRepository.shareTrip', () => {
 
   it('envía un body vacío cuando no se pasan opciones (defaults del bff)', async () => {
     const post = jest.fn(async () => SHARE_LINK);
-    const http = { post } as unknown as HttpClient;
+    const http = {post} as unknown as HttpClient;
     const repository = new HttpTripRepository(http);
 
     await repository.shareTrip('trip-1');
@@ -117,9 +147,11 @@ describe('HttpTripRepository.shareTrip', () => {
     const post = jest.fn(async () => {
       throw new Error('network down');
     });
-    const http = { post } as unknown as HttpClient;
+    const http = {post} as unknown as HttpClient;
     const repository = new HttpTripRepository(http);
 
-    await expect(repository.shareTrip('trip-1')).rejects.toThrow(/network down/);
+    await expect(repository.shareTrip('trip-1')).rejects.toThrow(
+      /network down/,
+    );
   });
 });

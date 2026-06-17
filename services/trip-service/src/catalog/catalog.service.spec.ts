@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OFFERING_LIST, OfferingId, PricingMode } from '@veo/shared-types';
 import { CatalogService } from './catalog.service';
-import type {
-  CatalogTx,
-  OfferingCatalogRepository,
-  PersistedOverlay,
-} from './catalog.repository';
+import type { CatalogTx, OfferingCatalogRepository, PersistedOverlay } from './catalog.repository';
 
 /**
  * Repo fake en memoria (clean arch: el servicio depende del puerto). Captura el outbox emitido en la tx
@@ -24,7 +20,7 @@ class FakeRepo implements OfferingCatalogRepository {
       offeringCatalog: {
         // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE (espejo del UPDATE ... WHERE version=).
         updateMany: (args) => {
-          if (this.overlay && this.overlay.version === args.where.version) {
+          if (this.overlay?.version === args.where.version) {
             this.overlay = {
               overrides: (args.data.overrides as PersistedOverlay['overrides']) ?? [],
               version: args.data.version as number,
@@ -43,7 +39,9 @@ class FakeRepo implements OfferingCatalogRepository {
           return Promise.resolve({ version: this.overlay.version, updatedAt: new Date(0) });
         },
         findUnique: () =>
-          Promise.resolve(this.overlay ? { version: this.overlay.version, updatedAt: new Date(0) } : null),
+          Promise.resolve(
+            this.overlay ? { version: this.overlay.version, updatedAt: new Date(0) } : null,
+          ),
       },
       outboxEvent: {
         create: (args) => {
@@ -107,7 +105,9 @@ describe('CatalogService', () => {
   it('CAS · expectedVersion STALE → ConflictError (otro admin cambió el catálogo; sin lost update)', async () => {
     const repo = new FakeRepo({ overrides: [], version: 7, updatedAt: new Date(0).toISOString() });
     const service = new CatalogService(repo, 0);
-    await expect(service.replaceOverlay([{ id: OfferingId.VEO_XL, enabled: false }], 6)).rejects.toThrow(/cambió/);
+    await expect(
+      service.replaceOverlay([{ id: OfferingId.VEO_XL, enabled: false }], 6),
+    ).rejects.toThrow(/cambió/);
     expect(repo.outboxEvents).toEqual([]);
     expect((await service.getCatalog()).version).toBe(7); // intacto
   });
@@ -116,7 +116,15 @@ describe('CatalogService', () => {
     const repo = new FakeRepo(null);
     const service = new CatalogService(repo, 0);
     await service.replaceOverlay(
-      [{ id: OfferingId.VEO_ECONOMICO, enabled: true, mode: PricingMode.FIXED, multiplier: 1.5, minFareCents: 700 }],
+      [
+        {
+          id: OfferingId.VEO_ECONOMICO,
+          enabled: true,
+          mode: PricingMode.FIXED,
+          multiplier: 1.5,
+          minFareCents: 700,
+        },
+      ],
       0,
     );
     const eco = await service.resolveOffering(OfferingId.VEO_ECONOMICO);

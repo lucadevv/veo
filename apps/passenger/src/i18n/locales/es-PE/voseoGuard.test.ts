@@ -1,4 +1,4 @@
-import { common } from './common';
+import {common} from './common';
 
 /**
  * GUARDIÁN ANTI-VOSEO (es-PE · español de Lima).
@@ -21,21 +21,71 @@ import { common } from './common';
 /** Raíces verbales cuyo imperativo voseante (raíz + á/é/í) NO debe aparecer en copy es-PE. */
 const IMPERATIVE_STEMS = [
   // -ar → imperativo voseo termina en -á
-  'agreg', 'prob', 'confirm', 'complet', 'vincul', 'toc', 'cerr', 'busc',
-  'llen', 'carg', 'avis', 'mir', 'dej', 'par', 'olvid', 'activ', 'desactiv',
-  'permit', 'cont', 'empez', 'us', 'revis', 'intent', 'termin', 'escane',
-  'ingres', 'apret', 'pag', 'cancel', 'guard', 'esper', 'cont', 'fij',
-  'tap', 'marc', 'sigu', 'qued', 'arm',
+  'agreg',
+  'prob',
+  'confirm',
+  'complet',
+  'vincul',
+  'toc',
+  'cerr',
+  'busc',
+  'llen',
+  'carg',
+  'avis',
+  'mir',
+  'dej',
+  'par',
+  'olvid',
+  'activ',
+  'desactiv',
+  'permit',
+  'cont',
+  'empez',
+  'us',
+  'revis',
+  'intent',
+  'termin',
+  'escane',
+  'ingres',
+  'apret',
+  'pag',
+  'cancel',
+  'guard',
+  'esper',
+  'cont',
+  'fij',
+  'tap',
+  'marc',
+  'sigu',
+  'qued',
+  'arm',
 ];
 
 /** Raíces -er/-ir cuyo imperativo voseo termina en -é. */
 const IMPERATIVE_STEMS_E = [
-  'ofrec', 'elig', 'eleg', 'volv', 'corr', 'recib', 'escrib', 'sub', 'compart',
+  'ofrec',
+  'elig',
+  'eleg',
+  'volv',
+  'corr',
+  'recib',
+  'escrib',
+  'sub',
+  'compart',
 ];
 
 /** Presente indicativo voseante irregular (2ª persona voseo): raíz + és / ís. */
 const PRESENT_VOSEO = [
-  'quer', 'pod', 'ten', 'sab', 'hac', 'dec', 'ven', 'pon', 'sal', 've',
+  'quer',
+  'pod',
+  'ten',
+  'sab',
+  'hac',
+  'dec',
+  'ven',
+  'pon',
+  'sal',
+  've',
 ];
 
 /**
@@ -122,7 +172,7 @@ describe('Guardián anti-voseo · copy es-PE (español de Lima, tuteo)', () => {
       'Ingresá el código',
       'Activá el GPS',
       'escaneás el QR',
-    ])('marca como voseo: "%s"', (sample) => {
+    ])('marca como voseo: "%s"', sample => {
       expect(sample).toMatch(VOSEO_REGEX);
     });
 
@@ -139,8 +189,11 @@ describe('Guardián anti-voseo · copy es-PE (español de Lima, tuteo)', () => {
       'Agrega tu nombre',
       'Elige por precio o llegada.',
       'Confirma que eres tú',
-    ])('NO marca como voseo (tuteo / futuro / sustantivo legítimo): "%s"', (sample) => {
-      expect(sample).not.toMatch(VOSEO_REGEX);
-    });
+    ])(
+      'NO marca como voseo (tuteo / futuro / sustantivo legítimo): "%s"',
+      sample => {
+        expect(sample).not.toMatch(VOSEO_REGEX);
+      },
+    );
   });
 });

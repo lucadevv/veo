@@ -44,11 +44,14 @@ export function resolveTripOffering(
       throw new UnknownOfferingError(category);
     }
     // Inconsistencia category/vehicleType: la oferta es la autoridad del pool (vehicleClass).
-    const mismatch = vehicleType !== undefined && vehicleType !== null && vehicleType !== offering.vehicleClass;
+    const mismatch =
+      vehicleType !== undefined && vehicleType !== null && vehicleType !== offering.vehicleClass;
     return { offering, mismatch };
   }
   // Compat cliente viejo (sin category): deriva por vehicleType — MOTO → veo_moto, CAR/ausente → económico.
   const offering =
-    vehicleType === VehicleClass.MOTO ? OFFERINGS[OfferingId.VEO_MOTO] : OFFERINGS[OfferingId.VEO_ECONOMICO];
+    vehicleType === VehicleClass.MOTO
+      ? OFFERINGS[OfferingId.VEO_MOTO]
+      : OFFERINGS[OfferingId.VEO_ECONOMICO];
   return { offering, mismatch: false };
 }

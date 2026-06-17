@@ -3,12 +3,7 @@
  * Se monta global DESPUÉS del JwtAuthGuard (para conocer al usuario). Los endpoints marcados
  * con @SkipRateLimit() — POST /panic — nunca se limitan.
  */
-import {
-  Inject,
-  Injectable,
-  type CanActivate,
-  type ExecutionContext,
-} from '@nestjs/common';
+import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { RateLimitError } from '@veo/utils';

@@ -32,7 +32,9 @@ export function OverviewChart({ series }: OverviewChartProps) {
   const c = useTokenColors();
 
   if (series.length === 0) {
-    return <EmptyState title="Sin datos del periodo" description="No hay actividad para graficar." />;
+    return (
+      <EmptyState title="Sin datos del periodo" description="No hay actividad para graficar." />
+    );
   }
 
   const data: ChartDatum[] = series.map((p) => ({

@@ -1,9 +1,9 @@
 import React from 'react';
-import {useTranslation} from 'react-i18next';
-import type {TFunction} from 'i18next';
-import {ApiError} from '@veo/api-client';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList} from '../../../../navigation/types';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { ApiError } from '@veo/api-client';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../../../navigation/types';
 import {
   BIOMETRIC_CAPTURE_UNAVAILABLE,
   BIOMETRIC_BACKEND_UNAVAILABLE,
@@ -11,8 +11,8 @@ import {
   BIOMETRIC_LOCKED,
   BIOMETRIC_REJECTED,
 } from '../../domain';
-import {BiometricGate, type BiometricGateBanner} from '../components/BiometricGate';
-import {useShiftStartFlow} from '../hooks/useShiftStartFlow';
+import { BiometricGate, type BiometricGateBanner } from '../components/BiometricGate';
+import { useShiftStartFlow } from '../hooks/useShiftStartFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
 
@@ -22,9 +22,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
  * obtener el `sessionRef`, se llama al backend. Si el conductor no está enrolado, se le redirige a
  * registrar su rostro. El layout premium (escudo + halo cian) vive en `BiometricGate`.
  */
-export const ShiftStartScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
-  const {run, phase, error, score, isBusy} = useShiftStartFlow(
+export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
+  const { run, phase, error, score, isBusy } = useShiftStartFlow(
     () => navigation.goBack(),
     () => navigation.navigate('BiometricEnroll'),
   );
@@ -33,8 +33,9 @@ export const ShiftStartScreen = ({navigation}: Props): React.JSX.Element => {
 
   // Bloqueo biométrico (regla #1: 3 fallos → 1h, solo central destraba). Mientras dure, deshabilitamos
   // el CTA para que el conductor NO siga reintentando y comiéndose rechazos. El banner ya explica el lock.
-  const errorCode = error instanceof Error ? (error as {code?: string}).code : undefined;
-  const locked = errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403);
+  const errorCode = error instanceof Error ? (error as { code?: string }).code : undefined;
+  const locked =
+    errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403);
 
   return (
     <BiometricGate
@@ -59,12 +60,12 @@ function resolveBanner(
   t: TFunction,
 ): BiometricGateBanner | null {
   if (phase === 'done' && score !== null) {
-    return {tone: 'success', title: t('shift.biometricSuccess', {score})};
+    return { tone: 'success', title: t('shift.biometricSuccess', { score }) };
   }
   if (!error) {
     return null;
   }
-  const errorCode = error instanceof Error ? (error as {code?: string}).code : undefined;
+  const errorCode = error instanceof Error ? (error as { code?: string }).code : undefined;
   if (
     errorCode === BIOMETRIC_CAPTURE_UNAVAILABLE ||
     errorCode === BIOMETRIC_FRAME_GRABBER_UNAVAILABLE
@@ -84,17 +85,29 @@ function resolveBanner(
   }
   if (errorCode === BIOMETRIC_LOCKED) {
     const message = error instanceof Error ? error.message : undefined;
-    return {tone: 'danger', title: t('shift.blockedTitle'), description: message || t('shift.blockedBody')};
+    return {
+      tone: 'danger',
+      title: t('shift.blockedTitle'),
+      description: message || t('shift.blockedBody'),
+    };
   }
   if (errorCode === BIOMETRIC_REJECTED) {
     const message = error instanceof Error ? error.message : undefined;
-    return {tone: 'danger', title: t('shift.biometricFailedTitle'), description: message || t('shift.biometricRejectedBody')};
+    return {
+      tone: 'danger',
+      title: t('shift.biometricFailedTitle'),
+      description: message || t('shift.biometricRejectedBody'),
+    };
   }
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return {tone: 'danger', title: t('shift.blockedTitle'), description: error.message || t('shift.blockedBody')};
+      return {
+        tone: 'danger',
+        title: t('shift.blockedTitle'),
+        description: error.message || t('shift.blockedBody'),
+      };
     }
-    return {tone: 'danger', title: t('errors.generic'), description: error.message};
+    return { tone: 'danger', title: t('errors.generic'), description: error.message };
   }
-  return {tone: 'danger', title: t('errors.generic')};
+  return { tone: 'danger', title: t('errors.generic') };
 }

@@ -1,7 +1,4 @@
-import type {
-  CreateYapeAffiliation,
-  YapeAffiliationView,
-} from '@veo/api-client';
+import type {CreateYapeAffiliation, YapeAffiliationView} from '@veo/api-client';
 
 /**
  * Abstracción del repositorio de AFILIACIÓN Yape On File (cobro automático). El `userId` lo deriva el
@@ -20,7 +17,9 @@ export interface AffiliationRepository {
    * afilia (primera vez). Devuelve el estado inicial (PROCESS) y, si el gateway lo soporta, un `deepLink`
    * para aprobar en la app Yape. El sandbox responde 409 honesto (→ `AffiliationUnsupportedError`).
    */
-  createYapeAffiliation(input?: CreateYapeAffiliation): Promise<YapeAffiliationView>;
+  createYapeAffiliation(
+    input?: CreateYapeAffiliation,
+  ): Promise<YapeAffiliationView>;
   /** DELETE /payments/affiliations/yape → baja (revocación local). Devuelve `{status:'REVOKED'}`. */
   revokeYapeAffiliation(): Promise<YapeAffiliationView>;
 }

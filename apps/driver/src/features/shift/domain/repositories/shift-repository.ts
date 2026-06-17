@@ -1,9 +1,4 @@
-import type {
-  ShiftStartResult,
-  ShiftState,
-  ShiftStatusResult,
-  StartShiftInput,
-} from '../entities';
+import type { ShiftStartResult, ShiftState, ShiftStatusResult, StartShiftInput } from '../entities';
 
 /**
  * Contrato del repositorio de turno (capa domain). Implementación concreta en `data/`.

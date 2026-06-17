@@ -19,7 +19,7 @@ spec:
         prometheus.io/port: "3013"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: places-service  # IRSA bound to least-privilege IAM role
+      serviceAccountName: places-service # IRSA bound to least-privilege IAM role
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -47,7 +47,7 @@ spec:
             - configMapRef: { name: places-service-config }
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
-            limits:   { cpu: "1000m", memory: "1Gi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
           livenessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 20

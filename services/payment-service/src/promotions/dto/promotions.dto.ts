@@ -60,4 +60,3 @@ export interface PromoRedemptionView {
   code: string;
   discountCents: number;
 }
-

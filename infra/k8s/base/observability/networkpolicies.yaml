@@ -25,7 +25,11 @@ spec:
       ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
     # Scrape de pods de aplicación (mismo namespace) y del otel-collector.
     - to:
-        - podSelector: { matchExpressions: [{ key: tier, operator: In, values: [backend, bff, observability] }] }
+        - podSelector:
+            {
+              matchExpressions:
+                [{ key: tier, operator: In, values: [backend, bff, observability] }],
+            }
     # API server (SD) — fuera del cluster pod-CIDR; se permite a todo egress restante TCP 443/6443.
     - to: []
       ports: [{ protocol: TCP, port: 443 }, { protocol: TCP, port: 6443 }]

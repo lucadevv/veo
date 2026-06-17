@@ -1,5 +1,5 @@
-import React, {useEffect} from 'react';
-import type {StyleProp, ViewProps, ViewStyle} from 'react-native';
+import React, { useEffect } from 'react';
+import type { StyleProp, ViewProps, ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import {useTheme, useReducedMotion} from '@veo/ui-kit';
+import { useTheme, useReducedMotion } from '@veo/ui-kit';
 
 /** Dirección desde la que entra el contenido (nada aparece "de la nada": siempre con opacidad). */
 export type RevealFrom = 'bottom' | 'top' | 'scale';
@@ -46,7 +46,7 @@ export function Reveal({
 
   useEffect(() => {
     if (reduced) {
-      progress.value = withDelay(delay, withTiming(1, {duration: theme.motion.duration.base}));
+      progress.value = withDelay(delay, withTiming(1, { duration: theme.motion.duration.base }));
       return;
     }
     progress.value = spring
@@ -62,14 +62,14 @@ export function Reveal({
 
   const animatedStyle = useAnimatedStyle(() => {
     if (reduced) {
-      return {opacity: progress.value};
+      return { opacity: progress.value };
     }
     if (from === 'scale') {
-      return {opacity: progress.value, transform: [{scale: 0.96 + progress.value * 0.04}]};
+      return { opacity: progress.value, transform: [{ scale: 0.96 + progress.value * 0.04 }] };
     }
     const translate = (1 - progress.value) * distance;
     const translateY = from === 'top' ? -translate : translate;
-    return {opacity: progress.value, transform: [{translateY}]};
+    return { opacity: progress.value, transform: [{ translateY }] };
   });
 
   return (

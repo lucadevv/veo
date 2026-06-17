@@ -1,6 +1,6 @@
-import { NativeModules, Platform } from 'react-native';
+import {NativeModules, Platform} from 'react-native';
 import Config from 'react-native-config';
-import { z } from 'zod';
+import {z} from 'zod';
 
 /**
  * Configuración de entorno tipada y validada con zod (react-native-config).
@@ -50,9 +50,12 @@ import { z } from 'zod';
 export function metroDevHost(): string | null {
   const urls: unknown[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const getDevServer = require('react-native/Libraries/Core/Devtools/getDevServer')
-      .default as () => { url?: string; bundleLoadedFromServer?: boolean };
+    // getDevServer es un módulo INTERNO de RN expuesto solo como CommonJS (no hay import ESM) y solo
+    // existe en dev (por eso el try/catch). El require dinámico es deliberado, no un workaround.
+    const getDevServer =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('react-native/Libraries/Core/Devtools/getDevServer')
+        .default as () => {url?: string; bundleLoadedFromServer?: boolean};
     const info = getDevServer();
     // En release getDevServer devuelve un url placeholder con bundleLoadedFromServer:false.
     if (info.bundleLoadedFromServer !== false) urls.push(info.url);
@@ -60,7 +63,8 @@ export function metroDevHost(): string | null {
     // getDevServer no disponible en este runtime → probamos scriptURL.
   }
   urls.push(
-    (NativeModules as { SourceCode?: { scriptURL?: unknown } }).SourceCode?.scriptURL,
+    (NativeModules as {SourceCode?: {scriptURL?: unknown}}).SourceCode
+      ?.scriptURL,
   );
 
   for (const candidate of urls) {
@@ -98,7 +102,10 @@ const metroHost = __DEV__ ? metroDevHost() : null;
  * Metro (un Reload reconecta sin recompilar). Se avisa por consola para que no sea magia silenciosa.
  * `metroHost` ya es `null` fuera de `__DEV__`, así que staging/prod y release jamás entran al if.
  */
-function resolveBackendUrl(explicit: string | undefined, derived: string): string {
+function resolveBackendUrl(
+  explicit: string | undefined,
+  derived: string,
+): string {
   if (!explicit) return derived;
   if (metroHost) {
     const host = hostOf(explicit);
@@ -158,7 +165,7 @@ const envSchema = z.object({
   FIREBASE_ENABLED: z
     .string()
     .default('false')
-    .transform((value) => value === 'true'),
+    .transform(value => value === 'true'),
   VEO_ENV: z
     .enum(['development', 'staging', 'production'])
     .default('development'),

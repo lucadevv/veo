@@ -13,14 +13,16 @@ function makeGateway(opts: {
   trip?: { found: boolean; passengerId: string; status: string };
 }) {
   const jwt = {
-    verifyAccess: vi.fn().mockResolvedValue(
-      opts.claims ?? { sub: 'usr-1', typ: 'passenger', roles: [] as never[], sid: 'sess-1' },
-    ),
+    verifyAccess: vi
+      .fn()
+      .mockResolvedValue(
+        opts.claims ?? { sub: 'usr-1', typ: 'passenger', roles: [] as never[], sid: 'sess-1' },
+      ),
   } as unknown as JwtService;
   const tripGrpc = {
-    call: vi.fn().mockResolvedValue(
-      opts.trip ?? { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' },
-    ),
+    call: vi
+      .fn()
+      .mockResolvedValue(opts.trip ?? { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' }),
   } as unknown as GrpcServiceClient;
   const state = new RealtimeStateService();
   const gateway = new PassengerGateway(jwt, tripGrpc, SECRET, state);
@@ -30,7 +32,11 @@ function makeGateway(opts: {
 function fakeSocket(auth: Record<string, unknown>): {
   id: string;
   rooms: Set<string>;
-  handshake: { auth: Record<string, unknown>; headers: Record<string, string>; query: Record<string, string> };
+  handshake: {
+    auth: Record<string, unknown>;
+    headers: Record<string, string>;
+    query: Record<string, string>;
+  };
   join: ReturnType<typeof vi.fn>;
   emit: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
@@ -47,7 +53,9 @@ function fakeSocket(auth: Record<string, unknown>): {
 
 describe('PassengerGateway handshake', () => {
   it('verifica JWT de pasajero + propiedad del viaje activo y une a la sala', async () => {
-    const { gateway, state } = makeGateway({ trip: { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' } });
+    const { gateway, state } = makeGateway({
+      trip: { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' },
+    });
     const socket = fakeSocket({ token: 'Bearer abc.def', tripId: 'trip-1' });
     await gateway.handleConnection(socket as never);
     expect(socket.join).toHaveBeenCalledWith(passengerRoom('trip-1'));
@@ -59,26 +67,35 @@ describe('PassengerGateway handshake', () => {
     const { gateway } = makeGateway({});
     const socket = fakeSocket({ token: 'abc' });
     await gateway.handleConnection(socket as never);
-    expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 'TRIP_REQUIRED' }));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({ code: 'TRIP_REQUIRED' }),
+    );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('rechaza a un sujeto que no es pasajero', async () => {
-    const { gateway } = makeGateway({ claims: { sub: 'd1', typ: 'driver', roles: [] as never[], sid: 's' } });
+    const { gateway } = makeGateway({
+      claims: { sub: 'd1', typ: 'driver', roles: [] as never[], sid: 's' },
+    });
     const socket = fakeSocket({ token: 'abc', tripId: 'trip-1' });
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('rechaza si el viaje no pertenece al pasajero', async () => {
-    const { gateway } = makeGateway({ trip: { found: true, passengerId: 'otro', status: 'IN_PROGRESS' } });
+    const { gateway } = makeGateway({
+      trip: { found: true, passengerId: 'otro', status: 'IN_PROGRESS' },
+    });
     const socket = fakeSocket({ token: 'abc', tripId: 'trip-1' });
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('rechaza si el viaje no está activo (COMPLETED)', async () => {
-    const { gateway } = makeGateway({ trip: { found: true, passengerId: 'usr-1', status: 'COMPLETED' } });
+    const { gateway } = makeGateway({
+      trip: { found: true, passengerId: 'usr-1', status: 'COMPLETED' },
+    });
     const socket = fakeSocket({ token: 'abc', tripId: 'trip-1' });
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);
@@ -105,7 +122,11 @@ describe('PassengerGateway emisiones', () => {
 
     // Con un pasajero suscrito: emite a su sala.
     state.addPassenger('sock-1', 'trip-9');
-    gateway.emitEta('trip-9', { tripId: 'trip-9', etaSeconds: 120, at: '2026-05-29T00:00:00.000Z' });
+    gateway.emitEta('trip-9', {
+      tripId: 'trip-9',
+      etaSeconds: 120,
+      at: '2026-05-29T00:00:00.000Z',
+    });
     expect(to).toHaveBeenCalledWith(passengerRoom('trip-9'));
     expect(emit).toHaveBeenCalledWith('eta', expect.objectContaining({ etaSeconds: 120 }));
   });

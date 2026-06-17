@@ -1,21 +1,21 @@
-import { Container, createToken } from '../src/core/di/container';
-import { buildContainer } from '../src/core/di/registry';
-import { TOKENS } from '../src/core/di/tokens';
+import {Container, createToken} from '../src/core/di/container';
+import {buildContainer} from '../src/core/di/registry';
+import {TOKENS} from '../src/core/di/tokens';
 
 describe('Container (DI)', () => {
   it('resuelve una dependencia registrada', () => {
     const container = new Container();
-    const token = createToken<{ value: number }>('test.value');
-    container.register(token, () => ({ value: 42 }));
+    const token = createToken<{value: number}>('test.value');
+    container.register(token, () => ({value: 42}));
 
     expect(container.resolve(token).value).toBe(42);
   });
 
   it('cachea la instancia como singleton', () => {
     const container = new Container();
-    const token = createToken<{ id: number }>('test.singleton');
+    const token = createToken<{id: number}>('test.singleton');
     let calls = 0;
-    container.register(token, () => ({ id: ++calls }));
+    container.register(token, () => ({id: ++calls}));
 
     const first = container.resolve(token);
     const second = container.resolve(token);
@@ -34,10 +34,10 @@ describe('Container (DI)', () => {
   it('inyecta dependencias entre fábricas (DIP)', () => {
     const container = new Container();
     const dep = createToken<number>('test.dep');
-    const consumer = createToken<{ doubled: number }>('test.consumer');
+    const consumer = createToken<{doubled: number}>('test.consumer');
 
     container.register(dep, () => 21);
-    container.register(consumer, (c) => ({ doubled: c.resolve(dep) * 2 }));
+    container.register(consumer, c => ({doubled: c.resolve(dep) * 2}));
 
     expect(container.resolve(consumer).doubled).toBe(42);
   });

@@ -18,7 +18,9 @@ export class AffiliationsController {
 
   @Post()
   @HttpCode(200)
-  @ApiOperation({ summary: 'Crear/iniciar afiliación Yape On File. Devuelve deepLink para aprobar en la app Yape' })
+  @ApiOperation({
+    summary: 'Crear/iniciar afiliación Yape On File. Devuelve deepLink para aprobar en la app Yape',
+  })
   create(@Body() dto: CreateYapeAffiliationDto, @CurrentUser() user: AuthenticatedUser) {
     // El deepLink SÍ va al cliente (para abrir Yape). El walletUid NUNCA sale.
     // phone solo viaja en origin=WEB; en MOBILE (default) se omite (deepLink abre Yape directo).
@@ -32,7 +34,9 @@ export class AffiliationsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Estado de la afiliación Yape del usuario (sin walletUid ni PII completa)' })
+  @ApiOperation({
+    summary: 'Estado de la afiliación Yape del usuario (sin walletUid ni PII completa)',
+  })
   async status(@CurrentUser() user: AuthenticatedUser) {
     const view = await this.affiliations.getAffiliationStatus(user.userId);
     return view ?? { status: 'NONE' as const };

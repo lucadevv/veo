@@ -1,7 +1,7 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useTheme } from '@veo/ui-kit';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
 import {
   AuthScreen,
   BiometricLockScreen,
@@ -12,19 +12,22 @@ import {
   useBiometricGateStore,
   useOnboardingStore,
 } from '../features/auth/presentation';
-import { useProfileCompletion } from '../features/profile/presentation';
-import { TrustedContactsScreen } from '../features/contacts/presentation';
-import { ChildModeScreen } from '../features/childMode/presentation';
-import { KycCameraScreen } from '../features/kyc/presentation';
-import { NotificationsScreen } from '../features/notifications/presentation';
-import { PanicScreen } from '../features/panic/presentation';
-import { PaymentMethodsScreen, PaymentScreen } from '../features/payments/presentation';
-import { SavedPlacesScreen } from '../features/places/presentation';
-import { ProfileScreen } from '../features/profile/presentation';
-import { RatingScreen } from '../features/ratings/presentation';
-import { ReferralsScreen } from '../features/referrals/presentation';
-import { ChatScreen } from '../features/chat/presentation';
-import { HelpScreen } from '../features/support/presentation';
+import {useProfileCompletion} from '../features/profile/presentation';
+import {TrustedContactsScreen} from '../features/contacts/presentation';
+import {ChildModeScreen} from '../features/childMode/presentation';
+import {KycCameraScreen} from '../features/kyc/presentation';
+import {NotificationsScreen} from '../features/notifications/presentation';
+import {PanicScreen} from '../features/panic/presentation';
+import {
+  PaymentMethodsScreen,
+  PaymentScreen,
+} from '../features/payments/presentation';
+import {SavedPlacesScreen} from '../features/places/presentation';
+import {ProfileScreen} from '../features/profile/presentation';
+import {RatingScreen} from '../features/ratings/presentation';
+import {ReferralsScreen} from '../features/referrals/presentation';
+import {ChatScreen} from '../features/chat/presentation';
+import {HelpScreen} from '../features/support/presentation';
 import {
   CameraControlScreen,
   CameraLiveScreen,
@@ -39,11 +42,15 @@ import {
   TripActiveScreen,
   TripHistoryScreen,
 } from '../features/trip/presentation';
-import { MapPickScreen, RouteQuoteScreen, SearchScreen } from '../features/maps/presentation';
-import { useSessionStore } from '../core/session/sessionStore';
-import { syncPushRegistration } from '../services/messaging';
-import { SplashGate } from './components/SplashGate';
-import type { RootStackParamList } from './types';
+import {
+  MapPickScreen,
+  RouteQuoteScreen,
+  SearchScreen,
+} from '../features/maps/presentation';
+import {useSessionStore} from '../core/session/sessionStore';
+import {syncPushRegistration} from '../services/messaging';
+import {SplashGate} from './components/SplashGate';
+import type {RootStackParamList} from './types';
 
 /**
  * Navegador raíz del pasajero. Conmuta de stack según el estado de sesión (no navega
@@ -61,11 +68,11 @@ import type { RootStackParamList } from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator(): React.JSX.Element {
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const theme = useTheme();
-  const status = useSessionStore((state) => state.status);
-  const onboardingCompleted = useOnboardingStore((state) => state.completed);
-  const biometricLocked = useBiometricGateStore((state) => state.locked);
+  const status = useSessionStore(state => state.status);
+  const onboardingCompleted = useOnboardingStore(state => state.completed);
+  const biometricLocked = useBiometricGateStore(state => state.locked);
   // Completitud derivada del perfil REAL (`GET /users/me`) o de la bandera local por usuario; no
   // de un flag global (que atrapaba a sesiones existentes). 'loading' mientras se resuelve.
   const profileCompletion = useProfileCompletion();
@@ -96,9 +103,14 @@ export function RootNavigator(): React.JSX.Element {
 
   if (!splashDone) {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{headerShown: false}}>
         <Stack.Screen name="Splash">
-          {() => <SplashGate ready={status !== 'unknown'} onDone={handleSplashDone} />}
+          {() => (
+            <SplashGate
+              ready={status !== 'unknown'}
+              onDone={handleSplashDone}
+            />
+          )}
         </Stack.Screen>
       </Stack.Navigator>
     );
@@ -111,7 +123,7 @@ export function RootNavigator(): React.JSX.Element {
   // 'unauthenticated' → Auth.
   if (status === 'expired') {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Navigator screenOptions={{headerShown: false, animation: 'fade'}}>
         <Stack.Screen name="SessionExpired" component={SessionExpiredScreen} />
       </Stack.Navigator>
     );
@@ -122,7 +134,7 @@ export function RootNavigator(): React.JSX.Element {
   // así que solo resta conmutar Onboarding/Auth. El fondo oscuro compartido evita destellos.
   if (status !== 'authenticated') {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Navigator screenOptions={{headerShown: false, animation: 'fade'}}>
         {onboardingCompleted ? (
           <Stack.Screen name="Auth" component={AuthScreen} />
         ) : (
@@ -135,7 +147,7 @@ export function RootNavigator(): React.JSX.Element {
   // Autenticado pero con candado biométrico activo (sesión rehidratada en frío): re-login local.
   if (biometricLocked) {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{headerShown: false}}>
         <Stack.Screen name="BiometricLock" component={BiometricLockScreen} />
       </Stack.Navigator>
     );
@@ -145,7 +157,7 @@ export function RootNavigator(): React.JSX.Element {
   // como pantalla de espera para no destellar "Completar perfil" a sesiones ya completas.
   if (profileCompletion === 'loading') {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Navigator screenOptions={{headerShown: false, animation: 'fade'}}>
         <Stack.Screen name="Splash" component={SplashScreen} />
       </Stack.Navigator>
     );
@@ -155,8 +167,11 @@ export function RootNavigator(): React.JSX.Element {
   // completar perfil antes de entrar. Conmutación por estado derivado, no navegación imperativa.
   if (profileCompletion === 'incomplete') {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+      <Stack.Navigator screenOptions={{headerShown: false, animation: 'fade'}}>
+        <Stack.Screen
+          name="CompleteProfile"
+          component={CompleteProfileScreen}
+        />
       </Stack.Navigator>
     );
   }
@@ -167,132 +182,156 @@ export function RootNavigator(): React.JSX.Element {
     <Stack.Navigator
       screenOptions={{
         headerShown: true,
-        headerStyle: { backgroundColor: theme.colors.bg },
+        headerStyle: {backgroundColor: theme.colors.bg},
         headerTintColor: theme.colors.ink,
-        headerTitleStyle: { color: theme.colors.ink },
+        headerTitleStyle: {color: theme.colors.ink},
         headerShadowVisible: false,
-        contentStyle: { backgroundColor: theme.colors.bg },
-      }}
-    >
+        contentStyle: {backgroundColor: theme.colors.bg},
+      }}>
       {/* HOME = pantalla RAÍZ autenticada (antes el tab Home). Va PRIMERA (initialRoute de facto), sin
           header del SO (su chrome propio: pill de ubicación + campana + avatar flotan sobre el mapa). */}
-      <Stack.Screen name="Home" component={RequestFlowScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Home"
+        component={RequestFlowScreen}
+        options={{headerShown: false}}
+      />
       {/* "Mis viajes" y Perfil dejaron de ser tabs: ahora son pantallas del stack con el header nativo
           oscuro estándar (la convención del resto del stack autenticado). Profile se abre desde el
           avatar del Home; TripHistory desde la entrada "Mis viajes" del Perfil. */}
       <Stack.Screen
         name="TripHistory"
         component={TripHistoryScreen}
-        options={{ title: t('screens.tripHistory') }}
+        options={{title: t('screens.tripHistory')}}
       />
       <Stack.Screen
         name="Profile"
         component={ProfileScreen}
-        options={{ title: t('screens.profile') }}
+        options={{title: t('screens.profile')}}
       />
       <Stack.Screen
         name="Search"
         component={SearchScreen}
-        options={{ headerShown: false, animation: 'slide_from_right' }}
+        options={{headerShown: false, animation: 'slide_from_right'}}
       />
       <Stack.Screen
         name="RouteQuote"
         component={RouteQuoteScreen}
-        options={{ headerShown: false }}
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="MapPick"
         component={MapPickScreen}
-        options={{ headerShown: false, animation: 'slide_from_bottom' }}
+        options={{headerShown: false, animation: 'slide_from_bottom'}}
       />
       <Stack.Screen
         name="OffersBoard"
         component={OffersBoardScreen}
-        options={{ title: t('screens.offersBoard') }}
+        options={{title: t('screens.offersBoard')}}
       />
       <Stack.Screen
         name="Counter"
         component={CounterScreen}
-        options={{ title: t('screens.counter') }}
+        options={{title: t('screens.counter')}}
       />
       <Stack.Screen
         name="NoOffers"
         component={NoOffersScreen}
-        options={{ title: t('screens.noOffers') }}
+        options={{title: t('screens.noOffers')}}
       />
       <Stack.Screen
         name="TripActive"
         component={TripActiveScreen}
-        options={{ title: t('screens.tripActive') }}
+        options={{title: t('screens.tripActive')}}
       />
       {/* Control de cámara: header oscuro estándar, igual que el diseño CameraControl. */}
       <Stack.Screen
         name="CameraControl"
         component={CameraControlScreen}
-        options={{ title: t('screens.cameraControl') }}
+        options={{title: t('screens.cameraControl')}}
       />
       <Stack.Screen
         name="ScheduledTrips"
         component={ScheduledTripsScreen}
-        options={{ title: t('screens.scheduledTrips') }}
+        options={{title: t('screens.scheduledTrips')}}
       />
       <Stack.Screen
         name="ScheduleNew"
         component={ScheduleNewScreen}
-        options={{ title: t('screens.scheduleNew') }}
+        options={{title: t('screens.scheduleNew')}}
       />
       <Stack.Screen
         name="Notifications"
         component={NotificationsScreen}
-        options={{ title: t('screens.notifications') }}
+        options={{title: t('screens.notifications')}}
       />
       <Stack.Screen
         name="LostItem"
         component={LostItemScreen}
-        options={{ title: t('screens.lostItem') }}
+        options={{title: t('screens.lostItem')}}
       />
       {/* Reasignación (REASSIGNING): inmersiva, sin header del SO, sin gesto de retroceso —
           el flujo continúa al board de ofertas o cancela explícitamente. */}
       <Stack.Screen
         name="Reassign"
         component={ReassignScreen}
-        options={{ headerShown: false, gestureEnabled: false }}
+        options={{headerShown: false, gestureEnabled: false}}
       />
       <Stack.Screen
         name="TrustedContacts"
         component={TrustedContactsScreen}
-        options={{ title: t('screens.trustedContacts') }}
+        options={{title: t('screens.trustedContacts')}}
       />
-      <Stack.Screen name="ChildMode" component={ChildModeScreen} options={{ title: t('screens.childMode') }} />
+      <Stack.Screen
+        name="ChildMode"
+        component={ChildModeScreen}
+        options={{title: t('screens.childMode')}}
+      />
       <Stack.Screen
         name="KycCamera"
         component={KycCameraScreen}
-        options={{ title: t('screens.kycCamera'), headerShown: false, animation: 'slide_from_bottom' }}
+        options={{
+          title: t('screens.kycCamera'),
+          headerShown: false,
+          animation: 'slide_from_bottom',
+        }}
       />
       <Stack.Screen
         name="PaymentMethods"
         component={PaymentMethodsScreen}
-        options={{ title: t('screens.paymentMethods') }}
+        options={{title: t('screens.paymentMethods')}}
       />
-      <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: t('screens.payment') }} />
-      <Stack.Screen name="Rating" component={RatingScreen} options={{ title: t('screens.rating') }} />
+      <Stack.Screen
+        name="Payment"
+        component={PaymentScreen}
+        options={{title: t('screens.payment')}}
+      />
+      <Stack.Screen
+        name="Rating"
+        component={RatingScreen}
+        options={{title: t('screens.rating')}}
+      />
       <Stack.Screen
         name="SavedPlaces"
         component={SavedPlacesScreen}
-        options={{ title: t('screens.savedPlaces') }}
+        options={{title: t('screens.savedPlaces')}}
       />
       <Stack.Screen
         name="Referrals"
         component={ReferralsScreen}
-        options={{ title: t('screens.referrals') }}
+        options={{title: t('screens.referrals')}}
       />
       <Stack.Screen
         name="Chat"
         component={ChatScreen}
-        options={{ title: t('screens.chat'), animation: 'slide_from_bottom' }}
+        options={{title: t('screens.chat'), animation: 'slide_from_bottom'}}
       />
-      <Stack.Screen name="Help" component={HelpScreen} options={{ title: t('screens.help') }} />
-      <Stack.Group screenOptions={{ presentation: 'fullScreenModal', headerShown: false }}>
+      <Stack.Screen
+        name="Help"
+        component={HelpScreen}
+        options={{title: t('screens.help')}}
+      />
+      <Stack.Group
+        screenOptions={{presentation: 'fullScreenModal', headerShown: false}}>
         {/* Cámara del viaje a pantalla completa (Ola 2A): modal full-screen, sin chrome del SO. */}
         <Stack.Screen name="CameraLive" component={CameraLiveScreen} />
         <Stack.Screen name="Panic" component={PanicScreen} />

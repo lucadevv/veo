@@ -64,7 +64,12 @@ export function SearchField({
         ]}
       >
         <View style={styles.icon}>{leftIcon ?? <MarkerGlyph kind="origin" size={14} />}</View>
-        <Text variant="bodyStrong" color={hasValue ? 'ink' : 'inkSubtle'} numberOfLines={1} style={styles.label}>
+        <Text
+          variant="bodyStrong"
+          color={hasValue ? 'ink' : 'inkSubtle'}
+          numberOfLines={1}
+          style={styles.label}
+        >
           {hasValue ? value : placeholder}
         </Text>
         {trailing ? <View style={styles.icon}>{trailing}</View> : null}

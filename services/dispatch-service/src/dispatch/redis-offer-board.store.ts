@@ -426,7 +426,13 @@ export class RedisOfferBoardStore implements OfferBoardStore {
   }
 
   async markMatchEmitted(tripId: string): Promise<void> {
-    await this.redis.eval(MARK_MATCH_EMITTED_SCRIPT, 2, this.boardKey(tripId), MATCHED_ZSET, tripId);
+    await this.redis.eval(
+      MARK_MATCH_EMITTED_SCRIPT,
+      2,
+      this.boardKey(tripId),
+      MATCHED_ZSET,
+      tripId,
+    );
   }
 
   async matchedUnemittedBoards(olderThanMs: number): Promise<OfferBoard[]> {
@@ -445,7 +451,8 @@ export class RedisOfferBoardStore implements OfferBoardStore {
       }
       const board = RedisOfferBoardStore.parseBoard(raw);
       // Solo los CLOSED_MATCHED sin la marca necesitan reconciliación (un revert ya los sacó del zset).
-      if (board.status === BoardStatus.CLOSED_MATCHED && board.matchEmitted !== true) boards.push(board);
+      if (board.status === BoardStatus.CLOSED_MATCHED && board.matchEmitted !== true)
+        boards.push(board);
     }
     return boards;
   }

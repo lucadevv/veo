@@ -1,7 +1,11 @@
-import type { HttpClient } from '@veo/api-client';
-import type { KycChallenge } from '../domain/entities';
-import { mapKycStatus } from '../domain/entities';
-import type { KycRepository, KycSubmission, KycSubmissionResult } from '../domain/kycRepository';
+import type {HttpClient} from '@veo/api-client';
+import type {KycChallenge} from '../domain/entities';
+import {mapKycStatus} from '../domain/entities';
+import type {
+  KycRepository,
+  KycSubmission,
+  KycSubmissionResult,
+} from '../domain/kycRepository';
 import {
   KYC_CHALLENGE_PATH,
   KYC_SUBMIT_PATH,
@@ -35,13 +39,15 @@ export class HttpKycRepository implements KycRepository {
 
   async submit(input: KycSubmission): Promise<KycSubmissionResult> {
     const response = await this.http.post(KYC_SUBMIT_PATH, {
-      body: { challengeId: input.challengeId, frames: input.frames },
+      body: {challengeId: input.challengeId, frames: input.frames},
       schema: kycSubmitResponse,
     });
     return {
       status: mapKycStatus(response.status),
-      ...(response.verificationId ? { verificationId: response.verificationId } : {}),
-      ...(response.reason ? { reason: response.reason } : {}),
+      ...(response.verificationId
+        ? {verificationId: response.verificationId}
+        : {}),
+      ...(response.reason ? {reason: response.reason} : {}),
     };
   }
 }

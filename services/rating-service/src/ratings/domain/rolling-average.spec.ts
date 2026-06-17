@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { averageOfStars, computeRollingAverage, windowCutoff, type TimedRating } from './rolling-average';
+import {
+  averageOfStars,
+  computeRollingAverage,
+  windowCutoff,
+  type TimedRating,
+} from './rolling-average';
 
 describe('averageOfStars', () => {
   it('promedia y redondea a 2 decimales', () => {

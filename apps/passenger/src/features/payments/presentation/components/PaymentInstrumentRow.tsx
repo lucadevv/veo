@@ -1,8 +1,8 @@
-import type { MobilePaymentMethod } from '@veo/api-client';
-import { StatusPill, Text, useTheme } from '@veo/ui-kit';
+import type {MobilePaymentMethod} from '@veo/api-client';
+import {StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { PaymentMethodLogo } from '../../../../shared/assets/payment-methods';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {PaymentMethodLogo} from '../../../../shared/assets/payment-methods';
 
 export interface PaymentInstrumentRowProps {
   method: MobilePaymentMethod;
@@ -55,10 +55,9 @@ export function PaymentInstrumentRow({
         style={[
           styles.leadRing,
           emphasized
-            ? { borderColor: theme.colors.accent, borderWidth: 2 }
-            : { borderColor: 'transparent', borderWidth: 2 },
-        ]}
-      >
+            ? {borderColor: theme.colors.accent, borderWidth: 2}
+            : {borderColor: 'transparent', borderWidth: 2},
+        ]}>
         <PaymentMethodLogo method={method} size={36} />
       </View>
 
@@ -71,8 +70,10 @@ export function PaymentInstrumentRow({
         </Text>
       </View>
 
-      <View style={[styles.trailing, { gap: theme.spacing.xs }]}>
-        {isDefault && defaultLabel ? <StatusPill label={defaultLabel} tone="accent" dot /> : null}
+      <View style={[styles.trailing, {gap: theme.spacing.xs}]}>
+        {isDefault && defaultLabel ? (
+          <StatusPill label={defaultLabel} tone="accent" dot />
+        ) : null}
         {action ?? trailing ?? null}
       </View>
     </>
@@ -86,7 +87,9 @@ export function PaymentInstrumentRow({
     borderRadius: theme.radii.md,
     borderWidth: emphasized ? 2 : 1,
     borderColor: emphasized ? theme.colors.accent : theme.colors.border,
-    backgroundColor: emphasized ? theme.colors.surfaceElevated : theme.colors.surface,
+    backgroundColor: emphasized
+      ? theme.colors.surfaceElevated
+      : theme.colors.surface,
   } as const;
 
   if (!onPress) {
@@ -94,8 +97,7 @@ export function PaymentInstrumentRow({
       <View
         accessible
         accessibilityLabel={accessibilityLabel ?? `${name}. ${line}`}
-        style={[styles.row, containerStyle]}
-      >
+        style={[styles.row, containerStyle]}>
         {content}
       </View>
     );
@@ -106,20 +108,23 @@ export function PaymentInstrumentRow({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? `${name}. ${line}`}
       accessibilityHint={accessibilityHint}
-      accessibilityState={{ selected: isDefault }}
+      accessibilityState={{selected: isDefault}}
       onPress={onPress}
-      style={({ pressed }) => [styles.row, containerStyle, { opacity: pressed ? 0.7 : 1 }]}
-    >
+      style={({pressed}) => [
+        styles.row,
+        containerStyle,
+        {opacity: pressed ? 0.7 : 1},
+      ]}>
       {content}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center' },
+  row: {flexDirection: 'row', alignItems: 'center'},
   // Anillo de 2px alrededor del logo circular (transparente salvo cuando el instrumento se enfatiza),
   // con `borderRadius` generoso para acompañar el círculo de 36px del logo.
-  leadRing: { borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, gap: 2 },
-  trailing: { flexDirection: 'row', alignItems: 'center' },
+  leadRing: {borderRadius: 22, alignItems: 'center', justifyContent: 'center'},
+  body: {flex: 1, gap: 2},
+  trailing: {flexDirection: 'row', alignItems: 'center'},
 });

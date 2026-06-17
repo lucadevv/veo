@@ -1,13 +1,13 @@
-import type { DocumentType, YapeAffiliationView } from '@veo/api-client';
-import { affiliationStatus } from '@veo/api-client';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
+import type {DocumentType, YapeAffiliationView} from '@veo/api-client';
+import {affiliationStatus} from '@veo/api-client';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {Banner, BottomSheet, Button, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import {useTranslation} from 'react-i18next';
+import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {useNavigation} from '@react-navigation/native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 import {
   AffiliationDocumentMissingError,
   AffiliationProfileIncompleteError,
@@ -15,11 +15,14 @@ import {
   AffiliationUpstreamUnavailableError,
   AffiliationValidationError,
 } from '../../domain/affiliationUsecases';
-import { openExternalUrl } from '../../../../shared/utils/linking';
-import { usePaymentPrefsStore } from '../stores/paymentPrefsStore';
-import { YAPE_AFFILIATION_QUERY_KEY, useYapeAffiliation } from '../hooks/useYapeAffiliation';
-import { DocumentField } from './DocumentField';
-import { EnterView, SuccessCheck } from './motion';
+import {openExternalUrl} from '../../../../shared/utils/linking';
+import {usePaymentPrefsStore} from '../stores/paymentPrefsStore';
+import {
+  YAPE_AFFILIATION_QUERY_KEY,
+  useYapeAffiliation,
+} from '../hooks/useYapeAffiliation';
+import {DocumentField} from './DocumentField';
+import {EnterView, SuccessCheck} from './motion';
 
 /** Cadencia del poll mientras esperamos la aprobación en la app Yape (deepLink → ACTIVE vía proveedor). */
 const POLL_INTERVAL_MS = 4500;
@@ -33,7 +36,7 @@ const POLL_TIMEOUT_MS = 120_000;
 const UPSTREAM_RETRY_DELAY_MS = 1500;
 
 /** Argumento del alta: `null` = UN TAP (body vacío); objeto = primera vez (documento que se persiste). */
-type LinkArg = { documentType: DocumentType; document: string } | null;
+type LinkArg = {documentType: DocumentType; document: string} | null;
 
 export interface YapeLinkSheetProps {
   visible: boolean;
@@ -58,15 +61,18 @@ export interface YapeLinkSheetProps {
  * solos; el vínculo "automático" y el "predeterminado" son conceptos DISTINTOS). Solo si elige "Sí" →
  * setDefault('YAPE'); si "Ahora no", el vínculo queda pero su preferencia no se toca.
  */
-export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.JSX.Element {
+export function YapeLinkSheet({
+  visible,
+  onClose,
+}: YapeLinkSheetProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
 
   const createAffiliation = useDependency(TOKENS.createYapeAffiliationUseCase);
   const getProfile = useDependency(TOKENS.getProfileUseCase);
-  const setDefault = usePaymentPrefsStore((s) => s.setDefault);
+  const setDefault = usePaymentPrefsStore(s => s.setDefault);
   const affiliationQuery = useYapeAffiliation();
 
   // Perfil del usuario (misma queryKey que ProfileScreen → una sola fuente). Decide el modo del sheet:
@@ -91,13 +97,15 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
   >('form');
   // Resolución del paso askDefault: 'set' (eligió Yape como predeterminado) | 'kept' (lo dejó igual).
   // Decide el copy del feedback final en la fase `done`.
-  const [defaultChoice, setDefaultChoice] = React.useState<'set' | 'kept'>('kept');
+  const [defaultChoice, setDefaultChoice] = React.useState<'set' | 'kept'>(
+    'kept',
+  );
   const waitStartedAtRef = React.useRef<number>(0);
   // Reintento automático del 502 (Cloudflare transitorio): 'none' (sin 502 aún) → 'retrying' (502 visto,
   // reintento programado, sin error visible) → 'exhausted' (el reintento también falló → mensaje honesto).
-  const [upstreamRetry, setUpstreamRetry] = React.useState<'none' | 'retrying' | 'exhausted'>(
-    'none',
-  );
+  const [upstreamRetry, setUpstreamRetry] = React.useState<
+    'none' | 'retrying' | 'exhausted'
+  >('none');
   // No se pudo ABRIR Yape para aprobar la afiliación (openURL rechazó: app no instalada / esquema
   // desconocido). Aviso honesto en la fase de espera, sin error crudo (la promesa nunca queda sin catch).
   const [openFailed, setOpenFailed] = React.useState(false);
@@ -136,10 +144,8 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
   const createMutation = useMutation<YapeAffiliationView, Error, LinkArg>({
     // El usecase valida (throw `AffiliationValidationError`) ANTES de tocar la red; react-query enruta
     // ese throw a `onError`. `arg === null` ⇒ UN TAP (body vacío, el server lo resuelve del perfil).
-    mutationFn: (arg) =>
-      Promise.resolve().then(() =>
-        createAffiliation.execute(arg ?? undefined),
-      ),
+    mutationFn: arg =>
+      Promise.resolve().then(() => createAffiliation.execute(arg ?? undefined)),
     onError: (err, arg) => {
       if (err instanceof AffiliationValidationError) {
         setFieldError(err.message);
@@ -152,7 +158,10 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
       }
       // 502 transitorio del gateway → reintento automático UNA vez (mismo arg) tras un respiro. Mientras
       // tanto NO mostramos error (estado 'retrying'); si el reintento también falla, pasa a 'exhausted'.
-      if (err instanceof AffiliationUpstreamUnavailableError && upstreamRetry !== 'exhausted') {
+      if (
+        err instanceof AffiliationUpstreamUnavailableError &&
+        upstreamRetry !== 'exhausted'
+      ) {
         if (upstreamRetry === 'none') {
           setUpstreamRetry('retrying');
           setTimeout(() => createMutation.mutate(arg), UPSTREAM_RETRY_DELAY_MS);
@@ -164,12 +173,12 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
       }
       // PROFILE_NAME_MISSING / unsupported / genérico se leen del `error` abajo.
     },
-    onSuccess: (view) => {
+    onSuccess: view => {
       setAffiliationCache(view);
       if (view.deepLink) {
         // Captura el rechazo de openURL (Yape no instalada / esquema desconocido): sin catch, subía como
         // unhandled rejection. Si no abre, lo reflejamos en la fase de espera ("no pudimos abrir Yape").
-        void openExternalUrl(view.deepLink).then((ok) => setOpenFailed(!ok));
+        void openExternalUrl(view.deepLink).then(ok => setOpenFailed(!ok));
       }
       if (view.status.toUpperCase() === affiliationStatus.enum.ACTIVE) {
         onActive();
@@ -214,11 +223,14 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
         setPhase('timeout');
         return;
       }
-      void affiliationQuery.refetch().then((res) => {
+      void affiliationQuery.refetch().then(res => {
         const status = res.data?.status?.toUpperCase();
         if (status === affiliationStatus.enum.ACTIVE) {
           onActive();
-        } else if (status === affiliationStatus.enum.EXPIRED || status === affiliationStatus.enum.REVOKED) {
+        } else if (
+          status === affiliationStatus.enum.EXPIRED ||
+          status === affiliationStatus.enum.REVOKED
+        ) {
           setPhase('timeout');
         }
       });
@@ -226,12 +238,16 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
     return () => clearInterval(id);
   }, [visible, phase, affiliationQuery, onActive]);
 
-  const isUnsupported = createMutation.error instanceof AffiliationUnsupportedError;
-  const isProfileIncomplete = createMutation.error instanceof AffiliationProfileIncompleteError;
-  const isValidationError = createMutation.error instanceof AffiliationValidationError;
+  const isUnsupported =
+    createMutation.error instanceof AffiliationUnsupportedError;
+  const isProfileIncomplete =
+    createMutation.error instanceof AffiliationProfileIncompleteError;
+  const isValidationError =
+    createMutation.error instanceof AffiliationValidationError;
   // 502 persistente: ya reintentamos automáticamente y volvió a fallar (estado 'exhausted').
   const isUpstreamUnavailable = upstreamRetry === 'exhausted';
-  const isDocMissing = createMutation.error instanceof AffiliationDocumentMissingError;
+  const isDocMissing =
+    createMutation.error instanceof AffiliationDocumentMissingError;
   const isGenericError =
     createMutation.isError &&
     !isUnsupported &&
@@ -248,7 +264,7 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
     setFieldError(null);
     setUpstreamRetry('none');
     // Modo primera vez: mandamos el documento (el server lo persiste). Modo UN TAP: body vacío.
-    createMutation.mutate(needsDocument ? { documentType, document } : null);
+    createMutation.mutate(needsDocument ? {documentType, document} : null);
   }
 
   function goToProfile(): void {
@@ -267,8 +283,8 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
     // TASK 1 · El vínculo quedó ACTIVE. Preguntamos (no seteamos solos) si lo quiere de predeterminado.
     // Distinción léxica clara: "vinculado" (automático) vs "predeterminado" (con qué pagas siempre).
     body = (
-      <View style={{ gap: theme.spacing.md, paddingVertical: theme.spacing.sm }}>
-        <View style={{ alignItems: 'center', gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.md, paddingVertical: theme.spacing.sm}}>
+        <View style={{alignItems: 'center', gap: theme.spacing.sm}}>
           <SuccessCheck />
           <Text variant="title3" style={styles.center}>
             {t('payments.auto.askDefaultTitle')}
@@ -277,7 +293,7 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
         <Text variant="callout" color="inkMuted" style={styles.center}>
           {t('payments.auto.askDefaultBody')}
         </Text>
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Button
             label={t('payments.auto.askDefaultYes')}
             variant="accent"
@@ -297,24 +313,45 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
     // El copy del feedback final depende de si eligió usar Yape de predeterminado o lo dejó igual.
     const setDefaulted = defaultChoice === 'set';
     body = (
-      <View style={{ alignItems: 'center', gap: theme.spacing.md, paddingVertical: theme.spacing.lg }}>
+      <View
+        style={{
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          paddingVertical: theme.spacing.lg,
+        }}>
         <SuccessCheck />
         <Text variant="title3" style={styles.center}>
-          {t(setDefaulted ? 'payments.auto.askDefaultDoneTitle' : 'payments.auto.askDefaultKeptTitle')}
+          {t(
+            setDefaulted
+              ? 'payments.auto.askDefaultDoneTitle'
+              : 'payments.auto.askDefaultKeptTitle',
+          )}
         </Text>
         <Text variant="callout" color="inkMuted" style={styles.center}>
-          {t(setDefaulted ? 'payments.auto.askDefaultDoneBody' : 'payments.auto.askDefaultKeptBody')}
+          {t(
+            setDefaulted
+              ? 'payments.auto.askDefaultDoneBody'
+              : 'payments.auto.askDefaultKeptBody',
+          )}
         </Text>
       </View>
     );
   } else if (phase === 'waiting' || phase === 'timeout') {
     const timedOut = phase === 'timeout';
     body = (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Banner
           tone={timedOut ? 'info' : 'warn'}
-          title={t(timedOut ? 'payments.auto.waitingTimeoutTitle' : 'payments.auto.waitingTitle')}
-          description={t(timedOut ? 'payments.auto.waitingTimeoutBody' : 'payments.auto.waitingBody')}
+          title={t(
+            timedOut
+              ? 'payments.auto.waitingTimeoutTitle'
+              : 'payments.auto.waitingTitle',
+          )}
+          description={t(
+            timedOut
+              ? 'payments.auto.waitingTimeoutBody'
+              : 'payments.auto.waitingBody',
+          )}
         />
         {/* Yape no abrió (app no instalada / esquema desconocido): aviso honesto, no error crudo. */}
         {openFailed ? (
@@ -330,25 +367,30 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
             variant="secondary"
             fullWidth
             onPress={() => {
-              void openExternalUrl(deepLink).then((ok) => setOpenFailed(!ok));
+              void openExternalUrl(deepLink).then(ok => setOpenFailed(!ok));
             }}
           />
         ) : null}
-        <Button label={t('payments.auto.close')} variant="ghost" fullWidth onPress={onClose} />
+        <Button
+          label={t('payments.auto.close')}
+          variant="ghost"
+          fullWidth
+          onPress={onClose}
+        />
       </View>
     );
   } else if (profileQuery.isLoading) {
     // El perfil decide el modo (un tap vs pedir documento): mientras carga, un respiro sutil.
     body = (
-      <View style={{ alignItems: 'center', paddingVertical: theme.spacing.xl }}>
+      <View style={{alignItems: 'center', paddingVertical: theme.spacing.xl}}>
         <ActivityIndicator color={theme.colors.accent} />
       </View>
     );
   } else if (isProfileIncomplete) {
     // 422 PROFILE_NAME_MISSING: el perfil no tiene nombre → CTA al perfil (no error de campo).
     body = (
-      <View style={{ gap: theme.spacing.lg }}>
-        <View style={{ gap: theme.spacing.sm }}>
+      <View style={{gap: theme.spacing.lg}}>
+        <View style={{gap: theme.spacing.sm}}>
           <Banner
             tone="info"
             title={t('payments.auto.profileIncompleteTitle')}
@@ -377,9 +419,9 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
   } else {
     // phase === 'form' (un tap o primera vez con documento).
     body = (
-      <View style={{ gap: theme.spacing.lg }}>
+      <View style={{gap: theme.spacing.lg}}>
         {/* Explicación de 2 líneas: el consentimiento del cargo automático va INTEGRADO al copy. */}
-        <View style={{ gap: 4 }}>
+        <View style={{gap: 4}}>
           <Text variant="callout" color="inkMuted">
             {t('payments.auto.linkIntro1')}
           </Text>
@@ -403,10 +445,14 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
         {isUpstreamUnavailable ? (
           <Banner tone="warn" title={t('payments.auto.upstreamBusy')} />
         ) : null}
-        {isGenericError ? <Banner tone="danger" title={t('payments.auto.error')} /> : null}
+        {isGenericError ? (
+          <Banner tone="danger" title={t('payments.auto.error')} />
+        ) : null}
 
         <Button
-          label={busy ? t('payments.auto.submitting') : t('payments.auto.openYape')}
+          label={
+            busy ? t('payments.auto.submitting') : t('payments.auto.openYape')
+          }
           variant="accent"
           fullWidth
           loading={busy}
@@ -417,12 +463,15 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
   }
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('payments.auto.linkTitle')}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('payments.auto.linkTitle')}>
       <EnterView offsetY={6}>{body}</EnterView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { textAlign: 'center' },
+  center: {textAlign: 'center'},
 });

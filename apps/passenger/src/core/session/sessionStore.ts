@@ -1,6 +1,6 @@
-import type { MobileSessionUser } from '@veo/api-client';
-import { create } from 'zustand';
-import { secureStore } from '../storage/mmkv';
+import type {MobileSessionUser} from '@veo/api-client';
+import {create} from 'zustand';
+import {secureStore} from '../storage/mmkv';
 
 /** Claves de persistencia en el almacén seguro. */
 const KEYS = {
@@ -61,7 +61,7 @@ export interface SessionState {
  * Persistencia manual en el almacén seguro (MMKV cifrado), no en el estado de servidor
  * (React Query). El `HttpClient` lee `accessToken` desde aquí vía `getState()`.
  */
-export const useSessionStore = create<SessionState>((set) => ({
+export const useSessionStore = create<SessionState>(set => ({
   accessToken: null,
   refreshToken: null,
   user: null,
@@ -79,17 +79,17 @@ export const useSessionStore = create<SessionState>((set) => ({
     });
   },
 
-  setSession: ({ accessToken, refreshToken, user }) => {
+  setSession: ({accessToken, refreshToken, user}) => {
     secureStore.setString(KEYS.accessToken, accessToken);
     secureStore.setString(KEYS.refreshToken, refreshToken);
     secureStore.setJSON(KEYS.user, user);
-    set({ accessToken, refreshToken, user, status: 'authenticated' });
+    set({accessToken, refreshToken, user, status: 'authenticated'});
   },
 
   setTokens: (accessToken, refreshToken) => {
     secureStore.setString(KEYS.accessToken, accessToken);
     secureStore.setString(KEYS.refreshToken, refreshToken);
-    set({ accessToken, refreshToken });
+    set({accessToken, refreshToken});
   },
 
   clearSession: (reason = 'user-logout') => {

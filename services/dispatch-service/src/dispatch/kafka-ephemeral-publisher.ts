@@ -29,7 +29,10 @@ export class KafkaEphemeralPublisher
   constructor(config: ConfigService<Env, true>) {
     const kafka = createKafka({
       clientId: 'dispatch-service-ephemeral',
-      brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(',').map((b) => b.trim()),
+      brokers: config
+        .getOrThrow<string>('KAFKA_BROKERS')
+        .split(',')
+        .map((b) => b.trim()),
     });
     this.producer = new KafkaEventProducer(kafka);
   }

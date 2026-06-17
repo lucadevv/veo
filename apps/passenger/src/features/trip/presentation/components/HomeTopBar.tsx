@@ -1,10 +1,10 @@
-import { Avatar, IconButton, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { LocationStatus } from '../hooks/useCurrentLocation';
-import { IconBell } from './icons';
+import {Avatar, IconButton, Text, useTheme} from '@veo/ui-kit';
+import React, {useCallback} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Linking, Pressable, StyleSheet, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import type {LocationStatus} from '../hooks/useCurrentLocation';
+import {IconBell} from './icons';
 
 export interface HomeTopBarProps {
   /** Estado del fix de ubicación: cada estado no-feliz da un mensaje + CTA accionable. */
@@ -37,13 +37,15 @@ export function HomeTopBar({
   onOpenProfile,
 }: HomeTopBarProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const insets = useSafeAreaInsets();
 
   // Estado de la pastilla de ubicación: cada estado no-feliz da un mensaje + CTA accionable
   // (Ajustes para permiso/GPS, Reintentar para fix fallido), en vez de un genérico mudo.
   const locationActionable =
-    locationStatus === 'denied' || locationStatus === 'servicesOff' || locationStatus === 'error';
+    locationStatus === 'denied' ||
+    locationStatus === 'servicesOff' ||
+    locationStatus === 'error';
   const userLabel =
     locationStatus === 'denied'
       ? t('home.locationDenied')
@@ -51,9 +53,11 @@ export function HomeTopBar({
         ? t('home.locationServicesOff')
         : locationStatus === 'error'
           ? t('home.locationUnavailable')
-          : originTitle ??
+          : (originTitle ??
             reverseTitle ??
-            (locationStatus === 'locating' ? t('home.locating') : t('home.yourLocation'));
+            (locationStatus === 'locating'
+              ? t('home.locating')
+              : t('home.yourLocation')));
   // La acción del pill: permiso/GPS → abrir Ajustes del sistema; fix fallido → reintentar en el acto.
   const locationActionLabel =
     locationStatus === 'error'
@@ -64,42 +68,57 @@ export function HomeTopBar({
   const onLocationAction = useCallback(() => {
     if (locationStatus === 'error') {
       onRetryLocation();
-    } else if (locationStatus === 'denied' || locationStatus === 'servicesOff') {
+    } else if (
+      locationStatus === 'denied' ||
+      locationStatus === 'servicesOff'
+    ) {
       void Linking.openSettings();
     }
   }, [locationStatus, onRetryLocation]);
 
   return (
     <View
-      style={[styles.topRow, { top: insets.top + theme.spacing.sm }]}
-      pointerEvents="box-none"
-    >
+      style={[styles.topRow, {top: insets.top + theme.spacing.sm}]}
+      pointerEvents="box-none">
       <Pressable
         accessibilityRole={locationActionable ? 'button' : undefined}
-        accessibilityLabel={locationActionable ? `${userLabel}. ${locationActionLabel ?? ''}` : userLabel}
+        accessibilityLabel={
+          locationActionable
+            ? `${userLabel}. ${locationActionLabel ?? ''}`
+            : userLabel
+        }
         onPress={locationActionable ? onLocationAction : undefined}
         disabled={!locationActionable}
         style={[
           styles.locationPill,
           {
             backgroundColor: theme.colors.surface,
-            borderColor: locationActionable ? theme.colors.warn : theme.colors.border,
+            borderColor: locationActionable
+              ? theme.colors.warn
+              : theme.colors.border,
             borderRadius: theme.radii.pill,
             ...theme.elevation.level2,
           },
-        ]}
-      >
+        ]}>
         <View
           style={[
             styles.locationDot,
-            { backgroundColor: locationActionable ? theme.colors.warn : theme.colors.accent },
+            {
+              backgroundColor: locationActionable
+                ? theme.colors.warn
+                : theme.colors.accent,
+            },
           ]}
         />
         <Text variant="subhead" numberOfLines={1} style={styles.locationLabel}>
           {userLabel}
         </Text>
         {locationActionLabel ? (
-          <Text variant="subhead" color="accent" numberOfLines={1} style={styles.locationAction}>
+          <Text
+            variant="subhead"
+            color="accent"
+            numberOfLines={1}
+            style={styles.locationAction}>
             {locationActionLabel}
           </Text>
         ) : null}
@@ -110,14 +129,17 @@ export function HomeTopBar({
           variant="surface"
           onPress={onOpenNotifications}
           icon={<IconBell color={theme.colors.ink} size={20} />}
-          style={{ ...theme.elevation.level2 }}
+          style={{...theme.elevation.level2}}
         />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('screens.profile')}
-          onPress={onOpenProfile}
-        >
-          <Avatar uri={profilePhotoUrl ?? undefined} name={profileName ?? t('appName')} size="md" />
+          onPress={onOpenProfile}>
+          <Avatar
+            uri={profilePhotoUrl ?? undefined}
+            name={profileName ?? t('appName')}
+            size="md"
+          />
         </Pressable>
       </View>
     </View>
@@ -134,7 +156,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  topActions: {flexDirection: 'row', alignItems: 'center', gap: 10},
   locationPill: {
     flex: 1,
     flexDirection: 'row',
@@ -144,7 +166,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
   },
-  locationDot: { width: 7, height: 7, borderRadius: 999 },
-  locationLabel: { flexShrink: 1 },
-  locationAction: { fontWeight: '600', flexShrink: 0 },
+  locationDot: {width: 7, height: 7, borderRadius: 999},
+  locationLabel: {flexShrink: 1},
+  locationAction: {fontWeight: '600', flexShrink: 0},
 });

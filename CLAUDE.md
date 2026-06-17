@@ -9,13 +9,13 @@
 
 **Estructura: MONOREPO único** (`github.com/lucadevv/veo`). Consolidación de los 4 repos hermanos previos (`veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra`):
 
-| Carpeta | Qué vive ahí |
-|---|---|
-| `apps/` | `passenger` + `driver` (React Native) · `admin-web` + `family-web` + `web-hub` (Next.js) |
-| `services/` | 14 microservicios (NestJS) + BFFs (`public`/`driver`/`admin`) |
-| `packages/` | código compartido `@veo/*` (tipos, auth, rpc, utils, ui-kit, observability…) |
-| `infra/` | Terraform + K8s (Kustomize) + ArgoCD |
-| `dev-stack/` · `docs/` · `e2e/` | orquestación local · documentación · pruebas end-to-end |
+| Carpeta                         | Qué vive ahí                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `apps/`                         | `passenger` + `driver` (React Native) · `admin-web` + `family-web` + `web-hub` (Next.js) |
+| `services/`                     | 14 microservicios (NestJS) + BFFs (`public`/`driver`/`admin`)                            |
+| `packages/`                     | código compartido `@veo/*` (tipos, auth, rpc, utils, ui-kit, observability…)             |
+| `infra/`                        | Terraform + K8s (Kustomize) + ArgoCD                                                     |
+| `dev-stack/` · `docs/` · `e2e/` | orquestación local · documentación · pruebas end-to-end                                  |
 
 Las apps móviles consumen `@veo/*` vía `workspace:*` (pnpm workspace, `node-linker=hoisted`). Build unificado: un solo `pnpm install`. Metro resuelve los packages desde `packages/`.
 
@@ -24,6 +24,7 @@ Las apps móviles consumen `@veo/*` vía `workspace:*` (pnpm workspace, `node-li
 Lee `/Users/jaxximize/Desktop/ecritrorio/00_Proyectos/VEO/VEO_Blueprint.pdf` o `VEO_Blueprint.html` para el blueprint maestro (lógica de negocio + arquitectura completa). Ese documento es la fuente de verdad para decisiones estratégicas.
 
 > 🟢 **ANTES DE CODEAR, LEE EN ORDEN:**
+>
 > 1. **`docs/STATUS.md`** — qué se hizo, dónde quedamos y qué falta (handoff actualizado; punto de entrada para cualquier agente/Cursor).
 > 2. **`docs/FOUNDATION.md`** — contrato técnico canónico (convenciones, anatomía de servicio, §0.7 soberanía, §14 todas las decisiones).
 > 3. Este `CLAUDE.md` — reglas no negociables.
@@ -119,6 +120,7 @@ RCT_METRO_PORT=8084 pnpm --filter @veo/driver dev
 ## Equipo (Fase build)
 
 10.5 FTE durante ~30 semanas:
+
 - 1 Staff Engineer / Tech Lead
 - 2 Backend seniors
 - 2 Mobile seniors (RN + módulos nativos)

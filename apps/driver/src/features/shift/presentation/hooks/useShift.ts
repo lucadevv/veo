@@ -1,5 +1,5 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
 import {
   EndShiftUseCase,
   GetShiftStateUseCase,
@@ -30,7 +30,7 @@ export interface ShiftStateView {
 
 /** Query: estado actual del turno del conductor. */
 export function useShiftState() {
-  const {shift} = useRepositories();
+  const { shift } = useRepositories();
   return useQuery<ShiftStateView>({
     queryKey: SHIFT_STATE_QUERY_KEY,
     queryFn: async () => {
@@ -51,31 +51,31 @@ export function useShiftState() {
 
 /** Mutación: iniciar/reanudar turno con el `sessionRef` biométrico ya obtenido. */
 export function useStartShift() {
-  const {shift} = useRepositories();
+  const { shift } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({sessionRef, geo}: {sessionRef: string; geo?: ShiftStartGeo}) =>
+    mutationFn: ({ sessionRef, geo }: { sessionRef: string; geo?: ShiftStartGeo }) =>
       new StartShiftUseCase(shift).execute(sessionRef, geo),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY }),
   });
 }
 
 /** Mutación: finalizar turno (→ OFFLINE). */
 export function useEndShift() {
-  const {shift} = useRepositories();
+  const { shift } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => new EndShiftUseCase(shift).execute(),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY }),
   });
 }
 
 /** Mutación: pausar turno (→ ON_BREAK). */
 export function usePauseShift() {
-  const {shift} = useRepositories();
+  const { shift } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => new PauseShiftUseCase(shift).execute(),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: SHIFT_STATE_QUERY_KEY}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY }),
   });
 }

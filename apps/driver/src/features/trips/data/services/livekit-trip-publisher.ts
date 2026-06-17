@@ -1,4 +1,4 @@
-import {Room} from 'livekit-client';
+import { Room } from 'livekit-client';
 import type {
   PublisherTokenPort,
   TripMediaPublisher,
@@ -35,7 +35,7 @@ export class LiveKitTripPublisher implements TripMediaPublisher {
     const credentials = await this.tokenPort.fetchPublisherCredentials(tripId);
 
     // `adaptiveStream`/`dynacast` mejoran el envío sobre redes móviles variables.
-    const room = new Room({adaptiveStream: true, dynacast: true});
+    const room = new Room({ adaptiveStream: true, dynacast: true });
     this.room = room;
     try {
       // 2) Conexión a la sala del viaje con el token de publicación.

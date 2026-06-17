@@ -1,4 +1,4 @@
-import type {DriverDocument, DriverDocumentList, RegisterDocumentInput} from '../entities';
+import type { DriverDocument, DriverDocumentList, RegisterDocumentInput } from '../entities';
 
 /**
  * Contrato del repositorio de documentos (capa domain). Implementación concreta en `data/`.

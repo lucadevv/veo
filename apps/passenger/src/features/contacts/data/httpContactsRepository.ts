@@ -5,8 +5,8 @@ import {
   type HttpClient,
   resendContactOtpResult,
 } from '@veo/api-client';
-import type { ContactsRepository } from '../domain/contactsRepository';
-import type { NewTrustedContact, TrustedContact } from '../domain/entities';
+import type {ContactsRepository} from '../domain/contactsRepository';
+import type {NewTrustedContact, TrustedContact} from '../domain/entities';
 
 /**
  * Implementación REAL de `ContactsRepository` contra el public-bff (`/contacts`, BR-I06).
@@ -21,7 +21,7 @@ export class HttpContactsRepository implements ContactsRepository {
   constructor(private readonly http: HttpClient) {}
 
   list(): Promise<TrustedContact[]> {
-    return this.http.get('/contacts', { schema: contactListSchema });
+    return this.http.get('/contacts', {schema: contactListSchema});
   }
 
   async add(input: NewTrustedContact): Promise<TrustedContact> {
@@ -34,7 +34,7 @@ export class HttpContactsRepository implements ContactsRepository {
 
   verify(contactId: string, code: string): Promise<TrustedContact> {
     return this.http.post(`/contacts/${contactId}/verify-otp`, {
-      body: { code },
+      body: {code},
       schema: contactResource,
     });
   }

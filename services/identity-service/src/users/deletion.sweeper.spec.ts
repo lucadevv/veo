@@ -97,7 +97,11 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
     expect(calls.outboxCreate).toHaveBeenCalledTimes(1);
     const arg = calls.outboxCreate.mock.calls[0]![0] as {
-      data: { aggregateId: string; eventType: string; envelope: EventEnvelope<{ userId: string; driverId?: string; at: string }> };
+      data: {
+        aggregateId: string;
+        eventType: string;
+        envelope: EventEnvelope<{ userId: string; driverId?: string; at: string }>;
+      };
     };
     expect(arg.data.aggregateId).toBe('u1');
     expect(arg.data.eventType).toBe('user.deleted');
@@ -112,7 +116,11 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     const { prisma, calls } = makePrisma([{ id: 'u1', driver: null }]);
     const sweeper = new DeletionSweeper(prisma as never, config);
     await sweeper.sweep();
-    const env = (calls.outboxCreate.mock.calls[0]![0] as { data: { envelope: EventEnvelope<{ driverId?: string }> } }).data.envelope;
+    const env = (
+      calls.outboxCreate.mock.calls[0]![0] as {
+        data: { envelope: EventEnvelope<{ driverId?: string }> };
+      }
+    ).data.envelope;
     expect(env.payload.driverId).toBeUndefined();
   });
 

@@ -1,4 +1,4 @@
-import {NativeModules, PermissionsAndroid, Platform, type Permission} from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform, type Permission } from 'react-native';
 import {
   BiometricFrameGrabberUnavailableError,
   type BiometricFrameGrabber,
@@ -14,9 +14,7 @@ interface NativeFrameGrabberModule {
 }
 
 /** Acceso tipado al módulo nativo (undefined si no está enlazado en esta plataforma/build). */
-const nativeModule = NativeModules.VeoBiometricFrameGrabber as
-  | NativeFrameGrabberModule
-  | undefined;
+const nativeModule = NativeModules.VeoBiometricFrameGrabber as NativeFrameGrabberModule | undefined;
 
 /** Margen fijo (ms) que damos al nativo además del tiempo teórico de captura antes de abortar. */
 const CAPTURE_TIMEOUT_BUFFER_MS = 8_000;

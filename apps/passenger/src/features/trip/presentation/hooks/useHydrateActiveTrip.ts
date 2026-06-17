@@ -1,9 +1,9 @@
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { useActiveTripStore } from '../stores/activeTripStore';
+import {useFocusEffect} from '@react-navigation/native';
+import {useCallback} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {useActiveTripStore} from '../stores/activeTripStore';
 
 /**
  * Rehidrata el viaje ACTIVO del pasajero desde el server al ENFOCAR la pantalla — montaje inicial y al
@@ -24,12 +24,14 @@ import { useActiveTripStore } from '../stores/activeTripStore';
  */
 export function useHydrateActiveTrip(): void {
   const getMyActiveTrip = useDependency(TOKENS.getMyActiveTripUseCase);
-  const getPendingSettlement = useDependency(TOKENS.getPendingSettlementUseCase);
-  const setActiveTripId = useActiveTripStore((s) => s.setActiveTripId);
+  const getPendingSettlement = useDependency(
+    TOKENS.getPendingSettlementUseCase,
+  );
+  const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
 
   useFocusEffect(
     useCallback(() => {
-      const { accessToken } = useSessionStore.getState();
+      const {accessToken} = useSessionStore.getState();
       if (!accessToken) {
         return;
       }
@@ -37,8 +39,8 @@ export function useHydrateActiveTrip(): void {
       void getMyActiveTrip
         .execute()
         // Sin viaje vivo: probamos el cierre pendiente (COMPLETED sin cerrar → re-entrada al recibo).
-        .then((trip) => (trip ? trip : getPendingSettlement.execute()))
-        .then((trip) => {
+        .then(trip => (trip ? trip : getPendingSettlement.execute()))
+        .then(trip => {
           if (!cancelled && trip) {
             setActiveTripId(trip.id);
           }

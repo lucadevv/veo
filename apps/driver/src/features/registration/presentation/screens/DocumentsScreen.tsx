@@ -1,14 +1,14 @@
-import React, {useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import Svg, {Circle, Path} from 'react-native-svg';
-import {useTranslation} from 'react-i18next';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Banner, Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import {IconCar, IconDocument, IconShield} from '../../../../shared/presentation/icons';
-import {Reveal} from '../../../../shared/presentation/components/motion';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import type {RegistrationStackParamList} from '../../../../navigation/types';
-import {useRegistrationStore} from '../state/registrationStore';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { IconCar, IconDocument, IconShield } from '../../../../shared/presentation/icons';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import type { RegistrationStackParamList } from '../../../../navigation/types';
+import { useRegistrationStore } from '../state/registrationStore';
 import {
   registrationDocTypeToBackend,
   type RegistrationDocumentServerStatus,
@@ -26,12 +26,12 @@ import {
   RegistrationProgress,
   type DocumentCardTone,
 } from '../components';
-import type {RegistrationDocumentInput} from '../components/RegistrationDocumentSheet';
+import type { RegistrationDocumentInput } from '../components/RegistrationDocumentSheet';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'Documents'>;
 
 /** Glifo informativo (i) del aviso de formatos. */
-function InfoGlyph({color, size = 16}: {color: string; size?: number}): React.JSX.Element {
+function InfoGlyph({ color, size = 16 }: { color: string; size?: number }): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={2} />
@@ -41,10 +41,10 @@ function InfoGlyph({color, size = 16}: {color: string; size?: number}): React.JS
   );
 }
 
-const DOCS: {type: RegistrationDocumentType; labelKey: string; icon: typeof IconDocument}[] = [
-  {type: 'LICENSE', labelKey: 'registration.documents.license', icon: IconDocument},
-  {type: 'SOAT', labelKey: 'registration.documents.soat', icon: IconShield},
-  {type: 'VEHICLE_REGISTRATION', labelKey: 'registration.documents.property', icon: IconCar},
+const DOCS: { type: RegistrationDocumentType; labelKey: string; icon: typeof IconDocument }[] = [
+  { type: 'LICENSE', labelKey: 'registration.documents.license', icon: IconDocument },
+  { type: 'SOAT', labelKey: 'registration.documents.soat', icon: IconShield },
+  { type: 'VEHICLE_REGISTRATION', labelKey: 'registration.documents.property', icon: IconCar },
 ];
 
 /** Tono del chip según el `simpleStatus` real del documento (espeja el dominio de documentos). */
@@ -64,12 +64,12 @@ function serverStatusTone(status: RegistrationDocumentServerStatus): DocumentCar
 }
 
 /** Paso 3 del alta: subida de documentos del conductor (drv-06) contra el driver-bff. */
-export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
-  const documents = useRegistrationStore(s => s.documents);
-  const setDocumentStatus = useRegistrationStore(s => s.setDocumentStatus);
-  const setCurrentStep = useRegistrationStore(s => s.setCurrentStep);
+  const documents = useRegistrationStore((s) => s.documents);
+  const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
+  const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
 
   // Rehidrata el estado real de los documentos (chips reflejan `simpleStatus`).
   const serverDocs = useRegistrationDocuments();
@@ -81,12 +81,12 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
   const [submitError, setSubmitError] = useState<unknown>(null);
 
   const statusOf = (type: RegistrationDocumentType) =>
-    documents.find(d => d.type === type)?.status ?? 'pending';
+    documents.find((d) => d.type === type)?.status ?? 'pending';
 
   /** Estado del servidor para un documento del wizard (si ya existe en `GET /drivers/me/documents`). */
   const serverStateOf = (type: RegistrationDocumentType) => {
     const backendType = registrationDocTypeToBackend(type);
-    const match = serverDocs.data?.find(doc => doc.type === backendType);
+    const match = serverDocs.data?.find((doc) => doc.type === backendType);
     if (!match) {
       return undefined;
     }
@@ -96,7 +96,7 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
     };
   };
 
-  const activeDoc = DOCS.find(d => d.type === activeType) ?? null;
+  const activeDoc = DOCS.find((d) => d.type === activeType) ?? null;
 
   const onSubmitDocument = async (input: RegistrationDocumentInput) => {
     if (!activeType) {
@@ -108,7 +108,7 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
       await submitDocument.mutateAsync({
         type: registrationDocTypeToBackend(activeType),
         documentNumber: input.documentNumber,
-        ...(input.expiresAtIso ? {expiresAt: input.expiresAtIso} : {}),
+        ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
       });
       // La licencia, además, alimenta el onboarding del conductor (driverOnboardRequest).
       if (activeType === 'LICENSE' && input.expiresAtIso) {
@@ -129,7 +129,7 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
   // requeridos subidos (licencia/SOAT/tarjeta de propiedad). Coherente con `isDraftComplete` y con la
   // regla de negocio (no se completa el alta con documentación faltante). `DOCS` es el catálogo de
   // requeridos; cada uno debe estar en `uploaded` localmente (el chip del servidor es informativo).
-  const allRequiredUploaded = DOCS.every(doc => statusOf(doc.type) === 'uploaded');
+  const allRequiredUploaded = DOCS.every((doc) => statusOf(doc.type) === 'uploaded');
 
   const onContinue = () => {
     // Guarda defensiva además del `disabled` del botón: jamás avanzar con documentos pendientes.
@@ -154,15 +154,16 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
           disabled={!allRequiredUploaded}
           onPress={onContinue}
         />
-      }>
-      <View style={[styles.body, {gap: theme.spacing.xl}]}>
+      }
+    >
+      <View style={[styles.body, { gap: theme.spacing.xl }]}>
         <Reveal>
           <RegistrationProgress current={3} />
         </Reveal>
 
         <Reveal delay={40} style={styles.intro}>
           <Text variant="caption" color="inkMuted" align="center">
-            {t('registration.stepOf', {current: 3, total: 4})}
+            {t('registration.stepOf', { current: 3, total: 4 })}
           </Text>
           <Text variant="title1">{t('registration.documents.title')}</Text>
           <Text variant="callout" color="inkMuted">
@@ -180,7 +181,7 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
           </Reveal>
         ) : null}
 
-        <View style={[styles.list, {gap: theme.spacing.md}]}>
+        <View style={[styles.list, { gap: theme.spacing.md }]}>
           {DOCS.map((doc, index) => {
             const Icon = doc.icon;
             const label = t(doc.labelKey);
@@ -194,7 +195,9 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
                   pendingLabel={t('registration.documents.pending')}
                   serverState={serverStateOf(doc.type)}
                   busy={submitting && activeType === doc.type}
-                  accessibilityLabel={t('registration.documents.uploadAccessibility', {document: label})}
+                  accessibilityLabel={t('registration.documents.uploadAccessibility', {
+                    document: label,
+                  })}
                   onPress={() => {
                     setSubmitError(null);
                     setActiveType(doc.type);
@@ -205,7 +208,7 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
           })}
         </View>
 
-        <Reveal delay={300} style={[styles.note, {gap: theme.spacing.sm}]}>
+        <Reveal delay={300} style={[styles.note, { gap: theme.spacing.sm }]}>
           <InfoGlyph color={theme.colors.inkSubtle} />
           <Text variant="footnote" color="inkSubtle" style={styles.noteText}>
             {t('registration.documents.formats')}
@@ -227,9 +230,9 @@ export const DocumentsScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  body: {paddingTop: 12},
-  intro: {gap: 6},
+  body: { paddingTop: 12 },
+  intro: { gap: 6 },
   list: {},
-  note: {flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4},
-  noteText: {flex: 1},
+  note: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 },
+  noteText: { flex: 1 },
 });

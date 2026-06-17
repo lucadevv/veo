@@ -138,7 +138,10 @@ export function categoryFareCentsV2(
  * B5-1 · costo de energía por km DERIVADO = precio_por_unidad ÷ rendimiento (km por unidad). Mismo cálculo
  * que `deriveFuelPerKmCents` de trip-service (precio÷rendimiento, ≤0 → 0). Unifica líquido y eléctrico.
  */
-export function deriveEnergyPerKmCents(pricePerUnitCents: number, efficiencyKmPerUnit: number): number {
+export function deriveEnergyPerKmCents(
+  pricePerUnitCents: number,
+  efficiencyKmPerUnit: number,
+): number {
   if (!Number.isFinite(pricePerUnitCents) || pricePerUnitCents < 0) return 0;
   if (!Number.isFinite(efficiencyKmPerUnit) || efficiencyKmPerUnit <= 0) return 0;
   return Math.round(pricePerUnitCents / efficiencyKmPerUnit);
@@ -164,7 +167,19 @@ export function shadowCompareCategoryFare(
   oldFuelPerKmCents: number,
   newEnergyPerKmCents: number,
 ): QuoteShadowDelta {
-  const oldCents = categoryFareCents(distanceMeters, durationSeconds, multiplier, minFareCents, oldFuelPerKmCents);
-  const newCents = categoryFareCentsV2(distanceMeters, durationSeconds, multiplier, minFareCents, newEnergyPerKmCents);
+  const oldCents = categoryFareCents(
+    distanceMeters,
+    durationSeconds,
+    multiplier,
+    minFareCents,
+    oldFuelPerKmCents,
+  );
+  const newCents = categoryFareCentsV2(
+    distanceMeters,
+    durationSeconds,
+    multiplier,
+    minFareCents,
+    newEnergyPerKmCents,
+  );
   return { oldCents, newCents, deltaCents: newCents - oldCents };
 }

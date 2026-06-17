@@ -109,10 +109,7 @@ export function historyWhere(
   const at = new Date(cursor.requestedAt);
   return {
     passengerId,
-    OR: [
-      { requestedAt: { lt: at } },
-      { requestedAt: at, id: { lt: cursor.id } },
-    ],
+    OR: [{ requestedAt: { lt: at } }, { requestedAt: at, id: { lt: cursor.id } }],
   };
 }
 

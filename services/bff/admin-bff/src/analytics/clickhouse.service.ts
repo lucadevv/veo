@@ -55,7 +55,10 @@ export class ClickHouseService {
       const text = await res.text();
       if (!res.ok) {
         this.logger.warn({ status: res.status }, 'consulta ClickHouse fallida');
-        throw new ExternalServiceError('consulta ClickHouse fallida', { status: res.status, body: text.slice(0, 200) });
+        throw new ExternalServiceError('consulta ClickHouse fallida', {
+          status: res.status,
+          body: text.slice(0, 200),
+        });
       }
       const parsed = JSON.parse(text) as ClickHouseJsonResponse<T>;
       return parsed.data;

@@ -1,11 +1,11 @@
-import {useEffect, useRef, useState} from 'react';
-import {useReducedMotion} from '@veo/ui-kit';
+import { useEffect, useRef, useState } from 'react';
+import { useReducedMotion } from '@veo/ui-kit';
 
 /**
  * Las primitivas Appear/PressableScale ahora son CANÓNICAS del design system (`@veo/ui-kit`) — se
  * re-exportan acá para no tocar los imports de las pantallas. `useCountUp` es específico de ganancias.
  */
-export {Appear, PressableScale} from '@veo/ui-kit';
+export { Appear, PressableScale } from '@veo/ui-kit';
 
 /**
  * Cuenta ascendente sutil de un valor entero (p. ej. céntimos) con ease-out cúbico sobre ~700ms.

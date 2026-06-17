@@ -28,7 +28,10 @@ const AVATAR_KEY_PATTERN = /^avatars\/[^/]+\/avatar\.(jpg|jpeg|png|webp)$/;
  * que media-service valide la cuota de tamaño y devuelva la `publicUrl` definitiva.
  */
 export class ConfirmAvatarUploadDto {
-  @ApiProperty({ description: 'Key del objeto subido (la del ticket)', example: 'avatars/usr-1/avatar.jpg' })
+  @ApiProperty({
+    description: 'Key del objeto subido (la del ticket)',
+    example: 'avatars/usr-1/avatar.jpg',
+  })
   @IsString()
   @Matches(AVATAR_KEY_PATTERN, { message: 'key de avatar inválida' })
   key!: string;

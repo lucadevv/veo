@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 /**
  * Estado del CANDADO biométrico de re-login (Zustand, en memoria).
@@ -19,8 +19,8 @@ interface BiometricGateState {
   lock: () => void;
 }
 
-export const useBiometricGateStore = create<BiometricGateState>((set) => ({
+export const useBiometricGateStore = create<BiometricGateState>(set => ({
   locked: true,
-  unlock: () => set({ locked: false }),
-  lock: () => set({ locked: true }),
+  unlock: () => set({locked: false}),
+  lock: () => set({locked: true}),
 }));

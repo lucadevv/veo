@@ -111,7 +111,15 @@
       "source": "region",
       "source-layer": "transportation",
       "minzoom": 11,
-      "filter": ["in", "class", "tertiary", "residential", "street", "street_limited", "living_street"],
+      "filter": [
+        "in",
+        "class",
+        "tertiary",
+        "residential",
+        "street",
+        "street_limited",
+        "living_street"
+      ],
       "layout": { "line-cap": "round", "line-join": "round" },
       "paint": {
         "line-color": "#232F3B",

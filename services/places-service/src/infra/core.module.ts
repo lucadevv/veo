@@ -25,12 +25,6 @@ const internalSecretProvider: Provider = {
     InternalIdentityGuard,
     RolesGuard,
   ],
-  exports: [
-    PrismaService,
-    REDIS,
-    INTERNAL_IDENTITY_SECRET,
-    InternalIdentityGuard,
-    RolesGuard,
-  ],
+  exports: [PrismaService, REDIS, INTERNAL_IDENTITY_SECRET, InternalIdentityGuard, RolesGuard],
 })
 export class CoreModule {}

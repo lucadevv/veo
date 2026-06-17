@@ -49,12 +49,20 @@ function makePrisma() {
   };
 
   const authMethod = {
-    findUnique: vi.fn(async ({ where, include }: { where: Record<string, unknown>; include?: { user?: boolean } }) => {
-      const m = findMethod(where);
-      if (!m) return null;
-      if (include?.user) return { ...m, user: users.find((u) => u.id === m.userId)! };
-      return { ...m };
-    }),
+    findUnique: vi.fn(
+      async ({
+        where,
+        include,
+      }: {
+        where: Record<string, unknown>;
+        include?: { user?: boolean };
+      }) => {
+        const m = findMethod(where);
+        if (!m) return null;
+        if (include?.user) return { ...m, user: users.find((u) => u.id === m.userId)! };
+        return { ...m };
+      },
+    ),
     // Account-linking: busca un AuthMethod verificado por email (cualquier tipo).
     findFirst: vi.fn(async ({ where }: { where: { email?: string; emailVerified?: boolean } }) => {
       const m = methods.find(
@@ -64,19 +72,21 @@ function makePrisma() {
       );
       return m ? { ...m } : null;
     }),
-    create: vi.fn(async ({ data }: { data: Partial<MethodRow> & { userId: string; type: string } }) => {
-      const row: MethodRow = {
-        id: nextId('am'),
-        userId: data.userId,
-        type: data.type,
-        email: data.email ?? null,
-        passwordHash: data.passwordHash ?? null,
-        emailVerified: data.emailVerified ?? false,
-        verified: data.verified ?? false,
-      };
-      methods.push(row);
-      return { ...row };
-    }),
+    create: vi.fn(
+      async ({ data }: { data: Partial<MethodRow> & { userId: string; type: string } }) => {
+        const row: MethodRow = {
+          id: nextId('am'),
+          userId: data.userId,
+          type: data.type,
+          email: data.email ?? null,
+          passwordHash: data.passwordHash ?? null,
+          emailVerified: data.emailVerified ?? false,
+          verified: data.verified ?? false,
+        };
+        methods.push(row);
+        return { ...row };
+      },
+    ),
     update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<MethodRow> }) => {
       const m = methods.find((x) => x.id === where.id)!;
       Object.assign(m, data);
@@ -230,9 +240,9 @@ describe('EmailAuthService.register', () => {
     const { svc, prisma } = build();
     await svc.register(EMAIL, STRONG_PASSWORD, undefined, 'PASSENGER');
     prisma.method0().emailVerified = true;
-    await expect(svc.register(EMAIL, STRONG_PASSWORD, undefined, 'PASSENGER')).rejects.toBeInstanceOf(
-      ConflictError,
-    );
+    await expect(
+      svc.register(EMAIL, STRONG_PASSWORD, undefined, 'PASSENGER'),
+    ).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('duplicado SIN verificar → reenvía código, no error, no crea otro método', async () => {
@@ -316,7 +326,15 @@ describe('EmailAuthService.verifyEmail', () => {
     await svc.verifyEmail(EMAIL, '123456');
 
     expect(prisma.write.outboxEvent.create).toHaveBeenCalledOnce();
-    const calls = prisma.write.outboxEvent.create.mock.calls as unknown as [{ data: { aggregateId: string; eventType: string; envelope: { payload: Record<string, unknown> } } }][];
+    const calls = prisma.write.outboxEvent.create.mock.calls as unknown as [
+      {
+        data: {
+          aggregateId: string;
+          eventType: string;
+          envelope: { payload: Record<string, unknown> };
+        };
+      },
+    ][];
     const arg = calls[0]![0];
     expect(arg.data.eventType).toBe('user.email_verified');
     expect(arg.data.aggregateId).toBe(userId);
@@ -345,7 +363,9 @@ describe('EmailAuthService.login', () => {
 
   it('correo inexistente → 401 genérico', async () => {
     const { svc } = build();
-    await expect(svc.login('nope@veo.pe', STRONG_PASSWORD)).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(svc.login('nope@veo.pe', STRONG_PASSWORD)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('verificado + password ok → emite tokens', async () => {
@@ -412,7 +432,13 @@ describe('EmailAuthService.register · account-linking (correo ya verificado en 
       data: { email: NORM, name: 'Ada', type: 'PASSENGER' },
     });
     await prisma.write.authMethod.create({
-      data: { userId: existingUser.id, type: 'GOOGLE', email: NORM, emailVerified: true, verified: true },
+      data: {
+        userId: existingUser.id,
+        type: 'GOOGLE',
+        email: NORM,
+        emailVerified: true,
+        verified: true,
+      },
     });
     const usersBefore = prisma._state.users.length;
 
@@ -487,7 +513,9 @@ describe('EmailAuthService.resetPassword', () => {
     const { svc, codes } = build();
     await svc.register(EMAIL, STRONG_PASSWORD, undefined, 'PASSENGER');
     codes.verify.mockClear();
-    await expect(svc.resetPassword(EMAIL, '123456', 'short')).rejects.toBeInstanceOf(ValidationError);
+    await expect(svc.resetPassword(EMAIL, '123456', 'short')).rejects.toBeInstanceOf(
+      ValidationError,
+    );
     expect(codes.verify).not.toHaveBeenCalled();
   });
 });

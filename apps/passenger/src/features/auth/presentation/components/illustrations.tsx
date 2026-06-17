@@ -1,7 +1,7 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
-import { hexAlpha, useTheme } from '@veo/ui-kit';
-import { IconCheck, IconPerson } from './icons';
+import {StyleSheet, View} from 'react-native';
+import {hexAlpha, useTheme} from '@veo/ui-kit';
+import {IconCheck, IconPerson} from './icons';
 
 /**
  * Ilustraciones de marca del onboarding, compuestas con Views (sin `react-native-svg`, ausente en
@@ -10,7 +10,13 @@ import { IconCheck, IconPerson } from './icons';
  */
 
 /** Punto de destino tipo pin de mapa (círculo lima con cola). */
-function MapPin({ size = 22, color }: { size?: number; color: string }): React.JSX.Element {
+function MapPin({
+  size = 22,
+  color,
+}: {
+  size?: number;
+  color: string;
+}): React.JSX.Element {
   const theme = useTheme();
   return (
     <View style={styles.center}>
@@ -22,8 +28,7 @@ function MapPin({ size = 22, color }: { size?: number; color: string }): React.J
           backgroundColor: color,
           alignItems: 'center',
           justifyContent: 'center',
-        }}
-      >
+        }}>
         <View
           style={{
             width: size * 0.34,
@@ -51,7 +56,13 @@ function MapPin({ size = 22, color }: { size?: number; color: string }): React.J
 }
 
 /** Origen anular hueco. */
-function OriginRing({ size = 16, color }: { size?: number; color: string }): React.JSX.Element {
+function OriginRing({
+  size = 16,
+  color,
+}: {
+  size?: number;
+  color: string;
+}): React.JSX.Element {
   const theme = useTheme();
   return (
     <View
@@ -98,7 +109,7 @@ function Segment({
         height: width,
         borderRadius: width / 2,
         backgroundColor: color,
-        transform: [{ rotate: `${angle}deg` }],
+        transform: [{rotate: `${angle}deg`}],
       }}
     />
   );
@@ -121,7 +132,9 @@ function Polyline({
         if (!from) {
           return null;
         }
-        return <Segment key={i} from={from} to={p} color={color} width={width} />;
+        return (
+          <Segment key={i} from={from} to={p} color={color} width={width} />
+        );
       })}
     </>
   );
@@ -138,26 +151,26 @@ export interface ArtProps {
  * Emblema de seguridad: insignia lima con halo, silueta de persona y un check de verificación,
  * con una traza de ruta hacia un pin de destino. Hero del slide "Viaja con quien debe ser".
  */
-export function SafetyArt({ width, height }: ArtProps): React.JSX.Element {
+export function SafetyArt({width, height}: ArtProps): React.JSX.Element {
   const theme = useTheme();
   const emblem = Math.min(width * 0.42, height * 0.74, 168);
 
-  const start: Pt = { x: emblem * 0.78, y: height * 0.74 };
-  const dest: Pt = { x: width * 0.9, y: height * 0.3 };
+  const start: Pt = {x: emblem * 0.78, y: height * 0.74};
+  const dest: Pt = {x: width * 0.9, y: height * 0.3};
   const route: Pt[] = [
     start,
-    { x: width * 0.6, y: height * 0.5 },
-    { x: width * 0.78, y: height * 0.58 },
+    {x: width * 0.6, y: height * 0.5},
+    {x: width * 0.78, y: height * 0.58},
     dest,
   ];
 
   return (
-    <View style={[styles.canvas, { width, height }]} pointerEvents="none">
+    <View style={[styles.canvas, {width, height}]} pointerEvents="none">
       <Polyline points={route} color={hexAlpha(theme.colors.brand, 0.55)} />
-      <View style={{ position: 'absolute', left: start.x - 8, top: start.y - 8 }}>
+      <View style={{position: 'absolute', left: start.x - 8, top: start.y - 8}}>
         <OriginRing color={theme.colors.brand} />
       </View>
-      <View style={{ position: 'absolute', left: dest.x - 11, top: dest.y - 26 }}>
+      <View style={{position: 'absolute', left: dest.x - 11, top: dest.y - 26}}>
         <MapPin color={theme.colors.brand} />
       </View>
 
@@ -170,11 +183,13 @@ export function SafetyArt({ width, height }: ArtProps): React.JSX.Element {
             borderRadius: emblem * 0.32,
             borderWidth: 2,
             borderColor: theme.colors.brand,
-            backgroundColor: hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.1 : 0.06),
+            backgroundColor: hexAlpha(
+              theme.colors.brand,
+              theme.scheme === 'dark' ? 0.1 : 0.06,
+            ),
             alignItems: 'center',
             justifyContent: 'center',
-          }}
-        >
+          }}>
           <IconPerson color={theme.colors.brand} size={emblem * 0.5} />
           {/* Check de verificación en la esquina inferior. */}
           <View
@@ -188,8 +203,7 @@ export function SafetyArt({ width, height }: ArtProps): React.JSX.Element {
               backgroundColor: theme.colors.brand,
               alignItems: 'center',
               justifyContent: 'center',
-            }}
-          >
+            }}>
             <IconCheck color={theme.colors.onBrand} size={emblem * 0.16} />
           </View>
         </View>
@@ -202,21 +216,21 @@ export function SafetyArt({ width, height }: ArtProps): React.JSX.Element {
  * Mini-mapa estilizado con cuadrícula tenue y ruta lima entre origen y destino. Hero del slide
  * "Precio claro antes de subir".
  */
-export function PriceMapArt({ width, height }: ArtProps): React.JSX.Element {
+export function PriceMapArt({width, height}: ArtProps): React.JSX.Element {
   const theme = useTheme();
   const gridColor = hexAlpha(theme.colors.inkSubtle, 0.16);
 
   const verticals = [0.22, 0.46, 0.7];
   const horizontals = [0.3, 0.62];
 
-  const origin: Pt = { x: width * 0.16, y: height * 0.5 };
-  const dest: Pt = { x: width * 0.84, y: height * 0.34 };
+  const origin: Pt = {x: width * 0.16, y: height * 0.5};
+  const dest: Pt = {x: width * 0.84, y: height * 0.34};
   const route: Pt[] = [
     origin,
-    { x: width * 0.34, y: height * 0.5 },
-    { x: width * 0.46, y: height * 0.66 },
-    { x: width * 0.62, y: height * 0.66 },
-    { x: width * 0.7, y: height * 0.34 },
+    {x: width * 0.34, y: height * 0.5},
+    {x: width * 0.46, y: height * 0.66},
+    {x: width * 0.62, y: height * 0.66},
+    {x: width * 0.7, y: height * 0.34},
     dest,
   ];
 
@@ -224,28 +238,47 @@ export function PriceMapArt({ width, height }: ArtProps): React.JSX.Element {
     <View
       style={[
         styles.map,
-        { width, height, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surface },
+        {
+          width,
+          height,
+          borderRadius: theme.radii.lg,
+          backgroundColor: theme.colors.surface,
+        },
       ]}
-      pointerEvents="none"
-    >
+      pointerEvents="none">
       {verticals.map((v, i) => (
         <View
           key={`v${i}`}
-          style={{ position: 'absolute', left: width * v, top: 0, bottom: 0, width: 1, backgroundColor: gridColor }}
+          style={{
+            position: 'absolute',
+            left: width * v,
+            top: 0,
+            bottom: 0,
+            width: 1,
+            backgroundColor: gridColor,
+          }}
         />
       ))}
       {horizontals.map((h, i) => (
         <View
           key={`h${i}`}
-          style={{ position: 'absolute', top: height * h, left: 0, right: 0, height: 1, backgroundColor: gridColor }}
+          style={{
+            position: 'absolute',
+            top: height * h,
+            left: 0,
+            right: 0,
+            height: 1,
+            backgroundColor: gridColor,
+          }}
         />
       ))}
 
       <Polyline points={route} color={theme.colors.brand} width={5} />
-      <View style={{ position: 'absolute', left: origin.x - 8, top: origin.y - 8 }}>
+      <View
+        style={{position: 'absolute', left: origin.x - 8, top: origin.y - 8}}>
         <OriginRing color={theme.colors.brand} />
       </View>
-      <View style={{ position: 'absolute', left: dest.x - 11, top: dest.y - 26 }}>
+      <View style={{position: 'absolute', left: dest.x - 11, top: dest.y - 26}}>
         <MapPin color={theme.colors.brand} />
       </View>
     </View>
@@ -256,13 +289,13 @@ export function PriceMapArt({ width, height }: ArtProps): React.JSX.Element {
  * Emblema de privacidad: insignia de seguridad central flanqueada por un candado y un vehículo,
  * unidos por trazas de energía. Hero del slide de consentimientos.
  */
-export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
+export function ConsentArt({width, height}: ArtProps): React.JSX.Element {
   const theme = useTheme();
   const emblem = Math.min(height * 0.82, 120);
   const sideY = height * 0.5;
 
   return (
-    <View style={[styles.canvas, { width, height }]} pointerEvents="none">
+    <View style={[styles.canvas, {width, height}]} pointerEvents="none">
       {/* Trazas laterales. */}
       <View
         style={{
@@ -286,7 +319,7 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
       />
 
       {/* Candado (izquierda). */}
-      <View style={{ position: 'absolute', left: width * 0.1, top: sideY - 16 }}>
+      <View style={{position: 'absolute', left: width * 0.1, top: sideY - 16}}>
         <View
           style={{
             width: 18,
@@ -310,7 +343,7 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
       </View>
 
       {/* Vehículo (derecha). */}
-      <View style={{ position: 'absolute', right: width * 0.1, top: sideY - 8 }}>
+      <View style={{position: 'absolute', right: width * 0.1, top: sideY - 8}}>
         <View
           style={{
             width: 34,
@@ -323,8 +356,8 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
           }}
         />
         <View style={styles.carWheels}>
-          <View style={[styles.wheel, { backgroundColor: theme.colors.bg }]} />
-          <View style={[styles.wheel, { backgroundColor: theme.colors.bg }]} />
+          <View style={[styles.wheel, {backgroundColor: theme.colors.bg}]} />
+          <View style={[styles.wheel, {backgroundColor: theme.colors.bg}]} />
         </View>
       </View>
 
@@ -338,8 +371,7 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
             backgroundColor: theme.colors.brand,
             alignItems: 'center',
             justifyContent: 'center',
-          }}
-        >
+          }}>
           <IconPerson color={theme.colors.onBrand} size={emblem * 0.52} />
         </View>
       </View>
@@ -348,9 +380,18 @@ export function ConsentArt({ width, height }: ArtProps): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  canvas: { position: 'relative' },
-  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
-  map: { overflow: 'hidden' },
-  carWheels: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginTop: -3 },
-  wheel: { width: 6, height: 6, borderRadius: 3 },
+  canvas: {position: 'relative'},
+  center: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  map: {overflow: 'hidden'},
+  carWheels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    marginTop: -3,
+  },
+  wheel: {width: 6, height: 6, borderRadius: 3},
 });

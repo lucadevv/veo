@@ -1,6 +1,6 @@
-import {create} from 'zustand';
-import type {Message} from '../../domain';
-import {isOwnMessage, mergeMessages, upsertMessage} from '../../domain';
+import { create } from 'zustand';
+import type { Message } from '../../domain';
+import { isOwnMessage, mergeMessages, upsertMessage } from '../../domain';
 
 /** Estado del chat de UN viaje: mensajes ordenados + no leídos del pasajero. */
 interface TripChat {
@@ -8,7 +8,7 @@ interface TripChat {
   unread: number;
 }
 
-const emptyChat: TripChat = {messages: [], unread: 0};
+const emptyChat: TripChat = { messages: [], unread: 0 };
 
 /**
  * Estado en vivo del chat por viaje (Zustand). Es estado de sesión/UI en vivo (no cacheable como
@@ -39,52 +39,60 @@ function chatOf(state: ChatState, tripId: string): TripChat {
 export const useChatStore = create<ChatState>((set, get) => ({
   byTrip: {},
 
-  receiveMessage: message => {
+  receiveMessage: (message) => {
     const current = chatOf(get(), message.tripId);
     const messages = upsertMessage(current.messages, message);
     // No incrementamos no leídos por nuestro propio eco (DRIVER) ni si el mensaje ya estaba.
     const isNew = messages.length > current.messages.length;
     const unread = isOwnMessage(message) || !isNew ? current.unread : current.unread + 1;
-    set(state => ({byTrip: {...state.byTrip, [message.tripId]: {messages, unread}}}));
+    set((state) => ({ byTrip: { ...state.byTrip, [message.tripId]: { messages, unread } } }));
   },
 
   hydrate: (tripId, history) => {
     const current = chatOf(get(), tripId);
     const messages = mergeMessages(current.messages, history);
-    set(state => ({byTrip: {...state.byTrip, [tripId]: {messages, unread: current.unread}}}));
+    set((state) => ({
+      byTrip: { ...state.byTrip, [tripId]: { messages, unread: current.unread } },
+    }));
   },
 
-  appendOwn: message => {
+  appendOwn: (message) => {
     const current = chatOf(get(), message.tripId);
     const messages = upsertMessage(current.messages, message);
-    set(state => ({byTrip: {...state.byTrip, [message.tripId]: {messages, unread: current.unread}}}));
+    set((state) => ({
+      byTrip: { ...state.byTrip, [message.tripId]: { messages, unread: current.unread } },
+    }));
   },
 
-  markRead: tripId => {
+  markRead: (tripId) => {
     const current = chatOf(get(), tripId);
     if (current.unread === 0) {
       return;
     }
-    set(state => ({byTrip: {...state.byTrip, [tripId]: {...current, unread: 0}}}));
+    set((state) => ({ byTrip: { ...state.byTrip, [tripId]: { ...current, unread: 0 } } }));
   },
 
-  clear: tripId =>
-    set(state => {
+  clear: (tripId) =>
+    set((state) => {
       if (!(tripId in state.byTrip)) {
         return state;
       }
       const rest = Object.fromEntries(Object.entries(state.byTrip).filter(([id]) => id !== tripId));
-      return {byTrip: rest};
+      return { byTrip: rest };
     }),
 }));
 
 /** Selector: mensajes ordenados del viaje (lista estable vacía si no hay chat). */
-export const selectMessages = (tripId: string) => (state: ChatState): Message[] =>
-  state.byTrip[tripId]?.messages ?? EMPTY_MESSAGES;
+export const selectMessages =
+  (tripId: string) =>
+  (state: ChatState): Message[] =>
+    state.byTrip[tripId]?.messages ?? EMPTY_MESSAGES;
 
 /** Selector: nº de mensajes no leídos del pasajero en el viaje. */
-export const selectUnread = (tripId: string) => (state: ChatState): number =>
-  state.byTrip[tripId]?.unread ?? 0;
+export const selectUnread =
+  (tripId: string) =>
+  (state: ChatState): number =>
+    state.byTrip[tripId]?.unread ?? 0;
 
 /** Referencia estable para evitar re-renders cuando no hay chat para el viaje. */
 const EMPTY_MESSAGES: Message[] = [];

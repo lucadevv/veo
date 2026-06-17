@@ -30,15 +30,14 @@ import {
  * `RegistrationRepository`, no de esta clase.
  */
 export class StubRegistrationRepository implements RegistrationRepository {
-   
   async submit(_draft: RegistrationDraft): Promise<RegistrationSubmissionResult> {
     await delay(600);
-    return {status: 'in_review'};
+    return { status: 'in_review' };
   }
 
   async updatePersonalData(input: PersonalDataInput): Promise<PersonalDataView> {
     await delay(400);
-    return {legalName: input.legalName, dni: input.dni, birthDate: input.birthDate};
+    return { legalName: input.legalName, dni: input.dni, birthDate: input.birthDate };
   }
 
   async registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {
@@ -57,20 +56,49 @@ export class StubRegistrationRepository implements RegistrationRepository {
     };
   }
 
-  async listVehicleModels(params: {vehicleType: VehicleType}): Promise<VehicleModelOption[]> {
+  async listVehicleModels(params: { vehicleType: VehicleType }): Promise<VehicleModelOption[]> {
     await delay(200);
     // Catálogo de muestra para el flujo de UI local (sin backend). Filtra por tipo como el real.
     const all: VehicleModelOption[] = [
-      {id: 'dev-yaris', make: 'Toyota', model: 'Yaris', yearFrom: 2017, yearTo: 2024, vehicleType: VehicleType.CAR, seats: 5},
-      {id: 'dev-i10', make: 'Hyundai', model: 'i10', yearFrom: 2018, yearTo: 2024, vehicleType: VehicleType.CAR, seats: 5},
-      {id: 'dev-bajaj', make: 'Bajaj', model: 'RE', yearFrom: 2018, yearTo: 2024, vehicleType: VehicleType.MOTO, seats: 3},
+      {
+        id: 'dev-yaris',
+        make: 'Toyota',
+        model: 'Yaris',
+        yearFrom: 2017,
+        yearTo: 2024,
+        vehicleType: VehicleType.CAR,
+        seats: 5,
+      },
+      {
+        id: 'dev-i10',
+        make: 'Hyundai',
+        model: 'i10',
+        yearFrom: 2018,
+        yearTo: 2024,
+        vehicleType: VehicleType.CAR,
+        seats: 5,
+      },
+      {
+        id: 'dev-bajaj',
+        make: 'Bajaj',
+        model: 'RE',
+        yearFrom: 2018,
+        yearTo: 2024,
+        vehicleType: VehicleType.MOTO,
+        seats: 3,
+      },
     ];
-    return all.filter(m => m.vehicleType === params.vehicleType);
+    return all.filter((m) => m.vehicleType === params.vehicleType);
   }
 
   async requestVehicleModel(input: VehicleModelRequestInput): Promise<VehicleModelRequestResult> {
     await delay(400);
-    return {id: `dev-model-req-${Date.now()}`, make: input.make, model: input.model, status: 'PENDING_REVIEW'};
+    return {
+      id: `dev-model-req-${Date.now()}`,
+      make: input.make,
+      model: input.model,
+      status: 'PENDING_REVIEW',
+    };
   }
 
   async listVehicles(): Promise<VehicleView[]> {
@@ -114,26 +142,24 @@ export class StubRegistrationRepository implements RegistrationRepository {
     };
   }
 
-   
   async onboardLicense(_input: LicenseOnboardInput): Promise<void> {
     await delay(400);
   }
 
-   
   async enrollBiometric(_input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     await delay(500);
-    return {enrolled: true, enrolledAt: new Date().toISOString()};
+    return { enrolled: true, enrolledAt: new Date().toISOString() };
   }
 
   async resubmit(): Promise<ResubmitResult> {
     await delay(400);
-    return {id: `dev-driver-${Date.now()}`, backgroundCheckStatus: 'PENDING'};
+    return { id: `dev-driver-${Date.now()}`, backgroundCheckStatus: 'PENDING' };
   }
 }
 
 /** Pequeña espera para simular la latencia de red (solo en el stub). */
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Instancia compartida del repositorio stub (doble de pruebas / fallback local). */

@@ -16,14 +16,20 @@ export class TokenIssuerService {
   ) {}
 
   /** Crea sesión + firma access/refresh para `userId`. `user` es el bloque público devuelto al cliente. */
-  async issue(
-    userId: string,
-    typ: SubjectType,
-    user: AuthTokens['user'],
-  ): Promise<AuthTokens> {
+  async issue(userId: string, typ: SubjectType, user: AuthTokens['user']): Promise<AuthTokens> {
     const { sessionId, newJti } = await this.sessions.createSession(userId);
-    const accessToken = await this.jwt.signAccessToken({ sub: userId, typ, roles: [], sid: sessionId });
-    const refreshToken = await this.jwt.signRefreshToken({ sub: userId, sid: sessionId, jti: newJti, typ });
+    const accessToken = await this.jwt.signAccessToken({
+      sub: userId,
+      typ,
+      roles: [],
+      sid: sessionId,
+    });
+    const refreshToken = await this.jwt.signRefreshToken({
+      sub: userId,
+      sid: sessionId,
+      jti: newJti,
+      typ,
+    });
     return { accessToken, refreshToken, user };
   }
 }

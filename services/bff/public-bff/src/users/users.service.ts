@@ -96,7 +96,10 @@ export class UsersService {
    * propagando la identidad firmada del pasajero. identity reusa la infra OTP del login.
    */
   requestPhoneLink(user: AuthenticatedUser, dto: RequestPhoneLinkDto): Promise<{ sent: true }> {
-    return this.identity.post<{ sent: true }>('/users/me/phone/request', { identity: user, body: dto });
+    return this.identity.post<{ sent: true }>('/users/me/phone/request', {
+      identity: user,
+      body: dto,
+    });
   }
 
   /**

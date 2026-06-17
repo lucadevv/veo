@@ -1,11 +1,26 @@
-import type { OfferView } from '@veo/api-client';
-import { Avatar, Banner, Button, Card, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import React, { useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import { IconStarFilled } from './icons';
+import type {OfferView} from '@veo/api-client';
+import {
+  Avatar,
+  Banner,
+  Button,
+  Card,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useEffect, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {
+  formatDurationMinutes,
+  formatPEN,
+} from '../../../../shared/utils/format';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {IconStarFilled} from './icons';
 
 /**
  * F1/F2 · Ventana de búsqueda (default ratificado §9 = 60s, usado SÓLO de fallback). El countdown es
@@ -38,7 +53,7 @@ function formatCountdown(secondsLeft: number): string {
 function useSearchCountdown(
   active: boolean,
   expiresAt: number | null,
-): { secondsLeft: number; elapsed: boolean } {
+): {secondsLeft: number; elapsed: boolean} {
   // Ancla del fallback local: el instante de montaje en fase searching, sembrado una sola vez. Sólo se
   // usa mientras el board todavía no entregó su `expiresAt` autoritativo.
   const startRef = useRef<number | null>(null);
@@ -57,7 +72,8 @@ function useSearchCountdown(
           ? // AUTORITATIVO: cuánto falta para el vencimiento real del board.
             expiresAt - Date.now()
           : // FALLBACK local: 60s desde el montaje (sólo hasta que el board entregue su expiresAt).
-            SEARCH_WINDOW_SECONDS * 1000 - (Date.now() - (startRef.current as number));
+            SEARCH_WINDOW_SECONDS * 1000 -
+            (Date.now() - (startRef.current as number));
       setSecondsLeft(Math.max(0, remainingMs / 1000));
     };
     tick();
@@ -65,7 +81,7 @@ function useSearchCountdown(
     return () => clearInterval(id);
   }, [active, expiresAt]);
 
-  return { secondsLeft, elapsed: secondsLeft <= 0 };
+  return {secondsLeft, elapsed: secondsLeft <= 0};
 }
 
 export interface OffersBodyProps {
@@ -108,13 +124,13 @@ export function OffersBody({
   actionError,
 }: OffersBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // F1 · countdown VISUAL de la búsqueda, activo solo mientras buscamos de verdad (sin ofertas, no
   // expirado, sin error/carga). No decide la fase: cuando el backend confirma EXPIRED, el screen pasa
   // a `noOffers` y desmonta este cuerpo.
   const searching = !isError && !isLoading && !expired && offers.length === 0;
-  const { secondsLeft, elapsed } = useSearchCountdown(searching, expiresAt);
+  const {secondsLeft, elapsed} = useSearchCountdown(searching, expiresAt);
 
   const body = isError ? (
     <ErrorState onRetry={onRetry} />
@@ -122,33 +138,48 @@ export function OffersBody({
     <LoadingState lines={3} />
   ) : offers.length === 0 ? (
     expired ? (
-      <EmptyState title={t('offers.noneTitle')} subtitle={t('offers.noneBody')} />
+      <EmptyState
+        title={t('offers.noneTitle')}
+        subtitle={t('offers.noneBody')}
+      />
     ) : elapsed ? (
       // Countdown agotado pero el backend aún no confirmó EXPIRED: spinner HONESTO, sin botón roto.
       // Esperamos la verdad del server (el sweeper expira a los 60s + margen) → luego fase noOffers.
       <View style={styles.takingLong}>
         <ActivityIndicator color={theme.colors.accent} />
-        <EmptyState title={t('offers.takingLongTitle')} subtitle={t('offers.takingLongBody')} />
+        <EmptyState
+          title={t('offers.takingLongTitle')}
+          subtitle={t('offers.takingLongBody')}
+        />
       </View>
     ) : (
       <EmptyState
-        title={t('offers.waitingCountdown', { time: formatCountdown(secondsLeft) })}
+        title={t('offers.waitingCountdown', {
+          time: formatCountdown(secondsLeft),
+        })}
         subtitle={t('offers.waitingBody')}
       />
     )
   ) : (
-    <View style={{ gap: theme.spacing.sm }}>
-      {offers.map((offer) => (
-        <OfferCard key={offer.driverId} offer={offer} onChoose={() => onChoose(offer)} choosing={choosing} />
+    <View style={{gap: theme.spacing.sm}}>
+      {offers.map(offer => (
+        <OfferCard
+          key={offer.driverId}
+          offer={offer}
+          onChoose={() => onChoose(offer)}
+          choosing={choosing}
+        />
       ))}
     </View>
   );
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text variant="title3">{t('offers.title', { count: offers.length })}</Text>
+        <View style={{flex: 1}}>
+          <Text variant="title3">
+            {t('offers.title', {count: offers.length})}
+          </Text>
           <Text variant="footnote" color="inkMuted">
             {t('offers.chooseHint')}
           </Text>
@@ -163,7 +194,9 @@ export function OffersBody({
 
       {body}
 
-      {actionError ? <Banner tone="danger" title={t('offers.actionError')} /> : null}
+      {actionError ? (
+        <Banner tone="danger" title={t('offers.actionError')} />
+      ) : null}
 
       <Button
         label={t('offers.cancel')}
@@ -188,16 +221,21 @@ function OfferCard({
   choosing: boolean;
 }): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const acceptsPrice = offer.kind === 'ACCEPT_PRICE';
 
   return (
-    <Card variant="outlined" padding="md" style={acceptsPrice ? { borderColor: theme.colors.accent } : undefined}>
+    <Card
+      variant="outlined"
+      padding="md"
+      style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
       <View style={styles.row}>
         <Avatar size="md" />
-        <View style={{ flex: 1, gap: theme.spacing.xxs }}>
+        <View style={{flex: 1, gap: theme.spacing.xxs}}>
           <View style={styles.nameRow}>
-            <Text variant="bodyStrong">{offer.driverName ?? t('offers.driver')}</Text>
+            <Text variant="bodyStrong">
+              {offer.driverName ?? t('offers.driver')}
+            </Text>
             {offer.rating != null ? (
               <View style={styles.ratingRow}>
                 <IconStarFilled color={theme.colors.warn} size={13} />
@@ -213,12 +251,20 @@ function OfferCard({
             </Text>
           ) : null}
           <Text variant="footnote" color={acceptsPrice ? 'safe' : 'inkMuted'}>
-            {acceptsPrice ? t('offers.acceptsPrice') : t('offers.proposesOther')} ·{' '}
-            {t('offers.etaMin', { minutes: formatDurationMinutes(offer.etaSeconds) })}
+            {acceptsPrice
+              ? t('offers.acceptsPrice')
+              : t('offers.proposesOther')}{' '}
+            ·{' '}
+            {t('offers.etaMin', {
+              minutes: formatDurationMinutes(offer.etaSeconds),
+            })}
           </Text>
         </View>
-        <View style={{ alignItems: 'flex-end', gap: theme.spacing.xs }}>
-          <Text variant="title3" color={acceptsPrice ? 'accent' : 'ink'} tabular>
+        <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
+          <Text
+            variant="title3"
+            color={acceptsPrice ? 'accent' : 'ink'}
+            tabular>
             {formatPEN(offer.priceCents)}
           </Text>
           <Button
@@ -236,9 +282,9 @@ function OfferCard({
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  takingLong: { alignItems: 'center', gap: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  takingLong: {alignItems: 'center', gap: 8},
+  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
 });

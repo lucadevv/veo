@@ -1,8 +1,8 @@
-import { BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
-import React, { useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { formatClock } from '../../../../shared/utils/format';
+import {BottomSheet, Button, Text, useTheme} from '@veo/ui-kit';
+import React, {useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {formatClock} from '../../../../shared/utils/format';
 import {
   type DayOption,
   scheduleDayOptions,
@@ -17,7 +17,15 @@ export interface ScheduleSheetProps {
 }
 
 /** Etiquetas cortas de día de semana en es-PE (0=domingo). */
-const WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'] as const;
+const WEEKDAY_LABELS = [
+  'Dom',
+  'Lun',
+  'Mar',
+  'Mié',
+  'Jue',
+  'Vie',
+  'Sáb',
+] as const;
 
 /**
  * Selector propio de fecha/hora para VIAJES PROGRAMADOS (no hay date-picker en el ui-kit). Diseño
@@ -26,9 +34,13 @@ const WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'] as co
  * anticipación), por lo que el resultado SIEMPRE cae en la ventana y el CTA no puede producir un
  * `scheduledFor` inválido. El backend revalida igual.
  */
-export function ScheduleSheet({ visible, onClose, onConfirm }: ScheduleSheetProps): React.JSX.Element {
+export function ScheduleSheet({
+  visible,
+  onClose,
+  onConfirm,
+}: ScheduleSheetProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // Días/horas se calculan a partir del momento en que se abre el sheet (estable mientras está abierto).
   const days = useMemo<DayOption[]>(
@@ -43,7 +55,10 @@ export function ScheduleSheet({ visible, onClose, onConfirm }: ScheduleSheetProp
   const activeDayStart = dayStart ?? days[0]?.startOfDay ?? null;
 
   const slots = useMemo<number[]>(
-    () => (activeDayStart !== null ? timeSlotsForDay(activeDayStart, new Date()) : []),
+    () =>
+      activeDayStart !== null
+        ? timeSlotsForDay(activeDayStart, new Date())
+        : [],
     [activeDayStart],
   );
 
@@ -82,22 +97,20 @@ export function ScheduleSheet({ visible, onClose, onConfirm }: ScheduleSheetProp
             }
           }}
         />
-      }
-    >
-      <View style={{ gap: theme.spacing.lg }}>
+      }>
+      <View style={{gap: theme.spacing.lg}}>
         <Text variant="callout" color="inkMuted">
           {t('schedule.subtitle')}
         </Text>
 
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Text variant="subhead" color="inkMuted">
             {t('schedule.day')}
           </Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: theme.spacing.sm }}
-          >
+            contentContainerStyle={{gap: theme.spacing.sm}}>
             {days.map((day, index) => (
               <Chip
                 key={day.startOfDay}
@@ -112,12 +125,12 @@ export function ScheduleSheet({ visible, onClose, onConfirm }: ScheduleSheetProp
           </ScrollView>
         </View>
 
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Text variant="subhead" color="inkMuted">
             {t('schedule.time')}
           </Text>
           <View style={styles.slotGrid}>
-            {slots.map((ts) => (
+            {slots.map(ts => (
               <Chip
                 key={ts}
                 label={formatClock(ts)}
@@ -141,15 +154,20 @@ interface ChipProps {
 }
 
 /** Chip seleccionable (día/hora): borde lima + fondo elevado cuando está activo (estado por borde, no solo color). */
-function Chip({ label, selected, onPress, tabular }: ChipProps): React.JSX.Element {
+function Chip({
+  label,
+  selected,
+  onPress,
+  tabular,
+}: ChipProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{selected}}
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({pressed}) => [
         styles.chip,
         {
           borderRadius: theme.radii.pill,
@@ -157,12 +175,16 @@ function Chip({ label, selected, onPress, tabular }: ChipProps): React.JSX.Eleme
           paddingVertical: theme.spacing.sm,
           borderWidth: selected ? 2 : 1,
           borderColor: selected ? theme.colors.accent : theme.colors.border,
-          backgroundColor: selected ? theme.colors.surfaceElevated : theme.colors.surface,
+          backgroundColor: selected
+            ? theme.colors.surfaceElevated
+            : theme.colors.surface,
           opacity: pressed ? 0.7 : 1,
         },
-      ]}
-    >
-      <Text variant="subhead" color={selected ? 'ink' : 'inkMuted'} tabular={tabular}>
+      ]}>
+      <Text
+        variant="subhead"
+        color={selected ? 'ink' : 'inkMuted'}
+        tabular={tabular}>
         {label}
       </Text>
     </Pressable>
@@ -170,6 +192,6 @@ function Chip({ label, selected, onPress, tabular }: ChipProps): React.JSX.Eleme
 }
 
 const styles = StyleSheet.create({
-  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { alignItems: 'center', justifyContent: 'center' },
+  slotGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  chip: {alignItems: 'center', justifyContent: 'center'},
 });

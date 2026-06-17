@@ -8,7 +8,11 @@
  *                   `KycFrameSource` que aísla el "grab frame" (sin lib de captura en este hilo).
  */
 export * from './domain/entities';
-export type { KycRepository, KycSubmission, KycSubmissionResult } from './domain/kycRepository';
+export type {
+  KycRepository,
+  KycSubmission,
+  KycSubmissionResult,
+} from './domain/kycRepository';
 export {
   RequestKycChallengeUseCase,
   SubmitKycUseCase,
@@ -16,4 +20,4 @@ export {
   MIN_KYC_FRAMES,
   MAX_KYC_FRAMES,
 } from './domain/usecases';
-export { KycCameraScreen } from './presentation';
+export {KycCameraScreen} from './presentation';

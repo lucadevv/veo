@@ -1,11 +1,24 @@
-import { Banner, Button, IconButton, SafeScreen, spacing, Text, TextField, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
-import { OtpField } from '../components/OtpField';
-import { OtpKeypad } from '../components/OtpKeypad';
-import { IconChevronLeft } from '../components/icons';
+import {
+  Banner,
+  Button,
+  IconButton,
+  SafeScreen,
+  spacing,
+  Text,
+  TextField,
+  TOUCH_TARGET,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {
+  FadeInView,
+  PressableScale,
+} from '../../../../shared/presentation/components/motion';
+import {OtpField} from '../components/OtpField';
+import {OtpKeypad} from '../components/OtpKeypad';
+import {IconChevronLeft} from '../components/icons';
 import {
   type EmailAuthErrorKind,
   isValidEmail,
@@ -49,9 +62,11 @@ function formatCountdown(totalSeconds: number): string {
  * y REUSO de OtpField/OtpKeypad para el código. Toggle iniciar sesión / crear cuenta. Tras
  * verify/login la sesión cambia y el RootNavigator conmuta solo (no se navega imperativamente).
  */
-export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Element {
+export function EmailAuthScreen({
+  onBack,
+}: EmailAuthScreenProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const flow = useEmailAuthFlow();
 
   const [step, setStep] = useState<EmailStep>('form');
@@ -73,7 +88,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
   // "Shake" del código en cada error de verificación.
   useEffect(() => {
     if (flow.verifyError || flow.resetError === 'invalidCode') {
-      setErrorNonce((n) => n + 1);
+      setErrorNonce(n => n + 1);
     }
   }, [flow.verifyError, flow.resetError]);
 
@@ -82,7 +97,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
     if (cooldown <= 0) {
       return;
     }
-    const timer = setTimeout(() => setCooldown((value) => value - 1), 1000);
+    const timer = setTimeout(() => setCooldown(value => value - 1), 1000);
     return () => clearTimeout(timer);
   }, [cooldown]);
 
@@ -251,7 +266,8 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
 
   /* ── Paso: código de verificación (reusa OtpField + OtpKeypad) ── */
   if (step === 'code') {
-    const showCodeError = (touched && code.length !== CODE_LENGTH) || Boolean(flow.verifyError);
+    const showCodeError =
+      (touched && code.length !== CODE_LENGTH) || Boolean(flow.verifyError);
     return (
       <SafeScreen
         scroll
@@ -265,15 +281,18 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
             disabled={code.length !== CODE_LENGTH}
             onPress={submitVerify}
           />
-        }
-      >
+        }>
         {backButton(backToForm)}
         <FadeInView style={styles.copy} offsetY={12}>
           <Text variant="display" align="center">
             {t('auth.email.verifyTitle')}
           </Text>
-          <Text variant="body" color="inkMuted" align="center" style={styles.subtitle}>
-            {t('auth.email.verifySubtitle', { email: maskedEmail })}
+          <Text
+            variant="body"
+            color="inkMuted"
+            align="center"
+            style={styles.subtitle}>
+            {t('auth.email.verifySubtitle', {email: maskedEmail})}
           </Text>
         </FadeInView>
 
@@ -281,13 +300,15 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           <Banner
             tone="danger"
             title={errorMessage(flow.verifyError) ?? ''}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
         <OtpField
           value={code}
-          onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH))}
+          onChangeText={value =>
+            setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH))
+          }
           length={CODE_LENGTH}
           hasError={showCodeError}
           errorNonce={errorNonce}
@@ -296,11 +317,17 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
 
         <View style={styles.keypad}>
           <OtpKeypad
-            onPress={(digit) => setCode((prev) => (prev + digit).slice(0, CODE_LENGTH))}
+            onPress={digit =>
+              setCode(prev => (prev + digit).slice(0, CODE_LENGTH))
+            }
           />
         </View>
 
-        <Text variant="footnote" color="inkSubtle" align="center" style={styles.expiry}>
+        <Text
+          variant="footnote"
+          color="inkSubtle"
+          align="center"
+          style={styles.expiry}>
           {t('auth.email.codeExpiry')}
         </Text>
 
@@ -309,7 +336,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           busy={flow.registering}
           onResend={resendCode}
           labelIdle={t('auth.email.resend')}
-          labelWaiting={t('auth.email.resendIn', { time: formatCountdown(cooldown) })}
+          labelWaiting={t('auth.email.resendIn', {
+            time: formatCountdown(cooldown),
+          })}
         />
       </SafeScreen>
     );
@@ -330,8 +359,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
             disabled={!emailValid}
             onPress={submitForgot}
           />
-        }
-      >
+        }>
         {backButton(backToForm)}
         <FadeInView style={styles.copy} offsetY={12}>
           <Text variant="display">{t('auth.email.forgotTitle')}</Text>
@@ -344,7 +372,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           <Banner
             tone="danger"
             title={errorMessage(flow.forgotError) ?? ''}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
@@ -353,7 +381,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           placeholder={t('auth.email.emailPlaceholder')}
           value={email}
           onChangeText={setEmail}
-          error={touched && !emailValid ? t('auth.email.invalidEmail') : undefined}
+          error={
+            touched && !emailValid ? t('auth.email.invalidEmail') : undefined
+          }
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
@@ -366,7 +396,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
 
   /* ── Paso: restablecer contraseña (código + nueva contraseña) ── */
   if (step === 'reset') {
-    const showCodeError = (touched && code.length !== CODE_LENGTH) || flow.resetError === 'invalidCode';
+    const showCodeError =
+      (touched && code.length !== CODE_LENGTH) ||
+      flow.resetError === 'invalidCode';
     return (
       <SafeScreen
         scroll
@@ -377,16 +409,17 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
             fullWidth
             size="lg"
             loading={flow.resetting}
-            disabled={code.length !== CODE_LENGTH || !isValidPassword(newPassword)}
+            disabled={
+              code.length !== CODE_LENGTH || !isValidPassword(newPassword)
+            }
             onPress={submitReset}
           />
-        }
-      >
+        }>
         {backButton(goToForgot)}
         <FadeInView style={styles.copy} offsetY={12}>
           <Text variant="display">{t('auth.email.resetTitle')}</Text>
           <Text variant="body" color="inkMuted" style={styles.subtitle}>
-            {t('auth.email.resetSubtitle', { email: maskedEmail })}
+            {t('auth.email.resetSubtitle', {email: maskedEmail})}
           </Text>
         </FadeInView>
 
@@ -394,7 +427,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           <Banner
             tone="info"
             title={t('auth.email.forgotSent')}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
@@ -402,7 +435,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           <Banner
             tone="danger"
             title={errorMessage(flow.resetError) ?? ''}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
@@ -411,7 +444,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
         </Text>
         <OtpField
           value={code}
-          onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH))}
+          onChangeText={value =>
+            setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH))
+          }
           length={CODE_LENGTH}
           hasError={Boolean(showCodeError)}
           errorNonce={errorNonce}
@@ -426,7 +461,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
             onChangeText={setNewPassword}
             helperText={t('auth.email.passwordHint')}
             error={
-              touched && !isValidPassword(newPassword) ? t('auth.email.invalidPassword') : undefined
+              touched && !isValidPassword(newPassword)
+                ? t('auth.email.invalidPassword')
+                : undefined
             }
             secureTextEntry
             autoCapitalize="none"
@@ -440,7 +477,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           busy={flow.forgetting}
           onResend={resendReset}
           labelIdle={t('auth.email.resend')}
-          labelWaiting={t('auth.email.resendIn', { time: formatCountdown(cooldown) })}
+          labelWaiting={t('auth.email.resendIn', {
+            time: formatCountdown(cooldown),
+          })}
         />
       </SafeScreen>
     );
@@ -449,13 +488,17 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
   /* ── Paso: formulario principal (toggle login / register) ── */
   const isRegister = mode === 'register';
   const formError = isRegister ? flow.registerError : flow.loginError;
-  const submitDisabled = isRegister ? !emailValid || !passwordValid : !emailValid || password.length < 1;
+  const submitDisabled = isRegister
+    ? !emailValid || !passwordValid
+    : !emailValid || password.length < 1;
   return (
     <SafeScreen
       scroll
       footer={
         <Button
-          label={isRegister ? t('auth.email.registerCta') : t('auth.email.loginCta')}
+          label={
+            isRegister ? t('auth.email.registerCta') : t('auth.email.loginCta')
+          }
           variant="accent"
           fullWidth
           size="lg"
@@ -463,8 +506,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           disabled={submitDisabled}
           onPress={isRegister ? submitRegister : submitLogin}
         />
-      }
-    >
+      }>
       {backButton(onBack)}
 
       <FadeInView style={styles.copy} offsetY={12}>
@@ -480,9 +522,12 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
         accessibilityLabel={t('auth.email.tabsLabel')}
         style={[
           styles.segment,
-          { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md, borderColor: theme.colors.border },
-        ]}
-      >
+          {
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radii.md,
+            borderColor: theme.colors.border,
+          },
+        ]}>
         <SegmentTab
           label={t('auth.email.tabLogin')}
           active={!isRegister}
@@ -499,7 +544,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
         <Banner
           tone="success"
           title={t('auth.email.resetDone')}
-          style={{ marginBottom: theme.spacing.lg }}
+          style={{marginBottom: theme.spacing.lg}}
         />
       ) : null}
 
@@ -507,7 +552,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
         <Banner
           tone="danger"
           title={errorMessage(formError) ?? ''}
-          style={{ marginBottom: theme.spacing.lg }}
+          style={{marginBottom: theme.spacing.lg}}
         />
       ) : null}
 
@@ -517,7 +562,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           placeholder={t('auth.email.emailPlaceholder')}
           value={email}
           onChangeText={setEmail}
-          error={touched && !emailValid ? t('auth.email.invalidEmail') : undefined}
+          error={
+            touched && !emailValid ? t('auth.email.invalidEmail') : undefined
+          }
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
@@ -532,7 +579,9 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           onChangeText={setPassword}
           helperText={isRegister ? t('auth.email.passwordHint') : undefined}
           error={
-            isRegister && touched && !passwordValid ? t('auth.email.invalidPassword') : undefined
+            isRegister && touched && !passwordValid
+              ? t('auth.email.invalidPassword')
+              : undefined
           }
           secureTextEntry
           autoCapitalize="none"
@@ -559,8 +608,7 @@ export function EmailAuthScreen({ onBack }: EmailAuthScreenProps): React.JSX.Ele
           accessibilityLabel={t('auth.email.forgotCta')}
           hitSlop={8}
           onPress={goToForgot}
-          contentStyle={styles.forgotLink}
-        >
+          contentStyle={styles.forgotLink}>
           <Text variant="subhead" color="accent">
             {t('auth.email.forgotCta')}
           </Text>
@@ -577,23 +625,28 @@ interface SegmentTabProps {
 }
 
 /** Pestaña del segmented control (login/register). */
-function SegmentTab({ label, active, onPress }: SegmentTabProps): React.JSX.Element {
+function SegmentTab({
+  label,
+  active,
+  onPress,
+}: SegmentTabProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <PressableScale
       accessibilityRole="tab"
       accessibilityLabel={label}
-      accessibilityState={{ selected: active }}
+      accessibilityState={{selected: active}}
       onPress={onPress}
       style={styles.segmentTabPressable}
       contentStyle={[
         styles.segmentTab,
         {
-          backgroundColor: active ? theme.colors.surfaceElevated : 'transparent',
+          backgroundColor: active
+            ? theme.colors.surfaceElevated
+            : 'transparent',
           borderRadius: theme.radii.sm,
         },
-      ]}
-    >
+      ]}>
       <Text variant="bodyStrong" color={active ? 'ink' : 'inkMuted'}>
         {label}
       </Text>
@@ -610,14 +663,20 @@ interface ResendRowProps {
 }
 
 /** Fila de reenvío del código con cuenta regresiva (mismo patrón visual que el OTP). */
-function ResendRow({ cooldown, busy, onResend, labelIdle, labelWaiting }: ResendRowProps): React.JSX.Element {
+function ResendRow({
+  cooldown,
+  busy,
+  onResend,
+  labelIdle,
+  labelWaiting,
+}: ResendRowProps): React.JSX.Element {
   const theme = useTheme();
   const disabled = cooldown > 0 || busy;
   return (
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={cooldown > 0 ? labelWaiting : labelIdle}
-      accessibilityState={{ disabled }}
+      accessibilityState={{disabled}}
       disabled={disabled}
       onPress={onResend}
       contentStyle={[
@@ -627,8 +686,7 @@ function ResendRow({ cooldown, busy, onResend, labelIdle, labelWaiting }: Resend
           borderRadius: theme.radii.md,
           opacity: disabled ? 0.55 : 1,
         },
-      ]}
-    >
+      ]}>
       <Text variant="bodyStrong" color="inkMuted" tabular>
         {cooldown > 0 ? labelWaiting : labelIdle}
       </Text>
@@ -637,11 +695,15 @@ function ResendRow({ cooldown, busy, onResend, labelIdle, labelWaiting }: Resend
 }
 
 const styles = StyleSheet.create({
-  backRow: { marginTop: spacing.xs, marginBottom: spacing.sm, alignItems: 'flex-start' },
-  copy: { gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing['2xl'] },
+  backRow: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  copy: {gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing['2xl']},
   subtitle: {},
-  fields: { gap: 18 },
-  fieldLabel: { marginBottom: spacing.sm },
+  fields: {gap: 18},
+  fieldLabel: {marginBottom: spacing.sm},
   segment: {
     flexDirection: 'row',
     padding: spacing.xs,
@@ -649,16 +711,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: spacing.xl,
   },
-  segmentTabPressable: { flex: 1 },
+  segmentTabPressable: {flex: 1},
   segmentTab: {
     minHeight: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  forgotLink: { alignSelf: 'flex-start', marginTop: spacing.lg, paddingVertical: spacing.sm },
-  keypad: { marginTop: 18 },
-  expiry: { marginTop: 18 },
-  resetPassword: { marginTop: 18 },
+  forgotLink: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  keypad: {marginTop: 18},
+  expiry: {marginTop: 18},
+  resetPassword: {marginTop: 18},
   resendRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -14,4 +14,4 @@ import type {
 export type SupportTicketView = SupportTicket;
 export type SupportTicketListView = SupportTicketList;
 export type CreateTicketInput = CreateTicketRequest;
-export type {SupportCategory, SupportStatus};
+export type { SupportCategory, SupportStatus };

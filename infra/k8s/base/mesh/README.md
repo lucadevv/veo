@@ -17,10 +17,10 @@ los manifests de los servicios.
 
 ## Componentes en este directorio
 
-| Archivo | Qué es | Cuándo se aplica |
-|---|---|---|
-| `cert-manager-trust-anchor.yaml` | CA raíz + Issuer de identidad de Linkerd vía cert-manager | Una vez por cluster (namespace `linkerd`) |
-| `linkerd-inject-patch.yaml` | Patch Kustomize que añade `linkerd.io/inject: enabled` a todos los Deployments del overlay | Se referencia como `patches` en el overlay |
+| Archivo                          | Qué es                                                                                     | Cuándo se aplica                           |
+| -------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `cert-manager-trust-anchor.yaml` | CA raíz + Issuer de identidad de Linkerd vía cert-manager                                  | Una vez por cluster (namespace `linkerd`)  |
+| `linkerd-inject-patch.yaml`      | Patch Kustomize que añade `linkerd.io/inject: enabled` a todos los Deployments del overlay | Se referencia como `patches` en el overlay |
 
 > Estos archivos **no** se incluyen en `k8s/base/kustomization.yaml` por defecto:
 > el control-plane de Linkerd y cert-manager se instalan a nivel de cluster
@@ -59,7 +59,7 @@ Añadir el patch de inyección al overlay (mismo mecanismo que `replicas.yaml`):
 patches:
   - path: replicas.yaml
     target: { kind: Deployment }
-  - path: ../../base/mesh/linkerd-inject-patch.yaml   # <-- activar mTLS
+  - path: ../../base/mesh/linkerd-inject-patch.yaml # <-- activar mTLS
     target: { kind: Deployment }
 ```
 
@@ -75,7 +75,7 @@ linkerd viz edges deployment -n veo-prod   # debe mostrar src/dst "√ (mTLS)"
 Aunque el mesh aún no esté inyectado, el repositorio mantiene:
 
 - **NetworkPolicies default-deny** (`k8s/base/networkpolicies/default-deny.yaml`)
-  + allowlist explícita por flujo. Esto da segmentación L3/L4 incluso sin mTLS.
+  - allowlist explícita por flujo. Esto da segmentación L3/L4 incluso sin mTLS.
 - Una vez inyectado Linkerd, el mTLS añade autenticación/cifrado L7 sobre esa
   segmentación (defensa en profundidad).
 

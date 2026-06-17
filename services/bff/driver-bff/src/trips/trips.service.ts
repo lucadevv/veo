@@ -7,14 +7,28 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ExternalServiceError, ForbiddenError, NotFoundError } from '@veo/utils';
-import { isOnboard, normalizeTripStatus, type RespondWaypointView, type TripStatus } from '@veo/api-client';
+import {
+  isOnboard,
+  normalizeTripStatus,
+  type RespondWaypointView,
+  type TripStatus,
+} from '@veo/api-client';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { LatLon, MapsClient } from '@veo/maps';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import { MAPS } from '../infra/maps.client';
 import type { DriverReply, TripReply, TripStateReply } from '../common/grpc-replies';
-import type { AcceptTripDto, ArrivingTripDto, CancelTripDto, CompleteTripDto, StartTripDto, TripRouteView, TripStateView, TripView } from './dto/trips.dto';
+import type {
+  AcceptTripDto,
+  ArrivingTripDto,
+  CancelTripDto,
+  CompleteTripDto,
+  StartTripDto,
+  TripRouteView,
+  TripStateView,
+  TripView,
+} from './dto/trips.dto';
 
 /** Recurso del viaje tal como lo devuelve trip-service por REST (campos que necesita la navegación). */
 interface TripResourceReply {
@@ -179,17 +193,26 @@ export class TripsService {
   // accept/arriving/arrived. Mismo patrón que start/complete/cancel.
   async accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/accept`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/accept`, {
+      identity: { ...identity, driverId },
+      body: { ...dto, driverId },
+    });
   }
 
   async arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arriving`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/arriving`, {
+      identity: { ...identity, driverId },
+      body: { ...dto, driverId },
+    });
   }
 
   async arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arrived`, { identity: { ...identity, driverId }, body: { driverId } });
+    return this.trip().post(`/trips/${id}/arrived`, {
+      identity: { ...identity, driverId },
+      body: { driverId },
+    });
   }
 
   /**
@@ -200,7 +223,10 @@ export class TripsService {
    */
   async start(id: string, dto: StartTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/start`, { identity: { ...identity, driverId }, body: { ...dto, driverId } });
+    return this.trip().post(`/trips/${id}/start`, {
+      identity: { ...identity, driverId },
+      body: { ...dto, driverId },
+    });
   }
 
   /**

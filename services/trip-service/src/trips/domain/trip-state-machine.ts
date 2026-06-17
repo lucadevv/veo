@@ -102,9 +102,7 @@ export const TRIP_TRANSITIONS: Readonly<Record<TripStatus, readonly TripStatus[]
 
 /** Estados terminales (sin transiciones de salida). */
 export const TERMINAL_STATES: ReadonlySet<TripStatus> = new Set(
-  (Object.keys(TRIP_TRANSITIONS) as TripStatus[]).filter(
-    (s) => TRIP_TRANSITIONS[s].length === 0,
-  ),
+  (Object.keys(TRIP_TRANSITIONS) as TripStatus[]).filter((s) => TRIP_TRANSITIONS[s].length === 0),
 );
 
 /**
@@ -120,8 +118,7 @@ export const TERMINAL_STATES: ReadonlySet<TripStatus> = new Set(
  */
 export const LIVE_STATES: ReadonlySet<TripStatus> = new Set(
   (Object.keys(TRIP_TRANSITIONS) as TripStatus[]).filter(
-    (s) =>
-      !TERMINAL_STATES.has(s) && s !== TripStatus.SCHEDULED && s !== TripStatus.EXPIRED,
+    (s) => !TERMINAL_STATES.has(s) && s !== TripStatus.SCHEDULED && s !== TripStatus.EXPIRED,
   ),
 );
 

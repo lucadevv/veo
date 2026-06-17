@@ -1,4 +1,4 @@
-import {planForChallenge} from '../index';
+import { planForChallenge } from '../index';
 
 describe('planForChallenge', () => {
   it('deriva más frames para acciones dinámicas (parpadeo/asentir)', () => {

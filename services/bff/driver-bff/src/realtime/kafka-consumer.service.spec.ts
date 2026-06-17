@@ -86,10 +86,7 @@ describe('KafkaConsumerService · relay dispatch.offered → dispatch:offer', ()
 
   it('ignora eventType desconocido sin emitir', async () => {
     const { handle, emits } = makeService();
-    await handle(
-      { ...offeredEnvelope('drv-9'), eventType: 'dispatch.unknown' },
-      'dispatch:offer',
-    );
+    await handle({ ...offeredEnvelope('drv-9'), eventType: 'dispatch.unknown' }, 'dispatch:offer');
     expect(emits).toHaveLength(0);
   });
 });

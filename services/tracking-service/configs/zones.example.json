@@ -3,18 +3,16 @@
     {
       "id": "centro-historico-lima",
       "polygon": [
-        { "lat": -12.038, "lon": -77.040 },
-        { "lat": -12.038, "lon": -77.020 },
-        { "lat": -12.055, "lon": -77.020 },
-        { "lat": -12.055, "lon": -77.040 }
+        { "lat": -12.038, "lon": -77.04 },
+        { "lat": -12.038, "lon": -77.02 },
+        { "lat": -12.055, "lon": -77.02 },
+        { "lat": -12.055, "lon": -77.04 }
       ]
     },
     {
       "id": "aeropuerto-jorge-chavez",
       "h3Resolution": 9,
-      "h3Cells": [
-        "89283082803ffff"
-      ]
+      "h3Cells": ["89283082803ffff"]
     }
   ]
 }

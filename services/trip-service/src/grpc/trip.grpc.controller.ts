@@ -348,7 +348,11 @@ export class TripGrpcController {
     cursor,
     limit,
   }: ListPassengerTripsRequest): Promise<PassengerTripsReply> {
-    const page = await this.query.listPassengerTrips(passengerId, cursor || undefined, limit || undefined);
+    const page = await this.query.listPassengerTrips(
+      passengerId,
+      cursor || undefined,
+      limit || undefined,
+    );
     return {
       items: page.items.map((it) => ({
         id: it.id,

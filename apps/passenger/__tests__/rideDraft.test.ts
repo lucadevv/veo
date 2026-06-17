@@ -1,8 +1,12 @@
-import { MAX_WAYPOINTS, isWaypointSet, type RoutePlace } from '../src/features/maps/domain/entities';
-import { useRideDraftStore } from '../src/features/maps/presentation/stores/rideDraftStore';
+import {
+  MAX_WAYPOINTS,
+  isWaypointSet,
+  type RoutePlace,
+} from '../src/features/maps/domain/entities';
+import {useRideDraftStore} from '../src/features/maps/presentation/stores/rideDraftStore';
 
 function place(title: string, lat = -12.05, lng = -77.04): RoutePlace {
-  return { point: { lat, lng }, title };
+  return {point: {lat, lng}, title};
 }
 
 describe('rideDraftStore · paradas múltiples (waypoints)', () => {
@@ -13,7 +17,7 @@ describe('rideDraftStore · paradas múltiples (waypoints)', () => {
   it('inicia sin paradas y editando el destino', () => {
     const state = useRideDraftStore.getState();
     expect(state.waypoints).toEqual([]);
-    expect(state.editing).toEqual({ kind: 'destination' });
+    expect(state.editing).toEqual({kind: 'destination'});
   });
 
   it('agrega un marcador vacío y lo deja en edición', () => {
@@ -21,7 +25,7 @@ describe('rideDraftStore · paradas múltiples (waypoints)', () => {
     const state = useRideDraftStore.getState();
     expect(state.waypoints).toHaveLength(1);
     expect(isWaypointSet(state.waypoints[0])).toBe(false);
-    expect(state.editing).toEqual({ kind: 'waypoint', index: 0 });
+    expect(state.editing).toEqual({kind: 'waypoint', index: 0});
   });
 
   it('fija la dirección de una parada por índice', () => {

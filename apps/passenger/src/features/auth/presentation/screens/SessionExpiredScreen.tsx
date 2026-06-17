@@ -1,9 +1,9 @@
-import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { IconLock } from '../components/icons';
+import {Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import React, {useCallback} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {IconLock} from '../components/icons';
 
 /**
  * Pantalla de sesión EXPIRADA (refresh JWT fallido / token vencido). El `RootNavigator` la muestra
@@ -16,8 +16,8 @@ import { IconLock } from '../components/icons';
  */
 export function SessionExpiredScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const clearSession = useSessionStore((state) => state.clearSession);
+  const {t} = useTranslation();
+  const clearSession = useSessionStore(state => state.clearSession);
 
   // Re-login intencional desde la pantalla de expiración: motivo 'user-logout' → 'unauthenticated'
   // → Auth (no reentra al estado 'expired').
@@ -35,9 +35,8 @@ export function SessionExpiredScreen(): React.JSX.Element {
           size="lg"
           onPress={reVerify}
         />
-      }
-    >
-      <View style={[styles.center, { gap: theme.spacing.md }]}>
+      }>
+      <View style={[styles.center, {gap: theme.spacing.md}]}>
         <View
           style={[
             styles.badge,
@@ -46,8 +45,7 @@ export function SessionExpiredScreen(): React.JSX.Element {
               borderColor: theme.colors.border,
               borderRadius: theme.radii.pill,
             },
-          ]}
-        >
+          ]}>
           <IconLock color={theme.colors.inkMuted} size={34} />
         </View>
         <Text variant="display" align="center">
@@ -62,7 +60,7 @@ export function SessionExpiredScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: {flex: 1, justifyContent: 'center', alignItems: 'center'},
   badge: {
     width: 84,
     height: 84,

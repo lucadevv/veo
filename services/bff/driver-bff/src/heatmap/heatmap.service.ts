@@ -11,7 +11,12 @@ import { RestGateway } from '../infra/rest.gateway';
 export class HeatmapService {
   constructor(private readonly rest: RestGateway) {}
 
-  get(identity: AuthenticatedUser, lat: number, lng: number, radius?: number): Promise<HeatmapView> {
+  get(
+    identity: AuthenticatedUser,
+    lat: number,
+    lng: number,
+    radius?: number,
+  ): Promise<HeatmapView> {
     return this.rest.client('dispatch').get<HeatmapView>('/heatmap', {
       identity,
       query: { lat, lng, radius },

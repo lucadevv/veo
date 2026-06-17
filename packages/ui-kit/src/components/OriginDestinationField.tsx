@@ -26,7 +26,11 @@ const RAIL_WIDTH = 28;
  * Segmento Origen → Destino con puntos lima y una línea conectora vertical. Dos filas
  * presionables (cada una abre su buscador). Presentacional: el consumidor maneja la navegación.
  */
-export function OriginDestinationField({ origin, destination, style }: OriginDestinationFieldProps) {
+export function OriginDestinationField({
+  origin,
+  destination,
+  style,
+}: OriginDestinationFieldProps) {
   const theme = useTheme();
 
   const renderRow = (endpoint: RouteEndpoint, kind: 'origin' | 'destination') => {
@@ -52,7 +56,9 @@ export function OriginDestinationField({ origin, destination, style }: OriginDes
           numberOfLines={1}
           style={styles.value}
         >
-          {hasValue ? endpoint.value : (endpoint.placeholder ?? (isOrigin ? 'Punto de recogida' : '¿A dónde vamos?'))}
+          {hasValue
+            ? endpoint.value
+            : (endpoint.placeholder ?? (isOrigin ? 'Punto de recogida' : '¿A dónde vamos?'))}
         </Text>
       </Pressable>
     );
@@ -77,11 +83,19 @@ export function OriginDestinationField({ origin, destination, style }: OriginDes
         pointerEvents="none"
         style={[
           styles.connector,
-          { left: theme.spacing.md + RAIL_WIDTH / 2 - 1, backgroundColor: theme.colors.borderStrong },
+          {
+            left: theme.spacing.md + RAIL_WIDTH / 2 - 1,
+            backgroundColor: theme.colors.borderStrong,
+          },
         ]}
       />
       {renderRow(origin, 'origin')}
-      <View style={[styles.divider, { backgroundColor: theme.colors.border, marginLeft: RAIL_WIDTH + theme.spacing.sm }]} />
+      <View
+        style={[
+          styles.divider,
+          { backgroundColor: theme.colors.border, marginLeft: RAIL_WIDTH + theme.spacing.sm },
+        ]}
+      />
       {renderRow(destination, 'destination')}
     </View>
   );
@@ -93,5 +107,11 @@ const styles = StyleSheet.create({
   rail: { alignItems: 'center', justifyContent: 'center' },
   value: { flex: 1 },
   divider: { height: StyleSheet.hairlineWidth },
-  connector: { position: 'absolute', top: TOUCH_TARGET / 2, bottom: TOUCH_TARGET / 2, width: 2, borderRadius: 1 },
+  connector: {
+    position: 'absolute',
+    top: TOUCH_TARGET / 2,
+    bottom: TOUCH_TARGET / 2,
+    width: 2,
+    borderRadius: 1,
+  },
 });

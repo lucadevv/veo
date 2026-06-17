@@ -44,7 +44,12 @@ function fakeFuel() {
     }),
     replace: async (price: number, kmPerLiter: number, expectedVersion: number) => {
       replaced.push({ price, kmPerLiter, expectedVersion });
-      return { fuelPricePerLiterCents: price, kmPerLiter, version: 3, updatedAt: '2026-06-16T00:00:00.000Z' };
+      return {
+        fuelPricePerLiterCents: price,
+        kmPerLiter,
+        version: 3,
+        updatedAt: '2026-06-16T00:00:00.000Z',
+      };
     },
   } as unknown as FuelSurchargeService;
   return { svc, replaced };
@@ -52,7 +57,8 @@ function fakeFuel() {
 
 /** Doble del BidFloorService (ADR 010 §9.3): captura el config reemplazado, devuelve config fija. */
 function fakeBidFloor() {
-  const replaced: { defaultFloorCents: number; overrides: unknown[]; expectedVersion: number }[] = [];
+  const replaced: { defaultFloorCents: number; overrides: unknown[]; expectedVersion: number }[] =
+    [];
   const svc = {
     getConfig: async () => ({
       defaultFloorCents: 700,
@@ -60,9 +66,18 @@ function fakeBidFloor() {
       version: 2,
       updatedAt: '2026-06-17T00:00:00.000Z',
     }),
-    replace: async (input: { defaultFloorCents: number; overrides: unknown[]; expectedVersion: number }) => {
+    replace: async (input: {
+      defaultFloorCents: number;
+      overrides: unknown[];
+      expectedVersion: number;
+    }) => {
       replaced.push(input);
-      return { defaultFloorCents: input.defaultFloorCents, overrides: input.overrides, version: 3, updatedAt: '2026-06-17T00:00:00.000Z' };
+      return {
+        defaultFloorCents: input.defaultFloorCents,
+        overrides: input.overrides,
+        version: 3,
+        updatedAt: '2026-06-17T00:00:00.000Z',
+      };
     },
   } as unknown as BidFloorService;
   return { svc, replaced };
@@ -99,7 +114,12 @@ describe('PricingController.resolve · S2 · `at` opcional', () => {
 describe('PricingController · fuel surcharge (B4 · precio÷rendimiento)', () => {
   it('GET fuel-surcharge → devuelve la config vigente (precio + rendimiento)', async () => {
     const fuel = fakeFuel();
-    const controller = new PricingController(fakePricing(PricingMode.PUJA).svc, fuel.svc, fakeEnergy(), fakeBidFloor().svc);
+    const controller = new PricingController(
+      fakePricing(PricingMode.PUJA).svc,
+      fuel.svc,
+      fakeEnergy(),
+      fakeBidFloor().svc,
+    );
     expect(await controller.getFuelSurcharge()).toEqual({
       fuelPricePerLiterCents: 420,
       kmPerLiter: 12,
@@ -110,8 +130,17 @@ describe('PricingController · fuel surcharge (B4 · precio÷rendimiento)', () =
 
   it('PUT fuel-surcharge → reemplaza con precio + rendimiento del DTO', async () => {
     const fuel = fakeFuel();
-    const controller = new PricingController(fakePricing(PricingMode.PUJA).svc, fuel.svc, fakeEnergy(), fakeBidFloor().svc);
-    const out = await controller.replaceFuelSurcharge({ fuelPricePerLiterCents: 480, kmPerLiter: 12, expectedVersion: 2 });
+    const controller = new PricingController(
+      fakePricing(PricingMode.PUJA).svc,
+      fuel.svc,
+      fakeEnergy(),
+      fakeBidFloor().svc,
+    );
+    const out = await controller.replaceFuelSurcharge({
+      fuelPricePerLiterCents: 480,
+      kmPerLiter: 12,
+      expectedVersion: 2,
+    });
     expect(fuel.replaced).toEqual([{ price: 480, kmPerLiter: 12, expectedVersion: 2 }]);
     expect(out.fuelPricePerLiterCents).toBe(480);
     expect(out.kmPerLiter).toBe(12);
@@ -120,7 +149,12 @@ describe('PricingController · fuel surcharge (B4 · precio÷rendimiento)', () =
 
 describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
   it('GET bid-floor → devuelve la config vigente (default + overrides por oferta)', async () => {
-    const controller = new PricingController(fakePricing(PricingMode.PUJA).svc, fakeFuel().svc, fakeEnergy(), fakeBidFloor().svc);
+    const controller = new PricingController(
+      fakePricing(PricingMode.PUJA).svc,
+      fakeFuel().svc,
+      fakeEnergy(),
+      fakeBidFloor().svc,
+    );
     expect(await controller.getBidFloor()).toEqual({
       defaultFloorCents: 700,
       overrides: [{ zone: 'GLOBAL', offeringId: 'veo_moto', floorCents: 300 }],
@@ -131,7 +165,12 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
 
   it('PUT bid-floor → reemplaza con default + overrides del DTO', async () => {
     const bid = fakeBidFloor();
-    const controller = new PricingController(fakePricing(PricingMode.PUJA).svc, fakeFuel().svc, fakeEnergy(), bid.svc);
+    const controller = new PricingController(
+      fakePricing(PricingMode.PUJA).svc,
+      fakeFuel().svc,
+      fakeEnergy(),
+      bid.svc,
+    );
     const dto = {
       defaultFloorCents: 700,
       overrides: [{ zone: 'GLOBAL' as const, offeringId: 'veo_moto' as const, floorCents: 300 }],

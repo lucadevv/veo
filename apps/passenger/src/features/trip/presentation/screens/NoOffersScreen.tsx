@@ -1,17 +1,24 @@
-import { type RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
-import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
-import { formatPEN } from '../../../../shared/utils/format';
-import { BID_STEP_CENTS, stepBidCents } from '../../../../shared/utils/bid';
+import {
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import React, {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
+import {
+  EmptyState,
+  ScreenStateFallback,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {formatPEN} from '../../../../shared/utils/format';
+import {BID_STEP_CENTS, stepBidCents} from '../../../../shared/utils/bid';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -23,9 +30,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  */
 export function NoOffersScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { tripId } = useRoute<RouteProp<RootStackParamList, 'NoOffers'>>().params;
+  const {tripId} = useRoute<RouteProp<RootStackParamList, 'NoOffers'>>().params;
 
   const tripRepository = useDependency(TOKENS.tripRepository);
   const rebid = useDependency(TOKENS.rebidUseCase);
@@ -49,7 +56,7 @@ export function NoOffersScreen(): React.JSX.Element {
 
   const rebidMutation = useMutation({
     mutationFn: (amount: number) => rebid.execute(tripId, amount),
-    onSuccess: () => navigation.replace('OffersBoard', { tripId }),
+    onSuccess: () => navigation.replace('OffersBoard', {tripId}),
   });
 
   // Cancelar la puja de verdad (cierra el board server-side) antes de volver al Home. Idempotente; si
@@ -62,29 +69,41 @@ export function NoOffersScreen(): React.JSX.Element {
   if (tripQuery.isError) {
     return <ScreenStateFallback onRetry={() => tripQuery.refetch()} />;
   }
-  if (tripQuery.isLoading || currentBidCents === undefined || bidCents === null) {
+  if (
+    tripQuery.isLoading ||
+    currentBidCents === undefined ||
+    bidCents === null
+  ) {
     return <ScreenStateFallback loading loadingLines={2} />;
   }
 
   return (
     <SafeScreen>
-      <View style={{ gap: theme.spacing.lg, flex: 1 }}>
+      <View style={{gap: theme.spacing.lg, flex: 1}}>
         <EmptyState
           title={t('noOffers.title')}
-          subtitle={t('noOffers.body', { price: formatPEN(currentBidCents) })}
+          subtitle={t('noOffers.body', {price: formatPEN(currentBidCents)})}
         />
 
         <BidPanel
           bidCents={bidCents}
           floorCents={currentBidCents}
-          onDecrement={() => setBidCents((b) => stepBidCents(b ?? currentBidCents, -1, currentBidCents))}
-          onIncrement={() => setBidCents((b) => stepBidCents(b ?? currentBidCents, 1, currentBidCents))}
+          onDecrement={() =>
+            setBidCents(b =>
+              stepBidCents(b ?? currentBidCents, -1, currentBidCents),
+            )
+          }
+          onIncrement={() =>
+            setBidCents(b =>
+              stepBidCents(b ?? currentBidCents, 1, currentBidCents),
+            )
+          }
         />
 
-        <View style={{ flex: 1 }} />
+        <View style={{flex: 1}} />
 
         <Button
-          label={t('noOffers.rebid', { price: formatPEN(bidCents) })}
+          label={t('noOffers.rebid', {price: formatPEN(bidCents)})}
           variant="primary"
           fullWidth
           loading={rebidMutation.isPending}

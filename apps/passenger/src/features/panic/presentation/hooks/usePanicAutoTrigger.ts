@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import {useEffect, useRef} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /**
  * Arma el detector NATIVO de pánico (triple pulsación de volumen) mientras un viaje está activo y, al

@@ -8,8 +8,8 @@
  * un ternario implícito. Lookup con `Object.hasOwn` (misma convención que `findOffering` del
  * catálogo): keys hostiles del prototype (`constructor`, `__proto__`) no devuelven basura.
  */
-import {VehicleClass} from '@veo/shared-types';
-import {IconCar, IconMoto} from './icons';
+import { VehicleClass } from '@veo/shared-types';
+import { IconCar, IconMoto } from './icons';
 
 /** Glyph de una clase: componente de ícono propio (mismo contrato `IconProps`). */
 export type VehicleGlyph = typeof IconCar;

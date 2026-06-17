@@ -1,12 +1,7 @@
 'use client';
 
 import { z } from 'zod';
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from './client';
 import {
   analyticsOverview,
@@ -207,7 +202,11 @@ export function useOperatorDecision() {
   return useMutation({
     // Aprobar exige los roles a asignar (RBAC); rechazar no lleva cuerpo. El admin-bff revalida
     // `@Roles(ADMIN, SUPERADMIN)` server-side: la UI solo refleja el permiso, nunca autoriza.
-    mutationFn: (input: { id: string; decision: 'approve'; roles: AdminRoleValue[] } | { id: string; decision: 'reject' }) =>
+    mutationFn: (
+      input:
+        | { id: string; decision: 'approve'; roles: AdminRoleValue[] }
+        | { id: string; decision: 'reject' },
+    ) =>
       input.decision === 'approve'
         ? apiClient().post(`/ops/operators/${input.id}/approve`, {
             body: { roles: input.roles },
@@ -227,7 +226,11 @@ export function usePanics(status: string) {
   return useQuery({
     queryKey: qk.panics(status),
     queryFn: ({ signal }) =>
-      apiClient().get('/security/panics', { schema: panicPage, signal, query: cleanQuery({ status }) }),
+      apiClient().get('/security/panics', {
+        schema: panicPage,
+        signal,
+        query: cleanQuery({ status }),
+      }),
     refetchInterval: REALTIME_REFETCH,
   });
 }
@@ -235,7 +238,8 @@ export function usePanics(status: string) {
 export function usePanic(id: string) {
   return useQuery({
     queryKey: qk.panic(id),
-    queryFn: ({ signal }) => apiClient().get(`/security/panics/${id}`, { schema: panicDetail, signal }),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/security/panics/${id}`, { schema: panicDetail, signal }),
     enabled: id.length > 0,
   });
 }
@@ -356,7 +360,11 @@ export function useModelReview(status: string) {
 export function useModelReviewAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; decision: 'approve' } & ApproveVehicleModelRequest | { id: string; decision: 'reject' }) =>
+    mutationFn: (
+      input:
+        | ({ id: string; decision: 'approve' } & ApproveVehicleModelRequest)
+        | { id: string; decision: 'reject' },
+    ) =>
       input.decision === 'approve'
         ? apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
             body: {
@@ -367,7 +375,9 @@ export function useModelReviewAction() {
             },
             schema: vehicleModelReviewView,
           })
-        : apiClient().post(`/fleet/vehicle-models/${input.id}/reject`, { schema: vehicleModelReviewView }),
+        : apiClient().post(`/fleet/vehicle-models/${input.id}/reject`, {
+            schema: vehicleModelReviewView,
+          }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
     },
@@ -378,7 +388,8 @@ export function useModelReviewAction() {
 export function useCreateVehicle() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateVehicleRequest) => apiClient().post('/fleet/vehicles', { body: input }),
+    mutationFn: (input: CreateVehicleRequest) =>
+      apiClient().post('/fleet/vehicles', { body: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.vehicles });
     },
@@ -402,7 +413,8 @@ export function useCreateDocument() {
 export function useCreateInspection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateInspectionRequest) => apiClient().post('/fleet/inspections', { body: input }),
+    mutationFn: (input: CreateInspectionRequest) =>
+      apiClient().post('/fleet/inspections', { body: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.inspections });
     },
@@ -464,7 +476,12 @@ export function useReleaseDriverPayouts() {
 export function useRefund() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { tripId: string; amountCents: number; reason: string; idempotencyKey: string }) =>
+    mutationFn: (input: {
+      tripId: string;
+      amountCents: number;
+      reason: string;
+      idempotencyKey: string;
+    }) =>
       // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason}.
       apiClient().post(`/finance/refunds/${input.tripId}`, {
         body: { amountCents: input.amountCents, reason: input.reason },
@@ -526,7 +543,8 @@ export function useReplaceFuelSurcharge() {
 export function useBidFloor() {
   return useQuery({
     queryKey: qk.bidFloor,
-    queryFn: ({ signal }) => apiClient().get('/pricing/bid-floor', { schema: bidFloorView, signal }),
+    queryFn: ({ signal }) =>
+      apiClient().get('/pricing/bid-floor', { schema: bidFloorView, signal }),
   });
 }
 

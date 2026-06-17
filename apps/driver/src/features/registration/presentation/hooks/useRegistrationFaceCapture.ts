@@ -1,9 +1,9 @@
-import {useCallback, useRef, useState} from 'react';
-import type {FaceCapture} from '../../domain';
-import {useRegistrationStore} from '../state/registrationStore';
-import {useFaceCapture} from '../providers/FaceCaptureProvider';
-import {useRegistrationSubmit} from './useRegistrationSubmit';
-import {useEnrollBiometric} from './useRegistrationDocuments';
+import { useCallback, useRef, useState } from 'react';
+import type { FaceCapture } from '../../domain';
+import { useRegistrationStore } from '../state/registrationStore';
+import { useFaceCapture } from '../providers/FaceCaptureProvider';
+import { useRegistrationSubmit } from './useRegistrationSubmit';
+import { useEnrollBiometric } from './useRegistrationDocuments';
 
 /**
  * Fase del flujo de KYC del alta (estado de PRESENTACIÓN, no de negocio):
@@ -22,7 +22,7 @@ export type FaceCapturePhase = 'idle' | 'capturing' | 'preview' | 'submitting';
  */
 export function useRegistrationFaceCapture() {
   const faceCapture = useFaceCapture();
-  const setFaceCapture = useRegistrationStore(s => s.setFaceCapture);
+  const setFaceCapture = useRegistrationStore((s) => s.setFaceCapture);
   const enroll = useEnrollBiometric();
   const submit = useRegistrationSubmit();
 
@@ -79,7 +79,7 @@ export function useRegistrationFaceCapture() {
     setPhase('submitting');
     try {
       if (capture?.photoBase64) {
-        await enroll.mutateAsync({photo: capture.photoBase64});
+        await enroll.mutateAsync({ photo: capture.photoBase64 });
       }
       await submit.mutateAsync();
     } catch (e) {

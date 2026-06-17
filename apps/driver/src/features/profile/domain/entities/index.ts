@@ -1,4 +1,4 @@
-import type {DriverOnboardRequest, DriverProfileView} from '@veo/api-client';
+import type { DriverOnboardRequest, DriverProfileView } from '@veo/api-client';
 
 /**
  * Entidades del dominio de perfil del conductor (identity + rating + fleet + compliance).

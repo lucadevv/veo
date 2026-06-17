@@ -1,5 +1,5 @@
-import type { KycChallenge, KycFrame } from './entities';
-import type { KycRepository, KycSubmissionResult } from './kycRepository';
+import type {KycChallenge, KycFrame} from './entities';
+import type {KycRepository, KycSubmissionResult} from './kycRepository';
 
 /** Error de validación de la captura KYC antes de tocar la red (SRP: la regla vive aquí). */
 export class KycValidationError extends Error {
@@ -34,16 +34,22 @@ export class RequestKycChallengeUseCase {
 export class SubmitKycUseCase {
   constructor(private readonly repository: KycRepository) {}
 
-  execute(challengeId: string, frames: KycFrame[]): Promise<KycSubmissionResult> {
+  execute(
+    challengeId: string,
+    frames: KycFrame[],
+  ): Promise<KycSubmissionResult> {
     if (challengeId.trim().length === 0) {
       throw new KycValidationError('no-challenge');
     }
     if (frames.length < MIN_KYC_FRAMES) {
       throw new KycValidationError('no-frames');
     }
-    if (frames.some((frame) => frame.base64Jpeg.trim().length === 0)) {
+    if (frames.some(frame => frame.base64Jpeg.trim().length === 0)) {
       throw new KycValidationError('empty-frame');
     }
-    return this.repository.submit({ challengeId, frames: frames.slice(0, MAX_KYC_FRAMES) });
+    return this.repository.submit({
+      challengeId,
+      frames: frames.slice(0, MAX_KYC_FRAMES),
+    });
   }
 }

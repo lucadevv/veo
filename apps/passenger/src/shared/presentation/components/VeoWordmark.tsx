@@ -1,8 +1,8 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
-import { RouteMotif } from './RouteMotif';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View, type ViewStyle} from 'react-native';
+import {RouteMotif} from './RouteMotif';
 
 /** Color de marca admitido (mismo contrato de color que el `Text` del ui-kit: token del tema). */
 type BrandColor = NonNullable<React.ComponentProps<typeof Text>['color']>;
@@ -48,10 +48,42 @@ interface SizeSpec {
 
 /** Proporciones por tamaño (el motivo se alinea bajo el wordmark con un solape sutil). */
 const SIZES: Record<VeoWordmarkSize, SizeSpec> = {
-  sm: { fontSize: 20, lineHeight: 26, letterSpacing: 0.5, motifWidth: 84, motifHeight: 26, motifOffset: -6, taglineVariant: 'caption' },
-  md: { fontSize: 28, lineHeight: 34, letterSpacing: -0.4, motifWidth: 110, motifHeight: 34, motifOffset: -8, taglineVariant: 'caption' },
-  lg: { fontSize: 40, lineHeight: 46, letterSpacing: -1, motifWidth: 150, motifHeight: 44, motifOffset: -12, taglineVariant: 'callout' },
-  xl: { fontSize: 72, lineHeight: 78, letterSpacing: -2, motifWidth: 240, motifHeight: 64, motifOffset: -18, taglineVariant: 'callout' },
+  sm: {
+    fontSize: 20,
+    lineHeight: 26,
+    letterSpacing: 0.5,
+    motifWidth: 84,
+    motifHeight: 26,
+    motifOffset: -6,
+    taglineVariant: 'caption',
+  },
+  md: {
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: -0.4,
+    motifWidth: 110,
+    motifHeight: 34,
+    motifOffset: -8,
+    taglineVariant: 'caption',
+  },
+  lg: {
+    fontSize: 40,
+    lineHeight: 46,
+    letterSpacing: -1,
+    motifWidth: 150,
+    motifHeight: 44,
+    motifOffset: -12,
+    taglineVariant: 'callout',
+  },
+  xl: {
+    fontSize: 72,
+    lineHeight: 78,
+    letterSpacing: -2,
+    motifWidth: 240,
+    motifHeight: 64,
+    motifOffset: -18,
+    taglineVariant: 'callout',
+  },
 };
 
 /**
@@ -76,7 +108,7 @@ export function VeoWordmark({
   accessibilityLabel,
 }: VeoWordmarkProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const spec = SIZES[size];
   const wordmark = t('appName');
   const resolvedTagline = tagline ?? t('brandTaglinePeru');
@@ -86,8 +118,7 @@ export function VeoWordmark({
       style={[align === 'center' ? styles.center : styles.left, style]}
       accessible
       accessibilityRole="image"
-      accessibilityLabel={accessibilityLabel ?? wordmark}
-    >
+      accessibilityLabel={accessibilityLabel ?? wordmark}>
       <Text
         color={color}
         align={align === 'center' ? 'center' : 'left'}
@@ -96,8 +127,7 @@ export function VeoWordmark({
           lineHeight: spec.lineHeight,
           fontWeight: '700',
           letterSpacing: spec.letterSpacing,
-        }}
-      >
+        }}>
         {wordmark}
       </Text>
 
@@ -107,7 +137,7 @@ export function VeoWordmark({
           height={spec.motifHeight}
           color={theme.colors[color]}
           animated={animated}
-          style={{ marginTop: spec.motifOffset }}
+          style={{marginTop: spec.motifOffset}}
         />
       ) : null}
 
@@ -116,8 +146,7 @@ export function VeoWordmark({
           variant={spec.taglineVariant}
           color="inkMuted"
           align={align === 'center' ? 'center' : 'left'}
-          style={styles.tagline}
-        >
+          style={styles.tagline}>
           {resolvedTagline}
         </Text>
       ) : null}
@@ -126,7 +155,7 @@ export function VeoWordmark({
 }
 
 const styles = StyleSheet.create({
-  center: { alignItems: 'center' },
-  left: { alignItems: 'flex-start' },
-  tagline: { marginTop: 4 },
+  center: {alignItems: 'center'},
+  left: {alignItems: 'flex-start'},
+  tagline: {marginTop: 4},
 });

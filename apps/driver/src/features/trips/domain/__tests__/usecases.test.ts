@@ -1,4 +1,4 @@
-import type {RespondWaypointView} from '@veo/api-client';
+import type { RespondWaypointView } from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -34,7 +34,7 @@ const TRIP: Trip = {
 
 /** Doble de prueba del repositorio de viajes (no es un mock de producción). */
 class FakeTripsRepository implements TripsRepository {
-  startCalls: Array<{tripId: string; input: StartTripInput}> = [];
+  startCalls: Array<{ tripId: string; input: StartTripInput }> = [];
 
   getOffer(): Promise<TripOffer> {
     throw new Error('no usado');
@@ -52,7 +52,7 @@ class FakeTripsRepository implements TripsRepository {
     return Promise.resolve(TRIP);
   }
   getTripState(): Promise<TripState> {
-    return Promise.resolve({id: 't1', status: 'IN_PROGRESS'});
+    return Promise.resolve({ id: 't1', status: 'IN_PROGRESS' });
   }
   getRoute(): Promise<TripRouteView> {
     return Promise.resolve({
@@ -60,8 +60,8 @@ class FakeTripsRepository implements TripsRepository {
       distanceMeters: 0,
       durationSeconds: 0,
       steps: [],
-      origin: {lat: 0, lon: 0},
-      destination: {lat: 0, lon: 0},
+      origin: { lat: 0, lon: 0 },
+      destination: { lat: 0, lon: 0 },
       waypoints: [],
     });
   }
@@ -75,7 +75,7 @@ class FakeTripsRepository implements TripsRepository {
     return Promise.resolve(TRIP);
   }
   start(tripId: string, input: StartTripInput): Promise<Trip> {
-    this.startCalls.push({tripId, input});
+    this.startCalls.push({ tripId, input });
     return Promise.resolve(TRIP);
   }
   complete(): Promise<Trip> {
@@ -100,21 +100,25 @@ class FakeTripsRepository implements TripsRepository {
 describe('StartTripUseCase (modo niño)', () => {
   it('lanza error si el código no tiene 4 a 6 dígitos', async () => {
     const repo = new FakeTripsRepository();
-    await expect(() => new StartTripUseCase(repo).execute('t1', '12')).toThrow(InvalidChildCodeError);
-    await expect(() => new StartTripUseCase(repo).execute('t1', 'abcd')).toThrow(InvalidChildCodeError);
+    await expect(() => new StartTripUseCase(repo).execute('t1', '12')).toThrow(
+      InvalidChildCodeError,
+    );
+    await expect(() => new StartTripUseCase(repo).execute('t1', 'abcd')).toThrow(
+      InvalidChildCodeError,
+    );
     expect(repo.startCalls).toHaveLength(0);
   });
 
   it('acepta código válido y lo reenvía al repositorio', async () => {
     const repo = new FakeTripsRepository();
     await new StartTripUseCase(repo).execute('t1', '1234');
-    expect(repo.startCalls[0]).toEqual({tripId: 't1', input: {childCode: '1234'}});
+    expect(repo.startCalls[0]).toEqual({ tripId: 't1', input: { childCode: '1234' } });
   });
 
   it('permite iniciar sin código (viaje normal)', async () => {
     const repo = new FakeTripsRepository();
     await new StartTripUseCase(repo).execute('t1');
-    expect(repo.startCalls[0]).toEqual({tripId: 't1', input: {childCode: undefined}});
+    expect(repo.startCalls[0]).toEqual({ tripId: 't1', input: { childCode: undefined } });
   });
 });
 
@@ -135,7 +139,7 @@ describe('GetActiveTripUseCase (rehidratación)', () => {
 
 /** Repo configurable: secuencia de estados a devolver por getTripState + captura de accept. */
 class ScriptedTripsRepository extends FakeTripsRepository {
-  acceptCalls: Array<{tripId: string; input: AcceptTripInput}> = [];
+  acceptCalls: Array<{ tripId: string; input: AcceptTripInput }> = [];
   private readonly states: string[];
   private cursor = 0;
 
@@ -147,12 +151,12 @@ class ScriptedTripsRepository extends FakeTripsRepository {
   override getTripState(): Promise<TripState> {
     const status = this.states[Math.min(this.cursor, this.states.length - 1)] ?? 'MATCHING';
     this.cursor += 1;
-    return Promise.resolve({id: 't1', status});
+    return Promise.resolve({ id: 't1', status });
   }
 
   override accept(tripId: string, input: AcceptTripInput): Promise<Trip> {
-    this.acceptCalls.push({tripId, input});
-    return Promise.resolve({...TRIP, id: tripId, status: 'ACCEPTED'});
+    this.acceptCalls.push({ tripId, input });
+    return Promise.resolve({ ...TRIP, id: tripId, status: 'ACCEPTED' });
   }
 }
 
@@ -161,9 +165,11 @@ describe('EnsureTripAcceptedUseCase (ASSIGNED→ACCEPTED robusto)', () => {
 
   it('acepta de inmediato si el viaje ya está ASSIGNED', async () => {
     const repo = new ScriptedTripsRepository(['ASSIGNED']);
-    const result = await new EnsureTripAcceptedUseCase(repo, noSleep).execute('t1', {etaSeconds: 90});
+    const result = await new EnsureTripAcceptedUseCase(repo, noSleep).execute('t1', {
+      etaSeconds: 90,
+    });
 
-    expect(repo.acceptCalls).toEqual([{tripId: 't1', input: {etaSeconds: 90}}]);
+    expect(repo.acceptCalls).toEqual([{ tripId: 't1', input: { etaSeconds: 90 } }]);
     expect(result?.status).toBe('ACCEPTED');
   });
 

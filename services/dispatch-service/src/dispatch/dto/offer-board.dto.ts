@@ -94,7 +94,8 @@ export class OpenBidDto {
   @ApiProperty({
     isArray: true,
     enum: ['PET', 'LUGGAGE', 'CHILD_SEAT'],
-    description: 'BE-2 · solicitudes especiales del pasajero; el conductor las ve antes de ofertar.',
+    description:
+      'BE-2 · solicitudes especiales del pasajero; el conductor las ve antes de ofertar.',
   })
   specialRequests!: string[];
 }

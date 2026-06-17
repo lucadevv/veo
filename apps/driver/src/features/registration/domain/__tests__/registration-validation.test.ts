@@ -1,6 +1,6 @@
-import {validatePersonalData} from '../usecases/update-personal-data';
-import {validateVehicle} from '../usecases/register-vehicle';
-import type {PersonalData, VehicleData} from '../entities';
+import { validatePersonalData } from '../usecases/update-personal-data';
+import { validateVehicle } from '../usecases/register-vehicle';
+import type { PersonalData, VehicleData } from '../entities';
 
 const basePersonal: PersonalData = {
   fullName: 'Carlos Quispe Mamani',
@@ -32,7 +32,7 @@ describe('validatePersonalData', () => {
   });
 
   it('rechaza DNI que no tenga 8 dígitos', () => {
-    const result = validatePersonalData({...basePersonal, dni: '1234'});
+    const result = validatePersonalData({ ...basePersonal, dni: '1234' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.dni).toBe('dni_invalid');
@@ -40,7 +40,11 @@ describe('validatePersonalData', () => {
   });
 
   it('rechaza nombre vacío y fecha inválida', () => {
-    const result = validatePersonalData({fullName: '   ', dni: '70123456', birthdate: '32/13/1990'});
+    const result = validatePersonalData({
+      fullName: '   ',
+      dni: '70123456',
+      birthdate: '32/13/1990',
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.fullName).toBe('name_required');
@@ -79,7 +83,7 @@ describe('validateVehicle', () => {
   });
 
   it('rechaza placa con formato inválido', () => {
-    const result = validateVehicle({...baseVehicle, plate: '12'});
+    const result = validateVehicle({ ...baseVehicle, plate: '12' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.plate).toBe('plate_invalid');
@@ -87,7 +91,7 @@ describe('validateVehicle', () => {
   });
 
   it('rechaza año fuera de rango', () => {
-    const result = validateVehicle({...baseVehicle, year: '1990'});
+    const result = validateVehicle({ ...baseVehicle, year: '1990' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.year).toBe('year_invalid');
@@ -95,7 +99,7 @@ describe('validateVehicle', () => {
   });
 
   it('rechaza si no se eligió un modelo del catálogo (modelSpecId vacío)', () => {
-    const result = validateVehicle({...baseVehicle, modelSpecId: '   '});
+    const result = validateVehicle({ ...baseVehicle, modelSpecId: '   ' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.model).toBe('model_not_selected');

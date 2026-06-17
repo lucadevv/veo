@@ -33,7 +33,10 @@ import {
 const DEFAULT_TITLE = 'VEO';
 
 /** Estrategia de despacho de un canal: del registro renderizado → resultado tipado del riel. */
-type ChannelStrategy = (rec: NotificationRecord, rendered: RenderedMessage) => Promise<DispatchResult>;
+type ChannelStrategy = (
+  rec: NotificationRecord,
+  rendered: RenderedMessage,
+) => Promise<DispatchResult>;
 
 function toStringMap(value: unknown): Record<string, string> | undefined {
   if (value === null || typeof value !== 'object') return undefined;
@@ -59,7 +62,8 @@ interface PushPayloadView {
 function parsePushPayload(payload: Record<string, unknown>): PushPayloadView {
   const view: { -readonly [K in keyof PushPayloadView]: PushPayloadView[K] } = {};
   if (typeof payload.topic === 'string' && payload.topic.length > 0) view.topic = payload.topic;
-  if (typeof payload.condition === 'string' && payload.condition.length > 0) view.condition = payload.condition;
+  if (typeof payload.condition === 'string' && payload.condition.length > 0)
+    view.condition = payload.condition;
   if (payload.platform === PushPlatform.Ios || payload.platform === PushPlatform.Android) {
     view.platform = payload.platform;
   }
@@ -81,18 +85,30 @@ export class ChannelDispatcher implements MessageDispatcher {
   ) {
     this.strategies = new Map<NotificationChannel, ChannelStrategy>([
       [NotificationChannel.PUSH, (rec, rendered) => this.dispatchPush(rec, rendered)],
-      [NotificationChannel.SMS, (_rec, rendered) => this.attempt(() => this.sms.send(rendered.to, rendered.body))],
+      [
+        NotificationChannel.SMS,
+        (_rec, rendered) => this.attempt(() => this.sms.send(rendered.to, rendered.body)),
+      ],
       [
         NotificationChannel.EMAIL,
         (_rec, rendered) =>
           this.attempt(() =>
-            this.email.send({ to: rendered.to, subject: rendered.subject ?? DEFAULT_TITLE, html: rendered.body }),
+            this.email.send({
+              to: rendered.to,
+              subject: rendered.subject ?? DEFAULT_TITLE,
+              html: rendered.body,
+            }),
           ),
       ],
       [
         NotificationChannel.WEBHOOK,
         (rec, rendered) =>
-          this.attempt(() => this.webhook.send({ url: rendered.to, payload: { ...rec.payload, body: rendered.body } })),
+          this.attempt(() =>
+            this.webhook.send({
+              url: rendered.to,
+              payload: { ...rec.payload, body: rendered.body },
+            }),
+          ),
       ],
     ]);
   }
@@ -107,7 +123,10 @@ export class ChannelDispatcher implements MessageDispatcher {
   }
 
   /** PUSH: traduce el `PushResult` del riel a `DispatchResult` y CIERRA el loop borrando tokens muertos. */
-  private async dispatchPush(rec: NotificationRecord, rendered: RenderedMessage): Promise<DispatchResult> {
+  private async dispatchPush(
+    rec: NotificationRecord,
+    rendered: RenderedMessage,
+  ): Promise<DispatchResult> {
     const payload = parsePushPayload(rec.payload);
     const target = this.resolvePushTarget(payload, rendered);
     const data = toStringMap(payload.data);
@@ -163,7 +182,10 @@ export class ChannelDispatcher implements MessageDispatcher {
       await fn();
       return { status: DispatchStatus.Sent };
     } catch (err) {
-      return { status: DispatchStatus.Transient, reason: err instanceof Error ? err.message : String(err) };
+      return {
+        status: DispatchStatus.Transient,
+        reason: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 }

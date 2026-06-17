@@ -1,4 +1,4 @@
-import type { GeoPoint } from '@veo/api-client';
+import type {GeoPoint} from '@veo/api-client';
 // v5: los enums se importan del paquete de TYPES, NO de react-native-background-geolocation. Razón
 // (verificado en runtime): el paquete principal re-exporta los TIPOS pero NO los VALORES de los enums →
 // serían `undefined` en runtime y `DesiredAccuracy.High` crashea. @transistorsoft/...-types sí los
@@ -44,7 +44,9 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
   private lastKnown: GeoPoint | null = null;
 
   /** Suscriptores a cambios de disponibilidad (GPS on/off, permiso). El handler nativo los notifica. */
-  private readonly availabilityListeners = new Set<(availability: LocationAvailability) => void>();
+  private readonly availabilityListeners = new Set<
+    (availability: LocationAvailability) => void
+  >();
 
   /** Configura el SDK una única vez (idempotente). */
   private ensureReady(): Promise<void> {
@@ -78,12 +80,12 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
         // RN advierte "Sending `location`/`providerchange` with no listeners registered" (benigno
         // pero ruidoso). Registramos listeners PERSISTENTES que CONSUMEN el evento → siempre hay ≥1
         // listener, sin warning. NO arrancan el tracking (eso lo hace `start()` en watchPosition).
-        BackgroundGeolocation.onLocation((location) => {
+        BackgroundGeolocation.onLocation(location => {
           this.lastKnown = this.toGeoPoint(location);
         });
         // `providerchange` es el evento del SO cuando el usuario prende/apaga el GPS o cambia el
         // permiso desde Ajustes. Lo propagamos a los suscriptores → la app se RECUPERA sola sin poll.
-        BackgroundGeolocation.onProviderChange((event) => {
+        BackgroundGeolocation.onProviderChange(event => {
           this.emitAvailability(this.fromProviderEvent(event));
         });
       });
@@ -93,7 +95,7 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
 
   /** Convierte la `Location` del SDK al `GeoPoint` del dominio. */
   private toGeoPoint(location: Location): GeoPoint {
-    return { lat: location.coords.latitude, lon: location.coords.longitude };
+    return {lat: location.coords.latitude, lon: location.coords.longitude};
   }
 
   /**
@@ -126,7 +128,7 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
 
   /** Notifica a todos los suscriptores de disponibilidad (defensivo: un listener que tira no tumba al resto). */
   private emitAvailability(availability: LocationAvailability): void {
-    this.availabilityListeners.forEach((listener) => {
+    this.availabilityListeners.forEach(listener => {
       try {
         listener(availability);
       } catch {
@@ -165,7 +167,9 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
     return this.getAvailability();
   }
 
-  onAvailabilityChange(listener: (availability: LocationAvailability) => void): () => void {
+  onAvailabilityChange(
+    listener: (availability: LocationAvailability) => void,
+  ): () => void {
     this.availabilityListeners.add(listener);
     // Asegura que el handler nativo `onProviderChange` esté registrado (idempotente).
     void this.ensureReady();
@@ -182,7 +186,7 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
       if (cancelled) {
         return;
       }
-      subscription = BackgroundGeolocation.onLocation((location) => {
+      subscription = BackgroundGeolocation.onLocation(location => {
         onChange(this.toGeoPoint(location));
       });
       // Entrega inmediata del último fix conocido (si lo hay) para no esperar al primer evento.

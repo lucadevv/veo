@@ -3,8 +3,8 @@ import {
   type PassengerClientToServer,
   type PassengerServerToClient,
 } from '@veo/api-client';
-import { io, type Socket } from 'socket.io-client';
-import { env } from '../config/env';
+import {io, type Socket} from 'socket.io-client';
+import {env} from '../config/env';
 
 /**
  * Socket del pasajero, tipado con los mapas de eventos de `@veo/api-client`:
@@ -47,6 +47,6 @@ export function createPassengerSocket(
     transports: ['websocket'],
     // El ciclo de conexión lo controla la feature, no el constructor.
     autoConnect: false,
-    auth: (cb) => cb({ token: opts.getToken() ?? '', tripId: opts.tripId }),
+    auth: cb => cb({token: opts.getToken() ?? '', tripId: opts.tripId}),
   });
 }

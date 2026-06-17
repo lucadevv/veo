@@ -12,7 +12,15 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope, type EventPayload } from '@veo/events';
 import { enqueueOutbox, isUniqueViolation } from '@veo/database';
-import { InvalidStateError, NotFoundError, UnauthorizedError, ValidationError, isUuidV7, uuidv7, verifyHmac } from '@veo/utils';
+import {
+  InvalidStateError,
+  NotFoundError,
+  UnauthorizedError,
+  ValidationError,
+  isUuidV7,
+  uuidv7,
+  verifyHmac,
+} from '@veo/utils';
 import { PanicStatus } from '@veo/shared-types';
 import type { PanicEvent } from '../generated/prisma';
 import { PrismaService } from '../infra/prisma.service';
@@ -166,10 +174,9 @@ export class PanicService {
       if (cas.count === 0) {
         const current = await tx.panicEvent.findUnique({ where: { id: panicId } });
         if (!current) throw new NotFoundError('Evento de pánico no encontrado');
-        throw new InvalidStateError(
-          `No se puede reconocer un pánico en estado ${current.status}`,
-          { from: current.status },
-        );
+        throw new InvalidStateError(`No se puede reconocer un pánico en estado ${current.status}`, {
+          from: current.status,
+        });
       }
       const row = await tx.panicEvent.findUniqueOrThrow({ where: { id: panicId } });
       // tripId + passengerId ENRIQUECIDOS desde la fila (downstream: notification pushea al pasajero
@@ -293,5 +300,4 @@ export class PanicService {
       where: { status: { in: [PanicStatus.TRIGGERED, PanicStatus.ACKNOWLEDGED] } },
     });
   }
-
 }

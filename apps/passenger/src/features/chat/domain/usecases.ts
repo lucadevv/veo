@@ -1,6 +1,6 @@
-import type { ChatMessage } from './entities';
-import { MAX_MESSAGE_LENGTH } from './entities';
-import type { ChatRepository } from './chatRepository';
+import type {ChatMessage} from './entities';
+import {MAX_MESSAGE_LENGTH} from './entities';
+import type {ChatRepository} from './chatRepository';
 
 /** Error de dominio para un mensaje inválido antes de tocar la red. */
 export class ChatMessageError extends Error {

@@ -5,7 +5,7 @@ Log de auditoría **inmutable** de VEO (movilidad segura · Lima · **Ley 29733*
 - **Append-only** con **hash chain** real (`chainHash` de `@veo/utils`): cada entrada encadena el
   hash de la anterior → manipulación detectable de forma determinista.
 - **Inmutabilidad en profundidad**: triggers Postgres que rechazan `UPDATE`/`DELETE`
-  (`s3_object_key` es la única columna *write-once*) + réplica **WORM** a **S3 Object Lock**
+  (`s3_object_key` es la única columna _write-once_) + réplica **WORM** a **S3 Object Lock**
   (modo `COMPLIANCE`) sobre MinIO self-hosted en dev.
 - Principalmente **consume** los eventos auditables del dominio (ver [`docs/events.md`](docs/events.md)).
 
@@ -55,11 +55,11 @@ writers concurrentes.
 
 ## Endpoints REST (`/api/v1`)
 
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| `POST` | `/audit` | `InternalIdentityGuard` | Registrar una acción auditable (síncrona) |
-| `GET` | `/audit` | RBAC `COMPLIANCE_SUPERVISOR` / `SUPERADMIN` | Consultar (filtros `resourceType`, `resourceId`, `actorId`, `action`, `limit`, `beforeSeq`) |
-| `GET` | `/audit/verify` | RBAC `COMPLIANCE_SUPERVISOR` / `SUPERADMIN` | Verificar integridad de la cadena en `[fromSeq, toSeq]` |
+| Método | Ruta            | Auth                                        | Descripción                                                                                 |
+| ------ | --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `POST` | `/audit`        | `InternalIdentityGuard`                     | Registrar una acción auditable (síncrona)                                                   |
+| `GET`  | `/audit`        | RBAC `COMPLIANCE_SUPERVISOR` / `SUPERADMIN` | Consultar (filtros `resourceType`, `resourceId`, `actorId`, `action`, `limit`, `beforeSeq`) |
+| `GET`  | `/audit/verify` | RBAC `COMPLIANCE_SUPERVISOR` / `SUPERADMIN` | Verificar integridad de la cadena en `[fromSeq, toSeq]`                                     |
 
 gRPC `veo.audit.v1.AuditService`: `Record`, `Verify`.
 

@@ -1,16 +1,25 @@
-import React, {useState} from 'react';
-import {ActivityIndicator, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {useQueryClient} from '@tanstack/react-query';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Banner, Button, Card, SafeScreen, Skeleton, StatusPill, Text, useTheme} from '@veo/ui-kit';
-import {TopBar} from '../../../../shared/presentation/components/TopBar';
+import React, { useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  Banner,
+  Button,
+  Card,
+  SafeScreen,
+  Skeleton,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import {
   vehicleClassGlyph,
   vehicleClassLabelKey,
 } from '../../../../shared/presentation/vehicle-class';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import type {RootStackParamList} from '../../../../navigation/types';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import type { RootStackParamList } from '../../../../navigation/types';
 import {
   VehicleType,
   VehicleValidationError,
@@ -19,7 +28,7 @@ import {
   type VehicleModelOption,
   type VehicleView,
 } from '../../domain';
-import {RegistrationField, VehicleModelSelector, VehicleTypeSelector} from '../components';
+import { RegistrationField, VehicleModelSelector, VehicleTypeSelector } from '../components';
 import {
   ACTIVE_VEHICLE_QUERY_KEY,
   REGISTRATION_VEHICLES_QUERY_KEY,
@@ -31,7 +40,14 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Vehicles'>;
 
-const EMPTY_FORM: VehicleData = {type: VehicleType.CAR, plate: '', year: '', modelSpecId: '', brand: '', model: ''};
+const EMPTY_FORM: VehicleData = {
+  type: VehicleType.CAR,
+  plate: '',
+  year: '',
+  modelSpecId: '',
+  brand: '',
+  model: '',
+};
 
 /** El status `ACTIVE` (vehicle-rules de fleet) = verificado por el operador; el resto, en revisión. */
 const VERIFIED_STATUS = 'ACTIVE';
@@ -43,8 +59,8 @@ const VERIFIED_STATUS = 'ACTIVE';
  *  - permite REGISTRAR un vehículo nuevo (el 2do, p. ej. una moto), que es lo que faltaba para poder
  *    "cambiar de auto a moto" (antes el alta vivía solo en el wizard y bloqueaba el 2do).
  */
-export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
 
@@ -61,19 +77,19 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
   const [serverError, setServerError] = useState<unknown>(null);
 
   const update = (patch: Partial<VehicleData>, field: keyof VehicleErrors) => {
-    setForm(prev => ({...prev, ...patch}));
-    if (errors[field]) setErrors(prev => ({...prev, [field]: undefined}));
+    setForm((prev) => ({ ...prev, ...patch }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
   /** Cambiar el tipo invalida el modelo elegido (el catálogo se filtra por tipo). */
   const onChangeType = (type: VehicleType) => {
-    setForm(prev => ({...prev, type, modelSpecId: '', brand: '', model: ''}));
+    setForm((prev) => ({ ...prev, type, modelSpecId: '', brand: '', model: '' }));
   };
 
   /** El conductor eligió un modelo del catálogo: guarda id + etiqueta y limpia el error de modelo. */
   const onPickModel = (model: VehicleModelOption) => {
-    setForm(prev => ({...prev, modelSpecId: model.id, brand: model.make, model: model.model}));
-    if (errors.model) setErrors(prev => ({...prev, model: undefined}));
+    setForm((prev) => ({ ...prev, modelSpecId: model.id, brand: model.make, model: model.model }));
+    if (errors.model) setErrors((prev) => ({ ...prev, model: undefined }));
   };
 
   const fieldError = (field: keyof VehicleErrors): string | undefined => {
@@ -92,8 +108,8 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
     setServerError(null);
     try {
       await register.mutateAsync(form);
-      queryClient.invalidateQueries({queryKey: REGISTRATION_VEHICLES_QUERY_KEY});
-      queryClient.invalidateQueries({queryKey: ACTIVE_VEHICLE_QUERY_KEY});
+      queryClient.invalidateQueries({ queryKey: REGISTRATION_VEHICLES_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ACTIVE_VEHICLE_QUERY_KEY });
       setForm(EMPTY_FORM);
     } catch (e) {
       if (e instanceof VehicleValidationError) setErrors(e.errors);
@@ -109,7 +125,11 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
     return (
       <Card key={vehicle.id} variant={isActive ? 'filled' : 'outlined'} style={styles.vehicleCard}>
         <View style={styles.vehicleRow}>
-          <Icon size={22} color={isActive ? theme.colors.accent : theme.colors.inkMuted} strokeWidth={2} />
+          <Icon
+            size={22}
+            color={isActive ? theme.colors.accent : theme.colors.inkMuted}
+            strokeWidth={2}
+          />
           <View style={styles.vehicleInfo}>
             <Text variant="subhead" numberOfLines={1}>
               {t(vehicleClassLabelKey(vehicle.vehicleType))} · {vehicle.plate}
@@ -119,7 +139,13 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             </Text>
           </View>
           <StatusPill
-            label={isActive ? t('vehicles.active') : verified ? t('vehicles.verified') : t('vehicles.inReview')}
+            label={
+              isActive
+                ? t('vehicles.active')
+                : verified
+                  ? t('vehicles.verified')
+                  : t('vehicles.inReview')
+            }
             tone={isActive ? 'accent' : verified ? 'success' : 'warn'}
             dot
           />
@@ -131,7 +157,9 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             size="sm"
             fullWidth
             disabled={pending}
-            leftIcon={pending ? <ActivityIndicator size="small" color={theme.colors.accent} /> : undefined}
+            leftIcon={
+              pending ? <ActivityIndicator size="small" color={theme.colors.accent} /> : undefined
+            }
             onPress={() => select.mutate(vehicle.id)}
             style={styles.spaced}
           />
@@ -151,7 +179,7 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             tone="danger"
             title={t('errors.generic')}
             description={toErrorMessage(vehicles.error, t)}
-            action={{label: t('common.retry'), onPress: () => vehicles.refetch()}}
+            action={{ label: t('common.retry'), onPress: () => vehicles.refetch() }}
           />
         ) : list.length === 0 ? (
           <Banner tone="info" title={t('vehicles.empty')} />
@@ -171,7 +199,7 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
           {/* B5-2: el modelo se ELIGE del catálogo curado (filtrado por tipo), no a texto libre. */}
           <VehicleModelSelector
             vehicleType={form.type}
-            value={{modelSpecId: form.modelSpecId, brand: form.brand, model: form.model}}
+            value={{ modelSpecId: form.modelSpecId, brand: form.brand, model: form.model }}
             onChange={onPickModel}
             error={fieldError('model')}
           />
@@ -179,7 +207,7 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             label={t('registration.vehicle.plateLabel')}
             placeholder={t('registration.vehicle.platePlaceholder')}
             value={form.plate}
-            onChangeText={text => update({plate: text.toUpperCase()}, 'plate')}
+            onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
             autoCapitalize="characters"
             maxLength={8}
             error={fieldError('plate')}
@@ -188,13 +216,17 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
             label={t('registration.vehicle.yearLabel')}
             placeholder={t('registration.vehicle.yearPlaceholder')}
             value={form.year}
-            onChangeText={text => update({year: text}, 'year')}
+            onChangeText={(text) => update({ year: text }, 'year')}
             keyboardType="number-pad"
             maxLength={4}
             error={fieldError('year')}
           />
           {serverError ? (
-            <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(serverError, t)} />
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(serverError, t)}
+            />
           ) : null}
           <Button
             label={t('registration.vehicle.register')}
@@ -211,11 +243,11 @@ export const VehiclesScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  body: {padding: 16, gap: 12},
-  vehicleCard: {gap: 0},
-  vehicleRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  vehicleInfo: {flex: 1},
-  section: {marginTop: 12},
-  form: {gap: 16, marginTop: 8},
-  spaced: {marginTop: 12},
+  body: { padding: 16, gap: 12 },
+  vehicleCard: { gap: 0 },
+  vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  vehicleInfo: { flex: 1 },
+  section: { marginTop: 12 },
+  form: { gap: 16, marginTop: 8 },
+  spaced: { marginTop: 12 },
 });

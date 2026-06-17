@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, {Circle, Path, Rect} from 'react-native-svg';
 
 /**
  * Set de iconos del flujo de ingreso dibujados con `react-native-svg` (ya instalado y enlazado en la
@@ -18,7 +18,10 @@ export interface GlyphProps {
 const STROKE = 2;
 
 /** Chevron hacia la izquierda (volver). Espejo del `chevR` del diseño. */
-export function IconChevronLeft({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconChevronLeft({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -33,7 +36,7 @@ export function IconChevronLeft({ color, size = 22 }: GlyphProps): React.JSX.Ele
 }
 
 /** Marca de verificación (check). */
-export function IconCheck({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconCheck({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -48,17 +51,22 @@ export function IconCheck({ color, size = 16 }: GlyphProps): React.JSX.Element {
 }
 
 /** Reloj (cuenta regresiva de reenvío). */
-export function IconClock({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconClock({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={STROKE} />
-      <Path d="M12 7v5l3 2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M12 7v5l3 2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Lápiz (editar / cambiar número). Feather `edit-2`. */
-export function IconPencil({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconPencil({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -78,7 +86,11 @@ export interface CameraProps extends GlyphProps {
 }
 
 /** Cámara (FAB para agregar foto de perfil). */
-export function IconCamera({ color, holeColor, size = 22 }: CameraProps): React.JSX.Element {
+export function IconCamera({
+  color,
+  holeColor,
+  size = 22,
+}: CameraProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -87,16 +99,30 @@ export function IconCamera({ color, holeColor, size = 22 }: CameraProps): React.
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Circle cx={12} cy={12.5} r={3.2} stroke={color} strokeWidth={STROKE} fill={holeColor} />
+      <Circle
+        cx={12}
+        cy={12.5}
+        r={3.2}
+        stroke={color}
+        strokeWidth={STROKE}
+        fill={holeColor}
+      />
     </Svg>
   );
 }
 
 /** Silueta de persona (placeholder de avatar). Feather `user`. */
-export function IconPerson({ color, size = 56 }: GlyphProps): React.JSX.Element {
+export function IconPerson({color, size = 56}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Circle
+        cx={12}
+        cy={8}
+        r={4}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
       <Path
         d="M4 21a8 8 0 0 1 16 0"
         stroke={color}
@@ -114,7 +140,11 @@ export interface ShieldCheckProps extends GlyphProps {
 }
 
 /** Insignia de seguridad (escudo) con check interior. */
-export function IconShieldCheck({ color, onColor, size = 18 }: ShieldCheckProps): React.JSX.Element {
+export function IconShieldCheck({
+  color,
+  onColor,
+  size = 18,
+}: ShieldCheckProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -136,10 +166,18 @@ export function IconShieldCheck({ color, onColor, size = 18 }: ShieldCheckProps)
 }
 
 /** Sobre / correo (continuar con correo). Feather `mail`. */
-export function IconMail({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconMail({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={3} y={5} width={18} height={14} rx={2} stroke={color} strokeWidth={STROKE} />
+      <Rect
+        x={3}
+        y={5}
+        width={18}
+        height={14}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
       <Path
         d="m3 7 9 6 9-6"
         stroke={color}
@@ -152,7 +190,7 @@ export function IconMail({ color, size = 20 }: GlyphProps): React.JSX.Element {
 }
 
 /** Teléfono / auricular (continuar con teléfono). Handset del diseño canónico. */
-export function IconPhone({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconPhone({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -176,7 +214,7 @@ export function IconPhone({ color, size = 20 }: GlyphProps): React.JSX.Element {
  * custom siempre que use el LOGO de Apple + texto aprobado. Es un glyph relleno de un solo trazo,
  * tintado por `color` (usamos `theme.colors.ink`, igual que IconMail/IconPhone). viewBox 24×24.
  */
-export function IconApple({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconApple({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -231,7 +269,10 @@ export function BrandBadge({
  * Ícono de WhatsApp: glyph oficial del logo (auricular dentro de la burbuja con cola). Path limpio
  * de un solo trazo relleno, tintado por `color` (color de marca #25D366 lo aporta el consumidor).
  */
-export function IconWhatsapp({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconWhatsapp({
+  color,
+  size = 20,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -247,7 +288,7 @@ export function IconWhatsapp({ color, size = 20 }: GlyphProps): React.JSX.Elemen
 }
 
 /** Ojo (insignia de marca del paso inicial). */
-export function IconEye({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconEye({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -262,11 +303,24 @@ export function IconEye({ color, size = 22 }: GlyphProps): React.JSX.Element {
 }
 
 /** Candado (pantalla de sesión expirada). */
-export function IconLock({ color, size = 24 }: GlyphProps): React.JSX.Element {
+export function IconLock({color, size = 24}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={4} y={10} width={16} height={11} rx={2.5} stroke={color} strokeWidth={STROKE} />
-      <Path d="M8 10V7a4 4 0 0 1 8 0v3" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Rect
+        x={4}
+        y={10}
+        width={16}
+        height={11}
+        rx={2.5}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
+      <Path
+        d="M8 10V7a4 4 0 0 1 8 0v3"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }

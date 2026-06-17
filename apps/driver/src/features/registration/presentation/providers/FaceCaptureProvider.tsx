@@ -1,6 +1,6 @@
-import React, {createContext, useContext, type ReactNode} from 'react';
-import type {FaceCaptureService} from '../../domain';
-import {stubFaceCaptureService} from '../../data';
+import React, { createContext, useContext, type ReactNode } from 'react';
+import type { FaceCaptureService } from '../../domain';
+import { stubFaceCaptureService } from '../../data';
 
 /**
  * Contexto del puerto de captura facial del registro. El valor por defecto es el STUB de

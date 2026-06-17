@@ -14,7 +14,13 @@ import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, EXCLUSION_REGISTRY, type HotIndex, type ExclusionRegistry, type DriverVehicleAttrs } from '../hot-index/hot-index.port';
+import {
+  HOT_INDEX,
+  EXCLUSION_REGISTRY,
+  type HotIndex,
+  type ExclusionRegistry,
+  type DriverVehicleAttrs,
+} from '../hot-index/hot-index.port';
 import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { MatchingService } from './matching.service';
@@ -72,14 +78,14 @@ export class DispatchService {
     const pre = await this.prisma.read.dispatchMatch.findUnique({ where: { id: matchId } });
     // Ownership-check (anti-IDOR #9): un conductor que conoce el matchId de OTRO recibe 404 (NO 403:
     // no filtramos existencia). El driverId viene de la identidad FIRMADA, no del cliente.
-    if (!pre || pre.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
+    if (pre?.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
     const vehicleId = await this.resolveVehicleId(pre.driverId);
 
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
       // Re-chequeo de ownership dentro de la tx (404 si desapareció o no es del dueño). Esto NO es la
       // señal de concurrencia: el dueño legítimo que llega TARDE pasa este check y cae en el CAS de abajo.
-      if (!match || match.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
+      if (match?.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
       const respondedAt = new Date();
       // Guard ATÓMICO (no check-then-act): outcome + driverId van en el WHERE. Dos accepts concurrentes del
       // MISMO dueño → solo UNO matchea OFFERED y gana; el que llega tarde ve count=0 → 409 Conflict
@@ -97,7 +103,9 @@ export class DispatchService {
         // Lo traducimos a 409 limpio (no un 500). Helper ESTRUCTURAL (@veo/database): el `instanceof` del
         // cliente generado por servicio no matchearía cross-cliente. En el secuencial este path no se da.
         if (isUniqueViolation(err, 'trip_id')) {
-          throw new ConflictError('La emergencia ya fue tomada por otro conductor', { tripId: match.tripId });
+          throw new ConflictError('La emergencia ya fue tomada por otro conductor', {
+            tripId: match.tripId,
+          });
         }
         throw err;
       }
@@ -111,7 +119,12 @@ export class DispatchService {
         eventType: 'dispatch.match_found',
         producer: 'dispatch-service',
         // vehicleId adjunto (si se resolvió) → trip-service lo persiste en el viaje (trazabilidad).
-        payload: { tripId: match.tripId, driverId: match.driverId, vehicleId: vehicleId ?? undefined, scoreMs },
+        payload: {
+          tripId: match.tripId,
+          driverId: match.driverId,
+          vehicleId: vehicleId ?? undefined,
+          scoreMs,
+        },
         // dedupKey DETERMINISTA (no uuidv7 aleatorio): un retry HTTP del accept NO duplica el match_found.
         dedupKey: `match_found:${match.tripId}:${match.driverId}`,
       });
@@ -174,7 +187,7 @@ export class DispatchService {
     const view = await this.prisma.write.$transaction(async (tx) => {
       const match = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
       // Ownership-check (anti-IDOR #9): 404 si no existe o no es del conductor firmado (NO filtra existencia).
-      if (!match || match.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
+      if (match?.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
       const respondedAt = new Date();
       // CAS con driverId en el WHERE (defensa en profundidad). count===0 = el DUEÑO llega tarde → 409.
       const claimed = await tx.dispatchMatch.updateMany({
@@ -196,7 +209,7 @@ export class DispatchService {
     const match = await this.prisma.read.dispatchMatch.findUnique({ where: { id: matchId } });
     // Ownership-check (anti-IDOR #9): 404 si no existe o no es del conductor firmado (NO 403: no filtra
     // existencia, un conductor no puede sondear matchIds ajenos por la diferencia de status code).
-    if (!match || match.driverId !== driverId) throw new NotFoundError('Match no encontrado');
+    if (match?.driverId !== driverId) throw new NotFoundError('Match no encontrado');
     return DispatchService.toView(match);
   }
 

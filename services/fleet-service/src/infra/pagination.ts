@@ -24,5 +24,6 @@ export function clampLimit(limit?: number): number {
 export function toPage<T extends { id: string }>(rows: T[], limit: number): Page<T> {
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
-  return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
+  const last = items[items.length - 1];
+  return { items, nextCursor: hasMore && last ? last.id : null };
 }

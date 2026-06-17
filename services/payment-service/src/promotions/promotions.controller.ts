@@ -31,7 +31,9 @@ export class PromotionsController {
 
   @Post('redeem')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Canje idempotente de un cupón para un viaje (un uso por usuario/regla)' })
+  @ApiOperation({
+    summary: 'Canje idempotente de un cupón para un viaje (un uso por usuario/regla)',
+  })
   redeem(@Body() dto: RedeemPromoDto): Promise<PromoRedemptionView> {
     return this.promos.redeemPromo({
       code: dto.code,

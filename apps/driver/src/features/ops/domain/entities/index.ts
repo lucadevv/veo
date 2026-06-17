@@ -14,7 +14,7 @@ export type DemandHeatmap = HeatmapView;
 export type DemandCell = HeatmapCell;
 export type Incentive = DriverIncentive;
 export type IncentiveList = DriverIncentiveList;
-export type {IncentiveType};
+export type { IncentiveType };
 
 /** Parámetros de la consulta del mapa de calor: ubicación del conductor + radio en metros. */
 export interface HeatmapQuery {

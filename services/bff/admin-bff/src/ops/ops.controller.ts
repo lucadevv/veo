@@ -80,7 +80,9 @@ export class OpsController {
   @Post('drivers/:id/suspend')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Suspende manualmente a un conductor con motivo (SAFETY · compliance/admin)' })
+  @ApiOperation({
+    summary: 'Suspende manualmente a un conductor con motivo (SAFETY · compliance/admin)',
+  })
   suspendDriver(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

@@ -13,7 +13,8 @@ import type { Env } from '../config/env.schema';
 const internalSecretProvider: Provider = {
   provide: INTERNAL_IDENTITY_SECRET,
   inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>) => config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
+  useFactory: (config: ConfigService<Env, true>) =>
+    config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
 @Global()

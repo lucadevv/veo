@@ -1,4 +1,4 @@
-import type { ChatMessage } from './entities';
+import type {ChatMessage} from './entities';
 
 /**
  * Abstracción del repositorio de Chat del viaje (DIP). Implementación real contra el public-bff

@@ -21,5 +21,8 @@ export interface EphemeralEventPublisher {
    * Publica un envelope DIRECTO al topic Kafka (sin outbox). `key` ordena por entidad (tripId).
    * Fire-and-forget: el caller la trata best-effort (un fallo NO rompe el broadcast).
    */
-  publish<T extends EventType>(envelope: EventEnvelope<EventPayload<T>>, key: string): Promise<void>;
+  publish<T extends EventType>(
+    envelope: EventEnvelope<EventPayload<T>>,
+    key: string,
+  ): Promise<void>;
 }

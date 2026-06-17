@@ -1,0 +1,32 @@
+# Excepciones REVISADAS del scan de vulnerabilidades (trivy fs · CI Security Scan).
+#
+# Regla: acá SOLO entran CVEs (a) sin fix usable upstream o cuyo fix exige una migración mayor que
+# rompe el build, Y (b) VERIFICADOS como NO explotables en nuestro uso (evidencia nivel 1, abajo).
+# Cada uno lleva `expired_at` (gatillo): pasada esa fecha trivy lo VUELVE a marcar → revisión forzada.
+# NO es "deuda escondida": es intención trazable con techo + gatillo. Lo fixeable se fixeó de verdad
+# (multer 2.2.0, ws 8.21.0, form-data 4.0.6, nodemailer 7) — esto es solo lo upstream-bloqueado.
+vulnerabilities:
+  # @nestjs/microservices 10.4.x · DoS por recursión en JsonSocket del TCP transport.
+  # NO explotable: los 10 servicios usan Transport.GRPC (services/*/main.ts), CERO TCP transport.
+  # Fix = @nestjs/microservices 11.1.19, que EXIGE migrar todo el stack nestjs 10→11 (5+ servicios) —
+  # campaña aparte, no un override (forzar micro@11 con core@10 rompe la alineación de versiones).
+  # gatillo: revisar al hacer la migración nestjs 11, o el 2026-12-17 (lo que ocurra primero).
+  - id: CVE-2026-40879
+    statement: "TCP JsonSocket DoS — usamos solo Transport.GRPC (no TCP). Fix exige migración nestjs 11."
+    expired_at: 2026-12-17
+  # @opentelemetry/sdk-node + auto-instrumentations-node · crash del Prometheus exporter por HTTP malformado.
+  # NO explotable: las métricas usan prom-client (packages/observability/src/metrics.ts), NO el
+  # @opentelemetry/exporter-prometheus vulnerable (nunca se instancia). El traza-exporter es OTLP.
+  # Fix = sdk-node 0.217 / auto-instr 0.75: VERIFICADO que rompe observability (Resource.getRawAttributes
+  # + OTLPTraceExporter no asignable) → exige migración otel completa (todos los @opentelemetry/* en lockstep
+  # + rewrite de otel.ts). gatillo: migración otel, o 2026-12-17.
+  - id: CVE-2026-44902
+    statement: "Prometheus exporter de otel no usado (usamos prom-client + OTLP). Fix rompe el build (migración otel)."
+    expired_at: 2026-12-17
+  # lodash 4.17.21 · RCE vía _.template con input no confiable.
+  # NO explotable: CERO imports de lodash y CERO uso de _.template en todo el src (es transitivo).
+  # Fix = 4.18.0, que NO EXISTE en npm (verificado: npm view lodash@4.18.0 → sin versión). Sin fix usable upstream.
+  # gatillo: cuando lodash publique una versión con el fix, o 2026-12-17.
+  - id: CVE-2026-4800
+    statement: "_.template RCE — no importamos lodash ni usamos _.template (transitivo). Sin fix publicado (4.18.0 inexistente)."
+    expired_at: 2026-12-17

@@ -1,8 +1,8 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
-import {StatusPill, Text, useTheme, type StatusTone} from '@veo/ui-kit';
-import {IconDocument} from '../../../../shared/presentation/icons';
-import {PressableScale} from './motion';
+import { StyleSheet, View } from 'react-native';
+import { StatusPill, Text, useTheme, type StatusTone } from '@veo/ui-kit';
+import { IconDocument } from '../../../../shared/presentation/icons';
+import { PressableScale } from './motion';
 
 export interface DocumentRowProps {
   /** Nombre legible del tipo de documento (ya traducido). */
@@ -47,7 +47,7 @@ export function DocumentRow({
   return (
     <View>
       {showDivider ? (
-        <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+        <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
       ) : null}
       <PressableScale
         accessibilityRole="button"
@@ -55,9 +55,14 @@ export function DocumentRow({
         onPress={onPress}
         style={[
           styles.row,
-          {paddingVertical: theme.spacing.md, gap: theme.spacing.lg, borderRadius: theme.radii.md},
+          {
+            paddingVertical: theme.spacing.md,
+            gap: theme.spacing.lg,
+            borderRadius: theme.radii.md,
+          },
         ]}
-        pressedStyle={{backgroundColor: theme.colors.surfaceElevated}}>
+        pressedStyle={{ backgroundColor: theme.colors.surfaceElevated }}
+      >
         <View
           style={[
             styles.icon,
@@ -67,7 +72,8 @@ export function DocumentRow({
               borderColor: highlighted && highlightColor ? highlightColor : theme.colors.border,
               borderWidth: highlighted ? 1.5 : StyleSheet.hairlineWidth,
             },
-          ]}>
+          ]}
+        >
           <IconDocument
             size={20}
             color={highlighted && highlightColor ? highlightColor : theme.colors.accent}
@@ -89,13 +95,13 @@ export function DocumentRow({
 }
 
 const styles = StyleSheet.create({
-  divider: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  row: {flexDirection: 'row', alignItems: 'center'},
+  divider: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  row: { flexDirection: 'row', alignItems: 'center' },
   icon: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  body: {flex: 1, gap: 2},
+  body: { flex: 1, gap: 2 },
 });

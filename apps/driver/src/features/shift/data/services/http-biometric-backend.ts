@@ -1,5 +1,4 @@
-import type {
-  HttpClient} from '@veo/api-client';
+import type { HttpClient } from '@veo/api-client';
 import {
   ApiError,
   biometricChallenge,
@@ -67,12 +66,12 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
 
   async enroll(photoBase64: string): Promise<BiometricEnrollResult> {
     try {
-      const body = driverBiometricEnrollRequest.parse({photo: photoBase64});
+      const body = driverBiometricEnrollRequest.parse({ photo: photoBase64 });
       const result = await this.http.post('/drivers/biometric/enroll', {
         body,
         schema: driverBiometricEnrollResult,
       });
-      return {enrolledAt: result.enrolledAt};
+      return { enrolledAt: result.enrolledAt };
     } catch (error) {
       throw this.mapError(error);
     }
@@ -92,8 +91,6 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
       }
       return new BiometricBackendUnavailableError(error.message || undefined);
     }
-    return new BiometricBackendUnavailableError(
-      error instanceof Error ? error.message : undefined,
-    );
+    return new BiometricBackendUnavailableError(error instanceof Error ? error.message : undefined);
   }
 }

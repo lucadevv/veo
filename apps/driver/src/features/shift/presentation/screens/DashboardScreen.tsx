@@ -1,12 +1,12 @@
-import React, {useEffect, useState} from 'react';
-import {Linking, StyleSheet, View} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {useTranslation} from 'react-i18next';
-import type {TFunction} from 'i18next';
-import type {CompositeScreenProps} from '@react-navigation/native';
-import type {BottomTabScreenProps} from '@react-navigation/bottom-tabs';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {GeoPoint} from '@veo/api-client';
+import React, { useEffect, useState } from 'react';
+import { Linking, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { GeoPoint } from '@veo/api-client';
 import {
   Avatar,
   Banner,
@@ -21,22 +21,32 @@ import {
   useTheme,
   type StatusTone,
 } from '@veo/ui-kit';
-import type {MainTabParamList, RootStackParamList} from '../../../../navigation/types';
-import {AppMap} from '../../../../shared/presentation/components/AppMap';
-import {IconFlame, IconPower} from '../../../../shared/presentation/icons';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {formatPEN} from '../../../../shared/presentation/format';
-import {vehicleClassLabelKey} from '../../../../shared/presentation/vehicle-class';
-import {LIMA_CENTER} from '../../../../shared/utils/geo';
-import {useEarningsSummary} from '../../../earnings/presentation/hooks/useEarnings';
-import {DemandLegend, useHeatCells, useHeatmap} from '../../../ops/presentation';
-import {useDispatchStore} from '../../../realtime/presentation/state/dispatchStore';
-import {useLocationAvailability, useLocationSource, useTipStore} from '../../../realtime/presentation';
-import {canStartShift, isOnShift, isSuspended, type ShiftStatus, type VehicleType} from '../../domain';
-import {useEndShift, usePauseShift, useShiftState} from '../hooks/useShift';
-import {useActiveVehicle} from '../../../registration/presentation';
-import {VehicleTypeSelector} from '../components/VehicleTypeSelector';
-import {Appear, PressableScale, Pulse} from '../components/motion';
+import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { IconFlame, IconPower } from '../../../../shared/presentation/icons';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { formatPEN } from '../../../../shared/presentation/format';
+import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
+import { LIMA_CENTER } from '../../../../shared/utils/geo';
+import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
+import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
+import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
+import {
+  useLocationAvailability,
+  useLocationSource,
+  useTipStore,
+} from '../../../realtime/presentation';
+import {
+  canStartShift,
+  isOnShift,
+  isSuspended,
+  type ShiftStatus,
+  type VehicleType,
+} from '../../domain';
+import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
+import { useActiveVehicle } from '../../../registration/presentation';
+import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
+import { Appear, PressableScale, Pulse } from '../components/motion';
 
 /**
  * "Inicio" es una tab dentro del stack `Main`. Tipamos la navegación de forma compuesta para poder
@@ -67,30 +77,34 @@ function vehicleTypeLabel(type: VehicleType, t: TFunction): string {
 function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   switch (status) {
     case 'AVAILABLE':
-      return {label: `${t('shift.status.available')} · Buscando viajes`, tone: 'success', live: true};
+      return {
+        label: `${t('shift.status.available')} · Buscando viajes`,
+        tone: 'success',
+        live: true,
+      };
     case 'ASSIGNED':
     case 'ON_TRIP':
-      return {label: t('shift.status.onTrip'), tone: 'accent', live: true};
+      return { label: t('shift.status.onTrip'), tone: 'accent', live: true };
     case 'ON_BREAK':
-      return {label: t('shift.status.onBreak'), tone: 'warn', live: false};
+      return { label: t('shift.status.onBreak'), tone: 'warn', live: false };
     case 'SUSPENDED':
-      return {label: t('shift.status.suspended'), tone: 'danger', live: false};
+      return { label: t('shift.status.suspended'), tone: 'danger', live: false };
     default:
-      return {label: t('shift.status.offline'), tone: 'neutral', live: false};
+      return { label: t('shift.status.offline'), tone: 'neutral', live: false };
   }
 }
 
-export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const shift = useShiftState();
   const earnings = useEarningsSummary();
   const pause = usePauseShift();
   const end = useEndShift();
-  const activeTripId = useDispatchStore(s => s.activeTripId);
-  const lastTip = useTipStore(s => s.lastTip);
-  const clearTip = useTipStore(s => s.clearTip);
+  const activeTripId = useDispatchStore((s) => s.activeTripId);
+  const lastTip = useTipStore((s) => s.lastTip);
+  const clearTip = useTipStore((s) => s.clearTip);
   const activeVehicle = useActiveVehicle();
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
@@ -106,13 +120,13 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
     if (!locationSource.available) {
       return;
     }
-    const unsubscribe = locationSource.subscribe(sample => {
+    const unsubscribe = locationSource.subscribe((sample) => {
       // Defensa: ignoramos fixes corruptos (lat/lon no finitos). Pasar coordenadas NaN al mapa puede
       // tumbar la vista nativa; mejor conservar el último punto válido (o ninguno → centramos en Lima).
       if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lon)) {
         return;
       }
-      setDriverPoint({lat: sample.lat, lon: sample.lon});
+      setDriverPoint({ lat: sample.lat, lon: sample.lon });
     });
     return unsubscribe;
   }, [locationSource]);
@@ -139,7 +153,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   // activo y con ubicación conocida. Si falta cualquier condición, la query queda inactiva (null).
   const heatmapQuery =
     demandOn && online && !activeTripId && driverPoint
-      ? {lat: driverPoint.lat, lng: driverPoint.lon}
+      ? { lat: driverPoint.lat, lng: driverPoint.lon }
       : null;
   const heatmap = useHeatmap(heatmapQuery);
   const heatCells = useHeatCells(heatmap.data);
@@ -147,7 +161,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
 
   // Cabecera flotante: avatar (→ perfil) + saludo a la izquierda; pill de estado a la derecha.
   const topOverlay = (
-    <View style={[styles.topRow, {paddingTop: insets.top}]} pointerEvents="box-none">
+    <View style={[styles.topRow, { paddingTop: insets.top }]} pointerEvents="box-none">
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel={t('shift.viewProfile')}
@@ -162,7 +176,8 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
             paddingVertical: theme.spacing.xs,
             ...theme.elevation.level2,
           },
-        ]}>
+        ]}
+      >
         <Avatar name="VEO" size="sm" online={online} />
         <View style={styles.greetText}>
           <Text variant="footnote" color="inkSubtle">
@@ -178,15 +193,19 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
         {/* Indicador del vehículo ACTIVO (server-authoritative): el conductor ve con qué vehículo está
             operando, que es lo que el dispatch usa para ofrecerle viajes. Oculto si aún no hay activo. */}
         {activeVehicle.data ? (
-          <StatusPill label={vehicleTypeLabel(activeVehicle.data.vehicleType, t)} tone="accent" dot />
+          <StatusPill
+            label={vehicleTypeLabel(activeVehicle.data.vehicleType, t)}
+            tone="accent"
+            dot
+          />
         ) : null}
         {/* Toggle "Zonas de demanda": pinta el mapa de calor para saber a dónde ir. */}
         {showDemandToggle ? (
           <PressableScale
             accessibilityRole="switch"
-            accessibilityState={{checked: demandOn}}
+            accessibilityState={{ checked: demandOn }}
             accessibilityLabel={t('ops.demand.toggle')}
-            onPress={() => setDemandOn(prev => !prev)}
+            onPress={() => setDemandOn((prev) => !prev)}
             style={[
               styles.demandToggle,
               {
@@ -195,7 +214,8 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
                 borderRadius: theme.radii.pill,
                 ...theme.elevation.level2,
               },
-            ]}>
+            ]}
+          >
             <IconFlame
               size={16}
               color={demandOn ? theme.colors.onAccent : theme.colors.accent}
@@ -214,31 +234,30 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   const mapDriver = online ? driverPoint : null;
 
   // Métricas en vivo (reutiliza los campos reales del resumen: neto acumulado y por liquidar).
-  const earningsMetrics =
-    earnings.isLoading ? (
-      <Skeleton height={56} />
-    ) : earnings.isError || !earnings.data ? (
-      <Banner tone="warn" title={t('shift.kpisUnavailable')} />
-    ) : (
-      <View style={styles.kpisRow}>
-        <Appear style={styles.kpi} delay={40}>
-          <Text variant="footnote" color="inkMuted">
-            {t('shift.netTotal')}
-          </Text>
-          <Text variant="title3" tabular>
-            {formatPEN(earnings.data.totalNetCents ?? 0)}
-          </Text>
-        </Appear>
-        <Appear style={styles.kpi} delay={110}>
-          <Text variant="footnote" color="inkMuted">
-            {t('shift.pendingNet')}
-          </Text>
-          <Text variant="title3" color="warn" tabular>
-            {formatPEN(earnings.data.pendingNetCents ?? 0)}
-          </Text>
-        </Appear>
-      </View>
-    );
+  const earningsMetrics = earnings.isLoading ? (
+    <Skeleton height={56} />
+  ) : earnings.isError || !earnings.data ? (
+    <Banner tone="warn" title={t('shift.kpisUnavailable')} />
+  ) : (
+    <View style={styles.kpisRow}>
+      <Appear style={styles.kpi} delay={40}>
+        <Text variant="footnote" color="inkMuted">
+          {t('shift.netTotal')}
+        </Text>
+        <Text variant="title3" tabular>
+          {formatPEN(earnings.data.totalNetCents ?? 0)}
+        </Text>
+      </Appear>
+      <Appear style={styles.kpi} delay={110}>
+        <Text variant="footnote" color="inkMuted">
+          {t('shift.pendingNet')}
+        </Text>
+        <Text variant="title3" color="warn" tabular>
+          {formatPEN(earnings.data.pendingNetCents ?? 0)}
+        </Text>
+      </Appear>
+    </View>
+  );
 
   // ─── Dock inferior: estados de carga/error > viaje activo > en línea > desconectado.
   // El mapa de fondo se monta UNA sola vez (return único más abajo): nunca se desmonta entre
@@ -254,8 +273,17 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
   } else if (shift.isError || !shift.data) {
     bottomOverlay = (
       <Card variant="filled">
-        <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(shift.error, t)} />
-        <Button label={t('common.retry')} fullWidth onPress={() => shift.refetch()} style={styles.spaced} />
+        <Banner
+          tone="danger"
+          title={t('errors.generic')}
+          description={toErrorMessage(shift.error, t)}
+        />
+        <Button
+          label={t('common.retry')}
+          fullWidth
+          onPress={() => shift.refetch()}
+          style={styles.spaced}
+        />
       </Card>
     );
   } else if (activeTripId) {
@@ -269,7 +297,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
           label={t('shift.viewActiveTrip')}
           variant="accent"
           fullWidth
-          onPress={() => navigation.navigate('TripActive', {tripId: activeTripId})}
+          onPress={() => navigation.navigate('TripActive', { tripId: activeTripId })}
           style={styles.spaced}
         />
       </Card>
@@ -278,129 +306,147 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
     // En línea: sheet slim con métricas en vivo, pausa y desconexión (misma lógica de mutaciones).
     bottomOverlay = (
       <Appear key="online">
-      <Card variant="filled" padding="lg">
-        {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
+        <Card variant="filled" padding="lg">
+          {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
             Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
-        {gpsUnavailable ? (
-          <Banner
-            tone="danger"
-            title={t('shift.gpsUnavailableTitle')}
-            description={gpsBannerBody}
-            // Acción directa: abre los ajustes del SO de la app, donde el conductor activa el permiso o
-            // el servicio de ubicación. Sin esto el banner solo informaba y el conductor debía adivinar.
-            action={{label: t('shift.gpsOpenSettings'), onPress: () => Linking.openSettings()}}
-            style={styles.bannerBelow}
-          />
-        ) : null}
-        <View style={styles.onlineHead}>
-          <Pulse active={status === 'AVAILABLE'} style={styles.liveDotWrap}>
-            <View style={[styles.liveDot, {backgroundColor: theme.colors.success}]} />
-          </Pulse>
-          <Text variant="headline">{t('shift.readyForTrips')}</Text>
-        </View>
-        {/* Tipo de vehículo activo: editable en línea (bloqueado solo durante un viaje), porque es
-            lo que decide qué viajes —Auto o Moto— le ofrece el dispatch. */}
-        <View style={styles.spaced}>
-          <VehicleTypeSelector disabled={status === 'ON_TRIP' || status === 'ASSIGNED'} />
-        </View>
-        <View style={styles.spaced}>{earningsMetrics}</View>
-        {/* Pujas abiertas: el conductor entra al marketplace "proponé tu precio" para ofertar/contraofertar. */}
-        <Button
-          label={t('trips.bid.screenTitle')}
-          variant="accent"
-          fullWidth
-          leftIcon={<IconFlame size={18} color={theme.colors.onAccent} strokeWidth={2} />}
-          onPress={() => navigation.navigate('Bids')}
-          style={styles.spaced}
-        />
-        <View style={styles.actionsRow}>
-          {status === 'AVAILABLE' ? (
-            <Button
-              label={t('shift.pause')}
-              variant="secondary"
-              fullWidth
-              loading={pause.isPending}
-              onPress={() => pause.mutate()}
-              style={styles.actionItem}
+          {gpsUnavailable ? (
+            <Banner
+              tone="danger"
+              title={t('shift.gpsUnavailableTitle')}
+              description={gpsBannerBody}
+              // Acción directa: abre los ajustes del SO de la app, donde el conductor activa el permiso o
+              // el servicio de ubicación. Sin esto el banner solo informaba y el conductor debía adivinar.
+              action={{ label: t('shift.gpsOpenSettings'), onPress: () => Linking.openSettings() }}
+              style={styles.bannerBelow}
             />
           ) : null}
+          <View style={styles.onlineHead}>
+            <Pulse active={status === 'AVAILABLE'} style={styles.liveDotWrap}>
+              <View style={[styles.liveDot, { backgroundColor: theme.colors.success }]} />
+            </Pulse>
+            <Text variant="headline">{t('shift.readyForTrips')}</Text>
+          </View>
+          {/* Tipo de vehículo activo: editable en línea (bloqueado solo durante un viaje), porque es
+            lo que decide qué viajes —Auto o Moto— le ofrece el dispatch. */}
+          <View style={styles.spaced}>
+            <VehicleTypeSelector disabled={status === 'ON_TRIP' || status === 'ASSIGNED'} />
+          </View>
+          <View style={styles.spaced}>{earningsMetrics}</View>
+          {/* Pujas abiertas: el conductor entra al marketplace "proponé tu precio" para ofertar/contraofertar. */}
           <Button
-            label={t('shift.goOffline')}
-            variant="ghost"
+            label={t('trips.bid.screenTitle')}
+            variant="accent"
             fullWidth
-            loading={end.isPending}
-            onPress={() => setEndConfirm(true)}
-            style={styles.actionItem}
+            leftIcon={<IconFlame size={18} color={theme.colors.onAccent} strokeWidth={2} />}
+            onPress={() => navigation.navigate('Bids')}
+            style={styles.spaced}
           />
-        </View>
-        {pause.isError ? (
-          <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(pause.error, t)} style={styles.spaced} />
-        ) : null}
-        {end.isError ? (
-          <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(end.error, t)} style={styles.spaced} />
-        ) : null}
-      </Card>
+          <View style={styles.actionsRow}>
+            {status === 'AVAILABLE' ? (
+              <Button
+                label={t('shift.pause')}
+                variant="secondary"
+                fullWidth
+                loading={pause.isPending}
+                onPress={() => pause.mutate()}
+                style={styles.actionItem}
+              />
+            ) : null}
+            <Button
+              label={t('shift.goOffline')}
+              variant="ghost"
+              fullWidth
+              loading={end.isPending}
+              onPress={() => setEndConfirm(true)}
+              style={styles.actionItem}
+            />
+          </View>
+          {pause.isError ? (
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(pause.error, t)}
+              style={styles.spaced}
+            />
+          ) : null}
+          {end.isError ? (
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(end.error, t)}
+              style={styles.spaced}
+            />
+          ) : null}
+        </Card>
       </Appear>
     );
   } else {
     // Desconectado / en pausa: dock con resumen de ganancias y CTA principal "Conéctate".
     bottomOverlay = (
       <Appear key="offline">
-      <Card variant="filled">
-        {/* Elige el vehículo ANTES de conectarte: define qué viajes recibirás al iniciar turno. */}
-        <View style={styles.vehiclePicker}>
-          <VehicleTypeSelector />
-          {/* Gestionar/registrar vehículos (p. ej. sumar una moto para poder cambiar de tipo). */}
+        <Card variant="filled">
+          {/* Elige el vehículo ANTES de conectarte: define qué viajes recibirás al iniciar turno. */}
+          <View style={styles.vehiclePicker}>
+            <VehicleTypeSelector />
+            {/* Gestionar/registrar vehículos (p. ej. sumar una moto para poder cambiar de tipo). */}
+            <Button
+              label={t('vehicles.manage')}
+              variant="ghost"
+              size="sm"
+              onPress={() => navigation.navigate('Vehicles')}
+              style={styles.spaced}
+            />
+          </View>
+          {earningsMetrics}
           <Button
-            label={t('vehicles.manage')}
-            variant="ghost"
-            size="sm"
-            onPress={() => navigation.navigate('Vehicles')}
-            style={styles.spaced}
-          />
-        </View>
-        {earningsMetrics}
-        <Button
             label={t('shift.viewEarnings')}
             variant="ghost"
             size="sm"
             onPress={() => navigation.navigate('Ganancias')}
-          style={styles.spaced}
-        />
-        {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
+            style={styles.spaced}
+          />
+          {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
             en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
-        {isSuspended(status) ? (
-          <Banner
-            tone="danger"
-            title={t('shift.suspendedTitle')}
-            description={t('shift.suspendedBody')}
-            action={{label: t('shift.contactSupport'), onPress: () => navigation.navigate('Support')}}
-            style={styles.spaced}
-          />
-        ) : canStartShift(status) ? (
-          <Button
-            label={status === 'ON_BREAK' ? t('shift.resume') : t('shift.connect')}
-            size="lg"
-            fullWidth
-            leftIcon={<IconPower size={20} color={theme.colors.onAccent} />}
-            onPress={() => navigation.navigate('ShiftStart')}
-            style={styles.spaced}
-          />
-        ) : (
-          /* Estado NO reconocido (UNKNOWN): ni suspendido ni conectable. En vez de un dock sin CTA ni
+          {isSuspended(status) ? (
+            <Banner
+              tone="danger"
+              title={t('shift.suspendedTitle')}
+              description={t('shift.suspendedBody')}
+              action={{
+                label: t('shift.contactSupport'),
+                onPress: () => navigation.navigate('Support'),
+              }}
+              style={styles.spaced}
+            />
+          ) : canStartShift(status) ? (
+            <Button
+              label={status === 'ON_BREAK' ? t('shift.resume') : t('shift.connect')}
+              size="lg"
+              fullWidth
+              leftIcon={<IconPower size={20} color={theme.colors.onAccent} />}
+              onPress={() => navigation.navigate('ShiftStart')}
+              style={styles.spaced}
+            />
+          ) : (
+            /* Estado NO reconocido (UNKNOWN): ni suspendido ni conectable. En vez de un dock sin CTA ni
              explicación (conductor confundido), avisamos honesto y ofrecemos reintentar la lectura. */
-          <Banner
-            tone="warn"
-            title={t('shift.unknownStateTitle')}
-            description={t('shift.unknownStateBody')}
-            action={{label: t('common.retry'), onPress: () => shift.refetch()}}
-            style={styles.spaced}
-          />
-        )}
-        {end.isError ? (
-          <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(end.error, t)} style={styles.spaced} />
-        ) : null}
-      </Card>
+            <Banner
+              tone="warn"
+              title={t('shift.unknownStateTitle')}
+              description={t('shift.unknownStateBody')}
+              action={{ label: t('common.retry'), onPress: () => shift.refetch() }}
+              style={styles.spaced}
+            />
+          )}
+          {end.isError ? (
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(end.error, t)}
+              style={styles.spaced}
+            />
+          ) : null}
+        </Card>
       </Appear>
     );
   }
@@ -416,10 +462,7 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
         />
         {/* Atenuación del mapa cuando el conductor no está en línea. */}
         {!online ? (
-          <View
-            style={[styles.dim, {backgroundColor: theme.colors.bg}]}
-            pointerEvents="none"
-          />
+          <View style={[styles.dim, { backgroundColor: theme.colors.bg }]} pointerEvents="none" />
         ) : null}
         {/* Propina recibida en vivo (100% del conductor): banner celebratorio flotante, descartable.
             Aparece en cualquier estado de turno; el monto real ya entró a ganancias. */}
@@ -427,9 +470,9 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
           <View style={styles.tipWrap}>
             <Banner
               tone="success"
-              title={t('shift.tipReceivedTitle', {amount: formatPEN(lastTip.tipCents)})}
+              title={t('shift.tipReceivedTitle', { amount: formatPEN(lastTip.tipCents) })}
               description={t('shift.tipReceivedBody')}
-              action={{label: t('common.gotIt'), onPress: clearTip}}
+              action={{ label: t('common.gotIt'), onPress: clearTip }}
             />
           </View>
         ) : null}
@@ -455,7 +498,11 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
         title={t('shift.endConfirmTitle')}
         footer={
           <View style={styles.sheetFooter}>
-            <Button label={t('common.cancel')} variant="secondary" onPress={() => setEndConfirm(false)} />
+            <Button
+              label={t('common.cancel')}
+              variant="secondary"
+              onPress={() => setEndConfirm(false)}
+            />
             <Button
               label={t('shift.endShift')}
               variant="danger"
@@ -465,7 +512,8 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
               }}
             />
           </View>
-        }>
+        }
+      >
         <Text variant="callout" color="inkMuted">
           {t('shift.endConfirmBody')}
         </Text>
@@ -475,8 +523,13 @@ export const DashboardScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  topRow: {flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12},
-  topRight: {alignItems: 'flex-end', gap: 8},
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  topRight: { alignItems: 'flex-end', gap: 8 },
   demandToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -485,20 +538,20 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderWidth: 1,
   },
-  legendWrap: {position: 'absolute', left: 16, right: 16, bottom: 16},
-  tipWrap: {position: 'absolute', left: 16, right: 16, top: 96},
-  vehiclePicker: {marginBottom: 16},
-  greetCard: {flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220},
-  greetText: {flexShrink: 1, paddingRight: 4},
-  dim: {...StyleSheet.absoluteFill, opacity: 0.55},
-  kpisRow: {flexDirection: 'row', gap: 16},
-  kpi: {flex: 1, gap: 2},
-  onlineHead: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  liveDotWrap: {width: 10, height: 10, alignItems: 'center', justifyContent: 'center'},
-  liveDot: {width: 10, height: 10, borderRadius: 999},
-  actionsRow: {flexDirection: 'row', gap: 12, marginTop: 16},
-  actionItem: {flex: 1},
-  spaced: {marginTop: 12},
-  bannerBelow: {marginBottom: 12},
-  sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
+  legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
+  tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
+  vehiclePicker: { marginBottom: 16 },
+  greetCard: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220 },
+  greetText: { flexShrink: 1, paddingRight: 4 },
+  dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
+  kpisRow: { flexDirection: 'row', gap: 16 },
+  kpi: { flex: 1, gap: 2 },
+  onlineHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveDotWrap: { width: 10, height: 10, alignItems: 'center', justifyContent: 'center' },
+  liveDot: { width: 10, height: 10, borderRadius: 999 },
+  actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  actionItem: { flex: 1 },
+  spaced: { marginTop: 12 },
+  bannerBelow: { marginBottom: 12 },
+  sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
 });

@@ -7,7 +7,12 @@
  * un array JSON { zone, offeringId, floorCents } que se parsea DEFENSIVAMENTE (fila corrupta → []).
  */
 import { Injectable } from '@nestjs/common';
-import { findOffering, GLOBAL_ZONE, type BidFloorConfig, type BidFloorOverride } from '@veo/shared-types';
+import {
+  findOffering,
+  GLOBAL_ZONE,
+  type BidFloorConfig,
+  type BidFloorOverride,
+} from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
 
@@ -36,10 +41,14 @@ export interface BidFloorTx {
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
     create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
+    findUnique(args: {
+      where: { id: string };
+    }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
-    create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;
+    create(args: {
+      data: { aggregateId: string; eventType: string; envelope: unknown };
+    }): Promise<unknown>;
   };
 }
 
@@ -56,7 +65,9 @@ export class PrismaBidFloorRepository implements BidFloorRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async find(): Promise<PersistedBidFloor | null> {
-    const row = await this.prisma.read.bidFloorConfig.findUnique({ where: { id: BID_FLOOR_SINGLETON_ID } });
+    const row = await this.prisma.read.bidFloorConfig.findUnique({
+      where: { id: BID_FLOOR_SINGLETON_ID },
+    });
     if (!row) return null;
     return {
       defaultFloorCents: row.defaultFloorCents,

@@ -19,10 +19,7 @@ export class OtpService {
   private readonly ttl: number;
   private readonly maxAttempts: number;
 
-  constructor(
-    @Inject(REDIS) redis: Redis,
-    config: ConfigService<Env, true>,
-  ) {
+  constructor(@Inject(REDIS) redis: Redis, config: ConfigService<Env, true>) {
     this.codes = new VerificationCodeService(redis);
     this.ttl = config.getOrThrow<number>('OTP_TTL_SECONDS');
     this.maxAttempts = config.getOrThrow<number>('OTP_MAX_ATTEMPTS');

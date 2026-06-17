@@ -81,26 +81,32 @@ const REQUIRED_KEYS = [
 ] as const;
 
 describe('Copy-contract · afiliación Yape + PAGOEFECTIVO + checkout (es-PE)', () => {
-  it.each(REQUIRED_KEYS)('resuelve "%s" a texto real (no la clave cruda)', (key) => {
-    const value = i18n.t(key);
-    expect(typeof value).toBe('string');
-    expect(value).not.toBe(key);
-    expect(value.length).toBeGreaterThan(0);
-  });
+  it.each(REQUIRED_KEYS)(
+    'resuelve "%s" a texto real (no la clave cruda)',
+    key => {
+      const value = i18n.t(key);
+      expect(typeof value).toBe('string');
+      expect(value).not.toBe(key);
+      expect(value.length).toBeGreaterThan(0);
+    },
+  );
 
   it('interpola el teléfono enmascarado en la línea del Yape vinculado', () => {
-    const value = i18n.t('payments.auto.linkedLine', { phone: '9*****678' });
+    const value = i18n.t('payments.auto.linkedLine', {phone: '9*****678'});
     expect(value).toContain('9*****678');
   });
 
   it('interpola la fecha de vencimiento del checkout', () => {
-    const value = i18n.t('settlement.checkout.expiresAt', { date: '12/06 14:30' });
+    const value = i18n.t('settlement.checkout.expiresAt', {
+      date: '12/06 14:30',
+    });
     expect(value).toContain('12/06 14:30');
   });
 
   it('el copy del sheet integra el consentimiento: cobro automático + se desactiva cuando quiera', () => {
     // El consentimiento va INTEGRADO al copy del sheet (2 líneas), no como banner aparte.
-    const intro = `${i18n.t('payments.auto.linkIntro1')} ${i18n.t('payments.auto.linkIntro2')}`.toLowerCase();
+    const intro =
+      `${i18n.t('payments.auto.linkIntro1')} ${i18n.t('payments.auto.linkIntro2')}`.toLowerCase();
     expect(intro).toContain('cobra');
     expect(intro).toContain('desactiv');
   });
@@ -123,7 +129,10 @@ describe('Copy-contract · afiliación Yape + PAGOEFECTIVO + checkout (es-PE)', 
     // El recibo (SettlementBody·CAPTURED) usa payments.method.* y settlement.paidBody: ninguno menciona
     // "automático". Un cobro pagado una vez con Yape (QR/deepLink) no es el cobro On-File.
     const paid = i18n
-      .t('settlement.paidBody', { amount: 'S/ 12.00', method: i18n.t('payments.method.YAPE') })
+      .t('settlement.paidBody', {
+        amount: 'S/ 12.00',
+        method: i18n.t('payments.method.YAPE'),
+      })
       .toLowerCase();
     expect(paid).not.toContain('autom');
   });

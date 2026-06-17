@@ -30,7 +30,15 @@ function passengerUser(): AuthenticatedUser {
   return { userId: 'user-2', type: 'passenger', roles: [], sessionId: 'sess-2' };
 }
 
-function makeController(): { ctrl: OfferBoardController; svc: { submitOffer: ReturnType<typeof vi.fn>; listOpenBidsNear: ReturnType<typeof vi.fn>; getOffersView: ReturnType<typeof vi.fn>; cancelBoard: ReturnType<typeof vi.fn> } } {
+function makeController(): {
+  ctrl: OfferBoardController;
+  svc: {
+    submitOffer: ReturnType<typeof vi.fn>;
+    listOpenBidsNear: ReturnType<typeof vi.fn>;
+    getOffersView: ReturnType<typeof vi.fn>;
+    cancelBoard: ReturnType<typeof vi.fn>;
+  };
+} {
   const offer: Offer = {
     tripId: TRIP,
     driverId: 'signed-driver',
@@ -79,7 +87,9 @@ describe('OfferBoardController — trust boundary del lado conductor (#9)', () =
   it('submitOffer IGNORA un driverId colado en el body — oferta como el conductor FIRMADO', async () => {
     const { ctrl, svc } = makeController();
     // Un cliente malicioso intenta colar otro driverId en el body (campo ya removido del DTO).
-    const spoofed = { ...baseDto, driverId: 'victim-driver' } as SubmitOfferDto & { driverId: string };
+    const spoofed = { ...baseDto, driverId: 'victim-driver' } as SubmitOfferDto & {
+      driverId: string;
+    };
     await ctrl.submitOffer(TRIP, driverUser('signed-driver'), spoofed);
     // El service recibe el FIRMADO, nunca 'victim-driver'.
     expect(svc.submitOffer).toHaveBeenCalledWith(

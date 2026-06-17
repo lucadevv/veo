@@ -1,4 +1,4 @@
-export {HttpShiftRepository} from './repositories/http-shift-repository';
+export { HttpShiftRepository } from './repositories/http-shift-repository';
 export {
   NativeForegroundService,
   nativeForegroundService,

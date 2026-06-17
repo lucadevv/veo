@@ -1,11 +1,12 @@
-import { uuidv7 } from '../src/shared/utils/uuid';
+import {uuidv7} from '../src/shared/utils/uuid';
 
 /**
  * El panic-service exige `dedupKey` en formato UUIDv7 (rechaza v4). Estas pruebas garantizan que el
  * generador del cliente cumple versión, variante, formato y orden temporal.
  */
 describe('uuidv7', () => {
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
   it('genera un UUID con formato canónico', () => {
     expect(uuidv7()).toMatch(UUID_RE);

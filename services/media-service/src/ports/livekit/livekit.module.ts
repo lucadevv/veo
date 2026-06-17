@@ -6,7 +6,12 @@ import { Module, Logger, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, EncodedFileOutput, S3Upload } from 'livekit-server-sdk';
 import { ExternalServiceError } from '@veo/utils';
-import { LIVEKIT_PORT, type LiveKitPort, type IssueTokenInput, type StartRecordingInput } from './livekit.port';
+import {
+  LIVEKIT_PORT,
+  type LiveKitPort,
+  type IssueTokenInput,
+  type StartRecordingInput,
+} from './livekit.port';
 import type { Env } from '../../config/env.schema';
 
 /** Convierte la URL ws(s):// de señalización en el host http(s):// de las APIs de servidor. */

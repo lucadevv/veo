@@ -1,4 +1,4 @@
-import { Linking } from 'react-native';
+import {Linking} from 'react-native';
 
 /**
  * Abre una URL externa (deepLink de wallet, web de checkout) de forma SEGURA.
@@ -15,7 +15,9 @@ import { Linking } from 'react-native';
  *          desconocido, URL vacía). El llamador decide el fallback honesto (banner + "Pagar desde el
  *          navegador" si hay una urlPay web, o reintentar).
  */
-export async function openExternalUrl(url: string | null | undefined): Promise<boolean> {
+export async function openExternalUrl(
+  url: string | null | undefined,
+): Promise<boolean> {
   if (!url) {
     return false;
   }

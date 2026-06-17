@@ -72,7 +72,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = ctx.getRequest<HttpRequestLike>();
     const traceId = trace.getActiveSpan()?.spanContext().traceId;
 
-    const { status, code, message, details } = this.mapException(exception) ?? this.mapBase(exception);
+    const { status, code, message, details } =
+      this.mapException(exception) ?? this.mapBase(exception);
 
     errorsTotal.inc({ code, status: String(status) });
 

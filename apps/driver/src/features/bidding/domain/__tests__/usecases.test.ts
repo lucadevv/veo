@@ -1,4 +1,4 @@
-import type {BiddingRepository, OpenBid, SubmitOfferInput, SubmittedOffer} from '../index';
+import type { BiddingRepository, OpenBid, SubmitOfferInput, SubmittedOffer } from '../index';
 import {
   AcceptBidUseCase,
   BID_MAX_CENTS,
@@ -19,14 +19,14 @@ const BID: OpenBid = {
 
 /** Doble de prueba del repositorio de pujas: captura el último submit (no es un mock de producción). */
 class FakeBiddingRepository implements BiddingRepository {
-  lastSubmit: {tripId: string; input: SubmitOfferInput} | null = null;
+  lastSubmit: { tripId: string; input: SubmitOfferInput } | null = null;
   readonly bids: OpenBid[] = [BID];
 
   listOpenBids(): Promise<OpenBid[]> {
     return Promise.resolve(this.bids);
   }
   submitOffer(tripId: string, input: SubmitOfferInput): Promise<SubmittedOffer> {
-    this.lastSubmit = {tripId, input};
+    this.lastSubmit = { tripId, input };
     return Promise.resolve({
       tripId,
       driverId: 'd1',
@@ -52,7 +52,7 @@ describe('AcceptBidUseCase', () => {
     await new AcceptBidUseCase(repo).execute(BID);
     expect(repo.lastSubmit).toEqual({
       tripId: 't1',
-      input: {kind: 'ACCEPT_PRICE', priceCents: 1500},
+      input: { kind: 'ACCEPT_PRICE', priceCents: 1500 },
     });
   });
 });
@@ -63,7 +63,7 @@ describe('CounterBidUseCase', () => {
     await new CounterBidUseCase(repo).execute(BID, 1800);
     expect(repo.lastSubmit).toEqual({
       tripId: 't1',
-      input: {kind: 'COUNTER', priceCents: 1800},
+      input: { kind: 'COUNTER', priceCents: 1800 },
     });
   });
 

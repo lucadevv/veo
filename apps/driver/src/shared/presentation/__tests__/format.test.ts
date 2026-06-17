@@ -1,4 +1,4 @@
-import {formatPEN} from '../format';
+import { formatPEN } from '../format';
 
 /**
  * Regresión del dashboard: `formatPEN` se usa para los KPIs de ganancias. Si un campo opcional llega

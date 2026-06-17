@@ -64,7 +64,9 @@ export function SafeScreen({
   );
 
   return (
-    <View style={[styles.flex, { backgroundColor: bg, paddingTop: topInset ? insets.top : 0 }, style]}>
+    <View
+      style={[styles.flex, { backgroundColor: bg, paddingTop: topInset ? insets.top : 0 }, style]}
+    >
       <StatusBar barStyle={theme.statusBarStyle} backgroundColor={bg} translucent />
       {header ? <View style={{ paddingHorizontal: horizontal }}>{header}</View> : null}
       {body}

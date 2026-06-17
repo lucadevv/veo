@@ -63,7 +63,10 @@ export const ProntoPagaMethodType = { YAPE_AFFILIATION: 'yape_affiliation' } as 
  *  - CARD → pe_card_payment.
  *  - PAGOEFECTIVO → pagoefectivo_payment.
  */
-export function mapMethodToProntoPaga(method: GatewayPaymentMethod, hasWalletUid: boolean): ProntoPagaMethod {
+export function mapMethodToProntoPaga(
+  method: GatewayPaymentMethod,
+  hasWalletUid: boolean,
+): ProntoPagaMethod {
   switch (method) {
     case 'YAPE':
       return hasWalletUid ? 'yape_cof_payment' : 'yape_oneshot_payment';
@@ -135,7 +138,8 @@ export function mapAffiliationStatus(status: string): WebhookStatus {
  * `affiliation`; de lo contrario es `payment`. `order` es nuestra referencia (paymentId/affiliationId).
  */
 export function normalizeWebhook(raw: Record<string, unknown>): WebhookResult {
-  const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.length > 0 ? v : undefined;
   const uid = str(raw.uid) ?? str(raw.reference) ?? '';
   const order = str(raw.order);
   const statusStr = str(raw.status) ?? '';

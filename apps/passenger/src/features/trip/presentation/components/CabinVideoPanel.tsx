@@ -1,11 +1,11 @@
-import { ApiError } from '@veo/api-client';
-import { Card, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import { useQuery } from '@tanstack/react-query';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import {ApiError} from '@veo/api-client';
+import {Card, StatusPill, Text, useTheme} from '@veo/ui-kit';
+import {useQuery} from '@tanstack/react-query';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 import {
   getCabinVideoViewer,
   type CabinViewerState,
@@ -30,10 +30,11 @@ export function CabinVideoPanel({
   onOpenFullscreen?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const getVideo = useDependency(TOKENS.getCabinVideoUseCase);
   // Estado REAL de la conexión en vivo del visor (distinto del REC, que refleja la grabación server-side).
-  const [viewerState, setViewerState] = useState<CabinViewerState>('connecting');
+  const [viewerState, setViewerState] =
+    useState<CabinViewerState>('connecting');
 
   const query = useQuery({
     queryKey: ['trip', tripId, 'video'],
@@ -60,7 +61,7 @@ export function CabinVideoPanel({
 
   return (
     <Card variant="filled" padding="lg">
-      <View style={[styles.header, { marginBottom: theme.spacing.sm }]}>
+      <View style={[styles.header, {marginBottom: theme.spacing.sm}]}>
         <Text variant="subhead" color="inkMuted">
           {t('trip.cabinVideoTitle')}
         </Text>
@@ -73,14 +74,20 @@ export function CabinVideoPanel({
           habilita: no se ofrece "ver en grande" si no hay nada que ver (degradación honesta). */}
       <Pressable
         accessibilityRole={hasGrant && onOpenFullscreen ? 'button' : undefined}
-        accessibilityLabel={hasGrant && onOpenFullscreen ? t('cameraLive.openFullscreen') : undefined}
+        accessibilityLabel={
+          hasGrant && onOpenFullscreen
+            ? t('cameraLive.openFullscreen')
+            : undefined
+        }
         disabled={!(hasGrant && onOpenFullscreen)}
         onPress={onOpenFullscreen}
         style={[
           styles.stage,
-          { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.md },
-        ]}
-      >
+          {
+            backgroundColor: theme.colors.surfaceElevated,
+            borderRadius: theme.radii.md,
+          },
+        ]}>
         {hasGrant && Viewer ? (
           <>
             <Viewer grant={query.data} onStateChange={setViewerState} />
@@ -95,14 +102,16 @@ export function CabinVideoPanel({
         ) : (
           <View style={styles.center}>
             <Text variant="footnote" color="inkSubtle" align="center">
-              {hasGrant ? t('trip.cabinVideoNative') : t('trip.cabinVideoUnavailable')}
+              {hasGrant
+                ? t('trip.cabinVideoNative')
+                : t('trip.cabinVideoUnavailable')}
             </Text>
           </View>
         )}
       </Pressable>
 
       {hasGrant && onOpenFullscreen ? (
-        <View style={[styles.hint, { marginTop: theme.spacing.sm }]}>
+        <View style={[styles.hint, {marginTop: theme.spacing.sm}]}>
           <Text variant="footnote" color="inkMuted">
             {t('cameraLive.openFullscreen')}
           </Text>
@@ -113,8 +122,21 @@ export function CabinVideoPanel({
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stage: { height: 180, overflow: 'hidden' },
-  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  hint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stage: {height: 180, overflow: 'hidden'},
+  center: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  hint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
 });

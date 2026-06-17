@@ -1,10 +1,10 @@
-import { hmacSha256Hex } from '../../../shared/crypto/hmacSha256';
+import {hmacSha256Hex} from '../../../shared/crypto/hmacSha256';
 import {
   type PanicSecretStore,
   PanicSecretUnavailableError,
 } from '../domain/panicSecretStore';
-import { buildPanicSignatureMessage } from '../domain/panicSignature';
-import type { PanicSignaturePayload, PanicSigner } from '../domain/panicSigner';
+import {buildPanicSignatureMessage} from '../domain/panicSignature';
+import type {PanicSignaturePayload, PanicSigner} from '../domain/panicSigner';
 
 /**
  * Firmador REAL del pánico (BR-S04): produce `HMAC_SHA256(mensaje_canónico, secreto)` en hex.

@@ -60,12 +60,7 @@ export class ContactsService {
 
   private async markModified(userId: string, now = Date.now()): Promise<void> {
     // TTL = cool-down: pasado ese tiempo el marcador expira y se puede volver a modificar.
-    await this.redis.set(
-      this.cooldownKey(userId),
-      String(now),
-      'PX',
-      this.cooldownMs,
-    );
+    await this.redis.set(this.cooldownKey(userId), String(now), 'PX', this.cooldownMs);
   }
 
   /** Lista los contactos de confianza del usuario. */
@@ -81,7 +76,10 @@ export class ContactsService {
    * Alta de contacto: valida cupo (max 3) y cool-down, crea el contacto (no verificado),
    * emite un OTP y lo envía por SMS al teléfono del contacto.
    */
-  async add(userId: string, input: AddContactInput): Promise<{ contact: ContactView; otpSent: true }> {
+  async add(
+    userId: string,
+    input: AddContactInput,
+  ): Promise<{ contact: ContactView; otpSent: true }> {
     const phone = parseOrThrow(peruPhoneSchema, input.phone, 'phone');
 
     assertContactsCooldown(await this.lastModifiedAt(userId), this.cooldownMs);
@@ -128,7 +126,10 @@ export class ContactsService {
     const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: contactId } });
     if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
     const code = await this.otp.issue(contactId);
-    await this.sms.send(contact.phone, `Tu código de verificación de contacto VEO es ${code} (válido 5 min).`);
+    await this.sms.send(
+      contact.phone,
+      `Tu código de verificación de contacto VEO es ${code} (válido 5 min).`,
+    );
     return { otpSent: true };
   }
 

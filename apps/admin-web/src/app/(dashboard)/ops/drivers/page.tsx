@@ -35,7 +35,11 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
     header: 'Teléfono',
     cell: ({ row }) => <span className="tabular text-ink-muted">{row.original.phone ?? '—'}</span>,
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     accessorKey: 'averageRating',
     header: 'Rating',
@@ -71,14 +75,18 @@ const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-col">
         <span className="font-mono text-xs text-ink">{row.original.id.slice(0, 8)}</span>
-        <span className="font-mono text-xs text-ink-muted">usuario {row.original.userId.slice(0, 8)}</span>
+        <span className="font-mono text-xs text-ink-muted">
+          usuario {row.original.userId.slice(0, 8)}
+        </span>
       </div>
     ),
   },
   {
     accessorKey: 'licenseNumber',
     header: 'Licencia',
-    cell: ({ row }) => <span className="tabular text-ink-muted">{row.original.licenseNumber ?? '—'}</span>,
+    cell: ({ row }) => (
+      <span className="tabular text-ink-muted">{row.original.licenseNumber ?? '—'}</span>
+    ),
   },
   {
     id: 'actions',
@@ -135,7 +143,10 @@ export default function DriversPage() {
   if (!can(user, 'drivers:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Conductores" breadcrumbs={[{ label: 'Operación' }, { label: 'Conductores' }]} />
+        <PageHeader
+          title="Conductores"
+          breadcrumbs={[{ label: 'Operación' }, { label: 'Conductores' }]}
+        />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}
@@ -184,11 +195,15 @@ export default function DriversPage() {
               ) : (
                 <>
                   <DataTable
-                    caption={value === 'REJECTED' ? 'Conductores rechazados' : 'Listado de conductores'}
+                    caption={
+                      value === 'REJECTED' ? 'Conductores rechazados' : 'Listado de conductores'
+                    }
                     columns={value === 'REJECTED' ? rejectedColumns : columns}
                     data={fleetRows}
                     loading={fleet.isLoading}
-                    emptyTitle={value === 'REJECTED' ? 'Sin conductores rechazados' : 'Sin conductores'}
+                    emptyTitle={
+                      value === 'REJECTED' ? 'Sin conductores rechazados' : 'Sin conductores'
+                    }
                     emptyDescription={
                       value === 'REJECTED'
                         ? 'No hay conductores con antecedentes rechazados.'

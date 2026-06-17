@@ -14,12 +14,16 @@ import { metricsRegistry, httpRequestDuration } from '@veo/observability';
 interface HistogramLike {
   observe(value: number): void;
 }
-type HistogramCtor = new (cfg: { name: string; help: string; buckets: number[]; registers: unknown[] }) => HistogramLike;
+type HistogramCtor = new (cfg: {
+  name: string;
+  help: string;
+  buckets: number[];
+  registers: unknown[];
+}) => HistogramLike;
 
 // Clase Histogram tomada de la instancia existente (misma copia de prom-client).
-const HistogramClass = (
-  httpRequestDuration as unknown as { constructor: HistogramCtor }
-).constructor;
+const HistogramClass = (httpRequestDuration as unknown as { constructor: HistogramCtor })
+  .constructor;
 
 /** Buckets en segundos afinados al SLO de <800ms (incluye colas para detectar regresiones). */
 const ACK_BUCKETS = [0.01, 0.025, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1, 2, 5];

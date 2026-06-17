@@ -9,7 +9,9 @@ const user: AuthenticatedUser = { userId: 'usr-1', type: 'passenger', roles: [],
 
 describe('UsersService.requestPhoneLink', () => {
   it('proxya el request a identity-service propagando la identidad y devuelve {sent:true}', async () => {
-    const identity = { post: vi.fn().mockResolvedValue({ sent: true }) } as unknown as InternalRestClient;
+    const identity = {
+      post: vi.fn().mockResolvedValue({ sent: true }),
+    } as unknown as InternalRestClient;
     const media = {} as unknown as InternalRestClient;
     const svc = new UsersService(identity, media);
 

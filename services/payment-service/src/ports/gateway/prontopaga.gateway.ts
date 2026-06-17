@@ -49,10 +49,7 @@ import {
   originForMethod,
   ProntoPagaPayinStatus,
 } from './prontopaga.mapping';
-import {
-  UndiciProntoPagaHttpClient,
-  type ProntoPagaHttpClient,
-} from './prontopaga.http-client';
+import { UndiciProntoPagaHttpClient, type ProntoPagaHttpClient } from './prontopaga.http-client';
 
 export interface ProntoPagaGatewayOptions {
   baseUrl: string;
@@ -194,7 +191,9 @@ export class ProntoPagaGateway
       );
     }
     if (!opts.webhookBaseUrl) {
-      throw new ExternalServiceError('ProntoPaga requiere PRONTOPAGA_WEBHOOK_BASE_URL para armar urlConfirmation');
+      throw new ExternalServiceError(
+        'ProntoPaga requiere PRONTOPAGA_WEBHOOK_BASE_URL para armar urlConfirmation',
+      );
     }
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.webhookUrl = `${opts.webhookBaseUrl.replace(/\/$/, '')}/api/v1/webhooks/prontopaga`;
@@ -318,7 +317,9 @@ export class ProntoPagaGateway
    * contra los webhooks ya capturados en DB). Devolvemos vacío: la conciliación cae al libro propio.
    */
   async getStatement(): Promise<GatewayStatementEntry[]> {
-    this.logger.debug('ProntoPaga: getStatement no soportado por el proveedor; conciliación por DB/webhooks');
+    this.logger.debug(
+      'ProntoPaga: getStatement no soportado por el proveedor; conciliación por DB/webhooks',
+    );
     return [];
   }
 
@@ -412,7 +413,11 @@ export class ProntoPagaGateway
   /* ──────────────────────────────── HTTP helpers ──────────────────────────────────────── */
 
   /** Request FIRMADO y AUTENTICADO: firma el body con secretKey y adjunta el Bearer cacheado. */
-  private async request<T>(method: 'GET' | 'POST', path: string, payload: SignablePayload): Promise<T> {
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    payload: SignablePayload,
+  ): Promise<T> {
     const token = await this.getToken();
     const signed = withSignature(payload, this.opts.secretKey);
     return this.rawRequest<T>(method, path, signed, token);
@@ -485,7 +490,9 @@ export class ProntoPagaGateway
           { capability, body: text.slice(0, 300) },
         );
       }
-      throw new ExternalServiceError(`ProntoPaga respondió ${res.status}`, { body: text.slice(0, 500) });
+      throw new ExternalServiceError(`ProntoPaga respondió ${res.status}`, {
+        body: text.slice(0, 500),
+      });
     }
     const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;

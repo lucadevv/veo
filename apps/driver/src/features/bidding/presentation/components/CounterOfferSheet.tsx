@@ -1,14 +1,14 @@
-import React, {useEffect, useRef, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, BottomSheet, Button, StatusPill, Text, useTheme} from '@veo/ui-kit';
-import {formatPEN} from '../../../../shared/presentation/format';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {CountdownRing} from '../../../trips/presentation/components/CountdownRing';
-import {BID_MAX_CENTS, type OpenBid} from '../../domain';
-import {useAcceptBid, useCounterBid} from '../hooks/useBids';
-import {isBidGoneError} from '../bid-errors';
-import {useCountdownMs} from '../hooks/useCountdownMs';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, BottomSheet, Button, StatusPill, Text, useTheme } from '@veo/ui-kit';
+import { formatPEN } from '../../../../shared/presentation/format';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { CountdownRing } from '../../../trips/presentation/components/CountdownRing';
+import { BID_MAX_CENTS, type OpenBid } from '../../domain';
+import { useAcceptBid, useCounterBid } from '../hooks/useBids';
+import { isBidGoneError } from '../bid-errors';
+import { useCountdownMs } from '../hooks/useCountdownMs';
 
 interface Props {
   bid: OpenBid | null;
@@ -32,8 +32,8 @@ function solesToCents(text: string): number {
  * AUTORITATIVO sigue en dispatch. Clona el patrón visual de TripIncoming: anillo de cuenta atrás cian,
  * monto como foco y acciones [contraofertar (ghost)] · [aceptar (accent)].
  */
-export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const accept = useAcceptBid();
   const counter = useCounterBid();
@@ -77,14 +77,14 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
     if (!bid) {
       return;
     }
-    accept.mutate(bid, {onSuccess: onClose});
+    accept.mutate(bid, { onSuccess: onClose });
   };
 
   const onSendCounter = () => {
     if (!bid || !counterValid) {
       return;
     }
-    counter.mutate({bid, priceCents: counterCents}, {onSuccess: onClose});
+    counter.mutate({ bid, priceCents: counterCents }, { onSuccess: onClose });
   };
 
   return (
@@ -106,10 +106,10 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
 
           {bid.specialRequests.length > 0 ? (
             <View style={styles.specials}>
-              {bid.specialRequests.map(req => (
+              {bid.specialRequests.map((req) => (
                 <StatusPill
                   key={req}
-                  label={t(`trips.bid.special.${req}`, {defaultValue: req})}
+                  label={t(`trips.bid.special.${req}`, { defaultValue: req })}
                   tone="neutral"
                 />
               ))}
@@ -124,8 +124,9 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
               <View
                 style={[
                   styles.inputRow,
-                  {borderColor: theme.colors.border, borderRadius: theme.radii.lg},
-                ]}>
+                  { borderColor: theme.colors.border, borderRadius: theme.radii.lg },
+                ]}
+              >
                 <Text variant="title3" color="inkMuted">
                   S/
                 </Text>
@@ -135,12 +136,15 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
               </View>
               {/* Teclado numérico inline para no depender del foco del sheet sobre el teclado nativo. */}
               <CounterPad
-                onDigit={d => setCounterText(prev => appendDigit(prev, d))}
+                onDigit={(d) => setCounterText((prev) => appendDigit(prev, d))}
                 onClear={() => setCounterText('')}
-                onBackspace={() => setCounterText(prev => prev.slice(0, -1))}
+                onBackspace={() => setCounterText((prev) => prev.slice(0, -1))}
               />
-              <Text variant="footnote" color={counterValid || counterText.length === 0 ? 'inkSubtle' : 'danger'}>
-                {t('trips.bid.counterHelper', {min: formatPEN(bid.bidCents)})}
+              <Text
+                variant="footnote"
+                color={counterValid || counterText.length === 0 ? 'inkSubtle' : 'danger'}
+              >
+                {t('trips.bid.counterHelper', { min: formatPEN(bid.bidCents) })}
               </Text>
             </View>
           ) : null}
@@ -150,10 +154,18 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
           ) : (
             <>
               {accept.isError ? (
-                <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(accept.error, t)} />
+                <Banner
+                  tone="danger"
+                  title={t('errors.generic')}
+                  description={toErrorMessage(accept.error, t)}
+                />
               ) : null}
               {counter.isError ? (
-                <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(counter.error, t)} />
+                <Banner
+                  tone="danger"
+                  title={t('errors.generic')}
+                  description={toErrorMessage(counter.error, t)}
+                />
               ) : null}
               {expired ? <Banner tone="danger" title={t('trips.bid.expired')} /> : null}
             </>
@@ -172,7 +184,7 @@ export const CounterOfferSheet = ({bid, gone = false, onClose}: Props): React.JS
                 style={styles.counterBtn}
               />
               <Button
-                label={t('trips.bid.acceptFare', {amount: formatPEN(bid.bidCents)})}
+                label={t('trips.bid.acceptFare', { amount: formatPEN(bid.bidCents) })}
                 variant="accent"
                 fullWidth
                 disabled={expired || accept.isPending}
@@ -219,11 +231,11 @@ const CounterPad = ({
   onBackspace: () => void;
   onClear: () => void;
 }): React.JSX.Element => {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
   return (
     <View style={styles.pad}>
-      {keys.map(k => (
+      {keys.map((k) => (
         <Button
           key={k}
           label={k}
@@ -240,16 +252,23 @@ const CounterPad = ({
 };
 
 const styles = StyleSheet.create({
-  body: {gap: 16, paddingTop: 4},
-  ringWrap: {alignItems: 'center'},
-  amountBlock: {gap: 2},
-  specials: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center'},
-  counterBlock: {gap: 8},
-  inputRow: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1},
-  inputValue: {flex: 1, textAlign: 'right'},
-  pad: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between'},
-  padKey: {width: '31%'},
-  actions: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  counterBtn: {flex: 0},
-  acceptBtn: {flex: 1},
+  body: { gap: 16, paddingTop: 4 },
+  ringWrap: { alignItems: 'center' },
+  amountBlock: { gap: 2 },
+  specials: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  counterBlock: { gap: 8 },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+  },
+  inputValue: { flex: 1, textAlign: 'right' },
+  pad: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' },
+  padKey: { width: '31%' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  counterBtn: { flex: 0 },
+  acceptBtn: { flex: 1 },
 });

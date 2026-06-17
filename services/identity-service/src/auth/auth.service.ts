@@ -3,12 +3,7 @@
  * rotación de refresh (Redis) y logout. Crea el User en su primer login y emite user.registered.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  JwtService,
-  RedisRefreshTokenStore,
-  RefreshError,
-  type SubjectType,
-} from '@veo/auth';
+import { JwtService, RedisRefreshTokenStore, RefreshError, type SubjectType } from '@veo/auth';
 import { parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
 import { type AdminRole } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
@@ -100,7 +95,8 @@ export class AuthService {
       });
       return { accessToken, refreshToken: newRefresh };
     } catch (err) {
-      if (err instanceof RefreshError) throw new UnauthorizedError('Sesión revocada o token reutilizado');
+      if (err instanceof RefreshError)
+        throw new UnauthorizedError('Sesión revocada o token reutilizado');
       throw err;
     }
   }

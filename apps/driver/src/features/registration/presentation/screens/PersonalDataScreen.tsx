@@ -1,26 +1,26 @@
-import React, {useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Banner, Button, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import {IconAccount, IconCalendar, IconDocument} from '../../../../shared/presentation/icons';
-import {Reveal} from '../../../../shared/presentation/components/motion';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import type {RegistrationStackParamList} from '../../../../navigation/types';
-import {PersonalDataValidationError, type PersonalDataErrors} from '../../domain';
-import {useRegistrationStore} from '../state/registrationStore';
-import {useUpdatePersonalData} from '../hooks/useRegistrationWizard';
-import {RegistrationField, RegistrationHeader, RegistrationProgress} from '../components';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { IconAccount, IconCalendar, IconDocument } from '../../../../shared/presentation/icons';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import type { RegistrationStackParamList } from '../../../../navigation/types';
+import { PersonalDataValidationError, type PersonalDataErrors } from '../../domain';
+import { useRegistrationStore } from '../state/registrationStore';
+import { useUpdatePersonalData } from '../hooks/useRegistrationWizard';
+import { RegistrationField, RegistrationHeader, RegistrationProgress } from '../components';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
 
 /** Paso 1 del alta: datos personales como aparecen en el DNI (drv-04). PATCH /drivers/me/personal. */
-export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
-  const personal = useRegistrationStore(s => s.personal);
-  const setPersonal = useRegistrationStore(s => s.setPersonal);
-  const setCurrentStep = useRegistrationStore(s => s.setCurrentStep);
+  const personal = useRegistrationStore((s) => s.personal);
+  const setPersonal = useRegistrationStore((s) => s.setPersonal);
+  const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   const updatePersonalData = useUpdatePersonalData();
 
   // Errores de validación por campo (códigos del dominio → mensajes) y error de servidor.
@@ -36,7 +36,7 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
   const update = (patch: Partial<typeof personal>, field: keyof PersonalDataErrors) => {
     setPersonal(patch);
     if (errors[field]) {
-      setErrors(prev => ({...prev, [field]: undefined}));
+      setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
   };
 
@@ -79,15 +79,16 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
           disabled={!canContinue}
           onPress={onContinue}
         />
-      }>
-      <View style={[styles.body, {gap: theme.spacing.xl}]}>
+      }
+    >
+      <View style={[styles.body, { gap: theme.spacing.xl }]}>
         <Reveal>
           <RegistrationProgress current={1} />
         </Reveal>
 
         <Reveal delay={40}>
           <Text variant="caption" color="inkMuted" align="center">
-            {t('registration.stepOf', {current: 1, total: 4})}
+            {t('registration.stepOf', { current: 1, total: 4 })}
           </Text>
         </Reveal>
 
@@ -108,13 +109,13 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
           </Reveal>
         ) : null}
 
-        <View style={[styles.form, {gap: theme.spacing.lg}]}>
+        <View style={[styles.form, { gap: theme.spacing.lg }]}>
           <Reveal delay={120} from="scale">
             <RegistrationField
               label={t('registration.personal.nameLabel')}
               placeholder={t('registration.personal.namePlaceholder')}
               value={personal.fullName}
-              onChangeText={text => update({fullName: text}, 'fullName')}
+              onChangeText={(text) => update({ fullName: text }, 'fullName')}
               autoCapitalize="words"
               textContentType="name"
               error={fieldError('fullName')}
@@ -127,7 +128,7 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
               label={t('registration.personal.dniLabel')}
               placeholder={t('registration.personal.dniPlaceholder')}
               value={personal.dni}
-              onChangeText={text => update({dni: text}, 'dni')}
+              onChangeText={(text) => update({ dni: text }, 'dni')}
               keyboardType="number-pad"
               maxLength={11}
               error={fieldError('dni')}
@@ -140,7 +141,7 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
               label={t('registration.personal.birthdateLabel')}
               placeholder={t('registration.personal.birthdatePlaceholder')}
               value={personal.birthdate}
-              onChangeText={text => update({birthdate: text}, 'birthdate')}
+              onChangeText={(text) => update({ birthdate: text }, 'birthdate')}
               keyboardType="number-pad"
               maxLength={14}
               error={fieldError('birthdate')}
@@ -154,7 +155,7 @@ export const PersonalDataScreen = ({navigation}: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  body: {paddingTop: 12},
-  intro: {gap: 6},
+  body: { paddingTop: 12 },
+  intro: { gap: 6 },
   form: {},
 });

@@ -4,7 +4,8 @@ import { Card } from '@/components/ui/card';
 
 export const metadata: Metadata = {
   title: 'VEO Family · Sigue el viaje en vivo',
-  description: 'Cuando alguien comparte su viaje contigo, lo ves en tiempo real desde el link. Sin app, sin cuenta.',
+  description:
+    'Cuando alguien comparte su viaje contigo, lo ves en tiempo real desde el link. Sin app, sin cuenta.',
 };
 
 export default function HomePage() {
@@ -22,8 +23,9 @@ export default function HomePage() {
           Acompaña el viaje de quien quieres, en vivo.
         </h1>
         <p className="mt-5 max-w-prose text-lg leading-relaxed text-ink-muted">
-          Cuando un familiar comparte su viaje contigo, recibes un link. Al abrirlo ves dónde está, quién maneja
-          y cuánto falta para llegar. No necesitas instalar ninguna app ni crear una cuenta.
+          Cuando un familiar comparte su viaje contigo, recibes un link. Al abrirlo ves dónde está,
+          quién maneja y cuánto falta para llegar. No necesitas instalar ninguna app ni crear una
+          cuenta.
         </p>
       </section>
 
@@ -35,7 +37,8 @@ export default function HomePage() {
           <li className="flex gap-4">
             <span className="mt-0.5 text-sm font-semibold tabular text-accent">1</span>
             <p className="text-base leading-relaxed text-ink-muted">
-              Tu familiar activa el viaje compartido desde la app de VEO y te envía un link por mensaje.
+              Tu familiar activa el viaje compartido desde la app de VEO y te envía un link por
+              mensaje.
             </p>
           </li>
           <li className="flex gap-4">
@@ -92,8 +95,8 @@ export default function HomePage() {
         <Card className="bg-surface-2 p-5">
           <h2 className="text-base font-semibold">Tu acceso es solo de lectura</h2>
           <p className="mt-2 text-base leading-relaxed text-ink-muted">
-            Con el link puedes mirar el viaje, nada más. No puedes cambiar la ruta ni contactar al conductor sin
-            permiso. El link tiene una vigencia corta y caduca solo.
+            Con el link puedes mirar el viaje, nada más. No puedes cambiar la ruta ni contactar al
+            conductor sin permiso. El link tiene una vigencia corta y caduca solo.
           </p>
         </Card>
       </section>

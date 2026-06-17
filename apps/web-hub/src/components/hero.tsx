@@ -14,9 +14,9 @@ export function Hero() {
         cuatro experiencias conectadas.
       </h1>
       <p className="mt-4 max-w-[560px] text-[17px] leading-[1.55] text-ink-muted">
-        Movilidad con la seguridad como capa transversal: tú pones el precio, tu familia te ve llegar,
-        y todo viaje se graba, analiza y audita. Explora cada app como prototipo clicable o como lienzo
-        de flujo completo.
+        Movilidad con la seguridad como capa transversal: tú pones el precio, tu familia te ve
+        llegar, y todo viaje se graba, analiza y audita. Explora cada app como prototipo clicable o
+        como lienzo de flujo completo.
       </p>
       <StatList stats={ECOSYSTEM_STATS} />
     </section>

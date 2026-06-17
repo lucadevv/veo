@@ -225,11 +225,31 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       // que él ejecuta / `system` en las del watchdog / la parte que canceló en cancelled). Se EXCLUYEN a
       // propósito trip.requested / trip.bid_posted / trip.reassigning: llevan geo (origin/destination) y el
       // audit persiste el payload en WORM inmutable — la traza forense del viaje no necesita la ubicación.
-      'trip.assigned': this.audited('trip.assigned', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId })),
-      'trip.accepted': this.audited('trip.accepted', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId })),
-      'trip.arriving': this.audited('trip.arriving', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId })),
-      'trip.arrived': this.audited('trip.arrived', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId })),
-      'trip.started': this.audited('trip.started', (p) => ({ actorId: p.driverId, resourceType: 'trip', resourceId: p.tripId })),
+      'trip.assigned': this.audited('trip.assigned', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      'trip.accepted': this.audited('trip.accepted', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      'trip.arriving': this.audited('trip.arriving', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      'trip.arrived': this.audited('trip.arrived', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      'trip.started': this.audited('trip.started', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
       'trip.completed': this.audited('trip.completed', (p) => ({
         actorId: p.driverId ?? 'system',
         resourceType: 'trip',
@@ -245,8 +265,16 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'trip',
         resourceId: p.tripId,
       })),
-      'trip.expired': this.audited('trip.expired', (p) => ({ actorId: 'system', resourceType: 'trip', resourceId: p.tripId })),
-      'trip.failed': this.audited('trip.failed', (p) => ({ actorId: 'system', resourceType: 'trip', resourceId: p.tripId })),
+      'trip.expired': this.audited('trip.expired', (p) => ({
+        actorId: 'system',
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      'trip.failed': this.audited('trip.failed', (p) => ({
+        actorId: 'system',
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
       // Seguridad: un código de modo niño fallido es un intento sospechoso → cadena de custodia (BR-T07).
       'trip.child_code_failed': this.audited('trip.child_code_failed', (p) => ({
         actorId: p.driverId ?? 'driver',
@@ -267,7 +295,10 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       try {
         await this.audit.recordFromEvent(envelope, topicForEvent(type), map(payload));
       } catch (err) {
-        this.logger.error({ err, eventType: type, eventId: envelope.eventId }, 'fallo al auditar evento');
+        this.logger.error(
+          { err, eventType: type, eventId: envelope.eventId },
+          'fallo al auditar evento',
+        );
         throw err;
       }
     };

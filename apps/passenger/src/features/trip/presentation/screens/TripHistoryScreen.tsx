@@ -1,20 +1,32 @@
-import type { TripHistoryItem } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
-import { ErrorState } from '../../../../shared/presentation/components/ScreenStates';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { groupTripsByTime, type HistorySection } from '../../domain/historyGrouping';
-import { isLiveTrip } from '../../domain/tripStatusClass';
-import { useActiveTripStore } from '../stores/activeTripStore';
-import { useTripHistory } from '../hooks/useTripHistory';
-import { EnterView } from '../components/motion';
-import { TripDetailSheet } from '../components/TripDetailSheet';
-import { TripHistoryRowContainer } from '../components/TripHistoryRowContainer';
-import { TripHistoryEmpty, TripHistorySkeleton } from '../components/TripHistoryStates';
+import type {TripHistoryItem} from '@veo/api-client';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import React, {useCallback, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  SectionList,
+  StyleSheet,
+  View,
+} from 'react-native';
+import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {
+  groupTripsByTime,
+  type HistorySection,
+} from '../../domain/historyGrouping';
+import {isLiveTrip} from '../../domain/tripStatusClass';
+import {useActiveTripStore} from '../stores/activeTripStore';
+import {useTripHistory} from '../hooks/useTripHistory';
+import {EnterView} from '../components/motion';
+import {TripDetailSheet} from '../components/TripDetailSheet';
+import {TripHistoryRowContainer} from '../components/TripHistoryRowContainer';
+import {
+  TripHistoryEmpty,
+  TripHistorySkeleton,
+} from '../components/TripHistoryStates';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -40,13 +52,15 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  */
 export function TripHistoryScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const setActiveTripId = useActiveTripStore((s) => s.setActiveTripId);
+  const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
 
   // Viaje cuyo detalle se muestra en el sheet (null = sheet cerrado). Guardamos el ITEM completo, no solo
   // el id: el detalle pinta lo esencial al INSTANTE desde acá (sin flash de carga) y enriquece por red.
-  const [selectedTrip, setSelectedTrip] = useState<TripHistoryItem | null>(null);
+  const [selectedTrip, setSelectedTrip] = useState<TripHistoryItem | null>(
+    null,
+  );
 
   const {
     items,
@@ -115,9 +129,12 @@ export function TripHistoryScreen(): React.JSX.Element {
     <SafeScreen padded={false}>
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={{ padding: theme.spacing.xl, paddingTop: theme.spacing.md }}
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          paddingTop: theme.spacing.md,
+        }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -131,28 +148,36 @@ export function TripHistoryScreen(): React.JSX.Element {
         // gatea (no dispara si no hay más o si ya hay una en vuelo), así un onEndReached agresivo es seguro.
         onEndReachedThreshold={0.4}
         onEndReached={fetchNextPage}
-        renderSectionHeader={({ section }) => (
+        renderSectionHeader={({section}) => (
           <Text
             variant="label"
             color="inkSubtle"
             style={[
               styles.sectionHeader,
-              { marginTop: theme.spacing.lg, marginBottom: theme.spacing.sm },
-            ]}
-          >
-            {t(`history.section.${(section as HistorySection<TripHistoryItem>).id}`)}
+              {marginTop: theme.spacing.lg, marginBottom: theme.spacing.sm},
+            ]}>
+            {t(
+              `history.section.${(section as HistorySection<TripHistoryItem>).id}`,
+            )}
           </Text>
         )}
-        renderItem={({ item, index, section }) => (
+        renderItem={({item, index, section}) => (
           <EnterView
-            index={(section as HistorySection<TripHistoryItem>).id === 'today' ? index : 0}
-            style={{ marginBottom: theme.spacing.md }}
-          >
-            <TripHistoryRowContainer trip={item} onPress={() => openTrip(item)} />
+            index={
+              (section as HistorySection<TripHistoryItem>).id === 'today'
+                ? index
+                : 0
+            }
+            style={{marginBottom: theme.spacing.md}}>
+            <TripHistoryRowContainer
+              trip={item}
+              onPress={() => openTrip(item)}
+            />
           </EnterView>
         )}
         ListFooterComponent={
-          <View style={{ paddingVertical: theme.spacing.lg, gap: theme.spacing.sm }}>
+          <View
+            style={{paddingVertical: theme.spacing.lg, gap: theme.spacing.sm}}>
             {isFetchingNextPage ? (
               // "Cargando más" al paginar: indicador + copy, no un salto en seco.
               <View style={styles.footerLoading}>
@@ -179,6 +204,11 @@ export function TripHistoryScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  sectionHeader: { textTransform: 'uppercase' },
-  footerLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  sectionHeader: {textTransform: 'uppercase'},
+  footerLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
 });

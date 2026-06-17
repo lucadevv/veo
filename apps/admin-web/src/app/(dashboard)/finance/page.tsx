@@ -18,19 +18,35 @@ import { ReleaseHeldPayoutButton, RunPayoutsButton } from '@/components/finance/
 import { RefundDialog } from '@/components/finance/refund-dialog';
 
 const columns: ColumnDef<PayoutView, unknown>[] = [
-  { accessorKey: 'id', header: 'Liquidación', cell: ({ row }) => <span className="font-mono text-xs">{row.original.id.slice(0, 8)}</span> },
+  {
+    accessorKey: 'id',
+    header: 'Liquidación',
+    cell: ({ row }) => <span className="font-mono text-xs">{row.original.id.slice(0, 8)}</span>,
+  },
   {
     accessorKey: 'driverId',
     header: 'Conductor',
-    cell: ({ row }) => <span className="font-mono text-xs text-ink-muted">{row.original.driverId.slice(0, 8)}</span>,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs text-ink-muted">{row.original.driverId.slice(0, 8)}</span>
+    ),
   },
-  { accessorKey: 'period', header: 'Periodo', cell: ({ row }) => <span className="text-ink-muted">{row.original.period}</span> },
+  {
+    accessorKey: 'period',
+    header: 'Periodo',
+    cell: ({ row }) => <span className="text-ink-muted">{row.original.period}</span>,
+  },
   {
     accessorKey: 'amountCents',
     header: 'Monto',
-    cell: ({ row }) => <span className="tabular font-medium text-ink">{money(row.original.amountCents)}</span>,
+    cell: ({ row }) => (
+      <span className="tabular font-medium text-ink">{money(row.original.amountCents)}</span>
+    ),
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     id: 'actions',
     header: '',
@@ -39,7 +55,10 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
     // `status` es el enum tipado del contrato (payoutStatus): nada de literales sueltos.
     cell: ({ row }) =>
       row.original.status === payoutStatus.enum.HELD ? (
-        <ReleaseHeldPayoutButton driverId={row.original.driverId} amountCents={row.original.amountCents} />
+        <ReleaseHeldPayoutButton
+          driverId={row.original.driverId}
+          amountCents={row.original.amountCents}
+        />
       ) : null,
   },
 ];

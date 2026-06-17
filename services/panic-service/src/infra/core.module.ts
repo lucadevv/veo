@@ -5,11 +5,7 @@
  */
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  INTERNAL_IDENTITY_SECRET,
-  InternalIdentityGuard,
-  RolesGuard,
-} from '@veo/auth';
+import { INTERNAL_IDENTITY_SECRET, InternalIdentityGuard, RolesGuard } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';

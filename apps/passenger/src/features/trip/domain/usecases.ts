@@ -14,10 +14,10 @@ import type {
   TripResource,
   TripVideoGrant,
 } from '@veo/api-client';
-import { isValidChildCode } from '../../childMode/domain/entities';
-import { isWithinLima } from '../../../shared/utils/geo';
-import { validateScheduledFor } from './scheduling';
-import type { TripRepository } from './tripRepository';
+import {isValidChildCode} from '../../childMode/domain/entities';
+import {isWithinLima} from '../../../shared/utils/geo';
+import {validateScheduledFor} from './scheduling';
+import type {TripRepository} from './tripRepository';
 
 /** Error de dominio para entradas inválidas de viaje (origen/destino/código/programación). */
 export class TripValidationError extends Error {
@@ -94,15 +94,31 @@ export class CloseTripUseCase {
 export class CreateTripUseCase {
   constructor(private readonly repository: TripRepository) {}
 
-  execute(input: CreateTripRequest, idempotencyKey?: string): Promise<TripResource> {
+  execute(
+    input: CreateTripRequest,
+    idempotencyKey?: string,
+  ): Promise<TripResource> {
     if (!isWithinLima(input.origin) || !isWithinLima(input.destination)) {
-      throw new TripValidationError('Fuera de Lima Metropolitana', 'OUTSIDE_LIMA');
+      throw new TripValidationError(
+        'Fuera de Lima Metropolitana',
+        'OUTSIDE_LIMA',
+      );
     }
-    if (input.waypoints?.some((stop) => !isWithinLima(stop))) {
-      throw new TripValidationError('Fuera de Lima Metropolitana', 'OUTSIDE_LIMA');
+    if (input.waypoints?.some(stop => !isWithinLima(stop))) {
+      throw new TripValidationError(
+        'Fuera de Lima Metropolitana',
+        'OUTSIDE_LIMA',
+      );
     }
-    if (input.childMode && input.childCode && !isValidChildCode(input.childCode)) {
-      throw new TripValidationError('Código de modo niño inválido', 'INVALID_CHILD_CODE');
+    if (
+      input.childMode &&
+      input.childCode &&
+      !isValidChildCode(input.childCode)
+    ) {
+      throw new TripValidationError(
+        'Código de modo niño inválido',
+        'INVALID_CHILD_CODE',
+      );
     }
     if (input.scheduledFor !== undefined) {
       const verdict = validateScheduledFor(new Date(input.scheduledFor));
@@ -126,7 +142,7 @@ export class CancelTripUseCase {
   constructor(private readonly repository: TripRepository) {}
 
   execute(tripId: string, reason?: string): Promise<TripResource> {
-    return this.repository.cancelTrip(tripId, reason ? { reason } : {});
+    return this.repository.cancelTrip(tripId, reason ? {reason} : {});
   }
 }
 
@@ -136,7 +152,10 @@ export class ChangeDestinationUseCase {
 
   execute(tripId: string, destination: GeoPoint): Promise<TripResource> {
     if (!isWithinLima(destination)) {
-      throw new TripValidationError('Fuera de Lima Metropolitana', 'OUTSIDE_LIMA');
+      throw new TripValidationError(
+        'Fuera de Lima Metropolitana',
+        'OUTSIDE_LIMA',
+      );
     }
     return this.repository.changeDestination(tripId, destination);
   }

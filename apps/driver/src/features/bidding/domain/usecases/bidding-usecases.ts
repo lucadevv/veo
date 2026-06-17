@@ -1,6 +1,6 @@
-import type {BiddingRepository} from '../repositories/bidding-repository';
-import type {OpenBid, SubmittedOffer} from '../entities';
-import {OfferKind, assertValidCounter} from '../value-objects/offer-kind';
+import type { BiddingRepository } from '../repositories/bidding-repository';
+import type { OpenBid, SubmittedOffer } from '../entities';
+import { OfferKind, assertValidCounter } from '../value-objects/offer-kind';
 
 /** Caso de uso: listar las pujas OPEN cercanas que el conductor puede ofertar. */
 export class ListOpenBidsUseCase {

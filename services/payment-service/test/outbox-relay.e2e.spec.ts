@@ -9,7 +9,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { PrismaOutboxStore } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
@@ -51,10 +55,12 @@ describe('OutboxRelay · drainLocked seguro en multi-réplica (advisory lock)', 
     const publishedA: string[] = [];
     const publishedB: string[] = [];
     // Delay dentro del publish para FORZAR el solape: el 1ro sostiene el lock mientras el 2do intenta.
-    const slowPublish = (acc: string[]) => async (r: { id: string }): Promise<void> => {
-      acc.push(r.id);
-      await new Promise((res) => setTimeout(res, 25));
-    };
+    const slowPublish =
+      (acc: string[]) =>
+      async (r: { id: string }): Promise<void> => {
+        acc.push(r.id);
+        await new Promise((res) => setTimeout(res, 25));
+      };
 
     const [countA, countB] = await Promise.all([
       store.drainLocked(100, slowPublish(publishedA)),

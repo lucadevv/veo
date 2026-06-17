@@ -1,5 +1,5 @@
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { GOOGLE_OAUTH } from './oauthConfig';
+import {GoogleSignin} from '@react-native-google-signin/google-signin';
+import {GOOGLE_OAUTH} from './oauthConfig';
 
 let configured = false;
 

@@ -47,7 +47,9 @@ function item(over: Partial<TripHistoryItemReply> = {}): TripHistoryItemReply {
 function makeService(reply: PassengerTripsReply) {
   const call = vi.fn().mockResolvedValue(reply);
   const tripGrpc = { call } as unknown as GrpcServiceClient;
-  const stub = { call: vi.fn().mockResolvedValue({ found: false }) } as unknown as GrpcServiceClient;
+  const stub = {
+    call: vi.fn().mockResolvedValue({ found: false }),
+  } as unknown as GrpcServiceClient;
   const restStub = {} as unknown as InternalRestClient;
   const svc = new TripsService(
     tripGrpc,
@@ -136,7 +138,10 @@ describe('TripsService.getTripHistory · shape de la card', () => {
   });
 
   it('mapea un viaje COMPLETED con conductor (driverId presente, sin nombre)', async () => {
-    const { svc } = makeService({ items: [item({ driverId: 'drv-9', category: 'veo_xl' })], nextCursor: '' });
+    const { svc } = makeService({
+      items: [item({ driverId: 'drv-9', category: 'veo_xl' })],
+      nextCursor: '',
+    });
     const page = await svc.getTripHistory(user);
     expect(page.items[0]).toMatchObject({
       status: 'COMPLETED',

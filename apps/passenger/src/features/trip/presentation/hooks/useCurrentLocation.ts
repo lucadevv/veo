@@ -1,9 +1,9 @@
-import type { GeoPoint } from '@veo/api-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { LocationAvailability } from '../../../../shared/location/domain/locationProvider';
+import type {GeoPoint} from '@veo/api-client';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {AppState} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {LocationAvailability} from '../../../../shared/location/domain/locationProvider';
 
 /**
  * Estado del ciclo de vida de la ubicación, en términos de UI:
@@ -13,7 +13,12 @@ import type { LocationAvailability } from '../../../../shared/location/domain/lo
  *  - `servicesOff` → permiso ok pero GPS del dispositivo apagado → derivar a Ajustes de ubicación.
  *  - `error`       → no se pudo obtener un fix (sin señal, indoor, puerto no disponible) → reintentar.
  */
-export type LocationStatus = 'locating' | 'ready' | 'denied' | 'servicesOff' | 'error';
+export type LocationStatus =
+  | 'locating'
+  | 'ready'
+  | 'denied'
+  | 'servicesOff'
+  | 'error';
 
 export interface CurrentLocation {
   point: GeoPoint | null;
@@ -52,7 +57,10 @@ export function useCurrentLocation(): CurrentLocation {
 
   const attempt = useCallback(async () => {
     const runId = ++runIdRef.current;
-    const settle = (next: LocationStatus, resolved: GeoPoint | null = null): void => {
+    const settle = (
+      next: LocationStatus,
+      resolved: GeoPoint | null = null,
+    ): void => {
       if (!mountedRef.current || runId !== runIdRef.current) {
         return;
       }
@@ -63,7 +71,7 @@ export function useCurrentLocation(): CurrentLocation {
     };
 
     // No parpadear a "locating" si ya estábamos en ready (re-intento de refresco en foreground).
-    setStatus((prev) => (prev === 'ready' ? prev : 'locating'));
+    setStatus(prev => (prev === 'ready' ? prev : 'locating'));
 
     let availability: LocationAvailability;
     try {
@@ -115,7 +123,7 @@ export function useCurrentLocation(): CurrentLocation {
 
   // (2) Reintento al volver al foreground (volvió de Ajustes tras prender GPS / conceder permiso).
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
+    const sub = AppState.addEventListener('change', state => {
       if (state === 'active') {
         void attempt();
       }

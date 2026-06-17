@@ -1,4 +1,4 @@
-import type {EarningsBreakdown, EarningsOverview, PayoutList} from '../entities';
+import type { EarningsBreakdown, EarningsOverview, PayoutList } from '../entities';
 
 /**
  * Contrato del repositorio de ganancias (capa domain). Implementación concreta en `data/`.

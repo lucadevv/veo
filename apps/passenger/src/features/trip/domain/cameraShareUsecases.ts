@@ -28,7 +28,7 @@ export class SaveCameraSharePreferenceUseCase {
   execute(tripId: string, preference: CameraSharePreference): Promise<void> {
     const normalized: CameraSharePreference = preference.shareWithFamily
       ? preference
-      : { shareWithFamily: false, allowedContactIds: [] };
+      : {shareWithFamily: false, allowedContactIds: []};
     return this.repository.save(tripId, normalized);
   }
 }

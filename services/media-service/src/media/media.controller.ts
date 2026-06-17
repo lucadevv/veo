@@ -19,7 +19,7 @@ import {
   ListSegmentsQueryDto,
   RejectAccessRequestDto,
 } from './dto/media.dto';
-import type { VideoAccessRequest, VideoAccessStatus } from '../generated/prisma';
+import type { VideoAccessRequest } from '../generated/prisma';
 
 interface SegmentView {
   id: string;
@@ -66,7 +66,9 @@ export class MediaController {
   @RequireStepUpMfa()
   @Post('rooms/:tripId/viewer-token')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Token LiveKit solo-suscripción de la cabina en vivo (admin, doble-auth)' })
+  @ApiOperation({
+    summary: 'Token LiveKit solo-suscripción de la cabina en vivo (admin, doble-auth)',
+  })
   issueViewerToken(
     @Param('tripId') tripId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -101,7 +103,9 @@ export class MediaController {
   @RequireStepUpMfa()
   @Post('access/:id/approve')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Aprobar solicitud de acceso a video (COMPLIANCE + MFA, solo estado) (BR-S02)' })
+  @ApiOperation({
+    summary: 'Aprobar solicitud de acceso a video (COMPLIANCE + MFA, solo estado) (BR-S02)',
+  })
   approve(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -119,7 +123,9 @@ export class MediaController {
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post('access/:id/reject')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Rechazar solicitud de acceso a video (COMPLIANCE/ADMIN, rol) (BR-S02)' })
+  @ApiOperation({
+    summary: 'Rechazar solicitud de acceso a video (COMPLIANCE/ADMIN, rol) (BR-S02)',
+  })
   reject(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -145,9 +151,13 @@ export class MediaController {
   @UseGuards(InternalIdentityGuard, RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('access')
-  @ApiOperation({ summary: 'Listar solicitudes de acceso a video (filtro opcional por estado) (BR-S02)' })
+  @ApiOperation({
+    summary: 'Listar solicitudes de acceso a video (filtro opcional por estado) (BR-S02)',
+  })
   listAccessRequests(@Query() query: ListAccessRequestsQueryDto): Promise<VideoAccessRequest[]> {
-    return this.access.listAccessRequests({ status: query.status as VideoAccessStatus | undefined });
+    return this.access.listAccessRequests({
+      status: query.status,
+    });
   }
 
   /** Lista los metadatos de los segmentos de un viaje (solo cumplimiento; nunca URLs). */

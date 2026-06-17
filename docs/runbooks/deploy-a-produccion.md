@@ -4,6 +4,7 @@
 > Honesto sobre lo que aún NO existe — ver "Qué falta" al final.
 
 ## Responsable
+
 - Equipo: SRE / Platform
 - Política: **no deployar a prod un viernes** salvo emergencia (CLAUDE.md). Cambios a prod = 2 approvals.
 

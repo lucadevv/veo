@@ -1,9 +1,9 @@
-import { LogBox } from 'react-native';
-import { registerGlobals } from 'react-native-webrtc';
-import { LiveKitCabinViewer } from '../features/trip/presentation/components/LiveKitCabinViewer';
-import { registerCabinVideoViewer } from '../features/trip/presentation/ports/cabinVideoViewer';
-import { registerBackgroundMessageHandler } from '../services/messaging';
-import { initMapbox } from '../core/maps/mapbox';
+import {LogBox} from 'react-native';
+import {registerGlobals} from 'react-native-webrtc';
+import {LiveKitCabinViewer} from '../features/trip/presentation/components/LiveKitCabinViewer';
+import {registerCabinVideoViewer} from '../features/trip/presentation/ports/cabinVideoViewer';
+import {registerBackgroundMessageHandler} from '../services/messaging';
+import {initMapbox} from '../core/maps/mapbox';
 
 /**
  * Bootstrap de la capa NATIVA (efectos de arranque, fuera del ciclo de React).

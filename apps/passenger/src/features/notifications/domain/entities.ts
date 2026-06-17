@@ -8,7 +8,12 @@
  */
 
 /** Categoría del aviso (mapea a un ícono/tono y, opcionalmente, a una acción de navegación). */
-export type NotificationKind = 'TRIP' | 'SAFETY' | 'PROMO' | 'RECEIPT' | 'GENERAL';
+export type NotificationKind =
+  | 'TRIP'
+  | 'SAFETY'
+  | 'PROMO'
+  | 'RECEIPT'
+  | 'GENERAL';
 
 /** Un aviso del centro de notificaciones. */
 export interface AppNotification {

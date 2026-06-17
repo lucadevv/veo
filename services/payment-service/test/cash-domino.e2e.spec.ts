@@ -13,7 +13,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -32,8 +36,12 @@ let db: TestDatabase;
 let prisma: PrismaClient;
 let svc: PaymentsService;
 
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -46,7 +54,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 function chargeCash(opts: { cashCollected?: boolean } = {}) {
@@ -175,7 +186,9 @@ describe('REGLA DE BORDE · un CASH PENDING con driverConfirmed (sin confirmar e
     // El conductor cobró y confirmó al terminar; el pasajero NUNCA confirma → el Payment queda PENDING.
     const payment = await chargeCash({ cashCollected: true });
     expect(payment.status).toBe('PENDING');
-    expect((await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed).toBe(true);
+    expect(
+      (await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed,
+    ).toBe(true);
 
     // El gate de DEBT y la query de PENDING_ACTION NO lo agarran: un CASH sin external_uid no es accionable
     // (no tiene checkout) y no es deuda (el conductor ya cobró en mano; no es deuda del pasajero).

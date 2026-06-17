@@ -50,5 +50,8 @@ export interface ImagePickerService {
    * Abre la fuente indicada y resuelve con la imagen elegida, o `null` si el usuario canceló.
    * Lanza `ImagePickError` ante fallos accionables (permiso denegado, cámara no disponible).
    */
-  pick(source: ImageSource, options?: ImagePickOptions): Promise<PickedImage | null>;
+  pick(
+    source: ImageSource,
+    options?: ImagePickOptions,
+  ): Promise<PickedImage | null>;
 }

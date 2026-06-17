@@ -1,5 +1,5 @@
-import React, {createContext, useContext, type ReactNode} from 'react';
-import {getContainer, type AppContainer, type AppRepositories} from './container';
+import React, { createContext, useContext, type ReactNode } from 'react';
+import { getContainer, type AppContainer, type AppRepositories } from './container';
 
 /**
  * Acceso al contenedor de DI desde React.
@@ -15,7 +15,7 @@ export interface DiProviderProps {
   container?: AppContainer;
 }
 
-export const DiProvider = ({children, container}: DiProviderProps): React.JSX.Element => (
+export const DiProvider = ({ children, container }: DiProviderProps): React.JSX.Element => (
   <ContainerContext.Provider value={container ?? getContainer()}>
     {children}
   </ContainerContext.Provider>

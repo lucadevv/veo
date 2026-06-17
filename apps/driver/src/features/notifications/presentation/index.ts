@@ -1,1 +1,1 @@
-export {PushManager} from './PushManager';
+export { PushManager } from './PushManager';

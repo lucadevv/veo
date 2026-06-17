@@ -76,7 +76,10 @@ describe('AdminService.reject · decisión validada por la máquina dentro de la
  */
 function makeApprovePrisma(replicaAdmin: unknown) {
   const findUnique = vi.fn(async () => replicaAdmin);
-  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'a1', ...data }));
+  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+    id: 'a1',
+    ...data,
+  }));
   return {
     findUnique,
     update,
@@ -109,7 +112,9 @@ describe('AdminService.approve · anti-escalada de privilegios (jerarquía estri
 
   it('SUPERADMIN → [SUPERADMIN]: OK (excepción explícita)', async () => {
     const { prisma } = makeApprovePrisma({ id: 'a1', status: 'PENDING' });
-    const res = await makeService(prisma).approve([AdminRole.SUPERADMIN], 'a1', [AdminRole.SUPERADMIN]);
+    const res = await makeService(prisma).approve([AdminRole.SUPERADMIN], 'a1', [
+      AdminRole.SUPERADMIN,
+    ]);
     expect(res.status).toBe('ACTIVE');
     expect(res.roles).toEqual([AdminRole.SUPERADMIN]);
   });

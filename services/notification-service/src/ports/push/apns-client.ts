@@ -8,7 +8,13 @@
  */
 import { connect, constants, type ClientHttp2Session } from 'node:http2';
 import { createSign } from 'node:crypto';
-import { PushOutcome, PushTargetKind, type PushMessage, type PushResult, type PushTransport } from './push.port';
+import {
+  PushOutcome,
+  PushTargetKind,
+  type PushMessage,
+  type PushResult,
+  type PushTransport,
+} from './push.port';
 
 const TOKEN_TTL_SECONDS = 3_000; // ~50 min
 
@@ -35,7 +41,11 @@ const INVALID_TOKEN_REASONS = new Set<string>([
 ]);
 
 function base64url(input: Buffer | string): string {
-  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /** Extrae el `reason` del cuerpo de error de APNs (`{ "reason": "BadDeviceToken" }`). */
@@ -82,14 +92,20 @@ export class ApnsClient implements PushTransport {
     if (msg.target.kind !== PushTargetKind.Token) {
       // APNs directo NO tiene topics/broadcast (es exclusivo de FCM). No debería llegar acá (el ruteo
       // manda los topic-send a FCM); si llega, es error de ruteo → transitorio, no se entrega.
-      return { outcome: PushOutcome.Transient, reason: 'APNs no soporta topic/condition (broadcast solo por FCM)' };
+      return {
+        outcome: PushOutcome.Transient,
+        reason: 'APNs no soporta topic/condition (broadcast solo por FCM)',
+      };
     }
     const token = msg.target.token;
     let session: ClientHttp2Session;
     try {
       session = connect(this.cfg.host);
     } catch (err) {
-      return { outcome: PushOutcome.Transient, reason: `APNs conexión: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        outcome: PushOutcome.Transient,
+        reason: `APNs conexión: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
     try {
       return await this.request(session, token, msg);
@@ -98,7 +114,11 @@ export class ApnsClient implements PushTransport {
     }
   }
 
-  private request(session: ClientHttp2Session, token: string, msg: PushMessage): Promise<PushResult> {
+  private request(
+    session: ClientHttp2Session,
+    token: string,
+    msg: PushMessage,
+  ): Promise<PushResult> {
     return new Promise((resolve) => {
       session.once('error', (err: Error) =>
         resolve({ outcome: PushOutcome.Transient, reason: `APNs sesión: ${err.message}` }),
@@ -127,10 +147,15 @@ export class ApnsClient implements PushTransport {
       req.on('data', (chunk: string) => {
         respBody += chunk;
       });
-      req.on('error', (err: Error) => resolve({ outcome: PushOutcome.Transient, reason: `APNs stream: ${err.message}` }));
+      req.on('error', (err: Error) =>
+        resolve({ outcome: PushOutcome.Transient, reason: `APNs stream: ${err.message}` }),
+      );
       req.on('end', () => {
         if (status === ApnsStatus.Ok) {
-          resolve({ outcome: PushOutcome.Accepted, ...(apnsId ? { providerMessageId: apnsId } : {}) });
+          resolve({
+            outcome: PushOutcome.Accepted,
+            ...(apnsId ? { providerMessageId: apnsId } : {}),
+          });
           return;
         }
         const reason = extractApnsReason(respBody) || `status ${status}`;

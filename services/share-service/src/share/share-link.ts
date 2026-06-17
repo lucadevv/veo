@@ -7,7 +7,14 @@
  * Al abrir la página pública se valida la firma y la expiración criptográficamente (rápido y a prueba
  * de manipulación) y, además, el estado autoritativo (revocación, usos, expiración) contra la BD.
  */
-import { randomToken, signHmac, verifyHmac, sha256Hex, ForbiddenError, UnauthorizedError } from '@veo/utils';
+import {
+  randomToken,
+  signHmac,
+  verifyHmac,
+  sha256Hex,
+  ForbiddenError,
+  UnauthorizedError,
+} from '@veo/utils';
 
 const SEP = '.';
 
@@ -32,7 +39,11 @@ function decodeBody(value: string): string {
 }
 
 /** Firma un nuevo token de enlace para `shareId` con expiración `expiresAtMs`. */
-export function signShareToken(shareId: string, expiresAtMs: number, secret: string): SignedShareToken {
+export function signShareToken(
+  shareId: string,
+  expiresAtMs: number,
+  secret: string,
+): SignedShareToken {
   const nonce = randomToken(24);
   const body = `${shareId}${SEP}${expiresAtMs}${SEP}${nonce}`;
   const signature = signHmac(body, secret);
@@ -50,7 +61,11 @@ export function tokenHashOf(token: string): string {
  * - Firma inválida / token malformado → UnauthorizedError.
  * - Token expirado → ForbiddenError.
  */
-export function verifyShareToken(token: string, secret: string, now = Date.now()): ShareTokenClaims {
+export function verifyShareToken(
+  token: string,
+  secret: string,
+  now = Date.now(),
+): ShareTokenClaims {
   const idx = token.lastIndexOf(SEP);
   if (idx <= 0) throw new UnauthorizedError('Enlace de seguimiento inválido');
 

@@ -44,20 +44,22 @@ export class HttpPaymentsRepository implements PaymentsRepository {
   }
 
   getPayment(paymentId: string): Promise<PaymentView> {
-    return this.http.get(`/payments/${paymentId}`, { schema: paymentView });
+    return this.http.get(`/payments/${paymentId}`, {schema: paymentView});
   }
 
   getMyDebts(): Promise<DebtView> {
-    return this.http.get('/payments/debts', { schema: debtView });
+    return this.http.get('/payments/debts', {schema: debtView});
   }
 
   getUserCredit(): Promise<UserCreditView> {
-    return this.http.get('/payments/credit', { schema: userCreditView });
+    return this.http.get('/payments/credit', {schema: userCreditView});
   }
 
   retryCharge(paymentId: string): Promise<PaymentView> {
     // El bff deriva la idempotencia del cobro (un Payment por viaje): NO mandamos dedupKey propia.
-    return this.http.post(`/payments/${paymentId}/retry-charge`, { schema: retryChargeView });
+    return this.http.post(`/payments/${paymentId}/retry-charge`, {
+      schema: retryChargeView,
+    });
   }
 
   async getPaymentByTrip(tripId: string): Promise<PaymentView | null> {
@@ -65,7 +67,9 @@ export class HttpPaymentsRepository implements PaymentsRepository {
     // error duro acá — significa "aún no existe" (o viaje ajeno, anti-IDOR). Lo normalizamos a `null`
     // para que la presentación reintente con un poll suave; el resto de errores se propagan.
     try {
-      return await this.http.get(`/payments/by-trip/${tripId}`, { schema: paymentByTripView });
+      return await this.http.get(`/payments/by-trip/${tripId}`, {
+        schema: paymentByTripView,
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         return null;
@@ -98,7 +102,7 @@ export class HttpPaymentsRepository implements PaymentsRepository {
     // Validamos el body con el contrato SOBERANO del `@veo/api-client` (`changePaymentMethodRequest`)
     // antes de salir a la red; la respuesta 200 usa `changePaymentMethodView` (= `paymentView`, trae el
     // checkout nuevo del método elegido).
-    const body = changePaymentMethodRequest.parse({ method });
+    const body = changePaymentMethodRequest.parse({method});
     try {
       return await this.http.post(changePaymentMethodPath(paymentId), {
         body,

@@ -4,34 +4,34 @@ import type {
   TripActiveView,
   TripResource,
 } from '@veo/api-client';
-import { tripStatus } from '@veo/api-client';
-import { IconButton, Skeleton, Text, TextField, useTheme } from '@veo/ui-kit';
+import {tripStatus} from '@veo/api-client';
+import {IconButton, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import type { RoutePlace } from '../../../maps/domain/entities';
-import type { SavedPlace } from '../../../places/domain/entities';
-import { ActiveTripBody } from '../components/ActiveTripBody';
-import { CompletionBody } from '../components/CompletionBody';
-import { DebtStrip } from '../components/DebtStrip';
-import { HomeHero } from '../components/HomeHero';
-import { HomeShortcutChips } from '../components/HomeShortcutChips';
-import { IconArrowLeft, IconClose } from '../components/icons';
-import { IdleBody } from '../components/IdleBody';
-import { LastDriverCard } from '../components/LastDriverCard';
-import { EnterView } from '../components/motion';
-import { NoOffersBody } from '../components/NoOffersBody';
-import { OfferingsTeaser } from '../components/OfferingsTeaser';
-import { OffersBody } from '../components/OffersBody';
-import { OriginDestinationCard } from '../components/OriginDestinationCard';
-import { QuotingBody } from '../components/QuotingBody';
-import { placeToRoute, suggestionToRoute } from '../components/routePlace';
-import { SearchingBody } from '../components/SearchingBody';
-import type { LastDriver } from './useLastDriver';
-import type { OfferBoard } from './useOfferBoard';
-import type { UsePassengerTripSocket } from './usePassengerTripSocket';
-import type { WaypointProposalController } from './useWaypointProposal';
-import type { TripPhase } from './tripFlowPhase';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import type {RoutePlace} from '../../../maps/domain/entities';
+import type {SavedPlace} from '../../../places/domain/entities';
+import {ActiveTripBody} from '../components/ActiveTripBody';
+import {CompletionBody} from '../components/CompletionBody';
+import {DebtStrip} from '../components/DebtStrip';
+import {HomeHero} from '../components/HomeHero';
+import {HomeShortcutChips} from '../components/HomeShortcutChips';
+import {IconArrowLeft, IconClose} from '../components/icons';
+import {IdleBody} from '../components/IdleBody';
+import {LastDriverCard} from '../components/LastDriverCard';
+import {EnterView} from '../components/motion';
+import {NoOffersBody} from '../components/NoOffersBody';
+import {OfferingsTeaser} from '../components/OfferingsTeaser';
+import {OffersBody} from '../components/OffersBody';
+import {OriginDestinationCard} from '../components/OriginDestinationCard';
+import {QuotingBody} from '../components/QuotingBody';
+import {placeToRoute, suggestionToRoute} from '../components/routePlace';
+import {SearchingBody} from '../components/SearchingBody';
+import type {LastDriver} from './useLastDriver';
+import type {OfferBoard} from './useOfferBoard';
+import type {UsePassengerTripSocket} from './usePassengerTripSocket';
+import type {WaypointProposalController} from './useWaypointProposal';
+import type {TripPhase} from './tripFlowPhase';
 
 /** Modo LOCAL del sheet en el home: `idle` (atajos) o `searching` (búsqueda plegada DENTRO del sheet). */
 export type SheetFlowState = 'idle' | 'searching';
@@ -121,7 +121,7 @@ export type PhaseHandoff = 'reassign' | 'clear';
 /* ────────────────────────────── Bodies por fase ────────────────────────────── */
 
 /** Fase `quoting`: cotización / "ofrecé tu tarifa" (PUJA) en el mismo sheet. */
-export function QuotingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
+export function QuotingPhaseBody({ctx}: SlotProps): React.JSX.Element {
   return (
     <QuotingBody
       onTripCreated={ctx.onTripCreated}
@@ -137,8 +137,8 @@ export function QuotingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Fases `searching`/`offers`: el board de la PUJA (buscando conductores / elegir oferta). */
-export function BiddingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
-  const { board } = ctx;
+export function BiddingPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  const {board} = ctx;
   return (
     <OffersBody
       offers={board.offers}
@@ -159,7 +159,7 @@ export function BiddingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Fases `enRoute`/`arrived`/`inProgress`: el viaje VIVO (conductor real, ETA, cámara, cancelar). */
-export function ActiveTripPhaseBody({ ctx }: SlotProps): React.JSX.Element {
+export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
   if (!ctx.tripDetail) {
     return <Skeleton variant="rect" height={140} />;
   }
@@ -177,23 +177,35 @@ export function ActiveTripPhaseBody({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Fase `completed`: el CIERRE (pago + rating) in-sheet. */
-export function CompletionPhaseBody({ ctx }: SlotProps): React.JSX.Element {
+export function CompletionPhaseBody({ctx}: SlotProps): React.JSX.Element {
   if (!ctx.tripDetail) {
     return <Skeleton variant="rect" height={140} />;
   }
-  return <CompletionBody tripId={ctx.activeTripId as string} trip={ctx.tripDetail} onDone={ctx.clearTrip} />;
+  return (
+    <CompletionBody
+      tripId={ctx.activeTripId as string}
+      trip={ctx.tripDetail}
+      onDone={ctx.clearTrip}
+    />
+  );
 }
 
 /**
  * Fase `noOffers` · PUJA SIN OFERTAS (EXPIRED): in-sheet, sin navegar. Re-pujar reabre el board (la fase
  * vuelve a 'searching' sola); Salir abandona la puja expirada y vuelve al home limpio.
  */
-export function NoOffersPhaseBody({ ctx }: SlotProps): React.JSX.Element {
-  return <NoOffersBody tripId={ctx.activeTripId as string} onRebid={() => undefined} onExit={ctx.clearTrip} />;
+export function NoOffersPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  return (
+    <NoOffersBody
+      tripId={ctx.activeTripId as string}
+      onRebid={() => undefined}
+      onExit={ctx.clearTrip}
+    />
+  );
 }
 
 /** Home · flow `idle`: franja pasiva de deuda/pago por completar + favoritos y recientes. */
-export function HomeIdleFlowBody({ ctx }: SlotProps): React.JSX.Element {
+export function HomeIdleFlowBody({ctx}: SlotProps): React.JSX.Element {
   return (
     <>
       {/* Señal PASIVA del home (sin castigo) → abre el DebtSheet. La DEUDA tiene prioridad (warn +
@@ -201,11 +213,19 @@ export function HomeIdleFlowBody({ ctx }: SlotProps): React.JSX.Element {
           "Continuar" que abre el checkout directo (resuelve el dead-end del pago a medias). */}
       {ctx.hasDebt ? (
         <EnterView index={5}>
-          <DebtStrip kind="debt" amountCents={ctx.debtTotalCents} onPress={ctx.onOpenDebtFromHome} />
+          <DebtStrip
+            kind="debt"
+            amountCents={ctx.debtTotalCents}
+            onPress={ctx.onOpenDebtFromHome}
+          />
         </EnterView>
       ) : ctx.hasPendingAction ? (
         <EnterView index={5}>
-          <DebtStrip kind="pendingAction" amountCents={0} onPress={ctx.onOpenPendingFromHome} />
+          <DebtStrip
+            kind="pendingAction"
+            amountCents={0}
+            onPress={ctx.onOpenPendingFromHome}
+          />
         </EnterView>
       ) : null}
       {/* Las secciones del cuerpo (favoritos + últimos viajes) cierran la cascada como un solo bloque. */}
@@ -222,7 +242,7 @@ export function HomeIdleFlowBody({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Home · flow `searching`: "usar mi ubicación" + guardados + sugerencias del autocompletado. */
-export function HomeSearchFlowBody({ ctx }: SlotProps): React.JSX.Element {
+export function HomeSearchFlowBody({ctx}: SlotProps): React.JSX.Element {
   return (
     <SearchingBody
       showCurrentLocation={ctx.hasCurrentLocation && !ctx.searchActive}
@@ -232,8 +252,8 @@ export function HomeSearchFlowBody({ ctx }: SlotProps): React.JSX.Element {
       loading={ctx.searchLoading}
       error={ctx.searchError}
       active={ctx.searchActive}
-      onSelectSuggestion={(s) => ctx.onSelectDestination(suggestionToRoute(s))}
-      onSelectSaved={(p) => ctx.onSelectDestination(placeToRoute(p))}
+      onSelectSuggestion={s => ctx.onSelectDestination(suggestionToRoute(s))}
+      onSelectSaved={p => ctx.onSelectDestination(placeToRoute(p))}
     />
   );
 }
@@ -243,7 +263,7 @@ export function HomeSearchFlowBody({ ctx }: SlotProps): React.JSX.Element {
  * COMPONE explícitamente la segunda máquina (el eje local del sheet) vía `SHEET_FLOW_DESCRIPTORS` —
  * son DOS máquinas (fase global × modo del sheet), no una re-mezcla de booleans.
  */
-export function HomePhaseBody({ ctx }: SlotProps): React.JSX.Element {
+export function HomePhaseBody({ctx}: SlotProps): React.JSX.Element {
   const FlowBody = SHEET_FLOW_DESCRIPTORS[ctx.flow].Body;
   return <FlowBody ctx={ctx} />;
 }
@@ -251,11 +271,15 @@ export function HomePhaseBody({ ctx }: SlotProps): React.JSX.Element {
 /* ────────────────────────────── Headers por fase ────────────────────────────── */
 
 /** Header de la cotización: volver (limpia el destino → fase idle) + título del destino. */
-export function QuotingSheetHeader({ ctx }: SlotProps): React.JSX.Element {
+export function QuotingSheetHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   return (
-    <View style={[styles.header, { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm }]}>
+    <View
+      style={[
+        styles.header,
+        {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm},
+      ]}>
       <View style={styles.searchHeader}>
         <IconButton
           accessibilityLabel={t('actions.back')}
@@ -279,13 +303,13 @@ export function QuotingSheetHeader({ ctx }: SlotProps): React.JSX.Element {
  * de verse vacía. Cada bloque sale de tokens del tema; nada inventado (la tarjeta del conductor no
  * renderiza si `lastDriver` es `null`).
  */
-export function HomeIdleFlowHeader({ ctx }: SlotProps): React.JSX.Element {
+export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
   // ENTRADA ESCALONADA del Home idle: cada bloque entra con fade + leve subida, en cascada por `index`
   // (~40ms entre bloques, ease-out, <300ms, reduce-motion safe via EnterView). Da "vida" al Home sin
   // pelear con el scroll (solo opacity/transform). Los índices continúan en el body (debt/secciones).
   return (
-    <View style={{ gap: theme.spacing.lg }}>
+    <View style={{gap: theme.spacing.lg}}>
       <EnterView index={0}>
         <HomeHero />
       </EnterView>
@@ -320,9 +344,9 @@ export function HomeIdleFlowHeader({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Home · flow `searching`: input con autofocus + cerrar (la búsqueda vive DENTRO del mismo sheet). */
-export function HomeSearchFlowHeader({ ctx }: SlotProps): React.JSX.Element {
+export function HomeSearchFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   return (
     <View style={styles.searchHeader}>
       <View style={styles.searchInput}>
@@ -347,11 +371,15 @@ export function HomeSearchFlowHeader({ ctx }: SlotProps): React.JSX.Element {
 }
 
 /** Header del HOME: compone la segunda máquina (idle ↔ searching) dentro del wrapper fijo del sheet. */
-export function HomeSheetHeader({ ctx }: SlotProps): React.JSX.Element {
+export function HomeSheetHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
   const FlowHeader = SHEET_FLOW_DESCRIPTORS[ctx.flow].Header;
   return (
-    <View style={[styles.header, { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm }]}>
+    <View
+      style={[
+        styles.header,
+        {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm},
+      ]}>
       <FlowHeader ctx={ctx} />
     </View>
   );
@@ -370,9 +398,20 @@ export interface SheetFlowDescriptor {
   allowsPickupPin: boolean;
 }
 
-export const SHEET_FLOW_DESCRIPTORS: Record<SheetFlowState, SheetFlowDescriptor> = {
-  idle: { Body: HomeIdleFlowBody, Header: HomeIdleFlowHeader, allowsPickupPin: true },
-  searching: { Body: HomeSearchFlowBody, Header: HomeSearchFlowHeader, allowsPickupPin: false },
+export const SHEET_FLOW_DESCRIPTORS: Record<
+  SheetFlowState,
+  SheetFlowDescriptor
+> = {
+  idle: {
+    Body: HomeIdleFlowBody,
+    Header: HomeIdleFlowHeader,
+    allowsPickupPin: true,
+  },
+  searching: {
+    Body: HomeSearchFlowBody,
+    Header: HomeSearchFlowHeader,
+    allowsPickupPin: false,
+  },
 };
 
 /* ──────────────────────── Descriptor por fase (patrón State) ──────────────────────── */
@@ -575,14 +614,20 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
  * `pickupMode` = Home idle (no buscando, no en cotización/viaje). COMPOSICIÓN EXPLÍCITA de las dos
  * máquinas (fase global × modo local del sheet): cada eje aporta su mitad desde SU descriptor.
  */
-export function resolvePickupMode(phase: TripPhase, flow: SheetFlowState): boolean {
-  return TRIP_PHASE_DESCRIPTORS[phase].pickupEligible && SHEET_FLOW_DESCRIPTORS[flow].allowsPickupPin;
+export function resolvePickupMode(
+  phase: TripPhase,
+  flow: SheetFlowState,
+): boolean {
+  return (
+    TRIP_PHASE_DESCRIPTORS[phase].pickupEligible &&
+    SHEET_FLOW_DESCRIPTORS[flow].allowsPickupPin
+  );
 }
 
 const styles = StyleSheet.create({
   // Header FIJO del sheet (no scrollea): buscador + chips Casa/Trabajo (home) o volver + destino (quoting).
-  header: { paddingBottom: 8 },
+  header: {paddingBottom: 8},
   // Header del modo búsqueda (input + cerrar), también fijo. Mismo layout para el header de cotización.
-  searchHeader: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-  searchInput: { flex: 1 },
+  searchHeader: {flexDirection: 'row', alignItems: 'flex-end', gap: 10},
+  searchInput: {flex: 1},
 });

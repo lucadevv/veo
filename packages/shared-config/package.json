@@ -17,5 +17,11 @@
     "./tailwind/preset.cjs": "./tailwind/preset.cjs",
     "./tailwind/tokens.css": "./tailwind/tokens.css"
   },
-  "files": ["eslint", "tsconfig", "jest", "prettier", "tailwind"]
+  "files": [
+    "eslint",
+    "tsconfig",
+    "jest",
+    "prettier",
+    "tailwind"
+  ]
 }

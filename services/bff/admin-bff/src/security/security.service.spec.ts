@@ -6,7 +6,12 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 
-const identity: AuthenticatedUser = { userId: 'sec1', type: 'admin', roles: ['SUPPORT_L2'], sessionId: 's1' };
+const identity: AuthenticatedUser = {
+  userId: 'sec1',
+  type: 'admin',
+  roles: ['SUPPORT_L2'],
+  sessionId: 's1',
+};
 const config = { get: () => 'internal-secret' } as unknown as ConfigService<Env, true>;
 
 /** identity gRPC que enriquece nombres: GetUser → pasajero, GetDriver → conductor. */
@@ -66,7 +71,9 @@ describe('SecurityService', () => {
         evidenceS3Keys: ['panic/t1/clip.mp4'],
       }),
     } as unknown as InternalRestClient;
-    const audit = { record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }) } as unknown as AuditRecorder;
+    const audit = {
+      record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
+    } as unknown as AuditRecorder;
     const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
     const out = await svc.ack(identity, 'pa1');
     expect(out.status).toBe('ACKNOWLEDGED');

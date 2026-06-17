@@ -33,8 +33,20 @@ describe('PaymentsService.getMyDebts (banner de la app)', () => {
       hasDebt: true,
       totalCents: 3500,
       debts: [
-        { paymentId: 'p1', tripId: 't1', amountCents: 1000, reason: 'yape_insufficient_funds', createdAt: '2026-06-01T00:00:00Z' },
-        { paymentId: 'p2', tripId: 't2', amountCents: 2500, reason: 'declined_by_provider', createdAt: '2026-06-05T00:00:00Z' },
+        {
+          paymentId: 'p1',
+          tripId: 't1',
+          amountCents: 1000,
+          reason: 'yape_insufficient_funds',
+          createdAt: '2026-06-01T00:00:00Z',
+        },
+        {
+          paymentId: 'p2',
+          tripId: 't2',
+          amountCents: 2500,
+          reason: 'declined_by_provider',
+          createdAt: '2026-06-05T00:00:00Z',
+        },
       ],
     });
     const { svc } = makeService({ get });
@@ -59,7 +71,14 @@ describe('PaymentsService.getMyDebts (banner de la app)', () => {
       hasDebt: false, // payment-service ya garantiza hasDebt solo-DEBT
       totalCents: 0,
       debts: [
-        { paymentId: 'pa1', tripId: 'tp1', amountCents: 3600, reason: '', createdAt: '2026-06-02T00:00:00Z', kind: 'PENDING_ACTION' },
+        {
+          paymentId: 'pa1',
+          tripId: 'tp1',
+          amountCents: 3600,
+          reason: '',
+          createdAt: '2026-06-02T00:00:00Z',
+          kind: 'PENDING_ACTION',
+        },
       ],
     });
     const { svc } = makeService({ get });
@@ -73,14 +92,26 @@ describe('PaymentsService.getMyDebts (banner de la app)', () => {
       hasDebt: true, // payment-service ya cuenta la penalidad PENDING como bloqueante
       totalCents: 800,
       debts: [
-        { penaltyId: 'pen-1', tripId: 'tc1', amountCents: 800, reason: 'no_show', createdAt: '2026-06-07T00:00:00Z', kind: 'CANCELLATION_PENALTY' },
+        {
+          penaltyId: 'pen-1',
+          tripId: 'tc1',
+          amountCents: 800,
+          reason: 'no_show',
+          createdAt: '2026-06-07T00:00:00Z',
+          kind: 'CANCELLATION_PENALTY',
+        },
       ],
     });
     const { svc } = makeService({ get });
     const out = await svc.getMyDebts(user);
     expect(out.hasDebt).toBe(true);
     expect(out.totalCents).toBe(800);
-    expect(out.debts[0]).toMatchObject({ penaltyId: 'pen-1', tripId: 'tc1', amountCents: 800, kind: 'CANCELLATION_PENALTY' });
+    expect(out.debts[0]).toMatchObject({
+      penaltyId: 'pen-1',
+      tripId: 'tc1',
+      amountCents: 800,
+      kind: 'CANCELLATION_PENALTY',
+    });
     expect(out.debts[0]?.paymentId).toBeUndefined();
   });
 
@@ -88,7 +119,15 @@ describe('PaymentsService.getMyDebts (banner de la app)', () => {
     const get = vi.fn().mockResolvedValue({
       hasDebt: true,
       totalCents: 1000,
-      debts: [{ paymentId: 'p1', tripId: 't1', amountCents: 1000, reason: 'declined', createdAt: '2026-06-01T00:00:00Z' }],
+      debts: [
+        {
+          paymentId: 'p1',
+          tripId: 't1',
+          amountCents: 1000,
+          reason: 'declined',
+          createdAt: '2026-06-01T00:00:00Z',
+        },
+      ],
     });
     const { svc } = makeService({ get });
     const out = await svc.getMyDebts(user);
@@ -194,7 +233,9 @@ describe('PaymentsService.settlePenalty (pagar penalidad de cancelación · F2.3
   it('propaga el error de payment-service (404 penalidad ajena/inexistente) sin invalidar a ciegas', async () => {
     const post = vi.fn().mockRejectedValue(new NotFoundError('Penalidad no encontrada'));
     const { svc, redis } = makeService({ post });
-    await expect(svc.settlePenalty(user, 'pen-ajena', 'YAPE')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.settlePenalty(user, 'pen-ajena', 'YAPE')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     expect(redis.del).not.toHaveBeenCalled();
   });
 });
@@ -226,7 +267,10 @@ describe('PaymentsService.changeMethod (cambiar método de un pago pendiente · 
 
     const out = await svc.changeMethod(user, 'pay-1', 'PLIN');
     expect(get).toHaveBeenCalledWith('/payments/pay-1', { identity: user });
-    expect(post).toHaveBeenCalledWith('/payments/pay-1/method', { identity: user, body: { method: 'PLIN' } });
+    expect(post).toHaveBeenCalledWith('/payments/pay-1/method', {
+      identity: user,
+      body: { method: 'PLIN' },
+    });
     expect(out.id).toBe('pay-1');
     expect(out.method).toBe('PLIN');
     expect(out.checkoutUrl).toBe('https://pay/new');
@@ -245,7 +289,9 @@ describe('PaymentsService.changeMethod (cambiar método de un pago pendiente · 
     const get = vi.fn().mockResolvedValue({ passengerId: null });
     const post = vi.fn();
     const { svc } = makeService({ get, post });
-    await expect(svc.changeMethod(user, 'pay-legacy', 'PLIN')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.changeMethod(user, 'pay-legacy', 'PLIN')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     expect(post).not.toHaveBeenCalled();
   });
 

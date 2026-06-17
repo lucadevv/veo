@@ -19,7 +19,12 @@ import {
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
-import { aggregatePayouts, assertPayoutTransition, periodLabel, type DriverEarningRow } from './payout.policy';
+import {
+  aggregatePayouts,
+  assertPayoutTransition,
+  periodLabel,
+  type DriverEarningRow,
+} from './payout.policy';
 import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -94,10 +99,16 @@ export class PayoutsService {
    * weeklyCron y una corrida manual del operador podía solaparse con el cron). Si otra liquidación
    * está en curso, la manual falla con ConflictError (409 honesto) en vez de competir.
    */
-  async runPayouts(start: Date, end: Date, operator?: AuthenticatedUser): Promise<PayoutRunSummary> {
+  async runPayouts(
+    start: Date,
+    end: Date,
+    operator?: AuthenticatedUser,
+  ): Promise<PayoutRunSummary> {
     const outcome = await this.runPayoutsExclusive(start, end, operator);
     if (!outcome.acquired) {
-      throw new ConflictError('Ya hay una liquidación de payouts en curso: reintentá cuando termine');
+      throw new ConflictError(
+        'Ya hay una liquidación de payouts en curso: reintentá cuando termine',
+      );
     }
     return outcome.result;
   }
@@ -144,7 +155,11 @@ export class PayoutsService {
     const alreadyPaidDriverIds = new Set(
       (
         await this.prisma.read.payout.findMany({
-          where: { periodStart: start, periodEnd: end, driverId: { in: aggregated.map((a) => a.driverId) } },
+          where: {
+            periodStart: start,
+            periodEnd: end,
+            driverId: { in: aggregated.map((a) => a.driverId) },
+          },
           select: { driverId: true },
         })
       ).map((p) => p.driverId),
@@ -206,7 +221,13 @@ export class PayoutsService {
       }
     }
 
-    return { periodStart: start.toISOString(), periodEnd: end.toISOString(), processed, held, totalAmountCents };
+    return {
+      periodStart: start.toISOString(),
+      periodEnd: end.toISOString(),
+      processed,
+      held,
+      totalAmountCents,
+    };
   }
 
   listByDriver(driverId: string): Promise<unknown[]> {
@@ -221,7 +242,11 @@ export class PayoutsService {
    * Paginación cursor por id (uuidv7 ⇒ orden temporal estable). Separado de listByDriver (anti-IDOR
    * del conductor): este lo gatea el controller con RBAC FINANCE/ADMIN, no es por-dueño.
    */
-  async listAll(opts: { status?: PayoutStatus; cursor?: string; limit?: number }): Promise<PayoutPage> {
+  async listAll(opts: {
+    status?: PayoutStatus;
+    cursor?: string;
+    limit?: number;
+  }): Promise<PayoutPage> {
     const limit = clampPayoutLimit(opts.limit);
     const where: Prisma.PayoutWhereInput = {};
     if (opts.status) where.status = opts.status;
@@ -233,7 +258,8 @@ export class PayoutsService {
     });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
-    return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
+    const last = items[items.length - 1];
+    return { items, nextCursor: hasMore && last ? last.id : null };
   }
 
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */
@@ -257,7 +283,10 @@ export class PayoutsService {
    *  - El audit trail del operador lo registra admin-bff (AuditRecorder, action payout.release_held),
    *    como hace con payout.run; acá queda el rastro de dominio (outbox + log estructurado).
    */
-  async releaseHeldPayouts(driverId: string, operator?: AuthenticatedUser): Promise<ReleaseHeldPayoutsResult> {
+  async releaseHeldPayouts(
+    driverId: string,
+    operator?: AuthenticatedUser,
+  ): Promise<ReleaseHeldPayoutsResult> {
     const held = await this.prisma.read.payout.findMany({
       where: { driverId, status: PayoutStatus.HELD },
       orderBy: { periodStart: 'asc' },
@@ -327,8 +356,15 @@ export class PayoutsService {
       select: { driverId: true, grossCents: true, commissionCents: true, tipCents: true },
     });
     const earningRows: DriverEarningRow[] = payments
-      .filter((p): p is { driverId: string; grossCents: number; commissionCents: number; tipCents: number } =>
-        p.driverId !== null,
+      .filter(
+        (
+          p,
+        ): p is {
+          driverId: string;
+          grossCents: number;
+          commissionCents: number;
+          tipCents: number;
+        } => p.driverId !== null,
       )
       .map((p) => ({
         driverId: p.driverId,
@@ -350,8 +386,9 @@ export class PayoutsService {
       select: { driverId: true, driverCompensationCents: true },
     });
     const compensationRows: DriverEarningRow[] = penalties
-      .filter((p): p is { driverId: string; driverCompensationCents: number } =>
-        p.driverId !== null && p.driverCompensationCents > 0,
+      .filter(
+        (p): p is { driverId: string; driverCompensationCents: number } =>
+          p.driverId !== null && p.driverCompensationCents > 0,
       )
       .map((p) => ({
         driverId: p.driverId,

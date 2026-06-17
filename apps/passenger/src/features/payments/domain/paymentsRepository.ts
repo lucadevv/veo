@@ -46,7 +46,10 @@ export interface PaymentsRepository {
    */
   getPaymentByTrip(tripId: string): Promise<PaymentView | null>;
   /** POST /payments/:id/cash/confirm → confirma el pago en efectivo. */
-  confirmCash(paymentId: string, input: CashConfirmRequest): Promise<PaymentView>;
+  confirmCash(
+    paymentId: string,
+    input: CashConfirmRequest,
+  ): Promise<PaymentView>;
   /**
    * POST /payments/:id/method → cambia el método de un pago PENDIENTE a otro DIGITAL (TASK 3). Devuelve
    * el `PaymentView` con el checkout NUEVO del método elegido (deepLink/QR/CIP/web), y el llamador sigue

@@ -40,8 +40,8 @@ export class LivenessBiometricCaptureService
     const frames = await this.grabber.captureSequence(plan);
 
     // 3) Verificación → sessionRef. Si liveness/match fallan, el backend port lanza BiometricRejected.
-    const outcome = await this.backend.verify({challengeId: challenge.challengeId, frames});
-    return {sessionRef: outcome.sessionRef, score: outcome.score};
+    const outcome = await this.backend.verify({ challengeId: challenge.challengeId, frames });
+    return { sessionRef: outcome.sessionRef, score: outcome.score };
   }
 
   async enroll(): Promise<BiometricEnrollResult> {

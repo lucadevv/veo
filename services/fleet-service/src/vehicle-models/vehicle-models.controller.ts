@@ -4,9 +4,25 @@
  * consume cualquier usuario autenticado (selector del onboarding + panel admin). El conductor SOLICITA
  * modelos nuevos (B5-2.c); el OPERADOR los revisa/aprueba/rechaza (role-gated).
  */
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { InternalIdentityGuard, RolesGuard, Roles, CurrentUser, type AuthenticatedUser } from '@veo/auth';
+import {
+  InternalIdentityGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { ForbiddenError } from '@veo/utils';
 import { VehicleModelsService } from './vehicle-models.service';
@@ -21,7 +37,11 @@ import {
 import type { Page } from '../infra/pagination';
 
 /** Roles del operador habilitados para revisar/curar el catálogo (espeja el review de documentos). */
-const CATALOG_REVIEWERS = [AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN] as const;
+const CATALOG_REVIEWERS = [
+  AdminRole.COMPLIANCE_SUPERVISOR,
+  AdminRole.ADMIN,
+  AdminRole.SUPERADMIN,
+] as const;
 
 @ApiTags('vehicle-models')
 @ApiBearerAuth()
@@ -31,7 +51,9 @@ export class VehicleModelsController {
   constructor(private readonly models: VehicleModelsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Catálogo APROBADO de modelos (selector de onboarding). Filtros: vehicleType, q' })
+  @ApiOperation({
+    summary: 'Catálogo APROBADO de modelos (selector de onboarding). Filtros: vehicleType, q',
+  })
   list(@Query() query: ListVehicleModelsQuery): Promise<Page<VehicleModelSpecView>> {
     return this.models.listApproved({
       vehicleType: query.vehicleType,
@@ -57,13 +79,19 @@ export class VehicleModelsController {
   @Get('review')
   @ApiOperation({ summary: 'Cola de revisión de modelos (default PENDING_REVIEW). Solo operador' })
   review(@Query() query: ListReviewQuery): Promise<Page<VehicleModelReviewView>> {
-    return this.models.listForReview({ status: query.status, cursor: query.cursor, limit: query.limit });
+    return this.models.listForReview({
+      status: query.status,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
   }
 
   @UseGuards(RolesGuard)
   @Roles(...CATALOG_REVIEWERS)
   @Put(':id/approve')
-  @ApiOperation({ summary: 'Aprobar una solicitud completando la ficha técnica (PENDING→APPROVED). Solo operador' })
+  @ApiOperation({
+    summary: 'Aprobar una solicitud completando la ficha técnica (PENDING→APPROVED). Solo operador',
+  })
   approve(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ApproveVehicleModelDto,
@@ -92,7 +120,9 @@ export class VehicleModelsController {
   /** Exige que la identidad sea un conductor antes de crear una solicitud a su nombre; devuelve su User.id. */
   private driverId(user: AuthenticatedUser): string {
     if (user.type !== 'driver') {
-      throw new ForbiddenError('Solo un conductor puede solicitar un modelo nuevo', { type: user.type });
+      throw new ForbiddenError('Solo un conductor puede solicitar un modelo nuevo', {
+        type: user.type,
+      });
     }
     return user.userId;
   }

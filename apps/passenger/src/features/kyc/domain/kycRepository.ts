@@ -1,4 +1,4 @@
-import type { KycChallenge, KycFrame, KycStatus } from './entities';
+import type {KycChallenge, KycFrame, KycStatus} from './entities';
 
 /**
  * Resultado de enviar una verificación de identidad al servicio biométrico (vía public-bff).

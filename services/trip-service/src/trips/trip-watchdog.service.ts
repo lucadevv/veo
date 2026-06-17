@@ -98,7 +98,9 @@ export class TripWatchdogService {
     });
 
     if (!applied) return null;
-    this.logger.log(`watchdog: viaje ${id} ${trip.status} → ${target} (estancado ${staleMinutes} min)`);
+    this.logger.log(
+      `watchdog: viaje ${id} ${trip.status} → ${target} (estancado ${staleMinutes} min)`,
+    );
     return target;
   }
 }

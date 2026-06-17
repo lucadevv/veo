@@ -5,24 +5,24 @@ Todos los eventos viajan en el envelope estándar de `@veo/events` y se publican
 
 ## Publica
 
-| Topic (eventType)      | Schema (`@veo/events`)                          | Disparado por                                  | Consumidores         |
-|------------------------|-------------------------------------------------|------------------------------------------------|----------------------|
-| `dispatch.match_found` | `{ tripId, driverId, scoreMs }`                 | `DispatchService.accept` (oferta aceptada)     | trip-service         |
-| `dispatch.timeout`     | `{ tripId, attemptedDrivers }`                  | `MatchingService` (candidatos agotados)        | trip-service         |
+| Topic (eventType)      | Schema (`@veo/events`)          | Disparado por                              | Consumidores |
+| ---------------------- | ------------------------------- | ------------------------------------------ | ------------ |
+| `dispatch.match_found` | `{ tripId, driverId, scoreMs }` | `DispatchService.accept` (oferta aceptada) | trip-service |
+| `dispatch.timeout`     | `{ tripId, attemptedDrivers }`  | `MatchingService` (candidatos agotados)    | trip-service |
 
 > `scoreMs` = latencia oferta→aceptación en ms (proxy de tiempo de asignación).
 
 ## Consume
 
-| Topic (eventType)          | Acción                                                                                  | Reintentos |
-|----------------------------|----------------------------------------------------------------------------------------|------------|
-| `trip.requested`           | Registra demanda surge y lanza el matching (k-ring + scoring + oferta secuencial).      | Kafka (groupId `dispatch-service`) |
-| `driver.location_updated`  | Actualiza el hot index Redis (ubicación + celda H3, mueve de celda con LUA atómico).    | Kafka      |
-| `panic.triggered`          | Excluye al conductor del viaje en pánico del pool de ofertas (sin reasignación auto).   | Kafka      |
-| `rating.created`           | Proyección local `driver_stats`: media móvil del rating.                                | Kafka      |
-| `driver.flagged`           | Proyección local: rating promedio impuesto (`rollingAvg`).                              | Kafka      |
-| `trip.completed`           | Proyección (último viaje) + reincorpora al conductor al pool disponible.                | Kafka      |
-| `trip.cancelled`           | Proyección de cancelación del conductor (solo `by = DRIVER`).                           | Kafka      |
+| Topic (eventType)         | Acción                                                                                | Reintentos                         |
+| ------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------- |
+| `trip.requested`          | Registra demanda surge y lanza el matching (k-ring + scoring + oferta secuencial).    | Kafka (groupId `dispatch-service`) |
+| `driver.location_updated` | Actualiza el hot index Redis (ubicación + celda H3, mueve de celda con LUA atómico).  | Kafka                              |
+| `panic.triggered`         | Excluye al conductor del viaje en pánico del pool de ofertas (sin reasignación auto). | Kafka                              |
+| `rating.created`          | Proyección local `driver_stats`: media móvil del rating.                              | Kafka                              |
+| `driver.flagged`          | Proyección local: rating promedio impuesto (`rollingAvg`).                            | Kafka                              |
+| `trip.completed`          | Proyección (último viaje) + reincorpora al conductor al pool disponible.              | Kafka                              |
+| `trip.cancelled`          | Proyección de cancelación del conductor (solo `by = DRIVER`).                         | Kafka                              |
 
 ## Decisiones de contrato
 

@@ -1,1 +1,1 @@
-export {HttpSupportRepository} from './repositories/http-support-repository';
+export { HttpSupportRepository } from './repositories/http-support-repository';

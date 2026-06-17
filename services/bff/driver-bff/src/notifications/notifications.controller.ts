@@ -17,10 +17,7 @@ export class NotificationsController {
   @Get()
   @ApiOperation({ summary: 'Listar las notificaciones del conductor autenticado' })
   @ApiQuery({ name: 'limit', required: false })
-  list(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query('limit') limit?: string,
-  ): Promise<unknown> {
+  list(@CurrentUser() user: AuthenticatedUser, @Query('limit') limit?: string): Promise<unknown> {
     const parsed = limit ? Number(limit) : undefined;
     return this.notifications.listMine(user, Number.isFinite(parsed) ? parsed : undefined);
   }

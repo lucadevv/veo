@@ -1,11 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
-import { OFFERING_LIST } from '@veo/shared-types';
-import { Text, useTheme } from '@veo/ui-kit';
+import {useQuery} from '@tanstack/react-query';
+import {OFFERING_LIST} from '@veo/shared-types';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 import {
   MAP_GLYPH_DEFAULTS,
   offeringDisplayName,
@@ -25,7 +25,9 @@ interface TeaserItem {
  * default. B5-4: las verticales especiales + EV (defaultEnabled:false) nacen ocultas — no se muestran en la
  * teaser ni cuando el fetch del catálogo falla (el backend ya filtra igual; la app NO debe leakearlas).
  */
-const CODE_FALLBACK: TeaserItem[] = OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => ({
+const CODE_FALLBACK: TeaserItem[] = OFFERING_LIST.filter(
+  o => o.defaultEnabled,
+).map(o => ({
   id: o.id,
   labelKey: o.labelKey,
   icon: o.icon as string,
@@ -46,7 +48,7 @@ const CODE_FALLBACK: TeaserItem[] = OFFERING_LIST.filter((o) => o.defaultEnabled
  */
 export function OfferingsTeaser(): React.JSX.Element | null {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const getCatalog = useDependency(TOKENS.getCatalogUseCase);
 
   const catalogQuery = useQuery({
@@ -64,13 +66,13 @@ export function OfferingsTeaser(): React.JSX.Element | null {
   if (items.length === 0) return null;
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       <Text variant="caption" color="inkSubtle">
         {t('home.servicesTitle')}
       </Text>
-      <View style={[styles.grid, { gap: theme.spacing.sm }]}>
-        {items.map((offering) => {
-          const glyph = offeringGlyph({ icon: offering.icon });
+      <View style={[styles.grid, {gap: theme.spacing.sm}]}>
+        {items.map(offering => {
+          const glyph = offeringGlyph({icon: offering.icon});
           return (
             <View
               key={offering.id}
@@ -84,15 +86,21 @@ export function OfferingsTeaser(): React.JSX.Element | null {
                   paddingHorizontal: theme.spacing.xs,
                   gap: theme.spacing.xs,
                 },
-              ]}
-            >
+              ]}>
               <glyph.MapGlyph
                 size={MAP_GLYPH_DEFAULTS.size}
                 bodyColor={theme.colors.ink}
                 glassColor={theme.colors.surface}
               />
-              <Text variant="caption" color="inkMuted" numberOfLines={1} style={styles.label}>
-                {offeringDisplayName({ labelKey: offering.labelKey, name: offering.name })}
+              <Text
+                variant="caption"
+                color="inkMuted"
+                numberOfLines={1}
+                style={styles.label}>
+                {offeringDisplayName({
+                  labelKey: offering.labelKey,
+                  name: offering.name,
+                })}
               </Text>
             </View>
           );
@@ -104,7 +112,7 @@ export function OfferingsTeaser(): React.JSX.Element | null {
 
 const styles = StyleSheet.create({
   // Fila de iguales: cada celda toma su fracción del ancho (escala sola al crecer el catálogo).
-  grid: { flexDirection: 'row' },
-  cell: { flex: 1, borderWidth: 1, alignItems: 'center' },
-  label: { textAlign: 'center' },
+  grid: {flexDirection: 'row'},
+  cell: {flex: 1, borderWidth: 1, alignItems: 'center'},
+  label: {textAlign: 'center'},
 });

@@ -1,7 +1,7 @@
-import { useTheme } from '@veo/ui-kit';
+import {useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
-import { IconUsers } from '../../../trip/presentation/components/icons';
+import {StyleSheet, View} from 'react-native';
+import {IconUsers} from '../../../trip/presentation/components/icons';
 
 /**
  * Lead-circle del set (handoff `Trusted`: `.leadcircle` 46×46, radio 13, fondo surface2, borde, con
@@ -19,13 +19,18 @@ export function ContactLeadCircle(): React.JSX.Element {
           borderColor: theme.colors.border,
           borderRadius: theme.radii.md,
         },
-      ]}
-    >
+      ]}>
       <IconUsers color={theme.colors.accent} size={20} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  circle: {
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
 });

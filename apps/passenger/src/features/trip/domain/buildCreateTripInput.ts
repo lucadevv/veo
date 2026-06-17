@@ -40,26 +40,32 @@ export interface BuildCreateTripInputParams {
   /** Cupón aplicado o `null`. */
   promoCode: string | null;
   /** Modo niño: si está activo, viaja el flag + el código. */
-  childMode: { enabled: boolean; code: string };
+  childMode: {enabled: boolean; code: string};
 }
 
-export function buildCreateTripInput(p: BuildCreateTripInputParams): CreateTripRequest {
+export function buildCreateTripInput(
+  p: BuildCreateTripInputParams,
+): CreateTripRequest {
   return {
     origin: p.origin,
     destination: p.destination,
     paymentMethod: p.paymentMethod,
     // category + vehicleType en AMBOS modos: el server deriva el pool (Moto vs Auto). En PUJA es lo que
     // permite pujar una Moto (el board filtra por vehicleType).
-    ...(p.selectedId ? { category: p.selectedId } : {}),
-    ...(p.selectedOption ? { vehicleType: p.selectedOption.vehicleType } : {}),
+    ...(p.selectedId ? {category: p.selectedId} : {}),
+    ...(p.selectedOption ? {vehicleType: p.selectedOption.vehicleType} : {}),
     // bid + pedidos especiales SOLO si la oferta elegida resuelve PUJA.
-    ...(p.selectedIsPuja && p.bidCents !== null ? { bidCents: p.bidCents } : {}),
+    ...(p.selectedIsPuja && p.bidCents !== null ? {bidCents: p.bidCents} : {}),
     ...(p.selectedIsPuja && p.specialRequests.length > 0
-      ? { specialRequests: p.specialRequests }
+      ? {specialRequests: p.specialRequests}
       : {}),
-    ...(p.waypoints.length > 0 ? { waypoints: p.waypoints } : {}),
-    ...(p.scheduledAt !== null ? { scheduledFor: new Date(p.scheduledAt).toISOString() } : {}),
-    ...(p.promoCode ? { promoCode: p.promoCode } : {}),
-    ...(p.childMode.enabled ? { childMode: true, childCode: p.childMode.code || undefined } : {}),
+    ...(p.waypoints.length > 0 ? {waypoints: p.waypoints} : {}),
+    ...(p.scheduledAt !== null
+      ? {scheduledFor: new Date(p.scheduledAt).toISOString()}
+      : {}),
+    ...(p.promoCode ? {promoCode: p.promoCode} : {}),
+    ...(p.childMode.enabled
+      ? {childMode: true, childCode: p.childMode.code || undefined}
+      : {}),
   };
 }

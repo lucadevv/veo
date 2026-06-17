@@ -5,7 +5,10 @@ import { Reflector } from '@nestjs/core';
 import { JwtAuthGuard, type JwtService } from '@veo/auth';
 import { UnauthorizedError } from '@veo/utils';
 
-function ctxWith(headers: Record<string, string>, handler = () => {}): {
+function ctxWith(
+  headers: Record<string, string>,
+  handler = () => {},
+): {
   ctx: ExecutionContext;
   req: { headers: Record<string, string>; user?: unknown };
 } {

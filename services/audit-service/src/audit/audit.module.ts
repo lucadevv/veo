@@ -13,7 +13,13 @@ import { AuditRepository } from './audit.repository';
 
 @Module({
   controllers: [AuditController, AuditGrpcController],
-  providers: [AuditRepository, AuditService, AuditConsumer, S3ReplicationRelay, outboxRelayProvider],
+  providers: [
+    AuditRepository,
+    AuditService,
+    AuditConsumer,
+    S3ReplicationRelay,
+    outboxRelayProvider,
+  ],
   exports: [AuditService, AuditRepository],
 })
 export class AuditModule {}

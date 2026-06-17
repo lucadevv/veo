@@ -1,16 +1,28 @@
-import { type RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Button, Card, MapShell, RoutePin, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import {
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {
+  Button,
+  Card,
+  MapShell,
+  RoutePin,
+  SafeScreen,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import { ErrorState } from '../../../../shared/presentation/components/ScreenStates';
-import { formatPEN } from '../../../../shared/utils/format';
-import type { RootStackParamList } from '../../../../navigation/types';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
+import {formatPEN} from '../../../../shared/utils/format';
+import type {RootStackParamList} from '../../../../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'Reassign'>;
@@ -26,9 +38,9 @@ type Params = RouteProp<RootStackParamList, 'Reassign'>;
  */
 export function ReassignScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { tripId } = useRoute<Params>().params;
+  const {tripId} = useRoute<Params>().params;
 
   const tripRepository = useDependency(TOKENS.tripRepository);
   const cancelBid = useDependency(TOKENS.cancelBidUseCase);
@@ -62,38 +74,55 @@ export function ReassignScreen(): React.JSX.Element {
           <AppMap origin={null} destination={null} interactive={false} />
         </MapShell>
         <View
-          style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+          style={[
+            StyleSheet.absoluteFill,
+            {backgroundColor: theme.colors.overlay},
+          ]}
           pointerEvents="none"
         />
       </View>
 
-      <View style={[styles.sheet, { backgroundColor: theme.colors.bg, padding: theme.spacing.xl }]}>
+      <View
+        style={[
+          styles.sheet,
+          {backgroundColor: theme.colors.bg, padding: theme.spacing.xl},
+        ]}>
         <View style={styles.center}>
           <RoutePin variant="user" pulse size={26} />
-          <Text variant="title3" align="center" style={{ marginTop: theme.spacing.lg }}>
+          <Text
+            variant="title3"
+            align="center"
+            style={{marginTop: theme.spacing.lg}}>
             {t('reassign.title')}
           </Text>
-          <Text variant="callout" color="inkMuted" align="center" style={{ marginTop: theme.spacing.sm }}>
+          <Text
+            variant="callout"
+            color="inkMuted"
+            align="center"
+            style={{marginTop: theme.spacing.sm}}>
             {fareCents !== null
-              ? t('reassign.body', { price: formatPEN(fareCents) })
+              ? t('reassign.body', {price: formatPEN(fareCents)})
               : t('reassign.bodyNoPrice')}
           </Text>
         </View>
 
-        <Card variant="filled" padding="lg" style={{ marginTop: theme.spacing.xl }}>
+        <Card
+          variant="filled"
+          padding="lg"
+          style={{marginTop: theme.spacing.xl}}>
           <Text variant="footnote" color="inkMuted">
             {t('reassign.note')}
           </Text>
         </Card>
 
-        <View style={{ flex: 1 }} />
+        <View style={{flex: 1}} />
 
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           <Button
             label={t('reassign.continue')}
             variant="primary"
             fullWidth
-            onPress={() => navigation.replace('OffersBoard', { tripId })}
+            onPress={() => navigation.replace('OffersBoard', {tripId})}
           />
           <Button
             label={t('reassign.cancel')}
@@ -109,7 +138,7 @@ export function ReassignScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  mapArea: { flex: 1 },
-  sheet: { flex: 1.2 },
-  center: { alignItems: 'center' },
+  mapArea: {flex: 1},
+  sheet: {flex: 1.2},
+  center: {alignItems: 'center'},
 });

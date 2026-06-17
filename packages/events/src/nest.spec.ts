@@ -199,7 +199,11 @@ describe('ErasureConsumerBase · esqueleto', () => {
     const logSpy = vi.spyOn(Logger.prototype, 'log');
 
     await consumer.invokeTripErased(
-      tripErasedEnvelope({ tripId: 'trip-1', passengerId: 'usr-1', at: '2026-06-10T00:00:00.000Z' }),
+      tripErasedEnvelope({
+        tripId: 'trip-1',
+        passengerId: 'usr-1',
+        at: '2026-06-10T00:00:00.000Z',
+      }),
     );
 
     expect(eraseTrip).toHaveBeenCalledWith('trip-1');

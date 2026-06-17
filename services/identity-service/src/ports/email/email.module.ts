@@ -22,7 +22,12 @@ export class EmailSmtpSender implements EmailSender {
 
   async send(msg: EmailMessage): Promise<void> {
     try {
-      await this.transport.sendMail({ from: this.from, to: msg.to, subject: msg.subject, html: msg.html });
+      await this.transport.sendMail({
+        from: this.from,
+        to: msg.to,
+        subject: msg.subject,
+        html: msg.html,
+      });
     } catch (err) {
       throw new ExternalServiceError(`SMTP: ${err instanceof Error ? err.message : String(err)}`);
     }

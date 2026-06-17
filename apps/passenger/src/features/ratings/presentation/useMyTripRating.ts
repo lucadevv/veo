@@ -1,7 +1,7 @@
-import type { MyRatingView } from '@veo/api-client';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { TOKENS } from '../../../core/di/tokens';
-import { useDependency } from '../../../core/di/useDependency';
+import type {MyRatingView} from '@veo/api-client';
+import {useQuery, type UseQueryResult} from '@tanstack/react-query';
+import {TOKENS} from '../../../core/di/tokens';
+import {useDependency} from '../../../core/di/useDependency';
 
 /** Clave de cache compartida por la lista del historial y el detalle (una sola verdad por viaje). */
 export const myTripRatingKey = (tripId: string): readonly string[] => [
@@ -27,7 +27,7 @@ export interface UseMyTripRatingOptions {
  */
 export function useMyTripRating(
   tripId: string,
-  { enabled = true }: UseMyTripRatingOptions = {},
+  {enabled = true}: UseMyTripRatingOptions = {},
 ): UseQueryResult<MyRatingView | null> {
   const ratings = useDependency(TOKENS.ratingsRepository);
   return useQuery({

@@ -33,7 +33,9 @@ function buildPrisma(initial?: SnapshotRow) {
 
   const tx = {
     tripSnapshot: {
-      findUnique: vi.fn(async ({ where }: { where: { tripId: string } }) => store.get(where.tripId) ?? null),
+      findUnique: vi.fn(
+        async ({ where }: { where: { tripId: string } }) => store.get(where.tripId) ?? null,
+      ),
       upsert: vi.fn(
         async ({
           where,
@@ -47,7 +49,7 @@ function buildPrisma(initial?: SnapshotRow) {
           const existing = store.get(where.tripId);
           const next = existing
             ? { ...existing, ...update }
-            : ({
+            : {
                 prePanicStatus: null,
                 passengerId: null,
                 lastLat: null,
@@ -55,7 +57,7 @@ function buildPrisma(initial?: SnapshotRow) {
                 lastLocationAt: null,
                 status: 'UNKNOWN',
                 ...create,
-              } as SnapshotRow);
+              };
           store.set(where.tripId, next);
           return next;
         },

@@ -21,7 +21,10 @@ function makePrisma(ownerByPhone: Record<string, string> = {}) {
     return id ? { id, phone: where.phone, type: 'PASSENGER', kycStatus: 'PENDING' } : null;
   });
   const tx = { user: { findUnique: findOwner, update: userUpdate }, authMethod };
-  const write = { ...tx, $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)) };
+  const write = {
+    ...tx,
+    $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+  };
   const read = { user: { findUnique: findOwner } };
   return { write, read, _m: { authMethod, userUpdate, findOwner } };
 }
@@ -117,7 +120,9 @@ describe('PhoneLinkService.verify', () => {
     });
     const svc = new PhoneLinkService(prisma as never, otp as never, users as never);
 
-    await expect(svc.verify('u-1', '987654321', '000000')).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(svc.verify('u-1', '987654321', '000000')).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
     expect(prisma._m.userUpdate).not.toHaveBeenCalled();
     expect(prisma._m.authMethod.upsert).not.toHaveBeenCalled();
   });

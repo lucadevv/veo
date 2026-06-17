@@ -1,11 +1,11 @@
-import { Card, useTheme } from '@veo/ui-kit';
+import {Card, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import type { RoutePlace } from '../../../maps/domain/entities';
-import { useTripHistory } from '../hooks/useTripHistory';
-import { RecentTripRow } from './RecentTripRow';
-import { SectionHeader } from './SectionHeader';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import type {RoutePlace} from '../../../maps/domain/entities';
+import {useTripHistory} from '../hooks/useTripHistory';
+import {RecentTripRow} from './RecentTripRow';
+import {SectionHeader} from './SectionHeader';
 
 /** Cuántos viajes recientes muestra el Home idle (decisión del dueño: los últimos 3). */
 const RECENT_TRIPS_LIMIT = 3;
@@ -26,10 +26,13 @@ export interface RecentTripsSectionProps {
  * DEGRADACIÓN HONESTA: si no hay historial (cuenta nueva, primer uso, u offline sin cache) la sección NO
  * se muestra — no inventamos viajes ni dejamos un bloque vacío.
  */
-export function RecentTripsSection({ onSelect, onSeeAll }: RecentTripsSectionProps): React.JSX.Element | null {
+export function RecentTripsSection({
+  onSelect,
+  onSeeAll,
+}: RecentTripsSectionProps): React.JSX.Element | null {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const { items } = useTripHistory();
+  const {t} = useTranslation();
+  const {items} = useTripHistory();
 
   const recentTrips = items.slice(0, RECENT_TRIPS_LIMIT);
 
@@ -38,14 +41,14 @@ export function RecentTripsSection({ onSelect, onSeeAll }: RecentTripsSectionPro
   }
 
   return (
-    <View style={{ gap: theme.spacing.sm }}>
+    <View style={{gap: theme.spacing.sm}}>
       <SectionHeader
         title={t('home.recentTripsTitle')}
         actionLabel={t('home.seeAll')}
         onAction={onSeeAll}
       />
       <Card variant="outlined" padding="sm">
-        {recentTrips.map((trip) => (
+        {recentTrips.map(trip => (
           <RecentTripRow key={trip.id} trip={trip} onSelect={onSelect} />
         ))}
       </Card>

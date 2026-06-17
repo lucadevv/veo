@@ -12,15 +12,13 @@ module.exports = {
   apps: {
     'ios.debug': {
       type: 'ios.app',
-      binaryPath:
-        'ios/build/Build/Products/Debug-iphonesimulator/VEODriver.app',
+      binaryPath: 'ios/build/Build/Products/Debug-iphonesimulator/VEODriver.app',
       build:
         'xcodebuild -workspace ios/VEODriver.xcworkspace -scheme VEODriver -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build',
     },
     'ios.release': {
       type: 'ios.app',
-      binaryPath:
-        'ios/build/Build/Products/Release-iphonesimulator/VEODriver.app',
+      binaryPath: 'ios/build/Build/Products/Release-iphonesimulator/VEODriver.app',
       build:
         'xcodebuild -workspace ios/VEODriver.xcworkspace -scheme VEODriver -configuration Release -sdk iphonesimulator -derivedDataPath ios/build',
     },
@@ -40,17 +38,17 @@ module.exports = {
   devices: {
     simulator: {
       type: 'ios.simulator',
-      device: {type: 'iPhone 15'},
+      device: { type: 'iPhone 15' },
     },
     emulator: {
       type: 'android.emulator',
-      device: {avdName: 'Pixel_7_API_34'},
+      device: { avdName: 'Pixel_7_API_34' },
     },
   },
   configurations: {
-    'ios.sim.debug': {device: 'simulator', app: 'ios.debug'},
-    'ios.sim.release': {device: 'simulator', app: 'ios.release'},
-    'android.emu.debug': {device: 'emulator', app: 'android.debug'},
-    'android.emu.release': {device: 'emulator', app: 'android.release'},
+    'ios.sim.debug': { device: 'simulator', app: 'ios.debug' },
+    'ios.sim.release': { device: 'simulator', app: 'ios.release' },
+    'android.emu.debug': { device: 'emulator', app: 'android.debug' },
+    'android.emu.release': { device: 'emulator', app: 'android.release' },
   },
 };

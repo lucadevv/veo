@@ -16,7 +16,13 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
     solid: true,
     description:
       'Pide con tu precio (estilo regateo), viaja con cámara y SOS, y comparte el viaje con tu familia.',
-    features: ['Tú pones el precio', 'Cámara + SOS', 'Compartir con familia', 'Stripe · Yape · Plin', 'Control parental'],
+    features: [
+      'Tú pones el precio',
+      'Cámara + SOS',
+      'Compartir con familia',
+      'Stripe · Yape · Plin',
+      'Control parental',
+    ],
     icon: 'eye',
     links: {
       primary: { label: 'Prototipo clicable', href: '#pasajero-app' },
@@ -31,7 +37,13 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
     solid: true,
     description:
       'Registro con documentos y selfie, gate biométrico por turno, ofertas con contraoferta y ganancias.',
-    features: ['Gate biométrico', 'Oferta / contraoferta', 'Modo destino', 'Documentos + vencimientos', 'Incentivos'],
+    features: [
+      'Gate biométrico',
+      'Oferta / contraoferta',
+      'Modo destino',
+      'Documentos + vencimientos',
+      'Incentivos',
+    ],
     icon: 'car',
     links: {
       primary: { label: 'Prototipo clicable', href: '#conductor-app' },
@@ -46,7 +58,13 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
     solid: false,
     description:
       'Sin instalar nada: abre el link y acompaña el viaje en vivo — mapa, conductor, cámara y llegada.',
-    features: ['Sin login', 'Viaje en vivo', 'Cámara del viaje', 'Solo lectura', '7 estados de cierre'],
+    features: [
+      'Sin login',
+      'Viaje en vivo',
+      'Cámara del viaje',
+      'Solo lectura',
+      '7 estados de cierre',
+    ],
     icon: 'family',
     links: {
       primary: { label: 'Prototipo clicable', href: '#familia-app' },
@@ -61,7 +79,13 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
     solid: false,
     description:
       'Operación en vivo, cola de pánicos, conductores, flota, finanzas, video con doble auth y auditoría.',
-    features: ['Pánicos en vivo', 'Acceso a video (MFA)', 'Liquidaciones', 'Auditoría hash', 'RBAC'],
+    features: [
+      'Pánicos en vivo',
+      'Acceso a video (MFA)',
+      'Liquidaciones',
+      'Auditoría hash',
+      'RBAC',
+    ],
     icon: 'shield',
     links: {
       primary: { label: 'Prototipo clicable', href: '#admin-app' },

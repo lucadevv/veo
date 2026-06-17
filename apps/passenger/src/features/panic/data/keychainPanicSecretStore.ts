@@ -1,5 +1,5 @@
 import * as Keychain from 'react-native-keychain';
-import type { PanicSecretStore } from '../domain/panicSecretStore';
+import type {PanicSecretStore} from '../domain/panicSecretStore';
 
 /** Servicio (namespace) del secreto de pánico en el Keychain/Keystore. */
 const PANIC_SECRET_SERVICE = 'pe.veo.passenger.panic.hmac';
@@ -31,6 +31,6 @@ export class KeychainPanicSecretStore implements PanicSecretStore {
   }
 
   async clearSecret(): Promise<void> {
-    await Keychain.resetGenericPassword({ service: PANIC_SECRET_SERVICE });
+    await Keychain.resetGenericPassword({service: PANIC_SECRET_SERVICE});
   }
 }

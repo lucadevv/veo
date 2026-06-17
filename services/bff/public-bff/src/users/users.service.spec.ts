@@ -52,7 +52,13 @@ describe('UsersService.recordConsent', () => {
 
     const res = await svc.recordConsent(
       user,
-      { dataProcessing: true, inCabinCamera: true, location: false, marketing: false, policyVersion: '2026-05-01' },
+      {
+        dataProcessing: true,
+        inCabinCamera: true,
+        location: false,
+        marketing: false,
+        policyVersion: '2026-05-01',
+      },
       '200.48.225.130',
     );
 
@@ -77,7 +83,13 @@ describe('UsersService.recordConsent', () => {
 
     await svc.recordConsent(
       user,
-      { dataProcessing: true, inCabinCamera: false, location: true, marketing: true, policyVersion: '2026-05-01' },
+      {
+        dataProcessing: true,
+        inCabinCamera: false,
+        location: true,
+        marketing: true,
+        policyVersion: '2026-05-01',
+      },
       null,
     );
 

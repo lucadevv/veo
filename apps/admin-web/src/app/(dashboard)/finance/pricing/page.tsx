@@ -1,7 +1,12 @@
 'use client';
 
 import { Lock } from 'lucide-react';
-import { useModeSchedule, useFuelSurcharge, useEnergyCatalog, useBidFloor } from '@/lib/api/queries';
+import {
+  useModeSchedule,
+  useFuelSurcharge,
+  useEnergyCatalog,
+  useBidFloor,
+} from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -26,7 +31,10 @@ export default function PricingPage() {
   if (!can(user, 'pricing:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Modo de pricing" breadcrumbs={[{ label: 'Finanzas' }, { label: 'Pricing' }]} />
+        <PageHeader
+          title="Modo de pricing"
+          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Pricing' }]}
+        />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}

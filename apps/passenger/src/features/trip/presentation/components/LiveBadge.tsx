@@ -1,7 +1,7 @@
-import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
+import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -28,7 +28,7 @@ import Animated, {
  */
 export function LiveBadge(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
 
   // Pulso del punto: 0→1→0 en loop (~2s total). Maneja opacidad del dot y el halo (escala + fade).
@@ -41,8 +41,8 @@ export function LiveBadge(): React.JSX.Element {
     }
     pulse.value = withRepeat(
       withSequence(
-        withTiming(1, { duration: 1_000, easing: Easing.inOut(Easing.quad) }),
-        withTiming(0, { duration: 1_000, easing: Easing.inOut(Easing.quad) }),
+        withTiming(1, {duration: 1_000, easing: Easing.inOut(Easing.quad)}),
+        withTiming(0, {duration: 1_000, easing: Easing.inOut(Easing.quad)}),
       ),
       -1,
       false,
@@ -51,11 +51,13 @@ export function LiveBadge(): React.JSX.Element {
   }, [reduced, pulse]);
 
   // El dot baja apenas su opacidad en el valle del pulso (sigue presente, nunca parpadea a 0).
-  const dotStyle = useAnimatedStyle(() => ({ opacity: interpolate(pulse.value, [0, 1], [0.55, 1]) }));
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulse.value, [0, 1], [0.55, 1]),
+  }));
   // El halo crece y se desvanece (anillo de "señal viva" alrededor del dot).
   const haloStyle = useAnimatedStyle(() => ({
     opacity: interpolate(pulse.value, [0, 1], [0.4, 0]),
-    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 2.4]) }],
+    transform: [{scale: interpolate(pulse.value, [0, 1], [1, 2.4])}],
   }));
 
   return (
@@ -70,14 +72,24 @@ export function LiveBadge(): React.JSX.Element {
           borderRadius: theme.radii.pill,
           ...theme.elevation.level2,
         },
-      ]}
-    >
-      <View style={styles.dotWrap} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      ]}>
+      <View
+        style={styles.dotWrap}
+        importantForAccessibility="no-hide-descendants"
+        accessibilityElementsHidden>
         <Animated.View
-          style={[styles.halo, { backgroundColor: theme.colors.success, borderRadius: 999 }, haloStyle]}
+          style={[
+            styles.halo,
+            {backgroundColor: theme.colors.success, borderRadius: 999},
+            haloStyle,
+          ]}
         />
         <Animated.View
-          style={[styles.dot, { backgroundColor: theme.colors.success, borderRadius: 999 }, dotStyle]}
+          style={[
+            styles.dot,
+            {backgroundColor: theme.colors.success, borderRadius: 999},
+            dotStyle,
+          ]}
         />
       </View>
       <Text variant="label" color="ink">
@@ -97,7 +109,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  dotWrap: { width: 8, height: 8, alignItems: 'center', justifyContent: 'center' },
-  dot: { width: 8, height: 8 },
-  halo: { position: 'absolute', width: 8, height: 8 },
+  dotWrap: {
+    width: 8,
+    height: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {width: 8, height: 8},
+  halo: {position: 'absolute', width: 8, height: 8},
 });

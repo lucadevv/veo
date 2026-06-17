@@ -1,9 +1,13 @@
-import type { DebtView } from '@veo/api-client';
-import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useFocusEffect } from '@react-navigation/native';
+import type {DebtView} from '@veo/api-client';
+import {
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from '@tanstack/react-query';
+import {useFocusEffect} from '@react-navigation/native';
 import React from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 
 /** Clave de caché de las deudas del pasajero (`GET /payments/debts`). Compartida home + sheet de deuda. */
 export const MY_DEBTS_QUERY_KEY = ['payments', 'debts'] as const;
@@ -21,7 +25,7 @@ const DEBTS_STALE_TIME_MS = 5_000;
 export function useInvalidateMyDebts(): () => void {
   const queryClient = useQueryClient();
   return React.useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: MY_DEBTS_QUERY_KEY });
+    void queryClient.invalidateQueries({queryKey: MY_DEBTS_QUERY_KEY});
   }, [queryClient]);
 }
 
@@ -44,7 +48,7 @@ export function useMyDebts(enabled: boolean): UseQueryResult<DebtView, Error> {
 
   // Al recuperar foco (volver al home tras Yape / otra pantalla), refrescamos si está habilitado y stale.
   // refetch() respeta el staleTime via el propio query: sólo pega a red si pasó el TTL → "razonable".
-  const { refetch } = query;
+  const {refetch} = query;
   useFocusEffect(
     React.useCallback(() => {
       if (enabled) {

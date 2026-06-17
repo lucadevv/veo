@@ -139,7 +139,12 @@ describe('history · tripToHistoryItem', () => {
   });
 
   it('viaje sin conductor (EXPIRED) → driverId null', () => {
-    const item = tripToHistoryItem({ ...base, driverId: null, status: 'EXPIRED', completedAt: null });
+    const item = tripToHistoryItem({
+      ...base,
+      driverId: null,
+      status: 'EXPIRED',
+      completedAt: null,
+    });
     expect(item.driverId).toBeNull();
     expect(item.completedAt).toBeNull();
     expect(item.status).toBe('EXPIRED');

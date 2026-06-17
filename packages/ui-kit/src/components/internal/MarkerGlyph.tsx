@@ -26,7 +26,13 @@ export function MarkerGlyph({ kind = 'origin', size = 14, style }: MarkerGlyphPr
       <View
         style={[
           styles.center,
-          { width: size, height: size, borderRadius: size / 2, borderWidth: Math.max(2, size * 0.18), borderColor: brand },
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: Math.max(2, size * 0.18),
+            borderColor: brand,
+          },
           style,
         ]}
       />
@@ -43,7 +49,9 @@ export function MarkerGlyph({ kind = 'origin', size = 14, style }: MarkerGlyphPr
           style,
         ]}
       >
-        <View style={{ width: core, height: core, borderRadius: 2, backgroundColor: theme.colors.bg }} />
+        <View
+          style={{ width: core, height: core, borderRadius: 2, backgroundColor: theme.colors.bg }}
+        />
       </View>
     );
   }
@@ -60,7 +68,14 @@ export function MarkerGlyph({ kind = 'origin', size = 14, style }: MarkerGlyphPr
           style,
         ]}
       >
-        <View style={{ width: core, height: core, borderRadius: core / 2, backgroundColor: theme.colors.bg }} />
+        <View
+          style={{
+            width: core,
+            height: core,
+            borderRadius: core / 2,
+            backgroundColor: theme.colors.bg,
+          }}
+        />
       </View>
     );
   }

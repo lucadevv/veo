@@ -12,7 +12,9 @@ export class PromosController {
 
   @Post('validate')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Previsualiza el descuento de un cupón sobre una cotización (BR Ola 2A)' })
+  @ApiOperation({
+    summary: 'Previsualiza el descuento de un cupón sobre una cotización (BR Ola 2A)',
+  })
   validate(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ValidatePromoDto,

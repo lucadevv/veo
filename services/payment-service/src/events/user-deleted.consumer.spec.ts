@@ -46,7 +46,9 @@ function makeConsumer(overrides?: { erasePii?: ReturnType<typeof vi.fn> }) {
   const affiliations = { eraseUser: eraseAffiliation } as unknown as AffiliationsService;
   const consumer = new UserDeletedConsumer(payments, affiliations, makeRedis() as never, config);
   const invoke = (e: EventEnvelope<unknown>) =>
-    (consumer as unknown as { onUserDeleted(e: EventEnvelope<unknown>): Promise<void> }).onUserDeleted(e);
+    (
+      consumer as unknown as { onUserDeleted(e: EventEnvelope<unknown>): Promise<void> }
+    ).onUserDeleted(e);
   return { erasePii, eraseAffiliation, invoke };
 }
 

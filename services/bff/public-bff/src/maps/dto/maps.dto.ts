@@ -79,7 +79,8 @@ export class QuoteRequestDto {
 
   @ApiPropertyOptional({
     type: [MapPointDto],
-    description: 'Paradas intermedias ordenadas (Ola 2B, máx 3). La cotización las incluye en la ruta.',
+    description:
+      'Paradas intermedias ordenadas (Ola 2B, máx 3). La cotización las incluye en la ruta.',
   })
   @IsOptional()
   @IsArray()
@@ -94,7 +95,8 @@ export class QuoteRequestDto {
    * de recojo. Omitir = viaje inmediato (modo de ahora). Es solo un preview; el modo se congela en POST /trips.
    */
   @ApiPropertyOptional({
-    description: 'Hora de recojo de una reserva (ISO-8601). El quote resuelve el modo para esa hora (S2).',
+    description:
+      'Hora de recojo de una reserva (ISO-8601). El quote resuelve el modo para esa hora (S2).',
     example: '2026-06-01T22:00:00.000Z',
   })
   @IsOptional()

@@ -48,7 +48,8 @@ export class CreateTripDto {
 
   @ApiPropertyOptional({
     type: [GeoPointDto],
-    description: 'Paradas intermedias ordenadas (Ola 2B, máx 3). La ruta y la tarifa firme las incluyen.',
+    description:
+      'Paradas intermedias ordenadas (Ola 2B, máx 3). La ruta y la tarifa firme las incluyen.',
   })
   @IsOptional()
   @IsArray()
@@ -69,7 +70,8 @@ export class CreateTripDto {
 
   @ApiPropertyOptional({
     enum: VehicleType,
-    description: 'Tipo de vehículo (Ola 2B · moto-taxi). Suele derivarse de quoteOption.vehicleType.',
+    description:
+      'Tipo de vehículo (Ola 2B · moto-taxi). Suele derivarse de quoteOption.vehicleType.',
   })
   @IsOptional()
   @IsEnum(VehicleType)
@@ -96,7 +98,8 @@ export class CreateTripDto {
   paymentMethod!: PaymentMethod;
 
   @ApiPropertyOptional({
-    description: 'Categoría/opción de tarifa elegida en la cotización (quoteOption.id, p.ej. veo_economico)',
+    description:
+      'Categoría/opción de tarifa elegida en la cotización (quoteOption.id, p.ej. veo_economico)',
     example: 'veo_economico',
   })
   @IsOptional()
@@ -123,7 +126,8 @@ export class CreateTripDto {
   childCode?: string;
 
   @ApiPropertyOptional({
-    description: 'Código de promoción (Ola 2A). Se propaga al cobro; el descuento reduce solo lo que paga el pasajero.',
+    description:
+      'Código de promoción (Ola 2A). Se propaga al cobro; el descuento reduce solo lo que paga el pasajero.',
   })
   @IsOptional()
   @IsString()
@@ -133,7 +137,8 @@ export class CreateTripDto {
   @ApiPropertyOptional({
     isArray: true,
     enum: SpecialRequest,
-    description: 'Solicitudes especiales (mascota/equipaje/silla); el conductor las ve antes de aceptar.',
+    description:
+      'Solicitudes especiales (mascota/equipaje/silla); el conductor las ve antes de aceptar.',
   })
   @IsOptional()
   @IsArray()
@@ -201,13 +206,18 @@ export class AddTipDto {
  * limit es opcional y el SERVIDOR lo acota a su tope (el cliente no puede forzar páginas enormes).
  */
 export class TripHistoryQueryDto {
-  @ApiPropertyOptional({ description: 'Cursor opaco de la página previa (nextCursor). Omitir = primera página.' })
+  @ApiPropertyOptional({
+    description: 'Cursor opaco de la página previa (nextCursor). Omitir = primera página.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(256)
   cursor?: string;
 
-  @ApiPropertyOptional({ description: 'Tamaño de página pedido; el servidor lo acota a su tope (≤50).', example: 20 })
+  @ApiPropertyOptional({
+    description: 'Tamaño de página pedido; el servidor lo acota a su tope (≤50).',
+    example: 20,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

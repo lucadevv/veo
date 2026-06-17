@@ -136,7 +136,13 @@ export class MatchingService {
     const requires = findOffering(session.category ?? '')?.requires;
     // Rankea desde el k-ring actual; si está agotado, expande (persistiendo el avance) y reintenta.
     for (let k = session.currentKRing; k <= this.maxKRing; k++) {
-      const ranked = await this.rankCandidates(neighbors(center, k), origin, attempted, session.vehicleType, requires);
+      const ranked = await this.rankCandidates(
+        neighbors(center, k),
+        origin,
+        attempted,
+        session.vehicleType,
+        requires,
+      );
       const top = ranked[0];
       if (!top) continue;
       if (k !== session.currentKRing) await this.sessions.bumpKRing(tripId, k);
@@ -315,7 +321,10 @@ export class MatchingService {
   ): Promise<{ driverId: string; score: number; location: LatLon }[]> {
     // Candidatos elegibles (disponibles + del tipo requerido + que cumplen el `requires` de la oferta +
     // no excluidos por pánico + no ya ofertados). Filtrado centralizado en DriverPool (misma fuente que PUJA).
-    const usable = await this.driverPool.eligible(cells, requiredVehicleType, { exclude: attempted, requires });
+    const usable = await this.driverPool.eligible(cells, requiredVehicleType, {
+      exclude: attempted,
+      requires,
+    });
     if (usable.length === 0) return [];
 
     const stats = await this.projection.getStats(usable.map((l) => l.driverId));
@@ -360,6 +369,8 @@ export class MatchingService {
       });
     });
     domainEventsTotal.inc({ event: 'dispatch.no_offers', result: 'published' });
-    this.logger.log(`matcher FIXED sin candidatos para ${tripId} (intentados ${attemptedDrivers}) → no_offers`);
+    this.logger.log(
+      `matcher FIXED sin candidatos para ${tripId} (intentados ${attemptedDrivers}) → no_offers`,
+    );
   }
 }

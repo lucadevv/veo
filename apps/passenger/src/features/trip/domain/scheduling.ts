@@ -12,8 +12,8 @@ export const MAX_SCHEDULE_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Resultado de validar una fecha/hora de programación contra la ventana operativa. */
 export type ScheduleValidation =
-  | { valid: true }
-  | { valid: false; reason: 'TOO_SOON' | 'TOO_FAR' | 'INVALID' };
+  | {valid: true}
+  | {valid: false; reason: 'TOO_SOON' | 'TOO_FAR' | 'INVALID'};
 
 /**
  * Valida que `scheduledAt` caiga dentro de la ventana [now+15min, now+7días]. `now` es inyectable
@@ -26,14 +26,14 @@ export function validateScheduledFor(
 ): ScheduleValidation {
   const target = scheduledAt.getTime();
   if (Number.isNaN(target)) {
-    return { valid: false, reason: 'INVALID' };
+    return {valid: false, reason: 'INVALID'};
   }
   const lead = target - now.getTime();
   if (lead < MIN_SCHEDULE_LEAD_MS) {
-    return { valid: false, reason: 'TOO_SOON' };
+    return {valid: false, reason: 'TOO_SOON'};
   }
   if (lead > MAX_SCHEDULE_HORIZON_MS) {
-    return { valid: false, reason: 'TOO_FAR' };
+    return {valid: false, reason: 'TOO_FAR'};
   }
-  return { valid: true };
+  return {valid: true};
 }

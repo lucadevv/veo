@@ -1,6 +1,6 @@
-import type { PromoValidationView } from './entities';
-import { normalizePromoCode } from './entities';
-import type { PromosRepository } from './promosRepository';
+import type {PromoValidationView} from './entities';
+import {normalizePromoCode} from './entities';
+import type {PromosRepository} from './promosRepository';
 
 /** Error de dominio para una entrada de cupón inválida antes de tocar la red. */
 export class PromoInputError extends Error {

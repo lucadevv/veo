@@ -20,7 +20,11 @@ import {
   type RenderedMessage,
   type TemplateRenderer,
 } from './types';
-import { bumpNotificationFailed, NotificationFailureKind, priorityLabel } from '../metrics/notification.metrics';
+import {
+  bumpNotificationFailed,
+  NotificationFailureKind,
+  priorityLabel,
+} from '../metrics/notification.metrics';
 
 @Injectable()
 export class NotificationEngine {
@@ -64,7 +68,9 @@ export class NotificationEngine {
       if (input.dedupKey) {
         const raced = await this.store.findByDedupKey(input.dedupKey);
         if (raced) {
-          this.logger.debug(`dedup (carrera): ${input.dedupKey} insertada por otra réplica (${raced.id})`);
+          this.logger.debug(
+            `dedup (carrera): ${input.dedupKey} insertada por otra réplica (${raced.id})`,
+          );
           return { notification: raced, deduped: true };
         }
       }
@@ -92,7 +98,11 @@ export class NotificationEngine {
         return { status: 'SENT', attempts };
       case DispatchStatus.InvalidRecipient:
         // Permanente: destino muerto (el dispatcher ya invalidó el token). NO se reintenta.
-        await this.store.markFailed(rec.id, { channel: rec.channel, reason: result.reason, attempts });
+        await this.store.markFailed(rec.id, {
+          channel: rec.channel,
+          reason: result.reason,
+          attempts,
+        });
         this.logger.warn(`notificación ${rec.id} FAILED (destino inválido): ${result.reason}`);
         bumpNotificationFailed({
           channel: rec.channel,

@@ -4,13 +4,13 @@ import type {
   EmailResendResult,
   EmailResetResult,
 } from '@veo/api-client';
-import { ApiError } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { useCallback } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { useBiometricGateStore } from '../stores/biometricGateStore';
+import {ApiError} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {useCallback} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {useBiometricGateStore} from '../stores/biometricGateStore';
 
 /** Mínimo de contraseña (ADR-012 §4). El backend además rechaza contraseñas triviales (400). */
 export const EMAIL_PASSWORD_MIN = 12;
@@ -59,12 +59,16 @@ export function useEmailAuthFlow() {
   const resetPasswordUseCase = useDependency(TOKENS.resetPasswordUseCase);
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
-  const setSession = useSessionStore((state) => state.setSession);
-  const unlockBiometricGate = useBiometricGateStore((state) => state.unlock);
+  const setSession = useSessionStore(state => state.setSession);
+  const unlockBiometricGate = useBiometricGateStore(state => state.unlock);
 
   /** Persiste la sesión tras verify/login (idéntico al flujo OTP). */
   const persistSession = useCallback(
-    (tokens: { accessToken: string; refreshToken: string; user: Parameters<typeof setSession>[0]['user'] }) => {
+    (tokens: {
+      accessToken: string;
+      refreshToken: string;
+      user: Parameters<typeof setSession>[0]['user'];
+    }) => {
       setSession({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -75,19 +79,27 @@ export function useEmailAuthFlow() {
       // Drena la cola durable de consentimiento (best-effort): el onboarding la encoló antes del login.
       void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta al disparar.
-      void panicSecretProvisioner.ensureProvisioned().catch((error) => {
-        console.warn('[panic] aprovisionamiento del secreto tras login falló:', error);
+      void panicSecretProvisioner.ensureProvisioned().catch(error => {
+        console.warn(
+          '[panic] aprovisionamiento del secreto tras login falló:',
+          error,
+        );
       });
     },
-    [setSession, unlockBiometricGate, panicSecretProvisioner, syncPendingConsent],
+    [
+      setSession,
+      unlockBiometricGate,
+      panicSecretProvisioner,
+      syncPendingConsent,
+    ],
   );
 
   const registerMutation = useMutation<
     EmailRegisterResult,
     Error,
-    { email: string; password: string; name?: string }
+    {email: string; password: string; name?: string}
   >({
-    mutationFn: ({ email, password, name }) =>
+    mutationFn: ({email, password, name}) =>
       registerEmailUseCase.execute({
         email: email.trim().toLowerCase(),
         password,
@@ -98,40 +110,58 @@ export function useEmailAuthFlow() {
 
   const resendMutation = useMutation<EmailResendResult, Error, string>({
     mutationFn: (email: string) =>
-      resendEmailUseCase.execute({ email: email.trim().toLowerCase() }),
+      resendEmailUseCase.execute({email: email.trim().toLowerCase()}),
   });
 
-  const verifyMutation = useMutation<void, Error, { email: string; code: string }>({
-    mutationFn: async ({ email, code }) => {
-      const tokens = await verifyEmailUseCase.execute({ email: email.trim().toLowerCase(), code });
+  const verifyMutation = useMutation<
+    void,
+    Error,
+    {email: string; code: string}
+  >({
+    mutationFn: async ({email, code}) => {
+      const tokens = await verifyEmailUseCase.execute({
+        email: email.trim().toLowerCase(),
+        code,
+      });
       persistSession(tokens);
     },
   });
 
-  const loginMutation = useMutation<void, Error, { email: string; password: string }>({
-    mutationFn: async ({ email, password }) => {
-      const tokens = await loginEmailUseCase.execute({ email: email.trim().toLowerCase(), password });
+  const loginMutation = useMutation<
+    void,
+    Error,
+    {email: string; password: string}
+  >({
+    mutationFn: async ({email, password}) => {
+      const tokens = await loginEmailUseCase.execute({
+        email: email.trim().toLowerCase(),
+        password,
+      });
       persistSession(tokens);
     },
   });
 
   const forgotMutation = useMutation<EmailForgotResult, Error, string>({
     mutationFn: (email: string) =>
-      forgotPasswordUseCase.execute({ email: email.trim().toLowerCase() }),
+      forgotPasswordUseCase.execute({email: email.trim().toLowerCase()}),
   });
 
   const resetMutation = useMutation<
     EmailResetResult,
     Error,
-    { email: string; code: string; newPassword: string }
+    {email: string; code: string; newPassword: string}
   >({
-    mutationFn: ({ email, code, newPassword }) =>
-      resetPasswordUseCase.execute({ email: email.trim().toLowerCase(), code, newPassword }),
+    mutationFn: ({email, code, newPassword}) =>
+      resetPasswordUseCase.execute({
+        email: email.trim().toLowerCase(),
+        code,
+        newPassword,
+      }),
   });
 
   const registerEmail = useCallback(
     (email: string, password: string, name?: string) =>
-      registerMutation.mutateAsync({ email, password, name }),
+      registerMutation.mutateAsync({email, password, name}),
     [registerMutation],
   );
   const resendEmail = useCallback(
@@ -139,11 +169,12 @@ export function useEmailAuthFlow() {
     [resendMutation],
   );
   const verifyEmail = useCallback(
-    (email: string, code: string) => verifyMutation.mutateAsync({ email, code }),
+    (email: string, code: string) => verifyMutation.mutateAsync({email, code}),
     [verifyMutation],
   );
   const loginEmail = useCallback(
-    (email: string, password: string) => loginMutation.mutateAsync({ email, password }),
+    (email: string, password: string) =>
+      loginMutation.mutateAsync({email, password}),
     [loginMutation],
   );
   const forgotPassword = useCallback(
@@ -152,7 +183,7 @@ export function useEmailAuthFlow() {
   );
   const resetPassword = useCallback(
     (email: string, code: string, newPassword: string) =>
-      resetMutation.mutateAsync({ email, code, newPassword }),
+      resetMutation.mutateAsync({email, code, newPassword}),
     [resetMutation],
   );
 

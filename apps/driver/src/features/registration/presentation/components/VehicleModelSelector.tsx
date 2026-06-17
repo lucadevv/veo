@@ -1,18 +1,18 @@
-import React, {useMemo, useState} from 'react';
-import {ActivityIndicator, FlatList, Pressable, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, BottomSheet, Button, Text, TextField, useTheme} from '@veo/ui-kit';
-import {IconChevronRight} from '../../../../shared/presentation/icons';
-import {useVehicleModels} from '../hooks/useRegistrationWizard';
-import {filterVehicleModels} from './vehicle-model-filter';
-import {VehicleModelRequestForm} from './VehicleModelRequestForm';
-import type {VehicleModelOption, VehicleType} from '../../domain';
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, BottomSheet, Button, Text, TextField, useTheme } from '@veo/ui-kit';
+import { IconChevronRight } from '../../../../shared/presentation/icons';
+import { useVehicleModels } from '../hooks/useRegistrationWizard';
+import { filterVehicleModels } from './vehicle-model-filter';
+import { VehicleModelRequestForm } from './VehicleModelRequestForm';
+import type { VehicleModelOption, VehicleType } from '../../domain';
 
 interface VehicleModelSelectorProps {
   /** Tipo elegido (filtra el catálogo: un mototaxista solo ve motos). */
   vehicleType: VehicleType;
   /** Modelo elegido (vacío hasta seleccionar): id + etiqueta marca/modelo para mostrar. */
-  value: {modelSpecId: string; brand: string; model: string};
+  value: { modelSpecId: string; brand: string; model: string };
   onChange: (model: VehicleModelOption) => void;
   /** Mensaje de error (ya traducido) si no se eligió modelo al validar. */
   error?: string;
@@ -31,14 +31,15 @@ export function VehicleModelSelector({
   error,
 }: VehicleModelSelectorProps): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   // Modo del sheet: elegir del catálogo, o solicitar un modelo nuevo que no está (B5-2.c).
   const [mode, setMode] = useState<'pick' | 'request'>('pick');
 
   const modelsQuery = useVehicleModels(vehicleType);
-  const models = modelsQuery.data ?? [];
+  // Memoizado: `data ?? []` crearía un array nuevo en cada render (rompiendo el useMemo de `filtered`).
+  const models = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
 
   // Búsqueda client-side (catálogo chico): filtra por marca o modelo, case-insensitive.
   const filtered = useMemo(() => filterVehicleModels(models, search), [models, search]);
@@ -66,8 +67,9 @@ export function VehicleModelSelector({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t('registration.vehicle.modelSelectLabel')}
-        accessibilityState={{expanded: open}}
-        onPress={() => setOpen(true)}>
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(true)}
+      >
         <View
           style={[
             styles.box,
@@ -79,7 +81,8 @@ export function VehicleModelSelector({
               paddingHorizontal: theme.spacing.lg,
               paddingVertical: theme.spacing.md,
             },
-          ]}>
+          ]}
+        >
           <View style={styles.texts}>
             <Text variant="footnote" color="inkMuted">
               {t('registration.vehicle.modelSelectLabel')}
@@ -98,7 +101,8 @@ export function VehicleModelSelector({
           color="danger"
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
-          style={styles.error}>
+          style={styles.error}
+        >
           {error}
         </Text>
       ) : null}
@@ -110,7 +114,8 @@ export function VehicleModelSelector({
           mode === 'request'
             ? t('registration.vehicle.modelRequestTitle')
             : t('registration.vehicle.modelSheetTitle')
-        }>
+        }
+      >
         {mode === 'request' ? (
           <VehicleModelRequestForm
             vehicleType={vehicleType}
@@ -118,7 +123,7 @@ export function VehicleModelSelector({
             onCancel={() => setMode('pick')}
           />
         ) : (
-          <View style={[styles.sheet, {gap: theme.spacing.md}]}>
+          <View style={[styles.sheet, { gap: theme.spacing.md }]}>
             <TextField
               label={t('registration.vehicle.modelSearchLabel')}
               value={search}
@@ -157,13 +162,20 @@ interface ModelListProps {
 }
 
 /** Lista del catálogo con sus 4 estados: cargando, error (con reintento), vacío y datos. */
-function ModelList({loading, error, models, selectedId, onSelect, onRetry}: ModelListProps): React.JSX.Element {
+function ModelList({
+  loading,
+  error,
+  models,
+  selectedId,
+  onSelect,
+  onRetry,
+}: ModelListProps): React.JSX.Element {
   const theme = useTheme();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
 
   if (loading) {
     return (
-      <View style={[styles.state, {gap: theme.spacing.md}]}>
+      <View style={[styles.state, { gap: theme.spacing.md }]}>
         <ActivityIndicator color={theme.colors.accent} />
         <Text variant="footnote" color="inkMuted">
           {t('registration.vehicle.modelLoading')}
@@ -177,7 +189,7 @@ function ModelList({loading, error, models, selectedId, onSelect, onRetry}: Mode
         tone="danger"
         title={t('errors.generic')}
         description={t('registration.vehicle.modelLoadError')}
-        action={{label: t('common.retry'), onPress: onRetry}}
+        action={{ label: t('common.retry'), onPress: onRetry }}
       />
     );
   }
@@ -194,19 +206,20 @@ function ModelList({loading, error, models, selectedId, onSelect, onRetry}: Mode
   return (
     <FlatList
       data={models}
-      keyExtractor={m => m.id}
+      keyExtractor={(m) => m.id}
       keyboardShouldPersistTaps="handled"
       style={styles.list}
       ItemSeparatorComponent={() => (
-        <View style={[styles.sep, {backgroundColor: theme.colors.border}]} />
+        <View style={[styles.sep, { backgroundColor: theme.colors.border }]} />
       )}
-      renderItem={({item}) => (
+      renderItem={({ item }) => (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${item.make} ${item.model}`}
-          accessibilityState={{selected: item.id === selectedId}}
+          accessibilityState={{ selected: item.id === selectedId }}
           onPress={() => onSelect(item)}
-          style={[styles.rowItem, {paddingVertical: theme.spacing.md}]}>
+          style={[styles.rowItem, { paddingVertical: theme.spacing.md }]}
+        >
           <View style={styles.rowTexts}>
             <Text variant="bodyStrong" color="ink">
               {item.make} {item.model}
@@ -231,14 +244,14 @@ function ModelList({loading, error, models, selectedId, onSelect, onRetry}: Mode
 }
 
 const styles = StyleSheet.create({
-  wrap: {alignSelf: 'stretch', gap: 6},
-  box: {flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch'},
-  texts: {flex: 1, gap: 2},
-  error: {paddingHorizontal: 4},
-  sheet: {paddingBottom: 8},
-  list: {maxHeight: 360},
-  state: {paddingVertical: 32, alignItems: 'center', justifyContent: 'center'},
-  sep: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  rowItem: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
-  rowTexts: {flex: 1, gap: 2},
+  wrap: { alignSelf: 'stretch', gap: 6 },
+  box: { flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch' },
+  texts: { flex: 1, gap: 2 },
+  error: { paddingHorizontal: 4 },
+  sheet: { paddingBottom: 8 },
+  list: { maxHeight: 360 },
+  state: { paddingVertical: 32, alignItems: 'center', justifyContent: 'center' },
+  sep: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  rowItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  rowTexts: { flex: 1, gap: 2 },
 });

@@ -218,7 +218,11 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
     const parsed = dispatchMatchFound.safeParse(env.payload);
     if (parsed.success) {
       this.state.setDriverTrip(parsed.data.driverId, parsed.data.tripId);
-      this.pushTripUpdate(parsed.data.tripId, this.state.getStatus(parsed.data.tripId) ?? 'MATCHING', null);
+      this.pushTripUpdate(
+        parsed.data.tripId,
+        this.state.getStatus(parsed.data.tripId) ?? 'MATCHING',
+        null,
+      );
     }
     return Promise.resolve();
   }
@@ -322,7 +326,10 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   ): Promise<void> {
     const parsed = schema.safeParse(env.payload);
     if (parsed.success) {
-      this.passenger.emitWaypointOutcome(parsed.data.tripId, { proposalId: parsed.data.proposalId, status });
+      this.passenger.emitWaypointOutcome(parsed.data.tripId, {
+        proposalId: parsed.data.proposalId,
+        status,
+      });
     }
     return Promise.resolve();
   }
@@ -343,7 +350,10 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
     const parsed = panicTriggered.safeParse(env.payload);
     if (parsed.success) {
       this.gateway.cutFamilyForPanic(parsed.data.tripId);
-      this.log.warn({ tripId: parsed.data.tripId }, 'pánico: canal /family cortado (seguimiento en vivo suprimido)');
+      this.log.warn(
+        { tripId: parsed.data.tripId },
+        'pánico: canal /family cortado (seguimiento en vivo suprimido)',
+      );
     }
     return Promise.resolve();
   }
@@ -364,7 +374,10 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
     const parsed = panicResolved.safeParse(env.payload);
     if (parsed.success && parsed.data.status === PanicStatus.FALSE_ALARM) {
       this.state.clearPanic(parsed.data.tripId);
-      this.log.warn({ tripId: parsed.data.tripId }, 'pánico cerrado (falsa alarma): canal /family restaurado');
+      this.log.warn(
+        { tripId: parsed.data.tripId },
+        'pánico cerrado (falsa alarma): canal /family restaurado',
+      );
     }
     return Promise.resolve();
   }

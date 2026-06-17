@@ -1,10 +1,10 @@
-import { ApiError, type HttpClient } from '@veo/api-client';
-import type { KeyValueStore } from '../src/core/storage/mmkv';
+import {ApiError, type HttpClient} from '@veo/api-client';
+import type {KeyValueStore} from '../src/core/storage/mmkv';
 import {
   HttpSavedPlacesRepository,
   PlacesFavoritesLimitError,
 } from '../src/features/places/data/httpPlacesRepository';
-import type { SavedPlaceInput } from '../src/features/places/domain/entities';
+import type {SavedPlaceInput} from '../src/features/places/domain/entities';
 
 /** KeyValueStore en memoria (sin MMKV nativo). */
 class MemoryStore implements KeyValueStore {
@@ -39,8 +39,8 @@ class MemoryStore implements KeyValueStore {
   }
 }
 
-const lima: SavedPlaceInput['point'] = { lat: -12.04, lng: -77.04 };
-const flush = () => new Promise((r) => setImmediate(r));
+const lima: SavedPlaceInput['point'] = {lat: -12.04, lng: -77.04};
+const flush = () => new Promise(r => setImmediate(r));
 
 /** Fake mínimo del HttpClient con las cuatro verbos que usa el repo. */
 function fakeHttp(overrides: Partial<HttpClient>): HttpClient {
@@ -69,7 +69,9 @@ describe('HttpSavedPlacesRepository', () => {
         },
       ]),
     });
-    const repo = new HttpSavedPlacesRepository(http, new MemoryStore(), { onCacheUpdated });
+    const repo = new HttpSavedPlacesRepository(http, new MemoryStore(), {
+      onCacheUpdated,
+    });
 
     // Primera lectura: caché vacío (la red aún no respondió) → no bloquea.
     expect(repo.list()).toEqual([]);
@@ -79,7 +81,11 @@ describe('HttpSavedPlacesRepository', () => {
     expect(onCacheUpdated).toHaveBeenCalled();
     const list = repo.list();
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: 'p1', kind: 'HOME', point: { lat: -12.04, lng: -77.04 } });
+    expect(list[0]).toMatchObject({
+      id: 'p1',
+      kind: 'HOME',
+      point: {lat: -12.04, lng: -77.04},
+    });
     expect(list[0]).not.toHaveProperty('lat');
   });
 
@@ -93,9 +99,17 @@ describe('HttpSavedPlacesRepository', () => {
       lng: -77.04,
       createdAt: '2026-05-30T00:00:00.000Z',
     }));
-    const repo = new HttpSavedPlacesRepository(fakeHttp({ post }), new MemoryStore());
+    const repo = new HttpSavedPlacesRepository(
+      fakeHttp({post}),
+      new MemoryStore(),
+    );
 
-    const optimistic = repo.save({ kind: 'FAVORITE', label: 'Gimnasio', subtitle: 'Av. Larco 123', point: lima });
+    const optimistic = repo.save({
+      kind: 'FAVORITE',
+      label: 'Gimnasio',
+      subtitle: 'Av. Larco 123',
+      point: lima,
+    });
     // Optimista: visible al instante con un id provisional.
     expect(repo.list()[0]!.label).toBe('Gimnasio');
     await flush();
@@ -103,7 +117,13 @@ describe('HttpSavedPlacesRepository', () => {
     // El body enviado lleva lat/lng planos (no point).
     expect(post).toHaveBeenCalledWith(
       '/places',
-      expect.objectContaining({ body: expect.objectContaining({ lat: -12.04, lng: -77.04, kind: 'FAVORITE' }) }),
+      expect.objectContaining({
+        body: expect.objectContaining({
+          lat: -12.04,
+          lng: -77.04,
+          kind: 'FAVORITE',
+        }),
+      }),
     );
     // El optimista fue reemplazado por el id real del servidor.
     const after = repo.list();
@@ -117,16 +137,22 @@ describe('HttpSavedPlacesRepository', () => {
     const post = jest.fn(async () => {
       throw new ApiError(409, 'RESOURCE_EXHAUSTED', 'máximo de favoritos');
     });
-    const repo = new HttpSavedPlacesRepository(fakeHttp({ post }), new MemoryStore(), {
-      onReconcileError,
-    });
+    const repo = new HttpSavedPlacesRepository(
+      fakeHttp({post}),
+      new MemoryStore(),
+      {
+        onReconcileError,
+      },
+    );
 
-    repo.save({ kind: 'FAVORITE', label: 'Uno más', point: lima });
+    repo.save({kind: 'FAVORITE', label: 'Uno más', point: lima});
     expect(repo.list()).toHaveLength(1); // optimista presente
     await flush();
 
     expect(repo.list()).toHaveLength(0); // revertido
-    expect(onReconcileError).toHaveBeenCalledWith(expect.any(PlacesFavoritesLimitError));
+    expect(onReconcileError).toHaveBeenCalledWith(
+      expect.any(PlacesFavoritesLimitError),
+    );
   });
 
   it('save() con error de red TRANSITORIO conserva el optimista (degradación offline)', async () => {
@@ -134,11 +160,15 @@ describe('HttpSavedPlacesRepository', () => {
     const post = jest.fn(async () => {
       throw new ApiError(0, 'NETWORK_ERROR', 'sin red');
     });
-    const repo = new HttpSavedPlacesRepository(fakeHttp({ post }), new MemoryStore(), {
-      onReconcileError,
-    });
+    const repo = new HttpSavedPlacesRepository(
+      fakeHttp({post}),
+      new MemoryStore(),
+      {
+        onReconcileError,
+      },
+    );
 
-    repo.save({ kind: 'HOME', label: 'Casa', point: lima });
+    repo.save({kind: 'HOME', label: 'Casa', point: lima});
     await flush();
 
     expect(repo.list()).toHaveLength(1); // se conserva para sincronizar luego
@@ -152,9 +182,17 @@ describe('HttpSavedPlacesRepository', () => {
     });
     const store = new MemoryStore();
     store.setJSON('places.http.cache', [
-      { id: 'x', kind: 'FAVORITE', label: 'Gym', point: lima, createdAt: '2026-05-30T00:00:00.000Z' },
+      {
+        id: 'x',
+        kind: 'FAVORITE',
+        label: 'Gym',
+        point: lima,
+        createdAt: '2026-05-30T00:00:00.000Z',
+      },
     ]);
-    const repo = new HttpSavedPlacesRepository(fakeHttp({ delete: del }), store, { onReconcileError });
+    const repo = new HttpSavedPlacesRepository(fakeHttp({delete: del}), store, {
+      onReconcileError,
+    });
 
     repo.remove('x');
     expect(repo.list()).toHaveLength(0); // optimista

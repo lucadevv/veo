@@ -1,4 +1,4 @@
-import { hmacSha256Hex } from '../src/shared/crypto/hmacSha256';
+import {hmacSha256Hex} from '../src/shared/crypto/hmacSha256';
 
 /**
  * Verifica el HMAC-SHA256 puro (Hermes) contra vectores de prueba conocidos. Si esto pasa, la firma
@@ -26,6 +26,8 @@ describe('hmacSha256Hex', () => {
   });
 
   it('es sensible a UTF-8 multibyte', () => {
-    expect(hmacSha256Hex('niño', 'clave')).not.toBe(hmacSha256Hex('nino', 'clave'));
+    expect(hmacSha256Hex('niño', 'clave')).not.toBe(
+      hmacSha256Hex('nino', 'clave'),
+    );
   });
 });

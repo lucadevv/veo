@@ -6,7 +6,7 @@ import {
   type PanicView,
   panicView,
 } from '@veo/api-client';
-import type { PanicRepository } from '../domain/panicRepository';
+import type {PanicRepository} from '../domain/panicRepository';
 
 /** Implementación de `PanicRepository` contra el public-bff. */
 export class HttpPanicRepository implements PanicRepository {
@@ -22,6 +22,6 @@ export class HttpPanicRepository implements PanicRepository {
   }
 
   getPanic(panicId: string): Promise<PanicView> {
-    return this.http.get(`/panic/${panicId}`, { schema: panicView });
+    return this.http.get(`/panic/${panicId}`, {schema: panicView});
   }
 }

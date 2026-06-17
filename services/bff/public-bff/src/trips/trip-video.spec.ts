@@ -20,9 +20,9 @@ function makeService(opts: {
   trip?: { found: boolean; passengerId: string; status: string };
 }) {
   const tripGrpc = {
-    call: vi.fn().mockResolvedValue(
-      opts.trip ?? { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' },
-    ),
+    call: vi
+      .fn()
+      .mockResolvedValue(opts.trip ?? { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' }),
   } as unknown as GrpcServiceClient;
   const stub = {} as unknown as GrpcServiceClient;
   const rest = {} as unknown as InternalRestClient;

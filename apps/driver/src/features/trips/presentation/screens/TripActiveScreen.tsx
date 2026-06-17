@@ -1,9 +1,9 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {ScrollView, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import type {TFunction} from 'i18next';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Avatar,
   Banner,
@@ -19,28 +19,28 @@ import {
   useTheme,
   type StatusTone,
 } from '@veo/ui-kit';
-import {mobilePaymentMethod} from '@veo/api-client';
-import type {RootStackParamList} from '../../../../navigation/types';
-import {AppMap} from '../../../../shared/presentation/components/AppMap';
-import {StateView} from '../../../../shared/presentation/components/StateView';
-import {TopBar} from '../../../../shared/presentation/components/TopBar';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {formatPEN, metersToKm, secondsToMinutes} from '../../../../shared/presentation/format';
-import {IconNavigation} from '../../../../shared/presentation/icons';
-import {LIMA_CENTER} from '../../../../shared/utils/geo';
-import {decodePolyline, decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
-import {useDispatchStore} from '../../../realtime/presentation/state/dispatchStore';
-import {ChatButton, useChatStore} from '../../../chat/presentation';
-import {isTripActive, parseTripStatus, type DriverTripStatus} from '../../domain';
-import {useEnsureTripAccepted, useTrip, useTripActions, useTripRoute} from '../hooks/useTrips';
-import {useDriverWaypointProposal} from '../hooks/useDriverWaypointProposal';
-import {useTripPublisher} from '../hooks/useTripPublisher';
-import {WaypointProposalCard} from '../components/WaypointProposalCard';
-import {useDriverPose} from '../components/useDriverPose';
-import {ManeuverBanner} from '../components/ManeuverBanner';
-import {RouteStepsList} from '../components/RouteStepsList';
-import {ExternalNavButtons} from '../components/ExternalNavButtons';
-import {Appear} from '../components/motion';
+import { mobilePaymentMethod } from '@veo/api-client';
+import type { RootStackParamList } from '../../../../navigation/types';
+import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { StateView } from '../../../../shared/presentation/components/StateView';
+import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
+import { IconNavigation } from '../../../../shared/presentation/icons';
+import { LIMA_CENTER } from '../../../../shared/utils/geo';
+import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
+import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
+import { ChatButton, useChatStore } from '../../../chat/presentation';
+import { isTripActive, parseTripStatus, type DriverTripStatus } from '../../domain';
+import { useEnsureTripAccepted, useTrip, useTripActions, useTripRoute } from '../hooks/useTrips';
+import { useDriverWaypointProposal } from '../hooks/useDriverWaypointProposal';
+import { useTripPublisher } from '../hooks/useTripPublisher';
+import { WaypointProposalCard } from '../components/WaypointProposalCard';
+import { useDriverPose } from '../components/useDriverPose';
+import { ManeuverBanner } from '../components/ManeuverBanner';
+import { RouteStepsList } from '../components/RouteStepsList';
+import { ExternalNavButtons } from '../components/ExternalNavButtons';
+import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripActive'>;
 
@@ -93,20 +93,20 @@ function statusLabel(status: DriverTripStatus, t: TFunction): string {
   }
 }
 
-export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element => {
-  const {t} = useTranslation();
+export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const {tripId} = route.params;
+  const { tripId } = route.params;
   const trip = useTrip(tripId);
   const actions = useTripActions(tripId);
   const ensureAccepted = useEnsureTripAccepted(tripId);
   const ensureMutate = ensureAccepted.mutate;
-  const setActiveTripId = useDispatchStore(s => s.setActiveTripId);
+  const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
   // Estado de la conexión `/driver` en vivo: si el socket está caído (túnel, zona muerta) el conductor
   // ve "Reconectando…" en vez de creer que el viaje se actualiza en tiempo real cuando está aislado.
-  const connected = useDispatchStore(s => s.connected);
-  const clearChat = useChatStore(s => s.clear);
+  const connected = useDispatchStore((s) => s.connected);
+  const clearChat = useChatStore((s) => s.clear);
 
   // Pose del conductor (ubicación + rumbo) para pintar el mapa y la cámara de NAVEGACIÓN tipo Waze.
   // Degrada a null sin GPS nativo → sin pin y la cámara cae al encuadre normal (degradación honesta).
@@ -199,14 +199,14 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
       setCashOpen(true);
       return;
     }
-    actions.complete.mutate(undefined, {onSuccess: finishToDashboard});
+    actions.complete.mutate(undefined, { onSuccess: finishToDashboard });
   };
 
   // Cierra el viaje declarando si se cobró el efectivo. `collected=false` lo termina igual (flujo
   // bilateral: el cobro queda a la espera de la confirmación del pasajero), nunca data falsa.
   const completeCash = (collected: boolean) => {
     setCashOpen(false);
-    actions.complete.mutate({cashCollected: collected}, {onSuccess: finishToDashboard});
+    actions.complete.mutate({ cashCollected: collected }, { onSuccess: finishToDashboard });
   };
 
   // Entrada al chat con el pasajero (con badge de no leídos). Solo tiene sentido mientras el viaje
@@ -216,7 +216,7 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
       tripId={tripId}
       accessibilityLabel={t('chat.openWithBadge')}
       disabled={!isTripActive(status)}
-      onPress={() => navigation.navigate('Chat', {tripId})}
+      onPress={() => navigation.navigate('Chat', { tripId })}
     />
   );
 
@@ -238,7 +238,7 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
         <StateView
           title={t('errors.generic')}
           description={toErrorMessage(trip.error, t)}
-          action={{label: t('common.retry'), onPress: () => trip.refetch()}}
+          action={{ label: t('common.retry'), onPress: () => trip.refetch() }}
         />
       </SafeScreen>
     );
@@ -270,7 +270,7 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
   };
 
   // Resumen métrico real del contrato (no hay turn-by-turn ni ETA): distancia + duración del viaje.
-  const tripMetrics = `${t('trips.kilometers', {value: metersToKm(data.distanceMeters)})} · ${t('trips.minutes', {value: secondsToMinutes(data.durationSeconds)})}`;
+  const tripMetrics = `${t('trips.kilometers', { value: metersToKm(data.distanceMeters) })} · ${t('trips.minutes', { value: secondsToMinutes(data.durationSeconds) })}`;
 
   return (
     <SafeScreen padded={false} header={<View style={styles.headerPad}>{header}</View>}>
@@ -289,7 +289,12 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
               <Appear key={status} style={styles.statusBanner}>
                 <Card variant="filled">
                   <View style={styles.statusRow}>
-                    <View style={[styles.statusIcon, {backgroundColor: theme.colors.surface, borderRadius: theme.radii.md}]}>
+                    <View
+                      style={[
+                        styles.statusIcon,
+                        { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md },
+                      ]}
+                    >
                       <IconNavigation size={22} color={theme.colors.accent} />
                     </View>
                     <View style={styles.flex}>
@@ -304,7 +309,8 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
                 </Card>
               </Appear>
             )
-          }>
+          }
+        >
           <AppMap
             center={driverLocation ?? LIMA_CENTER}
             driver={driverLocation}
@@ -322,9 +328,13 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
 
       {/* Sheet inferior: panel del pasajero + estado + acción principal de la FSM. */}
       <ScrollView
-        style={[styles.sheet, {backgroundColor: theme.colors.bg}]}
-        contentContainerStyle={[styles.sheetContent, {paddingBottom: insets.bottom + theme.spacing.xl}]}
-        showsVerticalScrollIndicator={false}>
+        style={[styles.sheet, { backgroundColor: theme.colors.bg }]}
+        contentContainerStyle={[
+          styles.sheetContent,
+          { paddingBottom: insets.bottom + theme.spacing.xl },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <Appear style={styles.passengerRow}>
           <Avatar size="lg" online={status === 'IN_PROGRESS'} />
           <View style={styles.flex}>
@@ -364,7 +374,10 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
             de la próxima maniobra ya vive sobre el mapa (prioridad). Solo cuando hay ruta. */}
         {isNavigating && tripRoute ? (
           <>
-            <RouteStepsList steps={tripRoute.steps} totalDistanceMeters={tripRoute.distanceMeters} />
+            <RouteStepsList
+              steps={tripRoute.steps}
+              totalDistanceMeters={tripRoute.distanceMeters}
+            />
             <ExternalNavButtons destination={externalDestination} />
           </>
         ) : null}
@@ -375,7 +388,11 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
         ) : null}
 
         {actionError ? (
-          <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(actionError, t)} />
+          <Banner
+            tone="danger"
+            title={t('errors.generic')}
+            description={toErrorMessage(actionError, t)}
+          />
         ) : null}
 
         {/* Parada propuesta por el pasajero (Lote C4): tarjeta para aceptar/rechazar, sobre las acciones
@@ -392,8 +409,12 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
         ) : null}
 
         <Appear key={`actions-${status}`} style={styles.actions}>
-          {confirming ? <Button label={t('trips.confirmingAssignment')} fullWidth loading disabled /> : null}
-          {confirmFailed ? <Button label={t('common.retry')} fullWidth onPress={retryConfirm} /> : null}
+          {confirming ? (
+            <Button label={t('trips.confirmingAssignment')} fullWidth loading disabled />
+          ) : null}
+          {confirmFailed ? (
+            <Button label={t('common.retry')} fullWidth onPress={retryConfirm} />
+          ) : null}
           {status === 'ACCEPTED' ? (
             <Button
               label={t('trips.actions.arriving')}
@@ -413,10 +434,22 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
             />
           ) : null}
           {status === 'ARRIVED' ? (
-            <Button label={t('trips.actions.start')} variant="safe" fullWidth loading={anyBusy} onPress={onStart} />
+            <Button
+              label={t('trips.actions.start')}
+              variant="safe"
+              fullWidth
+              loading={anyBusy}
+              onPress={onStart}
+            />
           ) : null}
           {status === 'IN_PROGRESS' ? (
-            <Button label={t('trips.actions.complete')} variant="safe" fullWidth loading={anyBusy} onPress={onComplete} />
+            <Button
+              label={t('trips.actions.complete')}
+              variant="safe"
+              fullWidth
+              loading={anyBusy}
+              onPress={onComplete}
+            />
           ) : null}
 
           {/* Salida al dashboard cuando el viaje NO es accionable: cualquier cierre (completado,
@@ -427,7 +460,12 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
           ) : null}
 
           {isTripActive(status) && status !== 'IN_PROGRESS' ? (
-            <Button label={t('trips.actions.cancel')} variant="ghost" fullWidth onPress={() => setCancelOpen(true)} />
+            <Button
+              label={t('trips.actions.cancel')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setCancelOpen(true)}
+            />
           ) : null}
         </Appear>
       </ScrollView>
@@ -438,17 +476,24 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
         title={t('trips.cancelConfirmTitle')}
         footer={
           <View style={styles.sheetFooter}>
-            <Button label={t('common.back')} variant="secondary" onPress={() => setCancelOpen(false)} />
+            <Button
+              label={t('common.back')}
+              variant="secondary"
+              onPress={() => setCancelOpen(false)}
+            />
             <Button
               label={t('trips.actions.cancel')}
               variant="danger"
               loading={actions.cancel.isPending}
               onPress={() =>
-                actions.cancel.mutate(cancelReason.trim() || undefined, {onSuccess: finishToDashboard})
+                actions.cancel.mutate(cancelReason.trim() || undefined, {
+                  onSuccess: finishToDashboard,
+                })
               }
             />
           </View>
-        }>
+        }
+      >
         <Text variant="callout" color="inkMuted" style={styles.spacer}>
           {t('trips.cancelConfirmBody')}
         </Text>
@@ -466,7 +511,11 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
         title={t('trips.childMode')}
         footer={
           <View style={styles.sheetFooter}>
-            <Button label={t('common.cancel')} variant="secondary" onPress={() => setChildOpen(false)} />
+            <Button
+              label={t('common.cancel')}
+              variant="secondary"
+              onPress={() => setChildOpen(false)}
+            />
             <Button
               label={t('trips.actions.start')}
               variant="safe"
@@ -479,7 +528,8 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
               }}
             />
           </View>
-        }>
+        }
+      >
         <Text variant="callout" color="inkMuted" style={styles.spacer}>
           {t('trips.childModeHint')}
         </Text>
@@ -508,13 +558,16 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
               onPress={() => completeCash(false)}
             />
             <Button
-              label={t('trips.cashCollectConfirm', {amount: formatPEN(trip.data?.fareCents ?? 0)})}
+              label={t('trips.cashCollectConfirm', {
+                amount: formatPEN(trip.data?.fareCents ?? 0),
+              })}
               variant="safe"
               loading={actions.complete.isPending}
               onPress={() => completeCash(true)}
             />
           </View>
-        }>
+        }
+      >
         <Text variant="title3" style={styles.cashAmount}>
           {formatPEN(trip.data?.fareCents ?? 0)}
         </Text>
@@ -527,22 +580,22 @@ export const TripActiveScreen = ({navigation, route}: Props): React.JSX.Element 
 };
 
 const styles = StyleSheet.create({
-  headerPad: {paddingHorizontal: 20},
-  mapArea: {flex: 1},
+  headerPad: { paddingHorizontal: 20 },
+  mapArea: { flex: 1 },
   // Empuja el banner de estado por debajo del pill "EN VIVO" de MapShell (esquina superior izq.).
-  statusBanner: {marginTop: 32},
+  statusBanner: { marginTop: 32 },
   // Banner de maniobra: mismo respiro bajo el pill "EN VIVO".
-  maneuverWrap: {marginTop: 32},
-  statusRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  statusIcon: {width: 40, height: 40, alignItems: 'center', justifyContent: 'center'},
-  flex: {flex: 1},
-  sheet: {flexShrink: 0, maxHeight: '46%'},
-  sheetContent: {paddingHorizontal: 20, paddingTop: 16, gap: 14},
-  passengerRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  fareCol: {alignItems: 'flex-end'},
-  statusPillRow: {flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap'},
-  actions: {gap: 12, marginTop: 4},
-  sheetFooter: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
-  spacer: {marginTop: 12},
-  cashAmount: {textAlign: 'center', marginTop: 4},
+  maneuverWrap: { marginTop: 32 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  statusIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  flex: { flex: 1 },
+  sheet: { flexShrink: 0, maxHeight: '46%' },
+  sheetContent: { paddingHorizontal: 20, paddingTop: 16, gap: 14 },
+  passengerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  fareCol: { alignItems: 'flex-end' },
+  statusPillRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  actions: { gap: 12, marginTop: 4 },
+  sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  spacer: { marginTop: 12 },
+  cashAmount: { textAlign: 'center', marginTop: 4 },
 });

@@ -115,7 +115,10 @@ describe('EligibilityGate (cierre #9)', () => {
   });
 
   it('desconocido en identity (found=false) → 403', async () => {
-    const gate = await gateWith({ identity: identityFake({ found: false }), seedVehicle: VehicleType.CAR });
+    const gate = await gateWith({
+      identity: identityFake({ found: false }),
+      seedVehicle: VehicleType.CAR,
+    });
     await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR));
   });
 

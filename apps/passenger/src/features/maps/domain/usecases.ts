@@ -6,8 +6,8 @@ import type {
   QuoteResult,
   ReversePlace,
 } from '@veo/api-client';
-import { MIN_QUERY_LENGTH } from './entities';
-import type { MapsRepository } from './mapsRepository';
+import {MIN_QUERY_LENGTH} from './entities';
+import type {MapsRepository} from './mapsRepository';
 
 /**
  * Autocompleta direcciones. Aplica la regla de negocio de longitud mínima ANTES de tocar la red

@@ -112,7 +112,11 @@ export class ReadModelService {
     await pipe.exec();
   }
 
-  async listTrips(filter: TripListFilter, cursor: string | null, limit: number): Promise<Page<TripRecord>> {
+  async listTrips(
+    filter: TripListFilter,
+    cursor: string | null,
+    limit: number,
+  ): Promise<Page<TripRecord>> {
     const key = filter.status
       ? `${TRIPS}:s:${filter.status}`
       : filter.driverId
@@ -140,7 +144,8 @@ export class ReadModelService {
           : current.averageRating
             ? Number(current.averageRating)
             : null,
-      backgroundCheckStatus: rec.backgroundCheckStatus ?? current.backgroundCheckStatus ?? 'PENDING',
+      backgroundCheckStatus:
+        rec.backgroundCheckStatus ?? current.backgroundCheckStatus ?? 'PENDING',
       // null SOLO si se pasó explícito (re-aprobación limpia el motivo); undefined conserva el actual.
       // El hash de Redis guarda "" para "sin motivo": nonEmptyOrNull lo normaliza (cadena vacía → null).
       rejectionReason:
@@ -164,11 +169,16 @@ export class ReadModelService {
     pipe.expire(keyHash, TTL_SECONDS);
     pipe.zadd(DRIVERS, score, merged.id);
     pipe.zadd(`${DRIVERS}:s:${merged.status}`, score, merged.id);
-    if (prevStatus && prevStatus !== merged.status) pipe.zrem(`${DRIVERS}:s:${prevStatus}`, merged.id);
+    if (prevStatus && prevStatus !== merged.status)
+      pipe.zrem(`${DRIVERS}:s:${prevStatus}`, merged.id);
     await pipe.exec();
   }
 
-  async listDrivers(filter: DriverListFilter, cursor: string | null, limit: number): Promise<Page<DriverRecord>> {
+  async listDrivers(
+    filter: DriverListFilter,
+    cursor: string | null,
+    limit: number,
+  ): Promise<Page<DriverRecord>> {
     const key = filter.status ? `${DRIVERS}:s:${filter.status}` : DRIVERS;
     const ids = await this.pageIds(key, cursor, limit);
     const records = await this.loadMany(ids.members, (id) => `bff:rm:driver:${id}`, this.toDriver);
@@ -184,7 +194,15 @@ export class ReadModelService {
     limit: number,
   ): Promise<{ members: string[]; nextCursor: string | null }> {
     const max = cursor ? `(${cursor}` : '+inf';
-    const raw = await this.redis.zrevrangebyscore(key, max, '-inf', 'WITHSCORES', 'LIMIT', 0, limit);
+    const raw = await this.redis.zrevrangebyscore(
+      key,
+      max,
+      '-inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      limit,
+    );
     const members: string[] = [];
     let lastScore: string | null = null;
     for (let i = 0; i < raw.length; i += 2) {

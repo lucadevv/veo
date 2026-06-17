@@ -42,9 +42,7 @@ export interface LocationSource {
    * Suscribe a cambios de DISPONIBILIDAD del GPS (servicios del SO + permiso). Emite cada vez que
    * cambia el estado. Devuelve una función para cancelar la suscripción.
    */
-  onAvailabilityChange(
-    listener: (availability: LocationAvailability) => void,
-  ): () => void;
+  onAvailabilityChange(listener: (availability: LocationAvailability) => void): () => void;
 }
 
 /** Fuente por defecto: sin GPS nativo. No emite muestras; el publisher la ignora con seguridad. */

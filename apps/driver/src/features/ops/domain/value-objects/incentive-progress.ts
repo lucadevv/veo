@@ -1,4 +1,4 @@
-import type {Incentive, IncentiveType} from '../entities';
+import type { Incentive, IncentiveType } from '../entities';
 
 /**
  * Lógica pura de incentivos: progreso normalizado, formato de recompensa/multiplicador y vigencia.

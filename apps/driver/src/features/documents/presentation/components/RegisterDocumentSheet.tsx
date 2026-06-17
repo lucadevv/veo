@@ -1,7 +1,7 @@
-import React, {useEffect, useMemo, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {BottomSheet, Button, Text, TextField, useTheme} from '@veo/ui-kit';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { BottomSheet, Button, Text, TextField, useTheme } from '@veo/ui-kit';
 import {
   DOCUMENT_TYPES,
   documentTypeI18nKey,
@@ -23,7 +23,7 @@ export interface RegisterDocumentSheetProps {
 }
 
 /** Acepta una fecha exacta `AAAA-MM-DD` y valida que sea un día real (no 2026-13-40). */
-function parseExpiry(raw: string): {iso: string} | null {
+function parseExpiry(raw: string): { iso: string } | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!match) {
     return null;
@@ -41,7 +41,7 @@ function parseExpiry(raw: string): {iso: string} | null {
   ) {
     return null;
   }
-  return {iso: date.toISOString()};
+  return { iso: date.toISOString() };
 }
 
 /**
@@ -58,7 +58,7 @@ export function RegisterDocumentSheet({
   onSubmit,
   submitting = false,
 }: RegisterDocumentSheetProps): React.JSX.Element {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
 
   const [type, setType] = useState<string>(initialType ?? DOCUMENT_TYPES[0]);
@@ -77,7 +77,10 @@ export function RegisterDocumentSheet({
   }, [visible, initialType, initialNumber]);
 
   const numberError = useMemo(
-    () => (touched && documentNumber.trim().length === 0 ? t('documents.form.numberRequired') : undefined),
+    () =>
+      touched && documentNumber.trim().length === 0
+        ? t('documents.form.numberRequired')
+        : undefined,
     [touched, documentNumber, t],
   );
   const expiryError = useMemo(() => {
@@ -100,7 +103,7 @@ export function RegisterDocumentSheet({
     onSubmit({
       type,
       documentNumber: documentNumber.trim(),
-      ...(parsed ? {expiresAt: parsed.iso} : {}),
+      ...(parsed ? { expiresAt: parsed.iso } : {}),
     });
   };
 
@@ -119,22 +122,23 @@ export function RegisterDocumentSheet({
             onPress={handleSubmit}
           />
         </View>
-      }>
+      }
+    >
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
-        <View style={[styles.field, {gap: theme.spacing.sm}]}>
+        <View style={[styles.field, { gap: theme.spacing.sm }]}>
           <Text variant="label" color="inkMuted">
             {t('documents.form.typeLabel')}
           </Text>
-          <View style={[styles.typeGrid, {gap: theme.spacing.sm}]}>
+          <View style={[styles.typeGrid, { gap: theme.spacing.sm }]}>
             {DOCUMENT_TYPES.map((dt: DocumentType) => {
               const selected = dt === type;
               return (
                 <Pressable
                   key={dt}
                   accessibilityRole="button"
-                  accessibilityState={{selected}}
+                  accessibilityState={{ selected }}
                   onPress={() => setType(dt)}
-                  style={({pressed}) => [
+                  style={({ pressed }) => [
                     styles.typeChip,
                     {
                       borderRadius: theme.radii.pill,
@@ -144,11 +148,13 @@ export function RegisterDocumentSheet({
                         : theme.colors.surface,
                       opacity: pressed ? 0.85 : 1,
                     },
-                  ]}>
+                  ]}
+                >
                   <Text
                     variant="footnote"
                     color={selected ? 'accent' : 'inkMuted'}
-                    numberOfLines={1}>
+                    numberOfLines={1}
+                  >
                     {t(documentTypeI18nKey(dt))}
                   </Text>
                 </Pressable>
@@ -191,14 +197,14 @@ export function RegisterDocumentSheet({
 }
 
 const styles = StyleSheet.create({
-  scroll: {maxHeight: 420},
-  field: {marginBottom: 16},
-  typeGrid: {flexDirection: 'row', flexWrap: 'wrap'},
+  scroll: { maxHeight: 420 },
+  field: { marginBottom: 16 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   typeChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  note: {marginTop: 4},
-  footer: {flexDirection: 'row', justifyContent: 'flex-end', gap: 12},
+  note: { marginTop: 4 },
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
 });

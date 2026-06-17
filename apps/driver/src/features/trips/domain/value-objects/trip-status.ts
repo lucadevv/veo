@@ -1,4 +1,4 @@
-import {tripStatus, type TripStatus} from '@veo/api-client';
+import { tripStatus, type TripStatus } from '@veo/api-client';
 
 /** Estado de viaje normalizado para la UI (incluye `UNKNOWN` para valores no reconocidos). */
 export type DriverTripStatus = TripStatus | 'UNKNOWN';

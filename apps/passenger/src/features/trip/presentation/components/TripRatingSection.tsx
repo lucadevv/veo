@@ -1,14 +1,14 @@
-import { Button, Card, Text, useTheme } from '@veo/ui-kit';
-import { useQueryClient } from '@tanstack/react-query';
-import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { RatingBody } from '../../../ratings/presentation/components/RatingBody';
+import {Button, Card, Text, useTheme} from '@veo/ui-kit';
+import {useQueryClient} from '@tanstack/react-query';
+import React, {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {RatingBody} from '../../../ratings/presentation/components/RatingBody';
 import {
   myTripRatingKey,
   useMyTripRating,
 } from '../../../ratings/presentation/useMyTripRating';
-import { RatingSheet } from './RatingSheet';
+import {RatingSheet} from './RatingSheet';
 
 export interface TripRatingSectionProps {
   tripId: string;
@@ -20,16 +20,18 @@ export interface TripRatingSectionProps {
 }
 
 /** Estrellas de solo-lectura (★ llenas / ☆ vacías) con el mismo carácter tipográfico del selector. */
-function ReadOnlyStars({ value }: { value: number }): React.JSX.Element {
-  const { t } = useTranslation();
+function ReadOnlyStars({value}: {value: number}): React.JSX.Element {
+  const {t} = useTranslation();
   return (
     <View
       style={styles.stars}
       accessibilityRole="image"
-      accessibilityLabel={t('ratings.givenStars', { stars: value })}
-    >
-      {[1, 2, 3, 4, 5].map((star) => (
-        <Text key={star} variant="title3" color={star <= value ? 'warn' : 'inkSubtle'}>
+      accessibilityLabel={t('ratings.givenStars', {stars: value})}>
+      {[1, 2, 3, 4, 5].map(star => (
+        <Text
+          key={star}
+          variant="title3"
+          color={star <= value ? 'warn' : 'inkSubtle'}>
           {star <= value ? '★' : '☆'}
         </Text>
       ))}
@@ -56,21 +58,21 @@ export function TripRatingSection({
   onRated,
 }: TripRatingSectionProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const queryClient = useQueryClient();
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const rated = embeddedStars != null;
 
   // Comentario (y confirmación) solo si ya hay calificación. Cacheado y compartido con el historial.
-  const ratingQuery = useMyTripRating(tripId, { enabled: rated });
+  const ratingQuery = useMyTripRating(tripId, {enabled: rated});
   const stars = ratingQuery.data?.stars ?? embeddedStars;
   const comment = ratingQuery.data?.comment?.trim();
 
   const handleDone = (): void => {
     setSheetOpen(false);
     // Refresca ambas verdades: el cache por-viaje (lista + esta sección) y el detalle (myRatingStars).
-    void queryClient.invalidateQueries({ queryKey: myTripRatingKey(tripId) });
+    void queryClient.invalidateQueries({queryKey: myTripRatingKey(tripId)});
     onRated();
   };
 
@@ -80,12 +82,15 @@ export function TripRatingSection({
         <Text variant="footnote" color="inkMuted">
           {t('ratings.yourRating')}
         </Text>
-        <View style={[styles.ratedHeader, { marginTop: theme.spacing.xs }]}>
+        <View style={[styles.ratedHeader, {marginTop: theme.spacing.xs}]}>
           <Text variant="bodyStrong">{t('ratings.youRated')}</Text>
           <ReadOnlyStars value={stars} />
         </View>
         {comment ? (
-          <Text variant="callout" color="inkMuted" style={{ marginTop: theme.spacing.sm }}>
+          <Text
+            variant="callout"
+            color="inkMuted"
+            style={{marginTop: theme.spacing.sm}}>
             {comment}
           </Text>
         ) : null}
@@ -97,7 +102,10 @@ export function TripRatingSection({
     <>
       <Card variant="filled" padding="lg">
         <Text variant="bodyStrong">{t('ratings.ctaTitle')}</Text>
-        <Text variant="callout" color="inkMuted" style={{ marginTop: theme.spacing.xs }}>
+        <Text
+          variant="callout"
+          color="inkMuted"
+          style={{marginTop: theme.spacing.xs}}>
           {t('ratings.ctaBody')}
         </Text>
         <Button
@@ -105,7 +113,7 @@ export function TripRatingSection({
           variant="accent"
           fullWidth
           onPress={() => setSheetOpen(true)}
-          style={{ marginTop: theme.spacing.md }}
+          style={{marginTop: theme.spacing.md}}
         />
       </Card>
 
@@ -117,6 +125,11 @@ export function TripRatingSection({
 }
 
 const styles = StyleSheet.create({
-  stars: { flexDirection: 'row', gap: 2 },
-  ratedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  stars: {flexDirection: 'row', gap: 2},
+  ratedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
 });

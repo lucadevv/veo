@@ -18,7 +18,8 @@ const fontMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: 'VEO Family · Sigue el viaje en vivo',
-  description: 'Mira en tiempo real el viaje de tu familiar desde el link que te compartieron. Sin instalar nada.',
+  description:
+    'Mira en tiempo real el viaje de tu familiar desde el link que te compartieron. Sin instalar nada.',
   robots: { index: false, follow: false },
 };
 
@@ -35,7 +36,11 @@ const themeScript = `(function(){try{document.documentElement.classList.add('dar
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={`${fontSans.variable} ${fontMono.variable}`} suppressHydrationWarning>
+    <html
+      lang="es"
+      className={`${fontSans.variable} ${fontMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

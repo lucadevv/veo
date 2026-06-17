@@ -8,7 +8,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { EVENT_SCHEMAS } from '@veo/events';
 import type { MapsClient } from '@veo/maps';
@@ -194,7 +198,11 @@ describe('Reassign tras cancel del conductor · Strategy por modo · Postgres re
       where: { aggregateId: tripId, eventType: 'trip.requested' },
     });
     expect(requested).toHaveLength(1);
-    expect(() => EVENT_SCHEMAS['trip.requested'].parse((requested[0]!.envelope as { payload: unknown }).payload)).not.toThrow();
+    expect(() =>
+      EVENT_SCHEMAS['trip.requested'].parse(
+        (requested[0]!.envelope as { payload: unknown }).payload,
+      ),
+    ).not.toThrow();
     const reassigning = await prisma.outboxEvent.findMany({
       where: { aggregateId: tripId, eventType: 'trip.reassigning' },
     });

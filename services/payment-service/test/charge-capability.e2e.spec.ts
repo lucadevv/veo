@@ -9,7 +9,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -29,8 +33,12 @@ const PAX = '0192f8a0-0000-7000-8000-0000000000aa';
 let db: TestDatabase;
 let prisma: PrismaClient;
 
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -42,7 +50,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 /**
@@ -62,10 +73,18 @@ function fixedGateway(result: GatewayChargeResult): PaymentGateway {
 
 function makeService(gateway: PaymentGateway): PaymentsService {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  return new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  return new PaymentsService(
+    prismaService,
+    gateway,
+    noAffiliation,
+    noPromos,
+    makeConfig() as never,
+  );
 }
 
-async function seedDebt(over: { method?: string; failureReason?: string | null } = {}): Promise<{ id: string }> {
+async function seedDebt(
+  over: { method?: string; failureReason?: string | null } = {},
+): Promise<{ id: string }> {
   const id = uuidv7();
   const tripId = uuidv7();
   await prisma.payment.create({
@@ -108,7 +127,13 @@ beforeEach(async () => {
 describe('cobro · clasificación honesta del fallo por capacidad', () => {
   it('changeMethod a un método NO habilitado → DEBT con failureReason method_unavailable:<METHOD>', async () => {
     const { id } = await seedDebt({ method: 'YAPE', failureReason: 'yape_insufficient_funds' });
-    const svc = makeService(fixedGateway({ status: 'DECLINED', failureKind: 'capability_unavailable', reason: 'not enabled' }));
+    const svc = makeService(
+      fixedGateway({
+        status: 'DECLINED',
+        failureKind: 'capability_unavailable',
+        reason: 'not enabled',
+      }),
+    );
     const out = await svc.changeMethod(id, 'PAGOEFECTIVO');
     expect(out.status).toBe('DEBT');
     expect(out.failureReason).toBe('method_unavailable:PAGOEFECTIVO'); // estructurada por-método
@@ -124,8 +149,17 @@ describe('cobro · clasificación honesta del fallo por capacidad', () => {
   });
 
   it('retryCharge sobre un método no habilitado → DEBT method_unavailable:<METHOD> (no loop ciego)', async () => {
-    const { id } = await seedDebt({ method: 'PAGOEFECTIVO', failureReason: 'method_unavailable:PAGOEFECTIVO' });
-    const svc = makeService(fixedGateway({ status: 'DECLINED', failureKind: 'capability_unavailable', reason: 'not enabled' }));
+    const { id } = await seedDebt({
+      method: 'PAGOEFECTIVO',
+      failureReason: 'method_unavailable:PAGOEFECTIVO',
+    });
+    const svc = makeService(
+      fixedGateway({
+        status: 'DECLINED',
+        failureKind: 'capability_unavailable',
+        reason: 'not enabled',
+      }),
+    );
     const out = await svc.retryCharge(id);
     expect(out.status).toBe('DEBT');
     expect(out.failureReason).toBe('method_unavailable:PAGOEFECTIVO');

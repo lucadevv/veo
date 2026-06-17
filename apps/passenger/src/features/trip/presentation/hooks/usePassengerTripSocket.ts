@@ -5,9 +5,9 @@ import type {
   TripStatus,
   WaypointProposalOutcome,
 } from '@veo/api-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPassengerSocket } from '../../../../core/realtime/socket';
-import { useSessionStore } from '../../../../core/session/sessionStore';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {createPassengerSocket} from '../../../../core/realtime/socket';
+import {useSessionStore} from '../../../../core/session/sessionStore';
 
 /** Snapshot en vivo del viaje recibido por el socket `/passenger`. */
 export interface LiveTripState {
@@ -78,7 +78,7 @@ export function usePassengerTripSocket(
    */
   enabled = true,
 ): UsePassengerTripSocket {
-  const accessToken = useSessionStore((state) => state.accessToken);
+  const accessToken = useSessionStore(state => state.accessToken);
   const [state, setState] = useState<LiveTripState>(INITIAL);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -88,9 +88,11 @@ export function usePassengerTripSocket(
       return;
     }
     const consumed = new Set(ids);
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
-      incomingMessages: prev.incomingMessages.filter((msg) => !consumed.has(msg.id)),
+      incomingMessages: prev.incomingMessages.filter(
+        msg => !consumed.has(msg.id),
+      ),
     }));
   }, []);
 
@@ -100,7 +102,7 @@ export function usePassengerTripSocket(
     // conexión ociosa en el Home Y el loop de handshakes rechazados por el gateway en la re-entrada al
     // cierre (trip COMPLETED). Al desconectar, reseteamos a INITIAL para no arrastrar un `status` viejo.
     if (!accessToken || !tripId || !enabled) {
-      setState((prev) => (prev === INITIAL ? prev : INITIAL));
+      setState(prev => (prev === INITIAL ? prev : INITIAL));
       return;
     }
 
@@ -111,11 +113,13 @@ export function usePassengerTripSocket(
       tripId,
     });
 
-    socket.on('connect', () => setState((prev) => ({ ...prev, connected: true })));
-    socket.on('disconnect', () => setState((prev) => ({ ...prev, connected: false })));
+    socket.on('connect', () => setState(prev => ({...prev, connected: true})));
+    socket.on('disconnect', () =>
+      setState(prev => ({...prev, connected: false})),
+    );
 
-    socket.on('trip:update', (msg) => {
-      setState((prev) => ({
+    socket.on('trip:update', msg => {
+      setState(prev => ({
         ...prev,
         status: msg.status,
         etaSeconds: msg.etaSeconds ?? prev.etaSeconds,
@@ -123,49 +127,57 @@ export function usePassengerTripSocket(
       }));
     });
 
-    socket.on('driver:location', (msg) => {
-      setState((prev) => ({ ...prev, driverLocation: msg.point, driverHeading: msg.heading }));
+    socket.on('driver:location', msg => {
+      setState(prev => ({
+        ...prev,
+        driverLocation: msg.point,
+        driverHeading: msg.heading,
+      }));
     });
 
-    socket.on('eta', (msg) => {
-      setState((prev) => ({ ...prev, etaSeconds: msg.etaSeconds }));
+    socket.on('eta', msg => {
+      setState(prev => ({...prev, etaSeconds: msg.etaSeconds}));
     });
 
-    socket.on('trip:ended', (msg) => {
-      setState((prev) => ({ ...prev, status: msg.status, ended: true }));
+    socket.on('trip:ended', msg => {
+      setState(prev => ({...prev, status: msg.status, ended: true}));
     });
 
     // Mensaje de chat entrante del conductor: se acumula sin duplicar (idempotente por id), para que
     // la pantalla de chat lo agregue a su estado y luego lo drene con `acknowledgeMessages`.
-    socket.on('chat:message', (msg) => {
-      setState((prev) =>
-        prev.incomingMessages.some((existing) => existing.id === msg.id)
+    socket.on('chat:message', msg => {
+      setState(prev =>
+        prev.incomingMessages.some(existing => existing.id === msg.id)
           ? prev
-          : { ...prev, incomingMessages: [...prev.incomingMessages, msg] },
+          : {...prev, incomingMessages: [...prev.incomingMessages, msg]},
       );
     });
 
     // PUJA · oferta entrante: se acumula por conductor (la última oferta de ese driver pisa la anterior,
     // p. ej. si pasa de COUNTER a otro precio). La pantalla del board las fusiona con el snapshot REST.
-    socket.on('offer:made', (msg) => {
-      setState((prev) => ({
+    socket.on('offer:made', msg => {
+      setState(prev => ({
         ...prev,
         incomingOffers: [
-          ...prev.incomingOffers.filter((o) => o.driverId !== msg.driverId),
+          ...prev.incomingOffers.filter(o => o.driverId !== msg.driverId),
           msg,
         ],
         // Una nueva oferta DES-RETIRA al conductor: si había sido retirado y vuelve a ofertar (oferta
         // fresca válida), ya no debe quedar excluido del board (si no, su re-oferta sería invisible).
-        withdrawnDriverIds: prev.withdrawnDriverIds.filter((id) => id !== msg.driverId),
+        withdrawnDriverIds: prev.withdrawnDriverIds.filter(
+          id => id !== msg.driverId,
+        ),
       }));
     });
 
     // BE-3 · una oferta se retiró (conductor no elegible): la quitamos de las entrantes y marcamos su
     // driverId como retirado para que el board la excluya también del snapshot REST (al instante).
-    socket.on('offer:withdrawn', (msg) => {
-      setState((prev) => ({
+    socket.on('offer:withdrawn', msg => {
+      setState(prev => ({
         ...prev,
-        incomingOffers: prev.incomingOffers.filter((o) => o.driverId !== msg.driverId),
+        incomingOffers: prev.incomingOffers.filter(
+          o => o.driverId !== msg.driverId,
+        ),
         withdrawnDriverIds: prev.withdrawnDriverIds.includes(msg.driverId)
           ? prev.withdrawnDriverIds
           : [...prev.withdrawnDriverIds, msg.driverId],
@@ -174,8 +186,8 @@ export function usePassengerTripSocket(
 
     // Lote C4 · desenlace de una parada propuesta: el conductor aceptó/rechazó o venció. Se guarda el
     // último; `useWaypointProposal` lo consume (idempotente por proposalId) para cerrar el "esperando".
-    socket.on('waypoint:outcome', (msg) => {
-      setState((prev) => ({ ...prev, waypointOutcome: msg }));
+    socket.on('waypoint:outcome', msg => {
+      setState(prev => ({...prev, waypointOutcome: msg}));
     });
 
     socket.connect();
@@ -188,5 +200,5 @@ export function usePassengerTripSocket(
     };
   }, [accessToken, tripId, enabled]);
 
-  return { ...state, acknowledgeMessages };
+  return {...state, acknowledgeMessages};
 }

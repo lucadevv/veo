@@ -1,6 +1,6 @@
 import React from 'react';
-import TestRenderer, { act } from 'react-test-renderer';
-import { DEFAULT_MIN_SPLASH_MS, useMinimumSplash } from './useMinimumSplash';
+import TestRenderer, {act} from 'react-test-renderer';
+import {DEFAULT_MIN_SPLASH_MS, useMinimumSplash} from './useMinimumSplash';
 
 /**
  * Especificación del PISO de duración del splash de marca. El gate es un PISO, no un techo:
@@ -17,7 +17,7 @@ function renderHook(ms?: number): {
   unmount: () => void;
 } {
   let last = false;
-  function Probe({ value }: { value?: number }): null {
+  function Probe({value}: {value?: number}): null {
     last = useMinimumSplash(value);
     return null;
   }
@@ -27,7 +27,8 @@ function renderHook(ms?: number): {
   });
   return {
     current: () => last,
-    rerender: (nextMs: number) => act(() => renderer.update(<Probe value={nextMs} />)),
+    rerender: (nextMs: number) =>
+      act(() => renderer.update(<Probe value={nextMs} />)),
     unmount: () => act(() => renderer.unmount()),
   };
 }

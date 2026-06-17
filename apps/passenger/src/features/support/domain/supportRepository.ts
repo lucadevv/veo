@@ -1,4 +1,4 @@
-import type { CreateTicketRequest, SupportTicket } from '@veo/api-client';
+import type {CreateTicketRequest, SupportTicket} from '@veo/api-client';
 
 /** Abstracción del repositorio de Soporte (DIP). */
 export interface SupportRepository {

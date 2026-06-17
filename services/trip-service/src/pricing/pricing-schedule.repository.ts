@@ -33,10 +33,14 @@ export interface ScheduleTx {
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
     create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
+    findUnique(args: {
+      where: { id: string };
+    }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
-    create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;
+    create(args: {
+      data: { aggregateId: string; eventType: string; envelope: unknown };
+    }): Promise<unknown>;
   };
 }
 
@@ -56,7 +60,9 @@ export class PrismaPricingScheduleRepository implements PricingScheduleRepositor
   constructor(private readonly prisma: PrismaService) {}
 
   async find(): Promise<PersistedSchedule | null> {
-    const row = await this.prisma.read.pricingModeSchedule.findUnique({ where: { id: SINGLETON_ID } });
+    const row = await this.prisma.read.pricingModeSchedule.findUnique({
+      where: { id: SINGLETON_ID },
+    });
     if (!row) return null;
     return {
       defaultMode: row.defaultMode,

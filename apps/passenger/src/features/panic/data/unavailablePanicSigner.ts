@@ -1,5 +1,5 @@
-import { NotImplementedError } from '../../../core/errors/notImplemented';
-import type { PanicSignaturePayload, PanicSigner } from '../domain/panicSigner';
+import {NotImplementedError} from '../../../core/errors/notImplemented';
+import type {PanicSignaturePayload, PanicSigner} from '../domain/panicSigner';
 
 /**
  * Firma de pánico por defecto mientras no exista el módulo nativo. NO es un mock: nunca devuelve

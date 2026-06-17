@@ -1,16 +1,32 @@
-import { type RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Avatar, Banner, Button, Card, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { formatPEN } from '../../../../shared/utils/format';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import { IconStarFilled } from '../components/icons';
+import {
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {
+  Avatar,
+  Banner,
+  Button,
+  Card,
+  SafeScreen,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useRef} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {formatPEN} from '../../../../shared/utils/format';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {IconStarFilled} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -34,9 +50,10 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  */
 export function CounterScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  const { tripId, driverId } = useRoute<RouteProp<RootStackParamList, 'Counter'>>().params;
+  const {tripId, driverId} =
+    useRoute<RouteProp<RootStackParamList, 'Counter'>>().params;
 
   const queryClient = useQueryClient();
   const listOffers = useDependency(TOKENS.listOffersUseCase);
@@ -80,7 +97,10 @@ export function CounterScreen(): React.JSX.Element {
       goOnce(() => {
         // Siembra el estado compartido como ASSIGNED (el accept ⇒ match): el board re-enfocado rutea a
         // TripActive AL INSTANTE, sin esperar el próximo poll/evento. El server lo confirma enseguida.
-        queryClient.setQueryData(['trip', tripId, 'state'], { id: tripId, status: 'ASSIGNED' });
+        queryClient.setQueryData(['trip', tripId, 'state'], {
+          id: tripId,
+          status: 'ASSIGNED',
+        });
         navigation.goBack();
       }),
   });
@@ -104,14 +124,19 @@ export function CounterScreen(): React.JSX.Element {
 
   // Contrato nuevo `{ board, offers }`: buscamos en `.offers`. Si el board cerró (EXPIRED/CANCELLED/…)
   // viene `[]` → `offer` undefined → cae al estado "el conductor retiró su oferta" (sin zombie).
-  const offer = offersQuery.data?.offers.find((o) => o.driverId === driverId);
+  const offer = offersQuery.data?.offers.find(o => o.driverId === driverId);
   // La oferta original del pasajero = la tarifa congelada del viaje (su bid).
   const originalBidCents = tripQuery.data?.fareCents;
 
   if (offersQuery.isError || tripQuery.isError) {
     return (
       <SafeScreen>
-        <ErrorState onRetry={() => { void offersQuery.refetch(); void tripQuery.refetch(); }} />
+        <ErrorState
+          onRetry={() => {
+            void offersQuery.refetch();
+            void tripQuery.refetch();
+          }}
+        />
       </SafeScreen>
     );
   }
@@ -126,21 +151,31 @@ export function CounterScreen(): React.JSX.Element {
   if (!offer) {
     return (
       <SafeScreen>
-        <EmptyState title={t('counter.goneTitle')} subtitle={t('counter.goneBody')} />
-        <Button label={t('counter.back')} variant="secondary" fullWidth onPress={() => goOnce(() => navigation.goBack())} />
+        <EmptyState
+          title={t('counter.goneTitle')}
+          subtitle={t('counter.goneBody')}
+        />
+        <Button
+          label={t('counter.back')}
+          variant="secondary"
+          fullWidth
+          onPress={() => goOnce(() => navigation.goBack())}
+        />
       </SafeScreen>
     );
   }
 
   return (
     <SafeScreen>
-      <View style={{ gap: theme.spacing.md, flex: 1 }}>
+      <View style={{gap: theme.spacing.md, flex: 1}}>
         <Card variant="outlined" padding="md">
           <View style={styles.row}>
             <Avatar size="md" />
-            <View style={{ flex: 1, gap: 2 }}>
+            <View style={{flex: 1, gap: 2}}>
               <View style={styles.nameRow}>
-                <Text variant="bodyStrong">{offer.driverName ?? t('offers.driver')}</Text>
+                <Text variant="bodyStrong">
+                  {offer.driverName ?? t('offers.driver')}
+                </Text>
                 {offer.rating != null ? (
                   <View style={styles.ratingRow}>
                     <IconStarFilled color={theme.colors.warn} size={16} />
@@ -168,7 +203,11 @@ export function CounterScreen(): React.JSX.Element {
               <Text variant="callout" color="inkMuted">
                 {t('counter.yourOffer')}
               </Text>
-              <Text variant="callout" color="inkSubtle" tabular style={styles.strike}>
+              <Text
+                variant="callout"
+                color="inkSubtle"
+                tabular
+                style={styles.strike}>
                 {formatPEN(originalBidCents)}
               </Text>
             </View>
@@ -181,13 +220,13 @@ export function CounterScreen(): React.JSX.Element {
           </View>
         </Card>
 
-        <View style={{ flex: 1 }} />
+        <View style={{flex: 1}} />
 
         {acceptMutation.isError ? (
           <Banner tone="danger" title={t('counter.acceptError')} />
         ) : null}
         <Button
-          label={t('counter.accept', { price: formatPEN(offer.priceCents) })}
+          label={t('counter.accept', {price: formatPEN(offer.priceCents)})}
           variant="primary"
           fullWidth
           loading={acceptMutation.isPending}
@@ -206,9 +245,14 @@ export function CounterScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  compareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-  strike: { textDecorationLine: 'line-through' },
+  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  compareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  strike: {textDecorationLine: 'line-through'},
 });

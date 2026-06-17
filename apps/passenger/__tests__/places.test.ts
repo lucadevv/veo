@@ -1,6 +1,6 @@
-import type { KeyValueStore } from '../src/core/storage/mmkv';
-import { LocalPlacesRepository } from '../src/features/places/data/localPlacesRepository';
-import type { SavedPlaceInput } from '../src/features/places/domain/entities';
+import type {KeyValueStore} from '../src/core/storage/mmkv';
+import {LocalPlacesRepository} from '../src/features/places/data/localPlacesRepository';
+import type {SavedPlaceInput} from '../src/features/places/domain/entities';
 import {
   PlaceValidationError,
   SavePlaceUseCase,
@@ -39,7 +39,7 @@ class MemoryStore implements KeyValueStore {
   }
 }
 
-const lima: SavedPlaceInput['point'] = { lat: -12.04, lng: -77.04 };
+const lima: SavedPlaceInput['point'] = {lat: -12.04, lng: -77.04};
 
 /** Reloj incremental determinista para ordenar por createdAt. */
 function clock() {
@@ -51,10 +51,14 @@ describe('LocalPlacesRepository', () => {
   it('mantiene Casa y Trabajo únicos (reemplaza el previo del mismo tipo)', () => {
     const repo = new LocalPlacesRepository(new MemoryStore(), clock());
 
-    repo.save({ kind: 'HOME', label: 'Casa', point: lima });
-    repo.save({ kind: 'HOME', label: 'Casa nueva', point: { lat: -12.05, lng: -77.05 } });
+    repo.save({kind: 'HOME', label: 'Casa', point: lima});
+    repo.save({
+      kind: 'HOME',
+      label: 'Casa nueva',
+      point: {lat: -12.05, lng: -77.05},
+    });
 
-    const homes = repo.list().filter((p) => p.kind === 'HOME');
+    const homes = repo.list().filter(p => p.kind === 'HOME');
     expect(homes).toHaveLength(1);
     expect(homes[0]!.label).toBe('Casa nueva');
   });
@@ -62,23 +66,28 @@ describe('LocalPlacesRepository', () => {
   it('agrega varios favoritos y los ordena (Casa/Trabajo primero, favoritos por fecha desc)', () => {
     const repo = new LocalPlacesRepository(new MemoryStore(), clock());
 
-    repo.save({ kind: 'FAVORITE', label: 'Gimnasio', point: lima });
-    repo.save({ kind: 'WORK', label: 'Trabajo', point: lima });
-    repo.save({ kind: 'FAVORITE', label: 'Casa de mamá', point: lima });
-    repo.save({ kind: 'HOME', label: 'Casa', point: lima });
+    repo.save({kind: 'FAVORITE', label: 'Gimnasio', point: lima});
+    repo.save({kind: 'WORK', label: 'Trabajo', point: lima});
+    repo.save({kind: 'FAVORITE', label: 'Casa de mamá', point: lima});
+    repo.save({kind: 'HOME', label: 'Casa', point: lima});
 
     const list = repo.list();
-    expect(list.map((p) => p.kind)).toEqual(['HOME', 'WORK', 'FAVORITE', 'FAVORITE']);
+    expect(list.map(p => p.kind)).toEqual([
+      'HOME',
+      'WORK',
+      'FAVORITE',
+      'FAVORITE',
+    ]);
     // El favorito más reciente va primero entre los favoritos.
-    const favs = list.filter((p) => p.kind === 'FAVORITE');
+    const favs = list.filter(p => p.kind === 'FAVORITE');
     expect(favs[0]!.label).toBe('Casa de mamá');
   });
 
   it('edita y elimina por id', () => {
     const repo = new LocalPlacesRepository(new MemoryStore(), clock());
 
-    const fav = repo.save({ kind: 'FAVORITE', label: 'Gimnasio', point: lima });
-    repo.update(fav.id, { kind: 'FAVORITE', label: 'Gym nuevo', point: lima });
+    const fav = repo.save({kind: 'FAVORITE', label: 'Gimnasio', point: lima});
+    repo.update(fav.id, {kind: 'FAVORITE', label: 'Gym nuevo', point: lima});
     expect(repo.list()[0]!.label).toBe('Gym nuevo');
 
     repo.remove(fav.id);
@@ -91,20 +100,24 @@ describe('SavePlaceUseCase', () => {
     const repo = new LocalPlacesRepository(new MemoryStore(), clock());
     const useCase = new SavePlaceUseCase(repo);
 
-    expect(() => useCase.execute({ kind: 'FAVORITE', label: '   ', point: lima })).toThrow(
-      PlaceValidationError,
-    );
+    expect(() =>
+      useCase.execute({kind: 'FAVORITE', label: '   ', point: lima}),
+    ).toThrow(PlaceValidationError);
   });
 
   it('rellena la etiqueta por defecto de Casa/Trabajo y valida el punto', () => {
     const repo = new LocalPlacesRepository(new MemoryStore(), clock());
     const useCase = new SavePlaceUseCase(repo);
 
-    const home = useCase.execute({ kind: 'HOME', label: '', point: lima });
+    const home = useCase.execute({kind: 'HOME', label: '', point: lima});
     expect(home.label).toBe('Casa');
 
     expect(() =>
-      useCase.execute({ kind: 'HOME', label: '', point: { lat: Number.NaN, lng: 0 } }),
+      useCase.execute({
+        kind: 'HOME',
+        label: '',
+        point: {lat: Number.NaN, lng: 0},
+      }),
     ).toThrow(PlaceValidationError);
   });
 });

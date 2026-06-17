@@ -18,10 +18,7 @@ const livekit: LiveKitConfig = {
 };
 const user: AuthenticatedUser = { userId: 'usr-1', type: 'passenger', roles: [], sessionId: 's1' };
 
-function makeService(
-  trip: { found: boolean; passengerId: string },
-  dispatchResult: unknown = [],
-) {
+function makeService(trip: { found: boolean; passengerId: string }, dispatchResult: unknown = []) {
   const tripGrpc = {
     call: vi.fn().mockResolvedValue({ ...trip, status: 'REQUESTED' }),
   } as unknown as GrpcServiceClient;
@@ -62,8 +59,18 @@ function makeService(
 describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => {
   it('listOffers delega a dispatch GET /bids/:tripId/offers y devuelve { board, offers } enriquecidas', async () => {
     // FIX contrato: dispatch ahora responde { board:{status,expiresAt}, offers } (no un array pelado).
-    const offer = { tripId: 'trip-1', driverId: 'd1', kind: 'ACCEPT_PRICE', priceCents: 700, etaSeconds: 120, status: 'PENDING' };
-    const dispatchView = { board: { status: 'OPEN', expiresAt: 1_900_000_000_000 }, offers: [offer] };
+    const offer = {
+      tripId: 'trip-1',
+      driverId: 'd1',
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+      etaSeconds: 120,
+      status: 'PENDING',
+    };
+    const dispatchView = {
+      board: { status: 'OPEN', expiresAt: 1_900_000_000_000 },
+      offers: [offer],
+    };
     const { svc, get, enrich } = makeService({ found: true, passengerId: 'usr-1' }, dispatchView);
     const res = await svc.listOffers(user, 'trip-1');
     // El board se pasa tal cual; cada oferta queda ENRIQUECIDA con rating + vehículo (BE-1).
@@ -77,7 +84,10 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
       vehicle: { make: 'Toyota', model: 'Yaris', color: 'Plomo', plate: 'ABC-123' },
     });
     expect(enrich).toHaveBeenCalledWith('d1', expect.anything());
-    expect(get).toHaveBeenCalledWith('/bids/trip-1/offers', expect.objectContaining({ identity: user }));
+    expect(get).toHaveBeenCalledWith(
+      '/bids/trip-1/offers',
+      expect.objectContaining({ identity: user }),
+    );
   });
 
   it('listOffers rechaza con 403 si el viaje no pertenece al pasajero (anti-IDOR)', async () => {
@@ -92,7 +102,14 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
   });
 
   it('acceptOffer delega a dispatch con idempotencyKey por (passenger,trip,driver)', async () => {
-    const accepted = { tripId: 'trip-1', driverId: 'd1', kind: 'ACCEPT_PRICE', priceCents: 700, etaSeconds: 120, status: 'ACCEPTED' };
+    const accepted = {
+      tripId: 'trip-1',
+      driverId: 'd1',
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+      etaSeconds: 120,
+      status: 'ACCEPTED',
+    };
     const { svc, post } = makeService({ found: true, passengerId: 'usr-1' }, accepted);
     const res = await svc.acceptOffer(user, 'trip-1', 'd1');
     expect(res).toEqual(accepted);
@@ -115,7 +132,10 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
     const { svc, post } = makeService({ found: true, passengerId: 'usr-1' }, { ok: true });
     const res = await svc.cancelBid(user, 'trip-1');
     expect(res).toEqual({ ok: true });
-    expect(post).toHaveBeenCalledWith('/bids/trip-1/cancel', expect.objectContaining({ identity: user }));
+    expect(post).toHaveBeenCalledWith(
+      '/bids/trip-1/cancel',
+      expect.objectContaining({ identity: user }),
+    );
   });
 
   it('cancelBid rechaza con 403 sobre un viaje ajeno', async () => {
@@ -127,7 +147,12 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
   // ── RE-PUJA (H6.4): ownership + delegación a trip-service (NO a dispatch) ──
 
   it('rebid delega a trip-service POST /trips/:id/rebid con passengerId de la identidad e idempotencyKey', async () => {
-    const reactivated = { id: 'trip-1', passengerId: 'usr-1', status: 'REQUESTED', fareCents: 1500 };
+    const reactivated = {
+      id: 'trip-1',
+      passengerId: 'usr-1',
+      status: 'REQUESTED',
+      fareCents: 1500,
+    };
     const { svc, tripPost } = makeService({ found: true, passengerId: 'usr-1' }, reactivated);
     const res = await svc.rebid(user, 'trip-1', { bidCents: 1500 });
     expect(res).toEqual(reactivated);
@@ -143,13 +168,17 @@ describe('TripsService — PUJA lado pasajero (ownership + delegación)', () => 
 
   it('rebid rechaza con 403 sobre un viaje ajeno (anti-IDOR, no llama a trip-service)', async () => {
     const { svc, tripPost } = makeService({ found: true, passengerId: 'otro' });
-    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({ httpStatus: 403 });
+    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({
+      httpStatus: 403,
+    });
     expect(tripPost).not.toHaveBeenCalled();
   });
 
   it('rebid responde 404 si el viaje no existe', async () => {
     const { svc, tripPost } = makeService({ found: false, passengerId: 'usr-1' });
-    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({ httpStatus: 404 });
+    await expect(svc.rebid(user, 'trip-1', { bidCents: 1500 })).rejects.toMatchObject({
+      httpStatus: 404,
+    });
     expect(tripPost).not.toHaveBeenCalled();
   });
 });

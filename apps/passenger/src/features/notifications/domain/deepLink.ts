@@ -27,7 +27,7 @@ type TripScreen = (typeof TRIP_SCREENS)[number];
 /** Deep-link a una pantalla de viaje legacy (params `{ tripId }`). */
 interface TripScreenTarget {
   screen: TripScreen;
-  params: { tripId: string };
+  params: {tripId: string};
 }
 
 /**
@@ -43,7 +43,9 @@ interface HomeTarget {
 export type DeepLinkTarget = TripScreenTarget | HomeTarget;
 
 function isTripScreen(value: string | undefined): value is TripScreen {
-  return value !== undefined && (TRIP_SCREENS as readonly string[]).includes(value);
+  return (
+    value !== undefined && (TRIP_SCREENS as readonly string[]).includes(value)
+  );
 }
 
 export function resolveDeepLink(
@@ -57,10 +59,10 @@ export function resolveDeepLink(
 
   // Puja EXPIRED: el flujo normal vive en el sheet → aterriza en el Home, no en la pantalla legacy.
   if (screen === 'NoOffers') {
-    return { screen: 'Home' };
+    return {screen: 'Home'};
   }
 
   // `Counter` necesita driverId además de tripId; un push no lo lleva, así que no es destino directo.
   const target: TripScreen = isTripScreen(screen) ? screen : 'TripActive';
-  return { screen: target, params: { tripId } };
+  return {screen: target, params: {tripId}};
 }

@@ -1,6 +1,10 @@
-import type {SupportRepository} from '../repositories/support-repository';
-import type {SupportTicketListView, SupportTicketView} from '../entities';
-import {isTicketDraftValid, toCreateTicketInput, type TicketDraft} from '../value-objects/ticket-draft';
+import type { SupportRepository } from '../repositories/support-repository';
+import type { SupportTicketListView, SupportTicketView } from '../entities';
+import {
+  isTicketDraftValid,
+  toCreateTicketInput,
+  type TicketDraft,
+} from '../value-objects/ticket-draft';
 
 /** Error de validación del borrador de ticket (asunto/cuerpo no cumplen longitudes). */
 export class InvalidTicketDraftError extends Error {

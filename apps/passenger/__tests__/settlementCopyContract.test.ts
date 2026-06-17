@@ -3,7 +3,7 @@
  * claves por `t(...)`; si faltan, la UI muestra la clave cruda. Cubre las claves agregadas en los
  * fixes F4 (reembolso honesto) y F6 (rating ya enviado / 409 amigable).
  */
-import { common } from '../src/i18n/locales/es-PE/common';
+import {common} from '../src/i18n/locales/es-PE/common';
 
 describe('es-PE · copy del cierre post-viaje', () => {
   it('F4 · expone el copy NEUTRAL de reembolso (ni "pagado" ni propina)', () => {

@@ -192,7 +192,12 @@ export function LoginForm({ next }: { next: string }) {
             />
           </Field>
 
-          <Button type="submit" className="w-full" loading={pending} disabled={enrollCode.length < 6}>
+          <Button
+            type="submit"
+            className="w-full"
+            loading={pending}
+            disabled={enrollCode.length < 6}
+          >
             Activar y entrar
           </Button>
           <Button

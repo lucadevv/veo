@@ -3,7 +3,7 @@
  * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
  * global de la solicitud que conmuta la navegación.
  */
-import {VehicleClass} from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,

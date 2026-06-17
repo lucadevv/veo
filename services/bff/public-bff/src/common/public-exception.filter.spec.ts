@@ -21,7 +21,11 @@ function runFilter(exception: unknown): Captured {
   const res = {
     status(code: number) {
       captured.status = code;
-      return { json(body: unknown) { captured.body = body as Captured['body']; } };
+      return {
+        json(body: unknown) {
+          captured.body = body as Captured['body'];
+        },
+      };
     },
   };
   const host = {
@@ -31,7 +35,9 @@ function runFilter(exception: unknown): Captured {
     }),
   } as unknown as Parameters<PublicExceptionFilter['catch']>[1];
 
-  const logger = { warn: vi.fn(), error: vi.fn() } as unknown as ConstructorParameters<typeof PublicExceptionFilter>[0];
+  const logger = { warn: vi.fn(), error: vi.fn() } as unknown as ConstructorParameters<
+    typeof PublicExceptionFilter
+  >[0];
   new PublicExceptionFilter(logger).catch(exception, host);
   return captured;
 }

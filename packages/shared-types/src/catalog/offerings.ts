@@ -457,7 +457,9 @@ export interface ResolvedOffering extends OfferingSpec {
  *  - B2: `multiplier`/`minFareCents` del override pisan el pricing de código (campo a campo); un `mode`
  *    pineado FUERA de `allowedModes` se descarta (la oferta veta) → `modePin` queda `undefined`.
  */
-export function resolveCatalog(overlay: OfferingCatalogOverlay | null): readonly ResolvedOffering[] {
+export function resolveCatalog(
+  overlay: OfferingCatalogOverlay | null,
+): readonly ResolvedOffering[] {
   const overrideById = new Map((overlay?.overrides ?? []).map((o) => [o.id, o]));
   return OFFERING_LIST.map((spec) => {
     const ov = overrideById.get(spec.id);
@@ -465,7 +467,8 @@ export function resolveCatalog(overlay: OfferingCatalogOverlay | null): readonly
       multiplier: ov?.multiplier ?? spec.pricing.multiplier,
       minFareCents: ov?.minFareCents ?? spec.pricing.minFareCents,
     };
-    const modePin = ov?.mode !== undefined && spec.allowedModes.includes(ov.mode) ? ov.mode : undefined;
+    const modePin =
+      ov?.mode !== undefined && spec.allowedModes.includes(ov.mode) ? ov.mode : undefined;
     return { ...spec, pricing, enabled: ov?.enabled ?? spec.defaultEnabled, modePin };
   });
 }

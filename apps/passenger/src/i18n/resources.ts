@@ -1,4 +1,4 @@
-import { common } from './locales/es-PE/common';
+import {common} from './locales/es-PE/common';
 
 /** Namespace por defecto de la app. */
 export const defaultNS = 'common';

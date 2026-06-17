@@ -1,6 +1,6 @@
-import { Button, spacing, Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import {Button, spacing, Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useCallback, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {
   type ImageSourcePropType,
   type NativeScrollEvent,
@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -19,16 +19,25 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { uuidv7 } from '../../../../shared/utils/uuid';
-import { CONSENT_POLICY_VERSION } from '../../domain/usecases';
-import { PendingConsentStatus } from '../../domain/pendingConsent';
-import { AnimatedDots, FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
-import { useOnboardingStore } from '../stores/onboardingStore';
-import { IconCheck, IconShieldCheck } from '../components/icons';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {uuidv7} from '../../../../shared/utils/uuid';
+import {CONSENT_POLICY_VERSION} from '../../domain/usecases';
+import {PendingConsentStatus} from '../../domain/pendingConsent';
+import {
+  AnimatedDots,
+  FadeInView,
+  PressableScale,
+} from '../../../../shared/presentation/components/motion';
+import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
+import {useOnboardingStore} from '../stores/onboardingStore';
+import {IconCheck, IconShieldCheck} from '../components/icons';
 import safetyPhoto from '../assets/onboarding-safety.jpg';
 import pricePhoto from '../assets/onboarding-price.jpg';
 import privacyPhoto from '../assets/onboarding-privacy.jpg';
@@ -97,7 +106,7 @@ function BackgroundPhoto({
 }): React.JSX.Element {
   const animatedStyle = useAnimatedStyle(() => {
     if (reduced) {
-      return { opacity: index === 0 ? 1 : 0 };
+      return {opacity: index === 0 ? 1 : 0};
     }
     const opacity = interpolate(
       scrollX.value,
@@ -105,10 +114,14 @@ function BackgroundPhoto({
       [0, 1, 0],
       Extrapolation.CLAMP,
     );
-    return { opacity };
+    return {opacity};
   });
   return (
-    <Animated.Image source={source} style={[StyleSheet.absoluteFill, animatedStyle]} resizeMode="cover" />
+    <Animated.Image
+      source={source}
+      style={[StyleSheet.absoluteFill, animatedStyle]}
+      resizeMode="cover"
+    />
   );
 }
 
@@ -126,7 +139,7 @@ function ConsentRow({
   return (
     <PressableScale
       accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
+      accessibilityState={{checked}}
       accessibilityLabel={label}
       onPress={onToggle}
       contentStyle={[
@@ -138,18 +151,18 @@ function ConsentRow({
           padding: theme.spacing.md,
           gap: theme.spacing.md,
         },
-      ]}
-    >
+      ]}>
       <View
         style={[
           styles.consentBox,
           {
             borderRadius: theme.radii.sm,
             backgroundColor: checked ? theme.colors.accent : 'transparent',
-            borderColor: checked ? theme.colors.accent : theme.colors.borderStrong,
+            borderColor: checked
+              ? theme.colors.accent
+              : theme.colors.borderStrong,
           },
-        ]}
-      >
+        ]}>
         {checked ? <IconCheck color={theme.colors.onAccent} size={14} /> : null}
       </View>
       <Text variant="callout" style={styles.consentLabel}>
@@ -168,11 +181,11 @@ function ConsentRow({
  */
 export function OnboardingScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const complete = useOnboardingStore((state) => state.complete);
+  const {width} = useWindowDimensions();
+  const complete = useOnboardingStore(state => state.complete);
   const pendingConsentStore = useDependency(TOKENS.pendingConsentStore);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
 
@@ -186,7 +199,7 @@ export function OnboardingScreen(): React.JSX.Element {
   const [location, setLocation] = useState(false);
   const allAccepted = data && camera && location;
 
-  const onScroll = useAnimatedScrollHandler((event) => {
+  const onScroll = useAnimatedScrollHandler(event => {
     scrollX.value = event.contentOffset.x;
     dotsProgress.value = width > 0 ? event.contentOffset.x / width : 0;
   });
@@ -201,7 +214,7 @@ export function OnboardingScreen(): React.JSX.Element {
 
   const goToPage = useCallback(
     (target: number) => {
-      scrollRef.current?.scrollTo({ x: target * width, animated: true });
+      scrollRef.current?.scrollTo({x: target * width, animated: true});
     },
     [scrollRef, width],
   );
@@ -231,17 +244,36 @@ export function OnboardingScreen(): React.JSX.Element {
     });
     void syncPendingConsent.flush();
     complete();
-  }, [pendingConsentStore, syncPendingConsent, data, camera, location, complete]);
+  }, [
+    pendingConsentStore,
+    syncPendingConsent,
+    data,
+    camera,
+    location,
+    complete,
+  ]);
 
   const isLast = page === SLIDE_COUNT - 1;
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.colors.bg, paddingTop: insets.top }]}>
+    <View
+      style={[
+        styles.screen,
+        {backgroundColor: theme.colors.bg, paddingTop: insets.top},
+      ]}>
       {/* Fondo: fotos a pantalla completa con cross-fade por scroll + velo de legibilidad. */}
-      <OnboardingBackground scrollX={scrollX} pageWidth={width} reduced={reduced} />
+      <OnboardingBackground
+        scrollX={scrollX}
+        pageWidth={width}
+        reduced={reduced}
+      />
 
       {/* Cabecera: wordmark + indicador de paso. */}
-      <View style={[styles.header, { paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.md }]}>
+      <View
+        style={[
+          styles.header,
+          {paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.md},
+        ]}>
         <View style={styles.headerSide} />
         <VeoWordmark size="sm" color="brand" />
         <View style={[styles.headerSide, styles.headerRight]}>
@@ -254,10 +286,9 @@ export function OnboardingScreen(): React.JSX.Element {
                   borderColor: theme.colors.border,
                   borderRadius: theme.radii.pill,
                 },
-              ]}
-            >
+              ]}>
               <Text variant="caption" color="inkMuted" tabular>
-                {t('onboarding.step', { current: page + 1, total: SLIDE_COUNT })}
+                {t('onboarding.step', {current: page + 1, total: SLIDE_COUNT})}
               </Text>
             </View>
           ) : null}
@@ -272,10 +303,10 @@ export function OnboardingScreen(): React.JSX.Element {
         onScroll={onScroll}
         onMomentumScrollEnd={onMomentumEnd}
         scrollEventThrottle={16}
-        style={styles.flex}
-      >
+        style={styles.flex}>
         {/* ── Slide 1 · Seguridad ─────────────────────────────────────── */}
-        <View style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}>
+        <View
+          style={[styles.slide, {width, paddingHorizontal: theme.spacing.xl}]}>
           <FadeInView style={styles.copy} offsetY={14}>
             <Text variant="label" color="accent" style={styles.eyebrow}>
               {t('onboarding.safety.eyebrow')}
@@ -283,14 +314,19 @@ export function OnboardingScreen(): React.JSX.Element {
             <Text variant="displayEditorial" style={styles.slideTitle}>
               {t('onboarding.safety.title')}
             </Text>
-            <Text variant="body" color="inkMuted" align="center" style={styles.slideBody}>
+            <Text
+              variant="body"
+              color="inkMuted"
+              align="center"
+              style={styles.slideBody}>
               {t('onboarding.safety.body')}
             </Text>
           </FadeInView>
         </View>
 
         {/* ── Slide 2 · Auto (solo servicio, sin precio) ──────────────── */}
-        <View style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}>
+        <View
+          style={[styles.slide, {width, paddingHorizontal: theme.spacing.xl}]}>
           <View style={styles.copy}>
             <Text variant="titleEditorial" style={styles.slideTitleLeft}>
               {t('onboarding.price.title')}
@@ -298,7 +334,7 @@ export function OnboardingScreen(): React.JSX.Element {
             <Text variant="body" color="inkMuted" style={styles.slideBodyLeft}>
               {t('onboarding.price.body')}
             </Text>
-            <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.lg }}>
+            <View style={{gap: theme.spacing.sm, marginTop: theme.spacing.lg}}>
               <VehicleOption
                 name={t('onboarding.price.car')}
                 caption={t('onboarding.price.carTagline')}
@@ -309,29 +345,56 @@ export function OnboardingScreen(): React.JSX.Element {
         </View>
 
         {/* ── Slide 3 · Consentimientos (Ley N.° 29733) ───────────────── */}
-        <View style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}>
+        <View
+          style={[styles.slide, {width, paddingHorizontal: theme.spacing.xl}]}>
           <View style={styles.copy}>
-            <Text variant="titleEditorial" align="center" style={styles.slideTitle}>
+            <Text
+              variant="titleEditorial"
+              align="center"
+              style={styles.slideTitle}>
               {t('onboarding.consent.title')}
             </Text>
-            <Text variant="body" color="inkMuted" align="center" style={styles.slideBody}>
+            <Text
+              variant="body"
+              color="inkMuted"
+              align="center"
+              style={styles.slideBody}>
               {t('onboarding.consent.subtitle')}
             </Text>
           </View>
-          <Text variant="subhead" color="inkSubtle" style={styles.consentSection}>
+          <Text
+            variant="subhead"
+            color="inkSubtle"
+            style={styles.consentSection}>
             {t('onboarding.consent.sectionLabel')}
           </Text>
-          <View style={{ gap: theme.spacing.sm }}>
-            <ConsentRow checked={data} label={t('onboarding.consent.data')} onToggle={() => setData((v) => !v)} />
-            <ConsentRow checked={camera} label={t('onboarding.consent.camera')} onToggle={() => setCamera((v) => !v)} />
+          <View style={{gap: theme.spacing.sm}}>
+            <ConsentRow
+              checked={data}
+              label={t('onboarding.consent.data')}
+              onToggle={() => setData(v => !v)}
+            />
+            <ConsentRow
+              checked={camera}
+              label={t('onboarding.consent.camera')}
+              onToggle={() => setCamera(v => !v)}
+            />
             <ConsentRow
               checked={location}
               label={t('onboarding.consent.location')}
-              onToggle={() => setLocation((v) => !v)}
+              onToggle={() => setLocation(v => !v)}
             />
           </View>
-          <View style={[styles.legalRow, { marginTop: theme.spacing.lg, gap: theme.spacing.sm }]}>
-            <IconShieldCheck color={theme.colors.inkSubtle} onColor={theme.colors.bg} size={16} />
+          <View
+            style={[
+              styles.legalRow,
+              {marginTop: theme.spacing.lg, gap: theme.spacing.sm},
+            ]}>
+            <IconShieldCheck
+              color={theme.colors.inkSubtle}
+              onColor={theme.colors.bg}
+              size={16}
+            />
             <Text variant="footnote" color="inkSubtle">
               {t('onboarding.consent.legal')}
             </Text>
@@ -349,8 +412,7 @@ export function OnboardingScreen(): React.JSX.Element {
             paddingTop: theme.spacing.md,
             gap: theme.spacing.lg,
           },
-        ]}
-      >
+        ]}>
         <AnimatedDots count={SLIDE_COUNT} progress={dotsProgress} />
         {isLast ? (
           <Button
@@ -403,8 +465,7 @@ function VehicleOption({
           borderRadius: theme.radii.lg,
           padding: theme.spacing.lg,
         },
-      ]}
-    >
+      ]}>
       <View style={styles.vehicleInfo}>
         <Text variant="bodyStrong">{name}</Text>
         <Text variant="footnote" color="inkMuted">
@@ -412,28 +473,36 @@ function VehicleOption({
         </Text>
       </View>
       {/* Sello de confianza (en vez de precio): refuerza el "verificado/seguro" del posicionamiento. */}
-      <IconShieldCheck color={theme.colors.accent} onColor={theme.colors.bg} size={22} />
+      <IconShieldCheck
+        color={theme.colors.accent}
+        onColor={theme.colors.bg}
+        size={22}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  flex: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerSide: { width: 64 },
-  headerRight: { alignItems: 'flex-end' },
-  stepPill: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3 },
+  screen: {flex: 1},
+  flex: {flex: 1},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerSide: {width: 64},
+  headerRight: {alignItems: 'flex-end'},
+  stepPill: {borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3},
   // El contenido se ancla ABAJO (sobre el refuerzo del velo) — la foto respira arriba.
-  slide: { flex: 1, justifyContent: 'flex-end', paddingBottom: spacing['2xl'] },
-  copy: { gap: 10 },
-  eyebrow: { textTransform: 'uppercase', textAlign: 'center' },
-  slideTitle: { textAlign: 'center' },
+  slide: {flex: 1, justifyContent: 'flex-end', paddingBottom: spacing['2xl']},
+  copy: {gap: 10},
+  eyebrow: {textTransform: 'uppercase', textAlign: 'center'},
+  slideTitle: {textAlign: 'center'},
   slideTitleLeft: {},
-  slideBody: { maxWidth: 320, alignSelf: 'center' },
+  slideBody: {maxWidth: 320, alignSelf: 'center'},
   slideBodyLeft: {},
-  consentSection: { marginTop: 14, marginBottom: spacing.sm },
-  consentRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1 },
+  consentSection: {marginTop: 14, marginBottom: spacing.sm},
+  consentRow: {flexDirection: 'row', alignItems: 'center', borderWidth: 1},
   consentBox: {
     width: 26,
     height: 26,
@@ -441,16 +510,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  consentLabel: { flex: 1 },
-  legalRow: { flexDirection: 'row', alignItems: 'center' },
+  consentLabel: {flex: 1},
+  legalRow: {flexDirection: 'row', alignItems: 'center'},
   vehicleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
   },
-  vehicleInfo: { gap: spacing.xxs },
+  vehicleInfo: {gap: spacing.xxs},
   footer: {},
-  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  nextButton: { flex: 1, marginLeft: spacing.lg },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  nextButton: {flex: 1, marginLeft: spacing.lg},
 });

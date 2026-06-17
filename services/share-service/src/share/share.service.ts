@@ -72,10 +72,14 @@ export class ShareService {
   private async assertTripOwnership(userId: string, tripId: string): Promise<void> {
     const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId } });
     if (!snapshot?.passengerId) {
-      throw new UnprocessableEntityError('El viaje aún no está disponible para compartir', { tripId });
+      throw new UnprocessableEntityError('El viaje aún no está disponible para compartir', {
+        tripId,
+      });
     }
     if (snapshot.passengerId !== userId) {
-      throw new ForbiddenError('Solo el pasajero del viaje puede gestionar su enlace de seguimiento');
+      throw new ForbiddenError(
+        'Solo el pasajero del viaje puede gestionar su enlace de seguimiento',
+      );
     }
   }
 
@@ -83,10 +87,16 @@ export class ShareService {
    * Crea un enlace de seguimiento para un viaje. Valida (falla-cerrado) que el solicitante sea el
    * pasajero del viaje según el read-model. Devuelve el token (única vez que se expone).
    */
-  async createLink(userId: string, tripId: string, opts: CreateLinkOptions = {}): Promise<CreatedShareLink> {
+  async createLink(
+    userId: string,
+    tripId: string,
+    opts: CreateLinkOptions = {},
+  ): Promise<CreatedShareLink> {
     await this.assertTripOwnership(userId, tripId);
     if (opts.contactId) {
-      const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: opts.contactId } });
+      const contact = await this.prisma.read.trustedContact.findUnique({
+        where: { id: opts.contactId },
+      });
       if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
     }
     return this.createLinkInternal(tripId, opts);
@@ -96,12 +106,17 @@ export class ShareService {
    * Núcleo de creación de enlace (usado por REST y por el flujo de pánico). Inserta el ShareLink y
    * encola share.link_generated en la MISMA transacción (outbox).
    */
-  async createLinkInternal(tripId: string, opts: CreateLinkOptions = {}): Promise<CreatedShareLink> {
+  async createLinkInternal(
+    tripId: string,
+    opts: CreateLinkOptions = {},
+  ): Promise<CreatedShareLink> {
     // Idempotencia (Kafka at-least-once): si ya existe un enlace con esta dedupKey lo reutilizamos sin
     // crear otro ni reenviar el SMS. El token solo se expone al CREARLO; un dedup no puede reconstruirlo
     // (en BD vive el hash), por eso el retorno deduped no trae token/url usables.
     if (opts.dedupKey) {
-      const existing = await this.prisma.read.shareLink.findUnique({ where: { dedupKey: opts.dedupKey } });
+      const existing = await this.prisma.read.shareLink.findUnique({
+        where: { dedupKey: opts.dedupKey },
+      });
       if (existing) return this.toDedupedLink(existing);
     }
 
@@ -137,7 +152,9 @@ export class ShareService {
       // existe, fue justamente ese dedup (devolvemos el ganador como deduped → no reenvía SMS). Si el fallo NO
       // era por la dedupKey, no hay existente → relanzamos. Mismo patrón que notification.engine (store-agnóstico).
       if (opts.dedupKey) {
-        const raced = await this.prisma.read.shareLink.findUnique({ where: { dedupKey: opts.dedupKey } });
+        const raced = await this.prisma.read.shareLink.findUnique({
+          where: { dedupKey: opts.dedupKey },
+        });
         if (raced) return this.toDedupedLink(raced);
       }
       throw err;
@@ -167,7 +184,12 @@ export class ShareService {
    */
   async createPanicFanout(
     tripId: string,
-    input: { panicId: string; passengerId: string; geo: { lat: number; lon: number }; contactIds: string[] },
+    input: {
+      panicId: string;
+      passengerId: string;
+      geo: { lat: number; lon: number };
+      contactIds: string[];
+    },
     opts: { ttlSeconds: number; maxUses: number },
   ): Promise<{ shareId: string; url: string; emitted: boolean }> {
     const dedupKey = `panic:${input.panicId}:link`;
@@ -186,7 +208,15 @@ export class ShareService {
     try {
       await this.prisma.write.$transaction(async (tx) => {
         await tx.shareLink.create({
-          data: { id: shareId, tripId, contactId: null, tokenHash, dedupKey, expiresAt, maxUses: opts.maxUses },
+          data: {
+            id: shareId,
+            tripId,
+            contactId: null,
+            tokenHash,
+            dedupKey,
+            expiresAt,
+            maxUses: opts.maxUses,
+          },
         });
         // El share.link_generated histórico se mantiene (alimenta read-models/auditoría de enlaces).
         await enqueueOutbox(
@@ -297,7 +327,8 @@ export class ShareService {
         where: { id: link.id, revokedAt: null, usedCount: { lt: link.maxUses } },
         data: { usedCount: { increment: 1 } },
       });
-      if (updated.count === 0) throw new ForbiddenError('El enlace de seguimiento ya no está disponible');
+      if (updated.count === 0)
+        throw new ForbiddenError('El enlace de seguimiento ya no está disponible');
 
       await tx.shareView.create({
         data: { id: uuidv7(), shareId: link.id, ip: ip ?? undefined, viewedAt },
@@ -310,7 +341,9 @@ export class ShareService {
       await enqueueOutbox(tx, envelope, link.id);
     });
 
-    const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId: link.tripId } });
+    const snapshot = await this.prisma.read.tripSnapshot.findUnique({
+      where: { tripId: link.tripId },
+    });
     return {
       shareId: link.id,
       tripId: link.tripId,

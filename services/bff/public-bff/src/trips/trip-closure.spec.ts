@@ -43,7 +43,9 @@ function makeService(handlers: Record<string, (req: unknown) => unknown>) {
     return Promise.resolve(h ? h(req) : { found: false });
   });
   const tripGrpc = { call } as unknown as GrpcServiceClient;
-  const stub = { call: vi.fn().mockResolvedValue({ found: false }) } as unknown as GrpcServiceClient;
+  const stub = {
+    call: vi.fn().mockResolvedValue({ found: false }),
+  } as unknown as GrpcServiceClient;
   const restStub = {} as unknown as InternalRestClient;
   // rating rest del enrich (MI rating): sin rating en estos casos → rechaza → fetchMyRatingStars da null.
   const ratingRestStub = {

@@ -1,6 +1,6 @@
 import React from 'react';
-import Svg, {Circle, Path} from 'react-native-svg';
-import {driverMapRoute} from '@veo/ui-kit';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { driverMapRoute } from '@veo/ui-kit';
 
 export interface NavPuckProps {
   /** Tamaño del puck en px. */
@@ -14,7 +14,7 @@ export interface NavPuckProps {
  * la dirección de viaje queda SIEMPRE "arriba" en pantalla y la flecha apunta arriba. Halo translúcido
  * + borde oscuro para contraste sobre el lienzo nocturno (tokens `driverMapRoute`, sin hex sueltos).
  */
-export const NavPuck = ({size = 38}: NavPuckProps): React.JSX.Element => (
+export const NavPuck = ({ size = 38 }: NavPuckProps): React.JSX.Element => (
   <Svg width={size} height={size} viewBox="0 0 38 38">
     {/* Halo de presencia (mismo glow que la ruta). */}
     <Circle cx={19} cy={19} r={18} fill={driverMapRoute.routeGlowColor} />

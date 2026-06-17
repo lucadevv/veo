@@ -69,7 +69,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3005);
   await app.listen(port);
-  logger.info(`payment-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50055'})`);
+  logger.info(
+    `payment-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50055'})`,
+  );
 }
 
 bootstrap().catch((err) => {

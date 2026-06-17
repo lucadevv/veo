@@ -1,1 +1,1 @@
-export {HttpOpsRepository} from './repositories/http-ops-repository';
+export { HttpOpsRepository } from './repositories/http-ops-repository';

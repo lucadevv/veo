@@ -17,14 +17,14 @@ mecánico) repetiría el patrón multiplicado. Tres ejes concretos:
 
 El mismo par de literales vive copiado, sin fuente única:
 
-| # | Definición | Archivo |
-|---|---|---|
-| 1 | `VehicleType` const (canónico) | `packages/shared-types/src/enums/index.ts:64` |
-| 2 | `mobileVehicleType = z.enum(['CAR','MOTO'])` (espejo wire deliberado) | `packages/api-client/src/mobile.ts:28` |
-| 3 | union inline `'CAR' \| 'MOTO'` en `RideCategory` | `services/bff/public-bff/src/maps/fare.ts:46` |
-| 4 | `NearbyVehicleType = 'CAR' \| 'MOTO'` | `apps/passenger/src/features/dispatch/domain/dispatchRepository.ts:8` |
-| 5 | `VehicleType = 'MOTO' \| 'CAR'` | `apps/driver/src/features/registration/domain/entities/index.ts:41` |
-| 6 | `VehicleType` + `parseVehicleType` | `apps/driver/src/features/shift/domain/value-objects/vehicle-type.ts:9` |
+| #   | Definición                                                            | Archivo                                                                 |
+| --- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1   | `VehicleType` const (canónico)                                        | `packages/shared-types/src/enums/index.ts:64`                           |
+| 2   | `mobileVehicleType = z.enum(['CAR','MOTO'])` (espejo wire deliberado) | `packages/api-client/src/mobile.ts:28`                                  |
+| 3   | union inline `'CAR' \| 'MOTO'` en `RideCategory`                      | `services/bff/public-bff/src/maps/fare.ts:46`                           |
+| 4   | `NearbyVehicleType = 'CAR' \| 'MOTO'`                                 | `apps/passenger/src/features/dispatch/domain/dispatchRepository.ts:8`   |
+| 5   | `VehicleType = 'MOTO' \| 'CAR'`                                       | `apps/driver/src/features/registration/domain/entities/index.ts:41`     |
+| 6   | `VehicleType` + `parseVehicleType`                                    | `apps/driver/src/features/shift/domain/value-objects/vehicle-type.ts:9` |
 
 (+2 espejos Prisma legítimos: `trip-service/prisma/schema.prisma:79`, `fleet-service/prisma/schema.prisma:61` —
 esos se quedan: Prisma no importa TS, el espejo DB↔shared-types es la convención del repo.)
@@ -49,7 +49,7 @@ GET /maps/quote → options[] {id, name, vehicleType, priceCents(multiplier apli
 **Bug confirmado:** en modo FIXED, `veo_confort` (×1.25) y `veo_xl` (×1.6) cobran la tarifa de
 `veo_economico` (×1.0), y `veo_moto` cobra MÁS que su preview (×0.55, mínima S/3 vs S/5). El quote promete
 un precio que `createTrip` no aplica. (En PUJA no afecta: el bid ES la tarifa.) El propio código lo declara
-deuda: *"Si se modela tarifa por categoría a futuro, este es el punto donde alimentar calculateFare"*.
+deuda: _"Si se modela tarifa por categoría a futuro, este es el punto donde alimentar calculateFare"_.
 
 ### Eje 3 — `PricingMode` global+temporal, sin dimensión de oferta
 
@@ -65,15 +65,15 @@ dimensión que falta (**qué modos permite cada oferta**).
 
 ### Quién consume cada eje HOY (mapa de impacto)
 
-| Consumidor | vehicleType (eje 1) | category (eje 2) | PricingMode (eje 3) |
-|---|---|---|---|
-| **trip-service** | `createTrip` default CAR (`trips.service.ts:258`), columna `Trip.vehicleType`, evento `trip.bid_posted`/`trip.requested`/`trip.reassigning` enriquecidos | persiste opaco (`:324`); **NO** alimenta la tarifa | `resolveMode` puro + `PricingScheduleService` (cache+outbox) + `DispatchModeRegistry` (Strategy) + `Trip.dispatchMode` congelado |
-| **dispatch-service** | filtro de matching: `hot-index.port.ts:28`, `redis-hot-index.ts:59` (+default CAR `:167`), `in-memory-hot-index.ts`, `eligibility.gate.ts:105` (bid MOTO solo a MOTO), `kafka-consumers.service.ts:86` (`?? 'CAR'`), gRPC `getNearbyDrivers` | — | indirecto (consume el evento que el modo eligió) |
-| **fleet-service** | `Vehicle.vehicleType` (certificación del vehículo) | — | — |
-| **public-bff** | `RideCategory.vehicleType` (fare.ts), propaga al create | **dueño** de `RIDE_CATEGORIES` + multiplier + mínimas | `maps.service.ts:93-135`: resuelve modo vía trip-service, degrada a PUJA |
-| **api-client** | `mobileVehicleType` en quote/createTrip/nearby/board | `category: z.string()` (opaco) | `mode` en el quote |
-| **apps (passenger/driver)** | 9 ternarios UI + 3 definiciones locales + store del turno del conductor | passenger manda `category` del quote | pantalla puja vs fija según `quote.mode` |
-| **e2e** | golden-path (8 its) crea CAR; pricing-switch (7 its) | implícito | pricing-switch A1-A3/B1-B3/C1 |
+| Consumidor                  | vehicleType (eje 1)                                                                                                                                                                                                                          | category (eje 2)                                      | PricingMode (eje 3)                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **trip-service**            | `createTrip` default CAR (`trips.service.ts:258`), columna `Trip.vehicleType`, evento `trip.bid_posted`/`trip.requested`/`trip.reassigning` enriquecidos                                                                                     | persiste opaco (`:324`); **NO** alimenta la tarifa    | `resolveMode` puro + `PricingScheduleService` (cache+outbox) + `DispatchModeRegistry` (Strategy) + `Trip.dispatchMode` congelado |
+| **dispatch-service**        | filtro de matching: `hot-index.port.ts:28`, `redis-hot-index.ts:59` (+default CAR `:167`), `in-memory-hot-index.ts`, `eligibility.gate.ts:105` (bid MOTO solo a MOTO), `kafka-consumers.service.ts:86` (`?? 'CAR'`), gRPC `getNearbyDrivers` | —                                                     | indirecto (consume el evento que el modo eligió)                                                                                 |
+| **fleet-service**           | `Vehicle.vehicleType` (certificación del vehículo)                                                                                                                                                                                           | —                                                     | —                                                                                                                                |
+| **public-bff**              | `RideCategory.vehicleType` (fare.ts), propaga al create                                                                                                                                                                                      | **dueño** de `RIDE_CATEGORIES` + multiplier + mínimas | `maps.service.ts:93-135`: resuelve modo vía trip-service, degrada a PUJA                                                         |
+| **api-client**              | `mobileVehicleType` en quote/createTrip/nearby/board                                                                                                                                                                                         | `category: z.string()` (opaco)                        | `mode` en el quote                                                                                                               |
+| **apps (passenger/driver)** | 9 ternarios UI + 3 definiciones locales + store del turno del conductor                                                                                                                                                                      | passenger manda `category` del quote                  | pantalla puja vs fija según `quote.mode`                                                                                         |
+| **e2e**                     | golden-path (8 its) crea CAR; pricing-switch (7 its)                                                                                                                                                                                         | implícito                                             | pricing-switch A1-A3/B1-B3/C1                                                                                                    |
 
 ---
 
@@ -110,7 +110,7 @@ Criterio del import graph, verificado:
 import { PricingMode, VehicleType } from '../enums';
 
 /** Alias semántico: la KEY del pool de matching. El wire field sigue siendo `vehicleType` (contrato). */
-export const VehicleClass = VehicleType;            // mismo objeto: CAR | MOTO (cerrado)
+export const VehicleClass = VehicleType; // mismo objeto: CAR | MOTO (cerrado)
 export type VehicleClass = VehicleType;
 
 export const OfferingId = {
@@ -118,7 +118,7 @@ export const OfferingId = {
   VEO_ECONOMICO: 'veo_economico',
   VEO_CONFORT: 'veo_confort',
   VEO_XL: 'veo_xl',
-} as const;                                          // ids = contrato con la app: INMUTABLES
+} as const; // ids = contrato con la app: INMUTABLES
 export type OfferingId = (typeof OfferingId)[keyof typeof OfferingId];
 
 /** Token de ícono que la app resuelve en SU registro token→glyph (mata los ternarios MOTO). */
@@ -154,14 +154,51 @@ export interface OfferingSpec {
 }
 
 export const OFFERINGS = {
-  [OfferingId.VEO_MOTO]:      { id: OfferingId.VEO_MOTO,      labelKey: 'offering.veo_moto.name',      icon: OfferingIcon.MOTO, vehicleClass: VehicleClass.MOTO, pricing: { multiplier: 0.55, minFareCents: 300 }, allowedModes: [PricingMode.PUJA, PricingMode.FIXED], flow: OfferingFlow.STANDARD, sortOrder: 0 },
-  [OfferingId.VEO_ECONOMICO]: { id: OfferingId.VEO_ECONOMICO, labelKey: 'offering.veo_economico.name', icon: OfferingIcon.CAR,  vehicleClass: VehicleClass.CAR,  pricing: { multiplier: 1.0,  minFareCents: 500 }, allowedModes: [PricingMode.PUJA, PricingMode.FIXED], flow: OfferingFlow.STANDARD, sortOrder: 1 },
-  [OfferingId.VEO_CONFORT]:   { id: OfferingId.VEO_CONFORT,   labelKey: 'offering.veo_confort.name',   icon: OfferingIcon.CAR,  vehicleClass: VehicleClass.CAR,  pricing: { multiplier: 1.25, minFareCents: 500 }, allowedModes: [PricingMode.PUJA, PricingMode.FIXED], flow: OfferingFlow.STANDARD, sortOrder: 2 },
-  [OfferingId.VEO_XL]:        { id: OfferingId.VEO_XL,        labelKey: 'offering.veo_xl.name',        icon: OfferingIcon.CAR,  vehicleClass: VehicleClass.CAR,  pricing: { multiplier: 1.6,  minFareCents: 500 }, allowedModes: [PricingMode.PUJA, PricingMode.FIXED], flow: OfferingFlow.STANDARD, sortOrder: 3 },
+  [OfferingId.VEO_MOTO]: {
+    id: OfferingId.VEO_MOTO,
+    labelKey: 'offering.veo_moto.name',
+    icon: OfferingIcon.MOTO,
+    vehicleClass: VehicleClass.MOTO,
+    pricing: { multiplier: 0.55, minFareCents: 300 },
+    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    flow: OfferingFlow.STANDARD,
+    sortOrder: 0,
+  },
+  [OfferingId.VEO_ECONOMICO]: {
+    id: OfferingId.VEO_ECONOMICO,
+    labelKey: 'offering.veo_economico.name',
+    icon: OfferingIcon.CAR,
+    vehicleClass: VehicleClass.CAR,
+    pricing: { multiplier: 1.0, minFareCents: 500 },
+    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    flow: OfferingFlow.STANDARD,
+    sortOrder: 1,
+  },
+  [OfferingId.VEO_CONFORT]: {
+    id: OfferingId.VEO_CONFORT,
+    labelKey: 'offering.veo_confort.name',
+    icon: OfferingIcon.CAR,
+    vehicleClass: VehicleClass.CAR,
+    pricing: { multiplier: 1.25, minFareCents: 500 },
+    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    flow: OfferingFlow.STANDARD,
+    sortOrder: 2,
+  },
+  [OfferingId.VEO_XL]: {
+    id: OfferingId.VEO_XL,
+    labelKey: 'offering.veo_xl.name',
+    icon: OfferingIcon.CAR,
+    vehicleClass: VehicleClass.CAR,
+    pricing: { multiplier: 1.6, minFareCents: 500 },
+    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    flow: OfferingFlow.STANDARD,
+    sortOrder: 3,
+  },
 } as const satisfies Record<OfferingId, OfferingSpec>;
 
-export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS)
-  .sort((a, b) => a.sortOrder - b.sortOrder);
+export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS).sort(
+  (a, b) => a.sortOrder - b.sortOrder,
+);
 
 /** Lookup tolerante para input del cliente (string crudo): undefined si no existe — el caller decide. */
 export function findOffering(id: string): OfferingSpec | undefined {
@@ -182,7 +219,10 @@ para un `OfferingCatalog` versionado. Ese día el registro en código pasa a ser
 
 ```ts
 // shared-types/src/catalog (pura, unit-testeable; trip-service la consume)
-export function resolveOfferingMode(offering: OfferingSpec, scheduledMode: PricingMode): {
+export function resolveOfferingMode(
+  offering: OfferingSpec,
+  scheduledMode: PricingMode,
+): {
   mode: PricingMode;
   /** true si el schedule pidió un modo que la oferta NO permite (observabilidad: warn + counter). */
   overridden: boolean;
@@ -196,8 +236,8 @@ Precedencia, en orden:
 
 1. **El schedule del admin propone**: `scheduledMode = PricingScheduleService.resolve(zone, at)` —
    intacto de ADR 011 (cache, default PUJA, lock-at-booking S2 para reservas).
-2. **La oferta acota**: si `scheduledMode ∈ allowedModes` → ese es el modo. El admin manda *dentro de lo
-   que la oferta permite*.
+2. **La oferta acota**: si `scheduledMode ∈ allowedModes` → ese es el modo. El admin manda _dentro de lo
+   que la oferta permite_.
 3. **Conflicto (schedule dice PUJA pero la oferta solo permite FIXED)**: **gana la oferta** con su modo
    preferido (`allowedModes[0]`), `overridden: true` → trip-service loguea `warn` + bumpea un counter
    (`pricing_offering_mode_overridden`). Razón: `allowedModes` codifica un invariante de producto/seguridad
@@ -225,7 +265,7 @@ strategy ya es el fail-fast correcto.
 Verificado en el working tree de este mismo Lote P: `packages/utils/src/assert.ts` ya exporta
 
 ```ts
-export function assertNever(value: never, message = 'Variante no contemplada'): never
+export function assertNever(value: never, message = 'Variante no contemplada'): never;
 ```
 
 re-exportado desde el index del package y con 3 specs en `utils.spec.ts` (runtime lanza, mensaje
@@ -257,7 +297,7 @@ que toca trip-service (B), `createTrip` resuelve el offering desde `dto.category
 
 ```ts
 // DispatchCreationInput (extensión additive)
-pricing: OfferingPricingPolicy;   // FixedDispatchStrategy: calculateFare(...) × multiplier, max(minFareCents)
+pricing: OfferingPricingPolicy; // FixedDispatchStrategy: calculateFare(...) × multiplier, max(minFareCents)
 ```
 
 PUJA no cambia (el bid ES la tarifa; el multiplier solo afecta el `suggestedCents` del quote, que ya lo
@@ -270,16 +310,16 @@ en el header de `fare.ts`) deja de poder divergir en multiplicadores/mínimas.
 
 ## 2. Caminos infelices del diseño
 
-| ¿Y si…? | Resultado |
-|---|---|
-| `dto.category` desconocido (cliente roto/malicioso) | **400 `UNKNOWN_OFFERING`** (ValidationError tipado). Es seguro: los ids siempre nacen del quote del server — un id que no está en el catálogo no puede venir de un cliente honesto. NUNCA default silencioso a económico (cobrarías un precio que el pasajero no vio). |
-| `dto.category` AUSENTE (cliente viejo: el campo es opcional hoy) | Compat: se deriva la oferta default por `dto.vehicleType` → MOTO→`veo_moto`, CAR/ausente→`veo_economico` (replica el comportamiento actual: multiplier efectivo 1.0 era el bug; ahora moto obtiene su política real). Precedencia: `category` > `vehicleType` > default económico. |
-| `category` y `vehicleType` inconsistentes (ej. `veo_moto` + CAR) | **La oferta gana** (`offering.vehicleClass` es la fuente del pool); se loguea warn. No 400: apps viejas ya en la calle mandan ambos y un bug de UI no debe romperles el create. |
-| schedule dice PUJA pero la oferta solo permite FIXED | La oferta gana con `allowedModes[0]` + warn + counter `pricing_offering_mode_overridden` (§1.3.3). El flip del admin NUNCA hace negociar a una ambulancia. |
+| ¿Y si…?                                                             | Resultado                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dto.category` desconocido (cliente roto/malicioso)                 | **400 `UNKNOWN_OFFERING`** (ValidationError tipado). Es seguro: los ids siempre nacen del quote del server — un id que no está en el catálogo no puede venir de un cliente honesto. NUNCA default silencioso a económico (cobrarías un precio que el pasajero no vio).                                                                                                                              |
+| `dto.category` AUSENTE (cliente viejo: el campo es opcional hoy)    | Compat: se deriva la oferta default por `dto.vehicleType` → MOTO→`veo_moto`, CAR/ausente→`veo_economico` (replica el comportamiento actual: multiplier efectivo 1.0 era el bug; ahora moto obtiene su política real). Precedencia: `category` > `vehicleType` > default económico.                                                                                                                  |
+| `category` y `vehicleType` inconsistentes (ej. `veo_moto` + CAR)    | **La oferta gana** (`offering.vehicleClass` es la fuente del pool); se loguea warn. No 400: apps viejas ya en la calle mandan ambos y un bug de UI no debe romperles el create.                                                                                                                                                                                                                     |
+| schedule dice PUJA pero la oferta solo permite FIXED                | La oferta gana con `allowedModes[0]` + warn + counter `pricing_offering_mode_overridden` (§1.3.3). El flip del admin NUNCA hace negociar a una ambulancia.                                                                                                                                                                                                                                          |
 | vehicleClass sin pool de conductores en la zona (cero motos online) | NO se bloquea ni el quote ni el create (pool vacío AHORA ≠ vacío en 30s; el gate sería una carrera). El flujo existente ya degrada honesto: FIXED → matching agota → `EXPIRED`/NoOffers; PUJA → sin ofertas → `EXPIRED` (ADR 010). Follow-up additive opcional: `options[].nearbyCount` (dispatch `getNearbyDrivers` ya filtra por clase) para que la app muestre "sin motos cerca" ANTES de pedir. |
-| oferta nueva en el server, app vieja | El quote ya manda `name` resuelto server-side (se mantiene) → la app vieja la lista con nombre correcto; ícono → fallback genérico del registro de glyphs. La app vieja puede crearla (el id viene del quote). |
-| modo nuevo (EMERGENCY) llega a una app vieja en `options[].mode` | La app vieja no conoce la pantalla → cae a su rama por-defecto (puja). Mitigación: una oferta con modo nuevo se lanza con versión mínima de app (gate por feature-flag de quote, fuera de alcance de este ADR). |
-| el catálogo crece y negocio quiere editarlo sin release | Se replica la plantilla `PricingModeSchedule` singleton+version+outbox (probada) con el registro en código como fallback. NO se construye hoy (YAGNI §3). |
+| oferta nueva en el server, app vieja                                | El quote ya manda `name` resuelto server-side (se mantiene) → la app vieja la lista con nombre correcto; ícono → fallback genérico del registro de glyphs. La app vieja puede crearla (el id viene del quote).                                                                                                                                                                                      |
+| modo nuevo (EMERGENCY) llega a una app vieja en `options[].mode`    | La app vieja no conoce la pantalla → cae a su rama por-defecto (puja). Mitigación: una oferta con modo nuevo se lanza con versión mínima de app (gate por feature-flag de quote, fuera de alcance de este ADR).                                                                                                                                                                                     |
+| el catálogo crece y negocio quiere editarlo sin release             | Se replica la plantilla `PricingModeSchedule` singleton+version+outbox (probada) con el registro en código como fallback. NO se construye hoy (YAGNI §3).                                                                                                                                                                                                                                           |
 
 ---
 
@@ -324,15 +364,15 @@ una devDep; `options[].mode` agranda el payload del quote (4 strings).
 > económico (multiplier 1.0) → los montos NO cambian en ningún lote: si un e2e cambia de expectativa, es
 > señal de regresión, no de "ajuste".
 
-| Lote | Qué entra | Gate de verificación |
-|---|---|---|
-| **A — packages (sin tocar servicios)** | `catalog/` en shared-types (`VehicleClass` alias, `OfferingId`, `OFFERINGS`, `findOffering`, `resolveOfferingMode`) — consume el `assertNever` que YA está en `@veo/utils` (§1.5), no lo re-crea · specs unitarios del catálogo (ids estables = snapshot de contrato, `multiplier > 0`, `allowedModes` no vacío, `satisfies` compila) · spec de sync en api-client (devDep shared-types) | `pnpm typecheck` global + specs de utils/shared-types/api-client. e2e intacto por construcción (nada lo importa aún). |
-| **B — trip-service (cierra el bug)** | `createTrip`: resuelve offering (`category` > `vehicleType` > default, 400 `UNKNOWN_OFFERING`), `vehicleClass` deriva del offering, modo = `resolveOfferingMode(offering, schedule)` + warn/counter · `DispatchCreationInput.pricing` → `FixedDispatchStrategy` aplica multiplier + minFare | Specs trip-service (casos nuevos: offering desconocido→400, conflicto de modos→override+flag, confort FIXED cobra ×1.25) · golden-path 8/8 · pricing-switch 7/7 **sin cambiar expectativas** (ambos usan económico ×1.0). |
-| **C — public-bff** | `fare.ts` deja de definir `RIDE_CATEGORIES`/mapeos: importa `OFFERING_LIST` (la fórmula `categoryFareCents` queda, alimentada por `offering.pricing`) · quote agrega `options[].mode`, `labelKey`, `icon` (additive; `name` y `mode` top-level se mantienen) | `fare.spec` + `waypoints-fare.spec` + specs de maps verdes con los MISMOS montos (la política movida, no cambiada) · golden-path + pricing-switch verdes. |
-| **D — dispatch-service + driver-bff (tipado, sin estructura)** | dispatch ya filtra por clase: solo tipar con `VehicleClass`, `assertNever` en switches restantes, eliminar defaults `?? 'CAR'` que oculten clases nuevas donde sea seguro (el de pings legacy `redis-hot-index.ts:167` se queda: datos viejos reales) | Specs dispatch (eligibility, hot-index, consumers) verdes sin debilitar. |
-| **P5-1 — passenger** | Registro `OFFERING_GLYPHS` + render desde `options[].icon/labelKey` (fallback server `name`) · borra ternarios de `VehicleIcon` ×2, `RouteQuoteScreen`, `QuotingBody`, `TripHistoryRow` · `NearbyVehicleType` → import shared-types | `__tests__` passenger verdes (createTrip.test sigue mandando `category`+`vehicleType`: contrato intacto) + typecheck app. |
-| **P5-2 — driver** | `vehicle-type.ts` y `registration/entities` re-exportan desde shared-types (los specs `vehicle-type.test`/`vehicleTypeStore.test` siguen pasando contra la re-export — si un assert cambia, se justifica en el PR) · `VehicleTypeSelector` data-driven · `BidCard`/`VehicleStatusCard` por registro de tokens | Specs driver verdes + typecheck app. |
-| **Prueba de fuego (post-P5, opcional en rama)** | Agregar `VEO_AMBULANCIA` de mentira (`allowedModes: [FIXED]`) y verificar que SOLO se tocan: 1 enum value, 1 token, 1 entrada de catálogo, 1 glyph — y que el override de modo emite el counter | Demo del criterio del dueño: extender AGREGANDO. Se revierte tras la demo. |
+| Lote                                                           | Qué entra                                                                                                                                                                                                                                                                                                                                                                                | Gate de verificación                                                                                                                                                                                                      |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A — packages (sin tocar servicios)**                         | `catalog/` en shared-types (`VehicleClass` alias, `OfferingId`, `OFFERINGS`, `findOffering`, `resolveOfferingMode`) — consume el `assertNever` que YA está en `@veo/utils` (§1.5), no lo re-crea · specs unitarios del catálogo (ids estables = snapshot de contrato, `multiplier > 0`, `allowedModes` no vacío, `satisfies` compila) · spec de sync en api-client (devDep shared-types) | `pnpm typecheck` global + specs de utils/shared-types/api-client. e2e intacto por construcción (nada lo importa aún).                                                                                                     |
+| **B — trip-service (cierra el bug)**                           | `createTrip`: resuelve offering (`category` > `vehicleType` > default, 400 `UNKNOWN_OFFERING`), `vehicleClass` deriva del offering, modo = `resolveOfferingMode(offering, schedule)` + warn/counter · `DispatchCreationInput.pricing` → `FixedDispatchStrategy` aplica multiplier + minFare                                                                                              | Specs trip-service (casos nuevos: offering desconocido→400, conflicto de modos→override+flag, confort FIXED cobra ×1.25) · golden-path 8/8 · pricing-switch 7/7 **sin cambiar expectativas** (ambos usan económico ×1.0). |
+| **C — public-bff**                                             | `fare.ts` deja de definir `RIDE_CATEGORIES`/mapeos: importa `OFFERING_LIST` (la fórmula `categoryFareCents` queda, alimentada por `offering.pricing`) · quote agrega `options[].mode`, `labelKey`, `icon` (additive; `name` y `mode` top-level se mantienen)                                                                                                                             | `fare.spec` + `waypoints-fare.spec` + specs de maps verdes con los MISMOS montos (la política movida, no cambiada) · golden-path + pricing-switch verdes.                                                                 |
+| **D — dispatch-service + driver-bff (tipado, sin estructura)** | dispatch ya filtra por clase: solo tipar con `VehicleClass`, `assertNever` en switches restantes, eliminar defaults `?? 'CAR'` que oculten clases nuevas donde sea seguro (el de pings legacy `redis-hot-index.ts:167` se queda: datos viejos reales)                                                                                                                                    | Specs dispatch (eligibility, hot-index, consumers) verdes sin debilitar.                                                                                                                                                  |
+| **P5-1 — passenger**                                           | Registro `OFFERING_GLYPHS` + render desde `options[].icon/labelKey` (fallback server `name`) · borra ternarios de `VehicleIcon` ×2, `RouteQuoteScreen`, `QuotingBody`, `TripHistoryRow` · `NearbyVehicleType` → import shared-types                                                                                                                                                      | `__tests__` passenger verdes (createTrip.test sigue mandando `category`+`vehicleType`: contrato intacto) + typecheck app.                                                                                                 |
+| **P5-2 — driver**                                              | `vehicle-type.ts` y `registration/entities` re-exportan desde shared-types (los specs `vehicle-type.test`/`vehicleTypeStore.test` siguen pasando contra la re-export — si un assert cambia, se justifica en el PR) · `VehicleTypeSelector` data-driven · `BidCard`/`VehicleStatusCard` por registro de tokens                                                                            | Specs driver verdes + typecheck app.                                                                                                                                                                                      |
+| **Prueba de fuego (post-P5, opcional en rama)**                | Agregar `VEO_AMBULANCIA` de mentira (`allowedModes: [FIXED]`) y verificar que SOLO se tocan: 1 enum value, 1 token, 1 entrada de catálogo, 1 glyph — y que el override de modo emite el counter                                                                                                                                                                                          | Demo del criterio del dueño: extender AGREGANDO. Se revierte tras la demo.                                                                                                                                                |
 
 Orden estricto A→B→C→D→P5: B y C dependen de A; D y P5 dependen de C solo por los campos nuevos del quote
 (pueden paralelizarse con D). Ningún lote requiere migración de datos (`Trip.category` ya persiste los

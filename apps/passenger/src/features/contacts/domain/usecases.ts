@@ -1,6 +1,9 @@
-import { isValidPeruPhone, normalizePeruPhone } from '../../../shared/utils/phone';
-import type { ContactsRepository } from './contactsRepository';
-import type { NewTrustedContact, TrustedContact } from './entities';
+import {
+  isValidPeruPhone,
+  normalizePeruPhone,
+} from '../../../shared/utils/phone';
+import type {ContactsRepository} from './contactsRepository';
+import type {NewTrustedContact, TrustedContact} from './entities';
 
 /** Error de validación de contacto (campo concreto inválido). */
 export class ContactValidationError extends Error {
@@ -36,7 +39,10 @@ export class AddContactUseCase {
     if (input.name.trim().length < 2 || input.name.trim().length > 80) {
       throw new ContactValidationError('name');
     }
-    if (input.relationship.trim().length < 2 || input.relationship.trim().length > 40) {
+    if (
+      input.relationship.trim().length < 2 ||
+      input.relationship.trim().length > 40
+    ) {
       throw new ContactValidationError('relationship');
     }
     if (input.email && !EMAIL_PATTERN.test(input.email)) {
@@ -46,7 +52,7 @@ export class AddContactUseCase {
       phone,
       name: input.name.trim(),
       relationship: input.relationship.trim(),
-      ...(input.email ? { email: input.email.trim() } : {}),
+      ...(input.email ? {email: input.email.trim()} : {}),
     });
   }
 }

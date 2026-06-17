@@ -13,45 +13,62 @@ import {
   isKycRequiredError,
   isOfferingUnavailableError,
 } from '@veo/api-client';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, Button, RideOptionRow, Skeleton, StatusPill, Text, useTheme } from '@veo/ui-kit';
-import { CHILD_MODE_FEE_CENTS, isFixedMode, isPujaMode } from '@veo/shared-types';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { formatDateTime, formatDistance, formatDurationMinutes, formatPEN } from '../../../../shared/utils/format';
-import { useChildModeStore } from '../../../childMode/presentation/stores/childModeStore';
-import { usePaymentPrefsStore } from '../../../payments/presentation/stores/paymentPrefsStore';
-import { PaymentMethodRow, PaymentMethodSheet, useIsYapeAutoActive } from '../../../payments/presentation';
-import { PromoField, type AppliedPromo } from '../../../promos/presentation';
-import { ScheduleSheet } from './ScheduleSheet';
-import { initialBidCents, stepBidCents } from '../../../../shared/utils/bid';
-import { uuidv4 } from '../../../../shared/utils/uuid';
-import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
-import { buildCreateTripInput } from '../../domain/buildCreateTripInput';
-import { mapKycStatus } from '../../../kyc/domain/entities';
-import { KycGate } from './KycGate';
-import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  RideOptionRow,
+  Skeleton,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import {CHILD_MODE_FEE_CENTS, isFixedMode, isPujaMode} from '@veo/shared-types';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {
+  formatDateTime,
+  formatDistance,
+  formatDurationMinutes,
+  formatPEN,
+} from '../../../../shared/utils/format';
+import {useChildModeStore} from '../../../childMode/presentation/stores/childModeStore';
+import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
+import {
+  PaymentMethodRow,
+  PaymentMethodSheet,
+  useIsYapeAutoActive,
+} from '../../../payments/presentation';
+import {PromoField, type AppliedPromo} from '../../../promos/presentation';
+import {ScheduleSheet} from './ScheduleSheet';
+import {initialBidCents, stepBidCents} from '../../../../shared/utils/bid';
+import {uuidv4} from '../../../../shared/utils/uuid';
+import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
+import {buildCreateTripInput} from '../../domain/buildCreateTripInput';
+import {mapKycStatus} from '../../../kyc/domain/entities';
+import {KycGate} from './KycGate';
+import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
 import {
   offeringDisplayName,
   offeringGlyph,
 } from '../../../../shared/presentation/components/offeringGlyphs';
-import { RoutePointsList } from '../../../maps/presentation/components/RoutePointsList';
-import { SpecialRequestChips } from '../../../maps/presentation/components/SpecialRequestChips';
-import { VehicleIcon } from '../../../maps/presentation/components/VehicleIcon';
-import { SelectionBump } from '../../../maps/presentation/components/motion';
-import { useRideDraftStore } from '../../../maps/presentation/stores/rideDraftStore';
+import {RoutePointsList} from '../../../maps/presentation/components/RoutePointsList';
+import {SpecialRequestChips} from '../../../maps/presentation/components/SpecialRequestChips';
+import {VehicleIcon} from '../../../maps/presentation/components/VehicleIcon';
+import {SelectionBump} from '../../../maps/presentation/components/motion';
+import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /** Convierte el punto de la API de mapas (lng) al `GeoPoint` de dominio (lon). */
 function toGeoPoint(point: MapPoint): GeoPoint {
-  return { lat: point.lat, lon: point.lng };
+  return {lat: point.lat, lon: point.lng};
 }
 
 export interface QuotingBodyProps {
@@ -106,23 +123,23 @@ export function QuotingBody({
   kycStatus,
 }: QuotingBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
 
   const quoteRide = useDependency(TOKENS.quoteRideUseCase);
   const createTrip = useDependency(TOKENS.createTripUseCase);
-  const defaultMethod = usePaymentPrefsStore((s) => s.defaultMethod);
+  const defaultMethod = usePaymentPrefsStore(s => s.defaultMethod);
   // Para que el toggle "Recordar como predeterminado" del selector pueda ascender la elección de ESTE
   // viaje a predeterminado del perfil (TASK 2). No se toca salvo que el usuario lo pida explícitamente.
-  const setDefaultMethod = usePaymentPrefsStore((s) => s.setDefault);
+  const setDefaultMethod = usePaymentPrefsStore(s => s.setDefault);
   const childMode = useChildModeStore();
 
-  const origin = useRideDraftStore((s) => s.origin);
-  const destination = useRideDraftStore((s) => s.destination);
-  const waypoints = useRideDraftStore((s) => s.waypoints);
-  const setEditing = useRideDraftStore((s) => s.setEditing);
-  const addWaypoint = useRideDraftStore((s) => s.addWaypoint);
-  const removeWaypoint = useRideDraftStore((s) => s.removeWaypoint);
+  const origin = useRideDraftStore(s => s.origin);
+  const destination = useRideDraftStore(s => s.destination);
+  const waypoints = useRideDraftStore(s => s.waypoints);
+  const setEditing = useRideDraftStore(s => s.setEditing);
+  const addWaypoint = useRideDraftStore(s => s.addWaypoint);
+  const removeWaypoint = useRideDraftStore(s => s.removeWaypoint);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
@@ -132,7 +149,8 @@ export function QuotingBody({
   const [specialRequests, setSpecialRequests] = useState<SpecialRequest[]>([]);
   // Método de pago PARA ESTE VIAJE: se siembra del default del perfil al montar (lazy init) y vive en
   // el quoting. Elegir otro acá NO pisa el default del perfil (ese se cambia en PaymentMethodsScreen).
-  const [tripPaymentMethod, setTripPaymentMethod] = useState<MobilePaymentMethod>(() => defaultMethod);
+  const [tripPaymentMethod, setTripPaymentMethod] =
+    useState<MobilePaymentMethod>(() => defaultMethod);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   // ¿El cobro automático con Yape está activo? Solo para REFLEJAR una señal sutil en la fila (la app no
   // decide el cobro: es server-side). El query comparte caché con la card del perfil (sin doble fetch).
@@ -145,10 +163,16 @@ export function QuotingBody({
   // volver, el gate desaparece solo. 'approved' = puede pedir; resto (unverified/pending/rejected) = gate.
   const kycApproved = mapKycStatus(kycStatus) === 'approved';
 
-  const setWaypoints = useMemo<RoutePlace[]>(() => waypoints.filter(isWaypointSet), [waypoints]);
-  const quoteWaypoints = useMemo<MapPoint[]>(() => setWaypoints.map((stop) => stop.point), [setWaypoints]);
+  const setWaypoints = useMemo<RoutePlace[]>(
+    () => waypoints.filter(isWaypointSet),
+    [waypoints],
+  );
+  const quoteWaypoints = useMemo<MapPoint[]>(
+    () => setWaypoints.map(stop => stop.point),
+    [setWaypoints],
+  );
   const waypointsKey = useMemo(
-    () => quoteWaypoints.map((p) => `${p.lat},${p.lng}`).join('|'),
+    () => quoteWaypoints.map(p => `${p.lat},${p.lng}`).join('|'),
     [quoteWaypoints],
   );
 
@@ -173,7 +197,7 @@ export function QuotingBody({
       quoteRide.execute({
         origin: origin!.point,
         destination: destination!.point,
-        ...(quoteWaypoints.length > 0 ? { waypoints: quoteWaypoints } : {}),
+        ...(quoteWaypoints.length > 0 ? {waypoints: quoteWaypoints} : {}),
       }),
     enabled: ready,
     staleTime: 60_000,
@@ -187,7 +211,8 @@ export function QuotingBody({
     const options = quoteQuery.data?.options ?? [];
     const first = options[0];
     if (!first) return;
-    const stillValid = selectedId !== null && options.some((o) => o.id === selectedId);
+    const stillValid =
+      selectedId !== null && options.some(o => o.id === selectedId);
     if (!stillValid) {
       setSelectedId(first.id);
       setAppliedPromo(null); // la selección cambió → el cupón previsualizado ya no es fiable
@@ -198,7 +223,7 @@ export function QuotingBody({
   // Oferta seleccionada: la UI REACTIVA se proyecta de ELLA, no de un modo global. El selector se muestra
   // SIEMPRE; el panel de abajo (puja vs precio fijo) y el bid dependen de la oferta elegida (server-driven).
   const selectedOption = useMemo(
-    () => quote?.options.find((option) => option.id === selectedId) ?? null,
+    () => quote?.options.find(option => option.id === selectedId) ?? null,
     [quote, selectedId],
   );
   // Modo EFECTIVO de la oferta elegida (ADR 013 §1.3: el modo POR oferta; fallback al top-level del quote
@@ -206,8 +231,10 @@ export function QuotingBody({
   const selectedIsPuja = isPujaMode(selectedOption?.mode ?? quote?.mode);
   const selectedIsFixed = isFixedMode(selectedOption?.mode ?? quote?.mode);
   // Piso + sugerido PER-OFERTA (A2): cada oferta PUJA trae lo suyo; fallback al top-level (server viejo).
-  const selectedBidFloorCents = selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
-  const selectedSuggestedCents = selectedOption?.suggestedCents ?? quote?.suggestedCents;
+  const selectedBidFloorCents =
+    selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
+  const selectedSuggestedCents =
+    selectedOption?.suggestedCents ?? quote?.suggestedCents;
 
   // Re-ancla el bid cuando cambia el sugerido de la oferta ELEGIDA: al cambiar la RUTA (agregar/quitar
   // parada → nueva tarifa) O al cambiar de oferta (Moto→Económico tienen sugeridos distintos), el precio
@@ -218,16 +245,29 @@ export function QuotingBody({
     if (!selectedIsPuja || !selectedOption) return;
     if (selectedSuggestedCents !== lastSuggestedRef.current) {
       lastSuggestedRef.current = selectedSuggestedCents;
-      setBidCents(initialBidCents(selectedSuggestedCents, selectedBidFloorCents));
+      setBidCents(
+        initialBidCents(selectedSuggestedCents, selectedBidFloorCents),
+      );
     }
-  }, [selectedIsPuja, selectedOption, selectedSuggestedCents, selectedBidFloorCents]);
+  }, [
+    selectedIsPuja,
+    selectedOption,
+    selectedSuggestedCents,
+    selectedBidFloorCents,
+  ]);
 
   const decrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents)),
+    () =>
+      setBidCents(b =>
+        stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents),
+      ),
     [selectedBidFloorCents],
   );
   const incrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents)),
+    () =>
+      setBidCents(b =>
+        stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents),
+      ),
     [selectedBidFloorCents],
   );
 
@@ -242,14 +282,17 @@ export function QuotingBody({
 
   const selectedFareCents = selectedOption?.priceCents ?? 0;
   // El recargo de modo niño aplica SOLO en FIJO (en PUJA el bid ES el precio): decide si mostrar el desglose.
-  const showChildFee = childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
+  const showChildFee =
+    childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
   const childTotalCents = selectedFareCents + CHILD_MODE_FEE_CENTS;
 
   // Lote C3 · PREVIEW del crédito de referido, SOLO en FIJO (en PUJA el precio es el bid, no `priceCents`).
   // `creditAppliedCents` lo computó el SERVER (min(saldo, priceCents), §INTEGRACIONES); acá solo se MUESTRA.
   // El "pagás" suma figuras server/constantes (tarifa + recargo − crédito): es un PREVIEW, el recibo
   // muestra el aplicado real al cobrar (si hay promo, el crédito real puede ser menor).
-  const selectedCreditCents = selectedIsFixed ? (selectedOption?.creditAppliedCents ?? 0) : 0;
+  const selectedCreditCents = selectedIsFixed
+    ? (selectedOption?.creditAppliedCents ?? 0)
+    : 0;
   const payableAfterCreditCents = Math.max(
     0,
     (showChildFee ? childTotalCents : selectedFareCents) - selectedCreditCents,
@@ -266,23 +309,23 @@ export function QuotingBody({
   // `flow: 'sheet'` → al fijar, Search hace goBack y VOLVEMOS a esta cotización in-sheet (no a la
   // pantalla legacy RouteQuote). El borrador (Zustand) ya quedó actualizado, así que el quote se recalcula.
   const editOrigin = useCallback(() => {
-    setEditing({ kind: 'origin' });
-    navigation.navigate('Search', { flow: 'sheet' });
+    setEditing({kind: 'origin'});
+    navigation.navigate('Search', {flow: 'sheet'});
   }, [navigation, setEditing]);
   const editDestination = useCallback(() => {
-    setEditing({ kind: 'destination' });
-    navigation.navigate('Search', { flow: 'sheet' });
+    setEditing({kind: 'destination'});
+    navigation.navigate('Search', {flow: 'sheet'});
   }, [navigation, setEditing]);
   const editWaypoint = useCallback(
     (index: number) => {
-      setEditing({ kind: 'waypoint', index });
-      navigation.navigate('Search', { flow: 'sheet' });
+      setEditing({kind: 'waypoint', index});
+      navigation.navigate('Search', {flow: 'sheet'});
     },
     [navigation, setEditing],
   );
   const onAddWaypoint = useCallback(() => {
     addWaypoint();
-    navigation.navigate('Search', { flow: 'sheet' });
+    navigation.navigate('Search', {flow: 'sheet'});
   }, [addWaypoint, navigation]);
 
   const createMutation = useMutation({
@@ -297,14 +340,14 @@ export function QuotingBody({
           selectedIsPuja,
           bidCents,
           specialRequests,
-          waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)),
+          waypoints: setWaypoints.map(stop => toGeoPoint(stop.point)),
           scheduledAt,
           promoCode: appliedPromo?.code ?? null,
-          childMode: { enabled: childMode.enabled, code: childMode.code },
+          childMode: {enabled: childMode.enabled, code: childMode.code},
         }),
         idempotencyKey,
       ),
-    onSuccess: (trip) => {
+    onSuccess: trip => {
       childMode.reset();
       if (scheduledAt !== null) {
         onScheduled();
@@ -312,7 +355,7 @@ export function QuotingBody({
       }
       onTripCreated(trip);
     },
-    onError: (error) => {
+    onError: error => {
       if (isKycRequiredError(error)) {
         onKycRequired();
         return;
@@ -344,7 +387,9 @@ export function QuotingBody({
     !createMutation.isPending &&
     ready &&
     Boolean(selectedId) &&
-    (selectedIsPuja ? bidCents !== null && bidCents >= selectedBidFloorCents : true);
+    (selectedIsPuja
+      ? bidCents !== null && bidCents >= selectedBidFloorCents
+      : true);
 
   // RE-INTENTO automático tras saldar la deuda: cuando el token cambia (no en el primer render), re-dispara
   // el create solo si hay datos válidos y no hay otro pedido en vuelo. El `createMutation` se referencia por
@@ -362,10 +407,13 @@ export function QuotingBody({
   }, [requestAgainToken]);
 
   const formatEta = (option: QuoteOption): string =>
-    t('trip.etaMinutes', { minutes: formatDurationMinutes(option.etaSeconds) });
+    t('trip.etaMinutes', {minutes: formatDurationMinutes(option.etaSeconds)});
 
   // Subtítulo de la opción: etiqueta del tipo de vehículo (del registro de glyphs, ADR 013 §1.6).
-  const optionDescription = (option: QuoteOption, cheapest: boolean): string => {
+  const optionDescription = (
+    option: QuoteOption,
+    cheapest: boolean,
+  ): string => {
     const vehicle = t(offeringGlyph(option).vehicleLabelKey);
     return cheapest ? `${vehicle} · ${t('quote.cheapest')}` : vehicle;
   };
@@ -375,11 +423,11 @@ export function QuotingBody({
     : scheduledAt !== null
       ? t('schedule.confirm')
       : selectedIsPuja && bidCents !== null
-        ? t('puja.searchDriver', { price: formatPEN(bidCents) })
+        ? t('puja.searchDriver', {price: formatPEN(bidCents)})
         : t('quote.confirm');
 
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       {/* Trayecto editable: origen → paradas → destino (+ agregar parada). */}
       <RoutePointsList
         origin={origin}
@@ -397,7 +445,9 @@ export function QuotingBody({
         {quoteQuery.data ? (
           <Text variant="footnote" color="inkMuted" tabular>
             {formatDistance(quoteQuery.data.distanceMeters)} ·{' '}
-            {t('trip.etaMinutes', { minutes: formatDurationMinutes(quoteQuery.data.durationSeconds) })}
+            {t('trip.etaMinutes', {
+              minutes: formatDurationMinutes(quoteQuery.data.durationSeconds),
+            })}
           </Text>
         ) : null}
       </View>
@@ -406,16 +456,24 @@ export function QuotingBody({
         <Banner
           tone="danger"
           title={t('quote.error')}
-          action={{ label: t('actions.retry'), onPress: () => quoteQuery.refetch() }}
+          action={{
+            label: t('actions.retry'),
+            onPress: () => quoteQuery.refetch(),
+          }}
         />
       ) : null}
 
-      {quoteQuery.isLoading || (ready && !quoteQuery.data && !quoteQuery.isError) ? (
-        <View style={{ gap: theme.spacing.sm }}>
+      {quoteQuery.isLoading ||
+      (ready && !quoteQuery.data && !quoteQuery.isError) ? (
+        <View style={{gap: theme.spacing.sm}}>
           <Skeleton variant="rect" height={64} />
           <Skeleton variant="rect" height={64} />
           <Skeleton variant="rect" height={64} />
-          <Text variant="footnote" color="inkSubtle" align="center" style={{ marginTop: theme.spacing.sm }}>
+          <Text
+            variant="footnote"
+            color="inkSubtle"
+            align="center"
+            style={{marginTop: theme.spacing.sm}}>
             {t('quote.calculating')}
           </Text>
         </View>
@@ -424,15 +482,23 @@ export function QuotingBody({
         // XL en cualquier modo). Debajo de la elegida aparece el panel que CORRESPONDE A SU modo: si la
         // oferta resuelve PUJA → proponés tu precio (piso/sugerido PROPIOS de la oferta); si es FIJO → el
         // precio firme ya está en la fila y el desglose va más abajo. Nada de un modo global que decide todo.
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{gap: theme.spacing.sm}}>
           {options.map((option, index) => (
-            <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
+            <SelectionBump
+              key={option.id}
+              index={index}
+              selected={option.id === selectedId}>
               <RideOptionRow
                 name={offeringDisplayName(option)}
                 price={formatPEN(option.priceCents)}
                 eta={formatEta(option)}
                 description={optionDescription(option, index === 0)}
-                icon={<VehicleIcon icon={option.icon} vehicleType={option.vehicleType} />}
+                icon={
+                  <VehicleIcon
+                    icon={option.icon}
+                    vehicleType={option.vehicleType}
+                  />
+                }
                 selected={option.id === selectedId}
                 onPress={() => selectChanged(option.id)}
               />
@@ -440,7 +506,7 @@ export function QuotingBody({
           ))}
 
           {selectedIsPuja && selectedOption && bidCents !== null ? (
-            <View style={{ gap: theme.spacing.lg, marginTop: theme.spacing.xs }}>
+            <View style={{gap: theme.spacing.lg, marginTop: theme.spacing.xs}}>
               <BidPanel
                 bidCents={bidCents}
                 suggestedCents={selectedSuggestedCents}
@@ -448,7 +514,10 @@ export function QuotingBody({
                 onDecrement={decrementBid}
                 onIncrement={incrementBid}
               />
-              <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
+              <SpecialRequestChips
+                value={specialRequests}
+                onChange={setSpecialRequests}
+              />
             </View>
           ) : null}
         </View>
@@ -461,9 +530,8 @@ export function QuotingBody({
         <View
           style={[
             styles.feeBreakdown,
-            { borderTopColor: theme.colors.border, gap: theme.spacing.xs },
-          ]}
-        >
+            {borderTopColor: theme.colors.border, gap: theme.spacing.xs},
+          ]}>
           <View style={styles.feeRow}>
             <Text variant="footnote" color="inkMuted">
               {t('childMode.feeLine')}
@@ -484,7 +552,11 @@ export function QuotingBody({
       {/* Lote C3 · PREVIEW del crédito de referido (solo FIJO): el descuento que se aplicará y lo que
           pagás. `creditAppliedCents` es server-computed; el recibo confirma el aplicado REAL al cobrar. */}
       {selectedCreditCents > 0 ? (
-        <View style={[styles.feeBreakdown, { borderTopColor: theme.colors.border, gap: theme.spacing.xs }]}>
+        <View
+          style={[
+            styles.feeBreakdown,
+            {borderTopColor: theme.colors.border, gap: theme.spacing.xs},
+          ]}>
           <View style={styles.feeRow}>
             <Text variant="footnote" color="inkMuted">
               {t('quote.referralCredit')}
@@ -506,11 +578,18 @@ export function QuotingBody({
       {scheduledAt !== null ? (
         <View style={styles.scheduleRow}>
           <StatusPill
-            label={t('schedule.scheduledFor', { when: formatDateTime(new Date(scheduledAt).toISOString()) })}
+            label={t('schedule.scheduledFor', {
+              when: formatDateTime(new Date(scheduledAt).toISOString()),
+            })}
             tone="brand"
             dot
           />
-          <Button label={t('schedule.now')} variant="ghost" size="sm" onPress={() => setScheduledAt(null)} />
+          <Button
+            label={t('schedule.now')}
+            variant="ghost"
+            size="sm"
+            onPress={() => setScheduledAt(null)}
+          />
         </View>
       ) : (
         <Button
@@ -524,7 +603,9 @@ export function QuotingBody({
 
       {selectedOption ? (
         <PromoField
-          fareCents={selectedIsPuja && bidCents !== null ? bidCents : selectedFareCents}
+          fareCents={
+            selectedIsPuja && bidCents !== null ? bidCents : selectedFareCents
+          }
           applied={appliedPromo}
           onApplied={setAppliedPromo}
           onCleared={() => setAppliedPromo(null)}
@@ -594,7 +675,7 @@ export function QuotingBody({
       <ScheduleSheet
         visible={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
-        onConfirm={(epochMs) => {
+        onConfirm={epochMs => {
           setScheduledAt(epochMs);
           setScheduleOpen(false);
         }}
@@ -604,10 +685,23 @@ export function QuotingBody({
 }
 
 const styles = StyleSheet.create({
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  scheduleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   // Desglose del recargo de modo niño (precio FIJO): separado del bloque de opciones por un borde fino
   // (color del token `border`, aplicado inline). El `gap` también viene del token de spacing.
-  feeBreakdown: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
-  feeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  feeBreakdown: {borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8},
+  feeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 });

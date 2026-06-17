@@ -16,20 +16,41 @@ import { MediaActions } from '@/components/media/media-actions';
 import { RequestAccessDialog } from '@/components/media/request-access-dialog';
 
 const columns: ColumnDef<MediaAccessRequestView, unknown>[] = [
-  { accessorKey: 'tripId', header: 'Viaje', cell: ({ row }) => <span className="font-mono text-xs">{row.original.tripId.slice(0, 8)}</span> },
-  { accessorKey: 'reason', header: 'Motivo', cell: ({ row }) => <span className="text-ink">{row.original.reason}</span> },
+  {
+    accessorKey: 'tripId',
+    header: 'Viaje',
+    cell: ({ row }) => <span className="font-mono text-xs">{row.original.tripId.slice(0, 8)}</span>,
+  },
+  {
+    accessorKey: 'reason',
+    header: 'Motivo',
+    cell: ({ row }) => <span className="text-ink">{row.original.reason}</span>,
+  },
   {
     accessorKey: 'requestedBy',
     header: 'Solicitante',
-    cell: ({ row }) => <span className="font-mono text-xs text-ink-muted">{row.original.requestedBy.slice(0, 8)}</span>,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs text-ink-muted">
+        {row.original.requestedBy.slice(0, 8)}
+      </span>
+    ),
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     accessorKey: 'requestedAt',
     header: 'Solicitado',
     cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.requestedAt)}</span>,
   },
-  { id: 'actions', header: 'Acciones', enableSorting: false, cell: ({ row }) => <MediaActions request={row.original} /> },
+  {
+    id: 'actions',
+    header: 'Acciones',
+    enableSorting: false,
+    cell: ({ row }) => <MediaActions request={row.original} />,
+  },
 ];
 
 export default function MediaPage() {

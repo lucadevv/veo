@@ -2,20 +2,12 @@ import { cn } from '@/lib/cn';
 
 /** Tarjeta sobria: borde 1px (sin sombra) para evitar el anti-patrón ghost-card. */
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn('rounded-lg border border-border bg-surface', className)}
-      {...props}
-    />
-  );
+  return <div className={cn('rounded-lg border border-border bg-surface', className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cn('flex items-start justify-between gap-4 px-5 pt-5', className)}
-      {...props}
-    />
+    <div className={cn('flex items-start justify-between gap-4 px-5 pt-5', className)} {...props} />
   );
 }
 

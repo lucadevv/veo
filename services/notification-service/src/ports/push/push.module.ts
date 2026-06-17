@@ -53,10 +53,15 @@ export class PushLiveSender implements PushSender {
   async send(msg: PushMessage): Promise<PushResult> {
     // Token → riel por plataforma (Record). Topic/Condition (broadcast) → SIEMPRE FCM (APNs no tiene topics).
     const transportKey =
-      msg.target.kind === PushTargetKind.Token ? this.routing[msg.target.platform] : PushTransportKey.Fcm;
+      msg.target.kind === PushTargetKind.Token
+        ? this.routing[msg.target.platform]
+        : PushTransportKey.Fcm;
     const transport = this.transports.get(transportKey);
     if (!transport) {
-      return { outcome: PushOutcome.Transient, reason: `PUSH live: riel '${transportKey}' no configurado` };
+      return {
+        outcome: PushOutcome.Transient,
+        reason: `PUSH live: riel '${transportKey}' no configurado`,
+      };
     }
     return transport.send(msg);
   }
@@ -66,7 +71,8 @@ const pushProvider: Provider = {
   provide: PUSH_SENDER,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): PushSender => {
-    if (config.getOrThrow<PushMode>('VEO_PUSH_MODE') !== PushMode.Live) return new PushSandboxSender();
+    if (config.getOrThrow<PushMode>('VEO_PUSH_MODE') !== PushMode.Live)
+      return new PushSandboxSender();
 
     // Registry de transportes: cada riel se registra SOLO si tiene credenciales (presencia, no ruteo).
     const transports = new Map<PushTransportKey, PushTransport>();
@@ -75,7 +81,10 @@ const pushProvider: Provider = {
     if (projectId) {
       transports.set(
         PushTransportKey.Fcm,
-        new FcmClient({ projectId, serviceAccountJson: config.get<string>('FCM_SERVICE_ACCOUNT_JSON') }),
+        new FcmClient({
+          projectId,
+          serviceAccountJson: config.get<string>('FCM_SERVICE_ACCOUNT_JSON'),
+        }),
       );
     }
 
@@ -86,7 +95,13 @@ const pushProvider: Provider = {
     if (keyP8 && keyId && teamId && bundleId) {
       transports.set(
         PushTransportKey.Apns,
-        new ApnsClient({ keyP8, keyId, teamId, bundleId, host: config.getOrThrow<string>('APNS_HOST') }),
+        new ApnsClient({
+          keyP8,
+          keyId,
+          teamId,
+          bundleId,
+          host: config.getOrThrow<string>('APNS_HOST'),
+        }),
       );
     }
 
@@ -100,7 +115,9 @@ const pushProvider: Provider = {
     // tener credenciales registradas. Recorre los rieles usados (sin enumerarlos a mano).
     for (const key of new Set(Object.values(routing))) {
       if (!transports.has(key)) {
-        throw new ExternalServiceError(`PUSH live: el routing usa el riel '${key}' pero faltan sus credenciales`);
+        throw new ExternalServiceError(
+          `PUSH live: el routing usa el riel '${key}' pero faltan sus credenciales`,
+        );
       }
     }
 

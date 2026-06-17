@@ -1,8 +1,8 @@
-import { tripStatus } from '@veo/api-client';
-import { useQuery } from '@tanstack/react-query';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useTripHistory } from './useTripHistory';
+import {tripStatus} from '@veo/api-client';
+import {useQuery} from '@tanstack/react-query';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useTripHistory} from './useTripHistory';
 
 /**
  * Conductor del ÚLTIMO viaje del pasajero, listo para pintar la tarjeta de confianza del Home idle
@@ -39,11 +39,11 @@ export interface UseLastDriverResult {
  */
 export function useLastDriver(): UseLastDriverResult {
   const tripRepository = useDependency(TOKENS.tripRepository);
-  const { items, isLoading: historyLoading } = useTripHistory();
+  const {items, isLoading: historyLoading} = useTripHistory();
 
   // Último viaje COMPLETED con conductor (la lista ya viene DESC por requestedAt).
   const lastTrip = items.find(
-    (trip) => trip.status === tripStatus.enum.COMPLETED && trip.driverId != null,
+    trip => trip.status === tripStatus.enum.COMPLETED && trip.driverId != null,
   );
   const tripId = lastTrip?.id ?? null;
 
@@ -56,7 +56,7 @@ export function useLastDriver(): UseLastDriverResult {
   });
 
   if (!lastTrip) {
-    return { driver: null, isLoading: historyLoading };
+    return {driver: null, isLoading: historyLoading};
   }
 
   const detail = detailQuery.data;

@@ -28,7 +28,10 @@ async function readError(res: Response): Promise<string> {
  * challenge de enrolamiento (status 'mfa_required' con la URL otpauth).
  */
 export async function login(email: string, password: string, totp?: string): Promise<LoginResult> {
-  const res = await postJson('/api/auth/login', totp ? { email, password, totp } : { email, password });
+  const res = await postJson(
+    '/api/auth/login',
+    totp ? { email, password, totp } : { email, password },
+  );
   if (!res.ok) throw new Error(await readError(res));
   return loginResult.parse(await res.json());
 }

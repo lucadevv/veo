@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect } from 'react';
-import type { ViewStyle } from 'react-native';
+import React, {useCallback, useEffect} from 'react';
+import type {ViewStyle} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -7,7 +7,7 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
 
 /** Tope de stagger para que listas largas no demoren la última fila. */
 const MAX_STAGGER_STEPS = 6;
@@ -27,7 +27,13 @@ export interface EnterViewProps {
  * Entrada con fade + desplazamiento sutil (ease-out, tokens `motion`). Respeta reduce-motion
  * (estado final inmediato). Solo anima opacity/transform. Pensado para secciones y filas de lista.
  */
-export function EnterView({ children, index = 0, delay, offsetY = 10, style }: EnterViewProps) {
+export function EnterView({
+  children,
+  index = 0,
+  delay,
+  offsetY = 10,
+  style,
+}: EnterViewProps) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const progress = useSharedValue(0);
@@ -50,10 +56,12 @@ export function EnterView({ children, index = 0, delay, offsetY = 10, style }: E
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * offsetY }],
+    transform: [{translateY: (1 - progress.value) * offsetY}],
   }));
 
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+  );
 }
 
 /**
@@ -66,7 +74,9 @@ export function usePressScale(scaleTo?: number) {
   const scale = useSharedValue(1);
   const target = scaleTo ?? theme.motion.scale.press;
 
-  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{scale: scale.value}],
+  }));
 
   const onPressIn = useCallback(() => {
     if (reduced) return;
@@ -84,8 +94,8 @@ export function usePressScale(scaleTo?: number) {
     });
   }, [reduced, theme, scale]);
 
-  return { animatedStyle, onPressIn, onPressOut };
+  return {animatedStyle, onPressIn, onPressOut};
 }
 
 /** Reexport para envolver contenido presionable con estilo animado. */
-export { Animated };
+export {Animated};

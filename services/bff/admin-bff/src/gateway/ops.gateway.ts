@@ -67,7 +67,12 @@ interface OpsSocketData {
 }
 
 type OpsSocket = Socket<OpsClientToServer, OpsServerToClient, DefaultEventsMap, OpsSocketData>;
-type OpsNamespace = Namespace<OpsClientToServer, OpsServerToClient, DefaultEventsMap, OpsSocketData>;
+type OpsNamespace = Namespace<
+  OpsClientToServer,
+  OpsServerToClient,
+  DefaultEventsMap,
+  OpsSocketData
+>;
 
 @WebSocketGateway({ namespace: OPS_NAMESPACE })
 export class OpsGateway implements OnGatewayConnection {

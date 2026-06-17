@@ -1,13 +1,8 @@
-import {
-  Room,
-  RoomEvent,
-  Track,
-  type RemoteTrack,
-} from 'livekit-client';
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { MediaStream, RTCView } from 'react-native-webrtc';
-import type { CabinVideoViewerProps } from '../ports/cabinVideoViewer';
+import {Room, RoomEvent, Track, type RemoteTrack} from 'livekit-client';
+import React, {useEffect, useState} from 'react';
+import {StyleSheet, View} from 'react-native';
+import {MediaStream, RTCView} from 'react-native-webrtc';
+import type {CabinVideoViewerProps} from '../ports/cabinVideoViewer';
 
 /**
  * Visor REAL del video del habitáculo (BR de seguridad) sobre LiveKit self-hosted.
@@ -36,7 +31,7 @@ export function LiveKitCabinViewer({
     onStateChange?.('connecting');
 
     // `adaptiveStream` ajusta la calidad recibida; `dynacast` no aplica al ser solo suscriptor.
-    const room = new Room({ adaptiveStream: true });
+    const room = new Room({adaptiveStream: true});
 
     const attachVideo = (track: RemoteTrack): void => {
       if (track.kind !== Track.Kind.Video) {
@@ -52,8 +47,8 @@ export function LiveKitCabinViewer({
     };
 
     room
-      .on(RoomEvent.TrackSubscribed, (track) => attachVideo(track))
-      .on(RoomEvent.TrackUnsubscribed, (track) => {
+      .on(RoomEvent.TrackSubscribed, track => attachVideo(track))
+      .on(RoomEvent.TrackUnsubscribed, track => {
         if (track.kind === Track.Kind.Video && !cancelled) {
           // La pista se cayó: volvemos a "conectando" en vez de dejar un panel en blanco mudo.
           setStreamURL(null);
@@ -97,9 +92,11 @@ export function LiveKitCabinViewer({
     return <View style={styles.fill} />;
   }
 
-  return <RTCView streamURL={streamURL} style={styles.fill} objectFit="cover" />;
+  return (
+    <RTCView streamURL={streamURL} style={styles.fill} objectFit="cover" />
+  );
 }
 
 const styles = StyleSheet.create({
-  fill: { ...StyleSheet.absoluteFill },
+  fill: {...StyleSheet.absoluteFill},
 });

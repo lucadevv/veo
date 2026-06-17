@@ -16,6 +16,8 @@ export const redisProvider: Provider = {
     // (maxRetriesPerRequest null + retryStrategy con techo + handler on('error'))
     // vive ahora en el factory compartido @veo/redis. Ante un rebote transitorio
     // de Redis NO morimos: reintenta sin lanzar MaxRetriesPerRequestError.
-    return createRedisClient(config.getOrThrow<string>('REDIS_URL'), { logger: new Logger('Redis') });
+    return createRedisClient(config.getOrThrow<string>('REDIS_URL'), {
+      logger: new Logger('Redis'),
+    });
   },
 };

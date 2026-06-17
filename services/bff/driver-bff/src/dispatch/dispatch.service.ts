@@ -9,12 +9,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import type { DriverReply, MatchReply, SurgeReply } from '../common/grpc-replies';
-import type {
-  OfferView,
-  OpenBidView,
-  SubmittedOfferView,
-  SurgeView,
-} from './dto/dispatch.dto';
+import type { OfferView, OpenBidView, SubmittedOfferView, SurgeView } from './dto/dispatch.dto';
 
 function emptyToNull(value: string): string | null {
   return value ? value : null;
@@ -60,12 +55,18 @@ export class DispatchService {
 
   async accept(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
     const { identity: signed } = await this.resolveDriver(identity);
-    return this.dispatch().post(`/dispatch/offers/${matchId}/accept`, { identity: signed, body: {} });
+    return this.dispatch().post(`/dispatch/offers/${matchId}/accept`, {
+      identity: signed,
+      body: {},
+    });
   }
 
   async reject(matchId: string, identity: AuthenticatedUser): Promise<unknown> {
     const { identity: signed } = await this.resolveDriver(identity);
-    return this.dispatch().post(`/dispatch/offers/${matchId}/reject`, { identity: signed, body: {} });
+    return this.dispatch().post(`/dispatch/offers/${matchId}/reject`, {
+      identity: signed,
+      body: {},
+    });
   }
 
   async getSurge(lat: number, lon: number, identity: AuthenticatedUser): Promise<SurgeView> {
@@ -120,7 +121,8 @@ export class DispatchService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new NotFoundError('No existe un perfil de conductor para este usuario');
+    if (!driver.found)
+      throw new NotFoundError('No existe un perfil de conductor para este usuario');
     return { identity: { ...identity, driverId: driver.id }, driverId: driver.id };
   }
 

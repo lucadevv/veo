@@ -1,21 +1,25 @@
-import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { container, TOKENS } from './core/di';
-import { HttpSavedPlacesRepository } from './features/places/data/httpPlacesRepository';
-import { useSavedPlacesStore } from './features/places/presentation';
-import { queryClient } from './core/query/queryClient';
-import { initSecureStorage } from './core/storage/mmkv';
-import { useSessionStore } from './core/session/sessionStore';
+import {
+  DarkTheme,
+  NavigationContainer,
+  type Theme,
+} from '@react-navigation/native';
+import {QueryClientProvider} from '@tanstack/react-query';
+import {ThemeProvider, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {AppState, type AppStateStatus} from 'react-native';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {container, TOKENS} from './core/di';
+import {HttpSavedPlacesRepository} from './features/places/data/httpPlacesRepository';
+import {useSavedPlacesStore} from './features/places/presentation';
+import {queryClient} from './core/query/queryClient';
+import {initSecureStorage} from './core/storage/mmkv';
+import {useSessionStore} from './core/session/sessionStore';
 // Inicializa i18n (es-PE) por efecto secundario antes de renderizar.
 import './i18n';
-import { RootNavigator } from './navigation/RootNavigator';
-import { navigationRef } from './navigation/navigationRef';
-import { flushPendingDeepLink } from './services/messaging';
+import {RootNavigator} from './navigation/RootNavigator';
+import {navigationRef} from './navigation/navigationRef';
+import {flushPendingDeepLink} from './services/messaging';
 
 /**
  * Raíz de la app pasajero. Orden de providers:
@@ -24,7 +28,7 @@ import { flushPendingDeepLink } from './services/messaging';
  * `ThemeProvider name="passenger"` aplica el tema cálido/claro de `@veo/ui-kit`.
  */
 export default function App(): React.JSX.Element {
-  const hydrate = useSessionStore((state) => state.hydrate);
+  const hydrate = useSessionStore(state => state.hydrate);
 
   // Inicializa el almacén seguro (crea la instancia MMKV con la clave del Keychain) y RECIÉN AHÍ
   // hidrata la sesión: leer los tokens antes de que el almacén exista con su clave real perdería la
@@ -107,11 +111,10 @@ function ThemedNavigation(): React.JSX.Element {
       onReady={flushPendingDeepLink}
       // Reintenta el deep-link pendiente en cada conmutación de stack: cuando la sesión pasa de
       // bloqueada/no-autenticada a autenticada, recién ahí monta OffersBoard y la navegación aterriza.
-      onStateChange={flushPendingDeepLink}
-    >
+      onStateChange={flushPendingDeepLink}>
       <RootNavigator />
     </NavigationContainer>
   );
 }
 
-const styles = { root: { flex: 1 } } as const;
+const styles = {root: {flex: 1}} as const;

@@ -15,9 +15,7 @@ export function DialogContent({
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay
-        className="fixed inset-0 z-backdrop bg-brand/40 backdrop-brightness-75 data-[state=open]:animate-fade-in"
-      />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-backdrop bg-brand/40 backdrop-brightness-75 data-[state=open]:animate-fade-in" />
       <DialogPrimitive.Content
         className={cn(
           'fixed left-1/2 top-1/2 z-modal w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2',
@@ -48,10 +46,7 @@ export function DialogTitle({
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
   return (
-    <DialogPrimitive.Title
-      className={cn('text-lg font-semibold text-ink', className)}
-      {...props}
-    />
+    <DialogPrimitive.Title className={cn('text-lg font-semibold text-ink', className)} {...props} />
   );
 }
 
@@ -60,10 +55,7 @@ export function DialogDescription({
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>) {
   return (
-    <DialogPrimitive.Description
-      className={cn('text-sm text-ink-muted', className)}
-      {...props}
-    />
+    <DialogPrimitive.Description className={cn('text-sm text-ink-muted', className)} {...props} />
   );
 }
 

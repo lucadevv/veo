@@ -20,7 +20,15 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { type ActorType, ACTOR_TYPES, PaymentMethod, PricingMode, SpecialRequest, TripStatus, VehicleType } from '@veo/shared-types';
+import {
+  type ActorType,
+  ACTOR_TYPES,
+  PaymentMethod,
+  PricingMode,
+  SpecialRequest,
+  TripStatus,
+  VehicleType,
+} from '@veo/shared-types';
 import { BID_MAX_CENTS } from '@veo/utils';
 
 /** Máximo de paradas intermedias por viaje (Ola 2B · waypoints). */
@@ -181,7 +189,9 @@ export class AcceptTripDto {
    * (GetDriverByUser → driver.id) y lo envía; trip-service verifica `trip.driverId === driverId`
    * (404 si no coincide). El cliente final NUNCA lo provee. Opcional para no romper callers legacy.
    */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsString()
   driverId?: string;
@@ -195,7 +205,9 @@ export class ArrivingTripDto {
   etaSeconds?: number;
 
   /** A1 · ownership server-side (anti-IDOR). driverId derivado por el BFF; trip-service verifica trip.driverId === driverId (404). */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsString()
   driverId?: string;
@@ -204,14 +216,18 @@ export class ArrivingTripDto {
 /** POST /trips/:id/arrived — el cuerpo solo transporta el driverId derivado por el BFF (anti-IDOR). */
 export class ArrivedTripDto {
   /** A1 · ownership server-side (anti-IDOR). driverId derivado por el BFF; trip-service verifica trip.driverId === driverId (404). */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsString()
   driverId?: string;
 }
 
 export class StartTripDto {
-  @ApiPropertyOptional({ description: 'Código modo niño (BR-T07), requerido si el viaje es childMode' })
+  @ApiPropertyOptional({
+    description: 'Código modo niño (BR-T07), requerido si el viaje es childMode',
+  })
   @IsOptional()
   @IsString()
   @Matches(/^\d{4,6}$/, { message: 'El código de modo niño tiene 4 a 6 dígitos' })
@@ -223,7 +239,9 @@ export class StartTripDto {
    * `trip.driverId === driverId` (404 si no coincide, no filtra existencia ajena). El cliente final
    * NUNCA lo provee. Opcional en el contrato para no romper callers legacy que aún no lo envían.
    */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsString()
   driverId?: string;
@@ -251,7 +269,9 @@ export class CompleteTripDto {
    * (GetDriverByUser → driver.id) y lo envía; trip-service verifica `trip.driverId === driverId`
    * (404 si no coincide). El cliente final NUNCA lo provee. Opcional para no romper callers legacy.
    */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsString()
   driverId?: string;
@@ -331,7 +351,9 @@ export class RespondWaypointDto {
   accept!: boolean;
 
   /** A1 · ownership server-side (anti-IDOR). driverId derivado por el BFF; trip-service verifica trip.driverId === driverId (404). */
-  @ApiPropertyOptional({ description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía' })
+  @ApiPropertyOptional({
+    description: 'driverId derivado server-side por el BFF (anti-IDOR); el cliente no lo envía',
+  })
   @IsOptional()
   @IsUUID()
   driverId?: string;

@@ -16,7 +16,11 @@ function makeGateway(opts: {
   };
   const grpc = {
     call: vi.fn(() =>
-      Promise.resolve({ id: opts.driverId ?? 'drv-9', userId: 'usr-1', found: opts.driverFound ?? true }),
+      Promise.resolve({
+        id: opts.driverId ?? 'drv-9',
+        userId: 'usr-1',
+        found: opts.driverFound ?? true,
+      }),
     ),
   };
   const publisher = {
@@ -26,7 +30,9 @@ function makeGateway(opts: {
   // aserciones de tipo de los tests existentes no cambian. Su lógica real se testea aparte (fleet).
   const activeVehicleType = {
     // B5-3: resolve devuelve el vehículo activo resuelto ({vehicleType, +attrs de eligibilidad opcionales}).
-    resolve: vi.fn((_identity: unknown, fallback: VehicleClass) => Promise.resolve({ vehicleType: fallback })),
+    resolve: vi.fn((_identity: unknown, fallback: VehicleClass) =>
+      Promise.resolve({ vehicleType: fallback }),
+    ),
   };
   const config = { getOrThrow: () => '' };
   const gateway = new DriverGateway(
@@ -69,7 +75,8 @@ describe('DriverGateway', () => {
 
   it('rechaza a un sujeto que no es driver', async () => {
     const { gateway } = makeGateway({
-      verify: () => Promise.resolve({ sub: 'usr-2', typ: 'passenger', roles: [] as never[], sid: 's' }),
+      verify: () =>
+        Promise.resolve({ sub: 'usr-2', typ: 'passenger', roles: [] as never[], sid: 's' }),
     });
     const socket = fakeSocket('tok');
     await gateway.handleConnection(socket as never);
@@ -100,7 +107,14 @@ describe('DriverGateway', () => {
 });
 
 describe('DriverGateway evento location', () => {
-  const report = { lat: -12.0464, lon: -77.0428, heading: 90, speed: 8.3, accuracy: 5, ts: '2026-05-29T00:00:00.000Z' };
+  const report = {
+    lat: -12.0464,
+    lon: -77.0428,
+    heading: 90,
+    speed: 8.3,
+    accuracy: 5,
+    ts: '2026-05-29T00:00:00.000Z',
+  };
 
   it('publica driver.location_updated y responde ack ok', async () => {
     const publish = vi.fn(() => Promise.resolve(true));

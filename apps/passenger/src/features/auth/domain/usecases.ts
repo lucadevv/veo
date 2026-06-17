@@ -19,8 +19,8 @@ import type {
   OtpVerify,
   RecordConsentRequest,
 } from '@veo/api-client';
-import type { AuthRepository } from './authRepository';
-import type { ConsentRepository } from './consentRepository';
+import type {AuthRepository} from './authRepository';
+import type {ConsentRepository} from './consentRepository';
 
 /**
  * Casos de uso de Auth (patrón de referencia para el resto de features).
@@ -153,14 +153,17 @@ export interface ConsentSelection {
 export class RecordConsentUseCase {
   constructor(private readonly repository: ConsentRepository) {}
 
-  execute(selection: ConsentSelection, dedupKey?: string): Promise<ConsentRecorded> {
+  execute(
+    selection: ConsentSelection,
+    dedupKey?: string,
+  ): Promise<ConsentRecorded> {
     const request: RecordConsentRequest = {
       dataProcessing: selection.dataProcessing,
       inCabinCamera: selection.inCabinCamera,
       location: selection.location,
       marketing: selection.marketing,
       policyVersion: CONSENT_POLICY_VERSION,
-      ...(dedupKey !== undefined ? { dedupKey } : {}),
+      ...(dedupKey !== undefined ? {dedupKey} : {}),
     };
     return this.repository.record(request);
   }

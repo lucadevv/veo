@@ -83,7 +83,8 @@ export function LiveCabinViewer({
             type="button"
             onClick={onClose}
             aria-label="Cerrar cámara"
-            className="text-ink-muted transition-colors hover:text-ink">
+            className="text-ink-muted transition-colors hover:text-ink"
+          >
             <X className="size-4" aria-hidden />
           </button>
         </div>
@@ -101,7 +102,9 @@ export function LiveCabinViewer({
           <div className="absolute inset-0 grid place-items-center p-6 text-center">
             <div className="max-w-xs text-sm text-ink-muted">
               {state === 'connecting' ? <p>Conectando con la cámara…</p> : null}
-              {state === 'waiting' ? <p>La cámara aparecerá cuando el conductor publique.</p> : null}
+              {state === 'waiting' ? (
+                <p>La cámara aparecerá cuando el conductor publique.</p>
+              ) : null}
               {state === 'error' ? (
                 <p className="flex flex-col items-center gap-2">
                   <VideoOff className="size-6 text-ink-subtle" aria-hidden />

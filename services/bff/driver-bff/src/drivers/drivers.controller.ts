@@ -83,7 +83,9 @@ export class DriversController {
   }
 
   @Patch('me/personal')
-  @ApiOperation({ summary: 'Actualizar datos personales del conductor (nombre legal, DNI, nacimiento)' })
+  @ApiOperation({
+    summary: 'Actualizar datos personales del conductor (nombre legal, DNI, nacimiento)',
+  })
   updatePersonal(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateDriverPersonalDto,
@@ -93,7 +95,9 @@ export class DriversController {
 
   @Post('vehicles')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Registrar el vehículo del conductor (queda pendiente de verificación)' })
+  @ApiOperation({
+    summary: 'Registrar el vehículo del conductor (queda pendiente de verificación)',
+  })
   registerVehicle(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RegisterVehicleDto,
@@ -102,7 +106,10 @@ export class DriversController {
   }
 
   @Get('vehicle-models')
-  @ApiOperation({ summary: 'Catálogo APROBADO de modelos para el selector del onboarding. Filtros: vehicleType, q' })
+  @ApiOperation({
+    summary:
+      'Catálogo APROBADO de modelos para el selector del onboarding. Filtros: vehicleType, q',
+  })
   vehicleModels(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListVehicleModelsQuery,
@@ -112,7 +119,9 @@ export class DriversController {
 
   @Post('vehicle-models')
   @HttpCode(201)
-  @ApiOperation({ summary: 'El conductor solicita un modelo nuevo que no está en el catálogo (queda en revisión)' })
+  @ApiOperation({
+    summary: 'El conductor solicita un modelo nuevo que no está en el catálogo (queda en revisión)',
+  })
   requestVehicleModel(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RequestVehicleModelDto,
@@ -127,7 +136,9 @@ export class DriversController {
   }
 
   @Get('active-vehicle')
-  @ApiOperation({ summary: 'Vehículo ACTIVO (operado) del conductor; 200 + vehículo o 204 si ninguno' })
+  @ApiOperation({
+    summary: 'Vehículo ACTIVO (operado) del conductor; 200 + vehículo o 204 si ninguno',
+  })
   async activeVehicle(
     @CurrentUser() user: AuthenticatedUser,
     @Res({ passthrough: true }) res: HttpResponseLike,

@@ -1,10 +1,14 @@
-import { ApiError, type GeoPoint, type PanicTriggerResult } from '@veo/api-client';
-import type { LocationProvider } from '../../../shared/location/domain/locationProvider';
-import { uuidv7 } from '../../../shared/utils/uuid';
-import { withTimeout } from '../../../shared/utils/withTimeout';
-import type { PanicRepository } from './panicRepository';
-import type { PanicSecretProvisioner } from './panicSecretProvisioner';
-import type { PanicSigner } from './panicSigner';
+import {
+  ApiError,
+  type GeoPoint,
+  type PanicTriggerResult,
+} from '@veo/api-client';
+import type {LocationProvider} from '../../../shared/location/domain/locationProvider';
+import {uuidv7} from '../../../shared/utils/uuid';
+import {withTimeout} from '../../../shared/utils/withTimeout';
+import type {PanicRepository} from './panicRepository';
+import type {PanicSecretProvisioner} from './panicSecretProvisioner';
+import type {PanicSigner} from './panicSigner';
 
 /**
  * El backend responde 401 cuando la firma HMAC no valida (p. ej. tras rotar el secreto compartido).
@@ -49,7 +53,10 @@ export class TriggerPanicUseCase {
    *                 reintento (at-least-once): si un POST anterior llegó al server pero la
    *                 respuesta se perdió, el reintento dedup-ea en vez de duplicar la alerta.
    */
-  async execute(tripId: string, dedupKey: string = uuidv7()): Promise<PanicTriggerResult> {
+  async execute(
+    tripId: string,
+    dedupKey: string = uuidv7(),
+  ): Promise<PanicTriggerResult> {
     // Asegura el secreto HMAC antes de firmar (lo descarga del backend si aún no está provisionado).
     await this.provisioner.ensureProvisioned();
     // Tope de tiempo: un getCurrentPosition() que cuelga dejaría el pánico en un spinner infinito
@@ -73,9 +80,9 @@ export class TriggerPanicUseCase {
     geo: GeoPoint,
     allowRefresh: boolean,
   ): Promise<PanicTriggerResult> {
-    const signature = await this.signer.sign({ tripId, dedupKey, geo });
+    const signature = await this.signer.sign({tripId, dedupKey, geo});
     try {
-      return await this.repository.trigger({ tripId, dedupKey, geo, signature });
+      return await this.repository.trigger({tripId, dedupKey, geo, signature});
     } catch (error) {
       if (allowRefresh && isSignatureRejected(error)) {
         // Rotación: el secreto compartido cambió en el backend. Refresca y reintenta una vez.

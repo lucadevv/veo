@@ -1,16 +1,16 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {useDi, useRepositories} from '../../../../core/di/useDi';
-import {useSessionStore} from '../../../../core/session/sessionStore';
-import {GetProfileUseCase, profileToSessionUser} from '../../domain';
-import {LogoutUseCase} from '../../../auth/domain';
-import {HttpPushRegistrationPort, fcmPushService} from '../../../notifications/data';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDi, useRepositories } from '../../../../core/di/useDi';
+import { useSessionStore } from '../../../../core/session/sessionStore';
+import { GetProfileUseCase, profileToSessionUser } from '../../domain';
+import { LogoutUseCase } from '../../../auth/domain';
+import { HttpPushRegistrationPort, fcmPushService } from '../../../notifications/data';
 
 /** Clave de caché del perfil del conductor. */
 export const PROFILE_QUERY_KEY = ['profile', 'me'] as const;
 
 /** Query: perfil agregado del conductor (identity + rating + fleet + compliance). */
 export function useProfile() {
-  const {profile} = useRepositories();
+  const { profile } = useRepositories();
   return useQuery({
     queryKey: PROFILE_QUERY_KEY,
     queryFn: async () => {
@@ -27,8 +27,8 @@ export function useProfile() {
  * Si la revocación remota falla (p. ej. sin red), igual se cierra la sesión localmente.
  */
 export function useLogout() {
-  const {auth} = useRepositories();
-  const {localAuth, httpClient} = useDi();
+  const { auth } = useRepositories();
+  const { localAuth, httpClient } = useDi();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {

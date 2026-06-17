@@ -1,5 +1,5 @@
-import {createNavigationContainerRef} from '@react-navigation/native';
-import type {RootStackParamList} from './types';
+import { createNavigationContainerRef } from '@react-navigation/native';
+import type { RootStackParamList } from './types';
 
 /**
  * Ref global del contenedor de navegación. Permite navegar fuera del árbol de pantallas
@@ -28,6 +28,6 @@ export function navigateToBids(): void {
  */
 export function navigateToTripActive(tripId: string): void {
   if (navigationRef.isReady()) {
-    navigationRef.navigate('TripActive', {tripId});
+    navigationRef.navigate('TripActive', { tripId });
   }
 }

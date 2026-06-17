@@ -49,7 +49,10 @@ export class ReferralsService {
     const code = await this.ensureCode(userId);
     const [referredCount, user] = await Promise.all([
       this.prisma.read.referral.count({ where: { referrerUserId: userId } }),
-      this.prisma.read.user.findUnique({ where: { id: userId }, select: { referralRewardCents: true } }),
+      this.prisma.read.user.findUnique({
+        where: { id: userId },
+        select: { referralRewardCents: true },
+      }),
     ]);
     return {
       code,
@@ -116,7 +119,8 @@ export class ReferralsService {
       where: { referralCode: code },
       select: { id: true, deletedAt: true },
     });
-    if (!referrer || referrer.deletedAt) throw new NotFoundError('Código de referido inválido', { code });
+    if (!referrer || referrer.deletedAt)
+      throw new NotFoundError('Código de referido inválido', { code });
     if (referrer.id === newUserId) {
       throw new ValidationError('No puedes usar tu propio código de referido');
     }
@@ -208,6 +212,8 @@ export class ReferralsService {
         },
       });
     });
-    this.logger.log(`Recompensa de referido otorgada a ${referral.referrerUserId} por viaje ${tripId}`);
+    this.logger.log(
+      `Recompensa de referido otorgada a ${referral.referrerUserId} por viaje ${tripId}`,
+    );
   }
 }

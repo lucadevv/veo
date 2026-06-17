@@ -7,7 +7,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { InvalidStateError, NotFoundError, UnprocessableEntityError, uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
@@ -24,8 +28,12 @@ let db: TestDatabase;
 let prisma: PrismaClient;
 let svc: PaymentsService;
 
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -38,7 +46,10 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 interface SeedOver {
@@ -81,7 +92,12 @@ beforeAll(async () => {
   prisma = new PrismaClient({ datasourceUrl: db.databaseUrl });
   await prisma.$connect();
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000', pendingExternal: true, webhookSecret: 'sec' });
+  const gateway = new SandboxPaymentGateway({
+    confirmDelayMs: 0,
+    declineSuffix: '0000',
+    pendingExternal: true,
+    webhookSecret: 'sec',
+  });
   svc = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
 }, 180_000);
 
@@ -97,7 +113,11 @@ beforeEach(async () => {
 
 describe('changeMethod (cambio de método de un pago no-capturado)', () => {
   it('PENDING YAPE → PLIN (prontopaga): method=PLIN, status PENDING, CHECKOUT NUEVO, checkout viejo limpiado', async () => {
-    const { id } = await seedRow({ method: 'YAPE', deepLink: 'yapeapp:oneshot/OLD', externalUid: 'uid-old' });
+    const { id } = await seedRow({
+      method: 'YAPE',
+      deepLink: 'yapeapp:oneshot/OLD',
+      externalUid: 'uid-old',
+    });
     const out = await svc.changeMethod(id, 'PLIN');
     expect(out.method).toBe('PLIN');
     expect(out.status).toBe('PENDING'); // espera webhook/poll
@@ -106,7 +126,12 @@ describe('changeMethod (cambio de método de un pago no-capturado)', () => {
   });
 
   it('DEBT YAPE → PLIN: normaliza a PENDING y re-cobra con el método nuevo', async () => {
-    const { id } = await seedRow({ method: 'YAPE', status: 'DEBT', failureReason: 'yape_insufficient_funds', deepLink: null });
+    const { id } = await seedRow({
+      method: 'YAPE',
+      status: 'DEBT',
+      failureReason: 'yape_insufficient_funds',
+      deepLink: null,
+    });
     const out = await svc.changeMethod(id, 'PLIN');
     expect(out.method).toBe('PLIN');
     expect(out.status).toBe('PENDING');
@@ -130,7 +155,11 @@ describe('changeMethod (cambio de método de un pago no-capturado)', () => {
   });
 
   it('no-op idempotente: mismo método pedido → estado vigente, sin re-cobrar (checkout viejo intacto)', async () => {
-    const { id } = await seedRow({ method: 'YAPE', deepLink: 'yapeapp:oneshot/OLD', externalUid: 'uid-old' });
+    const { id } = await seedRow({
+      method: 'YAPE',
+      deepLink: 'yapeapp:oneshot/OLD',
+      externalUid: 'uid-old',
+    });
     const out = await svc.changeMethod(id, 'YAPE');
     expect(out.method).toBe('YAPE');
     expect(out.deepLink).toBe('yapeapp:oneshot/OLD'); // no re-cobró

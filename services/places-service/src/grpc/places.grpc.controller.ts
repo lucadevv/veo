@@ -79,7 +79,10 @@ export class PlacesGrpcController {
   ) {}
 
   @GrpcMethod('PlacesService', 'ListByUser')
-  async listByUser(@Payload() _payload: unknown, @Ctx() meta: Metadata): Promise<{ places: PlaceMsg[] }> {
+  async listByUser(
+    @Payload() _payload: unknown,
+    @Ctx() meta: Metadata,
+  ): Promise<{ places: PlaceMsg[] }> {
     const user = this.identity(meta);
     const rows = await this.places.listByUser(user.userId);
     return { places: rows.map(toMsg) };
@@ -95,7 +98,10 @@ export class PlacesGrpcController {
   }
 
   @GrpcMethod('PlacesService', 'Update')
-  async update(@Payload() payload: UpdatePayload, @Ctx() meta: Metadata): Promise<{ place: PlaceMsg }> {
+  async update(
+    @Payload() payload: UpdatePayload,
+    @Ctx() meta: Metadata,
+  ): Promise<{ place: PlaceMsg }> {
     const user = this.identity(meta);
     const place = await this.run(() =>
       this.places.update(user.userId, payload.id, toInput(payload)),
@@ -106,7 +112,10 @@ export class PlacesGrpcController {
   }
 
   @GrpcMethod('PlacesService', 'Remove')
-  async remove(@Payload() payload: RemovePayload, @Ctx() meta: Metadata): Promise<{ removed: boolean }> {
+  async remove(
+    @Payload() payload: RemovePayload,
+    @Ctx() meta: Metadata,
+  ): Promise<{ removed: boolean }> {
     const user = this.identity(meta);
     await this.run(() => this.places.remove(user.userId, payload.id));
     domainEventsTotal.inc({ event: 'place.removed', result: 'ok' });

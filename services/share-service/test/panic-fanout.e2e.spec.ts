@@ -18,7 +18,11 @@
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
 import { createEnvelope, KafkaEventConsumer, type EventEnvelope } from '@veo/events';
 import type Redis from 'ioredis';
@@ -92,7 +96,9 @@ beforeAll(async () => {
 
 /** Lee del outbox los eventos panic.fanout_requested emitidos para un panicId. */
 async function fanoutEventsFor(panicId: string): Promise<Array<Record<string, unknown>>> {
-  const rows = await prisma.outboxEvent.findMany({ where: { eventType: 'panic.fanout_requested' } });
+  const rows = await prisma.outboxEvent.findMany({
+    where: { eventType: 'panic.fanout_requested' },
+  });
   return rows
     .map((r) => (r.envelope as { payload: Record<string, unknown> }).payload)
     .filter((p) => p.panicId === panicId);
@@ -113,7 +119,12 @@ beforeEach(async () => {
 });
 
 /** Seedea un contacto de confianza; `verified=false` deja otpVerifiedAt en null (no recibe pánico). */
-async function seedContact(userId: string, name: string, phone: string, verified: boolean): Promise<string> {
+async function seedContact(
+  userId: string,
+  name: string,
+  phone: string,
+  verified: boolean,
+): Promise<string> {
   const id = uuidv7();
   await prisma.trustedContact.create({
     data: {
@@ -128,7 +139,11 @@ async function seedContact(userId: string, name: string, phone: string, verified
   return id;
 }
 
-function panicEnvelope(panicId: string, tripId: string, passengerId: string): EventEnvelope<unknown> {
+function panicEnvelope(
+  panicId: string,
+  tripId: string,
+  passengerId: string,
+): EventEnvelope<unknown> {
   return createEnvelope({
     eventType: 'panic.triggered',
     producer: 'panic-service',

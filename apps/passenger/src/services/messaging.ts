@@ -1,4 +1,4 @@
-import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import type {FirebaseMessagingTypes} from '@react-native-firebase/messaging';
 // Imports ESTÁTICOS (no `await import(...)`): el import dinámico + lazy-bundling de Metro en dev
 // rompe con `LoadBundleFromServerError: Could not load bundle` (URL de split-bundle malformada) en
 // CADA sitio que difería la carga (background handler en el boot, registro de token en el login…).
@@ -20,15 +20,15 @@ import {
   subscribeToTopic,
   unsubscribeFromTopic,
 } from '@react-native-firebase/messaging';
-import { getApp } from '@react-native-firebase/app';
-import { Platform } from 'react-native';
-import { env } from '../core/config/env';
-import { queryClient } from '../core/query/queryClient';
-import { TOKENS } from '../core/di/tokens';
-import { container } from '../core/di/registry';
-import { resolveDeepLink } from '../features/notifications/domain/deepLink';
-import type { PushPlatform } from '../features/notifications/domain/pushTokenRegistrar';
-import { navigationRef } from '../navigation/navigationRef';
+import {getApp} from '@react-native-firebase/app';
+import {Platform} from 'react-native';
+import {env} from '../core/config/env';
+import {queryClient} from '../core/query/queryClient';
+import {TOKENS} from '../core/di/tokens';
+import {container} from '../core/di/registry';
+import {resolveDeepLink} from '../features/notifications/domain/deepLink';
+import type {PushPlatform} from '../features/notifications/domain/pushTokenRegistrar';
+import {navigationRef} from '../navigation/navigationRef';
 
 /**
  * Inicialización PROTEGIDA de push (FCM/APNs) + handlers foreground/background.
@@ -82,7 +82,7 @@ async function waitForApnsToken(messaging: Messaging): Promise<boolean> {
     if (apns) {
       return true;
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    await new Promise<void>(resolve => setTimeout(resolve, 300));
   }
   return false;
 }
@@ -92,7 +92,9 @@ async function waitForApnsToken(messaging: Messaging): Promise<boolean> {
  * no relanza (un fallo de red NO debe trabar el toggle; la fuente de verdad legal es el consent server).
  * No-op si Firebase está deshabilitado.
  */
-export async function setPromotionsSubscription(enabled: boolean): Promise<void> {
+export async function setPromotionsSubscription(
+  enabled: boolean,
+): Promise<void> {
   if (!env.firebaseEnabled) {
     return;
   }
@@ -102,7 +104,10 @@ export async function setPromotionsSubscription(enabled: boolean): Promise<void>
       ? subscribeToTopic(messaging, PROMOS_TOPIC)
       : unsubscribeFromTopic(messaging, PROMOS_TOPIC));
   } catch (error) {
-    console.warn('[messaging] no se pudo actualizar la suscripción a promociones:', error);
+    console.warn(
+      '[messaging] no se pudo actualizar la suscripción a promociones:',
+      error,
+    );
   }
 }
 
@@ -122,7 +127,10 @@ export async function registerBackgroundMessageHandler(): Promise<void> {
     setBackgroundMessageHandler(messaging, async () => {});
     backgroundHandlerSet = true;
   } catch (error) {
-    console.warn('[messaging] no se pudo registrar el handler de background:', error);
+    console.warn(
+      '[messaging] no se pudo registrar el handler de background:',
+      error,
+    );
   }
 }
 
@@ -149,7 +157,9 @@ const DEEP_LINK_TTL_MS = 5 * 60_000;
  * app abierta y autenticada). Si la ruta destino aún no está montada, queda pendiente para el próximo
  * `onStateChange` — pero caduca (R4) y se limpia en logout (R5), para no convertirse en un salto fantasma.
  */
-function navigateFromPush(message: FirebaseMessagingTypes.RemoteMessage | null): void {
+function navigateFromPush(
+  message: FirebaseMessagingTypes.RemoteMessage | null,
+): void {
   if (!resolveDeepLink(message?.data)) return; // push sin deep-link resoluble: ignorar
   pendingDeepLink = message;
   pendingDeepLinkAt = Date.now();
@@ -184,7 +194,7 @@ export function flushPendingDeepLink(): void {
   if (target.screen === 'Home') {
     navigationRef.navigate(target.screen);
   } else {
-    navigationRef.navigate(target.screen, target.params as { tripId: string });
+    navigationRef.navigate(target.screen, target.params as {tripId: string});
   }
 }
 
@@ -206,11 +216,13 @@ async function wireForeground(messaging: Messaging): Promise<void> {
   onMessage(messaging, async () => {
     // Best-effort: si la invalidación falla, la bandeja igual se refresca por staleTime/focus. El
     // `.catch` evita un unhandled rejection dentro del callback de RNFirebase (no debe tirar acá).
-    await queryClient.invalidateQueries({ queryKey: ['notifications', 'list'] }).catch(() => {});
+    await queryClient
+      .invalidateQueries({queryKey: ['notifications', 'list']})
+      .catch(() => {});
   });
 
   // App en SEGUNDO PLANO y el usuario TOCA la notificación → la trae al frente: deep-link al board.
-  onNotificationOpenedApp(messaging, (remoteMessage) => {
+  onNotificationOpenedApp(messaging, remoteMessage => {
     navigateFromPush(remoteMessage);
   });
 
@@ -218,8 +230,11 @@ async function wireForeground(messaging: Messaging): Promise<void> {
   // sesión activa al rotar, backend caído), NO debe quedar como unhandled rejection (era el LogBox
   // "Uncaught (in promise)" del arranque). Se loguea y sigue — mismo criterio que onMessage arriba.
   onTokenRefresh(messaging, (token: string) => {
-    registrar.register(token, currentPlatform()).catch((error) => {
-      console.warn('[messaging] no se pudo re-registrar el token rotado:', error);
+    registrar.register(token, currentPlatform()).catch(error => {
+      console.warn(
+        '[messaging] no se pudo re-registrar el token rotado:',
+        error,
+      );
     });
   });
 }
@@ -230,9 +245,10 @@ export type PushPermission = 'granted' | 'denied' | 'undetermined';
 /** Mapea el `AuthorizationStatus` de RNFirebase a nuestro estado de UI (AUTHORIZED/PROVISIONAL = granted). */
 function toPushPermission(
   status: number,
-  Auth: { AUTHORIZED: number; PROVISIONAL: number; NOT_DETERMINED: number },
+  Auth: {AUTHORIZED: number; PROVISIONAL: number; NOT_DETERMINED: number},
 ): PushPermission {
-  if (status === Auth.AUTHORIZED || status === Auth.PROVISIONAL) return 'granted';
+  if (status === Auth.AUTHORIZED || status === Auth.PROVISIONAL)
+    return 'granted';
   if (status === Auth.NOT_DETERMINED) return 'undetermined';
   return 'denied';
 }
@@ -277,7 +293,10 @@ export async function getPushPermission(): Promise<PushPermission> {
   }
   try {
     const messaging = await loadMessaging();
-    return toPushPermission(await hasPermission(messaging), AuthorizationStatus);
+    return toPushPermission(
+      await hasPermission(messaging),
+      AuthorizationStatus,
+    );
   } catch {
     return 'denied';
   }
@@ -294,7 +313,10 @@ export async function syncPushRegistration(): Promise<string | null> {
   }
   try {
     const messaging = await loadMessaging();
-    if (toPushPermission(await hasPermission(messaging), AuthorizationStatus) !== 'granted') {
+    if (
+      toPushPermission(await hasPermission(messaging), AuthorizationStatus) !==
+      'granted'
+    ) {
       return null; // sin permiso previo: NO prompteamos en el arranque (permiso progresivo)
     }
     return await registerForPush(messaging);
@@ -316,7 +338,10 @@ export async function enablePush(): Promise<PushPermission> {
   }
   try {
     const messaging = await loadMessaging();
-    const status = toPushPermission(await requestPermission(messaging), AuthorizationStatus);
+    const status = toPushPermission(
+      await requestPermission(messaging),
+      AuthorizationStatus,
+    );
     if (status === 'granted') {
       await registerForPush(messaging);
     }

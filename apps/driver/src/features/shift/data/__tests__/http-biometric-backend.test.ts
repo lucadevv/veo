@@ -1,5 +1,5 @@
-import {ApiError, type HttpClient} from '@veo/api-client';
-import {HttpBiometricBackendPort} from '../services/http-biometric-backend';
+import { ApiError, type HttpClient } from '@veo/api-client';
+import { HttpBiometricBackendPort } from '../services/http-biometric-backend';
 import {
   BiometricBackendUnavailableError,
   BiometricNotEnrolledError,
@@ -10,7 +10,7 @@ type Handler = (method: string, path: string, opts: any) => unknown;
 
 /** Doble de prueba del HttpClient (no es un mock de producción): registra llamadas y responde/lanza. */
 class FakeHttpClient {
-  calls: Array<{method: string; path: string; opts: any}> = [];
+  calls: Array<{ method: string; path: string; opts: any }> = [];
   constructor(private readonly handler: Handler) {}
   post(path: string, opts: any = {}) {
     return this.run('POST', path, opts);
@@ -22,7 +22,7 @@ class FakeHttpClient {
     return this.run('GET', path, opts);
   }
   private async run(method: string, path: string, opts: any) {
-    this.calls.push({method, path, opts});
+    this.calls.push({ method, path, opts });
     return this.handler(method, path, opts);
   }
 }
@@ -39,11 +39,11 @@ describe('HttpBiometricBackendPort', () => {
     }));
     const port = new HttpBiometricBackendPort(asHttp(fake));
 
-    const result = await port.verify({challengeId: 'c1', frames: ['ZmE=']});
+    const result = await port.verify({ challengeId: 'c1', frames: ['ZmE='] });
 
     expect(result.sessionRef).toBe('sess-1');
     expect(fake.calls[0]?.path).toBe('/drivers/shift/biometric/verify');
-    expect(fake.calls[0]?.opts.body).toEqual({challengeId: 'c1', frames: ['ZmE=']});
+    expect(fake.calls[0]?.opts.body).toEqual({ challengeId: 'c1', frames: ['ZmE='] });
   });
 
   it('verify con liveness/match fallido lanza BiometricRejectedError', async () => {
@@ -55,7 +55,7 @@ describe('HttpBiometricBackendPort', () => {
     }));
     const port = new HttpBiometricBackendPort(asHttp(fake));
 
-    await expect(port.verify({challengeId: 'c1', frames: ['x']})).rejects.toBeInstanceOf(
+    await expect(port.verify({ challengeId: 'c1', frames: ['x'] })).rejects.toBeInstanceOf(
       BiometricRejectedError,
     );
   });
@@ -75,7 +75,7 @@ describe('HttpBiometricBackendPort', () => {
     });
     const port = new HttpBiometricBackendPort(asHttp(fake));
 
-    await expect(port.verify({challengeId: 'c1', frames: ['x']})).rejects.toMatchObject({
+    await expect(port.verify({ challengeId: 'c1', frames: ['x'] })).rejects.toMatchObject({
       name: 'BiometricLockedError',
       message: 'Bloqueado 1 hora',
     });
@@ -91,13 +91,13 @@ describe('HttpBiometricBackendPort', () => {
   });
 
   it('enroll envía la foto y devuelve enrolledAt', async () => {
-    const fake = new FakeHttpClient(() => ({enrolled: true, enrolledAt: '2026-05-29T00:00:00Z'}));
+    const fake = new FakeHttpClient(() => ({ enrolled: true, enrolledAt: '2026-05-29T00:00:00Z' }));
     const port = new HttpBiometricBackendPort(asHttp(fake));
 
     const result = await port.enroll('Zm90bw==');
 
     expect(result.enrolledAt).toBe('2026-05-29T00:00:00Z');
     expect(fake.calls[0]?.path).toBe('/drivers/biometric/enroll');
-    expect(fake.calls[0]?.opts.body).toEqual({photo: 'Zm90bw=='});
+    expect(fake.calls[0]?.opts.body).toEqual({ photo: 'Zm90bw==' });
   });
 });

@@ -59,9 +59,9 @@ describe('Eje Driver.currentStatus · cobertura del producto cartesiano', () => 
   });
 
   it('SUSPENDED no puede auto-ponerse AVAILABLE (solo sale hacia OFFLINE)', () => {
-    expect(
-      driverStatusMachine.canTransition(DriverStatus.SUSPENDED, DriverStatus.AVAILABLE),
-    ).toBe(false);
+    expect(driverStatusMachine.canTransition(DriverStatus.SUSPENDED, DriverStatus.AVAILABLE)).toBe(
+      false,
+    );
     expect(driverStatusMachine.canTransition(DriverStatus.SUSPENDED, DriverStatus.OFFLINE)).toBe(
       true,
     );

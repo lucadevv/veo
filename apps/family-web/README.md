@@ -38,14 +38,14 @@ src/app/
 
 Copia `.env.example` a `.env.local`. Resumen:
 
-| Variable | Uso |
-|---|---|
-| `NEXT_PUBLIC_BFF_URL` | Base REST del public-bff (cliente). Default `http://localhost:4001/api/v1`. |
-| `PUBLIC_BFF_URL` | Base REST para el render server-side (opcional, host interno). |
-| `NEXT_PUBLIC_BFF_WS_URL` | Origen Socket.IO del public-bff (namespace `/family`). |
-| `NEXT_PUBLIC_TILE_URL` | Tiles OSM self-hosted (plantilla XYZ o style.json). |
-| `NEXT_PUBLIC_LIVEKIT_URL` | Servidor LiveKit self-hosted (wss). |
-| `NEXT_PUBLIC_HELP_PHONE` | Teléfono del botón de ayuda (default 105, PNP). |
+| Variable                  | Uso                                                                         |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_BFF_URL`     | Base REST del public-bff (cliente). Default `http://localhost:4001/api/v1`. |
+| `PUBLIC_BFF_URL`          | Base REST para el render server-side (opcional, host interno).              |
+| `NEXT_PUBLIC_BFF_WS_URL`  | Origen Socket.IO del public-bff (namespace `/family`).                      |
+| `NEXT_PUBLIC_TILE_URL`    | Tiles OSM self-hosted (plantilla XYZ o style.json).                         |
+| `NEXT_PUBLIC_LIVEKIT_URL` | Servidor LiveKit self-hosted (wss).                                         |
+| `NEXT_PUBLIC_HELP_PHONE`  | Teléfono del botón de ayuda (default 105, PNP).                             |
 
 ## Comandos
 

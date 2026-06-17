@@ -35,7 +35,10 @@ class CapturingPublisher implements EphemeralEventPublisher {
     envelope: EventEnvelope<EventPayload<T>>,
     key: string,
   ): Promise<void> {
-    this.published.push({ topicKey: key, envelope: envelope as unknown as PublishedEvent['envelope'] });
+    this.published.push({
+      topicKey: key,
+      envelope: envelope as unknown as PublishedEvent['envelope'],
+    });
   }
 }
 

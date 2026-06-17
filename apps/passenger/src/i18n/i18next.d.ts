@@ -1,5 +1,5 @@
 import 'react-i18next';
-import type { defaultNS, resources } from './resources';
+import type {defaultNS, resources} from './resources';
 
 /**
  * Tipado de las claves de traducción: `t('screens.home')` queda autocompletado y

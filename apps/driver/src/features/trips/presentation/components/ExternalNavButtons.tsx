@@ -1,8 +1,8 @@
-import React, {useCallback} from 'react';
-import {Linking, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Button} from '@veo/ui-kit';
-import type {LatLng} from '../../../../shared/utils/polyline';
+import React, { useCallback } from 'react';
+import { Linking, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Button } from '@veo/ui-kit';
+import type { LatLng } from '../../../../shared/utils/polyline';
 
 export interface ExternalNavButtonsProps {
   /** Destino al que abrir la navegación externa (último punto de la geometría de ruta). */
@@ -10,12 +10,12 @@ export interface ExternalNavButtonsProps {
 }
 
 /** Deep link de Waze para navegar a una coordenada. */
-export function wazeUrl({latitude, longitude}: LatLng): string {
+export function wazeUrl({ latitude, longitude }: LatLng): string {
   return `waze://?ll=${latitude},${longitude}&navigate=yes`;
 }
 
 /** URL universal de Google Maps Directions hacia una coordenada (abre app o web). */
-export function googleMapsUrl({latitude, longitude}: LatLng): string {
+export function googleMapsUrl({ latitude, longitude }: LatLng): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
 }
 
@@ -25,8 +25,10 @@ export function googleMapsUrl({latitude, longitude}: LatLng): string {
  * Waze intenta el esquema nativo y, si no está instalado, cae a Google Maps (URL universal que el SO
  * resuelve a app o navegador). No se renderiza si aún no hay coordenada de destino.
  */
-export function ExternalNavButtons({destination}: ExternalNavButtonsProps): React.JSX.Element | null {
-  const {t} = useTranslation();
+export function ExternalNavButtons({
+  destination,
+}: ExternalNavButtonsProps): React.JSX.Element | null {
+  const { t } = useTranslation();
 
   const openWaze = useCallback(async () => {
     if (!destination) {
@@ -71,6 +73,6 @@ export function ExternalNavButtons({destination}: ExternalNavButtonsProps): Reac
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', gap: 12},
-  item: {flex: 1},
+  row: { flexDirection: 'row', gap: 12 },
+  item: { flex: 1 },
 });

@@ -77,17 +77,17 @@ CI de `veo-platform` publica via `changesets` cuando hay cambios en `packages/`.
 
 ## Consecuencias
 
-+ Velocidad de build mobile aumenta ~3x (no resuelve `node_modules` del backend)
-+ Devs backend no requieren Xcode/Android Studio en su máquina
-+ Auditoría de infra (KMS, IAM, RBAC) queda en repo aislado y trackeable
-+ Permisos GitHub granulares (mobile devs solo en sus repos)
-+ Cadencias independientes — un fix de seguridad en backend no espera al ciclo mobile
-+ Compatible con outsourcing parcial (un vendor mobile sin acceso al backend)
+- Velocidad de build mobile aumenta ~3x (no resuelve `node_modules` del backend)
+- Devs backend no requieren Xcode/Android Studio en su máquina
+- Auditoría de infra (KMS, IAM, RBAC) queda en repo aislado y trackeable
+- Permisos GitHub granulares (mobile devs solo en sus repos)
+- Cadencias independientes — un fix de seguridad en backend no espera al ciclo mobile
+- Compatible con outsourcing parcial (un vendor mobile sin acceso al backend)
 
-- Refactor de tipos requiere coordinar PRs cross-repo (1 PR a veo-platform + 2 PRs a apps móviles)
-- Devs full-stack clonan 4 repos en lugar de 1
-- Versionado de packages compartidos exige disciplina (changesets, semver)
-- CI cross-repo (tag update PR) requiere PAT con permisos cuidados
+* Refactor de tipos requiere coordinar PRs cross-repo (1 PR a veo-platform + 2 PRs a apps móviles)
+* Devs full-stack clonan 4 repos en lugar de 1
+* Versionado de packages compartidos exige disciplina (changesets, semver)
+* CI cross-repo (tag update PR) requiere PAT con permisos cuidados
 
 ## Migración
 

@@ -158,7 +158,9 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
   async listOpenBoards(nowMs: number): Promise<OfferBoard[]> {
     this.listOpenBoardsCalls += 1;
     // H8 — espeja `ZRANGEBYSCORE board:expiry (<now> +inf`: solo boards aún NO vencidos (score > now).
-    const ids = [...this.expiryZset.entries()].filter(([, score]) => score > nowMs).map(([id]) => id);
+    const ids = [...this.expiryZset.entries()]
+      .filter(([, score]) => score > nowMs)
+      .map(([id]) => id);
     return ids
       .map((id) => this.boards.get(id))
       .filter((b): b is OfferBoard => b?.status === 'OPEN')
@@ -223,7 +225,12 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
    * el reconciliador necesita para recuperar el precio (sin fabricarlo). Pasar `null` simula el caso #11
    * donde NO hay precio recuperable (o no pasar el sink → no se siembra fila).
    */
-  __crashedMatch(tripId: string, driverId: string, claimedAtMs = 0, agreedPriceCents: number | null = 700): void {
+  __crashedMatch(
+    tripId: string,
+    driverId: string,
+    claimedAtMs = 0,
+    agreedPriceCents: number | null = 700,
+  ): void {
     const b = this.boards.get(tripId);
     if (!b) return;
     b.status = 'CLOSED_MATCHED';
@@ -507,7 +514,12 @@ async function ctx(eligible = true): Promise<Ctx> {
   return { svc, store, hotIndex, outbox, delivery, gate, maps };
 }
 
-async function openBoard(c: Ctx, windowSec = 60, bidCents = 700, negotiationSeq = 1): Promise<string> {
+async function openBoard(
+  c: Ctx,
+  windowSec = 60,
+  bidCents = 700,
+  negotiationSeq = 1,
+): Promise<string> {
   const tripId = 'trip-1';
   await c.svc.openBoard({
     tripId,
@@ -587,7 +599,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     await c.hotIndex.seed('d1', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
     const tripId = await openBoard(c, 60, 700);
 
-    const offer = await c.svc.submitOffer({ driverId: 'd1', tripId, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    const offer = await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
     expect(offer.status).toBe('PENDING');
     expect(c.outbox.byType('dispatch.offer_made')).toHaveLength(1);
   });
@@ -611,7 +628,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     const tripId = await openBoard(c, 60, 700);
     let caught: unknown;
     try {
-      await c.svc.submitOffer({ driverId: 'd1', tripId, kind: 'COUNTER', priceCents: 9_999_999_999 });
+      await c.svc.submitOffer({
+        driverId: 'd1',
+        tripId,
+        kind: 'COUNTER',
+        priceCents: 9_999_999_999,
+      });
     } catch (e) {
       caught = e;
     }
@@ -671,7 +693,8 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1);
     // H13 — el offer_accepted lleva ESTAMPADO el negotiationSeq del board (ciclo 1 de openBoard).
     expect(
-      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number }).negotiationSeq,
+      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number })
+        .negotiationSeq,
     ).toBe(1);
   });
 
@@ -695,7 +718,8 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // El offer_accepted del re-match lleva el seq=2 (no el 1 del ciclo viejo): trip lo usa para descartar
     // un offer_accepted STALE del ciclo 1 que se redelivere tarde.
     expect(
-      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number }).negotiationSeq,
+      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number })
+        .negotiationSeq,
     ).toBe(2);
   });
 
@@ -736,7 +760,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(c.store.setOfferStatusCalls).toBe(0);
     const offers = await c.store.listOffers(tripId);
     expect(offers.every((o) => o.status === 'LAPSED')).toBe(true);
-    expect((c.outbox.byType('dispatch.no_offers')[0]?.payload as { reason: string }).reason).toBe('all_lapsed');
+    expect((c.outbox.byType('dispatch.no_offers')[0]?.payload as { reason: string }).reason).toBe(
+      'all_lapsed',
+    );
   });
 
   it('acceptOffer es idempotente (doble-tap del pasajero → no re-emite)', async () => {
@@ -764,7 +790,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     }
     // Conflicto con código distinguible para la UI.
     expect(isDomainError(caught) && caught.httpStatus === 409).toBe(true);
-    expect((caught as { details?: { reason?: string } }).details?.reason).toBe('driver_unavailable');
+    expect((caught as { details?: { reason?: string } }).details?.reason).toBe(
+      'driver_unavailable',
+    );
     // El board NO se reclamó: sigue OPEN para que el pasajero elija otra oferta.
     expect((await c.store.getBoard(tripId))?.status).toBe('OPEN');
     // La oferta rancia queda STALE.
@@ -971,14 +999,22 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // Un board que YA venció (windowSec=1) y otro que sigue vigente (windowSec=600).
     const dueTrip = 'trip-1';
     await c.svc.openBoard({
-      tripId: dueTrip, passengerId: PASSENGER, bidCents: 700,
-      vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 1,
+      tripId: dueTrip,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 1,
       negotiationSeq: 1,
     });
     const liveTrip = 'trip-live';
     await c.svc.openBoard({
-      tripId: liveTrip, passengerId: PASSENGER, bidCents: 700,
-      vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 600,
+      tripId: liveTrip,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 600,
       negotiationSeq: 1,
     });
 
@@ -1022,8 +1058,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // 50 boards vigentes (no vencidos) + ninguno due.
     for (let i = 0; i < 50; i++) {
       await c.svc.openBoard({
-        tripId: `live-${i}`, passengerId: PASSENGER, bidCents: 700,
-        vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 600,
+        tripId: `live-${i}`,
+        passengerId: PASSENGER,
+        bidCents: 700,
+        vehicleType: VehicleType.CAR,
+        origin: ORIGIN,
+        windowSec: 600,
         negotiationSeq: 1,
       });
     }
@@ -1225,7 +1265,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(visible.map((o) => o.driverId)).toEqual(['d1']);
     expect(visible.every((o) => o.status === 'PENDING')).toBe(true);
     // El store interno SÍ sigue viendo todas (lo usan accept/sweep para transicionar estados).
-    expect((await c.store.listOffers(tripId))).toHaveLength(3);
+    expect(await c.store.listOffers(tripId)).toHaveLength(3);
   });
 
   it('FIX contrato · getOffersView OPEN: status OPEN + expiresAt + SOLO ofertas PENDING', async () => {
@@ -1346,8 +1386,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     await c.hotIndex.seed('d1', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
     // Board lejano (Madrid): su originCell NO cae en el k-ring de Lima → SUNION no lo incluye.
     await c.svc.openBoard({
-      tripId: 'trip-far', passengerId: PASSENGER, bidCents: 800,
-      vehicleType: VehicleType.CAR, origin: { lat: 40.4168, lon: -3.7038 }, windowSec: 60,
+      tripId: 'trip-far',
+      passengerId: PASSENGER,
+      bidCents: 800,
+      vehicleType: VehicleType.CAR,
+      origin: { lat: 40.4168, lon: -3.7038 },
+      windowSec: 60,
       negotiationSeq: 1,
     });
     // Board cercano + mismo vehículo: SÍ aparece.
@@ -1366,20 +1410,33 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // 1) ACEPTACIÓN (claim OPEN→CLOSED_MATCHED) saca el board del índice de celda.
     const claimTrip = 'trip-claim';
     await c.svc.openBoard({
-      tripId: claimTrip, passengerId: PASSENGER, bidCents: 700,
-      vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 60,
+      tripId: claimTrip,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
       negotiationSeq: 1,
     });
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).toContain(claimTrip);
-    await c.svc.submitOffer({ driverId: 'd1', tripId: claimTrip, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId: claimTrip,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
     await c.svc.acceptOffer(claimTrip, 'd1');
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).not.toContain(claimTrip);
 
     // 2) EXPIRACIÓN (sweep OPEN→EXPIRED) saca el board del índice de celda.
     const expTrip = 'trip-exp';
     await c.svc.openBoard({
-      tripId: expTrip, passengerId: PASSENGER, bidCents: 700,
-      vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 1,
+      tripId: expTrip,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 1,
       negotiationSeq: 1,
     });
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).toContain(expTrip);
@@ -1389,8 +1446,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // 3) CANCELACIÓN (setBoardStatus OPEN→CANCELLED) saca el board del índice de celda.
     const cancelTrip = 'trip-cancel';
     await c.svc.openBoard({
-      tripId: cancelTrip, passengerId: PASSENGER, bidCents: 700,
-      vehicleType: VehicleType.CAR, origin: ORIGIN, windowSec: 60,
+      tripId: cancelTrip,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
       negotiationSeq: 1,
     });
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).toContain(cancelTrip);
@@ -1450,9 +1511,7 @@ describe('OfferBoardService — concurrencia del board (H1, CAS atómico)', () =
     ]);
 
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected',
-    );
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
     // Ganador único: una resuelve, la otra rechaza con ConflictError (409).
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
@@ -1465,12 +1524,13 @@ describe('OfferBoardService — concurrencia del board (H1, CAS atómico)', () =
     // El board quedó CLOSED_MATCHED (no doble transición).
     expect((await c.store.getBoard(tripId))?.status).toBe('CLOSED_MATCHED');
     // El conductor ganador es el del match emitido (consistencia accepted/match).
-    const matchDriver = (c.outbox.byType('dispatch.match_found')[0]?.payload as { driverId: string })
-      .driverId;
+    const matchDriver = (
+      c.outbox.byType('dispatch.match_found')[0]?.payload as { driverId: string }
+    ).driverId;
     expect(['d1', 'd2']).toContain(matchDriver);
-    expect((c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { driverId: string }).driverId).toBe(
-      matchDriver,
-    );
+    expect(
+      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { driverId: string }).driverId,
+    ).toBe(matchDriver);
   });
 
   it('acceptOffer vs expireIfOpen concurrentes → board CLOSED_MATCHED XOR EXPIRED, nunca ambos', async () => {
@@ -1594,7 +1654,8 @@ describe('OfferBoardService — N5: revert compensatorio + reconciliador del mat
     ).toBe(700);
     // H13 — el re-emit del reconciliador estampa el MISMO seq del ciclo del board (1, de openBoard).
     expect(
-      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number }).negotiationSeq,
+      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { negotiationSeq: number })
+        .negotiationSeq,
     ).toBe(1);
 
     // Segunda corrida del reconciliador: ya marcado → no re-emite (idempotente).
@@ -1629,7 +1690,9 @@ describe('OfferBoardService — N5: revert compensatorio + reconciliador del mat
     // cutoff = now - grace: el match con score=now NO entra (es reciente).
     expect(await c.store.matchedUnemittedBoards(now - 5_000)).toHaveLength(0);
     // cutoff = now + 6s: el match con score=now SÍ entra (ya es viejo).
-    expect((await c.store.matchedUnemittedBoards(now + 1_000)).map((b) => b.tripId)).toEqual([tripId]);
+    expect((await c.store.matchedUnemittedBoards(now + 1_000)).map((b) => b.tripId)).toEqual([
+      tripId,
+    ]);
   });
 
   it('reconciliador: usa dedupKey ESTABLE → un re-emit dedupea con el match original (idempotencia downstream)', async () => {

@@ -24,7 +24,7 @@ function matchReply(): MatchReply {
     outcome: 'OFFERED',
     offeredAt: '2026-01-01T00:00:00.000Z',
     respondedAt: '',
-  } as unknown as MatchReply;
+  };
 }
 
 function makeService(opts: { driverFound?: boolean; match?: MatchReply } = {}) {
@@ -53,7 +53,12 @@ describe('DispatchService (driver-bff) — getOffer/accept/reject derivan driver
     const { service, grpc } = makeService();
     await service.getOffer(MATCH, identity);
     // 1) derivó el driverId vía GetDriverByUser (nunca del cliente).
-    expect(grpc.call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+    expect(grpc.call).toHaveBeenCalledWith(
+      'identity',
+      'GetDriverByUser',
+      { id: 'usr-1' },
+      identity,
+    );
     // 2) el GetMatch viaja con la identidad que YA lleva driverId firmado.
     expect(grpc.call).toHaveBeenCalledWith('dispatch', 'GetMatch', { matchId: MATCH }, signed);
   });
@@ -61,7 +66,12 @@ describe('DispatchService (driver-bff) — getOffer/accept/reject derivan driver
   it('accept propaga la identidad FIRMADA con driverId al endpoint interno', async () => {
     const { service, grpc, post } = makeService();
     await service.accept(MATCH, identity);
-    expect(grpc.call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+    expect(grpc.call).toHaveBeenCalledWith(
+      'identity',
+      'GetDriverByUser',
+      { id: 'usr-1' },
+      identity,
+    );
     expect(post).toHaveBeenCalledWith(`/dispatch/offers/${MATCH}/accept`, {
       identity: signed,
       body: {},

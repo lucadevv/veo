@@ -108,7 +108,8 @@ export class EarningsService {
       { id: identity.userId },
       identity,
     );
-    if (!driver.found) throw new NotFoundError('No existe un perfil de conductor para este usuario');
+    if (!driver.found)
+      throw new NotFoundError('No existe un perfil de conductor para este usuario');
     return { identity: { ...identity, driverId: driver.id }, driverId: driver.id };
   }
 }

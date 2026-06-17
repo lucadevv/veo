@@ -54,7 +54,9 @@ export const envSchema = z.object({
   /// consola de Firebase. La app registra el token FCM (RNFirebase getToken) para ambas plataformas.
   /// 'apns': iOS viaja DIRECTO a Apple por el cliente APNs HTTP/2 soberano (requiere que la app registre
   /// el token APNs crudo vía getAPNSToken). Conmutable sin tocar código: cambia este flag.
-  PUSH_IOS_TRANSPORT: z.enum([PushTransportKey.Fcm, PushTransportKey.Apns]).default(PushTransportKey.Fcm),
+  PUSH_IOS_TRANSPORT: z
+    .enum([PushTransportKey.Fcm, PushTransportKey.Apns])
+    .default(PushTransportKey.Fcm),
 
   // ---- PUSH: APNs HTTP/2 (token JWT ES256 firmado con node:crypto) ----
   APNS_KEY_P8: z.string().optional(), // clave .p8 (PEM EC P-256)

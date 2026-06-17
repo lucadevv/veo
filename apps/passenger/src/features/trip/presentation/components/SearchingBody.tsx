@@ -1,12 +1,12 @@
-import type { PlaceSuggestion } from '@veo/api-client';
-import { Banner, ListItem, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import type {PlaceSuggestion} from '@veo/api-client';
+import {Banner, ListItem, Skeleton, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import type { SavedPlace } from '../../../places/domain/entities';
-import { SavedPlacesShortcuts } from '../../../places/presentation';
-import { IconPin, IconTarget } from './icons';
-import { EnterView } from './motion';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import type {SavedPlace} from '../../../places/domain/entities';
+import {SavedPlacesShortcuts} from '../../../places/presentation';
+import {IconPin, IconTarget} from './icons';
+import {EnterView} from './motion';
 
 export interface SearchingBodyProps {
   showCurrentLocation: boolean;
@@ -37,7 +37,7 @@ export function SearchingBody({
   onSelectSaved,
 }: SearchingBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   return (
     <>
@@ -68,7 +68,7 @@ export function SearchingBody({
         : null}
 
       {suggestions.length === 0 && loading ? (
-        <View style={{ gap: theme.spacing.md, paddingTop: theme.spacing.md }}>
+        <View style={{gap: theme.spacing.md, paddingTop: theme.spacing.md}}>
           <Skeleton variant="text" height={20} />
           <Skeleton variant="text" height={20} />
           <Skeleton variant="text" height={20} />
@@ -76,7 +76,11 @@ export function SearchingBody({
       ) : null}
 
       {suggestions.length === 0 && !loading ? (
-        <Text variant="footnote" color="inkSubtle" align="center" style={{ paddingTop: theme.spacing.lg }}>
+        <Text
+          variant="footnote"
+          color="inkSubtle"
+          align="center"
+          style={{paddingTop: theme.spacing.lg}}>
           {active ? t('maps.noResults') : t('maps.typeMore')}
         </Text>
       ) : null}

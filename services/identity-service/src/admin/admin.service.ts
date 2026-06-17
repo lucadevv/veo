@@ -183,7 +183,12 @@ export class AdminService {
       mfaAt: Math.floor(Date.now() / 1000),
       email, // operador staff: email legible para watermark/audit (BR-S02)
     });
-    const refreshToken = await this.jwt.signRefreshToken({ sub: id, sid: sessionId, jti: newJti, typ: 'admin' });
+    const refreshToken = await this.jwt.signRefreshToken({
+      sub: id,
+      sid: sessionId,
+      jti: newJti,
+      typ: 'admin',
+    });
     return { accessToken, refreshToken, admin: { id, email, roles } };
   }
 }

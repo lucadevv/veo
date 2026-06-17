@@ -29,7 +29,7 @@ const PERMANENT_PRISMA_CODES = new Set<string>([
 
 function extractPrismaCode(err: unknown): string | undefined {
   if (err && typeof err === 'object' && 'code' in err) {
-    const code = (err).code;
+    const code = err.code;
     if (typeof code === 'string' && /^P\d{4}$/.test(code)) return code;
   }
   return undefined;

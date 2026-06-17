@@ -23,7 +23,10 @@ export class RatingsController {
 
   @Post()
   @ApiOperation({ summary: 'Crear calificación post-viaje (1-5)' })
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateRatingDto): Promise<RatingView> {
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateRatingDto,
+  ): Promise<RatingView> {
     return this.ratings.create(user, dto);
   }
 

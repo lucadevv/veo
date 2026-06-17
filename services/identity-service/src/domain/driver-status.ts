@@ -32,16 +32,8 @@ export const DRIVER_STATUS_TRANSITIONS: Readonly<Record<DriverStatus, readonly D
     DriverStatus.OFFLINE,
     DriverStatus.SUSPENDED,
   ],
-  [DriverStatus.ON_TRIP]: [
-    DriverStatus.AVAILABLE,
-    DriverStatus.OFFLINE,
-    DriverStatus.SUSPENDED,
-  ],
-  [DriverStatus.ON_BREAK]: [
-    DriverStatus.AVAILABLE,
-    DriverStatus.OFFLINE,
-    DriverStatus.SUSPENDED,
-  ],
+  [DriverStatus.ON_TRIP]: [DriverStatus.AVAILABLE, DriverStatus.OFFLINE, DriverStatus.SUSPENDED],
+  [DriverStatus.ON_BREAK]: [DriverStatus.AVAILABLE, DriverStatus.OFFLINE, DriverStatus.SUSPENDED],
   [DriverStatus.SUSPENDED]: [DriverStatus.OFFLINE],
 };
 

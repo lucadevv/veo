@@ -10,10 +10,9 @@ export { familyVideoGrant, type FamilyVideoGrant };
 export async function fetchVideoGrant(token: string): Promise<FamilyVideoGrant | null> {
   const client = new HttpClient({ baseUrl: serverEnv.bffUrl, credentials: 'omit', retries: 0 });
   try {
-    return await client.get<FamilyVideoGrant>(
-      `/public/share/${encodeURIComponent(token)}/video`,
-      { schema: familyVideoGrant },
-    );
+    return await client.get<FamilyVideoGrant>(`/public/share/${encodeURIComponent(token)}/video`, {
+      schema: familyVideoGrant,
+    });
   } catch (error) {
     if (error instanceof ApiError) return null;
     return null;

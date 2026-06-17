@@ -35,7 +35,9 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
     // Regla FIXED Lun-Dom 07:00–10:00 Lima. 2026-06-04T13:00Z = 08:00 Lima jueves → matchea.
     const schedule: PricingModeSchedule = {
       defaultMode: PricingMode.PUJA,
-      rules: [{ dayMask: ALL_DAYS, startMinute: 7 * 60, endMinute: 10 * 60, mode: PricingMode.FIXED }],
+      rules: [
+        { dayMask: ALL_DAYS, startMinute: 7 * 60, endMinute: 10 * 60, mode: PricingMode.FIXED },
+      ],
     };
     const mode = resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'));
     expect(mode).toBe(PricingMode.FIXED);
@@ -47,19 +49,29 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
       rules: [{ dayMask: ALL_DAYS, startMinute: 420, endMinute: 600, mode: PricingMode.FIXED }],
     };
     // start inclusive (07:00 = 12:00 UTC), end exclusive (10:00 = 15:00 UTC).
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T12:00:00.000Z'))).toBe(PricingMode.FIXED);
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(PricingMode.FIXED);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T12:00:00.000Z'))).toBe(
+      PricingMode.FIXED,
+    );
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(
+      PricingMode.FIXED,
+    );
     // 10:00 Lima (15:00 UTC) es EXCLUSIVO → no matchea → defaultMode PUJA.
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T15:00:00.000Z'))).toBe(PricingMode.PUJA);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T15:00:00.000Z'))).toBe(
+      PricingMode.PUJA,
+    );
   });
 
   it('ninguna regla matchea (fuera de hora) → defaultMode', () => {
     const schedule: PricingModeSchedule = {
       defaultMode: PricingMode.PUJA,
-      rules: [{ dayMask: ALL_DAYS, startMinute: 7 * 60, endMinute: 10 * 60, mode: PricingMode.FIXED }],
+      rules: [
+        { dayMask: ALL_DAYS, startMinute: 7 * 60, endMinute: 10 * 60, mode: PricingMode.FIXED },
+      ],
     };
     // 18:00 UTC = 13:00 Lima → fuera de 07:00–10:00 → default PUJA.
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T18:00:00.000Z'))).toBe(PricingMode.PUJA);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T18:00:00.000Z'))).toBe(
+      PricingMode.PUJA,
+    );
   });
 
   it('ninguna regla matchea (día equivocado) → defaultMode', () => {
@@ -68,12 +80,16 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: MON | TUE, startMinute: 0, endMinute: 1439, mode: PricingMode.FIXED }],
     };
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(PricingMode.PUJA);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(
+      PricingMode.PUJA,
+    );
   });
 
   it('schedule vacío → defaultMode', () => {
     const schedule: PricingModeSchedule = { defaultMode: PricingMode.FIXED, rules: [] };
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(PricingMode.FIXED);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(
+      PricingMode.FIXED,
+    );
   });
 
   it('DEFAULT_SCHEDULE (sin schedule cargado) → FIXED (B5: default de sistema = precio fijo)', () => {
@@ -90,7 +106,9 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
         { dayMask: ALL_DAYS, startMinute: 0, endMinute: 1439, mode: PricingMode.PUJA },
       ],
     };
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(PricingMode.FIXED);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T13:00:00.000Z'))).toBe(
+      PricingMode.FIXED,
+    );
   });
 
   it('rango overnight (end <= start) NO matchea (MVP same-day) → defaultMode', () => {
@@ -99,7 +117,9 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
       rules: [{ dayMask: ALL_DAYS, startMinute: 1300, endMinute: 200, mode: PricingMode.FIXED }],
     };
     // 13:00 Lima (18:00 UTC): aunque > 1300, el rango invertido se ignora → default PUJA.
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T18:00:00.000Z'))).toBe(PricingMode.PUJA);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T18:00:00.000Z'))).toBe(
+      PricingMode.PUJA,
+    );
   });
 
   it('matchea por día específico (miércoles) en hora local de Lima', () => {
@@ -108,7 +128,9 @@ describe('resolveMode · ADR 011 §1.1 (decisión pura)', () => {
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: WED, startMinute: 20 * 60, endMinute: 22 * 60, mode: PricingMode.FIXED }],
     };
-    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T02:00:00.000Z'))).toBe(PricingMode.FIXED);
+    expect(resolveMode(schedule, 'GLOBAL', new Date('2026-06-04T02:00:00.000Z'))).toBe(
+      PricingMode.FIXED,
+    );
   });
 });
 

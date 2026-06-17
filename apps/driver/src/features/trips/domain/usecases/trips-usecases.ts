@@ -1,7 +1,7 @@
-import type {GeoPoint} from '@veo/api-client';
-import type {TripsRepository} from '../repositories/trips-repository';
-import type {CompleteTripInput, Trip, TripOffer, TripRouteView, TripState} from '../entities';
-import {parseTripStatus} from '../value-objects/trip-status';
+import type { GeoPoint } from '@veo/api-client';
+import type { TripsRepository } from '../repositories/trips-repository';
+import type { CompleteTripInput, Trip, TripOffer, TripRouteView, TripState } from '../entities';
+import { parseTripStatus } from '../value-objects/trip-status';
 
 /** Error de validación del código del modo niño (4 a 6 dígitos). */
 export class InvalidChildCodeError extends Error {
@@ -73,14 +73,14 @@ export class GetTripRouteUseCase {
 export class AcceptTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, etaSeconds?: number): Promise<Trip> {
-    return this.trips.accept(tripId, {etaSeconds});
+    return this.trips.accept(tripId, { etaSeconds });
   }
 }
 
 /** Espera entre reintentos del poll de estado (inyectable para tests). */
 export type SleepFn = (ms: number) => Promise<void>;
 
-const defaultSleep: SleepFn = ms => new Promise(resolve => setTimeout(resolve, ms));
+const defaultSleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface EnsureTripAcceptedOptions {
   /** ETA al recojo en segundos (si se conoce); se reenvía al endpoint de accept. */
@@ -115,7 +115,7 @@ export class EnsureTripAcceptedUseCase {
       const status = parseTripStatus(state.status);
 
       if (status === 'ASSIGNED') {
-        return this.trips.accept(tripId, {etaSeconds: options.etaSeconds});
+        return this.trips.accept(tripId, { etaSeconds: options.etaSeconds });
       }
 
       // Aún sin asignar (latencia dispatch→trip): espera y reintenta.
@@ -139,7 +139,7 @@ export class EnsureTripAcceptedUseCase {
 export class ArrivingTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, etaSeconds?: number): Promise<Trip> {
-    return this.trips.arriving(tripId, {etaSeconds});
+    return this.trips.arriving(tripId, { etaSeconds });
   }
 }
 
@@ -161,7 +161,7 @@ export class StartTripUseCase {
     if (childCode !== undefined && !CHILD_CODE.test(childCode)) {
       throw new InvalidChildCodeError();
     }
-    return this.trips.start(tripId, {childCode});
+    return this.trips.start(tripId, { childCode });
   }
 }
 
@@ -177,6 +177,6 @@ export class CompleteTripUseCase {
 export class CancelTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, reason?: string): Promise<Trip> {
-    return this.trips.cancel(tripId, {reason});
+    return this.trips.cancel(tripId, { reason });
   }
 }

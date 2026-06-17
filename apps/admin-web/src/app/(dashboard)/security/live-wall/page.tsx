@@ -28,7 +28,10 @@ export default function LiveWallPage() {
   if (!can(user, 'live:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Cámaras en vivo" breadcrumbs={[{ label: 'Seguridad' }, { label: 'Cámaras en vivo' }]} />
+        <PageHeader
+          title="Cámaras en vivo"
+          breadcrumbs={[{ label: 'Seguridad' }, { label: 'Cámaras en vivo' }]}
+        />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}

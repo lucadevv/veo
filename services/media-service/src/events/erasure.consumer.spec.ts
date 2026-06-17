@@ -83,10 +83,10 @@ function tripErasedEnvelope(payload: unknown, eventId = 'evt-1'): EventEnvelope<
   };
 }
 
-type ErasureConsumerInternals = {
+interface ErasureConsumerInternals {
   onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
   onTripErased(e: EventEnvelope<unknown>): Promise<void>;
-};
+}
 
 function makeConsumer(avatars: AvatarService, recording: RecordingService) {
   const consumer = new ErasureConsumer(avatars, recording, makeRedis() as never, config);
@@ -199,7 +199,11 @@ describe('ErasureConsumer · trip.pii_erased (derecho al olvido del video)', () 
     const { invokeTripErased: invoke } = setup(recording);
 
     await invoke(
-      tripErasedEnvelope({ tripId: 'trip-1', passengerId: 'pax-1', at: '2026-06-04T00:00:00.000Z' }),
+      tripErasedEnvelope({
+        tripId: 'trip-1',
+        passengerId: 'pax-1',
+        at: '2026-06-04T00:00:00.000Z',
+      }),
     );
 
     expect(erased).toEqual(['trip-1']);

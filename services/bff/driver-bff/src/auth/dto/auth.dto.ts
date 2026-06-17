@@ -8,7 +8,10 @@ export interface AuthTokens {
 }
 
 export class RequestOtpDto {
-  @ApiProperty({ example: '+51987654321', description: 'Teléfono del conductor en formato internacional' })
+  @ApiProperty({
+    example: '+51987654321',
+    description: 'Teléfono del conductor en formato internacional',
+  })
   @IsString()
   @Matches(/^\+?\d{8,15}$/, { message: 'Teléfono inválido' })
   phone!: string;

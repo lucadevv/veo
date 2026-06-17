@@ -1,6 +1,6 @@
-import type {AuthRepository} from '../repositories/auth-repository';
-import type {OtpRequestOutcome} from '../entities';
-import {isValidPeruPhone, normalizePeruPhone} from '../value-objects/phone';
+import type { AuthRepository } from '../repositories/auth-repository';
+import type { OtpRequestOutcome } from '../entities';
+import { isValidPeruPhone, normalizePeruPhone } from '../value-objects/phone';
 
 /** Error de validación de entrada del flujo OTP. */
 export class InvalidPhoneError extends Error {
@@ -22,6 +22,6 @@ export class RequestOtpUseCase {
       throw new InvalidPhoneError();
     }
     const phone = normalizePeruPhone(rawPhone);
-    return this.auth.requestOtp({phone, type: 'DRIVER'});
+    return this.auth.requestOtp({ phone, type: 'DRIVER' });
   }
 }

@@ -1,4 +1,4 @@
-import type { GeoPoint } from '@veo/api-client';
+import type {GeoPoint} from '@veo/api-client';
 
 /**
  * Estado del permiso de ubicación de la app, en términos de DOMINIO (no del SDK):
@@ -7,7 +7,11 @@ import type { GeoPoint } from '@veo/api-client';
  *  - `undetermined` → aún no se pidió (se puede disparar el prompt del SO con `requestPermission`).
  *  - `restricted`   → bloqueado por control parental/MDM (iOS); el usuario no puede concederlo.
  */
-export type LocationPermission = 'granted' | 'denied' | 'undetermined' | 'restricted';
+export type LocationPermission =
+  | 'granted'
+  | 'denied'
+  | 'undetermined'
+  | 'restricted';
 
 /**
  * Disponibilidad de ubicación = permiso de la app ∩ servicios del dispositivo. Son dos ejes
@@ -45,5 +49,7 @@ export interface LocationProvider {
    * Suscribe a cambios de disponibilidad (el usuario prende/apaga el GPS, concede/revoca el permiso
    * desde Ajustes, etc.). Es event-driven: el SO avisa, no hace falta poll. Devuelve la baja.
    */
-  onAvailabilityChange(listener: (availability: LocationAvailability) => void): () => void;
+  onAvailabilityChange(
+    listener: (availability: LocationAvailability) => void,
+  ): () => void;
 }

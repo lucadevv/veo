@@ -61,7 +61,11 @@ export function DriverCard({
           <View
             style={[
               styles.plate,
-              { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border, borderRadius: theme.radii.sm },
+              {
+                backgroundColor: theme.colors.surfaceElevated,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.sm,
+              },
             ]}
           >
             <Text variant="label" color="ink" tabular>
@@ -113,6 +117,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
   body: { flex: 1, gap: 2 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  plate: { alignSelf: 'flex-start', marginTop: 4, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
+  plate: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
   eta: { alignItems: 'flex-end', justifyContent: 'center' },
 });

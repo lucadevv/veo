@@ -1,5 +1,5 @@
-import { ApiError } from '@veo/api-client';
-import { classifyOAuthError } from '../src/features/auth/presentation/hooks/useOAuthFlow';
+import {ApiError} from '@veo/api-client';
+import {classifyOAuthError} from '../src/features/auth/presentation/hooks/useOAuthFlow';
 
 /**
  * El clasificador mapea el error crudo del login social al `OAuthErrorKind` que la UI usa para el
@@ -12,23 +12,27 @@ describe('classifyOAuthError', () => {
   });
 
   it('backend 401 → invalidAccount', () => {
-    expect(classifyOAuthError(new ApiError(401, 'UNAUTHORIZED', 'no autorizado'))).toBe(
-      'invalidAccount',
-    );
+    expect(
+      classifyOAuthError(new ApiError(401, 'UNAUTHORIZED', 'no autorizado')),
+    ).toBe('invalidAccount');
   });
 
   it('backend 403 → invalidAccount', () => {
-    expect(classifyOAuthError(new ApiError(403, 'FORBIDDEN', 'prohibido'))).toBe(
-      'invalidAccount',
-    );
+    expect(
+      classifyOAuthError(new ApiError(403, 'FORBIDDEN', 'prohibido')),
+    ).toBe('invalidAccount');
   });
 
   it('sin conexión (status 0) → network', () => {
-    expect(classifyOAuthError(new ApiError(0, 'NETWORK', 'sin red'))).toBe('network');
+    expect(classifyOAuthError(new ApiError(0, 'NETWORK', 'sin red'))).toBe(
+      'network',
+    );
   });
 
   it('error de servidor (5xx) → network', () => {
-    expect(classifyOAuthError(new ApiError(503, 'UNAVAILABLE', 'caído'))).toBe('network');
+    expect(classifyOAuthError(new ApiError(503, 'UNAVAILABLE', 'caído'))).toBe(
+      'network',
+    );
   });
 
   it('error genérico → unknown', () => {

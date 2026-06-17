@@ -1,8 +1,8 @@
-import type { TripHistoryItem, TripStatus } from '@veo/api-client';
-import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
-import React, { useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
+import type {TripHistoryItem, TripStatus} from '@veo/api-client';
+import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
+import React, {useMemo} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
 import {
   calendarDaysAgo,
   formatDistance,
@@ -11,9 +11,9 @@ import {
   formatShortDate,
   formatTimeOfDay,
 } from '../../../../shared/utils/format';
-import { offeringGlyph } from '../../../../shared/presentation/components/offeringGlyphs';
-import { Animated, usePressScale } from './motion';
-import { TripRatingTag } from './TripRatingTag';
+import {offeringGlyph} from '../../../../shared/presentation/components/offeringGlyphs';
+import {Animated, usePressScale} from './motion';
+import {TripRatingTag} from './TripRatingTag';
 
 export interface TripHistoryRowProps {
   trip: TripHistoryItem;
@@ -28,7 +28,9 @@ export interface TripHistoryRowProps {
  * acento FINO, no un bloque. Los terminales felices (completado) usan el verde de marca; los no-felices
  * (cancelado/expirado/fallido) un tono de alarma sobrio; lo vivo, el accent.
  */
-const STATUS_DOT: Partial<Record<TripStatus, 'success' | 'danger' | 'warn' | 'accent' | 'brand'>> = {
+const STATUS_DOT: Partial<
+  Record<TripStatus, 'success' | 'danger' | 'warn' | 'accent' | 'brand'>
+> = {
   COMPLETED: 'success',
   CANCELLED: 'danger',
   FAILED: 'danger',
@@ -86,15 +88,16 @@ export function TripHistoryRow({
   onPress,
 }: TripHistoryRowProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale(0.985);
+  const {t} = useTranslation();
+  const {animatedStyle, onPressIn, onPressOut} = usePressScale(0.985);
 
   const status = normalizeStatus(trip.status);
   const dotTone = STATUS_DOT[status] ?? 'accent';
   const dotColor = theme.colors[dotTone];
   const isLive = LIVE_STATUSES.has(status);
   const isCompleted = status === 'COMPLETED';
-  const isCancelled = status === 'CANCELLED' || status === 'FAILED' || status === 'EXPIRED';
+  const isCancelled =
+    status === 'CANCELLED' || status === 'FAILED' || status === 'EXPIRED';
 
   const dayLabel = useMemo(() => {
     const days = calendarDaysAgo(trip.requestedAt);
@@ -106,7 +109,9 @@ export function TripHistoryRow({
   const time = formatTimeOfDay(trip.requestedAt);
   // Ícono del tier desde el registro de glyphs (ADR 013 §1.6): el historial no trae `icon`, así que
   // resuelve por clase de vehículo (mapeo exhaustivo, no ternario).
-  const { LineIcon: VehicleIcon } = offeringGlyph({ vehicleType: trip.vehicleType });
+  const {LineIcon: VehicleIcon} = offeringGlyph({
+    vehicleType: trip.vehicleType,
+  });
 
   // Resumen del trayecto SIN inventar direcciones: distancia + duración (lo que el item SÍ sabe).
   const distanceText = formatDistance(trip.distanceMeters);
@@ -139,8 +144,7 @@ export function TripHistoryRow({
             padding: theme.spacing.lg,
             ...theme.elevation.level1,
           },
-        ]}
-      >
+        ]}>
         {/* CABECERA FINA: estado (punto + micro-label trackeada) a la izquierda · vehículo a la derecha.
             El estado vive ACÁ como un detalle de autor, no como un chip suelto. */}
         <View style={styles.topLine}>
@@ -148,15 +152,21 @@ export function TripHistoryRow({
             <View
               style={[
                 styles.dot,
-                { backgroundColor: dotColor },
-                isLive ? { borderColor: hexAlpha(dotColor, 0.28) } : null,
+                {backgroundColor: dotColor},
+                isLive ? {borderColor: hexAlpha(dotColor, 0.28)} : null,
               ]}
             />
             <Text
               variant="caption"
-              style={[styles.statusLabel, { color: isCancelled ? theme.colors.inkMuted : theme.colors.inkSubtle }]}
-              numberOfLines={1}
-            >
+              style={[
+                styles.statusLabel,
+                {
+                  color: isCancelled
+                    ? theme.colors.inkMuted
+                    : theme.colors.inkSubtle,
+                },
+              ]}
+              numberOfLines={1}>
               {t(`tripStatus.${status}`)}
             </Text>
           </View>
@@ -178,14 +188,32 @@ export function TripHistoryRow({
           </View>
 
           <View style={styles.journey}>
-            <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <View style={[styles.railDotOrigin, { borderColor: theme.colors.brand }]} />
-              <View style={[styles.railLine, { backgroundColor: theme.colors.border }]} />
-              <View style={[styles.railDotDest, { backgroundColor: theme.colors.ink }]} />
+            <View
+              style={styles.rail}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants">
+              <View
+                style={[
+                  styles.railDotOrigin,
+                  {borderColor: theme.colors.brand},
+                ]}
+              />
+              <View
+                style={[
+                  styles.railLine,
+                  {backgroundColor: theme.colors.border},
+                ]}
+              />
+              <View
+                style={[
+                  styles.railDotDest,
+                  {backgroundColor: theme.colors.ink},
+                ]}
+              />
             </View>
             <View style={styles.journeyLabels}>
               <Text variant="subhead" color="inkMuted" numberOfLines={1}>
-                {t('history.departedAt', { time })}
+                {t('history.departedAt', {time})}
               </Text>
               <Text variant="bodyStrong" numberOfLines={1}>
                 {`${distanceText} · ${durationText}`}
@@ -195,9 +223,20 @@ export function TripHistoryRow({
         </View>
 
         {/* PIE: hairline + el MONTO con presencia (payoff) y, si corresponde, el sello de calificación. */}
-        <View style={[styles.footer, { borderTopColor: theme.colors.border, paddingTop: theme.spacing.md, marginTop: theme.spacing.md }]}>
+        <View
+          style={[
+            styles.footer,
+            {
+              borderTopColor: theme.colors.border,
+              paddingTop: theme.spacing.md,
+              marginTop: theme.spacing.md,
+            },
+          ]}>
           {isCompleted && trip.driverId ? (
-            <TripRatingTag stars={ratingStars ?? null} loading={ratingLoading} />
+            <TripRatingTag
+              stars={ratingStars ?? null}
+              loading={ratingLoading}
+            />
           ) : (
             <View />
           )}
@@ -219,22 +258,36 @@ export function TripHistoryRow({
 const RAIL_DOT = 10;
 
 const styles = StyleSheet.create({
-  card: { minHeight: 44, overflow: 'hidden' },
-  topLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  statusGroup: { flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 },
-  dot: { width: 8, height: 8, borderRadius: 4, borderWidth: 3 },
+  card: {minHeight: 44, overflow: 'hidden'},
+  topLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusGroup: {flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1},
+  dot: {width: 8, height: 8, borderRadius: 4, borderWidth: 3},
   // Estado como micro-label editorial: mayúsculas con tracking, no un chip.
-  statusLabel: { textTransform: 'uppercase', letterSpacing: 0.8, flexShrink: 1 },
-  vehicle: { flexDirection: 'row', alignItems: 'center' },
-  body: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 14 },
+  statusLabel: {textTransform: 'uppercase', letterSpacing: 0.8, flexShrink: 1},
+  vehicle: {flexDirection: 'row', alignItems: 'center'},
+  body: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    marginTop: 14,
+  },
   // "Lomo" temporal a la izquierda: ancho fijo para que los rieles de toda la lista queden alineados.
-  dateSpine: { width: 84, gap: 2 },
-  journey: { flex: 1, flexDirection: 'row', gap: 12 },
-  rail: { width: RAIL_DOT, alignItems: 'center', paddingTop: 5 },
-  railDotOrigin: { width: RAIL_DOT, height: RAIL_DOT, borderRadius: RAIL_DOT / 2, borderWidth: 2.5 },
-  railLine: { width: 2, flex: 1, marginVertical: 3, minHeight: 16 },
-  railDotDest: { width: RAIL_DOT, height: RAIL_DOT, borderRadius: 2 },
-  journeyLabels: { flex: 1, justifyContent: 'space-between', gap: 12 },
+  dateSpine: {width: 84, gap: 2},
+  journey: {flex: 1, flexDirection: 'row', gap: 12},
+  rail: {width: RAIL_DOT, alignItems: 'center', paddingTop: 5},
+  railDotOrigin: {
+    width: RAIL_DOT,
+    height: RAIL_DOT,
+    borderRadius: RAIL_DOT / 2,
+    borderWidth: 2.5,
+  },
+  railLine: {width: 2, flex: 1, marginVertical: 3, minHeight: 16},
+  railDotDest: {width: RAIL_DOT, height: RAIL_DOT, borderRadius: 2},
+  journeyLabels: {flex: 1, justifyContent: 'space-between', gap: 12},
   footer: {
     flexDirection: 'row',
     alignItems: 'center',

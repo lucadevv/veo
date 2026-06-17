@@ -3,7 +3,7 @@ import {
   NativeEventEmitter,
   NativeModules,
 } from 'react-native';
-import type { PanicTrigger } from '../domain/panicTrigger';
+import type {PanicTrigger} from '../domain/panicTrigger';
 
 /** Nombre del módulo nativo (Android: VolumePanicModule · iOS: VeoPanicVolume.swift). */
 const NATIVE_MODULE_NAME = 'VeoPanicVolume';
@@ -32,16 +32,20 @@ export class NativePanicTrigger implements PanicTrigger {
   private readonly emitter: NativeEventEmitter | null;
 
   constructor() {
-    const candidate = (NativeModules as Record<string, unknown>)[NATIVE_MODULE_NAME] as
-      | VeoPanicVolumeNativeModule
-      | undefined;
+    const candidate = (NativeModules as Record<string, unknown>)[
+      NATIVE_MODULE_NAME
+    ] as VeoPanicVolumeNativeModule | undefined;
     this.nativeModule = candidate ?? null;
-    this.emitter = this.nativeModule ? new NativeEventEmitter(NativeModules[NATIVE_MODULE_NAME]) : null;
+    this.emitter = this.nativeModule
+      ? new NativeEventEmitter(NativeModules[NATIVE_MODULE_NAME])
+      : null;
   }
 
   start(onTriggered: () => void): void {
     if (!this.nativeModule || !this.emitter) {
-      console.warn('[panic] módulo nativo de volumen no disponible; detección automática inactiva');
+      console.warn(
+        '[panic] módulo nativo de volumen no disponible; detección automática inactiva',
+      );
       return;
     }
     // Evita suscripciones duplicadas si se llama start dos veces.

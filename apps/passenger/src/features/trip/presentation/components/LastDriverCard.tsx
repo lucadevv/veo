@@ -1,9 +1,9 @@
-import { Avatar, Card, Text, useTheme } from '@veo/ui-kit';
+import {Avatar, Card, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import type { LastDriver } from '../hooks/useLastDriver';
-import { IconStarFilled } from './icons';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import type {LastDriver} from '../hooks/useLastDriver';
+import {IconStarFilled} from './icons';
 
 export interface LastDriverCardProps {
   driver: LastDriver;
@@ -21,16 +21,18 @@ const STAR_SCALE = 5;
  * esas filas no se pintan (no muestra placeholders falsos). El rating se redondea a la estrella entera
  * más cercana para la escala visual; la cifra exacta acompaña al lado.
  */
-export function LastDriverCard({ driver }: LastDriverCardProps): React.JSX.Element {
+export function LastDriverCard({
+  driver,
+}: LastDriverCardProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   const name = driver.name ?? t('home.lastDriverTitle');
   const filledStars = driver.rating != null ? Math.round(driver.rating) : 0;
 
   return (
     <Card variant="elevated" padding="lg" style={styles.card}>
-      <View style={[styles.row, { gap: theme.spacing.md }]}>
+      <View style={[styles.row, {gap: theme.spacing.md}]}>
         <Avatar name={driver.name ?? undefined} size="lg" />
         <View style={styles.identity}>
           <Text variant="headline" color="ink" numberOfLines={1}>
@@ -43,13 +45,17 @@ export function LastDriverCard({ driver }: LastDriverCardProps): React.JSX.Eleme
           ) : null}
         </View>
         {driver.rating != null ? (
-          <View style={[styles.rating, { gap: theme.spacing.xs }]}>
+          <View style={[styles.rating, {gap: theme.spacing.xs}]}>
             <View style={styles.stars}>
-              {Array.from({ length: STAR_SCALE }).map((_, index) => (
+              {Array.from({length: STAR_SCALE}).map((_, index) => (
                 <IconStarFilled
                   key={index}
                   size={14}
-                  color={index < filledStars ? theme.colors.warn : theme.colors.borderStrong}
+                  color={
+                    index < filledStars
+                      ? theme.colors.warn
+                      : theme.colors.borderStrong
+                  }
                 />
               ))}
             </View>
@@ -64,9 +70,9 @@ export function LastDriverCard({ driver }: LastDriverCardProps): React.JSX.Eleme
 }
 
 const styles = StyleSheet.create({
-  card: { alignSelf: 'stretch' },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  identity: { flex: 1, justifyContent: 'center' },
-  rating: { alignItems: 'flex-end' },
-  stars: { flexDirection: 'row', gap: 2 },
+  card: {alignSelf: 'stretch'},
+  row: {flexDirection: 'row', alignItems: 'center'},
+  identity: {flex: 1, justifyContent: 'center'},
+  rating: {alignItems: 'flex-end'},
+  stars: {flexDirection: 'row', gap: 2},
 });

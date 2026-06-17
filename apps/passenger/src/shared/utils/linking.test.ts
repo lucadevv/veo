@@ -1,5 +1,5 @@
-import { Linking } from 'react-native';
-import { openExternalUrl } from './linking';
+import {Linking} from 'react-native';
+import {openExternalUrl} from './linking';
 
 /**
  * openExternalUrl: el helper que resuelve el CRASH de "unhandled promise rejection" al abrir un esquema
@@ -18,7 +18,9 @@ describe('openExternalUrl', () => {
 
   it('CAPTURA el rechazo de openURL (Yape no instalada / esquema desconocido) y devuelve false', async () => {
     // En iOS, openURL RECHAZA si no puede abrir el esquema → sin catch sería un crash. Acá NO debe lanzar.
-    jest.spyOn(Linking, 'openURL').mockRejectedValue(new Error('no se pudo abrir el esquema'));
+    jest
+      .spyOn(Linking, 'openURL')
+      .mockRejectedValue(new Error('no se pudo abrir el esquema'));
     await expect(openExternalUrl('yapeapp:oneshot/abc')).resolves.toBe(false);
   });
 

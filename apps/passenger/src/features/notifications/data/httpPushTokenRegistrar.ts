@@ -1,5 +1,8 @@
-import { type HttpClient, registerDevice } from '@veo/api-client';
-import type { PushPlatform, PushTokenRegistrar } from '../domain/pushTokenRegistrar';
+import {type HttpClient, registerDevice} from '@veo/api-client';
+import type {
+  PushPlatform,
+  PushTokenRegistrar,
+} from '../domain/pushTokenRegistrar';
 
 /**
  * Implementación REAL de `PushTokenRegistrar` contra el public-bff.
@@ -15,8 +18,8 @@ export class HttpPushTokenRegistrar implements PushTokenRegistrar {
   constructor(private readonly http: HttpClient) {}
 
   async register(token: string, platform: PushPlatform): Promise<void> {
-    const body = registerDevice.parse({ token, platform });
-    await this.http.post('/devices', { body });
+    const body = registerDevice.parse({token, platform});
+    await this.http.post('/devices', {body});
   }
 
   async unregister(token: string): Promise<void> {

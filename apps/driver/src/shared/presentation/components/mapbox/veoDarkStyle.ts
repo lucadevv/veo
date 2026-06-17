@@ -132,7 +132,13 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'fill',
       source: 'composite',
       'source-layer': 'landuse_overlay',
-      filter: ['match', ['get', 'class'], ['national_park', 'wetland', 'wetland_noveg'], true, false],
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['national_park', 'wetland', 'wetland_noveg'],
+        true,
+        false,
+      ],
       paint: {
         'fill-color': palette.park,
         'fill-opacity': 0.5,
@@ -204,13 +210,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 12,
-      filter: [
-        'match',
-        ['get', 'class'],
-        ['service', 'track', 'path', 'pedestrian'],
-        true,
-        false,
-      ],
+      filter: ['match', ['get', 'class'], ['service', 'track', 'path', 'pedestrian'], true, false],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': palette.roadMinor,
@@ -286,7 +286,12 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'line',
       source: 'composite',
       'source-layer': 'admin',
-      filter: ['all', ['<=', ['get', 'admin_level'], 1], ['==', ['get', 'maritime'], 'false'], WORLDVIEW_ALL],
+      filter: [
+        'all',
+        ['<=', ['get', 'admin_level'], 1],
+        ['==', ['get', 'maritime'], 'false'],
+        WORLDVIEW_ALL,
+      ],
       paint: {
         'line-color': palette.boundary,
         'line-dasharray': [2, 2],

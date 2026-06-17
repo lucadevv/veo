@@ -1,11 +1,11 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import type { RoutePlace } from '../../../maps/domain/entities';
-import type { SavedPlace } from '../../../places/domain/entities';
-import { IconHome, IconWork } from './icons';
-import { placeToRoute } from './routePlace';
-import { ShortcutChip } from './ShortcutChip';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import type {RoutePlace} from '../../../maps/domain/entities';
+import type {SavedPlace} from '../../../places/domain/entities';
+import {IconHome, IconWork} from './icons';
+import {placeToRoute} from './routePlace';
+import {ShortcutChip} from './ShortcutChip';
 
 export interface HomeShortcutChipsProps {
   savedPlaces: SavedPlace[];
@@ -15,10 +15,14 @@ export interface HomeShortcutChipsProps {
 }
 
 /** Casa/Trabajo como pills de 1 toque (anclas, siempre visibles). Si falta, el chip invita a agregar. */
-export function HomeShortcutChips({ savedPlaces, onSelect, onAdd }: HomeShortcutChipsProps): React.JSX.Element {
-  const { t } = useTranslation();
-  const home = savedPlaces.find((p) => p.kind === 'HOME');
-  const work = savedPlaces.find((p) => p.kind === 'WORK');
+export function HomeShortcutChips({
+  savedPlaces,
+  onSelect,
+  onAdd,
+}: HomeShortcutChipsProps): React.JSX.Element {
+  const {t} = useTranslation();
+  const home = savedPlaces.find(p => p.kind === 'HOME');
+  const work = savedPlaces.find(p => p.kind === 'WORK');
   return (
     <View style={styles.chipsRow}>
       <ShortcutChip
@@ -38,5 +42,5 @@ export function HomeShortcutChips({ savedPlaces, onSelect, onAdd }: HomeShortcut
 }
 
 const styles = StyleSheet.create({
-  chipsRow: { flexDirection: 'row', gap: 8 },
+  chipsRow: {flexDirection: 'row', gap: 8},
 });

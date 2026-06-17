@@ -4,8 +4,8 @@ import {
   type HttpClient,
   type NotificationCategory,
 } from '@veo/api-client';
-import type { AppNotification, NotificationKind } from '../domain/entities';
-import type { NotificationsRepository } from '../domain/notificationsRepository';
+import type {AppNotification, NotificationKind} from '../domain/entities';
+import type {NotificationsRepository} from '../domain/notificationsRepository';
 
 /** `category` (semántica pública del backend) → `kind` (ícono/tono en la app). Mapeo de presentación. */
 const KIND_BY_CATEGORY: Record<NotificationCategory, NotificationKind> = {

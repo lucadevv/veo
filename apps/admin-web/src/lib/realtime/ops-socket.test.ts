@@ -23,7 +23,9 @@ describe('createTicketAuth', () => {
   });
 
   it('ante fallo de red (ticket null) emite payload vacío sin reventar', async () => {
-    const fetchTicket = vi.fn<(signal?: AbortSignal) => Promise<string | null>>().mockResolvedValue(null);
+    const fetchTicket = vi
+      .fn<(signal?: AbortSignal) => Promise<string | null>>()
+      .mockResolvedValue(null);
     const auth = createTicketAuth(fetchTicket);
 
     const payload = await invoke(auth);
@@ -46,10 +48,12 @@ describe('createTicketAuth', () => {
 
   it('respeta AbortSignal: si está abortado tras el fetch, no invoca el callback', async () => {
     const ac = new AbortController();
-    const fetchTicket = vi.fn<(signal?: AbortSignal) => Promise<string | null>>().mockImplementation(async () => {
-      ac.abort();
-      return 'late-ticket';
-    });
+    const fetchTicket = vi
+      .fn<(signal?: AbortSignal) => Promise<string | null>>()
+      .mockImplementation(async () => {
+        ac.abort();
+        return 'late-ticket';
+      });
     const auth = createTicketAuth(fetchTicket, ac.signal);
     const cb = vi.fn();
 
@@ -61,7 +65,9 @@ describe('createTicketAuth', () => {
 });
 
 /** Invoca el provider y resuelve con el payload que recibió el callback. */
-function invoke(auth: (cb: (p: { ticket?: string }) => void) => void): Promise<{ ticket?: string }> {
+function invoke(
+  auth: (cb: (p: { ticket?: string }) => void) => void,
+): Promise<{ ticket?: string }> {
   return new Promise((resolve) => auth(resolve));
 }
 

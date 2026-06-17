@@ -6,8 +6,8 @@ import { formatRating } from '@/lib/format';
 /** Datos del conductor y del vehículo. Oculta los campos que el bff no envíe (null). */
 export function DriverCard({ driver }: { driver: FamilyDriver }) {
   const rating = formatRating(driver.rating);
-  const vehicleParts = [driver.vehicleModel, driver.vehicleColor].filter(
-    (part): part is string => Boolean(part),
+  const vehicleParts = [driver.vehicleModel, driver.vehicleColor].filter((part): part is string =>
+    Boolean(part),
   );
 
   return (
@@ -35,7 +35,9 @@ export function DriverCard({ driver }: { driver: FamilyDriver }) {
           <Car className="mt-0.5 size-5 shrink-0 text-ink-muted" aria-hidden />
           <div className="min-w-0">
             {driver.vehiclePlate ? (
-              <p className="font-mono text-base font-semibold tracking-wide tabular">{driver.vehiclePlate}</p>
+              <p className="font-mono text-base font-semibold tracking-wide tabular">
+                {driver.vehiclePlate}
+              </p>
             ) : null}
             {vehicleParts.length > 0 ? (
               <p className="mt-0.5 text-sm text-ink-muted">{vehicleParts.join(', ')}</p>

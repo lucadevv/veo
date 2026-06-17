@@ -137,7 +137,13 @@ export class LogoutDto {
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; phone: string | null; type: string; kycStatus: string; email?: string | null };
+  user: {
+    id: string;
+    phone: string | null;
+    type: string;
+    kycStatus: string;
+    email?: string | null;
+  };
 }
 
 /** Confirmación de envío de código (register/forgot). */

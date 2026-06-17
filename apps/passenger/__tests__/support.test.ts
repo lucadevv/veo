@@ -1,5 +1,5 @@
-import type { CreateTicketRequest, SupportTicket } from '@veo/api-client';
-import type { SupportRepository } from '../src/features/support/domain/supportRepository';
+import type {CreateTicketRequest, SupportTicket} from '@veo/api-client';
+import type {SupportRepository} from '../src/features/support/domain/supportRepository';
 import {
   CreateTicketUseCase,
   ListTicketsUseCase,
@@ -54,7 +54,7 @@ describe('CreateTicketUseCase', () => {
     });
 
     expect(repo.createTicket).toHaveBeenCalledWith(
-      expect.objectContaining({ tripId: 'trip-123' }),
+      expect.objectContaining({tripId: 'trip-123'}),
     );
   });
 
@@ -63,7 +63,11 @@ describe('CreateTicketUseCase', () => {
     const useCase = new CreateTicketUseCase(repo);
 
     expect(() =>
-      useCase.execute({ category: 'OTHER', subject: 'ab', body: 'Mensaje suficientemente largo.' }),
+      useCase.execute({
+        category: 'OTHER',
+        subject: 'ab',
+        body: 'Mensaje suficientemente largo.',
+      }),
     ).toThrow(TicketValidationError);
     expect(repo.createTicket).not.toHaveBeenCalled();
   });
@@ -73,7 +77,11 @@ describe('CreateTicketUseCase', () => {
     const useCase = new CreateTicketUseCase(repo);
 
     try {
-      useCase.execute({ category: 'OTHER', subject: 'Asunto válido', body: 'corto' });
+      useCase.execute({
+        category: 'OTHER',
+        subject: 'Asunto válido',
+        body: 'corto',
+      });
       throw new Error('debió lanzar');
     } catch (error) {
       expect(error).toBeInstanceOf(TicketValidationError);

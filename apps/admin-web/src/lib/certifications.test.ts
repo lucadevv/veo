@@ -16,7 +16,9 @@ describe('certificationTypesForEnabledOfferings · gate de certs por vertical ha
 
   it('ambulancia HABILITADA → aparece su credencial (AMBULANCE_OPERATOR)', () => {
     const offerings = [off(OfferingId.VEO_ECONOMICO, true), off(OfferingId.VEO_AMBULANCE, true)];
-    expect(certificationTypesForEnabledOfferings(offerings)).toEqual([FleetDocumentType.AMBULANCE_OPERATOR]);
+    expect(certificationTypesForEnabledOfferings(offerings)).toEqual([
+      FleetDocumentType.AMBULANCE_OPERATOR,
+    ]);
   });
 
   it('varias verticales habilitadas → todas sus credenciales (sin duplicar)', () => {

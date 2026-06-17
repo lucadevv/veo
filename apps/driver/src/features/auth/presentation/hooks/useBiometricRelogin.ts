@@ -1,9 +1,9 @@
-import {useCallback, useEffect, useState} from 'react';
-import {mobileRefreshResult} from '@veo/api-client';
-import {env} from '../../../../core/config/env';
-import {useDi, useRepositories} from '../../../../core/di/useDi';
-import {useSessionStore} from '../../../../core/session/sessionStore';
-import {GetProfileUseCase, profileToSessionUser} from '../../../profile/domain';
+import { useCallback, useEffect, useState } from 'react';
+import { mobileRefreshResult } from '@veo/api-client';
+import { env } from '../../../../core/config/env';
+import { useDi, useRepositories } from '../../../../core/di/useDi';
+import { useSessionStore } from '../../../../core/session/sessionStore';
+import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 
 interface BiometricReloginState {
   /** true si hay biometría disponible y un refresh token guardado (se puede ofrecer re-login). */
@@ -22,8 +22,8 @@ interface BiometricReloginState {
  * cancela o el refresh falla, deja al conductor en el flujo OTP normal.
  */
 export function useBiometricRelogin(): BiometricReloginState {
-  const {localAuth} = useDi();
-  const {profile} = useRepositories();
+  const { localAuth } = useDi();
+  const { profile } = useRepositories();
   const [available, setAvailable] = useState(false);
   const [isPending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -53,8 +53,8 @@ export function useBiometricRelogin(): BiometricReloginState {
 
       const response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-        body: JSON.stringify({refreshToken}),
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ refreshToken }),
       });
       if (!response.ok) {
         throw new Error('No se pudo refrescar la sesión');
@@ -67,7 +67,7 @@ export function useBiometricRelogin(): BiometricReloginState {
       const tokens = parsed.data;
       useSessionStore.getState().setTokens(tokens);
       const driverProfile = await new GetProfileUseCase(profile).execute();
-      useSessionStore.getState().setSession({tokens, user: profileToSessionUser(driverProfile)});
+      useSessionStore.getState().setSession({ tokens, user: profileToSessionUser(driverProfile) });
       // Rota el token guardado al nuevo refresh token.
       await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
     } catch (e) {
@@ -77,5 +77,5 @@ export function useBiometricRelogin(): BiometricReloginState {
     }
   }, [localAuth, profile]);
 
-  return {available, isPending, error, relogin};
+  return { available, isPending, error, relogin };
 }

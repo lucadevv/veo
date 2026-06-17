@@ -1,4 +1,4 @@
-import type {GeoPoint, RespondWaypointView} from '@veo/api-client';
+import type { GeoPoint, RespondWaypointView } from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -59,5 +59,9 @@ export interface TripsRepository {
    * aceptar agrega la parada y recalcula la tarifa+ruta server-side. Devuelve el estado terminal de la
    * propuesta + la tarifa VIGENTE del viaje (la nueva si aceptó, la misma si rechazó).
    */
-  respondWaypoint(tripId: string, proposalId: string, accept: boolean): Promise<RespondWaypointView>;
+  respondWaypoint(
+    tripId: string,
+    proposalId: string,
+    accept: boolean,
+  ): Promise<RespondWaypointView>;
 }

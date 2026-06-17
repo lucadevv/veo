@@ -1,8 +1,14 @@
-import type { GeoPoint } from '@veo/api-client';
-import { type ElementRef, type RefObject, useCallback, useEffect, useRef } from 'react';
-import type { Camera } from '@rnmapbox/maps';
-import { boundsOf, distanceMeters, toLngLat } from '../../utils/geo';
-import type { CameraTarget } from '../../../features/trip/presentation/hooks/mapDirector';
+import type {GeoPoint} from '@veo/api-client';
+import {
+  type ElementRef,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+} from 'react';
+import type {Camera} from '@rnmapbox/maps';
+import {boundsOf, distanceMeters, toLngLat} from '../../utils/geo';
+import type {CameraTarget} from '../../../features/trip/presentation/hooks/mapDirector';
 
 /** Tipo del ref imperativo de la `Camera` de rnmapbox (no se exporta como `CameraRef` desde el índice). */
 export type DirectedCameraRef = ElementRef<typeof Camera>;
@@ -49,7 +55,7 @@ export function useDirectedCamera(
   cameraRef: RefObject<DirectedCameraRef | null>,
   target: CameraTarget,
   bottomInset: number,
-): { onGesture: () => void } {
+): {onGesture: () => void} {
   const lastAppliedAt = useRef(0);
   const lastLead = useRef<GeoPoint | null>(null);
   const lastSignature = useRef<string>('');
@@ -57,41 +63,49 @@ export function useDirectedCamera(
   const bottomInsetRef = useRef(bottomInset);
   bottomInsetRef.current = bottomInset;
 
-  const apply = useCallback((t: CameraTarget): void => {
-    const cam = cameraRef.current;
-    if (!cam) return;
-    const padBottom = bottomInsetRef.current;
+  const apply = useCallback(
+    (t: CameraTarget): void => {
+      const cam = cameraRef.current;
+      if (!cam) return;
+      const padBottom = bottomInsetRef.current;
 
-    if (t.mode === 'fit') {
-      if (t.fitPoints.length === 0) return; // el fit de ruta lo maneja la Camera declarativa del AppMap.
-      const positions = t.fitPoints.map(toLngLat);
-      const bounds = boundsOf(positions);
-      if (!bounds) return;
-      // Padding APRETADO + reserva del sheet abajo (ya CAPADA por el AppMap: `padBottom` nunca aplasta el
-      // viewport). Calibración de GUSTO del dueño ("más encima de la acción"): bajamos de 56/48 a 40/36 →
-      // el box [conductor+recogida] (enRoute) y el box casi-puntual sobre la recogida (arrived) cierran más,
-      // dejando menos aire alrededor. En 'arrived' el conductor ya está sobre el origen → box mínimo → con
-      // 40/36 el encuadre se siente BIEN cerrado (casi nivel calle sobre el punto de recogida) sin maxZoom
-      // (fitBounds no lo aplica acá → se cierra por geometría). Con un solo punto, fitBounds centra y el
-      // padding chico fija un zoom cerrado.
-      cam.fitBounds(
-        bounds.ne,
-        bounds.sw,
-        [40, 36, 40 + padBottom, 36], // [top, right, bottom, left]
-        ANIM_MS,
-      );
-      return;
-    }
+      if (t.mode === 'fit') {
+        if (t.fitPoints.length === 0) return; // el fit de ruta lo maneja la Camera declarativa del AppMap.
+        const positions = t.fitPoints.map(toLngLat);
+        const bounds = boundsOf(positions);
+        if (!bounds) return;
+        // Padding APRETADO + reserva del sheet abajo (ya CAPADA por el AppMap: `padBottom` nunca aplasta el
+        // viewport). Calibración de GUSTO del dueño ("más encima de la acción"): bajamos de 56/48 a 40/36 →
+        // el box [conductor+recogida] (enRoute) y el box casi-puntual sobre la recogida (arrived) cierran más,
+        // dejando menos aire alrededor. En 'arrived' el conductor ya está sobre el origen → box mínimo → con
+        // 40/36 el encuadre se siente BIEN cerrado (casi nivel calle sobre el punto de recogida) sin maxZoom
+        // (fitBounds no lo aplica acá → se cierra por geometría). Con un solo punto, fitBounds centra y el
+        // padding chico fija un zoom cerrado.
+        cam.fitBounds(
+          bounds.ne,
+          bounds.sw,
+          [40, 36, 40 + padBottom, 36], // [top, right, bottom, left]
+          ANIM_MS,
+        );
+        return;
+      }
 
-    if (!t.followPoint) return;
-    cam.setCamera({
-      centerCoordinate: toLngLat(t.followPoint),
-      ...(t.followZoom != null ? { zoomLevel: t.followZoom } : {}),
-      padding: { paddingTop: 0, paddingBottom: padBottom, paddingLeft: 0, paddingRight: 0 },
-      animationDuration: ANIM_MS,
-      animationMode: 'easeTo',
-    });
-  }, [cameraRef]);
+      if (!t.followPoint) return;
+      cam.setCamera({
+        centerCoordinate: toLngLat(t.followPoint),
+        ...(t.followZoom != null ? {zoomLevel: t.followZoom} : {}),
+        padding: {
+          paddingTop: 0,
+          paddingBottom: padBottom,
+          paddingLeft: 0,
+          paddingRight: 0,
+        },
+        animationDuration: ANIM_MS,
+        animationMode: 'easeTo',
+      });
+    },
+    [cameraRef],
+  );
 
   useEffect(() => {
     const sig = targetSignature(target);
@@ -129,5 +143,5 @@ export function useDirectedCamera(
     freeUntil.current = Date.now() + FREE_MODE_MS;
   }, []);
 
-  return { onGesture };
+  return {onGesture};
 }

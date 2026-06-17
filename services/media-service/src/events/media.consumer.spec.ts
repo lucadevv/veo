@@ -99,7 +99,10 @@ describe('MediaEventConsumer', () => {
       payload: { tripId: 'trip-1', driverId: 'drv-1', startedAt: '2026-06-04T00:00:00.000Z' },
     });
 
-    expect(recording.startForTrip).toHaveBeenCalledWith('trip-1', new Date('2026-06-04T00:00:00.000Z'));
+    expect(recording.startForTrip).toHaveBeenCalledWith(
+      'trip-1',
+      new Date('2026-06-04T00:00:00.000Z'),
+    );
   });
 
   it('ignora payloads inválidos sin procesar nada (no lanza)', async () => {

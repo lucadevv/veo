@@ -36,7 +36,10 @@ export class DriverEnrichmentService {
    * MISMO vuelo de 3 gRPC en vez de disparar N×3 (stampede). El fetch nunca rechaza (cada downstream cae
    * a null), así que una Promise cacheada jamás queda "envenenada" con rechazo.
    */
-  private readonly cache = new Map<string, { value: Promise<OfferDriverInfo>; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { value: Promise<OfferDriverInfo>; expiresAt: number }
+  >();
 
   constructor(
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
@@ -51,12 +54,18 @@ export class DriverEnrichmentService {
 
     const inFlight = this.fetchInfo(driverId, meta);
     if (this.cache.size < DriverEnrichmentService.MAX_ENTRIES) {
-      this.cache.set(driverId, { value: inFlight, expiresAt: now + DriverEnrichmentService.TTL_MS });
+      this.cache.set(driverId, {
+        value: inFlight,
+        expiresAt: now + DriverEnrichmentService.TTL_MS,
+      });
     }
     return inFlight;
   }
 
-  private async fetchInfo(driverId: string, meta: Record<string, string>): Promise<OfferDriverInfo> {
+  private async fetchInfo(
+    driverId: string,
+    meta: Record<string, string>,
+  ): Promise<OfferDriverInfo> {
     // Tolerante a fallos: cada downstream que falle deja su campo en null (la lista de ofertas no rompe).
     // El conductor se resuelve PRIMERO: fleet indexa los vehículos por `User.id` (NO por `Driver.id`, que
     // es lo que trae la oferta), así que el vehículo se busca con el `userId` resuelto vía identity. Sin
@@ -65,7 +74,9 @@ export class DriverEnrichmentService {
       .call<DriverReply>('GetDriver', { id: driverId }, meta)
       .catch(() => null);
     const [aggregate, vehicles] = await Promise.all([
-      this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId: driverId }, meta).catch(() => null),
+      this.ratingGrpc
+        .call<AggregateReply>('GetAggregate', { subjectId: driverId }, meta)
+        .catch(() => null),
       driver?.found && driver.userId
         ? this.fleetGrpc
             .call<DriverVehiclesReply>('GetDriverVehicles', { id: driver.userId }, meta)

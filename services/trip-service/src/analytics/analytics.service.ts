@@ -19,9 +19,7 @@ export type { TripStatsView };
 
 @Injectable()
 export class AnalyticsService {
-  constructor(
-    @Inject(TRIP_STATS_REPO) private readonly repo: TripStatsRepository,
-  ) {}
+  constructor(@Inject(TRIP_STATS_REPO) private readonly repo: TripStatsRepository) {}
 
   async getTripStats(now: Date = new Date()): Promise<TripStatsView> {
     const limaMidnight = startOfLimaDay(now);

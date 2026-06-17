@@ -63,12 +63,11 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
       : `Debe ser un entero entre ${K_RING_MIN} y ${K_RING_MAX}.`,
   };
   const valid = !errors.nearbyKRing && !errors.matchKRing;
-  const dirty = values.nearbyKRing !== config.nearbyKRing || values.matchKRing !== config.matchKRing;
+  const dirty =
+    values.nearbyKRing !== config.nearbyKRing || values.matchKRing !== config.matchKRing;
 
   const fieldFor = (key: 'nearbyKRing' | 'matchKRing') =>
-    key === 'nearbyKRing'
-      ? ([nearby, setNearby] as const)
-      : ([match, setMatch] as const);
+    key === 'nearbyKRing' ? ([nearby, setNearby] as const) : ([match, setMatch] as const);
 
   async function save() {
     await update.mutateAsync({ nearbyKRing: values.nearbyKRing, matchKRing: values.matchKRing });
@@ -97,7 +96,8 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
                   label={label}
                   hint={description}
                   error={canManage ? errors[key] : undefined}
-                  required={canManage}>
+                  required={canManage}
+                >
                   <Input
                     type="number"
                     inputMode="numeric"
@@ -111,8 +111,8 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
                   />
                 </Field>
                 <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-                  <Icon className="size-3.5" aria-hidden />
-                  k = {value || '—'} · {isValidKRing(k) ? kRingLabel(k) : '—'}
+                  <Icon className="size-3.5" aria-hidden />k = {value || '—'} ·{' '}
+                  {isValidKRing(k) ? kRingLabel(k) : '—'}
                 </p>
               </div>
             );
@@ -123,12 +123,14 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
       <section>
         <h2 className="text-sm font-medium text-ink-muted">Referencia de cobertura (H3 res-9)</h2>
         <ul className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-border px-4 py-3 text-sm sm:grid-cols-4">
-          {Array.from({ length: K_RING_MAX - K_RING_MIN + 1 }, (_, i) => K_RING_MIN + i).map((k) => (
-            <li key={k} className="flex items-center justify-between gap-2">
-              <span className="text-ink">k={k}</span>
-              <span className="tabular text-ink-muted">{kRingLabel(k)}</span>
-            </li>
-          ))}
+          {Array.from({ length: K_RING_MAX - K_RING_MIN + 1 }, (_, i) => K_RING_MIN + i).map(
+            (k) => (
+              <li key={k} className="flex items-center justify-between gap-2">
+                <span className="text-ink">k={k}</span>
+                <span className="tabular text-ink-muted">{kRingLabel(k)}</span>
+              </li>
+            ),
+          )}
         </ul>
       </section>
 
@@ -140,9 +142,7 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
             </Button>
           ) : (
             <StepUpDialog
-              trigger={
-                <Button type="button">Guardar radios</Button>
-              }
+              trigger={<Button type="button">Guardar radios</Button>}
               title="Actualizar radios de dispatch"
               description={`El feed de mapa pasará a k=${values.nearbyKRing} (${kRingLabel(
                 values.nearbyKRing,

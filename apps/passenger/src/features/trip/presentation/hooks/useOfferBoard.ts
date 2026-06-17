@@ -1,11 +1,15 @@
-import type { ClientBoardStatus, OfferView, TripStatus } from '@veo/api-client';
-import { ApiError } from '@veo/api-client';
-import { useMutation, useQuery, type UseMutationResult } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { mergeOffers } from '../../domain/offers';
-import type { LiveTripState } from './usePassengerTripSocket';
+import type {ClientBoardStatus, OfferView, TripStatus} from '@veo/api-client';
+import {ApiError} from '@veo/api-client';
+import {
+  useMutation,
+  useQuery,
+  type UseMutationResult,
+} from '@tanstack/react-query';
+import {useEffect, useRef, useState} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {mergeOffers} from '../../domain/offers';
+import type {LiveTripState} from './usePassengerTripSocket';
 
 /** Estado del BOARD de la puja (contrato nuevo `{ board, offers }`). `null` hasta el primer snapshot. */
 export interface OfferBoardState {
@@ -44,7 +48,10 @@ export interface OfferBoard {
  * —puede ser "el board aún no abrió" (race con el dispatch async vía Kafka tras el 201 del POST /trips)
  * o "venció por TTL"— y no puede decidir la fase sin pintar un `noOffers` fantasma instantáneo.
  */
-export const TERMINAL_BOARD_STATUS: Record<ClientBoardStatus, TripStatus | string | null> = {
+export const TERMINAL_BOARD_STATUS: Record<
+  ClientBoardStatus,
+  TripStatus | string | null
+> = {
   OPEN: null, // la puja sigue viva → no fuerza nada, manda el socket/poll.
   CANCELLED: 'CANCELLED', // el pasajero canceló → fase `ended` → vuelve al home (sin esperar el socket).
   EXPIRED: null, // ambiguo/redundante: la fase noOffers la decide el trip EXPIRED real (no el board).
@@ -53,7 +60,9 @@ export const TERMINAL_BOARD_STATUS: Record<ClientBoardStatus, TripStatus | strin
 };
 
 /** Override puro del estado efectivo del viaje según el board (testeable sin render). */
-export function resolveBoardOverride(board: OfferBoardState | null): TripStatus | string | null {
+export function resolveBoardOverride(
+  board: OfferBoardState | null,
+): TripStatus | string | null {
   return board ? TERMINAL_BOARD_STATUS[board.status] : null;
 }
 
@@ -77,8 +86,11 @@ const ACTION_ERROR_TTL_MS = 5_000;
  */
 export function useOfferBoard(
   tripId: string | null,
-  live: Pick<LiveTripState, 'status' | 'incomingOffers' | 'withdrawnDriverIds' | 'connected'>,
-  callbacks: { onAccepted: () => void; onCancelled: () => void },
+  live: Pick<
+    LiveTripState,
+    'status' | 'incomingOffers' | 'withdrawnDriverIds' | 'connected'
+  >,
+  callbacks: {onAccepted: () => void; onCancelled: () => void},
 ): OfferBoard {
   const listOffers = useDependency(TOKENS.listOffersUseCase);
   const acceptOffer = useDependency(TOKENS.acceptOfferUseCase);
@@ -106,11 +118,16 @@ export function useOfferBoard(
   // socket. EXPIRED/GONE NO fuerzan nada (GONE es ambiguo: "aún no abrió" por el dispatch async vía Kafka
   // vs TTL) → la fase noOffers la decide el trip EXPIRED real (socket `trip:update`/poll REST de estado).
   const boardOverride = resolveBoardOverride(board);
-  const status = boardOverride ?? live.status ?? stateQuery.data?.status ?? null;
+  const status =
+    boardOverride ?? live.status ?? stateQuery.data?.status ?? null;
 
   // F1: las ofertas SÓLO vienen (no vacías) con board OPEN; en cualquier otro estado el server ya manda
   // `[]` → la lista jamás muestra ofertas zombies de una puja muerta.
-  const offers = mergeOffers(offersQuery.data?.offers ?? [], live.incomingOffers, live.withdrawnDriverIds);
+  const offers = mergeOffers(
+    offersQuery.data?.offers ?? [],
+    live.incomingOffers,
+    live.withdrawnDriverIds,
+  );
 
   // Error de acción VISIBLE con auto-limpieza: hoy quedaba PEGADO (OffersBody.tsx:145) porque colgaba de
   // `mutation.isError`, que persiste hasta el próximo intento. Lo desacoplamos a un flag con TTL: se
@@ -120,7 +137,10 @@ export function useOfferBoard(
   const flagActionError = (): void => {
     setActionError(true);
     if (clearTimer.current) clearTimeout(clearTimer.current);
-    clearTimer.current = setTimeout(() => setActionError(false), ACTION_ERROR_TTL_MS);
+    clearTimer.current = setTimeout(
+      () => setActionError(false),
+      ACTION_ERROR_TTL_MS,
+    );
   };
   useEffect(
     () => () => {
@@ -130,12 +150,13 @@ export function useOfferBoard(
   );
 
   const acceptMutation = useMutation({
-    mutationFn: (driverId: string) => acceptOffer.execute(tripId as string, driverId),
+    mutationFn: (driverId: string) =>
+      acceptOffer.execute(tripId as string, driverId),
     onSuccess: () => {
       setActionError(false);
       callbacks.onAccepted();
     },
-    onError: (error) => {
+    onError: error => {
       // F1 · la oferta dejó de ser válida (conductor ya no elegible / board cerrado): 404/409. NO nos
       // quedamos con la oferta zombie clavada en pantalla: refetch INMEDIATO → el board nuevo dice la
       // verdad (offers `[]` + status real) y la UI se re-deriva. Mensaje honesto vía el flag con TTL.

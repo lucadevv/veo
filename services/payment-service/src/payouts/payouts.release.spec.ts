@@ -49,25 +49,41 @@ function makePrisma(rows: FakePayout[]) {
   const outbox: { aggregateId: string; eventType: string; envelope: unknown }[] = [];
   const tx = {
     payout: {
-      updateMany: vi.fn(async ({ where, data }: { where: { id: string; status: string }; data: Partial<FakePayout> }) => {
-        const p = payouts.get(where.id);
-        if (!p || p.status !== where.status) return { count: 0 };
-        Object.assign(p, data);
-        return { count: 1 };
-      }),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string; status: string };
+          data: Partial<FakePayout>;
+        }) => {
+          const p = payouts.get(where.id);
+          if (p?.status !== where.status) return { count: 0 };
+          Object.assign(p, data);
+          return { count: 1 };
+        },
+      ),
     },
     outboxEvent: {
-      create: vi.fn(async ({ data }: { data: { aggregateId: string; eventType: string; envelope: unknown } }) => {
-        outbox.push(data);
-        return data;
-      }),
+      create: vi.fn(
+        async ({
+          data,
+        }: {
+          data: { aggregateId: string; eventType: string; envelope: unknown };
+        }) => {
+          outbox.push(data);
+          return data;
+        },
+      ),
     },
   };
   const prisma = {
     read: {
       payout: {
         findMany: vi.fn(async ({ where }: { where: { driverId: string; status: string } }) =>
-          [...payouts.values()].filter((p) => p.driverId === where.driverId && p.status === where.status),
+          [...payouts.values()].filter(
+            (p) => p.driverId === where.driverId && p.status === where.status,
+          ),
         ),
       },
     },
@@ -134,7 +150,9 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
     const svc = new PayoutsService(prisma, redis as never, config);
     const staleOperator = { userId: 'op-1', roles: ['FINANCE'] } as AuthenticatedUser;
 
-    await expect(svc.releaseHeldPayouts('drv-1', staleOperator)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.releaseHeldPayouts('drv-1', staleOperator)).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
     expect(payouts.get('po-1')!.status).toBe('HELD');
     expect(outbox).toHaveLength(0);
     expect(flagged.has('drv-1')).toBe(true); // la retención sigue en pie

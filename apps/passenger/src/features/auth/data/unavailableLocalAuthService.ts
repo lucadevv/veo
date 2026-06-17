@@ -1,4 +1,4 @@
-import type { LocalAuthService } from '../domain/localAuthService';
+import type {LocalAuthService} from '../domain/localAuthService';
 
 /**
  * Implementación por defecto del puerto biométrico mientras no exista el módulo nativo.

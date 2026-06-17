@@ -16,7 +16,7 @@ export interface Token<T> {
 
 /** Crea un token tipado e irrepetible. */
 export function createToken<T>(description: string): Token<T> {
-  return { symbol: Symbol(description) };
+  return {symbol: Symbol(description)};
 }
 
 /** Fábrica perezosa de una dependencia; recibe el contenedor para resolver sus propias deps. */

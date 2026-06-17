@@ -1,7 +1,7 @@
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { DocumentType } from '@veo/api-client';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {DocumentType} from '@veo/api-client';
+import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Avatar,
   Banner,
@@ -16,25 +16,31 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { uuidv7 } from '../../../../shared/utils/uuid';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { useBiometricGateStore } from '../../../auth/presentation';
-import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
-import { formatShortDate } from '../../../../shared/utils/format';
-import { setPromotionsSubscription, unregisterMessaging } from '../../../../services/messaging';
-import { isKycVerified } from '../../../kyc/domain/entities';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { DocumentField } from '../../../payments/presentation';
-import { isDocumentValid } from '../../../payments/domain/affiliationUsecases';
-import { maskDocument } from '../../../../shared/utils/format';
-import { EnterView } from '../components/motion';
-import { PhoneVerificationSheet } from '../components/PhoneVerificationSheet';
-import { usePushPermission } from '../../../notifications/presentation/hooks/usePushPermission';
+import React, {useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Linking, Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {uuidv7} from '../../../../shared/utils/uuid';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {useBiometricGateStore} from '../../../auth/presentation';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {formatShortDate} from '../../../../shared/utils/format';
+import {
+  setPromotionsSubscription,
+  unregisterMessaging,
+} from '../../../../services/messaging';
+import {isKycVerified} from '../../../kyc/domain/entities';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {DocumentField} from '../../../payments/presentation';
+import {isDocumentValid} from '../../../payments/domain/affiliationUsecases';
+import {maskDocument} from '../../../../shared/utils/format';
+import {EnterView} from '../components/motion';
+import {PhoneVerificationSheet} from '../components/PhoneVerificationSheet';
+import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
 import {
   IconAccessibility,
   IconBell,
@@ -53,9 +59,12 @@ import {
   IconTrash,
   IconUsers,
 } from '../components/icons';
-import { IconCheck, IconPencil } from '../../../auth/presentation/components/icons';
-import { IconStarFilled } from '../../../trip/presentation/components/icons';
-import { useMyAggregateRating } from '../../../ratings/presentation/useMyAggregateRating';
+import {
+  IconCheck,
+  IconPencil,
+} from '../../../auth/presentation/components/icons';
+import {IconStarFilled} from '../../../trip/presentation/components/icons';
+import {useMyAggregateRating} from '../../../ratings/presentation/useMyAggregateRating';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -90,7 +99,7 @@ type CompletionStep = 'name' | 'phone' | 'document';
  */
 export function ProfileScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
   // Permiso de push (estado real del SO + activar). El toggle de notificaciones lo refleja y gestiona.
   const push = usePushPermission();
@@ -106,7 +115,10 @@ export function ProfileScreen(): React.JSX.Element {
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
 
   // Consentimiento VIGENTE (Ley 29733) → estado del toggle de promociones.
-  const consentQuery = useQuery({ queryKey: ['consent'], queryFn: () => getConsent.execute() });
+  const consentQuery = useQuery({
+    queryKey: ['consent'],
+    queryFn: () => getConsent.execute(),
+  });
 
   // Reconcilia la COLA DURABLE contra el consent vigente del server cada vez que el GET trae dato
   // fresco (equivalente al `onSuccess` que React Query v5 ya no expone en `useQuery`): si el server ya
@@ -118,7 +130,9 @@ export function ProfileScreen(): React.JSX.Element {
     }
   }, [consentQuery.data, syncPendingConsent]);
   // Feedback optimista: el Switch refleja el cambio al instante; si la mutación falla, revierte al refetch.
-  const [pendingMarketing, setPendingMarketing] = useState<boolean | null>(null);
+  const [pendingMarketing, setPendingMarketing] = useState<boolean | null>(
+    null,
+  );
   const marketingOn = pendingMarketing ?? consentQuery.data?.marketing ?? false;
 
   /**
@@ -153,9 +167,9 @@ export function ProfileScreen(): React.JSX.Element {
     marketingMutation.mutate(next);
   };
 
-  const refreshToken = useSessionStore((s) => s.refreshToken);
-  const clearSession = useSessionStore((s) => s.clearSession);
-  const lockBiometricGate = useBiometricGateStore((s) => s.lock);
+  const refreshToken = useSessionStore(s => s.refreshToken);
+  const clearSession = useSessionStore(s => s.clearSession);
+  const lockBiometricGate = useBiometricGateStore(s => s.lock);
 
   const profileQuery = useQuery({
     queryKey: ['profile'],
@@ -186,8 +200,8 @@ export function ProfileScreen(): React.JSX.Element {
       // se persiste vía PATCH /users/me (queda disponible para la vinculación de Yape de UN TAP).
       return updateProfile.execute({
         name: trimmedName,
-        ...(trimmedEmail ? { email: trimmedEmail } : {}),
-        ...(trimmedDoc ? { documentType, document: trimmedDoc } : {}),
+        ...(trimmedEmail ? {email: trimmedEmail} : {}),
+        ...(trimmedDoc ? {documentType, document: trimmedDoc} : {}),
       });
     },
     onSuccess: () => {
@@ -233,22 +247,29 @@ export function ProfileScreen(): React.JSX.Element {
   }
 
   const profile = profileQuery.data;
-  const hasName = typeof profile.name === 'string' && profile.name.trim().length > 0;
+  const hasName =
+    typeof profile.name === 'string' && profile.name.trim().length > 0;
   // Nombre visible: el nombre real; si falta, el correo/teléfono como identificador temporal.
-  const displayName = hasName ? profile.name! : (profile.email ?? profile.phone ?? '');
+  const displayName = hasName
+    ? profile.name!
+    : (profile.email ?? profile.phone ?? '');
   // Línea de identidad ÚNICA bajo el nombre: teléfono o, si no hay, el correo.
   const contact = profile.phone ?? profile.email ?? null;
   const verified = isKycVerified(profile.kycStatus);
   const trimmedName = name.trim();
   const nameValid = trimmedName.length >= 2 && trimmedName.length <= 80;
   const trimmedEmail = email.trim();
-  const emailValid = trimmedEmail.length === 0 || EMAIL_PATTERN.test(trimmedEmail);
+  const emailValid =
+    trimmedEmail.length === 0 || EMAIL_PATTERN.test(trimmedEmail);
   const trimmedDoc = document.trim();
   // Documento OPCIONAL: válido si está vacío (no se toca) o si pasa la validación local del tipo.
-  const documentValid = trimmedDoc.length === 0 || isDocumentValid(documentType, trimmedDoc);
+  const documentValid =
+    trimmedDoc.length === 0 || isDocumentValid(documentType, trimmedDoc);
   const canSaveEdit = nameValid && emailValid && documentValid;
   // Documento enmascarado para la cabecera (privacidad): "12345678" → "DNI ••••5678".
-  const maskedDocument = profile.document ? maskDocument(profile.document) : null;
+  const maskedDocument = profile.document
+    ? maskDocument(profile.document)
+    : null;
 
   // CALIFICACIÓN RECIBIDA · 4 estados (sin layout shift brusco; el perfil no se rompe nunca):
   //  - loading  → no pintamos nada (placeholder sutil opcional, evitado a propósito).
@@ -303,27 +324,33 @@ export function ProfileScreen(): React.JSX.Element {
     <Text
       variant="label"
       color="inkMuted"
-      style={{ marginBottom: theme.spacing.sm, marginLeft: theme.spacing.xs }}
-    >
+      style={{marginBottom: theme.spacing.sm, marginLeft: theme.spacing.xs}}>
       {text}
     </Text>
   );
 
   return (
     <SafeScreen padded={false}>
-      <ScrollView contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.lg }}>
+      <ScrollView
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          gap: theme.spacing.lg,
+        }}>
         {/* Header del hub */}
         <Text variant="title1">{t('profile.title')}</Text>
 
         {/* CABECERA · avatar (→ editar, gesto pro) + nombre/CTA + línea de identidad + Editar perfil. */}
         <EnterView index={0}>
-          <View style={{ alignItems: 'center', gap: theme.spacing.sm }}>
+          <View style={{alignItems: 'center', gap: theme.spacing.sm}}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t('profile.editProfile')}
-              onPress={openEdit}
-            >
-              <Avatar uri={profile.photoUrl ?? undefined} name={hasName ? displayName : undefined} size="xl" />
+              onPress={openEdit}>
+              <Avatar
+                uri={profile.photoUrl ?? undefined}
+                name={hasName ? displayName : undefined}
+                size="xl"
+              />
             </Pressable>
 
             {hasName ? (
@@ -332,9 +359,8 @@ export function ProfileScreen(): React.JSX.Element {
                 {/* Identidad confirmada = detalle fino junto al nombre (check sutil), no una pill. */}
                 {verified ? (
                   <View
-                    style={[styles.verifiedTick, { backgroundColor: success }]}
-                    accessibilityLabel={t('profile.identityConfirmed')}
-                  >
+                    style={[styles.verifiedTick, {backgroundColor: success}]}
+                    accessibilityLabel={t('profile.identityConfirmed')}>
                     <IconCheck color={theme.colors.onSuccess} size={11} />
                   </View>
                 ) : null}
@@ -345,8 +371,7 @@ export function ProfileScreen(): React.JSX.Element {
                 accessibilityRole="button"
                 accessibilityLabel={t('profile.addName')}
                 onPress={openEdit}
-                style={styles.addNameCta}
-              >
+                style={styles.addNameCta}>
                 <Text variant="title3" color="accent">
                   {t('profile.addName')}
                 </Text>
@@ -360,7 +385,8 @@ export function ProfileScreen(): React.JSX.Element {
             ) : null}
             {maskedDocument ? (
               <Text variant="footnote" color="inkSubtle" tabular>
-                {t(`profile.docType.${profile.documentType ?? 'DN'}`)} {maskedDocument}
+                {t(`profile.docType.${profile.documentType ?? 'DN'}`)}{' '}
+                {maskedDocument}
               </Text>
             ) : null}
             {verified && hasName ? (
@@ -377,10 +403,9 @@ export function ProfileScreen(): React.JSX.Element {
                 accessibilityLabel={`${ratingScore} · ${
                   aggregate!.count30d === 1
                     ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', { count: aggregate!.count30d })
+                    : t('profile.ratingCountMany', {count: aggregate!.count30d})
                 }`}
-                style={styles.ratingRow}
-              >
+                style={styles.ratingRow}>
                 <IconStarFilled color={accent} size={16} />
                 <Text variant="headline" color="ink" tabular>
                   {ratingScore}
@@ -389,7 +414,9 @@ export function ProfileScreen(): React.JSX.Element {
                   {'· '}
                   {aggregate!.count30d === 1
                     ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', { count: aggregate!.count30d })}
+                    : t('profile.ratingCountMany', {
+                        count: aggregate!.count30d,
+                      })}
                 </Text>
               </View>
             ) : ratingEmpty ? (
@@ -413,15 +440,15 @@ export function ProfileScreen(): React.JSX.Element {
         {missingSteps.length > 0 ? (
           <EnterView index={1}>
             <Card variant="outlined" padding="md">
-              <View style={{ gap: theme.spacing.sm }}>
-                <View style={{ gap: 2 }}>
+              <View style={{gap: theme.spacing.sm}}>
+                <View style={{gap: 2}}>
                   <Text variant="headline">{t('profile.completionTitle')}</Text>
                   <Text variant="footnote" color="inkMuted">
                     {t('profile.completionSubtitle')}
                   </Text>
                 </View>
                 <View style={styles.chipRow}>
-                  {missingSteps.map((step) => (
+                  {missingSteps.map(step => (
                     <Pressable
                       key={step}
                       accessibilityRole="button"
@@ -429,10 +456,14 @@ export function ProfileScreen(): React.JSX.Element {
                       onPress={() => openStep(step)}
                       style={[
                         styles.chip,
-                        { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated },
-                      ]}
-                    >
-                      <View style={[styles.chipDot, { backgroundColor: accent }]} />
+                        {
+                          borderColor: theme.colors.border,
+                          backgroundColor: theme.colors.surfaceElevated,
+                        },
+                      ]}>
+                      <View
+                        style={[styles.chipDot, {backgroundColor: accent}]}
+                      />
                       <Text variant="footnote" color="ink">
                         {stepLabel[step]}
                       </Text>
@@ -450,7 +481,11 @@ export function ProfileScreen(): React.JSX.Element {
           <EnterView index={2}>
             <Card variant="outlined" padding="md">
               <View style={styles.verifyCard}>
-                <View style={[styles.verifyIconWrap, { backgroundColor: theme.colors.surfaceElevated }]}>
+                <View
+                  style={[
+                    styles.verifyIconWrap,
+                    {backgroundColor: theme.colors.surfaceElevated},
+                  ]}>
                   <IconShield color={accent} size={22} />
                 </View>
                 <View style={styles.verifyCopy}>
@@ -466,7 +501,7 @@ export function ProfileScreen(): React.JSX.Element {
                 fullWidth
                 size="sm"
                 onPress={() => navigation.navigate('KycCamera')}
-                style={{ marginTop: theme.spacing.sm }}
+                style={{marginTop: theme.spacing.sm}}
               />
             </Card>
           </EnterView>
@@ -483,7 +518,11 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconFaceScan color={accent} size={glyph} />}
                 trailing={
                   verified ? (
-                    <StatusPill label={t('profile.verifiedPill')} tone="success" dot />
+                    <StatusPill
+                      label={t('profile.verifiedPill')}
+                      tone="success"
+                      dot
+                    />
                   ) : undefined
                 }
                 chevron={!verified}
@@ -507,7 +546,12 @@ export function ProfileScreen(): React.JSX.Element {
                 title={t('profile.cameraControl')}
                 subtitle={t('profile.cameraControlSub')}
                 leading={<IconCamera color={accent} size={glyph} />}
-                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
+                trailing={
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
+                }
                 onPress={() => setComingSoon('cameraControl')}
               />
               {/* "Compartir viaje" NO es "próximamente" — es REAL y vive en la pantalla del viaje activo.
@@ -575,10 +619,16 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconBell color={accent} size={glyph} />}
                 trailing={
                   push.status === 'granted' ? (
-                    <StatusPill label={t('profile.notificationsPill')} tone="success" dot />
+                    <StatusPill
+                      label={t('profile.notificationsPill')}
+                      tone="success"
+                      dot
+                    />
                   ) : undefined
                 }
-                chevron={push.status === 'undetermined' || push.status === 'denied'}
+                chevron={
+                  push.status === 'undetermined' || push.status === 'denied'
+                }
                 onPress={() => {
                   if (push.status === 'undetermined') {
                     void push.enable();
@@ -604,7 +654,9 @@ export function ProfileScreen(): React.JSX.Element {
                   <Switch
                     value={marketingOn}
                     onValueChange={onToggleMarketing}
-                    disabled={consentQuery.isLoading || marketingMutation.isPending}
+                    disabled={
+                      consentQuery.isLoading || marketingMutation.isPending
+                    }
                     accessibilityLabel={t('profile.promotions')}
                   />
                 }
@@ -621,7 +673,12 @@ export function ProfileScreen(): React.JSX.Element {
               <ListItem
                 title={t('profile.accessibility')}
                 leading={<IconAccessibility color={accent} size={glyph} />}
-                trailing={<StatusPill label={t('profile.comingSoonTitle')} tone="neutral" />}
+                trailing={
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
+                }
                 onPress={() => setComingSoon('accessibility')}
               />
               <ListItem
@@ -665,10 +722,11 @@ export function ProfileScreen(): React.JSX.Element {
               updateMutation.mutate();
             }}
           />
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
-          {updateMutation.isError ? <Banner tone="danger" title={t('profile.saveError')} /> : null}
+        }>
+        <View style={{gap: theme.spacing.md}}>
+          {updateMutation.isError ? (
+            <Banner tone="danger" title={t('profile.saveError')} />
+          ) : null}
           <TextField
             label={t('profile.nameLabel')}
             placeholder={t('profile.namePlaceholder')}
@@ -688,7 +746,9 @@ export function ProfileScreen(): React.JSX.Element {
             textContentType="emailAddress"
             value={email}
             onChangeText={setEmail}
-            error={touched && !emailValid ? t('profile.invalidEmail') : undefined}
+            error={
+              touched && !emailValid ? t('profile.invalidEmail') : undefined
+            }
           />
           {/* Documento de identidad (para la vinculación de Yape de UN TAP). Opcional: si lo cargás,
               se persiste vía PATCH /users/me y vinculas Yape con un solo toque. */}
@@ -697,14 +757,21 @@ export function ProfileScreen(): React.JSX.Element {
             onChangeDocumentType={setDocumentType}
             document={document}
             onChangeDocument={setDocument}
-            error={touched && !documentValid ? t('profile.invalidDocument') : undefined}
+            error={
+              touched && !documentValid
+                ? t('profile.invalidDocument')
+                : undefined
+            }
             note={t('profile.documentNote')}
           />
         </View>
       </BottomSheet>
 
       {/* Verificación de celular (altas por correo/Google/Apple sin teléfono). */}
-      <PhoneVerificationSheet visible={phoneOpen} onClose={() => setPhoneOpen(false)} />
+      <PhoneVerificationSheet
+        visible={phoneOpen}
+        onClose={() => setPhoneOpen(false)}
+      />
 
       {/* Derecho al olvido */}
       <BottomSheet
@@ -713,7 +780,11 @@ export function ProfileScreen(): React.JSX.Element {
         title={t('profile.deletionTitle')}
         footer={
           deletionMutation.isSuccess ? (
-            <Button label={t('actions.close')} fullWidth onPress={() => setDeletionOpen(false)} />
+            <Button
+              label={t('actions.close')}
+              fullWidth
+              onPress={() => setDeletionOpen(false)}
+            />
           ) : (
             <Button
               label={t('profile.requestDeletion')}
@@ -723,9 +794,8 @@ export function ProfileScreen(): React.JSX.Element {
               onPress={() => deletionMutation.mutate()}
             />
           )
-        }
-      >
-        <View style={{ gap: theme.spacing.md }}>
+        }>
+        <View style={{gap: theme.spacing.md}}>
           {deletionMutation.isSuccess ? (
             <Banner
               tone="success"
@@ -739,7 +809,9 @@ export function ProfileScreen(): React.JSX.Element {
               {t('profile.deletionBody')}
             </Text>
           )}
-          {deletionMutation.isError ? <Banner tone="danger" title={t('states.errorBody')} /> : null}
+          {deletionMutation.isError ? (
+            <Banner tone="danger" title={t('states.errorBody')} />
+          ) : null}
         </View>
       </BottomSheet>
 
@@ -749,7 +821,7 @@ export function ProfileScreen(): React.JSX.Element {
         onClose={() => setLogoutOpen(false)}
         title={t('profile.logoutTitle')}
         footer={
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Button
               label={t('profile.logout')}
               variant="danger"
@@ -757,10 +829,14 @@ export function ProfileScreen(): React.JSX.Element {
               loading={logoutMutation.isPending}
               onPress={() => logoutMutation.mutate()}
             />
-            <Button label={t('actions.cancel')} variant="ghost" fullWidth onPress={() => setLogoutOpen(false)} />
+            <Button
+              label={t('actions.cancel')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setLogoutOpen(false)}
+            />
           </View>
-        }
-      >
+        }>
         <Text variant="callout" color="inkMuted">
           {t('profile.logoutBody')}
         </Text>
@@ -771,8 +847,13 @@ export function ProfileScreen(): React.JSX.Element {
         visible={comingSoon !== null}
         onClose={() => setComingSoon(null)}
         title={t('profile.comingSoonTitle')}
-        footer={<Button label={t('actions.close')} fullWidth onPress={() => setComingSoon(null)} />}
-      >
+        footer={
+          <Button
+            label={t('actions.close')}
+            fullWidth
+            onPress={() => setComingSoon(null)}
+          />
+        }>
         <Text variant="callout" color="inkMuted">
           {comingSoon ? t(COMING_SOON_COPY[comingSoon]) : ''}
         </Text>
@@ -782,8 +863,8 @@ export function ProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
   verifiedTick: {
     width: 18,
     height: 18,
@@ -791,8 +872,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addNameCta: { paddingVertical: 2 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  addNameCta: {paddingVertical: 2},
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -802,8 +883,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  chipDot: { width: 6, height: 6, borderRadius: 3 },
-  verifyCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  chipDot: {width: 6, height: 6, borderRadius: 3},
+  verifyCard: {flexDirection: 'row', alignItems: 'center', gap: 12},
   verifyIconWrap: {
     width: 44,
     height: 44,
@@ -811,5 +892,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  verifyCopy: { flex: 1, gap: 2 },
+  verifyCopy: {flex: 1, gap: 2},
 });

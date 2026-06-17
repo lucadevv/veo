@@ -1,4 +1,4 @@
-import type {CreateTicketInput, SupportCategory} from '../entities';
+import type { CreateTicketInput, SupportCategory } from '../entities';
 
 /** Límites de validación del borrador de ticket (alineados con un backend razonable). */
 export const SUBJECT_MIN = 4;
@@ -65,6 +65,6 @@ export function toCreateTicketInput(draft: TicketDraft): CreateTicketInput {
     category: draft.category,
     subject: draft.subject.trim(),
     body: draft.body.trim(),
-    ...(tripId ? {tripId} : {}),
+    ...(tripId ? { tripId } : {}),
   };
 }

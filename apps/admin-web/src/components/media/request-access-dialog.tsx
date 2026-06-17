@@ -33,7 +33,11 @@ export function RequestAccessDialog() {
     setError(null);
     try {
       await request.mutateAsync({ tripId: tripId.trim(), reason: reason.trim() });
-      toast({ tone: 'success', title: 'Solicitud enviada', description: 'Requiere doble aprobación.' });
+      toast({
+        tone: 'success',
+        title: 'Solicitud enviada',
+        description: 'Requiere doble aprobación.',
+      });
       setOpen(false);
       setTripId('');
       setReason('');
@@ -59,7 +63,11 @@ export function RequestAccessDialog() {
         </DialogHeader>
         <div className="space-y-4">
           <Field label="ID de viaje">
-            <Input value={tripId} onChange={(e) => setTripId(e.target.value)} placeholder="UUID del viaje" />
+            <Input
+              value={tripId}
+              onChange={(e) => setTripId(e.target.value)}
+              placeholder="UUID del viaje"
+            />
           </Field>
           <Field label="Motivo de la solicitud" error={error ?? undefined}>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -69,7 +77,12 @@ export function RequestAccessDialog() {
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
           </DialogClose>
-          <Button variant="primary" loading={request.isPending} disabled={!valid} onClick={() => void submit()}>
+          <Button
+            variant="primary"
+            loading={request.isPending}
+            disabled={!valid}
+            onClick={() => void submit()}
+          >
             Enviar solicitud
           </Button>
         </DialogFooter>

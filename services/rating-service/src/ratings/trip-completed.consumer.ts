@@ -24,9 +24,6 @@ const GROUP_ID = 'rating-service';
 
 @Injectable()
 export class TripCompletedConsumer extends KafkaConsumerBootstrap {
-  private retryTimer?: NodeJS.Timeout;
-  private stopped = false;
-
   constructor(config: ConfigService<Env, true>) {
     super({
       clientId: KAFKA_CLIENT_ID,
@@ -35,41 +32,18 @@ export class TripCompletedConsumer extends KafkaConsumerBootstrap {
     });
   }
 
-  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  /**
+   * TODOS los eventos del group, en un solo record (único punto de registro). El BOOTSTRAP resiliente
+   * (startWithRetry con backoff ante errores transitorios de Kafka) + el teardown viven promovidos en
+   * KafkaConsumerBootstrap.onModuleInit/onModuleDestroy — esta subclase solo declara su config
+   * (handlers + subscriptionLog), igual que PricingCacheConsumer. NO re-implementa el retry.
+   */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return { 'trip.completed': (envelope) => this.onTripCompleted(envelope) };
   }
 
   protected override subscriptionLog(eventTypes: readonly string[]): string {
     return `consumiendo ${eventTypes.join(', ')} (group ${GROUP_ID})`;
-  }
-
-  override async onModuleInit(): Promise<void> {
-    // Arranque resiliente: si el topic `trip` aún no existe o el broker está cargando, NO se tumba
-    // el servicio (REST + gRPC siguen vivos). Se reintenta en segundo plano hasta conectar.
-    await this.startWithRetry();
-  }
-
-  override async onModuleDestroy(): Promise<void> {
-    this.stopped = true;
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    try {
-      await super.onModuleDestroy();
-    } catch (err) {
-      this.logger.warn({ err }, 'error al detener el consumidor');
-    }
-  }
-
-  private async startWithRetry(): Promise<void> {
-    if (this.stopped) return;
-    try {
-      // Registro de handlers + start + log de suscripción (esqueleto promovido). Reintentar es
-      // seguro: el registro re-escribe las mismas entradas y start vuelve a conectar.
-      await super.onModuleInit();
-    } catch (err) {
-      this.logger.warn({ err }, 'no se pudo iniciar el consumidor de trip.completed; reintentando en 5s');
-      this.retryTimer = setTimeout(() => void this.startWithRetry(), 5000);
-    }
   }
 
   private async onTripCompleted(envelope: EventEnvelope<unknown>): Promise<void> {

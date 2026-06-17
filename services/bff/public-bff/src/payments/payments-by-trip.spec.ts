@@ -113,7 +113,12 @@ describe('PaymentsService.getPaymentByTrip', () => {
       post: vi.fn(async (path: string) => {
         restCalls.push(path);
         // El comando interno responde SOLO el estado de la confirmación (no un PaymentView).
-        return { tripId: 'trip-1', driverConfirmed: false, passengerConfirmed: true, status: 'PENDING' };
+        return {
+          tripId: 'trip-1',
+          driverConfirmed: false,
+          passengerConfirmed: true,
+          status: 'PENDING',
+        };
       }),
     } as unknown as InternalRestClient;
     const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
@@ -166,7 +171,9 @@ describe('PaymentsService.getPaymentByTrip', () => {
  */
 describe('PaymentsService.getPayment · anti-IDOR por id', () => {
   function make(opts: { owner?: { passengerId?: string | null }; restThrows?: boolean }) {
-    const paymentGrpc = { call: vi.fn().mockResolvedValue(PAYMENT) } as unknown as GrpcServiceClient;
+    const paymentGrpc = {
+      call: vi.fn().mockResolvedValue(PAYMENT),
+    } as unknown as GrpcServiceClient;
     const tripGrpc = { call: vi.fn() } as unknown as GrpcServiceClient;
     const restStub = {
       get: vi.fn(async () => {

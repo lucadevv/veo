@@ -1,5 +1,15 @@
 /** DTOs de los endpoints OPS. */
-import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, MinLength, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  Max,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdminRole } from '@veo/shared-types';
 

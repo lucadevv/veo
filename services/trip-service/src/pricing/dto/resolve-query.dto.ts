@@ -25,7 +25,8 @@ export class ResolveQueryDto {
    * 22:00 mostraría el modo de las 14:00. Solo afecta la LECTURA: el modo se congela recién en createTrip.
    */
   @ApiPropertyOptional({
-    description: 'Instante a resolver (ISO-8601). Default ahora. El quote de una reserva pasa la hora de recojo.',
+    description:
+      'Instante a resolver (ISO-8601). Default ahora. El quote de una reserva pasa la hora de recojo.',
     example: '2026-06-01T22:00:00.000Z',
   })
   @IsOptional()

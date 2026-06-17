@@ -1,4 +1,4 @@
-import {NativeModules, PermissionsAndroid, Platform, type Permission} from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform, type Permission } from 'react-native';
 import {
   FacePhotoGrabberUnavailableError,
   type FaceCapture,

@@ -124,10 +124,12 @@ export class DriversService {
     identity: AuthenticatedUser,
     query: ListVehicleModelsQuery,
   ): Promise<DriverVehicleModelView[]> {
-    const page = await this.rest.client('fleet').get<FleetVehicleModelPageReply>('/vehicle-models', {
-      identity,
-      query: { vehicleType: query.vehicleType, q: query.q, limit: VEHICLE_MODELS_PAGE_LIMIT },
-    });
+    const page = await this.rest
+      .client('fleet')
+      .get<FleetVehicleModelPageReply>('/vehicle-models', {
+        identity,
+        query: { vehicleType: query.vehicleType, q: query.q, limit: VEHICLE_MODELS_PAGE_LIMIT },
+      });
     // Truncación NO silenciosa: si fleet devuelve nextCursor, hay más modelos que el tope de una página.
     // Hoy el catálogo es chico y no debería pasar; si pasa, es señal de que la app necesita paginar/buscar.
     if (page.nextCursor) {
@@ -181,15 +183,24 @@ export class DriversService {
   }
 
   /** Selecciona el vehículo ACTIVO del conductor → fleet por REST (server-authoritative del tipo). */
-  async setActiveVehicle(identity: AuthenticatedUser, vehicleId: string): Promise<DriverVehicleView> {
+  async setActiveVehicle(
+    identity: AuthenticatedUser,
+    vehicleId: string,
+  ): Promise<DriverVehicleView> {
     const updated = await this.rest
       .client('fleet')
-      .patch<FleetDriverVehicleReply>('/drivers/vehicles/active', { identity, body: { vehicleId } });
+      .patch<FleetDriverVehicleReply>('/drivers/vehicles/active', {
+        identity,
+        body: { vehicleId },
+      });
     return buildDriverVehicleFromRest(updated);
   }
 
   /** Enrolamiento facial de referencia (BR-I02) → identity-service. */
-  enrollFace(identity: AuthenticatedUser, dto: EnrollFaceDto): Promise<DriverBiometricEnrollResult> {
+  enrollFace(
+    identity: AuthenticatedUser,
+    dto: EnrollFaceDto,
+  ): Promise<DriverBiometricEnrollResult> {
     return this.identity().post<DriverBiometricEnrollResult>('/drivers/biometric/enroll', {
       identity,
       body: dto,
@@ -266,7 +277,12 @@ export class DriversService {
     const [user, aggregate, docs] = await Promise.all([
       this.grpc.call<UserReply>('identity', 'GetUser', { id: identity.userId }, identity),
       this.grpc.call<AggregateReply>('rating', 'GetAggregate', { subjectId: driver.id }, identity),
-      this.grpc.call<DriverDocumentsReply>('fleet', 'GetDriverDocuments', { id: driver.id }, identity),
+      this.grpc.call<DriverDocumentsReply>(
+        'fleet',
+        'GetDriverDocuments',
+        { id: driver.id },
+        identity,
+      ),
     ]);
 
     return buildDriverProfile(driver, user, aggregate, docs);
@@ -303,7 +319,13 @@ export class DriversService {
    */
   async addDocument(
     identity: AuthenticatedUser,
-    input: { type: string; documentNumber: string; issuedAt?: string; expiresAt?: string; fileS3Key?: string },
+    input: {
+      type: string;
+      documentNumber: string;
+      issuedAt?: string;
+      expiresAt?: string;
+      fileS3Key?: string;
+    },
   ): Promise<DriverDocumentDetail> {
     const driver = await this.grpc.call<DriverReply>(
       'identity',

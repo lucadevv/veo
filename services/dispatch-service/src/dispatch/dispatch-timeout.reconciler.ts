@@ -26,7 +26,8 @@ export class DispatchTimeoutReconciler {
     this.running = true;
     try {
       const advanced = await this.matching.sweepExpiredOffers();
-      if (advanced > 0) this.logger.debug(`barrido: ${advanced} ofertas vencidas → TIMEOUT + advance`);
+      if (advanced > 0)
+        this.logger.debug(`barrido: ${advanced} ofertas vencidas → TIMEOUT + advance`);
     } catch (err) {
       this.logger.error(`barrido de ofertas vencidas falló: ${String(err)}`);
     } finally {

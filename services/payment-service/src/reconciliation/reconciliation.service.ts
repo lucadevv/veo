@@ -83,18 +83,28 @@ export class ReconciliationService {
   /** Cron horario (minuto 15): red de seguridad de Refunds PENDING viejos. Lock propio (multi-pod). */
   @Cron('15 * * * *')
   async staleRefundCron(): Promise<void> {
-    await withDistributedLock(this.redis, REFUND_SWEEP_LOCK_KEY, REFUND_SWEEP_LOCK_TTL_SECONDS, async () => {
-      await this.sweepStalePendingRefunds(new Date());
-    });
+    await withDistributedLock(
+      this.redis,
+      REFUND_SWEEP_LOCK_KEY,
+      REFUND_SWEEP_LOCK_TTL_SECONDS,
+      async () => {
+        await this.sweepStalePendingRefunds(new Date());
+      },
+    );
   }
 
   /** Cron horario (minuto 30): red de seguridad de pagos en EFECTIVO PENDING viejos (el conductor
    * cobró en mano pero el pasajero nunca confirmó). Lock propio (multi-pod). */
   @Cron('30 * * * *')
   async staleCashCron(): Promise<void> {
-    await withDistributedLock(this.redis, CASH_SWEEP_LOCK_KEY, CASH_SWEEP_LOCK_TTL_SECONDS, async () => {
-      await this.sweepStaleCashPending(new Date());
-    });
+    await withDistributedLock(
+      this.redis,
+      CASH_SWEEP_LOCK_KEY,
+      CASH_SWEEP_LOCK_TTL_SECONDS,
+      async () => {
+        await this.sweepStaleCashPending(new Date());
+      },
+    );
   }
 
   /**
@@ -116,7 +126,9 @@ export class ReconciliationService {
 
     const staleCount = await this.prisma.read.refund.count({ where });
     if (staleCount === 0) {
-      this.logger.log(`Barrido de reembolsos PENDING: sin refunds más viejos que ${this.refundPendingAlertMin}min`);
+      this.logger.log(
+        `Barrido de reembolsos PENDING: sin refunds más viejos que ${this.refundPendingAlertMin}min`,
+      );
       return { ranAt: now.toISOString(), staleCount: 0, alerted: false };
     }
 
@@ -173,7 +185,9 @@ export class ReconciliationService {
 
     const staleCount = await this.prisma.read.payment.count({ where });
     if (staleCount === 0) {
-      this.logger.log(`Barrido de efectivo PENDING: sin pagos más viejos que ${this.cashPendingAlertMin}min`);
+      this.logger.log(
+        `Barrido de efectivo PENDING: sin pagos más viejos que ${this.cashPendingAlertMin}min`,
+      );
       return { ranAt: now.toISOString(), staleCount: 0, alerted: false };
     }
 

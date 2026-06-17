@@ -19,7 +19,12 @@ import { PricingService, type ModeScheduleView } from './pricing.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import { ReplaceScheduleDto, PricingModeRuleDto, ReplaceFuelSurchargeDto } from './dto/pricing.dto';
 
-const admin: AuthenticatedUser = { userId: 'a1', type: 'admin', roles: [AdminRole.ADMIN], sessionId: 's1' };
+const admin: AuthenticatedUser = {
+  userId: 'a1',
+  type: 'admin',
+  roles: [AdminRole.ADMIN],
+  sessionId: 's1',
+};
 
 const schedule: ModeScheduleView = {
   version: 7,
@@ -32,7 +37,10 @@ describe('PricingService · proxy a trip-service', () => {
   it('GET mode-schedule → proxya al rest client con la identidad admin firmada', async () => {
     const rest = { get: vi.fn().mockResolvedValue(schedule), put: vi.fn() };
     const audit = { record: vi.fn() };
-    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new PricingService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     const out = await svc.getSchedule(admin);
 
@@ -44,7 +52,10 @@ describe('PricingService · proxy a trip-service', () => {
   it('PUT mode-schedule → proxya el body completo y audita la mutación', async () => {
     const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(schedule) };
     const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
-    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new PricingService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     const dto: ReplaceScheduleDto = {
       defaultMode: PricingMode.PUJA,
@@ -69,7 +80,10 @@ describe('PricingService · proxy a trip-service', () => {
   it('fail-closed: si el audit falla, replaceSchedule falla', async () => {
     const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(schedule) };
     const audit = { record: vi.fn().mockRejectedValue(new Error('audit down')) };
-    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new PricingService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     await expect(
       svc.replaceSchedule(admin, { defaultMode: PricingMode.PUJA, rules: [], expectedVersion: 0 }),
@@ -77,10 +91,19 @@ describe('PricingService · proxy a trip-service', () => {
   });
 
   it('B4 · GET fuel-surcharge → proxya con la identidad admin, sin auditar', async () => {
-    const fuel = { fuelPricePerLiterCents: 420, kmPerLiter: 12, perKmCents: 35, version: 2, updatedAt: '2026-06-16T00:00:00.000Z' };
+    const fuel = {
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 12,
+      perKmCents: 35,
+      version: 2,
+      updatedAt: '2026-06-16T00:00:00.000Z',
+    };
     const rest = { get: vi.fn().mockResolvedValue(fuel), put: vi.fn() };
     const audit = { record: vi.fn() };
-    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new PricingService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     const out = await svc.getFuelSurcharge(admin);
 
@@ -90,10 +113,19 @@ describe('PricingService · proxy a trip-service', () => {
   });
 
   it('B4 · PUT fuel-surcharge → proxya precio+rendimiento y audita la mutación', async () => {
-    const fuel = { fuelPricePerLiterCents: 480, kmPerLiter: 12, perKmCents: 40, version: 3, updatedAt: '2026-06-16T00:00:00.000Z' };
+    const fuel = {
+      fuelPricePerLiterCents: 480,
+      kmPerLiter: 12,
+      perKmCents: 40,
+      version: 3,
+      updatedAt: '2026-06-16T00:00:00.000Z',
+    };
     const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(fuel) };
     const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
-    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+    const svc = new PricingService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
 
     const out = await svc.replaceFuelSurcharge(admin, {
       fuelPricePerLiterCents: 480,
@@ -166,21 +198,49 @@ describe('Pricing DTO · validación', () => {
   });
 
   it('rechaza defaultMode fuera del enum', async () => {
-    expect(await errorsOf(ReplaceScheduleDto, { defaultMode: 'SURGE', rules: [] })).toContain('defaultMode');
+    expect(await errorsOf(ReplaceScheduleDto, { defaultMode: 'SURGE', rules: [] })).toContain(
+      'defaultMode',
+    );
   });
 
   it('PricingModeRuleDto: rechaza dayMask=0 / dayMask=128 (rango 1..127)', async () => {
-    expect(await errorsOf(PricingModeRuleDto, { dayMask: 0, startMinute: 0, endMinute: 1, mode: PricingMode.PUJA })).toContain('dayMask');
-    expect(await errorsOf(PricingModeRuleDto, { dayMask: 128, startMinute: 0, endMinute: 1, mode: PricingMode.PUJA })).toContain('dayMask');
+    expect(
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 0,
+        startMinute: 0,
+        endMinute: 1,
+        mode: PricingMode.PUJA,
+      }),
+    ).toContain('dayMask');
+    expect(
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 128,
+        startMinute: 0,
+        endMinute: 1,
+        mode: PricingMode.PUJA,
+      }),
+    ).toContain('dayMask');
   });
 
   it('PricingModeRuleDto: rechaza minute=1440 (rango 0..1439)', async () => {
-    const errs = await errorsOf(PricingModeRuleDto, { dayMask: 1, startMinute: 1440, endMinute: 2000, mode: PricingMode.PUJA });
+    const errs = await errorsOf(PricingModeRuleDto, {
+      dayMask: 1,
+      startMinute: 1440,
+      endMinute: 2000,
+      mode: PricingMode.PUJA,
+    });
     expect(errs).toEqual(expect.arrayContaining(['startMinute', 'endMinute']));
   });
 
   it('PricingModeRuleDto: rechaza mode fuera del enum', async () => {
-    expect(await errorsOf(PricingModeRuleDto, { dayMask: 1, startMinute: 0, endMinute: 1, mode: 'SURGE' })).toContain('mode');
+    expect(
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 1,
+        startMinute: 0,
+        endMinute: 1,
+        mode: 'SURGE',
+      }),
+    ).toContain('mode');
   });
 
   // S5 (M5) — cross-field: una regla overnight (start >= end) quedaría inerte en el resolver → 400 claro.
@@ -201,22 +261,68 @@ describe('Pricing DTO · validación', () => {
 
   it('S5: rechaza startMinute === endMinute (rango vacío)', async () => {
     expect(
-      await errorsOf(PricingModeRuleDto, { dayMask: 1, startMinute: 600, endMinute: 600, mode: PricingMode.FIXED }),
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 1,
+        startMinute: 600,
+        endMinute: 600,
+        mode: PricingMode.FIXED,
+      }),
     ).toContain('endMinute');
   });
 
   it('S5: una regla same-day válida (start < end) pasa', async () => {
     expect(
-      await errorsOf(PricingModeRuleDto, { dayMask: 127, startMinute: 1320, endMinute: 1439, mode: PricingMode.FIXED }),
+      await errorsOf(PricingModeRuleDto, {
+        dayMask: 127,
+        startMinute: 1320,
+        endMinute: 1439,
+        mode: PricingMode.FIXED,
+      }),
     ).toEqual([]);
   });
 
   it('B4 · ReplaceFuelSurchargeDto: acepta precio+rendimiento válidos, rechaza negativo / > techo / no-entero', async () => {
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 12, expectedVersion: 3 })).toEqual([]);
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 0, kmPerLiter: 0, expectedVersion: 0 })).toEqual([]);
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: -1, kmPerLiter: 12, expectedVersion: 0 })).toContain('fuelPricePerLiterCents');
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 201, expectedVersion: 0 })).toContain('kmPerLiter');
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 12.5, kmPerLiter: 12, expectedVersion: 0 })).toContain('fuelPricePerLiterCents');
-    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 12, expectedVersion: -1 })).toContain('expectedVersion');
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: 420,
+        kmPerLiter: 12,
+        expectedVersion: 3,
+      }),
+    ).toEqual([]);
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: 0,
+        kmPerLiter: 0,
+        expectedVersion: 0,
+      }),
+    ).toEqual([]);
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: -1,
+        kmPerLiter: 12,
+        expectedVersion: 0,
+      }),
+    ).toContain('fuelPricePerLiterCents');
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: 420,
+        kmPerLiter: 201,
+        expectedVersion: 0,
+      }),
+    ).toContain('kmPerLiter');
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: 12.5,
+        kmPerLiter: 12,
+        expectedVersion: 0,
+      }),
+    ).toContain('fuelPricePerLiterCents');
+    expect(
+      await errorsOf(ReplaceFuelSurchargeDto, {
+        fuelPricePerLiterCents: 420,
+        kmPerLiter: 12,
+        expectedVersion: -1,
+      }),
+    ).toContain('expectedVersion');
   });
 });

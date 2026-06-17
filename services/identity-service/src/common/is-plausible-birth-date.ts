@@ -3,7 +3,11 @@
  * edad razonable (entre 18 y 100 años). Evita typos groseros (1899, 2099) y menores de edad sin
  * acoplar el DTO a una librería de fechas. Se compara a medianoche UTC para ser determinista.
  */
-import { registerDecorator, type ValidationOptions, type ValidationArguments } from 'class-validator';
+import {
+  registerDecorator,
+  type ValidationOptions,
+  type ValidationArguments,
+} from 'class-validator';
 
 /** Edad mínima del conductor (mayoría de edad). */
 export const MIN_DRIVER_AGE_YEARS = 18;

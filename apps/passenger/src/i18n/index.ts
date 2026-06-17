@@ -1,6 +1,6 @@
 import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import { defaultNS, resources } from './resources';
+import {initReactI18next} from 'react-i18next';
+import {defaultNS, resources} from './resources';
 
 /**
  * Inicialización de i18n (i18next + react-i18next) en es-PE.
@@ -21,5 +21,5 @@ void i18n.use(initReactI18next).init({
   returnNull: false,
 });
 
-export { defaultNS, resources } from './resources';
+export {defaultNS, resources} from './resources';
 export default i18n;

@@ -46,7 +46,10 @@ function makePrisma(opts: {
   const captured = { outbox: [] as CapturedOutbox[], upserts: [] as Record<string, unknown>[] };
   const tx = {
     rating: {
-      create: async ({ data }: { data: Record<string, unknown> }) => ({ ...data, createdAt: new Date() }),
+      create: async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
+        createdAt: new Date(),
+      }),
       findMany: async () => opts.windowStars.map((stars) => ({ stars })),
     },
     ratingAggregate: {
@@ -57,7 +60,15 @@ function makePrisma(opts: {
       },
     },
     outboxEvent: {
-      create: async ({ data }: { data: { aggregateId: string; eventType: string; envelope: { payload: Record<string, unknown> } } }) => {
+      create: async ({
+        data,
+      }: {
+        data: {
+          aggregateId: string;
+          eventType: string;
+          envelope: { payload: Record<string, unknown> };
+        };
+      }) => {
         captured.outbox.push({
           eventType: data.eventType,
           aggregateId: data.aggregateId,
@@ -162,7 +173,9 @@ describe('RatingsService.create · gate de validación del viaje (fail-closed)',
     const svc = new RatingsService(
       prisma as never,
       config,
-      makeTripClient({ trip: { status: TripStatus.COMPLETED, passengerId: RATER, driverId: RATED } }),
+      makeTripClient({
+        trip: { status: TripStatus.COMPLETED, passengerId: RATER, driverId: RATED },
+      }),
     );
     await expect(
       svc.create(RATER, { tripId: TRIP, ratedId: OTHER, ratedRole: 'DRIVER', stars: 5 }),
@@ -201,19 +214,31 @@ describe('RatingsService.create · gate de validación del viaje (fail-closed)',
 describe('RatingsService.create · flags (BR-D01)', () => {
   it('promedio < 4.0 marca conductor y emite driver.flagged suspension', async () => {
     // ventana: [3,3,3] → avg 3.0 < 4.0
-    const { prisma, captured } = makePrisma({ existingTrip: false, windowStars: [3, 3, 3], prevAggregate: null });
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [3, 3, 3],
+      prevAggregate: null,
+    });
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 3 });
     const flagged = captured.outbox.find((e) => e.eventType === 'driver.flagged');
     expect(flagged).toBeDefined();
-    expect(flagged?.payload).toMatchObject({ driverId: RATED, reason: 'suspension', rollingAvg: 3 });
+    expect(flagged?.payload).toMatchObject({
+      driverId: RATED,
+      reason: 'suspension',
+      rollingAvg: 3,
+    });
     expect(captured.upserts[0]?.flagged).toBe(true);
     expect(captured.upserts[0]?.flagReason).toBe('suspension');
   });
 
   it('promedio en banda review (4.2) emite driver.flagged review', async () => {
     // [4,4,4,5] = 17/4 = 4.25 → review
-    const { prisma, captured } = makePrisma({ existingTrip: false, windowStars: [4, 4, 4, 5], prevAggregate: null });
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [4, 4, 4, 5],
+      prevAggregate: null,
+    });
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 4 });
     const flagged = captured.outbox.find((e) => e.eventType === 'driver.flagged');
@@ -235,7 +260,11 @@ describe('RatingsService.create · flags (BR-D01)', () => {
 
   it('promedio >= 4.3 no marca al conductor', async () => {
     // [5,5,4,4] = 18/4 = 4.5 ≥ 4.3 → sin flag
-    const { prisma, captured } = makePrisma({ existingTrip: false, windowStars: [5, 5, 4, 4], prevAggregate: null });
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [5, 5, 4, 4],
+      prevAggregate: null,
+    });
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 5 });
     expect(captured.upserts[0]?.flagged).toBe(false);
@@ -300,7 +329,11 @@ describe('RatingsService.findByTripForRater · MI rating (anti-IDOR)', () => {
 
 describe('RatingsService.create · flags (BR-I05 pasajero)', () => {
   it('pasajero con promedio < 4.0 emite passenger.flagged reverification', async () => {
-    const { prisma, captured } = makePrisma({ existingTrip: false, windowStars: [3, 3], prevAggregate: null });
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [3, 3],
+      prevAggregate: null,
+    });
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'PASSENGER', stars: 3 });
     const flagged = captured.outbox.find((e) => e.eventType === 'passenger.flagged');
@@ -309,7 +342,11 @@ describe('RatingsService.create · flags (BR-I05 pasajero)', () => {
   });
 
   it('pasajero en banda review de conductor (4.2) NO se marca', async () => {
-    const { prisma, captured } = makePrisma({ existingTrip: false, windowStars: [4, 4, 5], prevAggregate: null });
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [4, 4, 5],
+      prevAggregate: null,
+    });
     // avg 4.33 ≥ 4.0 → sin flag de pasajero
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'PASSENGER', stars: 4 });

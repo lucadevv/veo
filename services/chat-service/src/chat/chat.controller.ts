@@ -4,7 +4,17 @@
  *  - GET  /chat/trips/:tripId/messages → historial.
  *  - POST /chat/trips/:tripId/messages → persiste y devuelve el mensaje (el BFF lo emite por socket).
  */
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InternalIdentityGuard } from '@veo/auth';
 import { ChatService, type ChatMessageView } from './chat.service';

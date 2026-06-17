@@ -127,7 +127,11 @@ function pendingRequest(over: Partial<AccessRequest> = {}): AccessRequest {
 
 describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => {
   it('rechaza un motivo de 20 caracteres o menos', async () => {
-    const svc = new AccessService(makePrisma([segment()], []) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([segment()], []) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
     await expect(
       svc.requestAccess({
         tripId: 'trip-1',
@@ -141,7 +145,11 @@ describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => 
 
   it('crea la solicitud en estado PENDING cuando el motivo supera los 20 caracteres', async () => {
     const reqs: AccessRequest[] = [];
-    const svc = new AccessService(makePrisma([segment()], reqs) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([segment()], reqs) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
     const res = await svc.requestAccess({
       tripId: 'trip-1',
       segmentId: 'seg-1',
@@ -173,7 +181,11 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
   it('aprueba: marca APPROVED + approvedBy + approvedAt, sin firmar URL ni tocar el segmento', async () => {
     const seg = segment();
     const req = pendingRequest();
-    const svc = new AccessService(makePrisma([seg], [req]) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([seg], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     const res = await svc.approveAccess('req-1', 'compliance-1', now);
 
@@ -187,20 +199,46 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
   });
 
   it('no permite aprobar una solicitud ya decidida (guard de transición)', async () => {
-    const req = pendingRequest({ status: VideoAccessStatus.APPROVED, approvedBy: 'compliance-1', approvedAt: now });
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.approveAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(ConflictError);
+    const req = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      approvedBy: 'compliance-1',
+      approvedAt: now,
+    });
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.approveAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(
+      ConflictError,
+    );
   });
 
   it('no permite aprobar una solicitud rechazada', async () => {
-    const req = pendingRequest({ status: VideoAccessStatus.REJECTED, rejectedBy: 'compliance-1', rejectedAt: now });
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.approveAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(ConflictError);
+    const req = pendingRequest({
+      status: VideoAccessStatus.REJECTED,
+      rejectedBy: 'compliance-1',
+      rejectedAt: now,
+    });
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.approveAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(
+      ConflictError,
+    );
   });
 
   it('falla si la solicitud no existe', async () => {
-    const svc = new AccessService(makePrisma([segment()], []) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.approveAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(NotFoundError);
+    const svc = new AccessService(
+      makePrisma([segment()], []) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.approveAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 });
 
@@ -209,7 +247,11 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
 
   it('rechaza: marca REJECTED + rejectedBy + rejectedAt', async () => {
     const req = pendingRequest();
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     const res = await svc.rejectAccess('req-1', 'compliance-1', now);
 
@@ -219,14 +261,30 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
   });
 
   it('no permite rechazar una solicitud ya decidida (guard de transición)', async () => {
-    const req = pendingRequest({ status: VideoAccessStatus.APPROVED, approvedBy: 'compliance-1', approvedAt: now });
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.rejectAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(ConflictError);
+    const req = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      approvedBy: 'compliance-1',
+      approvedAt: now,
+    });
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.rejectAccess('req-1', 'compliance-2', now)).rejects.toBeInstanceOf(
+      ConflictError,
+    );
   });
 
   it('falla si la solicitud no existe', async () => {
-    const svc = new AccessService(makePrisma([segment()], []) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.rejectAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(NotFoundError);
+    const svc = new AccessService(
+      makePrisma([segment()], []) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.rejectAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 });
 
@@ -235,8 +293,16 @@ describe('AccessService.streamAccess · firma URL + watermark fresco, solo si AP
 
   it('firma signed URL (5 min), watermark con el email y suma accessedCount cuando está APPROVED', async () => {
     const seg = segment();
-    const req = pendingRequest({ status: VideoAccessStatus.APPROVED, approvedBy: 'compliance-1', approvedAt: now });
-    const svc = new AccessService(makePrisma([seg], [req]) as never, new StorageSandboxAdapter(), config);
+    const req = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      approvedBy: 'compliance-1',
+      approvedAt: now,
+    });
+    const svc = new AccessService(
+      makePrisma([seg], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
@@ -257,7 +323,11 @@ describe('AccessService.streamAccess · firma URL + watermark fresco, solo si AP
   it('cada reproducción incrementa accessedCount (cadena de custodia)', async () => {
     const seg = segment();
     const req = pendingRequest({ status: VideoAccessStatus.APPROVED });
-    const svc = new AccessService(makePrisma([seg], [req]) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([seg], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     await svc.streamAccess('req-1', 'compliance-1', now);
     await svc.streamAccess('req-1', 'compliance-1', now);
@@ -267,27 +337,55 @@ describe('AccessService.streamAccess · firma URL + watermark fresco, solo si AP
 
   it('rechaza la visualización si la solicitud está PENDING (no aprobada)', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.PENDING });
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.streamAccess('req-1', 'compliance-1', now)).rejects.toBeInstanceOf(ForbiddenError);
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.streamAccess('req-1', 'compliance-1', now)).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
   });
 
   it('rechaza la visualización si la solicitud está REJECTED', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.REJECTED });
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.streamAccess('req-1', 'compliance-1', now)).rejects.toBeInstanceOf(ForbiddenError);
+    const svc = new AccessService(
+      makePrisma([segment()], [req]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.streamAccess('req-1', 'compliance-1', now)).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
   });
 
   it('falla si la solicitud no existe', async () => {
-    const svc = new AccessService(makePrisma([segment()], []) as never, new StorageSandboxAdapter(), config);
-    await expect(svc.streamAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(NotFoundError);
+    const svc = new AccessService(
+      makePrisma([segment()], []) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.streamAccess('nope', 'compliance-1', now)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 });
 
 describe('AccessService.listAccessRequests · filtro por estado, orden createdAt desc (BR-S02)', () => {
   it('devuelve todas ordenadas por createdAt desc cuando no hay filtro', async () => {
-    const older = pendingRequest({ id: 'req-old', createdAt: new Date('2026-05-28T10:00:00.000Z') });
-    const newer = pendingRequest({ id: 'req-new', createdAt: new Date('2026-05-28T12:00:00.000Z') });
-    const svc = new AccessService(makePrisma([segment()], [older, newer]) as never, new StorageSandboxAdapter(), config);
+    const older = pendingRequest({
+      id: 'req-old',
+      createdAt: new Date('2026-05-28T10:00:00.000Z'),
+    });
+    const newer = pendingRequest({
+      id: 'req-new',
+      createdAt: new Date('2026-05-28T12:00:00.000Z'),
+    });
+    const svc = new AccessService(
+      makePrisma([segment()], [older, newer]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     const res = await svc.listAccessRequests();
 
@@ -297,7 +395,11 @@ describe('AccessService.listAccessRequests · filtro por estado, orden createdAt
   it('filtra por estado cuando se provee', async () => {
     const pending = pendingRequest({ id: 'req-p', status: VideoAccessStatus.PENDING });
     const approved = pendingRequest({ id: 'req-a', status: VideoAccessStatus.APPROVED });
-    const svc = new AccessService(makePrisma([segment()], [pending, approved]) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(
+      makePrisma([segment()], [pending, approved]) as never,
+      new StorageSandboxAdapter(),
+      config,
+    );
 
     const res = await svc.listAccessRequests({ status: VideoAccessStatus.APPROVED });
 

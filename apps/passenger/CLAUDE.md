@@ -44,18 +44,18 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
 
 ## Pantallas críticas (priorizadas)
 
-| Pantalla | Fase | Notas |
-|---|---|---|
-| Onboarding | F1 | Consentimientos Ley 29733 explícitos |
-| Auth (phone + OTP) | F1 | OTP a 6 dígitos vía notification-service propio (SMS soberano por SMPP) |
-| KycCamera | F1-F2 | Captura facial nativa → biometric-service propio (ONNX self-hosted), sin SDK de terceros |
-| Home (mapa + request) | F1 | MapLibre GL + tiles OSM self-hosted (tileserver-gl) |
-| TripActive (cámara + share) | F2 | WebRTC viewer + botón compartir familia |
-| Panic | F2 | UI mínima, native module |
-| TrustedContacts | F2 | Hasta 3, OTP cada uno |
-| ChildMode | F2 | Input código 4-6 dígitos |
-| Profile + Payments | F1-F4 | Yape/Plin F1, tarjeta F4 |
-| TripHistory | F1 | Lista paginada con detalles |
+| Pantalla                    | Fase  | Notas                                                                                    |
+| --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
+| Onboarding                  | F1    | Consentimientos Ley 29733 explícitos                                                     |
+| Auth (phone + OTP)          | F1    | OTP a 6 dígitos vía notification-service propio (SMS soberano por SMPP)                  |
+| KycCamera                   | F1-F2 | Captura facial nativa → biometric-service propio (ONNX self-hosted), sin SDK de terceros |
+| Home (mapa + request)       | F1    | MapLibre GL + tiles OSM self-hosted (tileserver-gl)                                      |
+| TripActive (cámara + share) | F2    | WebRTC viewer + botón compartir familia                                                  |
+| Panic                       | F2    | UI mínima, native module                                                                 |
+| TrustedContacts             | F2    | Hasta 3, OTP cada uno                                                                    |
+| ChildMode                   | F2    | Input código 4-6 dígitos                                                                 |
+| Profile + Payments          | F1-F4 | Yape/Plin F1, tarjeta F4                                                                 |
+| TripHistory                 | F1    | Lista paginada con detalles                                                              |
 
 ## Stack mobile
 

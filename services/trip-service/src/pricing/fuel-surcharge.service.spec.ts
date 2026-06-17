@@ -30,7 +30,7 @@ class FakeRepo implements FuelSurchargeRepository {
       fuelSurchargeConfig: {
         // CAS: solo "actualiza" si la fila existe Y su versión coincide con el WHERE (espejo del UPDATE ... WHERE version=).
         updateMany: (args) => {
-          if (this.config && this.config.version === args.where.version) {
+          if (this.config?.version === args.where.version) {
             this.config = {
               fuelPricePerLiterCents: args.data.fuelPricePerLiterCents as number,
               kmPerLiter: args.data.kmPerLiter as number,
@@ -51,11 +51,16 @@ class FakeRepo implements FuelSurchargeRepository {
           return Promise.resolve({ version: this.config.version, updatedAt: new Date(0) });
         },
         findUnique: () =>
-          Promise.resolve(this.config ? { version: this.config.version, updatedAt: new Date(0) } : null),
+          Promise.resolve(
+            this.config ? { version: this.config.version, updatedAt: new Date(0) } : null,
+          ),
       },
       outboxEvent: {
         create: (args) => {
-          this.outboxEvents.push({ aggregateId: args.data.aggregateId, eventType: args.data.eventType });
+          this.outboxEvents.push({
+            aggregateId: args.data.aggregateId,
+            eventType: args.data.eventType,
+          });
           return Promise.resolve({});
         },
       },
@@ -80,24 +85,41 @@ describe('FuelSurchargeService (B4 · derivado de precio÷rendimiento)', () => {
 
   it('con fila → getPerKmCents DERIVA = round(precio ÷ rendimiento)', async () => {
     // S/4.20/L (420 céntimos) ÷ 12 km/L = 35 céntimos/km.
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 420, kmPerLiter: 12, version: 5, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 12,
+      version: 5,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new FuelSurchargeService(repo, 0);
     expect(await service.getPerKmCents()).toBe(35);
   });
 
   it('rendimiento 0 → getPerKmCents 0 (degradación honesta, sin división por cero)', async () => {
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 420, kmPerLiter: 0, version: 1, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 0,
+      version: 1,
+      updatedAt: new Date(0).toISOString(),
+    });
     expect(await new FuelSurchargeService(repo, 0).getPerKmCents()).toBe(0);
   });
 
   it('replace (expectedVersion correcta) bumpea version, emite el evento en la misma tx y re-deriva el per-km', async () => {
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 100, kmPerLiter: 10, version: 4, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 100,
+      kmPerLiter: 10,
+      version: 4,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new FuelSurchargeService(repo, 0);
     const out = await service.replace(480, 12, 4); // expectedVersion=4 (la vigente); 480 ÷ 12 = 40 céntimos/km
     expect(out.version).toBe(5); // 4 + 1
     expect(out.fuelPricePerLiterCents).toBe(480);
     expect(out.kmPerLiter).toBe(12);
-    expect(repo.outboxEvents).toEqual([{ aggregateId: 'GLOBAL', eventType: 'fuel.surcharge_updated' }]);
+    expect(repo.outboxEvents).toEqual([
+      { aggregateId: 'GLOBAL', eventType: 'fuel.surcharge_updated' },
+    ]);
     // El cambio se ve de inmediato (cache invalidado) y el per-km se re-deriva: 480÷12 = 40.
     expect(await service.getPerKmCents()).toBe(40);
   });
@@ -108,17 +130,31 @@ describe('FuelSurchargeService (B4 · derivado de precio÷rendimiento)', () => {
   });
 
   it('CAS · expectedVersion STALE → ConflictError (otro admin cambió el config; sin lost update)', async () => {
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 420, kmPerLiter: 12, version: 7, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 12,
+      version: 7,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new FuelSurchargeService(repo, 0);
     // El admin cargó v6, pero la vigente ya es v7 (otro la movió) → rechazo honesto, NO pisa.
     await expect(service.replace(500, 10, 6)).rejects.toThrow(/cambió/);
     // La config NO se tocó: sigue v7 con los valores viejos, y NO se emitió evento.
-    expect(await service.getConfig()).toMatchObject({ fuelPricePerLiterCents: 420, kmPerLiter: 12, version: 7 });
+    expect(await service.getConfig()).toMatchObject({
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 12,
+      version: 7,
+    });
     expect(repo.outboxEvents).toEqual([]);
   });
 
   it('CAS · primer write pero la fila ya existe (expectedVersion 0 stale) → ConflictError', async () => {
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 420, kmPerLiter: 12, version: 3, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 420,
+      kmPerLiter: 12,
+      version: 3,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new FuelSurchargeService(repo, 0);
     await expect(service.replace(500, 10, 0)).rejects.toThrow(/inicializado/);
     expect(repo.outboxEvents).toEqual([]);
@@ -126,7 +162,12 @@ describe('FuelSurchargeService (B4 · derivado de precio÷rendimiento)', () => {
 
   it('#3 observabilidad: un replace EXITOSO bumpea veo_pricing_config_changed_total{kind=fuel_surcharge}; un conflicto NO', async () => {
     const before = await readPricingChanged('fuel_surcharge');
-    const repo = new FakeRepo({ fuelPricePerLiterCents: 100, kmPerLiter: 10, version: 4, updatedAt: new Date(0).toISOString() });
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 100,
+      kmPerLiter: 10,
+      version: 4,
+      updatedAt: new Date(0).toISOString(),
+    });
     const service = new FuelSurchargeService(repo, 0);
     await service.replace(480, 12, 4); // éxito → +1
     expect(await readPricingChanged('fuel_surcharge')).toBe(before + 1);

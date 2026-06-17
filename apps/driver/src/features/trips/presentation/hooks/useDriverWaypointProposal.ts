@@ -1,9 +1,9 @@
-import {useEffect} from 'react';
-import {useMutation, useQueryClient} from '@tanstack/react-query';
-import type {WaypointProposedMsg} from '@veo/api-client';
-import {useRepositories} from '../../../../core/di/useDi';
-import {useWaypointProposalStore} from '../../../realtime/presentation/state/waypointProposalStore';
-import {tripQueryKey} from './useTrips';
+import { useEffect } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { WaypointProposedMsg } from '@veo/api-client';
+import { useRepositories } from '../../../../core/di/useDi';
+import { useWaypointProposalStore } from '../../../realtime/presentation/state/waypointProposalStore';
+import { tripQueryKey } from './useTrips';
 
 export interface DriverWaypointProposalController {
   /** Propuesta entrante para ESTE viaje, o `null` si no hay ninguna viva. */
@@ -24,10 +24,10 @@ export interface DriverWaypointProposalController {
  * expiró en paralelo). Una propuesta de otro viaje se ignora (defensa anti-cruce). Solo presentación.
  */
 export function useDriverWaypointProposal(tripId: string): DriverWaypointProposalController {
-  const {trips} = useRepositories();
+  const { trips } = useRepositories();
   const queryClient = useQueryClient();
-  const stored = useWaypointProposalStore(s => s.proposal);
-  const clearProposal = useWaypointProposalStore(s => s.clearProposal);
+  const stored = useWaypointProposalStore((s) => s.proposal);
+  const clearProposal = useWaypointProposalStore((s) => s.clearProposal);
 
   // Solo es relevante la propuesta de ESTE viaje (el store guarda una sola, pero defendemos el cruce).
   const proposal = stored && stored.tripId === tripId ? stored : null;
@@ -48,21 +48,21 @@ export function useDriverWaypointProposal(tripId: string): DriverWaypointProposa
   }, [proposal, clearProposal]);
 
   const mutation = useMutation({
-    mutationFn: ({proposalId, accept}: {proposalId: string; accept: boolean}) =>
+    mutationFn: ({ proposalId, accept }: { proposalId: string; accept: boolean }) =>
       trips.respondWaypoint(tripId, proposalId, accept),
     onSuccess: () => {
       clearProposal();
       // Aceptar cambió la tarifa + la ruta del viaje server-side: refrescamos el viaje y la ruta.
-      queryClient.invalidateQueries({queryKey: tripQueryKey(tripId)});
+      queryClient.invalidateQueries({ queryKey: tripQueryKey(tripId) });
     },
   });
 
-  const {mutate} = mutation;
+  const { mutate } = mutation;
   const respond = (accept: boolean): void => {
     if (proposal) {
-      mutate({proposalId: proposal.proposalId, accept});
+      mutate({ proposalId: proposal.proposalId, accept });
     }
   };
 
-  return {proposal, isResponding: mutation.isPending, isError: mutation.isError, respond};
+  return { proposal, isResponding: mutation.isPending, isError: mutation.isError, respond };
 }

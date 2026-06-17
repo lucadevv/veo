@@ -28,12 +28,12 @@ pnpm ios     # o pnpm android
 
 ## Native modules críticos
 
-| Módulo | Plataforma | Para qué |
-|---|---|---|
-| `PanicDetector` | iOS + Android | Secuencia 3× vol con UI engañosa |
-| `BiometricReLogin` | iOS + Android | Re-login biométrico local (Face ID/huella vía Keychain/Keystore); sin SDK de terceros |
-| `WebRTC` | iOS + Android | `react-native-webrtc` oficial |
-| `BackgroundLocation` | iOS + Android | GPS durante viaje |
+| Módulo               | Plataforma    | Para qué                                                                              |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `PanicDetector`      | iOS + Android | Secuencia 3× vol con UI engañosa                                                      |
+| `BiometricReLogin`   | iOS + Android | Re-login biométrico local (Face ID/huella vía Keychain/Keystore); sin SDK de terceros |
+| `WebRTC`             | iOS + Android | `react-native-webrtc` oficial                                                         |
+| `BackgroundLocation` | iOS + Android | GPS durante viaje                                                                     |
 
 ## Packages compartidos
 

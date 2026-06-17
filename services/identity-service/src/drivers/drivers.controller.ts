@@ -189,7 +189,9 @@ export class DriversController {
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/suspend')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Suspender manualmente a un conductor (SAFETY · con motivo obligatorio)' })
+  @ApiOperation({
+    summary: 'Suspender manualmente a un conductor (SAFETY · con motivo obligatorio)',
+  })
   async suspend(@Param('id') id: string, @Body() dto: SuspendDriverDto): Promise<void> {
     await this.drivers.suspend(id, dto.reason);
   }

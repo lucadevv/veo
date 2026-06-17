@@ -1,7 +1,7 @@
 import React from 'react';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {driverTheme} from '@veo/ui-kit';
-import type {RegistrationStackParamList} from './types';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { driverTheme } from '@veo/ui-kit';
+import type { RegistrationStackParamList } from './types';
 import {
   DocumentsScreen,
   IdentityVerificationScreen,
@@ -27,9 +27,7 @@ const STEP_ROUTES: Record<number, keyof RegistrationStackParamList> = {
  * arrancar siempre en `PersonalData`. Para `rejected`, enrutamos también al paso donde quedó su
  * avance (tiene datos previos que debe corregir); si no hay paso válido, caemos a `PersonalData`.
  */
-function resolveInitialRoute(
-  currentStep: number,
-): keyof RegistrationStackParamList {
+function resolveInitialRoute(currentStep: number): keyof RegistrationStackParamList {
   return STEP_ROUTES[currentStep] ?? 'PersonalData';
 }
 
@@ -52,8 +50,9 @@ export const RegistrationNavigator = (): React.JSX.Element => {
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
-          contentStyle: {backgroundColor: driverTheme.colors.bg},
-        }}>
+          contentStyle: { backgroundColor: driverTheme.colors.bg },
+        }}
+      >
         <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
         <Stack.Screen name="Vehicle" component={VehicleScreen} />
         <Stack.Screen name="Documents" component={DocumentsScreen} />

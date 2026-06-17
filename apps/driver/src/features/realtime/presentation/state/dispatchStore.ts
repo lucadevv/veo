@@ -1,4 +1,4 @@
-import {create} from 'zustand';
+import { create } from 'zustand';
 
 /** Oferta entrante recibida por el socket `/driver` (evento `dispatch:offer`). */
 export interface IncomingOffer {
@@ -31,12 +31,12 @@ export interface DispatchState {
   clearOffer(): void;
 }
 
-export const useDispatchStore = create<DispatchState>(set => ({
+export const useDispatchStore = create<DispatchState>((set) => ({
   incomingOffer: null,
   activeTripId: null,
   connected: false,
-  setIncomingOffer: offer => set({incomingOffer: offer}),
-  setActiveTripId: tripId => set({activeTripId: tripId}),
-  setConnected: connected => set({connected}),
-  clearOffer: () => set({incomingOffer: null}),
+  setIncomingOffer: (offer) => set({ incomingOffer: offer }),
+  setActiveTripId: (tripId) => set({ activeTripId: tripId }),
+  setConnected: (connected) => set({ connected }),
+  clearOffer: () => set({ incomingOffer: null }),
 }));

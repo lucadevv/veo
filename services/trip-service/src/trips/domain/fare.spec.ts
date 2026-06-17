@@ -55,19 +55,32 @@ describe('BR-T05 · cálculo de tarifa', () => {
   });
 
   it('B3 · el fuel se surge junto al resto (1500+200 base ×1.5 = 2550)', () => {
-    const fare = calculateFare({ distanceMeters: 5000, durationSeconds: 600, fuelPerKmCents: 40, surgeMultiplier: 1.5 });
-    expect(fare.cents).toBe(Math.round((BASE_FARE_CENTS + (PER_KM_CENTS + 40) * 5 + PER_MIN_CENTS * 10) * 1.5));
+    const fare = calculateFare({
+      distanceMeters: 5000,
+      durationSeconds: 600,
+      fuelPerKmCents: 40,
+      surgeMultiplier: 1.5,
+    });
+    expect(fare.cents).toBe(
+      Math.round((BASE_FARE_CENTS + (PER_KM_CENTS + 40) * 5 + PER_MIN_CENTS * 10) * 1.5),
+    );
   });
 
   it('B3 · fuel default 0 = sin recargo; fuel negativo → ValidationError', () => {
     const a = calculateFare({ distanceMeters: 5000, durationSeconds: 600 });
     const b = calculateFare({ distanceMeters: 5000, durationSeconds: 600, fuelPerKmCents: 0 });
     expect(a.cents).toBe(b.cents);
-    expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: 60, fuelPerKmCents: -5 })).toThrow();
+    expect(() =>
+      calculateFare({ distanceMeters: 1000, durationSeconds: 60, fuelPerKmCents: -5 }),
+    ).toThrow();
   });
 
   it('aplica surge multiplicador antes del recargo de niño', () => {
-    const fare = calculateFare({ distanceMeters: 5000, durationSeconds: 600, surgeMultiplier: 1.5 });
+    const fare = calculateFare({
+      distanceMeters: 5000,
+      durationSeconds: 600,
+      surgeMultiplier: 1.5,
+    });
     // 1500 * 1.5 = 2250
     expect(fare.cents).toBe(2250);
   });
@@ -97,24 +110,32 @@ describe('BR-T05 · cálculo de tarifa', () => {
   });
 
   it('rechaza surge fuera de rango [1.0, 2.0]', () => {
-    expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 0.9 })).toThrow(
-      ValidationError,
-    );
-    expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 2.1 })).toThrow(
-      ValidationError,
-    );
+    expect(() =>
+      calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 0.9 }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 2.1 }),
+    ).toThrow(ValidationError);
   });
 
   it('acepta surge en los extremos 1.0 y 2.0', () => {
-    expect(calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 1.0 }).cents).toBeGreaterThan(0);
+    expect(
+      calculateFare({ distanceMeters: 1000, durationSeconds: 60, surgeMultiplier: 1.0 }).cents,
+    ).toBeGreaterThan(0);
     const max = calculateFare({ distanceMeters: 5000, durationSeconds: 600, surgeMultiplier: 2.0 });
     expect(max.cents).toBe(3000); // 1500 * 2
   });
 
   it('rechaza distancia/duración negativas o no finitas', () => {
-    expect(() => calculateFare({ distanceMeters: -1, durationSeconds: 60 })).toThrow(ValidationError);
-    expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: -1 })).toThrow(ValidationError);
-    expect(() => calculateFare({ distanceMeters: Number.NaN, durationSeconds: 60 })).toThrow(ValidationError);
+    expect(() => calculateFare({ distanceMeters: -1, durationSeconds: 60 })).toThrow(
+      ValidationError,
+    );
+    expect(() => calculateFare({ distanceMeters: 1000, durationSeconds: -1 })).toThrow(
+      ValidationError,
+    );
+    expect(() => calculateFare({ distanceMeters: Number.NaN, durationSeconds: 60 })).toThrow(
+      ValidationError,
+    );
   });
 });
 
@@ -141,14 +162,18 @@ describe('ADR 013 §1.7 · applyOfferingPricing (tarifa firme desde base — FUE
   });
 
   it('económico ×1.0: identidad por encima de la mínima; mínima (S/5.00) por debajo', () => {
-    expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents).toBe(1500);
-    expect(applyOfferingPricing(money(400), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents).toBe(
-      OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents,
-    );
+    expect(
+      applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents,
+    ).toBe(1500);
+    expect(
+      applyOfferingPricing(money(400), OFFERINGS[OfferingId.VEO_ECONOMICO].pricing).cents,
+    ).toBe(OFFERINGS[OfferingId.VEO_ECONOMICO].pricing.minFareCents);
   });
 
   it('preserva la currency de la base', () => {
-    expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_XL].pricing).currency).toBe('PEN');
+    expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_XL].pricing).currency).toBe(
+      'PEN',
+    );
   });
 });
 
@@ -175,16 +200,22 @@ describe('B5-1 · calculateOfferingFare (energía pass-through · multiplier sol
   });
 
   it('respeta la tarifa mínima', () => {
-    expect(calculateOfferingFare({ distanceMeters: 0, durationSeconds: 0 }, eco, 0).cents).toBe(600); // BASE 600 > minFare? no, 600>500 → 600
+    expect(calculateOfferingFare({ distanceMeters: 0, durationSeconds: 0 }, eco, 0).cents).toBe(
+      600,
+    ); // BASE 600 > minFare? no, 600>500 → 600
   });
 
   it('fee de niño es FLAT (no escalado por multiplier ni surge)', () => {
-    expect(calculateOfferingFare({ ...ride, childMode: true }, eco, 40).cents).toBe(1700 + CHILD_MODE_FEE_CENTS);
+    expect(calculateOfferingFare({ ...ride, childMode: true }, eco, 40).cents).toBe(
+      1700 + CHILD_MODE_FEE_CENTS,
+    );
   });
 
   it('rechaza insumos inválidos (energía negativa, surge fuera de rango)', () => {
     expect(() => calculateOfferingFare(ride, eco, -1)).toThrow(ValidationError);
-    expect(() => calculateOfferingFare({ ...ride, surgeMultiplier: 3 }, eco, 0)).toThrow(ValidationError);
+    expect(() => calculateOfferingFare({ ...ride, surgeMultiplier: 3 }, eco, 0)).toThrow(
+      ValidationError,
+    );
   });
 });
 

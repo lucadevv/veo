@@ -4,9 +4,7 @@
 require('react-native-gesture-handler/jestSetup');
 
 // Reanimated trae un mock oficial para Jest.
-jest.mock('react-native-reanimated', () =>
-  require('react-native-reanimated/mock'),
-);
+jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
 
 // MMKV: storage nativo no disponible en Jest. v4 expone la factory `createMMKV(config)` (además del
 // type `MMKV`); el código usa la factory, así que el mock DEBE proveerla, no solo la clase.
@@ -35,10 +33,13 @@ jest.mock('react-native-config', () => ({}));
 // que monte AppMap no intente cargar el módulo nativo.
 jest.mock('@rnmapbox/maps', () => {
   const React = require('react');
-  const passthrough = ({children}) => React.createElement(React.Fragment, null, children);
+  const passthrough = ({ children }) => React.createElement(React.Fragment, null, children);
   return {
     __esModule: true,
-    default: {setAccessToken: jest.fn(), StyleURL: {Street: 'mapbox://styles/mapbox/streets-v12'}},
+    default: {
+      setAccessToken: jest.fn(),
+      StyleURL: { Street: 'mapbox://styles/mapbox/streets-v12' },
+    },
     MapView: passthrough,
     Camera: passthrough,
     ShapeSource: passthrough,
@@ -55,6 +56,6 @@ jest.mock('react-native-keychain', () => ({
   getGenericPassword: jest.fn().mockResolvedValue(false),
   hasGenericPassword: jest.fn().mockResolvedValue(false),
   resetGenericPassword: jest.fn().mockResolvedValue(true),
-  ACCESS_CONTROL: {BIOMETRY_CURRENT_SET: 'BiometryCurrentSet'},
-  ACCESSIBLE: {WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'AccessibleWhenPasscodeSetThisDeviceOnly'},
+  ACCESS_CONTROL: { BIOMETRY_CURRENT_SET: 'BiometryCurrentSet' },
+  ACCESSIBLE: { WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'AccessibleWhenPasscodeSetThisDeviceOnly' },
 }));

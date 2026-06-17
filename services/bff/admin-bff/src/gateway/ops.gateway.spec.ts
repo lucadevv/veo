@@ -44,7 +44,10 @@ function gatewayWithSockets(sockets: FakeSocket[]): OpsGateway {
 describe('OpsGateway emisión', () => {
   it('PRIORIDAD: panic:alert ignora el watch PERO respeta el rol (solo panics:view)', () => {
     // COMPLIANCE_SUPERVISOR tiene panics:view; FINANCE tiene ops:view pero NO panics:view; anon no autenticado.
-    const viewer: FakeSocket = { data: { user: { roles: ['COMPLIANCE_SUPERVISOR'] }, watch: { tripId: 'otro' } }, emit: vi.fn() };
+    const viewer: FakeSocket = {
+      data: { user: { roles: ['COMPLIANCE_SUPERVISOR'] }, watch: { tripId: 'otro' } },
+      emit: vi.fn(),
+    };
     const finance: FakeSocket = { data: { user: { roles: ['FINANCE'] } }, emit: vi.fn() };
     const anon: FakeSocket = { data: {}, emit: vi.fn() };
     const gateway = gatewayWithSockets([viewer, finance, anon]);
@@ -65,11 +68,23 @@ describe('OpsGateway emisión', () => {
   });
 
   it('trip:update solo llega a sockets cuyo watch encaja', () => {
-    const watching: FakeSocket = { data: { user: { userId: 'a' }, watch: { tripId: 't1' } }, emit: vi.fn() };
-    const other: FakeSocket = { data: { user: { userId: 'b' }, watch: { tripId: 't2' } }, emit: vi.fn() };
+    const watching: FakeSocket = {
+      data: { user: { userId: 'a' }, watch: { tripId: 't1' } },
+      emit: vi.fn(),
+    };
+    const other: FakeSocket = {
+      data: { user: { userId: 'b' }, watch: { tripId: 't2' } },
+      emit: vi.fn(),
+    };
     const anon: FakeSocket = { data: {}, emit: vi.fn() }; // no autenticado → ignorado
     const gateway = gatewayWithSockets([watching, other, anon]);
-    const msg: TripUpdateMsg = { tripId: 't1', status: 'IN_PROGRESS', etaSeconds: null, driverLocation: null, at: 'x' };
+    const msg: TripUpdateMsg = {
+      tripId: 't1',
+      status: 'IN_PROGRESS',
+      etaSeconds: null,
+      driverLocation: null,
+      at: 'x',
+    };
     gateway.emitTripUpdate(msg);
     expect(watching.emit).toHaveBeenCalledWith('trip:update', msg);
     expect(other.emit).not.toHaveBeenCalled();
@@ -152,7 +167,9 @@ describe('OpsGateway handshake por ticket', () => {
   });
 
   it('rechaza un admin SIN rol de ops:view (ej. SUPPORT_L1) — la UI lo esconde, el socket también', async () => {
-    const gateway = gatewayWithTickets(vi.fn().mockResolvedValue({ ...ticketUser, roles: ['SUPPORT_L1'] }));
+    const gateway = gatewayWithTickets(
+      vi.fn().mockResolvedValue({ ...ticketUser, roles: ['SUPPORT_L1'] }),
+    );
     const socket = handshakeSocket({ ticket: 'support-l1' });
     await gateway.handleConnection(socket as never);
     expect(socket.data.user).toBeUndefined();

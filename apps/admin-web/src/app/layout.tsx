@@ -19,7 +19,11 @@ const themeInitScript = `(function(){try{var t=localStorage.getItem('veo-theme')
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={`${fontSans.variable} ${fontMono.variable}`} suppressHydrationWarning>
+    <html
+      lang="es"
+      className={`${fontSans.variable} ${fontMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>

@@ -18,7 +18,9 @@ async function main(): Promise<void> {
     create: { email, passwordHash, roles: ['SUPERADMIN'], status: 'ACTIVE' },
   });
 
-  console.warn(`SUPERADMIN listo: ${admin.email} (${admin.status}). Enrola TOTP en el primer login.`);
+  console.warn(
+    `SUPERADMIN listo: ${admin.email} (${admin.status}). Enrola TOTP en el primer login.`,
+  );
 }
 
 main()

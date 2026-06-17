@@ -1,6 +1,6 @@
-import type {AuthRepository} from '../repositories/auth-repository';
-import type {AuthTokens} from '../entities';
-import {normalizePeruPhone} from '../value-objects/phone';
+import type { AuthRepository } from '../repositories/auth-repository';
+import type { AuthTokens } from '../entities';
+import { normalizePeruPhone } from '../value-objects/phone';
 
 /** Error de validación del código OTP (6 dígitos). */
 export class InvalidOtpCodeError extends Error {
@@ -24,6 +24,6 @@ export class VerifyOtpUseCase {
       throw new InvalidOtpCodeError();
     }
     const phone = normalizePeruPhone(rawPhone);
-    return this.auth.verifyOtp({phone, code, type: 'DRIVER'});
+    return this.auth.verifyOtp({ phone, code, type: 'DRIVER' });
   }
 }

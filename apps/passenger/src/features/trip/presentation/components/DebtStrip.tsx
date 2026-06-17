@@ -1,8 +1,8 @@
-import { Text, useTheme } from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { formatPEN } from '../../../../shared/utils/format';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {formatPEN} from '../../../../shared/utils/format';
 
 export interface DebtStripProps {
   /**
@@ -23,14 +23,20 @@ export interface DebtStripProps {
  *    el checkout del cobro fresco (resuelve el dead-end del pago que quedó a medias).
  * El pasajero decide cuándo; la franja nunca bloquea desde el home.
  */
-export function DebtStrip({ kind, amountCents, onPress }: DebtStripProps): React.JSX.Element {
+export function DebtStrip({
+  kind,
+  amountCents,
+  onPress,
+}: DebtStripProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const isDebt = kind === 'debt';
   // DEUDA → warn (sobrio, urgente). PAGO POR COMPLETAR → accent (el verde de la marca: invita, no alarma).
   const accentColor = isDebt ? theme.colors.warn : theme.colors.accent;
   const title = isDebt ? t('debt.homeBannerTitle') : t('debt.homePendingTitle');
-  const action = isDebt ? t('debt.homeBannerAction') : t('debt.homePendingAction');
+  const action = isDebt
+    ? t('debt.homeBannerAction')
+    : t('debt.homePendingAction');
   const a11y = isDebt
     ? `${title} ${formatPEN(amountCents)}. ${action}`
     : `${title}. ${action}`;
@@ -46,9 +52,8 @@ export function DebtStrip({ kind, amountCents, onPress }: DebtStripProps): React
           borderColor: accentColor,
           borderRadius: theme.radii.md,
         },
-      ]}
-    >
-      <View style={[styles.debtDot, { backgroundColor: accentColor }]} />
+      ]}>
+      <View style={[styles.debtDot, {backgroundColor: accentColor}]} />
       <Text variant="subhead" numberOfLines={1} style={styles.debtLabel}>
         {title}
         {isDebt ? (
@@ -77,6 +82,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderWidth: 1,
   },
-  debtDot: { width: 7, height: 7, borderRadius: 999 },
-  debtLabel: { flex: 1 },
+  debtDot: {width: 7, height: 7, borderRadius: 999},
+  debtLabel: {flex: 1},
 });

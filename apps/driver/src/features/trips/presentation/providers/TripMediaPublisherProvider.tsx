@@ -1,11 +1,11 @@
-import React, {createContext, useContext, useMemo, type ReactNode} from 'react';
-import {useDi} from '../../../../core/di/useDi';
+import React, { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { useDi } from '../../../../core/di/useDi';
 import {
   UnavailableTripMediaPublisher,
   type TripMediaPublisher,
 } from '../../domain/ports/trip-media-publisher';
-import {HttpPublisherTokenPort} from '../../data/services/http-publisher-token';
-import {LiveKitTripPublisher} from '../../data/services/livekit-trip-publisher';
+import { HttpPublisherTokenPort } from '../../data/services/http-publisher-token';
+import { LiveKitTripPublisher } from '../../data/services/livekit-trip-publisher';
 
 /**
  * Contexto del publisher de video del viaje. Por defecto rechaza con un error claro.
@@ -29,7 +29,7 @@ export const TripMediaPublisherProvider = ({
   children,
   publisher,
 }: TripMediaPublisherProviderProps): React.JSX.Element => {
-  const {httpClient} = useDi();
+  const { httpClient } = useDi();
   const value = useMemo<TripMediaPublisher>(
     () => publisher ?? new LiveKitTripPublisher(new HttpPublisherTokenPort(httpClient)),
     [publisher, httpClient],

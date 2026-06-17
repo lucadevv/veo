@@ -53,13 +53,21 @@ export class PricingModeRuleDto {
   @Max(127)
   dayMask!: number;
 
-  @ApiProperty({ description: 'Inicio del rango, minuto del día en hora local de Lima (0..1439)', minimum: 0, maximum: 1439 })
+  @ApiProperty({
+    description: 'Inicio del rango, minuto del día en hora local de Lima (0..1439)',
+    minimum: 0,
+    maximum: 1439,
+  })
   @IsInt()
   @Min(0)
   @Max(1439)
   startMinute!: number;
 
-  @ApiProperty({ description: 'Fin del rango, minuto del día en hora local de Lima (0..1439)', minimum: 0, maximum: 1439 })
+  @ApiProperty({
+    description: 'Fin del rango, minuto del día en hora local de Lima (0..1439)',
+    minimum: 0,
+    maximum: 1439,
+  })
   @IsInt()
   @Min(0)
   @Max(1439)
@@ -74,11 +82,17 @@ export class PricingModeRuleDto {
 
 /** Body del PUT /internal/pricing/mode-schedule — reemplazo wholesale del schedule. */
 export class ReplaceScheduleDto {
-  @ApiProperty({ enum: MODES, description: 'Modo cuando ninguna regla matchea (§8.2 default PUJA)' })
+  @ApiProperty({
+    enum: MODES,
+    description: 'Modo cuando ninguna regla matchea (§8.2 default PUJA)',
+  })
   @IsIn(MODES)
   defaultMode!: PricingMode;
 
-  @ApiProperty({ type: [PricingModeRuleDto], description: 'Reglas en orden de evaluación (la primera que matchea gana)' })
+  @ApiProperty({
+    type: [PricingModeRuleDto],
+    description: 'Reglas en orden de evaluación (la primera que matchea gana)',
+  })
   @IsArray()
   @ArrayMaxSize(200)
   @ValidateNested({ each: true })

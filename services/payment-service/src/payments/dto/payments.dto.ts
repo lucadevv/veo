@@ -1,13 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
 
 export class ChargeDto {
@@ -30,7 +22,9 @@ export class ChargeDto {
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)' })
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)',
+  })
   @IsOptional()
   @IsString()
   payerRef?: string;
@@ -40,16 +34,24 @@ export class ChargeDto {
   @IsUUID()
   driverId?: string;
 
-  @ApiProperty({ description: 'Clave de idempotencia (UUIDv7 o derivada). Reintentos con la misma key son idempotentes' })
+  @ApiProperty({
+    description:
+      'Clave de idempotencia (UUIDv7 o derivada). Reintentos con la misma key son idempotentes',
+  })
   @IsString()
   dedupKey!: string;
 
-  @ApiPropertyOptional({ description: 'Código de promoción a aplicar (Ola 2A). Descuenta del total del pasajero' })
+  @ApiPropertyOptional({
+    description: 'Código de promoción a aplicar (Ola 2A). Descuenta del total del pasajero',
+  })
   @IsOptional()
   @IsString()
   promoCode?: string;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'Pasajero que paga (requerido si se envía promoCode)' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Pasajero que paga (requerido si se envía promoCode)',
+  })
   @IsOptional()
   @IsUUID()
   userId?: string;
@@ -64,7 +66,11 @@ export class ChargeDto {
  * negocio (un 422 con mensaje claro es mejor UX que un 400 "valor no permitido en enum").
  */
 export class ChangeMethodDto {
-  @ApiProperty({ enum: PaymentMethod, description: 'Nuevo método DIGITAL de liquidación del pago (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.' })
+  @ApiProperty({
+    enum: PaymentMethod,
+    description:
+      'Nuevo método DIGITAL de liquidación del pago (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.',
+  })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 }
@@ -89,7 +95,9 @@ export class AddTipDto {
   @Min(1)
   tipCents!: number;
 
-  @ApiProperty({ description: 'Clave de idempotencia del incremento de propina (UUIDv7 o derivada)' })
+  @ApiProperty({
+    description: 'Clave de idempotencia del incremento de propina (UUIDv7 o derivada)',
+  })
   @IsString()
   dedupKey!: string;
 }
@@ -114,11 +122,17 @@ export class EarningsQueryDto {
  * `@IsEnum` deja pasar CASH a nivel sintáctico; el guard de negocio lo bloquea con un 422 honesto.
  */
 export class SettlePenaltyDto {
-  @ApiProperty({ enum: PaymentMethod, description: 'Método DIGITAL de pago de la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.' })
+  @ApiProperty({
+    enum: PaymentMethod,
+    description:
+      'Método DIGITAL de pago de la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.',
+  })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)' })
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)',
+  })
   @IsOptional()
   @IsString()
   payerRef?: string;

@@ -42,7 +42,9 @@ export class ChargeDto {
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape/Plin)' })
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape/Plin)',
+  })
   @IsOptional()
   @IsString()
   payerRef?: string;
@@ -54,7 +56,8 @@ export class ChargeDto {
    */
   @ApiPropertyOptional({
     deprecated: true,
-    description: 'Ignorado: la dedupKey del cobro se deriva del tripId en el servidor (idempotencia por viaje).',
+    description:
+      'Ignorado: la dedupKey del cobro se deriva del tripId en el servidor (idempotencia por viaje).',
   })
   @IsOptional()
   @IsString()
@@ -72,7 +75,10 @@ export const DIGITAL_PAYMENT_METHODS = ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO'] 
  * para CASH como defensa en profundidad si llegara por otro camino.)
  */
 export class ChangeMethodDto {
-  @ApiProperty({ enum: DIGITAL_PAYMENT_METHODS, description: 'Nuevo método DIGITAL (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.' })
+  @ApiProperty({
+    enum: DIGITAL_PAYMENT_METHODS,
+    description: 'Nuevo método DIGITAL (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.',
+  })
   @IsIn(DIGITAL_PAYMENT_METHODS)
   method!: (typeof DIGITAL_PAYMENT_METHODS)[number];
 }
@@ -83,11 +89,17 @@ export class ChangeMethodDto {
  * → 400 antes de tocar el servicio; payment-service además devuelve 422 para CASH (defensa en profundidad).
  */
 export class SettlePenaltyDto {
-  @ApiProperty({ enum: DIGITAL_PAYMENT_METHODS, description: 'Método DIGITAL para pagar la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.' })
+  @ApiProperty({
+    enum: DIGITAL_PAYMENT_METHODS,
+    description:
+      'Método DIGITAL para pagar la penalidad (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH no se admite.',
+  })
   @IsIn(DIGITAL_PAYMENT_METHODS)
   method!: (typeof DIGITAL_PAYMENT_METHODS)[number];
 
-  @ApiPropertyOptional({ description: 'Referencia del pagador en el riel (teléfono/token Yape/Plin)' })
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape/Plin)',
+  })
   @IsOptional()
   @IsString()
   payerRef?: string;

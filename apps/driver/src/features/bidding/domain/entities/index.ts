@@ -1,4 +1,4 @@
-import type {OpenBidView, SubmitOfferRequest, SubmittedOfferView} from '@veo/api-client';
+import type { OpenBidView, SubmitOfferRequest, SubmittedOfferView } from '@veo/api-client';
 
 /**
  * Entidades del dominio de PUJAS (lado conductor, ADR 010 §6).

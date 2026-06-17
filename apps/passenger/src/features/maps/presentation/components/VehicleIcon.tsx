@@ -1,7 +1,7 @@
-import type { MobileVehicleType } from '@veo/api-client';
-import { Text } from '@veo/ui-kit';
+import type {MobileVehicleType} from '@veo/api-client';
+import {Text} from '@veo/ui-kit';
 import React from 'react';
-import { offeringGlyph } from '../../../../shared/presentation/components/offeringGlyphs';
+import {offeringGlyph} from '../../../../shared/presentation/components/offeringGlyphs';
 
 /**
  * Glifo del tipo de vehículo de una opción de tarifa. ADR 013 §1.6 (UI data-driven): emoji y tono
@@ -22,14 +22,13 @@ export function VehicleIcon({
   /** Override del tono; por defecto, el del registro de glyphs. */
   color?: React.ComponentProps<typeof Text>['color'];
 }): React.JSX.Element {
-  const glyph = offeringGlyph({ icon, vehicleType });
+  const glyph = offeringGlyph({icon, vehicleType});
   return (
     <Text
       variant="title3"
       color={color ?? glyph.tone}
       accessibilityElementsHidden
-      importantForAccessibility="no"
-    >
+      importantForAccessibility="no">
       {glyph.emoji}
     </Text>
   );

@@ -106,7 +106,13 @@ export class PanicController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPPORT_L1, AdminRole.SUPPORT_L2, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(
+    AdminRole.COMPLIANCE_SUPERVISOR,
+    AdminRole.SUPPORT_L1,
+    AdminRole.SUPPORT_L2,
+    AdminRole.ADMIN,
+    AdminRole.SUPERADMIN,
+  )
   @Post(':id/ack')
   @HttpCode(200)
   @ApiOperation({ summary: 'Reconocer la alerta (ACKNOWLEDGED + panic.acknowledged)' })

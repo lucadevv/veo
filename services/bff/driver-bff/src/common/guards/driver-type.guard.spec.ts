@@ -19,7 +19,12 @@ function contextWith(user: AuthenticatedUser | undefined, isPublic = false) {
 
 describe('DriverTypeGuard', () => {
   const driver: AuthenticatedUser = { userId: 'u1', type: 'driver', roles: [], sessionId: 's1' };
-  const passenger: AuthenticatedUser = { userId: 'u2', type: 'passenger', roles: [], sessionId: 's2' };
+  const passenger: AuthenticatedUser = {
+    userId: 'u2',
+    type: 'passenger',
+    roles: [],
+    sessionId: 's2',
+  };
 
   it('permite a un usuario de tipo driver', () => {
     const { reflector, ctx } = contextWith(driver);

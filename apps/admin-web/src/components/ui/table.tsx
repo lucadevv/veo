@@ -64,11 +64,7 @@ export function DataTable<TData>({
                   <th
                     key={header.id}
                     aria-sort={
-                      sortDir === 'asc'
-                        ? 'ascending'
-                        : sortDir === 'desc'
-                          ? 'descending'
-                          : 'none'
+                      sortDir === 'asc' ? 'ascending' : sortDir === 'desc' ? 'descending' : 'none'
                     }
                     className="px-4 py-2.5 text-left font-medium text-ink-muted"
                   >

@@ -8,10 +8,7 @@ import { Module } from '@nestjs/common';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 import { AdminIdentityGuard } from '../pricing/admin-identity.guard';
-import {
-  OFFERING_CATALOG_REPO,
-  PrismaOfferingCatalogRepository,
-} from './catalog.repository';
+import { OFFERING_CATALOG_REPO, PrismaOfferingCatalogRepository } from './catalog.repository';
 
 @Module({
   controllers: [CatalogController],

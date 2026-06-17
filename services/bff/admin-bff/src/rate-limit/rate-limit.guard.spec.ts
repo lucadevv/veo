@@ -51,7 +51,9 @@ describe('RateLimitGuard', () => {
 
   it('lanza RateLimitError (429) cuando se supera el máximo', async () => {
     const guard = new RateLimitGuard(fakeReflector(false), fakeRedis(3), fakeConfig(2));
-    await expect(guard.canActivate(ctx('/api/v1/ops/trips'))).rejects.toBeInstanceOf(RateLimitError);
+    await expect(guard.canActivate(ctx('/api/v1/ops/trips'))).rejects.toBeInstanceOf(
+      RateLimitError,
+    );
   });
 
   it('exime health/metrics del límite', async () => {

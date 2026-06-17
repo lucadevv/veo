@@ -40,7 +40,7 @@ export function decodePolyline(encoded: string | null | undefined): LatLng[] {
     } while (byte >= 0x1f && index < length);
     lng += (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
 
-    points.push({ latitude: lat * 1e-5, longitude: lng * 1e-5 });
+    points.push({latitude: lat * 1e-5, longitude: lng * 1e-5});
   }
 
   return points;
@@ -53,5 +53,8 @@ export function decodePolyline(encoded: string | null | undefined): LatLng[] {
 export function decodePolylineToCoordinates(
   encoded: string | null | undefined,
 ): [number, number][] {
-  return decodePolyline(encoded).map(({ latitude, longitude }) => [longitude, latitude]);
+  return decodePolyline(encoded).map(({latitude, longitude}) => [
+    longitude,
+    latitude,
+  ]);
 }

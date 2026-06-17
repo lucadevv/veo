@@ -65,27 +65,36 @@ const REQUIRED_KEYS = [
 ] as const;
 
 describe('Copy-contract · perfil rediseñado + verificación de celular (es-PE)', () => {
-  it.each(REQUIRED_KEYS)('resuelve "%s" a texto real (no la clave cruda)', (key) => {
-    const value = i18n.t(key);
-    expect(typeof value).toBe('string');
-    expect(value).not.toBe(key);
-    expect(value.length).toBeGreaterThan(0);
-  });
+  it.each(REQUIRED_KEYS)(
+    'resuelve "%s" a texto real (no la clave cruda)',
+    key => {
+      const value = i18n.t(key);
+      expect(typeof value).toBe('string');
+      expect(value).not.toBe(key);
+      expect(value.length).toBeGreaterThan(0);
+    },
+  );
 
   it('interpola el número en el intro del código', () => {
-    const value = i18n.t('profile.phoneCodeIntro', { phone: '+51 987654321' });
+    const value = i18n.t('profile.phoneCodeIntro', {phone: '+51 987654321'});
     expect(value).toContain('987654321');
   });
 
   it('la verificación NO usa copy de plantilla ("Verificar identidad" / "Identidad verificada")', () => {
     // La voz propia del momento (no la pill genérica del ui-kit), en tuteo peruano.
     expect(i18n.t('profile.verifyCardTitle')).toBe('Confirma que eres tú');
-    expect(i18n.t('profile.verifyCardTitle')).not.toContain('Verificar identidad');
-    expect(i18n.t('profile.identityConfirmed')).not.toBe('Identidad verificada');
+    expect(i18n.t('profile.verifyCardTitle')).not.toContain(
+      'Verificar identidad',
+    );
+    expect(i18n.t('profile.identityConfirmed')).not.toBe(
+      'Identidad verificada',
+    );
   });
 
   it('el dato faltante es una invitación, no un misterio: "Agrega tu nombre"', () => {
-    expect(i18n.t('profile.addName').toLowerCase()).toContain('agrega tu nombre');
+    expect(i18n.t('profile.addName').toLowerCase()).toContain(
+      'agrega tu nombre',
+    );
   });
 
   it('CompleteProfileScreen deja claro que el nombre es lo único obligatorio', () => {
@@ -93,13 +102,19 @@ describe('Copy-contract · perfil rediseñado + verificación de celular (es-PE)
   });
 
   it('el correo de la cuenta se presenta como tomado de tu cuenta (genérico, sin proveedor)', () => {
-    expect(i18n.t('profileSetup.emailFromAccount').toLowerCase()).toContain('tu cuenta');
+    expect(i18n.t('profileSetup.emailFromAccount').toLowerCase()).toContain(
+      'tu cuenta',
+    );
   });
 
   it('CompleteProfileScreen ya NO tiene copy de documento (doctrina de registro mínimo)', () => {
     // El documento se pide al vincular el pago (YapeLinkSheet/perfil), no en el alta. Si alguien
     // reintroduce claves de documento en `profileSetup`, este test lo frena.
-    expect(i18n.t('profileSetup.documentNote')).toBe('profileSetup.documentNote');
-    expect(i18n.t('profileSetup.invalidDocument')).toBe('profileSetup.invalidDocument');
+    expect(i18n.t('profileSetup.documentNote')).toBe(
+      'profileSetup.documentNote',
+    );
+    expect(i18n.t('profileSetup.invalidDocument')).toBe(
+      'profileSetup.invalidDocument',
+    );
   });
 });

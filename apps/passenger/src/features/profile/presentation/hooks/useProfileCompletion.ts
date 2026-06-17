@@ -1,10 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { useBiometricGateStore, useProfileLocalStore } from '../../../auth/presentation';
-import { usePaymentPrefsStore } from '../../../payments/presentation/stores/paymentPrefsStore';
+import {useQuery} from '@tanstack/react-query';
+import {useEffect, useRef} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {
+  useBiometricGateStore,
+  useProfileLocalStore,
+} from '../../../auth/presentation';
+import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
 
 /**
  * Clave de caché del perfil real del pasajero (`GET /users/me`), AISLADA por `userId`.
@@ -47,12 +50,12 @@ function hasRealName(name: string | null | undefined): boolean {
 }
 
 export function useProfileCompletion(): ProfileCompletion {
-  const userId = useSessionStore((state) => state.user?.id ?? null);
-  const status = useSessionStore((state) => state.status);
-  const biometricLocked = useBiometricGateStore((state) => state.locked);
+  const userId = useSessionStore(state => state.user?.id ?? null);
+  const status = useSessionStore(state => state.status);
+  const biometricLocked = useBiometricGateStore(state => state.locked);
 
-  const hydrateUser = useProfileLocalStore((state) => state.hydrateUser);
-  const completedLocally = useProfileLocalStore((state) =>
+  const hydrateUser = useProfileLocalStore(state => state.hydrateUser);
+  const completedLocally = useProfileLocalStore(state =>
     userId ? state.completedByUser[userId] === true : false,
   );
 
@@ -65,7 +68,8 @@ export function useProfileCompletion(): ProfileCompletion {
 
   const getProfile = useDependency(TOKENS.getProfileUseCase);
 
-  const active = status === 'authenticated' && !biometricLocked && Boolean(userId);
+  const active =
+    status === 'authenticated' && !biometricLocked && Boolean(userId);
   const query = useQuery({
     queryKey: profileQueryKey(userId),
     queryFn: () => getProfile.execute(),
@@ -78,7 +82,11 @@ export function useProfileCompletion(): ProfileCompletion {
   const syncedForUser = useRef<string | null>(null);
   useEffect(() => {
     // Esperamos a que el perfil cargue (data definida, aunque el campo sea null) y corremos 1× por usuario.
-    if (!userId || query.data === undefined || syncedForUser.current === userId) {
+    if (
+      !userId ||
+      query.data === undefined ||
+      syncedForUser.current === userId
+    ) {
       return;
     }
     syncedForUser.current = userId;

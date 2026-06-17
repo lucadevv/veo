@@ -1,7 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
-export const SUPPORT_CATEGORIES = ['TRIP', 'PAYMENT', 'ACCOUNT', 'SAFETY', 'DRIVER', 'OTHER'] as const;
+export const SUPPORT_CATEGORIES = [
+  'TRIP',
+  'PAYMENT',
+  'ACCOUNT',
+  'SAFETY',
+  'DRIVER',
+  'OTHER',
+] as const;
 export type SupportCategoryValue = (typeof SUPPORT_CATEGORIES)[number];
 
 /** POST /support/tickets → body. El BFF fija userId/role desde la identidad del conductor. */

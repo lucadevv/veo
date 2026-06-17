@@ -1,16 +1,33 @@
-import { Banner, Button, IconButton, SafeScreen, spacing, Text, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Platform, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
-import { FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
-import { RouteMotif } from '../../../../shared/presentation/components/RouteMotif';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
-import { isValidPhone, useAuthFlow } from '../hooks/useAuthFlow';
-import { type OAuthErrorKind, useOAuthFlow } from '../hooks/useOAuthFlow';
-import { OtpField } from '../components/OtpField';
-import { OtpKeypad } from '../components/OtpKeypad';
-import { OtpHelpSheet } from '../components/OtpHelpSheet';
-import { EmailAuthScreen } from './EmailAuthScreen';
+import {
+  Banner,
+  Button,
+  IconButton,
+  SafeScreen,
+  spacing,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {
+  Platform,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import {
+  FadeInView,
+  PressableScale,
+} from '../../../../shared/presentation/components/motion';
+import {RouteMotif} from '../../../../shared/presentation/components/RouteMotif';
+import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
+import {isValidPhone, useAuthFlow} from '../hooks/useAuthFlow';
+import {type OAuthErrorKind, useOAuthFlow} from '../hooks/useOAuthFlow';
+import {OtpField} from '../components/OtpField';
+import {OtpKeypad} from '../components/OtpKeypad';
+import {OtpHelpSheet} from '../components/OtpHelpSheet';
+import {EmailAuthScreen} from './EmailAuthScreen';
 import {
   BrandBadge,
   IconApple,
@@ -86,10 +103,10 @@ function formatCountdown(totalSeconds: number): string {
  */
 export function AuthScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const flow = useAuthFlow();
   const oauth = useOAuthFlow();
-  const { width } = useWindowDimensions();
+  const {width} = useWindowDimensions();
 
   const [step, setStep] = useState<Step>('start');
   const [phone, setPhone] = useState('');
@@ -105,7 +122,7 @@ export function AuthScreen(): React.JSX.Element {
   // "Shake" del OTP en cada nuevo error de verificación.
   useEffect(() => {
     if (flow.verifyError) {
-      setErrorNonce((n) => n + 1);
+      setErrorNonce(n => n + 1);
     }
   }, [flow.verifyError]);
 
@@ -114,7 +131,7 @@ export function AuthScreen(): React.JSX.Element {
     if (cooldown <= 0) {
       return;
     }
-    const timer = setTimeout(() => setCooldown((value) => value - 1), 1000);
+    const timer = setTimeout(() => setCooldown(value => value - 1), 1000);
     return () => clearTimeout(timer);
   }, [cooldown]);
 
@@ -216,7 +233,7 @@ export function AuthScreen(): React.JSX.Element {
   // ambos convergen en este setter, recortando a la longitud del OTP.
   const appendDigit = useCallback((digit: string) => {
     setComingSoon(null);
-    setCode((prev) => (prev + digit).slice(0, OTP_LENGTH));
+    setCode(prev => (prev + digit).slice(0, OTP_LENGTH));
   }, []);
 
   const motifWidth = useMemo(() => Math.min(width * 0.5, 220), [width]);
@@ -238,9 +255,12 @@ export function AuthScreen(): React.JSX.Element {
               borderRadius: theme.radii.lg,
               shadowColor: theme.colors.accent,
             },
-          ]}
-        >
-          <IconShieldCheck color={theme.colors.onAccent} onColor={theme.colors.accent} size={28} />
+          ]}>
+          <IconShieldCheck
+            color={theme.colors.onAccent}
+            onColor={theme.colors.accent}
+            size={28}
+          />
         </View>
 
         <FadeInView style={styles.headerCopy} offsetY={12}>
@@ -256,7 +276,7 @@ export function AuthScreen(): React.JSX.Element {
             tone="info"
             title={t('auth.comingSoonTitle')}
             description={t(COMING_SOON_COPY[comingSoon])}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
@@ -266,7 +286,7 @@ export function AuthScreen(): React.JSX.Element {
             tone="danger"
             title={t('auth.oauthErrorTitle')}
             description={t(googleErrorCopy)}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
         {appleErrorCopy ? (
@@ -274,11 +294,11 @@ export function AuthScreen(): React.JSX.Element {
             tone="danger"
             title={t('auth.oauthErrorTitle')}
             description={t(appleErrorCopy)}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
-        <View style={[styles.startActions, { gap: theme.spacing.md }]}>
+        <View style={[styles.startActions, {gap: theme.spacing.md}]}>
           <Button
             label={t('auth.continueGoogle')}
             variant="secondary"
@@ -287,7 +307,12 @@ export function AuthScreen(): React.JSX.Element {
             loading={oauth.googleLoading}
             disabled={oauth.appleLoading}
             leftIcon={
-              <BrandBadge letter="G" background={GOOGLE_BLUE} foreground="#FFFFFF" size={20} />
+              <BrandBadge
+                letter="G"
+                background={GOOGLE_BLUE}
+                foreground="#FFFFFF"
+                size={20}
+              />
             }
             onPress={continueWithGoogle}
           />
@@ -350,8 +375,7 @@ export function AuthScreen(): React.JSX.Element {
             disabled={!phoneValid}
             onPress={sendOtp}
           />
-        }
-      >
+        }>
         {/* Botón volver al paso de selección de método (diseño). */}
         <View style={styles.phoneBack}>
           <IconButton
@@ -367,12 +391,19 @@ export function AuthScreen(): React.JSX.Element {
           <View
             style={[
               styles.brandBadge,
-              { backgroundColor: theme.colors.accent, borderRadius: theme.radii.lg },
-            ]}
-          >
+              {
+                backgroundColor: theme.colors.accent,
+                borderRadius: theme.radii.lg,
+              },
+            ]}>
             <VeoWordmark size="sm" color="onAccent" />
           </View>
-          <RouteMotif width={motifWidth} height={70} animated style={styles.phoneMotif} />
+          <RouteMotif
+            width={motifWidth}
+            height={70}
+            animated
+            style={styles.phoneMotif}
+          />
         </View>
 
         <FadeInView style={styles.headerCopy} offsetY={12}>
@@ -387,7 +418,7 @@ export function AuthScreen(): React.JSX.Element {
             tone="danger"
             title={t('auth.errorRequest')}
             description={t('auth.errorRequestHint')}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         ) : null}
 
@@ -405,9 +436,9 @@ export function AuthScreen(): React.JSX.Element {
               borderWidth: phoneFocused || showError ? 2 : 1,
               borderRadius: theme.radii.md,
             },
-          ]}
-        >
-          <View style={[styles.prefix, { borderRightColor: theme.colors.border }]}>
+          ]}>
+          <View
+            style={[styles.prefix, {borderRightColor: theme.colors.border}]}>
             <Text variant="title3" color="inkMuted">
               {t('auth.countryCode')}
             </Text>
@@ -415,7 +446,9 @@ export function AuthScreen(): React.JSX.Element {
           <TextInput
             accessibilityLabel={t('auth.phoneLabel')}
             value={phone}
-            onChangeText={(v) => setPhone(v.replace(/\D/g, '').slice(0, PHONE_DIGITS))}
+            onChangeText={v =>
+              setPhone(v.replace(/\D/g, '').slice(0, PHONE_DIGITS))
+            }
             onFocus={() => setPhoneFocused(true)}
             onBlur={() => setPhoneFocused(false)}
             placeholder={t('auth.phonePlaceholder')}
@@ -426,7 +459,10 @@ export function AuthScreen(): React.JSX.Element {
             autoFocus
             style={[
               styles.phoneInput,
-              { color: theme.colors.ink, fontFamily: theme.typography.fontFamily.text },
+              {
+                color: theme.colors.ink,
+                fontFamily: theme.typography.fontFamily.text,
+              },
             ]}
           />
         </View>
@@ -434,15 +470,15 @@ export function AuthScreen(): React.JSX.Element {
           variant="footnote"
           color={showError ? 'danger' : 'inkSubtle'}
           accessibilityRole={showError ? 'alert' : undefined}
-          style={styles.helper}
-        >
+          style={styles.helper}>
           {showError ? t('auth.invalidPhone') : t('auth.phoneHelper')}
         </Text>
       </SafeScreen>
     );
   }
 
-  const showOtpError = (touched && code.length !== OTP_LENGTH) || flow.verifyError;
+  const showOtpError =
+    (touched && code.length !== OTP_LENGTH) || flow.verifyError;
   return (
     <SafeScreen
       scroll
@@ -455,8 +491,7 @@ export function AuthScreen(): React.JSX.Element {
           loading={flow.verifying}
           onPress={verify}
         />
-      }
-    >
+      }>
       {/* Cabecera del OTP: volver + wordmark + tagline. */}
       <View style={styles.otpHeader}>
         <IconButton
@@ -467,7 +502,12 @@ export function AuthScreen(): React.JSX.Element {
           style={styles.backButton}
         />
         <View style={styles.otpBrand}>
-          <VeoWordmark size="md" variant="tagline" color="brand" tagline={t('brandTaglineCity')} />
+          <VeoWordmark
+            size="md"
+            variant="tagline"
+            color="brand"
+            tagline={t('brandTaglineCity')}
+          />
         </View>
         <View style={styles.backButton} />
       </View>
@@ -476,8 +516,12 @@ export function AuthScreen(): React.JSX.Element {
         <Text variant="displayEditorial" align="center">
           {t('auth.otpTitle')}
         </Text>
-        <Text variant="body" color="inkMuted" align="center" style={styles.subtitle}>
-          {t('auth.otpSubtitle', { phone: maskPhone(phone) })}
+        <Text
+          variant="body"
+          color="inkMuted"
+          align="center"
+          style={styles.subtitle}>
+          {t('auth.otpSubtitle', {phone: maskPhone(phone)})}
         </Text>
       </FadeInView>
 
@@ -485,13 +529,15 @@ export function AuthScreen(): React.JSX.Element {
         <Banner
           tone="danger"
           title={t('auth.errorVerify')}
-          style={{ marginBottom: theme.spacing.lg }}
+          style={{marginBottom: theme.spacing.lg}}
         />
       ) : null}
 
       <OtpField
         value={code}
-        onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, OTP_LENGTH))}
+        onChangeText={value =>
+          setCode(value.replace(/\D/g, '').slice(0, OTP_LENGTH))
+        }
         length={OTP_LENGTH}
         hasError={Boolean(showOtpError)}
         errorNonce={errorNonce}
@@ -508,22 +554,29 @@ export function AuthScreen(): React.JSX.Element {
         accessibilityRole="button"
         accessibilityLabel={t('auth.otpHelpTrigger')}
         onPress={() => setHelpVisible(true)}
-        contentStyle={styles.helpTrigger}
-      >
+        contentStyle={styles.helpTrigger}>
         <Text variant="footnote" color="inkMuted" align="center">
           {t('auth.otpHelpTrigger')}
         </Text>
       </PressableScale>
 
-      <Text variant="footnote" color="inkSubtle" align="center" style={styles.expiry}>
+      <Text
+        variant="footnote"
+        color="inkSubtle"
+        align="center"
+        style={styles.expiry}>
         {t('auth.otpExpiry')}
       </Text>
 
-      <View style={[styles.otpActions, { gap: theme.spacing.sm }]}>
+      <View style={[styles.otpActions, {gap: theme.spacing.sm}]}>
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel={cooldown > 0 ? t('auth.resendIn', { time: formatCountdown(cooldown) }) : t('auth.resend')}
-          accessibilityState={{ disabled: cooldown > 0 || flow.requesting }}
+          accessibilityLabel={
+            cooldown > 0
+              ? t('auth.resendIn', {time: formatCountdown(cooldown)})
+              : t('auth.resend')
+          }
+          accessibilityState={{disabled: cooldown > 0 || flow.requesting}}
           disabled={cooldown > 0 || flow.requesting}
           onPress={resend}
           contentStyle={[
@@ -533,11 +586,12 @@ export function AuthScreen(): React.JSX.Element {
               borderRadius: theme.radii.md,
               opacity: cooldown > 0 || flow.requesting ? 0.55 : 1,
             },
-          ]}
-        >
+          ]}>
           <IconClock color={theme.colors.inkMuted} size={18} />
           <Text variant="bodyStrong" color="inkMuted" tabular>
-            {cooldown > 0 ? t('auth.resendIn', { time: formatCountdown(cooldown) }) : t('auth.resend')}
+            {cooldown > 0
+              ? t('auth.resendIn', {time: formatCountdown(cooldown)})
+              : t('auth.resend')}
           </Text>
         </PressableScale>
 
@@ -547,9 +601,8 @@ export function AuthScreen(): React.JSX.Element {
           onPress={changeNumber}
           contentStyle={[
             styles.otpActionRow,
-            { borderColor: theme.colors.border, borderRadius: theme.radii.md },
-          ]}
-        >
+            {borderColor: theme.colors.border, borderRadius: theme.radii.md},
+          ]}>
           <IconPencil color={theme.colors.inkMuted} size={18} />
           <Text variant="bodyStrong" color="inkMuted">
             {t('auth.changeNumber')}
@@ -560,7 +613,7 @@ export function AuthScreen(): React.JSX.Element {
       <OtpHelpSheet
         visible={helpVisible}
         onClose={() => setHelpVisible(false)}
-        onComingSoon={(method) => {
+        onComingSoon={method => {
           // "Mejor entro con correo" ahora es REAL: navega al flujo de correo.
           if (method === 'email') {
             goToEmail();
@@ -591,29 +644,68 @@ const styles = StyleSheet.create({
     // Glow lima (route-glow del diseño).
     shadowOpacity: 0.6,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOffset: {width: 0, height: 0},
     elevation: 8,
   },
-  startActions: { marginTop: spacing['2xl'] },
-  startHint: { marginTop: spacing.lg, lineHeight: 17 },
-  phoneBack: { marginTop: spacing.xs, marginBottom: spacing.sm, alignItems: 'flex-start' },
-  keypad: { marginTop: 18 },
-  helpTrigger: { alignSelf: 'center', paddingVertical: spacing.md, paddingHorizontal: spacing.lg, marginTop: 14 },
-  phoneHeader: { height: 96, justifyContent: 'center', marginTop: spacing.sm, marginBottom: spacing['2xl'] },
-  brandBadge: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
-  phoneMotif: { position: 'absolute', right: -8, top: 4 },
-  headerCopy: { gap: spacing.sm, marginBottom: 28 },
+  startActions: {marginTop: spacing['2xl']},
+  startHint: {marginTop: spacing.lg, lineHeight: 17},
+  phoneBack: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  keypad: {marginTop: 18},
+  helpTrigger: {
+    alignSelf: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: 14,
+  },
+  phoneHeader: {
+    height: 96,
+    justifyContent: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing['2xl'],
+  },
+  brandBadge: {
+    width: 64,
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneMotif: {position: 'absolute', right: -8, top: 4},
+  headerCopy: {gap: spacing.sm, marginBottom: 28},
   subtitle: {},
-  phoneField: { flexDirection: 'row', alignItems: 'center', minHeight: 64, paddingHorizontal: 18 },
-  prefix: { paddingRight: 14, marginRight: 14, borderRightWidth: StyleSheet.hairlineWidth },
-  phoneInput: { flex: 1, fontSize: 22, fontWeight: '600', letterSpacing: 1, paddingVertical: 14 },
-  helper: { marginTop: 10 },
-  otpHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
-  backButton: { width: 48 },
-  otpBrand: { alignItems: 'center', gap: spacing.xxs },
-  otpCopy: { gap: spacing.sm, marginTop: spacing['2xl'], marginBottom: 28 },
-  expiry: { marginTop: 18 },
-  otpActions: { marginTop: 18 },
+  phoneField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 64,
+    paddingHorizontal: 18,
+  },
+  prefix: {
+    paddingRight: 14,
+    marginRight: 14,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  phoneInput: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: 1,
+    paddingVertical: 14,
+  },
+  helper: {marginTop: 10},
+  otpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  backButton: {width: 48},
+  otpBrand: {alignItems: 'center', gap: spacing.xxs},
+  otpCopy: {gap: spacing.sm, marginTop: spacing['2xl'], marginBottom: 28},
+  expiry: {marginTop: 18},
+  otpActions: {marginTop: 18},
   otpActionRow: {
     flexDirection: 'row',
     alignItems: 'center',

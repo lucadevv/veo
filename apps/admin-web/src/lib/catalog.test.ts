@@ -57,7 +57,10 @@ describe('withOverride · persistencia del override por defaultEnabled real', ()
   });
 
   it('con pin de modo/precio PERSISTE aunque enabled coincida con el default', () => {
-    const out = withOverride([], ov({ id: OfferingId.VEO_ECONOMICO, enabled: true, multiplier: 1.5 }));
+    const out = withOverride(
+      [],
+      ov({ id: OfferingId.VEO_ECONOMICO, enabled: true, multiplier: 1.5 }),
+    );
     expect(out).toEqual([{ id: OfferingId.VEO_ECONOMICO, enabled: true, multiplier: 1.5 }]);
   });
 

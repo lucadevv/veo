@@ -1,50 +1,59 @@
-import type { GeoPoint, MapPoint, OfferView, TripResource } from '@veo/api-client';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RoutePin, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import type { RootStackParamList } from '../../../../navigation/types';
-import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import type {
+  GeoPoint,
+  MapPoint,
+  OfferView,
+  TripResource,
+} from '@veo/api-client';
+import {useIsFocused, useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {RoutePin, TOUCH_TARGET, useTheme} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {ScrollView, StyleSheet, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
+import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
 } from '../../../../shared/presentation/components/DraggableSheet';
-import { isWaypointSet, type RoutePlace } from '../../../maps/domain/entities';
-import { useNearbyVehicles } from '../../../dispatch/presentation/hooks/useNearbyVehicles';
-import { useAutocomplete } from '../../../maps/presentation/hooks/useAutocomplete';
-import { useRideDraftStore } from '../../../maps/presentation/stores/rideDraftStore';
-import { useSavedPlacesStore } from '../../../places/presentation/stores/savedPlacesStore';
-import { DebtSheet } from '../../../payments/presentation';
-import { usePushPermission } from '../../../notifications/presentation/hooks/usePushPermission';
-import { PushPrePrompt } from '../../../notifications/presentation/components/PushPrePrompt';
-import { usePanicAutoTrigger } from '../../../panic/presentation';
-import { HomeTopBar } from '../components/HomeTopBar';
-import { TripTopBar } from '../components/TripTopBar';
-import { useCurrentLocation } from '../hooks/useCurrentLocation';
-import { usePassengerTripSocket } from '../hooks/usePassengerTripSocket';
-import { useWaypointProposal } from '../hooks/useWaypointProposal';
-import { useOfferBoard } from '../hooks/useOfferBoard';
-import { useHydrateActiveTrip } from '../hooks/useHydrateActiveTrip';
-import { useDebtGate } from '../hooks/useDebtGate';
-import { useLastDriver } from '../hooks/useLastDriver';
-import { resolveTripPhase, mapModeForPhase, isLiveSocketPhase } from '../hooks/tripFlowPhase';
+import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
+import {useNearbyVehicles} from '../../../dispatch/presentation/hooks/useNearbyVehicles';
+import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
+import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
+import {useSavedPlacesStore} from '../../../places/presentation/stores/savedPlacesStore';
+import {DebtSheet} from '../../../payments/presentation';
+import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
+import {PushPrePrompt} from '../../../notifications/presentation/components/PushPrePrompt';
+import {usePanicAutoTrigger} from '../../../panic/presentation';
+import {HomeTopBar} from '../components/HomeTopBar';
+import {TripTopBar} from '../components/TripTopBar';
+import {useCurrentLocation} from '../hooks/useCurrentLocation';
+import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
+import {useWaypointProposal} from '../hooks/useWaypointProposal';
+import {useOfferBoard} from '../hooks/useOfferBoard';
+import {useHydrateActiveTrip} from '../hooks/useHydrateActiveTrip';
+import {useDebtGate} from '../hooks/useDebtGate';
+import {useLastDriver} from '../hooks/useLastDriver';
+import {
+  resolveTripPhase,
+  mapModeForPhase,
+  isLiveSocketPhase,
+} from '../hooks/tripFlowPhase';
 import {
   resolvePickupMode,
   TRIP_PHASE_DESCRIPTORS,
   type RequestFlowContext,
   type SheetFlowState,
 } from '../hooks/tripPhaseDescriptors';
-import { resolveMapDirective } from '../hooks/mapDirector';
-import { useActiveTripStore } from '../stores/activeTripStore';
+import {resolveMapDirective} from '../hooks/mapDirector';
+import {useActiveTripStore} from '../stores/activeTripStore';
 
 /** Convierte el punto del borrador (MapPoint, lng) al GeoPoint (lon) que consume el AppMap. */
-function draftToGeo(place: { point: MapPoint } | null): GeoPoint | null {
-  return place ? { lat: place.point.lat, lon: place.point.lng } : null;
+function draftToGeo(place: {point: MapPoint} | null): GeoPoint | null {
+  return place ? {lat: place.point.lat, lon: place.point.lng} : null;
 }
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -96,16 +105,20 @@ export function RequestFlowScreen(): React.JSX.Element {
   const history = useDependency(TOKENS.tripHistoryRepository);
   const tripRepository = useDependency(TOKENS.tripRepository);
 
-  const { point: myLocation, status: locationStatus, retry: retryLocation } = useCurrentLocation();
-  const origin = useRideDraftStore((s) => s.origin);
-  const destination = useRideDraftStore((s) => s.destination);
-  const waypoints = useRideDraftStore((s) => s.waypoints);
-  const setOrigin = useRideDraftStore((s) => s.setOrigin);
-  const setDestination = useRideDraftStore((s) => s.setDestination);
-  const setEditing = useRideDraftStore((s) => s.setEditing);
-  const swapRoute = useRideDraftStore((s) => s.swap);
-  const resetDraft = useRideDraftStore((s) => s.reset);
-  const savedPlaces = useSavedPlacesStore((s) => s.places);
+  const {
+    point: myLocation,
+    status: locationStatus,
+    retry: retryLocation,
+  } = useCurrentLocation();
+  const origin = useRideDraftStore(s => s.origin);
+  const destination = useRideDraftStore(s => s.destination);
+  const waypoints = useRideDraftStore(s => s.waypoints);
+  const setOrigin = useRideDraftStore(s => s.setOrigin);
+  const setDestination = useRideDraftStore(s => s.setDestination);
+  const setEditing = useRideDraftStore(s => s.setEditing);
+  const swapRoute = useRideDraftStore(s => s.swap);
+  const resetDraft = useRideDraftStore(s => s.reset);
+  const savedPlaces = useSavedPlacesStore(s => s.places);
 
   // Alto visible del peek (lo reporta el sheet): se lo pasamos al mapa como paddingBottom para que el
   // pin del usuario quede en la franja visible por encima del sheet, no tapado por él.
@@ -121,9 +134,9 @@ export function RequestFlowScreen(): React.JSX.Element {
   const [routeCoords, setRouteCoords] = useState<[number, number][]>([]);
   // Viaje VIVO del pasajero. Vive en un store (no useState) para SOBREVIVIR al desmontaje del tab Home
   // (detachInactiveScreens): al volver, el sheet re-entra al viaje. La fuente de verdad es el server.
-  const activeTripId = useActiveTripStore((s) => s.activeTripId);
-  const setActiveTripId = useActiveTripStore((s) => s.setActiveTripId);
-  const clearActiveTrip = useActiveTripStore((s) => s.clear);
+  const activeTripId = useActiveTripStore(s => s.activeTripId);
+  const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const clearActiveTrip = useActiveTripStore(s => s.clear);
 
   // Re-entrada: al enfocar (montaje + volver al tab), rehidrata el viaje activo desde el server.
   useHydrateActiveTrip();
@@ -176,7 +189,10 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   // AMBIENTE: autitos cercanos anónimos alrededor del pasajero (fases con `showNearby` en el descriptor).
   // Centro = la ubicación del usuario. El hook ya degrada a lista vacía en error (es decoración del mapa).
-  const { vehicles: nearbyVehicles } = useNearbyVehicles(myLocation, descriptor.showNearby);
+  const {vehicles: nearbyVehicles} = useNearbyVehicles(
+    myLocation,
+    descriptor.showNearby,
+  );
 
   // Detalle del viaje (conductor/vehículo/tarifa) para el cuerpo del viaje activo Y el cierre (pago/rating).
   const tripDetailQuery = useQuery({
@@ -197,7 +213,9 @@ export function RequestFlowScreen(): React.JSX.Element {
   // para que el mapa y la tarifa reflejen lo nuevo sin esperar al poll de 15 s.
   useEffect(() => {
     if (addStop.phase === 'accepted' && activeTripId) {
-      void queryClient.invalidateQueries({ queryKey: ['trip', activeTripId, 'active'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['trip', activeTripId, 'active'],
+      });
     }
   }, [addStop.phase, activeTripId, queryClient]);
 
@@ -261,12 +279,12 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Chat con el conductor: drena los no leídos y abre la pantalla de chat.
   const unreadCount = live.incomingMessages.length;
   const openChat = useCallback(() => {
-    live.acknowledgeMessages(live.incomingMessages.map((m) => m.id));
-    navigation.navigate('Chat', { tripId: activeTripId as string });
+    live.acknowledgeMessages(live.incomingMessages.map(m => m.id));
+    navigation.navigate('Chat', {tripId: activeTripId as string});
   }, [live, navigation, activeTripId]);
 
   const myPoint = useMemo<MapPoint | null>(
-    () => (myLocation ? { lat: myLocation.lat, lng: myLocation.lon } : null),
+    () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
     [myLocation],
   );
 
@@ -295,7 +313,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   useEffect(() => {
     if (!origin && reverseQuery.data) {
       setOrigin({
-        point: { lat: reverseQuery.data.lat, lng: reverseQuery.data.lng },
+        point: {lat: reverseQuery.data.lat, lng: reverseQuery.data.lng},
         title: reverseQuery.data.title,
         subtitle: reverseQuery.data.subtitle,
       });
@@ -316,14 +334,19 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   // ÚLTIMO conductor para la tarjeta de confianza del Home idle. `null` si no hay viaje con conductor
   // (degradación honesta: la tarjeta no se renderiza, no se inventa un conductor).
-  const { driver: lastDriver } = useLastDriver();
+  const {driver: lastDriver} = useLastDriver();
 
   // Autocompletado real (debounce + sesgo por ubicación), activo solo cuando hay texto.
-  const { suggestions, loading: searchLoading, error: searchError, active } = useAutocomplete(query, myPoint);
+  const {
+    suggestions,
+    loading: searchLoading,
+    error: searchError,
+    active,
+  } = useAutocomplete(query, myPoint);
 
   // Tocar el buscador EXPANDE el sheet y entra a modo búsqueda DENTRO del mismo sheet (no navega).
   const enterSearch = useCallback(() => {
-    setEditing({ kind: 'destination' });
+    setEditing({kind: 'destination'});
     setQuery('');
     setFlow('searching');
     sheetRef.current?.snapToIndex(FULL_INDEX);
@@ -333,8 +356,8 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (`Search`, flow 'sheet' → al fijar vuelve acá con el borrador actualizado). Es el MISMO gesto que
   // usa la cotización (`QuotingBody.editOrigin`): el origen deja de ser un display de solo lectura.
   const editOrigin = useCallback(() => {
-    setEditing({ kind: 'origin' });
-    navigation.navigate('Search', { flow: 'sheet' });
+    setEditing({kind: 'origin'});
+    navigation.navigate('Search', {flow: 'sheet'});
   }, [setEditing, navigation]);
 
   // Sale de búsqueda y vuelve al peek (X o arrastrar hasta abajo).
@@ -385,7 +408,10 @@ export function RequestFlowScreen(): React.JSX.Element {
     (offer: OfferView) => {
       if (board.acceptMutation.isPending) return;
       if (offer.kind === 'COUNTER') {
-        navigation.navigate('Counter', { tripId: activeTripId as string, driverId: offer.driverId });
+        navigation.navigate('Counter', {
+          tripId: activeTripId as string,
+          driverId: offer.driverId,
+        });
       } else {
         board.acceptMutation.mutate(offer.driverId);
       }
@@ -399,10 +425,13 @@ export function RequestFlowScreen(): React.JSX.Element {
     navigation.navigate('ScheduledTrips');
   }, [resetDraft, navigation]);
 
-  const onKycRequired = useCallback(() => navigation.navigate('KycCamera'), [navigation]);
+  const onKycRequired = useCallback(
+    () => navigation.navigate('KycCamera'),
+    [navigation],
+  );
 
   const onOpenCamera = useCallback(
-    () => navigation.navigate('CameraLive', { tripId: activeTripId as string }),
+    () => navigation.navigate('CameraLive', {tripId: activeTripId as string}),
     [navigation, activeTripId],
   );
 
@@ -430,7 +459,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     const id = activeTripId;
     if (descriptor.handoff === 'reassign') {
       handedOff.current = true;
-      navigation.navigate('Reassign', { tripId: id });
+      navigation.navigate('Reassign', {tripId: id});
       clearTrip();
     } else if (descriptor.handoff === 'clear') {
       handedOff.current = true;
@@ -442,7 +471,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   const useCurrentAsDestination = useCallback(() => {
     if (reverseQuery.data) {
       selectDestination({
-        point: { lat: reverseQuery.data.lat, lng: reverseQuery.data.lng },
+        point: {lat: reverseQuery.data.lat, lng: reverseQuery.data.lng},
         title: reverseQuery.data.title,
         subtitle: reverseQuery.data.subtitle,
       });
@@ -450,13 +479,24 @@ export function RequestFlowScreen(): React.JSX.Element {
   }, [reverseQuery.data, selectDestination]);
 
   // "Ver todas" → pantallas de gestión existentes (lugares guardados / historial de viajes).
-  const goSavedPlaces = useCallback(() => navigation.navigate('SavedPlaces'), [navigation]);
-  const goTripHistory = useCallback(() => navigation.navigate('TripHistory'), [navigation]);
+  const goSavedPlaces = useCallback(
+    () => navigation.navigate('SavedPlaces'),
+    [navigation],
+  );
+  const goTripHistory = useCallback(
+    () => navigation.navigate('TripHistory'),
+    [navigation],
+  );
 
   // Encuadre del mapa memoizado (mismo objeto para route y trip mode): un literal inline se recreaba en
   // cada render y rompía el React.memo del AppMap. Solo cambia con el safe-area top o el alto del peek.
   const fitEdgePadding = useMemo(
-    () => ({ top: insets.top + 40, bottom: peekHeight + 16, left: 40, right: 40 }),
+    () => ({
+      top: insets.top + 40,
+      bottom: peekHeight + 16,
+      left: 40,
+      right: 40,
+    }),
     [insets.top, peekHeight],
   );
 
@@ -513,7 +553,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   const SheetHeader = descriptor.Header;
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
+    <View style={[styles.root, {backgroundColor: theme.colors.bg}]}>
       {/* MAPA: persistente MIENTRAS el Home está enfocado, SOLO en las fases de pedido/viaje (route=ruta /
           trip=auto). En `idle` NO se renderiza mapa: el home es CONTENT-FIRST (fondo sólido `theme.colors.bg`
           del root + contenido full-screen). El guard `isFocused` lo DESMONTA al pushear otra pantalla encima
@@ -559,7 +599,9 @@ export function RequestFlowScreen(): React.JSX.Element {
             showUserPoint={mapDirective.showUserPoint}
             userPoint={mapDirective.showUserPoint ? myLocation : null}
             // En completed vuelve el AMBIENTE (autitos cercanos) además del userPoint (cierre del ciclo).
-            nearbyVehicles={mapDirective.showNearby ? nearbyVehicles : undefined}
+            nearbyVehicles={
+              mapDirective.showNearby ? nearbyVehicles : undefined
+            }
             cameraTarget={mapDirective.cameraTarget ?? undefined}
             // La ruta al destino sigue dibujada también en curso (la baja el director como contexto).
             routeCoordinates={routeCoords.length > 1 ? routeCoords : undefined}
@@ -567,18 +609,18 @@ export function RequestFlowScreen(): React.JSX.Element {
             // la Camera DECLARATIVA encuadra la ruta+markers (fitToRoute) en vez de quedar muda y derivar al
             // zoom-ciudad. Con conductor, manda el cameraTarget (director) y este fit se ignora. En
             // 'completed' (cameraTarget null pero sin querer fit de ruta) cae al center sobre mi ubicación.
-            fitToRoute={mapDirective.cameraTarget == null && descriptor.activeTrip}
+            fitToRoute={
+              mapDirective.cameraTarget == null && descriptor.activeTrip
+            }
             fitEdgePadding={fitEdgePadding}
             // El encuadre lo gobierna el cameraTarget (director) cuando dirige; si no, el fit declarativo.
             // El AppMap TOPA el bottomInset al CAP para el fit dirigido (enRoute conductor+recogida).
             bottomInset={peekHeight + 16}
             interactive
           />
-        ) : (
-          // `idle`: SIN mapa. El home es content-first (fondo sólido del root); el mapa aparece recién al
-          // elegir destino → quoting (modo `route`). El contenido idle se renderiza full-screen más abajo.
-          null
-        )}
+        ) : // `idle`: SIN mapa. El home es content-first (fondo sólido del root); el mapa aparece recién al
+        // elegir destino → quoting (modo `route`). El contenido idle se renderiza full-screen más abajo.
+        null}
       </View>
 
       {/* CONTENIDO IDLE · CONTENT-FIRST (sin mapa): ocupa la PANTALLA COMPLETA bajo el HomeTopBar, NO un
@@ -594,13 +636,13 @@ export function RequestFlowScreen(): React.JSX.Element {
               // El HomeTopBar es un overlay absoluto anclado en `insets.top + spacing.sm`, alto ≈ TOUCH_TARGET
               // (pill/avatar). El contenido idle arranca debajo de él, con un respiro (spacing.md), y deja el
               // home indicator abajo (bottomInset).
-              paddingTop: insets.top + theme.spacing.sm + TOUCH_TARGET + theme.spacing.md,
+              paddingTop:
+                insets.top + theme.spacing.sm + TOUCH_TARGET + theme.spacing.md,
               paddingBottom: bottomInset,
             },
-          ]}
-        >
+          ]}>
           {SheetHeader ? (
-            <View style={{ paddingHorizontal: theme.spacing.xl }}>
+            <View style={{paddingHorizontal: theme.spacing.xl}}>
               <SheetHeader ctx={ctx} />
             </View>
           ) : null}
@@ -614,8 +656,7 @@ export function RequestFlowScreen(): React.JSX.Element {
                 gap: theme.spacing.md,
               },
             ]}
-            showsVerticalScrollIndicator={false}
-          >
+            showsVerticalScrollIndicator={false}>
             <SheetBody ctx={ctx} />
           </ScrollView>
         </View>
@@ -646,7 +687,9 @@ export function RequestFlowScreen(): React.JSX.Element {
         <TripTopBar
           unreadCount={unreadCount}
           onOpenChat={openChat}
-          onSos={() => navigation.navigate('Panic', { tripId: activeTripId as string })}
+          onSos={() =>
+            navigation.navigate('Panic', {tripId: activeTripId as string})
+          }
         />
       )}
 
@@ -662,7 +705,7 @@ export function RequestFlowScreen(): React.JSX.Element {
           onPeekHeightChange={setPeekHeight}
           bottomOffset={bottomInset}
           renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
-          renderScroll={(ScrollComponent) => (
+          renderScroll={ScrollComponent => (
             <ScrollComponent
               style={styles.sheetScroll}
               contentContainerStyle={[
@@ -675,8 +718,7 @@ export function RequestFlowScreen(): React.JSX.Element {
                   gap: theme.spacing.md,
                 },
               ]}
-              showsVerticalScrollIndicator={false}
-            >
+              showsVerticalScrollIndicator={false}>
               <SheetBody ctx={ctx} />
             </ScrollComponent>
           )}
@@ -696,7 +738,11 @@ export function RequestFlowScreen(): React.JSX.Element {
       {/* Pre-prompt CONTEXTUAL de notificaciones: al estar BUSCANDO conductor (ahí el push importa) y solo
           si el permiso nunca se decidió ('undetermined'). Una vez por sesión; "Ahora no" no insiste. */}
       <PushPrePrompt
-        visible={descriptor.showsPushPrePrompt && push.status === 'undetermined' && !pushPrePromptSeen}
+        visible={
+          descriptor.showsPushPrePrompt &&
+          push.status === 'undetermined' &&
+          !pushPrePromptSeen
+        }
         onDismiss={() => setPushPrePromptSeen(true)}
         onEnable={() => {
           setPushPrePromptSeen(true);
@@ -708,15 +754,19 @@ export function RequestFlowScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: {flex: 1},
   // Capa del pin de recojo (modelo Cabify): centra el pin en el centro GEOMÉTRICO del mapa — que es lo que
   // reporta onCenterChange — sobre el mapa y bajo el chrome. No intercepta gestos (pointerEvents none).
-  pickupPinLayer: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  pickupPinLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   // Layout CONTENT-FIRST de la fase idle: ocupa toda la pantalla (flex:1 dentro del root) bajo el HomeTopBar
   // (sin mapa de fondo). El header (buscador "¿A dónde vamos?" + chips) queda fijo arriba y la lista
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
-  idleScreen: { flex: 1 },
-  sheetScroll: { flex: 1 },
-  sheetContent: { paddingTop: 4 },
+  idleScreen: {flex: 1},
+  sheetScroll: {flex: 1},
+  sheetContent: {paddingTop: 4},
 });

@@ -6,7 +6,7 @@ export type {
   SupportTicket,
 } from '@veo/api-client';
 
-import type { SupportCategory } from '@veo/api-client';
+import type {SupportCategory} from '@veo/api-client';
 
 /** Categorías de ticket en el orden que se muestran al pasajero en el selector. */
 export const SUPPORT_CATEGORIES: readonly SupportCategory[] = [

@@ -31,21 +31,21 @@ export type RootStackParamList = {
    *  - `'quote'` (default): callers LEGACY/no migrados (flujo PROGRAMADO `ScheduleNew`) → navega a
    *    `RouteQuote`. Es el default a propósito para no romper esos callers.
    */
-  Search: { flow?: 'sheet' | 'quote' } | undefined;
+  Search: {flow?: 'sheet' | 'quote'} | undefined;
   /** Elegir un punto (recojo/destino/parada) arrastrando el mapa bajo un pin fijo. Aplica al `editing`. */
   MapPick: undefined;
   RouteQuote: undefined;
   /** PUJA · board de ofertas en vivo tras crear la puja (ADR 010). */
-  OffersBoard: { tripId: string };
+  OffersBoard: {tripId: string};
   /** PUJA · detalle de la contraoferta de UN conductor (aceptar / esperar). */
-  Counter: { tripId: string; driverId: string };
+  Counter: {tripId: string; driverId: string};
   /** PUJA · puja sin ofertas (EXPIRED): re-pujar más alto para reabrir el board. */
-  NoOffers: { tripId: string };
-  TripActive: { tripId: string };
+  NoOffers: {tripId: string};
+  TripActive: {tripId: string};
   /** Cámara del viaje a pantalla completa (Ola 2A · seguridad). */
-  CameraLive: { tripId: string };
+  CameraLive: {tripId: string};
   /** Control de privacidad: quién puede ver la cámara del viaje (Ola 2A). */
-  CameraControl: { tripId: string };
+  CameraControl: {tripId: string};
   // El DETALLE de un viaje terminal YA NO es una pantalla (`TripDetail` eliminado): vive en un
   // `DraggableSheet` SOBRE "Mis Viajes" (ver TripDetailSheet). No hay ruta ni params que tipar.
   ScheduledTrips: undefined;
@@ -54,24 +54,24 @@ export type RootStackParamList = {
   /** Centro de avisos del pasajero (campana del Home). */
   Notifications: undefined;
   /** Reasignación: el conductor canceló (estado REASSIGNING) → reabre el board de ofertas. */
-  Reassign: { tripId: string };
+  Reassign: {tripId: string};
   /** Reportar un objeto olvidado de un viaje (vía ticket de soporte). */
-  LostItem: { tripId: string };
+  LostItem: {tripId: string};
   /**
    * Pantalla manual de pánico. `escalated: true` cuando llega por ESCALAMIENTO del disparo
    * silencioso fallido (SilentPanicDispatcher agotó reintentos): la pantalla arranca avisando
    * que la alerta oculta NO se envió, en vez del estado neutro "¿Necesitas ayuda?".
    */
-  Panic: { tripId: string; escalated?: boolean };
+  Panic: {tripId: string; escalated?: boolean};
   TrustedContacts: undefined;
   ChildMode: undefined;
   KycCamera: undefined;
   PaymentMethods: undefined;
-  Payment: { tripId: string; amountCents: number; driverId?: string };
-  Rating: { tripId: string; driverId: string };
+  Payment: {tripId: string; amountCents: number; driverId?: string};
+  Rating: {tripId: string; driverId: string};
   SavedPlaces: undefined;
   Referrals: undefined;
-  Chat: { tripId: string };
+  Chat: {tripId: string};
   Help: undefined;
 };
 

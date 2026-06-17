@@ -6,7 +6,7 @@
  * implementación vive en `data/` y se cablea por el contenedor de DI.
  */
 
-import type { PickedImage } from './imagePickerService';
+import type {PickedImage} from './imagePickerService';
 
 /** Motivo accionable por el que la subida del avatar falló (para feedback claro al usuario). */
 export type AvatarUploadFailure =
@@ -58,5 +58,5 @@ export interface AvatarUploader {
    *     (autoritativo; borra el objeto si excede) y devuelve la `publicUrl` sellada.
    * Lanza `AvatarUploadError` ante fallos accionables.
    */
-  uploadAvatar(file: PickedImage): Promise<{ photoUrl: string }>;
+  uploadAvatar(file: PickedImage): Promise<{photoUrl: string}>;
 }

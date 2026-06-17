@@ -36,7 +36,10 @@ export function signPayload(payload: SignablePayload, secretKey: string): string
 }
 
 /** Devuelve una copia del payload con el campo `sign` ya calculado (listo para enviar). */
-export function withSignature<T extends SignablePayload>(payload: T, secretKey: string): T & { sign: string } {
+export function withSignature<T extends SignablePayload>(
+  payload: T,
+  secretKey: string,
+): T & { sign: string } {
   return { ...payload, sign: signPayload(payload, secretKey) };
 }
 
@@ -45,7 +48,11 @@ export function withSignature<T extends SignablePayload>(payload: T, secretKey: 
  * Recomputa la firma sobre todos los campos salvo `sign` y compara con `crypto.timingSafeEqual`
  * (evita oráculos de tiempo). Devuelve false si falta `sign`, si difiere la longitud, o si no coincide.
  */
-export function verifySignature(payload: SignablePayload, secretKey: string, provided: string | undefined): boolean {
+export function verifySignature(
+  payload: SignablePayload,
+  secretKey: string,
+  provided: string | undefined,
+): boolean {
   if (!provided || typeof provided !== 'string') return false;
   const expected = signPayload(payload, secretKey);
   const a = Buffer.from(expected, 'utf8');

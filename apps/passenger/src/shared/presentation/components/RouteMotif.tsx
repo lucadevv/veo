@@ -1,13 +1,13 @@
-import { hexAlpha, useReducedMotion, useTheme } from '@veo/ui-kit';
-import React, { useEffect } from 'react';
-import { type ViewStyle } from 'react-native';
+import {hexAlpha, useReducedMotion, useTheme} from '@veo/ui-kit';
+import React, {useEffect} from 'react';
+import {type ViewStyle} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, {Circle, Path} from 'react-native-svg';
 
 export interface RouteMotifProps {
   /** Ancho del lienzo del motivo (px). */
@@ -26,8 +26,8 @@ const VIEW_W = 200;
 const VIEW_H = 64;
 /** Curva que sube de izquierda (origen) a derecha (pin de destino), lenguaje "Midnight Motion". */
 const ROUTE_PATH = 'M12 48 C 56 48, 78 20, 120 18 S 176 14, 188 14';
-const PIN = { x: 188, y: 14 } as const;
-const ORIGIN = { x: 12, y: 48 } as const;
+const PIN = {x: 188, y: 14} as const;
+const ORIGIN = {x: 12, y: 48} as const;
 
 /**
  * Motivo de marca "ruta lima con glow": un origen anular a la izquierda, una traza punteada que
@@ -67,20 +67,27 @@ export function RouteMotif({
   // Entrada del grupo: fade + deslizamiento sutil desde la izquierda (la ruta "llega").
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateX: (1 - progress.value) * -10 }],
+    transform: [{translateX: (1 - progress.value) * -10}],
   }));
 
   return (
-    <Animated.View pointerEvents="none" style={[{ width, height }, animatedStyle, style]}>
+    <Animated.View
+      pointerEvents="none"
+      style={[{width, height}, animatedStyle, style]}>
       <Svg
         width={width}
         height={height}
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         preserveAspectRatio="xMidYMid meet"
-        pointerEvents="none"
-      >
+        pointerEvents="none">
         {/* Halo translúcido bajo la traza. */}
-        <Path d={ROUTE_PATH} stroke={glow} strokeWidth={12} strokeLinecap="round" fill="none" />
+        <Path
+          d={ROUTE_PATH}
+          stroke={glow}
+          strokeWidth={12}
+          strokeLinecap="round"
+          fill="none"
+        />
         {/* Traza punteada lima (dots). */}
         <Path
           d={ROUTE_PATH}
@@ -91,9 +98,23 @@ export function RouteMotif({
           fill="none"
         />
         {/* Origen: anillo hueco lima sobre el fondo. */}
-        <Circle cx={ORIGIN.x} cy={ORIGIN.y} r={5} stroke={line} strokeWidth={3} fill={theme.colors.bg} />
+        <Circle
+          cx={ORIGIN.x}
+          cy={ORIGIN.y}
+          r={5}
+          stroke={line}
+          strokeWidth={3}
+          fill={theme.colors.bg}
+        />
         {/* Pin de destino: punto lima + halo. */}
-        <Circle cx={PIN.x} cy={PIN.y} r={11} stroke={glow} strokeWidth={2} fill="none" />
+        <Circle
+          cx={PIN.x}
+          cy={PIN.y}
+          r={11}
+          stroke={glow}
+          strokeWidth={2}
+          fill="none"
+        />
         <Circle cx={PIN.x} cy={PIN.y} r={6} fill={line} />
       </Svg>
     </Animated.View>

@@ -1,5 +1,5 @@
-import type { GeoPoint, NearbyVehiclesView } from '@veo/api-client';
-import type { VehicleClass } from '@veo/shared-types';
+import type {GeoPoint, NearbyVehiclesView} from '@veo/api-client';
+import type {VehicleClass} from '@veo/shared-types';
 
 /**
  * Tipo de vehículo para FILTRAR los autitos de ambiente (opcional). Ausente = todos los tipos.
@@ -20,5 +20,8 @@ export interface DispatchRepository {
    * con coords redondeadas (~110m) por el backend. `vehicleType` opcional filtra por tipo; ausente = todos.
    * Devuelve `{ vehicles: [] }` si no hay nadie cerca o el origen cae fuera de Lima.
    */
-  getNearbyVehicles(coords: GeoPoint, vehicleType?: NearbyVehicleType): Promise<NearbyVehiclesView>;
+  getNearbyVehicles(
+    coords: GeoPoint,
+    vehicleType?: NearbyVehicleType,
+  ): Promise<NearbyVehiclesView>;
 }

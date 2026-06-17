@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Path, Rect, Circle } from 'react-native-svg';
+import Svg, {Path, Rect, Circle} from 'react-native-svg';
 
 export interface CashIconProps {
   /** Tamaño del recuadro (px). */
@@ -16,7 +16,11 @@ export interface CashIconProps {
  * resto de íconos de la app: viewBox 24×24, trazo ~1.6px, color por prop). Decorativo: la fila
  * presionable aporta la etiqueta accesible.
  */
-export function CashIcon({ size = 28, color, fill }: CashIconProps): React.JSX.Element {
+export function CashIcon({
+  size = 28,
+  color,
+  fill,
+}: CashIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       {/* Billete de atrás (apilado, ligeramente desplazado) */}

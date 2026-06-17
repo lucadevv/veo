@@ -1,13 +1,20 @@
-import type { YapeAffiliationView } from '@veo/api-client';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banner, BottomSheet, Button, ListItem, StatusPill, useTheme } from '@veo/ui-kit';
+import type {YapeAffiliationView} from '@veo/api-client';
+import {useMutation, useQueryClient} from '@tanstack/react-query';
+import {
+  Banner,
+  BottomSheet,
+  Button,
+  ListItem,
+  StatusPill,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { usePaymentPrefsStore } from '../stores/paymentPrefsStore';
-import { YAPE_AFFILIATION_QUERY_KEY } from '../hooks/useYapeAffiliation';
+import {useTranslation} from 'react-i18next';
+import {View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {usePaymentPrefsStore} from '../stores/paymentPrefsStore';
+import {YAPE_AFFILIATION_QUERY_KEY} from '../hooks/useYapeAffiliation';
 
 export interface YapeManageSheetProps {
   visible: boolean;
@@ -21,14 +28,17 @@ export interface YapeManageSheetProps {
  *  - "Desvincular Yape" — acción destructiva con confirmación inline. Al desvincular, si el default era
  *    YAPE se QUEDA en YAPE (sin afiliación = pago Yape por QR al final, válido); lo avisa el copy.
  */
-export function YapeManageSheet({ visible, onClose }: YapeManageSheetProps): React.JSX.Element {
+export function YapeManageSheet({
+  visible,
+  onClose,
+}: YapeManageSheetProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const queryClient = useQueryClient();
 
   const revokeAffiliation = useDependency(TOKENS.revokeYapeAffiliationUseCase);
-  const defaultMethod = usePaymentPrefsStore((s) => s.defaultMethod);
-  const setDefault = usePaymentPrefsStore((s) => s.setDefault);
+  const defaultMethod = usePaymentPrefsStore(s => s.defaultMethod);
+  const setDefault = usePaymentPrefsStore(s => s.setDefault);
 
   const [confirming, setConfirming] = React.useState(false);
 
@@ -42,7 +52,7 @@ export function YapeManageSheet({ visible, onClose }: YapeManageSheetProps): Rea
 
   const revokeMutation = useMutation<YapeAffiliationView, Error, void>({
     mutationFn: () => revokeAffiliation.execute(),
-    onSuccess: (view) => {
+    onSuccess: view => {
       queryClient.setQueryData(YAPE_AFFILIATION_QUERY_KEY, view);
       // El default se queda como estaba: si era YAPE, sigue siendo YAPE (QR al final, sin afiliación).
       onClose();
@@ -52,16 +62,21 @@ export function YapeManageSheet({ visible, onClose }: YapeManageSheetProps): Rea
   const isDefault = defaultMethod === 'YAPE';
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('payments.auto.manageTitle')}>
-      <View style={{ gap: theme.spacing.lg }}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={t('payments.auto.manageTitle')}>
+      <View style={{gap: theme.spacing.lg}}>
         {confirming ? (
-          <View style={{ gap: theme.spacing.md }}>
+          <View style={{gap: theme.spacing.md}}>
             <Banner
               tone="warn"
               title={t('payments.auto.unlinkConfirmTitle')}
               description={t('payments.auto.unlinkConfirmBody')}
             />
-            {revokeMutation.isError ? <Banner tone="danger" title={t('payments.auto.error')} /> : null}
+            {revokeMutation.isError ? (
+              <Banner tone="danger" title={t('payments.auto.error')} />
+            ) : null}
             <Button
               label={
                 revokeMutation.isPending
@@ -82,12 +97,16 @@ export function YapeManageSheet({ visible, onClose }: YapeManageSheetProps): Rea
             />
           </View>
         ) : (
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <ListItem
               title={t('payments.auto.makeDefault')}
               trailing={
                 isDefault ? (
-                  <StatusPill label={t('payments.auto.isDefault')} tone="accent" dot />
+                  <StatusPill
+                    label={t('payments.auto.isDefault')}
+                    tone="accent"
+                    dot
+                  />
                 ) : undefined
               }
               onPress={isDefault ? undefined : () => setDefault('YAPE')}

@@ -34,7 +34,10 @@ export class DocumentsService {
   async create(input: CreateDocumentDto): Promise<FleetDocument> {
     if (input.ownerType === FleetOwnerType.VEHICLE) {
       const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: input.ownerId } });
-      if (!vehicle) throw new NotFoundError('Vehículo dueño del documento no existe', { ownerId: input.ownerId });
+      if (!vehicle)
+        throw new NotFoundError('Vehículo dueño del documento no existe', {
+          ownerId: input.ownerId,
+        });
     }
 
     const duplicate = await this.prisma.read.fleetDocument.findFirst({
@@ -42,7 +45,13 @@ export class DocumentsService {
         ownerType: input.ownerType,
         ownerId: input.ownerId,
         type: input.type,
-        status: { in: [FleetDocumentStatus.PENDING_REVIEW, FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON] },
+        status: {
+          in: [
+            FleetDocumentStatus.PENDING_REVIEW,
+            FleetDocumentStatus.VALID,
+            FleetDocumentStatus.EXPIRING_SOON,
+          ],
+        },
       },
     });
     if (duplicate) {
@@ -78,7 +87,12 @@ export class DocumentsService {
    * Lista paginada de documentos para el operador (admin), filtrable por estado (índice
    * `[status, expiresAt]`). Paginación cursor por id (uuidv7). Sin `status` lista todos.
    */
-  async list(opts: { ownerId?: string; status?: FleetDocumentStatus; cursor?: string; limit?: number }): Promise<Page<FleetDocument>> {
+  async list(opts: {
+    ownerId?: string;
+    status?: FleetDocumentStatus;
+    cursor?: string;
+    limit?: number;
+  }): Promise<Page<FleetDocument>> {
     const limit = clampLimit(opts.limit);
     const where: Prisma.FleetDocumentWhereInput = {};
     if (opts.ownerId) where.ownerId = opts.ownerId;
@@ -97,11 +111,18 @@ export class DocumentsService {
    * por vencimiento de inmediato (puede caer en EXPIRING_SOON/EXPIRED). Si un documento crítico de
    * un conductor queda EXPIRED, se publica la suspensión por outbox (BR-I04).
    */
-  async review(id: string, decision: ReviewDecision, reviewerId: string, now = new Date()): Promise<FleetDocument> {
+  async review(
+    id: string,
+    decision: ReviewDecision,
+    reviewerId: string,
+    now = new Date(),
+  ): Promise<FleetDocument> {
     const doc = await this.prisma.read.fleetDocument.findUnique({ where: { id } });
     if (!doc) throw new NotFoundError('Documento no encontrado', { id });
     if (doc.status !== FleetDocumentStatus.PENDING_REVIEW) {
-      throw new ValidationError('El documento no está pendiente de revisión', { status: doc.status });
+      throw new ValidationError('El documento no está pendiente de revisión', {
+        status: doc.status,
+      });
     }
 
     const finalStatus =
@@ -153,7 +174,13 @@ export class DocumentsService {
       withinDays !== undefined
         ? {
             expiresAt: { not: null, lte: new Date(now.getTime() + withinDays * 86_400_000) },
-            status: { in: [FleetDocumentStatus.VALID, FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED] },
+            status: {
+              in: [
+                FleetDocumentStatus.VALID,
+                FleetDocumentStatus.EXPIRING_SOON,
+                FleetDocumentStatus.EXPIRED,
+              ],
+            },
           }
         : { status: { in: [FleetDocumentStatus.EXPIRING_SOON, FleetDocumentStatus.EXPIRED] } };
 

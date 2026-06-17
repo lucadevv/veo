@@ -6,10 +6,7 @@
 import { Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PricingController } from './pricing.controller';
-import {
-  PricingScheduleService,
-  PRICING_SCHEDULE_CACHE_TTL_MS,
-} from './pricing-schedule.service';
+import { PricingScheduleService, PRICING_SCHEDULE_CACHE_TTL_MS } from './pricing-schedule.service';
 import { FuelSurchargeService, FUEL_SURCHARGE_CACHE_TTL_MS } from './fuel-surcharge.service';
 import { EnergyCatalogService, ENERGY_CATALOG_CACHE_TTL_MS } from './energy-catalog.service';
 import { BidFloorService, BID_FLOOR_CACHE_TTL_MS } from './bid-floor.service';

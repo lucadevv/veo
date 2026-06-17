@@ -18,7 +18,7 @@ spec:
         prometheus.io/port: "5000"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: admin-web  # IRSA bound to least-privilege IAM role
+      serviceAccountName: admin-web # IRSA bound to least-privilege IAM role
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -44,7 +44,7 @@ spec:
             - configMapRef: { name: admin-web-config }
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
-            limits:   { cpu: "1000m", memory: "1Gi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
           livenessProbe:
             httpGet: { path: /api/health, port: http }
             initialDelaySeconds: 20

@@ -8,7 +8,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { PrismaClient } from '../src/generated/prisma';
 import { AffiliationsService } from '../src/affiliations/affiliations.service';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -16,7 +20,11 @@ import type { PaymentGateway, YapeSubscriber } from '../src/ports/gateway/paymen
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 const USER = '0192f8a0-0000-7000-8000-0000000000a1';
-const MOBILE_INPUT = { document: '12345678', documentType: 'DN' as const, clientName: 'Juan Perez' };
+const MOBILE_INPUT = {
+  document: '12345678',
+  documentType: 'DN' as const,
+  clientName: 'Juan Perez',
+};
 
 let db: TestDatabase;
 let prisma: PrismaClient;
@@ -32,7 +40,12 @@ class FakeGateway implements YapeSubscriber {
 
   async createYapeSubscription(input: Record<string, unknown>) {
     this.lastCreateInput = input;
-    return { uid: 'WUID-SECRET-123', status: 'PROCESS', deepLink: 'yape://approve/abc', phoneNumber: null };
+    return {
+      uid: 'WUID-SECRET-123',
+      status: 'PROCESS',
+      deepLink: 'yape://approve/abc',
+      phoneNumber: null,
+    };
   }
   async showYapeSubscription(walletUid: string) {
     this.showCalls.push(walletUid);
@@ -112,7 +125,11 @@ describe('AffiliationsService · Yape On File', () => {
 
   it('webhook CONFIRMED → ACTIVE; resolveActiveWalletUid lo devuelve solo internamente', async () => {
     await service.createAffiliation(USER, { ...MOBILE_INPUT });
-    await service.markFromWebhook({ affiliationId: undefined, walletUid: 'WUID-SECRET-123', status: 'CONFIRMED' });
+    await service.markFromWebhook({
+      affiliationId: undefined,
+      walletUid: 'WUID-SECRET-123',
+      status: 'CONFIRMED',
+    });
     const view = await service.getAffiliationStatus(USER);
     expect(view?.status).toBe('ACTIVE');
     expect(await service.resolveActiveWalletUid(USER)).toBe('WUID-SECRET-123');

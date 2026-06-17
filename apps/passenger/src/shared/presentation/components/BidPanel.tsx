@@ -1,10 +1,13 @@
-import { IconButton, Text, useTheme } from '@veo/ui-kit';
+import {IconButton, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { formatPEN } from '../../utils/format';
-import { isAtFloor } from '../../utils/bid';
-import { IconMinus, IconPlus } from '../../../features/trip/presentation/components/icons';
+import {useTranslation} from 'react-i18next';
+import {StyleSheet, View} from 'react-native';
+import {formatPEN} from '../../utils/format';
+import {isAtFloor} from '../../utils/bid';
+import {
+  IconMinus,
+  IconPlus,
+} from '../../../features/trip/presentation/components/icons';
 
 /**
  * PUJA · "Ofrece tu tarifa" (handoff `Offer`). Stepper de a S/1 sobre el número grande, anclado en el
@@ -27,23 +30,28 @@ export function BidPanel({
   onIncrement,
 }: BidPanelProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const atFloor = isAtFloor(bidCents, floorCents);
 
   return (
-    <View style={{ gap: theme.spacing.xs }}>
+    <View style={{gap: theme.spacing.xs}}>
       <Text variant="footnote" color="inkMuted" align="center">
         {t('puja.offerYourFare')}
       </Text>
 
-      <View style={[styles.stepperRow, { gap: theme.spacing.xl }]}>
+      <View style={[styles.stepperRow, {gap: theme.spacing.xl}]}>
         <IconButton
           accessibilityLabel={t('puja.decrease')}
           variant="surface"
           size="lg"
           disabled={atFloor}
           onPress={onDecrement}
-          icon={<IconMinus color={atFloor ? theme.colors.inkSubtle : theme.colors.ink} size={22} />}
+          icon={
+            <IconMinus
+              color={atFloor ? theme.colors.inkSubtle : theme.colors.ink}
+              size={22}
+            />
+          }
         />
         <Text variant="display" color="ink" tabular>
           {formatPEN(bidCents)}
@@ -63,7 +71,7 @@ export function BidPanel({
               suggested: formatPEN(suggestedCents),
               min: formatPEN(floorCents),
             })
-          : t('puja.minOnly', { min: formatPEN(floorCents) })}
+          : t('puja.minOnly', {min: formatPEN(floorCents)})}
       </Text>
 
       {atFloor ? (
@@ -80,5 +88,9 @@ export function BidPanel({
 }
 
 const styles = StyleSheet.create({
-  stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

@@ -630,7 +630,10 @@ export const createTripRequest = z.object({
   category: z.string().min(1).optional(),
   surgeMultiplier: z.number().min(1).max(2).optional(),
   childMode: z.boolean().optional(),
-  childCode: z.string().regex(/^\d{4,6}$/).optional(),
+  childCode: z
+    .string()
+    .regex(/^\d{4,6}$/)
+    .optional(),
   /**
    * Código de promoción opcional (Ola 2A). Si se envía, el public-bff lo propaga al cobro
    * (POST /payments/charge) y el descuento reduce SOLO lo que paga el pasajero; comisión y
@@ -697,13 +700,7 @@ export type OfferView = z.infer<typeof offerView>;
  *  - CLOSED_MATCHED → el pasajero ya eligió una oferta (match).
  *  - GONE           → el board ya no existe en Redis (TTL); tratar como puja terminada.
  */
-export const clientBoardStatus = z.enum([
-  'OPEN',
-  'CANCELLED',
-  'EXPIRED',
-  'CLOSED_MATCHED',
-  'GONE',
-]);
+export const clientBoardStatus = z.enum(['OPEN', 'CANCELLED', 'EXPIRED', 'CLOSED_MATCHED', 'GONE']);
 export type ClientBoardStatus = z.infer<typeof clientBoardStatus>;
 
 export const offersBoardView = z.object({
@@ -1006,7 +1003,15 @@ export interface TripHistoryQuery {
  *   while (cursor);
  */
 export function getTripHistory(
-  http: { get<T>(path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; schema?: z.ZodType<T> }): Promise<T> },
+  http: {
+    get<T>(
+      path: string,
+      opts?: {
+        query?: Record<string, string | number | boolean | undefined>;
+        schema?: z.ZodType<T>;
+      },
+    ): Promise<T>;
+  },
   query: TripHistoryQuery = {},
 ): Promise<TripHistoryPage> {
   return http.get<TripHistoryPage>('/trips/history', {
@@ -1048,7 +1053,15 @@ export interface NotificationsQuery {
  * respuesta con `appNotification`.
  */
 export function getNotifications(
-  http: { get<T>(path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; schema?: z.ZodType<T> }): Promise<T> },
+  http: {
+    get<T>(
+      path: string,
+      opts?: {
+        query?: Record<string, string | number | boolean | undefined>;
+        schema?: z.ZodType<T>;
+      },
+    ): Promise<T>;
+  },
   query: NotificationsQuery = {},
 ): Promise<AppNotification[]> {
   return http.get<AppNotification[]>('/notifications', {
@@ -1278,7 +1291,14 @@ export type AddTipRequest = z.infer<typeof addTipRequest>;
  * payment-service). Tiparlo (no `z.string()`) evita comparar contra un literal inexistente: el estado
  * "pagado" es CAPTURED, NUNCA 'PAID' (PaymentStatus no tiene 'PAID').
  */
-export const paymentStatus = z.enum(['PENDING', 'CAPTURED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'DEBT']);
+export const paymentStatus = z.enum([
+  'PENDING',
+  'CAPTURED',
+  'FAILED',
+  'REFUNDED',
+  'PARTIALLY_REFUNDED',
+  'DEBT',
+]);
 
 /** Vista de pago del pasajero (POST /payments/charge, GET /payments/:id, cash/confirm, POST /trips/:id/tip). */
 export const paymentView = z.object({
@@ -1902,7 +1922,11 @@ export const registerVehicleRequest = z
     /** Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo. */
     model: z.string().min(1).max(60).optional(),
     /** Año del vehículo (>= 2005). BR-D04 (>= 2017) lo aplica fleet-service. */
-    year: z.number().int().min(2005).max(new Date().getUTCFullYear() + 1),
+    year: z
+      .number()
+      .int()
+      .min(2005)
+      .max(new Date().getUTCFullYear() + 1),
     color: z.string().min(1).max(30).optional(),
   })
   .refine((v) => Boolean(v.modelSpecId) || (Boolean(v.make) && Boolean(v.model)), {
@@ -1939,8 +1963,16 @@ export type DriverVehicleModelList = z.infer<typeof driverVehicleModelList>;
 export const requestVehicleModelRequest = z.object({
   make: z.string().min(1).max(60),
   model: z.string().min(1).max(60),
-  yearFrom: z.number().int().min(1990).max(new Date().getUTCFullYear() + 1),
-  yearTo: z.number().int().min(1990).max(new Date().getUTCFullYear() + 1),
+  yearFrom: z
+    .number()
+    .int()
+    .min(1990)
+    .max(new Date().getUTCFullYear() + 1),
+  yearTo: z
+    .number()
+    .int()
+    .min(1990)
+    .max(new Date().getUTCFullYear() + 1),
   vehicleType: mobileVehicleType,
   seats: z.number().int().min(1).max(20),
 });
@@ -2077,7 +2109,10 @@ export type ArrivingTripRequest = z.infer<typeof arrivingTripRequest>;
 
 /** POST /trips/:id/start → body (código modo niño si aplica). */
 export const startTripRequest = z.object({
-  childCode: z.string().regex(/^\d{4,6}$/).optional(),
+  childCode: z
+    .string()
+    .regex(/^\d{4,6}$/)
+    .optional(),
 });
 export type StartTripRequest = z.infer<typeof startTripRequest>;
 
@@ -2328,14 +2363,7 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequest>;
  * Categoría de un ticket de soporte (Ola 2C). Estable para el filtrado/enrutamiento del backstage.
  * La FAQ es estática del lado app; estas categorías agrupan los tickets que SÍ llegan al backend.
  */
-export const supportCategory = z.enum([
-  'TRIP',
-  'PAYMENT',
-  'ACCOUNT',
-  'SAFETY',
-  'DRIVER',
-  'OTHER',
-]);
+export const supportCategory = z.enum(['TRIP', 'PAYMENT', 'ACCOUNT', 'SAFETY', 'DRIVER', 'OTHER']);
 export type SupportCategory = z.infer<typeof supportCategory>;
 
 /** Rol del autor del ticket (lo fija el BFF desde la identidad; no lo envía la app). */

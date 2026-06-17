@@ -71,7 +71,10 @@ export class NotificationsService {
    * y categorizadas. Carga las plantillas en UNA query (sin N+1) y arma la vista que ve el usuario.
    */
   async listInbox(recipientId: string, limit = 30): Promise<InboxNotificationView[]> {
-    const rows = await this.repo.findInboxByRecipient(recipientId, Math.min(Math.max(limit, 1), 100));
+    const rows = await this.repo.findInboxByRecipient(
+      recipientId,
+      Math.min(Math.max(limit, 1), 100),
+    );
     const tpls = await this.templates.loadTemplatesByKeys(rows.map((r) => r.template));
     return rows.map((rec) => {
       const { title, body } = this.templates.renderInbox(rec, tpls.get(rec.template));

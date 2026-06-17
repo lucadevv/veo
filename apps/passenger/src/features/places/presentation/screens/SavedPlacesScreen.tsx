@@ -1,4 +1,4 @@
-import type { MapPoint, PlaceSuggestion } from '@veo/api-client';
+import type {MapPoint, PlaceSuggestion} from '@veo/api-client';
 import {
   Banner,
   BottomSheet,
@@ -12,19 +12,23 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScrollView, View } from 'react-native';
-import { useCurrentLocation } from '../../../trip/presentation/hooks/useCurrentLocation';
-import { useAutocomplete } from '../../../maps/presentation/hooks/useAutocomplete';
+import React, {useCallback, useMemo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ScrollView, View} from 'react-native';
+import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
 import {
   IconClose,
   IconHome,
   IconStar,
   IconWork,
 } from '../../../trip/presentation/components/icons';
-import type { SavedPlace, SavedPlaceInput, SavedPlaceKind } from '../../domain/entities';
-import { useSavedPlacesStore } from '../stores/savedPlacesStore';
+import type {
+  SavedPlace,
+  SavedPlaceInput,
+  SavedPlaceKind,
+} from '../../domain/entities';
+import {useSavedPlacesStore} from '../stores/savedPlacesStore';
 
 interface EditorState {
   kind: SavedPlaceKind;
@@ -42,16 +46,16 @@ interface EditorState {
  */
 export function SavedPlacesScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
-  const places = useSavedPlacesStore((s) => s.places);
-  const save = useSavedPlacesStore((s) => s.save);
-  const update = useSavedPlacesStore((s) => s.update);
-  const remove = useSavedPlacesStore((s) => s.remove);
+  const places = useSavedPlacesStore(s => s.places);
+  const save = useSavedPlacesStore(s => s.save);
+  const update = useSavedPlacesStore(s => s.update);
+  const remove = useSavedPlacesStore(s => s.remove);
 
-  const { point: myLocation } = useCurrentLocation();
+  const {point: myLocation} = useCurrentLocation();
   const near = useMemo<MapPoint | null>(
-    () => (myLocation ? { lat: myLocation.lat, lng: myLocation.lon } : null),
+    () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
     [myLocation],
   );
 
@@ -59,11 +63,11 @@ export function SavedPlacesScreen(): React.JSX.Element {
   const [confirmRemove, setConfirmRemove] = useState<SavedPlace | null>(null);
   const [query, setQuery] = useState('');
 
-  const { suggestions, loading, active } = useAutocomplete(query, near);
+  const {suggestions, loading, active} = useAutocomplete(query, near);
 
-  const home = places.find((p) => p.kind === 'HOME');
-  const work = places.find((p) => p.kind === 'WORK');
-  const favorites = places.filter((p) => p.kind === 'FAVORITE');
+  const home = places.find(p => p.kind === 'HOME');
+  const work = places.find(p => p.kind === 'WORK');
+  const favorites = places.filter(p => p.kind === 'FAVORITE');
 
   const openEditor = useCallback((state: EditorState) => {
     setQuery('');
@@ -71,21 +75,24 @@ export function SavedPlacesScreen(): React.JSX.Element {
   }, []);
 
   const pickSuggestion = useCallback((suggestion: PlaceSuggestion) => {
-    setEditor((prev) =>
+    setEditor(prev =>
       prev
         ? {
             ...prev,
-            point: { lat: suggestion.lat, lng: suggestion.lng },
+            point: {lat: suggestion.lat, lng: suggestion.lng},
             subtitle: suggestion.subtitle ?? suggestion.title,
             // Para favoritos sin nombre propio, propón el título como etiqueta.
-            label: prev.label || (prev.kind === 'FAVORITE' ? suggestion.title : prev.label),
+            label:
+              prev.label ||
+              (prev.kind === 'FAVORITE' ? suggestion.title : prev.label),
           }
         : prev,
     );
     setQuery('');
   }, []);
 
-  const canSave = Boolean(editor?.point) && (editor?.label.trim().length ?? 0) >= 1;
+  const canSave =
+    Boolean(editor?.point) && (editor?.label.trim().length ?? 0) >= 1;
 
   const submit = useCallback(() => {
     if (!editor?.point) {
@@ -95,7 +102,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
       kind: editor.kind,
       label: editor.label.trim(),
       point: editor.point,
-      ...(editor.subtitle ? { subtitle: editor.subtitle } : {}),
+      ...(editor.subtitle ? {subtitle: editor.subtitle} : {}),
     };
     if (editor.id) {
       update(editor.id, input);
@@ -107,7 +114,11 @@ export function SavedPlacesScreen(): React.JSX.Element {
 
   return (
     <SafeScreen padded={false}>
-      <ScrollView contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.lg }}>
+      <ScrollView
+        contentContainerStyle={{
+          padding: theme.spacing.xl,
+          gap: theme.spacing.lg,
+        }}>
         <Text variant="footnote" color="inkMuted">
           {t('places.subtitle')}
         </Text>
@@ -127,7 +138,15 @@ export function SavedPlacesScreen(): React.JSX.Element {
                   icon={<IconClose color={theme.colors.danger} size={18} />}
                 />
               }
-              onPress={() => openEditor({ kind: 'HOME', id: home.id, label: home.label, subtitle: home.subtitle, point: home.point })}
+              onPress={() =>
+                openEditor({
+                  kind: 'HOME',
+                  id: home.id,
+                  label: home.label,
+                  subtitle: home.subtitle,
+                  point: home.point,
+                })
+              }
             />
           ) : (
             <ListItem
@@ -135,7 +154,9 @@ export function SavedPlacesScreen(): React.JSX.Element {
               subtitle={t('places.addHomeHint')}
               leading={<IconHome color={theme.colors.accent} size={20} />}
               chevron
-              onPress={() => openEditor({ kind: 'HOME', label: t('places.home') })}
+              onPress={() =>
+                openEditor({kind: 'HOME', label: t('places.home')})
+              }
             />
           )}
           {work ? (
@@ -151,7 +172,15 @@ export function SavedPlacesScreen(): React.JSX.Element {
                   icon={<IconClose color={theme.colors.danger} size={18} />}
                 />
               }
-              onPress={() => openEditor({ kind: 'WORK', id: work.id, label: work.label, subtitle: work.subtitle, point: work.point })}
+              onPress={() =>
+                openEditor({
+                  kind: 'WORK',
+                  id: work.id,
+                  label: work.label,
+                  subtitle: work.subtitle,
+                  point: work.point,
+                })
+              }
             />
           ) : (
             <ListItem
@@ -159,19 +188,24 @@ export function SavedPlacesScreen(): React.JSX.Element {
               subtitle={t('places.addWorkHint')}
               leading={<IconWork color={theme.colors.accent} size={20} />}
               chevron
-              onPress={() => openEditor({ kind: 'WORK', label: t('places.work') })}
+              onPress={() =>
+                openEditor({kind: 'WORK', label: t('places.work')})
+              }
             />
           )}
         </Card>
 
         {/* Favoritos */}
         <View>
-          <Text variant="subhead" color="inkMuted" style={{ marginBottom: theme.spacing.sm }}>
+          <Text
+            variant="subhead"
+            color="inkMuted"
+            style={{marginBottom: theme.spacing.sm}}>
             {t('places.favorites')}
           </Text>
           {favorites.length > 0 ? (
             <Card variant="outlined" padding="sm">
-              {favorites.map((place) => (
+              {favorites.map(place => (
                 <ListItem
                   key={place.id}
                   title={place.label}
@@ -202,7 +236,11 @@ export function SavedPlacesScreen(): React.JSX.Element {
               <Text variant="body" color="inkMuted" align="center">
                 {t('places.empty')}
               </Text>
-              <Text variant="footnote" color="inkSubtle" align="center" style={{ marginTop: theme.spacing.xs }}>
+              <Text
+                variant="footnote"
+                color="inkSubtle"
+                align="center"
+                style={{marginTop: theme.spacing.xs}}>
                 {t('places.emptySubtitle')}
               </Text>
             </Card>
@@ -213,7 +251,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
           label={t('places.addFavorite')}
           variant="secondary"
           fullWidth
-          onPress={() => openEditor({ kind: 'FAVORITE', label: '' })}
+          onPress={() => openEditor({kind: 'FAVORITE', label: ''})}
         />
 
         <Text variant="footnote" color="inkSubtle" align="center">
@@ -233,28 +271,39 @@ export function SavedPlacesScreen(): React.JSX.Element {
             disabled={!canSave}
             onPress={submit}
           />
-        }
-      >
+        }>
         {editor ? (
-          <View style={{ gap: theme.spacing.md }}>
+          <View style={{gap: theme.spacing.md}}>
             {editor.kind === 'FAVORITE' ? (
               <TextField
                 label={t('places.labelLabel')}
                 placeholder={t('places.labelPlaceholder')}
                 value={editor.label}
-                onChangeText={(label) => setEditor((prev) => (prev ? { ...prev, label } : prev))}
+                onChangeText={label =>
+                  setEditor(prev => (prev ? {...prev, label} : prev))
+                }
                 maxLength={40}
               />
             ) : null}
 
             <View>
-              <Text variant="footnote" color="inkMuted" style={{ marginBottom: theme.spacing.xs }}>
+              <Text
+                variant="footnote"
+                color="inkMuted"
+                style={{marginBottom: theme.spacing.xs}}>
                 {t('places.pickLabel')}
               </Text>
               {editor.subtitle ? (
-                <Banner tone="success" title={editor.subtitle} style={{ marginBottom: theme.spacing.sm }} />
+                <Banner
+                  tone="success"
+                  title={editor.subtitle}
+                  style={{marginBottom: theme.spacing.sm}}
+                />
               ) : (
-                <Text variant="footnote" color="inkSubtle" style={{ marginBottom: theme.spacing.sm }}>
+                <Text
+                  variant="footnote"
+                  color="inkSubtle"
+                  style={{marginBottom: theme.spacing.sm}}>
                   {t('places.pickHelper')}
                 </Text>
               )}
@@ -269,18 +318,22 @@ export function SavedPlacesScreen(): React.JSX.Element {
             </View>
 
             {loading ? (
-              <View style={{ gap: theme.spacing.sm }}>
+              <View style={{gap: theme.spacing.sm}}>
                 <Skeleton variant="text" height={18} />
                 <Skeleton variant="text" height={18} />
               </View>
             ) : (
               <View>
-                {suggestions.map((item) => (
+                {suggestions.map(item => (
                   <ListItem
                     key={item.id}
                     title={item.title}
                     subtitle={item.subtitle}
-                    leading={<Text variant="bodyStrong" color="inkSubtle">◍</Text>}
+                    leading={
+                      <Text variant="bodyStrong" color="inkSubtle">
+                        ◍
+                      </Text>
+                    }
                     onPress={() => pickSuggestion(item)}
                   />
                 ))}
@@ -301,7 +354,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
         onClose={() => setConfirmRemove(null)}
         title={t('places.removeTitle')}
         footer={
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             <Button
               label={t('actions.delete')}
               variant="danger"
@@ -313,10 +366,14 @@ export function SavedPlacesScreen(): React.JSX.Element {
                 setConfirmRemove(null);
               }}
             />
-            <Button label={t('actions.cancel')} variant="ghost" fullWidth onPress={() => setConfirmRemove(null)} />
+            <Button
+              label={t('actions.cancel')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setConfirmRemove(null)}
+            />
           </View>
-        }
-      >
+        }>
         <Text variant="callout" color="inkMuted">
           {t('places.removeBody')}
         </Text>

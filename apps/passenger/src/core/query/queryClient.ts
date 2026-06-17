@@ -1,6 +1,6 @@
-import { ApiError } from '@veo/api-client';
-import { focusManager, QueryClient } from '@tanstack/react-query';
-import { AppState, type AppStateStatus } from 'react-native';
+import {ApiError} from '@veo/api-client';
+import {focusManager, QueryClient} from '@tanstack/react-query';
+import {AppState, type AppStateStatus} from 'react-native';
 
 /**
  * Cablea el `focusManager` de React Query al `AppState` de React Native. En RN no existe el evento
@@ -10,7 +10,7 @@ import { AppState, type AppStateStatus } from 'react-native';
  * las queries activas (p.ej. el poll del recibo en el cierre post-viaje) re-evalúan al instante.
  * Patrón canónico de @tanstack/react-query + react-native.
  */
-focusManager.setEventListener((handleFocus) => {
+focusManager.setEventListener(handleFocus => {
   const onChange = (state: AppStateStatus): void => {
     handleFocus(state === 'active');
   };

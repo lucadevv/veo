@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
   Banner,
   BottomSheet,
@@ -11,29 +11,37 @@ import {
   useReducedMotion,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+import React, {useCallback, useEffect, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ActivityIndicator, Image, StyleSheet, View} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { profileQueryKey } from '../../../profile/presentation/hooks/useProfileCompletion';
-import { AvatarUploadError } from '../../../../shared/media/domain/avatarUploader';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {profileQueryKey} from '../../../profile/presentation/hooks/useProfileCompletion';
+import {AvatarUploadError} from '../../../../shared/media/domain/avatarUploader';
 import {
   ImagePickError,
   type ImageSource,
   type PickedImage,
 } from '../../../../shared/media/domain/imagePickerService';
-import { FadeInView, PressableScale } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
-import { useProfileLocalStore } from '../stores/profileStore';
-import { IconCamera, IconMail, IconPerson, IconShieldCheck } from '../components/icons';
+import {
+  FadeInView,
+  PressableScale,
+} from '../../../../shared/presentation/components/motion';
+import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
+import {useProfileLocalStore} from '../stores/profileStore';
+import {
+  IconCamera,
+  IconMail,
+  IconPerson,
+  IconShieldCheck,
+} from '../components/icons';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -64,7 +72,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 export function CompleteProfileScreen(): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const queryClient = useQueryClient();
   const reduced = useReducedMotion();
 
@@ -73,8 +81,8 @@ export function CompleteProfileScreen(): React.JSX.Element {
   const uploadAvatar = useDependency(TOKENS.uploadAvatarUseCase);
   const removeAvatarUseCase = useDependency(TOKENS.removeAvatarUseCase);
   const imagePicker = useDependency(TOKENS.imagePickerService);
-  const userId = useSessionStore((state) => state.user?.id ?? null);
-  const markCompleted = useProfileLocalStore((state) => state.markCompleted);
+  const userId = useSessionStore(state => state.user?.id ?? null);
+  const markCompleted = useProfileLocalStore(state => state.markCompleted);
 
   // Perfil real (GET /users/me), MISMA queryKey que `useProfileCompletion` → la caché ya está caliente
   // cuando llegamos acá (el RootNavigator la pobló para decidir el stack). De ahí sale el correo que
@@ -84,7 +92,9 @@ export function CompleteProfileScreen(): React.JSX.Element {
     queryFn: () => getProfile.execute(),
     enabled: Boolean(userId),
   });
-  const knownEmail = profileQuery.data?.email?.trim() ? profileQuery.data.email.trim() : null;
+  const knownEmail = profileQuery.data?.email?.trim()
+    ? profileQuery.data.email.trim()
+    : null;
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -99,22 +109,27 @@ export function CompleteProfileScreen(): React.JSX.Element {
   const nameValid = trimmedName.length >= 2 && trimmedName.length <= 80;
   // El correo editable es OPCIONAL: válido si está vacío o si tiene forma de correo. Si el perfil YA
   // trae correo (Apple/Google) no hay campo editable → no participa de la validación.
-  const emailValid = knownEmail !== null || trimmedEmail.length === 0 || EMAIL_PATTERN.test(trimmedEmail);
+  const emailValid =
+    knownEmail !== null ||
+    trimmedEmail.length === 0 ||
+    EMAIL_PATTERN.test(trimmedEmail);
   // ÚNICO bloqueo del submit: el nombre. El documento NO se pide acá (su momento es al vincular el pago).
   const canSubmit = nameValid && emailValid;
 
   // Sube el avatar y persiste la `photoUrl` en el perfil (toda la red vive en el caso de uso).
   const avatarMutation = useMutation({
     mutationFn: (file: PickedImage) => uploadAvatar.execute(file),
-    onSuccess: (profile) => {
+    onSuccess: profile => {
       // Refleja el perfil real (con la nueva `photoUrl`) sin esperar al refetch.
       queryClient.setQueryData(profileQueryKey(userId), profile);
-      void queryClient.invalidateQueries({ queryKey: ['profile'] });
+      void queryClient.invalidateQueries({queryKey: ['profile']});
     },
   });
 
   // URL pública remota una vez subida; null mientras sube / si falla (rollback optimista del valor).
-  const uploadedPhotoUrl = avatarMutation.isSuccess ? (avatarMutation.data.photoUrl ?? null) : null;
+  const uploadedPhotoUrl = avatarMutation.isSuccess
+    ? (avatarMutation.data.photoUrl ?? null)
+    : null;
   const previewUri = uploadedPhotoUrl ?? pickedFile?.uri ?? null;
   const isUploading = avatarMutation.isPending;
   const avatarUploadErrorText = avatarMutation.isError
@@ -140,7 +155,9 @@ export function CompleteProfileScreen(): React.JSX.Element {
       easing: Easing.bezier(...theme.motion.easing.standard),
     });
   }, [pickedFile, reduced, avatarPop, theme]);
-  const avatarStyle = useAnimatedStyle(() => ({ transform: [{ scale: avatarPop.value }] }));
+  const avatarStyle = useAnimatedStyle(() => ({
+    transform: [{scale: avatarPop.value}],
+  }));
 
   // Overlay "subiendo": fade del scrim (solo opacity = GPU; respeta reduce-motion).
   const overlayOpacity = useSharedValue(0);
@@ -150,11 +167,15 @@ export function CompleteProfileScreen(): React.JSX.Element {
       return;
     }
     overlayOpacity.value = withTiming(isUploading ? 1 : 0, {
-      duration: isUploading ? theme.motion.duration.base : theme.motion.exit.base,
+      duration: isUploading
+        ? theme.motion.duration.base
+        : theme.motion.exit.base,
       easing: Easing.bezier(...theme.motion.easing.standard),
     });
   }, [isUploading, reduced, overlayOpacity, theme]);
-  const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }));
+  const overlayStyle = useAnimatedStyle(() => ({
+    opacity: overlayOpacity.value,
+  }));
 
   const submitMutation = useMutation({
     mutationFn: () =>
@@ -164,15 +185,15 @@ export function CompleteProfileScreen(): React.JSX.Element {
       // cuanto se sube (ver `avatarMutation`), no en este PATCH.
       updateProfile.execute({
         name: trimmedName,
-        ...(!knownEmail && trimmedEmail ? { email: trimmedEmail } : {}),
+        ...(!knownEmail && trimmedEmail ? {email: trimmedEmail} : {}),
       }),
-    onSuccess: (profile) => {
+    onSuccess: profile => {
       // Refleja el perfil real recién guardado para que la completitud conmute sin esperar refetch.
       queryClient.setQueryData(profileQueryKey(userId), profile);
       if (userId) {
         markCompleted(userId);
       }
-      void queryClient.invalidateQueries({ queryKey: ['profile'] });
+      void queryClient.invalidateQueries({queryKey: ['profile']});
     },
   });
 
@@ -189,7 +210,11 @@ export function CompleteProfileScreen(): React.JSX.Element {
       setSourceSheetOpen(false);
       setPickError(null);
       try {
-        const picked = await imagePicker.pick(source, { maxWidth: 1024, maxHeight: 1024, quality: 0.8 });
+        const picked = await imagePicker.pick(source, {
+          maxWidth: 1024,
+          maxHeight: 1024,
+          quality: 0.8,
+        });
         if (picked) {
           // Preview optimista + subida inmediata (el caso de uso persiste la `photoUrl`).
           setPickedFile(picked);
@@ -225,12 +250,12 @@ export function CompleteProfileScreen(): React.JSX.Element {
     if (wasPersisted) {
       void removeAvatarUseCase
         .execute()
-        .then((profile) => {
+        .then(profile => {
           // Refleja el perfil sin foto sin esperar al refetch.
           queryClient.setQueryData(profileQueryKey(userId), profile);
-          void queryClient.invalidateQueries({ queryKey: ['profile'] });
+          void queryClient.invalidateQueries({queryKey: ['profile']});
         })
-        .catch((error) => {
+        .catch(error => {
           // Best-effort: si la reversión remota falla, la UI ya quedó limpia; el usuario puede
           // reintentar quitando/cambiando la foto. No bloqueamos el flujo de completar perfil.
           console.warn('[profile] reversión remota del avatar falló:', error);
@@ -251,8 +276,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
           disabled={!canSubmit}
           onPress={submit}
         />
-      }
-    >
+      }>
       <FadeInView index={0} style={styles.brand}>
         <VeoWordmark size="md" variant="tagline" color="brand" />
       </FadeInView>
@@ -261,7 +285,11 @@ export function CompleteProfileScreen(): React.JSX.Element {
         <Text variant="display" align="center">
           {t('profileSetup.title')}
         </Text>
-        <Text variant="body" color="inkMuted" align="center" style={styles.subtitle}>
+        <Text
+          variant="body"
+          color="inkMuted"
+          align="center"
+          style={styles.subtitle}>
           {t('profileSetup.subtitle')}
         </Text>
       </FadeInView>
@@ -271,7 +299,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
           <Banner
             tone="danger"
             title={t('profileSetup.saveError')}
-            style={{ marginBottom: theme.spacing.lg }}
+            style={{marginBottom: theme.spacing.lg}}
           />
         </FadeInView>
       ) : null}
@@ -281,12 +309,18 @@ export function CompleteProfileScreen(): React.JSX.Element {
         <Animated.View
           style={[
             styles.avatarRing,
-            { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface },
+            {
+              borderColor: theme.colors.accent,
+              backgroundColor: theme.colors.surface,
+            },
             avatarStyle,
-          ]}
-        >
+          ]}>
           {previewUri ? (
-            <Image source={{ uri: previewUri }} style={styles.avatarImage} resizeMode="cover" />
+            <Image
+              source={{uri: previewUri}}
+              style={styles.avatarImage}
+              resizeMode="cover"
+            />
           ) : (
             <IconPerson color={theme.colors.inkSubtle} size={72} />
           )}
@@ -294,10 +328,17 @@ export function CompleteProfileScreen(): React.JSX.Element {
           <Animated.View
             pointerEvents={isUploading ? 'auto' : 'none'}
             accessibilityElementsHidden={!isUploading}
-            importantForAccessibility={isUploading ? 'yes' : 'no-hide-descendants'}
-            accessibilityLabel={isUploading ? t('profileSetup.photoUploading') : undefined}
-            style={[styles.avatarOverlay, { backgroundColor: theme.colors.overlay }, overlayStyle]}
-          >
+            importantForAccessibility={
+              isUploading ? 'yes' : 'no-hide-descendants'
+            }
+            accessibilityLabel={
+              isUploading ? t('profileSetup.photoUploading') : undefined
+            }
+            style={[
+              styles.avatarOverlay,
+              {backgroundColor: theme.colors.overlay},
+              overlayStyle,
+            ]}>
             <ActivityIndicator color={theme.colors.onAccent} />
           </Animated.View>
         </Animated.View>
@@ -317,9 +358,12 @@ export function CompleteProfileScreen(): React.JSX.Element {
               borderColor: theme.colors.bg,
               opacity: isUploading ? 0.5 : 1,
             },
-          ]}
-        >
-          <IconCamera color={theme.colors.onAccent} holeColor={theme.colors.accent} size={22} />
+          ]}>
+          <IconCamera
+            color={theme.colors.onAccent}
+            holeColor={theme.colors.accent}
+            size={22}
+          />
         </PressableScale>
       </FadeInView>
 
@@ -340,8 +384,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel={t('profileSetup.photoUploadRetry')}
             onPress={retryUpload}
-            contentStyle={styles.retryButton}
-          >
+            contentStyle={styles.retryButton}>
             <Text variant="footnote" color="accent" align="center">
               {t('profileSetup.photoUploadRetry')}
             </Text>
@@ -349,7 +392,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
         </FadeInView>
       ) : null}
 
-      <FadeInView index={3} style={[styles.form, { gap: theme.spacing.lg }]}>
+      <FadeInView index={3} style={[styles.form, {gap: theme.spacing.lg}]}>
         <TextField
           label={t('profileSetup.nameLabel')}
           placeholder={t('profileSetup.namePlaceholder')}
@@ -358,19 +401,23 @@ export function CompleteProfileScreen(): React.JSX.Element {
           autoCapitalize="words"
           autoComplete="name"
           textContentType="name"
-          error={touched && !nameValid ? t('profileSetup.invalidName') : undefined}
+          error={
+            touched && !nameValid ? t('profileSetup.invalidName') : undefined
+          }
         />
         {knownEmail ? (
           /* El correo ya lo entregó la cuenta (Apple/Google): fila informativa de solo lectura, no un
              campo deshabilitado. El usuario no tiene NADA que hacer acá salvo escribir su nombre. */
           <Card variant="filled" padding="md">
-            <View style={[styles.emailRow, { gap: theme.spacing.md }]}>
+            <View style={[styles.emailRow, {gap: theme.spacing.md}]}>
               <View
                 style={[
                   styles.emailIcon,
-                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-                ]}
-              >
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                  },
+                ]}>
                 <IconMail color={theme.colors.inkMuted} size={20} />
               </View>
               <View style={styles.emailText}>
@@ -394,13 +441,23 @@ export function CompleteProfileScreen(): React.JSX.Element {
             autoCapitalize="none"
             autoComplete="email"
             textContentType="emailAddress"
-            error={touched && !emailValid ? t('profileSetup.invalidEmail') : undefined}
+            error={
+              touched && !emailValid
+                ? t('profileSetup.invalidEmail')
+                : undefined
+            }
           />
         )}
       </FadeInView>
 
-      <FadeInView index={4} style={[styles.privacyRow, { gap: theme.spacing.sm }]}>
-        <IconShieldCheck color={theme.colors.inkSubtle} onColor={theme.colors.bg} size={16} />
+      <FadeInView
+        index={4}
+        style={[styles.privacyRow, {gap: theme.spacing.sm}]}>
+        <IconShieldCheck
+          color={theme.colors.inkSubtle}
+          onColor={theme.colors.bg}
+          size={16}
+        />
         <Text variant="footnote" color="inkSubtle" style={styles.privacyText}>
           {t('profileSetup.privacyNote')}
         </Text>
@@ -410,9 +467,8 @@ export function CompleteProfileScreen(): React.JSX.Element {
       <BottomSheet
         visible={sourceSheetOpen}
         onClose={() => setSourceSheetOpen(false)}
-        title={t('profileSetup.photoSheetTitle')}
-      >
-        <View style={{ gap: theme.spacing.sm }}>
+        title={t('profileSetup.photoSheetTitle')}>
+        <View style={{gap: theme.spacing.sm}}>
           <Button
             label={t('profileSetup.photoFromCamera')}
             variant="primary"
@@ -440,10 +496,15 @@ export function CompleteProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  brand: { alignItems: 'center', gap: spacing.xxs, marginTop: spacing.xs, marginBottom: spacing.lg },
-  copy: { gap: spacing.sm, marginBottom: spacing['2xl'] },
-  subtitle: { maxWidth: 320, alignSelf: 'center' },
-  avatarWrap: { alignSelf: 'center', marginBottom: 28 },
+  brand: {
+    alignItems: 'center',
+    gap: spacing.xxs,
+    marginTop: spacing.xs,
+    marginBottom: spacing.lg,
+  },
+  copy: {gap: spacing.sm, marginBottom: spacing['2xl']},
+  subtitle: {maxWidth: 320, alignSelf: 'center'},
+  avatarWrap: {alignSelf: 'center', marginBottom: 28},
   avatarRing: {
     width: 132,
     height: 132,
@@ -454,14 +515,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarImage: { width: '100%', height: '100%', borderRadius: 64 },
+  avatarImage: {width: '100%', height: '100%', borderRadius: 64},
   avatarOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 64,
   },
-  cameraFabAnchor: { position: 'absolute', right: 0, bottom: 4 },
+  cameraFabAnchor: {position: 'absolute', right: 0, bottom: 4},
   cameraFab: {
     width: 44,
     height: 44,
@@ -470,7 +531,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emailRow: { flexDirection: 'row', alignItems: 'center' },
+  emailRow: {flexDirection: 'row', alignItems: 'center'},
   emailIcon: {
     width: 40,
     height: 40,
@@ -479,11 +540,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emailText: { flex: 1, gap: spacing.xxs },
-  pickErrorWrap: { marginTop: -16, marginBottom: spacing.xl },
-  uploadErrorWrap: { marginTop: -16, marginBottom: spacing.xl, gap: 6 },
-  retryButton: { paddingVertical: 6, alignItems: 'center' },
+  emailText: {flex: 1, gap: spacing.xxs},
+  pickErrorWrap: {marginTop: -16, marginBottom: spacing.xl},
+  uploadErrorWrap: {marginTop: -16, marginBottom: spacing.xl, gap: 6},
+  retryButton: {paddingVertical: 6, alignItems: 'center'},
   form: {},
-  privacyRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: spacing.xl },
-  privacyText: { flex: 1 },
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.xl,
+  },
+  privacyText: {flex: 1},
 });

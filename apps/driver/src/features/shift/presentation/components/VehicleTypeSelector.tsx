@@ -1,7 +1,7 @@
 import React from 'react';
-import {ActivityIndicator, StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, Skeleton, Text, useTheme} from '@veo/ui-kit';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, Skeleton, Text, useTheme } from '@veo/ui-kit';
 import {
   vehicleClassGlyph,
   vehicleClassLabelKey,
@@ -11,7 +11,7 @@ import {
   useDriverVehicles,
   useSetActiveVehicle,
 } from '../../../registration/presentation';
-import {PressableScale} from './motion';
+import { PressableScale } from './motion';
 
 export interface VehicleTypeSelectorProps {
   /** Deshabilita el cambio (p. ej. yendo a recoger o con un viaje en curso). */
@@ -31,8 +31,10 @@ const VERIFIED_STATUS = 'ACTIVE';
  * 2+ (segmentos seleccionables con su placa). El color nunca es el único indicador del activo: hay
  * relleno, borde, ícono y placa.
  */
-export const VehicleTypeSelector = ({disabled = false}: VehicleTypeSelectorProps): React.JSX.Element => {
-  const {t} = useTranslation();
+export const VehicleTypeSelector = ({
+  disabled = false,
+}: VehicleTypeSelectorProps): React.JSX.Element => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const vehicles = useDriverVehicles();
   const active = useActiveVehicle();
@@ -80,8 +82,9 @@ export const VehicleTypeSelector = ({disabled = false}: VehicleTypeSelectorProps
             padding: theme.spacing.xxs,
             opacity: locked ? 0.6 : 1,
           },
-        ]}>
-        {list.map(vehicle => {
+        ]}
+      >
+        {list.map((vehicle) => {
           const isActive = vehicle.id === activeId;
           const Icon = vehicleClassGlyph(vehicle.vehicleType);
           const labelColor = isActive ? theme.colors.onAccent : theme.colors.inkMuted;
@@ -90,7 +93,7 @@ export const VehicleTypeSelector = ({disabled = false}: VehicleTypeSelectorProps
             <PressableScale
               key={vehicle.id}
               accessibilityRole="radio"
-              accessibilityState={{selected: isActive, disabled: locked}}
+              accessibilityState={{ selected: isActive, disabled: locked }}
               accessibilityLabel={t(vehicleClassLabelKey(vehicle.vehicleType))}
               // Bloqueado durante un cambio en curso, en viaje (disabled), o si ya es el activo.
               disabled={locked || isActive}
@@ -101,17 +104,18 @@ export const VehicleTypeSelector = ({disabled = false}: VehicleTypeSelectorProps
                   borderRadius: theme.radii.pill,
                   backgroundColor: isActive ? theme.colors.accent : 'transparent',
                 },
-              ]}>
+              ]}
+            >
               {pending ? (
                 <ActivityIndicator size="small" color={labelColor} />
               ) : (
                 <Icon size={18} color={labelColor} />
               )}
               <View style={styles.segmentText}>
-                <Text variant="subhead" style={{color: labelColor}} numberOfLines={1}>
+                <Text variant="subhead" style={{ color: labelColor }} numberOfLines={1}>
                   {t(vehicleClassLabelKey(vehicle.vehicleType))}
                 </Text>
-                <Text variant="caption" style={{color: labelColor}} numberOfLines={1}>
+                <Text variant="caption" style={{ color: labelColor }} numberOfLines={1}>
                   {vehicle.plate}
                 </Text>
               </View>
@@ -134,7 +138,7 @@ export const VehicleTypeSelector = ({disabled = false}: VehicleTypeSelectorProps
 };
 
 const styles = StyleSheet.create({
-  track: {flexDirection: 'row', gap: 4, marginTop: 8},
+  track: { flexDirection: 'row', gap: 4, marginTop: 8 },
   segment: {
     flex: 1,
     flexDirection: 'row',
@@ -143,6 +147,6 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
   },
-  segmentText: {alignItems: 'flex-start'},
-  spaced: {marginTop: 8},
+  segmentText: { alignItems: 'flex-start' },
+  spaced: { marginTop: 8 },
 });

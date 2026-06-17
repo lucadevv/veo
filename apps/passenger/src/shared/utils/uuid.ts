@@ -12,7 +12,7 @@ function randomByte(): number {
 
 /** UUID v4. Aceptado por `@IsUUID()` del backend (versiones 1-5). */
 export function uuidv4(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
     const random = (Math.random() * 16) | 0;
     const value = char === 'x' ? random : (random & 0x3) | 0x8;
     return value.toString(16);
@@ -43,7 +43,7 @@ export function uuidv7(now: number = Date.now()): string {
   // Variante RFC 4122 (10xx) en el byte 8.
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
 
-  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hex = bytes.map(b => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
     16,
     20,

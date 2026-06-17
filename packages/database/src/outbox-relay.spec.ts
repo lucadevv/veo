@@ -56,13 +56,13 @@ function row(i: number, eventType = 'trip.requested'): Row {
 }
 
 function fakeProducer(): {
-  published: Array<{ envelope: EventEnvelope<unknown>; key: string }>;
+  published: { envelope: EventEnvelope<unknown>; key: string }[];
   publish: ReturnType<typeof vi.fn>;
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
   asKafkaProducer(): KafkaEventProducer;
 } {
-  const published: Array<{ envelope: EventEnvelope<unknown>; key: string }> = [];
+  const published: { envelope: EventEnvelope<unknown>; key: string }[] = [];
   const fake = {
     published,
     connect: vi.fn(async () => {}),
@@ -77,7 +77,10 @@ function fakeProducer(): {
   return fake;
 }
 
-function fakeLogger(): OutboxRelayLogger & { debug: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } {
+function fakeLogger(): OutboxRelayLogger & {
+  debug: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+} {
   return { debug: vi.fn(), error: vi.fn() };
 }
 

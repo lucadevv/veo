@@ -11,7 +11,11 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { signHmac, uuidv7, UnauthorizedError } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { PanicService } from '../src/panic/panic.service';
@@ -35,7 +39,9 @@ let db: TestDatabase;
 let client: PrismaClient;
 let svc: PanicService;
 
-function makeSignedInput(overrides: Partial<{ tripId: string; dedupKey: string; lat: number; lon: number }> = {}) {
+function makeSignedInput(
+  overrides: Partial<{ tripId: string; dedupKey: string; lat: number; lon: number }> = {},
+) {
   const tripId = overrides.tripId ?? uuidv7();
   const dedupKey = overrides.dedupKey ?? uuidv7();
   const lat = overrides.lat ?? -12.0464;

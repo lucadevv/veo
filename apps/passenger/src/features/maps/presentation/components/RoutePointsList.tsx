@@ -1,10 +1,10 @@
-import { IconButton, Text, useTheme } from '@veo/ui-kit';
+import {IconButton, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { MAX_WAYPOINTS, type RoutePlace } from '../../domain/entities';
-import { IconClose } from '../../../trip/presentation/components/icons';
-import { IconPencil } from '../../../auth/presentation/components/icons';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {MAX_WAYPOINTS, type RoutePlace} from '../../domain/entities';
+import {IconClose} from '../../../trip/presentation/components/icons';
+import {IconPencil} from '../../../auth/presentation/components/icons';
 
 export interface RoutePointsListProps {
   origin: RoutePlace | null;
@@ -34,11 +34,11 @@ export function RoutePointsList({
   onAddWaypoint,
 }: RoutePointsListProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   const canAdd = waypoints.length < MAX_WAYPOINTS;
 
   return (
-    <View style={{ gap: theme.spacing.xs }}>
+    <View style={{gap: theme.spacing.xs}}>
       <PointRow
         dotColor={theme.colors.brand}
         label={origin?.title ?? t('waypoints.origin')}
@@ -52,7 +52,11 @@ export function RoutePointsList({
         <PointRow
           key={`stop-${index}`}
           dotColor={theme.colors.inkSubtle}
-          label={stop.title.trim().length > 0 ? stop.title : t('waypoints.stopLabel', { index: index + 1 })}
+          label={
+            stop.title.trim().length > 0
+              ? stop.title
+              : t('waypoints.stopLabel', {index: index + 1})
+          }
           muted={stop.title.trim().length === 0}
           showConnector
           onPress={() => onEditWaypoint(index)}
@@ -81,21 +85,23 @@ export function RoutePointsList({
           accessibilityRole="button"
           accessibilityLabel={t('waypoints.add')}
           onPress={onAddWaypoint}
-          style={({ pressed }) => [
+          style={({pressed}) => [
             styles.addRow,
             {
               opacity: pressed ? 0.6 : 1,
               paddingVertical: theme.spacing.sm,
               marginLeft: theme.spacing.xs,
             },
-          ]}
-        >
+          ]}>
           <Text variant="subhead" color="brand">
             {t('waypoints.add')}
           </Text>
         </Pressable>
       ) : (
-        <Text variant="footnote" color="inkSubtle" style={{ marginLeft: theme.spacing.xs }}>
+        <Text
+          variant="footnote"
+          color="inkSubtle"
+          style={{marginLeft: theme.spacing.xs}}>
           {t('waypoints.max')}
         </Text>
       )}
@@ -124,16 +130,18 @@ function PointRow({
   return (
     <View style={styles.row}>
       <View style={styles.rail}>
-        <View style={[styles.dot, { backgroundColor: dotColor }]} />
+        <View style={[styles.dot, {backgroundColor: dotColor}]} />
         {showConnector ? (
-          <View style={[styles.connector, { backgroundColor: theme.colors.border }]} />
+          <View
+            style={[styles.connector, {backgroundColor: theme.colors.border}]}
+          />
         ) : null}
       </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
         onPress={onPress}
-        style={({ pressed }) => [
+        style={({pressed}) => [
           styles.pressable,
           {
             backgroundColor: pressed ? theme.colors.surface : 'transparent',
@@ -141,14 +149,12 @@ function PointRow({
             paddingVertical: theme.spacing.sm,
             paddingHorizontal: theme.spacing.sm,
           },
-        ]}
-      >
+        ]}>
         <Text
           variant="body"
           color={muted ? 'inkSubtle' : 'ink'}
           numberOfLines={1}
-          style={styles.label}
-        >
+          style={styles.label}>
           {label}
         </Text>
         {trailing}
@@ -158,11 +164,11 @@ function PointRow({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'stretch', minHeight: 40 },
-  rail: { width: 24, alignItems: 'center' },
-  dot: { width: 10, height: 10, borderRadius: 5, marginTop: 14 },
-  connector: { width: 2, flex: 1, marginTop: 2, marginBottom: -2 },
-  pressable: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  label: { flex: 1 },
-  addRow: { alignSelf: 'flex-start' },
+  row: {flexDirection: 'row', alignItems: 'stretch', minHeight: 40},
+  rail: {width: 24, alignItems: 'center'},
+  dot: {width: 10, height: 10, borderRadius: 5, marginTop: 14},
+  connector: {width: 2, flex: 1, marginTop: 2, marginBottom: -2},
+  pressable: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8},
+  label: {flex: 1},
+  addRow: {alignSelf: 'flex-start'},
 });

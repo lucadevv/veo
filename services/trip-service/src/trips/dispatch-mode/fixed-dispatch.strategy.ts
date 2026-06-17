@@ -76,7 +76,12 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
    * trip.requested (mismo evento que la creación FIXED) para re-arrancar el matching secuencial. La tarifa
    * fija NO cambia (BR-T01 inmutable). NO toca negotiationSeq/agreedFareCents (dominio puja, irrelevantes).
    */
-  async reassign(tx: TxClient, trip: Trip, nextReassignCount: number, reason?: string): Promise<Trip> {
+  async reassign(
+    tx: TxClient,
+    trip: Trip,
+    nextReassignCount: number,
+    reason?: string,
+  ): Promise<Trip> {
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     const destination: LatLon = { lat: trip.destLat, lon: trip.destLon };
     const next = await tx.trip.update({

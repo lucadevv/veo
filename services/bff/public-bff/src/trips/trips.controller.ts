@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type { TripVideoGrant, WaypointProposalView } from '@veo/api-client';
@@ -104,28 +115,19 @@ export class TripsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalle agregado del viaje (trip + conductor + rating + vehículo)' })
-  detail(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<TripDetailView> {
+  detail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetailView> {
     return this.trips.getTripDetail(user, id);
   }
 
   @Get(':id/state')
   @ApiOperation({ summary: 'Estado del viaje (BR-T02)' })
-  state(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<TripStateView> {
+  state(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripStateView> {
     return this.trips.getTripState(user, id);
   }
 
   @Get(':id/video')
   @ApiOperation({ summary: 'Token viewer LiveKit del habitáculo (solo en viaje IN_PROGRESS)' })
-  video(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<TripVideoGrant> {
+  video(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripVideoGrant> {
     return this.trips.videoGrant(user, id);
   }
 
@@ -147,10 +149,7 @@ export class TripsController {
       'Cerrar el post-viaje de un viaje COMPLETED (re-entrada): sella el cierre. Idempotente; tras esto ' +
       'el viaje deja de aparecer en /pending-settlement. NO cambia el estado del viaje (sigue COMPLETED).',
   })
-  close(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<TripDetailView> {
+  close(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetailView> {
     return this.trips.close(user, id);
   }
 
@@ -182,7 +181,9 @@ export class TripsController {
 
   @Delete(':id/schedule')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cancelar un viaje PROGRAMADO antes de activarse (Ola 2B; sin penalidad)' })
+  @ApiOperation({
+    summary: 'Cancelar un viaje PROGRAMADO antes de activarse (Ola 2B; sin penalidad)',
+  })
   cancelSchedule(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -192,7 +193,9 @@ export class TripsController {
 
   @Post(':id/tip')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Propina al conductor de un viaje ya cobrado (BR-P04). 100% al conductor' })
+  @ApiOperation({
+    summary: 'Propina al conductor de un viaje ya cobrado (BR-P04). 100% al conductor',
+  })
   tip(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -207,10 +210,7 @@ export class TripsController {
   @ApiOperation({
     summary: 'Estado del board + ofertas de SU viaje (puja): { board:{status,expiresAt}, offers }',
   })
-  offers(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<OffersResponse> {
+  offers(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<OffersResponse> {
     return this.trips.listOffers(user, id);
   }
 
@@ -227,7 +227,9 @@ export class TripsController {
 
   @Post(':id/bid/cancel')
   @HttpCode(200)
-  @ApiOperation({ summary: 'El pasajero cancela la puja de SU viaje → board CANCELLED (idempotente)' })
+  @ApiOperation({
+    summary: 'El pasajero cancela la puja de SU viaje → board CANCELLED (idempotente)',
+  })
   cancelBid(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

@@ -1,5 +1,5 @@
-import { hmacSha256Hex } from '../src/shared/crypto/hmacSha256';
-import { KeychainPanicSigner } from '../src/features/panic/data/keychainPanicSigner';
+import {hmacSha256Hex} from '../src/shared/crypto/hmacSha256';
+import {KeychainPanicSigner} from '../src/features/panic/data/keychainPanicSigner';
 import {
   buildPanicSignatureMessage,
   PANIC_SIGNATURE_VERSION,
@@ -14,10 +14,16 @@ describe('buildPanicSignatureMessage', () => {
     const message = buildPanicSignatureMessage({
       tripId: 'trip-1',
       dedupKey: 'dedup-1',
-      geo: { lat: -12.0464, lon: -77.0428 },
+      geo: {lat: -12.0464, lon: -77.0428},
     });
     expect(message).toBe(
-      [PANIC_SIGNATURE_VERSION, 'trip-1', 'dedup-1', '-12.046400', '-77.042800'].join('\n'),
+      [
+        PANIC_SIGNATURE_VERSION,
+        'trip-1',
+        'dedup-1',
+        '-12.046400',
+        '-77.042800',
+      ].join('\n'),
     );
   });
 });
@@ -37,7 +43,7 @@ describe('KeychainPanicSigner', () => {
   const payload = {
     tripId: 'trip-1',
     dedupKey: 'dedup-1',
-    geo: { lat: -12.0464, lon: -77.0428 },
+    geo: {lat: -12.0464, lon: -77.0428},
   };
 
   it('firma el mensaje canónico con HMAC-SHA256 usando el secreto del store', async () => {
@@ -52,6 +58,8 @@ describe('KeychainPanicSigner', () => {
 
   it('lanza PanicSecretUnavailableError si no hay clave provisionada (hueco de backend)', async () => {
     const signer = new KeychainPanicSigner(new FakeSecretStore(null));
-    await expect(signer.sign(payload)).rejects.toBeInstanceOf(PanicSecretUnavailableError);
+    await expect(signer.sign(payload)).rejects.toBeInstanceOf(
+      PanicSecretUnavailableError,
+    );
   });
 });

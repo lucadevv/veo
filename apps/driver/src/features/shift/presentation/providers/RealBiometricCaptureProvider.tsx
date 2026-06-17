@@ -1,15 +1,15 @@
-import React, {useMemo, type ReactNode} from 'react';
-import {useDi} from '../../../../core/di/useDi';
-import type {BiometricCaptureService, BiometricEnrollmentService} from '../../domain';
-import type {BiometricFrameGrabber} from '../../domain';
-import {HttpBiometricBackendPort} from '../../data/services/http-biometric-backend';
-import {LivenessBiometricCaptureService} from '../../data/services/liveness-biometric-capture';
+import React, { useMemo, type ReactNode } from 'react';
+import { useDi } from '../../../../core/di/useDi';
+import type { BiometricCaptureService, BiometricEnrollmentService } from '../../domain';
+import type { BiometricFrameGrabber } from '../../domain';
+import { HttpBiometricBackendPort } from '../../data/services/http-biometric-backend';
+import { LivenessBiometricCaptureService } from '../../data/services/liveness-biometric-capture';
 import {
   nativeBiometricFrameGrabber,
   nativeBiometricFrameGrabberLinked,
 } from '../../data/services/native-biometric-frame-grabber';
-import {stubBiometricFrameGrabber} from '../../data/services/stub-biometric-frame-grabber';
-import {BiometricCaptureProvider} from './BiometricCaptureProvider';
+import { stubBiometricFrameGrabber } from '../../data/services/stub-biometric-frame-grabber';
+import { BiometricCaptureProvider } from './BiometricCaptureProvider';
 
 /**
  * Elige el frame-grabber. En PRODUCCIÓN siempre el nativo. SOLO en dev (`__DEV__`) y cuando el módulo
@@ -19,7 +19,6 @@ import {BiometricCaptureProvider} from './BiometricCaptureProvider';
  */
 function selectFrameGrabber(): BiometricFrameGrabber {
   if (__DEV__ && !nativeBiometricFrameGrabberLinked) {
-    // eslint-disable-next-line no-console
     console.warn(
       '[VEO][dev] Frame-grabber biométrico nativo no enlazado (simulador): usando stub sintético. ' +
         'El backend debe estar en VEO_BIOMETRIC_MODE=sandbox. Esto NO ocurre en builds de release.',
@@ -40,7 +39,7 @@ export const RealBiometricCaptureProvider = ({
 }: {
   children: ReactNode;
 }): React.JSX.Element => {
-  const {httpClient} = useDi();
+  const { httpClient } = useDi();
   const service = useMemo<BiometricCaptureService & BiometricEnrollmentService>(
     () =>
       new LivenessBiometricCaptureService(

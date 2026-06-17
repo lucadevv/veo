@@ -64,10 +64,14 @@ describe('geo (H3)', () => {
 
 describe('assertNever (exhaustividad sin default silencioso)', () => {
   it('lanza ante una variante imprevista en runtime (no se traga el caso)', () => {
-    expect(() => assertNever('inesperado' as never)).toThrow('Variante no contemplada: "inesperado"');
+    expect(() => assertNever('inesperado' as never)).toThrow(
+      'Variante no contemplada: "inesperado"',
+    );
   });
   it('acepta un mensaje de contexto propio', () => {
-    expect(() => assertNever(undefined as never, 'Flujo no contemplado')).toThrow('Flujo no contemplado');
+    expect(() => assertNever(undefined as never, 'Flujo no contemplado')).toThrow(
+      'Flujo no contemplado',
+    );
   });
   it('hace exhaustivo un switch sobre una unión (compila solo si cubre todos los casos)', () => {
     type Flow = 'a' | 'b';

@@ -13,8 +13,18 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
-import { ExternalServiceError, InvalidStateError, NotFoundError, UnprocessableEntityError, uuidv7 } from '@veo/utils';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
+import {
+  ExternalServiceError,
+  InvalidStateError,
+  NotFoundError,
+  UnprocessableEntityError,
+  uuidv7,
+} from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
@@ -36,9 +46,16 @@ const RAIL_REF = 'pp_uid_original';
 let db: TestDatabase;
 let prisma: PrismaClient;
 
-const noAffiliation = { resolveActiveWalletUid: async () => null } as unknown as AffiliationsService;
-const noPromos = { redeemPromo: async () => ({ discountCents: 0 }) } as unknown as PromotionsService;
-const L2: AuthenticatedUser = { userId: 'op-L2', roles: [AdminRole.SUPPORT_L2] } as unknown as AuthenticatedUser;
+const noAffiliation = {
+  resolveActiveWalletUid: async () => null,
+} as unknown as AffiliationsService;
+const noPromos = {
+  redeemPromo: async () => ({ discountCents: 0 }),
+} as unknown as PromotionsService;
+const L2: AuthenticatedUser = {
+  userId: 'op-L2',
+  roles: [AdminRole.SUPPORT_L2],
+} as unknown as AuthenticatedUser;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -51,11 +68,16 @@ function makeConfig(): ConfigService {
     REFUND_L2_THRESHOLD_CENTS: 3000,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
-  return { getOrThrow: (k: string) => values[k], get: (k: string) => values[k] } as unknown as ConfigService;
+  return {
+    getOrThrow: (k: string) => values[k],
+    get: (k: string) => values[k],
+  } as unknown as ConfigService;
 }
 
 /** Gateway doble con capacidad Refundable controlable por test (el resultado del reverso se inyecta). */
-function makeService(refundImpl?: (ref: string, cents: number, meta?: RefundMeta) => Promise<RefundResult>): {
+function makeService(
+  refundImpl?: (ref: string, cents: number, meta?: RefundMeta) => Promise<RefundResult>,
+): {
   service: PaymentsService;
   calls: { ref: string; cents: number; meta?: RefundMeta }[];
 } {
@@ -73,7 +95,13 @@ function makeService(refundImpl?: (ref: string, cents: number, meta?: RefundMeta
       : {}),
   } as unknown as PaymentGateway;
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  const service = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  const service = new PaymentsService(
+    prismaService,
+    gateway,
+    noAffiliation,
+    noPromos,
+    makeConfig() as never,
+  );
   return { service, calls };
 }
 
@@ -130,7 +158,10 @@ beforeEach(async () => {
 
 describe('PaymentsService.refund · proveedor confirma SÍNCRONO (ACCEPTED)', () => {
   it('llama a gateway.refund con la referencia del riel y la idempotency key derivada (refund-{id})', async () => {
-    const { service, calls } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev-1' }));
+    const { service, calls } = makeService(async () => ({
+      status: 'ACCEPTED',
+      externalRefundId: 'rev-1',
+    }));
     const { tripId } = await seedCaptured();
 
     const res = await service.refund(tripId, 500, 'cliente_insatisfecho', L2);
@@ -142,7 +173,10 @@ describe('PaymentsService.refund · proveedor confirma SÍNCRONO (ACCEPTED)', ()
   });
 
   it('reembolso parcial → payment.refunded con amountCents y passengerId enriquecido', async () => {
-    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev-1' }));
+    const { service } = makeService(async () => ({
+      status: 'ACCEPTED',
+      externalRefundId: 'rev-1',
+    }));
     const { id, tripId } = await seedCaptured();
 
     const res = await service.refund(tripId, 500, 'cliente_insatisfecho', L2);
@@ -161,7 +195,10 @@ describe('PaymentsService.refund · proveedor confirma SÍNCRONO (ACCEPTED)', ()
   });
 
   it('reembolso TOTAL → pago REFUNDED y Refund COMPLETED con el uid del reverso', async () => {
-    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev-9' }));
+    const { service } = makeService(async () => ({
+      status: 'ACCEPTED',
+      externalRefundId: 'rev-9',
+    }));
     const { id, tripId } = await seedCaptured();
 
     const res = await service.refund(tripId, 2000, 'x', L2);
@@ -192,7 +229,10 @@ describe('PaymentsService.refund · proveedor confirma SÍNCRONO (ACCEPTED)', ()
 
 describe('PaymentsService.refund · proveedor ASÍNCRONO (PENDING + callback)', () => {
   it('PENDING → Refund queda PENDING con el uid, SIN payment.refunded (la plata aún no volvió)', async () => {
-    const { service } = makeService(async () => ({ status: 'PENDING', externalRefundId: 'rev-async' }));
+    const { service } = makeService(async () => ({
+      status: 'PENDING',
+      externalRefundId: 'rev-async',
+    }));
     const { id, tripId } = await seedCaptured();
 
     const res = await service.refund(tripId, 2000, 'x', L2);
@@ -206,25 +246,42 @@ describe('PaymentsService.refund · proveedor ASÍNCRONO (PENDING + callback)', 
   });
 
   it('callback CONFIRMED → completa el Refund y emite payment.refunded UNA vez (redelivery idempotente)', async () => {
-    const { service } = makeService(async () => ({ status: 'PENDING', externalRefundId: 'rev-async' }));
+    const { service } = makeService(async () => ({
+      status: 'PENDING',
+      externalRefundId: 'rev-async',
+    }));
     const { tripId } = await seedCaptured();
     const res = await service.refund(tripId, 2000, 'x', L2);
 
-    const first = await service.applyRefundWebhookResult({ externalRefundId: 'rev-async', status: 'CONFIRMED' });
+    const first = await service.applyRefundWebhookResult({
+      externalRefundId: 'rev-async',
+      status: 'CONFIRMED',
+    });
     expect(first).toEqual({ applied: true, status: 'COMPLETED' });
-    const redelivery = await service.applyRefundWebhookResult({ externalRefundId: 'rev-async', status: 'CONFIRMED' });
+    const redelivery = await service.applyRefundWebhookResult({
+      externalRefundId: 'rev-async',
+      status: 'CONFIRMED',
+    });
     expect(redelivery).toEqual({ applied: false, status: 'COMPLETED' });
 
-    expect((await prisma.refund.findUniqueOrThrow({ where: { id: res.refundId } })).status).toBe('COMPLETED');
+    expect((await prisma.refund.findUniqueOrThrow({ where: { id: res.refundId } })).status).toBe(
+      'COMPLETED',
+    );
     expect(await refundedEvents()).toHaveLength(1); // un solo push, aunque el callback se re-entregue
   });
 
   it('callback DECLINED → Refund REJECTED + compensación (el pago vuelve a CAPTURED), sin evento', async () => {
-    const { service } = makeService(async () => ({ status: 'PENDING', externalRefundId: 'rev-async' }));
+    const { service } = makeService(async () => ({
+      status: 'PENDING',
+      externalRefundId: 'rev-async',
+    }));
     const { id, tripId } = await seedCaptured();
     const res = await service.refund(tripId, 2000, 'x', L2);
 
-    const applied = await service.applyRefundWebhookResult({ externalRefundId: 'rev-async', status: 'DECLINED' });
+    const applied = await service.applyRefundWebhookResult({
+      externalRefundId: 'rev-async',
+      status: 'DECLINED',
+    });
     expect(applied).toEqual({ applied: true, status: 'REJECTED' });
 
     const refund = await prisma.refund.findUniqueOrThrow({ where: { id: res.refundId } });
@@ -245,7 +302,10 @@ describe('PaymentsService.refund · proveedor ASÍNCRONO (PENDING + callback)', 
     // Simula el agujero real: ProntoPaga responde /reverse/new con uid y dispara el callback ANTES de
     // que refundViaGateway commitee el update del uid. La 1ra entrega DEBE fallar no-2xx (para apalancar
     // el retry del proveedor); el retry —ya con el uid persistido— completa el Refund normalmente.
-    const { service } = makeService(async () => ({ status: 'PENDING', externalRefundId: 'rev-carrera' }));
+    const { service } = makeService(async () => ({
+      status: 'PENDING',
+      externalRefundId: 'rev-carrera',
+    }));
     const { tripId } = await seedCaptured();
 
     // 1ra entrega ANTES del refund(): el uid no existe todavía → NotFoundError (proveedor reintentará).
@@ -255,9 +315,14 @@ describe('PaymentsService.refund · proveedor ASÍNCRONO (PENDING + callback)', 
 
     const res = await service.refund(tripId, 2000, 'x', L2); // persiste el uid apenas llega del gateway
     // RETRY del proveedor: ahora correlaciona y completa (payment.refunded sale UNA vez).
-    const retry = await service.applyRefundWebhookResult({ externalRefundId: 'rev-carrera', status: 'CONFIRMED' });
+    const retry = await service.applyRefundWebhookResult({
+      externalRefundId: 'rev-carrera',
+      status: 'CONFIRMED',
+    });
     expect(retry).toEqual({ applied: true, status: 'COMPLETED' });
-    expect((await prisma.refund.findUniqueOrThrow({ where: { id: res.refundId } })).status).toBe('COMPLETED');
+    expect((await prisma.refund.findUniqueOrThrow({ where: { id: res.refundId } })).status).toBe(
+      'COMPLETED',
+    );
     expect(await refundedEvents()).toHaveLength(1);
   });
 });
@@ -267,7 +332,9 @@ describe('PaymentsService.refund · rechazo y fallas del proveedor', () => {
     const { service } = makeService(async () => ({ status: 'REJECTED', reason: 'monto excede' }));
     const { id, tripId } = await seedCaptured();
 
-    await expect(service.refund(tripId, 2000, 'x', L2)).rejects.toBeInstanceOf(UnprocessableEntityError);
+    await expect(service.refund(tripId, 2000, 'x', L2)).rejects.toBeInstanceOf(
+      UnprocessableEntityError,
+    );
 
     const refunds = await prisma.refund.findMany({});
     expect(refunds).toHaveLength(1);

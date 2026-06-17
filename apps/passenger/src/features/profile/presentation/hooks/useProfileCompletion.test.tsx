@@ -1,13 +1,19 @@
-import type { PassengerProfile } from '@veo/api-client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type {PassengerProfile} from '@veo/api-client';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import React from 'react';
-import TestRenderer, { act } from 'react-test-renderer';
-import { TOKENS } from '../../../../core/di/tokens';
-import { container } from '../../../../core/di/registry';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { useBiometricGateStore, useProfileLocalStore } from '../../../auth/presentation';
-import type { GetProfileUseCase } from '../../domain/usecases';
-import { useProfileCompletion, type ProfileCompletion } from './useProfileCompletion';
+import TestRenderer, {act} from 'react-test-renderer';
+import {TOKENS} from '../../../../core/di/tokens';
+import {container} from '../../../../core/di/registry';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {
+  useBiometricGateStore,
+  useProfileLocalStore,
+} from '../../../auth/presentation';
+import type {GetProfileUseCase} from '../../domain/usecases';
+import {
+  useProfileCompletion,
+  type ProfileCompletion,
+} from './useProfileCompletion';
 
 /**
  * Especificación de la REGLA DE COMPLETITUD nueva: el perfil está completo SOLO con `name` real. El
@@ -48,10 +54,10 @@ function registerProfile(profile: PassengerProfile | Error): void {
 /** Prepara la sesión como autenticada/desbloqueada (condición `active` del hook). */
 function authenticate(): void {
   useSessionStore.setState({
-    user: { id: USER_ID } as never,
+    user: {id: USER_ID} as never,
     status: 'authenticated',
   });
-  useBiometricGateStore.setState({ locked: false });
+  useBiometricGateStore.setState({locked: false});
 }
 
 let activeClient: QueryClient | null = null;
@@ -62,7 +68,7 @@ function renderHook(): {
   unmount: () => void;
 } {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    defaultOptions: {queries: {retry: false, gcTime: 0}},
   });
   activeClient = client;
   let last: ProfileCompletion = 'loading';
@@ -88,22 +94,22 @@ function renderHook(): {
 async function flush(times = 4): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
     });
   }
 }
 
 beforeEach(() => {
   container.reset();
-  useProfileLocalStore.setState({ completedByUser: {} });
+  useProfileLocalStore.setState({completedByUser: {}});
 });
 
 afterEach(() => {
   activeClient?.clear();
   activeClient = null;
-  useSessionStore.setState({ user: null, status: 'unknown' } as never);
-  useBiometricGateStore.setState({ locked: true });
-  useProfileLocalStore.setState({ completedByUser: {} });
+  useSessionStore.setState({user: null, status: 'unknown'} as never);
+  useBiometricGateStore.setState({locked: true});
+  useProfileLocalStore.setState({completedByUser: {}});
   jest.clearAllMocks();
 });
 
@@ -117,7 +123,7 @@ describe('useProfileCompletion · regla = nombre presente', () => {
 
   it('perfil con nombre → complete', async () => {
     authenticate();
-    registerProfile(makeProfile({ name: 'María Ríos' }));
+    registerProfile(makeProfile({name: 'María Ríos'}));
     const hook = renderHook();
     await flush();
     expect(hook.current()).toBe('complete');
@@ -126,7 +132,7 @@ describe('useProfileCompletion · regla = nombre presente', () => {
 
   it('perfil SIN nombre pero CON correo → incomplete (el correo no alcanza)', async () => {
     authenticate();
-    registerProfile(makeProfile({ name: null, email: 'ana@correo.com' }));
+    registerProfile(makeProfile({name: null, email: 'ana@correo.com'}));
     const hook = renderHook();
     await flush();
     expect(hook.current()).toBe('incomplete');
@@ -135,7 +141,7 @@ describe('useProfileCompletion · regla = nombre presente', () => {
 
   it('perfil con nombre solo espacios en blanco → incomplete (name vacío real)', async () => {
     authenticate();
-    registerProfile(makeProfile({ name: '   ' }));
+    registerProfile(makeProfile({name: '   '}));
     const hook = renderHook();
     await flush();
     expect(hook.current()).toBe('incomplete');
@@ -145,8 +151,8 @@ describe('useProfileCompletion · regla = nombre presente', () => {
   it('bandera local marcada NO saltea el nombre: perfil cargado sin nombre → incomplete', async () => {
     authenticate();
     // El usuario quedó marcado localmente, pero el perfil REAL no tiene nombre (el bug del dueño).
-    useProfileLocalStore.setState({ completedByUser: { [USER_ID]: true } });
-    registerProfile(makeProfile({ name: null, email: 'x@y.com' }));
+    useProfileLocalStore.setState({completedByUser: {[USER_ID]: true}});
+    registerProfile(makeProfile({name: null, email: 'x@y.com'}));
     const hook = renderHook();
     await flush();
     expect(hook.current()).toBe('incomplete');

@@ -88,7 +88,13 @@ const FONT_REGULAR = ['DIN Pro Regular', 'Arial Unicode MS Regular'];
 const NAME_FIELD: unknown = ['coalesce', ['get', 'name_es'], ['get', 'name']];
 
 /** Filtro de mundo requerido por las capas `admin` y `place_label` (class=country) de Streets v8. */
-const WORLDVIEW_ALL: unknown = ['match', ['get', 'worldview'], ['all'], true, false];
+const WORLDVIEW_ALL: unknown = [
+  'match',
+  ['get', 'worldview'],
+  ['all'],
+  true,
+  false,
+];
 
 /**
  * Style JSON de Mapbox (spec v8). Tipado laxo a `Record<string, unknown>` porque el spec de estilo
@@ -113,7 +119,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
     {
       id: 'background',
       type: 'background',
-      paint: { 'background-color': palette.bg },
+      paint: {'background-color': palette.bg},
     },
     // landcover (OMT) → cobertura natural en `landuse` de Streets v8.
     {
@@ -121,7 +127,13 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'fill',
       source: 'composite',
       'source-layer': 'landuse',
-      filter: ['match', ['get', 'class'], ['wood', 'scrub', 'grass', 'glacier'], true, false],
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['wood', 'scrub', 'grass', 'glacier'],
+        true,
+        false,
+      ],
       paint: {
         'fill-color': palette.landcover,
         'fill-opacity': 0.6,
@@ -144,7 +156,13 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'fill',
       source: 'composite',
       'source-layer': 'landuse_overlay',
-      filter: ['match', ['get', 'class'], ['national_park', 'wetland', 'wetland_noveg'], true, false],
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['national_park', 'wetland', 'wetland_noveg'],
+        true,
+        false,
+      ],
       paint: {
         'fill-color': palette.park,
         'fill-opacity': 0.5,
@@ -169,7 +187,15 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       filter: [
         'match',
         ['get', 'class'],
-        ['industrial', 'commercial_area', 'cemetery', 'hospital', 'school', 'parking', 'airport'],
+        [
+          'industrial',
+          'commercial_area',
+          'cemetery',
+          'hospital',
+          'school',
+          'parking',
+          'airport',
+        ],
         true,
         false,
       ],
@@ -223,7 +249,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         true,
         false,
       ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      layout: {'line-cap': 'round', 'line-join': 'round'},
       paint: {
         'line-color': palette.roadMinor,
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.4, 16, 3],
@@ -242,7 +268,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         true,
         false,
       ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      layout: {'line-cap': 'round', 'line-join': 'round'},
       paint: {
         'line-color': palette.roadStreet,
         'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 16, 5],
@@ -254,8 +280,14 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 9,
-      filter: ['match', ['get', 'class'], ['secondary', 'secondary_link'], true, false],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['secondary', 'secondary_link'],
+        true,
+        false,
+      ],
+      layout: {'line-cap': 'round', 'line-join': 'round'},
       paint: {
         'line-color': palette.roadSecondary,
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 16, 6],
@@ -274,7 +306,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         true,
         false,
       ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      layout: {'line-cap': 'round', 'line-join': 'round'},
       paint: {
         'line-color': palette.roadPrimary,
         'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.6, 16, 8],
@@ -286,8 +318,14 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 5,
-      filter: ['match', ['get', 'class'], ['motorway', 'motorway_link'], true, false],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['motorway', 'motorway_link'],
+        true,
+        false,
+      ],
+      layout: {'line-cap': 'round', 'line-join': 'round'},
       paint: {
         'line-color': palette.roadMotorway,
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 16, 10],
@@ -298,7 +336,12 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'line',
       source: 'composite',
       'source-layer': 'admin',
-      filter: ['all', ['<=', ['get', 'admin_level'], 1], ['==', ['get', 'maritime'], 'false'], WORLDVIEW_ALL],
+      filter: [
+        'all',
+        ['<=', ['get', 'admin_level'], 1],
+        ['==', ['get', 'maritime'], 'false'],
+        WORLDVIEW_ALL,
+      ],
       paint: {
         'line-color': palette.boundary,
         'line-dasharray': [2, 2],
@@ -314,7 +357,17 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       filter: [
         'match',
         ['get', 'class'],
-        ['sea', 'ocean', 'lake', 'water', 'river', 'bay', 'reservoir', 'canal', 'stream'],
+        [
+          'sea',
+          'ocean',
+          'lake',
+          'water',
+          'river',
+          'bay',
+          'reservoir',
+          'canal',
+          'stream',
+        ],
         true,
         false,
       ],
@@ -384,7 +437,17 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         'text-halo-color': palette.labelStreetHalo,
         'text-halo-width': 1.4,
         // Fade-in suave: invisibles a 13, ~0.5 a 14, tope 0.65. Nunca al 100% (ambientes, no foco).
-        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, 0.5, 17, 0.65],
+        'text-opacity': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          13,
+          0,
+          14,
+          0.5,
+          17,
+          0.65,
+        ],
       },
     },
     {
@@ -437,4 +500,5 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
  * Style serializado para el prop `styleJSON` de `MapView`. Se memoiza a nivel de módulo (el objeto
  * es constante) para no re-stringificar en cada render del mapa.
  */
-export const veoDarkMapboxStyleJSON: string = JSON.stringify(veoDarkMapboxStyle);
+export const veoDarkMapboxStyleJSON: string =
+  JSON.stringify(veoDarkMapboxStyle);

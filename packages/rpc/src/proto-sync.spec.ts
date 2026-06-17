@@ -10,7 +10,13 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PROTO_DIR, SERVICE_PACKAGE, SERVICE_PROTO, protoPathFor, type ServiceName } from './proto-paths.js';
+import {
+  PROTO_DIR,
+  SERVICE_PACKAGE,
+  SERVICE_PROTO,
+  protoPathFor,
+  type ServiceName,
+} from './proto-paths.js';
 
 const REPO_ROOT = join(PROTO_DIR, '..', '..', '..');
 const SERVICES_DIR = join(REPO_ROOT, 'services');
@@ -59,7 +65,8 @@ describe('protos canónicos (packages/rpc/proto) — fuente única', () => {
       const protoDir = join(SERVICES_DIR, entry, 'proto');
       if (!existsSync(protoDir)) continue;
       for (const file of readdirSync(protoDir).filter((f) => f.endsWith(PROTO_EXT))) {
-        if (entry !== `${basename(file, PROTO_EXT)}-service`) offenders.push(join(entry, 'proto', file));
+        if (entry !== `${basename(file, PROTO_EXT)}-service`)
+          offenders.push(join(entry, 'proto', file));
       }
     }
     expect(offenders, 'copias de consumidor detectadas — usá @veo/rpc').toEqual([]);

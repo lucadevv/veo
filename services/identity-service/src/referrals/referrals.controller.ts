@@ -28,7 +28,10 @@ export class ReferralsController {
   @Post('redeem')
   @HttpCode(200)
   @ApiOperation({ summary: 'Canjear un código de referido (una sola vez, no auto-referirse)' })
-  redeem(@CurrentUser() user: AuthenticatedUser, @Body() dto: RedeemReferralDto): Promise<ReferralSummary> {
+  redeem(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RedeemReferralDto,
+  ): Promise<ReferralSummary> {
     return this.referrals.applyReferral(user.userId, dto.code);
   }
 }

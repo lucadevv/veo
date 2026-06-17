@@ -1,6 +1,14 @@
-import type { ChargeRequest, DebtView, PaymentView, UserCreditView } from '@veo/api-client';
-import { uuidv4 } from '../../../shared/utils/uuid';
-import type { ChangeablePaymentMethod, PaymentsRepository } from './paymentsRepository';
+import type {
+  ChargeRequest,
+  DebtView,
+  PaymentView,
+  UserCreditView,
+} from '@veo/api-client';
+import {uuidv4} from '../../../shared/utils/uuid';
+import type {
+  ChangeablePaymentMethod,
+  PaymentsRepository,
+} from './paymentsRepository';
 
 /** Tope razonable de propina (S/ 200) para evitar dedazos catastróficos. */
 export const MAX_TIP_CENTS = 20_000;
@@ -33,7 +41,10 @@ export class ChargeTripUseCase {
   constructor(private readonly repository: PaymentsRepository) {}
 
   execute(input: ChargeRequest): Promise<PaymentView> {
-    return this.repository.charge({ ...input, dedupKey: input.dedupKey ?? uuidv4() });
+    return this.repository.charge({
+      ...input,
+      dedupKey: input.dedupKey ?? uuidv4(),
+    });
   }
 }
 
@@ -67,7 +78,7 @@ export class ConfirmCashUseCase {
   constructor(private readonly repository: PaymentsRepository) {}
 
   execute(paymentId: string): Promise<PaymentView> {
-    return this.repository.confirmCash(paymentId, { confirmed: true });
+    return this.repository.confirmCash(paymentId, {confirmed: true});
   }
 }
 
@@ -80,10 +91,14 @@ export class AddTipUseCase {
   constructor(private readonly repository: PaymentsRepository) {}
 
   execute(tripId: string, tipCents: number): Promise<PaymentView> {
-    if (!Number.isInteger(tipCents) || tipCents <= 0 || tipCents > MAX_TIP_CENTS) {
+    if (
+      !Number.isInteger(tipCents) ||
+      tipCents <= 0 ||
+      tipCents > MAX_TIP_CENTS
+    ) {
       throw new TipValidationError();
     }
-    return this.repository.addTip(tripId, { tipCents });
+    return this.repository.addTip(tripId, {tipCents});
   }
 }
 
@@ -157,7 +172,10 @@ export class PaymentNotChangeableError extends Error {
 export class ChangePaymentMethodUseCase {
   constructor(private readonly repository: PaymentsRepository) {}
 
-  execute(paymentId: string, method: ChangeablePaymentMethod): Promise<PaymentView> {
+  execute(
+    paymentId: string,
+    method: ChangeablePaymentMethod,
+  ): Promise<PaymentView> {
     return this.repository.changePaymentMethod(paymentId, method);
   }
 }

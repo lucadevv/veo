@@ -1,6 +1,6 @@
-import type {OpsRepository} from '../repositories/ops-repository';
-import type {DemandHeatmap, HeatmapQuery, IncentiveList} from '../entities';
-import {incentiveSortRank} from '../value-objects/incentive-progress';
+import type { OpsRepository } from '../repositories/ops-repository';
+import type { DemandHeatmap, HeatmapQuery, IncentiveList } from '../entities';
+import { incentiveSortRank } from '../value-objects/incentive-progress';
 
 /** Caso de uso: mapa de calor de demanda alrededor del conductor. */
 export class GetHeatmapUseCase {
@@ -18,8 +18,6 @@ export class ListIncentivesUseCase {
   constructor(private readonly ops: OpsRepository) {}
   async execute(now: Date = new Date()): Promise<IncentiveList> {
     const incentives = await this.ops.listIncentives();
-    return [...incentives].sort(
-      (a, b) => incentiveSortRank(a, now) - incentiveSortRank(b, now),
-    );
+    return [...incentives].sort((a, b) => incentiveSortRank(a, now) - incentiveSortRank(b, now));
   }
 }

@@ -1,8 +1,8 @@
-import React, {useState} from 'react';
-import {LayoutAnimation, Platform, Pressable, StyleSheet, UIManager, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
-import {IconChevronRight} from '../../../../shared/presentation/icons';
+import React, { useState } from 'react';
+import { LayoutAnimation, Platform, Pressable, StyleSheet, UIManager, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
+import { IconChevronRight } from '../../../../shared/presentation/icons';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -18,7 +18,7 @@ export type FaqKey = (typeof FAQ_KEYS)[number];
  * reduce-motion. Texto legible en poca luz y áreas táctiles cómodas.
  */
 export function FaqAccordion(): React.JSX.Element {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
   const reduceMotion = useReducedMotion();
   const [openKey, setOpenKey] = useState<FaqKey | null>(null);
@@ -27,12 +27,18 @@ export function FaqAccordion(): React.JSX.Element {
     if (!reduceMotion) {
       LayoutAnimation.configureNext({
         duration: 200,
-        update: {type: LayoutAnimation.Types.easeInEaseOut},
-        create: {type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity},
-        delete: {type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity},
+        update: { type: LayoutAnimation.Types.easeInEaseOut },
+        create: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+          property: LayoutAnimation.Properties.opacity,
+        },
+        delete: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+          property: LayoutAnimation.Properties.opacity,
+        },
       });
     }
-    setOpenKey(prev => (prev === key ? null : key));
+    setOpenKey((prev) => (prev === key ? null : key));
   };
 
   return (
@@ -44,7 +50,8 @@ export function FaqAccordion(): React.JSX.Element {
           borderColor: theme.colors.border,
           borderRadius: theme.radii.lg,
         },
-      ]}>
+      ]}
+    >
       {FAQ_KEYS.map((key, index) => {
         const open = openKey === key;
         return (
@@ -52,17 +59,23 @@ export function FaqAccordion(): React.JSX.Element {
             key={key}
             style={
               index > 0
-                ? {borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth}
+                ? { borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth }
                 : undefined
-            }>
+            }
+          >
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{expanded: open}}
+              accessibilityState={{ expanded: open }}
               onPress={() => toggle(key)}
-              style={({pressed}) => [
+              style={({ pressed }) => [
                 styles.row,
-                {paddingHorizontal: theme.spacing.lg, paddingVertical: theme.spacing.lg, opacity: pressed ? 0.85 : 1},
-              ]}>
+                {
+                  paddingHorizontal: theme.spacing.lg,
+                  paddingVertical: theme.spacing.lg,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
               <Text variant="callout" style={styles.flex}>
                 {t(`support.faq.${key}.q`)}
               </Text>
@@ -71,7 +84,12 @@ export function FaqAccordion(): React.JSX.Element {
               </View>
             </Pressable>
             {open ? (
-              <View style={[styles.answer, {paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.lg}]}>
+              <View
+                style={[
+                  styles.answer,
+                  { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.lg },
+                ]}
+              >
                 <Text variant="footnote" color="inkMuted">
                   {t(`support.faq.${key}.a`)}
                 </Text>
@@ -85,10 +103,10 @@ export function FaqAccordion(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  card: {borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden'},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  flex: {flex: 1},
-  chevron: {transform: [{rotate: '90deg'}]},
-  chevronOpen: {transform: [{rotate: '270deg'}]},
+  card: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  flex: { flex: 1 },
+  chevron: { transform: [{ rotate: '90deg' }] },
+  chevronOpen: { transform: [{ rotate: '270deg' }] },
   answer: {},
 });

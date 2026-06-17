@@ -49,7 +49,9 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
         mediaSegment: {
           findMany: async ({ where }: { where: { retentionUntil: { lte: Date } } }) =>
             segments.filter(
-              (s) => s.retentionUntil !== null && s.retentionUntil.getTime() <= where.retentionUntil.lte.getTime(),
+              (s) =>
+                s.retentionUntil !== null &&
+                s.retentionUntil.getTime() <= where.retentionUntil.lte.getTime(),
             ),
         },
       },
@@ -68,14 +70,26 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
   it('borra solo los segmentos vencidos y respeta los indefinidos y futuros', async () => {
     const now = new Date('2026-06-15T00:00:00.000Z');
     const segments = [
-      { id: 'expired', s3Key: 'recordings/t1/expired.mp4', retentionUntil: new Date('2026-06-01T00:00:00.000Z') },
-      { id: 'future', s3Key: 'recordings/t2/future.mp4', retentionUntil: new Date('2026-07-01T00:00:00.000Z') },
+      {
+        id: 'expired',
+        s3Key: 'recordings/t1/expired.mp4',
+        retentionUntil: new Date('2026-06-01T00:00:00.000Z'),
+      },
+      {
+        id: 'future',
+        s3Key: 'recordings/t2/future.mp4',
+        retentionUntil: new Date('2026-07-01T00:00:00.000Z'),
+      },
       { id: 'panic', s3Key: 'recordings/t3/panic.mp4', retentionUntil: null },
     ];
     const { prisma, deleted } = makePrisma(segments);
     // Redis fake mínimo: sweep() no toca el lock (vive en run()); el cliente solo se inyecta.
     const fakeRedis = { set: async () => 'OK', del: async () => 1 };
-    const sweeper = new RetentionSweeper(prisma as never, new StorageSandboxAdapter(), fakeRedis as never);
+    const sweeper = new RetentionSweeper(
+      prisma as never,
+      new StorageSandboxAdapter(),
+      fakeRedis as never,
+    );
 
     const purged = await sweeper.sweep(now);
 

@@ -30,7 +30,8 @@ export class AffiliationsController {
 
   @Get()
   @ApiOperation({
-    summary: 'Estado de la afiliación Yape del pasajero (sin walletUid ni PII completa). status:NONE si no afilió.',
+    summary:
+      'Estado de la afiliación Yape del pasajero (sin walletUid ni PII completa). status:NONE si no afilió.',
   })
   status(@CurrentUser() user: AuthenticatedUser): Promise<YapeAffiliationView> {
     return this.affiliations.status(user);

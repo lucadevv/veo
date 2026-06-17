@@ -10,7 +10,13 @@ import {
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { AdminService, type AdminTokens } from './admin.service';
-import { AdminRegisterDto, AdminLoginDto, AdminEnrollConfirmDto, ApproveAdminDto, StepUpDto } from './dto/admin.dto';
+import {
+  AdminRegisterDto,
+  AdminLoginDto,
+  AdminEnrollConfirmDto,
+  ApproveAdminDto,
+  StepUpDto,
+} from './dto/admin.dto';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -27,7 +33,9 @@ export class AdminController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Login operador (email+password+TOTP); si no enroló, devuelve enrolamiento' })
+  @ApiOperation({
+    summary: 'Login operador (email+password+TOTP); si no enroló, devuelve enrolamiento',
+  })
   login(
     @Body() dto: AdminLoginDto,
   ): Promise<AdminTokens | { mustEnrollTotp: true; otpauthUrl: string }> {
@@ -47,7 +55,10 @@ export class AdminController {
   @Post('step-up')
   @HttpCode(200)
   @ApiOperation({ summary: 'Step-up MFA (TOTP) para acciones sensibles (BR-S07)' })
-  stepUp(@CurrentUser() user: AuthenticatedUser, @Body() dto: StepUpDto): Promise<{ accessToken: string }> {
+  stepUp(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StepUpDto,
+  ): Promise<{ accessToken: string }> {
     return this.admin.stepUp(user.userId, dto.totp);
   }
 

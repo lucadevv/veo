@@ -1,5 +1,5 @@
-import type {HttpClient} from '@veo/api-client';
-import { driverPublisherGrant} from '@veo/api-client';
+import type { HttpClient } from '@veo/api-client';
+import { driverPublisherGrant } from '@veo/api-client';
 import {
   PublisherTokenUnavailableError,
   type PublisherCredentials,
@@ -19,15 +19,16 @@ export class HttpPublisherTokenPort implements PublisherTokenPort {
 
   async fetchPublisherCredentials(tripId: string): Promise<PublisherCredentials> {
     try {
-      const grant = await this.http.post(`/media/rooms/${encodeURIComponent(tripId)}/publisher-token`, {
-        schema: driverPublisherGrant,
-      });
-      // El contrato del bff ya coincide con `PublisherCredentials` ({ url, token, room }).
-      return {url: grant.url, token: grant.token, room: grant.room};
-    } catch (error) {
-      throw new PublisherTokenUnavailableError(
-        error instanceof Error ? error.message : undefined,
+      const grant = await this.http.post(
+        `/media/rooms/${encodeURIComponent(tripId)}/publisher-token`,
+        {
+          schema: driverPublisherGrant,
+        },
       );
+      // El contrato del bff ya coincide con `PublisherCredentials` ({ url, token, room }).
+      return { url: grant.url, token: grant.token, room: grant.room };
+    } catch (error) {
+      throw new PublisherTokenUnavailableError(error instanceof Error ? error.message : undefined);
     }
   }
 }

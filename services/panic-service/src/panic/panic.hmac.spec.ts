@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { signHmac, verifyHmac, uuidv7 } from '@veo/utils';
-import {
-  buildPanicSignatureMessage,
-  PANIC_SIGNATURE_VERSION,
-} from './panic.hmac';
+import { buildPanicSignatureMessage, PANIC_SIGNATURE_VERSION } from './panic.hmac';
 
 const SECRET = 'unit-test-panic-secret';
 

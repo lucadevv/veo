@@ -1,6 +1,6 @@
-import { HttpClient, mobileRefreshResult } from '@veo/api-client';
-import { env } from '../config/env';
-import { useSessionStore } from '../session/sessionStore';
+import {HttpClient, mobileRefreshResult} from '@veo/api-client';
+import {env} from '../config/env';
+import {useSessionStore} from '../session/sessionStore';
 
 /**
  * Cliente HTTP del pasajero: envuelve el `HttpClient` de `@veo/api-client` apuntando
@@ -21,7 +21,7 @@ let inFlightRefresh: Promise<boolean> | null = null;
 
 /** Intenta renovar los tokens contra el public-bff. Devuelve true si tuvo éxito. */
 async function refreshTokens(): Promise<boolean> {
-  const { refreshToken, setTokens, clearSession } = useSessionStore.getState();
+  const {refreshToken, setTokens, clearSession} = useSessionStore.getState();
   if (!refreshToken) {
     return false;
   }
@@ -33,7 +33,7 @@ async function refreshTokens(): Promise<boolean> {
         Accept: 'application/json',
         'Accept-Language': ACCEPT_LANGUAGE,
       },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({refreshToken}),
     });
     if (!res.ok) {
       // El servidor RECHAZÓ el refresh (token vencido/revocado): sesión EXPIRADA, no un fallo de
@@ -58,7 +58,7 @@ async function refreshTokens(): Promise<boolean> {
 /** Construye las cabeceras con el Bearer actual del store de sesión. */
 function withAuthHeaders(init: RequestInit | undefined): Headers {
   const headers = new Headers(init?.headers);
-  const { accessToken } = useSessionStore.getState();
+  const {accessToken} = useSessionStore.getState();
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
@@ -71,7 +71,7 @@ function withAuthHeaders(init: RequestInit | undefined): Headers {
  * recibe esta implementación, por lo que su lógica de reintentos (red/5xx/429) sigue intacta.
  */
 const authFetch: typeof fetch = async (input, init) => {
-  const res = await fetch(input, { ...init, headers: withAuthHeaders(init) });
+  const res = await fetch(input, {...init, headers: withAuthHeaders(init)});
 
   if (res.status !== 401 || !useSessionStore.getState().refreshToken) {
     return res;
@@ -85,15 +85,15 @@ const authFetch: typeof fetch = async (input, init) => {
     return res;
   }
 
-  return fetch(input, { ...init, headers: withAuthHeaders(init) });
+  return fetch(input, {...init, headers: withAuthHeaders(init)});
 };
 
 /** Cliente HTTP único del pasajero contra el public-bff. */
 export const httpClient = new HttpClient({
   baseUrl: env.publicBffUrl,
   credentials: 'omit',
-  headers: { 'Accept-Language': ACCEPT_LANGUAGE },
+  headers: {'Accept-Language': ACCEPT_LANGUAGE},
   fetchImpl: authFetch,
 });
 
-export type { HttpClient };
+export type {HttpClient};

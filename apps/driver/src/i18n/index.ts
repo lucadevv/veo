@@ -1,5 +1,5 @@
 import i18n from 'i18next';
-import {initReactI18next} from 'react-i18next';
+import { initReactI18next } from 'react-i18next';
 import commonEsPe from './locales/es-PE/common.json';
 
 /** Locale base de la app conductor: español de Perú. */
@@ -24,7 +24,7 @@ i18n.use(initReactI18next).init({
   fallbackLng: APP_LOCALE,
   ns: [DEFAULT_NS],
   defaultNS: DEFAULT_NS,
-  interpolation: {escapeValue: false},
+  interpolation: { escapeValue: false },
   returnNull: false,
 });
 

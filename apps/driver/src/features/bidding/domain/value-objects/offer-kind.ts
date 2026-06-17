@@ -1,8 +1,8 @@
 // Techo absoluto de una contraoferta (céntimos PEN). Submódulo PURO de @veo/utils (no el barrel, que
 // arrastra node:crypto, inexistente en Hermes/React Native — mismo motivo que shared/presentation/format).
-import {BID_MAX_CENTS} from '@veo/utils/money';
+import { BID_MAX_CENTS } from '@veo/utils/money';
 
-export {BID_MAX_CENTS};
+export { BID_MAX_CENTS };
 
 /**
  * Tipo de respuesta del conductor a una puja (ADR 010 §6). `as const` (no enum, no literal suelto): un

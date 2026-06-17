@@ -1,11 +1,14 @@
-import type { OtpRequestResult } from '@veo/api-client';
-import { useMutation } from '@tanstack/react-query';
-import { useCallback } from 'react';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { useSessionStore } from '../../../../core/session/sessionStore';
-import { isValidPeruPhone, normalizePeruPhone } from '../../../../shared/utils/phone';
-import { useBiometricGateStore } from '../stores/biometricGateStore';
+import type {OtpRequestResult} from '@veo/api-client';
+import {useMutation} from '@tanstack/react-query';
+import {useCallback} from 'react';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {useSessionStore} from '../../../../core/session/sessionStore';
+import {
+  isValidPeruPhone,
+  normalizePeruPhone,
+} from '../../../../shared/utils/phone';
+import {useBiometricGateStore} from '../stores/biometricGateStore';
 
 /** Normaliza el teléfono ingresado al formato que espera el bff (con prefijo 51). */
 export function normalizePhone(raw: string): string {
@@ -28,16 +31,23 @@ export function useAuthFlow() {
   const verifyOtpUseCase = useDependency(TOKENS.verifyOtpUseCase);
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
-  const setSession = useSessionStore((state) => state.setSession);
-  const unlockBiometricGate = useBiometricGateStore((state) => state.unlock);
+  const setSession = useSessionStore(state => state.setSession);
+  const unlockBiometricGate = useBiometricGateStore(state => state.unlock);
 
   const requestMutation = useMutation<OtpRequestResult, Error, string>({
     mutationFn: (phone: string) =>
-      requestOtpUseCase.execute({ phone: normalizePhone(phone), type: 'PASSENGER' }),
+      requestOtpUseCase.execute({
+        phone: normalizePhone(phone),
+        type: 'PASSENGER',
+      }),
   });
 
-  const verifyMutation = useMutation<void, Error, { phone: string; code: string }>({
-    mutationFn: async ({ phone, code }) => {
+  const verifyMutation = useMutation<
+    void,
+    Error,
+    {phone: string; code: string}
+  >({
+    mutationFn: async ({phone, code}) => {
       const tokens = await verifyOtpUseCase.execute({
         phone: normalizePhone(phone),
         code,
@@ -55,8 +65,11 @@ export function useAuthFlow() {
       void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta perezosamente al
       // disparar el pánico. No bloquea el login.
-      void panicSecretProvisioner.ensureProvisioned().catch((error) => {
-        console.warn('[panic] aprovisionamiento del secreto tras login falló:', error);
+      void panicSecretProvisioner.ensureProvisioned().catch(error => {
+        console.warn(
+          '[panic] aprovisionamiento del secreto tras login falló:',
+          error,
+        );
       });
     },
   });
@@ -67,7 +80,7 @@ export function useAuthFlow() {
   );
 
   const verifyOtp = useCallback(
-    (phone: string, code: string) => verifyMutation.mutateAsync({ phone, code }),
+    (phone: string, code: string) => verifyMutation.mutateAsync({phone, code}),
     [verifyMutation],
   );
 

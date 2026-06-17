@@ -46,7 +46,8 @@ async function resolveJwtKeys(config: ConfigService<Env, true>): Promise<JwtKeys
 const jwtProvider: Provider = {
   provide: JwtService,
   inject: [ConfigService],
-  useFactory: async (config: ConfigService<Env, true>) => new JwtService(await resolveJwtKeys(config)),
+  useFactory: async (config: ConfigService<Env, true>) =>
+    new JwtService(await resolveJwtKeys(config)),
 };
 
 const refreshStoreProvider: Provider = {

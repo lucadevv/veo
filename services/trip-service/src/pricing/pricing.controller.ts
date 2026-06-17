@@ -37,7 +37,9 @@ export class PricingController {
   ) {}
 
   @Get('mode-schedule')
-  @ApiOperation({ summary: 'Schedule de modo vigente (o el default PUJA si no hay config). ADR 011' })
+  @ApiOperation({
+    summary: 'Schedule de modo vigente (o el default PUJA si no hay config). ADR 011',
+  })
   getSchedule() {
     return this.pricing.getSchedule();
   }
@@ -77,7 +79,9 @@ export class PricingController {
   }
 
   @Get('energy-catalog')
-  @ApiOperation({ summary: 'Catálogo de precios de energía por fuente vigente (o vacío si no hay config). B5' })
+  @ApiOperation({
+    summary: 'Catálogo de precios de energía por fuente vigente (o vacío si no hay config). B5',
+  })
   getEnergyCatalog() {
     return this.energy.getCatalog();
   }
@@ -101,7 +105,10 @@ export class PricingController {
   }
 
   @Get('bid-floor')
-  @ApiOperation({ summary: 'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). ADR 010 §9.3' })
+  @ApiOperation({
+    summary:
+      'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). ADR 010 §9.3',
+  })
   getBidFloor() {
     return this.bidFloor.getConfig();
   }

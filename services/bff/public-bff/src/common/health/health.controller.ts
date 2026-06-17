@@ -4,11 +4,7 @@
  */
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import {
-  HealthCheck,
-  HealthCheckService,
-  type HealthCheckResult,
-} from '@nestjs/terminus';
+import { HealthCheck, HealthCheckService, type HealthCheckResult } from '@nestjs/terminus';
 import { Public } from '@veo/auth';
 import { RedisHealthIndicator } from './redis.health-indicator';
 import { DownstreamHealthIndicator } from './downstream.health-indicator';

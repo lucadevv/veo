@@ -1,6 +1,6 @@
-import { type HttpClient, referralSummary } from '@veo/api-client';
-import type { ReferralSummary } from '../domain/entities';
-import type { ReferralsRepository } from '../domain/referralsRepository';
+import {type HttpClient, referralSummary} from '@veo/api-client';
+import type {ReferralSummary} from '../domain/entities';
+import type {ReferralsRepository} from '../domain/referralsRepository';
 
 /**
  * Implementación REAL de `ReferralsRepository` contra el public-bff (`/referrals`, Ola 2A).
@@ -12,12 +12,12 @@ export class HttpReferralsRepository implements ReferralsRepository {
   constructor(private readonly http: HttpClient) {}
 
   getSummary(): Promise<ReferralSummary> {
-    return this.http.get('/referrals/me', { schema: referralSummary });
+    return this.http.get('/referrals/me', {schema: referralSummary});
   }
 
   redeem(code: string): Promise<ReferralSummary> {
     return this.http.post('/referrals/redeem', {
-      body: { code },
+      body: {code},
       schema: referralSummary,
     });
   }

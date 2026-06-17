@@ -1,10 +1,10 @@
-import React, {useState} from 'react';
-import {StyleSheet, View} from 'react-native';
-import {useTranslation} from 'react-i18next';
-import {Banner, Button, Text, TextField, useTheme} from '@veo/ui-kit';
-import {toErrorMessage} from '../../../../shared/presentation/errors';
-import {useRequestVehicleModel} from '../hooks/useRegistrationWizard';
-import type {VehicleType} from '../../domain';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Banner, Button, Text, TextField, useTheme } from '@veo/ui-kit';
+import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { useRequestVehicleModel } from '../hooks/useRegistrationWizard';
+import type { VehicleType } from '../../domain';
 
 interface VehicleModelRequestFormProps {
   /** Tipo elegido en el selector: se envía con la solicitud (el form no lo re-pregunta). */
@@ -27,11 +27,11 @@ export function VehicleModelRequestForm({
   onDone,
   onCancel,
 }: VehicleModelRequestFormProps): React.JSX.Element {
-  const {t} = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
   const request = useRequestVehicleModel();
 
-  const [form, setForm] = useState({make: '', model: '', yearFrom: '', yearTo: '', seats: ''});
+  const [form, setForm] = useState({ make: '', model: '', yearFrom: '', yearTo: '', seats: '' });
   const [error, setError] = useState<unknown>(null);
   const [submitted, setSubmitted] = useState(false);
 
@@ -41,9 +41,15 @@ export function VehicleModelRequestForm({
   const valid =
     form.make.trim().length > 0 &&
     form.model.trim().length > 0 &&
-    Number.isInteger(yearFrom) && yearFrom >= MIN_YEAR && yearFrom <= CURRENT_YEAR + 1 &&
-    Number.isInteger(yearTo) && yearTo >= yearFrom && yearTo <= CURRENT_YEAR + 1 &&
-    Number.isInteger(seats) && seats >= 1 && seats <= 20;
+    Number.isInteger(yearFrom) &&
+    yearFrom >= MIN_YEAR &&
+    yearFrom <= CURRENT_YEAR + 1 &&
+    Number.isInteger(yearTo) &&
+    yearTo >= yearFrom &&
+    yearTo <= CURRENT_YEAR + 1 &&
+    Number.isInteger(seats) &&
+    seats >= 1 &&
+    seats <= 20;
 
   const submit = async () => {
     if (!valid || request.isPending) {
@@ -67,7 +73,7 @@ export function VehicleModelRequestForm({
 
   if (submitted) {
     return (
-      <View style={[styles.body, styles.success, {gap: theme.spacing.md}]}>
+      <View style={[styles.body, styles.success, { gap: theme.spacing.md }]}>
         <Text variant="title3" align="center">
           {t('registration.vehicle.modelRequestSentTitle')}
         </Text>
@@ -79,10 +85,10 @@ export function VehicleModelRequestForm({
     );
   }
 
-  const update = (patch: Partial<typeof form>) => setForm(f => ({...f, ...patch}));
+  const update = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
-    <View style={[styles.body, {gap: theme.spacing.md}]}>
+    <View style={[styles.body, { gap: theme.spacing.md }]}>
       <Text variant="footnote" color="inkMuted">
         {t('registration.vehicle.modelRequestHint')}
       </Text>
@@ -90,22 +96,22 @@ export function VehicleModelRequestForm({
       <TextField
         label={t('registration.vehicle.modelRequestMake')}
         value={form.make}
-        onChangeText={text => update({make: text})}
+        onChangeText={(text) => update({ make: text })}
         autoCapitalize="words"
         autoCorrect={false}
       />
       <TextField
         label={t('registration.vehicle.modelRequestModel')}
         value={form.model}
-        onChangeText={text => update({model: text})}
+        onChangeText={(text) => update({ model: text })}
         autoCorrect={false}
       />
-      <View style={[styles.row, {gap: theme.spacing.md}]}>
+      <View style={[styles.row, { gap: theme.spacing.md }]}>
         <View style={styles.flex}>
           <TextField
             label={t('registration.vehicle.modelRequestYearFrom')}
             value={form.yearFrom}
-            onChangeText={text => update({yearFrom: text})}
+            onChangeText={(text) => update({ yearFrom: text })}
             keyboardType="number-pad"
             maxLength={4}
           />
@@ -114,7 +120,7 @@ export function VehicleModelRequestForm({
           <TextField
             label={t('registration.vehicle.modelRequestYearTo')}
             value={form.yearTo}
-            onChangeText={text => update({yearTo: text})}
+            onChangeText={(text) => update({ yearTo: text })}
             keyboardType="number-pad"
             maxLength={4}
           />
@@ -123,7 +129,7 @@ export function VehicleModelRequestForm({
       <TextField
         label={t('registration.vehicle.modelRequestSeats')}
         value={form.seats}
-        onChangeText={text => update({seats: text})}
+        onChangeText={(text) => update({ seats: text })}
         keyboardType="number-pad"
         maxLength={2}
       />
@@ -132,7 +138,7 @@ export function VehicleModelRequestForm({
         <Banner tone="danger" title={t('errors.generic')} description={toErrorMessage(error, t)} />
       ) : null}
 
-      <View style={[styles.actions, {gap: theme.spacing.md}]}>
+      <View style={[styles.actions, { gap: theme.spacing.md }]}>
         <Button label={t('common.cancel')} variant="secondary" onPress={onCancel} />
         <Button
           label={t('registration.vehicle.modelRequestSubmit')}
@@ -147,9 +153,9 @@ export function VehicleModelRequestForm({
 }
 
 const styles = StyleSheet.create({
-  body: {paddingBottom: 8},
-  success: {alignItems: 'center', paddingVertical: 24},
-  row: {flexDirection: 'row'},
-  flex: {flex: 1},
-  actions: {flexDirection: 'row', justifyContent: 'flex-end'},
+  body: { paddingBottom: 8 },
+  success: { alignItems: 'center', paddingVertical: 24 },
+  row: { flexDirection: 'row' },
+  flex: { flex: 1 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end' },
 });

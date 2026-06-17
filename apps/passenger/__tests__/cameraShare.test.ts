@@ -1,5 +1,5 @@
-import type { KeyValueStore } from '../src/core/storage/mmkv';
-import { LocalCameraSharePreferenceRepository } from '../src/features/trip/data/localCameraSharePreferenceRepository';
+import type {KeyValueStore} from '../src/core/storage/mmkv';
+import {LocalCameraSharePreferenceRepository} from '../src/features/trip/data/localCameraSharePreferenceRepository';
 import {
   GetCameraSharePreferenceUseCase,
   SaveCameraSharePreferenceUseCase,
@@ -47,7 +47,7 @@ describe('Camera share preference (degradación local · hueco de backend)', () 
 
     const pref = await get.execute(TRIP);
 
-    expect(pref).toEqual({ shareWithFamily: false, allowedContactIds: [] });
+    expect(pref).toEqual({shareWithFamily: false, allowedContactIds: []});
   });
 
   it('persiste y relee la preferencia del pasajero por viaje', async () => {
@@ -55,7 +55,10 @@ describe('Camera share preference (degradación local · hueco de backend)', () 
     const save = new SaveCameraSharePreferenceUseCase(repo);
     const get = new GetCameraSharePreferenceUseCase(repo);
 
-    await save.execute(TRIP, { shareWithFamily: true, allowedContactIds: ['c1', 'c2'] });
+    await save.execute(TRIP, {
+      shareWithFamily: true,
+      allowedContactIds: ['c1', 'c2'],
+    });
 
     expect(await get.execute(TRIP)).toEqual({
       shareWithFamily: true,
@@ -69,9 +72,15 @@ describe('Camera share preference (degradación local · hueco de backend)', () 
     const get = new GetCameraSharePreferenceUseCase(repo);
 
     // El llamador intenta guardar contactos con el master apagado: el usecase los descarta.
-    await save.execute(TRIP, { shareWithFamily: false, allowedContactIds: ['c1', 'c2'] });
+    await save.execute(TRIP, {
+      shareWithFamily: false,
+      allowedContactIds: ['c1', 'c2'],
+    });
 
-    expect(await get.execute(TRIP)).toEqual({ shareWithFamily: false, allowedContactIds: [] });
+    expect(await get.execute(TRIP)).toEqual({
+      shareWithFamily: false,
+      allowedContactIds: [],
+    });
   });
 
   it('aísla la preferencia por viaje (no se mezclan dos viajes)', async () => {
@@ -79,8 +88,14 @@ describe('Camera share preference (degradación local · hueco de backend)', () 
     const save = new SaveCameraSharePreferenceUseCase(repo);
     const get = new GetCameraSharePreferenceUseCase(repo);
 
-    await save.execute('trip-a', { shareWithFamily: true, allowedContactIds: ['a'] });
-    await save.execute('trip-b', { shareWithFamily: true, allowedContactIds: ['b'] });
+    await save.execute('trip-a', {
+      shareWithFamily: true,
+      allowedContactIds: ['a'],
+    });
+    await save.execute('trip-b', {
+      shareWithFamily: true,
+      allowedContactIds: ['b'],
+    });
 
     expect((await get.execute('trip-a')).allowedContactIds).toEqual(['a']);
     expect((await get.execute('trip-b')).allowedContactIds).toEqual(['b']);

@@ -1,6 +1,6 @@
-import {NativeModules, Platform} from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import Config from 'react-native-config';
-import {z} from 'zod';
+import { z } from 'zod';
 
 /**
  * Configuración de entorno tipada y validada con zod.
@@ -28,16 +28,14 @@ export function metroDevHost(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const getDevServer = require('react-native/Libraries/Core/Devtools/getDevServer')
-      .default as () => {url?: string; bundleLoadedFromServer?: boolean};
+      .default as () => { url?: string; bundleLoadedFromServer?: boolean };
     const info = getDevServer();
     // bundleLoadedFromServer:false ⇒ release (bundle embebido) → ignorar el url placeholder.
     if (info.bundleLoadedFromServer !== false) urls.push(info.url);
   } catch {
     // getDevServer no disponible → probamos scriptURL.
   }
-  urls.push(
-    (NativeModules as {SourceCode?: {scriptURL?: unknown}}).SourceCode?.scriptURL,
-  );
+  urls.push((NativeModules as { SourceCode?: { scriptURL?: unknown } }).SourceCode?.scriptURL);
   for (const candidate of urls) {
     if (typeof candidate !== 'string' || candidate.length === 0) continue;
     const host = /^https?:\/\/([^/:?#]+)(?::\d+)?/i.exec(candidate)?.[1];
@@ -139,10 +137,7 @@ function loadEnv(): AppEnv {
   const raw = {
     APP_ENV: Config.APP_ENV ?? 'development',
     DRIVER_BFF_URL: resolveBackendUrl(Config.DRIVER_BFF_URL, devDefaults.bffUrl),
-    DRIVER_BFF_WS_URL: resolveBackendUrl(
-      Config.DRIVER_BFF_WS_URL,
-      devDefaults.wsUrl,
-    ),
+    DRIVER_BFF_WS_URL: resolveBackendUrl(Config.DRIVER_BFF_WS_URL, devDefaults.wsUrl),
     LIVEKIT_URL: Config.LIVEKIT_URL ?? '',
     MAPBOX_ACCESS_TOKEN: Config.MAPBOX_ACCESS_TOKEN ?? '',
     MAP_STYLE_URL: resolveBackendUrl(Config.MAP_STYLE_URL, devDefaults.mapStyleUrl),
@@ -152,7 +147,7 @@ function loadEnv(): AppEnv {
   const parsed = envSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map(issue => `${issue.path.join('.')}: ${issue.message}`)
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
       .join('; ');
     throw new Error(`Configuración de entorno inválida: ${issues}`);
   }

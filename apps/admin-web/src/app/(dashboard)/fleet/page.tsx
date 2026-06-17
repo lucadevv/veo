@@ -40,7 +40,11 @@ const OWNER_LABEL: Record<'DRIVER' | 'VEHICLE', string> = {
 };
 
 const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
-  { accessorKey: 'type', header: 'Tipo', cell: ({ row }) => <span className="text-ink">{row.original.type}</span> },
+  {
+    accessorKey: 'type',
+    header: 'Tipo',
+    cell: ({ row }) => <span className="text-ink">{row.original.type}</span>,
+  },
   {
     accessorKey: 'ownerType',
     header: 'Titular',
@@ -50,17 +54,30 @@ const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
       </span>
     ),
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     accessorKey: 'expiresAt',
     header: 'Vence',
     cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.expiresAt)}</span>,
   },
-  { id: 'actions', header: 'Acciones', enableSorting: false, cell: ({ row }) => <DocumentActions doc={row.original} /> },
+  {
+    id: 'actions',
+    header: 'Acciones',
+    enableSorting: false,
+    cell: ({ row }) => <DocumentActions doc={row.original} />,
+  },
 ];
 
 const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
-  { accessorKey: 'plate', header: 'Placa', cell: ({ row }) => <span className="font-mono tabular">{row.original.plate}</span> },
+  {
+    accessorKey: 'plate',
+    header: 'Placa',
+    cell: ({ row }) => <span className="font-mono tabular">{row.original.plate}</span>,
+  },
   {
     accessorKey: 'model',
     header: 'Vehículo',
@@ -71,8 +88,16 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
       </span>
     ),
   },
-  { accessorKey: 'color', header: 'Color', cell: ({ row }) => <span className="text-ink-muted">{row.original.color ?? '—'}</span> },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'color',
+    header: 'Color',
+    cell: ({ row }) => <span className="text-ink-muted">{row.original.color ?? '—'}</span>,
+  },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     accessorKey: 'driverId',
     header: 'Conductor',
@@ -88,9 +113,15 @@ const inspectionColumns: ColumnDef<InspectionView, unknown>[] = [
   {
     accessorKey: 'vehicleId',
     header: 'Vehículo',
-    cell: ({ row }) => <span className="font-mono text-xs">{row.original.vehicleId.slice(0, 8)}</span>,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.vehicleId.slice(0, 8)}</span>
+    ),
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     accessorKey: 'scheduledAt',
     header: 'Programada',
@@ -101,12 +132,29 @@ const inspectionColumns: ColumnDef<InspectionView, unknown>[] = [
     header: 'Realizada',
     cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.inspectedAt)}</span>,
   },
-  { accessorKey: 'inspector', header: 'Inspector', cell: ({ row }) => <span className="text-ink-muted">{row.original.inspector ?? '—'}</span> },
-  { accessorKey: 'result', header: 'Resultado', cell: ({ row }) => (row.original.result ? <StatusPill status={row.original.result} /> : <span className="text-ink-subtle">—</span>) },
+  {
+    accessorKey: 'inspector',
+    header: 'Inspector',
+    cell: ({ row }) => <span className="text-ink-muted">{row.original.inspector ?? '—'}</span>,
+  },
+  {
+    accessorKey: 'result',
+    header: 'Resultado',
+    cell: ({ row }) =>
+      row.original.result ? (
+        <StatusPill status={row.original.result} />
+      ) : (
+        <span className="text-ink-subtle">—</span>
+      ),
+  },
 ];
 
 const expiringColumns: ColumnDef<ExpiringDocumentView, unknown>[] = [
-  { accessorKey: 'type', header: 'Tipo', cell: ({ row }) => <span className="text-ink">{row.original.type}</span> },
+  {
+    accessorKey: 'type',
+    header: 'Tipo',
+    cell: ({ row }) => <span className="text-ink">{row.original.type}</span>,
+  },
   {
     accessorKey: 'ownerType',
     header: 'Titular',
@@ -168,7 +216,8 @@ const modelColumns: ColumnDef<VehicleModelReviewView, unknown>[] = [
     header: 'Tipo',
     cell: ({ row }) => (
       <span className="text-ink-muted">
-        {VEHICLE_TYPE_LABEL[row.original.vehicleType] ?? row.original.vehicleType} · {row.original.seats} as.
+        {VEHICLE_TYPE_LABEL[row.original.vehicleType] ?? row.original.vehicleType} ·{' '}
+        {row.original.seats} as.
       </span>
     ),
   },
@@ -176,10 +225,16 @@ const modelColumns: ColumnDef<VehicleModelReviewView, unknown>[] = [
     accessorKey: 'requestedBy',
     header: 'Solicitó',
     cell: ({ row }) => (
-      <span className="text-ink-muted font-mono">{row.original.requestedBy?.slice(0, 8) ?? '—'}</span>
+      <span className="text-ink-muted font-mono">
+        {row.original.requestedBy?.slice(0, 8) ?? '—'}
+      </span>
     ),
   },
-  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    accessorKey: 'status',
+    header: 'Estado',
+    cell: ({ row }) => <StatusPill status={row.original.status} />,
+  },
   {
     id: 'actions',
     header: 'Acciones',

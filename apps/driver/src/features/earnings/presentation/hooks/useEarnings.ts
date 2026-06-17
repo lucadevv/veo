@@ -1,6 +1,6 @@
-import {useQuery} from '@tanstack/react-query';
-import {useRepositories} from '../../../../core/di/useDi';
-import {GetEarningsBreakdownUseCase, GetEarningsSummaryUseCase} from '../../domain';
+import { useQuery } from '@tanstack/react-query';
+import { useRepositories } from '../../../../core/di/useDi';
+import { GetEarningsBreakdownUseCase, GetEarningsSummaryUseCase } from '../../domain';
 
 /** Clave de caché del resumen de ganancias. */
 export const EARNINGS_SUMMARY_QUERY_KEY = ['earnings', 'summary'] as const;
@@ -12,7 +12,7 @@ export const EARNINGS_BREAKDOWN_QUERY_KEY = ['earnings', 'breakdown'] as const;
  * llamada alimenta tanto los totales como la lista de liquidaciones de la pantalla.
  */
 export function useEarningsSummary() {
-  const {earnings} = useRepositories();
+  const { earnings } = useRepositories();
   return useQuery({
     queryKey: EARNINGS_SUMMARY_QUERY_KEY,
     queryFn: () => new GetEarningsSummaryUseCase(earnings).execute(),
@@ -24,7 +24,7 @@ export function useEarningsSummary() {
  * se carga al entrar en la sección "Desglose" de la pantalla de ganancias.
  */
 export function useEarningsBreakdown() {
-  const {earnings} = useRepositories();
+  const { earnings } = useRepositories();
   return useQuery({
     queryKey: EARNINGS_BREAKDOWN_QUERY_KEY,
     queryFn: () => new GetEarningsBreakdownUseCase(earnings).execute(),

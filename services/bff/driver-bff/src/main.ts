@@ -9,11 +9,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import {
-  LoggingInterceptor,
-  createLogger,
-  initDefaultMetrics,
-} from '@veo/observability';
+import { LoggingInterceptor, createLogger, initDefaultMetrics } from '@veo/observability';
 import { AppModule } from './app.module';
 import { PublicExceptionFilter } from './common/public-exception.filter';
 import type { Env } from './config/env.schema';
@@ -32,7 +28,10 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService<Env, true>);
 
   app.use(helmet());
-  app.enableCors({ origin: parseCors(config.getOrThrow<string>('CORS_ORIGINS')), credentials: true });
+  app.enableCors({
+    origin: parseCors(config.getOrThrow<string>('CORS_ORIGINS')),
+    credentials: true,
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('driver-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('driver-bff'));
@@ -41,7 +40,9 @@ async function bootstrap(): Promise<void> {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('driver-bff')
-    .setDescription('BFF de la app del conductor · VEO (gRPC lecturas + REST interno comandos + Socket.IO)')
+    .setDescription(
+      'BFF de la app del conductor · VEO (gRPC lecturas + REST interno comandos + Socket.IO)',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();

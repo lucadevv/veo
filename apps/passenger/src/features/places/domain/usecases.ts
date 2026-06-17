@@ -1,5 +1,9 @@
-import { MAX_PLACE_LABEL_LENGTH, type SavedPlace, type SavedPlaceInput } from './entities';
-import type { PlacesRepository } from './placesRepository';
+import {
+  MAX_PLACE_LABEL_LENGTH,
+  type SavedPlace,
+  type SavedPlaceInput,
+} from './entities';
+import type {PlacesRepository} from './placesRepository';
 
 /** Error de validación de un lugar guardado. */
 export class PlaceValidationError extends Error {
@@ -37,8 +41,8 @@ function validate(input: SavedPlaceInput): SavedPlaceInput {
   return {
     kind: input.kind,
     label,
-    point: { lat: input.point.lat, lng: input.point.lng },
-    ...(input.subtitle?.trim() ? { subtitle: input.subtitle.trim() } : {}),
+    point: {lat: input.point.lat, lng: input.point.lng},
+    ...(input.subtitle?.trim() ? {subtitle: input.subtitle.trim()} : {}),
   };
 }
 

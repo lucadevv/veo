@@ -5,13 +5,7 @@
  *
  * Cada servicio provee sus ReadinessCheck vía el token READINESS_CHECKS.
  */
-import {
-  Controller,
-  Get,
-  Inject,
-  Optional,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Controller, Get, Inject, Optional, ServiceUnavailableException } from '@nestjs/common';
 
 export interface ReadinessCheck {
   name: string;

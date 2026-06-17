@@ -1,4 +1,4 @@
-import {NativeModules} from 'react-native';
+import { NativeModules } from 'react-native';
 // v5: los enums DesiredAccuracy/LogLevel se importan del paquete de TYPES, NO de
 // react-native-background-geolocation. Razón (verificado en runtime): el paquete principal re-exporta
 // los TIPOS pero NO los VALORES de los enums → `DesiredAccuracy` sería `undefined` en runtime y
@@ -57,9 +57,7 @@ export class BackgroundGeolocationSource implements LocationSource {
   /** Listeners activos de la app (varios consumidores comparten una sola suscripción nativa). */
   private readonly listeners = new Set<(sample: LocationSample) => void>();
   /** Listeners de DISPONIBILIDAD del GPS (servicios del SO + permiso), multiplexados igual que los de muestra. */
-  private readonly availabilityListeners = new Set<
-    (availability: LocationAvailability) => void
-  >();
+  private readonly availabilityListeners = new Set<(availability: LocationAvailability) => void>();
   /** Suscripción nativa al evento `onLocation` (una sola, multiplexada). */
   private nativeSub: Subscription | null = null;
   /** Suscripción a `onProviderChange`: alimenta a los `availabilityListeners` (una sola, multiplexada). */
@@ -86,9 +84,7 @@ export class BackgroundGeolocationSource implements LocationSource {
     };
   }
 
-  onAvailabilityChange(
-    listener: (availability: LocationAvailability) => void,
-  ): () => void {
+  onAvailabilityChange(listener: (availability: LocationAvailability) => void): () => void {
     if (!this.available) {
       // Sin GPS nativo (Jest/build parcial): no hay proveedor que observar.
       return () => undefined;
@@ -100,7 +96,7 @@ export class BackgroundGeolocationSource implements LocationSource {
     // la ubicación apagada al abrir el dashboard, el aviso debe salir de inmediato.
     this.bg
       .getProviderState()
-      .then(state => listener(toAvailability(state)))
+      .then((state) => listener(toAvailability(state)))
       .catch(() => undefined);
 
     return () => {
@@ -114,9 +110,9 @@ export class BackgroundGeolocationSource implements LocationSource {
    */
   private ensureProviderListener(): void {
     if (!this.providerSub) {
-      this.providerSub = this.bg.onProviderChange(event => {
+      this.providerSub = this.bg.onProviderChange((event) => {
         const availability = toAvailability(event);
-        this.availabilityListeners.forEach(l => l(availability));
+        this.availabilityListeners.forEach((l) => l(availability));
       });
     }
   }
@@ -197,7 +193,7 @@ export class BackgroundGeolocationSource implements LocationSource {
 
   /** Convierte la `Location` nativa a `LocationSample` del dominio y notifica a los listeners. */
   private dispatch(location: Location): void {
-    const {coords} = location;
+    const { coords } = location;
     // Cinturón y tirantes: cualquier payload sin coords (error/evento no-ubicación) se descarta.
     if (!coords) {
       return;
@@ -211,7 +207,7 @@ export class BackgroundGeolocationSource implements LocationSource {
       // v5 tipa timestamp como `string | number`; el dominio (y el backend) esperan ISO-8601.
       ts: toIso(location.timestamp),
     };
-    this.listeners.forEach(listener => listener(sample));
+    this.listeners.forEach((listener) => listener(sample));
   }
 
   /** Detiene el tracking nativo cuando ya no quedan consumidores. */
@@ -238,8 +234,7 @@ function toAvailability(event: ProviderChangeEvent): LocationAvailability {
   return {
     servicesEnabled: event.enabled,
     permissionGranted:
-      event.status === AuthorizationStatus.Always ||
-      event.status === AuthorizationStatus.WhenInUse,
+      event.status === AuthorizationStatus.Always || event.status === AuthorizationStatus.WhenInUse,
   };
 }
 

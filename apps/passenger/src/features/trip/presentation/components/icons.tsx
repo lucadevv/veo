@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, {Circle, Path, Rect} from 'react-native-svg';
 
 /**
  * Set de iconos del flujo de VIAJE del pasajero (Home "¿A dónde vamos?", búsqueda, cotización/PUJA,
@@ -19,17 +19,22 @@ export interface GlyphProps {
 const STROKE = 2;
 
 /** Lupa (buscar destino). Espejo de `I.search`. */
-export function IconSearch({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconSearch({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={STROKE} />
-      <Path d="m20 20-3.2-3.2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="m20 20-3.2-3.2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Pin de ubicación (lugar/destino). Espejo de `I.pin`. */
-export function IconPin({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconPin({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -44,17 +49,27 @@ export function IconPin({ color, size = 18 }: GlyphProps): React.JSX.Element {
 }
 
 /** Casa (atajo "Casa" / lugar guardado HOME). Espejo de `I.home`. */
-export function IconHome({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconHome({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 11l9-8 9 8" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M5 10v10h14V10" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Path
+        d="M3 11l9-8 9 8"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M5 10v10h14V10"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
 
 /** Maletín (atajo "Trabajo" / lugar guardado WORK). Espejo de `I.work`. */
-export function IconWork({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconWork({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -74,7 +89,7 @@ export function IconWork({ color, size = 18 }: GlyphProps): React.JSX.Element {
 }
 
 /** Estrella (lugar guardado FAVORITE). Espejo de `I.star` (sin relleno). */
-export function IconStar({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconStar({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -88,16 +103,21 @@ export function IconStar({ color, size = 18 }: GlyphProps): React.JSX.Element {
 }
 
 /** Cruz (cerrar / quitar). Espejo de `I.x`. */
-export function IconClose({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconClose({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M18 6 6 18M6 6l12 12" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M18 6 6 18M6 6l12 12"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Campana de notificaciones. Espejo del glyph de campana de la Home del diseño. */
-export function IconBell({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconBell({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -106,13 +126,21 @@ export function IconBell({ color, size = 20 }: GlyphProps): React.JSX.Element {
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M13.5 21a2 2 0 0 1-3 0" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M13.5 21a2 2 0 0 1-3 0"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Flecha hacia la izquierda (volver). Espejo de `I.arrowL`. */
-export function IconArrowLeft({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconArrowLeft({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -127,7 +155,7 @@ export function IconArrowLeft({ color, size = 22 }: GlyphProps): React.JSX.Eleme
 }
 
 /** Diana / mira (usar mi ubicación actual). Espejo del glyph de target del diseño. */
-export function IconTarget({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconTarget({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={8} stroke={color} strokeWidth={STROKE} />
@@ -137,7 +165,10 @@ export function IconTarget({ color, size = 20 }: GlyphProps): React.JSX.Element 
 }
 
 /** Estrella (rating del conductor). Espejo de `I.star` RELLENA (usada en ratings). */
-export function IconStarFilled({ color, size = 14 }: GlyphProps): React.JSX.Element {
+export function IconStarFilled({
+  color,
+  size = 14,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -152,7 +183,7 @@ export function IconStarFilled({ color, size = 14 }: GlyphProps): React.JSX.Elem
 }
 
 /** Globo de chat (mensajería con el conductor). Espejo de `I.chat`. */
-export function IconChat({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconChat({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -166,7 +197,7 @@ export function IconChat({ color, size = 20 }: GlyphProps): React.JSX.Element {
 }
 
 /** Ruta con nodos (cambiar destino). Espejo de `I.route`. */
-export function IconRoute({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconRoute({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={6} cy={19} r={2.2} stroke={color} strokeWidth={STROKE} />
@@ -186,7 +217,10 @@ export function IconRoute({ color, size = 18 }: GlyphProps): React.JSX.Element {
  * Intercambiar (dos flechas verticales opuestas): permuta ORIGEN ↔ DESTINO. Vive en el botón
  * circular entre las dos filas de la tarjeta de ruta del Home (mismo gesto que `rideDraftStore.swap`).
  */
-export function IconSwapVertical({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconSwapVertical({
+  color,
+  size = 18,
+}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -201,7 +235,7 @@ export function IconSwapVertical({ color, size = 18 }: GlyphProps): React.JSX.El
 }
 
 /** Compartir (nodos conectados). Espejo de `I.share`. */
-export function IconShare({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconShare({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={6} cy={12} r={2.5} stroke={color} strokeWidth={STROKE} />
@@ -219,35 +253,57 @@ export function IconShare({ color, size = 18 }: GlyphProps): React.JSX.Element {
 }
 
 /** Menos (bajar la oferta en el stepper de PUJA). Espejo de `I.minus`. */
-export function IconMinus({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconMinus({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path
+        d="M5 12h14"
+        stroke={color}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Más (subir la oferta en el stepper de PUJA). Espejo de `I.plus`. */
-export function IconPlus({ color, size = 22 }: GlyphProps): React.JSX.Element {
+export function IconPlus({color, size = 22}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path
+        d="M12 5v14M5 12h14"
+        stroke={color}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Mascota / niño (solicitud especial). Espejo de `I.child` del diseño. */
-export function IconChild({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconChild({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={6.5} r={3} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M6 21v-2a6 6 0 0 1 12 0v2" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Circle
+        cx={12}
+        cy={6.5}
+        r={3}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M6 21v-2a6 6 0 0 1 12 0v2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
 
 /** Cámara (cámara del habitáculo / compartir cámara). Espejo de `I.cam` del diseño. */
-export function IconCamera({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconCamera({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -262,11 +318,16 @@ export function IconCamera({ color, size = 20 }: GlyphProps): React.JSX.Element 
 }
 
 /** Dos personas (contactos verificados / "quién puede ver"). Espejo de `I.users` del diseño. */
-export function IconUsers({ color, size = 20 }: GlyphProps): React.JSX.Element {
+export function IconUsers({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={9} cy={8} r={3.2} stroke={color} strokeWidth={STROKE} />
-      <Path d="M3 20v-1.5a5 5 0 0 1 10 0V20" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M3 20v-1.5a5 5 0 0 1 10 0V20"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
       <Path
         d="M16 5.2a3.2 3.2 0 0 1 0 6M17.5 20v-1.5a5 5 0 0 0-2.4-4.3"
         stroke={color}
@@ -278,17 +339,22 @@ export function IconUsers({ color, size = 20 }: GlyphProps): React.JSX.Element {
 }
 
 /** Reloj (programación / hora del viaje). Espejo de `I.clock` del diseño. */
-export function IconClock({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconClock({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={STROKE} />
-      <Path d="M12 7v5l3 2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M12 7v5l3 2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }
 
 /** Escudo (nota de seguridad / mediación). Espejo de `I.shield` del diseño. */
-export function IconShield({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconShield({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -302,20 +368,43 @@ export function IconShield({ color, size = 18 }: GlyphProps): React.JSX.Element 
 }
 
 /** Candado (grabación cifrada / nota de seguridad). Espejo de `I.lock` del diseño. */
-export function IconLock({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconLock({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={5} y={10.5} width={14} height={9.5} rx={2} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
-      <Path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Rect
+        x={5}
+        y={10.5}
+        width={14}
+        height={9.5}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8 10.5V8a4 4 0 0 1 8 0v2.5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
 
 /** Maletín / equipaje (solicitud especial). Espejo de `I.work` del diseño. */
-export function IconLuggage({ color, size = 18 }: GlyphProps): React.JSX.Element {
+export function IconLuggage({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={3} y={7} width={18} height={13} rx={2} stroke={color} strokeWidth={STROKE} strokeLinejoin="round" />
+      <Rect
+        x={3}
+        y={7}
+        width={18}
+        height={13}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
       <Path
         d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
         stroke={color}
@@ -327,7 +416,7 @@ export function IconLuggage({ color, size = 18 }: GlyphProps): React.JSX.Element
 }
 
 /** Auto (tier CAR del historial). Silueta lateral simple, mismo trazo 2px del set. */
-export function IconCar({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconCar({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -336,7 +425,12 @@ export function IconCar({ color, size = 16 }: GlyphProps): React.JSX.Element {
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M3 16h18" stroke={color} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M3 16h18"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
       <Circle cx={7.5} cy={16.5} r={1.6} stroke={color} strokeWidth={STROKE} />
       <Circle cx={16.5} cy={16.5} r={1.6} stroke={color} strokeWidth={STROKE} />
     </Svg>
@@ -344,7 +438,7 @@ export function IconCar({ color, size = 16 }: GlyphProps): React.JSX.Element {
 }
 
 /** Moto (tier MOTO del historial / moto-taxi). Espejo del set de tiers. */
-export function IconMoto({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconMoto({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={5.5} cy={16.5} r={2.5} stroke={color} strokeWidth={STROKE} />
@@ -361,7 +455,7 @@ export function IconMoto({ color, size = 16 }: GlyphProps): React.JSX.Element {
 }
 
 /** Check (calificación enviada / confirmación). Espejo del check del set de cierre. */
-export function IconCheck({ color, size = 16 }: GlyphProps): React.JSX.Element {
+export function IconCheck({color, size = 16}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path

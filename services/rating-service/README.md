@@ -47,11 +47,11 @@ src/
 
 ## API REST
 
-| Método | Ruta | Guard | Descripción |
-|---|---|---|---|
-| `POST` | `/api/v1/ratings` | `InternalIdentityGuard` | Crear calificación. Body: `{ tripId, ratedId, ratedRole, stars, comment? }`. `raterId` = usuario autenticado. |
-| `GET`  | `/api/v1/ratings?tripId=` | `InternalIdentityGuard` | Calificación de un viaje. |
-| `GET`  | `/api/v1/ratings/aggregate/:subjectId` | `InternalIdentityGuard` | Agregado (promedio rolling + flags). |
+| Método | Ruta                                   | Guard                   | Descripción                                                                                                   |
+| ------ | -------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/ratings`                      | `InternalIdentityGuard` | Crear calificación. Body: `{ tripId, ratedId, ratedRole, stars, comment? }`. `raterId` = usuario autenticado. |
+| `GET`  | `/api/v1/ratings?tripId=`              | `InternalIdentityGuard` | Calificación de un viaje.                                                                                     |
+| `GET`  | `/api/v1/ratings/aggregate/:subjectId` | `InternalIdentityGuard` | Agregado (promedio rolling + flags).                                                                          |
 
 gRPC: `RatingService/GetAggregate({ subjectId })` → `{ subjectId, role, rollingAvg30d, count30d, flagged, flagReason, lastComputedAt, found }`.
 

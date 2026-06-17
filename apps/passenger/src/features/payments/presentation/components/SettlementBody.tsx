@@ -1,19 +1,27 @@
-import type { PaymentView } from '@veo/api-client';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Banner, Button, Card, Skeleton, StatusPill, Text, useTheme } from '@veo/ui-kit';
+import type {PaymentView} from '@veo/api-client';
+import {useMutation, useQuery} from '@tanstack/react-query';
+import {
+  Banner,
+  Button,
+  Card,
+  Skeleton,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { TOKENS } from '../../../../core/di/tokens';
-import { useDependency } from '../../../../core/di/useDependency';
-import { formatPEN } from '../../../../shared/utils/format';
+import {useTranslation} from 'react-i18next';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {formatPEN} from '../../../../shared/utils/format';
 import {
   assertNever,
   interpretPaymentOutcome,
   isCashPayment,
 } from '../../domain/paymentOutcome';
-import { CheckoutInstructions } from './CheckoutInstructions';
-import { Animated, EnterView, SuccessCheck, usePressScale } from './motion';
+import {CheckoutInstructions} from './CheckoutInstructions';
+import {Animated, EnterView, SuccessCheck, usePressScale} from './motion';
 
 /** Propinas rápidas post-viaje sugeridas (céntimos PEN), alineadas al handoff: [Sin, S/2, S/3, S/5]. */
 const QUICK_TIPS_CENTS = [0, 200, 300, 500] as const;
@@ -84,17 +92,27 @@ export function SettlementBody({
   canFinish,
 }: SettlementBodyProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
 
   // Doble salida del recibo ya resuelto: primario "Calificar viaje" + ghost "Volver al inicio" (cierre
   // directo). Calificar es OPCIONAL → no obligamos a pasar por el rating. Solo aplica si hay conductor
   // que calificar; sin conductor, `onSettled` ya cierra directo (no duplicamos botones). Elemento
   // (no componente anidado) para no romper la identidad de tipo entre renders.
   const resolvedActions = (
-    <View style={{ gap: theme.spacing.sm }}>
-      <Button label={t('settlement.rateTrip')} variant="primary" fullWidth onPress={onSettled} />
+    <View style={{gap: theme.spacing.sm}}>
+      <Button
+        label={t('settlement.rateTrip')}
+        variant="primary"
+        fullWidth
+        onPress={onSettled}
+      />
       {canFinish ? (
-        <Button label={t('ratings.backHome')} variant="ghost" fullWidth onPress={onFinish} />
+        <Button
+          label={t('ratings.backHome')}
+          variant="ghost"
+          fullWidth
+          onPress={onFinish}
+        />
       ) : null}
     </View>
   );
@@ -110,7 +128,7 @@ export function SettlementBody({
     queryKey: ['payment', tripId, 'by-trip'],
     queryFn: () => getPaymentByTrip.execute(tripId),
     // Poll suave MIENTRAS el cobro no existe (404→null) o sigue PENDING-digital, hasta el tope.
-    refetchInterval: (query) => {
+    refetchInterval: query => {
       const data = query.state.data;
       const elapsed = Date.now() - startedAtRef.current;
       if (elapsed > POLL_TIMEOUT_MS) {
@@ -156,7 +174,7 @@ export function SettlementBody({
   // ── Cargando (primer fetch) ──────────────────────────────────────────────────────────────────
   if (paymentQuery.isPending) {
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Text variant="callout" color="inkMuted" align="center">
           {t('settlement.loading')}
         </Text>
@@ -173,8 +191,12 @@ export function SettlementBody({
     // Agotó el poll sin recibo: error honesto + reintentar (reinicia la ventana del poll).
     if (timedOut || paymentQuery.isError) {
       return (
-        <View style={{ gap: theme.spacing.md }}>
-          <Banner tone="warn" title={t('settlement.timeoutTitle')} description={t('settlement.timeoutBody')} />
+        <View style={{gap: theme.spacing.md}}>
+          <Banner
+            tone="warn"
+            title={t('settlement.timeoutTitle')}
+            description={t('settlement.timeoutBody')}
+          />
           <Button
             label={t('actions.retry')}
             variant="primary"
@@ -188,11 +210,21 @@ export function SettlementBody({
           {/* Escape del 404-eterno: si el recibo nunca aparece, el pasajero NO queda atrapado en el sheet.
               "Cerrar" avanza el cierre como un settlement resuelto (onSettled → rating/cierre en CompletionBody),
               evitando que un consumer caído lo deje secuestrado en un viaje ya terminado. */}
-          <Button label={t('actions.close')} variant="ghost" fullWidth onPress={onSettled} />
+          <Button
+            label={t('actions.close')}
+            variant="ghost"
+            fullWidth
+            onPress={onSettled}
+          />
         </View>
       );
     }
-    return <ProcessingBody title={t('settlement.processing')} hint={t('settlement.processingHint')} />;
+    return (
+      <ProcessingBody
+        title={t('settlement.processing')}
+        hint={t('settlement.processingHint')}
+      />
+    );
   }
 
   // La interpretación del cobro vive en el DOMINIO (`interpretPaymentOutcome` → `PaymentOutcome`):
@@ -205,15 +237,25 @@ export function SettlementBody({
   // ── PENDING digital con CHECKOUT (ProntoPaga): el usuario DEBE completarlo (deepLink/web/QR/CIP).
   // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
   if (outcome.kind === 'checkoutPending') {
-    return <CheckoutBody payment={payment} onRetry={retryPoll} retrying={paymentQuery.isFetching} />;
+    return (
+      <CheckoutBody
+        payment={payment}
+        onRetry={retryPoll}
+        retrying={paymentQuery.isFetching}
+      />
+    );
   }
 
   // ── PENDING digital SIN checkout (sandbox actual): procesando + poll, CERO regresión ────────────
   if (outcome.kind === 'processing') {
     if (timedOut) {
       return (
-        <View style={{ gap: theme.spacing.md }}>
-          <Banner tone="warn" title={t('settlement.timeoutTitle')} description={t('settlement.timeoutBody')} />
+        <View style={{gap: theme.spacing.md}}>
+          <Banner
+            tone="warn"
+            title={t('settlement.timeoutTitle')}
+            description={t('settlement.timeoutBody')}
+          />
           <Button
             label={t('actions.retry')}
             variant="primary"
@@ -224,7 +266,12 @@ export function SettlementBody({
         </View>
       );
     }
-    return <ProcessingBody title={t('settlement.processingDigital')} hint={t('settlement.processingHint')} />;
+    return (
+      <ProcessingBody
+        title={t('settlement.processingDigital')}
+        hint={t('settlement.processingHint')}
+      />
+    );
   }
 
   // ── PENDING + CASH ───────────────────────────────────────────────────────────────────────────
@@ -232,7 +279,7 @@ export function SettlementBody({
     // El pasajero ya confirmó su lado pero el cobro sigue PENDING → falta el conductor (bilateral).
     if (passengerConfirmedCash) {
       return (
-        <View style={{ gap: theme.spacing.md }}>
+        <View style={{gap: theme.spacing.md}}>
           <Banner
             tone="info"
             title={t('settlement.cashAwaitingDriverTitle')}
@@ -247,23 +294,34 @@ export function SettlementBody({
     }
 
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Text variant="title3">{t('settlement.cashTitle')}</Text>
         <Text variant="callout" color="inkMuted">
-          {t('settlement.cashBody', { amount: formatPEN(payment.amountCents) })}
+          {t('settlement.cashBody', {amount: formatPEN(payment.amountCents)})}
         </Text>
         <ReceiptCard payment={payment} cash />
         <Banner tone="info" title={t('settlement.cashBanner')} />
-        {confirmMutation.isError ? <Banner tone="danger" title={t('payments.payError')} /> : null}
+        {confirmMutation.isError ? (
+          <Banner tone="danger" title={t('payments.payError')} />
+        ) : null}
         <Button
-          label={confirmMutation.isPending ? t('settlement.confirmingCash') : t('settlement.confirmCash')}
+          label={
+            confirmMutation.isPending
+              ? t('settlement.confirmingCash')
+              : t('settlement.confirmCash')
+          }
           variant="accent"
           fullWidth
           loading={confirmMutation.isPending}
           onPress={() => confirmMutation.mutate(payment.id)}
         />
         {/* Escape sin cerrar: el settlement re-aparece al volver (es plata, no la perdemos). */}
-        <Button label={t('settlement.confirmLater')} variant="ghost" fullWidth onPress={onDeferred} />
+        <Button
+          label={t('settlement.confirmLater')}
+          variant="ghost"
+          fullWidth
+          onPress={onDeferred}
+        />
       </View>
     );
   }
@@ -272,11 +330,13 @@ export function SettlementBody({
   if (outcome.kind === 'failed' || outcome.kind === 'debt') {
     const isDebt = outcome.kind === 'debt';
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Banner
           tone={isDebt ? 'warn' : 'danger'}
           title={t(isDebt ? 'settlement.debtTitle' : 'settlement.failedTitle')}
-          description={t(isDebt ? 'settlement.debtBody' : 'settlement.failedBody')}
+          description={t(
+            isDebt ? 'settlement.debtBody' : 'settlement.failedBody',
+          )}
         />
         <ReceiptCard payment={payment} />
         {resolvedActions}
@@ -292,14 +352,20 @@ export function SettlementBody({
   if (outcome.kind === 'refunded') {
     const isPartial = outcome.partial;
     return (
-      <View style={{ gap: theme.spacing.md }}>
+      <View style={{gap: theme.spacing.md}}>
         <Banner
           tone="info"
-          title={t(isPartial ? 'settlement.partialRefundTitle' : 'settlement.refundedTitle')}
+          title={t(
+            isPartial
+              ? 'settlement.partialRefundTitle'
+              : 'settlement.refundedTitle',
+          )}
           description={
             isPartial
               ? t('settlement.partialRefundBody')
-              : t('settlement.refundedBody', { amount: formatPEN(payment.amountCents) })
+              : t('settlement.refundedBody', {
+                  amount: formatPEN(payment.amountCents),
+                })
           }
         />
         <ReceiptCard payment={payment} />
@@ -317,7 +383,7 @@ export function SettlementBody({
     return assertNever(outcome);
   }
   return (
-    <View style={{ gap: theme.spacing.md }}>
+    <View style={{gap: theme.spacing.md}}>
       <SuccessCheck />
       <EnterView delay={140}>
         <Banner
@@ -336,27 +402,35 @@ export function SettlementBody({
       {/* Propina post-viaje: solo si aún no dejó (tipCents === 0). Chips [Sin, S/2, S/3, S/5]. */}
       {payment.tipCents === 0 ? (
         <EnterView delay={260}>
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{gap: theme.spacing.sm}}>
             {/* Coherencia propina-efectivo: en un viaje CASH la tarifa va en mano, pero estos chips cobran
                 la propina DIGITAL (Yape/tarjeta). El prompt lo dice honesto (no miente "100% efectivo");
                 el LUGAR de la propina sigue siendo post-pago, sin un flujo nuevo de propina-efectivo. */}
             <Text variant="footnote" color="inkMuted">
               {t(isCash ? 'settlement.tipPromptCash' : 'settlement.tipPrompt')}
             </Text>
-            {tipMutation.isError ? <Banner tone="danger" title={t('tips.error')} /> : null}
-            <View style={[styles.chips, { gap: theme.spacing.sm }]}>
-              {QUICK_TIPS_CENTS.map((cents) => (
+            {tipMutation.isError ? (
+              <Banner tone="danger" title={t('tips.error')} />
+            ) : null}
+            <View style={[styles.chips, {gap: theme.spacing.sm}]}>
+              {QUICK_TIPS_CENTS.map(cents => (
                 <TipChip
                   key={cents}
-                  label={cents === 0 ? t('settlement.tipNone') : formatPEN(cents)}
+                  label={
+                    cents === 0 ? t('settlement.tipNone') : formatPEN(cents)
+                  }
                   tabular={cents !== 0}
-                  loading={tipMutation.isPending && tipMutation.variables === cents}
+                  loading={
+                    tipMutation.isPending && tipMutation.variables === cents
+                  }
                   // Anti doble-propina: una vez que la propina se envió OK, los chips quedan deshabilitados
                   // hasta que el refetch traiga tipCents>0 y oculte el bloque. Sin esto, entre el onSuccess y
                   // el re-render del refetch el pasajero podía tocar otro chip y mandar una segunda propina.
                   disabled={tipMutation.isPending || tipMutation.isSuccess}
                   // "Sin propina" no llama al backend (tipCents mínimo es 1): solo avanza.
-                  onPress={() => (cents === 0 ? undefined : tipMutation.mutate(cents))}
+                  onPress={() =>
+                    cents === 0 ? undefined : tipMutation.mutate(cents)
+                  }
                 />
               ))}
             </View>
@@ -370,9 +444,15 @@ export function SettlementBody({
 }
 
 /** Tarjeta de desglose canónica: Tarifa acordada / Propina (si >0) / divisor / Total (bold). */
-function ReceiptCard({ payment, cash = false }: { payment: PaymentView; cash?: boolean }): React.JSX.Element {
+function ReceiptCard({
+  payment,
+  cash = false,
+}: {
+  payment: PaymentView;
+  cash?: boolean;
+}): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   return (
     <Card variant="outlined" padding="lg">
       <View style={styles.row}>
@@ -393,14 +473,14 @@ function ReceiptCard({ payment, cash = false }: { payment: PaymentView; cash?: b
           </Text>
         </View>
       ) : null}
-      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+      <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
       <View style={styles.row}>
         <Text variant="bodyStrong">{t('payments.breakdownTotal')}</Text>
         <Text variant="title3" tabular>
           {formatPEN(payment.amountCents)}
         </Text>
       </View>
-      <View style={[styles.row, { marginTop: theme.spacing.xs }]}>
+      <View style={[styles.row, {marginTop: theme.spacing.xs}]}>
         <Text variant="footnote" color="inkMuted">
           {t('payments.status')}
         </Text>
@@ -415,10 +495,21 @@ function ReceiptCard({ payment, cash = false }: { payment: PaymentView; cash?: b
 }
 
 /** Estado "procesando" (cobro automático en vuelo): spinner tipográfico sobrio + hint. */
-function ProcessingBody({ title, hint }: { title: string; hint: string }): React.JSX.Element {
+function ProcessingBody({
+  title,
+  hint,
+}: {
+  title: string;
+  hint: string;
+}): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={{ gap: theme.spacing.md, alignItems: 'center', paddingVertical: theme.spacing.md }}>
+    <View
+      style={{
+        gap: theme.spacing.md,
+        alignItems: 'center',
+        paddingVertical: theme.spacing.md,
+      }}>
       <Skeleton variant="circle" height={56} />
       <Text variant="title3" align="center">
         {title}
@@ -445,14 +536,14 @@ function CheckoutBody({
   retrying: boolean;
 }): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  const {t} = useTranslation();
   return (
     <CheckoutInstructions
       payment={payment}
       onRetry={onRetry}
       retrying={retrying}
       header={
-        <View style={{ gap: theme.spacing.md }}>
+        <View style={{gap: theme.spacing.md}}>
           <Text variant="title3">{t('settlement.checkout.title')}</Text>
           <Text variant="callout" color="inkMuted">
             {t('settlement.checkout.body')}
@@ -473,9 +564,15 @@ interface TipChipProps {
 }
 
 /** Chip de propina post-viaje: feedback de press (scale) + hit-target ≥44. Respeta reduce-motion. */
-function TipChip({ label, onPress, tabular = false, loading = false, disabled = false }: TipChipProps): React.JSX.Element {
+function TipChip({
+  label,
+  onPress,
+  tabular = false,
+  loading = false,
+  disabled = false,
+}: TipChipProps): React.JSX.Element {
   const theme = useTheme();
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale();
+  const {animatedStyle, onPressIn, onPressOut} = usePressScale();
   return (
     <Pressable
       accessibilityRole="button"
@@ -483,8 +580,7 @@ function TipChip({ label, onPress, tabular = false, loading = false, disabled = 
       onPress={onPress}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
-      hitSlop={8}
-    >
+      hitSlop={8}>
       <Animated.View
         style={[
           styles.chip,
@@ -498,9 +594,11 @@ function TipChip({ label, onPress, tabular = false, loading = false, disabled = 
             borderWidth: 1,
             backgroundColor: theme.colors.surface,
           },
-        ]}
-      >
-        <Text variant="bodyStrong" color={loading ? 'inkMuted' : 'ink'} tabular={tabular}>
+        ]}>
+        <Text
+          variant="bodyStrong"
+          color={loading ? 'inkMuted' : 'ink'}
+          tabular={tabular}>
           {label}
         </Text>
       </Animated.View>
@@ -509,8 +607,13 @@ function TipChip({ label, onPress, tabular = false, loading = false, disabled = 
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-  divider: { height: 1, marginVertical: 8 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { alignItems: 'center', justifyContent: 'center', minHeight: 44 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  divider: {height: 1, marginVertical: 8},
+  chips: {flexDirection: 'row', flexWrap: 'wrap'},
+  chip: {alignItems: 'center', justifyContent: 'center', minHeight: 44},
 });

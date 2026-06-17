@@ -34,8 +34,7 @@ export default function GlobalError({
           padding: '24px',
           backgroundColor: '#000000',
           color: '#fafafa',
-          fontFamily:
-            'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
         }}
       >
         <div
@@ -67,9 +66,7 @@ export default function GlobalError({
           >
             !
           </div>
-          <h1 style={{ margin: '16px 0 0', fontSize: '18px', fontWeight: 600 }}>
-            Algo salió mal
-          </h1>
+          <h1 style={{ margin: '16px 0 0', fontSize: '18px', fontWeight: 600 }}>Algo salió mal</h1>
           <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#a3a3a3' }}>
             Ocurrió un error inesperado. Intenta recargar la aplicación.
           </p>

@@ -1,6 +1,10 @@
-import type { ConsentRecorded, HttpClient, RecordConsentRequest } from '@veo/api-client';
-import { HttpConsentRepository } from '../src/features/auth/data/httpConsentRepository';
-import type { ConsentRepository } from '../src/features/auth/domain/consentRepository';
+import type {
+  ConsentRecorded,
+  HttpClient,
+  RecordConsentRequest,
+} from '@veo/api-client';
+import {HttpConsentRepository} from '../src/features/auth/data/httpConsentRepository';
+import type {ConsentRepository} from '../src/features/auth/domain/consentRepository';
 import {
   CONSENT_POLICY_VERSION,
   RecordConsentUseCase,
@@ -27,8 +31,10 @@ function recorded(input: RecordConsentRequest): ConsentRecorded {
 
 describe('RecordConsentUseCase', () => {
   it('registra el consentimiento sellando la policyVersion constante (UN solo POST)', async () => {
-    const record = jest.fn(async (input: RecordConsentRequest) => recorded(input));
-    const repository: ConsentRepository = { record };
+    const record = jest.fn(async (input: RecordConsentRequest) =>
+      recorded(input),
+    );
+    const repository: ConsentRepository = {record};
     const useCase = new RecordConsentUseCase(repository);
 
     const result = await useCase.execute(SELECTION);
@@ -48,7 +54,7 @@ describe('RecordConsentUseCase', () => {
     const record = jest.fn(async () => {
       throw new Error('500');
     });
-    const repository: ConsentRepository = { record };
+    const repository: ConsentRepository = {record};
     const useCase = new RecordConsentUseCase(repository);
 
     await expect(useCase.execute(SELECTION)).rejects.toThrow(/500/);
@@ -65,7 +71,7 @@ describe('HttpConsentRepository.record', () => {
       policyVersion: CONSENT_POLICY_VERSION,
     };
     const post = jest.fn(async () => recorded(request));
-    const http = { post } as unknown as HttpClient;
+    const http = {post} as unknown as HttpClient;
     const repository = new HttpConsentRepository(http);
 
     const result = await repository.record(request);
@@ -81,7 +87,7 @@ describe('HttpConsentRepository.record', () => {
     const post = jest.fn(async () => {
       throw new Error('401 Unauthorized');
     });
-    const http = { post } as unknown as HttpClient;
+    const http = {post} as unknown as HttpClient;
     const repository = new HttpConsentRepository(http);
 
     await expect(

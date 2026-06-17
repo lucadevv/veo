@@ -45,7 +45,9 @@ export class ConsentsController {
   constructor(private readonly consents: ConsentsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Consentimiento VIGENTE del pasajero (el más reciente; null si nunca registró)' })
+  @ApiOperation({
+    summary: 'Consentimiento VIGENTE del pasajero (el más reciente; null si nunca registró)',
+  })
   current(@CurrentUser() user: AuthenticatedUser): Promise<ConsentView | null> {
     return this.consents.getCurrent(user.userId);
   }
@@ -53,7 +55,10 @@ export class ConsentsController {
   @Post()
   @HttpCode(201)
   @ApiOperation({ summary: 'Registrar un consentimiento del pasajero (Ley 29733, append-only)' })
-  record(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordConsentDto): Promise<ConsentView> {
+  record(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RecordConsentDto,
+  ): Promise<ConsentView> {
     return this.consents.record(user.userId, {
       dataProcessing: dto.dataProcessing,
       inCabinCamera: dto.inCabinCamera,

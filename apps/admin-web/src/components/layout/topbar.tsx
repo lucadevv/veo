@@ -78,7 +78,11 @@ export function Topbar() {
           onClick={toggle}
           className="size-9 px-0"
         >
-          {theme === 'dark' ? <Sun className="size-5" aria-hidden /> : <Moon className="size-5" aria-hidden />}
+          {theme === 'dark' ? (
+            <Sun className="size-5" aria-hidden />
+          ) : (
+            <Moon className="size-5" aria-hidden />
+          )}
         </Button>
 
         <DropdownMenu>
@@ -145,7 +149,9 @@ function MobileNav() {
                           onClick={() => setOpen(false)}
                           className={cn(
                             'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium',
-                            active ? 'bg-accent/10 text-accent' : 'text-ink-muted hover:bg-surface-2',
+                            active
+                              ? 'bg-accent/10 text-accent'
+                              : 'text-ink-muted hover:bg-surface-2',
                           )}
                         >
                           <Icon className="size-4" aria-hidden />

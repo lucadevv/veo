@@ -73,12 +73,15 @@ const REQUIRED_KEYS = [
 ] as const;
 
 describe('Copy-contract · DebtSheet + franja de deuda (es-PE)', () => {
-  it.each(REQUIRED_KEYS)('resuelve "%s" a texto real (no la clave cruda)', (key) => {
-    const value = i18n.t(key);
-    expect(typeof value).toBe('string');
-    expect(value).not.toBe(key);
-    expect(value.length).toBeGreaterThan(0);
-  });
+  it.each(REQUIRED_KEYS)(
+    'resuelve "%s" a texto real (no la clave cruda)',
+    key => {
+      const value = i18n.t(key);
+      expect(typeof value).toBe('string');
+      expect(value).not.toBe(key);
+      expect(value.length).toBeGreaterThan(0);
+    },
+  );
 
   it('el título es honesto y NO alarmante: "pago pendiente", no "deuda/moroso"', () => {
     const title = i18n.t('debt.title').toLowerCase();
@@ -99,12 +102,12 @@ describe('Copy-contract · DebtSheet + franja de deuda (es-PE)', () => {
   });
 
   it('interpola la fecha del viaje en la fila de la lista de deudas', () => {
-    const value = i18n.t('debt.itemLabel', { date: '03/06 12:00' });
+    const value = i18n.t('debt.itemLabel', {date: '03/06 12:00'});
     expect(value).toContain('03/06 12:00');
   });
 
   it('TASK 3 · el encabezado del pago pendiente interpola el método actual', () => {
-    const value = i18n.t('debt.currentMethod', { method: 'Yape' });
+    const value = i18n.t('debt.currentMethod', {method: 'Yape'});
     expect(value).toContain('Yape');
   });
 

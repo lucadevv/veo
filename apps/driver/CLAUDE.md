@@ -38,6 +38,7 @@ App conductor React Native Android. Parte de un sistema multi-repo:
 ## Stack mobile
 
 Igual al passenger-app excepto:
+
 - **react-native-mqtt** (publish GPS a IoT Core)
 - **ForegroundService nativo** (Android), no equivalente iOS hasta F3
 

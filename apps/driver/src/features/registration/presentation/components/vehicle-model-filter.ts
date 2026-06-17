@@ -1,4 +1,4 @@
-import type {VehicleModelOption} from '../../domain';
+import type { VehicleModelOption } from '../../domain';
 
 /**
  * Filtro client-side del catálogo de modelos (B5-2): el catálogo es chico, así que la búsqueda del
@@ -14,6 +14,6 @@ export function filterVehicleModels(
     return [...models];
   }
   return models.filter(
-    m => m.make.toLowerCase().includes(q) || m.model.toLowerCase().includes(q),
+    (m) => m.make.toLowerCase().includes(q) || m.model.toLowerCase().includes(q),
   );
 }

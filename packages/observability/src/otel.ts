@@ -41,7 +41,8 @@ export function bootstrapOtel(opts: OtelOptions): () => Promise<void> {
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean);
-            const origin = typeof req.origin === 'string' ? req.origin : req.origin?.toString() ?? '';
+            const origin =
+              typeof req.origin === 'string' ? req.origin : (req.origin?.toString() ?? '');
             return ignore.some((h) => origin.includes(h));
           },
         },

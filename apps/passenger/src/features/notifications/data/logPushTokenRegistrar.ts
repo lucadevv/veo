@@ -1,4 +1,7 @@
-import type { PushPlatform, PushTokenRegistrar } from '../domain/pushTokenRegistrar';
+import type {
+  PushPlatform,
+  PushTokenRegistrar,
+} from '../domain/pushTokenRegistrar';
 
 /**
  * Registrar de dev/sandbox: registra el token en consola en lugar de enviarlo al backend.

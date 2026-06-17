@@ -33,7 +33,9 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('places-service')
-    .setDescription('Lugares guardados del pasajero (Casa/Trabajo/favoritos) · CRUD gRPC para el BFF · VEO')
+    .setDescription(
+      'Lugares guardados del pasajero (Casa/Trabajo/favoritos) · CRUD gRPC para el BFF · VEO',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
@@ -52,7 +54,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3013);
   await app.listen(port);
-  logger.info(`places-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50063'})`);
+  logger.info(
+    `places-service escuchando en :${port} (gRPC en ${process.env.GRPC_URL ?? '0.0.0.0:50063'})`,
+  );
 }
 
 bootstrap().catch((err) => {

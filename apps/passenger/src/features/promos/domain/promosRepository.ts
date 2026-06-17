@@ -1,4 +1,4 @@
-import type { PromoValidationView } from './entities';
+import type {PromoValidationView} from './entities';
 
 /**
  * Abstracción del repositorio de Promociones (DIP). Implementación real contra el public-bff

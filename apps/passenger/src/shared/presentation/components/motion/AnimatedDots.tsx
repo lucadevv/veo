@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -7,7 +7,7 @@ import Animated, {
   type SharedValue,
   useAnimatedStyle,
 } from 'react-native-reanimated';
-import { useTheme } from '@veo/ui-kit';
+import {useTheme} from '@veo/ui-kit';
 
 const DOT_SIZE = 8;
 const DOT_ACTIVE_WIDTH = 26;
@@ -24,7 +24,12 @@ interface DotProps {
  * Punto del paginador. Interpola ancho y color según la distancia al desplazamiento actual
  * (`progress` = scrollX/pageWidth): el punto activo se expande en una píldora lima.
  */
-function Dot({ index, progress, inactiveColor, activeColor }: DotProps): React.JSX.Element {
+function Dot({
+  index,
+  progress,
+  inactiveColor,
+  activeColor,
+}: DotProps): React.JSX.Element {
   const theme = useTheme();
   const animatedStyle = useAnimatedStyle(() => {
     const distance = Math.abs(progress.value - index);
@@ -46,7 +51,11 @@ function Dot({ index, progress, inactiveColor, activeColor }: DotProps): React.J
   return (
     <Animated.View
       style={[
-        { height: DOT_SIZE, borderRadius: theme.radii.pill, marginHorizontal: DOT_GAP / 2 },
+        {
+          height: DOT_SIZE,
+          borderRadius: theme.radii.pill,
+          marginHorizontal: DOT_GAP / 2,
+        },
         animatedStyle,
       ]}
     />
@@ -80,9 +89,8 @@ export function AnimatedDots({
     <View
       style={styles.row}
       accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    >
-      {Array.from({ length: count }).map((_, index) => (
+      importantForAccessibility="no-hide-descendants">
+      {Array.from({length: count}).map((_, index) => (
         <Dot
           key={index}
           index={index}
@@ -96,5 +104,5 @@ export function AnimatedDots({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  row: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center'},
 });

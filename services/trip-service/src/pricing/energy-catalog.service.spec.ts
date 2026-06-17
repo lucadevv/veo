@@ -24,7 +24,7 @@ class FakeRepo implements EnergyCatalogRepository {
       energyCatalog: {
         // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE.
         updateMany: (args) => {
-          if (this.config && this.config.version === args.where.version) {
+          if (this.config?.version === args.where.version) {
             this.config = {
               sources: args.data.sources as EnergySourcePrice[],
               version: args.data.version as number,
@@ -43,11 +43,16 @@ class FakeRepo implements EnergyCatalogRepository {
           return Promise.resolve({ version: this.config.version, updatedAt: new Date(0) });
         },
         findUnique: () =>
-          Promise.resolve(this.config ? { version: this.config.version, updatedAt: new Date(0) } : null),
+          Promise.resolve(
+            this.config ? { version: this.config.version, updatedAt: new Date(0) } : null,
+          ),
       },
       outboxEvent: {
         create: (args) => {
-          this.outboxEvents.push({ aggregateId: args.data.aggregateId, eventType: args.data.eventType });
+          this.outboxEvents.push({
+            aggregateId: args.data.aggregateId,
+            eventType: args.data.eventType,
+          });
           return Promise.resolve({});
         },
       },
@@ -87,7 +92,9 @@ describe('EnergyCatalogService (B5)', () => {
     const out = await service.replace([GAS, ELEC], 4);
     expect(out.version).toBe(5);
     expect(out.sources).toHaveLength(2);
-    expect(repo.outboxEvents).toEqual([{ aggregateId: 'GLOBAL', eventType: 'energy.catalog_updated' }]);
+    expect(repo.outboxEvents).toEqual([
+      { aggregateId: 'GLOBAL', eventType: 'energy.catalog_updated' },
+    ]);
     // El cambio se ve de inmediato (cache invalidado): la nueva fuente eléctrica ya resuelve.
     expect(await service.getPriceFor(EnergySource.ELECTRIC)).toBe(65);
   });

@@ -1,5 +1,5 @@
-import type { RatingSubmitRequest, RatingView } from '@veo/api-client';
-import type { RatingsRepository } from './ratingsRepository';
+import type {RatingSubmitRequest, RatingView} from '@veo/api-client';
+import type {RatingsRepository} from './ratingsRepository';
 
 /** Error de validación de calificación. */
 export class RatingValidationError extends Error {

@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 /**
  * Estado de cliente del Modo Niño (Zustand, SOLO en memoria). El código (4-6 dígitos) se adjunta a
@@ -14,10 +14,10 @@ interface ChildModeState {
   reset: () => void;
 }
 
-export const useChildModeStore = create<ChildModeState>((set) => ({
+export const useChildModeStore = create<ChildModeState>(set => ({
   enabled: false,
   code: '',
-  setEnabled: (enabled) => set({ enabled }),
-  setCode: (code) => set({ code: code.replace(/\D/g, '').slice(0, 6) }),
-  reset: () => set({ enabled: false, code: '' }),
+  setEnabled: enabled => set({enabled}),
+  setCode: code => set({code: code.replace(/\D/g, '').slice(0, 6)}),
+  reset: () => set({enabled: false, code: ''}),
 }));

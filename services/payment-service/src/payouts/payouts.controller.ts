@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   Roles,
@@ -10,7 +20,12 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { assertDriverOwnsResource } from '@veo/auth';
 import { ValidationError } from '@veo/utils';
-import { PayoutsService, previousWeek, type PayoutPage, type ReleaseHeldPayoutsResult } from './payouts.service';
+import {
+  PayoutsService,
+  previousWeek,
+  type PayoutPage,
+  type ReleaseHeldPayoutsResult,
+} from './payouts.service';
 import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
 
 @ApiTags('payouts')
@@ -35,7 +50,9 @@ export class PayoutsController {
   @UseGuards(RolesGuard)
   @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('all')
-  @ApiOperation({ summary: 'Listar todos los payouts (paginado, filtro por estado) — FINANCE/ADMIN' })
+  @ApiOperation({
+    summary: 'Listar todos los payouts (paginado, filtro por estado) — FINANCE/ADMIN',
+  })
   listAll(@Query() query: ListAllPayoutsQueryDto): Promise<PayoutPage> {
     return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
   }
@@ -45,7 +62,9 @@ export class PayoutsController {
   @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post('run')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Correr la liquidación de payouts (FINANCE). >S/5000 requiere step-up MFA' })
+  @ApiOperation({
+    summary: 'Correr la liquidación de payouts (FINANCE). >S/5000 requiere step-up MFA',
+  })
   run(@Body() dto: RunPayoutsDto, @CurrentUser() user: AuthenticatedUser) {
     const fallback = previousWeek(new Date());
     const start = dto.periodStart ? new Date(dto.periodStart) : fallback.start;
@@ -61,7 +80,8 @@ export class PayoutsController {
   @Post('drivers/:driverId/release')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — FINANCE/ADMIN. Idempotente',
+    summary:
+      'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — FINANCE/ADMIN. Idempotente',
   })
   release(
     @Param('driverId', ParseUUIDPipe) driverId: string,

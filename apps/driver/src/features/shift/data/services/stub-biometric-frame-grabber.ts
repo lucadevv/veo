@@ -30,7 +30,7 @@ const SYNTHETIC_JPEG_BASE64 =
 
 /** Pausa breve para simular la cadencia de captura (que el feedback "capturando…" se sienta real). */
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Tope de la espera simulada (ms): suficiente para sentirse real sin demorar el flujo dev. */
@@ -39,7 +39,7 @@ const MAX_SIMULATED_CAPTURE_MS = 1200;
 export class StubBiometricFrameGrabber implements BiometricFrameGrabber {
   async captureSequence(plan: FrameCapturePlan): Promise<string[]> {
     await delay(Math.min(plan.frameCount * plan.intervalMs, MAX_SIMULATED_CAPTURE_MS));
-    return Array.from({length: plan.frameCount}, () => SYNTHETIC_JPEG_BASE64);
+    return Array.from({ length: plan.frameCount }, () => SYNTHETIC_JPEG_BASE64);
   }
 
   async capturePhoto(): Promise<string> {
