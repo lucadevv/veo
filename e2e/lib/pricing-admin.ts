@@ -77,10 +77,14 @@ function adminHeaders(): Record<string, string> {
 export async function putModeSchedule(
   schedule: ModeSchedule,
 ): Promise<{ status: number; body: unknown }> {
+  // CAS (optimistic locking): el DTO EXIGE `expectedVersion`. Resolvemos la version vigente (fresh = 0)
+  // y reemplazamos desde ahí → robusto para el primer write y para llamadas repetidas en la misma corrida.
+  const current = await getModeSchedule();
+  const expectedVersion = (current.body as { version?: number } | undefined)?.version ?? 0;
   const res = await fetch(`${TRIP_BASE}/internal/pricing/mode-schedule`, {
     method: 'PUT',
     headers: adminHeaders(),
-    body: JSON.stringify(schedule),
+    body: JSON.stringify({ ...schedule, expectedVersion }),
   });
   const text = await res.text();
   const body = text ? safeJson(text) : undefined;
