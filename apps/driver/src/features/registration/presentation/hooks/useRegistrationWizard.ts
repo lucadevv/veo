@@ -5,6 +5,8 @@ import {
   UpdatePersonalDataUseCase,
   type PersonalData,
   type VehicleData,
+  type VehicleModelRequestInput,
+  type VehicleType,
 } from '../../domain';
 
 /** Clave de caché del listado de vehículos del conductor (rehidratación del paso de vehículo). */
@@ -45,6 +47,37 @@ export function useDriverVehicles() {
   return useQuery({
     queryKey: REGISTRATION_VEHICLES_QUERY_KEY,
     queryFn: () => registration.listVehicles(),
+  });
+}
+
+/** Clave de caché del catálogo de modelos (por tipo) para el selector del alta. */
+export const VEHICLE_MODELS_QUERY_KEY = ['registration', 'vehicle-models'] as const;
+
+/**
+ * Query: catálogo de modelos APROBADOS por tipo (`GET /drivers/vehicle-models?vehicleType=`). Alimenta
+ * el selector del alta (B5-2). El catálogo es chico; la búsqueda fina la hace el selector client-side.
+ */
+export function useVehicleModels(vehicleType: VehicleType) {
+  const {registration} = useRepositories();
+  return useQuery({
+    queryKey: [...VEHICLE_MODELS_QUERY_KEY, vehicleType],
+    queryFn: () => registration.listVehicleModels({vehicleType}),
+  });
+}
+
+/**
+ * Mutación: solicita un modelo que no está en el catálogo (`POST /drivers/vehicle-models`). Al éxito,
+ * invalida el catálogo del tipo para que reaparezca apenas el operador lo apruebe. El modelo queda
+ * PENDING_REVIEW: NO se puede elegir aún (solo APPROVED se listan).
+ */
+export function useRequestVehicleModel() {
+  const {registration} = useRepositories();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: VehicleModelRequestInput) => registration.requestVehicleModel(input),
+    onSuccess: (_result, input) => {
+      queryClient.invalidateQueries({queryKey: [...VEHICLE_MODELS_QUERY_KEY, input.vehicleType]});
+    },
   });
 }
 

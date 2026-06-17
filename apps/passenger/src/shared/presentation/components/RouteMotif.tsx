@@ -1,4 +1,4 @@
-import { useReducedMotion, useTheme } from '@veo/ui-kit';
+import { hexAlpha, useReducedMotion, useTheme } from '@veo/ui-kit';
 import React, { useEffect } from 'react';
 import { type ViewStyle } from 'react-native';
 import Animated, {
@@ -98,18 +98,4 @@ export function RouteMotif({
       </Svg>
     </Animated.View>
   );
-}
-
-/**
- * Aplica alpha a un color hex de 6 dígitos (#RRGGBB → #RRGGBBAA). Si no es hex de 6 dígitos
- * (rgba/transparent), lo devuelve igual. Local para no acoplar el motivo a un feature.
- */
-function hexAlpha(color: string, alpha: number): string {
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
-    return color;
-  }
-  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
-    .toString(16)
-    .padStart(2, '0');
-  return `${color}${a}`.toUpperCase();
 }

@@ -35,7 +35,8 @@ async function bootstrap(): Promise<void> {
     credentials: true,
   });
 
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('public-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('public-bff'));
   // /api/v1 para la API; health y metrics quedan fuera del prefijo.

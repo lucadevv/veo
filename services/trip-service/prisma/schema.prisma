@@ -265,6 +265,90 @@ model PricingModeSchedule {
   @@schema("trip")
 }
 
+/// Overlay del catálogo de ofertas (ADR 013 §1.2 · puerta de escape · Fase B/B1). SINGLETON: una sola
+/// fila de config que el admin edita EN CALIENTE. El catálogo BASE (ids, clase de vehículo, pricing) vive
+/// en código (@veo/shared-types `OFFERINGS`, inmutable: cambiar un id rompe el contrato, una clase nueva
+/// exige certificar vehículos); esta fila guarda solo el OVERLAY configurable: por ahora `enabled` por
+/// oferta (B2 sumará modo/precio). Reemplazo WHOLESALE en el PUT del admin (se sobrescribe `overrides`
+/// entero, se bumpea `version`). Lo OWNE trip-service (co-locado con el pricing schedule: createTrip
+/// resuelve la oferta acá sin un hop de red). Sin fila → todas las ofertas habilitadas (degradación
+/// honesta = comportamiento actual). `overrides` es un array JSON de { id, enabled }; un id que ya no
+/// existe en código se IGNORA al resolver el catálogo efectivo.
+model OfferingCatalog {
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  id        String   @id
+  /// Overrides por oferta { id, enabled } (B1). Default [] = todas habilitadas.
+  overrides Json     @default("[]")
+  /// Versión MONOTÓNICA (se bumpea en cada PUT; viaja en catalog.updated por outbox).
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("offering_catalog")
+  @@schema("trip")
+}
+
+/// Recargo de combustible GLOBAL por km (B3). SINGLETON editable EN CALIENTE por el admin: el combustible
+/// cambia seguido y el admin lo ajusta SIN deploy. El motor de tarifa (domain/fare.ts) lo recibe como
+/// parámetro y lo pliega al costo POR KM. Sin fila → 0 (degradación honesta: sin recargo). Reemplazo del
+/// valor en el PUT del admin (bump `version`, emite fuel.surcharge_updated por outbox). Tier 1 GLOBAL
+/// (un solo valor; Tier 2 per-zona = no-breaking).
+model FuelSurchargeConfig {
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  id                  String   @id
+  /// B4 · precio del combustible por litro en céntimos PEN (lo que el admin ve en el grifo). Default 0.
+  fuelPricePerLiterCents Int   @default(0) @map("fuel_price_per_liter_cents")
+  /// B4 · rendimiento del vehículo de referencia en km por litro. El recargo/km = precio ÷ rendimiento.
+  /// Default 0 = sin recargo (degradación honesta: rendimiento 0 → no se divide). El multiplier de la
+  /// oferta escala el per-km derivado por clase (moto < auto < XL).
+  kmPerLiter          Int      @default(0) @map("km_per_liter")
+  /// Versión MONOTÓNICA (se bumpea en cada PUT; viaja en fuel.surcharge_updated por outbox).
+  version             Int      @default(0)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("fuel_surcharge_config")
+  @@schema("trip")
+}
+
+/// B5 · Catálogo de precios de energía por fuente, editable en caliente (singleton + version + CAS +
+/// outbox + cache, espejo de offering_catalog). `sources` = array JSON { sourceId, unit, pricePerUnitCents }.
+/// El costo de energía por km se deriva = precio_por_unidad ÷ rendimiento (km por unidad), unificando
+/// líquido (S/litro) y eléctrico (S/kWh). B5-0: se siembra (GASOLINE_95 = precio global actual) pero aún
+/// NO se cablea a la tarifa (eso es B5-1 con shadow-compare).
+model EnergyCatalog {
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  id        String   @id
+  /// Precios por fuente { sourceId, unit, pricePerUnitCents } (B5). Default [] = sin precios cargados.
+  sources   Json     @default("[]")
+  /// Versión MONOTÓNICA (CAS; se bumpea en cada PUT; viaja en energy.catalog_updated por outbox).
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("energy_catalog")
+  @@schema("trip")
+}
+
+/// Piso de la PUJA (bid floor) editable en caliente, keyed por (zona, oferta) — ADR 010 §9.3. SINGLETON
+/// (Tier 1 GLOBAL) + version + outbox + cache, espejo de fuel_surcharge_config/energy_catalog. Reemplaza el
+/// escalar global hardcodeado en env (BID_FLOOR_CENTS) por config que el admin maneja sin deploy. Sin fila →
+/// DEFAULT_BID_FLOOR_CONFIG (piso S/7, sin overrides) = comportamiento previo (degradación honesta). El gate
+/// AUTORITATIVO de la puja (createTrip/rebid) y el piso de DISPLAY del quote resuelven con resolveBidFloorCents
+/// (@veo/shared-types). `overrides` = array JSON { zone, offeringId, floorCents }; un id de oferta que ya no
+/// existe en código se IGNORA al resolver. Per-oferta funciona hoy; per-zona es no-breaking (la firma ya lleva zona).
+model BidFloorConfig {
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  id                String   @id
+  /// Piso por defecto en céntimos PEN cuando no hay override para la (zona, oferta). Default 700 (S/7).
+  defaultFloorCents Int      @default(700) @map("default_floor_cents")
+  /// Overrides del piso por (zona, oferta) { zone, offeringId, floorCents }. Default [] = solo el default.
+  overrides         Json     @default("[]")
+  /// Versión MONOTÓNICA (CAS; se bumpea en cada PUT; viaja en pricing.bid_floor_updated por outbox).
+  version           Int      @default(0)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("bid_floor_config")
+  @@schema("trip")
+}
+
 /// Estado de una PROPUESTA de parada mid-trip negociada (Lote C1). Coincide con
 /// WaypointProposalStatus del dominio (trips/domain/waypoint-proposal.ts). Solo PROPOSED es vivo;
 /// el resto son terminales. El pasajero PROPONE durante IN_PROGRESS, el conductor acepta/rechaza, o

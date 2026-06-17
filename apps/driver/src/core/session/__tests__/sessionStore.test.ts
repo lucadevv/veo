@@ -13,7 +13,7 @@ function makeRegistrationDirty(): void {
     statusResolvedFromBackend: true,
     currentStep: 4,
     personal: {fullName: 'Carlos Quispe Mamani', dni: '70123456', birthdate: '15/08/1990'},
-    vehicle: {type: 'CAR', plate: 'ABC-123', brand: 'Honda', year: '2021', model: 'CB 190R'},
+    vehicle: {type: 'CAR', plate: 'ABC-123', year: '2021', modelSpecId: 'spec-1', brand: 'Honda', model: 'CB 190R'},
     documents: [{type: 'LICENSE', status: 'uploaded'}],
     faceCapture: {ref: 'face-ref-123', score: 0.99, capturedAt: '2026-05-30T10:00:00.000Z'},
   });

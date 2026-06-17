@@ -23,7 +23,7 @@ export class TokenIssuerService {
   ): Promise<AuthTokens> {
     const { sessionId, newJti } = await this.sessions.createSession(userId);
     const accessToken = await this.jwt.signAccessToken({ sub: userId, typ, roles: [], sid: sessionId });
-    const refreshToken = await this.jwt.signRefreshToken({ sub: userId, sid: sessionId, jti: newJti });
+    const refreshToken = await this.jwt.signRefreshToken({ sub: userId, sid: sessionId, jti: newJti, typ });
     return { accessToken, refreshToken, user };
   }
 }

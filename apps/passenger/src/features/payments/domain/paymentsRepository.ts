@@ -5,6 +5,7 @@ import {
   type DebtView,
   type MobileDigitalPaymentMethod,
   type PaymentView,
+  type UserCreditView,
 } from '@veo/api-client';
 
 /**
@@ -27,6 +28,11 @@ export interface PaymentsRepository {
    * y lista las deudas (más antigua → más nueva) para la franja del home y el sheet de deuda.
    */
   getMyDebts(): Promise<DebtView>;
+  /**
+   * GET /payments/credit → saldo de crédito GASTABLE del pasajero (redención de referidos · Ola 2A). El
+   * cobro lo aplica solo; esto es para MOSTRAR el saldo. El BFF usa el userId del JWT (anti-IDOR).
+   */
+  getUserCredit(): Promise<UserCreditView>;
   /**
    * POST /payments/:id/retry-charge → re-cobra un cobro en DEBT (saldar deuda, BR-P02). Devuelve el
    * `PaymentView`: CAPTURED si saldó directo, o PENDING con checkout (ProntoPaga) si requiere completar

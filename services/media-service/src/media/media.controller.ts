@@ -11,8 +11,15 @@ import {
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { RecordingService } from './recording.service';
-import { AccessService } from './access.service';
-import { CreateAccessRequestDto, IssueRoomTokenDto, ListSegmentsQueryDto } from './dto/media.dto';
+import { AccessService, type StreamResult } from './access.service';
+import {
+  CreateAccessRequestDto,
+  IssueRoomTokenDto,
+  ListAccessRequestsQueryDto,
+  ListSegmentsQueryDto,
+  RejectAccessRequestDto,
+} from './dto/media.dto';
+import type { VideoAccessRequest, VideoAccessStatus } from '../generated/prisma';
 
 interface SegmentView {
   id: string;
@@ -85,23 +92,67 @@ export class MediaController {
     });
   }
 
-  /** BR-S02 (paso 2): COMPLIANCE_SUPERVISOR con MFA fresca aprueba → URL firmada (5 min) + watermark. */
+  /**
+   * BR-S02 (paso 2a): COMPLIANCE_SUPERVISOR con MFA fresca APRUEBA la solicitud (solo transición de
+   * estado PENDING → APPROVED, auditada). NO devuelve URL: la firma ocurre en GET access/:id/stream.
+   */
   @UseGuards(InternalIdentityGuard, RolesGuard, StepUpMfaGuard)
-  @Roles(AdminRole.COMPLIANCE_SUPERVISOR)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @RequireStepUpMfa()
   @Post('access/:id/approve')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Aprobar acceso a video (COMPLIANCE + MFA) → signed URL + watermark (BR-S02)' })
+  @ApiOperation({ summary: 'Aprobar solicitud de acceso a video (COMPLIANCE + MFA, solo estado) (BR-S02)' })
   approve(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<{ requestId: string; signedUrl: string; watermark: string; expiresAt: Date; segmentId: string }> {
+  ): Promise<VideoAccessRequest> {
     return this.access.approveAccess(id, user.userId);
+  }
+
+  /**
+   * BR-S02 (paso 2b): COMPLIANCE_SUPERVISOR con MFA fresca RECHAZA la solicitud (PENDING → REJECTED,
+   * auditada). Cierra la solicitud sin otorgar acceso.
+   */
+  // Rechazar NO exige step-up: deniega acceso (dirección segura) y el cliente lo hace con confirm simple.
+  // Sí gateado por rol (defensa en profundidad). Aprobar/reproducir SÍ exigen MFA fresca.
+  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('access/:id/reject')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Rechazar solicitud de acceso a video (COMPLIANCE/ADMIN, rol) (BR-S02)' })
+  reject(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() _dto: RejectAccessRequestDto,
+  ): Promise<VideoAccessRequest> {
+    return this.access.rejectAccess(id, user.userId);
+  }
+
+  /**
+   * BR-S02 (paso 3): VISUALIZACIÓN. Solo si la solicitud está APPROVED → URL firmada (5 min) +
+   * watermark fresco. Cada vista se audita (cadena de custodia). COMPLIANCE + MFA fresca.
+   */
+  @UseGuards(InternalIdentityGuard, RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @Get('access/:id/stream')
+  @ApiOperation({ summary: 'Visualizar video aprobado → signed URL (5 min) + watermark (BR-S02)' })
+  stream(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser): Promise<StreamResult> {
+    return this.access.streamAccess(id, user.userId);
+  }
+
+  /** BR-S02: lista las solicitudes de acceso, opcionalmente filtradas por estado. */
+  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('access')
+  @ApiOperation({ summary: 'Listar solicitudes de acceso a video (filtro opcional por estado) (BR-S02)' })
+  listAccessRequests(@Query() query: ListAccessRequestsQueryDto): Promise<VideoAccessRequest[]> {
+    return this.access.listAccessRequests({ status: query.status as VideoAccessStatus | undefined });
   }
 
   /** Lista los metadatos de los segmentos de un viaje (solo cumplimiento; nunca URLs). */
   @UseGuards(InternalIdentityGuard, RolesGuard)
-  @Roles(AdminRole.COMPLIANCE_SUPERVISOR)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('segments')
   @ApiOperation({ summary: 'Listar segmentos de video de un viaje (metadatos) (BR-S02)' })
   async listSegments(@Query() query: ListSegmentsQueryDto): Promise<SegmentView[]> {

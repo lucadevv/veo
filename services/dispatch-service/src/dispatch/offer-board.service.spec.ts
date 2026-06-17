@@ -211,8 +211,19 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
     }
     return out;
   }
-  /** Helper de test: simula el residual hard-crash — board CLOSED_MATCHED sin marca, en el matched-zset. */
-  __crashedMatch(tripId: string, driverId: string, claimedAtMs = 0): void {
+  /**
+   * Sink de la fila DispatchMatch persistida (lo provee el test desde la OutboxSpy). El crash real deja
+   * el board CLOSED_MATCHED en Redis Y la fila ACCEPTED ya COMMITEADA en Postgres (Finding #11: el
+   * reconciliador lee el precio de ahí). __crashedMatch siembra AMBOS lados para reproducir el residual fiel.
+   */
+  persistMatch?: (tripId: string, driverId: string, agreedPriceCents: number | null) => void;
+  /**
+   * Helper de test: simula el residual hard-crash — board CLOSED_MATCHED sin marca, en el matched-zset.
+   * `agreedPriceCents` (default 700, el bid de openBoard) siembra TAMBIÉN la fila ACCEPTED persistida que
+   * el reconciliador necesita para recuperar el precio (sin fabricarlo). Pasar `null` simula el caso #11
+   * donde NO hay precio recuperable (o no pasar el sink → no se siembra fila).
+   */
+  __crashedMatch(tripId: string, driverId: string, claimedAtMs = 0, agreedPriceCents: number | null = 700): void {
     const b = this.boards.get(tripId);
     if (!b) return;
     b.status = 'CLOSED_MATCHED';
@@ -221,6 +232,7 @@ class InMemoryOfferBoardStore implements OfferBoardStore {
     this.expiryZset.delete(tripId);
     this.matchedZset.set(tripId, claimedAtMs);
     this.cellRem(b.originCell, tripId);
+    if (agreedPriceCents !== null) this.persistMatch?.(tripId, driverId, agreedPriceCents);
   }
   async expireIfOpen(tripId: string, nowMs: number): Promise<ExpireResult> {
     const b = this.boards.get(tripId);
@@ -267,32 +279,86 @@ interface CapturedEvent {
   dedupKey: string;
 }
 
+/** Fila DispatchMatch persistida (subconjunto que el reconciliador lee: tripId, driverId, outcome, precio). */
+interface PersistedMatch {
+  tripId: string;
+  driverId: string;
+  outcome: string;
+  agreedPriceCents: number | null;
+}
+
+/**
+ * Error con la SHAPE de Prisma.PrismaClientKnownRequestError que el service detecta (instanceof + .code).
+ * El service usa `err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'`. Para que el
+ * instanceof matchee sin acoplar el test al runtime de Prisma, construimos la clase REAL via prototype.
+ */
+async function makeP2002(): Promise<Error> {
+  const { Prisma } = await import('../generated/prisma');
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'test',
+  });
+}
+
 class OutboxSpy {
   readonly events: CapturedEvent[] = [];
+  /** Filas DispatchMatch persistidas en la tx (Finding #11: fuente de verdad del precio acordado). */
+  readonly matches: PersistedMatch[] = [];
+  /** Finding #4a — dedupKeys ya vistas: un re-insert de la MISMA clave lanza P2002 (swallow path). */
+  private readonly seenDedupKeys = new Set<string>();
   /** Si está activo, la PRÓXIMA tx de outbox LANZA (simula un fallo de Postgres) y se auto-desactiva. */
   failNextTx = false;
-  get prisma(): { write: { $transaction: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> } } {
+  /** Helper de test: siembra una fila ACCEPTED persistida (lo que acceptOffer haría en la tx real). */
+  seedMatch(tripId: string, driverId: string, agreedPriceCents: number | null): void {
+    this.matches.push({ tripId, driverId, outcome: 'ACCEPTED', agreedPriceCents });
+  }
+  get prisma(): {
+    write: { $transaction: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
+    read: { dispatchMatch: { findMany: (args: unknown) => Promise<PersistedMatch[]> } };
+  } {
+    let p2002: Error | null = null;
     const tx = {
       outboxEvent: {
         create: async ({
           data,
         }: {
-          data: { eventType: string; aggregateId: string; envelope: { payload: unknown; dedupKey: string } };
+          data: {
+            eventType: string;
+            aggregateId: string;
+            dedupKey?: string;
+            envelope: { payload: unknown; dedupKey: string };
+          };
         }) => {
+          // Finding #4a — la columna dedupKey y la del envelope deben COINCIDIR (mismo origen estable).
+          const key = data.dedupKey ?? data.envelope.dedupKey;
+          if (key != null) {
+            if (this.seenDedupKeys.has(key)) {
+              // Re-insert de la MISMA clave estable → P2002 (ejercita el swallow idempotente del service).
+              p2002 ??= await makeP2002();
+              throw p2002;
+            }
+            this.seenDedupKeys.add(key);
+          }
           this.events.push({
             eventType: data.eventType,
             aggregateId: data.aggregateId,
             payload: data.envelope.payload,
-            dedupKey: data.envelope.dedupKey,
+            dedupKey: data.dedupKey ?? data.envelope.dedupKey,
           });
         },
       },
-      // acceptOffer persiste el RECORD de asignación (DispatchMatch) en la MISMA tx que el outbox. El spy
-      // solo capturaba outboxEvent; sin este stub, acceptOffer/reconcile lanzaban "Cannot read 'create'"
-      // (los 15 reds pre-existentes). No-op: el test verifica el match por los eventos del outbox, no por
-      // este row (mismo patrón aplicado en trips.service.spec para el mock de la tx).
+      // acceptOffer persiste el RECORD de asignación (DispatchMatch) en la MISMA tx que el outbox, con su
+      // agreedPriceCents (Finding #11). Lo registramos para que el reconciliador pueda leerlo via read.
       dispatchMatch: {
-        create: async () => undefined,
+        create: async ({ data }: { data: PersistedMatch }) => {
+          this.matches.push({
+            tripId: data.tripId,
+            driverId: data.driverId,
+            outcome: data.outcome,
+            agreedPriceCents: data.agreedPriceCents ?? null,
+          });
+          return undefined;
+        },
       },
     };
     return {
@@ -300,16 +366,42 @@ class OutboxSpy {
         $transaction: async (fn) => {
           if (this.failNextTx) {
             this.failNextTx = false;
-            // Emula el rollback de Postgres: la tx falla → NINGÚN evento queda encolado.
-            const before = this.events.length;
+            // Emula el rollback de Postgres: la tx falla → NINGÚN evento/match queda encolado.
+            const eventsBefore = this.events.length;
+            const matchesBefore = this.matches.length;
+            const keysBefore = new Set(this.seenDedupKeys);
             try {
               await fn(tx);
             } finally {
-              this.events.length = before; // descarta lo "escrito" en la tx abortada
+              this.events.length = eventsBefore; // descarta lo "escrito" en la tx abortada
+              this.matches.length = matchesBefore;
+              this.seenDedupKeys.clear();
+              for (const k of keysBefore) this.seenDedupKeys.add(k);
             }
             throw new Error('simulated outbox tx failure');
           }
           return fn(tx);
+        },
+      },
+      // Finding #11 + Finding #1 (N+1) — el reconciliador lee el precio acordado de las filas DispatchMatch
+      // ACCEPTED persistidas. Ahora en UN solo `findMany` (batch) por los (tripId,driverId) pendientes en vez
+      // de un `findFirst` por board. El where trae `outcome` + `OR:[{tripId,driverId},...]`; devolvemos TODAS
+      // las filas ACCEPTED que matchean alguno de esos pares (mismo subconjunto que antes resolvía N findFirst).
+      read: {
+        dispatchMatch: {
+          findMany: async (args: unknown) => {
+            const where = (
+              args as {
+                where: { outcome: string; OR?: { tripId: string; driverId: string }[] };
+              }
+            ).where;
+            const pairs = where.OR ?? [];
+            return this.matches.filter(
+              (m) =>
+                m.outcome === where.outcome &&
+                pairs.some((p) => p.tripId === m.tripId && p.driverId === m.driverId),
+            );
+          },
         },
       },
     };
@@ -408,6 +500,9 @@ async function ctx(eligible = true): Promise<Ctx> {
   const delivery = new CollectingDelivery();
   const gate = new FakeGate(eligible);
   const maps = new FakeMaps();
+  // Wire del sink de matches persistidos: __crashedMatch siembra la fila ACCEPTED en la OutboxSpy (el
+  // crash real deja la fila committeada en Postgres) para que el reconciliador recupere el precio (Finding #11).
+  store.persistMatch = (tripId, driverId, price) => outbox.seedMatch(tripId, driverId, price);
   const svc = makeService({ store, hotIndex, exclusion, outbox, delivery, gate, maps });
   return { svc, store, hotIndex, outbox, delivery, gate, maps };
 }
@@ -951,7 +1046,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect((await c.svc.listOpenBidsNear('d1')).map((b) => b.tripId)).toEqual([tripId]);
   });
 
-  it('no_offers usa dedupKey ESTABLE por ventana: re-emit del MISMO vencimiento → misma clave', async () => {
+  it('no_offers usa dedupKey ESTABLE por ventana: re-emit del MISMO vencimiento → idempotencia DEL PRODUCTOR (#4a)', async () => {
     const c = await ctx();
     const tripId = await openBoard(c, 1, 700);
     const board = await c.store.getBoard(tripId);
@@ -962,12 +1057,13 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(first).toHaveLength(1);
     expect(first[0]?.dedupKey).toBe(`no_offers:${tripId}:${expiresAt}`);
 
-    // Re-emitir el MISMO board/ventana (simula redelivery / re-corrida del barrido del mismo expiry):
-    // como la dedupKey ya NO lleva uuid, vuelve a salir idéntica → downstream dedupea.
+    // Re-emitir el MISMO board/ventana (redelivery / re-corrida del barrido del mismo expiry): la dedupKey
+    // estable ya está en la columna UNIQUE → el re-insert lanza P2002 y el productor lo TRAGA como no-op
+    // (Finding #4a). Antes downstream dedupeaba una segunda fila; ahora el productor ya NO la apila.
     await c.svc['expire'](tripId, 'window_expired', String(expiresAt));
     const second = c.outbox.byType('dispatch.no_offers');
-    expect(second).toHaveLength(2);
-    expect(second[1]?.dedupKey).toBe(first[0]?.dedupKey);
+    expect(second).toHaveLength(1); // sigue en UNA: la idempotencia del productor suprimió el re-insert
+    expect(second[0]?.dedupKey).toBe(first[0]?.dedupKey);
   });
 
   it('no_offers de un board REABIERTO usa dedupKey DISTINTA (ventana nueva → no se suprime)', async () => {
@@ -1544,5 +1640,67 @@ describe('OfferBoardService — N5: revert compensatorio + reconciliador del mat
     await c.svc.reconcileUnemittedMatches();
     const match = c.outbox.byType('dispatch.match_found');
     expect(match[0]?.dedupKey).toBe(`match_found:${tripId}:d1`);
+  });
+
+  // ── Finding #4a — la dedupKey estable evita apilar eventos en reconcile/retry ──────────────────
+  it('#4a: re-correr el reconciliador (misma dedupKey) NO apila un segundo match_found (P2002 swallow)', async () => {
+    const c = await ctx();
+    const tripId = await openBoard(c, 60, 700);
+    await c.svc.submitOffer({ driverId: 'd1', tripId, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    // Crash: board CLOSED_MATCHED sin emitir + fila ACCEPTED persistida (price 700).
+    c.store.__crashedMatch(tripId, 'd1');
+
+    // Primera reconciliación: emite el par una vez.
+    const first = await c.svc.reconcileUnemittedMatches();
+    expect(first).toBe(1);
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1);
+    expect(c.outbox.byType('dispatch.match_found')[0]?.dedupKey).toBe(`match_found:${tripId}:d1`);
+
+    // Simulamos que el board volvió a quedar "no emitido" (p.ej. la marca matchEmitted se perdió tras un
+    // segundo crash) → el reconciliador re-corre con la MISMA dedupKey ya insertada. El re-insert lanza
+    // P2002 y el service lo TRAGA como ya-hecho: NO se apila un segundo match_found.
+    c.store.__crashedMatch(tripId, 'd1');
+    const second = await c.svc.reconcileUnemittedMatches();
+    expect(second).toBe(1); // contó el board como reconciliado (idempotente), no falló
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1); // SIGUE en UNO (no apiló)
+    expect(c.outbox.byType('dispatch.offer_accepted')).toHaveLength(1);
+  });
+
+  // ── Finding #11 — el reconciliador NUNCA fabrica un precio ─────────────────────────────────────
+  it('#11: reconcile SIN precio persistido (y oferta efímera ausente) NO emite un precio fabricado', async () => {
+    const c = await ctx();
+    const tripId = await openBoard(c, 60, 700);
+    // Crash SIN fila ACCEPTED persistida (agreedPriceCents recuperable=null) Y sin oferta en Redis
+    // (getOffer = null): el bug previo caía a board.bidCents (700) — ahora debe SALTAR sin fabricar precio.
+    c.store.__crashedMatch(tripId, 'd1', 0, null);
+    // No hay oferta efímera (nunca se hizo submitOffer): getOffer → null.
+    expect(await c.store.getOffer(tripId, 'd1')).toBeNull();
+
+    const reemitted = await c.svc.reconcileUnemittedMatches();
+
+    // CERO eventos: no fabricó offer_accepted ni match_found con el bid del board.
+    expect(reemitted).toBe(0);
+    expect(c.outbox.byType('dispatch.offer_accepted')).toHaveLength(0);
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(0);
+    // NO marcó matchEmitted → un run posterior (cuando los datos sean consistentes) puede reintentar.
+    expect((await c.store.getBoard(tripId))?.matchEmitted).not.toBe(true);
+  });
+
+  it('#11: reconcile USA el precio DURABLE de DispatchMatch (no el bid del board efímero)', async () => {
+    const c = await ctx();
+    // board.bidCents = 700, PERO el precio acordado persistido fue 900 (un COUNTER aceptado).
+    const tripId = await openBoard(c, 60, 700);
+    // Crash con fila ACCEPTED persistida a 900 (lo que acordó el conductor) y SIN oferta efímera en Redis.
+    c.store.__crashedMatch(tripId, 'd1', 0, 900);
+    expect(await c.store.getOffer(tripId, 'd1')).toBeNull(); // la oferta efímera se evaporó
+
+    const reemitted = await c.svc.reconcileUnemittedMatches();
+
+    expect(reemitted).toBe(1);
+    // El precio sale de la BD (900), NO del bid efímero del board (700) → la BD es la fuente de verdad.
+    expect(
+      (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { priceCents: number }).priceCents,
+    ).toBe(900);
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1);
   });
 });

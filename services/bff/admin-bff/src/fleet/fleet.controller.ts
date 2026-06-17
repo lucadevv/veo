@@ -9,6 +9,7 @@ import type {
   ExpiringDocumentView,
   FleetDocumentView,
   InspectionView,
+  VehicleModelReviewView,
   VehicleView,
 } from '@veo/api-client';
 import { FleetService } from './fleet.service';
@@ -20,6 +21,8 @@ import {
   ListVehiclesQueryDto,
   ListDocumentsQueryDto,
   ListInspectionsQueryDto,
+  ListModelReviewQueryDto,
+  ApproveVehicleModelDto,
   ExpirationsQueryDto,
 } from './dto/fleet.dto';
 
@@ -109,5 +112,37 @@ export class FleetController {
     @Query() query: ListInspectionsQueryDto,
   ): Promise<Page<InspectionView>> {
     return this.fleet.listInspections(user, query);
+  }
+
+  // ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ──
+
+  @Get('vehicle-models/review')
+  @ApiOperation({ summary: 'Cola de revisión de modelos solicitados (default PENDING_REVIEW)' })
+  listModelReview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListModelReviewQueryDto,
+  ): Promise<Page<VehicleModelReviewView>> {
+    return this.fleet.listModelReview(user, query);
+  }
+
+  @Post('vehicle-models/:id/approve')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Aprueba una solicitud de modelo completando la ficha técnica (PENDING→APPROVED)' })
+  approveModel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ApproveVehicleModelDto,
+  ): Promise<VehicleModelReviewView> {
+    return this.fleet.approveModel(user, id, dto);
+  }
+
+  @Post('vehicle-models/:id/reject')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Rechaza una solicitud de modelo (PENDING→REJECTED)' })
+  rejectModel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<VehicleModelReviewView> {
+    return this.fleet.rejectModel(user, id);
   }
 }

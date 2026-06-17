@@ -10,6 +10,7 @@ const SELECTION = {
   dataProcessing: true,
   inCabinCamera: true,
   location: false,
+  marketing: false,
 } as const;
 
 function recorded(input: RecordConsentRequest): ConsentRecorded {
@@ -24,14 +25,11 @@ function recorded(input: RecordConsentRequest): ConsentRecorded {
   };
 }
 
-/** `delayMs` instantáneo: evita esperar el backoff real en los tests. */
-const noWait = (): Promise<void> => Promise.resolve();
-
 describe('RecordConsentUseCase', () => {
-  it('registra el consentimiento sellando la policyVersion constante', async () => {
+  it('registra el consentimiento sellando la policyVersion constante (UN solo POST)', async () => {
     const record = jest.fn(async (input: RecordConsentRequest) => recorded(input));
     const repository: ConsentRepository = { record };
-    const useCase = new RecordConsentUseCase(repository, noWait);
+    const useCase = new RecordConsentUseCase(repository);
 
     const result = await useCase.execute(SELECTION);
 
@@ -40,38 +38,21 @@ describe('RecordConsentUseCase', () => {
       dataProcessing: true,
       inCabinCamera: true,
       location: false,
+      marketing: false,
       policyVersion: CONSENT_POLICY_VERSION,
     });
     expect(result?.id).toBe('consent-1');
   });
 
-  it('reintenta una vez tras un fallo transitorio y devuelve el row del segundo intento', async () => {
-    const record = jest
-      .fn<Promise<ConsentRecorded>, [RecordConsentRequest]>()
-      .mockRejectedValueOnce(new Error('network'))
-      .mockImplementationOnce(async (input) => recorded(input));
-    const repository: ConsentRepository = { record };
-    const delayMs = jest.fn(noWait);
-    const useCase = new RecordConsentUseCase(repository, delayMs);
-
-    const result = await useCase.execute(SELECTION);
-
-    expect(record).toHaveBeenCalledTimes(2);
-    expect(delayMs).toHaveBeenCalledTimes(1);
-    expect(result?.id).toBe('consent-1');
-  });
-
-  it('degrada a null (BEST-EFFORT, no bloquea) si falla incluso tras el reintento', async () => {
+  it('propaga el error del repositorio (la durabilidad vive en SyncPendingConsentUseCase)', async () => {
     const record = jest.fn(async () => {
       throw new Error('500');
     });
     const repository: ConsentRepository = { record };
-    const useCase = new RecordConsentUseCase(repository, noWait);
+    const useCase = new RecordConsentUseCase(repository);
 
-    const result = await useCase.execute(SELECTION);
-
-    expect(record).toHaveBeenCalledTimes(2);
-    expect(result).toBeNull();
+    await expect(useCase.execute(SELECTION)).rejects.toThrow(/500/);
+    expect(record).toHaveBeenCalledTimes(1);
   });
 });
 

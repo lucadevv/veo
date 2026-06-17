@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -58,15 +59,22 @@ func (c *LifecycleConsumer) run(ctx context.Context) {
 		slog.String("topic", c.reader.Config().Topic),
 		slog.String("group", c.reader.Config().GroupID),
 	)
+	var backoff time.Duration
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, kafka.ErrGroupClosed) {
 				return
 			}
-			c.log.Warn("kafka: error leyendo mensaje", slog.Any("err", err))
+			backoff = nextReadBackoff(backoff)
+			c.log.Warn("kafka: error leyendo mensaje; reintento con backoff",
+				slog.Any("err", err), slog.Duration("backoff", backoff))
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
 			continue
 		}
+		backoff = 0 // fetch exitoso: resetea el backoff
 		if err := c.handle(ctx, msg.Value); err != nil {
 			c.log.Error("kafka: fallo procesando evento de viaje; sin commit, se reintentará", slog.Any("err", err))
 			continue

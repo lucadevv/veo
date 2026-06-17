@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { NotificationChannel } from '@veo/shared-types';
 import { NotificationEngine } from './notification.engine';
+import {
+  notificationFailedTotal,
+  NotificationFailureKind,
+  type NotificationFailedLabels,
+} from '../metrics/notification.metrics';
 import { NotificationPriority } from './types';
 import { RetryPolicy } from './retry.policy';
 import type {
@@ -243,6 +248,39 @@ describe('NotificationEngine · retry/backoff', () => {
     if (r2.status === 'FAILED') expect(r2.attempts).toBe(2);
     expect(store.records.get(notification.id)?.status).toBe('FAILED');
     expect(store.records.get(notification.id)?.failedReason).toContain('fallo simulado');
+  });
+
+  it('bumpea notification_failed_total al agotar reintentos (fallo VISIBLE, no silencioso)', async () => {
+    // El counter es un singleton global del proceso → medimos DELTA para esta combinación de labels,
+    // no el valor absoluto (otros tests también agotan y acumulan).
+    const labels: NotificationFailedLabels = {
+      channel: NotificationChannel.SMS,
+      kind: NotificationFailureKind.RetryExhausted,
+      priority: 'normal',
+    };
+    const failedCount = async (): Promise<number> => {
+      const snapshot = await notificationFailedTotal.get();
+      const series = snapshot.values.find(
+        (v) =>
+          v.labels.channel === labels.channel &&
+          v.labels.kind === labels.kind &&
+          v.labels.priority === labels.priority,
+      );
+      return series?.value ?? 0;
+    };
+
+    const before = await failedCount();
+    const { store, engine } = build(new FlakyDispatcher(99));
+    const { notification } = await engine.enqueue({
+      recipientId: 'u1',
+      channel: NotificationChannel.SMS,
+      template: 't',
+      payload: { to: '+51999' },
+      maxAttempts: 2,
+    });
+    await engine.process(notification); // 1º falla → RETRY
+    await engine.process(store.records.get(notification.id)!); // 2º agota → FAILED + bump
+    expect((await failedCount()) - before).toBe(1);
   });
 
   it('entrega al primer intento cuando el canal responde', async () => {

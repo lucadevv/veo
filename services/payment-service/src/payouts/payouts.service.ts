@@ -137,11 +137,21 @@ export class PayoutsService {
     let held = 0;
     let totalAmountCents = 0;
 
+    // Idempotencia SIN N+1: una sola query trae los drivers YA liquidados de este período (antes era un
+    // findUnique por driver DENTRO del loop → N queries). El guard DURO sigue intacto: el unique
+    // (driverId, periodStart, periodEnd) + la tx de creación + el lock distribuido del run (withDistributedLock)
+    // garantizan no-doble-pago aun con carrera; este SELECT solo evita re-trabajar lo ya hecho.
+    const alreadyPaidDriverIds = new Set(
+      (
+        await this.prisma.read.payout.findMany({
+          where: { periodStart: start, periodEnd: end, driverId: { in: aggregated.map((a) => a.driverId) } },
+          select: { driverId: true },
+        })
+      ).map((p) => p.driverId),
+    );
+
     for (const agg of aggregated) {
-      const existing = await this.prisma.read.payout.findUnique({
-        where: { driverId_periodStart_periodEnd: { driverId: agg.driverId, periodStart: start, periodEnd: end } },
-      });
-      if (existing) continue; // idempotencia: ya liquidado este período.
+      if (alreadyPaidDriverIds.has(agg.driverId)) continue; // idempotencia: ya liquidado este período.
 
       const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
       // Bonos pendientes que ESTE driver aporta a este Payout. Solo llegamos acá si agg superó el mínimo

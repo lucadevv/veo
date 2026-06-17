@@ -1,8 +1,10 @@
 import type { MobilePaymentMethod } from '@veo/api-client';
+import { affiliationStatus } from '@veo/api-client';
 import { Button, Card, SafeScreen, StatusPill, Text, useTheme } from '@veo/ui-kit';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, View } from 'react-native';
+import { ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
 import { EnterView } from '../components/motion';
 import { PaymentInstrumentRow } from '../components/PaymentInstrumentRow';
 import { YapeLinkSheet } from '../components/YapeLinkSheet';
@@ -29,15 +31,31 @@ export function PaymentMethodsScreen(): React.JSX.Element {
   const setDefault = usePaymentPrefsStore((s) => s.setDefault);
 
   const affiliationQuery = useYapeAffiliation();
-  const yapeStatus = (affiliationQuery.data?.status ?? 'NONE').toUpperCase();
-  const phoneMasked = affiliationQuery.data?.phoneMasked ?? null;
-  const isLinked = yapeStatus === 'ACTIVE';
-  const isProcess = yapeStatus === 'PROCESS';
 
   const [linkSheetOpen, setLinkSheetOpen] = useState(false);
   const [manageSheetOpen, setManageSheetOpen] = useState(false);
 
   const defaultPill = t('payments.defaultPill');
+
+  // ── 4 estados reales (degradación honesta) ──────────────────────────────────────────────────────
+  // El estado de la afiliación Yape decide la fila principal ("Vincular" vs "vinculado"). NO podemos
+  // pintarla hasta SABER el estado real: mientras carga → skeleton; si la consulta FALLÓ → error con
+  // reintento. JAMÁS interpretamos un error de red como "no afiliado" (eso mostraría "Vincular" como si
+  // el usuario hubiera perdido su Yape). El `status:'NONE'` legítimo solo llega en el caso SUCCESS.
+  if (affiliationQuery.isLoading) {
+    return <ScreenStateFallback loading loadingLines={5} />;
+  }
+
+  if (affiliationQuery.isError || !affiliationQuery.data) {
+    return <ScreenStateFallback errorMessage={t('payments.loadError')} onRetry={() => affiliationQuery.refetch()} />;
+  }
+
+  // SUCCESS: `data` está garantizado. `status` es el valor REAL del bff ('NONE' = genuinamente sin
+  // afiliar, NO un fallback ante error). Acá sí derivamos la presentación de la fila Yape.
+  const yapeStatus = affiliationQuery.data.status.toUpperCase();
+  const phoneMasked = affiliationQuery.data.phoneMasked ?? null;
+  const isLinked = yapeStatus === affiliationStatus.enum.ACTIVE;
+  const isProcess = yapeStatus === affiliationStatus.enum.PROCESS;
 
   // ── Fila Yape: línea + acción/estado según el status de la afiliación ───────────────────────────
   const yapeLine = isLinked

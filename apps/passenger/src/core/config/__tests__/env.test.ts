@@ -20,6 +20,27 @@ function setScriptURL(rn: typeof import('react-native'), scriptURL: unknown): vo
 }
 
 /**
+ * URL que devuelve el mock de `getDevServer()` (la fuente preferida de `metroDevHost`, soportada
+ * en new-arch). `null` ⇒ getDevServer "no disponible" (lanza) → `metroDevHost` cae a `scriptURL`,
+ * que es como se ejercita la arquitectura VIEJA. El prefijo `mock` lo exige el babel-plugin de jest
+ * para poder referenciarla dentro del factory de `jest.mock` (que se hoistea sobre los imports).
+ */
+let mockDevServerUrl: string | null = null;
+jest.mock(
+  'react-native/Libraries/Core/Devtools/getDevServer',
+  () => ({
+    __esModule: true,
+    default: () => {
+      if (mockDevServerUrl == null) {
+        throw new Error('getDevServer no disponible (test: arquitectura vieja)');
+      }
+      return { url: mockDevServerUrl, bundleLoadedFromServer: true };
+    },
+  }),
+  { virtual: true },
+);
+
+/**
  * Re-importa `env.ts` con un `scriptURL` y un `Config` controlados.
  * `isolateModules` aísla el registro de módulos por escenario para re-evaluar la
  * lógica top-level de `env.ts`. Bajo el preset CJS de jest el re-import dinámico es
@@ -34,11 +55,14 @@ function setScriptURL(rn: typeof import('react-native'), scriptURL: unknown): vo
  */
 function loadEnv(opts: {
   scriptURL?: unknown;
+  /** URL del packager vía getDevServer (new-arch). Omitido ⇒ getDevServer lanza → fallback a scriptURL. */
+  devServerUrl?: string | null;
   config?: Record<string, string | undefined>;
   dev?: boolean;
 }): EnvModule {
   const prevDev = devGlobal.__DEV__;
   devGlobal.__DEV__ = opts.dev ?? true;
+  mockDevServerUrl = opts.devServerUrl ?? null;
 
   // Instancia externa (registro restaurado tras el isolate): la lee `metroDevHost()` lazy.
   setScriptURL(require('react-native') as typeof import('react-native'), opts.scriptURL);
@@ -91,6 +115,33 @@ describe('metroDevHost', () => {
   });
 });
 
+describe('metroDevHost · new-arch (getDevServer, con scriptURL=null)', () => {
+  it('deriva el host de getDevServer cuando scriptURL es null (bridgeless)', () => {
+    // El caso REAL del bug: RCTNewArchEnabled=true → scriptURL null, pero getDevServer da el host.
+    const { metroDevHost } = loadEnv({
+      scriptURL: null,
+      devServerUrl: 'http://localhost:8081/',
+    });
+    expect(metroDevHost()).toBe('localhost');
+  });
+
+  it('device físico new-arch: getDevServer trae la IP de la Mac', () => {
+    const { metroDevHost } = loadEnv({
+      scriptURL: null,
+      devServerUrl: 'http://192.168.18.238:8081/',
+    });
+    expect(metroDevHost()).toBe('192.168.18.238');
+  });
+
+  it('getDevServer tiene PRECEDENCIA sobre scriptURL si ambos están', () => {
+    const { metroDevHost } = loadEnv({
+      scriptURL: 'http://192.168.18.227:8081/index.bundle',
+      devServerUrl: 'http://192.168.18.238:8081/',
+    });
+    expect(metroDevHost()).toBe('192.168.18.238');
+  });
+});
+
 describe('env · precedencia de resolución (dev)', () => {
   it('metro-derived: sin override, deriva las URLs del host de Metro', () => {
     const { env } = loadEnv({
@@ -128,5 +179,67 @@ describe('env · precedencia de resolución (dev)', () => {
     });
     expect(env.publicBffUrl).toBe('http://localhost:4001/api/v1');
     expect(env.publicBffWsUrl).toBe('http://localhost:4001');
+  });
+});
+
+describe('env · auto-sanado de IP LAN stale (dev)', () => {
+  it('override a IP LAN privada distinta del host VIVO de Metro → usa el host de Metro (el bug "sin conexión")', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // El .env quedó con una IP baked (192.168.18.227) pero el DHCP rotó la Mac a .238.
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: {
+        PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1',
+        PUBLIC_BFF_WS_URL: 'http://192.168.18.227:4001',
+        PUBLIC_MAP_STYLE_URL:
+          'http://192.168.18.227:8082/styles/veo-dark/style.json',
+      },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.238:4001/api/v1');
+    expect(env.publicBffWsUrl).toBe('http://192.168.18.238:4001');
+    expect(env.mapStyleUrl).toBe(
+      'http://192.168.18.238:8082/styles/veo-dark/style.json',
+    );
+    expect(warn).toHaveBeenCalled(); // avisa, no es magia silenciosa
+    warn.mockRestore();
+  });
+
+  it('override a IP LAN IGUAL al host de Metro → se respeta el override tal cual (no hay nada stale)', () => {
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:9999/custom/api' },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.227:9999/custom/api');
+  });
+
+  it('override NO-LAN (dominio staging) GANA aunque haya host de Metro: nunca se auto-sana', () => {
+    const { env } = loadEnv({
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1' },
+    });
+    expect(env.publicBffUrl).toBe('https://api.veo.pe/passenger/api/v1');
+  });
+
+  it('REGRESIÓN new-arch (el bug real): scriptURL=null + getDevServer localhost + .env IP stale → localhost', () => {
+    // Bridgeless (RCTNewArchEnabled): scriptURL es null, así que el auto-derive DEBE venir de
+    // getDevServer. Sin esto, metroHost=null → el self-heal no dispara → gana la .227 muerta.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { env } = loadEnv({
+      scriptURL: null,
+      devServerUrl: 'http://localhost:8081/',
+      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1' },
+    });
+    expect(env.publicBffUrl).toBe('http://localhost:4001/api/v1');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('release (!__DEV__): NUNCA se auto-sana — el override del .env manda siempre', () => {
+    const { env } = loadEnv({
+      dev: false,
+      scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
+      config: { PUBLIC_BFF_URL: 'http://192.168.18.227:4001/api/v1' },
+    });
+    expect(env.publicBffUrl).toBe('http://192.168.18.227:4001/api/v1');
   });
 });

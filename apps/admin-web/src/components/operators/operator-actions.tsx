@@ -9,6 +9,7 @@ import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 import {
   Dialog,
   DialogContent,
@@ -114,9 +115,24 @@ export function OperatorActions({ operator }: { operator: PendingOperator }) {
             <Button variant="secondary" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button variant="primary" onClick={() => void handleApprove()} disabled={pending || roles.size === 0}>
-              Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
-            </Button>
+            {pending || roles.size === 0 ? (
+              <Button variant="primary" disabled>
+                Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
+              </Button>
+            ) : (
+              <StepUpDialog
+                title="Aprobar operador y asignar roles"
+                description={`Aprobar a ${operator.email} con ${roles.size} ${
+                  roles.size === 1 ? 'rol' : 'roles'
+                } requiere verificación adicional. Esta acción queda auditada.`}
+                trigger={
+                  <Button variant="primary">
+                    Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
+                  </Button>
+                }
+                onVerified={handleApprove}
+              />
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

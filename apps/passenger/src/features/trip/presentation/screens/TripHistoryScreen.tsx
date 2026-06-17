@@ -65,7 +65,7 @@ export function TripHistoryScreen(): React.JSX.Element {
   );
 
   const goHome = useCallback(() => {
-    navigation.navigate('Main', { screen: 'Home' });
+    navigation.navigate('Home');
   }, [navigation]);
 
   const openTrip = useCallback(
@@ -75,7 +75,7 @@ export function TripHistoryScreen(): React.JSX.Element {
         // Adoptar el id hace que el sheet del Home rehidrate el viaje activo (mismo camino que el
         // banner cross-tab y `useHydrateActiveTrip`).
         setActiveTripId(trip.id);
-        navigation.navigate('Main', { screen: 'Home' });
+        navigation.navigate('Home');
         return;
       }
       // TERMINAL: abre el detalle en el sheet SOBRE la lista (no navega). El item completo es la semilla

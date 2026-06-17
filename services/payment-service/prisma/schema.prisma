@@ -131,9 +131,13 @@ model Payment {
   amountCents     Int           @map("amount_cents")
   grossCents      Int           @map("gross_cents")
   /// Descuento de promoción aplicado al pasajero (céntimos). 0 si no hubo promo (Ola 2A).
-  /// amountCents = grossCents − discountCents + tipCents. La comisión se calcula SOBRE grossCents
-  /// (la plataforma asume el costo de la promo); la propina queda intacta.
+  /// amountCents = grossCents − discountCents − creditCents + tipCents. La comisión se calcula SOBRE
+  /// grossCents (la plataforma asume el costo de promo + crédito); la propina queda intacta.
   discountCents   Int           @default(0) @map("discount_cents")
+  /// Crédito de referido GASTADO en este cobro (céntimos · Ola 2A · Lote B). Separado de discountCents
+  /// para reconciliación: promo = campaña de marketing, crédito = saldo ganado por el usuario (pasivos
+  /// distintos). Decrementa `UserCredit.balanceCents` en spendForCharge (idempotente por `credit:dedupKey`).
+  creditCents     Int           @default(0) @map("credit_cents")
   tipCents        Int           @default(0) @map("tip_cents")
   commissionCents Int           @map("commission_cents")
   feeCents        Int           @map("fee_cents")
@@ -476,5 +480,51 @@ model OutboxEvent {
 
   @@index([publishedAt, createdAt])
   @@map("outbox_events")
+  @@schema("payment")
+}
+
+/// Saldo de crédito GASTABLE de un usuario (céntimos PEN · Ola 2A · redención de referidos). Lo ALIMENTA el
+/// consumer de `referral.rewarded` (Lote A); lo GASTA el cobro del viaje (Lote B). payment-service es dueño
+/// de este saldo: identity guarda "ganado de por vida" (`User.referralRewardCents`, display), payment guarda
+/// lo "gastable" acá — así el descuento se aplica y DECREMENTA en la MISMA tx ACID del cobro (sin doble-gasto
+/// cross-service). Un registro por usuario; `balanceCents` nunca negativo (lo garantiza el gasto en Lote B).
+model UserCredit {
+  userId       String   @id @map("user_id") @db.Uuid
+  balanceCents Int      @default(0) @map("balance_cents")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  entries UserCreditEntry[]
+
+  @@map("user_credits")
+  @@schema("payment")
+}
+
+/// Movimiento del ledger de crédito (append-only · auditable · Ola 2A). `deltaCents` > 0 = acreditación
+/// (referral), < 0 = gasto (cobro · Lote B). `sourceRef` UNIQUE = la idempotencia financiera (§3 CLAUDE):
+/// un `referral.rewarded` re-entregado (mismo eventId) viola el UNIQUE → la tx aborta → NO re-acredita.
+/// `source` tipa el origen del movimiento (sin string mágico).
+model UserCreditEntry {
+  id         String       @id @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  credit     UserCredit   @relation(fields: [userId], references: [userId])
+  deltaCents Int          @map("delta_cents")
+  source     CreditSource
+  /// Clave de idempotencia del movimiento: eventId del `referral.rewarded` que lo originó. UNIQUE.
+  sourceRef  String       @unique @map("source_ref")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("user_credit_entries")
+  @@schema("payment")
+}
+
+/// Origen de un movimiento del ledger de crédito (Ola 2A).
+///  - REFERRAL:        acreditación (delta > 0) por `referral.rewarded`.
+///  - TRIP_REDEMPTION: gasto (delta < 0) al aplicarse el crédito en el cobro de un viaje (Lote B).
+enum CreditSource {
+  REFERRAL
+  TRIP_REDEMPTION
+
   @@schema("payment")
 }

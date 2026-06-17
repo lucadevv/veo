@@ -6,7 +6,7 @@
 import type { LatLon } from '@veo/utils';
 import { PricingMode, TripStatus } from '@veo/shared-types';
 import { emitTripRequested } from '../trip-events';
-import { applyOfferingPricing, calculateFare } from '../domain/fare';
+import { applyOfferingPricing, calculateFare, calculateOfferingFare } from '../domain/fare';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
   DispatchModeStrategy,
@@ -35,11 +35,28 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
    * negotiationSeq=0 (nunca emite offer_accepted).
    */
   resolveCreation(input: DispatchCreationInput): DispatchCreation {
+    // B5-1.d · FLIP: con el modelo de energía activo, la energía es PASS-THROUGH (no la escala el
+    // multiplier) y el multiplier solo posiciona el servicio. Fuente ÚNICA: calculateOfferingFare.
+    if (input.energyModelEnabled) {
+      const fare = calculateOfferingFare(
+        {
+          distanceMeters: input.route.distanceMeters,
+          durationSeconds: input.route.durationSeconds,
+          surgeMultiplier: input.surge,
+          childMode: input.childMode,
+        },
+        input.pricing,
+        input.energyPerKmCents ?? 0,
+      );
+      return { fareCents: fare.cents, negotiationSeq: 0 };
+    }
+    // Modelo VIEJO (default): el recargo de combustible se pliega al per-km y se escala con el multiplier.
     const base = calculateFare({
       distanceMeters: input.route.distanceMeters,
       durationSeconds: input.route.durationSeconds,
       surgeMultiplier: input.surge,
       childMode: input.childMode,
+      fuelPerKmCents: input.fuelPerKmCents, // B3 · recargo de combustible (admin), plegado al per-km
     });
     return { fareCents: applyOfferingPricing(base, input.pricing).cents, negotiationSeq: 0 };
   }

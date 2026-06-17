@@ -11,10 +11,13 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { TripStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
+import { CatalogService } from '../catalog/catalog.service';
 import { toTripView } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { assertTransition } from './domain/trip-state-machine';
+import { resolveTripOffering } from './domain/offering';
+import { bumpCatalogDegraded } from './trip-metrics';
 import type { Trip } from '../generated/prisma';
 import type { TripView } from './dto/trip.dto';
 import type { Env } from '../config/env.schema';
@@ -25,12 +28,17 @@ export class ScheduledTripService {
   /** Registry de estrategias por modo (open/closed). Self-default sin DI para tests legacy. */
   private readonly dispatchModes: DispatchModeRegistry;
 
+  /** Catálogo de ofertas (overlay admin, ADR 013 · Fase B). @Optional: tests legacy degradan honesto. */
+  private readonly catalog?: CatalogService;
+
   constructor(
     private readonly prisma: PrismaService,
     @Optional() config?: ConfigService<Env, true>,
     @Optional() dispatchModes?: DispatchModeRegistry,
+    @Optional() catalog?: CatalogService,
   ) {
     this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
+    this.catalog = catalog;
   }
 
   /**
@@ -42,6 +50,30 @@ export class ScheduledTripService {
     const trip = await this.prisma.read.trip.findUnique({ where: { id } });
     if (!trip) return;
     if (trip.status !== TripStatus.SCHEDULED) return; // ya activado/cancelado: idempotente
+
+    // ADR 013 · Fase B — si la oferta del viaje ya NO se puede concretar entre la reserva y la
+    // activación, el viaje se EXPIRA (terminal, sin cobro) y se notifica al pasajero. Dos causas, mismo
+    // desenlace: (a) DESHABILITADA por el admin en el overlay; (b) REMOVIDA del catálogo de código
+    // (release coordinado, Fase C) ⇒ resolveTripOffering lanza. Convención del repo
+    // (push-notification.registry): una terminación de SISTEMA usa trip.expired, NO trip.cancelled
+    // (by=SYSTEM → se cubre con expired/failed). La oferta se resuelve igual que en createTrip, no por
+    // el `category` crudo. Capturar el throw evita un poison-trip (el scheduler reintenta cada tick).
+    let offeringId: string;
+    try {
+      offeringId = resolveTripOffering(trip.category, trip.vehicleType).offering.id;
+    } catch (err) {
+      this.logger.warn(
+        `oferta del programado ${id} ya no existe en el catálogo de código ` +
+          `(${(err as Error).message}); se expira el viaje`,
+      );
+      await this.expireForDisabledOffering(trip, trip.category ?? 'unknown');
+      return;
+    }
+    if (!(await this.isOfferingEnabled(offeringId))) {
+      await this.expireForDisabledOffering(trip, offeringId);
+      return;
+    }
+
     assertTransition(trip.status, TripStatus.REQUESTED);
 
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
@@ -65,6 +97,58 @@ export class ScheduledTripService {
         .openDispatch(tx, activated, origin, destination, { scheduled: true });
     });
     this.logger.log(`Viaje programado ${id} activado → REQUESTED (modo ${trip.dispatchMode})`);
+  }
+
+  /**
+   * ¿La oferta sigue habilitada en el overlay admin? Degradación honesta: si el catálogo no está
+   * inyectado (tests legacy) o falla la lectura, devuelve `true` — NO abortamos un viaje YA reservado
+   * por una lectura de config caída (mismo criterio que el quote/create en TripsService).
+   */
+  private async isOfferingEnabled(offeringId: string): Promise<boolean> {
+    if (!this.catalog) return true;
+    try {
+      return await this.catalog.isEnabled(offeringId);
+    } catch (err) {
+      this.logger.warn(
+        `catálogo no disponible al activar oferta '${offeringId}' (${(err as Error).message}); ` +
+          `se permite la activación (degradación honesta)`,
+      );
+      bumpCatalogDegraded('activate');
+      return true;
+    }
+  }
+
+  /**
+   * EXPIRA un programado cuya oferta fue deshabilitada: SCHEDULED → EXPIRED (terminal, sin cobro) +
+   * trip.expired para que notification-service avise al pasajero. Mismo shape de payload que
+   * `TripsService.expireFromNoOffers` (un solo contrato de "viaje expirado"). Guard de carrera: solo
+   * expira si SIGUE SCHEDULED (otro tick pudo activarlo/cancelarlo).
+   */
+  private async expireForDisabledOffering(trip: Trip, offeringId: string): Promise<void> {
+    assertTransition(trip.status, TripStatus.EXPIRED);
+    const at = new Date();
+    await this.prisma.write.$transaction(async (tx) => {
+      const result = await tx.trip.updateMany({
+        where: { id: trip.id, status: TripStatus.SCHEDULED },
+        data: { status: TripStatus.EXPIRED },
+      });
+      if (result.count === 0) return; // otro tick ganó la carrera → no-op
+      const payload = {
+        tripId: trip.id,
+        passengerId: trip.passengerId,
+        fromStatus: trip.status,
+        driverId: trip.driverId ?? undefined,
+        staleMinutes: 0,
+        at: at.toISOString(),
+      };
+      await recordTripEvent(tx, trip.id, 'trip.expired', { ...payload, reason: 'offering_disabled', offeringId, scheduled: true });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({ eventType: 'trip.expired', producer: PRODUCER, payload }),
+        trip.id,
+      );
+    });
+    this.logger.warn(`Viaje programado ${trip.id} EXPIRADO: oferta '${offeringId}' deshabilitada por el admin`);
   }
 
   /**

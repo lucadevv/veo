@@ -72,6 +72,8 @@ export class UsersService {
   ): Promise<ConsentRecorded> {
     return this.identity.post<ConsentRecorded>('/users/consents', {
       identity: user,
+      // dedupKey → idempotencyKey del REST interno (espeja PanicService.trigger del BFF).
+      idempotencyKey: input.dedupKey,
       body: {
         dataProcessing: input.dataProcessing,
         inCabinCamera: input.inCabinCamera,
@@ -79,6 +81,7 @@ export class UsersService {
         marketing: input.marketing,
         policyVersion: input.policyVersion,
         ip,
+        dedupKey: input.dedupKey,
       },
     });
   }

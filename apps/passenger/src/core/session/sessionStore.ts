@@ -13,7 +13,24 @@ const KEYS = {
 export type SessionStatus =
   | 'unknown' // aún no se hidrató desde el almacenamiento
   | 'authenticated'
-  | 'unauthenticated';
+  | 'unauthenticated' // sin sesión: cold-start sin tokens o logout intencional del usuario
+  | 'expired'; // tenía sesión y el refresh JWT falló / venció → re-login forzado por seguridad
+
+/**
+ * MOTIVO del cierre de sesión. Modela la diferencia que el `RootNavigator` necesita rutear:
+ * un logout INTENCIONAL del usuario vuelve al flujo de ingreso normal (Auth), mientras que una
+ * sesión EXPIRADA (refresh fallido) muestra la pantalla dedicada `SessionExpired`. Tipado, no
+ * boolean suelto ni string mágico.
+ */
+export type LogoutReason =
+  | 'user-logout' // el usuario tocó "salir" (o re-login local fallido) → status 'unauthenticated'
+  | 'expired'; // el refresh JWT falló / la sesión venció → status 'expired'
+
+/** Mapea el motivo de cierre al estado de sesión resultante para el `RootNavigator`. */
+const STATUS_BY_LOGOUT_REASON: Record<LogoutReason, SessionStatus> = {
+  'user-logout': 'unauthenticated',
+  expired: 'expired',
+};
 
 export interface SessionState {
   accessToken: string | null;
@@ -31,8 +48,12 @@ export interface SessionState {
   }) => void;
   /** Actualiza sólo los tokens (tras un refresh). */
   setTokens: (accessToken: string, refreshToken: string) => void;
-  /** Cierra la sesión y limpia el almacenamiento seguro. */
-  clearSession: () => void;
+  /**
+   * Cierra la sesión y limpia el almacenamiento seguro. El `reason` decide el estado resultante:
+   * 'user-logout' (default) → 'unauthenticated' (vuelve a Auth); 'expired' → 'expired' (muestra
+   * la pantalla `SessionExpired`). Sin argumento se asume un logout intencional.
+   */
+  clearSession: (reason?: LogoutReason) => void;
 }
 
 /**
@@ -71,7 +92,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ accessToken, refreshToken });
   },
 
-  clearSession: () => {
+  clearSession: (reason = 'user-logout') => {
     secureStore.remove(KEYS.accessToken);
     secureStore.remove(KEYS.refreshToken);
     secureStore.remove(KEYS.user);
@@ -79,7 +100,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       accessToken: null,
       refreshToken: null,
       user: null,
-      status: 'unauthenticated',
+      status: STATUS_BY_LOGOUT_REASON[reason],
     });
   },
 }));

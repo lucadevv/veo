@@ -3,16 +3,17 @@
  * contrato `modeScheduleView` para la UI. Viven aquí (no en el componente) para ser testeables y
  * reutilizables (clean: la presentación no calcula, consume).
  */
+import { isPujaMode } from '@veo/shared-types';
 import type { PricingMode } from '@/lib/api/schemas';
 
 /** Etiqueta humana de cada modo. PUJA = el pasajero oferta; FIJO = tarifa calculada. */
 export function modeLabel(mode: PricingMode): string {
-  return mode === 'PUJA' ? 'Puja' : 'Precio fijo';
+  return isPujaMode(mode) ? 'Puja' : 'Precio fijo';
 }
 
 /** Descripción de una línea para cada modo (qué implica comercialmente). */
 export function modeDescription(mode: PricingMode): string {
-  return mode === 'PUJA'
+  return isPujaMode(mode)
     ? 'El pasajero propone su tarifa y los conductores la aceptan o contraofertan (estilo inDrive).'
     : 'VEO calcula la tarifa (base + distancia + tiempo). El pasajero no negocia.';
 }

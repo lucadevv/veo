@@ -343,8 +343,8 @@ importers:
         specifier: ^19.2.17
         version: 19.2.17
       '@types/react-test-renderer':
-        specifier: ^18.3.0
-        version: 18.3.1
+        specifier: ^19.0.0
+        version: 19.1.0
       babel-jest:
         specifier: ^29.7.0
         version: 29.7.0(@babel/core@7.29.7)
@@ -651,8 +651,8 @@ importers:
         specifier: ^19.2.17
         version: 19.2.17
       '@types/react-test-renderer':
-        specifier: ^18.3.0
-        version: 18.3.1
+        specifier: ^19.0.0
+        version: 19.1.0
       babel-jest:
         specifier: ^29.7.0
         version: 29.7.0(@babel/core@7.29.7)
@@ -953,6 +953,25 @@ importers:
         specifier: ^2.1.2
         version: 2.1.9(@types/node@20.19.41)(terser@5.48.0)
 
+  packages/redis:
+    dependencies:
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.11.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.41
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+      typescript:
+        specifier: ^5.6.2
+        version: 5.6.2
+      vitest:
+        specifier: ^2.1.2
+        version: 2.1.9(@types/node@20.19.41)(terser@5.48.0)
+
   packages/rpc:
     dependencies:
       '@grpc/grpc-js':
@@ -1234,6 +1253,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../../packages/redis
       '@veo/rpc':
         specifier: workspace:*
         version: link:../../../packages/rpc
@@ -1349,6 +1371,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../../packages/redis
       '@veo/rpc':
         specifier: workspace:*
         version: link:../../../packages/rpc
@@ -1464,6 +1489,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../../packages/redis
       '@veo/rpc':
         specifier: workspace:*
         version: link:../../../packages/rpc
@@ -1558,6 +1586,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -1664,6 +1695,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc
@@ -1773,6 +1807,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -1879,6 +1916,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2000,6 +2040,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2109,6 +2152,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc
@@ -2230,6 +2276,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2336,6 +2385,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2445,6 +2497,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2545,6 +2600,12 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
+      '@veo/rpc':
+        specifier: workspace:*
+        version: link:../../packages/rpc
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2651,6 +2712,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -2760,6 +2824,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
       '@veo/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -6677,9 +6744,6 @@ packages:
   '@types/pg@8.6.1':
     resolution: {integrity: sha512-1Kc4oAGzAl7uqUStZCDvaLFqZrW9qWSjXOmBfdgyBP5La7Us6Mg4GBvRlSoaZMhQF/zSj1C8CtKMBkoiT8eL8w==}
 
-  '@types/prop-types@15.7.15':
-    resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
-
   '@types/qs@6.15.1':
     resolution: {integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==}
 
@@ -6691,14 +6755,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.2.0
 
-  '@types/react-test-renderer@18.3.1':
-    resolution: {integrity: sha512-vAhnk0tG2eGa37lkU9+s5SoroCsRI08xnsWFiAXOuPH2jqzMbcXvKExXViPi1P5fIklDeCvXqyrdmipFaSkZrA==}
-
   '@types/react-test-renderer@19.1.0':
     resolution: {integrity: sha512-XD0WZrHqjNrxA/MaR9O22w/RNidWR9YZmBdRGI7wcnWGrv/3dA8wKCJ8m63Sn+tLJhcjmuhOi629N66W6kgWzQ==}
-
-  '@types/react@18.3.29':
-    resolution: {integrity: sha512-ch0qJdr2JY0r04NXSprbK6TXOgnaJ1Tz23fm5W+z0/CBah6BSBc3n96h7K9GOtwh0HrilNWHIBzE1Ko4Dcw/Wg==}
 
   '@types/react@19.2.17':
     resolution: {integrity: sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==}
@@ -17143,8 +17201,6 @@ snapshots:
       pg-protocol: 1.14.0
       pg-types: 2.2.0
 
-  '@types/prop-types@15.7.15': {}
-
   '@types/qs@6.15.1': {}
 
   '@types/range-parser@1.2.7': {}
@@ -17153,18 +17209,9 @@ snapshots:
     dependencies:
       '@types/react': 19.2.17
 
-  '@types/react-test-renderer@18.3.1':
-    dependencies:
-      '@types/react': 18.3.29
-
   '@types/react-test-renderer@19.1.0':
     dependencies:
       '@types/react': 19.2.17
-
-  '@types/react@18.3.29':
-    dependencies:
-      '@types/prop-types': 15.7.15
-      csstype: 3.2.3
 
   '@types/react@19.2.17':
     dependencies:

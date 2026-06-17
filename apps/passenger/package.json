@@ -9,7 +9,7 @@
   },
   "scripts": {
     "android": "ENVFILE=env/dev.secret.env react-native run-android",
-    "ios": "ENVFILE=env/dev.secret.env react-native run-ios",
+    "ios": "ENVFILE=env/dev.secret.env react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
     "lint": "eslint src --max-warnings 0",
@@ -86,7 +86,7 @@
     "@types/geojson": "^7946.0.16",
     "@types/jest": "^29.5.13",
     "@types/react": "^19.2.17",
-    "@types/react-test-renderer": "^18.3.0",
+    "@types/react-test-renderer": "^19.0.0",
     "babel-jest": "^29.7.0",
     "detox": "^20.27.5",
     "eslint": "^9.13.0",

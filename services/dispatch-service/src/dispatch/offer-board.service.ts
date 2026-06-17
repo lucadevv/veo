@@ -29,6 +29,12 @@ import {
   type LatLon,
 } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
+// Finding #4 (§5-bis DRY / §4-ter cero literales sueltos): la detección de violación de UNIQUE vive UNA
+// sola vez en @veo/database (helper tipado + constante PRISMA_UNIQUE_VIOLATION), compartida con
+// payment-service. Reusamos ESE helper en vez de duplicar inline el literal 'P2002' y el `instanceof`
+// (que, además, es FRÁGIL: cada servicio genera su propio cliente Prisma → clases distintas; el helper
+// compartido detecta de forma ESTRUCTURAL por name+code, válido cross-cliente).
+import { isUniqueViolation } from '@veo/database';
 import { DispatchOutcome, type SpecialRequest, type VehicleClass } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
@@ -87,6 +93,38 @@ export interface SubmitOfferInput {
   priceCents: number;
 }
 
+/**
+ * §4-ter — prefijos de dedupKey CENTRALIZADOS (cero magic strings repetidos). El VALOR resultante de
+ * cada clave es EXACTAMENTE el de antes (los tests asertan `match_found:${tripId}:${driverId}`, etc.):
+ * estos helpers solo DRY-ean la construcción, no cambian el formato. Cualquier cambio de formato pasa por
+ * acá una sola vez (la dedupKey va al envelope Y a la columna OutboxEvent.dedupKey — deben coincidir).
+ */
+const DEDUP_PREFIX = {
+  OFFER_ACCEPTED: 'offer_accepted',
+  MATCH_FOUND: 'match_found',
+  OFFER_MADE: 'offer_made',
+  NO_OFFERS: 'no_offers',
+  OFFER_WITHDRAWN: 'offer_withdrawn',
+  BID_CANCELLED: 'bid_cancelled',
+} as const;
+
+const dedupOfferAccepted = (tripId: string, driverId: string): string =>
+  `${DEDUP_PREFIX.OFFER_ACCEPTED}:${tripId}:${driverId}`;
+const dedupMatchFound = (tripId: string, driverId: string): string =>
+  `${DEDUP_PREFIX.MATCH_FOUND}:${tripId}:${driverId}`;
+const dedupOfferMade = (tripId: string, driverId: string, kind: OfferKind, priceCents: number): string =>
+  `${DEDUP_PREFIX.OFFER_MADE}:${tripId}:${driverId}:${kind}:${priceCents}`;
+const dedupNoOffers = (tripId: string, windowEpoch: string): string =>
+  `${DEDUP_PREFIX.NO_OFFERS}:${tripId}:${windowEpoch}`;
+const dedupOfferWithdrawn = (tripId: string, driverId: string): string =>
+  `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}`;
+const dedupBidCancelled = (tripId: string): string => `${DEDUP_PREFIX.BID_CANCELLED}:${tripId}`;
+
+/**
+ * Finding #4a — el re-insert de la MISMA dedupKey estable (reconcile/retry tras crash) debe tragarse
+ * como NO-OP idempotente, NUNCA burbujear como error: el evento YA está encolado. El check vive en
+ * `isUniqueViolation` (@veo/database, importado arriba): un solo lugar para todo el monorepo.
+ */
 @Injectable()
 export class OfferBoardService {
   private readonly logger = new Logger(OfferBoardService.name);
@@ -325,7 +363,7 @@ export class OfferBoardService {
         priceCents: input.priceCents,
         etaSeconds,
       },
-      `offer_made:${input.tripId}:${input.driverId}:${input.kind}:${input.priceCents}`,
+      dedupOfferMade(input.tripId, input.driverId, input.kind, input.priceCents),
     );
     return offer;
   }
@@ -413,7 +451,7 @@ export class OfferBoardService {
         'dispatch.offer_withdrawn',
         tripId,
         { tripId, driverId, reason: 'stale' },
-        `offer_withdrawn:${tripId}:${driverId}`,
+        dedupOfferWithdrawn(tripId, driverId),
       ).catch((err: unknown) =>
         this.logger.warn(`offer_withdrawn no emitido trip=${tripId} driver=${driverId}: ${String(err)}`),
       );
@@ -449,31 +487,37 @@ export class OfferBoardService {
     try {
       // offer_accepted + match_found en la MISMA transacción de outbox (FOUNDATION §6).
       await this.prisma.write.$transaction(async (tx) => {
+        const acceptedDedup = dedupOfferAccepted(tripId, driverId);
         const accepted = createEnvelope({
           eventType: 'dispatch.offer_accepted',
           producer: 'dispatch-service',
           // H13 — estampa el seq del CICLO del board: trip lo exige en applyAgreedFare para descartar una
           // redelivery de un ciclo viejo (la tarifa rancia del conductor anterior no debe escribirse).
           payload: { tripId, driverId, priceCents: chosen.priceCents, negotiationSeq: board.negotiationSeq },
-          dedupKey: `offer_accepted:${tripId}:${driverId}`,
+          dedupKey: acceptedDedup,
         });
         await tx.outboxEvent.create({
           data: {
             aggregateId: tripId,
             eventType: accepted.eventType,
+            // Finding #4a — idempotencia del productor: la MISMA clave estable que el envelope se persiste
+            // en la columna unique → un re-insert (reconcile/retry) lo rechaza con P2002 (lo tragamos abajo).
+            dedupKey: acceptedDedup,
             envelope: accepted as unknown as Prisma.InputJsonValue,
           },
         });
+        const matchFoundDedup = dedupMatchFound(tripId, driverId);
         const matchFound = createEnvelope({
           eventType: 'dispatch.match_found',
           producer: 'dispatch-service',
           payload: { tripId, driverId, scoreMs: 0 },
-          dedupKey: `match_found:${tripId}:${driverId}`,
+          dedupKey: matchFoundDedup,
         });
         await tx.outboxEvent.create({
           data: {
             aggregateId: tripId,
             eventType: matchFound.eventType,
+            dedupKey: matchFoundDedup,
             envelope: matchFound as unknown as Prisma.InputJsonValue,
           },
         });
@@ -484,6 +528,10 @@ export class OfferBoardService {
         // forma de liberarlo → quedaba fuera del pool hasta el TTL (2h). Lo persistimos en la MISMA tx que
         // el match (atómico). score/attempt no aplican a la PUJA (no hay ranking): 0/1. surgeMultiplier
         // queda en su default (la tarifa PUJA es el bid acordado, no lleva surge sobre el match).
+        // Finding #11 — agreedPriceCents es la FUENTE DE VERDAD DURABLE del precio acordado: el
+        // reconciliador lo lee de acá (NUNCA fabrica un precio desde el board/oferta efímeros de Redis).
+        // El índice UNIQUE PARCIAL (WHERE outcome='ACCEPTED') hace que un SEGUNDO insert ACCEPTED para el
+        // mismo trip lance P2002 (defensa-en-profundidad sobre el claim/CAS, que ya garantiza un solo writer).
         await tx.dispatchMatch.create({
           data: {
             id: uuidv7(),
@@ -492,11 +540,21 @@ export class OfferBoardService {
             score: new Prisma.Decimal(0),
             attempt: 1,
             outcome: DispatchOutcome.ACCEPTED,
+            agreedPriceCents: chosen.priceCents,
             respondedAt: new Date(),
           },
         });
       });
     } catch (txErr) {
+      // Finding #4a — el accept es single-writer por el claim/CAS, así que un P2002 acá es extremadamente
+      // improbable (re-insert de la misma dedupKey o segundo ACCEPTED del mismo trip): aun así NO debe
+      // crashear el accept — significa que el match YA quedó materializado. Lo tratamos como idempotente:
+      // saltamos el revert (no des-reclamar un board cuyo match ya existe) y seguimos al markMatchEmitted.
+      if (isUniqueViolation(txErr)) {
+        this.logger.debug(
+          `accept trip=${tripId} driver=${driverId}: P2002 (match/evento ya materializado) → no-op idempotente`,
+        );
+      } else {
       // Acción COMPENSATORIA: la tx durable falló → des-reclamar el board (CLOSED_MATCHED → OPEN) para
       // que el pasajero pueda reintentar. Best-effort + logueado: si el revert también falla, el board
       // queda CLOSED_MATCHED sin match (residual del hard-crash, lo cubre el reconciler del barrido).
@@ -512,6 +570,7 @@ export class OfferBoardService {
         );
       }
       throw txErr;
+      }
     }
 
     // La tx durable COMMITEÓ: marcamos el board como match-emitido (flag para el reconciler de N5, que
@@ -648,7 +707,7 @@ export class OfferBoardService {
         'dispatch.bid_cancelled',
         tripId,
         { tripId, reason: 'cancelled_by_passenger' },
-        `bid_cancelled:${tripId}`,
+        dedupBidCancelled(tripId),
       );
       this.logger.log(`emitido dispatch.bid_cancelled trip=${tripId} (cierre del viaje)`);
     }
@@ -719,6 +778,27 @@ export class OfferBoardService {
     // queda FUERA del rango → el reconciliador solo toca los genuinamente atascados (residual hard-crash).
     const pending = await this.store.matchedUnemittedBoards(now - OfferBoardService.RECONCILE_GRACE_MS);
     let reemitted = 0;
+
+    // Finding #1 (N+1) — el loop itera BOARDS efímeros (Redis), NO filas DispatchMatch: el
+    // `agreedPriceCents` durable NO está en la fila en mano, hay que leerlo de Postgres. El fix previo
+    // lo hacía con un `findFirst` POR board → una query por iteración (N+1). En su lugar, lo BATCHEAMOS:
+    // UNA sola `findMany` de todas las filas ACCEPTED de los (tripId,driverId) pendientes ANTES del loop,
+    // indexada en un Map por `tripId|driverId`. Dentro del loop leemos del Map → CERO queries por iteración.
+    // La semántica #11 queda IDÉNTICA: si el Map no tiene precio durable para el (trip,driver) → SKIP
+    // (no se fabrica precio, no se marca matchEmitted). El precio NUNCA sale del board/oferta efímeros.
+    const accepted = await this.prisma.read.dispatchMatch.findMany({
+      where: {
+        outcome: DispatchOutcome.ACCEPTED,
+        OR: pending
+          .filter((b) => b.acceptedDriverId)
+          .map((b) => ({ tripId: b.tripId, driverId: b.acceptedDriverId })),
+      },
+      select: { tripId: true, driverId: true, agreedPriceCents: true },
+    });
+    const priceByTripDriver = new Map<string, number | null>(
+      accepted.map((m) => [`${m.tripId}|${m.driverId}`, m.agreedPriceCents]),
+    );
+
     for (const board of pending) {
       const driverId = board.acceptedDriverId;
       if (!driverId) {
@@ -727,38 +807,68 @@ export class OfferBoardService {
         await this.store.markMatchEmitted(board.tripId).catch(() => undefined);
         continue;
       }
-      const chosen = await this.store.getOffer(board.tripId, driverId);
-      const priceCents = chosen?.priceCents ?? board.bidCents;
-      await this.prisma.write.$transaction(async (tx) => {
-        const accepted = createEnvelope({
-          eventType: 'dispatch.offer_accepted',
-          producer: 'dispatch-service',
-          // H13 — el re-emit del reconciliador estampa el MISMO seq del ciclo del board (idempotente por
-          // dedupKey): el offer_accepted reconciliado del crash queda atado a su ciclo, igual que el original.
-          payload: { tripId: board.tripId, driverId, priceCents, negotiationSeq: board.negotiationSeq },
-          dedupKey: `offer_accepted:${board.tripId}:${driverId}`,
+      // Finding #11 — la FUENTE DE VERDAD del precio acordado es la fila DispatchMatch ACCEPTED DURABLE,
+      // NO el board/oferta EFÍMEROS de Redis (que pueden haberse evaporado por TTL tras el crash). El bug
+      // previo (`chosen?.priceCents ?? board.bidCents`) FABRICABA un precio (caía al bid del board) cuando
+      // la oferta efímera ya no existía → trip-service facturaba un fareCents inventado. Acá leemos el
+      // precio REAL del Map pre-cargado en lote (sin query por iteración).
+      const priceCents = priceByTripDriver.get(`${board.tripId}|${driverId}`);
+      if (priceCents === null || priceCents === undefined) {
+        // No hay fila ACCEPTED persistida (o sin precio): el reconciliador NO PUEDE recuperar el precio
+        // acordado real → NO emite un offer_accepted con un precio fabricado. NO marca matchEmitted (deja
+        // que una corrida posterior reintente cuando los datos sean consistentes) y sigue al próximo board.
+        this.logger.warn(
+          `N5 reconciliador: SKIP trip=${board.tripId} driver=${driverId} — sin DispatchMatch ACCEPTED ` +
+            `con agreedPriceCents persistido (no se fabrica precio; se reintenta luego)`,
+        );
+        domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'skipped' });
+        continue;
+      }
+      try {
+        await this.prisma.write.$transaction(async (tx) => {
+          const acceptedDedup = dedupOfferAccepted(board.tripId, driverId);
+          const accepted = createEnvelope({
+            eventType: 'dispatch.offer_accepted',
+            producer: 'dispatch-service',
+            // H13 — el re-emit del reconciliador estampa el MISMO seq del ciclo del board (idempotente por
+            // dedupKey): el offer_accepted reconciliado del crash queda atado a su ciclo, igual que el original.
+            payload: { tripId: board.tripId, driverId, priceCents, negotiationSeq: board.negotiationSeq },
+            dedupKey: acceptedDedup,
+          });
+          await tx.outboxEvent.create({
+            data: {
+              aggregateId: board.tripId,
+              eventType: accepted.eventType,
+              dedupKey: acceptedDedup,
+              envelope: accepted as unknown as Prisma.InputJsonValue,
+            },
+          });
+          const matchFoundDedup = dedupMatchFound(board.tripId, driverId);
+          const matchFound = createEnvelope({
+            eventType: 'dispatch.match_found',
+            producer: 'dispatch-service',
+            payload: { tripId: board.tripId, driverId, scoreMs: 0 },
+            dedupKey: matchFoundDedup,
+          });
+          await tx.outboxEvent.create({
+            data: {
+              aggregateId: board.tripId,
+              eventType: matchFound.eventType,
+              dedupKey: matchFoundDedup,
+              envelope: matchFound as unknown as Prisma.InputJsonValue,
+            },
+          });
         });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: board.tripId,
-            eventType: accepted.eventType,
-            envelope: accepted as unknown as Prisma.InputJsonValue,
-          },
-        });
-        const matchFound = createEnvelope({
-          eventType: 'dispatch.match_found',
-          producer: 'dispatch-service',
-          payload: { tripId: board.tripId, driverId, scoreMs: 0 },
-          dedupKey: `match_found:${board.tripId}:${driverId}`,
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: board.tripId,
-            eventType: matchFound.eventType,
-            envelope: matchFound as unknown as Prisma.InputJsonValue,
-          },
-        });
-      });
+      } catch (txErr) {
+        // Finding #4a — el evento YA estaba encolado (offer_accepted/match_found con la misma dedupKey
+        // estable: una corrida anterior del reconcile, o el accept original, lo insertó). P2002 → NO apilar
+        // una segunda fila: tratamos TODO el reconcile de este board como ya-hecho → marcamos matchEmitted
+        // y seguimos (idempotente). Cualquier otro error sí burbujea.
+        if (!isUniqueViolation(txErr)) throw txErr;
+        this.logger.debug(
+          `N5 reconciliador: P2002 trip=${board.tripId} driver=${driverId} (evento ya encolado) → ya-hecho`,
+        );
+      }
       await this.store.markMatchEmitted(board.tripId);
       domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'reconciled' });
       domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'reconciled' });
@@ -786,7 +896,7 @@ export class OfferBoardService {
       'dispatch.no_offers',
       tripId,
       { tripId, reason },
-      `no_offers:${tripId}:${windowEpoch}`,
+      dedupNoOffers(tripId, windowEpoch),
     );
     this.logger.log(`board trip=${tripId} EXPIRED (${reason})`);
   }
@@ -808,15 +918,26 @@ export class OfferBoardService {
       payload,
       dedupKey,
     });
-    await this.prisma.write.$transaction(async (tx) => {
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
+    try {
+      await this.prisma.write.$transaction(async (tx) => {
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId,
+            eventType: envelope.eventType,
+            // Finding #4a — la MISMA dedupKey estable del envelope se persiste en la columna unique → un
+            // re-emit del MISMO evento (redelivery/retry) lo rechaza con P2002 (lo tragamos abajo) en vez
+            // de apilar una segunda fila en el outbox.
+            dedupKey,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
       });
-    });
+    } catch (err) {
+      // Re-emit del MISMO evento (misma dedupKey ya insertada): no-op idempotente, no burbujea.
+      if (!isUniqueViolation(err)) throw err;
+      this.logger.debug(`emit ${eventType} dedupKey=${dedupKey}: P2002 (ya encolado) → no-op idempotente`);
+      return;
+    }
     domainEventsTotal.inc({ event: eventType, result: 'published' });
   }
 }

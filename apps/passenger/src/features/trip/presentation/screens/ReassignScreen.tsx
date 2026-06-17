@@ -42,7 +42,7 @@ export function ReassignScreen(): React.JSX.Element {
   // falla la red igual liberamos al pasajero al Home (el watchdog del backend cierra el viaje).
   const cancelMutation = useMutation({
     mutationFn: () => cancelBid.execute(tripId),
-    onSettled: () => navigation.navigate('Main', { screen: 'Home' }),
+    onSettled: () => navigation.navigate('Home'),
   });
 
   if (tripQuery.isError) {

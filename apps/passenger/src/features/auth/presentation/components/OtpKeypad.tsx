@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
-import { Text, useTheme } from '@veo/ui-kit';
+import { Text, TOUCH_TARGET, useTheme } from '@veo/ui-kit';
 import { PressableScale } from '../../../../shared/presentation/components/motion';
 
 export interface OtpKeypadProps {
@@ -62,7 +62,7 @@ export function OtpKeypad({ onPress }: OtpKeypadProps): React.JSX.Element {
 /** Gap del diseño (9px) entre teclas. */
 const KEY_GAP = 9;
 /** Altura del diseño (44px = área táctil mínima). */
-const KEY_HEIGHT = 44;
+const KEY_HEIGHT = TOUCH_TARGET;
 
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap' },

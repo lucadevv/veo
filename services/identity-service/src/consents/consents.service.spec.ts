@@ -64,6 +64,8 @@ describe('ConsentsService.record · registro append-only (Ley 29733)', () => {
       marketing: true,
       policyVersion: '2026-05-01',
       ip: '200.48.225.130',
+      // Sin dedupKey en el input → se inserta null (append-only puro, backward-compat).
+      dedupKey: null,
     });
   });
 

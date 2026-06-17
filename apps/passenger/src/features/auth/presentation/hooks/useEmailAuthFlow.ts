@@ -58,6 +58,7 @@ export function useEmailAuthFlow() {
   const forgotPasswordUseCase = useDependency(TOKENS.forgotPasswordUseCase);
   const resetPasswordUseCase = useDependency(TOKENS.resetPasswordUseCase);
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
+  const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
   const setSession = useSessionStore((state) => state.setSession);
   const unlockBiometricGate = useBiometricGateStore((state) => state.unlock);
 
@@ -71,12 +72,14 @@ export function useEmailAuthFlow() {
       });
       // Login fresco: no exigir biometría en esta sesión.
       unlockBiometricGate();
+      // Drena la cola durable de consentimiento (best-effort): el onboarding la encoló antes del login.
+      void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta al disparar.
       void panicSecretProvisioner.ensureProvisioned().catch((error) => {
         console.warn('[panic] aprovisionamiento del secreto tras login falló:', error);
       });
     },
-    [setSession, unlockBiometricGate, panicSecretProvisioner],
+    [setSession, unlockBiometricGate, panicSecretProvisioner, syncPendingConsent],
   );
 
   const registerMutation = useMutation<

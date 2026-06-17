@@ -283,4 +283,15 @@ export class PanicService {
     });
   }
 
+  /**
+   * KPI dashboard admin: cantidad de pánicos ABIERTOS = los que AÚN requieren atención del operador
+   * (TRIGGERED + ACKNOWLEDGED). NO cuenta los cerrados (RESOLVED ni FALSE_ALARM). Un solo `count`
+   * con `status in [...]` (índice @@index([status, triggeredAt]) lo cubre) — sin N+1, sin traer filas.
+   */
+  countOpen(): Promise<number> {
+    return this.prisma.read.panicEvent.count({
+      where: { status: { in: [PanicStatus.TRIGGERED, PanicStatus.ACKNOWLEDGED] } },
+    });
+  }
+
 }

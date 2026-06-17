@@ -3,3 +3,4 @@
  * y modos de pricing permitidos.
  */
 export * from './offerings.js';
+export * from './bid-floor.js';

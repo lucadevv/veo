@@ -6,12 +6,14 @@ import {
   useExpiringDocuments,
   useFleetDocuments,
   useInspections,
+  useModelReview,
   useVehicles,
 } from '@/lib/api/queries';
 import type {
   ExpiringDocumentView,
   FleetDocumentView,
   InspectionView,
+  VehicleModelReviewView,
   VehicleView,
 } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
@@ -25,6 +27,7 @@ import { ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DocumentActions } from '@/components/fleet/document-actions';
+import { ModelReviewActions } from '@/components/fleet/model-review-actions';
 import {
   CreateDocumentDialog,
   CreateInspectionDialog,
@@ -139,6 +142,52 @@ const expiringColumns: ColumnDef<ExpiringDocumentView, unknown>[] = [
   },
 ];
 
+const VEHICLE_TYPE_LABEL: Record<string, string> = { CAR: 'Auto', MOTO: 'Moto' };
+
+const modelColumns: ColumnDef<VehicleModelReviewView, unknown>[] = [
+  {
+    accessorKey: 'make',
+    header: 'Modelo',
+    cell: ({ row }) => (
+      <span className="text-ink">
+        {row.original.make} {row.original.model}
+      </span>
+    ),
+  },
+  {
+    id: 'years',
+    header: 'Años',
+    cell: ({ row }) => (
+      <span className="text-ink-muted tabular">
+        {row.original.yearFrom}–{row.original.yearTo}
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'vehicleType',
+    header: 'Tipo',
+    cell: ({ row }) => (
+      <span className="text-ink-muted">
+        {VEHICLE_TYPE_LABEL[row.original.vehicleType] ?? row.original.vehicleType} · {row.original.seats} as.
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'requestedBy',
+    header: 'Solicitó',
+    cell: ({ row }) => (
+      <span className="text-ink-muted font-mono">{row.original.requestedBy?.slice(0, 8) ?? '—'}</span>
+    ),
+  },
+  { accessorKey: 'status', header: 'Estado', cell: ({ row }) => <StatusPill status={row.original.status} /> },
+  {
+    id: 'actions',
+    header: 'Acciones',
+    enableSorting: false,
+    cell: ({ row }) => <ModelReviewActions model={row.original} />,
+  },
+];
+
 export default function FleetPage() {
   const user = useSession();
   const canManage = can(user, 'fleet:manage');
@@ -148,6 +197,8 @@ export default function FleetPage() {
   const vehicles = useVehicles();
   const inspections = useInspections();
   const expiring = useExpiringDocuments();
+  // Cola de modelos solicitados por conductores, a curar/aprobar (B5-2.c).
+  const models = useModelReview('PENDING_REVIEW');
 
   return (
     <div className="flex h-full flex-col">
@@ -161,6 +212,7 @@ export default function FleetPage() {
           <TabsList>
             <TabsTrigger value="documents">Documentos</TabsTrigger>
             <TabsTrigger value="vehicles">Vehículos</TabsTrigger>
+            <TabsTrigger value="models">Modelos</TabsTrigger>
             <TabsTrigger value="inspections">Inspecciones</TabsTrigger>
             <TabsTrigger value="expiring">Vencimientos</TabsTrigger>
           </TabsList>
@@ -181,6 +233,7 @@ export default function FleetPage() {
                   data={documents.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={documents.isLoading}
                   emptyTitle="Sin documentos pendientes"
+                  emptyDescription="No hay documentos pendientes de revisión."
                 />
                 <LoadMore
                   hasNextPage={!!documents.hasNextPage}
@@ -207,11 +260,34 @@ export default function FleetPage() {
                   data={vehicles.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={vehicles.isLoading}
                   emptyTitle="Sin vehículos"
+                  emptyDescription="No hay vehículos registrados en la flota todavía."
                 />
                 <LoadMore
                   hasNextPage={!!vehicles.hasNextPage}
                   isFetching={vehicles.isFetchingNextPage}
                   onLoadMore={() => void vehicles.fetchNextPage()}
+                />
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="models">
+            {models.isError ? (
+              <ErrorState onRetry={() => void models.refetch()} />
+            ) : (
+              <>
+                <DataTable
+                  caption="Modelos solicitados por revisar"
+                  columns={modelColumns}
+                  data={models.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={models.isLoading}
+                  emptyTitle="Sin modelos pendientes"
+                  emptyDescription="Cuando un conductor solicite un modelo que no está en el catálogo, aparecerá acá."
+                />
+                <LoadMore
+                  hasNextPage={!!models.hasNextPage}
+                  isFetching={models.isFetchingNextPage}
+                  onLoadMore={() => void models.fetchNextPage()}
                 />
               </>
             )}
@@ -233,6 +309,7 @@ export default function FleetPage() {
                   data={inspections.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={inspections.isLoading}
                   emptyTitle="Sin inspecciones"
+                  emptyDescription="No hay inspecciones registradas."
                 />
                 <LoadMore
                   hasNextPage={!!inspections.hasNextPage}

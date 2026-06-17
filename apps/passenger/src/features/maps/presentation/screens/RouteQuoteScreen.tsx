@@ -6,6 +6,7 @@ import type {
   SpecialRequest,
 } from '@veo/api-client';
 import { isKycRequiredError } from '@veo/api-client';
+import { isPujaMode } from '@veo/shared-types';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -19,7 +20,7 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +42,7 @@ import { initialBidCents, stepBidCents } from '../../../../shared/utils/bid';
 import { uuidv4 } from '../../../../shared/utils/uuid';
 import { isWaypointSet, type RoutePlace } from '../../domain/entities';
 import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
+import { buildCreateTripInput } from '../../../trip/domain/buildCreateTripInput';
 import { RoutePointsList } from '../components/RoutePointsList';
 import { SpecialRequestChips } from '../components/SpecialRequestChips';
 import { VehicleIcon } from '../components/VehicleIcon';
@@ -165,27 +167,39 @@ export function RouteQuoteScreen(): React.JSX.Element {
     }
   }, [quoteQuery.data, selectedId]);
 
-  // PUJA · el SERVIDOR resuelve el modo en el quote (la app es agnóstica: refleja, no decide). En PUJA el
-  // pasajero OFRECE su tarifa con un stepper (piso/sugerido del quote); en FIXED elige una categoría.
+  // UI REACTIVA (server-driven): el selector se muestra SIEMPRE; el panel de abajo (puja vs precio fijo)
+  // y el bid dependen de la oferta ELEGIDA, no de un modo global. La app refleja, no decide.
   const quote = quoteQuery.data;
-  const isPuja = quote?.mode === 'PUJA';
-  const bidFloorCents = quote?.bidFloorCents ?? 0;
-  const suggestedCents = quote?.suggestedCents;
+  const selectedOption = useMemo(
+    () => quote?.options.find((option) => option.id === selectedId) ?? null,
+    [quote, selectedId],
+  );
+  // Modo EFECTIVO de la oferta elegida (ADR 013 §1.3; fallback al top-level del quote). Predicado de
+  // dominio — sin string mágico (§4-ter).
+  const selectedIsPuja = isPujaMode(selectedOption?.mode ?? quote?.mode);
+  // Piso + sugerido PER-OFERTA (A2): cada oferta PUJA trae lo suyo; fallback al top-level (server viejo).
+  const selectedBidFloorCents = selectedOption?.bidFloorCents ?? quote?.bidFloorCents ?? 0;
+  const selectedSuggestedCents = selectedOption?.suggestedCents ?? quote?.suggestedCents;
 
-  // Inicializa la oferta al sugerido (sobre el piso) cuando llega un quote PUJA.
+  // Re-ancla el bid al sugerido de la oferta ELEGIDA: cambia al cambiar la ruta (nueva tarifa) O al
+  // cambiar de oferta (Moto→Económico tienen sugeridos distintos), preservando ajustes manuales mientras
+  // la oferta y la ruta no cambien (mismo patrón que QuotingBody — coherencia entre las dos superficies).
+  const lastSuggestedRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (isPuja && quote && bidCents === null) {
-      setBidCents(initialBidCents(suggestedCents, bidFloorCents));
+    if (!selectedIsPuja || !selectedOption) return;
+    if (selectedSuggestedCents !== lastSuggestedRef.current) {
+      lastSuggestedRef.current = selectedSuggestedCents;
+      setBidCents(initialBidCents(selectedSuggestedCents, selectedBidFloorCents));
     }
-  }, [isPuja, quote, bidCents, suggestedCents, bidFloorCents]);
+  }, [selectedIsPuja, selectedOption, selectedSuggestedCents, selectedBidFloorCents]);
 
   const decrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? bidFloorCents, -1, bidFloorCents)),
-    [bidFloorCents],
+    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, -1, selectedBidFloorCents)),
+    [selectedBidFloorCents],
   );
   const incrementBid = useCallback(
-    () => setBidCents((b) => stepBidCents(b ?? bidFloorCents, 1, bidFloorCents)),
-    [bidFloorCents],
+    () => setBidCents((b) => stepBidCents(b ?? selectedBidFloorCents, 1, selectedBidFloorCents)),
+    [selectedBidFloorCents],
   );
 
   const routeCoordinates = useMemo<[number, number][] | undefined>(() => {
@@ -193,10 +207,6 @@ export function RouteQuoteScreen(): React.JSX.Element {
     return geometry ? (geometry.coordinates as [number, number][]) : undefined;
   }, [quoteQuery.data]);
 
-  const selectedOption = useMemo(
-    () => quoteQuery.data?.options.find((option) => option.id === selectedId) ?? null,
-    [quoteQuery.data, selectedId],
-  );
   const selectedFareCents = selectedOption?.priceCents ?? 0;
 
   // El cupón se valida contra la tarifa de la categoría elegida; si cambia la categoría, el descuento
@@ -231,30 +241,24 @@ export function RouteQuoteScreen(): React.JSX.Element {
 
   const createMutation = useMutation({
     mutationFn: () =>
-      createTrip.execute({
-        origin: toGeoPoint(origin!.point),
-        destination: toGeoPoint(destination!.point),
-        paymentMethod: tripPaymentMethod,
-        // FIXED · categoría/opción + tipo de vehículo de la opción elegida (Ola 2B). En PUJA se omiten:
-        // la tarifa es la OFERTA del pasajero (`bidCents`) y el vehículo cae al default del board (CAR,
-        // baseline del `suggestedCents`). El servidor RE-RESUELVE el modo y exige/ignora `bidCents`.
-        ...(!isPuja && selectedId ? { category: selectedId } : {}),
-        ...(!isPuja && selectedOption ? { vehicleType: selectedOption.vehicleType } : {}),
-        ...(isPuja && bidCents !== null ? { bidCents } : {}),
-        // BE-2 · solicitudes especiales (solo en puja, si eligió alguna). El conductor las ve.
-        ...(isPuja && specialRequests.length > 0 ? { specialRequests } : {}),
-        // Paradas intermedias ordenadas (Ola 2B · paradas múltiples).
-        ...(quoteWaypoints.length > 0
-          ? { waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)) }
-          : {}),
-        // Hora programada (Ola 2B · viajes programados). Omitir = viaje inmediato.
-        ...(scheduledAt !== null ? { scheduledFor: new Date(scheduledAt).toISOString() } : {}),
-        ...(appliedPromo ? { promoCode: appliedPromo.code } : {}),
-        ...(childMode.enabled
-          ? { childMode: true, childCode: childMode.code || undefined }
-          : {}),
-      // IK · una key por intento: el reintento dedupea server-side (no crea dos boards).
-      }, idempotencyKey),
+      createTrip.execute(
+        buildCreateTripInput({
+          origin: toGeoPoint(origin!.point),
+          destination: toGeoPoint(destination!.point),
+          paymentMethod: tripPaymentMethod,
+          selectedId,
+          selectedOption,
+          selectedIsPuja,
+          bidCents,
+          specialRequests,
+          waypoints: setWaypoints.map((stop) => toGeoPoint(stop.point)),
+          scheduledAt,
+          promoCode: appliedPromo?.code ?? null,
+          childMode: { enabled: childMode.enabled, code: childMode.code },
+        }),
+        // IK · una key por intento: el reintento dedupea server-side (no crea dos boards).
+        idempotencyKey,
+      ),
     onSuccess: (trip) => {
       history.record(trip);
       childMode.reset();
@@ -268,7 +272,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
       // El SERVIDOR resolvió el modo (autoritativo en `trip.dispatchMode`): si es PUJA, al board de
       // ofertas; si es FIXED, al seguimiento. Usar el modo del viaje (no el del quote) reconcilia un flip
       // de política entre cotizar y crear.
-      if (trip.dispatchMode === 'PUJA') {
+      if (isPujaMode(trip.dispatchMode)) {
         navigation.navigate('OffersBoard', { tripId: trip.id });
         return;
       }
@@ -287,7 +291,8 @@ export function RouteQuoteScreen(): React.JSX.Element {
   const canConfirm =
     !createMutation.isPending &&
     ready &&
-    (isPuja ? bidCents !== null && bidCents >= bidFloorCents : Boolean(selectedId));
+    Boolean(selectedId) &&
+    (selectedIsPuja ? bidCents !== null && bidCents >= selectedBidFloorCents : true);
 
   const formatEta = (option: QuoteOption): string =>
     t('trip.etaMinutes', { minutes: formatDurationMinutes(option.etaSeconds) });
@@ -303,7 +308,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
     ? t('quote.requesting')
     : scheduledAt !== null
       ? t('schedule.confirm')
-      : isPuja && bidCents !== null
+      : selectedIsPuja && bidCents !== null
         ? t('puja.searchDriver', { price: formatPEN(bidCents) })
         : t('quote.confirm');
 
@@ -373,7 +378,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
           />
 
           <View style={[styles.titleRow]}>
-            <Text variant="title3">{isPuja ? t('puja.title') : t('quote.title')}</Text>
+            <Text variant="title3">{t('quote.title')}</Text>
             {quoteQuery.data ? (
               <Text variant="footnote" color="inkMuted" tabular>
                 {formatDistance(quoteQuery.data.distanceMeters)} ·{' '}
@@ -399,20 +404,10 @@ export function RouteQuoteScreen(): React.JSX.Element {
                 {t('quote.calculating')}
               </Text>
             </View>
-          ) : isPuja ? (
-            bidCents !== null ? (
-              <View style={{ gap: theme.spacing.lg }}>
-                <BidPanel
-                  bidCents={bidCents}
-                  suggestedCents={suggestedCents}
-                  floorCents={bidFloorCents}
-                  onDecrement={decrementBid}
-                  onIncrement={incrementBid}
-                />
-                <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
-              </View>
-            ) : null
           ) : (
+            // UI REACTIVA (igual que QuotingBody): el selector se muestra SIEMPRE; debajo de la oferta
+            // elegida, si resuelve PUJA → panel de oferta (piso/sugerido PROPIOS); si es FIJO → el precio
+            // firme está en la fila. Así el flujo programado TAMBIÉN puede pujar una Moto.
             <View style={{ gap: theme.spacing.sm }}>
               {options.map((option, index) => (
                 <SelectionBump key={option.id} index={index} selected={option.id === selectedId}>
@@ -427,6 +422,19 @@ export function RouteQuoteScreen(): React.JSX.Element {
                   />
                 </SelectionBump>
               ))}
+
+              {selectedIsPuja && selectedOption && bidCents !== null ? (
+                <View style={{ gap: theme.spacing.lg, marginTop: theme.spacing.xs }}>
+                  <BidPanel
+                    bidCents={bidCents}
+                    suggestedCents={selectedSuggestedCents}
+                    floorCents={selectedBidFloorCents}
+                    onDecrement={decrementBid}
+                    onIncrement={incrementBid}
+                  />
+                  <SpecialRequestChips value={specialRequests} onChange={setSpecialRequests} />
+                </View>
+              ) : null}
             </View>
           )}
         </ScrollView>
@@ -457,9 +465,9 @@ export function RouteQuoteScreen(): React.JSX.Element {
             />
           )}
 
-          {selectedOption || (isPuja && bidCents !== null) ? (
+          {selectedOption ? (
             <PromoField
-              fareCents={isPuja && bidCents !== null ? bidCents : selectedFareCents}
+              fareCents={selectedIsPuja && bidCents !== null ? bidCents : selectedFareCents}
               applied={appliedPromo}
               onApplied={setAppliedPromo}
               onCleared={() => setAppliedPromo(null)}

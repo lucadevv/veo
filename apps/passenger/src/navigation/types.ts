@@ -1,18 +1,15 @@
-import type { NavigatorScreenParams } from '@react-navigation/native';
-
 /**
  * Tipado de la navegación del pasajero.
- * Flujo: Splash → (Onboarding | Auth) → Main (tabs) → pantallas de viaje/seguridad/pago.
+ * Flujo: Splash → (Onboarding | Auth) → Home (raíz autenticada) → pantallas de viaje/seguridad/pago.
+ *
+ * REFACTOR navegación (sin bottom tabs): se eliminó el tab navigator de 3 tabs. `Home` es ahora la
+ * pantalla RAÍZ del stack autenticado; `Profile` se alcanza por el avatar del header del Home y
+ * `TripHistory` ("Mis viajes") vive como entrada del Perfil. Por eso `Home`/`TripHistory`/`Profile`
+ * pasan a ser rutas DIRECTAS del `RootStackParamList` (antes vivían en `MainTabParamList` bajo `Main`).
+ * `Main`/`MainTabParamList` se eliminaron (ya no hay tabs ni navegación anidada que tipar).
  */
 
-/** Tabs principales tras autenticar. */
-export type MainTabParamList = {
-  Home: undefined;
-  TripHistory: undefined;
-  Profile: undefined;
-};
-
-/** Stack raíz que envuelve onboarding, auth, tabs y las pantallas modales/de viaje. */
+/** Stack raíz que envuelve onboarding, auth, el Home autenticado y las pantallas modales/de viaje. */
 export type RootStackParamList = {
   Splash: undefined;
   Onboarding: undefined;
@@ -21,7 +18,12 @@ export type RootStackParamList = {
   BiometricLock: undefined;
   /** Sesión expirada por inactividad: re-verificar identidad (el trigger es follow-up). */
   SessionExpired: undefined;
-  Main: NavigatorScreenParams<MainTabParamList>;
+  /** Pantalla RAÍZ autenticada (antes el tab Home): `RequestFlowScreen` con el mapa + sheet del flujo. */
+  Home: undefined;
+  /** "Mis viajes" (antes tab): alcanzable desde el Perfil. Lista paginada + detalle en sheet. */
+  TripHistory: undefined;
+  /** Perfil del pasajero (antes tab): se alcanza por el avatar del header del Home. */
+  Profile: undefined;
   /**
    * Buscador de origen/destino. `flow` decide a dónde vuelve al fijar AMBOS extremos:
    *  - `'sheet'`: abierto DESDE el sheet unificado (RequestFlowScreen/QuotingBody) → `goBack()` al

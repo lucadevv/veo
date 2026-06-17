@@ -18,9 +18,11 @@ import {
   RegistrationField,
   RegistrationHeader,
   RegistrationProgress,
+  VehicleModelSelector,
   VehicleStatusCard,
   VehicleTypeSelector,
 } from '../components';
+import type {VehicleModelOption} from '../../domain';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
 
@@ -44,9 +46,8 @@ export const VehicleScreen = ({navigation}: Props): React.JSX.Element => {
 
   const canContinue =
     vehicle.plate.trim().length > 0 &&
-    vehicle.brand.trim().length > 0 &&
     vehicle.year.trim().length > 0 &&
-    vehicle.model.trim().length > 0;
+    vehicle.modelSpecId.trim().length > 0;
 
   /** Actualiza un campo del vehículo y limpia su error inline. */
   const update = (patch: Partial<typeof vehicle>, field: keyof VehicleErrors) => {
@@ -54,6 +55,23 @@ export const VehicleScreen = ({navigation}: Props): React.JSX.Element => {
     if (errors[field]) {
       setErrors(prev => ({...prev, [field]: undefined}));
     }
+  };
+
+  /** El conductor eligió un modelo del catálogo: guarda id + etiqueta y limpia el error de modelo. */
+  const onPickModel = (model: VehicleModelOption) => {
+    setVehicle({modelSpecId: model.id, brand: model.make, model: model.model});
+    if (errors.model) {
+      setErrors(prev => ({...prev, model: undefined}));
+    }
+  };
+
+  /**
+   * Cambiar el tipo de vehículo invalida el modelo elegido (el catálogo se filtra por tipo: un modelo
+   * de auto no aplica a una moto). Limpia la elección para forzar re-seleccionar del catálogo correcto.
+   */
+  const onChangeType = (type: typeof vehicle.type) => {
+    setVehicleType(type);
+    setVehicle({modelSpecId: '', brand: '', model: ''});
   };
 
   const goNext = () => {
@@ -141,11 +159,21 @@ export const VehicleScreen = ({navigation}: Props): React.JSX.Element => {
         ) : (
           <>
             <Reveal delay={100}>
-              <VehicleTypeSelector value={vehicle.type} onChange={setVehicleType} />
+              <VehicleTypeSelector value={vehicle.type} onChange={onChangeType} />
             </Reveal>
 
             <View style={[styles.form, {gap: theme.spacing.lg}]}>
+              {/* B5-2: el modelo se ELIGE del catálogo curado (no texto libre), filtrado por tipo. */}
               <Reveal delay={150} from="scale">
+                <VehicleModelSelector
+                  vehicleType={vehicle.type}
+                  value={{modelSpecId: vehicle.modelSpecId, brand: vehicle.brand, model: vehicle.model}}
+                  onChange={onPickModel}
+                  error={fieldError('model')}
+                />
+              </Reveal>
+
+              <Reveal delay={190} from="scale">
                 <RegistrationField
                   label={t('registration.vehicle.plateLabel')}
                   placeholder={t('registration.vehicle.platePlaceholder')}
@@ -157,38 +185,15 @@ export const VehicleScreen = ({navigation}: Props): React.JSX.Element => {
                 />
               </Reveal>
 
-              <View style={[styles.row, {gap: theme.spacing.lg}]}>
-                <Reveal delay={190} from="scale" style={styles.flex}>
-                  <RegistrationField
-                    label={t('registration.vehicle.brandLabel')}
-                    placeholder={t('registration.vehicle.brandPlaceholder')}
-                    value={vehicle.brand}
-                    onChangeText={text => update({brand: text}, 'brand')}
-                    autoCapitalize="words"
-                    error={fieldError('brand')}
-                  />
-                </Reveal>
-                <Reveal delay={220} from="scale" style={styles.flex}>
-                  <RegistrationField
-                    label={t('registration.vehicle.yearLabel')}
-                    placeholder={t('registration.vehicle.yearPlaceholder')}
-                    value={vehicle.year}
-                    onChangeText={text => update({year: text}, 'year')}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    error={fieldError('year')}
-                  />
-                </Reveal>
-              </View>
-
-              <Reveal delay={260} from="scale">
+              <Reveal delay={220} from="scale">
                 <RegistrationField
-                  label={t('registration.vehicle.modelLabel')}
-                  placeholder={t('registration.vehicle.modelPlaceholder')}
-                  value={vehicle.model}
-                  onChangeText={text => update({model: text}, 'model')}
-                  autoCapitalize="characters"
-                  error={fieldError('model')}
+                  label={t('registration.vehicle.yearLabel')}
+                  placeholder={t('registration.vehicle.yearPlaceholder')}
+                  value={vehicle.year}
+                  onChangeText={text => update({year: text}, 'year')}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  error={fieldError('year')}
                 />
               </Reveal>
             </View>
@@ -203,6 +208,4 @@ const styles = StyleSheet.create({
   body: {paddingTop: 12},
   intro: {gap: 6},
   form: {},
-  row: {flexDirection: 'row', alignSelf: 'stretch'},
-  flex: {flex: 1},
 });

@@ -55,8 +55,8 @@ export async function POST(req: Request) {
   }
 
   // Login resuelto: persistimos los tokens en cookies httpOnly del propio origen.
-  setAccessCookie(result.data.accessToken);
-  setRefreshCookie(result.data.refreshToken);
+  await setAccessCookie(result.data.accessToken);
+  await setRefreshCookie(result.data.refreshToken);
   const out: LoginResult = { status: 'authenticated' };
   return NextResponse.json(out);
 }

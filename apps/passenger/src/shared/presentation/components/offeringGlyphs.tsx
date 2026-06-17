@@ -132,6 +132,38 @@ export const OFFERING_GLYPHS: Record<OfferingIcon, OfferingGlyph> = {
     MapGlyph: MotoMapGlyph,
     LineIcon: IconMoto,
   },
+  // B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false) → el quote nunca las
+  // cotiza, así que estos glyphs NO se renderizan hoy. Existen para satisfacer el registro exhaustivo
+  // (token nuevo sin entrada NO compila). Reusan la familia base (auto/moto) como placeholder; cuando el
+  // admin desbloquee la feature se les da arte propia (emoji ya distingue: ⚡🚑🛻🔧).
+  [OfferingIcon.EV]: {
+    emoji: '⚡',
+    tone: 'ink',
+    vehicleLabelKey: 'quote.vehicle.car',
+    MapGlyph: CarMapGlyph,
+    LineIcon: IconCar,
+  },
+  [OfferingIcon.AMBULANCE]: {
+    emoji: '🚑',
+    tone: 'ink',
+    vehicleLabelKey: 'quote.vehicle.car',
+    MapGlyph: CarMapGlyph,
+    LineIcon: IconCar,
+  },
+  [OfferingIcon.TOW]: {
+    emoji: '🛻',
+    tone: 'ink',
+    vehicleLabelKey: 'quote.vehicle.car',
+    MapGlyph: CarMapGlyph,
+    LineIcon: IconCar,
+  },
+  [OfferingIcon.WRENCH]: {
+    emoji: '🔧',
+    tone: 'brand',
+    vehicleLabelKey: 'quote.vehicle.moto',
+    MapGlyph: MotoMapGlyph,
+    LineIcon: IconMoto,
+  },
 };
 
 /**

@@ -95,6 +95,7 @@ export default function FinancePage() {
                   data={query.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={query.isLoading}
                   emptyTitle="Sin liquidaciones"
+                  emptyDescription="No hay liquidaciones para el período seleccionado."
                 />
                 <LoadMore
                   hasNextPage={!!query.hasNextPage}

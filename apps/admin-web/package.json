@@ -4,9 +4,9 @@
   "private": true,
   "description": "VEO Admin Dashboard · Next.js 14 (App Router)",
   "scripts": {
-    "dev": "next dev -p 5000",
+    "dev": "next dev -p 5001",
     "build": "next build",
-    "start": "next start -p 5000",
+    "start": "next start -p 5001",
     "lint": "eslint src --no-error-on-unmatched-pattern --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",

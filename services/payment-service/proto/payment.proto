@@ -9,6 +9,9 @@ service PaymentService {
   // Cobro canónico de un viaje, por trip_id (re-entrada del recibo). Resuelve el Payment del cobro
   // determinista del viaje (dedup_key 'trip-completed:{tripId}'). found=false si el viaje no tiene cobro.
   rpc GetPaymentByTrip (GetPaymentByTripRequest) returns (PaymentReply);
+  // Saldo de crédito GASTABLE del usuario (céntimos PEN · redención de referidos · Ola 2A). 0 si no tiene
+  // saldo. El BFF lo expone al pasajero (anti-IDOR: usa el userId del JWT, no uno del cliente).
+  rpc GetUserCredit (GetUserCreditRequest) returns (UserCreditReply);
 }
 
 message GetPaymentRequest {
@@ -17,6 +20,14 @@ message GetPaymentRequest {
 
 message GetPaymentByTripRequest {
   string trip_id = 1;
+}
+
+message GetUserCreditRequest {
+  string user_id = 1;
+}
+
+message UserCreditReply {
+  int32 balance_cents = 1;
 }
 
 message PaymentReply {

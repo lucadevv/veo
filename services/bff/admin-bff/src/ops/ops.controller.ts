@@ -4,7 +4,7 @@
  */
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
+import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { TripSummary, DriverApproval, TripDetail } from '@veo/api-client';
 import { OpsService, type PendingDriver, type PendingOperator } from './ops.service';
@@ -101,6 +101,7 @@ export class OpsController {
   @Post('operators/:id/approve')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
   @ApiOperation({ summary: 'Aprueba un operador y asigna roles (admin)' })
   approveOperator(
     @CurrentUser() user: AuthenticatedUser,

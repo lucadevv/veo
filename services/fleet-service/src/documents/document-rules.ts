@@ -34,6 +34,43 @@ export function isExpiryTracked(status: FleetDocumentStatus): boolean {
   return EXPIRY_TRACKED_STATUSES.includes(status);
 }
 
+/**
+ * B5-3.2 · Certificaciones de operador de las verticales especiales (conductor). A diferencia de los docs
+ * base, NO son críticas: su vencimiento NO suspende al conductor — solo lo vuelve inelegible para ESA
+ * vertical (que además está oculta). Una vertical exige la suya vía OfferingRequirements.certifications.
+ */
+export const CERTIFICATION_TYPES: readonly FleetDocumentType[] = [
+  FleetDocumentType.AMBULANCE_OPERATOR,
+  FleetDocumentType.TOW_OPERATOR,
+  FleetDocumentType.MECHANIC_CERT,
+];
+
+/** Estados en que una credencial está VIGENTE (operable): EXPIRING_SOON sigue vigente; EXPIRED/RECHAZADO no. */
+export const VALID_DOCUMENT_STATUSES: readonly FleetDocumentStatus[] = [
+  FleetDocumentStatus.VALID,
+  FleetDocumentStatus.EXPIRING_SOON,
+];
+
+export function isCertification(type: FleetDocumentType): boolean {
+  return CERTIFICATION_TYPES.includes(type);
+}
+
+export function isDocumentValid(status: FleetDocumentStatus): boolean {
+  return VALID_DOCUMENT_STATUSES.includes(status);
+}
+
+/**
+ * B5-3.2 · las certificaciones de vertical VÁLIDAS (tipo de cert ∧ estado vigente) que tiene un conductor.
+ * Pura, sin I/O: el caller trae los documentos (DocumentsService.listByOwner) y esta función destila la lista
+ * de certs que viaja a dispatch para la eligibilidad FAIL-CLOSED (requires.certifications ⊆ ésta). Excluye los
+ * docs base (licencia/SOAT) — solo certs de vertical — para que el ping no cargue credenciales irrelevantes.
+ */
+export function validCertificationsOf(
+  docs: readonly { type: FleetDocumentType; status: FleetDocumentStatus }[],
+): FleetDocumentType[] {
+  return docs.filter((d) => isCertification(d.type) && isDocumentValid(d.status)).map((d) => d.type);
+}
+
 /** Días (fraccionarios) hasta el vencimiento. Negativo si ya pasó. */
 export function daysUntil(expiresAt: Date, now: Date): number {
   return (expiresAt.getTime() - now.getTime()) / MS_PER_DAY;

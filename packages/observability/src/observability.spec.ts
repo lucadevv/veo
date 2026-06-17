@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { pino } from 'pino';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { PII_REDACT_PATHS, createLogger } from './logger.js';
+import { statusFromError } from './logging.interceptor.js';
 import { metricsRegistry, httpRequestDuration } from './metrics.js';
 import { HealthController } from './health.js';
 import { AllExceptionsFilter } from './exception-filter.js';
@@ -86,5 +87,23 @@ describe('AllExceptionsFilter', () => {
     filter.catch(tooLarge, host);
     expect(captured.code).toBe(413);
     expect((captured.body as { error: { code: string } }).error.code).toBe('HTTP_413');
+  });
+});
+
+describe('LoggingInterceptor · statusFromError (el log refleja el status REAL, no 500 hardcodeado)', () => {
+  it('HttpException → su status real (BadRequest → 400, no 500)', () => {
+    expect(statusFromError(new BadRequestException('phone inválido'))).toBe(400);
+    expect(statusFromError(new ServiceUnavailableException())).toBe(503);
+  });
+  it('DomainError → su httpStatus (NotFound → 404)', () => {
+    expect(statusFromError(new NotFoundError('viaje no existe'))).toBe(404);
+  });
+  it('http-errors (body-parser, status 413) → 413', () => {
+    const tooLarge = Object.assign(new Error('too large'), { status: 413, statusCode: 413 });
+    expect(statusFromError(tooLarge)).toBe(413);
+  });
+  it('Error plano SIN status → 500 (el único 500 real)', () => {
+    expect(statusFromError(new Error('boom'))).toBe(500);
+    expect(statusFromError('not an error')).toBe(500);
   });
 });

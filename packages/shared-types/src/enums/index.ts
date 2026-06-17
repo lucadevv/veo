@@ -68,6 +68,112 @@ export const VehicleType = {
 export type VehicleType = (typeof VehicleType)[keyof typeof VehicleType];
 
 /**
+ * Eje 1 de la taxonomía de flota (B5): la VERTICAL del servicio. RIDE = transporte de pasajeros (las
+ * 3 ofertas vivas hoy). AMBULANCE/TOW/MECHANIC = verticales especiales que se construyen pero arrancan
+ * OCULTAS (catálogo `enabled:false`) y se desbloquean como feature pagable. Cada oferta declara su
+ * `serviceType`; el matching y los requisitos de eligibilidad parten de acá.
+ */
+export const ServiceType = {
+  RIDE: 'RIDE',
+  AMBULANCE: 'AMBULANCE',
+  TOW: 'TOW',
+  MECHANIC: 'MECHANIC',
+} as const;
+export type ServiceType = (typeof ServiceType)[keyof typeof ServiceType];
+
+/**
+ * Fuente de energía del vehículo (B5). El costo de energía por km se UNIFICA como precio_por_unidad ÷
+ * rendimiento (km por unidad): líquido (S/litro ÷ km/L) y eléctrico (S/kWh ÷ km/kWh) usan la MISMA
+ * fórmula, solo cambia la `EnergyUnit`. Los precios viven en EnergyCatalog (hot-config, admin-editable).
+ */
+export const EnergySource = {
+  GASOLINE_95: 'GASOLINE_95',
+  GASOLINE_84: 'GASOLINE_84',
+  DIESEL: 'DIESEL',
+  GNV: 'GNV',
+  ELECTRIC: 'ELECTRIC',
+} as const;
+export type EnergySource = (typeof EnergySource)[keyof typeof EnergySource];
+
+/** Unidad de la fuente de energía: litro (combustibles líquidos/GNV) o kWh (eléctrico). B5. */
+export const EnergyUnit = {
+  LITER: 'LITER',
+  KWH: 'KWH',
+} as const;
+export type EnergyUnit = (typeof EnergyUnit)[keyof typeof EnergyUnit];
+
+/**
+ * Segmento del vehículo (B5) — eje de calidad/confort del modelo, derivado de su ficha (no del precio).
+ * ECONOMY (compactos), MID (sedán/medio), PREMIUM (alta gama). Lo usa VehicleModelSpec (fleet) y los
+ * requisitos de eligibilidad de la oferta (Offering.requires.segment, B5-3): un Confort exige segment ≥ MID.
+ */
+export const VehicleSegment = {
+  ECONOMY: 'ECONOMY',
+  MID: 'MID',
+  PREMIUM: 'PREMIUM',
+} as const;
+export type VehicleSegment = (typeof VehicleSegment)[keyof typeof VehicleSegment];
+
+/** Orden de los segmentos (para comparar "≥ MID" en la eligibilidad, B5-3). Mayor = más premium. */
+export const VEHICLE_SEGMENT_RANK: Record<VehicleSegment, number> = {
+  [VehicleSegment.ECONOMY]: 0,
+  [VehicleSegment.MID]: 1,
+  [VehicleSegment.PREMIUM]: 2,
+};
+
+/** Unidad canónica de cada fuente de energía (evita que el admin la elija mal). B5. */
+export const ENERGY_SOURCE_UNIT: Record<EnergySource, EnergyUnit> = {
+  [EnergySource.GASOLINE_95]: EnergyUnit.LITER,
+  [EnergySource.GASOLINE_84]: EnergyUnit.LITER,
+  [EnergySource.DIESEL]: EnergyUnit.LITER,
+  [EnergySource.GNV]: EnergyUnit.LITER,
+  [EnergySource.ELECTRIC]: EnergyUnit.KWH,
+};
+
+/**
+ * Precio de UNA fuente de energía (céntimos PEN por unidad: litro o kWh). B5.
+ *
+ * CONTRATO COMPARTIDO productor(trip-service · EnergyCatalog) ↔ consumidor(admin-bff · pricing proxy):
+ * vive ACÁ, junto a EnergySource/EnergyUnit, para que NO diverja entre el servicio que lo produce y el
+ * BFF que lo re-expone. El quote/economía derivan el costo/km = pricePerUnitCents ÷ rendimiento.
+ */
+export interface EnergySourcePrice {
+  sourceId: EnergySource;
+  unit: EnergyUnit;
+  pricePerUnitCents: number;
+}
+
+/**
+ * Un bucket horario del histograma de viajes creados del dashboard: hora UTC truncada (`bucket`,
+ * ISO UTC vía toStartOfHour / date_trunc) + conteo (`trips`).
+ */
+export interface TripsPerHourBucket {
+  /** Inicio de la hora en ISO UTC. */
+  bucket: string;
+  trips: number;
+}
+
+/**
+ * KPIs reales del dashboard admin servidos por trip-service (solo datos de trip-service, sin cross-service).
+ *
+ * CONTRATO COMPARTIDO productor(trip-service · AnalyticsService) ↔ consumidor(admin-bff · overview proxy)
+ * del endpoint interno GET /internal/analytics/trip-stats: vive ACÁ (junto a TripsPerHourBucket) para que
+ * NO diverja entre el servicio que lo produce y el BFF que lo agrega. Mismo patrón que EnergySourcePrice.
+ */
+export interface TripStatsView {
+  /** Viajes en vuelo AHORA (estados activos). */
+  activeTrips: number;
+  /** COMPLETED hoy (America/Lima). */
+  completedToday: number;
+  /** Cancelados (pasajero Y conductor) hoy (America/Lima). */
+  cancelledToday: number;
+  /** Promedio de durationSeconds de los viajes activos; null si no hay/no se almacena. */
+  avgDurationSeconds: number | null;
+  /** Viajes creados por hora en las últimas 24h, bucket = hora ISO UTC, orden asc. */
+  tripsPerHour: TripsPerHourBucket[];
+}
+
+/**
  * Solicitud especial del pasajero al conductor (BE-2). El conductor las VE antes de aceptar la puja.
  * PET = mascota · LUGGAGE = equipaje · CHILD_SEAT = silla de niño. "Parada" NO va acá: es un waypoint
  * del trayecto. Viajan en trip.bid_posted → board → vista de puja del conductor.
@@ -83,14 +189,27 @@ export type SpecialRequest = (typeof SpecialRequest)[keyof typeof SpecialRequest
  * Modo de despacho/pricing del viaje (ADR 011). PUJA = "proponé tu precio" (marketplace de ofertas,
  * ADR 010); FIXED = tarifa fija calculada estilo Uber (BR-T05). El ADMIN decide el modo por horario
  * (schedule global, Tier 1); el SERVIDOR lo resuelve UNA vez en createTrip y lo CONGELA en
- * Trip.dispatchMode (regla de oro resolve-once-persist-forever). Default del sistema: PUJA (VEO es
- * puja; el fijo es la excepción programada).
+ * Trip.dispatchMode (regla de oro resolve-once-persist-forever). Default del sistema (B5): FIXED (precio
+ * fijo) — la PUJA es la EXCEPCIÓN programada por horario en el panel admin. (Invierte el MVP original de
+ * ADR 011, que tenía PUJA por defecto; ver ADR 011 actualizado.)
  */
 export const PricingMode = {
   PUJA: 'PUJA',
   FIXED: 'FIXED',
 } as const;
 export type PricingMode = (typeof PricingMode)[keyof typeof PricingMode];
+
+/**
+ * Predicados de dominio del modo de pricing (ARQUITECTURA §4-ter nivel 2): la pregunta de "¿qué
+ * modo es?" vive ACÁ y solo acá, no desparramada como `=== 'PUJA'` por el motor (BFF quote) y la UI
+ * (selector de tarifas, pantalla programada). Fuente ÚNICA para backend y app — el `=== ` compara
+ * contra la CONSTANTE tipada, nunca contra un literal suelto. Aceptan `null/undefined` (estado de
+ * carga del quote en la UI) y devuelven `false`: si el modo aún no se conoce, no se muestra panel.
+ */
+export const isPujaMode = (mode: PricingMode | null | undefined): boolean =>
+  mode === PricingMode.PUJA;
+export const isFixedMode = (mode: PricingMode | null | undefined): boolean =>
+  mode === PricingMode.FIXED;
 
 export const KycStatus = {
   PENDING: 'PENDING',
@@ -99,6 +218,25 @@ export const KycStatus = {
   EXPIRED: 'EXPIRED',
 } as const;
 export type KycStatus = (typeof KycStatus)[keyof typeof KycStatus];
+
+/**
+ * Tipo de actor humano de la plataforma: PASSENGER (pasajero) · DRIVER (conductor). Es la FUENTE ÚNICA
+ * de este dominio — reemplaza las uniones inline `'PASSENGER' | 'DRIVER'` y los `@IsIn(['PASSENGER',
+ * 'DRIVER'])` crudos que estaban duplicados por los servicios (auth, chat, trip, rating…).
+ *
+ * Representación en MAYÚSCULAS porque es la PERSISTIDA (Prisma `enum UserType { PASSENGER DRIVER }`) y la
+ * del contrato REST/DTOs. OJO: el claim `typ` del JWT usa minúsculas (`SubjectType = 'passenger' |
+ * 'driver' | 'admin'` en `@veo/auth`) — es OTRA representación, del token, e incluye `admin`. NO se
+ * mezclan: si alguna vez hay que cruzar capas, el mapeo es explícito en el borde, no por coincidencia.
+ */
+export const ActorType = {
+  PASSENGER: 'PASSENGER',
+  DRIVER: 'DRIVER',
+} as const;
+export type ActorType = (typeof ActorType)[keyof typeof ActorType];
+
+/** Valores de `ActorType` para validadores de borde: `@IsIn(ACTOR_TYPES)`. Derivado del const, no re-tipeado. */
+export const ACTOR_TYPES = Object.values(ActorType);
 
 export const PanicStatus = {
   TRIGGERED: 'TRIGGERED',
@@ -194,6 +332,13 @@ export const FleetDocumentType = {
   PROPERTY_CARD: 'PROPERTY_CARD',
   BACKGROUND_CHECK: 'BACKGROUND_CHECK',
   ITV: 'ITV',
+  // B5-3.2 · CERTIFICACIONES de las verticales especiales (conductor): credencial de operador con la MISMA
+  // maquinaria FleetDocument (vencimiento + review del operador). NO son críticas (su vencimiento NO suspende
+  // al conductor — solo lo vuelve inelegible para ESA vertical, que además está oculta). Una oferta vertical
+  // exige la suya vía OfferingRequirements.certifications (eligibilidad fail-closed).
+  AMBULANCE_OPERATOR: 'AMBULANCE_OPERATOR',
+  TOW_OPERATOR: 'TOW_OPERATOR',
+  MECHANIC_CERT: 'MECHANIC_CERT',
 } as const;
 export type FleetDocumentType = (typeof FleetDocumentType)[keyof typeof FleetDocumentType];
 

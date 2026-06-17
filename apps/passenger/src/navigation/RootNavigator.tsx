@@ -1,4 +1,3 @@
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme } from '@veo/ui-kit';
 import React from 'react';
@@ -43,74 +42,23 @@ import {
 import { MapPickScreen, RouteQuoteScreen, SearchScreen } from '../features/maps/presentation';
 import { useSessionStore } from '../core/session/sessionStore';
 import { syncPushRegistration } from '../services/messaging';
-import { IconTabHome, IconTabTrips, IconTabUser } from './components/TabBarIcons';
 import { SplashGate } from './components/SplashGate';
-import type { MainTabParamList, RootStackParamList } from './types';
+import type { RootStackParamList } from './types';
 
 /**
  * Navegador raíz del pasajero. Conmuta de stack según el estado de sesión (no navega
  * imperativamente): `unknown` → Splash, `unauthenticated` → Onboarding/Auth, `authenticated` →
- * tabs + pantallas de viaje/seguridad/pago.
+ * Home (raíz) + pantallas de viaje/seguridad/pago.
+ *
+ * REFACTOR navegación (sin bottom tabs): se eliminó el `createBottomTabNavigator` de 3 tabs. `Home`
+ * (`RequestFlowScreen`) es ahora la PRIMERA `Stack.Screen` del stack autenticado (initialRoute de
+ * facto); `Profile` se alcanza por el avatar del header del Home y `TripHistory` ("Mis viajes") es
+ * una entrada del Perfil. El teardown del contexto GL del mapa que antes hacía `detachInactiveScreens`
+ * (desmontar el Home al cambiar de tab) ahora lo replica un guard de foco (`useIsFocused`) en
+ * `RequestFlowScreen`, que desmonta el `AppMap` cuando el Home pierde foco (ver allí).
  */
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab = createBottomTabNavigator<MainTabParamList>();
-
-function MainTabs(): React.JSX.Element {
-  const theme = useTheme();
-  const { t } = useTranslation();
-
-  return (
-    // `detachInactiveScreens` DESMONTA los tabs inactivos (vs. solo ocultarlos). El tab Home monta
-    // el `MapView` de MapLibre, que asigna un contexto GL/Metal nativo. MapLibre 10.4.2 NO expone
-    // teardown desde JS: el contexto solo se libera en el `deinit` nativo de la vista, y eso solo
-    // ocurre cuando el componente se DESMONTA. Con `false`, el Home (y su mapa) quedaba montado
-    // siempre; cada hot/fresh-reload dejaba un contexto GL huérfano → tras N reloads → mapa negro.
-    // Con `true`, salir del tab desmonta el Home → MapLibre libera el contexto → el leak se corta.
-    // Reentrar al Home remonta a su estado idle/peek (el natural); el borrador del viaje vive en
-    // Zustand y sobrevive al desmonte, así que no se pierde nada del flujo.
-    <Tab.Navigator
-      detachInactiveScreens={true}
-      screenOptions={{
-        headerShown: false,
-        // Congela los tabs inactivos que SÍ siguen montados durante la transición de detach, para
-        // que no rendericen ni corran timers de fondo mientras se desmontan.
-        freezeOnBlur: true,
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.inkSubtle,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-        },
-      }}
-    >
-      <Tab.Screen
-        name="Home"
-        component={RequestFlowScreen}
-        options={{
-          title: t('screens.home'),
-          tabBarIcon: ({ focused, color }) => <IconTabHome active={focused} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="TripHistory"
-        component={TripHistoryScreen}
-        options={{
-          title: t('screens.tripHistory'),
-          tabBarIcon: ({ focused, color }) => <IconTabTrips active={focused} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          title: t('screens.profile'),
-          tabBarIcon: ({ focused, color }) => <IconTabUser active={focused} color={color} />,
-        }}
-      />
-    </Tab.Navigator>
-  );
-}
 
 export function RootNavigator(): React.JSX.Element {
   const { t } = useTranslation();
@@ -152,6 +100,19 @@ export function RootNavigator(): React.JSX.Element {
         <Stack.Screen name="Splash">
           {() => <SplashGate ready={status !== 'unknown'} onDone={handleSplashDone} />}
         </Stack.Screen>
+      </Stack.Navigator>
+    );
+  }
+
+  // Sesión EXPIRADA (refresh JWT falló / venció): pantalla dedicada de re-login forzado. Es un
+  // estado tipado de la máquina de auth, distinto de 'unauthenticated' (logout intencional / cold
+  // start sin sesión). Va ANTES del branch de Onboarding/Auth para que 'expired' no caiga al flujo
+  // de ingreso normal. Desde `SessionExpired` el usuario re-ingresa con motivo 'user-logout' →
+  // 'unauthenticated' → Auth.
+  if (status === 'expired') {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+        <Stack.Screen name="SessionExpired" component={SessionExpiredScreen} />
       </Stack.Navigator>
     );
   }
@@ -213,7 +174,22 @@ export function RootNavigator(): React.JSX.Element {
         contentStyle: { backgroundColor: theme.colors.bg },
       }}
     >
-      <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+      {/* HOME = pantalla RAÍZ autenticada (antes el tab Home). Va PRIMERA (initialRoute de facto), sin
+          header del SO (su chrome propio: pill de ubicación + campana + avatar flotan sobre el mapa). */}
+      <Stack.Screen name="Home" component={RequestFlowScreen} options={{ headerShown: false }} />
+      {/* "Mis viajes" y Perfil dejaron de ser tabs: ahora son pantallas del stack con el header nativo
+          oscuro estándar (la convención del resto del stack autenticado). Profile se abre desde el
+          avatar del Home; TripHistory desde la entrada "Mis viajes" del Perfil. */}
+      <Stack.Screen
+        name="TripHistory"
+        component={TripHistoryScreen}
+        options={{ title: t('screens.tripHistory') }}
+      />
+      <Stack.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ title: t('screens.profile') }}
+      />
       <Stack.Screen
         name="Search"
         component={SearchScreen}
@@ -320,9 +296,6 @@ export function RootNavigator(): React.JSX.Element {
         {/* Cámara del viaje a pantalla completa (Ola 2A): modal full-screen, sin chrome del SO. */}
         <Stack.Screen name="CameraLive" component={CameraLiveScreen} />
         <Stack.Screen name="Panic" component={PanicScreen} />
-        {/* Sesión expirada por inactividad: la pantalla y la ruta existen; el trigger que conmuta
-            a este estado queda como follow-up. */}
-        <Stack.Screen name="SessionExpired" component={SessionExpiredScreen} />
       </Stack.Group>
     </Stack.Navigator>
   );

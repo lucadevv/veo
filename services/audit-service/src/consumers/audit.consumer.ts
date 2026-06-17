@@ -3,10 +3,11 @@
  * inmutable (hash chain). Idempotente por envelope.eventId. audit-service principalmente CONSUME.
  *
  * Cobertura actual (eventos definidos en @veo/events · EVENT_SCHEMAS):
- *  - Identidad/KYC: user.registered, user.kyc_verified, driver.verified, biometric.failed
+ *  - Identidad/KYC: user.registered, user.email_verified, user.kyc_verified, driver.verified, biometric.failed
  *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
  *  - Pagos:         payment.captured, payment.failed, payout.processed
+ *  - Recompensas:   user.referred (vínculo creado), referral.rewarded, promo.redeemed, incentive.completed (movimientos de crédito · Ley 29733)
  *  - Video/Media:   media.recording_started, media.archived, media.access_granted
  *  - Viaje (ciclo): trip.assigned/accepted/arriving/arrived/started/completed/cancelled/expired/failed
  *                   + trip.child_code_failed (solo IDs+estado, sin geo → ver nota en registerHandlers)
@@ -66,6 +67,15 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
     return {
       // Identidad / KYC
       'user.registered': this.audited('user.registered', (p) => ({
+        actorId: p.userId,
+        resourceType: 'user',
+        resourceId: p.userId,
+      })),
+      // Confirmación de titularidad del correo (ADR-012 · Ley 29733): traza inmutable de QUIÉN verificó su
+      // correo y cuándo. El payload trae al sujeto (userId) — no porta verificador → actor=recurso=userId
+      // (el titular del dato verificado), mismo patrón que user.registered/user.kyc_verified. El email viaja
+      // en el payload del evento (necesario para el consentimiento verificado), no se duplica en el mapping.
+      'user.email_verified': this.audited('user.email_verified', (p) => ({
         actorId: p.userId,
         resourceType: 'user',
         resourceId: p.userId,
@@ -159,6 +169,34 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         actorId: p.driverId,
         resourceType: 'payout',
         resourceId: p.payoutId,
+      })),
+
+      // Recompensas / créditos (Ola 2A/2C · Ley 29733): los movimientos de dinero —crédito al referidor,
+      // bono al conductor, descuento de promo— quedan en el WORM inmutable para reconstruir QUIÉN recibió
+      // QUÉ crédito y cuándo. actorId = el beneficiario del movimiento; recurso = la entidad de recompensa.
+      // Vínculo de referido CREADO (Ola 2A · Ley 29733): traza inmutable de QUIÉN refirió a QUIÉN y con qué
+      // código, antes de que se otorgue la recompensa (referral.rewarded llega luego, al 1er viaje). Permite
+      // reconstruir el origen de cada cuenta referida (antifraude/compliance). actorId=referidor (quien
+      // ejecuta la acción), recurso=referral/referido (la entidad creada). El código viaja en el payload.
+      'user.referred': this.audited('user.referred', (p) => ({
+        actorId: p.referrerUserId,
+        resourceType: 'referral',
+        resourceId: p.referredUserId,
+      })),
+      'referral.rewarded': this.audited('referral.rewarded', (p) => ({
+        actorId: p.referrerUserId,
+        resourceType: 'referral',
+        resourceId: p.referredUserId,
+      })),
+      'promo.redeemed': this.audited('promo.redeemed', (p) => ({
+        actorId: p.userId,
+        resourceType: 'promotion',
+        resourceId: p.promotionId,
+      })),
+      'incentive.completed': this.audited('incentive.completed', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'incentive',
+        resourceId: p.incentiveId,
       })),
 
       // Video / Media (ciclo de vida de la grabación · BR-S01)

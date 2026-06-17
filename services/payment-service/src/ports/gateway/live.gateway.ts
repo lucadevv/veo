@@ -21,6 +21,12 @@ import type {
 /** Catálogo del riel directo: solo Yape/Plin (tarjeta/PagoEfectivo no tienen riel directo — van por agregador). */
 const SUPPORTED_METHODS: ReadonlySet<GatewayPaymentMethod> = new Set(['YAPE', 'PLIN']);
 
+/**
+ * Estados de cobro APROBADO del riel directo (CONTRATO DEL PROVEEDOR del gateway live, no dominio VEO).
+ * Cualquiera de estos → el cobro se considera CONFIRMED; el resto → DECLINED. Co-locado en el adaptador.
+ */
+const LIVE_APPROVED_STATUSES: ReadonlySet<string> = new Set(['CONFIRMED', 'APPROVED', 'PAID']);
+
 export interface LiveGatewayOptions {
   baseUrl: string;
   apiKey: string;
@@ -71,7 +77,7 @@ export class LivePaymentGateway implements PaymentGateway {
     });
 
     const status = (body.status ?? '').toUpperCase();
-    if (status === 'CONFIRMED' || status === 'APPROVED' || status === 'PAID') {
+    if (LIVE_APPROVED_STATUSES.has(status)) {
       return { status: 'CONFIRMED', externalRef: body.transactionId };
     }
     return { status: 'DECLINED', reason: body.declineReason ?? `gateway_status_${status || 'UNKNOWN'}` };

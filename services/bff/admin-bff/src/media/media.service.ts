@@ -1,6 +1,6 @@
 /**
  * MediaService — acceso a video con doble-auth (BR-S07): un operador SOLICITA y otro APRUEBA con
- * step-up MFA fresco. La aprobación devuelve una URL firmada con watermark. Todo se audita.
+ * step-up MFA fresco. El stream devuelve una URL firmada con watermark. Todo se audita.
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -11,25 +11,68 @@ import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
 import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
-import type { LiveAccessDto, RequestAccessDto } from './dto/media.dto';
+import type { LiveAccessDto, RequestAccessDto, VideoAccessStatus } from './dto/media.dto';
 
-interface AccessRequestReply {
+/** Respuesta mínima de media-service al crear una solicitud (POST /media/access). */
+interface AccessRequestCreated {
   id: string;
-  status: string;
+  status: VideoAccessStatus;
 }
+
+/**
+ * Registro completo de una solicitud de acceso a video tal como lo expone media-service
+ * (GET/approve/reject). Es el modelo aguas-abajo que el bff mapea a la vista del cliente.
+ */
+interface VideoAccessRequest {
+  id: string;
+  segmentId: string | null;
+  tripId: string;
+  requestedBy: string;
+  requestedByEmail: string;
+  reason: string;
+  status: VideoAccessStatus;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  signedUrlExpiresAt: string | null;
+  watermark: string | null;
+  createdAt: string;
+}
+
+/** Stream firmado que devuelve media-service (GET .../stream). */
+interface StreamReply {
+  signedUrl: string;
+  watermark: string;
+  expiresAt: string;
+  segmentId: string;
+}
+
+/** Vista de solicitud de acceso que consume admin-web (schema Zod `mediaAccessRequestView`). */
+export interface MediaAccessRequestView {
+  id: string;
+  tripId: string;
+  requestedBy: string;
+  reason: string;
+  status: VideoAccessStatus;
+  requestedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+}
+
+/** URL firmada del video que consume admin-web (schema Zod `signedMedia`). */
+export interface SignedMedia {
+  url: string;
+  expiresAt: string;
+  watermark: string;
+}
+
 /** Token de cámara EN VIVO (solo-suscripción) emitido por media-service para el muro del admin. */
 export interface LiveViewerToken {
   roomName: string;
   token: string;
   url: string;
   expiresInSeconds: number;
-}
-export interface ApprovedAccess {
-  requestId: string;
-  signedUrl: string;
-  watermark: string;
-  expiresAt: string;
-  segmentId: string;
 }
 export interface SegmentView {
   id: string;
@@ -42,6 +85,23 @@ export interface SegmentView {
   accessedCount: number;
   hasPanic: boolean;
   hasIncident: boolean;
+}
+
+/**
+ * Mapea el registro completo de media-service a la vista del cliente (contrato EXACTO validado por Zod).
+ * `decidedAt`/`decidedBy` colapsan la rama approve/reject en un solo campo (la que esté presente, o null).
+ */
+function toView(req: VideoAccessRequest): MediaAccessRequestView {
+  return {
+    id: req.id,
+    tripId: req.tripId,
+    requestedBy: req.requestedBy,
+    reason: req.reason,
+    status: req.status,
+    requestedAt: req.createdAt,
+    decidedAt: req.approvedAt ?? req.rejectedAt ?? null,
+    decidedBy: req.approvedBy ?? req.rejectedBy ?? null,
+  };
 }
 
 @Injectable()
@@ -57,26 +117,114 @@ export class MediaService {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
-  async requestAccess(identity: AuthenticatedUser, dto: RequestAccessDto): Promise<AccessRequestReply> {
-    const res = await this.rest.post<AccessRequestReply>('/media/access', { identity, body: dto });
+  /**
+   * Email del operador para incrustar como watermark en el video (media-service lo exige con @IsEmail).
+   * El JWT admin transporta el `email` del operador (claim solo-admin, staff interno), así que el
+   * watermark muestra la identidad legible REAL del operador (BR-S02), no un sintético opaco. El camino
+   * de REFRESH de identity ahora distingue sujeto admin (`typ:'admin'` en el refresh token) y REPUEBLA
+   * `email` (y roles) desde AdminUser, así que el token re-emitido por refresh TAMBIÉN porta el email.
+   *
+   * Fallback residual: solo se activa para identidades sin email (passenger/driver, que nunca acceden a
+   * este BFF) o un refresh token PREVIO al fix que aún no portaba `typ` y se re-emitió sin email; en ese
+   * caso caemos al email determinista derivado del `userId` —que ES la clave canónica de rendición de
+   * cuentas (mismo valor que media-service persiste como `requestedBy`/`approvedBy`)— para que la
+   * validación @IsEmail downstream no rompa. Tras el primer refresh, el token queda curado con `typ` y
+   * el email real vuelve a estar presente.
+   */
+  private operatorEmail(identity: AuthenticatedUser): string {
+    return identity.email ?? `${identity.userId}@operator.veo.internal`;
+  }
+
+  /** Lista las solicitudes de acceso (opcionalmente filtradas por estado). Lectura — solo rol, sin step-up. */
+  async listRequests(
+    identity: AuthenticatedUser,
+    status?: VideoAccessStatus,
+  ): Promise<MediaAccessRequestView[]> {
+    const res = await this.rest.get<VideoAccessRequest[]>('/media/access', {
+      identity,
+      query: { status },
+    });
+    return res.map(toView);
+  }
+
+  /**
+   * Crea una solicitud de acceso (queda PENDING). El `operatorEmail` se deriva de la sesión, NO del cliente.
+   * media-service devuelve solo {id,status}; construimos la vista con los datos conocidos (el cliente igual
+   * invalida y refetchea la lista real, así que la vista provisional alcanza para el optimistic update).
+   */
+  async requestAccess(
+    identity: AuthenticatedUser,
+    dto: RequestAccessDto,
+  ): Promise<MediaAccessRequestView> {
+    const created = await this.rest.post<AccessRequestCreated>('/media/access', {
+      identity,
+      body: { tripId: dto.tripId, reason: dto.reason, operatorEmail: this.operatorEmail(identity) },
+    });
     await this.audit.record(identity, {
       action: 'media.access_request',
       resourceType: 'media_access',
-      resourceId: res.id,
-      payload: { tripId: dto.tripId, segmentId: dto.segmentId, reason: dto.reason },
+      resourceId: created.id,
+      payload: { tripId: dto.tripId, reason: dto.reason },
     });
-    return res;
+    return {
+      id: created.id,
+      tripId: dto.tripId,
+      requestedBy: identity.userId,
+      reason: dto.reason,
+      status: created.status,
+      requestedAt: new Date().toISOString(),
+      decidedAt: null,
+      decidedBy: null,
+    };
   }
 
-  async approveAccess(identity: AuthenticatedUser, requestId: string): Promise<ApprovedAccess> {
-    const res = await this.rest.post<ApprovedAccess>(`/media/access/${requestId}/approve`, { identity });
+  /** Aprueba la solicitud (requiere MFA fresca; el controller lo impone). Audita la decisión. */
+  async approveRequest(
+    identity: AuthenticatedUser,
+    requestId: string,
+  ): Promise<MediaAccessRequestView> {
+    const res = await this.rest.post<VideoAccessRequest>(`/media/access/${requestId}/approve`, {
+      identity,
+    });
     await this.audit.record(identity, {
       action: 'media.access_approve',
       resourceType: 'media_access',
       resourceId: requestId,
+      payload: { tripId: res.tripId, status: res.status },
+    });
+    return toView(res);
+  }
+
+  /** Rechaza la solicitud (solo rol, sin step-up). Audita la decisión. */
+  async rejectRequest(
+    identity: AuthenticatedUser,
+    requestId: string,
+  ): Promise<MediaAccessRequestView> {
+    const res = await this.rest.post<VideoAccessRequest>(`/media/access/${requestId}/reject`, {
+      identity,
+    });
+    await this.audit.record(identity, {
+      action: 'media.access_reject',
+      resourceType: 'media_access',
+      resourceId: requestId,
+      payload: { tripId: res.tripId, status: res.status },
+    });
+    return toView(res);
+  }
+
+  /**
+   * Obtiene la URL firmada del video de una solicitud aprobada (requiere MFA fresca; el controller lo impone).
+   * El acceso efectivo al material sensible se audita ANTES de devolver la URL (fail-closed, Ley 29733).
+   */
+  async streamRequest(identity: AuthenticatedUser, requestId: string): Promise<SignedMedia> {
+    const res = await this.rest.get<StreamReply>(`/media/access/${requestId}/stream`, { identity });
+    await this.audit.record(identity, {
+      action: 'media.access_stream',
+      resourceType: 'media_access',
+      resourceId: requestId,
       payload: { segmentId: res.segmentId, expiresAt: res.expiresAt },
     });
-    return res;
+    return { url: res.signedUrl, expiresAt: res.expiresAt, watermark: res.watermark };
   }
 
   /**
@@ -117,7 +265,7 @@ export class MediaService {
     const res = await this.rest.get<SegmentView[]>('/media/segments', { identity, query: { tripId } });
     // Listar qué segmentos de video de cabina existen para un viaje (incl. flags hasPanic/hasIncident)
     // es una lectura sensible: debe quedar en la pista de rendición de cuentas (Ley 29733), igual que
-    // requestAccess/approveAccess. fail-closed: si el audit falla, el listado falla.
+    // requestAccess/streamRequest. fail-closed: si el audit falla, el listado falla.
     await this.audit.record(identity, {
       action: 'media.segments_list',
       resourceType: 'media_segments',

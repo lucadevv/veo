@@ -1,5 +1,5 @@
 import type { TripHistoryItem, TripStatus } from '@veo/api-client';
-import { Text, useTheme } from '@veo/ui-kit';
+import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -12,7 +12,6 @@ import {
   formatTimeOfDay,
 } from '../../../../shared/utils/format';
 import { offeringGlyph } from '../../../../shared/presentation/components/offeringGlyphs';
-import { hexAlpha } from './color';
 import { Animated, usePressScale } from './motion';
 import { TripRatingTag } from './TripRatingTag';
 

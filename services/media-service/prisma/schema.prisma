@@ -51,6 +51,17 @@ model MediaSegment {
 
 /// Solicitud de acceso a un video (BR-S02). El operador la crea con un motivo (>20 chars); un
 /// COMPLIANCE_SUPERVISOR con MFA fresca la aprueba, generando una URL firmada (5 min) + watermark.
+/// Estado de la solicitud de acceso a video (BR-S02). PENDING al crearse; el supervisor la APRUEBA o
+/// RECHAZA (doble-auth). EXPIRED reservado para cuando una aprobación tenga ventana de validez vencida.
+enum VideoAccessStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+
+  @@schema("media")
+}
+
 model VideoAccessRequest {
   id                 String    @id @db.Uuid
   /// Segmento concreto al que se solicita acceso (opcional: se puede pedir por viaje completo).
@@ -63,17 +74,23 @@ model VideoAccessRequest {
   requestedByEmail   String    @map("requested_by_email")
   /// Motivo de la solicitud. CHECK a nivel DB: longitud > 20 (BR-S02).
   reason             String
+  /// Estado explícito de la solicitud (state machine: PENDING → APPROVED|REJECTED). Default PENDING.
+  status             VideoAccessStatus @default(PENDING)
   /// Supervisor de cumplimiento que aprueba (su id de usuario).
   approvedBy         String?   @map("approved_by") @db.Uuid
   approvedAt         DateTime? @map("approved_at") @db.Timestamptz
+  /// Supervisor que RECHAZA (su id de usuario) — cierra la solicitud sin otorgar acceso (auditado).
+  rejectedBy         String?   @map("rejected_by") @db.Uuid
+  rejectedAt         DateTime? @map("rejected_at") @db.Timestamptz
   signedUrlExpiresAt DateTime? @map("signed_url_expires_at") @db.Timestamptz
-  /// Watermark generado en la aprobación (email del operador + timestamp + id de solicitud).
+  /// Watermark de la última visualización (email del operador + timestamp + id de solicitud).
   watermark          String?
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([tripId])
   @@index([segmentId])
   @@index([requestedBy])
+  @@index([status, createdAt])
   @@map("video_access_requests")
   @@schema("media")
 }

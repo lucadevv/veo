@@ -12,7 +12,7 @@ export const common = {
   splashTagline: 'Movilidad segura',
   /** Taglines de marca usadas en cabeceras del flujo de ingreso. */
   brandTaglineCity: 'Tu viaje. Tu ciudad.',
-  brandTaglinePeru: 'Tu ride en Perú',
+  brandTaglinePeru: 'Tu viaje en Perú',
   placeholder: {
     subtitle: 'Pantalla en construcción',
   },
@@ -88,26 +88,21 @@ export const common = {
 
     safety: {
       eyebrow: 'Seguridad',
-      title: 'Viaja con quien debe ser',
-      body: 'Verificación biométrica del conductor en cada viaje y botón de pánico 24/7.',
+      title: 'Nunca viajas solo',
+      body: 'Conductor verificado y pánico 24/7, en cada viaje.',
+      imageAlt: 'Pasajera viajando tranquila de noche',
     },
 
     price: {
-      title: 'Precio claro antes de subir',
-      body: 'Conoce la tarifa exacta y elige tu VEO: moto o auto.',
-      moto: 'VEO Moto',
-      motoEta: '4 min',
-      motoPrice: 'S/ 7.50',
+      title: 'Tu auto, en minutos',
+      body: 'Autos cómodos y verificados, cuando los necesitas.',
       car: 'VEO Auto',
-      carEta: '6 min',
-      carPrice: 'S/ 12.00',
-      origin: 'Miraflores',
-      destination: 'Santiago de Surco',
+      carTagline: 'Cómodo, seguro y siempre verificado',
     },
 
     consent: {
-      title: 'Tu privacidad, primero',
-      subtitle: 'Necesitamos tu permiso para darte un viaje seguro.',
+      title: 'Tus datos, protegidos',
+      subtitle: 'Solo lo necesario para cuidarte.',
       sectionLabel: 'Consentimientos',
       data: 'Tratamiento de mis datos personales',
       camera: 'Uso de la cámara para verificación',
@@ -119,13 +114,13 @@ export const common = {
 
   auth: {
     /** Paso inicial: elegir método de ingreso. */
-    startTitle: 'Ingresa a VEO',
+    startTitle: 'Bienvenido a VEO',
     startSubtitle: 'Elige cómo quieres entrar.',
     continueGoogle: 'Continuar con Google',
     continueApple: 'Continuar con Apple',
     continueEmail: 'Continuar con correo',
     continuePhone: 'Continuar con teléfono',
-    startHint: '¿Sin celular o sin señal? Usa correo o Google — no necesitas SMS.',
+    startHint: '¿Sin señal para el SMS? Entra con correo o Google.',
     /** Errores del login social (Google/Apple). Cancelar NO muestra Banner. */
     oauthErrorTitle: 'No pudimos iniciar sesión',
     oauthErrorUnavailable:
@@ -142,7 +137,7 @@ export const common = {
     comingSoonWhatsapp: 'El envío del código por WhatsApp estará disponible pronto.',
     back: 'Volver',
     phoneTitle: 'Ingresa tu número',
-    phoneSubtitle: 'Te enviaremos un código por SMS',
+    phoneSubtitle: 'Te enviamos un código por SMS.',
     phoneLabel: 'Número de teléfono',
     phoneHelper: 'Usaremos tu número solo para verificar tu cuenta.',
     phonePlaceholder: '987 654 321',
@@ -152,6 +147,7 @@ export const common = {
     otpTitle: 'Verifica tu número',
     otpSubtitle: 'Ingresa el código que enviamos al {{phone}}',
     otpLabel: 'Código de verificación',
+    otpProgress: '{{current}} de {{length}}',
     invalidOtp: 'El código debe tener 6 dígitos.',
     otpExpiry: 'El código expirará en 5 minutos.',
     verify: 'Verificar',
@@ -169,13 +165,14 @@ export const common = {
     otpHelpEmail: 'Mejor entro con correo',
     otpHelpResend: 'Reenviar SMS',
     errorRequest: 'No pudimos enviar el código. Verifica tu número e inténtalo de nuevo.',
+    errorRequestHint: 'Revisa tu conexión e inténtalo de nuevo.',
     errorVerify: 'Código incorrecto o vencido. Inténtalo de nuevo.',
     changeNumber: 'Cambiar número',
-    /** Pantalla de sesión expirada por inactividad. */
+    /** Pantalla de sesión expirada (refresh JWT vencido/revocado). */
     expiredTitle: 'Tu sesión expiró',
     expiredSubtitle:
-      'Por tu seguridad cerramos la sesión tras inactividad. Vuelve a verificar tu identidad para continuar.',
-    expiredAction: 'Volver a ingresar',
+      'Por tu seguridad cerramos la sesión. Vuelve a iniciar sesión para verificar tu identidad y continuar.',
+    expiredAction: 'Volver a iniciar sesión',
     biometricTitle: 'Desbloquea VEO',
     biometricSubtitle: 'Usa tu rostro o huella para continuar tu sesión de forma segura.',
     biometricUnlock: 'Desbloquear',
@@ -267,7 +264,7 @@ export const common = {
      *  Genérico elegante a propósito: la data del perfil no expone el proveedor. */
     emailFromAccount: 'Lo tomamos de tu cuenta',
     privacyNote: 'Tus datos están protegidos y solo los usamos para que viajes mejor.',
-    submit: 'Listo, empieza a viajar',
+    submit: 'Empezar a viajar',
     invalidName: 'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
     invalidEmail: 'Revisa tu correo, parece que le falta algo.',
     saveError: 'No pudimos guardar tu perfil. Inténtalo de nuevo.',
@@ -277,12 +274,26 @@ export const common = {
     title: '¿A dónde vamos?',
     greeting: 'Hola',
     whereTo: '¿A dónde vamos?',
+    /** Título héroe editorial del Home idle (ancla visual grande, arriba con aire). */
+    heroTitle: '¿A dónde vamos?',
     yourLocation: 'Tu ubicación',
     pickupLabel: 'Recojo',
+    /** Placeholder de la fila de origen cuando aún no hay ubicación resuelta (GPS sin fix). */
+    definePickup: 'Define tu punto de recojo',
     adjustPickup: 'Ajustar',
+    /** Botón circular que permuta origen ↔ destino en la tarjeta de ruta del Home. */
+    swapRoute: 'Intercambiar origen y destino',
+    /** Tarjeta del último conductor con quien viajaste (atajo de confianza). */
+    lastDriverTitle: 'Tu último conductor',
+    /** Título de la sección teaser del catálogo de servicios (informativa, sin precio, en el Home idle). */
+    servicesTitle: 'Nuestros servicios',
     shortcutHome: 'Casa',
     shortcutWork: 'Trabajo',
     shortcutRecent: 'Recientes',
+    /** Título de la sección "Tus últimos viajes" del Home idle (últimos 3 viajes reales). */
+    recentTripsTitle: 'Tus últimos viajes',
+    /** Etiqueta accesible de una fila de últimos viajes: destino + metadatos (día · distancia · duración). */
+    recentTripRowLabel: 'Pedir de nuevo a {{destination}}. {{meta}}',
     /** Título de la sección de favoritos guardados en el cuerpo del sheet. */
     savedTitle: 'Guardados',
     /** Enlace "ver todas" → pantallas de gestión (lugares guardados / historial). */
@@ -304,6 +315,8 @@ export const common = {
     locationActionSettings: 'Ajustes',
     /** CTA del pill para reintentar el fix. */
     locationActionRetry: 'Reintentar',
+    /** Botón flotante del mapa para volver la cámara a mi ubicación tras panear libremente. */
+    recenter: 'Centrar en mi ubicación',
     /** Campana de avisos de la Home (centro de notificaciones sin backend todavía). */
     notifications: 'Avisos',
     notificationsComingSoon:
@@ -436,6 +449,8 @@ export const common = {
     selectOption: 'Selecciona una categoría para continuar.',
     /** Gate de seguridad: el pasajero debe verificar su identidad antes del primer viaje. */
     kycRequired: 'Verifica tu identidad para pedir tu primer viaje.',
+    /** ADR 013 · Fase B: la oferta elegida se deshabilitó entre el quote y el create (carrera). */
+    offeringUnavailable: 'Esta oferta ya no está disponible. Actualizamos las opciones.',
     eta: 'ETA {{minutes}} min',
     /** Tipos de vehículo en las opciones de tarifa (Ola 2B · tier moto-taxi). */
     vehicle: {
@@ -445,6 +460,9 @@ export const common = {
     cheapest: 'Más barato',
     /** Etiqueta del total en el desglose de tarifa (p. ej. con recargo de modo niño). */
     total: 'Total',
+    /** Preview del crédito de referido aplicado a la tarifa (Lote C3). */
+    referralCredit: 'Crédito de referido',
+    youPay: 'Pagas',
   },
 
   /**
@@ -457,6 +475,13 @@ export const common = {
     veo_economico: { name: 'VEO Económico' },
     veo_confort: { name: 'VEO Confort' },
     veo_xl: { name: 'VEO XL' },
+    // B5-vert · verticales especiales + EV: codeadas pero OCULTAS (defaultEnabled:false). El i18n nativo
+    // existe para cuando el admin las habilite (la feature pagable); mientras estén ocultas el quote no las
+    // cotiza, así que estas claves no se renderizan. Mismos textos que OFFERING_DISPLAY_NAMES del public-bff.
+    veo_economico_ev: { name: 'VEO Económico Eléctrico' },
+    veo_ambulance: { name: 'VEO Ambulancia' },
+    veo_tow: { name: 'VEO Grúa' },
+    veo_mechanic: { name: 'VEO Mecánico' },
   },
 
   /** PUJA · "proponé tu precio" (ADR 010 · regateo inverso). */
@@ -890,6 +915,11 @@ export const common = {
   payments: {
     /** Subtítulo de la pantalla: cuenta el modelo (un solo cobro, al terminar el viaje). */
     subtitle: 'Elige cómo pagas; el cobro es al terminar el viaje.',
+    /**
+     * Error de RED al leer la afiliación Yape (no es "sin Yape": la consulta FALLÓ). Degradación honesta:
+     * nunca mostramos "Vincular" cuando en realidad no pudimos saber tu estado. Reintentable.
+     */
+    loadError: 'No pudimos cargar tus métodos de pago. Inténtalo de nuevo.',
     methodsTitle: 'Métodos disponibles',
     default: 'Por defecto',
     /** Pill en la fila del método elegido por defecto (patrón instrumentos). */
@@ -1410,6 +1440,12 @@ export const common = {
     /** Microcopy fino junto al nombre cuando la identidad está confirmada (no una pill gritona). */
     identityConfirmed: 'Identidad confirmada',
 
+    /** CALIFICACIÓN RECIBIDA · protagonista de la cabecera (estrella + score). Estado vacío HONESTO:
+        sin calificaciones todavía NO se inventa un rating falso ni estrellas en 0. */
+    ratingNone: 'Aún sin calificaciones',
+    ratingCountOne: '1 viaje',
+    ratingCountMany: '{{count}} viajes',
+
     /** VERIFICACIÓN con voz propia · card de invitación (sin verificar). NADA de "Verificar identidad". */
     verifyCardTitle: 'Confirma que eres tú',
     verifyCardBody: 'Un paso rápido que cuida tus viajes y los de tu familia.',
@@ -1474,6 +1510,7 @@ export const common = {
     shareTrip: 'Compartir mi viaje',
     shareTripSub: 'Durante tu viaje puedes compartirlo con tu familia para que te sigan en tiempo real.',
     // Preferencias
+    tripHistory: 'Mis viajes',
     paymentMethods: 'Métodos de pago',
     savedPlaces: 'Lugares guardados',
     referrals: 'Invita y gana',
@@ -1541,6 +1578,9 @@ export const common = {
       'Únete a VEO, la app de viajes más segura del Perú. Usa mi código {{code}} y ambos ganamos crédito. 🚗💚',
     referredCount: 'Amigos referidos',
     rewardsEarned: 'Crédito ganado',
+    /** Saldo de crédito GASTABLE (Ola 2A · Lote C). Distinto de `rewardsEarned` (ganado de por vida). */
+    availableCredit: 'Crédito disponible',
+    creditAutoApply: 'Se aplica solo en tu próximo viaje',
     redeemSection: '¿Te invitó un amigo?',
     redeemLabel: 'Código de tu amigo',
     redeemPlaceholder: 'Ingresa su código',

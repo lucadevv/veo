@@ -52,7 +52,9 @@
 
 /** Paleta veo-dark (idéntica al style.json original). Centralizada para no repetir literales. */
 const palette = {
-  bg: '#0B0F14',
+  // Negro puro = token `bg` del tema (themes.ts): el mapa y el chrome (sheets) comparten el MISMO
+  // negro, sin costura visible entre mapa y superficies. Antes #0B0F14 (navy) divergía del #000000.
+  bg: '#000000',
   landcover: '#10161D',
   park: '#0F1A14',
   landuseResidential: '#0E141B',
@@ -69,7 +71,7 @@ const palette = {
   labelWater: '#4A6680',
   labelWaterHalo: '#0A1A2A',
   labelStreet: '#7E8C9A',
-  labelStreetHalo: '#0B0F14',
+  labelStreetHalo: '#000000',
   labelPlaceOther: '#8A98A6',
   labelPlaceCity: '#C2CED9',
   labelPlaceCityHalo: '#070A0E',
@@ -334,12 +336,13 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'symbol',
       source: 'composite',
       'source-layer': 'road',
-      minzoom: 14,
+      // Calles sólo al acercarse a buscar el pickup (≥15), con fade. A z12 (Home) ya estaban ocultas.
+      minzoom: 15,
       filter: ['has', 'name'],
       layout: {
         'text-field': NAME_FIELD,
         'text-font': FONT_REGULAR,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 18, 13],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 15, 9, 18, 13],
         'symbol-placement': 'line',
         'text-rotation-alignment': 'map',
         'text-pitch-alignment': 'viewport',
@@ -348,6 +351,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         'text-color': palette.labelStreet,
         'text-halo-color': palette.labelStreetHalo,
         'text-halo-width': 1.2,
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, 0.85],
       },
     },
     {
@@ -355,8 +359,10 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'symbol',
       source: 'composite',
       'source-layer': 'place_label',
-      minzoom: 8,
-      maxzoom: 16,
+      // DECLUTTER (premium): los barrios NO se muestran en el overview de Home (z=LIMA_ZOOM=12);
+      // aparecen sutiles sólo al hacer zoom para orientarse (≥13). Antes minzoom 8 → gritaban a z12.
+      minzoom: 13,
+      maxzoom: 17,
       filter: [
         'match',
         ['get', 'type'],
@@ -367,15 +373,18 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       layout: {
         'text-field': NAME_FIELD,
         'text-font': FONT_REGULAR,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14],
+        // Más chico que antes (10→12 vs 10→14) y SIN uppercase: barrios en caja normal = ambientes,
+        // no encabezados que dominan el mapa.
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 17, 12],
         'text-max-width': 8,
-        'text-transform': 'uppercase',
         'text-letter-spacing': 0.05,
       },
       paint: {
         'text-color': palette.labelPlaceOther,
         'text-halo-color': palette.labelStreetHalo,
         'text-halo-width': 1.4,
+        // Fade-in suave: invisibles a 13, ~0.5 a 14, tope 0.65. Nunca al 100% (ambientes, no foco).
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, 0.5, 17, 0.65],
       },
     },
     {

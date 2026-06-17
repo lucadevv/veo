@@ -11,9 +11,15 @@
  */
 import { registerDecorator, type ValidationOptions, type ValidationArguments } from 'class-validator';
 
-/** Tipos de documento aceptados (espeja el enum Prisma `DocumentType`). */
-export const DOCUMENT_TYPES = ['DN', 'CE', 'PP'] as const;
-export type DocumentTypeValue = (typeof DOCUMENT_TYPES)[number];
+/**
+ * Tipos de documento aceptados (espeja el enum Prisma `DocumentType`). Const-object como FUENTE TIPADA:
+ * las comparaciones usan `DocumentType.DN` en vez de literales sueltos `'DN'` (§4-ter). `DOCUMENT_TYPES`
+ * (array) y `DocumentTypeValue` (union) se DERIVAN de él — una sola fuente.
+ */
+export const DocumentType = { DN: 'DN', CE: 'CE', PP: 'PP' } as const;
+export type DocumentTypeValue = (typeof DocumentType)[keyof typeof DocumentType];
+/** Lista de valores (derivada del const) — para validadores `@IsEnum`/`@IsIn` y recorridos. */
+export const DOCUMENT_TYPES = Object.values(DocumentType);
 
 /** Reglas de forma por tipo de documento. */
 const DOCUMENT_RULES: Record<DocumentTypeValue, RegExp> = {
@@ -60,11 +66,11 @@ export function IsValidDocument(validationOptions?: ValidationOptions) {
         defaultMessage(args: ValidationArguments): string {
           const type = (args.object as { documentType?: unknown }).documentType;
           switch (type) {
-            case 'DN':
+            case DocumentType.DN:
               return 'document (DNI) debe tener exactamente 8 dígitos';
-            case 'CE':
+            case DocumentType.CE:
               return 'document (CE) debe tener 9-12 dígitos';
-            case 'PP':
+            case DocumentType.PP:
               return 'document (PP) debe tener 6-12 caracteres alfanuméricos';
             default:
               return 'documentType es requerido para validar document (DN|CE|PP)';

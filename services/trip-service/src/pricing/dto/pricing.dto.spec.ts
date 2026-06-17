@@ -20,6 +20,7 @@ describe('trip-service Pricing DTO · S5 cross-field (start < end)', () => {
     const ok = {
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
+      expectedVersion: 0,
     };
     expect(await errorsOf(ReplaceScheduleDto, ok)).toEqual([]);
   });

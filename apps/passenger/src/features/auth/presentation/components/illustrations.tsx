@@ -1,7 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useTheme } from '@veo/ui-kit';
-import { hexAlpha } from './color';
+import { hexAlpha, useTheme } from '@veo/ui-kit';
 import { IconCheck, IconPerson } from './icons';
 
 /**

@@ -1,4 +1,5 @@
 import type { YapeAffiliationView } from '@veo/api-client';
+import { affiliationStatus } from '@veo/api-client';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
@@ -23,5 +24,5 @@ export function useYapeAffiliation(): UseQueryResult<YapeAffiliationView, Error>
 /** ¿El cobro automático con Yape está ACTIVO? Señal booleana para reflejar en el quoting. */
 export function useIsYapeAutoActive(): boolean {
   const { data } = useYapeAffiliation();
-  return data?.status?.toUpperCase() === 'ACTIVE';
+  return data?.status?.toUpperCase() === affiliationStatus.enum.ACTIVE;
 }

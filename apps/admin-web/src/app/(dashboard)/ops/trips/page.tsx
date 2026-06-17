@@ -7,9 +7,12 @@ import { useTrips, type TripFilters } from '@/lib/api/queries';
 import type { TripStatus, TripSummary } from '@/lib/api/schemas';
 import { dateTime, money } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
+import { Lock } from 'lucide-react';
 import { DataTable } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { ErrorState } from '@/components/ui/states';
+import { LoadMore } from '@/components/ui/load-more';
+import { EmptyState, ErrorState } from '@/components/ui/states';
+import { useSession } from '@/lib/session-context';
+import { can } from '@/lib/rbac';
 import { TripStatusBadge } from '@/components/trips/status-badge';
 import { cn } from '@/lib/cn';
 
@@ -90,8 +93,23 @@ function TripsInner() {
     [params, router],
   );
 
+  const user = useSession();
   const query = useTrips(filters);
   const rows = query.data?.pages.flatMap((p) => p.items) ?? [];
+
+  if (!can(user, 'trips:view')) {
+    return (
+      <div className="flex h-full flex-col">
+        <PageHeader title="Viajes" breadcrumbs={[{ label: 'Operación' }, { label: 'Viajes' }]} />
+        <EmptyState
+          className="flex-1"
+          icon={<Lock className="size-6" aria-hidden />}
+          title="Acceso restringido"
+          description="Necesitas el rol correspondiente para ver los viajes."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -143,17 +161,11 @@ function TripsInner() {
               emptyDescription="No hay viajes que coincidan con el filtro."
               onRowClick={(row) => router.push(`/ops/trips/${row.id}`)}
             />
-            {query.hasNextPage ? (
-              <div className="mt-4 flex justify-center">
-                <Button
-                  variant="secondary"
-                  loading={query.isFetchingNextPage}
-                  onClick={() => void query.fetchNextPage()}
-                >
-                  Cargar más
-                </Button>
-              </div>
-            ) : null}
+            <LoadMore
+              hasNextPage={!!query.hasNextPage}
+              isFetching={query.isFetchingNextPage}
+              onLoadMore={() => void query.fetchNextPage()}
+            />
           </>
         )}
       </div>

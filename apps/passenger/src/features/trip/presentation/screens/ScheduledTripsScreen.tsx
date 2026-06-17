@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { FlatList, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
+import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
 import { formatDateTime, formatPEN } from '../../../../shared/utils/format';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { EnterView } from '../components/motion';
@@ -68,19 +68,11 @@ export function ScheduledTripsScreen(): React.JSX.Element {
   });
 
   if (scheduledQuery.isLoading) {
-    return (
-      <SafeScreen>
-        <LoadingState />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback loading />;
   }
 
   if (scheduledQuery.isError) {
-    return (
-      <SafeScreen>
-        <ErrorState message={t('scheduled.loadError')} onRetry={() => scheduledQuery.refetch()} />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback errorMessage={t('scheduled.loadError')} onRetry={() => scheduledQuery.refetch()} />;
   }
 
   const trips = scheduledQuery.data ?? [];

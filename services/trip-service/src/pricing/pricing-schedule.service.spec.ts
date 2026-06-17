@@ -19,23 +19,30 @@ function makeRepo(initial: PersistedSchedule | null) {
   let row: PersistedSchedule | null = initial;
   const outbox: CapturedOutbox[] = [];
 
+  const updatedAt = new Date('2026-06-04T12:00:00.000Z');
+  const writeData = (data: Record<string, unknown>) => {
+    row = {
+      defaultMode: data.defaultMode as PricingMode,
+      rules: (data.rules as PersistedSchedule['rules']) ?? [],
+      version: data.version as number,
+      updatedAt: updatedAt.toISOString(),
+    };
+  };
   const tx: ScheduleTx = {
     pricingModeSchedule: {
-      upsert: async ({ create, update }) => {
-        const data = (row ? update : create) as {
-          defaultMode: PricingMode;
-          rules: unknown;
-          version: number;
-        };
-        const updatedAt = new Date('2026-06-04T12:00:00.000Z');
-        row = {
-          defaultMode: data.defaultMode,
-          rules: (data.rules as PersistedSchedule['rules']) ?? [],
-          version: data.version,
-          updatedAt: updatedAt.toISOString(),
-        };
-        return { version: data.version, updatedAt };
+      // CAS: "actualiza" solo si la fila existe y su versión coincide con el WHERE.
+      updateMany: async ({ where, data }) => {
+        if (row && row.version === where.version) {
+          writeData(data);
+          return { count: 1 };
+        }
+        return { count: 0 };
       },
+      create: async ({ data }) => {
+        writeData(data);
+        return { version: data.version as number, updatedAt };
+      },
+      findUnique: async () => (row ? { version: row.version, updatedAt } : null),
     },
     outboxEvent: {
       create: async ({ data }) => {
@@ -69,11 +76,11 @@ function makeRepo(initial: PersistedSchedule | null) {
 }
 
 describe('PricingScheduleService.getSchedule', () => {
-  it('sin fila → DEFAULT (PUJA, sin reglas, version 0)', async () => {
+  it('sin fila → DEFAULT (B5: FIXED, sin reglas, version 0)', async () => {
     const { repo } = makeRepo(null);
     const svc = new PricingScheduleService(repo);
     const schedule = await svc.getSchedule();
-    expect(schedule.defaultMode).toBe(PricingMode.PUJA);
+    expect(schedule.defaultMode).toBe(PricingMode.FIXED); // B5: default de sistema = precio fijo (ADR 011 invertido)
     expect(schedule.rules).toEqual([]);
     expect(schedule.version).toBe(0);
   });
@@ -93,6 +100,7 @@ describe('PricingScheduleService.replaceSchedule · PUT', () => {
     const result = await svc.replaceSchedule({
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: 127, startMinute: 420, endMinute: 600, mode: PricingMode.FIXED }],
+      expectedVersion: 3,
     });
 
     expect(result.version).toBe(4); // bump 3 → 4
@@ -105,11 +113,27 @@ describe('PricingScheduleService.replaceSchedule · PUT', () => {
     expect(payload.defaultMode).toBe(PricingMode.PUJA);
   });
 
-  it('primera escritura (sin fila previa) → version 1', async () => {
+  it('primera escritura (sin fila previa, expectedVersion 0) → version 1', async () => {
     const { repo } = makeRepo(null);
     const svc = new PricingScheduleService(repo);
-    const result = await svc.replaceSchedule({ defaultMode: PricingMode.FIXED, rules: [] });
+    const result = await svc.replaceSchedule({ defaultMode: PricingMode.FIXED, rules: [], expectedVersion: 0 });
     expect(result.version).toBe(1);
+  });
+
+  it('CAS · expectedVersion STALE → ConflictError (otro admin movió el schedule; sin lost update)', async () => {
+    const initial: PersistedSchedule = {
+      defaultMode: PricingMode.PUJA,
+      rules: [],
+      version: 9,
+      updatedAt: new Date(0).toISOString(),
+    };
+    const { repo, outbox, current } = makeRepo(initial);
+    void current;
+    const svc = new PricingScheduleService(repo);
+    await expect(
+      svc.replaceSchedule({ defaultMode: PricingMode.FIXED, rules: [], expectedVersion: 8 }),
+    ).rejects.toThrow(/cambió/);
+    expect(outbox).toEqual([]);
   });
 });
 
@@ -127,11 +151,11 @@ describe('PricingScheduleService.resolve · usa el resolver puro sobre el snapsh
     expect(mode).toBe(PricingMode.FIXED);
   });
 
-  it('sin fila cargada → PUJA (degradación honesta §8.2)', async () => {
+  it('sin fila cargada → FIXED (B5: default de sistema; degradación honesta)', async () => {
     const { repo } = makeRepo(null);
     const svc = new PricingScheduleService(repo);
     const mode = await svc.resolve('GLOBAL', new Date('2026-06-04T13:00:00.000Z'));
-    expect(mode).toBe(PricingMode.PUJA);
+    expect(mode).toBe(PricingMode.FIXED); // B5: sin config → precio fijo (no puja)
   });
 });
 
@@ -170,7 +194,7 @@ describe('PricingScheduleService · S3 · cache in-proc del schedule (espejo eli
 
     // El admin REEMPLAZA el schedule por uno sin reglas (default PUJA). replaceSchedule hace su propio
     // find (current version) + invalida el cache del resolver.
-    await svc.replaceSchedule({ defaultMode: PricingMode.PUJA, rules: [] });
+    await svc.replaceSchedule({ defaultMode: PricingMode.PUJA, rules: [], expectedVersion: 1 });
 
     // El siguiente resolve NO debe servir el snapshot viejo cacheado: re-lee y ahora resuelve PUJA.
     const mode = await svc.resolve('GLOBAL', FIXED_AT);

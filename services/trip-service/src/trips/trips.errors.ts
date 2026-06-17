@@ -45,6 +45,20 @@ export class UnknownOfferingError extends DomainError {
 }
 
 /**
+ * ADR 013 · Fase B · `dto.category` EXISTE en el catálogo pero el admin la DESHABILITÓ (overlay). El
+ * quote ya no la cotiza; si llega igual (carrera: el admin la apagó entre el quote y el create, o un
+ * cliente con quote stale) se rechaza con 409 — la oferta no está disponible AHORA. Defensa en
+ * profundidad: el gate primario es que el quote no la muestra; la UI solo refleja este 409.
+ */
+export class OfferingUnavailableError extends DomainError {
+  readonly code = 'OFFERING_UNAVAILABLE';
+  readonly httpStatus = 409;
+  constructor(category: string) {
+    super('Esta oferta no está disponible en este momento.', { category });
+  }
+}
+
+/**
  * Lote C1 · Ya existe una propuesta de parada ACTIVA (PROPOSED) para este viaje. Solo puede haber UNA
  * a la vez (índice único parcial en DB). El pasajero debe esperar la respuesta del conductor o el TTL.
  * 409 con el `proposalId` vivo para que la app lo lleve a la propuesta en curso (no crear duplicado).

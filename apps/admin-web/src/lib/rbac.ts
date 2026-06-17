@@ -33,6 +33,8 @@ export type Permission =
   | 'live:view'
   | 'pricing:view'
   | 'pricing:manage'
+  | 'catalog:view'
+  | 'catalog:manage'
   | 'dispatch:view'
   | 'dispatch:manage'
   | 'audit:view'
@@ -91,6 +93,10 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'pricing:view': [FINANCE, ADMIN, SUPERADMIN],
   // pricing.controller PUT mode-schedule: reemplazar el schedule (mutación global). Mismos roles.
   'pricing:manage': [FINANCE, ADMIN, SUPERADMIN],
+  // catalog.controller (clase): ver el catálogo de ofertas (enabled por oferta). Decisión comercial/operativa.
+  'catalog:view': [FINANCE, ADMIN, SUPERADMIN],
+  // catalog.controller PUT /catalog: reemplazar el overlay (prender/apagar ofertas). Mismos roles.
+  'catalog:manage': [FINANCE, ADMIN, SUPERADMIN],
   // dispatch-config.controller (clase): ver la config de RADIOS (k-rings) de dispatch. DISPATCHER es el
   // rol operativo natural del despacho; ADMIN/SUPERADMIN mantienen control.
   'dispatch:view': [DISPATCHER, ADMIN, SUPERADMIN],

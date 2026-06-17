@@ -6,7 +6,7 @@
  * los consumidores validen lo que reciben. Ampliar al implementar cada servicio.
  */
 import { z } from 'zod';
-import { PanicStatus, VehicleClass } from '@veo/shared-types';
+import { FleetDocumentType, PanicStatus, VehicleClass, VehicleSegment } from '@veo/shared-types';
 
 const geo = z.object({ lat: z.number(), lon: z.number() });
 
@@ -15,6 +15,15 @@ const geo = z.object({ lat: z.number(), lon: z.number() });
 /// canónico ABRE estos schemas automáticamente; antes era un z.enum(['CAR','MOTO']) hardcodeado ×5 y
 /// un evento con la clase nueva moría EN SILENCIO en el gate del consumer (kafka.ts safeParse → descarta).
 const vehicleClassSchema = z.enum(Object.values(VehicleClass) as [VehicleClass, ...VehicleClass[]]);
+/// Segmento del vehículo (B5-3) derivado del enum canónico VehicleSegment. Viaja en el ping de ubicación
+/// para que dispatch filtre la eligibilidad por oferta (confort exige ≥ MID) sin consultar fleet en el hot-path.
+const vehicleSegmentSchema = z.enum(Object.values(VehicleSegment) as [VehicleSegment, ...VehicleSegment[]]);
+/// B5-3.2 · certificaciones de operador de las verticales (conductor) derivadas del enum canónico
+/// FleetDocumentType. Viajan en el ping para que dispatch gatee la eligibilidad de las verticales
+/// (ambulancia exige AMBULANCE_OPERATOR) FAIL-CLOSED, sin consultar fleet en el hot-path.
+const fleetDocumentTypeSchema = z.enum(
+  Object.values(FleetDocumentType) as [FleetDocumentType, ...FleetDocumentType[]],
+);
 
 /// Modo de pricing/despacho (ADR 011). Espeja PricingMode de @veo/shared-types (PUJA | FIXED, cerrado
 /// y estable — a diferencia de la clase de vehículo, que es un eje de extensión del catálogo). Se
@@ -79,6 +88,10 @@ export const tripRequested = z.object({
   /// Ola 2B · tier moto-taxi: tipo de vehículo solicitado. dispatch filtra el matching por este
   /// valor (un viaje MOTO solo se ofrece a conductores MOTO). Opcional ⇒ default CAR en el consumidor.
   vehicleType: vehicleClassSchema.optional(),
+  /// B5-3 · oferta del viaje (offeringId del catálogo, ej. veo_confort). dispatch resuelve sus REQUISITOS
+  /// (segment/seats/antigüedad) para filtrar el pool por eligibilidad. Opcional/compat: ausente o
+  /// desconocido ⇒ sin requisitos extra (el pool solo filtra por vehicleType, como antes).
+  category: z.string().optional(),
   /// Ola 2B · viaje programado: marca que el viaje se activó desde el scheduler (reserva). dispatch
   /// puede incluirlo en la oferta como "reservado". Opcional.
   scheduled: z.boolean().optional(),
@@ -332,7 +345,9 @@ export const dispatchBidCancelled = z.object({
 export const dispatchOfferWithdrawn = z.object({
   tripId: z.string(),
   driverId: z.string(),
-  reason: z.enum(['stale']),
+  /// `stale` = el conductor quedó inelegible tras ofertar (board PUJA). `taken` = otro conductor ganó la
+  /// EMERGENCIA en el broadcast simultáneo de la ambulancia (B5-vert) — esta oferta hermana ya no vale.
+  reason: z.enum(['stale', 'taken']),
 });
 /// trip → dispatch. El conductor canceló DESPUÉS de aceptar (pre-recojo): trip pasa a REASSIGNING y
 /// re-abre el board (cierra el catastrófico #4 — no más pasajero abandonado). `bidCents` = bid con el que
@@ -392,6 +407,27 @@ export const pricingModeScheduleUpdated = z.object({
   updatedAt: z.string(),
 });
 
+/// Piso de la PUJA (bid floor) reemplazado por el admin (ADR 010 §9.3). Emitido por outbox en la MISMA tx
+/// del PUT; lo consume PricingCacheConsumer para invalidar el cache del piso cross-réplica (NO load-bearing:
+/// trip-service lee la tabla local). `overrides` = piso por (zona, oferta); sin override la combinación cae
+/// al `defaultFloorCents`. `version` MONOTÓNICA (la invalidación de cache es idempotente y tolera reorden).
+export const pricingBidFloorUpdated = z.object({
+  /// Piso por defecto en céntimos PEN (cuando no hay override para la (zona, oferta)).
+  defaultFloorCents: z.number().int().nonnegative(),
+  /// Overrides del piso por (zona, oferta). `zone`/`offeringId` son los enums de @veo/shared-types (string en wire).
+  overrides: z.array(
+    z.object({
+      zone: z.string(),
+      offeringId: z.string(),
+      floorCents: z.number().int().nonnegative(),
+    }),
+  ),
+  /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
+  version: z.number().int().nonnegative(),
+  /// Marca ISO de cuándo el admin guardó el snapshot.
+  updatedAt: z.string(),
+});
+
 /* ── tracking ── */
 export const driverLocationUpdated = z.object({
   driverId: z.string(),
@@ -405,6 +441,18 @@ export const driverLocationUpdated = z.object({
   /// Ola 2B · tier moto-taxi: tipo de vehículo activo del conductor. dispatch lo proyecta en el hot
   /// index para filtrar el matching por tipo. Opcional por compat (pings antiguos) ⇒ default CAR.
   vehicleType: vehicleClassSchema.optional(),
+  /// B5-3 · atributos de eligibilidad del vehículo activo (del modelSpec elegido + el año del vehículo).
+  /// dispatch los proyecta en el hot-index para filtrar por oferta (confort=segment≥MID, xl=6 asientos)
+  /// SIN consultar fleet en el hot-path. Opcionales por compat: un ping sin ellos NO restringe (el pool
+  /// degrada a "elegible" hasta que el productor los mande — no rompe el matching existente).
+  seats: z.number().int().positive().optional(),
+  segment: vehicleSegmentSchema.optional(),
+  vehicleYear: z.number().int().optional(),
+  /// B5-3.2 · certificaciones de operador VIGENTES del conductor (las verticales exigen la suya). dispatch
+  /// las proyecta en el hot-index y gatea la eligibilidad FAIL-CLOSED: una vertical sin la cert NO se ofrece.
+  /// Opcional por compat (pings sin ella) — para una oferta SIN certs requeridas no cambia nada; para una
+  /// vertical, su ausencia = inelegible (fail-closed, a diferencia de los attrs del vehículo que son fail-open).
+  certifications: z.array(fleetDocumentTypeSchema).optional(),
 });
 export const driverEnteredZone = z.object({ driverId: z.string(), zoneId: z.string(), at: z.string() });
 
@@ -418,6 +466,27 @@ export const mediaAccessGranted = z.object({
   operatorId: z.string(),
   approvedBy: z.string(),
   watermark: z.string().optional(),
+  expiresAt: z.string(),
+  at: z.string(),
+});
+/// BR-S02: el supervisor RECHAZA la solicitud (cierra sin otorgar acceso). Auditado en cadena de custodia.
+export const mediaAccessRejected = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  segmentId: z.string().optional(),
+  operatorId: z.string(),
+  rejectedBy: z.string(),
+  at: z.string(),
+});
+/// BR-S02: cada VISUALIZACIÓN de un video aprobado se audita (se firma URL + watermark fresco por acceso).
+export const mediaAccessViewed = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  segmentId: z.string(),
+  operatorId: z.string(),
+  operatorEmail: z.string(),
+  viewedBy: z.string(),
+  watermark: z.string(),
   expiresAt: z.string(),
   at: z.string(),
 });
@@ -666,6 +735,14 @@ export const fleetVehicleRegistered = z.object({
   vehicleType: vehicleClassSchema,
   registeredAt: z.string(),
 });
+export const fleetVehicleModelReviewed = z.object({
+  modelId: z.string(),
+  requestedBy: z.string(),        // userId del conductor que solicitó el modelo (destinatario del push)
+  verdict: z.enum(['APPROVED', 'REJECTED']),
+  make: z.string(),
+  model: z.string(),
+  reviewedAt: z.string(),
+});
 
 /** Registro central: eventType → schema del payload. */
 export const EVENT_SCHEMAS = {
@@ -707,11 +784,14 @@ export const EVENT_SCHEMAS = {
   'dispatch.bid_cancelled': dispatchBidCancelled,
   'dispatch.offer_withdrawn': dispatchOfferWithdrawn,
   'pricing.mode_schedule_updated': pricingModeScheduleUpdated,
+  'pricing.bid_floor_updated': pricingBidFloorUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,
   'media.archived': mediaArchived,
   'media.access_granted': mediaAccessGranted,
+  'media.access_rejected': mediaAccessRejected,
+  'media.access_viewed': mediaAccessViewed,
   'payment.captured': paymentCaptured,
   'payment.failed': paymentFailed,
   'payment.tip_added': paymentTipAdded,
@@ -743,6 +823,7 @@ export const EVENT_SCHEMAS = {
   'fleet.driver_suspended': fleetDriverSuspended,
   'fleet.vehicle_suspended': fleetVehicleSuspended,
   'fleet.vehicle_registered': fleetVehicleRegistered,
+  'fleet.vehicle_model_reviewed': fleetVehicleModelReviewed,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EventType = keyof typeof EVENT_SCHEMAS;

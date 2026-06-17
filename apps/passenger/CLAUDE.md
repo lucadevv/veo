@@ -18,6 +18,18 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
 - **Tipos y SDK** vienen de `veo-platform/packages/*` via `file:` link en dev. En CI/prod via GitHub Packages.
 - **API** se llama vía `public-bff` (puerto 4001 en dev local, `api.veo.pe/passenger` en prod).
 - **WebSocket** para tracking via `socket.io-client` apuntando a `public-bff`.
+- **URL del BFF en dev — NO hardcodees la IP.** `src/core/config/env.ts` resuelve `PUBLIC_BFF_URL` en 3 niveles:
+  (1) `.env` explícito (gana; úsalo para staging/prod), (2) **auto-derivada del host de Metro** (`metroDevHost()`
+  = la IP ACTUAL de la Mac), (3) fallback `localhost` (iOS/sim) / `10.0.2.2` (emulador Android).
+  → **Dejá `PUBLIC_BFF_URL`/`PUBLIC_BFF_WS_URL` VACÍOS en tu `.env` de dev**: la app sigue tu IP sola (un
+  Reload de Metro), sin recompilar. Ojo: `localhost` solo sirve en el simulador iOS — en un **device físico**
+  localhost es el device, no la Mac (por eso la auto-derivación, que cubre los 3 casos).
+  - **Auto-sanado anti-IP-stale (red de seguridad, solo `__DEV__`):** si igual quedó una **IP LAN baked**
+    (`192.168.x.y` / `10.x` / `172.16–31.x`) en tu `.env` y el DHCP te rotó la IP, la app **ignora el `.env`
+    stale y usa el host VIVO de Metro** — un Reload reconecta, **sin rebuild nativo** (`env.ts` es JS, lo bundlea
+    Metro; solo los VALORES del `.env` se bakean, y se leen en runtime). Avisa por `console.warn` para que no sea
+    magia silenciosa. URLs con **dominio** (staging/prod) y los **release** (`!__DEV__`) NO se tocan: el `.env`
+    manda siempre ahí. Esto mata el "sin conexión" por IP vieja sin que dependas de acordarte de vaciar el `.env`.
 - **WebRTC** se conecta directo a LiveKit (no via BFF) usando token emitido por `media-service`.
 
 ## Reglas no negociables

@@ -5,7 +5,7 @@
 export type { UserReply, DriverReply } from './identity.js';
 export type { GeoPoint, TripReply, TripStateReply, TripHistoryItem, PassengerTripsReply } from './trip.js';
 export type { MatchReply, SurgeReply, NearbyDriver, NearbyDriversReply } from './dispatch.js';
-export type { PaymentReply } from './payment.js';
+export type { PaymentReply, UserCreditReply } from './payment.js';
 export type { PanicReply } from './panic.js';
 export type { Segment, SegmentsReply } from './media.js';
 export type { RecordReply, VerifyReply } from './audit.js';

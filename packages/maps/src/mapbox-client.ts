@@ -22,7 +22,7 @@ import type {
   RouteWithStepsResult,
 } from './types.js';
 import { polylineToGeoJson } from './polyline.js';
-import { buildInstruction, type OsrmStepManeuver } from './steps.js';
+import { buildInstruction, OsrmManeuverModifier, OsrmManeuverType, type OsrmStepManeuver } from './steps.js';
 
 type FetchImpl = typeof fetch;
 
@@ -196,24 +196,24 @@ export class MapboxMapsClient implements MapsClient {
     const type = maneuver?.type ?? '';
     const modifier = maneuver?.modifier ?? '';
     switch (type) {
-      case 'depart':
+      case OsrmManeuverType.DEPART:
         return 'depart';
-      case 'arrive':
+      case OsrmManeuverType.ARRIVE:
         return 'arrive';
-      case 'roundabout':
-      case 'rotary':
-      case 'roundabout turn':
-      case 'exit roundabout':
-      case 'exit rotary':
+      case OsrmManeuverType.ROUNDABOUT:
+      case OsrmManeuverType.ROTARY:
+      case OsrmManeuverType.ROUNDABOUT_TURN:
+      case OsrmManeuverType.EXIT_ROUNDABOUT:
+      case OsrmManeuverType.EXIT_ROTARY:
         return 'roundabout';
-      case 'merge':
-      case 'on ramp':
+      case OsrmManeuverType.MERGE:
+      case OsrmManeuverType.ON_RAMP:
         return 'merge';
-      case 'fork':
+      case OsrmManeuverType.FORK:
         return 'fork';
-      case 'continue':
-      case 'new name':
-      case 'notification':
+      case OsrmManeuverType.CONTINUE:
+      case OsrmManeuverType.NEW_NAME:
+      case OsrmManeuverType.NOTIFICATION:
         return 'straight';
       default:
         return MapboxMapsClient.modifierToManeuver(modifier);
@@ -222,19 +222,19 @@ export class MapboxMapsClient implements MapsClient {
 
   private static modifierToManeuver(modifier: string): RouteManeuver {
     switch (modifier) {
-      case 'left':
+      case OsrmManeuverModifier.LEFT:
         return 'turn-left';
-      case 'right':
+      case OsrmManeuverModifier.RIGHT:
         return 'turn-right';
-      case 'slight left':
+      case OsrmManeuverModifier.SLIGHT_LEFT:
         return 'turn-slight-left';
-      case 'slight right':
+      case OsrmManeuverModifier.SLIGHT_RIGHT:
         return 'turn-slight-right';
-      case 'sharp left':
+      case OsrmManeuverModifier.SHARP_LEFT:
         return 'turn-sharp-left';
-      case 'sharp right':
+      case OsrmManeuverModifier.SHARP_RIGHT:
         return 'turn-sharp-right';
-      case 'uturn':
+      case OsrmManeuverModifier.UTURN:
         return 'uturn';
       default:
         return 'straight';

@@ -16,11 +16,12 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
+import { uuidv7 } from '../../../../shared/utils/uuid';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { useBiometricGateStore } from '../../../auth/presentation';
 import { ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
@@ -46,12 +47,15 @@ import {
   IconHelp,
   IconPin,
   IconPower,
+  IconReceipt,
   IconShare,
   IconShield,
   IconTrash,
   IconUsers,
 } from '../components/icons';
 import { IconCheck, IconPencil } from '../../../auth/presentation/components/icons';
+import { IconStarFilled } from '../../../trip/presentation/components/icons';
+import { useMyAggregateRating } from '../../../ratings/presentation/useMyAggregateRating';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -99,9 +103,20 @@ export function ProfileScreen(): React.JSX.Element {
   const panicSecretStore = useDependency(TOKENS.panicSecretStore);
   const getConsent = useDependency(TOKENS.getConsentUseCase);
   const recordConsent = useDependency(TOKENS.recordConsentUseCase);
+  const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
 
   // Consentimiento VIGENTE (Ley 29733) → estado del toggle de promociones.
   const consentQuery = useQuery({ queryKey: ['consent'], queryFn: () => getConsent.execute() });
+
+  // Reconcilia la COLA DURABLE contra el consent vigente del server cada vez que el GET trae dato
+  // fresco (equivalente al `onSuccess` que React Query v5 ya no expone en `useQuery`): si el server ya
+  // tiene la misma versión de política que lo encolado, la aceptación llegó → se vacía la cola y no se
+  // reintenta de más. No-op si la cola está vacía.
+  useEffect(() => {
+    if (consentQuery.data !== undefined) {
+      syncPendingConsent.reconcileWith(consentQuery.data);
+    }
+  }, [consentQuery.data, syncPendingConsent]);
   // Feedback optimista: el Switch refleja el cambio al instante; si la mutación falla, revierte al refetch.
   const [pendingMarketing, setPendingMarketing] = useState<boolean | null>(null);
   const marketingOn = pendingMarketing ?? consentQuery.data?.marketing ?? false;
@@ -113,12 +128,18 @@ export function ProfileScreen(): React.JSX.Element {
   const marketingMutation = useMutation({
     mutationFn: async (next: boolean) => {
       const c = consentQuery.data;
-      await recordConsent.execute({
-        dataProcessing: c?.dataProcessing ?? true,
-        inCabinCamera: c?.inCabinCamera ?? false,
-        location: c?.location ?? false,
-        marketing: next,
-      });
+      // dedupKey propio para ESTE toggle: el POST de consent ahora propaga el error (la durabilidad
+      // vive en la cola, no en el use case), así que un reintento manual del usuario reusaría la
+      // idempotencia del server sin duplicar el row append-only.
+      await recordConsent.execute(
+        {
+          dataProcessing: c?.dataProcessing ?? true,
+          inCabinCamera: c?.inCabinCamera ?? false,
+          location: c?.location ?? false,
+          marketing: next,
+        },
+        uuidv7(),
+      );
       await setPromotionsSubscription(next);
     },
     onSettled: () => {
@@ -140,6 +161,10 @@ export function ProfileScreen(): React.JSX.Element {
     queryKey: ['profile'],
     queryFn: () => getProfile.execute(),
   });
+
+  // Calificación RECIBIDA por el pasajero (agregado rolling 30d). El hook se llama incondicionalmente
+  // (reglas de hooks); `enabled` interno corta la llamada si todavía no tenemos `profile.id`.
+  const aggregateQuery = useMyAggregateRating(profileQuery.data?.id ?? '');
 
   const [editOpen, setEditOpen] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -224,6 +249,18 @@ export function ProfileScreen(): React.JSX.Element {
   const canSaveEdit = nameValid && emailValid && documentValid;
   // Documento enmascarado para la cabecera (privacidad): "12345678" → "DNI ••••5678".
   const maskedDocument = profile.document ? maskDocument(profile.document) : null;
+
+  // CALIFICACIÓN RECIBIDA · 4 estados (sin layout shift brusco; el perfil no se rompe nunca):
+  //  - loading  → no pintamos nada (placeholder sutil opcional, evitado a propósito).
+  //  - error    → silencioso (otro fallo que no sea 404): no mostramos el bloque.
+  //  - vacío    → data === null (404 = sin agregado) o count30d === 0 → microcopy honesto, SIN rating falso.
+  //  - ok       → count30d > 0 → score (1 decimal) + estrella + cantidad de viajes.
+  const aggregate = aggregateQuery.data;
+  const hasRating = aggregate != null && aggregate.count30d > 0;
+  const ratingScore = hasRating ? aggregate!.rollingAvg30d.toFixed(1) : null;
+  // Distinguimos "vacío legítimo" (query resuelta sin rating) de "todavía cargando / falló": solo el
+  // vacío legítimo muestra el microcopy; loading y error quedan en silencio.
+  const ratingEmpty = aggregateQuery.isSuccess && !hasRating;
 
   // Pasos faltantes de la completitud (guía, no castigo). Cuando no falta nada → franja en silencio.
   const missingSteps: CompletionStep[] = [];
@@ -329,6 +366,35 @@ export function ProfileScreen(): React.JSX.Element {
             {verified && hasName ? (
               <Text variant="footnote" color="inkSubtle">
                 {t('profile.identityConfirmed')}
+              </Text>
+            ) : null}
+
+            {/* CALIFICACIÓN RECIBIDA · protagonista de la cabecera (img2): estrella accent + score con 1
+                decimal + cantidad de viajes. Vacío honesto si aún no tiene; loading/error → silencio. */}
+            {hasRating ? (
+              <View
+                accessible
+                accessibilityLabel={`${ratingScore} · ${
+                  aggregate!.count30d === 1
+                    ? t('profile.ratingCountOne')
+                    : t('profile.ratingCountMany', { count: aggregate!.count30d })
+                }`}
+                style={styles.ratingRow}
+              >
+                <IconStarFilled color={accent} size={16} />
+                <Text variant="headline" color="ink" tabular>
+                  {ratingScore}
+                </Text>
+                <Text variant="footnote" color="inkMuted">
+                  {'· '}
+                  {aggregate!.count30d === 1
+                    ? t('profile.ratingCountOne')
+                    : t('profile.ratingCountMany', { count: aggregate!.count30d })}
+                </Text>
+              </View>
+            ) : ratingEmpty ? (
+              <Text variant="footnote" color="inkSubtle">
+                {t('profile.ratingNone')}
               </Text>
             ) : null}
 
@@ -460,6 +526,14 @@ export function ProfileScreen(): React.JSX.Element {
           <View>
             {sectionLabel(t('profile.sectionPreferences'))}
             <Card variant="outlined" padding="sm">
+              {/* "Mis viajes": tras quitar el bottom tab, el historial se alcanza desde acá (decisión de
+                  producto). Navega a la pantalla `TripHistory` del stack. */}
+              <ListItem
+                title={t('profile.tripHistory')}
+                leading={<IconReceipt color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('TripHistory')}
+              />
               <ListItem
                 title={t('profile.paymentMethods')}
                 leading={<IconCard color={accent} size={glyph} />}
@@ -709,6 +783,7 @@ export function ProfileScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   verifiedTick: {
     width: 18,
     height: 18,

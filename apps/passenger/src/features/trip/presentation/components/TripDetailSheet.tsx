@@ -1,5 +1,4 @@
 import type { GeoPoint, TripHistoryItem, TripStatus } from '@veo/api-client';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
@@ -85,7 +84,9 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const tabBarHeight = useBottomTabBarHeight();
+  // Sin tab bar (TripHistory ahora es pantalla del stack, no tab): el sheet ancla contra el inset
+  // inferior del safe-area, no contra el alto del tab bar (que ya no existe).
+  const bottomInset = insets.bottom;
 
   const sheetRef = useRef<DraggableSheetHandle>(null);
   const tripRepository = useDependency(TOKENS.tripRepository);
@@ -191,7 +192,7 @@ export function TripDetailSheet({ trip, onClose }: TripDetailSheetProps): React.
           ref={sheetRef}
           snapPoints={SNAP_POINTS}
           maxContentFraction={PEEK_MAX_FRACTION}
-          bottomOffset={tabBarHeight}
+          bottomOffset={bottomInset}
           // Arrastrar el sheet por debajo del peek = cerrar (índice 0 es el más bajo; un flick hacia abajo
           // lo lleva ahí y el padre desmonta). No hay índice "cerrado" en el sheet: el host gobierna eso.
           renderHeader={() => (

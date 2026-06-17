@@ -1,5 +1,7 @@
 import { HttpAuthRepository } from '../../features/auth/data/httpAuthRepository';
 import { HttpConsentRepository } from '../../features/auth/data/httpConsentRepository';
+import { MmkvPendingConsentStore } from '../../features/auth/data/mmkvPendingConsentStore';
+import { SyncPendingConsentUseCase } from '../../features/auth/domain/syncPendingConsentUseCase';
 import { KeychainLocalAuthService } from '../../features/auth/data/keychainLocalAuthService';
 import {
   ForgotPasswordUseCase,
@@ -31,6 +33,7 @@ import {
 import { HttpMapsRepository } from '../../features/maps/data/httpMapsRepository';
 import {
   AutocompletePlacesUseCase,
+  GetCatalogUseCase,
   QuoteRideUseCase,
   ReverseGeocodeUseCase,
 } from '../../features/maps/domain/usecases';
@@ -62,6 +65,7 @@ import {
   ChargeTripUseCase,
   ConfirmCashUseCase,
   GetMyDebtsUseCase,
+  GetUserCreditUseCase,
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
@@ -159,6 +163,12 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.consentRepository,
     (c) => new HttpConsentRepository(c.resolve(TOKENS.httpClient)),
+  );
+  // Cola durable de consentimiento (Ley 29733) en MMKV (prefs, no sensible): la aceptación capturada
+  // en el onboarding se persiste acá hasta que el backend la confirma (sobrevive a red caída / cierres).
+  container.register(
+    TOKENS.pendingConsentStore,
+    () => new MmkvPendingConsentStore(prefsStore),
   );
   container.register(
     TOKENS.profileRepository,
@@ -310,6 +320,17 @@ export function buildContainer(): Container {
     TOKENS.getConsentUseCase,
     (c) => new GetConsentUseCase(c.resolve(TOKENS.consentRepository)),
   );
+  // Cola durable: drena la aceptación encolada al backend (backoff + dedupKey idempotente). Singleton
+  // del contenedor: los reintentos sobreviven al desmontaje del onboarding y se reanudan en login/boot/
+  // foreground. Delega el POST en RecordConsentUseCase (SRP: el reintento NO vive en el use case de POST).
+  container.register(
+    TOKENS.syncPendingConsentUseCase,
+    (c) =>
+      new SyncPendingConsentUseCase(
+        c.resolve(TOKENS.recordConsentUseCase),
+        c.resolve(TOKENS.pendingConsentStore),
+      ),
+  );
   // Casos de uso · Auth por correo (ADR-012)
   container.register(
     TOKENS.registerEmailUseCase,
@@ -444,6 +465,10 @@ export function buildContainer(): Container {
     TOKENS.quoteRideUseCase,
     (c) => new QuoteRideUseCase(c.resolve(TOKENS.mapsRepository)),
   );
+  container.register(
+    TOKENS.getCatalogUseCase,
+    (c) => new GetCatalogUseCase(c.resolve(TOKENS.mapsRepository)),
+  );
 
   // Casos de uso · Dispatch (vehículos cercanos de ambiente)
   container.register(
@@ -532,6 +557,10 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.getMyDebtsUseCase,
     (c) => new GetMyDebtsUseCase(c.resolve(TOKENS.paymentsRepository)),
+  );
+  container.register(
+    TOKENS.getUserCreditUseCase,
+    (c) => new GetUserCreditUseCase(c.resolve(TOKENS.paymentsRepository)),
   );
   container.register(
     TOKENS.retryChargeUseCase,

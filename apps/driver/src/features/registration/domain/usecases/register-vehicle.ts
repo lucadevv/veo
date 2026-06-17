@@ -4,20 +4,18 @@ import type {VehicleData, VehicleRegisterInput, VehicleView} from '../entities';
 /**
  * Código de error de validación por campo del vehículo. El dominio NO conoce i18n: emite códigos
  * estables y la presentación los traduce (`registration.vehicle.errors.<code>`).
+ * B5-2: marca/modelo ya no son texto libre — el conductor ELIGE del catálogo, así que el error de
+ * modelo es "no elegiste un modelo" (`model_not_selected`), no longitud/requerido de texto.
  */
 export type VehicleFieldError =
   | 'plate_required'
   | 'plate_invalid'
-  | 'make_required'
-  | 'make_too_long'
-  | 'model_required'
-  | 'model_too_long'
+  | 'model_not_selected'
   | 'year_invalid';
 
 /** Errores de validación por campo del vehículo. */
 export interface VehicleErrors {
   plate?: VehicleFieldError;
-  brand?: VehicleFieldError;
   model?: VehicleFieldError;
   year?: VehicleFieldError;
 }
@@ -27,8 +25,6 @@ export type VehicleValidation =
   | {ok: true; request: VehicleRegisterInput}
   | {ok: false; errors: VehicleErrors};
 
-/** Longitud máxima de marca/modelo (coherente con `registerVehicleRequest`). */
-const MAX_TEXT_LENGTH = 60;
 /** Año mínimo aceptado por el contrato (`registerVehicleRequest.year`). fleet aplica BR-D04 (>=2017). */
 const MIN_VEHICLE_YEAR = 2005;
 
@@ -37,8 +33,9 @@ const PLATE_PATTERN = /^[A-Z0-9]{3}-?[A-Z0-9]{3}$/;
 
 /**
  * Valida y mapea los datos del vehículo del wizard al body de `POST /drivers/vehicles`. Lógica pura
- * y testeable: normaliza la placa (mayúsculas, sin espacios), convierte el año a número y recorta
- * marca/modelo. Coherente con `registerVehicleRequest` del contrato.
+ * y testeable: normaliza la placa (mayúsculas, sin espacios) y convierte el año a número. B5-2: la
+ * marca/modelo NO viajan a texto libre — el conductor eligió un modelo del catálogo, así que el body
+ * lleva `modelSpecId` y el backend snapshotea make/model del spec.
  */
 export function validateVehicle(vehicle: VehicleData): VehicleValidation {
   const errors: VehicleErrors = {};
@@ -50,18 +47,9 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
     errors.plate = 'plate_invalid';
   }
 
-  const make = vehicle.brand.trim();
-  if (make.length === 0) {
-    errors.brand = 'make_required';
-  } else if (make.length > MAX_TEXT_LENGTH) {
-    errors.brand = 'make_too_long';
-  }
-
-  const model = vehicle.model.trim();
-  if (model.length === 0) {
-    errors.model = 'model_required';
-  } else if (model.length > MAX_TEXT_LENGTH) {
-    errors.model = 'model_too_long';
+  const modelSpecId = vehicle.modelSpecId.trim();
+  if (modelSpecId.length === 0) {
+    errors.model = 'model_not_selected';
   }
 
   const year = Number(vehicle.year.trim());
@@ -72,10 +60,10 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
     errors.year = 'year_invalid';
   }
 
-  if (errors.plate || errors.brand || errors.model || errors.year) {
+  if (errors.plate || errors.model || errors.year) {
     return {ok: false, errors};
   }
-  return {ok: true, request: {vehicleType: vehicle.type, plate, make, model, year}};
+  return {ok: true, request: {vehicleType: vehicle.type, plate, year, modelSpecId}};
 }
 
 /**

@@ -5,6 +5,8 @@
     "lib": ["ES2022"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    // DEUDA: silenciamos las deprecaciones de TS 7.0 (moduleResolution:"Node"/node10 + baseUrl) con ignoreDeprecations en vez de migrar · techo: deja de funcionar en TS 7.0 (hoy 5.9.3) · gatillo: al subir a TS 7.0 — migrar los servicios NestJS a moduleResolution "node16"/"bundler" (exige extensiones .js en imports relativos) + sacar baseUrl (paths relativos al tsconfig)
+    "ignoreDeprecations": "5.0",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
@@ -54,7 +56,9 @@
       "@veo/api-client/*": ["packages/api-client/src/*"],
       "@veo/ui-kit": ["packages/ui-kit/src"],
       "@veo/rpc": ["packages/rpc/src"],
-      "@veo/rpc/*": ["packages/rpc/src/*"]
+      "@veo/rpc/*": ["packages/rpc/src/*"],
+      "@veo/redis": ["packages/redis/src"],
+      "@veo/redis/*": ["packages/redis/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build", ".next", "coverage"]

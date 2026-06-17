@@ -11,6 +11,7 @@ import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { LoadMore } from '@/components/ui/load-more';
 import { Input } from '@/components/ui/input';
 import { ErrorState } from '@/components/ui/states';
 
@@ -125,14 +126,13 @@ function AuditInner() {
               data={rows}
               loading={query.isLoading}
               emptyTitle="Sin registros"
+              emptyDescription="No hay eventos de auditoría para los filtros actuales."
             />
-            {query.hasNextPage ? (
-              <div className="mt-4 flex justify-center">
-                <Button variant="secondary" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
-                  Cargar más
-                </Button>
-              </div>
-            ) : null}
+            <LoadMore
+              hasNextPage={!!query.hasNextPage}
+              isFetching={query.isFetchingNextPage}
+              onLoadMore={() => void query.fetchNextPage()}
+            />
           </>
         )}
       </div>

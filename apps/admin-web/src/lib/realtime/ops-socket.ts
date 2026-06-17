@@ -133,12 +133,10 @@ export function useOpsSocket(handlers: OpsHandlers, enabled = true) {
       // damos al cliente la oportunidad de reintentar con uno nuevo en vez de morir en silencio.
       if (reason === SERVER_DISCONNECT && !disposed) {
         setStatus('reconnecting');
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            if (!disposed) socket.connect();
-          }, 1000);
-        }
+        reconnectTimer ??= setTimeout(() => {
+          reconnectTimer = null;
+          if (!disposed) socket.connect();
+        }, 1000);
         return;
       }
       setStatus('disconnected');

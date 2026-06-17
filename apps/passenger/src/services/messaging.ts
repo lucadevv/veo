@@ -180,9 +180,9 @@ export function flushPendingDeepLink(): void {
   if (!routeNames.includes(target.screen)) return;
   clearPendingDeepLink();
   // Estrechamos el union del target (TS no co-estrecha screen+params en una sola llamada): el HOME del
-  // sheet (Main/Home, puja EXPIRED) vs. las pantallas de viaje legacy (params `{ tripId }`).
-  if (target.screen === 'Main') {
-    navigationRef.navigate(target.screen, target.params);
+  // sheet (ruta directa `Home`, sin params, puja EXPIRED) vs. las pantallas de viaje legacy (`{ tripId }`).
+  if (target.screen === 'Home') {
+    navigationRef.navigate(target.screen);
   } else {
     navigationRef.navigate(target.screen, target.params as { tripId: string });
   }
@@ -214,9 +214,13 @@ async function wireForeground(messaging: Messaging): Promise<void> {
     navigateFromPush(remoteMessage);
   });
 
-  // Rotación de token: re-registrar contra el backend.
+  // Rotación de token: re-registrar contra el backend. Best-effort: si el POST /devices falla (sin
+  // sesión activa al rotar, backend caído), NO debe quedar como unhandled rejection (era el LogBox
+  // "Uncaught (in promise)" del arranque). Se loguea y sigue — mismo criterio que onMessage arriba.
   onTokenRefresh(messaging, (token: string) => {
-    void registrar.register(token, currentPlatform());
+    registrar.register(token, currentPlatform()).catch((error) => {
+      console.warn('[messaging] no se pudo re-registrar el token rotado:', error);
+    });
   });
 }
 

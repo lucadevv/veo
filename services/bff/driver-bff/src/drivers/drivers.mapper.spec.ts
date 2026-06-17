@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import {
+  buildDriverModelRequest,
   buildDriverProfile,
   buildDriverVehicleFromRest,
+  buildDriverVehicleModels,
   buildDriverVehicles,
   REQUIRED_DRIVER_DOCS,
 } from './drivers.mapper';
@@ -187,5 +189,41 @@ describe('mapeo de vehículos del conductor', () => {
 
   it('buildDriverVehicles devuelve [] si no hay vehículos', () => {
     expect(buildDriverVehicles([])).toEqual([]);
+  });
+});
+
+describe('catálogo de modelos (B5-2 · selector del onboarding)', () => {
+  it('buildDriverVehicleModels mapea la página de fleet al view del selector', () => {
+    const views = buildDriverVehicleModels({
+      items: [
+        {
+          id: 'm1',
+          make: 'Toyota',
+          model: 'Yaris',
+          yearFrom: 2017,
+          yearTo: 2024,
+          vehicleType: 'CAR',
+          seats: 5,
+        },
+      ],
+      nextCursor: null,
+    });
+    expect(views).toEqual([
+      { id: 'm1', make: 'Toyota', model: 'Yaris', yearFrom: 2017, yearTo: 2024, vehicleType: 'CAR', seats: 5 },
+    ]);
+  });
+
+  it('buildDriverVehicleModels tolera items ausente → []', () => {
+    expect(buildDriverVehicleModels({ items: undefined as never, nextCursor: null })).toEqual([]);
+  });
+
+  it('buildDriverModelRequest proyecta la confirmación mínima de la solicitud', () => {
+    const view = buildDriverModelRequest({
+      id: 'req-1',
+      make: 'Toyota',
+      model: 'Probox',
+      status: 'PENDING_REVIEW',
+    });
+    expect(view).toEqual({ id: 'req-1', make: 'Toyota', model: 'Probox', status: 'PENDING_REVIEW' });
   });
 });

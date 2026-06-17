@@ -57,6 +57,11 @@ model DispatchMatch {
   /// Multiplier surge aplicado al momento de la oferta (1.0 = sin surge). Lo usa trip-service en la tarifa.
   surgeMultiplier Decimal         @default(1.0) @map("surge_multiplier") @db.Decimal(3, 2)
   outcome         DispatchOutcome @default(OFFERED)
+  /// Precio acordado (céntimos PEN) cuando la oferta se ACEPTA (flujo PUJA). Es la FUENTE DE VERDAD
+  /// DURABLE del precio del match: el reconciliador (reconcileUnemittedMatches) lo lee de acá, NUNCA
+  /// fabrica un precio desde el board/oferta efímeros de Redis. NULLABLE: las filas OFFERED
+  /// (matching.service.createAndDeliverOffer) y las legacy no tienen precio acordado; solo las ACCEPTED lo setean.
+  agreedPriceCents Int?           @map("agreed_price_cents")
   offeredAt       DateTime        @default(now()) @map("offered_at") @db.Timestamptz
   respondedAt     DateTime?       @map("responded_at") @db.Timestamptz
 
@@ -66,6 +71,11 @@ model DispatchMatch {
   /// Hot-path del reconciler (sweepExpiredOffers, @Interval ~0.5Hz): filtra outcome=OFFERED (igualdad)
   /// + offeredAt < cutoff (rango) y ordena por offeredAt. outcome primero (igualdad), offeredAt segundo (rango+orden).
   @@index([outcome, offeredAt])
+  /// INVARIANTE "a-lo-sumo-UN-ACCEPTED-por-viaje": NO es un @@unique([tripId]) plano (un viaje tiene
+  /// muchos matches legítimos: oferta A rechazada → oferta B). Es un ÍNDICE UNIQUE PARCIAL
+  /// (WHERE outcome = 'ACCEPTED') que Prisma 5.22 NO puede expresar en el schema declarativo → vive como
+  /// SQL crudo en la migración (20260615120000_dispatch_idempotency_hardening). NO introspectable: si corrés
+  /// `prisma db pull`, este índice no aparece acá. Defensa-en-profundidad sobre el claim/CAS de acceptOffer.
   @@map("dispatch_matches")
   @@schema("dispatch")
 }
@@ -82,6 +92,9 @@ model DispatchSession {
   originLon    Float                 @map("origin_lon")
   /// El advance re-rankea SOLO conductores de este tipo (un viaje MOTO no se ofrece a un CAR).
   vehicleType  VehicleType           @default(CAR) @map("vehicle_type")
+  /// B5-3 · oferta del viaje (offeringId, ej. veo_confort): el advance resuelve sus requisitos de
+  /// eligibilidad (segment/seats/antigüedad) para filtrar el pool. Null/desconocido ⇒ sin requisitos extra.
+  category     String?               @map("category")
   /// k-ring actual de la búsqueda (1..maxKRing): el advance expande cuando se agotan los cercanos.
   currentKRing Int                   @default(1) @map("current_k_ring")
   createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz
@@ -158,6 +171,13 @@ model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
+  /// Idempotencia DEL PRODUCTOR (Finding #4a): clave ESTABLE por evento de dominio (p.ej.
+  /// `match_found:{tripId}:{driverId}`). NULLABLE + @unique → emits sin clave no se ven afectados y un
+  /// re-insert de la MISMA clave (reconcile/retry tras crash) lo rechaza el constraint (P2002) → el
+  /// service lo traga como no-op en vez de apilar una segunda fila. Postgres trata múltiples NULL como
+  /// distintos, así que el unique nullable no colisiona entre emits sin clave. El relay (drainLocked)
+  /// NO lee esta columna → agregarla no rompe la lectura.
+  dedupKey    String?   @unique @map("dedup_key")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz

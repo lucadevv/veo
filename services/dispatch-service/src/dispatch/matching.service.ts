@@ -24,11 +24,17 @@ import {
   type LatLon,
 } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
-import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
+import {
+  DispatchOutcome,
+  findOffering,
+  OfferingFlow,
+  type OfferingRequirements,
+  type VehicleClass,
+} from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, DispatchSessionStatus } from '../generated/prisma';
+import { Prisma, DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
 import { DriverPool } from './driver-pool';
 import { MatchingSessionStore } from './matching-session.store';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -49,6 +55,11 @@ export interface TripRequest {
    * (kafka-consumers), no acá — un caller nuevo no puede omitirla y caer silencioso a CAR.
    */
   requiredVehicleType: VehicleClass;
+  /**
+   * B5-3 · oferta del viaje (offeringId): el matching resuelve sus requisitos de eligibilidad para
+   * filtrar el pool (confort=segment≥MID, xl=6 asientos). Opcional: ausente/desconocida ⇒ sin requisitos.
+   */
+  category?: string;
 }
 
 @Injectable()
@@ -84,6 +95,7 @@ export class MatchingService {
       tripId: trip.tripId,
       origin: trip.origin,
       vehicleType: trip.requiredVehicleType,
+      category: trip.category,
     });
     await this.offerNext(trip.tripId);
   }
@@ -97,6 +109,12 @@ export class MatchingService {
     const session = await this.sessions.get(tripId);
     // `session?.status !== OPEN` cubre la inexistente (undefined) y la cerrada en una sola comparación.
     if (session?.status !== DispatchSessionStatus.OPEN) return; // no-op
+
+    // B5-vert · EMERGENCIA (ambulancia): despacho por BROADCAST simultáneo, no secuencial. Bifurca ACÁ;
+    // el flujo STANDARD (de acá para abajo) queda intacto. El flow se deriva de la oferta del viaje.
+    if (this.offeringFlow(session.category) === OfferingFlow.EMERGENCY) {
+      return this.offerBroadcast(tripId, session);
+    }
 
     // Una oferta a la vez: si hay un OFFERED vivo no encimamos otra (la respuesta o el reconciler avanzan).
     const inFlight = await this.prisma.read.dispatchMatch.count({
@@ -113,9 +131,12 @@ export class MatchingService {
 
     const origin: LatLon = { lat: session.originLat, lon: session.originLon };
     const center = toH3(origin, DISPATCH_H3_RESOLUTION);
+    // B5-3 · requisitos de eligibilidad de la oferta del viaje (segment/seats/antigüedad). Si la category
+    // está ausente o no matchea el catálogo, `findOffering` da undefined ⇒ el pool no restringe (degradación).
+    const requires = findOffering(session.category ?? '')?.requires;
     // Rankea desde el k-ring actual; si está agotado, expande (persistiendo el avance) y reintenta.
     for (let k = session.currentKRing; k <= this.maxKRing; k++) {
-      const ranked = await this.rankCandidates(neighbors(center, k), origin, attempted, session.vehicleType);
+      const ranked = await this.rankCandidates(neighbors(center, k), origin, attempted, session.vehicleType, requires);
       const top = ranked[0];
       if (!top) continue;
       if (k !== session.currentKRing) await this.sessions.bumpKRing(tripId, k);
@@ -134,6 +155,72 @@ export class MatchingService {
     if (await this.sessions.closeTimedOut(tripId)) {
       await this.publishNoCandidates(tripId, attempted.size);
     }
+  }
+
+  /**
+   * Deriva el FLUJO de despacho de la oferta del viaje (ADR 013). EMERGENCY = ambulancia (broadcast,
+   * prioridad). Sin category o desconocida ⇒ STANDARD (el flujo secuencial de siempre).
+   */
+  private offeringFlow(category: string | null): OfferingFlow {
+    return findOffering(category ?? '')?.flow ?? OfferingFlow.STANDARD;
+  }
+
+  /**
+   * Despacho de EMERGENCIA (ambulancia · OfferingFlow.EMERGENCY): oferta SIMULTÁNEA a TODOS los conductores
+   * elegibles del radio (no uno a la vez). El primero que acepta gana — la carrera la zanjan el CAS del
+   * accept + el índice UNIQUE PARCIAL (un solo ACCEPTED por viaje) + el CAS de cierre de sesión; los
+   * perdedores reciben offer_withdrawn (DispatchService.accept). Búsqueda AMPLIA de una (disco maxKRing),
+   * no expansión incremental: una emergencia no espera rondas. STATELESS y replica-safe (idempotente por
+   * el set de ya-ofertados). NO usa la guarda "una-oferta-a-la-vez": el broadcast son N ofertas vivas.
+   */
+  private async offerBroadcast(tripId: string, session: DispatchSession): Promise<void> {
+    // Ofertados de ESTA ronda (vivos OFFERED + ya respondidos): no re-ofertar al mismo conductor.
+    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
+      where: { tripId, offeredAt: { gte: session.createdAt } },
+      select: { driverId: true, outcome: true },
+    });
+    const attempted = new Set(priorMatches.map((m) => m.driverId));
+    const liveOffers = priorMatches.filter((m) => m.outcome === DispatchOutcome.OFFERED).length;
+
+    const origin: LatLon = { lat: session.originLat, lon: session.originLon };
+    const center = toH3(origin, DISPATCH_H3_RESOLUTION);
+    const requires = findOffering(session.category ?? '')?.requires;
+    // Disco completo hasta maxKRing de una (gridDisk acumulado): cobertura amplia inmediata para la emergencia.
+    const ranked = await this.rankCandidates(
+      neighbors(center, this.maxKRing),
+      origin,
+      attempted,
+      session.vehicleType,
+      requires,
+    );
+
+    if (ranked.length === 0) {
+      // Nadie NUEVO a quien ofertar. Si tampoco quedan ofertas vivas → cierre honesto (no_offers). Si aún
+      // hay vivas, esperamos su respuesta/expiración (el sweep re-invoca offerNext cuando alguna caduca).
+      if (liveOffers === 0 && (await this.sessions.closeTimedOut(tripId))) {
+        await this.publishNoCandidates(tripId, attempted.size);
+      }
+      return;
+    }
+
+    const surgeQuote = await this.surge.quote(origin);
+    let attempt = attempted.size;
+    // Broadcast en paralelo (patrón del board PUJA): una oferta a cada candidato nuevo. Un fallo de entrega
+    // individual NO aborta el resto (la oferta queda OFFERED en DB; el conductor la ve por el poll/backstop).
+    await Promise.all(
+      ranked.map((candidate) => {
+        attempt += 1;
+        return this.createAndDeliverOffer({
+          tripId,
+          candidate,
+          surgeMultiplier: surgeQuote.multiplier,
+          attempt,
+          origin,
+        }).catch((err) =>
+          this.logger.warn(`broadcast EMERGENCY a ${candidate.driverId} falló: ${String(err)}`),
+        );
+      }),
+    );
   }
 
   /** Cierra la sesión del viaje como MATCHED (un conductor aceptó). Idempotente (CAS where status=OPEN). */
@@ -224,10 +311,11 @@ export class MatchingService {
     origin: LatLon,
     attempted: Set<string>,
     requiredVehicleType: VehicleClass,
+    requires?: OfferingRequirements,
   ): Promise<{ driverId: string; score: number; location: LatLon }[]> {
-    // Candidatos elegibles (disponibles + del tipo requerido + no excluidos por pánico + no ya ofertados).
-    // Filtrado centralizado en DriverPool (misma fuente que el broadcast de la PUJA).
-    const usable = await this.driverPool.eligible(cells, requiredVehicleType, { exclude: attempted });
+    // Candidatos elegibles (disponibles + del tipo requerido + que cumplen el `requires` de la oferta +
+    // no excluidos por pánico + no ya ofertados). Filtrado centralizado en DriverPool (misma fuente que PUJA).
+    const usable = await this.driverPool.eligible(cells, requiredVehicleType, { exclude: attempted, requires });
     if (usable.length === 0) return [];
 
     const stats = await this.projection.getStats(usable.map((l) => l.driverId));

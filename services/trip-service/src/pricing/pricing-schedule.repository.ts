@@ -6,6 +6,7 @@
  * resolver + su servicio se testean con un repo en memoria, y la persistencia real vive en el adaptador.
  */
 import { Injectable } from '@nestjs/common';
+import { PricingMode } from '@veo/shared-types';
 import type { PricingModeSchedule } from '../trips/domain/pricing-mode';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
@@ -19,14 +20,20 @@ export interface PersistedSchedule extends PricingModeSchedule {
   updatedAt: string;
 }
 
-/** Cliente de transacción mínimo aceptado por `replace` (para encolar el outbox en la MISMA tx). */
+/**
+ * Cliente de transacción mínimo aceptado por `replace` (para encolar el outbox en la MISMA tx).
+ * Optimistic locking (CAS): `updateMany` con `version` en el WHERE → el predicado se evalúa bajo lock al
+ * escribir, así dos PUT concurrentes NO pueden ambos bumpear desde la misma versión (el 2º ve count=0).
+ * `create` cubre el primer write (sin fila); `findUnique` relee la fila escrita para el `updatedAt`.
+ */
 export interface ScheduleTx {
   pricingModeSchedule: {
-    upsert(args: {
-      where: { id: string };
-      create: Record<string, unknown>;
-      update: Record<string, unknown>;
-    }): Promise<{ version: number; updatedAt: Date }>;
+    updateMany(args: {
+      where: { id: string; version: number };
+      data: Record<string, unknown>;
+    }): Promise<{ count: number }>;
+    create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
+    findUnique(args: { where: { id: string } }): Promise<{ version: number; updatedAt: Date } | null>;
   };
   outboxEvent: {
     create(args: { data: { aggregateId: string; eventType: string; envelope: unknown } }): Promise<unknown>;
@@ -80,7 +87,7 @@ function parseRules(raw: Prisma.JsonValue): PricingModeSchedule['rules'] {
       typeof dayMask === 'number' &&
       typeof startMinute === 'number' &&
       typeof endMinute === 'number' &&
-      (mode === 'PUJA' || mode === 'FIXED')
+      (mode === PricingMode.PUJA || mode === PricingMode.FIXED)
     ) {
       out.push({ dayMask, startMinute, endMinute, mode });
     }

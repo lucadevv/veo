@@ -1,9 +1,9 @@
 /**
  * Cliente Redis compartido (idempotencia de consumidores + locks de grabación por trip).
  */
-import { type Provider, type OnApplicationShutdown } from '@nestjs/common';
+import { Logger, type Provider, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import { createRedisClient, type Redis } from '@veo/redis';
 import type { Env } from '../config/env.schema';
 
 export const REDIS = Symbol('REDIS');
@@ -12,7 +12,7 @@ export const redisProvider: Provider = {
   provide: REDIS,
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): Redis => {
-    return new Redis(config.getOrThrow<string>('REDIS_URL'), { maxRetriesPerRequest: 3 });
+    return createRedisClient(config.getOrThrow<string>('REDIS_URL'), { logger: new Logger('Redis') });
   },
 };
 

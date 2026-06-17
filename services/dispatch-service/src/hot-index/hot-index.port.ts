@@ -9,13 +9,29 @@
  * (D de SOLID: el dominio depende de estas interfaces, no de ioredis directamente.)
  */
 import type { LatLon } from '@veo/utils';
-import type { VehicleClass } from '@veo/shared-types';
+import type { FleetDocumentType, VehicleClass, VehicleSegment } from '@veo/shared-types';
 
 export const HOT_INDEX = Symbol('HOT_INDEX');
 export const EXCLUSION_REGISTRY = Symbol('EXCLUSION_REGISTRY');
 
+/**
+ * B5-3 · atributos de eligibilidad del vehículo activo (del modelSpec elegido + el año del vehículo).
+ * Todos OPCIONALES: un ping legacy (productor sin desplegar) no los trae y el pool degrada a "elegible".
+ */
+export interface DriverVehicleAttrs {
+  seats?: number;
+  segment?: VehicleSegment;
+  vehicleYear?: number;
+  /**
+   * B5-3.2 · certificaciones de operador VIGENTES del conductor (FleetDocumentType). El pool las usa para
+   * gatear las verticales FAIL-CLOSED (ambulancia exige AMBULANCE_OPERATOR). Opcional: ausente ⇒ el conductor
+   * NO tiene certs conocidas ⇒ inelegible para cualquier oferta que exija una (a diferencia de seats/segment).
+   */
+  certifications?: FleetDocumentType[];
+}
+
 /** Ubicación vigente de un conductor disponible. */
-export interface DriverLocation {
+export interface DriverLocation extends DriverVehicleAttrs {
   driverId: string;
   lat: number;
   lon: number;
@@ -41,7 +57,12 @@ export interface HotIndex {
    * matching por clase. OBLIGATORIO (ADR 013 · Lote D): el default legacy vive en el BORDE del evento
    * (kafka-consumers), no acá — un caller nuevo no puede "olvidar" la clase y caer silencioso a CAR.
    */
-  upsertLocation(driverId: string, point: LatLon, vehicleType: VehicleClass): Promise<DriverLocation>;
+  upsertLocation(
+    driverId: string,
+    point: LatLon,
+    vehicleType: VehicleClass,
+    attrs?: DriverVehicleAttrs,
+  ): Promise<DriverLocation>;
   /** Marca al conductor como ocupado (asignado / en viaje): sale del pool disponible. */
   markBusy(driverId: string): Promise<void>;
   /** Reincorpora al conductor al pool disponible en su última celda conocida. */
@@ -59,6 +80,14 @@ export interface HotIndex {
    * a ~`limit` en origen (muestreo en Redis), no en memoria del proceso.
    */
   availableSample(cells: string[], limit: number): Promise<DriverLocation[]>;
+  /**
+   * Cardinalidad de conductores EN LÍNEA ahora: cuántos tienen una ubicación viva en el índice
+   * (un ping refresca el TTL; al expirar/offline desaparece). Cuenta tanto disponibles como ocupados
+   * —un conductor en viaje SIGUE en línea—, sin doble conteo. KPI del dashboard admin ("conductores
+   * en línea"). No se apoya en los SETs por celda (esos son solo los DISPONIBLES y exigirían unir N
+   * celdas); usa la presencia de la loc como única fuente de verdad del estado "online".
+   */
+  countOnline(): Promise<number>;
 }
 
 /**

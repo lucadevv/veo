@@ -20,6 +20,12 @@ export interface AccessTokenClaims {
   sid: string;
   /** epoch (s) de la última verificación MFA fresca, para step-up (BR-S07) */
   mfaAt?: number;
+  /**
+   * Email del sujeto. SOLO se emite para operadores (`typ === 'admin'`): son staff interno y su
+   * identidad legible es parte de la rendición de cuentas (watermark de video BR-S02, audit). NUNCA
+   * se incluye para pasajero/conductor — su email/PII no viaja en el token. Ausente = no disponible.
+   */
+  email?: string;
 }
 
 export interface RefreshTokenClaims {
@@ -27,6 +33,13 @@ export interface RefreshTokenClaims {
   sid: string;
   /** id rotativo de este refresh concreto (para detección de reuse) */
   jti: string;
+  /**
+   * Tipo de sujeto del refresh token. Permite que `refresh` repueble la autorización desde la tabla
+   * correcta (admin → AdminUser; passenger/driver → User) y re-emita el access con roles/email frescos.
+   * El refresh NO porta autorización (roles/email): solo identifica DÓNDE re-leerla. `undefined` en
+   * tokens emitidos antes de este cambio (backward-compat: `refresh` cae a un lookup por tanteo).
+   */
+  typ?: SubjectType;
 }
 
 export interface AuthenticatedUser {
@@ -49,6 +62,12 @@ export interface AuthenticatedUser {
    * (defensa en profundidad del gate KYC, igual que driverId lo es para anti-IDOR). Ausente/false = no verificado.
    */
   kycVerified?: boolean;
+  /**
+   * Email del operador, propagado desde el claim `email` del access token (solo `type === 'admin'`).
+   * Fuente legible de identidad para el watermark de video (BR-S02) y la rendición de cuentas. Ausente
+   * para pasajero/conductor y para tokens de admin re-emitidos por refresh (ese camino no porta email).
+   */
+  email?: string;
 }
 
 /**
@@ -86,7 +105,11 @@ export class JwtService {
   }
 
   async signAccessToken(claims: AccessTokenClaims): Promise<string> {
-    return new SignJWT({ typ: claims.typ, roles: claims.roles, sid: claims.sid, mfaAt: claims.mfaAt })
+    // `email` se incluye solo si viene seteado (operadores). Omitirlo cuando es undefined evita
+    // un claim `email: null` ruidoso en tokens de pasajero/conductor.
+    const payload: JWTPayload = { typ: claims.typ, roles: claims.roles, sid: claims.sid, mfaAt: claims.mfaAt };
+    if (claims.email !== undefined) payload.email = claims.email;
+    return new SignJWT(payload)
       .setProtectedHeader({ alg: JWT_ALG })
       .setSubject(claims.sub)
       .setIssuer(this.keys.issuer)
@@ -97,7 +120,11 @@ export class JwtService {
   }
 
   async signRefreshToken(claims: RefreshTokenClaims): Promise<string> {
-    return new SignJWT({ sid: claims.sid })
+    // `typ` se incluye solo si viene seteado. Identifica el tipo de sujeto para que el refresh
+    // repueble la autorización desde la tabla correcta. NO se firman roles/email en el refresh.
+    const payload: JWTPayload = { sid: claims.sid };
+    if (claims.typ !== undefined) payload.typ = claims.typ;
+    return new SignJWT(payload)
       .setProtectedHeader({ alg: JWT_ALG })
       .setSubject(claims.sub)
       .setJti(claims.jti)
@@ -117,13 +144,20 @@ export class JwtService {
       roles: (payload.roles as AdminRole[] | undefined) ?? [],
       sid: payload.sid as string,
       mfaAt: payload.mfaAt as number | undefined,
+      email: payload.email as string | undefined,
     };
   }
 
   async verifyRefresh(token: string): Promise<RefreshTokenClaims> {
     const payload = await this.verify(token);
     if (!payload.sub || !payload.jti) throw new UnauthorizedError('refresh token incompleto');
-    return { sub: payload.sub, sid: payload.sid as string, jti: payload.jti };
+    return {
+      sub: payload.sub,
+      sid: payload.sid as string,
+      jti: payload.jti,
+      // `undefined` para refresh tokens emitidos antes de portar `typ` (backward-compat).
+      typ: payload.typ as SubjectType | undefined,
+    };
   }
 
   private async verify(token: string): Promise<JWTPayload & Record<string, unknown>> {
@@ -156,5 +190,6 @@ export function toAuthenticatedUser(claims: AccessTokenClaims): AuthenticatedUse
     roles: claims.roles,
     sessionId: claims.sid,
     mfaVerifiedAt: claims.mfaAt,
+    email: claims.email,
   };
 }

@@ -11,8 +11,10 @@ const basePersonal: PersonalData = {
 const baseVehicle: VehicleData = {
   type: 'MOTO',
   plate: 'abc-123',
-  brand: 'Honda',
   year: '2021',
+  // B5-2: el modelo se elige del catálogo; modelSpecId es lo que viaja al backend.
+  modelSpecId: 'spec-123',
+  brand: 'Honda',
   model: 'CB 190R',
 };
 
@@ -63,15 +65,14 @@ describe('validatePersonalData', () => {
 });
 
 describe('validateVehicle', () => {
-  it('normaliza la placa (mayúsculas) y convierte el año a número', () => {
+  it('normaliza la placa (mayúsculas), convierte el año y envía modelSpecId (no make/model libre)', () => {
     const result = validateVehicle(baseVehicle);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.request).toEqual({
         vehicleType: 'MOTO',
         plate: 'ABC-123',
-        make: 'Honda',
-        model: 'CB 190R',
+        modelSpecId: 'spec-123',
         year: 2021,
       });
     }
@@ -93,12 +94,11 @@ describe('validateVehicle', () => {
     }
   });
 
-  it('rechaza marca y modelo vacíos', () => {
-    const result = validateVehicle({...baseVehicle, brand: '  ', model: ''});
+  it('rechaza si no se eligió un modelo del catálogo (modelSpecId vacío)', () => {
+    const result = validateVehicle({...baseVehicle, modelSpecId: '   '});
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errors.brand).toBe('make_required');
-      expect(result.errors.model).toBe('model_required');
+      expect(result.errors.model).toBe('model_not_selected');
     }
   });
 });

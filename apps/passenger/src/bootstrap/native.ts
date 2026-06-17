@@ -3,7 +3,6 @@ import { registerGlobals } from 'react-native-webrtc';
 import { LiveKitCabinViewer } from '../features/trip/presentation/components/LiveKitCabinViewer';
 import { registerCabinVideoViewer } from '../features/trip/presentation/ports/cabinVideoViewer';
 import { registerBackgroundMessageHandler } from '../services/messaging';
-import { initSecureStorage } from '../core/storage/mmkv';
 import { initMapbox } from '../core/maps/mapbox';
 
 /**
@@ -36,7 +35,7 @@ void registerBackgroundMessageHandler();
 // A nivel de módulo (fuera de React) para que el primer render del mapa ya tenga token.
 initMapbox();
 
-// 4) Seguridad del almacén: deriva la encryptionKey del Keychain/Keystore y re-cifra el
-// almacén seguro ANTES de que la app rehidrate la sesión (los tokens se leen en un efecto de
-// React, posterior a este efecto de arranque a nivel de módulo). Fallback controlado dentro.
-void initSecureStorage();
+// 4) Seguridad del almacén: `initSecureStorage()` se llama (y se ESPERA) en App.tsx, encadenada a
+// `hydrate()`. Crea la instancia MMKV segura con la clave del Keychain de forma ASYNC; debe
+// completar ANTES de leer tokens, por eso NO se dispara acá (fire-and-forget sería un race contra
+// la hidratación y, peor, antes se creaba con una clave de arranque que no descifraba la sesión).

@@ -24,9 +24,9 @@ describe('notifications · resolveDeepLink', () => {
   it('NoOffers (puja EXPIRED) → Home del sheet, NO la pantalla legacy', () => {
     // El flujo normal vive ENTERO en el sheet: NoOffers ya no es una pantalla aparte, es la fase
     // `noOffers` del sheet. El push aterriza en el Home y el sheet rehidrata; el tripId no viaja.
+    // Tras quitar los bottom tabs, `Home` es una ruta DIRECTA del stack (antes `Main`/`{screen:'Home'}`).
     expect(resolveDeepLink({ tripId: 't5', screen: 'NoOffers' })).toEqual({
-      screen: 'Main',
-      params: { screen: 'Home' },
+      screen: 'Home',
     });
   });
 

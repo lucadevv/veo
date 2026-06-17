@@ -36,6 +36,23 @@ describe('JwtService (ES256)', () => {
     const jwt = new JwtService(keys);
     await expect(jwt.verifyAccess('not.a.token')).rejects.toThrow();
   });
+
+  it('firma y verifica refresh token portando typ (para repoblar autorización en refresh)', async () => {
+    const jwt = new JwtService(keys);
+    const token = await jwt.signRefreshToken({ sub: 'a1', sid: 's1', jti: 'j1', typ: 'admin' });
+    const claims = await jwt.verifyRefresh(token);
+    expect(claims.sub).toBe('a1');
+    expect(claims.sid).toBe('s1');
+    expect(claims.jti).toBe('j1');
+    expect(claims.typ).toBe('admin');
+  });
+
+  it('refresh token sin typ verifica con typ undefined (backward-compat tokens viejos)', async () => {
+    const jwt = new JwtService(keys);
+    const token = await jwt.signRefreshToken({ sub: 'u1', sid: 's1', jti: 'j1' });
+    const claims = await jwt.verifyRefresh(token);
+    expect(claims.typ).toBeUndefined();
+  });
 });
 
 describe('identidad interna BFF→servicio', () => {

@@ -1,6 +1,8 @@
 import type { HttpClient } from '@veo/api-client';
 import type { AuthRepository } from '../../features/auth/domain/authRepository';
 import type { ConsentRepository } from '../../features/auth/domain/consentRepository';
+import type { PendingConsentStore } from '../../features/auth/domain/pendingConsent';
+import type { SyncPendingConsentUseCase } from '../../features/auth/domain/syncPendingConsentUseCase';
 import type { LocalAuthService } from '../../features/auth/domain/localAuthService';
 import type {
   ForgotPasswordUseCase,
@@ -68,6 +70,7 @@ import type {
   GetMyDebtsUseCase,
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
+  GetUserCreditUseCase,
   RetryChargeUseCase,
 } from '../../features/payments/domain/usecases';
 import type { ProfileRepository } from '../../features/profile/domain/profileRepository';
@@ -126,6 +129,7 @@ import type {
 import type { MapsRepository } from '../../features/maps/domain/mapsRepository';
 import type {
   AutocompletePlacesUseCase,
+  GetCatalogUseCase,
   QuoteRideUseCase,
   ReverseGeocodeUseCase,
 } from '../../features/maps/domain/usecases';
@@ -145,6 +149,8 @@ export const TOKENS = {
   // Repositorios (interfaces en domain, impl en data)
   authRepository: createToken<AuthRepository>('AuthRepository'),
   consentRepository: createToken<ConsentRepository>('ConsentRepository'),
+  // Cola durable de consentimiento (Ley 29733) en MMKV: persiste la aceptación hasta confirmarla.
+  pendingConsentStore: createToken<PendingConsentStore>('PendingConsentStore'),
   profileRepository: createToken<ProfileRepository>('ProfileRepository'),
   tripRepository: createToken<TripRepository>('TripRepository'),
   tripHistoryRepository: createToken<TripHistoryRepository>('TripHistoryRepository'),
@@ -189,6 +195,9 @@ export const TOKENS = {
   verifyOtpUseCase: createToken<VerifyOtpUseCase>('VerifyOtpUseCase'),
   recordConsentUseCase: createToken<RecordConsentUseCase>('RecordConsentUseCase'),
   getConsentUseCase: createToken<GetConsentUseCase>('GetConsentUseCase'),
+  // Cola durable: drena la aceptación encolada al backend con backoff + dedupKey idempotente
+  // (singleton: los reintentos sobreviven al desmontaje de la pantalla que la encoló).
+  syncPendingConsentUseCase: createToken<SyncPendingConsentUseCase>('SyncPendingConsentUseCase'),
   // Casos de uso · Auth por correo (ADR-012)
   registerEmailUseCase: createToken<RegisterEmailUseCase>('RegisterEmailUseCase'),
   resendEmailUseCase: createToken<ResendEmailUseCase>('ResendEmailUseCase'),
@@ -233,6 +242,7 @@ export const TOKENS = {
   autocompletePlacesUseCase: createToken<AutocompletePlacesUseCase>('AutocompletePlacesUseCase'),
   reverseGeocodeUseCase: createToken<ReverseGeocodeUseCase>('ReverseGeocodeUseCase'),
   quoteRideUseCase: createToken<QuoteRideUseCase>('QuoteRideUseCase'),
+  getCatalogUseCase: createToken<GetCatalogUseCase>('GetCatalogUseCase'),
 
   // Casos de uso · Dispatch (vehículos cercanos de ambiente)
   getNearbyVehiclesUseCase: createToken<GetNearbyVehiclesUseCase>('GetNearbyVehiclesUseCase'),
@@ -263,6 +273,8 @@ export const TOKENS = {
   getPaymentUseCase: createToken<GetPaymentUseCase>('GetPaymentUseCase'),
   // Casos de uso · Payments · Deuda (gate BR-P02: saldar para volver a pedir)
   getMyDebtsUseCase: createToken<GetMyDebtsUseCase>('GetMyDebtsUseCase'),
+  // Caso de uso · Payments · Saldo de crédito gastable del pasajero (referidos · Ola 2A)
+  getUserCreditUseCase: createToken<GetUserCreditUseCase>('GetUserCreditUseCase'),
   retryChargeUseCase: createToken<RetryChargeUseCase>('RetryChargeUseCase'),
   // Caso de uso · Payments · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   changePaymentMethodUseCase: createToken<ChangePaymentMethodUseCase>(

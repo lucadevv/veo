@@ -14,7 +14,9 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
+import { ConflictError } from '@veo/utils';
 import { PricingMode } from '@veo/shared-types';
+import { bumpPricingConfigChanged } from '../trips/trip-metrics';
 import {
   DEFAULT_SCHEDULE,
   resolveMode,
@@ -83,9 +85,9 @@ export class PricingScheduleService {
   async replaceSchedule(input: {
     defaultMode: PricingMode;
     rules: PricingModeRule[];
+    expectedVersion: number;
   }): Promise<PersistedSchedule> {
-    const current = await this.repo.find();
-    const nextVersion = (current?.version ?? 0) + 1;
+    const nextVersion = input.expectedVersion + 1;
     // Serializamos las reglas tal cual (ya validadas por el DTO) como JSON de la fila.
     const rulesJson = input.rules.map((r) => ({
       dayMask: r.dayMask,
@@ -95,20 +97,28 @@ export class PricingScheduleService {
     }));
 
     const result = await this.repo.runInTx(async (tx) => {
-      const row = await tx.pricingModeSchedule.upsert({
-        where: { id: SINGLETON_ID },
-        create: {
-          id: SINGLETON_ID,
-          defaultMode: input.defaultMode,
-          rules: rulesJson,
-          version: nextVersion,
-        },
-        update: {
-          defaultMode: input.defaultMode,
-          rules: rulesJson,
-          version: nextVersion,
-        },
+      // Optimistic locking (CAS): el UPDATE solo pega si la versión vigente sigue siendo `expectedVersion`
+      // (predicado bajo lock) → dos PUT concurrentes no se pisan (el 2º ve count=0 → 409, sin lost update).
+      const data = { defaultMode: input.defaultMode, rules: rulesJson, version: nextVersion };
+      const updated = await tx.pricingModeSchedule.updateMany({
+        where: { id: SINGLETON_ID, version: input.expectedVersion },
+        data,
       });
+
+      let row: { version: number; updatedAt: Date };
+      if (updated.count === 1) {
+        const persisted = await tx.pricingModeSchedule.findUnique({ where: { id: SINGLETON_ID } });
+        if (!persisted) throw new ConflictError('el schedule desapareció durante el reemplazo');
+        row = persisted;
+      } else if (input.expectedVersion === 0) {
+        const existing = await tx.pricingModeSchedule.findUnique({ where: { id: SINGLETON_ID } });
+        if (existing) {
+          throw new ConflictError(`el schedule ya fue inicializado (v${existing.version}); recargá y reintentá`);
+        }
+        row = await tx.pricingModeSchedule.create({ data: { id: SINGLETON_ID, ...data } });
+      } else {
+        throw new ConflictError(`el schedule cambió (esperabas v${input.expectedVersion}); recargá y reintentá`);
+      }
       // Outbox EN LA MISMA TX (FOUNDATION §6): audit + consumidores futuros del cambio de schedule.
       await tx.outboxEvent.create({
         data: {
@@ -131,7 +141,8 @@ export class PricingScheduleService {
 
     // S3 — INVALIDA el cache: el PUT y el resolve viven en el MISMO proceso, así que un cambio de schedule
     // debe verse en el siguiente resolve SIN esperar el TTL (sino un flip tardaría hasta `cacheTtlMs`).
-    this.cache = null;
+    this.invalidateCache();
+    bumpPricingConfigChanged('mode_schedule'); // OPS: señal de cambio de config (FOUNDATION §6)
 
     this.logger.log(
       `pricing schedule REEMPLAZADO → version ${result.version} (defaultMode ${input.defaultMode}, ` +
@@ -143,6 +154,15 @@ export class PricingScheduleService {
       version: result.version,
       updatedAt: result.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * Invalida el cache in-proc DE ESTA réplica. Lo llama el PUT local (mismo proceso) y, vía
+   * PricingCacheConsumer, el evento `pricing.mode_schedule_updated` que emite el PUT de CUALQUIER
+   * réplica → invalidación instantánea cross-réplica, no acotada al TTL (que queda como fallback).
+   */
+  invalidateCache(): void {
+    this.cache = null;
   }
 
   /**

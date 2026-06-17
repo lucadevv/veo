@@ -48,7 +48,7 @@ interface RefreshResponse {
 
 /** Intenta rotar el access token usando el refresh de la cookie. Devuelve el nuevo access o null. */
 export async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = getRefreshToken();
+  const refreshToken = await getRefreshToken();
   if (!refreshToken) return null;
   const res = await bffFetch('/auth/refresh', {
     method: 'POST',
@@ -57,8 +57,8 @@ export async function refreshAccessToken(): Promise<string | null> {
   if (!res.ok) return null;
   const data = (await res.json().catch(() => null)) as RefreshResponse | null;
   if (!data?.accessToken) return null;
-  setAccessCookie(data.accessToken);
-  if (data.refreshToken) setRefreshCookie(data.refreshToken);
+  await setAccessCookie(data.accessToken);
+  if (data.refreshToken) await setRefreshCookie(data.refreshToken);
   return data.accessToken;
 }
 
@@ -67,7 +67,7 @@ export async function refreshAccessToken(): Promise<string | null> {
  * (el llamador decide cómo serializarla). Solo válida en contexto de Route Handler.
  */
 export async function authedBffFetch(path: string, init: BffFetchInit = {}): Promise<Response> {
-  const access = getAccessToken();
+  const access = await getAccessToken();
   const withAuth = (token: string | undefined): BffFetchInit => ({
     ...init,
     headers: {

@@ -419,6 +419,24 @@ export const PUSH_NOTIFICATION_SPECS = {
     dedup: (p) => `panic:${p.panicId}:resolved`,
     data: (p) => ({ tripId: p.tripId, panicId: p.panicId, screen: PUSH_SCREEN.TripActive }),
   }),
+
+  /**
+   * fleet.vehicle_model_reviewed → push al CONDUCTOR (`requestedBy`) que pidió el modelo: el operador lo
+   * aprobó o lo rechazó. El COPY varía por `verdict` (template dinámico, ramificado por el z.enum TIPADO
+   * del contrato — cero strings mágicos de dominio). dedup `vehicle-model:{modelId}:reviewed`: un modelo
+   * se resuelve UNA vez, redeliveries del mismo evento no duplican. No hay PUSH_SCREEN de flota → sin
+   * deep-link; la app abre la bandeja general con `modelId`.
+   */
+  'fleet.vehicle_model_reviewed': defineSpec('fleet.vehicle_model_reviewed', {
+    recipient: (p) => p.requestedBy,
+    template: (p) =>
+      p.verdict === 'APPROVED'
+        ? TEMPLATE_KEYS.VEHICLE_MODEL_APPROVED
+        : TEMPLATE_KEYS.VEHICLE_MODEL_REJECTED,
+    dedup: (p) => `vehicle-model:${p.modelId}:reviewed`,
+    vars: (p) => ({ make: p.make, model: p.model }),
+    data: (p) => ({ modelId: p.modelId }),
+  }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 
 export type RegistryEventType = keyof typeof PUSH_NOTIFICATION_SPECS;

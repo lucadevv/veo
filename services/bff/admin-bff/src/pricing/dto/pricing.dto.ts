@@ -19,9 +19,11 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { PricingMode } from '@veo/shared-types';
+import { BID_FLOOR_MAX_CENTS, GLOBAL_ZONE, OfferingId, PricingMode, type PricingZoneKey } from '@veo/shared-types';
 
 const MODES = [PricingMode.PUJA, PricingMode.FIXED] as const;
+const ZONES = [GLOBAL_ZONE] as const satisfies readonly PricingZoneKey[];
+const OFFERING_IDS = Object.values(OfferingId);
 
 /**
  * S5 (ADR 011 · footgun overnight) — cross-field: una regla SAME-DAY exige `startMinute < endMinute`.
@@ -92,4 +94,88 @@ export class ReplaceScheduleDto {
   @ValidateNested({ each: true })
   @Type(() => PricingModeRuleDto)
   rules!: PricingModeRuleDto[];
+
+  @ApiProperty({
+    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    minimum: 0,
+  })
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}
+
+/** Techos de cordura; espejo de trip-service. */
+export const FUEL_PRICE_MAX_CENTS_PER_LITER = 10_000;
+export const FUEL_KM_PER_LITER_MAX = 200;
+
+/**
+ * Body del PUT /pricing/fuel-surcharge (B4) — el admin ingresa PRECIO del combustible (céntimos/litro) +
+ * RENDIMIENTO (km/litro); trip-service deriva el recargo/km. Espejo del DTO de trip-service (re-valida abajo).
+ */
+export class ReplaceFuelSurchargeDto {
+  @ApiProperty({ description: 'Precio del combustible por litro en céntimos PEN', minimum: 0, maximum: FUEL_PRICE_MAX_CENTS_PER_LITER })
+  @IsInt()
+  @Min(0)
+  @Max(FUEL_PRICE_MAX_CENTS_PER_LITER)
+  fuelPricePerLiterCents!: number;
+
+  @ApiProperty({ description: 'Rendimiento del vehículo de referencia en km por litro', minimum: 0, maximum: FUEL_KM_PER_LITER_MAX })
+  @IsInt()
+  @Min(0)
+  @Max(FUEL_KM_PER_LITER_MAX)
+  kmPerLiter!: number;
+
+  @ApiProperty({
+    description:
+      'Optimistic locking (CAS): la `version` que el panel cargó. trip-service reemplaza solo si sigue vigente; ' +
+      'si otro admin la movió → 409. 0 = primer write.',
+    minimum: 0,
+  })
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}
+
+/** Un override del piso de la PUJA para una (zona, oferta). Espejo del DTO de trip-service (re-valida abajo). */
+export class BidFloorOverrideDto {
+  @ApiProperty({ enum: ZONES, description: 'Zona (Tier 1: solo GLOBAL)' })
+  @IsIn(ZONES)
+  zone!: PricingZoneKey;
+
+  @ApiProperty({ enum: OFFERING_IDS, description: 'Oferta a la que aplica este piso' })
+  @IsIn(OFFERING_IDS)
+  offeringId!: OfferingId;
+
+  @ApiProperty({ description: 'Piso EFECTIVO de esta (zona, oferta) en céntimos PEN', minimum: 1, maximum: BID_FLOOR_MAX_CENTS })
+  @IsInt()
+  @Min(1)
+  @Max(BID_FLOOR_MAX_CENTS)
+  floorCents!: number;
+}
+
+/**
+ * Body del PUT /pricing/bid-floor (ADR 010 §9.3) — piso de la PUJA por defecto + overrides por (zona, oferta).
+ * Reemplazo wholesale; espejo del DTO de trip-service (re-valida aguas abajo).
+ */
+export class ReplaceBidFloorDto {
+  @ApiProperty({ description: 'Piso por defecto en céntimos PEN (sin override para la (zona, oferta))', minimum: 1, maximum: BID_FLOOR_MAX_CENTS })
+  @IsInt()
+  @Min(1)
+  @Max(BID_FLOOR_MAX_CENTS)
+  defaultFloorCents!: number;
+
+  @ApiProperty({ type: [BidFloorOverrideDto], description: 'Pisos por (zona, oferta). Sin override → el default.' })
+  @IsArray()
+  @ArrayMaxSize(64)
+  @ValidateNested({ each: true })
+  @Type(() => BidFloorOverrideDto)
+  overrides!: BidFloorOverrideDto[];
+
+  @ApiProperty({
+    description: 'Optimistic locking (CAS): la `version` que el panel cargó. Conflicto → 409. 0 = primer write.',
+    minimum: 0,
+  })
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
 }

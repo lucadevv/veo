@@ -6,21 +6,23 @@ import { useSessionStore } from '../../../../core/session/sessionStore';
 import { IconLock } from '../components/icons';
 
 /**
- * Pantalla de sesión expirada por INACTIVIDAD (fiel al diseño). Cierra la sesión y vuelve al flujo
- * de ingreso para re-verificar la identidad. La conmutación de stack la hace el `RootNavigator`
- * según el estado de sesión (no se navega imperativamente): al limpiar la sesión, `status` pasa a
- * `unauthenticated` y el navegador muestra Auth.
+ * Pantalla de sesión EXPIRADA (refresh JWT fallido / token vencido). El `RootNavigator` la muestra
+ * cuando `status === 'expired'`, estado al que se llega desde `clearSession('expired')` en el flujo
+ * de refresh (`core/network/http.ts`). No se navega imperativamente: la conmutación de stack es por
+ * estado.
  *
- * Nota: esta pantalla solo cubre la UI + la ruta. El TRIGGER real de inactividad (temporizador que
- * conmuta a este estado) queda como follow-up.
+ * El CTA "Volver a iniciar sesión" cierra con motivo 'user-logout' (default de `clearSession`), que
+ * lleva `status` a 'unauthenticated' → el navegador muestra Auth para re-verificar la identidad.
  */
 export function SessionExpiredScreen(): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
   const clearSession = useSessionStore((state) => state.clearSession);
 
+  // Re-login intencional desde la pantalla de expiración: motivo 'user-logout' → 'unauthenticated'
+  // → Auth (no reentra al estado 'expired').
   const reVerify = useCallback(() => {
-    clearSession();
+    clearSession('user-logout');
   }, [clearSession]);
 
   return (

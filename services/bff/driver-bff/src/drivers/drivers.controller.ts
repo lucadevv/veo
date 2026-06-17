@@ -1,7 +1,7 @@
 /**
  * Sesión/onboarding del conductor. Todos los endpoints exigen JWT de tipo 'driver'.
  */
-import { Body, Controller, Get, HttpCode, Patch, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type {
@@ -19,14 +19,18 @@ import { DriversService } from './drivers.service';
 import {
   AddDocumentDto,
   EnrollFaceDto,
+  ListVehicleModelsQuery,
   OnboardDto,
   RegisterVehicleDto,
+  RequestVehicleModelDto,
   SelectActiveVehicleDto,
   StartShiftDto,
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
+  type DriverModelRequestView,
   type DriverPersonalData,
   type DriverProfileView,
+  type DriverVehicleModelView,
   type DriverVehicleView,
 } from './dto/drivers.dto';
 
@@ -95,6 +99,25 @@ export class DriversController {
     @Body() dto: RegisterVehicleDto,
   ): Promise<DriverVehicleView> {
     return this.drivers.registerVehicle(user, dto);
+  }
+
+  @Get('vehicle-models')
+  @ApiOperation({ summary: 'Catálogo APROBADO de modelos para el selector del onboarding. Filtros: vehicleType, q' })
+  vehicleModels(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListVehicleModelsQuery,
+  ): Promise<DriverVehicleModelView[]> {
+    return this.drivers.listVehicleModels(user, query);
+  }
+
+  @Post('vehicle-models')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'El conductor solicita un modelo nuevo que no está en el catálogo (queda en revisión)' })
+  requestVehicleModel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RequestVehicleModelDto,
+  ): Promise<DriverModelRequestView> {
+    return this.drivers.requestVehicleModel(user, dto);
   }
 
   @Get('vehicles')

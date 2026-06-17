@@ -263,6 +263,12 @@ start_service() {
     load_env "$dir"
     # Overrides explícitos pasados por argumento (kv 'VAR=value').
     for kv in "$@"; do export "${kv?}"; done
+    # Migraciones automáticas al boot (idempotente, P0 infra): aplica las PENDIENTES antes de
+    # arrancar. Mata el drift de schema — un servicio con migración nueva sin aplicar crashea en
+    # runtime (P2022/P3009). Si falla (drift corrupto / DB inalcanzable) NO arranca: fail-fast.
+    if [[ -d prisma/migrations ]]; then
+      npx prisma migrate deploy || { c_red "[$name] migrate deploy FALLÓ — NO arranco (revisá $logf)"; exit 1; }
+    fi
     exec node dist/main.js
   ) >"$logf" 2>&1 &
   echo $! > "$pidf"

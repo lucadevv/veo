@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   SafeScreen,
+  spacing,
   Text,
   TextField,
   useReducedMotion,
@@ -439,8 +440,8 @@ export function CompleteProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  brand: { alignItems: 'center', gap: 2, marginTop: 4, marginBottom: 16 },
-  copy: { gap: 8, marginBottom: 24 },
+  brand: { alignItems: 'center', gap: spacing.xxs, marginTop: spacing.xs, marginBottom: spacing.lg },
+  copy: { gap: spacing.sm, marginBottom: spacing['2xl'] },
   subtitle: { maxWidth: 320, alignSelf: 'center' },
   avatarWrap: { alignSelf: 'center', marginBottom: 28 },
   avatarRing: {
@@ -478,11 +479,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emailText: { flex: 1, gap: 2 },
-  pickErrorWrap: { marginTop: -16, marginBottom: 20 },
-  uploadErrorWrap: { marginTop: -16, marginBottom: 20, gap: 6 },
+  emailText: { flex: 1, gap: spacing.xxs },
+  pickErrorWrap: { marginTop: -16, marginBottom: spacing.xl },
+  uploadErrorWrap: { marginTop: -16, marginBottom: spacing.xl, gap: 6 },
   retryButton: { paddingVertical: 6, alignItems: 'center' },
   form: {},
-  privacyRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 20 },
+  privacyRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: spacing.xl },
   privacyText: { flex: 1 },
 });

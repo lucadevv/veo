@@ -100,7 +100,7 @@ export class RecordingService {
   async startForTrip(
     tripId: string,
     startedAt: Date,
-    opts: { forced?: boolean } = {},
+    opts: { forced?: boolean; panic?: boolean } = {},
   ): Promise<{ segmentId: string; created: boolean }> {
     const open = await this.findOpenSegment(tripId);
     if (open) {
@@ -116,7 +116,7 @@ export class RecordingService {
     const retentionUntil = computeRetentionUntil({
       startedAt,
       hasIncident: false,
-      hasPanic: false,
+      hasPanic: opts.panic ?? false,
       defaultDays: this.defaultDays,
       incidentDays: this.incidentDays,
     });
@@ -130,7 +130,10 @@ export class RecordingService {
           s3Key,
           codec: 'h264',
           encryptionKeyId: this.kmsKeyId,
-          retentionUntil,
+          hasPanic: opts.panic ?? false,
+          // Pánico ⇒ retención INDEFINIDA (null). Explícito y robusto aunque
+          // computeRetentionUntil ya devuelva null con hasPanic:true.
+          retentionUntil: opts.panic ? null : retentionUntil,
           egressId,
         },
       });
@@ -201,12 +204,10 @@ export class RecordingService {
       return { segmentId: open.id, forced: false };
     }
 
-    // Force-start: no había grabación (viaje en ARRIVING u otro estado).
-    const started = await this.startForTrip(tripId, at, { forced: true });
-    await this.prisma.write.mediaSegment.update({
-      where: { id: started.segmentId },
-      data: { hasPanic: true, retentionUntil: null },
-    });
+    // Force-start: no había grabación (viaje en ARRIVING u otro estado). El segment se crea YA con
+    // los flags de pánico (hasPanic:true, retención indefinida) en una sola escritura atómica: si el
+    // proceso crashea, jamás queda evidencia de pánico sin proteger (compliance Ley 29733).
+    const started = await this.startForTrip(tripId, at, { forced: true, panic: true });
     return { segmentId: started.segmentId, forced: true };
   }
 

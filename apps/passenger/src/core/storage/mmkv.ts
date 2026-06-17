@@ -4,22 +4,24 @@
 import { createMMKV, type MMKV } from 'react-native-mmkv';
 import {
   BOOTSTRAP_ENCRYPTION_KEY,
-  initSecureStorage as initSecureStorageWithRecrypt,
+  getOrCreateEncryptionKey,
 } from './secure-encryption-key';
 
 /**
  * Wrapper de persistencia sobre MMKV (3-5x más rápido que AsyncStorage; regla del repo).
  *
  * Dos almacenes separados por responsabilidad (SRP):
- *  - `secureStore`: datos sensibles (tokens de sesión). Cifrado con `encryptionKey`.
- *  - `prefsStore`:  preferencias y caché efímera no sensible.
+ *  - `secureStore`: datos sensibles (tokens de sesión). Cifrado con la clave del Keychain/Keystore.
+ *  - `prefsStore`:  preferencias y caché efímera no sensible (sin cifrar).
  *
- * SEGURIDAD — `encryptionKey` desde Keychain/Keystore:
- * La clave del almacén seguro YA NO es una constante embebida. La instancia MMKV se crea
- * síncronamente con una clave de ARRANQUE temporal (consumidores siguen importándola
- * síncrona); en el bootstrap se llama `initSecureStorage()` que recupera/genera la clave
- * fuerte en el Keychain y RE-CIFRA el almacén con `recrypt`. Detalles en
- * `./secure-encryption-key.ts`.
+ * SEGURIDAD — `encryptionKey` del Keychain, almacén creado ASYNC:
+ * La clave del almacén seguro NO es una constante embebida (extraíble del binario). La instancia
+ * MMKV segura se crea en `initSecureStorage()` (async) DIRECTAMENTE con la clave recuperada del
+ * Keychain/Keystore. ANTES se creaba síncrona con una clave de ARRANQUE y se re-cifraba con
+ * `recrypt`: ese patrón PERDÍA la sesión en cold-start (MMKV abría el archivo cifrado-con-keychain
+ * usando la clave de arranque → no descifraba → tokens "vacíos" → re-login forzado). Ahora el
+ * arranque DEBE llamar y ESPERAR `initSecureStorage()` antes de leer tokens: App.tsx lo encadena
+ * con `hydrate()`, y la sesión arranca en estado `unknown` (splash) hasta que `hydrate()` corre.
  */
 
 /** Contrato mínimo de un almacén clave-valor tipado. */
@@ -35,20 +37,20 @@ export interface KeyValueStore {
   clear(): void;
 }
 
-/** Adapta una instancia MMKV al contrato `KeyValueStore`. */
+/** Adapta una instancia MMKV (resuelta de forma perezosa) al contrato `KeyValueStore`. */
 class MmkvStore implements KeyValueStore {
-  constructor(private readonly mmkv: MMKV) {}
+  constructor(private readonly resolve: () => MMKV) {}
 
   getString(key: string): string | undefined {
-    return this.mmkv.getString(key);
+    return this.resolve().getString(key);
   }
 
   setString(key: string, value: string): void {
-    this.mmkv.set(key, value);
+    this.resolve().set(key, value);
   }
 
   getJSON<T>(key: string): T | undefined {
-    const raw = this.mmkv.getString(key);
+    const raw = this.resolve().getString(key);
     if (raw === undefined) {
       return undefined;
     }
@@ -56,60 +58,91 @@ class MmkvStore implements KeyValueStore {
       return JSON.parse(raw) as T;
     } catch {
       // Valor corrupto: lo eliminamos para no propagar el error.
-      this.mmkv.remove(key);
+      this.resolve().remove(key);
       return undefined;
     }
   }
 
   setJSON<T>(key: string, value: T): void {
-    this.mmkv.set(key, JSON.stringify(value));
+    this.resolve().set(key, JSON.stringify(value));
   }
 
   getBoolean(key: string): boolean | undefined {
-    return this.mmkv.getBoolean(key);
+    return this.resolve().getBoolean(key);
   }
 
   setBoolean(key: string, value: boolean): void {
-    this.mmkv.set(key, value);
+    this.resolve().set(key, value);
   }
 
   has(key: string): boolean {
-    return this.mmkv.contains(key);
+    return this.resolve().contains(key);
   }
 
   remove(key: string): void {
-    this.mmkv.remove(key);
+    this.resolve().remove(key);
   }
 
   clear(): void {
-    this.mmkv.clearAll();
+    this.resolve().clearAll();
   }
 }
 
 /**
- * Instancia MMKV segura. Se crea con la clave de ARRANQUE; se re-cifra con la clave del
- * Keychain en `initSecureStorage()`. Privada al módulo: solo `recrypt` la toca desde aquí.
+ * Instancia MMKV SEGURA. `null` hasta que `initSecureStorage()` la cree con la clave del Keychain.
+ * Privada al módulo; se accede vía `secureStore` (que exige el init previo).
  */
-const secureMmkv = createMMKV({
-  id: 'veo.secure',
-  encryptionKey: BOOTSTRAP_ENCRYPTION_KEY,
-});
+let secureMmkv: MMKV | null = null;
 
-/** Almacén seguro (cifrado) para tokens y datos sensibles. */
-export const secureStore: KeyValueStore = new MmkvStore(secureMmkv);
+/** Resuelve la instancia segura o falla con un mensaje claro si se leyó antes del bootstrap. */
+function requireSecureMmkv(): MMKV {
+  if (secureMmkv === null) {
+    throw new Error(
+      '[secureStore] leído antes de inicializar. Llamá y ESPERÁ `initSecureStorage()` en el ' +
+        'bootstrap (App.tsx encadena `initSecureStorage().then(hydrate)`).',
+    );
+  }
+  return secureMmkv;
+}
+
+/** Almacén de preferencias / caché no sensible (sin cifrar). Síncrono al import. */
+const prefsMmkv = createMMKV({ id: 'veo.prefs' });
+
+/** Almacén seguro (cifrado con la clave del Keychain). Requiere `initSecureStorage()` previo. */
+export const secureStore: KeyValueStore = new MmkvStore(requireSecureMmkv);
 
 /** Almacén de preferencias / caché no sensible. */
-export const prefsStore: KeyValueStore = new MmkvStore(
-  createMMKV({ id: 'veo.prefs' }),
-);
+export const prefsStore: KeyValueStore = new MmkvStore(() => prefsMmkv);
 
 /**
- * Inicializa la seguridad del almacén: deriva la `encryptionKey` del Keychain/Keystore y
- * re-cifra el almacén seguro. Llamar en el bootstrap ANTES de leer tokens (p. ej. antes de
- * `hydrate()` de la sesión). Idempotente y con fallback controlado (ver helper).
+ * Crea la instancia MMKV segura con la clave del Keychain/Keystore. Idempotente. Llamar y ESPERAR
+ * en el bootstrap ANTES de leer tokens (App.tsx lo encadena con `hydrate()`); el resto del árbol no
+ * lee `secureStore` hasta entonces (la sesión está en estado `unknown` → splash).
  *
- * @returns `true` si quedó activa la clave del Keychain; `false` si se degradó al fallback.
+ * @returns `true` si quedó activa la clave del Keychain; `false` si se degradó al fallback de
+ *          arranque (Keychain inaccesible) — controlado, no crashea.
  */
-export function initSecureStorage(): Promise<boolean> {
-  return initSecureStorageWithRecrypt((key) => secureMmkv.recrypt(key));
+export async function initSecureStorage(): Promise<boolean> {
+  if (secureMmkv !== null) {
+    return true; // idempotente
+  }
+  try {
+    const key = await getOrCreateEncryptionKey();
+    secureMmkv = createMMKV({ id: 'veo.secure', encryptionKey: key });
+    return true;
+  } catch (error) {
+    // FALLBACK controlado: el Keychain falló. Creamos el almacén con la clave de ARRANQUE constante
+    // para no crashear el arranque; la sesión previa (cifrada con la clave del Keychain) NO será
+    // legible (re-login), pero la app funciona. Se loguea para visibilidad/telemetría.
+    secureMmkv = createMMKV({
+      id: 'veo.secure',
+      encryptionKey: BOOTSTRAP_ENCRYPTION_KEY,
+    });
+    console.warn(
+      '[secure-encryption-key] Keychain inaccesible; almacén seguro con clave de ARRANQUE ' +
+        '(degradado, la sesión previa no se recupera). Error:',
+      error,
+    );
+    return false;
+  }
 }

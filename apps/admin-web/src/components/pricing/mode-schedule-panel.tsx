@@ -2,6 +2,7 @@
 
 import { Check, Gavel, Tag } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { ApiError } from '@veo/api-client';
 import type { ModeScheduleView, PricingMode } from '@/lib/api/schemas';
 import { formatDayMask, formatWindow, modeDescription, modeLabel } from '@/lib/pricing';
 import { dateTime } from '@/lib/formatters';
@@ -9,7 +10,7 @@ import { useReplaceSchedule } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useToast } from '@/components/ui/toast';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 const MODES: readonly { value: PricingMode; icon: LucideIcon }[] = [
   { value: 'PUJA', icon: Gavel },
@@ -29,9 +30,25 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
   const replace = useReplaceSchedule();
 
   async function switchTo(mode: PricingMode) {
-    // Reemplazo wholesale: cambia el default y CONSERVA las reglas vigentes (no las pisa).
-    await replace.mutateAsync({ defaultMode: mode, rules: schedule.rules });
-    toast({ tone: 'success', title: `Modo global cambiado a ${modeLabel(mode)}` });
+    try {
+      // Reemplazo wholesale: cambia el default y CONSERVA las reglas vigentes (no las pisa).
+      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409.
+      await replace.mutateAsync({
+        defaultMode: mode,
+        rules: schedule.rules,
+        expectedVersion: schedule.version,
+      });
+      toast({ tone: 'success', title: `Modo global cambiado a ${modeLabel(mode)}` });
+    } catch (err) {
+      // 409 = otro admin cambió el schedule. El hook re-sincroniza (onSettled) → el panel muestra lo vigente.
+      const conflict = err instanceof ApiError && err.status === 409;
+      toast({
+        tone: conflict ? 'info' : 'danger',
+        title: conflict
+          ? 'El modo lo cambió otro admin. Recargamos lo vigente — revisá y reintentá.'
+          : `No se pudo cambiar el modo${err instanceof Error ? `: ${err.message}` : ''}`,
+      });
+    }
   }
 
   return (
@@ -78,7 +95,7 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
             }
 
             return (
-              <ConfirmDialog
+              <StepUpDialog
                 key={value}
                 trigger={
                   <button type="button" className="text-left" disabled={replace.isPending}>
@@ -88,9 +105,8 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
                 title={`Cambiar modo global a ${modeLabel(value)}`}
                 description={`Todos los viajes nuevos pasarán a ${modeLabel(
                   value,
-                )}. Las franjas horarias definidas se conservan. El cambio queda auditado.`}
-                confirmLabel={`Cambiar a ${modeLabel(value)}`}
-                onConfirm={() => switchTo(value)}
+                )}. Las franjas horarias definidas se conservan. Esta acción cambia el pricing global y queda auditada.`}
+                onVerified={() => switchTo(value)}
               />
             );
           })}

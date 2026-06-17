@@ -1,11 +1,11 @@
 import type {
-  GeoPoint,
   OfferView,
   PlaceSuggestion,
   TripActiveView,
   TripResource,
 } from '@veo/api-client';
-import { IconButton, SearchField, Skeleton, Text, TextField, useTheme } from '@veo/ui-kit';
+import { tripStatus } from '@veo/api-client';
+import { IconButton, Skeleton, Text, TextField, useTheme } from '@veo/ui-kit';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
@@ -14,14 +14,20 @@ import type { SavedPlace } from '../../../places/domain/entities';
 import { ActiveTripBody } from '../components/ActiveTripBody';
 import { CompletionBody } from '../components/CompletionBody';
 import { DebtStrip } from '../components/DebtStrip';
+import { HomeHero } from '../components/HomeHero';
 import { HomeShortcutChips } from '../components/HomeShortcutChips';
-import { IconArrowLeft, IconClose, IconSearch } from '../components/icons';
+import { IconArrowLeft, IconClose } from '../components/icons';
 import { IdleBody } from '../components/IdleBody';
+import { LastDriverCard } from '../components/LastDriverCard';
+import { EnterView } from '../components/motion';
 import { NoOffersBody } from '../components/NoOffersBody';
+import { OfferingsTeaser } from '../components/OfferingsTeaser';
 import { OffersBody } from '../components/OffersBody';
+import { OriginDestinationCard } from '../components/OriginDestinationCard';
 import { QuotingBody } from '../components/QuotingBody';
 import { placeToRoute, suggestionToRoute } from '../components/routePlace';
 import { SearchingBody } from '../components/SearchingBody';
+import type { LastDriver } from './useLastDriver';
 import type { OfferBoard } from './useOfferBoard';
 import type { UsePassengerTripSocket } from './usePassengerTripSocket';
 import type { WaypointProposalController } from './useWaypointProposal';
@@ -72,11 +78,20 @@ export interface RequestFlowContext {
   onOpenDebtFromHome: () => void;
   onOpenPendingFromHome: () => void;
   savedPlaces: SavedPlace[];
-  recents: GeoPoint[];
   onSelectDestination: (place: RoutePlace) => void;
   onSeeAllSaved: () => void;
   onSeeAllRecents: () => void;
   onEnterSearch: () => void;
+  /** Editar el ORIGEN desde el Home idle: búsqueda con `editing = origin` (igual que la cotización). */
+  onEditOrigin: () => void;
+  /** Permuta origen ↔ destino del borrador (`rideDraftStore.swap`). */
+  onSwapRoute: () => void;
+  /** Calle REAL del origen (title del geocoding inverso) para pintar la dirección, no la región. */
+  currentLocationTitle: string | undefined;
+  /** Destino ya elegido (su etiqueta), para la fila de destino de la tarjeta de ruta del Home. */
+  destinationValue: string | undefined;
+  /** Conductor del último viaje (tarjeta de confianza del Home). `null` → la tarjeta no se muestra. */
+  lastDriver: LastDriver | null;
   // ── Home búsqueda (flow searching) ──
   query: string;
   onQueryChange: (query: string) => void;
@@ -128,7 +143,7 @@ export function BiddingPhaseBody({ ctx }: SlotProps): React.JSX.Element {
     <OffersBody
       offers={board.offers}
       connected={board.connected}
-      expired={board.status === 'EXPIRED'}
+      expired={board.status === tripStatus.enum.EXPIRED}
       // F2 · countdown AUTORITATIVO: vence cuando lo dice el board (epoch ms), no un reloj local.
       expiresAt={board.board?.expiresAt ?? null}
       isLoading={board.isLoading}
@@ -185,17 +200,23 @@ export function HomeIdleFlowBody({ ctx }: SlotProps): React.JSX.Element {
           monto + "Resolver"); si no hay deuda pero sí un PAGO POR COMPLETAR, franja info +
           "Continuar" que abre el checkout directo (resuelve el dead-end del pago a medias). */}
       {ctx.hasDebt ? (
-        <DebtStrip kind="debt" amountCents={ctx.debtTotalCents} onPress={ctx.onOpenDebtFromHome} />
+        <EnterView index={5}>
+          <DebtStrip kind="debt" amountCents={ctx.debtTotalCents} onPress={ctx.onOpenDebtFromHome} />
+        </EnterView>
       ) : ctx.hasPendingAction ? (
-        <DebtStrip kind="pendingAction" amountCents={0} onPress={ctx.onOpenPendingFromHome} />
+        <EnterView index={5}>
+          <DebtStrip kind="pendingAction" amountCents={0} onPress={ctx.onOpenPendingFromHome} />
+        </EnterView>
       ) : null}
-      <IdleBody
-        savedPlaces={ctx.savedPlaces}
-        recents={ctx.recents}
-        onSelect={ctx.onSelectDestination}
-        onSeeAllSaved={ctx.onSeeAllSaved}
-        onSeeAllRecents={ctx.onSeeAllRecents}
-      />
+      {/* Las secciones del cuerpo (favoritos + últimos viajes) cierran la cascada como un solo bloque. */}
+      <EnterView index={6}>
+        <IdleBody
+          savedPlaces={ctx.savedPlaces}
+          onSelect={ctx.onSelectDestination}
+          onSeeAllSaved={ctx.onSeeAllSaved}
+          onSeeAllRecents={ctx.onSeeAllRecents}
+        />
+      </EnterView>
     </>
   );
 }
@@ -250,23 +271,51 @@ export function QuotingSheetHeader({ ctx }: SlotProps): React.JSX.Element {
   );
 }
 
-/** Home · flow `idle`: buscador "¿A dónde vamos?" (tap → expande a búsqueda) + chips Casa/Trabajo. */
+/**
+ * Home · flow `idle` (rediseño fiel a la referencia): título HÉROE editorial + tarjeta del ÚLTIMO
+ * conductor (solo si hay uno real) + tarjeta de RUTA mejorada (origen REAL editable + swap circular +
+ * destino) + chips Casa/Trabajo + teaser INFORMATIVO del catálogo de servicios (sin precio: sin
+ * destino no hay cotización). Mucho aire arriba (hero) y contenido denso debajo: la pantalla deja
+ * de verse vacía. Cada bloque sale de tokens del tema; nada inventado (la tarjeta del conductor no
+ * renderiza si `lastDriver` es `null`).
+ */
 export function HomeIdleFlowHeader({ ctx }: SlotProps): React.JSX.Element {
   const theme = useTheme();
-  const { t } = useTranslation();
+  // ENTRADA ESCALONADA del Home idle: cada bloque entra con fade + leve subida, en cascada por `index`
+  // (~40ms entre bloques, ease-out, <300ms, reduce-motion safe via EnterView). Da "vida" al Home sin
+  // pelear con el scroll (solo opacity/transform). Los índices continúan en el body (debt/secciones).
   return (
-    <>
-      <SearchField
-        placeholder={t('home.whereTo')}
-        onPress={ctx.onEnterSearch}
-        leftIcon={<IconSearch color={theme.colors.accent} size={20} />}
-      />
-      <HomeShortcutChips
-        savedPlaces={ctx.savedPlaces}
-        onSelect={ctx.onSelectDestination}
-        onAdd={ctx.onSeeAllSaved}
-      />
-    </>
+    <View style={{ gap: theme.spacing.lg }}>
+      <EnterView index={0}>
+        <HomeHero />
+      </EnterView>
+      {ctx.lastDriver ? (
+        <EnterView index={1}>
+          <LastDriverCard driver={ctx.lastDriver} />
+        </EnterView>
+      ) : null}
+      <EnterView index={2}>
+        <OriginDestinationCard
+          originTitle={ctx.currentLocationTitle}
+          originSubtitle={ctx.currentLocationSubtitle}
+          destinationValue={ctx.destinationValue}
+          onEditOrigin={ctx.onEditOrigin}
+          onSwapRoute={ctx.onSwapRoute}
+          onEnterSearch={ctx.onEnterSearch}
+        />
+      </EnterView>
+      <EnterView index={3}>
+        <HomeShortcutChips
+          savedPlaces={ctx.savedPlaces}
+          onSelect={ctx.onSelectDestination}
+          onAdd={ctx.onSeeAllSaved}
+        />
+      </EnterView>
+      {/* Teaser del catálogo (informativo, sin precio): llena la mitad inferior antes vacía del Home. */}
+      <EnterView index={4}>
+        <OfferingsTeaser />
+      </EnterView>
+    </View>
   );
 }
 

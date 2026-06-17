@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { VideoAccessStatus } from '../../generated/prisma';
 
 /** Body opcional al emitir un token de cámara (la identidad sale del usuario autenticado). */
 export class IssueRoomTokenDto {
@@ -35,4 +36,23 @@ export class ListSegmentsQueryDto {
   @ApiProperty({ format: 'uuid', description: 'Viaje cuyos segmentos se listan' })
   @IsUUID()
   tripId!: string;
+}
+
+/** Filtro opcional por estado para listar solicitudes de acceso (BR-S02). */
+export class ListAccessRequestsQueryDto {
+  @ApiPropertyOptional({
+    enum: VideoAccessStatus,
+    description: 'Filtra por estado de la solicitud (PENDING|APPROVED|REJECTED|EXPIRED)',
+  })
+  @IsOptional()
+  @IsEnum(VideoAccessStatus)
+  status?: VideoAccessStatus;
+}
+
+/** Body opcional al rechazar una solicitud (el motivo de rechazo se audita en el evento). */
+export class RejectAccessRequestDto {
+  @ApiPropertyOptional({ description: 'Motivo del rechazo (opcional)' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

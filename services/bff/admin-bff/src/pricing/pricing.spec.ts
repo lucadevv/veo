@@ -17,7 +17,7 @@ import { AdminRole, PricingMode } from '@veo/shared-types';
 import type { InternalRestClient } from '@veo/rpc';
 import { PricingService, type ModeScheduleView } from './pricing.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
-import { ReplaceScheduleDto, PricingModeRuleDto } from './dto/pricing.dto';
+import { ReplaceScheduleDto, PricingModeRuleDto, ReplaceFuelSurchargeDto } from './dto/pricing.dto';
 
 const admin: AuthenticatedUser = { userId: 'a1', type: 'admin', roles: [AdminRole.ADMIN], sessionId: 's1' };
 
@@ -49,13 +49,14 @@ describe('PricingService · proxy a trip-service', () => {
     const dto: ReplaceScheduleDto = {
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
+      expectedVersion: 6,
     };
     const out = await svc.replaceSchedule(admin, dto);
 
     expect(out).toBe(schedule);
     expect(rest.put).toHaveBeenCalledWith('/internal/pricing/mode-schedule', {
       identity: admin,
-      body: { defaultMode: PricingMode.PUJA, rules: dto.rules },
+      body: { defaultMode: PricingMode.PUJA, rules: dto.rules, expectedVersion: 6 },
     });
     expect(audit.record).toHaveBeenCalledWith(admin, {
       action: 'pricing.mode_schedule_replace',
@@ -71,8 +72,46 @@ describe('PricingService · proxy a trip-service', () => {
     const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
 
     await expect(
-      svc.replaceSchedule(admin, { defaultMode: PricingMode.PUJA, rules: [] }),
+      svc.replaceSchedule(admin, { defaultMode: PricingMode.PUJA, rules: [], expectedVersion: 0 }),
     ).rejects.toThrow('audit down');
+  });
+
+  it('B4 · GET fuel-surcharge → proxya con la identidad admin, sin auditar', async () => {
+    const fuel = { fuelPricePerLiterCents: 420, kmPerLiter: 12, perKmCents: 35, version: 2, updatedAt: '2026-06-16T00:00:00.000Z' };
+    const rest = { get: vi.fn().mockResolvedValue(fuel), put: vi.fn() };
+    const audit = { record: vi.fn() };
+    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+
+    const out = await svc.getFuelSurcharge(admin);
+
+    expect(out).toBe(fuel);
+    expect(rest.get).toHaveBeenCalledWith('/internal/pricing/fuel-surcharge', { identity: admin });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('B4 · PUT fuel-surcharge → proxya precio+rendimiento y audita la mutación', async () => {
+    const fuel = { fuelPricePerLiterCents: 480, kmPerLiter: 12, perKmCents: 40, version: 3, updatedAt: '2026-06-16T00:00:00.000Z' };
+    const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(fuel) };
+    const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
+    const svc = new PricingService(rest as unknown as InternalRestClient, audit as unknown as AuditRecorder);
+
+    const out = await svc.replaceFuelSurcharge(admin, {
+      fuelPricePerLiterCents: 480,
+      kmPerLiter: 12,
+      expectedVersion: 2,
+    });
+
+    expect(out).toBe(fuel);
+    expect(rest.put).toHaveBeenCalledWith('/internal/pricing/fuel-surcharge', {
+      identity: admin,
+      body: { fuelPricePerLiterCents: 480, kmPerLiter: 12, expectedVersion: 2 },
+    });
+    expect(audit.record).toHaveBeenCalledWith(admin, {
+      action: 'pricing.fuel_surcharge_replace',
+      resourceType: 'fuel_surcharge_config',
+      resourceId: '3',
+      payload: { fuelPricePerLiterCents: 480, kmPerLiter: 12, version: 3 },
+    });
   });
 });
 
@@ -121,6 +160,7 @@ describe('Pricing DTO · validación', () => {
     const ok = {
       defaultMode: PricingMode.PUJA,
       rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
+      expectedVersion: 0,
     };
     expect(await errorsOf(ReplaceScheduleDto, ok)).toEqual([]);
   });
@@ -169,5 +209,14 @@ describe('Pricing DTO · validación', () => {
     expect(
       await errorsOf(PricingModeRuleDto, { dayMask: 127, startMinute: 1320, endMinute: 1439, mode: PricingMode.FIXED }),
     ).toEqual([]);
+  });
+
+  it('B4 · ReplaceFuelSurchargeDto: acepta precio+rendimiento válidos, rechaza negativo / > techo / no-entero', async () => {
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 12, expectedVersion: 3 })).toEqual([]);
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 0, kmPerLiter: 0, expectedVersion: 0 })).toEqual([]);
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: -1, kmPerLiter: 12, expectedVersion: 0 })).toContain('fuelPricePerLiterCents');
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 201, expectedVersion: 0 })).toContain('kmPerLiter');
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 12.5, kmPerLiter: 12, expectedVersion: 0 })).toContain('fuelPricePerLiterCents');
+    expect(await errorsOf(ReplaceFuelSurchargeDto, { fuelPricePerLiterCents: 420, kmPerLiter: 12, expectedVersion: -1 })).toContain('expectedVersion');
   });
 });

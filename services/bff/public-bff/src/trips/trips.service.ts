@@ -14,6 +14,7 @@ import {
   type TripVideoGrant,
   type WaypointProposalView,
 } from '@veo/api-client';
+import { KycStatus } from '@veo/shared-types';
 import {
   GRPC_FLEET,
   GRPC_IDENTITY,
@@ -156,7 +157,7 @@ export class TripsService {
     }
     const meta = grpcIdentityMetadata(user, this.secret);
     const me = await this.identityGrpc.call<UserReply>('GetUser', { id: user.userId }, meta);
-    if (me.kycStatus !== 'VERIFIED') {
+    if (me.kycStatus !== KycStatus.VERIFIED) {
       throw new KycRequiredError();
     }
     try {

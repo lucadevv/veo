@@ -47,6 +47,7 @@ import {
   mapProntoPagaStatus,
   normalizeWebhook,
   originForMethod,
+  ProntoPagaPayinStatus,
 } from './prontopaga.mapping';
 import {
   UndiciProntoPagaHttpClient,
@@ -397,7 +398,11 @@ export class ProntoPagaGateway
       throw err; // red/5xx/timeout → transitorio: el dominio deja el Refund PENDING (timeout ≠ falla).
     }
     const status = (body.status ?? '').toLowerCase();
-    if (status === 'rejected' || status === 'canceled' || status === 'cancelled') {
+    if (
+      status === ProntoPagaPayinStatus.REJECTED ||
+      status === ProntoPagaPayinStatus.CANCELED ||
+      status === ProntoPagaPayinStatus.CANCELLED
+    ) {
       return { status: 'REJECTED', reason: body.message ?? `reverse_${status}` };
     }
     // ProntoPaga reembolsa de forma asíncrona (callback): aceptado a la espera de confirmación.

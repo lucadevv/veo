@@ -20,6 +20,12 @@ import { Prisma } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import { generateReferralCode, normalizeReferralCode } from './referral-code';
 
+/**
+ * Tope de reintentos ante colisión del UNIQUE del `referralCode`. La colisión es de probabilidad ínfima
+ * (código aleatorio); 5 es cinturón-y-tirantes. Agotarlo lanza ConflictError (no se cuelga).
+ */
+const MAX_CODE_ATTEMPTS = 5;
+
 export interface ReferralSummary {
   code: string;
   referredCount: number;
@@ -61,30 +67,40 @@ export class ReferralsService {
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.referralCode) return user.referralCode;
 
-    // Reintenta ante colisión del UNIQUE (probabilidad baja, pero la manejamos).
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidate = generateReferralCode();
-      try {
-        await this.prisma.write.user.update({
-          where: { id: userId },
-          data: { referralCode: candidate },
-          select: { id: true },
-        });
-        return candidate;
-      } catch (err) {
-        if (isUniqueViolation(err, 'referralCode')) {
-          // Colisión de código: reintenta. Si otro proceso lo fijó en paralelo, relee.
-          const fresh = await this.prisma.read.user.findUnique({
-            where: { id: userId },
-            select: { referralCode: true },
-          });
-          if (fresh?.referralCode) return fresh.referralCode;
-          continue;
-        }
-        throw err;
-      }
+    // Reintenta ante colisión del UNIQUE (probabilidad baja). Cada vuelta es UNA llamada al helper — no una
+    // query suelta dentro del for (no es n+1: retry ACOTADO de una operación, no iteración de colección).
+    for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt += 1) {
+      const code = await this.tryAssignCode(userId);
+      if (code) return code;
     }
     throw new ConflictError('No se pudo generar un código de referido único');
+  }
+
+  /**
+   * UN intento de fijar un `referralCode` único al usuario. Devuelve el código fijado (o el que otro
+   * proceso fijó en una carrera), o `null` si hubo colisión del UNIQUE sin código a la vista (→ reintentar).
+   * Aislado del `for` de `ensureCode` para que las queries no queden dentro de un loop (no es n+1).
+   */
+  private async tryAssignCode(userId: string): Promise<string | null> {
+    const candidate = generateReferralCode();
+    try {
+      await this.prisma.write.user.update({
+        where: { id: userId },
+        data: { referralCode: candidate },
+        select: { id: true },
+      });
+      return candidate;
+    } catch (err) {
+      if (isUniqueViolation(err, 'referralCode')) {
+        // Colisión: si otro proceso lo fijó en paralelo, devolvemos ESE; si no, null → el caller reintenta.
+        const fresh = await this.prisma.read.user.findUnique({
+          where: { id: userId },
+          select: { referralCode: true },
+        });
+        return fresh?.referralCode ?? null;
+      }
+      throw err;
+    }
   }
 
   /**

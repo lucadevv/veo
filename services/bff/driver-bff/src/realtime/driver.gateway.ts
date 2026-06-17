@@ -98,13 +98,19 @@ export class DriverGateway implements OnGatewayConnection {
     // El `?? CAR` SE QUEDA (ADR 013 · Lote D): es el fallback de ÚLTIMO recurso para apps viejas que no
     // mandan el campo Y fleet caído a la vez — no oculta una clase nueva (si el ping la trae, viaja; si
     // fleet responde, manda la clase certificada). Sin él, un ping legacy dejaría de publicar ubicación.
-    const vehicleType = await this.activeVehicleType.resolve(
+    const activeVehicle = await this.activeVehicleType.resolve(
       identity,
       parsed.data.vehicleType ?? VehicleClass.CAR,
     );
     const published = await this.locationPublisher.publishDriverLocation(driverId, {
       ...parsed.data,
-      vehicleType,
+      vehicleType: activeVehicle.vehicleType,
+      // B5-3 · attrs de eligibilidad (si el modelo activo los aporta); el publisher los sella en el ping.
+      seats: activeVehicle.seats,
+      segment: activeVehicle.segment,
+      vehicleYear: activeVehicle.vehicleYear,
+      // B5-3.2 · certs vigentes del conductor para el gate de verticales en dispatch (fail-closed).
+      certifications: activeVehicle.certifications,
     });
     return published ? { ok: true } : { ok: false, error: 'publish_failed' };
   }

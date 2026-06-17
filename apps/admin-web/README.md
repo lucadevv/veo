@@ -51,7 +51,7 @@ Ver `.env.example`. Server-side: `ADMIN_BFF_URL` (incluye `/api/v1`). Públicas:
 ## Comandos
 
 ```bash
-pnpm --filter @veo/admin-web dev        # http://localhost:5000
+pnpm --filter @veo/admin-web dev        # http://localhost:5001
 pnpm --filter @veo/admin-web typecheck
 pnpm --filter @veo/admin-web lint
 pnpm --filter @veo/admin-web build

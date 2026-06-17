@@ -1,9 +1,9 @@
 /**
- * ANALÍTICA — métricas del dashboard (ClickHouse). RBAC: dashboard de operación.
+ * ANALÍTICA — KPIs del dashboard agregados desde los servicios OLTP. RBAC: dashboard de operación.
  */
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Roles } from '@veo/auth';
+import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { AnalyticsService, type OverviewMetrics } from './analytics.service';
 
@@ -21,8 +21,8 @@ export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get('overview')
-  @ApiOperation({ summary: 'Métricas agregadas reales (GPS/viajes por hora desde ClickHouse)' })
-  overview(): Promise<OverviewMetrics> {
-    return this.analytics.overview();
+  @ApiOperation({ summary: 'KPIs del dashboard agregados en vivo desde trip/dispatch/panic/payment' })
+  overview(@CurrentUser() user: AuthenticatedUser): Promise<OverviewMetrics> {
+    return this.analytics.overview(user);
   }
 }

@@ -31,6 +31,21 @@ const BIO_LOCK_TTL_SECONDS = 3600; // 1h (BR-I02)
 /** TTL del sessionRef de un solo uso minteado por la verificación biométrica (BR-I02). */
 const BIO_SESSION_TTL_SECONDS = 120;
 
+/**
+ * Estados DESDE los que `to` es alcanzable en el eje DriverStatus (inversa de la tabla de la máquina).
+ * Espeja `transitionSources` de trip-service: pensado para el guard CAS atómico
+ * (`updateMany({ where: { currentStatus: { in: driverStatusSources(to) } } })`), que mueve el estado en el
+ * MISMO statement que valida que era una transición legal — sin check-then-act. Deriva de
+ * `driverStatusMachine.transitions` (única fuente de verdad del eje): cero strings mágicos, si la tabla
+ * cambia el guard la sigue. Incluye `to` mismo (re-aplicación idempotente: la máquina permite from === to).
+ */
+function driverStatusSources(to: DriverStatus): DriverStatus[] {
+  const transitions = driverStatusMachine.transitions;
+  return (Object.keys(transitions) as DriverStatus[]).filter((from) =>
+    driverStatusMachine.canTransition(from, to),
+  );
+}
+
 /** Clave Redis del lockout de fallos biométricos del conductor. */
 function bioLockKey(driverId: string): string {
   return `veo:bio:fails:${driverId}`;
@@ -373,6 +388,15 @@ export class DriversService {
    * Inicio de turno con gate biométrico (BR-I02). Requiere KYC CLEARED, licencia vigente, no suspendido.
    * Consume el sessionRef de un solo uso minteado por verifyBiometric (lee+borra de Redis) y aplica
    * la lógica de lockout: 3 fallos consecutivos → bloqueo de 1h.
+   *
+   * SEPARACIÓN DE RESPONSABILIDADES TRANSACCIONALES (causa raíz de los 3 fixes): el REGISTRO DE AUDITORÍA
+   * del intento biométrico y la TRANSICIÓN DE ESTADO del turno son responsabilidades distintas y NO comparten
+   * destino transaccional. El biometricCheck (evidencia del intento) se persiste en su PROPIA tx, ANTES de
+   * intentar la transición — así un rechazo posterior (suspensión fresca, carrera, transición inválida) NO
+   * borra la evidencia con su rollback. La transición a AVAILABLE se hace por CAS atómico: el estado fuente
+   * válido Y `suspendedAt: null` viajan en el WHERE del updateMany, así dos startShift concurrentes no pueden
+   * ambos ganar (#2 double-shift) y una suspensión recién escrita bloquea sobre el dato FRESCO, no la réplica
+   * (#10). count === 0 ⇒ releemos para un error honesto: suspendido (Forbidden) vs. carrera/estado inválido.
    */
   async startShift(
     userId: string,
@@ -380,6 +404,8 @@ export class DriversService {
   ): Promise<{ status: 'AVAILABLE'; score: number }> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
+    // Gates baratos de fail-fast sobre la réplica (no autoridad final): el gate de suspensión REAL se
+    // re-evalúa sobre el dato fresco dentro del CAS (#10). Aquí solo evita trabajo si ya viene suspendido.
     if (d.suspendedAt) throw new ForbiddenError('Conductor suspendido');
     if (!isBackgroundCleared(d.backgroundCheckStatus)) throw new ForbiddenError('KYC no aprobado');
     if (d.licenseExpiresAt && d.licenseExpiresAt.getTime() < Date.now()) {
@@ -396,67 +422,89 @@ export class DriversService {
     const passed =
       session.livenessPassed && session.matchPassed && session.score >= this.minScore;
 
-    await this.prisma.write.$transaction(async (tx) => {
-      if (passed) {
-        // Re-lee el estado DENTRO de la tx (no la réplica) y asserta ANTES de escribir:
-        // el assert queda serializado y su rollback no se lleva el registro de auditoría.
-        const fresh = await tx.driver.findUnique({
-          where: { id: d.id },
-          select: { currentStatus: true },
-        });
-        if (!fresh) throw new NotFoundError('Conductor no encontrado');
-        driverStatusMachine.assertTransition(fresh.currentStatus, DriverStatus.AVAILABLE);
-      }
-      await tx.biometricCheck.create({
-        data: {
-          userId,
-          type: 'SHIFT_START',
-          score: session.score,
-          passed,
-          geoLat: input.geoLat,
-          geoLon: input.geoLon,
-        },
-      });
-      if (passed) {
-        await tx.driver.update({
-          where: { id: d.id },
-          data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
-        });
-        const envelope = createEnvelope({
-          eventType: 'driver.verified',
-          producer: 'identity-service',
-          payload: { driverId: d.id, userId, verifiedAt: new Date().toISOString() },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: d.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
-      } else {
-        const envelope = createEnvelope({
-          eventType: 'biometric.failed',
-          producer: 'identity-service',
-          payload: { driverId: d.id, score: session.score, attempt: fails + 1, at: new Date().toISOString() },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: d.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
-    });
+    const biometricCheckData = {
+      userId,
+      type: 'SHIFT_START',
+      score: session.score,
+      passed,
+      geoLat: input.geoLat,
+      geoLon: input.geoLon,
+    } satisfies Prisma.BiometricCheckUncheckedCreateInput;
 
     if (!passed) {
+      // #13 + atomicidad — TX DE EVIDENCIA PROPIA Y SEPARADA: el rechazo biométrico escribe DOS hechos
+      // (la auditoría del intento Y el evento de dominio biometric.failed) que pertenecen JUNTOS — o se
+      // persiste la evidencia con su evento, o ninguno. Van en UNA tx propia, INDEPENDIENTE de la tx del CAS
+      // de transición (#2/#10): el camino fallido ni siquiera llega al CAS, así que esta evidencia nunca queda
+      // a merced de un rollback de transición. Antes (post-#13) eran DOS escrituras sueltas sin tx entre sí.
+      const envelope = createEnvelope({
+        eventType: 'biometric.failed',
+        producer: 'identity-service',
+        payload: { driverId: d.id, score: session.score, attempt: fails + 1, at: new Date().toISOString() },
+      });
+      await this.prisma.write.$transaction(async (tx) => {
+        await tx.biometricCheck.create({ data: biometricCheckData });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: d.id,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+      });
       const newFails = await this.redis.incr(lockKey);
       if (newFails === 1) await this.redis.expire(lockKey, BIO_LOCK_TTL_SECONDS);
       throw new UnauthorizedError(
         `Verificación facial fallida (score ${session.score}). Intentos restantes: ${Math.max(0, MAX_BIO_FAILS - newFails)}`,
       );
     }
+
+    // #13 — AUDITORÍA EN SU PROPIA ESCRITURA, ANTES DEL CAS: el registro del intento exitoso PERSISTE sí o sí
+    // (evidencia de auditoría), independiente de si la transición de estado posterior pasa o falla. Antes vivía
+    // en la MISMA tx que el assert: un assert que fallaba (suspensión/carrera) hacía rollback y se llevaba la
+    // evidencia. Es una sola escritura previa e independiente de la tx del CAS — no comparte destino transaccional.
+    await this.prisma.write.biometricCheck.create({ data: biometricCheckData });
+
+    // #2 + #10 — TRANSICIÓN POR CAS ATÓMICO: el estado fuente válido (derivado de la máquina, cero strings
+    // mágicos) Y `suspendedAt: null` (dato FRESCO, no la réplica) viajan en el WHERE. Dos startShift
+    // concurrentes: solo UNO matchea un estado fuente y gana el claim (el otro ve count=0 → carrera).
+    await this.prisma.write.$transaction(async (tx) => {
+      const claim = await tx.driver.updateMany({
+        where: {
+          id: d.id,
+          suspendedAt: null,
+          currentStatus: { in: driverStatusSources(DriverStatus.AVAILABLE) },
+        },
+        data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
+      });
+      if (claim.count === 0) {
+        // Releemos para un error HONESTO con el estado real (la auditoría del intento YA quedó persistida).
+        const current = await tx.driver.findUnique({
+          where: { id: d.id },
+          select: { currentStatus: true, suspendedAt: true },
+        });
+        if (!current) throw new NotFoundError('Conductor no encontrado');
+        if (current.suspendedAt) throw new ForbiddenError('Conductor suspendido');
+        // No estaba suspendido pero el estado fuente no matcheó: o la máquina rechaza la transición, o
+        // otro startShift concurrente ya lo movió (double-shift evitado). assertTransition discrimina:
+        // si el estado actual no permite → AVAILABLE lanza InvalidStatusTransition (409); si SÍ permitía
+        // pero igual no matcheó, fue una carrera → ConflictError (409).
+        driverStatusMachine.assertTransition(current.currentStatus, DriverStatus.AVAILABLE);
+        throw new ConflictError('Otro inicio de turno concurrente ganó la transición');
+      }
+      const envelope = createEnvelope({
+        eventType: 'driver.verified',
+        producer: 'identity-service',
+        payload: { driverId: d.id, userId, verifiedAt: new Date().toISOString() },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: d.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
 
     await this.redis.del(lockKey);
     return { status: 'AVAILABLE', score: session.score };

@@ -1,4 +1,5 @@
 import type { DocumentType, YapeAffiliationView } from '@veo/api-client';
+import { affiliationStatus } from '@veo/api-client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import React from 'react';
@@ -170,7 +171,7 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
         // unhandled rejection. Si no abre, lo reflejamos en la fase de espera ("no pudimos abrir Yape").
         void openExternalUrl(view.deepLink).then((ok) => setOpenFailed(!ok));
       }
-      if (view.status.toUpperCase() === 'ACTIVE') {
+      if (view.status.toUpperCase() === affiliationStatus.enum.ACTIVE) {
         onActive();
         return;
       }
@@ -215,9 +216,9 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
       }
       void affiliationQuery.refetch().then((res) => {
         const status = res.data?.status?.toUpperCase();
-        if (status === 'ACTIVE') {
+        if (status === affiliationStatus.enum.ACTIVE) {
           onActive();
-        } else if (status === 'EXPIRED' || status === 'REVOKED') {
+        } else if (status === affiliationStatus.enum.EXPIRED || status === affiliationStatus.enum.REVOKED) {
           setPhase('timeout');
         }
       });
@@ -252,10 +253,11 @@ export function YapeLinkSheet({ visible, onClose }: YapeLinkSheetProps): React.J
 
   function goToProfile(): void {
     onClose();
-    // `CompleteProfile` SOLO existe en el stack PRE-Main; este sheet vive en Main, así que navegar a
-    // esa ruta tiraba un error de navegación. El destino correcto en Main es el tab Perfil: allí la
-    // franja de completitud invita a "Agregá tu nombre" y abre la edición (descubribilidad real).
-    navigation.navigate('Main', { screen: 'Profile' });
+    // `CompleteProfile` SOLO existe en el stack PRE-autenticación; este sheet vive en el stack
+    // autenticado, así que navegar a esa ruta tiraba un error de navegación. El destino correcto es
+    // el Perfil (ahora pantalla directa del stack, ya no un tab): allí la franja de completitud invita
+    // a "Agregá tu nombre" y abre la edición (descubribilidad real).
+    navigation.navigate('Profile');
   }
 
   // ── Render por fase ────────────────────────────────────────────────────────────────────────────

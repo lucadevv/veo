@@ -1,4 +1,4 @@
-import type { TripActiveView, TripStatus } from '@veo/api-client';
+import { tripStatus, type TripActiveView, type TripStatus } from '@veo/api-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Banner, BottomSheet, Button, Card, DriverCard, Text, TextField, useTheme } from '@veo/ui-kit';
 import React, { useState } from 'react';
@@ -53,7 +53,7 @@ export function ActiveTripBody({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
 
-  const isInProgress = status === 'IN_PROGRESS';
+  const isInProgress = status === tripStatus.enum.IN_PROGRESS;
   const etaMinutes = etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
   const hasDriver = Boolean(trip.driver);
 

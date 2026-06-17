@@ -37,21 +37,22 @@ const MARKER_CLASS: Record<MarkerKind, string> = {
   panic: 'bg-danger text-danger-on ring-2 ring-danger animate-pulse-danger',
 };
 
-/** Estilo soberano mínimo (sin tiles de terceros) cuando el tileserver propio no responde. */
+/**
+ * Estilo soberano mínimo (sin tiles de terceros) cuando el tileserver propio no responde.
+ * Color HEX literal a propósito: los tokens del tema son `oklch()`, que maplibre-gl NO parsea
+ * (`paint.background-color: color expected`) — pasarle el CSS var resuelto disparaba un error que el
+ * handler `map.on('error')` re-degradaba en BUCLE (miles de errores). Y SIN `glyphs` (un fondo sólido no
+ * tiene texto; `glyphs:''` era una URL inválida que sumaba más errores al loop). Estilo 100% estático y válido.
+ */
 function fallbackStyle(): StyleSpecification {
-  const surface =
-    typeof window !== 'undefined'
-      ? getComputedStyle(document.documentElement).getPropertyValue('--surface-2').trim()
-      : '';
   return {
     version: 8,
     sources: {},
-    glyphs: '',
     layers: [
       {
         id: 'background',
         type: 'background',
-        paint: { 'background-color': surface || '#1b2233' },
+        paint: { 'background-color': '#1b2233' },
       },
     ],
   };
@@ -78,6 +79,7 @@ export function MapView({ markers, center, zoom, className, onMarkerClick }: Map
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const markersRef = useRef<Map<string, MaplibreMarker>>(new Map());
+  const degradedRef = useRef(!TILE_URL);
   const [degraded, setDegraded] = useState(!TILE_URL);
 
   // Inicialización del mapa (una sola vez).
@@ -98,8 +100,13 @@ export function MapView({ markers, center, zoom, className, onMarkerClick }: Map
 
     // Si el estilo/tiles propios fallan, degradar al estilo mínimo (nunca a terceros).
     map.on('error', (e) => {
+      // Guard anti-BUCLE: degradar UNA sola vez. Sin esto, si el fallback disparara cualquier error, el
+      // handler lo re-aplicaría sin fin (era la causa de los miles de errores). Usamos el REF, no el state,
+      // para no leer un valor viejo en el closure del listener.
+      if (degradedRef.current) return;
       const failed = e.error instanceof Error;
       if (failed) {
+        degradedRef.current = true;
         setDegraded(true);
         try {
           map.setStyle(fallbackStyle());

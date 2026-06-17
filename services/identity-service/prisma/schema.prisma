@@ -288,6 +288,10 @@ model Consent {
   acceptedAt     DateTime @default(now()) @map("accepted_at") @db.Timestamptz
   /// IP de origen de la aceptación (evidencia de consentimiento). Null si no se pudo determinar.
   ip             String?
+  /// Clave de idempotencia (UUIDv7) emitida por el cliente. UNIQUE → el doble submit es no-op (espeja
+  /// PanicEvent.dedupKey). Nullable por backward-compat: los rows históricos / clientes sin dedupKey
+  /// quedan en NULL (Postgres permite múltiples NULL en un UNIQUE → no rompe el append-only puro).
+  dedupKey       String?  @unique @map("dedup_key")
 
   @@index([userId, acceptedAt])
   @@map("consents")

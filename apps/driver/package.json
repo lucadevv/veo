@@ -9,7 +9,7 @@
   },
   "scripts": {
     "android": "react-native run-android",
-    "ios": "react-native run-ios",
+    "ios": "react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint .",
@@ -78,7 +78,7 @@
     "@react-native/typescript-config": "0.85.3",
     "@types/jest": "^29.5.13",
     "@types/react": "^19.2.17",
-    "@types/react-test-renderer": "^18.3.0",
+    "@types/react-test-renderer": "^19.0.0",
     "babel-jest": "^29.7.0",
     "babel-plugin-module-resolver": "^5.0.2",
     "detox": "^20.27.5",

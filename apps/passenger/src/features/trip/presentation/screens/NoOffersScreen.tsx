@@ -9,7 +9,7 @@ import { TOKENS } from '../../../../core/di/tokens';
 import { useDependency } from '../../../../core/di/useDependency';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { BidPanel } from '../../../../shared/presentation/components/BidPanel';
-import { EmptyState, ErrorState, LoadingState } from '../../../../shared/presentation/components/ScreenStates';
+import { EmptyState, ScreenStateFallback } from '../../../../shared/presentation/components/ScreenStates';
 import { formatPEN } from '../../../../shared/utils/format';
 import { BID_STEP_CENTS, stepBidCents } from '../../../../shared/utils/bid';
 
@@ -56,22 +56,14 @@ export function NoOffersScreen(): React.JSX.Element {
   // falla la red igual liberamos al pasajero al Home (el watchdog del backend cierra el viaje EXPIRED).
   const cancelMutation = useMutation({
     mutationFn: () => cancelBid.execute(tripId),
-    onSettled: () => navigation.navigate('Main', { screen: 'Home' }),
+    onSettled: () => navigation.navigate('Home'),
   });
 
   if (tripQuery.isError) {
-    return (
-      <SafeScreen>
-        <ErrorState onRetry={() => tripQuery.refetch()} />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback onRetry={() => tripQuery.refetch()} />;
   }
   if (tripQuery.isLoading || currentBidCents === undefined || bidCents === null) {
-    return (
-      <SafeScreen>
-        <LoadingState lines={2} />
-      </SafeScreen>
-    );
+    return <ScreenStateFallback loading loadingLines={2} />;
   }
 
   return (

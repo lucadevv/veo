@@ -5,8 +5,8 @@
  *
  * Contrato del backend (notification-service): el push lleva `data: { tripId, screen? }`.
  *  - `screen` explícito (#1 PUJA programada → 'OffersBoard') gana, si está en la whitelist.
- *  - `screen: 'NoOffers'` (puja EXPIRED) → NO va a la pantalla legacy; aterriza en el HOME (`Main`/`Home`),
- *    donde el sheet unificado (RequestFlowScreen) rehidrata el viaje y la fase `noOffers` muestra
+ *  - `screen: 'NoOffers'` (puja EXPIRED) → NO va a la pantalla legacy; aterriza en el HOME (ruta directa
+ *    `Home`), donde el sheet unificado (RequestFlowScreen) rehidrata el viaje y la fase `noOffers` muestra
  *    `NoOffersBody`. El flujo normal vive ENTERO en el sheet (ver gap de hidratación EXPIRED abajo).
  *  - sin `screen` pero con `tripId` (assigned/expired) → cae a 'TripActive' (el detalle refleja cualquier estado).
  *  - sin `tripId` → null (no navegamos a ciegas).
@@ -33,11 +33,11 @@ interface TripScreenTarget {
 /**
  * Deep-link al HOME (sheet unificado). La puja EXPIRED (NoOffers) ya NO es una pantalla aparte: vive como
  * fase `noOffers` del sheet. El tripId NO viaja por navegación (el sheet hidrata desde el server); navegar
- * al tab Home alcanza para que el sheet re-entre al viaje en curso.
+ * al Home alcanza para que el sheet re-entre al viaje en curso. Tras quitar los tabs, `Home` es una ruta
+ * DIRECTA del stack (antes era `Main` con params `{ screen: 'Home' }`), así que el target ya no anida params.
  */
 interface HomeTarget {
-  screen: 'Main';
-  params: { screen: 'Home' };
+  screen: 'Home';
 }
 
 export type DeepLinkTarget = TripScreenTarget | HomeTarget;
@@ -57,7 +57,7 @@ export function resolveDeepLink(
 
   // Puja EXPIRED: el flujo normal vive en el sheet → aterriza en el Home, no en la pantalla legacy.
   if (screen === 'NoOffers') {
-    return { screen: 'Main', params: { screen: 'Home' } };
+    return { screen: 'Home' };
   }
 
   // `Counter` necesita driverId además de tripId; un push no lo lleva, así que no es destino directo.

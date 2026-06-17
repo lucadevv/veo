@@ -62,6 +62,7 @@ export default function MediaPage() {
                 data={query.data?.items ?? []}
                 loading={query.isLoading}
                 emptyTitle="Sin solicitudes"
+                emptyDescription="No hay solicitudes de acceso a video pendientes."
               />
             )}
           </TabsContent>

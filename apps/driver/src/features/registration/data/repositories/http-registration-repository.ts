@@ -9,10 +9,13 @@ import {
   driverPersonalData,
   driverPersonalDataRequest,
   driverProfileView,
+  driverModelRequestView,
   driverResubmitResult,
   driverVehicleList,
+  driverVehicleModelList,
   driverVehicleView,
   registerVehicleRequest,
+  requestVehicleModelRequest,
 } from '@veo/api-client';
 import {z} from 'zod';
 import {mapProfileToRegistrationStatus} from '../../domain';
@@ -28,7 +31,11 @@ import type {
   RegistrationRepository,
   RegistrationSubmissionResult,
   ResubmitResult,
+  VehicleModelOption,
+  VehicleModelRequestInput,
+  VehicleModelRequestResult,
   VehicleRegisterInput,
+  VehicleType,
   VehicleView,
 } from '../../domain';
 
@@ -63,6 +70,18 @@ export class HttpRegistrationRepository implements RegistrationRepository {
   registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {
     const body = registerVehicleRequest.parse(input);
     return this.http.post('/drivers/vehicles', {body, schema: driverVehicleView});
+  }
+
+  listVehicleModels(params: {vehicleType: VehicleType}): Promise<VehicleModelOption[]> {
+    return this.http.get('/drivers/vehicle-models', {
+      query: {vehicleType: params.vehicleType},
+      schema: driverVehicleModelList,
+    });
+  }
+
+  requestVehicleModel(input: VehicleModelRequestInput): Promise<VehicleModelRequestResult> {
+    const body = requestVehicleModelRequest.parse(input);
+    return this.http.post('/drivers/vehicle-models', {body, schema: driverModelRequestView});
   }
 
   listVehicles(): Promise<VehicleView[]> {

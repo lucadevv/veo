@@ -2,11 +2,34 @@
  * LoggingInterceptor (FOUNDATION §5): loguea cada request HTTP con método, ruta, status, latencia y traceId.
  * También mide la métrica http_request_duration_seconds.
  */
-import { Injectable, type CallHandler, type ExecutionContext, type NestInterceptor } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  type CallHandler,
+  type ExecutionContext,
+  type NestInterceptor,
+} from '@nestjs/common';
 import { trace } from '@opentelemetry/api';
 import { type Observable, tap } from 'rxjs';
 import { httpRequestDuration } from './metrics.js';
 import { createLogger, type Logger } from './logger.js';
+
+/**
+ * Status HTTP REAL de la excepción, en el punto del interceptor (ANTES de que corra el ExceptionFilter,
+ * así que `response.statusCode` todavía es el default). Lo derivamos del propio error — el MISMO criterio
+ * que `AllExceptionsFilter.mapBase`: `HttpException.getStatus()` · `DomainError.httpStatus` · `status`/
+ * `statusCode` de los http-errors (body-parser). Fallback 500 sólo para errores SIN status (los 500 reales).
+ * Antes el interceptor hardcodeaba 500 en TODA excepción → los 4xx (400/429) se logueaban como 500.
+ */
+export function statusFromError(err: unknown): number {
+  if (err instanceof HttpException) return err.getStatus();
+  if (err !== null && typeof err === 'object') {
+    const e = err as { status?: unknown; statusCode?: unknown; httpStatus?: unknown };
+    const raw = [e.status, e.statusCode, e.httpStatus].find((v) => typeof v === 'number');
+    if (typeof raw === 'number' && raw >= 400 && raw <= 599) return raw;
+  }
+  return 500;
+}
 
 interface ReqLike {
   method?: string;
@@ -34,7 +57,7 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: () => this.record(http.getResponse<ResLike>().statusCode ?? 200, method, route, start),
-        error: () => this.record(500, method, route, start),
+        error: (err) => this.record(statusFromError(err), method, route, start),
       }),
     );
   }

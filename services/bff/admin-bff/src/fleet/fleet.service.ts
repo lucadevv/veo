@@ -9,6 +9,7 @@ import type {
   ExpiringDocumentView,
   FleetDocumentView,
   InspectionView,
+  VehicleModelReviewView,
   VehicleView,
 } from '@veo/api-client';
 import { REST_FLEET } from '../infra/tokens';
@@ -21,6 +22,8 @@ import type {
   ListVehiclesQueryDto,
   ListDocumentsQueryDto,
   ListInspectionsQueryDto,
+  ListModelReviewQueryDto,
+  ApproveVehicleModelDto,
 } from './dto/fleet.dto';
 
 /** Página con cursor que devuelve fleet-service; misma forma que `paginated()` del contrato admin-web. */
@@ -154,6 +157,53 @@ export class FleetService {
       query: { days },
     });
     return docs.map(toExpiringDocumentView).filter((d): d is ExpiringDocumentView => d !== null);
+  }
+
+  /**
+   * Cola de revisión del catálogo de modelos (B5-2.c): solicitudes de los conductores a curar. Proxy a
+   * fleet GET /vehicle-models/review. La forma del review espeja 1:1 el contrato vehicleModelReviewView.
+   */
+  listModelReview(
+    identity: AuthenticatedUser,
+    query: ListModelReviewQueryDto,
+  ): Promise<Page<VehicleModelReviewView>> {
+    return this.rest.get<Page<VehicleModelReviewView>>('/vehicle-models/review', {
+      identity,
+      query: { status: query.status, cursor: query.cursor, limit: query.limit },
+    });
+  }
+
+  /** Aprueba una solicitud completando la ficha técnica → fleet PUT /vehicle-models/:id/approve + audit. */
+  async approveModel(
+    identity: AuthenticatedUser,
+    id: string,
+    dto: ApproveVehicleModelDto,
+  ): Promise<VehicleModelReviewView> {
+    const model = await this.rest.put<VehicleModelReviewView>(`/vehicle-models/${id}/approve`, {
+      identity,
+      body: dto,
+    });
+    await this.audit.record(identity, {
+      action: 'vehicle_model.approve',
+      resourceType: 'vehicle_model',
+      resourceId: id,
+      payload: { segment: dto.segment, energySource: dto.energySource, efficiency: dto.efficiency },
+    });
+    return model;
+  }
+
+  /** Rechaza una solicitud → fleet PUT /vehicle-models/:id/reject + audit. */
+  async rejectModel(identity: AuthenticatedUser, id: string): Promise<VehicleModelReviewView> {
+    const model = await this.rest.put<VehicleModelReviewView>(`/vehicle-models/${id}/reject`, {
+      identity,
+      body: {},
+    });
+    await this.audit.record(identity, {
+      action: 'vehicle_model.reject',
+      resourceType: 'vehicle_model',
+      resourceId: id,
+    });
+    return model;
   }
 }
 

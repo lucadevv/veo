@@ -33,7 +33,7 @@ export interface PricingModeRule {
   mode: PricingMode;
 }
 
-/** Snapshot del schedule resuelto: defaultMode (§8.2 PUJA) + reglas en orden de evaluación. */
+/** Snapshot del schedule resuelto: defaultMode + reglas en orden de evaluación. */
 export interface PricingModeSchedule {
   defaultMode: PricingMode;
   rules: PricingModeRule[];
@@ -42,8 +42,12 @@ export interface PricingModeSchedule {
 /** Clave de zona (ADR 011 §2). MVP: SIEMPRE 'GLOBAL' (Tier 1). Tier 2 (per-zona) = no-breaking. */
 export type ZoneKey = 'GLOBAL';
 
-/** Schedule por defecto cuando no hay fila cargada: degradación honesta a PUJA, sin reglas (§8.2). */
-export const DEFAULT_SCHEDULE: PricingModeSchedule = { defaultMode: PricingMode.PUJA, rules: [] };
+/**
+ * Schedule por defecto cuando no hay fila cargada (instalación nueva / degradación honesta), sin reglas.
+ * B5 · postura de producto INVERTIDA respecto del MVP original (ADR 011): el default del sistema es FIXED
+ * (precio fijo) — la PUJA es la EXCEPCIÓN programada por horario en el panel admin, no al revés. Ver ADR 011.
+ */
+export const DEFAULT_SCHEDULE: PricingModeSchedule = { defaultMode: PricingMode.FIXED, rules: [] };
 
 /**
  * Componentes de tiempo en hora LOCAL de Lima derivados de un `Date` (UTC absoluto).

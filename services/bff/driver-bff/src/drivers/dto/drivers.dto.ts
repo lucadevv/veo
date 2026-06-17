@@ -183,15 +183,26 @@ export class RegisterVehicleDto {
   @Matches(PLATE_PATTERN, { message: 'Placa inválida (formato XXX-XXX)' })
   plate!: string;
 
-  @ApiProperty({ example: 'Honda' })
-  @IsString()
-  @Length(1, 60)
-  make!: string;
+  @ApiPropertyOptional({
+    description:
+      'Id del modelo del catálogo (VehicleModelSpec APPROVED) elegido en el onboarding. Si viene, ' +
+      'fleet snapshotea make/model/vehicleType del spec e ignora el texto libre.',
+  })
+  @IsOptional()
+  @IsUUID()
+  modelSpecId?: string;
 
-  @ApiProperty({ example: 'CG 150' })
+  @ApiPropertyOptional({ example: 'Honda', description: 'Marca (texto libre). Requerida solo sin modelSpecId.' })
+  @IsOptional()
   @IsString()
   @Length(1, 60)
-  model!: string;
+  make?: string;
+
+  @ApiPropertyOptional({ example: 'CG 150', description: 'Modelo (texto libre). Requerido solo sin modelSpecId.' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  model?: string;
 
   @ApiProperty({ example: 2021, description: `Año del vehículo (>= ${MIN_REASONABLE_VEHICLE_YEAR}). BR-D04 (>=2017) lo aplica fleet.` })
   @IsInt()
@@ -227,6 +238,83 @@ export interface DriverVehicleView {
   vehicleType: string;
   status: string;
   docStatus: string;
+}
+
+/**
+ * GET /drivers/vehicle-models → query del catálogo curado (B5-2). El conductor filtra por tipo (un
+ * mototaxista solo ve motos) y busca por marca/modelo. Se proxya a fleet GET /vehicle-models.
+ */
+export class ListVehicleModelsQuery {
+  @ApiPropertyOptional({ enum: VehicleType, description: 'Filtra por tipo (CAR|MOTO).' })
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicleType?: VehicleType;
+
+  @ApiPropertyOptional({ description: 'Búsqueda por marca o modelo (contains, case-insensitive).' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  q?: string;
+}
+
+/**
+ * Modelo del catálogo para el selector del onboarding (GET /drivers/vehicle-models). Subconjunto del
+ * spec de fleet: lo que la app necesita para mostrar y elegir (no expone campos de revisión).
+ */
+export interface DriverVehicleModelView {
+  id: string;
+  make: string;
+  model: string;
+  yearFrom: number;
+  yearTo: number;
+  vehicleType: string;
+  seats: number;
+}
+
+/**
+ * POST /drivers/vehicle-models → body. El conductor SOLICITA un modelo que no está en el catálogo (B5-2.c).
+ * Trae solo lo que conoce; fleet lo guarda PENDING_REVIEW y el operador completa la ficha técnica al aprobar.
+ */
+export class RequestVehicleModelDto {
+  @ApiProperty({ example: 'Toyota' })
+  @IsString()
+  @Length(1, 60)
+  make!: string;
+
+  @ApiProperty({ example: 'Probox' })
+  @IsString()
+  @Length(1, 60)
+  model!: string;
+
+  @ApiProperty({ example: 2015 })
+  @IsInt()
+  @Min(MIN_REASONABLE_VEHICLE_YEAR)
+  @Max(CURRENT_YEAR + 1)
+  yearFrom!: number;
+
+  @ApiProperty({ example: 2024 })
+  @IsInt()
+  @Min(MIN_REASONABLE_VEHICLE_YEAR)
+  @Max(CURRENT_YEAR + 1)
+  yearTo!: number;
+
+  @ApiProperty({ enum: VehicleType, description: 'CAR | MOTO.' })
+  @IsEnum(VehicleType)
+  vehicleType!: VehicleType;
+
+  @ApiProperty({ example: 5, description: 'Asientos (1..20).' })
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  seats!: number;
+}
+
+/** Confirmación al conductor de que su solicitud de modelo quedó en revisión (PENDING_REVIEW). */
+export interface DriverModelRequestView {
+  id: string;
+  make: string;
+  model: string;
+  status: string;
 }
 
 /** Perfil agregado del conductor (gRPC identity + rating + fleet). */

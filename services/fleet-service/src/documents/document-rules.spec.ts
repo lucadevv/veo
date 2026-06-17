@@ -6,6 +6,8 @@ import {
   computeExpiryAlert,
   shouldSuspendDriver,
   isCriticalDocument,
+  isCertification,
+  validCertificationsOf,
   daysUntilCeil,
 } from './document-rules';
 
@@ -136,5 +138,49 @@ describe('shouldSuspendDriver / isCriticalDocument (BR-I04 — suspensión)', ()
         { type: FleetDocumentType.PROPERTY_CARD, status: FleetDocumentStatus.VALID },
       ]),
     ).toBe(false);
+  });
+
+  it('una certificación de vertical EXPIRED NO suspende al conductor (no es crítica · B5-3.2)', () => {
+    expect(isCertification(FleetDocumentType.AMBULANCE_OPERATOR)).toBe(true);
+    expect(isCriticalDocument(FleetDocumentType.AMBULANCE_OPERATOR)).toBe(false);
+    expect(
+      shouldSuspendDriver([
+        { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
+        { type: FleetDocumentType.AMBULANCE_OPERATOR, status: FleetDocumentStatus.EXPIRED },
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe('validCertificationsOf (B5-3.2 — certs vigentes del conductor para dispatch)', () => {
+  it('destila SOLO las certs de vertical en estado vigente (VALID/EXPIRING_SOON)', () => {
+    const certs = validCertificationsOf([
+      { type: FleetDocumentType.AMBULANCE_OPERATOR, status: FleetDocumentStatus.VALID },
+      { type: FleetDocumentType.TOW_OPERATOR, status: FleetDocumentStatus.EXPIRING_SOON },
+      { type: FleetDocumentType.MECHANIC_CERT, status: FleetDocumentStatus.EXPIRED }, // vencida → fuera
+    ]);
+    expect(certs).toEqual([FleetDocumentType.AMBULANCE_OPERATOR, FleetDocumentType.TOW_OPERATOR]);
+  });
+
+  it('EXCLUYE los docs base (licencia/SOAT) aunque estén vigentes — solo viajan certs de vertical', () => {
+    const certs = validCertificationsOf([
+      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
+      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.VALID },
+      { type: FleetDocumentType.AMBULANCE_OPERATOR, status: FleetDocumentStatus.VALID },
+    ]);
+    expect(certs).toEqual([FleetDocumentType.AMBULANCE_OPERATOR]);
+  });
+
+  it('una cert PENDING_REVIEW o REJECTED NO cuenta como válida (fail-closed aguas abajo)', () => {
+    expect(
+      validCertificationsOf([
+        { type: FleetDocumentType.AMBULANCE_OPERATOR, status: FleetDocumentStatus.PENDING_REVIEW },
+        { type: FleetDocumentType.TOW_OPERATOR, status: FleetDocumentStatus.REJECTED },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('conductor sin certs → lista vacía', () => {
+    expect(validCertificationsOf([])).toEqual([]);
   });
 });

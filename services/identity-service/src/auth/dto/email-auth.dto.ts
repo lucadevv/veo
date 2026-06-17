@@ -1,4 +1,5 @@
 import { IsEmail, IsIn, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
 
 /** Mínimo 12 chars (ADR-012 §4). El chequeo de "no trivial" se hace en el servicio. */
 const PASSWORD_MIN = 12;
@@ -16,8 +17,8 @@ export class RegisterEmailDto {
   @Length(1, 80, { message: 'El nombre debe tener entre 1 y 80 caracteres' })
   name?: string;
 
-  @IsIn(['PASSENGER', 'DRIVER'])
-  type!: 'PASSENGER' | 'DRIVER';
+  @IsIn(ACTOR_TYPES)
+  type!: ActorType;
 }
 
 export class VerifyEmailDto {

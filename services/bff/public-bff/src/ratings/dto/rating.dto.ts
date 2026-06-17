@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
 
 /** Crear calificación post-viaje (1-5). El raterId lo deriva el downstream desde la identidad. */
 export class CreateRatingDto {
@@ -11,9 +12,9 @@ export class CreateRatingDto {
   @IsUUID()
   ratedId!: string;
 
-  @ApiProperty({ enum: ['DRIVER', 'PASSENGER'], description: 'Rol del sujeto calificado' })
-  @IsIn(['DRIVER', 'PASSENGER'])
-  ratedRole!: 'DRIVER' | 'PASSENGER';
+  @ApiProperty({ enum: ACTOR_TYPES, description: 'Rol del sujeto calificado' })
+  @IsIn(ACTOR_TYPES)
+  ratedRole!: ActorType;
 
   @ApiProperty({ minimum: 1, maximum: 5 })
   @IsInt()
