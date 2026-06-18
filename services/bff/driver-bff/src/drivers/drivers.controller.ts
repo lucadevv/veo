@@ -18,6 +18,7 @@ import { DriverApi } from '../common/driver-api.decorator';
 import { DriversService } from './drivers.service';
 import {
   AddDocumentDto,
+  DocumentUploadTicketDto,
   EnrollFaceDto,
   ListVehicleModelsQuery,
   OnboardDto,
@@ -27,6 +28,7 @@ import {
   StartShiftDto,
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
+  type DocumentUploadTicketView,
   type DriverModelRequestView,
   type DriverPersonalData,
   type DriverProfileView,
@@ -67,6 +69,19 @@ export class DriversController {
     @Body() dto: AddDocumentDto,
   ): Promise<DriverDocument> {
     return this.drivers.addDocument(user, dto);
+  }
+
+  @Post('me/documents/presign')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Emitir ticket de subida (presigned PUT) del binario de un documento. Devuelve uploadUrl + fileS3Key',
+  })
+  presignDocumentUpload(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DocumentUploadTicketDto,
+  ): Promise<DocumentUploadTicketView> {
+    return this.drivers.presignDocumentUpload(user, dto);
   }
 
   @Post('onboard')

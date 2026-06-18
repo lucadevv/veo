@@ -26,6 +26,12 @@ const driver: DriverReply = {
   suspendedAt: '',
   name: 'Khalid Ríos',
   rejectionReason: '',
+  licenseNumber: '',
+  kycStatus: '',
+  createdAt: '',
+  faceEnrolledAt: '',
+  lastVerifiedAt: '',
+  phone: '',
 };
 
 const user: UserReply = {
@@ -51,6 +57,8 @@ function docsWith(
       documentNumber: 'X',
       status: t.status,
       expiresAt: t.expiresAt ?? '',
+      fileS3Key: '',
+      rejectionReason: '',
     })),
   };
 }
@@ -67,36 +75,72 @@ const aggregate: AggregateReply = {
 };
 
 describe('buildDriverProfile', () => {
-  it('marca compliant cuando todos los documentos requeridos están vigentes', () => {
+  it('REQUIRED_DRIVER_DOCS = solo los docs que sube el conductor (licencia, SOAT, tarjeta)', () => {
+    // BACKGROUND_CHECK (eje identity) e ITV (doc del vehículo) NO son docs del alta del conductor.
+    expect(REQUIRED_DRIVER_DOCS).toEqual([
+      FleetDocumentType.LICENSE_A1,
+      FleetDocumentType.SOAT,
+      FleetDocumentType.PROPERTY_CARD,
+    ]);
+  });
+
+  it('todos los requeridos VALID ⇒ allApproved + compliant, sin faltantes, submittedAllRequired', () => {
     const docs = docsWith(
       REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.VALID })),
     );
     const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.allApproved).toBe(true);
     expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.submittedAllRequired).toBe(true);
     expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.rejected).toEqual([]);
     expect(view.documents).toHaveLength(REQUIRED_DRIVER_DOCS.length);
   });
 
-  it('NO es compliant si falta un documento o está vencido', () => {
-    const docs = docsWith([
-      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
-      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.EXPIRED },
-      { type: FleetDocumentType.PROPERTY_CARD, status: FleetDocumentStatus.VALID },
-      // faltan BACKGROUND_CHECK e ITV
-    ]);
+  it('todos los requeridos PENDING_REVIEW ⇒ submittedAllRequired pero NO allApproved, missing vacío', () => {
+    // El caso del bug P0: 3 docs PENDING_REVIEW. "Enviado todo" pero "no aprobado" → in_review, no wizard.
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.PENDING_REVIEW })),
+    );
     const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.allApproved).toBe(false);
     expect(view.compliance.compliant).toBe(false);
-    expect(view.compliance.missing).toContain(FleetDocumentType.SOAT);
-    expect(view.compliance.missing).toContain(FleetDocumentType.BACKGROUND_CHECK);
-    expect(view.compliance.missing).toContain(FleetDocumentType.ITV);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.rejected).toEqual([]);
   });
 
-  it('considera EXPIRING_SOON como vigente', () => {
+  it('un tipo requerido genuinamente ausente ⇒ aparece en missing y NO submittedAllRequired', () => {
+    const docs = docsWith([
+      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.PENDING_REVIEW },
+      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.PENDING_REVIEW },
+      // falta PROPERTY_CARD
+    ]);
+    const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(false);
+    expect(view.compliance.missing).toEqual([FleetDocumentType.PROPERTY_CARD]);
+    expect(view.compliance.allApproved).toBe(false);
+  });
+
+  it('un documento requerido REJECTED ⇒ aparece en rejected (sigue presente, no missing)', () => {
+    const docs = docsWith([
+      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
+      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.REJECTED },
+      { type: FleetDocumentType.PROPERTY_CARD, status: FleetDocumentStatus.VALID },
+    ]);
+    const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.rejected).toEqual([FleetDocumentType.SOAT]);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.allApproved).toBe(false);
+  });
+
+  it('considera EXPIRING_SOON como aprobado (vigente)', () => {
     const docs = docsWith(
       REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.EXPIRING_SOON })),
     );
     const view = buildDriverProfile(driver, user, aggregate, docs);
-    expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.allApproved).toBe(true);
     expect(view.documents.every((d) => d.ok)).toBe(true);
   });
 

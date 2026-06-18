@@ -3,6 +3,7 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsEnum,
+  IsIn,
   IsISO8601,
   IsInt,
   IsNumber,
@@ -14,7 +15,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { VehicleType } from '@veo/shared-types';
+import { FleetDocumentType, VehicleType } from '@veo/shared-types';
 
 /** Año mínimo razonable para el alta de vehículo (sanity check; BR-D04 >=2017 lo revalida fleet). */
 const MIN_REASONABLE_VEHICLE_YEAR = 2005;
@@ -105,6 +106,59 @@ export class AddDocumentDto {
   @IsOptional()
   @IsString()
   fileS3Key?: string;
+}
+
+/**
+ * Content-Types permitidos para subir el binario de un documento (foto JPEG/PNG o PDF). Allowlist
+ * ÚNICA (Ley 29733: el binario es PII). DEBE coincidir con la de media-service: el `contentType`
+ * viaja firmado en la URL prefirmada, así que un valor fuera de esta lista produce una subida inválida.
+ */
+export const DOCUMENT_UPLOAD_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+] as const;
+export type DocumentUploadContentType = (typeof DOCUMENT_UPLOAD_CONTENT_TYPES)[number];
+
+/**
+ * Extensión de archivo por Content-Type (mapa TIPADO, sin comparaciones de string sueltas). La key
+ * S3 termina con la extensión derivada del contentType, no de un nombre que mande el cliente.
+ */
+export const DOCUMENT_EXTENSION_BY_CONTENT_TYPE: Record<DocumentUploadContentType, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'application/pdf': 'pdf',
+};
+
+/**
+ * POST /drivers/me/documents/presign → body. La app pide un ticket de subida para el binario de un
+ * documento. `type` es un FleetDocumentType real (enum tipado) y `contentType` está en la allowlist.
+ */
+export class DocumentUploadTicketDto {
+  @ApiProperty({
+    enum: FleetDocumentType,
+    description: 'Tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | BACKGROUND_CHECK | ...)',
+  })
+  @IsEnum(FleetDocumentType)
+  type!: FleetDocumentType;
+
+  @ApiProperty({
+    enum: DOCUMENT_UPLOAD_CONTENT_TYPES,
+    description: 'Content-Type del binario a subir (que el cliente reenviará exacto en el PUT)',
+  })
+  @IsIn(DOCUMENT_UPLOAD_CONTENT_TYPES)
+  contentType!: DocumentUploadContentType;
+}
+
+/**
+ * Ticket de subida que el driver-bff devuelve a la app: la URL PUT prefirmada, la key S3 (que la app
+ * reenvía luego a POST /drivers/me/documents), los headers obligatorios y el vencimiento del ticket.
+ */
+export interface DocumentUploadTicketView {
+  uploadUrl: string;
+  fileS3Key: string;
+  requiredHeaders: Record<string, string>;
+  expiresAt: string;
 }
 
 /** Vista del estado de un documento del conductor para el panel de cumplimiento. */
@@ -349,9 +403,23 @@ export interface DriverProfileView {
     flagReason: string | null;
   } | null;
   documents: DriverDocumentView[];
+  /**
+   * Cumplimiento documental del CONDUCTOR (solo los docs que sube en el alta: licencia, SOAT, tarjeta).
+   * Distingue el ciclo de vida real de cada tipo requerido: no-enviado vs enviado/PENDING_REVIEW vs
+   * aprobado. `backgroundCheckStatus`/`kycStatus` viven en sus propios ejes del perfil (no acá).
+   */
   compliance: {
+    /** true si TODOS los requeridos están APROBADOS (VALID/EXPIRING_SOON). Alias de `allApproved`. */
     compliant: boolean;
+    /** Tipos requeridos (los que el conductor sube en el alta). */
     requiredTypes: string[];
+    /** Tipos requeridos SIN ningún documento subido (presencia: genuinamente faltantes). */
     missing: string[];
+    /** Tipos requeridos cuyo documento fue RECHAZADO por el operador (corregir-y-reenviar). */
+    rejected: string[];
+    /** true si el conductor ya subió TODOS los requeridos (a cualquier estado). */
+    submittedAllRequired: boolean;
+    /** true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON). */
+    allApproved: boolean;
   };
 }

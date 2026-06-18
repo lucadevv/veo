@@ -60,6 +60,13 @@ export const envSchema = z
     // chat-service (Ola 2A): historial + persistencia de mensajes del viaje.
     CHAT_URL: z.string().url().default('http://localhost:3014'),
 
+    // Bucket S3/MinIO PRIVADO de documentos de flota (PII). Debe coincidir con media-service
+    // (S3_BUCKET_DOCUMENTS). El driver-bff lo pasa explícito al presign-put de media.
+    S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
+    // TTL (segundos) de la URL prefirmada de subida de documentos. Corto: la app sube el binario
+    // justo después de pedir el ticket. media-service acota el máximo (15 min) por su cuenta.
+    DOCUMENT_UPLOAD_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
     // Rate limiting (ventana fija por IP+usuario+ruta).
     RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),

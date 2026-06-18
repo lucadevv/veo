@@ -22,18 +22,35 @@ import type {
 } from './dto/drivers.dto';
 import type { FleetDocumentReply } from '../common/grpc-replies';
 
-/** Tipos de documento exigidos al conductor para operar (FOUNDATION §14). */
-export const REQUIRED_DRIVER_DOCS: string[] = [
+/**
+ * Tipos de documento que el CONDUCTOR sube en el alta (wizard paso 3) y que componen el gate de
+ * presencia/aprobación documental del perfil. Es EXACTAMENTE lo que la app envía
+ * (`registrationDocTypeToBackend`): Licencia A1, SOAT y Tarjeta de propiedad.
+ *
+ * NO incluye:
+ *  - `BACKGROUND_CHECK`: NO es un documento que suba el conductor — es una máquina de estados de
+ *    identity-service (`driver.backgroundCheckStatus`: PENDING|CLEARED|REJECTED). Su eje vive aparte
+ *    en el perfil; mezclarlo acá "perdía" al conductor en el wizard porque nunca existe una fila
+ *    FleetDocument de antecedentes.
+ *  - `ITV` (Revisión Técnica): documento del VEHÍCULO que gestiona el operador/flota, no parte del
+ *    alta del conductor (no está en el wizard).
+ */
+export const REQUIRED_DRIVER_DOCS: FleetDocumentType[] = [
   FleetDocumentType.LICENSE_A1,
   FleetDocumentType.SOAT,
   FleetDocumentType.PROPERTY_CARD,
-  FleetDocumentType.BACKGROUND_CHECK,
-  FleetDocumentType.ITV,
 ];
 
-/** Un documento está vigente si está VALID o por vencer (EXPIRING_SOON). */
-function isDocOk(status: string): boolean {
+/** Un documento está APROBADO/vigente si está VALID o por vencer (EXPIRING_SOON). */
+function isDocApproved(status: string): boolean {
   return status === FleetDocumentStatus.VALID || status === FleetDocumentStatus.EXPIRING_SOON;
+}
+
+/** Un documento fue REENVIADO (existe), independientemente de si está aprobado o no. */
+function isDocSubmitted(status: string): boolean {
+  // Cualquier estado del enum (PENDING_REVIEW/VALID/EXPIRING_SOON/EXPIRED/REJECTED) implica que el
+  // conductor YA subió ese documento. La presencia de la fila es la señal de "enviado".
+  return status.length > 0;
 }
 
 function emptyToNull(value: string): string | null {
@@ -68,7 +85,7 @@ export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail
     status: d.status,
     simpleStatus: toSimpleDocStatus(d.status),
     expiresAt: emptyToNull(d.expiresAt),
-    ok: isDocOk(d.status),
+    ok: isDocApproved(d.status),
   };
 }
 
@@ -190,12 +207,30 @@ export function buildDriverProfile(
     type: d.type,
     status: d.status,
     expiresAt: emptyToNull(d.expiresAt),
-    ok: isDocOk(d.status),
+    ok: isDocApproved(d.status),
   }));
 
-  const missing = REQUIRED_DRIVER_DOCS.filter(
-    (type) => !documents.some((d) => d.type === type && d.ok),
+  /** Documento del conductor para un tipo requerido (o undefined si nunca lo subió). */
+  const docFor = (type: FleetDocumentType): DriverDocumentView | undefined =>
+    documents.find((d) => d.type === type);
+
+  // PRESENCIA: faltan los tipos para los que NO hay NINGÚN documento subido (a cualquier estado).
+  // Un PENDING_REVIEW YA está subido → no es "faltante".
+  const missing = REQUIRED_DRIVER_DOCS.filter((type) => {
+    const doc = docFor(type);
+    return doc === undefined || !isDocSubmitted(doc.status);
+  });
+
+  // RECHAZO: tipos requeridos cuyo documento fue rechazado (el conductor debe corregir-y-reenviar).
+  const rejected = REQUIRED_DRIVER_DOCS.filter(
+    (type) => docFor(type)?.status === FleetDocumentStatus.REJECTED,
   );
+
+  // ENVIADO TODO: cada tipo requerido tiene un documento (a cualquier estado).
+  const submittedAllRequired = missing.length === 0;
+
+  // APROBADO TODO: cada tipo requerido tiene un documento VALID/EXPIRING_SOON.
+  const allApproved = REQUIRED_DRIVER_DOCS.every((type) => docFor(type)?.ok === true);
 
   return {
     driverId: driver.id,
@@ -217,9 +252,19 @@ export function buildDriverProfile(
       : null,
     documents,
     compliance: {
-      compliant: missing.length === 0,
+      // `compliant` = TODOS los requeridos aprobados (semántica que ya consumía ProfileScreen). Antes
+      // era `missing.length === 0` con `missing`=no-aprobados, que coincidía; ahora que `missing` es
+      // PRESENCIA, el gate de aprobado se expresa explícito como `allApproved`.
+      compliant: allApproved,
       requiredTypes: REQUIRED_DRIVER_DOCS,
+      // PRESENCIA: tipos sin ningún documento subido (genuinamente faltantes), NO los no-aprobados.
       missing,
+      // Tipos requeridos cuyo documento fue rechazado por el operador.
+      rejected,
+      // true si el conductor ya subió TODOS los requeridos (a revisión o aprobados).
+      submittedAllRequired,
+      // true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON).
+      allApproved,
     },
   };
 }

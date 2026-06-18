@@ -4,9 +4,12 @@
  *  - GET /drivers/me → agrega lecturas gRPC de identity + rating + fleet.
  */
 import { Injectable } from '@nestjs/common';
-import { NotFoundError } from '@veo/utils';
+import { ConfigService } from '@nestjs/config';
+import { NotFoundError, uuidv7 } from '@veo/utils';
 import { createLogger, type Logger } from '@veo/observability';
+import type { FleetDocumentType } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
+import type { Env } from '../config/env.schema';
 import type {
   DriverBiometricChallenge,
   DriverBiometricEnrollResult,
@@ -38,6 +41,11 @@ import {
   type FleetVehicleModelPageReply,
   type FleetVehicleModelRequestReply,
 } from './drivers.mapper';
+import {
+  DOCUMENT_EXTENSION_BY_CONTENT_TYPE,
+  type DocumentUploadContentType,
+  type DocumentUploadTicketView,
+} from './dto/drivers.dto';
 import type {
   DriverDocumentDetail,
   DriverModelRequestView,
@@ -62,14 +70,26 @@ import type {
  */
 const VEHICLE_MODELS_PAGE_LIMIT = 100;
 
+/** Respuesta de media-service POST /media/internal/presign-put. */
+interface MediaPresignPutReply {
+  url: string;
+  requiredHeaders: Record<string, string>;
+}
+
 @Injectable()
 export class DriversService {
   private readonly logger: Logger = createLogger('driver-bff:drivers');
+  private readonly documentsBucket: string;
+  private readonly documentUploadTtl: number;
 
   constructor(
     private readonly grpc: GrpcGateway,
     private readonly rest: RestGateway,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.documentsBucket = config.getOrThrow<string>('S3_BUCKET_DOCUMENTS');
+    this.documentUploadTtl = config.getOrThrow<number>('DOCUMENT_UPLOAD_TTL_SECONDS');
+  }
 
   onboard(identity: AuthenticatedUser, dto: OnboardDto): Promise<unknown> {
     return this.identity().post('/drivers/onboard', { identity, body: dto });
@@ -349,6 +369,77 @@ export class DriversService {
       },
     });
     return buildDriverDocument(created);
+  }
+
+  /**
+   * Emite un ticket de subida (presigned PUT) para el binario de un documento del conductor (Ley 29733:
+   * el archivo es PII y va al storage soberano privado, no por el body de la API). Flujo:
+   *   1. La app pide este ticket (type + contentType).
+   *   2. Sube el binario con un PUT a `uploadUrl` reenviando `requiredHeaders` (Content-Type firmado).
+   *   3. Llama POST /drivers/me/documents con el `fileS3Key` devuelto.
+   *
+   * Frontera de seguridad: la key es DRIVER-SCOPED (`drivers/{driverId}/documents/...`). El driverId
+   * lo resuelve el servidor desde la identidad autenticada (el cliente NO lo envía), así un conductor
+   * solo puede obtener una URL de escritura bajo SU propio prefijo. La extensión deriva del contentType
+   * (mapa tipado), no de un nombre del cliente.
+   */
+  async presignDocumentUpload(
+    identity: AuthenticatedUser,
+    input: { type: FleetDocumentType; contentType: DocumentUploadContentType },
+  ): Promise<DocumentUploadTicketView> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) {
+      throw new NotFoundError('No existe un perfil de conductor para este usuario');
+    }
+
+    const fileS3Key = this.buildDocumentKey(driver.id, input.type, input.contentType);
+
+    const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
+      '/media/internal/presign-put',
+      {
+        identity,
+        body: {
+          bucket: this.documentsBucket,
+          key: fileS3Key,
+          contentType: input.contentType,
+          ttlSeconds: this.documentUploadTtl,
+        },
+      },
+    );
+
+    const expiresAt = new Date(Date.now() + this.documentUploadTtl * 1000).toISOString();
+
+    // Observabilidad: se loguea driverId + type (metadatos), NUNCA el binario ni la URL firmada.
+    this.logger.info(
+      { driverId: driver.id, type: input.type, contentType: input.contentType },
+      'ticket de subida de documento emitido (presigned PUT, driver-scoped)',
+    );
+
+    return {
+      uploadUrl: ticket.url,
+      fileS3Key,
+      requiredHeaders: ticket.requiredHeaders,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Key DETERMINISTA y driver-scoped del documento: `drivers/{driverId}/documents/{type}/{uuid}.{ext}`.
+   * El prefijo `drivers/{driverId}/` ES la frontera de seguridad (un conductor solo escribe bajo lo
+   * suyo). El uuid evita colisiones entre reenvíos del mismo tipo; la extensión sale del contentType.
+   */
+  private buildDocumentKey(
+    driverId: string,
+    type: FleetDocumentType,
+    contentType: DocumentUploadContentType,
+  ): string {
+    const ext = DOCUMENT_EXTENSION_BY_CONTENT_TYPE[contentType];
+    return `drivers/${driverId}/documents/${type}/${uuidv7()}.${ext}`;
   }
 
   private identity() {
