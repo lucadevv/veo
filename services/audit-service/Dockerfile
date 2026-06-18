@@ -21,6 +21,8 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 COPY --from=builder /prod/app/dist ./dist
+# El servidor gRPC carga el .proto en runtime (join(__dirname, '../proto/audit.proto')).
+COPY --from=builder /prod/app/proto ./proto
 COPY --from=builder /prod/app/prisma ./prisma
 COPY --from=builder /prod/app/package.json ./
 COPY --from=builder /prod/app/node_modules ./node_modules

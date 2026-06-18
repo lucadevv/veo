@@ -100,7 +100,7 @@ services:
     environment:
       CLICKHOUSE_DB: veo_analytics
       CLICKHOUSE_USER: veo
-      CLICKHOUSE_PASSWORD: veo_dev
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?defini CLICKHOUSE_PASSWORD en /opt/veo/.env}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse-data:/var/lib/clickhouse
@@ -116,7 +116,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: veo_dev
-      MINIO_ROOT_PASSWORD: veo_dev_secret
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defini MINIO_ROOT_PASSWORD en /opt/veo/.env}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -144,7 +144,7 @@ services:
     image: livekit/livekit-server:latest
     command: --dev --bind 0.0.0.0
     environment:
-      LIVEKIT_KEYS: "devkey: devsecret_change_in_production"
+      LIVEKIT_KEYS: "devkey: ${LIVEKIT_API_SECRET:?defini LIVEKIT_API_SECRET en /opt/veo/.env}"
     mem_limit: 384m
     restart: unless-stopped
     networks: [veo-net]
@@ -357,4 +357,4 @@ volumes:
 networks:
   veo-net:
     name: veo-net
-    driver: bridge
+    external: true
