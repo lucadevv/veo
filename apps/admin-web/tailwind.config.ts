@@ -1,7 +1,6 @@
 import type { Config } from 'tailwindcss';
 // El preset compartido mapea los tokens semánticos OKLCH a utilidades Tailwind.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const preset = require('@veo/shared-config/tailwind/preset.cjs') as Config;
+import preset from '@veo/shared-config/tailwind/preset.cjs';
 
 const config: Config = {
   presets: [preset],
