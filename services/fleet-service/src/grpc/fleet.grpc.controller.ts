@@ -46,6 +46,9 @@ interface FleetDocumentReply {
   documentNumber: string;
   status: string;
   expiresAt: string;
+  /// Interno (admin review). El driver-bff mapea un subconjunto explícito y NO lo proyecta al conductor.
+  fileS3Key: string;
+  rejectionReason: string;
 }
 
 interface DriverDocumentsReply {
@@ -148,6 +151,9 @@ export class FleetGrpcController {
         documentNumber: d.documentNumber,
         status: d.status,
         expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        fileS3Key: d.fileS3Key ?? '',
+        // DEUDA: rejectionReason no existe como columna en FleetDocument; se devuelve '' hasta agregar la migración.
+        rejectionReason: '',
       })),
     };
   }

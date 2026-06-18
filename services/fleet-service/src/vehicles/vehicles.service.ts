@@ -12,6 +12,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '@veo/utils';
+import { isUniqueViolation } from '@veo/database';
 import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
@@ -110,9 +111,22 @@ export class VehiclesService {
 
   /**
    * Alta self-service: el conductor registra su propio vehículo durante el onboarding.
-   * Reglas: placa válida (plateSchema), año elegible (BR-D04) y placa no duplicada.
-   * El vehículo NO se activa: queda `active=false` (pendiente de verificación del operador) y se
-   * emite el evento `fleet.vehicle.registered` por outbox en la misma transacción.
+   * Reglas: placa válida (plateSchema), año elegible (BR-D04).
+   *
+   * IDEMPOTENCIA OWNERSHIP-AWARE: el wizard del onboarding reintenta el paso (red flaky, doble tap,
+   * volver atrás y reenviar). La placa es `@unique` GLOBAL — un 409 a secas bloqueaba al conductor
+   * reenviando SU PROPIA placa. Ahora:
+   *  - placa de ESTE conductor → no-op idempotente: se ACTUALIZA el vehículo con lo reenviado
+   *    (correcciones del wizard: modelo/snapshot, año, color, tipo) y se devuelve. NO se re-emite
+   *    `vehicle_registered` (el alta ya ocurrió una vez; un duplicado mentiría el ciclo de vida).
+   *  - placa de OTRO conductor → conflicto de dominio real (ConflictError).
+   *  - placa libre → alta nueva (active=false, pendiente de verificación) + `vehicle_registered`
+   *    por outbox en la MISMA transacción.
+   *
+   * Race-safety (TOCTOU): el findUnique-luego-escribe NO es atómico entre dos altas concurrentes con
+   * la MISMA placa. El `@unique` global es la barrera dura: si la carrera se cuela, el `create` lanza
+   * P2002 y lo capturamos para RE-RESOLVER el dueño (no un 500): re-leemos por placa y caemos al
+   * camino idempotente (mismo dueño) o al de conflicto (otro dueño). Espeja ConsentsService.record.
    *
    * `driverId` es el **User.id** de identity (el `userId` del token propagado), NO el id de perfil
    * `Driver` de identity; fleet lo persiste tal cual en `Vehicle.driverId` (sin traducir).
@@ -133,52 +147,106 @@ export class VehiclesService {
       );
     }
 
-    const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
-    if (existing) throw new ConflictError('Ya existe un vehículo con esa placa', { plate });
-
     // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec
     // (server-authoritative); si no, caen al texto libre. Resuelto ANTES de la transacción.
     const snapshot = await this.resolveModelSnapshot(input);
 
-    const vehicle = await this.prisma.write.$transaction(async (tx) => {
-      const created = await tx.vehicle.create({
-        data: {
-          id: uuidv7(),
-          plate,
-          make: snapshot.make,
-          model: snapshot.model,
-          year: input.year,
-          color: input.color?.trim() ?? '',
-          vehicleType: snapshot.vehicleType,
-          modelSpecId: snapshot.modelSpecId,
-          driverId,
-          // Onboarding: pendiente de verificación, no se activa automáticamente.
-          active: false,
-        },
-      });
+    const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
+    if (existing) {
+      return this.resolveExistingForDriver(driverId, existing, input, snapshot);
+    }
 
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: created.id,
-          eventType: FleetEventType.VEHICLE_REGISTERED,
-          envelope: buildFleetEvent(FleetEventType.VEHICLE_REGISTERED, {
-            vehicleId: created.id,
+    let vehicle: Vehicle;
+    try {
+      vehicle = await this.prisma.write.$transaction(async (tx) => {
+        const created = await tx.vehicle.create({
+          data: {
+            id: uuidv7(),
+            plate,
+            make: snapshot.make,
+            model: snapshot.model,
+            year: input.year,
+            color: input.color?.trim() ?? '',
+            vehicleType: snapshot.vehicleType,
+            modelSpecId: snapshot.modelSpecId,
             driverId,
-            plate: created.plate,
-            vehicleType: created.vehicleType,
-            registeredAt: created.createdAt.toISOString(),
-          }) as unknown as Prisma.InputJsonValue,
-        },
-      });
+            // Onboarding: pendiente de verificación, no se activa automáticamente.
+            active: false,
+          },
+        });
 
-      return created;
-    });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: created.id,
+            eventType: FleetEventType.VEHICLE_REGISTERED,
+            envelope: buildFleetEvent(FleetEventType.VEHICLE_REGISTERED, {
+              vehicleId: created.id,
+              driverId,
+              plate: created.plate,
+              vehicleType: created.vehicleType,
+              registeredAt: created.createdAt.toISOString(),
+            }) as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        return created;
+      });
+    } catch (err) {
+      // Carrera perdida contra otra alta concurrente con la MISMA placa (el @unique global ganó).
+      // Re-resolvemos el dueño en vez de un 500: mismo dueño → idempotente; otro → conflicto.
+      if (isUniqueViolation(err, 'plate')) {
+        const raced = await this.prisma.write.vehicle.findUnique({ where: { plate } });
+        if (raced) return this.resolveExistingForDriver(driverId, raced, input, snapshot);
+      }
+      throw err;
+    }
 
     // El alta puede convertir al nuevo vehículo en el activo (si es el primero/único operable): lo
     // resolvemos sobre la flota completa del conductor para no mentir el `isActive` de la respuesta.
     const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
     const active = pickActiveVehicle(all);
     return toDriverVehicleResponse(vehicle, active?.id === vehicle.id);
+  }
+
+  /**
+   * Resuelve una placa YA existente en el alta self-service según el dueño:
+   *  - de ESTE conductor → UPDATE idempotente (correcciones del wizard) SIN re-emitir el evento de alta.
+   *  - de OTRO conductor (o flota del operador, driverId=null) → ConflictError de dominio.
+   */
+  private async resolveExistingForDriver(
+    driverId: string,
+    existing: Vehicle,
+    input: RegisterDriverVehicleDto,
+    snapshot: {
+      make: string;
+      model: string;
+      vehicleType: VehicleType;
+      modelSpecId: string | null;
+    },
+  ): Promise<DriverVehicleResponse> {
+    if (existing.driverId !== driverId) {
+      throw new ConflictError('Esa placa ya está registrada por otro conductor', {
+        plate: existing.plate,
+      });
+    }
+
+    // Mismo dueño: reenvío del wizard ⇒ actualizamos con lo último (snapshot/año/color/tipo). NO
+    // tocamos `active` (sigue pendiente de verificación) ni re-emitimos `vehicle_registered`.
+    const updated = await this.prisma.write.vehicle.update({
+      where: { id: existing.id },
+      data: {
+        make: snapshot.make,
+        model: snapshot.model,
+        year: input.year,
+        color: input.color?.trim() ?? '',
+        vehicleType: snapshot.vehicleType,
+        modelSpecId: snapshot.modelSpecId,
+      },
+    });
+
+    const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    const active = pickActiveVehicle(all);
+    return toDriverVehicleResponse(updated, active?.id === updated.id);
   }
 
   /**

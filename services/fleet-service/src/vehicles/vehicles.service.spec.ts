@@ -5,7 +5,7 @@
  * rechaza; sin modelSpecId cae al texto libre y exige make+model.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ValidationError } from '@veo/utils';
+import { ConflictError, ValidationError } from '@veo/utils';
 import { VehicleType as SharedVehicleType } from '@veo/shared-types';
 import {
   VehicleDocStatus,
@@ -117,6 +117,111 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
     await expect(service.registerForDriver('driver-1', { ...baseBody })).rejects.toBeInstanceOf(
       ValidationError,
     );
+  });
+});
+
+/**
+ * Idempotencia ownership-aware del alta self-service (fix del 409 propio):
+ *  - reenvío del MISMO conductor → no-op idempotente (UPDATE, sin 409, sin re-emitir el evento de alta);
+ *  - misma placa de OTRO conductor → ConflictError de dominio ("otro conductor");
+ *  - placa nueva → alta como siempre (create + outbox).
+ */
+function makeIdempotentService(existingPlate: Vehicle | null) {
+  const txCreate = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+    const vehicle = {
+      ...data,
+      fleetId: null,
+      insuranceExpiresAt: null,
+      docStatus: VehicleDocStatus.VALID,
+      selectedAt: null,
+      createdAt: new Date('2026-06-16T00:00:00Z'),
+      updatedAt: new Date('2026-06-16T00:00:00Z'),
+    } as unknown as Vehicle;
+    return Promise.resolve(vehicle);
+  });
+  const outboxCreate = vi.fn().mockResolvedValue({});
+  const tx = { vehicle: { create: txCreate }, outboxEvent: { create: outboxCreate } };
+
+  const update = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+    Promise.resolve({ ...(existingPlate as object), ...data } as unknown as Vehicle),
+  );
+  const findManyAfter = vi
+    .fn()
+    .mockResolvedValue(existingPlate ? [existingPlate] : []);
+
+  const prisma = {
+    read: {
+      vehicle: {
+        findUnique: vi.fn().mockResolvedValue(existingPlate),
+        findMany: findManyAfter,
+      },
+      vehicleModelSpec: { findFirst: vi.fn().mockResolvedValue(null) },
+    },
+    write: {
+      $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)),
+      vehicle: { update, findUnique: vi.fn().mockResolvedValue(existingPlate) },
+    },
+  };
+  const service = new VehiclesService(prisma as never, { getOrThrow: () => 2017 } as never);
+  return { service, txCreate, outboxCreate, update };
+}
+
+describe('VehiclesService.registerForDriver · idempotencia ownership-aware', () => {
+  const body = {
+    plate: 'ABC-123',
+    year: 2022,
+    vehicleType: VehicleType.MOTO,
+    make: 'Honda',
+    model: 'CG 150',
+  };
+
+  it('mismo conductor reenvía SU placa → idempotente: UPDATE, sin 409, sin re-emitir el evento de alta', async () => {
+    const owned = {
+      id: 'veh-1',
+      plate: 'ABC-123',
+      driverId: 'driver-1',
+      modelSpecId: null,
+      active: false,
+    } as unknown as Vehicle;
+    const { service, txCreate, outboxCreate, update } = makeIdempotentService(owned);
+
+    const res = await service.registerForDriver('driver-1', { ...body, color: 'Rojo' });
+
+    // no crea fila nueva ni re-emite el "registered"
+    expect(txCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+    // actualiza el vehículo existente con lo reenviado
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]![0].where).toEqual({ id: 'veh-1' });
+    expect(update.mock.calls[0]![0].data.color).toBe('Rojo');
+    expect(res.id).toBe('veh-1');
+  });
+
+  it('otra placa del MISMO conductor distinta → ConflictError de otro conductor', async () => {
+    const foreign = {
+      id: 'veh-9',
+      plate: 'ABC-123',
+      driverId: 'driver-OTRO',
+      modelSpecId: null,
+      active: false,
+    } as unknown as Vehicle;
+    const { service, txCreate } = makeIdempotentService(foreign);
+
+    await expect(
+      service.registerForDriver('driver-1', body),
+    ).rejects.toThrowError(/otro conductor/i);
+    await expect(service.registerForDriver('driver-1', body)).rejects.toBeInstanceOf(ConflictError);
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('placa nueva → alta normal: create + outbox', async () => {
+    const { service, txCreate, outboxCreate, update } = makeIdempotentService(null);
+
+    await service.registerForDriver('driver-1', body);
+
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
   });
 });
 
