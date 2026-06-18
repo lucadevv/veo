@@ -9,6 +9,7 @@ import {
   ScrollText,
   ShieldAlert,
   Tags,
+  TrendingUp,
   Truck,
   UserCog,
   Users,
@@ -35,6 +36,7 @@ export const NAV: NavGroup[] = [
     title: 'Operación',
     items: [
       { href: '/ops', label: 'En vivo', icon: MapPinned, permission: 'ops:view', exact: true },
+      { href: '/ops/metrics', label: 'Métricas', icon: TrendingUp, permission: 'ops:view' },
       { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
       { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
       { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },

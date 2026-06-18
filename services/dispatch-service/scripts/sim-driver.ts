@@ -34,8 +34,9 @@ const POINT = {
   lon: Number(process.env.SIM_LON ?? -77.063354),
 };
 
-const DISPATCH = 'http://localhost:3003/api/v1';
-const TRIP = 'http://localhost:3002/api/v1';
+// Puertos del boot local (boot-passenger-stack.sh): dispatch 3093, trip 3092. Override por env.
+const DISPATCH = process.env.DISPATCH_URL ?? 'http://localhost:3093/api/v1';
+const TRIP = process.env.TRIP_URL ?? 'http://localhost:3092/api/v1';
 const SECRET = process.env.INTERNAL_IDENTITY_SECRET;
 if (!SECRET) {
   throw new Error(

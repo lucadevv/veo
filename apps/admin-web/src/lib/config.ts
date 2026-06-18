@@ -6,8 +6,13 @@
 /** Base del proxy server-side; el navegador nunca habla directo con el bff. */
 export const BFF_PROXY_BASE = '/api/bff';
 
-/** URL del style.json del tileserver OSM self-hosted (puede faltar → fallback soberano). */
-export const TILE_URL = process.env.NEXT_PUBLIC_TILE_URL ?? '';
+/**
+ * Token público de Mapbox (pk.*) para el mapa de operación (/ops). El mapa usa el estilo veo-dark
+ * "Midnight Motion" (Mapbox Streets v8), consistente con las apps passenger/driver. El token es
+ * público por diseño (se restringe por URL en el dashboard de Mapbox); puede faltar → fallback
+ * soberano (fondo sólido, los marcadores en vivo siguen funcionando).
+ */
+export const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
 
 /** Origen para Socket.IO (/ops). Si falta, se usa el mismo origen del navegador. */
 export const BFF_WS_URL = process.env.NEXT_PUBLIC_BFF_WS_URL ?? '';
