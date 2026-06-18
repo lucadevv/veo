@@ -22,6 +22,8 @@ RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 COPY --from=builder /prod/app/dist ./dist
 COPY --from=builder /prod/app/proto ./proto
+# prisma/ (schema + migrations) en runtime: lo necesita `prisma migrate deploy` del deploy.
+COPY --from=builder /prod/app/prisma ./prisma
 COPY --from=builder /prod/app/package.json ./
 COPY --from=builder /prod/app/node_modules ./node_modules
 EXPOSE 3013
