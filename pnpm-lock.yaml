@@ -2536,6 +2536,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.0
+      prisma:
+        specifier: ^5.20.0
+        version: 5.22.0
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -2555,9 +2558,6 @@ importers:
       '@types/node':
         specifier: ^20.16.10
         version: 20.19.41
-      prisma:
-        specifier: ^5.20.0
-        version: 5.22.0
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
