@@ -21,10 +21,12 @@ const API = 'https://api.cloudflare.com/client/v4';
 const H = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
 // hostname → servicio interno (nombre de contenedor en veo-net : puerto). Se finaliza con el compose.
+// Subdominios PLANOS (3er nivel) → cubiertos por el cert Universal *.yoveoapp.com.
+// (api.preview.* sería 4º nivel y el Universal SSL no lo cubre → handshake failure.)
 const INGRESS = [
-  { host: 'api.preview.yoveoapp.com', service: 'http://public-bff:4001' },
-  { host: 'driver-api.preview.yoveoapp.com', service: 'http://driver-bff:4002' },
-  { host: 'admin-api.preview.yoveoapp.com', service: 'http://admin-bff:4003' },
+  { host: 'api-preview.yoveoapp.com', service: 'http://public-bff:4001' },
+  { host: 'driver-api-preview.yoveoapp.com', service: 'http://driver-bff:4002' },
+  { host: 'admin-api-preview.yoveoapp.com', service: 'http://admin-bff:4003' },
 ];
 
 async function cf(path, init = {}) {

@@ -4,9 +4,9 @@
 # Despliegue del backend (18 servicios) + infra mínima en un VPS compartido con 'metatron'.
 # - Red dedicada `veo-net` (bridge) → aislado de metatron.
 # - Edge: Cloudflare Tunnel (cloudflared en veo-net). El tunnel "veo-preview" ya existe con ingress:
-#     api.preview.yoveoapp.com        → public-bff:4001
-#     driver-api.preview.yoveoapp.com → driver-bff:4002
-#     admin-api.preview.yoveoapp.com  → admin-bff:4003
+#     api-preview.yoveoapp.com        → public-bff:4001
+#     driver-api-preview.yoveoapp.com → driver-bff:4002
+#     admin-api-preview.yoveoapp.com  → admin-bff:4003
 # - Imágenes de servicio: ghcr.io/lucadevv/veo/<service>:latest (las buildea el CI).
 # - UI (admin-web/family-web/web-hub) corre LOCAL, NO en este compose.
 #
@@ -279,7 +279,7 @@ services:
     env_file: services/biometric-service/env/preview.env
     mem_limit: 512m
 
-  # --- public-bff · HTTP 4001 (edge: api.preview.yoveoapp.com) ---
+  # --- public-bff · HTTP 4001 (edge: api-preview.yoveoapp.com) ---
   public-bff:
     <<: *svc-defaults
     image: ghcr.io/lucadevv/veo/public-bff:latest
@@ -287,7 +287,7 @@ services:
     depends_on: [redis, kafka, identity-service, places-service, trip-service, dispatch-service]
     mem_limit: 256m
 
-  # --- driver-bff · HTTP 4002 (edge: driver-api.preview.yoveoapp.com) ---
+  # --- driver-bff · HTTP 4002 (edge: driver-api-preview.yoveoapp.com) ---
   driver-bff:
     <<: *svc-defaults
     image: ghcr.io/lucadevv/veo/driver-bff:latest
@@ -308,7 +308,7 @@ services:
       ]
     mem_limit: 256m
 
-  # --- admin-bff · HTTP 4003 (edge: admin-api.preview.yoveoapp.com) ---
+  # --- admin-bff · HTTP 4003 (edge: admin-api-preview.yoveoapp.com) ---
   admin-bff:
     <<: *svc-defaults
     image: ghcr.io/lucadevv/veo/admin-bff:latest
@@ -332,7 +332,7 @@ services:
 
   # ===========================================================
   # EDGE · Cloudflare Tunnel (connector del tunnel "veo-preview")
-  # El token trae la config de ingress remota (api/driver-api/admin-api.preview.yoveoapp.com).
+  # El token trae la config de ingress remota (api/driver-api/admin-api-preview.yoveoapp.com).
   # ===========================================================
   cloudflared:
     image: cloudflare/cloudflared:latest
