@@ -1,9 +1,18 @@
 import { IsArray, IsEmail, IsIn, IsOptional, IsString, Length, MinLength } from 'class-validator';
 import { AdminRole } from '@veo/shared-types';
 
-export class AdminRegisterDto {
+export class CreateOperatorDto {
   @IsEmail()
   email!: string;
+
+  @IsArray()
+  @IsIn(Object.values(AdminRole), { each: true })
+  roles!: AdminRole[];
+}
+
+export class AcceptInviteDto {
+  @IsString()
+  token!: string;
 
   @IsString()
   @MinLength(10, { message: 'La contraseña debe tener al menos 10 caracteres' })
@@ -33,12 +42,6 @@ export class AdminEnrollConfirmDto {
   @IsString()
   @Length(6, 6)
   totp!: string;
-}
-
-export class ApproveAdminDto {
-  @IsArray()
-  @IsIn(Object.values(AdminRole), { each: true })
-  roles!: AdminRole[];
 }
 
 export class StepUpDto {

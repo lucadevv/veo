@@ -15,7 +15,7 @@ import {
   StepUpDto,
   RefreshDto,
   LogoutDto,
-  RegisterDto,
+  AcceptInviteDto,
 } from './dto/auth.dto';
 
 @ApiTags('auth')
@@ -27,10 +27,11 @@ export class AuthController {
   ) {}
 
   @Public()
-  @Post('register')
-  @ApiOperation({ summary: 'Auto-registro de operador (queda PENDING hasta aprobación RBAC)' })
-  register(@Body() dto: RegisterDto): Promise<{ id: string; status: string }> {
-    return this.auth.register(dto);
+  @Post('invite/accept')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Aceptar invitación: el operador fija su contraseña → ACTIVE' })
+  acceptInvite(@Body() dto: AcceptInviteDto): Promise<{ email: string }> {
+    return this.auth.acceptInvite(dto);
   }
 
   @Public()

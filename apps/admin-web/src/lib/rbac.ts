@@ -17,7 +17,7 @@ export type Permission =
   | 'drivers:approve'
   | 'drivers:suspend'
   | 'operators:view'
-  | 'operators:approve'
+  | 'operators:create'
   | 'panics:view'
   | 'panics:ack'
   | 'panics:resolve'
@@ -57,9 +57,10 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'drivers:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // ops.controller drivers/:id/suspend: suspensión manual (SAFETY). Mismos roles que approve/reject.
   'drivers:suspend': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // ops.controller operators/pending + operators/:id/approve|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
+  // ops.controller GET operators + operators/:id/reinvite|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
   'operators:view': [ADMIN, SUPERADMIN],
-  'operators:approve': [ADMIN, SUPERADMIN],
+  // ops.controller POST operators (crear operador con roles → INVITED + link de invitación; step-up MFA).
+  'operators:create': [ADMIN, SUPERADMIN],
   // security.controller (clase): listar/ver/acusar pánicos (ack hereda los roles de la clase).
   'panics:view': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'panics:ack': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],

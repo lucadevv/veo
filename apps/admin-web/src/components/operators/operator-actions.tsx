@@ -1,159 +1,276 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X } from 'lucide-react';
-import { useOperatorDecision } from '@/lib/api/queries';
-import type { AdminRoleValue, PendingOperator } from '@/lib/api/schemas';
+import { Check, Copy, KeyRound, MoreHorizontal, Send, Ban, XCircle } from 'lucide-react';
+import { useReinviteOperator, useRejectOperator } from '@/lib/api/queries';
+import { operatorStatus } from '@/lib/api/schemas';
+import type { Operator, ReinviteOperatorResult } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { dateTime } from '@/lib/formatters';
+import { stepUp } from '@/lib/api/auth';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { Input } from '@/components/ui/input';
+import { Field } from '@/components/ui/field';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 
 /**
- * Roles asignables desde la UI al aprobar un operador, con etiqueta humana. NO incluye SUPERADMIN
- * (rol raíz, se otorga solo en bootstrap, no auto-servicio). El admin-bff revalida @Roles(ADMIN,SUPERADMIN)
- * server-side; esta lista es solo la UI (que nunca autoriza, solo refleja — MENTORIA capa UI).
+ * Re-emite la invitación de un operador INVITED. El endpoint del bff lleva @RequireStepUpMfa, así que
+ * verificamos TOTP fresco ANTES (mismo patrón que NewOperatorDialog/LiveAccessDialog). Tras reinvitar,
+ * mostramos el nuevo link + vencimiento (con COPY) y mantenemos el diálogo abierto. El backend reenvía
+ * el link por email. El servidor revalida @Roles + step-up.
  */
-const ASSIGNABLE_ROLES: readonly { value: AdminRoleValue; label: string }[] = [
-  { value: 'SUPPORT_L1', label: 'Soporte N1' },
-  { value: 'SUPPORT_L2', label: 'Soporte N2' },
-  { value: 'DISPATCHER', label: 'Despachador' },
-  { value: 'COMPLIANCE_SUPERVISOR', label: 'Cumplimiento' },
-  { value: 'FINANCE', label: 'Finanzas' },
-  { value: 'ADMIN', label: 'Administrador' },
-];
-
-/** Acciones de aprobación (con asignación de roles) / rechazo de un operador. Gated por operators:approve. */
-export function OperatorActions({ operator }: { operator: PendingOperator }) {
-  const user = useSession();
+function ReinviteDialog({ operator, onClose }: { operator: Operator; onClose: () => void }) {
   const { toast } = useToast();
-  const decision = useOperatorDecision();
-  const [open, setOpen] = useState(false);
-  const [roles, setRoles] = useState<Set<AdminRoleValue>>(new Set());
+  const reinvite = useReinviteOperator();
+  const [code, setCode] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ReinviteOperatorResult | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  if (!can(user, 'operators:approve')) {
-    return <span className="text-xs text-ink-subtle">—</span>;
-  }
-
-  function toggle(role: AdminRoleValue) {
-    setRoles((prev) => {
-      const next = new Set(prev);
-      if (next.has(role)) next.delete(role);
-      else next.add(role);
-      return next;
-    });
-  }
-
-  async function handleApprove() {
+  async function submit() {
     setError(null);
     setPending(true);
     try {
-      await decision.mutateAsync({ id: operator.id, decision: 'approve', roles: [...roles] });
-      toast({ tone: 'success', title: 'Operador aprobado' });
-      setOpen(false);
-      setRoles(new Set());
+      await stepUp(code);
+      const res = await reinvite.mutateAsync({ id: operator.id });
+      setResult(res);
+      setCode('');
+      toast({ tone: 'success', title: 'Invitación reenviada', description: operator.email });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo aprobar el operador.');
+      setError(e instanceof Error ? e.message : 'No se pudo reenviar la invitación.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function copyLink() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ tone: 'danger', title: 'No se pudo copiar el enlace' });
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent>
+        {result ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Check className="size-5 text-success" aria-hidden />
+                Invitación reenviada
+              </DialogTitle>
+              <DialogDescription>
+                Nuevo enlace para {operator.email}. También se reenvió por email.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <Field label="Enlace de invitación">
+                <div className="flex items-center gap-2">
+                  <Input readOnly value={result.inviteUrl} className="font-mono text-xs" />
+                  <Button variant="secondary" size="sm" onClick={() => void copyLink()}>
+                    {copied ? (
+                      <Check className="size-4 text-success" aria-hidden />
+                    ) : (
+                      <Copy className="size-4" aria-hidden />
+                    )}
+                    {copied ? 'Copiado' : 'Copiar'}
+                  </Button>
+                </div>
+              </Field>
+              <p className="text-xs text-ink-muted">
+                Vence el <span className="text-ink">{dateTime(result.expiresAt)}</span>.
+              </p>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="primary">Listo</Button>
+              </DialogClose>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="size-5 text-accent" aria-hidden />
+                Reenviar invitación
+              </DialogTitle>
+              <DialogDescription>
+                Se generará un nuevo enlace para {operator.email}. Verifica tu segundo factor.
+              </DialogDescription>
+            </DialogHeader>
+            <Field label="Código TOTP" error={error ?? undefined}>
+              <Input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={8}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                className="text-center font-mono text-lg tracking-[0.4em]"
+                placeholder="••••••"
+              />
+            </Field>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="ghost">Cancelar</Button>
+              </DialogClose>
+              <Button
+                variant="primary"
+                loading={pending}
+                disabled={code.length < 6}
+                onClick={() => void submit()}
+              >
+                Reenviar
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Confirmación controlada de cancelar invitación (INVITED) / suspender operador (ACTIVE). Controlada
+ * (no usa ConfirmDialog, que es uncontrolled-by-trigger) porque se abre desde un ítem del dropdown.
+ */
+function RejectDialog({ operator, onClose }: { operator: Operator; onClose: () => void }) {
+  const { toast } = useToast();
+  const reject = useRejectOperator();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isInvited = operator.status === operatorStatus.enum.INVITED;
+
+  async function confirm() {
+    setError(null);
+    setPending(true);
+    try {
+      await reject.mutateAsync({ id: operator.id });
+      toast({
+        tone: 'success',
+        title: isInvited ? 'Invitación cancelada' : 'Operador suspendido',
+      });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo completar la acción.');
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger asChild>
-          <Button size="sm" variant="primary">
-            <Check className="size-4" aria-hidden />
-            Aprobar
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{isInvited ? 'Cancelar invitación' : 'Suspender operador'}</DialogTitle>
+          <DialogDescription>
+            {isInvited
+              ? `Se cancelará la invitación de ${operator.email}. El enlace dejará de funcionar. Esta acción queda auditada.`
+              : `Se revocará el acceso de ${operator.email} al panel. Esta acción queda auditada.`}
+          </DialogDescription>
+        </DialogHeader>
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-danger">
+            {error}
+          </p>
+        ) : null}
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="ghost">Cancelar</Button>
+          </DialogClose>
+          <Button variant="danger" loading={pending} onClick={() => void confirm()}>
+            {isInvited ? 'Cancelar invitación' : 'Suspender'}
           </Button>
-        </DialogTrigger>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Aprobar operador</DialogTitle>
-            <DialogDescription>
-              Asigna los roles de {operator.email}. Define qué puede ver y operar en el panel.
-            </DialogDescription>
-          </DialogHeader>
-          <fieldset className="flex flex-col gap-2 py-2">
-            <legend className="sr-only">Roles a asignar</legend>
-            {ASSIGNABLE_ROLES.map((role) => {
-              const checked = roles.has(role.value);
-              return (
-                <button
-                  key={role.value}
-                  type="button"
-                  role="checkbox"
-                  aria-checked={checked}
-                  onClick={() => toggle(role.value)}
-                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                    checked
-                      ? 'border-accent bg-accent/10 text-ink'
-                      : 'border-border text-ink-muted hover:border-border-strong'
-                  }`}
-                >
-                  <span>{role.label}</span>
-                  {checked ? <Check className="size-4 text-accent" aria-hidden /> : null}
-                </button>
-              );
-            })}
-          </fieldset>
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setOpen(false)} disabled={pending}>
-              Cancelar
-            </Button>
-            {pending || roles.size === 0 ? (
-              <Button variant="primary" disabled>
-                Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
-              </Button>
-            ) : (
-              <StepUpDialog
-                title="Aprobar operador y asignar roles"
-                description={`Aprobar a ${operator.email} con ${roles.size} ${
-                  roles.size === 1 ? 'rol' : 'roles'
-                } requiere verificación adicional. Esta acción queda auditada.`}
-                trigger={
-                  <Button variant="primary">
-                    Aprobar con {roles.size} {roles.size === 1 ? 'rol' : 'roles'}
-                  </Button>
-                }
-                onVerified={handleApprove}
-              />
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-      <ConfirmDialog
-        trigger={
-          <Button size="sm" variant="secondary">
-            <X className="size-4" aria-hidden />
-            Rechazar
+type RowDialog = 'reinvite' | 'reject' | null;
+
+/**
+ * Acciones por fila de un operador. INVITED → reenviar invitación (step-up) o cancelar; ACTIVE →
+ * suspender/revocar. Gated por `operators:view` (ADMIN/SUPERADMIN); el admin-bff revalida server-side.
+ */
+export function OperatorActions({ operator }: { operator: Operator }) {
+  const user = useSession();
+  const [dialog, setDialog] = useState<RowDialog>(null);
+
+  if (!can(user, 'operators:view')) {
+    return <span className="text-xs text-ink-subtle">—</span>;
+  }
+
+  // SUSPENDED/REJECTED no ofrecen acciones (estado terminal en la UI).
+  const isInvited = operator.status === operatorStatus.enum.INVITED;
+  const isActive = operator.status === operatorStatus.enum.ACTIVE;
+  if (!isInvited && !isActive) {
+    return <span className="text-xs text-ink-subtle">—</span>;
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="ghost" aria-label="Acciones del operador">
+            <MoreHorizontal className="size-4" aria-hidden />
           </Button>
-        }
-        title="Rechazar operador"
-        description={`Se rechazará el alta de ${operator.email}. Esta acción queda auditada.`}
-        confirmLabel="Rechazar"
-        variant="danger"
-        onConfirm={async () => {
-          await decision.mutateAsync({ id: operator.id, decision: 'reject' });
-          toast({ tone: 'success', title: 'Operador rechazado' });
-        }}
-      />
-    </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {isInvited ? (
+            <>
+              <DropdownMenuItem onSelect={() => setDialog('reinvite')}>
+                <Send className="size-4" aria-hidden />
+                Reenviar invitación
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setDialog('reject')}
+                className="text-danger data-[highlighted]:bg-danger/10"
+              >
+                <XCircle className="size-4" aria-hidden />
+                Cancelar invitación
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem
+              onSelect={() => setDialog('reject')}
+              className="text-danger data-[highlighted]:bg-danger/10"
+            >
+              <Ban className="size-4" aria-hidden />
+              Suspender / Revocar
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {dialog === 'reinvite' ? (
+        <ReinviteDialog operator={operator} onClose={() => setDialog(null)} />
+      ) : null}
+
+      {dialog === 'reject' ? (
+        <RejectDialog operator={operator} onClose={() => setDialog(null)} />
+      ) : null}
+    </>
   );
 }

@@ -7,12 +7,17 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { TripSummary, DriverApproval, TripDetail } from '@veo/api-client';
-import { OpsService, type PendingDriver, type PendingOperator } from './ops.service';
+import {
+  OpsService,
+  type PendingDriver,
+  type OperatorSummary,
+  type CreatedOperator,
+} from './ops.service';
 import type { Page } from '../read-model/read-model.service';
 import {
   ListTripsQueryDto,
   ListDriversQueryDto,
-  ApproveOperatorDto,
+  CreateOperatorDto,
   RejectDriverDto,
   SuspendDriverDto,
 } from './dto/ops.dto';
@@ -32,8 +37,11 @@ export class OpsController {
 
   @Get('trips')
   @ApiOperation({ summary: 'Listado/búsqueda de viajes (filtros + paginación cursor)' })
-  listTrips(@Query() query: ListTripsQueryDto): Promise<Page<TripSummary>> {
-    return this.ops.listTrips(query);
+  listTrips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListTripsQueryDto,
+  ): Promise<Page<TripSummary>> {
+    return this.ops.listTrips(user.roles, query);
   }
 
   @Get('trips/:id')
@@ -44,8 +52,11 @@ export class OpsController {
 
   @Get('drivers')
   @ApiOperation({ summary: 'Listado de conductores (read-model)' })
-  listDrivers(@Query() query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
-    return this.ops.listDrivers(query);
+  listDrivers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListDriversQueryDto,
+  ): Promise<Page<DriverApproval>> {
+    return this.ops.listDrivers(user.roles, query);
   }
 
   @Get('drivers/pending')
@@ -93,24 +104,35 @@ export class OpsController {
 
   // ── Gestión de operadores (admin) ──
 
-  @Get('operators/pending')
+  @Get('operators')
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Operadores pendientes de aprobación' })
-  pendingOperators(@CurrentUser() user: AuthenticatedUser): Promise<PendingOperator[]> {
-    return this.ops.listPendingOperators(user);
+  @ApiOperation({ summary: 'Listar todos los operadores (gestión de staff)' })
+  listOperators(@CurrentUser() user: AuthenticatedUser): Promise<OperatorSummary[]> {
+    return this.ops.listOperators(user);
   }
 
-  @Post('operators/:id/approve')
+  @Post('operators')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Aprueba un operador y asigna roles (admin)' })
-  approveOperator(
+  @ApiOperation({ summary: 'Crea un operador (email+roles) → INVITED + link de invitación (admin)' })
+  createOperator(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateOperatorDto,
+  ): Promise<CreatedOperator> {
+    return this.ops.createOperator(user, dto.email, dto.roles);
+  }
+
+  @Post('operators/:id/reinvite')
+  @HttpCode(200)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Re-emite la invitación de un operador aún no aceptada (admin)' })
+  reinviteOperator(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: ApproveOperatorDto,
-  ): Promise<{ id: string; status: string; roles: string[] }> {
-    return this.ops.approveOperator(user, id, dto.roles);
+  ): Promise<{ inviteUrl: string; expiresAt: string }> {
+    return this.ops.reinviteOperator(user, id);
   }
 
   @Post('operators/:id/reject')

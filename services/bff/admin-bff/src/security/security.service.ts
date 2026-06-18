@@ -14,6 +14,7 @@ import {
 import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { GRPC_IDENTITY, GRPC_TRIP, REST_PANIC } from '../infra/tokens';
+import { canSeeIdentity } from '../redaction/redaction.policy';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import type { ListPanicsQueryDto, ResolvePanicDto, PanicEvidenceDto } from './dto/panic.dto';
@@ -99,11 +100,15 @@ export class SecurityService {
         ? this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta).catch(() => null)
         : Promise.resolve(null),
     ]);
+    // REDACCIÓN PII (matriz aprobada): los NOMBRES (pasajero/conductor) son identidad personal →
+    // Compliance+. Sub-Compliance ve `null`. La GEO del pánico STAYS EXACTA para todo el que pueda
+    // ver pánicos (emergencia — sin redacción); `base.geo` no se toca.
+    const identityVisible = canSeeIdentity(identity.roles);
     return {
       ...base,
-      passengerName: passenger?.found ? passenger.name || null : null,
+      passengerName: identityVisible ? (passenger?.found ? passenger.name || null : null) : null,
       driverId,
-      driverName: driver?.found ? driver.name || null : null,
+      driverName: identityVisible ? (driver?.found ? driver.name || null : null) : null,
     };
   }
 

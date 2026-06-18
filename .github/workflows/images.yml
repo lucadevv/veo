@@ -170,5 +170,9 @@ jobs:
           script: |
             cd /opt/veo
             docker compose -f docker-compose.preview.yml pull
+            # Infra primero (postgres debe estar arriba para migrar), luego migraciones, luego servicios.
+            docker compose -f docker-compose.preview.yml up -d postgres redis kafka clickhouse minio
+            # Migra TODAS las DBs (idempotente) ANTES de levantar los servicios → sin drift de schema.
+            bash infra/deploy/migrate-preview.sh
             docker compose -f docker-compose.preview.yml up -d --remove-orphans
             docker image prune -f

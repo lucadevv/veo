@@ -75,7 +75,10 @@ describe('SecurityService', () => {
       record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
     } as unknown as AuditRecorder;
     const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
-    const out = await svc.ack(identity, 'pa1');
+    // Actor COMPLIANCE_SUPERVISOR: este test verifica ENRIQUECIMIENTO+mapeo, no redacción → debe ver
+    // los nombres. (La redacción sub-Compliance se cubre en su propio test).
+    const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
+    const out = await svc.ack(compliance, 'pa1');
     expect(out.status).toBe('ACKNOWLEDGED');
     expect(out.acknowledgedBy).toBe('sec1');
     // ENRIQUECIDO: nombres reales de identity (security: quién está en peligro / quién maneja) + driverId del viaje.
@@ -87,5 +90,34 @@ describe('SecurityService', () => {
       { id: 'panic/t1/clip.mp4', kind: 'video', label: 'clip.mp4', at: panicEntity.triggeredAt },
     ]);
     expect(audit.record).toHaveBeenCalledOnce();
+  });
+
+  it('SUPPORT_L2 (sub-Compliance): redacta nombres a null pero la GEO del pánico STAYS EXACTA', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({ ...panicEntity, status: 'TRIGGERED' }),
+    } as unknown as InternalRestClient;
+    const audit = { record: vi.fn() } as unknown as AuditRecorder;
+    const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
+    // identity por defecto ya es SUPPORT_L2 (sub-Compliance).
+    const out = await svc.getPanic(identity, 'pa1');
+    // IDENTIDAD → null (Compliance+)
+    expect(out.passengerName).toBeNull();
+    expect(out.driverName).toBeNull();
+    // driverId NO es identidad personal (es un id opaco) → se preserva.
+    expect(out.driverId).toBe('drv-1');
+    // GEO de emergencia → EXACTA para todo el que pueda ver pánicos (sin redacción).
+    expect(out.geo).toEqual({ lat: -12.05, lon: -77.04 });
+  });
+
+  it('COMPLIANCE_SUPERVISOR: ve nombres reales sin redactar', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({ ...panicEntity, status: 'TRIGGERED' }),
+    } as unknown as InternalRestClient;
+    const audit = { record: vi.fn() } as unknown as AuditRecorder;
+    const svc = new SecurityService(rest, identityGrpc, tripGrpc, audit, config);
+    const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
+    const out = await svc.getPanic(compliance, 'pa1');
+    expect(out.passengerName).toBe('Ana Pérez');
+    expect(out.driverName).toBe('Khalid Ríos');
   });
 });

@@ -9,12 +9,12 @@ import {
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { AdminService, type AdminTokens } from './admin.service';
+import { AdminService, type AdminTokens, type OperatorSummary } from './admin.service';
 import {
-  AdminRegisterDto,
   AdminLoginDto,
   AdminEnrollConfirmDto,
-  ApproveAdminDto,
+  AcceptInviteDto,
+  CreateOperatorDto,
   StepUpDto,
 } from './dto/admin.dto';
 
@@ -24,10 +24,11 @@ export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
   @Public()
-  @Post('register')
-  @ApiOperation({ summary: 'Auto-registro de operador (queda PENDING)' })
-  register(@Body() dto: AdminRegisterDto): Promise<{ id: string; status: string }> {
-    return this.admin.register(dto.email, dto.password);
+  @Post('invite/accept')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Aceptar invitación: el operador fija su contraseña → ACTIVE' })
+  acceptInvite(@Body() dto: AcceptInviteDto): Promise<{ email: string }> {
+    return this.admin.acceptInvite(dto.token, dto.password);
   }
 
   @Public()
@@ -65,24 +66,36 @@ export class AdminController {
   @ApiBearerAuth()
   @UseGuards(InternalIdentityGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @Get('operators/pending')
-  @ApiOperation({ summary: 'Listar operadores pendientes de aprobación' })
-  listPending(): Promise<{ id: string; email: string; createdAt: Date }[]> {
-    return this.admin.listPending();
+  @Get('operators')
+  @ApiOperation({ summary: 'Listar todos los operadores (gestión de staff)' })
+  listOperators(): Promise<OperatorSummary[]> {
+    return this.admin.listOperators();
   }
 
   @ApiBearerAuth()
   @UseGuards(InternalIdentityGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @Post('operators/:id/approve')
+  @Post('operators')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Aprobar operador y asignar roles' })
-  approve(
+  @ApiOperation({ summary: 'Crear operador (email+roles) → INVITED + link de invitación' })
+  createOperator(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateOperatorDto,
+  ): Promise<{ id: string; inviteToken: string; inviteUrl: string; expiresAt: Date }> {
+    return this.admin.createOperator(user.roles, dto.email, dto.roles);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('operators/:id/reinvite')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Re-emitir la invitación de un operador aún no aceptada' })
+  reinvite(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: ApproveAdminDto,
-  ): Promise<{ id: string; status: string; roles: string[] }> {
-    return this.admin.approve(user.roles, id, dto.roles);
+  ): Promise<{ inviteUrl: string; expiresAt: Date }> {
+    return this.admin.reinvite(user.roles, id);
   }
 
   @ApiBearerAuth()
@@ -91,7 +104,7 @@ export class AdminController {
   @Post('operators/:id/reject')
   @HttpCode(204)
   @ApiOperation({ summary: 'Rechazar operador' })
-  async reject(@Param('id') id: string): Promise<void> {
-    await this.admin.reject(id);
+  async reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    await this.admin.reject(user.roles, user.userId, id);
   }
 }

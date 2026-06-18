@@ -37,6 +37,10 @@ export const envSchema = z.object({
   // Clave para cifrar el secreto TOTP de operadores en reposo (KMS en prod)
   TOTP_ENC_KEY: secret('dev-totp-enc-key-change-me'),
 
+  // URL pública del panel admin-web (NO secreto). Base del link de invitación de operadores
+  // (`${ADMIN_WEB_URL}/accept-invite?token=...`). Requerida: fail-fast si falta.
+  ADMIN_WEB_URL: z.string().url(),
+
   // Días de gracia antes del tombstone por derecho al olvido (BR-S06)
   DELETION_GRACE_DAYS: z.coerce.number().default(30),
 

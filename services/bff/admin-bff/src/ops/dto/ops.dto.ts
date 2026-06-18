@@ -1,6 +1,7 @@
 /** DTOs de los endpoints OPS. */
 import {
   IsArray,
+  IsEmail,
   IsIn,
   IsInt,
   IsOptional,
@@ -83,7 +84,10 @@ export class SuspendDriverDto {
   reason!: string;
 }
 
-export class ApproveOperatorDto {
+export class CreateOperatorDto {
+  @IsEmail()
+  email!: string;
+
   @IsArray()
   @IsIn(Object.values(AdminRole), { each: true })
   roles!: AdminRole[];

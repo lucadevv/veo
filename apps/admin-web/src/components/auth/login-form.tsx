@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, ShieldCheck } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { confirmTotp, login } from '@/lib/api/auth';
 import type { LoginEnrollment } from '@/lib/api/schemas';
 import { Button } from '@/components/ui/button';
@@ -164,18 +165,23 @@ export function LoginForm({ next }: { next: string }) {
 
           {enrollment ? (
             <div className="rounded-md border border-border bg-surface-2 p-4">
-              <dl className="space-y-2 text-xs">
-                {enrollSecret ? (
-                  <div>
-                    <dt className="text-ink-muted">Secreto</dt>
-                    <dd className="break-all font-mono text-ink">{enrollSecret}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt className="text-ink-muted">Enlace otpauth</dt>
-                  <dd className="break-all font-mono text-ink">{enrollment.otpauthUrl}</dd>
+              <div className="mb-3 flex justify-center">
+                <div
+                  className="rounded-md bg-white p-3"
+                  aria-label="Código QR para tu app de autenticación"
+                >
+                  <QRCodeSVG value={enrollment.otpauthUrl} size={176} level="M" />
                 </div>
-              </dl>
+              </div>
+              <p className="mb-2 text-center text-xs text-ink-muted">
+                Escaneá el QR con tu app. ¿No podés escanear? Ingresá el secreto a mano:
+              </p>
+              {enrollSecret ? (
+                <dl className="text-xs">
+                  <dt className="text-ink-muted">Secreto</dt>
+                  <dd className="break-all font-mono text-ink">{enrollSecret}</dd>
+                </dl>
+              ) : null}
             </div>
           ) : null}
 

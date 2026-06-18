@@ -18,6 +18,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Protege todo salvo /login, las rutas /api, y los estáticos de Next.
-  matcher: ['/((?!login|api|_next/static|_next/image|favicon.ico).*)'],
+  // Protege todo salvo /login, /accept-invite (alta de operador por invitación, PÚBLICA), las
+  // rutas /api, y los estáticos de Next.
+  matcher: ['/((?!login|accept-invite|api|_next/static|_next/image|favicon.ico).*)'],
 };
