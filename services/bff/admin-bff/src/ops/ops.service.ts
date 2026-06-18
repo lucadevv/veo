@@ -36,10 +36,19 @@ export interface PendingDriver {
   userId: string;
   licenseNumber: string | null;
 }
-export interface PendingOperator {
+export interface OperatorSummary {
   id: string;
   email: string;
+  status: string;
+  roles: string[];
   createdAt: string;
+}
+
+export interface CreatedOperator {
+  id: string;
+  inviteToken: string;
+  inviteUrl: string;
+  expiresAt: string;
 }
 
 @Injectable()
@@ -189,15 +198,15 @@ export class OpsService {
 
   // ── Operadores ──
 
-  listPendingOperators(identity: AuthUser): Promise<PendingOperator[]> {
-    return this.identityRest.get<PendingOperator[]>('/admin/operators/pending', { identity });
+  listOperators(identity: AuthUser): Promise<OperatorSummary[]> {
+    return this.identityRest.get<OperatorSummary[]>('/admin/operators', { identity });
   }
 
-  async approveOperator(
+  async createOperator(
     identity: AuthUser,
-    operatorId: string,
+    email: string,
     roles: AdminRole[],
-  ): Promise<{ id: string; status: string; roles: string[] }> {
+  ): Promise<CreatedOperator> {
     // Anti-escalada: el actor solo otorga roles de rango ESTRICTAMENTE menor al suyo
     // (excepción: SUPERADMIN→SUPERADMIN). El detalle estructurado va al log/audit, no al body.
     if (!canGrantRoles(identity.roles, roles)) {
@@ -206,15 +215,31 @@ export class OpsService {
         requested: roles,
       });
     }
-    const res = await this.identityRest.post<{ id: string; status: string; roles: string[] }>(
-      `/admin/operators/${operatorId}/approve`,
-      { identity, body: { roles } },
+    const res = await this.identityRest.post<CreatedOperator>('/admin/operators', {
+      identity,
+      body: { email, roles },
+    });
+    await this.audit.record(identity, {
+      action: 'operator.create',
+      resourceType: 'admin_user',
+      resourceId: res.id,
+      payload: { email, roles },
+    });
+    return res;
+  }
+
+  async reinviteOperator(
+    identity: AuthUser,
+    operatorId: string,
+  ): Promise<{ inviteUrl: string; expiresAt: string }> {
+    const res = await this.identityRest.post<{ inviteUrl: string; expiresAt: string }>(
+      `/admin/operators/${operatorId}/reinvite`,
+      { identity },
     );
     await this.audit.record(identity, {
-      action: 'operator.approve',
+      action: 'operator.reinvite',
       resourceType: 'admin_user',
       resourceId: operatorId,
-      payload: { roles },
     });
     return res;
   }

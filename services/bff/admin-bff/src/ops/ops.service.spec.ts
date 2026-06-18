@@ -196,7 +196,7 @@ describe('OpsService.approveDriver', () => {
   });
 });
 
-describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
+describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
   it('ADMIN → [SUPERADMIN]: ForbiddenError 403 que CORTA antes de identityRest.post', async () => {
     const post = vi.fn();
     const record = vi.fn();
@@ -213,7 +213,7 @@ describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
     );
 
     const err = await svc
-      .approveOperator(identity, 'op2', [AdminRole.SUPERADMIN])
+      .createOperator(identity, 'op2@veo.pe', [AdminRole.SUPERADMIN])
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(ForbiddenError);
@@ -221,8 +221,13 @@ describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
-  it('ADMIN → [SUPPORT_L2]: pasa, llama al REST y audita', async () => {
-    const post = vi.fn().mockResolvedValue({ id: 'op2', status: 'ACTIVE', roles: ['SUPPORT_L2'] });
+  it('ADMIN → [SUPPORT_L2]: pasa, llama al REST con email+roles y audita', async () => {
+    const post = vi.fn().mockResolvedValue({
+      id: 'op2',
+      inviteToken: 'tok',
+      inviteUrl: 'http://localhost:5001/accept-invite?token=tok',
+      expiresAt: '2026-06-20T00:00:00.000Z',
+    });
     const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
     const rest = { post } as unknown as InternalRestClient;
     const audit = { record } as unknown as AuditRecorder;
@@ -236,9 +241,14 @@ describe('OpsService.approveOperator · anti-escalada en la capa BFF', () => {
       config,
     );
 
-    const out = await svc.approveOperator(identity, 'op2', [AdminRole.SUPPORT_L2]);
-    expect(out.status).toBe('ACTIVE');
+    const out = await svc.createOperator(identity, 'op2@veo.pe', [AdminRole.SUPPORT_L2]);
+    expect(out.id).toBe('op2');
+    expect(out.inviteUrl).toContain('/accept-invite?token=');
     expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith('/admin/operators', {
+      identity,
+      body: { email: 'op2@veo.pe', roles: [AdminRole.SUPPORT_L2] },
+    });
     expect(record).toHaveBeenCalledOnce();
   });
 });

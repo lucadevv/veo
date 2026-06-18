@@ -9,7 +9,13 @@ import { isMfaFresh, type AuthenticatedUser } from '@veo/auth';
 import type { SessionUser } from '@veo/api-client';
 import { IdentityAuthClient } from './identity-auth.client';
 import { REST_IDENTITY } from '../infra/tokens';
-import type { LoginDto, TotpConfirmDto, RefreshDto, LogoutDto, RegisterDto } from './dto/auth.dto';
+import type {
+  LoginDto,
+  TotpConfirmDto,
+  RefreshDto,
+  LogoutDto,
+  AcceptInviteDto,
+} from './dto/auth.dto';
 
 /** Antigüedad máxima (s) de la verificación MFA para considerarla fresca (igual que StepUpMfaGuard). */
 const MFA_FRESH_MAX_AGE_SEC = 300;
@@ -34,8 +40,8 @@ export class AuthService {
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
   ) {}
 
-  register(dto: RegisterDto): Promise<{ id: string; status: string }> {
-    return this.identityAuth.post('/admin/register', dto);
+  acceptInvite(dto: AcceptInviteDto): Promise<{ email: string }> {
+    return this.identityAuth.post('/admin/invite/accept', dto);
   }
 
   login(dto: LoginDto): Promise<LoginResult> {

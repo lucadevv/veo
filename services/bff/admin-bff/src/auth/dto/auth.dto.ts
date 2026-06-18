@@ -45,9 +45,9 @@ export class LogoutDto {
   refreshToken!: string;
 }
 
-export class RegisterDto {
-  @IsEmail()
-  email!: string;
+export class AcceptInviteDto {
+  @IsString()
+  token!: string;
 
   @IsString()
   @MinLength(10)
