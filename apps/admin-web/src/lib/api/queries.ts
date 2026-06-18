@@ -27,12 +27,13 @@ import {
   energyCatalogView,
   bidFloorView,
   type ReplaceBidFloorRequest,
-  operatorApproval,
+  operator,
+  type CreateOperatorRequest,
+  createOperatorResult,
+  reinviteOperatorResult,
   paginated,
   pendingDriver,
-  pendingOperator,
   panicDetail,
-  type AdminRoleValue,
   type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
   type ReplaceFuelSurchargeRequest,
@@ -186,33 +187,58 @@ export function useDriversPending() {
   });
 }
 
-/* ── Operadores del panel (alta + asignación de roles · solo ADMIN/SUPERADMIN) ── */
-const pendingOperatorList = z.array(pendingOperator);
+/* ── Operadores del panel (alta por invitación · solo ADMIN/SUPERADMIN) ── */
+const operatorList = z.array(operator);
 
+/** Lista TODOS los operadores del panel (INVITED/ACTIVE/SUSPENDED/REJECTED). */
 export function useOperators() {
   return useQuery({
     queryKey: qk.operators,
-    queryFn: ({ signal }) =>
-      apiClient().get('/ops/operators/pending', { schema: pendingOperatorList, signal }),
+    queryFn: ({ signal }) => apiClient().get('/ops/operators', { schema: operatorList, signal }),
   });
 }
 
-export function useOperatorDecision() {
+/**
+ * Crea un operador por invitación (email + roles RBAC) → INVITED + link de invitación. El admin-bff
+ * marca el endpoint con @RequireStepUpMfa: el llamador (NewOperatorDialog) verifica TOTP fresco ANTES
+ * de invocar esta mutación (mismo patrón que LiveAccessDialog). El servidor revalida @Roles + step-up +
+ * anti-escalada (`canGrantRoles`) — la UI solo refleja, nunca autoriza.
+ */
+export function useCreateOperator() {
   const qc = useQueryClient();
   return useMutation({
-    // Aprobar exige los roles a asignar (RBAC); rechazar no lleva cuerpo. El admin-bff revalida
-    // `@Roles(ADMIN, SUPERADMIN)` server-side: la UI solo refleja el permiso, nunca autoriza.
-    mutationFn: (
-      input:
-        | { id: string; decision: 'approve'; roles: AdminRoleValue[] }
-        | { id: string; decision: 'reject' },
-    ) =>
-      input.decision === 'approve'
-        ? apiClient().post(`/ops/operators/${input.id}/approve`, {
-            body: { roles: input.roles },
-            schema: operatorApproval,
-          })
-        : apiClient().post(`/ops/operators/${input.id}/reject`, {}),
+    mutationFn: (input: CreateOperatorRequest) =>
+      apiClient().post('/ops/operators', { body: input, schema: createOperatorResult }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.operators });
+    },
+  });
+}
+
+/**
+ * Re-emite la invitación de un operador aún INVITED (nuevo link + vencimiento). Exige step-up MFA fresco
+ * (el llamador verifica TOTP antes de invocar). El servidor revalida @Roles + step-up.
+ */
+export function useReinviteOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/operators/${input.id}/reinvite`, { schema: reinviteOperatorResult }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.operators });
+    },
+  });
+}
+
+/**
+ * Cancela una invitación (INVITED) o revoca/suspende un operador (ACTIVE). Respuesta 204 vacía (no se
+ * parsea). El éxito refetchea la lista. El admin-bff revalida @Roles(ADMIN, SUPERADMIN) server-side.
+ */
+export function useRejectOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/operators/${input.id}/reject`, {}),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.operators });
     },

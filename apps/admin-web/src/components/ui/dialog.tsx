@@ -16,23 +16,28 @@ export function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-backdrop bg-brand/40 backdrop-brightness-75 data-[state=open]:animate-fade-in" />
-      <DialogPrimitive.Content
-        className={cn(
-          'fixed left-1/2 top-1/2 z-modal w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2',
-          'rounded-lg border border-border bg-surface p-6 shadow-3',
-          'data-[state=open]:animate-scale-in focus:outline-none',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <DialogPrimitive.Close
-          className="absolute right-4 top-4 grid size-8 place-items-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-          aria-label="Cerrar"
+      {/* Centrado por FLEXBOX (no por transform): la animación scale-in setea `transform` con fill
+          `both`, que pisaba el `-translate-x/y-1/2` y dejaba el modal "muy abajo". Con flex, el
+          centrado es independiente del transform → la escala anima sin descentrar. */}
+      <div className="fixed inset-0 z-modal flex items-center justify-center p-4">
+        <DialogPrimitive.Content
+          className={cn(
+            'relative max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto',
+            'rounded-lg border border-border bg-surface p-6 shadow-3',
+            'data-[state=open]:animate-scale-in focus:outline-none',
+            className,
+          )}
+          {...props}
         >
-          <X className="size-4" aria-hidden />
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
+          {children}
+          <DialogPrimitive.Close
+            className="absolute right-4 top-4 grid size-8 place-items-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+            aria-label="Cerrar"
+          >
+            <X className="size-4" aria-hidden />
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </div>
     </DialogPrimitive.Portal>
   );
 }

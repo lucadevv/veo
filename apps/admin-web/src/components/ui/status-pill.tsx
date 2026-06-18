@@ -26,6 +26,7 @@ const WARN = [
   'ACKNOWLEDGED',
   'PARTIALLY_REFUNDED',
   'REFUNDED',
+  'INVITED',
 ];
 const DANGER = [
   'REJECTED',
@@ -42,6 +43,7 @@ const DANGER = [
 const LABELS: Record<string, string> = {
   PENDING: 'Pendiente',
   PENDING_REVIEW: 'Por revisar',
+  INVITED: 'Invitado',
   APPROVED: 'Aprobado',
   REJECTED: 'Rechazado',
   ACTIVE: 'Activo',
