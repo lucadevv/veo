@@ -45,6 +45,8 @@ export const envSchema = z.object({
   S3_BUCKET_VIDEO: z.string().default('veo-video-dev'),
   /// Bucket de avatares del pasajero/conductor. LECTURA PÚBLICA: la publicUrl es accesible sin firma.
   S3_BUCKET_AVATAR: z.string().default('veo-avatars-dev'),
+  /// Bucket de documentos de flota (certificados, licencias). PRIVADO: solo accesible vía URL firmada.
+  S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
   /// Base pública para componer la URL estable del avatar (path-style, coherente con MinIO/forcePathStyle).
   S3_PUBLIC_BASE_URL: z.string().default('http://localhost:9002'),
   /// Tamaño máximo permitido para el avatar, en bytes (BR: el presign no acota el body, se valida en

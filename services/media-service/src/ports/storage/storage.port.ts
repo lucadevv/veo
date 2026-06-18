@@ -10,6 +10,11 @@ export const STORAGE_PORT = Symbol('STORAGE_PORT');
 export interface PresignDownloadInput {
   key: string;
   expiresSeconds: number;
+  /**
+   * Bucket origen. Opcional: por defecto el bucket primario del adapter (video). Se pasa explícito
+   * (p. ej. el bucket de documentos de flota) para no acoplar el dominio a un bucket concreto.
+   */
+  bucket?: string;
 }
 
 export interface PresignUploadInput {

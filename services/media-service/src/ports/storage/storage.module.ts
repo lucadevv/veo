@@ -22,7 +22,19 @@ import {
 import type { Env } from '../../config/env.schema';
 
 interface S3Config {
+  /**
+   * Endpoint INTERNO (server-to-server): el host que ESTE servicio usa para hablar con MinIO/S3
+   * (HeadObject/DeleteObject). En dev es `localhost:9002`; en prod, el endpoint interno del cluster.
+   */
   endpoint: string;
+  /**
+   * Endpoint PÚBLICO (client-reachable): el host que VERÁ el cliente que consume la URL prefirmada.
+   * SigV4 firma el `host` DENTRO de la firma, así que la URL prefirmada DEBE generarse con un cliente
+   * cuyo endpoint sea este host público — no se puede intercambiar el host a posteriori sin romper la
+   * firma (SignatureDoesNotMatch). En dev es la IP LAN del Mac (alcanzable desde el teléfono físico);
+   * en prod, el dominio público del bucket/CDN.
+   */
+  publicEndpoint: string;
   region: string;
   accessKey: string;
   secretKey: string;
@@ -30,22 +42,38 @@ interface S3Config {
   forcePathStyle: boolean;
 }
 
-/** Adapter LIVE: S3/MinIO real. forcePathStyle obligatorio para MinIO. */
+/**
+ * Adapter LIVE: S3/MinIO real. forcePathStyle obligatorio para MinIO.
+ *
+ * DOS clientes por una razón de seguridad/correctitud, no de comodidad:
+ *  - `internalClient` (endpoint = S3_ENDPOINT): operaciones server-to-server reales (HeadObject,
+ *    DeleteObject). Las hace ESTE servicio, que alcanza MinIO por el host interno.
+ *  - `presignClient` (endpoint = S3_PUBLIC_BASE_URL): SOLO para firmar URLs prefirmadas. El cliente
+ *    final (app/teléfono) no alcanza el host interno, y como SigV4 firma el `host`, la URL debe
+ *    nacer firmada contra el host público para ser a la vez alcanzable Y válida.
+ * Misma region/credenciales/forcePathStyle en ambos: lo único que cambia es el host.
+ */
 class S3LiveAdapter implements StoragePort {
-  private readonly client: S3Client;
+  private readonly internalClient: S3Client;
+  private readonly presignClient: S3Client;
 
   constructor(private readonly cfg: S3Config) {
-    this.client = new S3Client({
-      endpoint: cfg.endpoint,
+    const shared = {
       region: cfg.region,
       forcePathStyle: cfg.forcePathStyle,
       credentials: { accessKeyId: cfg.accessKey, secretAccessKey: cfg.secretKey },
-    });
+    } as const;
+    this.internalClient = new S3Client({ ...shared, endpoint: cfg.endpoint });
+    this.presignClient = new S3Client({ ...shared, endpoint: cfg.publicEndpoint });
   }
 
   async presignDownloadUrl(input: PresignDownloadInput): Promise<string> {
-    const command = new GetObjectCommand({ Bucket: this.cfg.bucket, Key: input.key });
-    return getSignedUrl(this.client, command, { expiresIn: input.expiresSeconds });
+    const command = new GetObjectCommand({
+      Bucket: input.bucket ?? this.cfg.bucket,
+      Key: input.key,
+    });
+    // Firma contra el host PÚBLICO: la URL debe ser alcanzable por el cliente final.
+    return getSignedUrl(this.presignClient, command, { expiresIn: input.expiresSeconds });
   }
 
   async presignUploadUrl(input: PresignUploadInput): Promise<string> {
@@ -55,12 +83,14 @@ class S3LiveAdapter implements StoragePort {
       Key: input.key,
       ContentType: input.contentType,
     });
-    return getSignedUrl(this.client, command, { expiresIn: input.expiresSeconds });
+    // Firma contra el host PÚBLICO: la URL debe ser alcanzable por el cliente final.
+    return getSignedUrl(this.presignClient, command, { expiresIn: input.expiresSeconds });
   }
 
   async deleteObject(key: string, bucket?: string): Promise<void> {
     try {
-      await this.client.send(
+      // Operación server-to-server: usa el host INTERNO.
+      await this.internalClient.send(
         new DeleteObjectCommand({ Bucket: bucket ?? this.cfg.bucket, Key: key }),
       );
     } catch (err) {
@@ -72,7 +102,8 @@ class S3LiveAdapter implements StoragePort {
 
   async getObjectSize(key: string, bucket?: string): Promise<number> {
     try {
-      const head = await this.client.send(
+      // Operación server-to-server: usa el host INTERNO.
+      const head = await this.internalClient.send(
         new HeadObjectCommand({ Bucket: bucket ?? this.cfg.bucket, Key: key }),
       );
       return head.ContentLength ?? 0;
@@ -82,12 +113,17 @@ class S3LiveAdapter implements StoragePort {
   }
 }
 
+export { S3LiveAdapter };
+export type { S3Config };
+
 /** Adapter SANDBOX: determinista, sin red. URLs estables para tests. */
 export class StorageSandboxAdapter implements StoragePort {
   private readonly logger = new Logger('StorageSandbox');
 
   async presignDownloadUrl(input: PresignDownloadInput): Promise<string> {
-    return `https://sandbox.s3.local/${input.key}?expires=${input.expiresSeconds}`;
+    // URL determinista (sin red): incluye bucket, key y expiración para tests reproducibles.
+    const bucket = input.bucket ?? 'sandbox';
+    return `https://sandbox.s3.local/download/${bucket}/${input.key}?expires=${input.expiresSeconds}`;
   }
 
   async presignUploadUrl(input: PresignUploadInput): Promise<string> {
@@ -115,6 +151,8 @@ const storageProvider: Provider = {
     }
     return new S3LiveAdapter({
       endpoint: config.getOrThrow<string>('S3_ENDPOINT'),
+      // Host público alcanzable por el cliente final: las URLs prefirmadas se firman contra él.
+      publicEndpoint: config.getOrThrow<string>('S3_PUBLIC_BASE_URL'),
       region: config.getOrThrow<string>('S3_REGION'),
       accessKey: config.getOrThrow<string>('S3_ACCESS_KEY'),
       secretKey: config.getOrThrow<string>('S3_SECRET_KEY'),
