@@ -52,6 +52,44 @@ describe('validatePersonalData', () => {
     }
   });
 
+  it('acepta la fecha de nacimiento ya en ISO yyyy-mm-dd (la que emite el DateField nativo)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '1990-08-15' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe('1990-08-15');
+    }
+  });
+
+  it('rechaza una fecha ISO anterior al año mínimo (1920)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '1919-12-31' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid');
+    }
+  });
+
+  it('rechaza una fecha ISO inexistente (29 feb de año no bisiesto)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '2021-02-29' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid');
+    }
+  });
+
+  it('rechaza una fecha ISO futura', () => {
+    const future = new Date();
+    future.setUTCFullYear(future.getUTCFullYear() + 1);
+    const iso = `${future.getUTCFullYear()}-${String(future.getUTCMonth() + 1).padStart(
+      2,
+      '0',
+    )}-${String(future.getUTCDate()).padStart(2, '0')}`;
+    const result = validatePersonalData({ ...basePersonal, birthdate: iso });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_future');
+    }
+  });
+
   it('rechaza fecha de nacimiento futura', () => {
     const future = new Date();
     future.setUTCFullYear(future.getUTCFullYear() + 1);

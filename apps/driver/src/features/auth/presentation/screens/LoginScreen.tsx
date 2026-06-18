@@ -343,6 +343,9 @@ export const LoginScreen = (): React.JSX.Element => {
               loading={requestOtp.isPending}
               onPress={onRequest}
             />
+            <Text variant="footnote" color="inkSubtle" align="center">
+              {t('auth.newDriverHint')}
+            </Text>
           </Reveal>
         </View>
       ) : (

@@ -15,8 +15,16 @@ import type { EarningsRepository } from '../../features/earnings/domain';
 import { HttpEarningsRepository } from '../../features/earnings/data';
 import type { ProfileRepository } from '../../features/profile/domain';
 import { HttpProfileRepository } from '../../features/profile/data';
-import type { DocumentsRepository } from '../../features/documents/domain';
-import { HttpDocumentsRepository } from '../../features/documents/data';
+import type {
+  DocumentsRepository,
+  DocumentUploader,
+  ImagePickerService,
+} from '../../features/documents/domain';
+import {
+  HttpDocumentsRepository,
+  HttpDocumentUploader,
+  nativeImagePickerService,
+} from '../../features/documents/data';
 import type { RegistrationRepository } from '../../features/registration/domain';
 import { HttpRegistrationRepository } from '../../features/registration/data';
 import type { ChatRepository } from '../../features/chat/domain';
@@ -56,6 +64,10 @@ export interface AppContainer {
   foregroundService: ForegroundServicePort;
   /** Re-login biométrico local (Face ID/huella) sobre Keychain/Keystore. */
   localAuth: LocalAuthService;
+  /** Subida del binario de documentos: presign por el BFF + PUT crudo directo al almacén soberano. */
+  documentUploader: DocumentUploader;
+  /** Captura/selección de imagen (cámara o galería) para el binario de documentos. */
+  imagePicker: ImagePickerService;
 }
 
 /**
@@ -94,6 +106,10 @@ function buildContainer(): AppContainer {
     repositories,
     foregroundService: nativeForegroundService,
     localAuth: keychainLocalAuthService,
+    // El uploader usa el MISMO httpClient autenticado SOLO para el presign; el PUT del binario va
+    // por `fetch` crudo (sin el Bearer del BFF) que el uploader inyecta por defecto.
+    documentUploader: new HttpDocumentUploader(httpClient),
+    imagePicker: nativeImagePickerService,
   };
 }
 

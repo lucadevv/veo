@@ -6,6 +6,7 @@ export {
   IdentityVerificationScreen,
   UnderReviewScreen,
   RejectedScreen,
+  RegistrationGateRetryScreen,
 } from './screens';
 export { useRegistrationStore, REGISTRATION_TOTAL_STEPS } from './state/registrationStore';
 export { FaceCaptureProvider, useFaceCapture } from './providers/FaceCaptureProvider';

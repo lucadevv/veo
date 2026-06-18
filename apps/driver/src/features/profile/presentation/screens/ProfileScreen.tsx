@@ -86,17 +86,20 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
             />
           </Appear>
 
-          {/* Aviso de cumplimiento según el estado real de documentación. */}
+          {/* Aviso de cumplimiento según el CICLO DE VIDA real de la documentación:
+              faltan por subir (warn) → enviados, en revisión (info) → todos aprobados (success). */}
           <Appear delay={50}>
-            {!data.compliance.compliant ? (
+            {data.compliance.missing.length > 0 ? (
               <Banner
                 tone="warn"
                 title={t('profile.complianceMissing', {
                   items: data.compliance.missing.join(', '),
                 })}
               />
-            ) : (
+            ) : data.compliance.allApproved ? (
               <Banner tone="success" title={t('profile.complianceOk')} />
+            ) : (
+              <Banner tone="info" title={t('profile.complianceInReview')} />
             )}
           </Appear>
 

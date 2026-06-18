@@ -17,8 +17,9 @@ import {
 import {
   useOnboardLicense,
   useRegistrationDocuments,
-  useSubmitRegistrationDocument,
+  useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
+import { useImagePicker } from '../../../../core/di/useDi';
 import {
   DocumentUploadCard,
   RegistrationDocumentSheet,
@@ -26,7 +27,10 @@ import {
   RegistrationProgress,
   type DocumentCardTone,
 } from '../components';
-import type { RegistrationDocumentInput } from '../components/RegistrationDocumentSheet';
+import type {
+  DocumentUploadState,
+  RegistrationDocumentInput,
+} from '../components/RegistrationDocumentSheet';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'Documents'>;
 
@@ -73,12 +77,15 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
 
   // Rehidrata el estado real de los documentos (chips reflejan `simpleStatus`).
   const serverDocs = useRegistrationDocuments();
-  const submitDocument = useSubmitRegistrationDocument();
+  const uploadDocument = useUploadAndRegisterDocument();
   const onboardLicense = useOnboardLicense();
+  const imagePicker = useImagePicker();
 
   // Documento cuyo sheet de captura está abierto (null = cerrado).
   const [activeType, setActiveType] = useState<RegistrationDocumentType | null>(null);
   const [submitError, setSubmitError] = useState<unknown>(null);
+  // Estado de la subida del documento ACTIVO (máquina honesta: idle/uploading/success/error).
+  const [uploadState, setUploadState] = useState<DocumentUploadState>('idle');
 
   const statusOf = (type: RegistrationDocumentType) =>
     documents.find((d) => d.type === type)?.status ?? 'pending';
@@ -98,15 +105,34 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const activeDoc = DOCS.find((d) => d.type === activeType) ?? null;
 
+  /** Abre el sheet de un documento, reiniciando el estado de subida y el error previo. */
+  const openDocument = (type: RegistrationDocumentType) => {
+    setSubmitError(null);
+    setUploadState('idle');
+    setActiveType(type);
+  };
+
+  /** Cierra el sheet (solo si no hay una subida en curso). */
+  const closeSheet = () => {
+    if (uploadState === 'uploading') {
+      return;
+    }
+    setActiveType(null);
+    setUploadState('idle');
+  };
+
   const onSubmitDocument = async (input: RegistrationDocumentInput) => {
     if (!activeType) {
       return;
     }
     setSubmitError(null);
+    setUploadState('uploading');
     try {
-      // Registra el documento (queda en revisión en fleet).
-      await submitDocument.mutateAsync({
+      // SUBE el binario al almacén soberano y REGISTRA el documento con su `fileS3Key` (queda en
+      // revisión en fleet). El flujo solo registra si el PUT del binario fue OK (sin éxito falso).
+      await uploadDocument.mutateAsync({
         type: registrationDocTypeToBackend(activeType),
+        file: input.file,
         documentNumber: input.documentNumber,
         ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
       });
@@ -117,11 +143,17 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
           licenseExpiresAt: input.expiresAtIso,
         });
       }
-      // Marca el avance local (permite continuar el wizard) y refresca los chips.
+      // Éxito real: marca el avance local (permite continuar el wizard) y refresca los chips.
       setDocumentStatus(activeType, 'uploaded');
-      setActiveType(null);
+      setUploadState('success');
+      // Cierra el sheet tras un breve instante para que el conductor vea el check de éxito.
+      setTimeout(() => {
+        setActiveType((current) => (current === activeType ? null : current));
+        setUploadState('idle');
+      }, 900);
     } catch (e) {
       setSubmitError(e);
+      setUploadState('error');
     }
   };
 
@@ -140,7 +172,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
     navigation.navigate('IdentityVerification');
   };
 
-  const submitting = submitDocument.isPending || onboardLicense.isPending;
+  const submitting = uploadDocument.isPending || onboardLicense.isPending;
 
   return (
     <SafeScreen
@@ -198,10 +230,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
                   accessibilityLabel={t('registration.documents.uploadAccessibility', {
                     document: label,
                   })}
-                  onPress={() => {
-                    setSubmitError(null);
-                    setActiveType(doc.type);
-                  }}
+                  onPress={() => openDocument(doc.type)}
                 />
               </Reveal>
             );
@@ -216,15 +245,20 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         </Reveal>
       </View>
 
-      <RegistrationDocumentSheet
-        visible={activeDoc !== null}
-        onClose={() => setActiveType(null)}
-        documentLabel={activeDoc ? t(activeDoc.labelKey) : ''}
-        requireExpiry={activeType === 'LICENSE'}
-        submitting={submitting}
-        errorMessage={submitError ? toErrorMessage(submitError, t) : undefined}
-        onSubmit={onSubmitDocument}
-      />
+      {activeDoc ? (
+        <RegistrationDocumentSheet
+          visible
+          onClose={closeSheet}
+          documentLabel={t(activeDoc.labelKey)}
+          // El tipo CANÓNICO selecciona la config contextual del formulario en el sheet (etiqueta del
+          // número propia + si el documento vence). El mapeo es el mismo que viaja al backend.
+          documentType={registrationDocTypeToBackend(activeDoc.type)}
+          uploadState={uploadState}
+          errorMessage={submitError ? toErrorMessage(submitError, t) : undefined}
+          onPick={(source) => imagePicker.pick(source)}
+          onSubmit={onSubmitDocument}
+        />
+      ) : null}
     </SafeScreen>
   );
 };

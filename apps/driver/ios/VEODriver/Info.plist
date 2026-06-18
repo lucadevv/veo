@@ -32,7 +32,9 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>VEO usa la cámara para la verificación facial al iniciar turno y para la grabación de seguridad durante el viaje.</string>
+	<string>VEO usa la cámara para la verificación facial al iniciar turno, para la grabación de seguridad durante el viaje y para fotografiar tus documentos del registro.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>VEO accede a tus fotos para que puedas adjuntar imágenes de tus documentos del registro.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>VEO usa Face ID para verificar tu identidad de forma segura al iniciar el turno.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

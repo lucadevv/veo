@@ -23,6 +23,11 @@ export type RootStackParamList = {
   UnderReview: undefined;
   /** Alta RECHAZADA: muestra el motivo + corregir-y-reenviar (resubmit). Fuera del grupo wizard. */
   Rejected: undefined;
+  /**
+   * Reintento del gate de alta: el perfil del conductor (`GET /drivers/me`) no resolvió por un error
+   * NO definitivo (red / 5xx) y nunca se resolvió antes. La sesión sigue válida; se ofrece reintentar.
+   */
+  RegistrationGateRetry: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   ShiftStart: undefined;
   BiometricEnroll: undefined;

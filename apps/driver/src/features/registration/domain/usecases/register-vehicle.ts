@@ -10,6 +10,9 @@ import type { VehicleData, VehicleRegisterInput, VehicleView } from '../entities
 export type VehicleFieldError =
   | 'plate_required'
   | 'plate_invalid'
+  // Conflicto del servidor (409): la placa pertenece a OTRO conductor. La idempotencia del backend ya
+  // deja pasar la placa PROPIA, así que un 409 que llega a la app es siempre "placa ajena".
+  | 'plate_taken'
   | 'model_not_selected'
   | 'year_invalid';
 

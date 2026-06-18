@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
-import { GetProfileUseCase } from '../../../profile/domain';
+import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 import { mapProfileToRegistrationStatus } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 
@@ -22,21 +22,32 @@ export interface RegistrationGate {
    * defecto ni provocar parpadeos.
    */
   resolving: boolean;
+  /**
+   * `true` cuando la resolución del alta falló con un error NO definitivo (red / 5xx / 429, etc.) y
+   * nunca se resolvió antes. El `RootNavigator` debe mostrar una pantalla de reintento — NO un banner
+   * de error de login ni un dead-end, y SIN limpiar la sesión (los tokens son válidos; lo único que
+   * falló fue `GET /drivers/me`). Un 404 NO entra acá: ese se mapea a `forceWizard()` (alta nueva).
+   */
+  needsRetry: boolean;
+  /** Reintenta resolver el perfil del conductor (recupera del estado `needsRetry`). */
+  retry(): void;
 }
 
 /**
  * Rehidrata `registrationStatus` desde `GET /drivers/me` tras autenticar y lo sincroniza en el
  * store (`applyBackendStatus`). Reutiliza el `ProfileRepository` por DI (abstracción) y el mapeo de
  * dominio. La conmutación de pantallas la hace el `RootNavigator` por estado (no imperativa): este
- * hook solo resuelve el estado y expone `resolving` para evitar parpadeos.
+ * hook solo resuelve el estado y expone `resolving`/`needsRetry` para evitar parpadeos y dead-ends.
  *
- * Fallback de demo: si la llamada falla y nunca se resolvió antes, se conserva el `status` local
- * persistido (override de demostración) sin bloquear. TODO(backend): cuando el endpoint sea estable
- * podríamos endurecer el fallback (p. ej. forzar re-login o reintento visible).
+ * Es además quien compone el `user` de la sesión para el conductor EXISTENTE: como el login ya NO
+ * fetchea el perfil (un conductor nuevo da 404 y eso debe ir al wizard, no a un error), el `user` de
+ * sesión se deriva acá del perfil resuelto (`profileToSessionUser`). Las pantallas que leen
+ * `session.user` (tabs/home, perfil) lo obtienen una vez que el gate resuelve.
  */
 export function useRegistrationGate(): RegistrationGate {
   const { profile } = useRepositories();
   const sessionStatus = useSessionStore((s) => s.status);
+  const setUser = useSessionStore((s) => s.setUser);
   const applyBackendStatus = useRegistrationStore((s) => s.applyBackendStatus);
   const forceWizard = useRegistrationStore((s) => s.forceWizard);
   const resolvedFromBackend = useRegistrationStore((s) => s.statusResolvedFromBackend);
@@ -56,19 +67,25 @@ export function useRegistrationGate(): RegistrationGate {
     if (data) {
       // Sincroniza el cache del servidor → store de dominio mediante una acción (no setState suelto).
       applyBackendStatus(mapProfileToRegistrationStatus(data));
+      // Compone el `user` de sesión del conductor existente (el login ya no lo fetchea).
+      setUser(profileToSessionUser(data));
     } else if (isError && isNotFound(error)) {
       // 404 definitivo ⇒ el conductor no existe en el backend: SIEMPRE wizard. No caemos al `status`
       // local persistido (que por la fuga de logout podía quedar `approved` y meter a un conductor
       // nuevo a las tabs sin aprobación). `forceWizard` descarta cualquier estado resuelto heredado.
       forceWizard();
     }
-  }, [data, isError, error, applyBackendStatus, forceWizard]);
+  }, [data, isError, error, applyBackendStatus, forceWizard, setUser]);
 
   // Solo "resolviendo" si el conductor está autenticado, aún no hay confirmación del backend y la
-  // query sigue en vuelo (sin error). Ante error sin resolución previa, dejamos de cargar y se usa
-  // el `status` local como fallback de demo (salvo el 404, que ya fuerza wizard arriba).
+  // query sigue en vuelo (sin error).
   const resolving =
     sessionStatus === 'authenticated' && !resolvedFromBackend && query.isLoading && !query.isError;
 
-  return { resolving };
+  // Error NO definitivo (no es 404) sin resolución previa ⇒ pantalla de reintento. La sesión sigue
+  // válida (tokens OK); lo único que falló fue resolver el perfil. NUNCA limpiamos la sesión acá.
+  const needsRetry =
+    sessionStatus === 'authenticated' && !resolvedFromBackend && isError && !isNotFound(error);
+
+  return { resolving, needsRetry, retry: () => void query.refetch() };
 }

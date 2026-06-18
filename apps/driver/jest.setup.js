@@ -49,6 +49,31 @@ jest.mock('@rnmapbox/maps', () => {
   };
 });
 
+// react-native-image-picker: el SDK se distribuye como ESM y arrastra el módulo nativo de cámara,
+// que no existe en Jest. Lo importa transitivamente el contenedor de DI (picker de documentos), así
+// que cualquier test que toque el contenedor lo necesita mockeado. `launchCamera`/`launchImageLibrary`
+// devuelven "cancelado" por defecto; los tests que ejercitan la captura lo sobre-mockean.
+jest.mock('react-native-image-picker', () => ({
+  launchCamera: jest.fn().mockResolvedValue({ didCancel: true }),
+  launchImageLibrary: jest.fn().mockResolvedValue({ didCancel: true }),
+}));
+
+// @react-native-community/datetimepicker: el picker nativo de fecha no existe en Jest. El default
+// export es el componente (iOS) y `DateTimePickerAndroid.open` la API imperativa (Android). Mockeamos
+// el componente como passthrough (no renderiza nada) y `open`/`dismiss` como no-ops; los tests que
+// ejercitan la confirmación de fecha invocan los callbacks directamente (lógica ISO ↔ Date, no nativa).
+jest.mock('@react-native-community/datetimepicker', () => {
+  const noop = () => null;
+  return {
+    __esModule: true,
+    default: noop,
+    DateTimePickerAndroid: {
+      open: jest.fn(),
+      dismiss: jest.fn().mockResolvedValue(true),
+    },
+  };
+});
+
 // react-native-keychain: almacén seguro nativo no disponible en Jest.
 jest.mock('react-native-keychain', () => ({
   getSupportedBiometryType: jest.fn().mockResolvedValue(null),

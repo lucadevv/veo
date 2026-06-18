@@ -1,3 +1,4 @@
+import { FleetDocumentStatus } from '@veo/shared-types';
 import type { DriverProfileView } from '@veo/api-client';
 import type { RegistrationStatus } from '../entities';
 
@@ -25,44 +26,49 @@ function isApproved(raw: string): boolean {
 
 /**
  * Proyecta el perfil agregado del conductor (`GET /drivers/me`) al estado de alta que conmuta la
- * navegación raíz. Reglas (documentadas por intención de negocio):
+ * navegación raíz. Modela el CICLO DE VIDA REAL de cada documento requerido, que tiene TRES estados:
+ * no-enviado → enviado/PENDING_REVIEW (esperando al operador) → aprobado/VALID. El bug histórico
+ * confundía "faltante" con "enviado pero en revisión" y atrapaba al conductor en el wizard.
  *
- *  1. RECHAZO → `rejected`: si el KYC o los antecedentes están rechazados, el conductor debe
- *     corregir su alta (vuelve al wizard para re-subir lo observado).
- *  2. APROBADO → `approved`: documentación COMPLETA (`compliance.compliant`) y ni KYC ni
- *     antecedentes rechazados ⇒ entra a la app (tabs). Es la regla que evita "atrapar" a un
- *     conductor ya aprobado en el wizard solo porque el estado local venía en `not_started`.
- *  3. EN REVISIÓN → `in_review`: ya envió lo necesario pero el backend aún valida — hay documentos
- *     en revisión, o el KYC/antecedentes no están ni aprobados ni rechazados (pendientes), o no
- *     faltan documentos pero todavía no está marcado como `compliant`.
- *  4. WIZARD → `not_started`: faltan documentos (`compliance.missing` no vacío) ⇒ aún no completó el
- *     alta. El store decide si conserva el progreso local (`in_progress`) o arranca el wizard.
+ * Reglas (en orden, documentadas por intención de negocio):
+ *
+ *  1. RECHAZO → `rejected`: KYC o antecedentes rechazados, O algún documento requerido rechazado por
+ *     el operador (`compliance.rejected`). El conductor debe corregir-y-reenviar.
+ *  2. WIZARD → `not_started`: falta SUBIR algún documento requerido (`compliance.missing` no vacío,
+ *     i.e. genuinamente ausente). El store decide si conserva progreso local (`in_progress`).
+ *  3. APROBADO → `approved`: TODOS los documentos requeridos aprobados (`compliance.allApproved`) +
+ *     KYC verificado + antecedentes CLEARED ⇒ entra a la app (tabs).
+ *  4. EN REVISIÓN → `in_review`: ya envió TODO lo requerido (`compliance.submittedAllRequired`) pero
+ *     el backend aún valida — hay documentos en revisión o los antecedentes/KYC siguen pendientes.
+ *     Este es el camino del conductor con 3 docs PENDING_REVIEW + backgroundCheck PENDING.
+ *
+ * Nota: la biometría (rostro de referencia) se enrola en el paso 4 del wizard ANTES de poder enviar
+ * los documentos, así que "todos los documentos enviados" implica que el enrolamiento ya ocurrió; no
+ * hace falta un check biométrico separado para `in_review` (el perfil no expone `faceEnrolledAt`).
  */
 export function mapProfileToRegistrationStatus(profile: DriverProfileView): RegistrationStatus {
   const { kycStatus, backgroundCheckStatus, compliance, documents } = profile;
 
-  // 1) Rechazo de identidad/antecedentes: el conductor debe corregir.
-  if (isRejected(kycStatus) || isRejected(backgroundCheckStatus)) {
+  // 1) Rechazo: identidad/antecedentes rechazados, o algún documento requerido rechazado por el operador.
+  const hasRejectedDoc =
+    compliance.rejected.length > 0 ||
+    documents.some((doc) => doc.status === FleetDocumentStatus.REJECTED);
+  if (isRejected(kycStatus) || isRejected(backgroundCheckStatus) || hasRejectedDoc) {
     return 'rejected';
   }
 
-  // 4) Faltan documentos requeridos ⇒ todavía no terminó el alta.
-  if (compliance.missing.length > 0) {
+  // 2) Falta SUBIR algún documento requerido (presencia) ⇒ todavía no terminó el alta.
+  if (!compliance.submittedAllRequired) {
     return 'not_started';
   }
 
-  // 2) Documentación al día + identidad/antecedentes sin rechazo ⇒ aprobado.
+  // 3) Todo aprobado + identidad/antecedentes verificados ⇒ aprobado (entra a la app).
   const identityClear = isApproved(kycStatus) && isApproved(backgroundCheckStatus);
-  if (compliance.compliant && identityClear) {
+  if (compliance.allApproved && identityClear) {
     return 'approved';
   }
 
-  // 3) Cumple documentación pero falta validación (docs en revisión o KYC/antecedentes pendientes).
-  const hasDocsInReview = documents.some((doc) => !doc.ok);
-  if (compliance.compliant || hasDocsInReview || !identityClear) {
-    return 'in_review';
-  }
-
-  // Por defecto, conservador: en revisión (nunca mandamos al wizard si no faltan documentos).
+  // 4) Envió todo lo requerido pero falta validación (docs en revisión o KYC/antecedentes pendientes).
+  //    Conservador: si no faltan documentos por subir y no hay rechazo, NUNCA volvemos al wizard.
   return 'in_review';
 }

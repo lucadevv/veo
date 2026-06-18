@@ -3,7 +3,7 @@
  * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
  * global de la solicitud que conmuta la navegación.
  */
-import { VehicleClass } from '@veo/shared-types';
+import { FleetDocumentType, VehicleClass } from '@veo/shared-types';
 import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,
@@ -85,23 +85,42 @@ export interface VehicleData {
   model: string;
 }
 
-/** Documentos requeridos en el alta (paso 3). */
+/**
+ * Documentos requeridos en el alta (paso 3). Es una etiqueta INTERNA, app-friendly, del wizard
+ * (`VEHICLE_REGISTRATION` = "tarjeta de propiedad" en la UI); el valor que viaja al backend NO es
+ * este label sino el `FleetDocumentType` canónico que devuelve `registrationDocTypeToBackend`.
+ */
 export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION';
 
 /**
- * Mapea el tipo del wizard al `type` que espera el backend (`addDocumentRequest.type` /
- * `driverDocument.type`, catálogo de fleet). La licencia se registra como `LICENSE_A1`.
+ * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige en el paso 3 (los tres documentos del
+ * wizard: licencia A1, SOAT y tarjeta de propiedad). Es el rango EXACTO de `registrationDocTypeToBackend`
+ * — tiparlo así (en vez del enum completo) deja que la presentación derive su config contextual del
+ * formulario sin castear, y que un tipo nuevo del alta sea un error de compilación.
  */
-export function registrationDocTypeToBackend(type: RegistrationDocumentType): string {
+export type RegistrationFleetDocumentType =
+  | typeof FleetDocumentType.LICENSE_A1
+  | typeof FleetDocumentType.SOAT
+  | typeof FleetDocumentType.PROPERTY_CARD;
+
+/**
+ * Mapea la etiqueta del wizard al `FleetDocumentType` CANÓNICO de `@veo/shared-types` que validan
+ * el `addDocumentRequest.type` / `documentUploadTicketRequest.type` (el presign del driver-bff hace
+ * `@IsEnum(FleetDocumentType)`). El retorno está tipado al subconjunto del alta y el `switch` es
+ * exhaustivo (sin `default`), así que cualquier futura deriva del label es un ERROR DE COMPILACIÓN, no
+ * un 400 en runtime. La "tarjeta de propiedad" es `PROPERTY_CARD` (NO el string mágico
+ * `VEHICLE_REGISTRATION`, que no existe en el enum). La licencia se registra como `LICENSE_A1`.
+ */
+export function registrationDocTypeToBackend(
+  type: RegistrationDocumentType,
+): RegistrationFleetDocumentType {
   switch (type) {
     case 'LICENSE':
-      return 'LICENSE_A1';
+      return FleetDocumentType.LICENSE_A1;
     case 'SOAT':
-      return 'SOAT';
+      return FleetDocumentType.SOAT;
     case 'VEHICLE_REGISTRATION':
-      return 'VEHICLE_REGISTRATION';
-    default:
-      return type;
+      return FleetDocumentType.PROPERTY_CARD;
   }
 }
 

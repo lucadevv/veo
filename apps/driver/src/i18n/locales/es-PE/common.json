@@ -45,13 +45,14 @@
     "profileLoadFailed": "No pudimos cargar tu perfil de conductor.",
     "tagline": "Maneja. Gana. Protegido.",
     "loginTitle": "Ingresa a\nVEO Conductores",
-    "loginSubtitle": "Tu cuenta de socio conductor",
+    "loginSubtitle": "Ingresa tu número para entrar o crear tu cuenta",
+    "newDriverHint": "¿Primera vez? Ingresa tu número y te damos de alta al instante.",
     "faceIdTitle": "Ingresar con Face ID",
     "faceIdBody": "Accede de forma rápida y segura",
     "useCodeInstead": "Usar código en su lugar",
     "phoneDivider": "O ingresa tu número de celular",
     "phonePlaceholder": "987 654 321",
-    "loginHelper": "Te enviaremos un código de verificación para iniciar sesión."
+    "loginHelper": "Te enviaremos un código. Si eres nuevo, con tu número creas tu cuenta de conductor."
   },
   "onboarding": {
     "skip": "Saltar",
@@ -76,6 +77,11 @@
     "stepOf": "Paso {{current}} de {{total}}",
     "progressLabel": "Progreso del registro: paso {{current}} de {{total}}",
     "back": "Volver al paso anterior",
+    "gateRetry": {
+      "title": "No pudimos cargar tu cuenta",
+      "body": "Revisa tu conexión a internet e inténtalo de nuevo. Tu sesión sigue activa.",
+      "retry": "Reintentar"
+    },
     "personal": {
       "title": "Tus datos personales",
       "subtitle": "Como aparecen en tu DNI.",
@@ -84,7 +90,7 @@
       "dniLabel": "DNI",
       "dniPlaceholder": "70 123 456",
       "birthdateLabel": "Fecha de nacimiento",
-      "birthdatePlaceholder": "DD / MM / AAAA",
+      "birthdatePlaceholder": "Selecciona tu fecha",
       "errors": {
         "name_required": "Ingresa tu nombre completo",
         "name_too_long": "El nombre es demasiado largo (máx. 120 caracteres)",
@@ -131,6 +137,7 @@
       "errors": {
         "plate_required": "Ingresa la placa",
         "plate_invalid": "Placa inválida (formato ABC-123)",
+        "plate_taken": "Esa placa ya está registrada por otro conductor",
         "model_not_selected": "Elige tu modelo del catálogo",
         "year_invalid": "Ingresa un año válido (desde 2005)"
       },
@@ -156,13 +163,35 @@
       "formats": "Formatos aceptados: JPG, PNG o PDF. Tamaño máx. 10 MB.",
       "uploadAccessibility": "Subir {{document}}",
       "numberLabel": "Número del documento",
+      "number": {
+        "LICENSE_A1": {
+          "label": "N° de licencia",
+          "placeholder": "Ingresa el número de tu licencia"
+        },
+        "SOAT": {
+          "label": "N° de póliza (SOAT)",
+          "placeholder": "Ingresa el número de póliza del SOAT"
+        },
+        "PROPERTY_CARD": {
+          "label": "N° de tarjeta de propiedad",
+          "placeholder": "Ingresa el número de tu tarjeta de propiedad"
+        }
+      },
       "numberRequired": "Ingresa el número del documento",
       "expiryLabel": "Fecha de vencimiento",
+      "expiryPlaceholder": "Selecciona la fecha",
       "expiryHelper": "Formato AAAA-MM-DD, ej. 2026-12-31",
       "expiryInvalid": "Usa el formato AAAA-MM-DD",
       "expiryRequired": "Ingresa la fecha de vencimiento",
       "save": "Guardar",
-      "reviewNote": "El documento quedará en revisión. La carga del archivo se habilitará en una próxima actualización."
+      "takePhoto": "Tomar foto",
+      "fromGallery": "Elegir de galería",
+      "noFile": "Toma una foto o elige una imagen del documento",
+      "uploading": "Subiendo…",
+      "uploadSuccess": "Documento subido",
+      "permissionDenied": "Necesitamos permiso de cámara para tomar la foto. Habilítalo en Ajustes.",
+      "captureFailed": "No se pudo capturar la imagen. Inténtalo de nuevo.",
+      "reviewNote": "El archivo se sube de forma segura y el documento queda en revisión."
     },
     "kyc": {
       "title": "Verifica tu identidad",
@@ -445,6 +474,7 @@
     "documentInvalid": "Requiere atención",
     "complianceOk": "Documentación al día",
     "complianceMissing": "Faltan documentos: {{items}}",
+    "complianceInReview": "Documentos en revisión. Te avisamos cuando estén aprobados.",
     "noDocuments": "Todavía no cargaste documentos.",
     "logout": "Cerrar sesión",
     "logoutConfirmTitle": "¿Cerrar sesión?",
@@ -505,9 +535,9 @@
     "type": {
       "LICENSE_A1": "Licencia A1",
       "SOAT": "SOAT",
-      "VEHICLE_REGISTRATION": "Tarjeta de propiedad",
+      "PROPERTY_CARD": "Tarjeta de propiedad",
       "ITV": "Revisión técnica (ITV)",
-      "CRIMINAL_RECORD": "Antecedentes"
+      "BACKGROUND_CHECK": "Antecedentes"
     },
     "form": {
       "title": "Registrar documento",

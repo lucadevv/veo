@@ -53,6 +53,13 @@ export interface SessionState {
   setSession(payload: { tokens: SessionTokens; user: MobileSessionUser }): void;
   /** Actualiza solo los tokens (usado por el refresh del cliente HTTP). */
   setTokens(tokens: SessionTokens): void;
+  /**
+   * Marca la sesión como `authenticated` SIN componer aún el `user`. La usa el login tras verificar
+   * el OTP: deja la sesión autenticada para que `useRegistrationGate` resuelva el perfil (y, con él,
+   * el `user` de sesión + el estado del alta). Un conductor nuevo (404 en `GET /drivers/me`) no tiene
+   * perfil, así que el login NO puede fetchearlo sin romper el flujo hacia el wizard.
+   */
+  setAuthenticated(): void;
   /** Actualiza el usuario de sesión (p. ej. tras refrescar el perfil del conductor). */
   setUser(user: MobileSessionUser): void;
   /** Limpia la sesión por logout explícito del conductor. */
@@ -103,6 +110,10 @@ export const useSessionStore = create<SessionState>((set) => ({
     secureStore.setString(SecureKey.AccessToken, tokens.accessToken);
     secureStore.setString(SecureKey.RefreshToken, tokens.refreshToken);
     set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+  },
+
+  setAuthenticated: () => {
+    set({ status: 'authenticated', expired: false });
   },
 
   setUser: (user) => {

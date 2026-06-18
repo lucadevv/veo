@@ -3,8 +3,9 @@ import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { IconAccount, IconCalendar, IconDocument } from '../../../../shared/presentation/icons';
+import { IconAccount, IconDocument } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
+import { DateField } from '../../../../shared/presentation/components/DateField';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { PersonalDataValidationError, type PersonalDataErrors } from '../../domain';
@@ -13,6 +14,9 @@ import { useUpdatePersonalData } from '../hooks/useRegistrationWizard';
 import { RegistrationField, RegistrationHeader, RegistrationProgress } from '../components';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
+
+/** Año mínimo de nacimiento aceptado (coincide con MIN_BIRTH_YEAR del dominio: evita fechas absurdas). */
+const MIN_BIRTHDATE = new Date(1920, 0, 1, 12, 0, 0, 0);
 
 /** Paso 1 del alta: datos personales como aparecen en el DNI (drv-04). PATCH /drivers/me/personal. */
 export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
@@ -26,6 +30,9 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   // Errores de validación por campo (códigos del dominio → mensajes) y error de servidor.
   const [errors, setErrors] = useState<PersonalDataErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
+
+  // Acota el picker de nacimiento a hoy (sin futuro); la regla dura vive en el dominio.
+  const today = new Date();
 
   const canContinue =
     personal.fullName.trim().length > 0 &&
@@ -137,15 +144,14 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
           </Reveal>
 
           <Reveal delay={200} from="scale">
-            <RegistrationField
+            <DateField
               label={t('registration.personal.birthdateLabel')}
               placeholder={t('registration.personal.birthdatePlaceholder')}
               value={personal.birthdate}
-              onChangeText={(text) => update({ birthdate: text }, 'birthdate')}
-              keyboardType="number-pad"
-              maxLength={14}
+              onChange={(iso) => update({ birthdate: iso }, 'birthdate')}
+              minimumDate={MIN_BIRTHDATE}
+              maximumDate={today}
               error={fieldError('birthdate')}
-              rightIcon={<IconCalendar size={24} color={theme.colors.accent} strokeWidth={1.8} />}
             />
           </Reveal>
         </View>

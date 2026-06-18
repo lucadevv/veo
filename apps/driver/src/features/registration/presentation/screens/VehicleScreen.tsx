@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { VehicleValidationError, type VehicleErrors } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
@@ -97,6 +97,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     } catch (e) {
       if (e instanceof VehicleValidationError) {
         setErrors(e.errors);
+      } else if (isConflictError(e)) {
+        // 409 del alta = la placa pertenece a OTRO conductor (la propia es idempotente server-side).
+        // Lo mostramos como error INLINE del campo placa (accionable), no como banner genérico.
+        setErrors({ plate: 'plate_taken' });
       } else {
         setServerError(e);
       }

@@ -3,7 +3,6 @@ import { useDi, useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { RequestOtpUseCase } from '../../domain';
 import { VerifyOtpUseCase } from '../../domain';
-import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 
 /**
  * Mutación: solicitar el OTP. El caso de uso valida/normaliza el teléfono.
@@ -16,32 +15,27 @@ export function useRequestOtp() {
 }
 
 /**
- * Mutación de login: verifica el OTP, persiste los tokens, resuelve el perfil del conductor
- * (`GET /drivers/me`) y compone la sesión completa. Cubre el hueco del contrato (verify sin `user`).
+ * Mutación de login: verifica el OTP y persiste los tokens, dejando la sesión en `authenticated`.
  *
- * Si el perfil falla, se revierte la sesión (no dejamos tokens sin usuario) y se propaga el error.
+ * IMPORTANTE: el login NO resuelve el perfil del conductor (`GET /drivers/me`). Un conductor nuevo
+ * todavía no tiene perfil y el backend responde 404 — eso NO es un error de login, es la señal de
+ * "andá al wizard de alta". Quien resuelve el perfil (y por ende el estado del alta + el `user` de
+ * sesión) es `useRegistrationGate`, que corre cuando la sesión ya es `authenticated` y mapea el 404
+ * a `forceWizard()`. Si fetcháramos el perfil acá y revirtiéramos la sesión ante el 404, el gate
+ * nunca correría y el conductor nuevo vería un banner de error en vez del wizard.
  */
 export function useLogin() {
-  const { auth, profile } = useRepositories();
+  const { auth } = useRepositories();
   const { localAuth } = useDi();
   return useMutation({
     mutationFn: async ({ phone, code }: { phone: string; code: string }) => {
       const tokens = await new VerifyOtpUseCase(auth).execute(phone, code);
-      // Persistimos tokens primero: el cliente HTTP los lee del store en la siguiente llamada.
+      // Solo tokens + estado autenticado: el perfil/usuario lo compone `useRegistrationGate`.
       useSessionStore.getState().setTokens(tokens);
-      try {
-        const driverProfile = await new GetProfileUseCase(profile).execute();
-        useSessionStore.getState().setSession({
-          tokens,
-          user: profileToSessionUser(driverProfile),
-        });
-        // Guarda el refresh token bajo biometría para el re-login rápido (best-effort).
-        if (await localAuth.isAvailable()) {
-          await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
-        }
-      } catch (error) {
-        useSessionStore.getState().clearSession();
-        throw error;
+      useSessionStore.getState().setAuthenticated();
+      // Guarda el refresh token bajo biometría para el re-login rápido (best-effort).
+      if (await localAuth.isAvailable()) {
+        await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
       }
     },
   });

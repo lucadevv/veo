@@ -2114,6 +2114,34 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - react-native-image-picker (8.2.1):
+    - boost
+    - DoubleConversion
+    - fast_float
+    - fmt
+    - glog
+    - hermes-engine
+    - RCT-Folly
+    - RCT-Folly/Fabric
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - SocketRocket
+    - Yoga
   - react-native-safe-area-context (5.8.0):
     - boost
     - DoubleConversion
@@ -2820,6 +2848,34 @@ PODS:
     - SocketRocket
     - TSLocationManager (~> 4.1.0)
     - Yoga
+  - RNDateTimePicker (9.1.0):
+    - boost
+    - DoubleConversion
+    - fast_float
+    - fmt
+    - glog
+    - hermes-engine
+    - RCT-Folly
+    - RCT-Folly/Fabric
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - SocketRocket
+    - Yoga
   - RNFBApp (24.1.0):
     - boost
     - DoubleConversion
@@ -3324,6 +3380,7 @@ DEPENDENCIES:
   - React-mutationobservernativemodule (from `../../../node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)
   - react-native-config (from `../../../node_modules/react-native-config`)
   - react-native-get-random-values (from `../../../node_modules/react-native-get-random-values`)
+  - react-native-image-picker (from `../../../node_modules/react-native-image-picker`)
   - react-native-safe-area-context (from `../../../node_modules/react-native-safe-area-context`)
   - react-native-webrtc (from `../../../node_modules/react-native-webrtc`)
   - React-NativeModulesApple (from `../../../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
@@ -3361,6 +3418,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../../../node_modules/react-native/ReactCommon`)
   - RNBackgroundFetch (from `../../../node_modules/react-native-background-fetch`)
   - RNBackgroundGeolocation (from `../../../node_modules/react-native-background-geolocation`)
+  - "RNDateTimePicker (from `../../../node_modules/@react-native-community/datetimepicker`)"
   - "RNFBApp (from `../../../node_modules/@react-native-firebase/app`)"
   - "RNFBMessaging (from `../../../node_modules/@react-native-firebase/messaging`)"
   - RNGestureHandler (from `../../../node_modules/react-native-gesture-handler`)
@@ -3495,6 +3553,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native-config"
   react-native-get-random-values:
     :path: "../../../node_modules/react-native-get-random-values"
+  react-native-image-picker:
+    :path: "../../../node_modules/react-native-image-picker"
   react-native-safe-area-context:
     :path: "../../../node_modules/react-native-safe-area-context"
   react-native-webrtc:
@@ -3569,6 +3629,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native-background-fetch"
   RNBackgroundGeolocation:
     :path: "../../../node_modules/react-native-background-geolocation"
+  RNDateTimePicker:
+    :path: "../../../node_modules/@react-native-community/datetimepicker"
   RNFBApp:
     :path: "../../../node_modules/@react-native-firebase/app"
   RNFBMessaging:
@@ -3655,6 +3717,7 @@ SPEC CHECKSUMS:
   React-mutationobservernativemodule: 9bb7f57044059bcaf28e0287154942acd9b9b6dc
   react-native-config: 916e53e7333d5b2bcb7ee9882f5605143b4fc4c5
   react-native-get-random-values: 5c2e7ce0c1eedefde8e97fe60152601887fcfa08
+  react-native-image-picker: 6051cfd030121b880a58f1cc0e5e33e9887804e4
   react-native-safe-area-context: 7794f18549493f369e4ca4b3cd66843bd050ac66
   react-native-webrtc: e8f0ce746353adc2744a2b933645e1aeb41eaa74
   React-NativeModulesApple: 67c09c715a8763a07a8a241a3019661ffc3f71d6
@@ -3692,6 +3755,7 @@ SPEC CHECKSUMS:
   ReactCommon: f7748c97e657e7be0df505a5fc51c4ace9791a32
   RNBackgroundFetch: 7d206d84b90932f47ff7a8a22dc1227cf52a40fa
   RNBackgroundGeolocation: 66200f8d43f3b06a95a981379745ae227cce6dc4
+  RNDateTimePicker: ea25d20659754bfe1014e0d5905d21dbc18ff705
   RNFBApp: 1177ee4a4bb43fba0c491526222286962680ab82
   RNFBMessaging: 2857d629f009adf6edf7571556568c80a3ee2c01
   RNGestureHandler: 673f6cade71c746ce8428927f6bbbd9991e97059
@@ -3707,6 +3771,6 @@ SPEC CHECKSUMS:
   Turf: c9eb11a65d96af58cac523460fd40fec5061b081
   Yoga: 9d8e8094a2bed6a175d9e6001a0546d5dae663ee
 
-PODFILE CHECKSUM: 8d59935445f786915ffe6b0187429fe98039681f
+PODFILE CHECKSUM: edebb473dad777416f31b314ffcd9f75a6cdfb58
 
 COCOAPODS: 1.16.2

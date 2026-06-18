@@ -14,6 +14,7 @@ import {
   useOnboardingStore,
 } from '../features/auth/presentation';
 import {
+  RegistrationGateRetryScreen,
   RejectedScreen,
   UnderReviewScreen,
   VehiclesScreen,
@@ -140,7 +141,7 @@ export const RootNavigator = (): React.JSX.Element => {
   const onboardingCompleted = useOnboardingStore((s) => s.completed);
   const registrationStatus = useRegistrationStore((s) => s.status);
   // Resuelve el estado del alta desde el backend tras autenticar (no parpadea hacia el wizard).
-  const { resolving } = useRegistrationGate();
+  const { resolving, needsRetry, retry } = useRegistrationGate();
 
   if (status === 'bootstrapping') {
     return <SplashScreen />;
@@ -162,6 +163,20 @@ export const RootNavigator = (): React.JSX.Element => {
   // mantiene el splash para no enviar al wizard por defecto ni parpadear.
   if (resolving) {
     return <SplashScreen />;
+  }
+
+  // El backend no respondió `GET /drivers/me` (error NO definitivo: red / 5xx) y nunca resolvió
+  // antes: pantalla de reintento. NO limpiamos la sesión (tokens válidos) ni mostramos un error de
+  // login confuso; ofrecemos recuperar el flujo con un reintento explícito. El 404 no llega acá
+  // (ese fuerza el wizard arriba, en el gate).
+  if (needsRetry) {
+    return (
+      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
+        <Stack.Screen name="RegistrationGateRetry">
+          {() => <RegistrationGateRetryScreen onRetry={retry} />}
+        </Stack.Screen>
+      </Stack.Navigator>
+    );
   }
 
   // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
