@@ -41,6 +41,9 @@ message FleetDocumentReply {
   string document_number = 5;
   string status = 6;
   string expires_at = 7;
+  // Internos (admin review). NO se proyectan al conductor: el driver-bff mapea un subconjunto explícito.
+  string file_s3_key = 8;
+  string rejection_reason = 9;
 }
 
 message DriverDocumentsReply {

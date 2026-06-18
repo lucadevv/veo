@@ -1827,6 +1827,40 @@ export const addDocumentRequest = z.object({
 });
 export type AddDocumentRequest = z.infer<typeof addDocumentRequest>;
 
+/**
+ * Content-Types permitidos para subir el binario de un documento (foto JPEG/PNG o PDF). Allowlist
+ * ÚNICA del contrato (Ley 29733: el binario es PII). Debe coincidir con la del driver-bff/media: el
+ * `contentType` viaja firmado en la URL prefirmada y el cliente lo reenvía exacto en el PUT.
+ */
+export const documentUploadContentType = z.enum(['image/jpeg', 'image/png', 'application/pdf']);
+export type DocumentUploadContentType = z.infer<typeof documentUploadContentType>;
+
+/**
+ * POST /drivers/me/documents/presign → body. La app pide un ticket para subir el binario de un
+ * documento de flota. `type` es el tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | ...);
+ * `contentType` el del archivo a subir. El driver-bff resuelve el driverId desde la identidad.
+ */
+export const documentUploadTicketRequest = z.object({
+  type: z.string().min(1),
+  contentType: documentUploadContentType,
+});
+export type DocumentUploadTicketRequest = z.infer<typeof documentUploadTicketRequest>;
+
+/**
+ * POST /drivers/me/documents/presign → respuesta. Ticket de subida directa al storage soberano:
+ *  - `uploadUrl`: URL PUT prefirmada de corta vida (el binario NO pasa por la API).
+ *  - `fileS3Key`: key driver-scoped que la app reenvía luego a POST /drivers/me/documents.
+ *  - `requiredHeaders`: headers que el cliente DEBE reenviar exactos en el PUT (Content-Type firmado).
+ *  - `expiresAt`: vencimiento del ticket (ISO-8601).
+ */
+export const documentUploadTicket = z.object({
+  uploadUrl: z.string(),
+  fileS3Key: z.string(),
+  requiredHeaders: z.record(z.string(), z.string()),
+  expiresAt: z.string(),
+});
+export type DocumentUploadTicket = z.infer<typeof documentUploadTicket>;
+
 /** GET /drivers/me → perfil agregado (identity + rating + fleet). */
 export const driverProfileView = z.object({
   driverId: z.string(),
@@ -1851,10 +1885,27 @@ export const driverProfileView = z.object({
     })
     .nullable(),
   documents: z.array(driverDocumentView),
+  /**
+   * Cumplimiento documental del CONDUCTOR (solo los docs del alta: licencia, SOAT, tarjeta). Modela el
+   * ciclo de vida real de cada tipo requerido y NO lo confunde con antecedentes/KYC (ejes aparte):
+   *  - `missing`: tipos SIN ningún documento subido (presencia → wizard).
+   *  - `rejected`: tipos cuyo documento fue rechazado (corregir-y-reenviar).
+   *  - `submittedAllRequired`: ya subió TODOS los requeridos (a revisión o aprobados → in_review).
+   *  - `allApproved`/`compliant`: TODOS los requeridos aprobados (VALID/EXPIRING_SOON).
+   */
   compliance: z.object({
+    /** TODOS los requeridos aprobados (alias de `allApproved`; mantiene compat con ProfileScreen). */
     compliant: z.boolean(),
+    /** Tipos requeridos (los que el conductor sube en el alta). */
     requiredTypes: z.array(z.string()),
+    /** Tipos requeridos SIN ningún documento subido (genuinamente faltantes). */
     missing: z.array(z.string()),
+    /** Tipos requeridos cuyo documento fue RECHAZADO por el operador. */
+    rejected: z.array(z.string()),
+    /** true si el conductor ya subió TODOS los requeridos (a cualquier estado). */
+    submittedAllRequired: z.boolean(),
+    /** true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON). */
+    allApproved: z.boolean(),
   }),
 });
 export type DriverProfileView = z.infer<typeof driverProfileView>;

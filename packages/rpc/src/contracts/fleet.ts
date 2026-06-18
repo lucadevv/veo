@@ -36,6 +36,10 @@ export interface FleetDocumentReply {
   documentNumber: string;
   status: string;
   expiresAt: string;
+  /** Interno (admin review). NO se proyecta al conductor; el driver-bff mapea un subconjunto explícito. */
+  fileS3Key: string;
+  /** Interno (admin review). NO se proyecta al conductor; el driver-bff mapea un subconjunto explícito. */
+  rejectionReason: string;
 }
 
 /** fleet.GetDriverDocuments / mensaje DriverDocumentsReply. */

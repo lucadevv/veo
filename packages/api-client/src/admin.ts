@@ -5,7 +5,7 @@
  * Montos en céntimos PEN (enteros). Fechas ISO-8601 string.
  */
 import { z } from 'zod';
-import { geoPoint, tripStatus, tripSummary, driverSummary } from './types.js';
+import { geoPoint, tripStatus, tripSummary, driverSummary, fleetDocumentStatus } from './types.js';
 import { pricingMode } from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
@@ -163,6 +163,64 @@ export const pendingDriver = z.object({
   licenseNumber: z.string().nullable(),
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
+
+/* ── Revisión detallada de conductor (GET /ops/drivers/:id) ── */
+
+/**
+ * Tipo de documento de flota. Espeja `FleetDocumentType` de @veo/shared-types (fuente de verdad
+ * server-side). Se define acá como enum del CONTRATO para que admin-web tipe la revisión de documentos
+ * sin importar shared-types en el cliente. `fleetDocumentStatus` (el ESTADO) se reutiliza de ./types.
+ */
+export const fleetDocumentType = z.enum([
+  'LICENSE_A1',
+  'SOAT',
+  'PROPERTY_CARD',
+  'BACKGROUND_CHECK',
+  'ITV',
+  'AMBULANCE_OPERATOR',
+  'TOW_OPERATOR',
+  'MECHANIC_CERT',
+]);
+export type FleetDocumentTypeValue = z.infer<typeof fleetDocumentType>;
+
+/**
+ * Un documento del conductor en la vista de revisión del operador. `url` es una presigned GET URL
+ * (acceso temporal al archivo); `null` si todavía no se subió ningún archivo. `rejectionReason` lo
+ * escribe el operador. Nombrado `adminDriverDocument` para no colisionar con el `driverDocument` de
+ * ./mobile (vista del conductor en su app, otra forma: usa `simpleStatus`, no `fleetDocumentStatus`).
+ */
+export const adminDriverDocument = z.object({
+  id: z.string(),
+  type: fleetDocumentType,
+  status: fleetDocumentStatus,
+  expiresAt: z.string().nullable(),
+  rejectionReason: z.string().nullable(),
+  url: z.string().nullable(),
+});
+export type AdminDriverDocument = z.infer<typeof adminDriverDocument>;
+
+/**
+ * Detalle de revisión de un conductor (GET /ops/drivers/:id): datos core + estado biométrico +
+ * documentos. El operador lo usa para aprobar/rechazar antecedentes. Fechas ISO-8601 string.
+ */
+export const driverDetail = z.object({
+  id: z.string(),
+  userId: z.string(),
+  fullName: z.string().nullable(),
+  phone: z.string().nullable(),
+  licenseNumber: z.string().nullable(),
+  backgroundCheckStatus: z.string(),
+  kycStatus: z.string(),
+  currentStatus: z.string(),
+  createdAt: z.string(),
+  rejectionReason: z.string().nullable(),
+  biometric: z.object({
+    faceEnrolledAt: z.string().nullable(),
+    lastVerifiedAt: z.string().nullable(),
+  }),
+  documents: z.array(adminDriverDocument),
+});
+export type DriverDetail = z.infer<typeof driverDetail>;
 
 /** Operador pendiente de aprobación (lo que devuelve GET /ops/operators/pending). */
 export const pendingOperator = z.object({

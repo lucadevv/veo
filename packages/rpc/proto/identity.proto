@@ -43,4 +43,18 @@ message DriverReply {
   // Añadido sin romper compatibilidad (campo 9). Lo consume el driver-bff (GET /drivers/me) para que la
   // app del conductor muestre el motivo en la pantalla de RECHAZO y ofrezca corregir-y-reenviar.
   string rejection_reason = 9;
+  // ── Campos de REVISIÓN del operador (admin-bff GET /ops/drivers/:id). Añadidos sin romper
+  // compatibilidad (campos 10-15). Todos opcionales: "" / proto3-default cuando no hay dato. ──
+  // Licencia/DNI del conductor (IDENTIDAD personal · Compliance+); "" si no registrada.
+  string license_number = 10;
+  // Estado KYC del usuario asociado (driver→user). "" si no se incluyó / no registrado.
+  string kyc_status = 11;
+  // ISO-8601 de alta del conductor; "" si no disponible.
+  string created_at = 12;
+  // ISO-8601 del enrolamiento biométrico facial; "" si aún no enroló.
+  string face_enrolled_at = 13;
+  // ISO-8601 de la última verificación biométrica en vivo; "" si nunca verificó.
+  string last_verified_at = 14;
+  // Teléfono del usuario asociado (driver→user); "" si no registrado.
+  string phone = 15;
 }
