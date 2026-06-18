@@ -14,6 +14,12 @@ const driver: DriverReply = {
   suspendedAt: '',
   name: 'Khalid Ríos',
   rejectionReason: '',
+  licenseNumber: '',
+  kycStatus: '',
+  createdAt: '',
+  faceEnrolledAt: '',
+  lastVerifiedAt: '',
+  phone: '',
 };
 
 const aggregate: AggregateReply = {
