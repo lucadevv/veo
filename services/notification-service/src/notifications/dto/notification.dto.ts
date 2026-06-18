@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { NotificationChannel, NotificationStatus } from '@veo/shared-types';
 import type { InboxCategory } from '../../engine/template.catalog';
+import { NotificationPriority } from '../../engine/types';
 
 export class CreateNotificationDto {
   @ApiProperty({ description: 'Id del destinatario (usuario, operador o "central").' })
@@ -63,6 +64,16 @@ export class CreateNotificationDto {
   @Min(1)
   @Max(20)
   maxAttempts?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Prioridad de drenado del worker (mayor = más urgente). Critical=100 salta la cola (OTP, ' +
+      'pánico), Normal=0 (transaccional, default), Bulk=-100 (broadcast). Default Normal.',
+    enum: Object.values(NotificationPriority),
+  })
+  @IsOptional()
+  @IsEnum(NotificationPriority)
+  priority?: NotificationPriority;
 }
 
 export class NotificationView {

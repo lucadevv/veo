@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { secret } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
+import { SmsProvider } from '../ports/sms/sms.port';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -38,7 +39,12 @@ export const envSchema = z.object({
 
   // ---- Selección de adapter por canal (default sandbox = determinista en consola) ----
   VEO_PUSH_MODE: z.enum([PushMode.Sandbox, PushMode.Live]).default(PushMode.Sandbox),
+  /// Flag SMS LEGADO (backward-compat): live→smpp, sandbox→sandbox. Sigue funcionando si SMS_PROVIDER no está.
   VEO_SMS_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
+  /// Proveedor SMS explícito (fuente única nueva). Si se define, manda sobre VEO_SMS_MODE. Default LOCAL: sandbox.
+  SMS_PROVIDER: z
+    .enum([SmsProvider.Sandbox, SmsProvider.Smpp, SmsProvider.Twilio, SmsProvider.WhatsApp])
+    .optional(),
   VEO_EMAIL_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
   VEO_WEBHOOK_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
 
@@ -72,6 +78,23 @@ export const envSchema = z.object({
   SMPP_PASSWORD: z.string().optional(),
   SMPP_SOURCE_ADDR: z.string().default('VEO'),
   SMPP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ---- SMS: Twilio REST (raw fetch) — solo si SMS_PROVIDER=twilio ----
+  /// AccountSid (AC…) y AuthToken son SECRETOS (van en el env gitignored). From/MessagingServiceSid: uno u otro.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM: z.string().optional(), // número remitente E.164 (excluyente con MessagingServiceSid)
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(), // MG… (excluyente con From)
+  TWILIO_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ---- SMS: WhatsApp Cloud API (Meta Graph) — solo si SMS_PROVIDER=whatsapp ----
+  /// PhoneNumberId y AccessToken son SECRETOS (env gitignored). Template debe estar pre-aprobado por Meta.
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_OTP_TEMPLATE: z.string().optional(), // nombre del template de autenticación aprobado
+  WHATSAPP_OTP_LANG: z.string().default('es'), // código de idioma del template
+  WHATSAPP_GRAPH_VERSION: z.string().default('v25.0'), // versión de Graph anclada
+  WHATSAPP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
   // ---- EMAIL: SMTP propio (nodemailer). Dev → Mailpit localhost:1025 ----
   SMTP_HOST: z.string().default('localhost'),

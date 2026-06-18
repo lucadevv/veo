@@ -51,6 +51,7 @@ export class NotificationsService {
       payload,
       dedupKey: dto.dedupKey,
       maxAttempts: dto.maxAttempts,
+      priority: dto.priority,
     });
     return toView(notification, deduped);
   }
