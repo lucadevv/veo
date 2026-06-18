@@ -95,7 +95,6 @@ describe('metroDevHost (driver)', () => {
 describe('env (driver) · resolución de URLs', () => {
   it('defaults válidos cuando Config está vacío y no hay Metro host (iOS → localhost:4002)', () => {
     const { env } = loadEnv({ scriptURL: undefined, config: {} });
-    expect(env.APP_ENV).toBe('development');
     expect(env.DRIVER_BFF_URL).toBe('http://localhost:4002/api/v1');
     expect(env.DRIVER_BFF_URL).toMatch(/\/api\/v1$/);
     expect(env.DRIVER_BFF_WS_URL).toBe('http://localhost:4002');

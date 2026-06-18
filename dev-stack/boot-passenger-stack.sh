@@ -4,15 +4,15 @@
 #
 # Levanta places(3013), identity(3091), trip(3092), dispatch(3093), fleet(3012),
 # payment(3005 + gRPC 50055), rating(3010 + gRPC 50060) y public-bff(4001) desde sus
-# `dist/main.js`, con el env de cada uno cargado desde `env/dev.env` (tracked) +
-# `env/dev.secret.env` (GITIGNORED).
+# `dist/main.js`, con el env de cada uno cargado desde un ÚNICO `env/<tier>.env` (GITIGNORED;
+# config + secretos mergeados — convención env única del backend). Solo `example.env` queda tracked.
 #
 # RAÍZ DEL PROBLEMA QUE RESUELVE: identity, si no recibe JWT_PRIVATE_KEY_PEM, genera un keypair
 # EFÍMERO en cada arranque; el public-bff, sin VEO_JWT_PUBLIC_PEM, genera OTRO. identity firma con
 # uno y el BFF valida con otro → 401. Aquí el keypair ES256 (EC P-256) es PERSISTENTE y compartido:
 #   - privada PKCS#8  → identity (JWT_PRIVATE_KEY_PEM)
 #   - pública  SPKI   → public-bff (VEO_JWT_PUBLIC_PEM)
-# Vive en dev-stack/secrets/*.pem (gitignored) y se inyecta vía los dev.secret.env. Si no existe, se
+# Vive en dev-stack/secrets/*.pem (gitignored) y se inyecta en los env/development.env. Si no existe, se
 # genera una vez y se reusa siempre (idempotente). Lo mismo el INTERNAL_IDENTITY_SECRET (HMAC) que
 # comparten identity + places + bff.
 #
@@ -146,98 +146,52 @@ ensure_secrets() {
   pp_secret="$(cat "$PRONTOPAGA_SECRET_FILE")"
   pp_token="$(cat "$PRONTOPAGA_TOKEN_FILE")"
 
-  # Regenera SIEMPRE los dev.secret.env a partir de la fuente canónica (mantiene todo en sync).
-  {
-    printf '# identity-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# Keypair JWT ES256 PERSISTENTE: privada PKCS#8. Pareja en public-bff (VEO_JWT_PUBLIC_PEM=SPKI).\n'
-    printf 'JWT_PRIVATE_KEY_PEM="%s"\n' "$priv"
-    printf 'JWT_PUBLIC_KEY_PEM="%s"\n' "$pub"
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$IDENTITY_DIR/env/dev.secret.env"
+  # Convención env ÚNICA: inyecta los secretos en el env/development.env de cada servicio (config +
+  # secretos mergeados, GITIGNORED). Append-if-absent / replace-if-empty por clave (idempotente):
+  # NO pisa la config ya presente y NO duplica claves. Helper compartido: dev-stack/lib/upsert-env.mjs.
+  local UPSERT="node $SCRIPT_DIR/lib/upsert-env.mjs"
 
-  {
-    printf '# public-bff · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# Solo clave PÚBLICA (SPKI) para VALIDAR el JWT. MISMO par que identity.\n'
-    printf 'VEO_JWT_PUBLIC_PEM="%s"\n' "$pub"
-    printf 'VEO_INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-    printf '# Token PÚBLICO de Mapbox (pk). Requerido por VEO_MAPS_MODE=mapbox (server-side, sin SDK).\n'
-    printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$mapbox_token"
-  } > "$BFF_DIR/env/dev.secret.env"
+  $UPSERT "$IDENTITY_DIR/env/development.env" \
+    "JWT_PRIVATE_KEY_PEM=$priv" "JWT_PUBLIC_KEY_PEM=$pub" "INTERNAL_IDENTITY_SECRET=$secret"
 
-  {
-    printf '# places-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al de identity + public-bff (HMAC identidad interna).\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$PLACES_DIR/env/dev.secret.env"
+  $UPSERT "$BFF_DIR/env/development.env" \
+    "VEO_JWT_PUBLIC_PEM=$pub" "VEO_INTERNAL_IDENTITY_SECRET=$secret" "MAPBOX_ACCESS_TOKEN=$mapbox_token"
 
-  {
-    printf '# trip-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: trip-service EXIGE el kycVerified firmado por el BFF.\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$TRIP_DIR/env/dev.secret.env"
+  $UPSERT "$PLACES_DIR/env/development.env"   "INTERNAL_IDENTITY_SECRET=$secret"
+  $UPSERT "$TRIP_DIR/env/development.env"     "INTERNAL_IDENTITY_SECRET=$secret"
+  $UPSERT "$DISPATCH_DIR/env/development.env" "INTERNAL_IDENTITY_SECRET=$secret"
+  $UPSERT "$FLEET_DIR/env/development.env"    "INTERNAL_IDENTITY_SECRET=$secret"
 
-  {
-    printf '# dispatch-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto (HMAC identidad interna).\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$DISPATCH_DIR/env/dev.secret.env"
+  $UPSERT "$PAYMENT_DIR/env/development.env" \
+    "INTERNAL_IDENTITY_SECRET=$secret" "PRONTOPAGA_SECRET_KEY=$pp_secret" "PRONTOPAGA_API_TOKEN=$pp_token"
 
-  {
-    printf '# fleet-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto (el bff lo consulta por gRPC con identidad firmada).\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$FLEET_DIR/env/dev.secret.env"
+  $UPSERT "$RATING_DIR/env/development.env"   "INTERNAL_IDENTITY_SECRET=$secret"
 
-  {
-    printf '# payment-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff cobra/confirma con identidad firmada.\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-    printf '# ProntoPaga (VEO_PAYMENT_MODE=prontopaga): credenciales de prueba PÚBLICAS del sandbox.\n'
-    printf '# secretKey firma el body (HMAC-SHA256); apiToken es el Bearer estático. En prod: reemplazar.\n'
-    printf 'PRONTOPAGA_SECRET_KEY=%s\n' "$pp_secret"
-    printf 'PRONTOPAGA_API_TOKEN=%s\n' "$pp_token"
-  } > "$PAYMENT_DIR/env/dev.secret.env"
+  # notification: HMAC interno + (opcional) APNs .p8 directo + RUTA del FCM service-account JSON. Solo se
+  # inyecta lo que exista (si falta el JSON, el push queda en sandbox — degradación honesta en cmd_start).
+  local notif_kv=( "INTERNAL_IDENTITY_SECRET=$secret" )
+  [[ -s "$APNS_P8_FILE" ]] && notif_kv+=( "APNS_KEY_P8=$(cat "$APNS_P8_FILE")" )
+  [[ -s "$FCM_SA_JSON_FILE" ]] && notif_kv+=( "GOOGLE_APPLICATION_CREDENTIALS=$FCM_SA_JSON_FILE" )
+  $UPSERT "$NOTIFICATION_DIR/env/development.env" "${notif_kv[@]}"
 
-  {
-    printf '# rating-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff envía calificaciones con identidad firmada.\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-  } > "$RATING_DIR/env/dev.secret.env"
-
-  # notification-service: HMAC interno (el bff registra el device-token con identidad firmada) + credenciales
-  # de PUSH leídas del config/ del workspace (gitignored). El .p8 (APNs directo, opcional) y la RUTA del
-  # service-account JSON de FCM (riel default). Si el JSON no existe, no se escribe la ruta y el push queda
-  # en sandbox (degradación honesta, decidido en cmd_start).
-  {
-    printf '# notification-service · secretos DEV (GITIGNORED). Generado por boot-passenger-stack.sh.\n'
-    printf '# INTERNAL_IDENTITY_SECRET idéntico al del resto: el bff proxea POST /devices con identidad firmada.\n'
-    printf 'INTERNAL_IDENTITY_SECRET=%s\n' "$secret"
-    if [[ -s "$APNS_P8_FILE" ]]; then
-      printf '# APNs .p8 (riel iOS DIRECTO soberano; solo se usa con PUSH_IOS_TRANSPORT=apns).\n'
-      printf 'APNS_KEY_P8="%s"\n' "$(cat "$APNS_P8_FILE")"
-    fi
-    if [[ -s "$FCM_SA_JSON_FILE" ]]; then
-      printf '# FCM service-account JSON (riel default). GoogleAuth lo lee de GOOGLE_APPLICATION_CREDENTIALS.\n'
-      printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$FCM_SA_JSON_FILE"
-    fi
-  } > "$NOTIFICATION_DIR/env/dev.secret.env"
-
-  c_green "[secrets] OK · keypair + HMAC sincronizados en los 9 dev.secret.env"
+  c_green "[secrets] OK · keypair + HMAC inyectados en los 9 env/development.env (env-única, idempotente)"
 }
 
 # ── Helpers de puerto / proceso ──────────────────────────────────────────────
 port_in_use() { lsof -ti "tcp:$1" -sTCP:LISTEN >/dev/null 2>&1; }
 pid_on_port() { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null | head -1; }
 
-# Carga env/dev.env + env/dev.secret.env de un servicio en el entorno actual y lo exporta.
-# `set -a` exporta toda var asignada; soporta valores multilínea entre comillas (los PEM).
+# Carga env/<APP_ENV>.{env,env} de un servicio y lo exporta (regla ENTORNOS §5: carga según
+# APP_ENV). Tier por defecto: development (= local-nativo). `set -a` exporta toda var asignada;
+# soporta valores multilínea entre comillas (los PEM).
 load_env() {
   local svc_dir="$1"
+  local tier="${APP_ENV:-development}"
   set -a
+  export APP_ENV="$tier"   # el servicio ve su tier en process.env
+  # Convención env ÚNICA: un solo env/<tier>.env por servicio (config + secretos mergeados, GITIGNORED).
   # shellcheck disable=SC1090
-  [[ -f "$svc_dir/env/dev.env" ]] && source "$svc_dir/env/dev.env"
-  # shellcheck disable=SC1090
-  [[ -f "$svc_dir/env/dev.secret.env" ]] && source "$svc_dir/env/dev.secret.env"
+  [[ -f "$svc_dir/env/${tier}.env" ]] && source "$svc_dir/env/${tier}.env"
   set +a
 }
 

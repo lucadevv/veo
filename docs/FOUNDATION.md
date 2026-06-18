@@ -111,7 +111,7 @@ Jaeger OTLP `4317/4318` UI `16686`, Prometheus `9090`, Grafana `3001→host` (ve
 > mapea host `3001` y colisionaba con identity; trip/dispatch se corrieron junto para mantener el bloque
 > contiguo (EADDRINUSE en local). **El gRPC NO cambió** (identity `50051`, trip `50052`, dispatch `50053`).
 > Los BFFs apuntan a `IDENTITY/TRIP/DISPATCH_URL=localhost:309X` (base SIN `/api/v1`, que el RestGateway añade).
-> Fuente de verdad = cada `services/<svc>/env/dev.env`; esta tabla los espeja.
+> Fuente de verdad = cada `services/<svc>/env/development.env`; esta tabla los espeja.
 
 ---
 

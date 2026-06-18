@@ -11,6 +11,22 @@ function maskPhone(to: string): string {
 }
 
 /**
+ * Espeja el mensaje (con el OTP en claro) al visor de OTPs de dev (dev-stack/otp-viewer) si
+ * `DEV_OTP_SINK_URL` está seteada. Fire-and-forget: jamás rompe el envío. Solo dev — la env solo
+ * existe en development; en prod no está y esto es no-op. NO afecta la regla de logs (acá sí va el
+ * cuerpo, pero al visor efímero de dev, no a los logs persistentes — soberanía §0.7 intacta).
+ */
+function mirrorToDevViewer(to: string, message: string): Promise<unknown> {
+  const sink = process.env.DEV_OTP_SINK_URL;
+  if (!sink) return Promise.resolve();
+  return fetch(sink, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ service: 'share-service', channel: 'sms', to, message }),
+  });
+}
+
+/**
  * Sandbox: no envía nada real. NO loguea el cuerpo (puede traer OTP/enlace) ni el teléfono completo:
  * solo destino enmascarado + longitud del mensaje. Soberanía §0.7: cero PII en logs.
  */
@@ -18,6 +34,9 @@ class SmsSandboxSender implements SmsSender {
   private readonly logger = new Logger('SmsSandbox');
   async send(to: string, message: string): Promise<void> {
     this.logger.warn(`[SANDBOX SMS] → ${maskPhone(to)} (${message.length} chars)`);
+    void mirrorToDevViewer(to, message).catch((err) =>
+      this.logger.debug(`[otp-viewer] no se pudo espejar el OTP (visor caído): ${err}`),
+    );
   }
 }
 

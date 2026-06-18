@@ -28,7 +28,7 @@ $RNMapboxMapsVersion = '~> 11.20.1'
 # Mapbox v11.8.0+ ELIMINÓ el requisito del download token (sk.): release notes v11.8.0 →
 # "Configuring Mapbox's secret token is no longer required when installing our SDKs". Por eso
 # `pod install` resuelve con SOLO el pk. público — sin `~/.netrc` ni sk. El pk. de runtime vive en
-# `env/dev.secret.env` (lo consume `Mapbox.setAccessToken`).
+# `env/<tier>.env` (lo consume `Mapbox.setAccessToken`).
 
 target 'VEODriver' do
   config = use_native_modules!

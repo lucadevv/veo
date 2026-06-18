@@ -17,7 +17,10 @@ start_node() { # <name> <dir> <port>
   # drift de schema. Si falla, NO arranca (fail-fast honesto, no a medias). node queda en background.
   if ! (
     cd "$dir"
-    set -a; . env/dev.env 2>/dev/null; . env/dev.secret.env 2>/dev/null; set +a
+    # Tier por APP_ENV (regla ENTORNOS §5); default development (local-nativo).
+    tier="${APP_ENV:-development}"
+    # Convención env ÚNICA: un solo env/<tier>.env por servicio (config + secretos mergeados, GITIGNORED).
+    set -a; export APP_ENV="$tier"; . "env/${tier}.env" 2>/dev/null; set +a
     if [ -d prisma/migrations ]; then
       npx prisma migrate deploy > "$LOGS/$name.log" 2>&1 || exit 1
     fi

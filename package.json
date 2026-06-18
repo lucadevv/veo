@@ -25,6 +25,7 @@
     "dev-stack:down": "docker compose -f dev-stack/docker-compose.yml down",
     "dev-stack:logs": "docker compose -f dev-stack/docker-compose.yml logs -f",
     "dev-stack:reset": "docker compose -f dev-stack/docker-compose.yml down -v",
+    "otp:viewer": "node dev-stack/otp-viewer/server.mjs",
     "db:migrate": "turbo run db:migrate",
     "db:seed": "turbo run db:seed",
     "codegen": "turbo run codegen",

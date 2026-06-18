@@ -1,6 +1,6 @@
 /**
  * Mint de un JWT de PASAJERO para LOAD TEST LOCAL (dev). Firma ES256 con la MISMA clave privada dev
- * (identity-service/env/dev.secret.env · JWT_PRIVATE_KEY_PEM) que el public-bff valida con su pública.
+ * (identity-service/env/development.env · JWT_PRIVATE_KEY_PEM) que el public-bff valida con su pública.
  * El JwtAuthGuard del BFF SOLO verifica firma + claims (no llama a identity GetUser), así que un token
  * bien firmado pasa sin que el usuario exista en DB → sirve para martillar el quote (read-only, sin gate KYC).
  *
@@ -12,13 +12,13 @@
 import { readFileSync } from 'node:fs';
 import { importPKCS8, SignJWT } from 'jose';
 
-const SECRET = new URL('../../services/identity-service/env/dev.secret.env', import.meta.url);
+const SECRET = new URL('../../services/identity-service/env/development.env', import.meta.url);
 const raw = readFileSync(SECRET, 'utf8');
 
 // El PEM es un valor multi-línea entre comillas con newlines reales.
 const m = raw.match(/JWT_PRIVATE_KEY_PEM="([\s\S]*?)"/);
 if (!m) {
-  console.error('mint-token: no encontré JWT_PRIVATE_KEY_PEM en dev.secret.env');
+  console.error('mint-token: no encontré JWT_PRIVATE_KEY_PEM en development.env');
   process.exit(1);
 }
 const pem = m[1].trim();

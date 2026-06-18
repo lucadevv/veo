@@ -37,7 +37,7 @@ Sin ese `~/.netrc`, `pod install` falla al resolver `MapboxMaps`.
 
 ## Token público de runtime (`pk.`) — distinto
 
-El `pk.` que el SDK usa en runtime para bajar teselas/glyphs vive en `env/dev.secret.env`
+El `pk.` que el SDK usa en runtime para bajar teselas/glyphs vive en `env/<tier>.env`
 (gitignored) como `MAPBOX_ACCESS_TOKEN`, y lo registra `Mapbox.setAccessToken` en el bootstrap
 nativo (`src/core/maps/mapbox.ts`, invocado desde `src/bootstrap/native.ts`).
 

@@ -111,8 +111,6 @@ const DEFAULT_SUPPORT_EMAIL = 'soporte@veo.pe';
 const optionalUrl = z.union([z.string().url(), z.literal('')]).optional();
 
 const envSchema = z.object({
-  /** Entorno de ejecución. */
-  APP_ENV: z.enum(['development', 'staging', 'production']).default('development'),
   /** Base REST del driver-bff, incluye el prefijo `/api/v1`. */
   DRIVER_BFF_URL: z.string().url(),
   /** Origen Socket.IO del driver-bff (sin prefijo REST; el namespace `/driver` se añade aparte). */
@@ -121,7 +119,7 @@ const envSchema = z.object({
   LIVEKIT_URL: optionalUrl,
   /**
    * Token PÚBLICO de Mapbox (`pk.`). Lo consume `Mapbox.setAccessToken` en el bootstrap nativo.
-   * Público por diseño (va al cliente), pero no se commitea: vive en `env/dev.secret.env`.
+   * Público por diseño (va al cliente): vive en `env/<tier>.env` (single-file), restringido por bundle-id en Mapbox.
    * Opcional a nivel de schema para no romper el arranque en tests/builds sin mapa configurado.
    */
   MAPBOX_ACCESS_TOKEN: z.string().optional().default(''),
@@ -135,7 +133,6 @@ export type AppEnv = z.infer<typeof envSchema>;
 
 function loadEnv(): AppEnv {
   const raw = {
-    APP_ENV: Config.APP_ENV ?? 'development',
     DRIVER_BFF_URL: resolveBackendUrl(Config.DRIVER_BFF_URL, devDefaults.bffUrl),
     DRIVER_BFF_WS_URL: resolveBackendUrl(Config.DRIVER_BFF_WS_URL, devDefaults.wsUrl),
     LIVEKIT_URL: Config.LIVEKIT_URL ?? '',
