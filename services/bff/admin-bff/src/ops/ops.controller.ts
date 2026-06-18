@@ -6,7 +6,7 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { TripSummary, DriverApproval, TripDetail } from '@veo/api-client';
+import type { TripSummary, DriverApproval, TripDetail, DriverDetail } from '@veo/api-client';
 import {
   OpsService,
   type PendingDriver,
@@ -63,6 +63,18 @@ export class OpsController {
   @ApiOperation({ summary: 'Conductores pendientes de aprobación' })
   pendingDrivers(@CurrentUser() user: AuthenticatedUser): Promise<PendingDriver[]> {
     return this.ops.listPendingDrivers(user);
+  }
+
+  @Get('drivers/:id')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({
+    summary: 'Detalle de revisión de un conductor: core + biométrico + documentos (URLs firmadas)',
+  })
+  driverDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<DriverDetail> {
+    return this.ops.driverDetail(user, id);
   }
 
   @Post('drivers/:id/approve')

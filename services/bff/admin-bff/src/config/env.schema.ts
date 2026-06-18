@@ -60,6 +60,11 @@ export const envSchema = z.object({
   MEDIA_URL: z.string().default('http://localhost:3007/api/v1'),
   AUDIT_URL: z.string().default('http://localhost:3009/api/v1'),
   FLEET_URL: z.string().default('http://localhost:3012/api/v1'),
+
+  // Bucket S3 donde fleet-service guarda los archivos de documentos del conductor. El admin-bff lo pasa
+  // a media-service (POST /media/internal/presign-get) para acuñar URLs GET firmadas en la revisión.
+  // Debe coincidir con S3_BUCKET_DOCUMENTS de fleet-service/media-service.
+  S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
 });
 
 export type Env = z.infer<typeof envSchema>;

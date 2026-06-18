@@ -11,12 +11,25 @@ import {
   type UserReply,
   type DriverReply,
   type DriverVehiclesReply,
+  type DriverDocumentsReply,
 } from '@veo/rpc';
-import { ForbiddenError, NotFoundError } from '@veo/utils';
+import { ConflictError, ForbiddenError, NotFoundError } from '@veo/utils';
 import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
-import { canGrantRoles, type AdminRole } from '@veo/shared-types';
-import type { TripSummary, DriverApproval, TripDetail, GeoPoint } from '@veo/api-client';
-import { GRPC_TRIP, GRPC_IDENTITY, GRPC_FLEET, REST_IDENTITY } from '../infra/tokens';
+import {
+  canGrantRoles,
+  FleetDocumentType,
+  FleetDocumentStatus,
+  type AdminRole,
+} from '@veo/shared-types';
+import type {
+  TripSummary,
+  DriverApproval,
+  TripDetail,
+  DriverDetail,
+  AdminDriverDocument,
+  GeoPoint,
+} from '@veo/api-client';
+import { GRPC_TRIP, GRPC_IDENTITY, GRPC_FLEET, REST_IDENTITY, REST_MEDIA } from '../infra/tokens';
 import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -31,6 +44,24 @@ import {
 import type { ListTripsQueryDto, ListDriversQueryDto } from './dto/ops.dto';
 
 const DEFAULT_LIMIT = 25;
+
+/**
+ * Documentos OBLIGATORIOS para aprobar a un conductor (gate server-side autoritativo · Ley 29733).
+ * Tipos del enum canónico de flota (NO magic strings): licencia A1 + SOAT + tarjeta de propiedad.
+ * DEUDA: el onboarding móvil sube LICENSE_A1 + SOAT + 'VEHICLE_REGISTRATION', pero el enum canónico de
+ * fleet para la tarjeta de propiedad del vehículo es PROPERTY_CARD — hay un mismatch de string a
+ * reconciliar (mobile 'VEHICLE_REGISTRATION' ↔ fleet PROPERTY_CARD). Acá mandamos el tipo canónico.
+ */
+const REQUIRED_DRIVER_DOC_TYPES = [
+  FleetDocumentType.LICENSE_A1,
+  FleetDocumentType.SOAT,
+  FleetDocumentType.PROPERTY_CARD,
+] as const;
+
+/** proto3 entrega "" para strings ausentes; el contrato del panel los quiere `null` honesto. */
+function emptyToNull(s: string): string | null {
+  return s ? s : null;
+}
 
 /** Coords del proto (lng) → GeoPoint (lon); 0,0 (default proto3 = sin set) → null honesto. */
 function toGeo(lat: number, lng: number): GeoPoint | null {
@@ -61,17 +92,20 @@ export interface CreatedOperator {
 @Injectable()
 export class OpsService {
   private readonly secret: string;
+  private readonly documentsBucket: string;
 
   constructor(
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
     @Inject(GRPC_FLEET) private readonly fleetGrpc: GrpcServiceClient,
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
+    @Inject(REST_MEDIA) private readonly mediaRest: InternalRestClient,
     private readonly readModel: ReadModelService,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+    this.documentsBucket = config.get('S3_BUCKET_DOCUMENTS', { infer: true });
   }
 
   async listTrips(roles: AdminRole[], query: ListTripsQueryDto): Promise<Page<TripSummary>> {
@@ -167,6 +201,81 @@ export class OpsService {
 
   // ── Conductores ──
 
+  /**
+   * Detalle de revisión de un conductor (GET /ops/drivers/:id): datos core + estado biométrico +
+   * documentos con URLs GET firmadas. Fan-out gRPC (identity GetDriver + fleet GetDriverDocuments) en
+   * paralelo; por cada doc con archivo, acuña una presigned URL contra media-service. Auditado (Ley
+   * 29733: ver PII/documentos del conductor deja traza inmutable). Ruta gateada a Compliance+ (toda esa
+   * franja pasa canSeeIdentity → no se enmascara nada acá: el operador ve los datos completos para revisar).
+   */
+  async driverDetail(identity: AuthUser, driverId: string): Promise<DriverDetail> {
+    const meta = grpcIdentityMetadata(identity, this.secret);
+    const [driver, docs] = await Promise.all([
+      this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta),
+      this.fleetGrpc.call<DriverDocumentsReply>('GetDriverDocuments', { id: driverId }, meta),
+    ]);
+    if (!driver.found) throw new NotFoundError('Conductor no encontrado', { driverId });
+
+    // Por cada documento: si tiene archivo (fileS3Key no vacío) acuñamos una presigned GET URL contra
+    // media-service. fileS3Key '' = todavía no se subió archivo (estado real actual — DEUDA: el upload
+    // del archivo del documento no está implementado) → url null. Las firmas van en paralelo.
+    const documents: AdminDriverDocument[] = await Promise.all(
+      docs.documents.map(async (doc) => ({
+        id: doc.id,
+        type: doc.type as AdminDriverDocument['type'],
+        status: doc.status as AdminDriverDocument['status'],
+        expiresAt: emptyToNull(doc.expiresAt),
+        rejectionReason: emptyToNull(doc.rejectionReason),
+        url: await this.presignDocument(identity, doc.fileS3Key),
+      })),
+    );
+
+    await this.audit.record(identity, {
+      action: 'driver.documents.view',
+      resourceType: 'driver',
+      resourceId: driverId,
+      payload: { documentCount: documents.length },
+    });
+
+    return {
+      id: driver.id,
+      userId: driver.userId,
+      fullName: emptyToNull(driver.name),
+      phone: emptyToNull(driver.phone),
+      licenseNumber: emptyToNull(driver.licenseNumber),
+      backgroundCheckStatus: driver.backgroundCheckStatus,
+      kycStatus: driver.kycStatus,
+      currentStatus: driver.currentStatus,
+      // createdAt es no-nullable en el contrato; proto3 entrega "" si no hay dato → degradación honesta a "".
+      createdAt: driver.createdAt,
+      rejectionReason: emptyToNull(driver.rejectionReason),
+      biometric: {
+        faceEnrolledAt: emptyToNull(driver.faceEnrolledAt),
+        lastVerifiedAt: emptyToNull(driver.lastVerifiedAt),
+      },
+      documents,
+    };
+  }
+
+  /**
+   * Acuña una presigned GET URL para el archivo de un documento (media-service, server-to-server).
+   * fileS3Key '' (sin archivo subido aún) → null. FAIL-SOFT: si la firma falla, devolvemos null y
+   * seguimos — una clave inválida NO debe tumbar toda la pantalla de revisión (la decisión de aprobar
+   * NO depende de poder ver el archivo; el gate de aprobación valida el ESTADO del doc, no su URL).
+   */
+  private async presignDocument(identity: AuthUser, fileS3Key: string): Promise<string | null> {
+    if (!fileS3Key) return null;
+    try {
+      const { url } = await this.mediaRest.post<{ url: string }>('/media/internal/presign-get', {
+        identity,
+        body: { bucket: this.documentsBucket, key: fileS3Key, ttlSeconds: 120 },
+      });
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
   async listPendingDrivers(identity: AuthUser): Promise<PendingDriver[]> {
     const list = await this.identityRest.get<PendingDriver[]>('/drivers/pending-approval', {
       identity,
@@ -180,6 +289,26 @@ export class OpsService {
     identity: AuthUser,
     driverId: string,
   ): Promise<{ id: string; backgroundCheckStatus: string }> {
+    // GATE autoritativo server-side (NO depende de la UI): un conductor solo se aprueba si TODOS los
+    // documentos obligatorios existen con estado VALID. Ley 29733: la decisión de habilitar un conductor
+    // exige documentación válida verificable. Corta ANTES de delegar la aprobación a identity-service.
+    const meta = grpcIdentityMetadata(identity, this.secret);
+    const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
+      'GetDriverDocuments',
+      { id: driverId },
+      meta,
+    );
+    const missing = REQUIRED_DRIVER_DOC_TYPES.filter(
+      (req) =>
+        !docs.documents.some((d) => d.type === req && d.status === FleetDocumentStatus.VALID),
+    );
+    if (missing.length > 0) {
+      throw new ConflictError(
+        `No se puede aprobar: faltan documentos válidos (${missing.join(', ')})`,
+        { driverId, missing },
+      );
+    }
+
     const res = await this.identityRest.post<{ id: string; backgroundCheckStatus: string }>(
       `/drivers/${driverId}/approve`,
       { identity },

@@ -3,8 +3,8 @@ import { OpsService } from './ops.service';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import type { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
-import { ForbiddenError, NotFoundError } from '@veo/utils';
-import { AdminRole } from '@veo/shared-types';
+import { ConflictError, ForbiddenError, NotFoundError } from '@veo/utils';
+import { AdminRole, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import type { ReadModelService } from '../read-model/read-model.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -30,6 +30,7 @@ const noopAudit = {
 } as unknown as AuditRecorder;
 const noopReadModel = {} as unknown as ReadModelService;
 const noopRest = {} as unknown as InternalRestClient;
+const noopMedia = {} as unknown as InternalRestClient;
 const noopFleet = grpc(() => ({})); // fleet sin vehículos → vehiclePlate null
 
 describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)', () => {
@@ -92,6 +93,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       identityGrpc,
       fleetGrpc,
       noopRest,
+      noopMedia,
       noopReadModel,
       noopAudit,
       config,
@@ -153,6 +155,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       identityGrpc,
       fleetGrpc,
       noopRest,
+      noopMedia,
       noopReadModel,
       noopAudit,
       config,
@@ -200,6 +203,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       grpc(() => ({})),
       noopFleet,
       noopRest,
+      noopMedia,
       noopReadModel,
       noopAudit,
       config,
@@ -219,6 +223,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       grpc(() => ({})),
       noopFleet,
       noopRest,
+      noopMedia,
       noopReadModel,
       noopAudit,
       config,
@@ -227,26 +232,195 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
   });
 });
 
-describe('OpsService.approveDriver', () => {
-  it('aprueba vía REST y registra auditoría', async () => {
+/** Documento de flota mínimo para los specs del gate de aprobación / detalle. */
+function fleetDoc(
+  type: FleetDocumentType,
+  status: FleetDocumentStatus,
+  overrides: Partial<{ id: string; expiresAt: string; rejectionReason: string; fileS3Key: string }> = {},
+) {
+  return {
+    id: overrides.id ?? `doc-${type}`,
+    ownerType: 'DRIVER',
+    ownerId: 'd1',
+    type,
+    documentNumber: 'X-123',
+    status,
+    expiresAt: overrides.expiresAt ?? '',
+    fileS3Key: overrides.fileS3Key ?? '',
+    rejectionReason: overrides.rejectionReason ?? '',
+  };
+}
+
+/** Las tres credenciales obligatorias, todas VALID → el gate pasa. */
+const allValidDocs = [
+  fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
+  fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
+  fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+];
+
+describe('OpsService.approveDriver · gate de documentos obligatorios (server-side, autoritativo)', () => {
+  it('aprueba vía REST y audita cuando LICENSE_A1+SOAT+PROPERTY_CARD están VALID', async () => {
     const rest = {
       post: vi.fn().mockResolvedValue({ id: 'd1', backgroundCheckStatus: 'CLEARED' }),
     } as unknown as InternalRestClient;
     const audit = {
       record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
     } as unknown as AuditRecorder;
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: allValidDocs } : {},
+    );
     const svc = new OpsService(
       grpc(() => ({})),
       grpc(() => ({})),
-      noopFleet,
+      fleetGrpc,
       rest,
+      noopMedia,
       noopReadModel,
       audit,
       config,
     );
     const out = await svc.approveDriver(identity, 'd1');
     expect(out.backgroundCheckStatus).toBe('CLEARED');
+    expect(rest.post).toHaveBeenCalledWith('/drivers/d1/approve', { identity });
     expect(audit.record).toHaveBeenCalledOnce();
+  });
+
+  it('lanza ConflictError y NO llama a identity approve cuando falta el SOAT válido', async () => {
+    const post = vi.fn();
+    const record = vi.fn();
+    const rest = { post } as unknown as InternalRestClient;
+    const audit = { record } as unknown as AuditRecorder;
+    // SOAT presente pero EXPIRED (no VALID) → no satisface el gate.
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments'
+        ? {
+            driverId: 'd1',
+            documents: [
+              fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
+              fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.EXPIRED),
+              fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+            ],
+          }
+        : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      rest,
+      noopMedia,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    const err = await svc.approveDriver(identity, 'd1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(post).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpsService.driverDetail · core + biométrico + documentos con URLs firmadas', () => {
+  it('mapea core ("" → null), firma docs con archivo (url) y deja null los sin archivo; audita view', async () => {
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriver'
+        ? {
+            id: 'd1',
+            userId: 'u-d1',
+            currentStatus: 'PENDING_APPROVAL',
+            backgroundCheckStatus: 'PENDING',
+            averageRating: 0,
+            found: true,
+            suspendedAt: '',
+            name: 'Khalid Ríos',
+            rejectionReason: '',
+            licenseNumber: 'A1-998877',
+            kycStatus: 'VERIFIED',
+            createdAt: '2026-06-01T10:00:00.000Z',
+            faceEnrolledAt: '2026-06-02T08:00:00.000Z',
+            lastVerifiedAt: '', // nunca verificó en vivo → null
+            phone: '', // no registrado → null
+          }
+        : {},
+    );
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments'
+        ? {
+            driverId: 'd1',
+            documents: [
+              fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID, {
+                id: 'doc-con-archivo',
+                expiresAt: '2027-01-01T00:00:00.000Z',
+                fileS3Key: 'drivers/d1/license.jpg',
+              }),
+              fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.PENDING_REVIEW, {
+                id: 'doc-sin-archivo',
+              }),
+            ],
+          }
+        : {},
+    );
+    const mediaPost = vi.fn().mockResolvedValue({ url: 'https://signed' });
+    const media = { post: mediaPost } as unknown as InternalRestClient;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      fleetGrpc,
+      noopRest,
+      media,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    const view = await svc.driverDetail(identity, 'd1');
+
+    // Core: "" del proto → null honesto; valores reales pasan.
+    expect(view.fullName).toBe('Khalid Ríos');
+    expect(view.licenseNumber).toBe('A1-998877');
+    expect(view.kycStatus).toBe('VERIFIED');
+    expect(view.createdAt).toBe('2026-06-01T10:00:00.000Z');
+    expect(view.phone).toBeNull();
+    expect(view.biometric.faceEnrolledAt).toBe('2026-06-02T08:00:00.000Z');
+    expect(view.biometric.lastVerifiedAt).toBeNull();
+    // Doc con archivo → presigned url; doc sin archivo → null.
+    const [withFile, withoutFile] = view.documents;
+    expect(withFile?.url).toBe('https://signed');
+    expect(withFile?.expiresAt).toBe('2027-01-01T00:00:00.000Z');
+    expect(withoutFile?.url).toBeNull();
+    expect(withoutFile?.rejectionReason).toBeNull();
+    // Solo se firma el doc con archivo (1 sola llamada a media).
+    expect(mediaPost).toHaveBeenCalledOnce();
+    expect(mediaPost).toHaveBeenCalledWith('/media/internal/presign-get', {
+      identity,
+      body: { bucket: 'secret', key: 'drivers/d1/license.jpg', ttlSeconds: 120 },
+    });
+    // Ley 29733: ver documentos PII deja traza.
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'driver.documents.view', resourceType: 'driver', resourceId: 'd1' }),
+    );
+  });
+
+  it('lanza NotFoundError si el conductor no existe', async () => {
+    const identityGrpc = grpc((m) => (m === 'GetDriver' ? { found: false } : {}));
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'x', documents: [] } : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      fleetGrpc,
+      noopRest,
+      noopMedia,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    await expect(svc.driverDetail(identity, 'missing')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -261,6 +435,7 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       grpc(() => ({})),
       noopFleet,
       rest,
+      noopMedia,
       noopReadModel,
       audit,
       config,
@@ -290,6 +465,7 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       grpc(() => ({})),
       noopFleet,
       rest,
+      noopMedia,
       noopReadModel,
       audit,
       config,
