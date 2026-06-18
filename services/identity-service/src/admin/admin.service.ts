@@ -5,6 +5,7 @@
  */
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
 import argon2 from 'argon2';
 import { JwtService, RedisRefreshTokenStore, enrollTotp, verifyTotp } from '@veo/auth';
 import { AdminRole as AdminRoles, canGrantRoles, maxRoleRank, type AdminRole } from '@veo/shared-types';
@@ -12,10 +13,12 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  RateLimitError,
   UnauthorizedError,
   ValidationError,
 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
+import { REDIS } from '../infra/redis';
 import { AdminStatus } from '../generated/prisma';
 import { adminStatusMachine, isOperationalAdmin } from '../domain/admin-status';
 import {
@@ -28,6 +31,19 @@ import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
 import type { Env } from '../config/env.schema';
 
 const VALID_ROLES = new Set(Object.values(AdminRoles));
+
+/**
+ * Prefijos de claves Redis del lockout de login admin (anti brute-force por email).
+ * Namespace propio, SEPARADO de las claves del login de pasajeros (`veo:login-*`): un operador
+ * y un pasajero con el mismo correo no comparten contador/lock.
+ */
+const ADMIN_LOGIN_ATTEMPTS_PREFIX = 'veo:admin-login-attempts:';
+const ADMIN_LOGIN_LOCK_PREFIX = 'veo:admin-login-lock:';
+
+/** Mensaje legible de un error desconocido (para logs best-effort). */
+function asMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 export interface AdminTokens {
   accessToken: string;
@@ -48,16 +64,21 @@ export class AdminService {
   private readonly logger = new Logger(AdminService.name);
   private readonly totpEncKey: string;
   private readonly adminWebUrl: string;
+  private readonly loginMaxAttempts: number;
+  private readonly loginLockSeconds: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly sessions: RedisRefreshTokenStore,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
+    @Inject(REDIS) private readonly redis: Redis,
     config: ConfigService<Env, true>,
   ) {
     this.totpEncKey = config.getOrThrow<string>('TOTP_ENC_KEY');
     this.adminWebUrl = config.getOrThrow<string>('ADMIN_WEB_URL');
+    this.loginMaxAttempts = config.getOrThrow<number>('LOGIN_MAX_ATTEMPTS');
+    this.loginLockSeconds = config.getOrThrow<number>('LOGIN_LOCK_SECONDS');
   }
 
   /**
@@ -244,7 +265,9 @@ export class AdminService {
     }
 
     if (!totp) throw new UnauthorizedError('Se requiere código TOTP');
-    this.assertTotp(admin.totpSecretEnc, totp);
+    // TOTP equivocado tras password correcta también es brute-force (sobre el código de 6 dígitos):
+    // registra el fallo bajo la MISMA clave del email para que el lockout lo cubra.
+    await this.assertTotp(admin.totpSecretEnc, totp, admin.email);
     return this.issueTokens(admin.id, admin.email, admin.roles);
   }
 
@@ -252,7 +275,7 @@ export class AdminService {
   async confirmTotpEnrollment(email: string, password: string, totp: string): Promise<AdminTokens> {
     const admin = await this.requireActiveAndAuthed(email, password);
     if (admin.totpEnrolled) throw new ConflictError('TOTP ya enrolado');
-    this.assertTotp(admin.totpSecretEnc, totp);
+    await this.assertTotp(admin.totpSecretEnc, totp, admin.email);
     await this.prisma.write.adminUser.update({
       where: { id: admin.id },
       data: { totpEnrolled: true },
@@ -264,7 +287,11 @@ export class AdminService {
   async stepUp(adminId: string, totp: string): Promise<{ accessToken: string }> {
     const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
     if (!admin || !isOperationalAdmin(admin)) throw new ForbiddenError('Operador no activo');
-    this.assertTotp(admin.totpSecretEnc, totp);
+    // Lock activo → 429 sin verificar TOTP (corta el brute-force sobre el código en step-up).
+    if (await this.isLocked(admin.email)) {
+      throw new RateLimitError('Demasiados intentos, esperá unos minutos.');
+    }
+    await this.assertTotp(admin.totpSecretEnc, totp, admin.email);
     const accessToken = await this.jwt.signAccessToken({
       sub: admin.id,
       typ: 'admin',
@@ -276,7 +303,18 @@ export class AdminService {
     return { accessToken };
   }
 
+  /**
+   * Verifica que el operador exista, esté operativo y la contraseña sea correcta.
+   * Lockout anti brute-force (BR-I06): si el email acumula LOGIN_MAX_ATTEMPTS fallos dentro de la
+   * ventana, se bloquea LOGIN_LOCK_SECONDS y devolvemos 429 ANTES de tocar la DB o comparar argon2.
+   * Este es el ÚNICO punto de chequeo del lock para password Y TOTP: tanto login() como
+   * confirmTotpEnrollment() pasan por acá primero, así que un lock dispara antes de cualquier camino.
+   */
   private async requireActiveAndAuthed(email: string, password: string) {
+    // Bloqueo activo → 429 sin tocar la DB ni argon2 (corta el brute-force temprano).
+    if (await this.isLocked(email)) {
+      throw new RateLimitError('Demasiados intentos, esperá unos minutos.');
+    }
     const admin = await this.prisma.read.adminUser.findUnique({ where: { email } });
     if (!admin) throw new UnauthorizedError('Credenciales inválidas');
     if (!isOperationalAdmin(admin)) {
@@ -285,18 +323,77 @@ export class AdminService {
     // ACTIVE siempre tiene passwordHash (lo fija acceptInvite); el guard es por el tipo nullable.
     if (!admin.passwordHash) throw new UnauthorizedError('Credenciales inválidas');
     const ok = await argon2.verify(admin.passwordHash, password);
-    if (!ok) throw new UnauthorizedError('Credenciales inválidas');
+    if (!ok) {
+      await this.registerAdminLoginFailure(email);
+      throw new UnauthorizedError('Credenciales inválidas');
+    }
     return admin;
   }
 
-  private assertTotp(totpSecretEnc: string | null, totp: string): void {
+  /**
+   * Verifica el TOTP. Si falla, registra el fallo bajo la clave del email (mismo contador que el
+   * password): un código equivocado tras una password correcta sigue siendo brute-force sobre los
+   * 6 dígitos. `email` es opcional para que el caller decida si cuenta el fallo (siempre lo pasa hoy).
+   */
+  private async assertTotp(totpSecretEnc: string | null, totp: string, email?: string): Promise<void> {
     if (!totpSecretEnc) throw new UnauthorizedError('TOTP no configurado');
     if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey))) {
+      if (email) await this.registerAdminLoginFailure(email);
       throw new UnauthorizedError('Código TOTP incorrecto');
     }
   }
 
+  /** Lock activo para ese email. Best-effort: si Redis falla, no bloqueamos (el login sigue). */
+  private async isLocked(email: string): Promise<boolean> {
+    try {
+      return Boolean(await this.redis.get(`${ADMIN_LOGIN_LOCK_PREFIX}${this.lockKeyEmail(email)}`));
+    } catch (err) {
+      this.logger.warn(`Redis no disponible para chequear el lock de login admin: ${asMessage(err)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Registra un fallo de login (password o TOTP): INCR del contador (EXPIRE de ventana en el primer
+   * fallo) y, si alcanza el tope, setea el lock con EX. Best-effort: si Redis falla, no rompe el 401.
+   */
+  private async registerAdminLoginFailure(email: string): Promise<void> {
+    const key = this.lockKeyEmail(email);
+    try {
+      const attemptsKey = `${ADMIN_LOGIN_ATTEMPTS_PREFIX}${key}`;
+      const attempts = await this.redis.incr(attemptsKey);
+      if (attempts === 1) {
+        await this.redis.expire(attemptsKey, this.loginLockSeconds);
+      }
+      if (attempts >= this.loginMaxAttempts) {
+        await this.redis.set(`${ADMIN_LOGIN_LOCK_PREFIX}${key}`, '1', 'EX', this.loginLockSeconds);
+      }
+    } catch (err) {
+      this.logger.warn(`Redis no disponible para registrar fallo de login admin: ${asMessage(err)}`);
+    }
+  }
+
+  /** Limpia contador + lock tras un login exitoso. Best-effort. */
+  private async clearAdminLoginFailures(email: string): Promise<void> {
+    const key = this.lockKeyEmail(email);
+    try {
+      await this.redis.del(
+        `${ADMIN_LOGIN_ATTEMPTS_PREFIX}${key}`,
+        `${ADMIN_LOGIN_LOCK_PREFIX}${key}`,
+      );
+    } catch (err) {
+      this.logger.warn(`Redis no disponible para limpiar el lockout de login admin: ${asMessage(err)}`);
+    }
+  }
+
+  /** Normaliza el email para la clave del lockout (mismo criterio que el login de pasajeros). */
+  private lockKeyEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   private async issueTokens(id: string, email: string, roles: string[]): Promise<AdminTokens> {
+    // Éxito completo (tokens emitidos): limpiamos contador + lock del email.
+    await this.clearAdminLoginFailures(email);
     const { sessionId, newJti } = await this.sessions.createSession(id);
     const accessToken = await this.jwt.signAccessToken({
       sub: id,

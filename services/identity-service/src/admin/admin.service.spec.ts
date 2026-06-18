@@ -1,17 +1,59 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '@veo/utils';
+import { authenticator } from 'otplib';
+import argon2 from 'argon2';
+import { enrollTotp } from '@veo/auth';
+import {
+  ForbiddenError,
+  NotFoundError,
+  RateLimitError,
+  UnauthorizedError,
+  ValidationError,
+} from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 import { AdminService } from './admin.service';
 import { InvalidStatusTransition } from '../domain/state-machine';
 import { hashInviteToken } from '../domain/invite-token';
+import { seal } from '../common/secret-box';
 import type { EmailSender } from '../ports/email/email.port';
 import type { Env } from '../config/env.schema';
 
+const TOTP_ENC_KEY = 'k'.repeat(32);
+
 const config = new ConfigService<Env, true>({
-  TOTP_ENC_KEY: 'k'.repeat(32),
+  TOTP_ENC_KEY,
   ADMIN_WEB_URL: 'http://localhost:5001',
+  LOGIN_MAX_ATTEMPTS: 5,
+  LOGIN_LOCK_SECONDS: 900,
 });
+
+/** Redis doble basado en Map (mismo patrón que email-auth.service.spec). */
+function fakeRedis() {
+  const store = new Map<string, string>();
+  return {
+    async get(k: string) {
+      return store.get(k) ?? null;
+    },
+    async set(k: string, v: string) {
+      store.set(k, v);
+      return 'OK';
+    },
+    async del(...keys: string[]) {
+      let n = 0;
+      for (const k of keys) if (store.delete(k)) n++;
+      return n;
+    },
+    async incr(k: string) {
+      const next = Number(store.get(k) ?? '0') + 1;
+      store.set(k, String(next));
+      return next;
+    },
+    async expire() {
+      return 1;
+    },
+    _store: store,
+  };
+}
 
 /** EmailSender doble que registra envíos; por defecto resuelve OK. */
 function makeEmail(impl?: () => Promise<void>): EmailSender & { sent: number } {
@@ -25,8 +67,21 @@ function makeEmail(impl?: () => Promise<void>): EmailSender & { sent: number } {
   return sender;
 }
 
-function makeService(prisma: unknown, email: EmailSender = makeEmail()): AdminService {
-  return new AdminService(prisma as never, {} as never, {} as never, email, config);
+function makeService(
+  prisma: unknown,
+  email: EmailSender = makeEmail(),
+  redis: unknown = fakeRedis(),
+  jwt: unknown = {},
+  sessions: unknown = {},
+): AdminService {
+  return new AdminService(
+    prisma as never,
+    jwt as never,
+    sessions as never,
+    email,
+    redis as never,
+    config,
+  );
 }
 
 /** Prisma doble: reject lee y escribe DENTRO de la tx (la réplica devuelve estado posiblemente viejo). */
@@ -341,5 +396,105 @@ describe('AdminService.reinvite · re-emite invitación solo si sigue INVITED', 
     await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'a1')).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+});
+
+/**
+ * Lockout anti brute-force en el login admin (Lote 2 hardening). Copia el patrón de
+ * email-auth.service.spec: fakeRedis Map-based, fallos de password Y de TOTP cuentan bajo la misma
+ * clave del email, login exitoso limpia, lock corta ANTES de comparar.
+ */
+describe('AdminService.login · lockout anti brute-force', () => {
+  const EMAIL = 'op@veo.pe';
+  const PASSWORD = 'una-clave-larga-segura';
+  const ATTEMPTS_KEY = `veo:admin-login-attempts:${EMAIL}`;
+  const LOCK_KEY = `veo:admin-login-lock:${EMAIL}`;
+
+  /** Operador ACTIVE con password real (argon2) y TOTP enrolado a partir de un secret sellado. */
+  async function makeActiveAdmin(): Promise<{ admin: Record<string, unknown>; secret: string }> {
+    const passwordHash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
+    const { secret } = enrollTotp(EMAIL);
+    return {
+      secret,
+      admin: {
+        id: 'a1',
+        email: EMAIL,
+        status: 'ACTIVE',
+        roles: [AdminRole.SUPPORT_L1],
+        passwordHash,
+        totpEnrolled: true,
+        totpSecretEnc: seal(secret, TOTP_ENC_KEY),
+      },
+    };
+  }
+
+  /** Prisma doble de login: read.findUnique({email}) devuelve el admin; write.update no-op. */
+  function makeLoginPrisma(admin: Record<string, unknown>) {
+    return {
+      read: { adminUser: { findUnique: async () => admin } },
+      write: { adminUser: { update: async () => admin } },
+    };
+  }
+
+  function makeSessions() {
+    return { createSession: vi.fn(async () => ({ sessionId: 'sid-1', newJti: 'jti-1' })) };
+  }
+
+  function makeJwt() {
+    return {
+      signAccessToken: vi.fn(async () => 'access-token'),
+      signRefreshToken: vi.fn(async () => 'refresh-token'),
+    };
+  }
+
+  it('5 fallos de password → el 6º se rechaza con RateLimitError aun con password CORRECTA', async () => {
+    const { admin } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis);
+
+    for (let i = 0; i < 5; i++) {
+      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(UnauthorizedError);
+    }
+    expect(redis._store.get(LOCK_KEY)).toBeDefined();
+
+    // 6º intento con la password correcta → 429 ANTES de comparar.
+    await expect(svc.login(EMAIL, PASSWORD)).rejects.toBeInstanceOf(RateLimitError);
+  });
+
+  it('el lock rechaza ANTES de comparar la contraseña / tocar la DB', async () => {
+    const { admin } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    redis._store.set(LOCK_KEY, '1');
+    // Si comparara, este hash corrupto haría reventar argon2; el lock corta antes.
+    const tampered = { ...admin, passwordHash: 'tampered' };
+    const svc = makeService(makeLoginPrisma(tampered), makeEmail(), redis);
+    await expect(svc.login(EMAIL, PASSWORD)).rejects.toBeInstanceOf(RateLimitError);
+  });
+
+  it('TOTP incorrecto tras password correcta también cuenta como fallo (brute-force del código)', async () => {
+    const { admin } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions());
+
+    await expect(svc.login(EMAIL, PASSWORD, '000000')).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(redis._store.get(ATTEMPTS_KEY)).toBe('1');
+  });
+
+  it('login exitoso (password + TOTP válidos) limpia el contador y el lock', async () => {
+    const { admin, secret } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions());
+
+    // 3 fallos por debajo del tope → contador en 3, sin lock.
+    for (let i = 0; i < 3; i++) {
+      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(UnauthorizedError);
+    }
+    expect(redis._store.get(ATTEMPTS_KEY)).toBe('3');
+
+    const validTotp = authenticator.generate(secret);
+    const tokens = await svc.login(EMAIL, PASSWORD, validTotp);
+    expect(tokens).toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(redis._store.get(ATTEMPTS_KEY)).toBeUndefined();
+    expect(redis._store.get(LOCK_KEY)).toBeUndefined();
   });
 });
