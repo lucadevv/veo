@@ -39,7 +39,10 @@ async function main(): Promise<void> {
 
   const admin = await prisma.adminUser.upsert({
     where: { email },
-    update: { status: 'ACTIVE', roles: ['SUPERADMIN'], ...totpFields },
+    // El update NO re-pisa el TOTP de un admin ya existente: hacerlo en cada corrida del seed rompía el
+    // enrolamiento real del operador (su Authenticator quedaba desincronizado del secreto en DB). El TOTP
+    // solo se pre-enrola en create (DB fresca, para el visor de dev). Re-forzar el fijo = acción explícita.
+    update: { status: 'ACTIVE', roles: ['SUPERADMIN'] },
     create: { email, passwordHash, roles: ['SUPERADMIN'], status: 'ACTIVE', ...totpFields },
   });
 

@@ -244,6 +244,12 @@ export class AdminService {
     });
   }
 
+  // DEUDA: no hay recovery self-service de TOTP para un admin enrolado que pierde su Authenticator —
+  // el único camino es resetear totp_enrolled=false en la DB a mano. Eso tienta a "arreglar" un 401
+  // rotando el secreto, que desincroniza el teléfono y rompe el login (causa raíz del incidente del
+  // superadmin). techo: con 1-2 admins se resuelve a mano; con más operadores escala mal y es propenso
+  // a error. gatillo: si suben los operadores o hay >1 incidente de Authenticator perdido → endpoint de
+  // reset de enrolamiento (superadmin resetea a otro operador; jamás rotar el secreto).
   /**
    * Login. Si el operador aún no enroló TOTP, devuelve la URL de enrolamiento (sin tokens).
    * Si ya enroló, exige y verifica el código TOTP, y emite tokens con MFA fresca.
