@@ -180,6 +180,62 @@ export const operatorApproval = z.object({
 });
 export type OperatorApproval = z.infer<typeof operatorApproval>;
 
+/**
+ * Estado de un operador del panel (alta por invitación, B-onboarding):
+ *  - INVITED: invitado, aún no aceptó (puede reinvitarse o cancelarse).
+ *  - ACTIVE: aceptó la invitación y enroló su credencial (puede suspenderse/revocarse).
+ *  - SUSPENDED: revocado/suspendido.
+ *  - REJECTED: invitación cancelada/rechazada.
+ * Tiparlo como enum (no `z.string()`) hace que comparar contra un literal fuera del set sea error de
+ * compilación, no un magic string mudo. Fuente de verdad server-side: identity-service.
+ */
+export const operatorStatus = z.enum(['INVITED', 'ACTIVE', 'SUSPENDED', 'REJECTED']);
+export type OperatorStatus = z.infer<typeof operatorStatus>;
+
+/** Un operador del panel tal como lo lista GET /ops/operators (gestión de staff · ADMIN/SUPERADMIN). */
+export const operator = z.object({
+  id: z.string(),
+  email: z.string(),
+  status: operatorStatus,
+  roles: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type Operator = z.infer<typeof operator>;
+
+/** Body del POST /ops/operators: alta por invitación (email + roles RBAC a otorgar). Step-up MFA. */
+export const createOperatorRequest = z.object({
+  email: z.string().email(),
+  roles: z.array(adminRole).min(1),
+});
+export type CreateOperatorRequest = z.infer<typeof createOperatorRequest>;
+
+/** Respuesta del POST /ops/operators: operador INVITED + link de invitación (también se envía por email). */
+export const createOperatorResult = z.object({
+  id: z.string(),
+  inviteToken: z.string(),
+  inviteUrl: z.string(),
+  expiresAt: z.string(),
+});
+export type CreateOperatorResult = z.infer<typeof createOperatorResult>;
+
+/** Respuesta del POST /ops/operators/:id/reinvite: nuevo link + vencimiento (re-emite la invitación). */
+export const reinviteOperatorResult = z.object({
+  inviteUrl: z.string(),
+  expiresAt: z.string(),
+});
+export type ReinviteOperatorResult = z.infer<typeof reinviteOperatorResult>;
+
+/** Body del POST /auth/invite/accept (PÚBLICO): token de invitación + contraseña elegida por el operador. */
+export const acceptInviteRequest = z.object({
+  token: z.string().min(1),
+  password: z.string().min(10),
+});
+export type AcceptInviteRequest = z.infer<typeof acceptInviteRequest>;
+
+/** Respuesta del POST /auth/invite/accept: el email del operador recién activado. */
+export const acceptInviteResult = z.object({ email: z.string() });
+export type AcceptInviteResult = z.infer<typeof acceptInviteResult>;
+
 /* ── Pricing: modo de despacho PUJA↔FIJO (schedule global · ADR 011) ── */
 /* `pricingMode` ('PUJA'|'FIXED') se reutiliza de ./mobile (fuente única del enum), no se redefine. */
 
