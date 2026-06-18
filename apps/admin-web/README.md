@@ -26,15 +26,18 @@ ocurre en el layout (Server Component) vía `getSession()`.
 
 ## Soberanía
 
-- Mapas con **MapLibre GL + tiles OSM self-hosted** (`NEXT_PUBLIC_TILE_URL`). Fallback a un estilo
-  mínimo propio si el tileserver no responde (jamás tiles de terceros).
+- Mapas con **MapLibre GL + estilo veo-dark "Midnight Motion" (Mapbox Streets v8)** vía
+  `NEXT_PUBLIC_MAPBOX_TOKEN` (mismo proveedor que passenger/driver). maplibre 4.x no soporta URLs
+  `mapbox://`, así que el componente reescribe tileset + glyphs a HTTPS con `transformRequest`.
+  Fallback a un estilo mínimo propio (fondo sólido) si falta el token o el estilo falla; los
+  marcadores en vivo siguen funcionando. El mapa base (calles) NO es dato sensible.
 - Fuentes self-hosted con `next/font` (Inter/JetBrains Mono se descargan y empaquetan en build).
-- CSP estricta que solo permite el origen del tileserver y el websocket del bff.
+- CSP estricta que solo permite los orígenes de Mapbox (mapa base) y el websocket del bff.
 
 ## Variables de entorno
 
 Ver `.env.example`. Server-side: `ADMIN_BFF_URL` (incluye `/api/v1`). Públicas:
-`NEXT_PUBLIC_TILE_URL`, `NEXT_PUBLIC_BFF_WS_URL`, `NEXT_PUBLIC_BFF_URL`, `NEXT_PUBLIC_MAP_*`.
+`NEXT_PUBLIC_MAPBOX_TOKEN`, `NEXT_PUBLIC_BFF_WS_URL`, `NEXT_PUBLIC_BFF_URL`, `NEXT_PUBLIC_MAP_*`.
 
 ## Rutas
 

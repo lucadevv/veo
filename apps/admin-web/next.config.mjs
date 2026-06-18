@@ -7,9 +7,25 @@ loadEnvFile({ path: process.env.ENVFILE ?? 'env/development.env' });
 
 /**
  * Configuración de admin-web (Next.js 14 App Router).
- * Cabeceras de seguridad estrictas con CSP que permite SOLO orígenes soberanos:
- * el tileserver self-hosted (OSM) y el websocket del admin-bff. Nada de SaaS de terceros.
+ * Cabeceras de seguridad estrictas con CSP que permite el websocket del admin-bff (soberano) y los
+ * orígenes de Mapbox (proveedor del mapa base del proyecto: tiles + glyphs + telemetría). El mapa
+ * base (calles) NO es dato sensible; soberanía = biometría/video/pánico/audit/PII (esos van por el bff).
  */
+
+/**
+ * Orígenes de Mapbox (mapa base veo-dark "Midnight Motion", consistente con passenger/driver).
+ *  - api.mapbox.com      : TileJSON (estilo/source) + glyphs (fuentes).
+ *  - *.tiles.mapbox.com  : los TILES vectoriales (.vector.pbf). El TileJSON de api.mapbox.com los sirve
+ *                          desde a./b.tiles.mapbox.com — SIN este origen, la CSP bloquea los .pbf y el
+ *                          mapa degrada (TileJSON 200 pero 0 tiles). Verificado con chrome-devtools.
+ *  - events.mapbox.com   : telemetría/eventos del SDK (POST).
+ * Always-on (dev y prod): Mapbox es el proveedor del mapa para todo el proyecto.
+ */
+const MAPBOX_ORIGINS = [
+  'https://api.mapbox.com',
+  'https://*.tiles.mapbox.com',
+  'https://events.mapbox.com',
+];
 
 /** Extrae el origen (scheme://host:port) de una URL de entorno, o null si no es válida. */
 function originOf(url) {
@@ -29,20 +45,19 @@ function wsOriginOf(httpOrigin) {
 
 const isDev = process.env.NODE_ENV !== 'production';
 
-const tileOrigin = originOf(process.env.NEXT_PUBLIC_TILE_URL);
 const bffOrigin = originOf(process.env.NEXT_PUBLIC_BFF_URL);
 const wsOrigin = originOf(process.env.NEXT_PUBLIC_BFF_WS_URL);
 
 const connectSrc = [
   "'self'",
-  tileOrigin,
+  ...MAPBOX_ORIGINS,
   bffOrigin,
   wsOrigin,
   wsOriginOf(wsOrigin),
   wsOriginOf(bffOrigin),
 ].filter(Boolean);
 
-const imgSrc = ["'self'", 'data:', 'blob:', tileOrigin].filter(Boolean);
+const imgSrc = ["'self'", 'data:', 'blob:', ...MAPBOX_ORIGINS].filter(Boolean);
 const mediaSrc = ["'self'", 'blob:', bffOrigin].filter(Boolean);
 
 // En dev Next requiere 'unsafe-eval'; en prod se omite. 'unsafe-inline' es necesario para

@@ -8,7 +8,6 @@ import { useOpsStore } from '@/lib/realtime/ops-store';
 import { money, relativeFromNow } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { KpiGrid } from '@/components/ops/kpi-grid';
-import { OverviewChart } from '@/components/charts/overview-chart';
 import { TripStatusBadge, isActiveTrip } from '@/components/trips/status-badge';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 import { Card } from '@/components/ui/card';
@@ -119,10 +118,6 @@ export default function OpsPage() {
           </section>
         </aside>
       </div>
-
-      <section aria-label="Tendencias" className="border-t border-border p-4 lg:p-6">
-        {overview.data ? <OverviewChart series={overview.data.series} /> : null}
-      </section>
     </div>
   );
 }
