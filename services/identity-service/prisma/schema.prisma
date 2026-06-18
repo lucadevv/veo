@@ -59,6 +59,7 @@ enum BiometricCheckType {
 
 enum AdminStatus {
   PENDING
+  INVITED
   ACTIVE
   SUSPENDED
   REJECTED
@@ -212,12 +213,19 @@ model Driver {
 model AdminUser {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String   @unique
-  passwordHash String   @map("password_hash")
+  /// Hash argon2id de la contraseña. Null mientras el operador está INVITED (aún no la fijó).
+  passwordHash String?  @map("password_hash")
   /// Roles RBAC (AdminRole[] de @veo/shared-types) serializados.
   roles        String[]
   /// Secreto TOTP cifrado (KMS en prod). Null hasta enrolar.
   totpSecretEnc String? @map("totp_secret_enc")
   totpEnrolled Boolean  @default(false) @map("totp_enrolled")
+  /// Onboarding por invitación (superadmin crea → INVITED + token de un solo uso; el operador fija
+  /// su contraseña → ACTIVE). Hash sha256 del token de invitación (nunca el token en claro). Null tras
+  /// aceptar/expirar: limpiarlo invalida el token (un solo uso).
+  inviteTokenHash String? @map("invite_token_hash")
+  /// Expiración de la invitación (48h). Null si no hay invitación pendiente.
+  inviteExpiresAt DateTime? @map("invite_expires_at") @db.Timestamptz
   /// Auto-registro → PENDING; un ADMIN aprueba y asigna roles → ACTIVE.
   status       AdminStatus @default(PENDING)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz

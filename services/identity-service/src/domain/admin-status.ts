@@ -1,7 +1,10 @@
 /**
  * Eje AdminUser.status — ciclo de vida del operador del panel admin.
  *
- *  - PENDING → ACTIVE | REJECTED: un ADMIN aprueba (asigna roles) o rechaza el auto-registro.
+ *  - PENDING → ACTIVE | REJECTED: un ADMIN aprueba (asigna roles) o rechaza el auto-registro (legacy).
+ *  - INVITED → ACTIVE | REJECTED: el operador acepta la invitación (fija su contraseña) o el superadmin
+ *    la revoca. Es el onboarding vigente: el superadmin crea al operador con roles → INVITED; el operador
+ *    abre el link y fija su contraseña → ACTIVE.
  *  - ACTIVE → SUSPENDED | REJECTED: se suspende o se revoca a un operador activo.
  *  - SUSPENDED → ACTIVE | REJECTED: se rehabilita o se revoca definitivamente.
  *  - REJECTED → ACTIVE: re-evaluación aprobada (hoy el operador puede re-aprobar un rechazo,
@@ -14,6 +17,7 @@ import { createStateMachine, type StateMachine } from './state-machine';
 /** Tabla de transiciones válidas del operador admin. */
 export const ADMIN_STATUS_TRANSITIONS: Readonly<Record<AdminStatus, readonly AdminStatus[]>> = {
   [AdminStatus.PENDING]: [AdminStatus.ACTIVE, AdminStatus.REJECTED],
+  [AdminStatus.INVITED]: [AdminStatus.ACTIVE, AdminStatus.REJECTED],
   [AdminStatus.ACTIVE]: [AdminStatus.SUSPENDED, AdminStatus.REJECTED],
   [AdminStatus.SUSPENDED]: [AdminStatus.ACTIVE, AdminStatus.REJECTED],
   [AdminStatus.REJECTED]: [AdminStatus.ACTIVE],

@@ -7,9 +7,12 @@ const ALL_STATES = Object.values(AdminStatus);
 
 /** Transiciones válidas esperadas, independientes de la tabla de producción (no tautologizar). */
 const EXPECTED_VALID = new Set<string>([
-  // decisión sobre el auto-registro
+  // decisión sobre el auto-registro (legacy)
   `${AdminStatus.PENDING}->${AdminStatus.ACTIVE}`,
   `${AdminStatus.PENDING}->${AdminStatus.REJECTED}`,
+  // onboarding por invitación: acepta (fija contraseña) o el superadmin revoca la invitación
+  `${AdminStatus.INVITED}->${AdminStatus.ACTIVE}`,
+  `${AdminStatus.INVITED}->${AdminStatus.REJECTED}`,
   // suspensión / revocación de un operador activo
   `${AdminStatus.ACTIVE}->${AdminStatus.SUSPENDED}`,
   `${AdminStatus.ACTIVE}->${AdminStatus.REJECTED}`,
@@ -64,6 +67,7 @@ describe('isOperationalAdmin · el predicado de login/step-up', () => {
   it('solo ACTIVE puede operar el panel', () => {
     expect(isOperationalAdmin({ status: AdminStatus.ACTIVE })).toBe(true);
     expect(isOperationalAdmin({ status: AdminStatus.PENDING })).toBe(false);
+    expect(isOperationalAdmin({ status: AdminStatus.INVITED })).toBe(false);
     expect(isOperationalAdmin({ status: AdminStatus.SUSPENDED })).toBe(false);
     expect(isOperationalAdmin({ status: AdminStatus.REJECTED })).toBe(false);
   });
