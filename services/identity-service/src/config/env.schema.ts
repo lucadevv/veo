@@ -84,6 +84,13 @@ export const envSchema = z.object({
 
   // Puertos externos (modo propio/sandbox por defecto)
   VEO_SMS_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
+  /// Base del notification-service (API interna) al que el adaptador SMS LIVE delega el OTP por REST
+  /// FIRMADO (POST /notifications). Solo se usa cuando VEO_SMS_MODE=live; el módulo hace getOrThrow,
+  /// así que apuntar al notification real antes de activar live. Default: notification del dev-stack.
+  NOTIFICATION_INTERNAL_URL: z.string().url().default('http://localhost:3008/api/v1'),
+  /// Timeout (ms) de la llamada saliente a notification-service. El OTP debe fallar RÁPIDO Y HONESTO
+  /// (502 reintentable) si notification se cuelga, en vez de colgar el login del usuario.
+  NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
   VEO_BIOMETRIC_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
   BIOMETRIC_SERVICE_URL: z.string().default('http://localhost:3015'),
   /// Score mínimo (0..100) de liveness/match para aprobar verificación de turno (BR-I02). Es el MISMO

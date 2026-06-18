@@ -434,29 +434,48 @@ describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', (
 });
 
 describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () => {
-  /** Prisma doble: refleja en la actualización los datos enviados (mapeo dni→document_id). */
-  function makePersonalPrisma(driver: unknown) {
+  /**
+   * Prisma doble del UPSERT (fix P0 order-independence). `existing` simula la fila previa: null = paso 1
+   * del wizard SIN fila Driver (caso que antes daba 404). El doble captura el branch usado (create/update)
+   * y refleja en el resultado el merge de la fila previa con los datos enviados (mapeo dni→document_id),
+   * para verificar tanto la vista devuelta como la materialización del cascarón.
+   */
+  function makePersonalPrisma(existing: Record<string, unknown> | null) {
+    const upsertCalls: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }[] = [];
     return {
-      read: { driver: { findUnique: async () => driver } },
-      write: {
-        driver: {
-          update: async ({ data }: { data: Record<string, unknown> }) => ({
-            legalName: (data.legalName as string | null) ?? null,
-            documentId: (data.documentId as string | null) ?? null,
-            birthDate: (data.birthDate as Date | null) ?? null,
-          }),
+      upsertCalls,
+      prisma: {
+        read: { driver: { findUnique: async () => existing } },
+        write: {
+          driver: {
+            upsert: async ({
+              create,
+              update,
+            }: {
+              create: Record<string, unknown>;
+              update: Record<string, unknown>;
+            }) => {
+              upsertCalls.push({ create, update });
+              // Sin fila previa → la rama create define el estado final; con fila previa → merge update.
+              const data = existing ? { ...existing, ...update } : create;
+              return {
+                legalName: (data.legalName as string | null) ?? null,
+                documentId: (data.documentId as string | null) ?? null,
+                birthDate: (data.birthDate as Date | null) ?? null,
+              };
+            },
+          },
         },
       },
     };
   }
 
-  it('persiste y devuelve los datos con birthDate en yyyy-mm-dd', async () => {
-    const svc = new DriversService(
-      makePersonalPrisma(okDriver) as never,
-      makeRedis() as never,
-      bio,
-      config,
-    );
+  it('persiste y devuelve los datos con birthDate en yyyy-mm-dd (fila previa existente)', async () => {
+    const { prisma } = makePersonalPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     const out = await svc.updatePersonalInfo('u1', {
       legalName: 'Juan Pérez',
       dni: '12345678',
@@ -465,16 +484,126 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     expect(out).toEqual({ legalName: 'Juan Pérez', dni: '12345678', birthDate: '1990-05-20' });
   });
 
-  it('lanza NotFoundError si el conductor no existe', async () => {
-    const svc = new DriversService(
-      makePersonalPrisma(null) as never,
-      makeRedis() as never,
-      bio,
-      config,
-    );
-    await expect(
-      svc.updatePersonalInfo('u1', { legalName: 'X', dni: '12345678', birthDate: '1990-05-20' }),
-    ).rejects.toBeInstanceOf(NotFoundError);
+  it('personal-first: SIN fila Driver previa crea el cascarón y fija los datos (ya NO 404, fix P0)', async () => {
+    const { prisma, upsertCalls } = makePersonalPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.updatePersonalInfo('u1', {
+      legalName: 'Ana',
+      dni: '87654321',
+      birthDate: '1992-01-10',
+    });
+    expect(out).toEqual({ legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    // El cascarón se materializa con los defaults tipados del agregado (sin strings mágicos).
+    expect(upsertCalls).toHaveLength(1);
+    expect(upsertCalls[0]?.create).toMatchObject({
+      userId: 'u1',
+      currentStatus: 'OFFLINE',
+      backgroundCheckStatus: 'PENDING',
+      legalName: 'Ana',
+      documentId: '87654321',
+    });
+  });
+
+  it('re-submit idempotente: llamar dos veces no rompe ni duplica (upsert por userId)', async () => {
+    const { prisma, upsertCalls } = makePersonalPrisma({ ...okDriver, legalName: 'Ana' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const input = { legalName: 'Ana María', dni: '87654321', birthDate: '1992-01-10' };
+    await svc.updatePersonalInfo('u1', input);
+    await svc.updatePersonalInfo('u1', input);
+    // Dos upsert al MISMO unique userId: idempotente, sin error de conflicto.
+    expect(upsertCalls).toHaveLength(2);
+  });
+});
+
+describe('DriversService.onboard · alta de licencia idempotente y orden-independiente (fix P0)', () => {
+  /**
+   * Prisma doble del UPSERT. `existing` simula si ya hay fila Driver (p. ej. porque corrió antes
+   * `updatePersonalInfo`). Captura el branch create/update y refleja el merge para verificar order-independence.
+   * `user` modela la validación previa (User type DRIVER, no borrado).
+   */
+  function makeOnboardPrisma(
+    existing: Record<string, unknown> | null,
+    user: Record<string, unknown> | null = { id: 'u1', type: 'DRIVER', deletedAt: null },
+  ) {
+    const upsertCalls: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }[] = [];
+    return {
+      upsertCalls,
+      prisma: {
+        read: {
+          user: { findUnique: async () => user },
+          driver: { findUnique: async () => existing },
+        },
+        write: {
+          driver: {
+            upsert: async ({
+              create,
+              update,
+            }: {
+              create: Record<string, unknown>;
+              update: Record<string, unknown>;
+            }) => {
+              upsertCalls.push({ create, update });
+              const data = existing ? { ...existing, ...update } : create;
+              return {
+                id: (data.id as string) ?? 'd-new',
+                backgroundCheckStatus: (data.backgroundCheckStatus as string) ?? 'PENDING',
+              };
+            },
+          },
+        },
+      },
+    };
+  }
+
+  const license = { licenseNumber: 'L-123', licenseExpiresAt: futureLicense.toISOString() };
+
+  it('onboard-first: SIN fila previa crea el cascarón con la licencia y queda PENDING', async () => {
+    const { prisma, upsertCalls } = makeOnboardPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.onboard('u1', license);
+    expect(out).toEqual({ driverId: 'd-new', backgroundCheckStatus: 'PENDING' });
+    expect(upsertCalls[0]?.create).toMatchObject({
+      userId: 'u1',
+      licenseNumber: 'L-123',
+      currentStatus: 'OFFLINE',
+      backgroundCheckStatus: 'PENDING',
+    });
+  });
+
+  it('onboard-after-personal: con cascarón ya creado fija la licencia y NO lanza ConflictError', async () => {
+    const { prisma, upsertCalls } = makeOnboardPrisma({
+      id: 'd1',
+      legalName: 'Ana',
+      backgroundCheckStatus: 'PENDING',
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.onboard('u1', license);
+    expect(out).toEqual({ driverId: 'd1', backgroundCheckStatus: 'PENDING' });
+    // Solo actualiza el slice de licencia: no pisa otros campos del agregado.
+    expect(upsertCalls[0]?.update).toEqual({ licenseNumber: 'L-123', licenseExpiresAt: futureLicense });
+  });
+
+  it('re-submit idempotente: onboard dos veces no rompe ni duplica (upsert por userId)', async () => {
+    const { prisma, upsertCalls } = makeOnboardPrisma({ id: 'd1', backgroundCheckStatus: 'PENDING' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.onboard('u1', license);
+    await svc.onboard('u1', license);
+    expect(upsertCalls).toHaveLength(2);
+  });
+
+  it('rechaza si el usuario no existe o está borrado (404)', async () => {
+    const { prisma } = makeOnboardPrisma(null, null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.onboard('u1', license)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rechaza si el usuario no es conductor (403)', async () => {
+    const { prisma } = makeOnboardPrisma(null, { id: 'u1', type: 'PASSENGER', deletedAt: null });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.onboard('u1', license)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 

@@ -36,6 +36,18 @@ interface DriverReply {
   name: string;
   /** Motivo del último rechazo de antecedentes; "" si NO está rechazado o no se dio motivo. */
   rejectionReason: string;
+  /** Licencia/DNI del conductor (Compliance+ · revisión del operador); "" si no registrada. */
+  licenseNumber: string;
+  /** Estado KYC del usuario asociado (driver→user); "" si no incluido. */
+  kycStatus: string;
+  /** ISO-8601 de alta del conductor; "" si no disponible. */
+  createdAt: string;
+  /** ISO-8601 del enrolamiento biométrico facial; "" si aún no enroló. */
+  faceEnrolledAt: string;
+  /** ISO-8601 de la última verificación biométrica en vivo; "" si nunca verificó. */
+  lastVerifiedAt: string;
+  /** Teléfono del usuario asociado (driver→user); "" si no registrado. */
+  phone: string;
 }
 
 const EMPTY_DRIVER: DriverReply = {
@@ -48,6 +60,12 @@ const EMPTY_DRIVER: DriverReply = {
   suspendedAt: '',
   name: '',
   rejectionReason: '',
+  licenseNumber: '',
+  kycStatus: '',
+  createdAt: '',
+  faceEnrolledAt: '',
+  lastVerifiedAt: '',
+  phone: '',
 };
 
 @Controller()
@@ -96,7 +114,7 @@ export class IdentityGrpcController {
     // BE-1b — incluye el nombre del usuario (driver→user, ambos en identity: NO es join cross-servicio).
     const d = await this.prisma.read.driver.findUnique({
       where: { id },
-      include: { user: { select: { name: true } } },
+      include: { user: { select: { name: true, kycStatus: true, phone: true } } },
     });
     return d ? this.toDriverReply(d) : EMPTY_DRIVER;
   }
@@ -106,7 +124,7 @@ export class IdentityGrpcController {
     this.requireIdentity(metadata);
     const d = await this.prisma.read.driver.findUnique({
       where: { userId: id },
-      include: { user: { select: { name: true } } },
+      include: { user: { select: { name: true, kycStatus: true, phone: true } } },
     });
     return d ? this.toDriverReply(d) : EMPTY_DRIVER;
   }
@@ -119,7 +137,11 @@ export class IdentityGrpcController {
     averageRating: { toString(): string };
     suspendedAt: Date | null;
     rejectionReason: string | null;
-    user?: { name: string | null } | null;
+    licenseNumber: string | null;
+    createdAt: Date;
+    faceEnrolledAt: Date | null;
+    lastVerifiedAt: Date | null;
+    user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
   }): DriverReply {
     return {
       id: d.id,
@@ -133,6 +155,13 @@ export class IdentityGrpcController {
       name: d.user?.name ?? '',
       // Motivo del último rechazo (dead-end fix); "" si no está rechazado o no se dio motivo.
       rejectionReason: d.rejectionReason ?? '',
+      // Campos de revisión del operador (admin-bff GET /ops/drivers/:id). "" cuando no hay dato.
+      licenseNumber: d.licenseNumber ?? '',
+      kycStatus: d.user?.kycStatus ?? '',
+      createdAt: d.createdAt.toISOString(),
+      faceEnrolledAt: d.faceEnrolledAt ? d.faceEnrolledAt.toISOString() : '',
+      lastVerifiedAt: d.lastVerifiedAt ? d.lastVerifiedAt.toISOString() : '',
+      phone: d.user?.phone ?? '',
     };
   }
 }

@@ -93,7 +93,19 @@ export class DriversService {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
   }
 
-  /** Onboarding: el conductor (User type DRIVER) registra su licencia → queda PENDING de aprobación. */
+  /**
+   * Onboarding del conductor (User type DRIVER): registra su licencia y queda PENDING de aprobación.
+   *
+   * IDEMPOTENTE Y ORDEN-INDEPENDIENTE (fix P0): el alta del conductor es un wizard multi-paso (datos
+   * personales, licencia, biometría) que NO tiene un único "paso creador". Cualquier paso que corra
+   * primero debe materializar el agregado Driver; los demás actualizan su slice. Por eso `onboard` hace
+   * UPSERT por el unique `userId` (atómico a nivel DB, sin check-then-act ni carrera entre pasos):
+   * crea la fila-cascarón con los defaults del agregado + la licencia si aún no existe, o solo actualiza
+   * la licencia si ya existía (porque corrió antes `updatePersonalInfo`). Reentrante por diseño: reenviar
+   * la licencia NO lanza ConflictError. NO emite evento de dominio (igual que antes): el hecho de negocio
+   * "listo para revisión" se representa con backgroundCheckStatus PENDING, que `listPendingApproval`
+   * (cola del operador) consulta por estado — no hay consumidor de un "driver.onboarded".
+   */
   async onboard(
     userId: string,
     input: { licenseNumber: string; licenseExpiresAt: string },
@@ -102,16 +114,19 @@ export class DriversService {
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.type !== 'DRIVER') throw new ForbiddenError('El usuario no es conductor');
 
-    const existing = await this.prisma.read.driver.findUnique({ where: { userId } });
-    if (existing) throw new ConflictError('El conductor ya completó el onboarding');
-
-    const driver = await this.prisma.write.driver.create({
-      data: {
+    const licenseExpiresAt = new Date(input.licenseExpiresAt);
+    const driver = await this.prisma.write.driver.upsert({
+      where: { userId },
+      create: {
         userId,
         licenseNumber: input.licenseNumber,
-        licenseExpiresAt: new Date(input.licenseExpiresAt),
+        licenseExpiresAt,
         currentStatus: DriverStatus.OFFLINE,
         backgroundCheckStatus: BackgroundCheckStatus.PENDING,
+      },
+      update: {
+        licenseNumber: input.licenseNumber,
+        licenseExpiresAt,
       },
     });
     return { driverId: driver.id, backgroundCheckStatus: driver.backgroundCheckStatus };
@@ -536,19 +551,32 @@ export class DriversService {
   /**
    * Registra/actualiza los datos personales del conductor autenticado (BR-I04 cumplimiento).
    * `dni` (DNI peruano, 8 dígitos) se valida en el borde; aquí se persiste y se devuelve la vista.
+   *
+   * IDEMPOTENTE Y ORDEN-INDEPENDIENTE (fix P0): este suele ser el PRIMER paso del wizard de alta, antes
+   * de que exista fila Driver (la licencia llega en `onboard`, paso posterior). UPSERT por el unique
+   * `userId` materializa el cascarón con los defaults del agregado + los datos personales si no existe, o
+   * solo actualiza el slice personal si ya existe — sin el viejo 404 que bloqueaba el paso 1. Atómico a
+   * nivel DB sobre el unique, sin carrera con un `onboard` concurrente.
    */
   async updatePersonalInfo(
     userId: string,
     input: { legalName: string; dni: string; birthDate: string },
   ): Promise<DriverPersonalInfoView> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
-    if (!d) throw new NotFoundError('Conductor no encontrado');
-    const updated = await this.prisma.write.driver.update({
-      where: { id: d.id },
-      data: {
+    const birthDate = new Date(`${input.birthDate}T00:00:00.000Z`);
+    const updated = await this.prisma.write.driver.upsert({
+      where: { userId },
+      create: {
+        userId,
+        currentStatus: DriverStatus.OFFLINE,
+        backgroundCheckStatus: BackgroundCheckStatus.PENDING,
         legalName: input.legalName,
         documentId: input.dni,
-        birthDate: new Date(`${input.birthDate}T00:00:00.000Z`),
+        birthDate,
+      },
+      update: {
+        legalName: input.legalName,
+        documentId: input.dni,
+        birthDate,
       },
     });
     return this.toPersonalInfoView(updated);
