@@ -74,10 +74,24 @@ export class RateLimitGuard implements CanActivate {
     return true;
   }
 
+  /**
+   * IP real del cliente. Detrás de cloudflared, `x-forwarded-for` es el túnel (127.0.0.1), así que
+   * `cf-connecting-ip` (la IP real que pone Cloudflare) tiene PRECEDENCIA. Si no está, caemos a
+   * `x-forwarded-for` (primer hop) y por último a `req.ip`.
+   */
   private clientIp(req: RequestLike): string {
+    const cf = this.firstHeader(req.headers['cf-connecting-ip']);
+    if (cf) return cf;
     const fwd = req.headers['x-forwarded-for'];
     if (typeof fwd === 'string' && fwd.length > 0) return (fwd.split(',')[0] ?? fwd).trim();
     if (Array.isArray(fwd) && fwd.length > 0) return fwd[0] ?? 'unknown';
     return req.ip ?? 'unknown';
+  }
+
+  /** Primer valor no vacío de un header string | string[]; undefined si no aplica. */
+  private firstHeader(value: string | string[] | undefined): string | undefined {
+    if (typeof value === 'string' && value.length > 0) return value.trim();
+    if (Array.isArray(value) && value.length > 0) return value[0]?.trim() || undefined;
+    return undefined;
   }
 }

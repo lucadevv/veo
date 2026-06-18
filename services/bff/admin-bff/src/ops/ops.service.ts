@@ -21,6 +21,13 @@ import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import { tripRecordToSummary, driverRecordToApproval, mapTripStatus } from './mappers';
+import {
+  canSeeIdentity,
+  canSeePlate,
+  canSeeExactTripGeo,
+  maskPlate,
+  coarseGeo,
+} from '../redaction/redaction.policy';
 import type { ListTripsQueryDto, ListDriversQueryDto } from './dto/ops.dto';
 
 const DEFAULT_LIMIT = 25;
@@ -67,24 +74,30 @@ export class OpsService {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
-  async listTrips(query: ListTripsQueryDto): Promise<Page<TripSummary>> {
+  async listTrips(roles: AdminRole[], query: ListTripsQueryDto): Promise<Page<TripSummary>> {
     const limit = query.limit ?? DEFAULT_LIMIT;
     const page = await this.readModel.listTrips(
       { status: query.status, driverId: query.driverId, passengerId: query.passengerId },
       query.cursor ?? null,
       limit,
     );
-    return { items: page.items.map(tripRecordToSummary), nextCursor: page.nextCursor };
+    return {
+      items: page.items.map((r) => tripRecordToSummary(r, roles)),
+      nextCursor: page.nextCursor,
+    };
   }
 
-  async listDrivers(query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
+  async listDrivers(roles: AdminRole[], query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
     const limit = query.limit ?? DEFAULT_LIMIT;
     const page = await this.readModel.listDrivers(
       { status: query.status },
       query.cursor ?? null,
       limit,
     );
-    return { items: page.items.map(driverRecordToApproval), nextCursor: page.nextCursor };
+    return {
+      items: page.items.map((r) => driverRecordToApproval(r, roles)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**
@@ -117,8 +130,17 @@ export class OpsService {
         : Promise.resolve(null),
     ]);
     // Un conductor puede tener varios vehículos: priorizamos el ACTIVO, si no el primero.
-    const vehiclePlate =
+    const rawPlate =
       vehicles?.vehicles?.find((v) => v.active)?.plate ?? vehicles?.vehicles?.[0]?.plate ?? null;
+
+    // REDACCIÓN PII (server-side, matriz aprobada): identidad=Compliance+, placa=dispatch+ (SUPPORT
+    // → enmascarada), geo de viaje=dispatch+ (SUPPORT → coarse ~100m). Montos (fareCents) NO se
+    // redactan acá: el contrato lo declara `number` no-nullable → diferido (ver mappers.ts + reporte).
+    const roles = identity.roles;
+    const passengerName = passenger?.found ? passenger.name || null : null;
+    const driverName = driver?.found ? driver.name || null : null;
+    const origin = toGeo(trip.originLat, trip.originLng);
+    const destination = toGeo(trip.destinationLat, trip.destinationLng);
 
     return {
       id: trip.id,
@@ -127,17 +149,17 @@ export class OpsService {
       driverId: trip.driverId || null,
       fareCents: trip.fareCents,
       createdAt: trip.requestedAt,
-      origin: toGeo(trip.originLat, trip.originLng),
-      destination: toGeo(trip.destinationLat, trip.destinationLng),
+      origin: canSeeExactTripGeo(roles) ? origin : coarseGeo(origin),
+      destination: canSeeExactTripGeo(roles) ? destination : coarseGeo(destination),
       driverLocation: null, // dato EN VIVO (tracking-service), no en GetTrip
       routePolyline: null, // follow-up: ruta no expuesta por GetTrip
       etaSeconds: null, // dato EN VIVO
       distanceMeters: trip.distanceMeters || null,
-      passengerName: passenger?.found ? passenger.name || null : null,
-      driverName: driver?.found ? driver.name || null : null,
+      passengerName: canSeeIdentity(roles) ? passengerName : null,
+      driverName: canSeeIdentity(roles) ? driverName : null,
       // Fecha de suspensión del conductor (proto DriverReply.suspendedAt; '' = no suspendido → null).
       driverSuspendedAt: driver?.found ? driver.suspendedAt || null : null,
-      vehiclePlate,
+      vehiclePlate: canSeePlate(roles) ? rawPlate : maskPlate(rawPlate),
       paymentMethod: trip.paymentMethod || null,
       timeline: [], // follow-up: timeline de eventos no expuesta por GetTrip
     };
@@ -145,8 +167,13 @@ export class OpsService {
 
   // ── Conductores ──
 
-  listPendingDrivers(identity: AuthUser): Promise<PendingDriver[]> {
-    return this.identityRest.get<PendingDriver[]>('/drivers/pending-approval', { identity });
+  async listPendingDrivers(identity: AuthUser): Promise<PendingDriver[]> {
+    const list = await this.identityRest.get<PendingDriver[]>('/drivers/pending-approval', {
+      identity,
+    });
+    // licenseNumber (DNI/licencia) = IDENTIDAD personal → Compliance+. Sub-Compliance: null honesto.
+    if (canSeeIdentity(identity.roles)) return list;
+    return list.map((d) => ({ ...d, licenseNumber: null }));
   }
 
   async approveDriver(

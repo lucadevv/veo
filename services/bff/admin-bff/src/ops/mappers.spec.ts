@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { tripRecordToSummary, driverRecordToSummary, mapTripStatus } from './mappers';
+import { AdminRole } from '@veo/shared-types';
+import {
+  tripRecordToSummary,
+  driverRecordToSummary,
+  driverRecordToApproval,
+  mapTripStatus,
+} from './mappers';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
+
+const COMPLIANCE: AdminRole[] = [AdminRole.COMPLIANCE_SUPERVISOR];
+const SUPPORT: AdminRole[] = [AdminRole.SUPPORT_L1];
 
 describe('mappers OPS', () => {
   it('mapea TripRecord → tripSummary preservando céntimos e id', () => {
@@ -12,7 +21,8 @@ describe('mappers OPS', () => {
       fareCents: 1500,
       createdAt: '2026-05-29T00:00:00.000Z',
     };
-    expect(tripRecordToSummary(rec)).toEqual({
+    // fareCents (monto) hoy NO se redacta: el contrato lo declara number no-nullable → diferido.
+    expect(tripRecordToSummary(rec, SUPPORT)).toEqual({
       id: 't1',
       status: 'IN_PROGRESS',
       passengerId: 'p1',
@@ -20,6 +30,23 @@ describe('mappers OPS', () => {
       fareCents: 1500,
       createdAt: '2026-05-29T00:00:00.000Z',
     });
+  });
+
+  it('driverRecordToApproval: fullName/phone null honesto (read-model no los provee aún)', () => {
+    const rec: DriverRecord = {
+      id: 'd1',
+      userId: 'u1',
+      status: 'PENDING',
+      averageRating: null,
+      backgroundCheckStatus: 'PENDING',
+      rejectionReason: null,
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+    // Tanto Compliance como SUPPORT obtienen null hoy (la data aún no se enriquece desde identity);
+    // la redacción ya está cableada para cuando aterrice.
+    expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
+    expect(driverRecordToApproval(rec, SUPPORT).fullName).toBeNull();
+    expect(driverRecordToApproval(rec, SUPPORT).phone).toBeNull();
   });
 
   it('mapea DriverRecord → driverSummary con rating nullable', () => {

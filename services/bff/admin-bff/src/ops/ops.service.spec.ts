@@ -116,6 +116,60 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     expect(view.timeline).toEqual([]);
   });
 
+  it('SUPPORT_L1 (sub-Compliance): redacta identidad/placa/geo per matriz; fareCents diferido visible', async () => {
+    const tripGrpc = grpc((m) =>
+      m === 'GetTrip'
+        ? {
+            id: 't1',
+            passengerId: 'p1',
+            driverId: 'd1',
+            status: 'COMPLETED',
+            fareCents: 2500,
+            distanceMeters: 8000,
+            paymentMethod: 'YAPE',
+            requestedAt: '2026-06-01T10:00:00.000Z',
+            originLat: -12.054321,
+            originLng: -77.041234,
+            destinationLat: -12.1,
+            destinationLng: -77.0,
+            found: true,
+          }
+        : {},
+    );
+    const identityGrpc = grpc((m) =>
+      m === 'GetUser'
+        ? { name: 'Ana Pérez', found: true }
+        : m === 'GetDriver'
+          ? { name: 'Khalid Ríos', found: true }
+          : {},
+    );
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverVehicles'
+        ? { vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] }
+        : {},
+    );
+    const svc = new OpsService(
+      tripGrpc,
+      identityGrpc,
+      fleetGrpc,
+      noopRest,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    const support: AuthenticatedUser = { ...identity, roles: ['SUPPORT_L1'] };
+    const view = await svc.tripDetail(support, 't1');
+    // IDENTIDAD → null (Compliance+)
+    expect(view.passengerName).toBeNull();
+    expect(view.driverName).toBeNull();
+    // PLACA → enmascarada '•••' + últimos 3 (SUPPORT no la ve completa)
+    expect(view.vehiclePlate).toBe('•••123');
+    // GEO → coarse 3 decimales (~100m)
+    expect(view.origin).toEqual({ lat: -12.054, lon: -77.041 });
+    // MONTO → diferido (contrato no-nullable): sigue visible
+    expect(view.fareCents).toBe(2500);
+  });
+
   it('origin 0,0 (sin set) → null honesto', async () => {
     const tripGrpc = grpc((m) =>
       m === 'GetTrip'

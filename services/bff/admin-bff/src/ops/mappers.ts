@@ -9,9 +9,18 @@ import {
   type TripStatus,
   type TripSummary,
 } from '@veo/api-client';
+import type { AdminRole } from '@veo/shared-types';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
+import { canSeeIdentity } from '../redaction/redaction.policy';
 
-export function tripRecordToSummary(r: TripRecord): TripSummary {
+/**
+ * `fareCents` es `number` NO-nullable en el contrato (`tripSummary`/`tripDetail` de @veo/api-client).
+ * La matriz aprobada manda redactar montos a `null` para roles sin permiso financiero, pero hacerlo
+ * acá rompería el contrato (toca @veo/api-client + UI admin-web). Por eso la redacción de MONTOS en
+ * /ops/trips queda DIFERIDA (identidad es la prioridad de este lote); ver reporte. `roles` se acepta
+ * ya en la firma para no re-tocar call-sites cuando el contrato se haga nullable.
+ */
+export function tripRecordToSummary(r: TripRecord, _roles: readonly AdminRole[]): TripSummary {
   return {
     id: r.id,
     status: r.status,
@@ -37,11 +46,15 @@ export function driverRecordToSummary(r: DriverRecord): DriverSummary {
  * (vienen de identity) → null honesto; el enriquecimiento por identity es follow-up. `submittedAt` se
  * aproxima con `updatedAt` (última señal del registro). El contrato exige las claves presentes (nullable).
  */
-export function driverRecordToApproval(r: DriverRecord): DriverApproval {
+export function driverRecordToApproval(r: DriverRecord, roles: readonly AdminRole[]): DriverApproval {
+  // IDENTIDAD (fullName/phone) = Compliance+. Hoy el read-model no los provee (null honesto), pero
+  // la redacción ya está cableada: cuando el enriquecimiento por identity aterrice, sub-Compliance
+  // seguirá viendo `null`. NUNCA se inventa data.
+  const identityVisible = canSeeIdentity(roles);
   return {
     ...driverRecordToSummary(r),
-    fullName: null,
-    phone: null,
+    fullName: identityVisible ? null : null,
+    phone: identityVisible ? null : null,
     submittedAt: r.updatedAt,
     // Motivo del último rechazo (proyectado del evento driver.rejected); null si no está rechazado.
     rejectionReason: r.rejectionReason,

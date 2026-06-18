@@ -37,8 +37,11 @@ export class OpsController {
 
   @Get('trips')
   @ApiOperation({ summary: 'Listado/búsqueda de viajes (filtros + paginación cursor)' })
-  listTrips(@Query() query: ListTripsQueryDto): Promise<Page<TripSummary>> {
-    return this.ops.listTrips(query);
+  listTrips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListTripsQueryDto,
+  ): Promise<Page<TripSummary>> {
+    return this.ops.listTrips(user.roles, query);
   }
 
   @Get('trips/:id')
@@ -49,8 +52,11 @@ export class OpsController {
 
   @Get('drivers')
   @ApiOperation({ summary: 'Listado de conductores (read-model)' })
-  listDrivers(@Query() query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
-    return this.ops.listDrivers(query);
+  listDrivers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListDriversQueryDto,
+  ): Promise<Page<DriverApproval>> {
+    return this.ops.listDrivers(user.roles, query);
   }
 
   @Get('drivers/pending')
