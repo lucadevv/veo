@@ -2,9 +2,11 @@
  * Seed mínimo: crea el operador SUPERADMIN inicial (ACTIVE).
  * Uso: DATABASE_URL=... SEED_SUPERADMIN_EMAIL=... SEED_SUPERADMIN_PASSWORD=... pnpm db:seed
  *
- * TOTP: en PROD el admin lo enrola en su primer login (secreto random). En DEV (APP_ENV != production)
- * se pre-enrola con un secreto FIJO conocido (DEV_TOTP_SECRET) para que el visor de OTPs (dev-stack/
- * otp-viewer) muestre el código vivo sin app de autenticación. Solo dev — guardado por APP_ENV.
+ * TOTP: en entornos ENDURECIDOS (NODE_ENV=production — preview Y prod, ambos internet-facing) el admin
+ * enrola en su primer login (secreto random). En DEV/local (NODE_ENV!=production) se pre-enrola con un
+ * secreto FIJO conocido (DEV_TOTP_SECRET) para que el visor de OTPs (dev-stack/otp-viewer) muestre el
+ * código vivo sin app de autenticación. La decisión usa NODE_ENV (igual que el secret() de @veo/utils):
+ * el TIER de despliegue (preview vs prod) lo da el env_file, NO este flag.
  */
 import argon2 from 'argon2';
 import { PrismaClient } from '../src/generated/prisma';
@@ -23,10 +25,12 @@ async function main(): Promise<void> {
   const password = process.env.SEED_SUPERADMIN_PASSWORD ?? 'ChangeMe_VEO_2026!';
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
-  const isProd = (process.env.APP_ENV ?? 'development') === 'production';
-  // En dev pre-enrolamos el TOTP con el secreto fijo (sellado igual que identity). En prod, null →
+  // Endurecido = cualquier entorno internet-facing (NODE_ENV=production: preview Y prod). Solo el
+  // local/dev (NODE_ENV development) pre-enrola el TOTP fijo para el visor.
+  const isHardened = process.env.NODE_ENV === 'production';
+  // En dev pre-enrolamos el TOTP con el secreto fijo (sellado igual que identity). Endurecido → null →
   // el admin enrola normal en el primer login (secreto random, jamás conocido).
-  const totpFields = isProd
+  const totpFields = isHardened
     ? {}
     : {
         totpEnrolled: true,
@@ -41,7 +45,9 @@ async function main(): Promise<void> {
 
   console.warn(
     `SUPERADMIN listo: ${admin.email} (${admin.status}). ` +
-      (isProd ? 'Enrola TOTP en el primer login.' : 'TOTP pre-enrolado (dev) — código en el visor :5190.'),
+      (isHardened
+        ? 'Enrola TOTP en el primer login.'
+        : 'TOTP pre-enrolado (dev) — código en el visor :5190.'),
   );
 }
 
