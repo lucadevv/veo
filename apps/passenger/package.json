@@ -8,8 +8,8 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "android": "ENVFILE=env/development.secret.env react-native run-android",
-    "ios": "ENVFILE=env/development.secret.env react-native run-ios --list-devices",
+    "android": "ENVFILE=env/development.env react-native run-android",
+    "ios": "ENVFILE=env/development.env react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
     "lint": "eslint src --max-warnings 0",
@@ -17,9 +17,9 @@
     "test": "jest",
     "test:e2e:android": "detox test --configuration android.emu.release",
     "test:e2e:ios": "detox test --configuration ios.sim.release",
-    "build:android": "cd android && ./gradlew assembleRelease",
-    "build:android:bundle": "cd android && ./gradlew bundleRelease",
-    "build:ios": "xcodebuild -workspace ios/VEO.xcworkspace -scheme VEO -configuration Release",
+    "build:android": "cd android && ENVFILE=env/production.env ./gradlew assembleRelease",
+    "build:android:bundle": "cd android && ENVFILE=env/production.env ./gradlew bundleRelease",
+    "build:ios": "ENVFILE=env/production.env xcodebuild -workspace ios/VEO.xcworkspace -scheme VEO -configuration Release",
     "pod:install": "cd ios && pod install",
     "clean": "rimraf node_modules ios/Pods android/.gradle"
   },

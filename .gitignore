@@ -39,8 +39,10 @@ lerna-debug.log*
 .env.*.local
 !.env.example
 # Convención por-entorno (playbook §4): config tracked, secretos gitignored
-*.secret.env
-!*.secret.env.example
+# Backend services: convención env ÚNICA (env/<tier>.env por servicio). Los <tier>.env del backend
+# llevan secretos REALES (JWT PEM, HMAC, DB pass) → gitignored. Solo example.env queda tracked.
+services/**/env/*.env
+!services/**/env/example.env
 
 # Editor
 .vscode/*
@@ -125,3 +127,11 @@ e2e/.logs/
 
 # Load-test: tokens JWT generados localmente (NO commitear)
 dev-stack/loadtest/tokens.json
+
+# Cloudflare OPS: tier files con secretos reales gitignored; example es el contrato
+infra/cloudflare/env/*.env
+!infra/cloudflare/env/example.env
+
+# apps: tier files con valores (incl. Mapbox pk) gitignored; example.env es el contrato
+apps/**/env/*.env
+!apps/**/env/example.env

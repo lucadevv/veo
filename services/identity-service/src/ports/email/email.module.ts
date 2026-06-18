@@ -5,11 +5,30 @@ import { ExternalServiceError } from '@veo/utils';
 import { EMAIL_SENDER, type EmailMessage, type EmailSender } from './email.port';
 import type { Env } from '../../config/env.schema';
 
+/**
+ * Espeja el correo (con el OTP de "verifica tu correo") al visor de OTPs de dev (dev-stack/otp-viewer)
+ * si `DEV_OTP_SINK_URL` está seteada. Manda subject + html SIN tags para que el visor extraiga el
+ * código limpio. Fire-and-forget: jamás rompe el envío. Solo dev — la env solo existe en development.
+ */
+function mirrorToDevViewer(msg: EmailMessage): Promise<unknown> {
+  const sink = process.env.DEV_OTP_SINK_URL;
+  if (!sink) return Promise.resolve();
+  const text = `${msg.subject} — ${msg.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`;
+  return fetch(sink, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ service: 'identity-service', channel: 'email', to: msg.to, message: text }),
+  });
+}
+
 /** Sandbox: imprime el correo (determinista) en consola. No envía nada real (dev/CI). */
 export class EmailSandboxSender implements EmailSender {
   private readonly logger = new Logger('EmailSandbox');
   async send(msg: EmailMessage): Promise<void> {
     this.logger.warn(`[SANDBOX EMAIL] → ${msg.to} · ${msg.subject}\n${msg.html}`);
+    void mirrorToDevViewer(msg).catch((err) =>
+      this.logger.debug(`[otp-viewer] no se pudo espejar el OTP (visor caído): ${err}`),
+    );
   }
 }
 

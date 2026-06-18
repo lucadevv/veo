@@ -17,7 +17,6 @@ import {
   PressableScale,
 } from '../../../../shared/presentation/components/motion';
 import {OtpField} from '../components/OtpField';
-import {OtpKeypad} from '../components/OtpKeypad';
 import {IconChevronLeft} from '../components/icons';
 import {
   type EmailAuthErrorKind,
@@ -59,7 +58,7 @@ function formatCountdown(totalSeconds: number): string {
 /**
  * Flujo de ingreso por correo + contraseña (ADR-012). Mismo lenguaje visual que los pasos
  * teléfono/OTP: SafeScreen, Button accent, Banner danger, Text variants, FadeInView, IconChevronLeft
- * y REUSO de OtpField/OtpKeypad para el código. Toggle iniciar sesión / crear cuenta. Tras
+ * y REUSO de OtpField para el código. Toggle iniciar sesión / crear cuenta. Tras
  * verify/login la sesión cambia y el RootNavigator conmuta solo (no se navega imperativamente).
  */
 export function EmailAuthScreen({
@@ -264,7 +263,7 @@ export function EmailAuthScreen({
 
   const maskedEmail = useMemo(() => maskEmail(email), [email]);
 
-  /* ── Paso: código de verificación (reusa OtpField + OtpKeypad) ── */
+  /* ── Paso: código de verificación (OtpField + teclado nativo del sistema) ── */
   if (step === 'code') {
     const showCodeError =
       (touched && code.length !== CODE_LENGTH) || Boolean(flow.verifyError);
@@ -314,14 +313,6 @@ export function EmailAuthScreen({
           errorNonce={errorNonce}
           accessibilityLabel={t('auth.otpLabel')}
         />
-
-        <View style={styles.keypad}>
-          <OtpKeypad
-            onPress={digit =>
-              setCode(prev => (prev + digit).slice(0, CODE_LENGTH))
-            }
-          />
-        </View>
 
         <Text
           variant="footnote"
@@ -722,7 +713,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     paddingVertical: spacing.sm,
   },
-  keypad: {marginTop: 18},
   expiry: {marginTop: 18},
   resetPassword: {marginTop: 18},
   resendRow: {

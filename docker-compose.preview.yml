@@ -1,0 +1,360 @@
+# =============================================================
+# VEO · Stack de PREVIEW/STAGING (VPS)
+# -------------------------------------------------------------
+# Despliegue del backend (18 servicios) + infra mínima en un VPS compartido con 'metatron'.
+# - Red dedicada `veo-net` (bridge) → aislado de metatron.
+# - Edge: Cloudflare Tunnel (cloudflared en veo-net). El tunnel "veo-preview" ya existe con ingress:
+#     api.preview.yoveoapp.com        → public-bff:4001
+#     driver-api.preview.yoveoapp.com → driver-bff:4002
+#     admin-api.preview.yoveoapp.com  → admin-bff:4003
+# - Imágenes de servicio: ghcr.io/lucadevv/veo/<service>:latest (las buildea el CI).
+# - UI (admin-web/family-web/web-hub) corre LOCAL, NO en este compose.
+#
+# RAM: el VPS tiene 15GB y comparte con metatron (~4.5GB) ⇒ ~9.5GB para VEO.
+#   Cada servicio lleva mem_limit OBLIGATORIO para no ahogar a metatron.
+#
+# NO se publican puertos al host: TODO es interno a veo-net. El único ingreso es cloudflared.
+#
+# Uso (en el VPS, con CLOUDFLARE_TUNNEL_TOKEN en el entorno o en infra/cloudflare/env/local.env):
+#   docker compose -f docker-compose.preview.yml pull
+#   docker compose -f docker-compose.preview.yml up -d
+# =============================================================
+name: veo
+
+# -------------------------------------------------------------
+# Anchor común para los 18 servicios de aplicación.
+# -------------------------------------------------------------
+x-svc-defaults: &svc-defaults
+  restart: unless-stopped
+  networks: [veo-net]
+
+services:
+  # ===========================================================
+  # INFRAESTRUCTURA (replicada de dev-stack/docker-compose.yml, en veo-net)
+  # Diferidos en preview (dev-only / pesados): kafka-ui, mailpit, jaeger,
+  # prometheus, grafana, tileserver, osrm, nominatim, minio-provision.
+  # ===========================================================
+
+  # === PostgreSQL 16 + PostGIS ===
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: veo
+      POSTGRES_PASSWORD: veo_dev
+      POSTGRES_DB: veo
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./dev-stack/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === Redis 7 (cache + pub/sub + dispatch hot index) ===
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 192mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === Kafka (KRaft mode, sin zookeeper) · imagen oficial Apache ===
+  # En veo-net los servicios hablan por kafka:9092 (listener PLAINTEXT interno).
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 1g
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === ClickHouse (analytics, GPS history) ===
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.9-alpine
+    environment:
+      CLICKHOUSE_DB: veo_analytics
+      CLICKHOUSE_USER: veo
+      CLICKHOUSE_PASSWORD: veo_dev
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    mem_limit: 768m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === MinIO (S3 self-hosted) ===
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: veo_dev
+      MINIO_ROOT_PASSWORD: veo_dev_secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === Mosquitto MQTT (driver GPS) ===
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    volumes:
+      - ./dev-stack/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    mem_limit: 64m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # === LiveKit (WebRTC SFU) ===
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret_change_in_production"
+    mem_limit: 384m
+    restart: unless-stopped
+    networks: [veo-net]
+
+  # ----- DIFERIDOS en preview (no se levantan acá): -----
+  #   kafka-ui, mailpit, jaeger, prometheus, grafana  → dev-only/observabilidad
+  #   tileserver, osrm, nominatim                      → mapas pesados (perfil "maps")
+  #   minio-provision                                  → sidecar one-shot de buckets (correr aparte)
+
+  # ===========================================================
+  # SERVICIOS DE APLICACIÓN (18)
+  # image: ghcr.io/lucadevv/veo/<svc>:latest · env_file por servicio · veo-net.
+  # Se hablan por <nombre>:<PORT> dentro de veo-net (cada container escucha su PORT del env).
+  # ===========================================================
+
+  # --- identity-service · HTTP 3091 / gRPC 50051 (pesado: auth/OAuth/JWKS) ---
+  identity-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/identity-service:latest
+    env_file: services/identity-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 384m
+
+  # --- trip-service · HTTP 3092 / gRPC 50052 (pesado: máquina de estados) ---
+  trip-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/trip-service:latest
+    env_file: services/trip-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 384m
+
+  # --- dispatch-service · HTTP 3093 / gRPC 50053 (pesado: matching/surge) ---
+  dispatch-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/dispatch-service:latest
+    env_file: services/dispatch-service/env/preview.env
+    depends_on: [postgres, redis, kafka, identity-service]
+    mem_limit: 384m
+
+  # --- payment-service · HTTP 3005 / gRPC 50055 ---
+  payment-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/payment-service:latest
+    env_file: services/payment-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- panic-service · HTTP 3006 / gRPC 50056 ---
+  panic-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/panic-service:latest
+    env_file: services/panic-service/env/preview.env
+    depends_on: [postgres, redis, kafka, minio]
+    mem_limit: 256m
+
+  # --- media-service · HTTP 3007 / gRPC 50057 (orquesta LiveKit + S3) ---
+  media-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/media-service:latest
+    env_file: services/media-service/env/preview.env
+    depends_on: [postgres, redis, kafka, minio, livekit]
+    mem_limit: 256m
+
+  # --- notification-service · HTTP 3008 (push FCM/APNs) ---
+  notification-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/notification-service:latest
+    env_file: services/notification-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- audit-service · HTTP 3009 / gRPC 50059 (consume Kafka + WORM a MinIO) ---
+  audit-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/audit-service:latest
+    env_file: services/audit-service/env/preview.env
+    depends_on: [postgres, kafka, minio]
+    mem_limit: 256m
+
+  # --- rating-service · HTTP 3010 / gRPC 50060 ---
+  rating-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/rating-service:latest
+    env_file: services/rating-service/env/preview.env
+    depends_on: [postgres, redis, kafka, trip-service]
+    mem_limit: 256m
+
+  # --- share-service · HTTP 3011 / gRPC 50061 ---
+  share-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/share-service:latest
+    env_file: services/share-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- fleet-service · HTTP 3012 / gRPC 50062 ---
+  fleet-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/fleet-service:latest
+    env_file: services/fleet-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- places-service · HTTP 3013 / gRPC 50063 ---
+  places-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/places-service:latest
+    env_file: services/places-service/env/preview.env
+    depends_on: [postgres, redis]
+    mem_limit: 256m
+
+  # --- chat-service · HTTP 3014 ---
+  chat-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/chat-service:latest
+    env_file: services/chat-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- tracking-service (Go) · HTTP 3004 (MQTT + ClickHouse + Redis + Kafka) ---
+  tracking-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/tracking-service:latest
+    env_file: services/tracking-service/env/preview.env
+    depends_on: [redis, kafka, clickhouse, mosquitto]
+    mem_limit: 256m
+
+  # --- biometric-service (Python/ML, ONNX) · HTTP 3015 (sin infra: modelos self-hosted) ---
+  biometric-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/biometric-service:latest
+    env_file: services/biometric-service/env/preview.env
+    mem_limit: 512m
+
+  # --- public-bff · HTTP 4001 (edge: api.preview.yoveoapp.com) ---
+  public-bff:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/public-bff:latest
+    env_file: services/bff/public-bff/env/preview.env
+    depends_on: [redis, kafka, identity-service, places-service, trip-service, dispatch-service]
+    mem_limit: 256m
+
+  # --- driver-bff · HTTP 4002 (edge: driver-api.preview.yoveoapp.com) ---
+  driver-bff:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/driver-bff:latest
+    env_file: services/bff/driver-bff/env/preview.env
+    depends_on:
+      [
+        redis,
+        kafka,
+        identity-service,
+        trip-service,
+        dispatch-service,
+        payment-service,
+        rating-service,
+        fleet-service,
+        notification-service,
+        media-service,
+        chat-service,
+      ]
+    mem_limit: 256m
+
+  # --- admin-bff · HTTP 4003 (edge: admin-api.preview.yoveoapp.com) ---
+  admin-bff:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/admin-bff:latest
+    env_file: services/bff/admin-bff/env/preview.env
+    depends_on:
+      [
+        redis,
+        kafka,
+        clickhouse,
+        identity-service,
+        trip-service,
+        dispatch-service,
+        payment-service,
+        panic-service,
+        media-service,
+        audit-service,
+        rating-service,
+        fleet-service,
+      ]
+    mem_limit: 256m
+
+  # ===========================================================
+  # EDGE · Cloudflare Tunnel (connector del tunnel "veo-preview")
+  # El token trae la config de ingress remota (api/driver-api/admin-api.preview.yoveoapp.com).
+  # ===========================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN es obligatorio (infra/cloudflare/env/local.env)}
+    restart: unless-stopped
+    networks: [veo-net]
+    depends_on: [public-bff, driver-bff, admin-bff]
+    mem_limit: 128m
+
+# -------------------------------------------------------------
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  clickhouse-data:
+  minio-data:
+  mosquitto-data:
+  mosquitto-log:
+
+networks:
+  veo-net:
+    name: veo-net
+    driver: bridge

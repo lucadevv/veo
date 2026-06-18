@@ -28,7 +28,7 @@ $RNFirebaseAsStaticFramework = true
 # v11 más vieja (p.ej. 11.15.2) ROMPE el build con "has no member". Mapbox v11.8.0+ ELIMINÓ el
 # download token (sk): "Configuring Mapbox's secret token is no longer required when installing our
 # SDKs". Por eso `pod install` funciona con SOLO el pk público — sin `~/.netrc` ni sk. NO fijar v10.x.
-# El pk de runtime vive en `env/development.secret.env` (lo consume `Mapbox.setAccessToken`).
+# El pk de runtime vive en `env/<tier>.env` (lo consume `Mapbox.setAccessToken`).
 $RNMapboxMapsVersion = '~> 11.20.1'
 
 target 'VEO' do

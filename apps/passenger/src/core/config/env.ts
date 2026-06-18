@@ -157,7 +157,7 @@ const envSchema = z.object({
   // embebido en el bundle (`veoDarkStyle`); esta URL queda como fallback opcional.
   PUBLIC_MAP_STYLE_URL: z.string().url(),
   // Token PÚBLICO de Mapbox (`pk.`). Lo consume `Mapbox.setAccessToken` en el bootstrap nativo.
-  // Público por diseño (va al cliente), pero NO se commitea: vive en `env/development.secret.env`.
+  // Público por diseño (va al cliente): vive en `env/<tier>.env` (single-file), restringido por bundle-id en Mapbox.
   // Opcional para no romper el arranque en tests/builds sin mapa configurado.
   MAPBOX_ACCESS_TOKEN: z.string().optional().default(''),
   LIVEKIT_URL: z.string().default(''),
@@ -166,9 +166,6 @@ const envSchema = z.object({
     .string()
     .default('false')
     .transform(value => value === 'true'),
-  VEO_ENV: z
-    .enum(['development', 'staging', 'production'])
-    .default('development'),
 });
 
 const parsed = envSchema.safeParse({
@@ -184,7 +181,6 @@ const parsed = envSchema.safeParse({
   MAPBOX_ACCESS_TOKEN: Config.MAPBOX_ACCESS_TOKEN ?? '',
   LIVEKIT_URL: Config.LIVEKIT_URL ?? '',
   FIREBASE_ENABLED: Config.FIREBASE_ENABLED ?? 'false',
-  VEO_ENV: Config.VEO_ENV ?? 'development',
 });
 
 if (!parsed.success) {
@@ -208,8 +204,6 @@ export const env = {
   livekitUrl: parsed.data.LIVEKIT_URL,
   /** FCM habilitado sólo cuando hay credenciales reales. */
   firebaseEnabled: parsed.data.FIREBASE_ENABLED,
-  /** Entorno de ejecución. */
-  environment: parsed.data.VEO_ENV,
 } as const;
 
 export type AppEnv = typeof env;

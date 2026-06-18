@@ -36,7 +36,7 @@ export const SECRETS = {
 /**
  * Par ES256 compartido (PKCS8 + SPKI). Es una clave DEV EXCLUSIVA de este harness e2e: esta es la
  * ÚNICA copia (los `.env` de los servicios NO llevan material de clave — su secreto vive en
- * `development.secret.env`, gitignored, o lo genera boot-passenger-stack.sh). NUNCA usar con
+ * `development.env (single-file)`, gitignored, o lo genera boot-passenger-stack.sh). NUNCA usar con
  * NODE_ENV != development: en prod la keypair la genera/rota terraform vía Secrets Manager.
  * El harness lo inyecta a TODOS los procesos para garantizar que los JWT que emite identity
  * los validen ambos BFFs (si difirieran, el login no autenticaría aguas arriba).

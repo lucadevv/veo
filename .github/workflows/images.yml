@@ -1,7 +1,11 @@
 name: Images
 
-# Build de imágenes Docker por servicio: en PR es gate (build sin push);
-# en push a main se publica a ECR con tags :<git-sha> y :latest.
+# Build de imágenes Docker POR SERVICIO, optimizado:
+#  - detect: calcula SOLO los servicios afectados por el diff (cambio de un servicio → 1 build;
+#    cambio compartido en packages/lock/patches → todos). Matrix dinámica.
+#  - image: en PR es gate (build sin push); en push a main publica a GHCR (siempre) y a ECR (si está
+#    configurado vars.AWS_ECR_PUSH_ROLE_ARN). Cache de capas gha por servicio.
+#  - deploy: en push a main, hace pull+up del compose en el VPS por SSH (dormido hasta VPS_DEPLOY_ENABLED).
 on:
   pull_request:
     branches: [main, develop]
@@ -23,83 +27,120 @@ concurrency:
 
 permissions:
   contents: read
-  # OIDC hacia AWS, misma convención que .github/workflows/terraform.yml
-  id-token: write
+  packages: write # GHCR push con GITHUB_TOKEN
+  id-token: write # OIDC hacia AWS (ECR, si está configurado)
 
 env:
-  # Región canónica de la infra (infra/terraform, us-east-1)
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
+  # ── 1) Detecta SOLO los servicios afectados por el diff ──────────────────────────────────
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      has: ${{ steps.set.outputs.has }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historia para el diff
+      - id: set
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # Catálogo de servicios (service · context · dockerfile · dir-que-lo-afecta)
+          ALL='[
+            {"service":"audit-service","context":".","dockerfile":"services/audit-service/Dockerfile","dir":"services/audit-service/"},
+            {"service":"admin-bff","context":".","dockerfile":"services/bff/admin-bff/Dockerfile","dir":"services/bff/admin-bff/"},
+            {"service":"driver-bff","context":".","dockerfile":"services/bff/driver-bff/Dockerfile","dir":"services/bff/driver-bff/"},
+            {"service":"public-bff","context":".","dockerfile":"services/bff/public-bff/Dockerfile","dir":"services/bff/public-bff/"},
+            {"service":"chat-service","context":".","dockerfile":"services/chat-service/Dockerfile","dir":"services/chat-service/"},
+            {"service":"dispatch-service","context":".","dockerfile":"services/dispatch-service/Dockerfile","dir":"services/dispatch-service/"},
+            {"service":"fleet-service","context":".","dockerfile":"services/fleet-service/Dockerfile","dir":"services/fleet-service/"},
+            {"service":"identity-service","context":".","dockerfile":"services/identity-service/Dockerfile","dir":"services/identity-service/"},
+            {"service":"media-service","context":".","dockerfile":"services/media-service/Dockerfile","dir":"services/media-service/"},
+            {"service":"notification-service","context":".","dockerfile":"services/notification-service/Dockerfile","dir":"services/notification-service/"},
+            {"service":"panic-service","context":".","dockerfile":"services/panic-service/Dockerfile","dir":"services/panic-service/"},
+            {"service":"payment-service","context":".","dockerfile":"services/payment-service/Dockerfile","dir":"services/payment-service/"},
+            {"service":"places-service","context":".","dockerfile":"services/places-service/Dockerfile","dir":"services/places-service/"},
+            {"service":"rating-service","context":".","dockerfile":"services/rating-service/Dockerfile","dir":"services/rating-service/"},
+            {"service":"share-service","context":".","dockerfile":"services/share-service/Dockerfile","dir":"services/share-service/"},
+            {"service":"trip-service","context":".","dockerfile":"services/trip-service/Dockerfile","dir":"services/trip-service/"},
+            {"service":"tracking-service","context":"services/tracking-service","dockerfile":"services/tracking-service/Dockerfile","dir":"services/tracking-service/"},
+            {"service":"biometric-service","context":"services/biometric-service","dockerfile":"services/biometric-service/Dockerfile","dir":"services/biometric-service/"}
+          ]'
+          # Base del diff
+          if [ "$EVENT" = "pull_request" ]; then
+            BASE="origin/$BASE_REF"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            BASE="$BEFORE"
+          else
+            BASE="HEAD~1"
+          fi
+          CHANGED="$(git diff --name-only "$BASE" HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)"
+          echo "Cambios:"; echo "$CHANGED" | sed 's/^/  /'
+          # Cambio COMPARTIDO → buildear TODO
+          if echo "$CHANGED" | grep -qE '^(packages/|patches/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.dockerignore|\.github/workflows/images\.yml)'; then
+            echo "→ cambio compartido: buildeo TODOS"
+            MATRIX="$ALL"
+          else
+            CHJSON="$(printf '%s\n' "$CHANGED" | jq -R . | jq -s .)"
+            MATRIX="$(echo "$ALL" | jq -c --argjson ch "$CHJSON" '[ .[] | select(.dir as $d | any($ch[]; startswith($d))) ]')"
+          fi
+          COUNT="$(echo "$MATRIX" | jq 'length')"
+          echo "→ servicios a buildear: $COUNT"
+          echo "matrix={\"include\":$(echo "$MATRIX" | jq -c .)}" >> "$GITHUB_OUTPUT"
+          echo "has=$([ "$COUNT" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  # ── 2) Build (+push en main) solo de los afectados ───────────────────────────────────────
   image:
+    needs: detect
+    if: needs.detect.outputs.has == 'true'
     name: ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Servicios node (contexto = raíz del monorepo, workspace pnpm)
-          - { service: audit-service, context: ., dockerfile: services/audit-service/Dockerfile }
-          - { service: admin-bff, context: ., dockerfile: services/bff/admin-bff/Dockerfile }
-          - { service: driver-bff, context: ., dockerfile: services/bff/driver-bff/Dockerfile }
-          - { service: public-bff, context: ., dockerfile: services/bff/public-bff/Dockerfile }
-          - { service: chat-service, context: ., dockerfile: services/chat-service/Dockerfile }
-          - {
-              service: dispatch-service,
-              context: .,
-              dockerfile: services/dispatch-service/Dockerfile,
-            }
-          - { service: fleet-service, context: ., dockerfile: services/fleet-service/Dockerfile }
-          - {
-              service: identity-service,
-              context: .,
-              dockerfile: services/identity-service/Dockerfile,
-            }
-          - { service: media-service, context: ., dockerfile: services/media-service/Dockerfile }
-          - {
-              service: notification-service,
-              context: .,
-              dockerfile: services/notification-service/Dockerfile,
-            }
-          - { service: panic-service, context: ., dockerfile: services/panic-service/Dockerfile }
-          - {
-              service: payment-service,
-              context: .,
-              dockerfile: services/payment-service/Dockerfile,
-            }
-          - { service: places-service, context: ., dockerfile: services/places-service/Dockerfile }
-          - { service: rating-service, context: ., dockerfile: services/rating-service/Dockerfile }
-          - { service: share-service, context: ., dockerfile: services/share-service/Dockerfile }
-          - { service: trip-service, context: ., dockerfile: services/trip-service/Dockerfile }
-          # Go (contexto propio)
-          - {
-              service: tracking-service,
-              context: services/tracking-service,
-              dockerfile: services/tracking-service/Dockerfile,
-            }
-          # Python (contexto propio)
-          - {
-              service: biometric-service,
-              context: services/biometric-service,
-              dockerfile: services/biometric-service/Dockerfile,
-            }
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS credentials (OIDC)
+      # GHCR (siempre, para el VPS) — solo en push (en PR es build-only gate)
+      - name: Login GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ECR (opcional, solo si hay rol AWS configurado) — para el camino k8s/AWS
+      - name: AWS creds (OIDC)
+        id: aws
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ECR_PUSH_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Parametrizado: definir vars.AWS_ECR_PUSH_ROLE_ARN en GitHub (sin account IDs hardcodeados)
           role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
+      - name: Login ECR
         id: ecr
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ECR_PUSH_ROLE_ARN != ''
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tags
+        id: meta
+        run: |
+          OWNER="${{ github.repository_owner }}"; OWNER="${OWNER,,}"
+          GHCR="ghcr.io/${OWNER}/veo/${{ matrix.service }}"
+          TAGS="${GHCR}:${{ github.sha }},${GHCR}:latest"
+          if [ -n "${{ steps.ecr.outputs.registry }}" ]; then
+            ECR="${{ steps.ecr.outputs.registry }}/veo/${{ matrix.service }}"
+            TAGS="${TAGS},${ECR}:${{ github.sha }},${ECR}:latest"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Build${{ github.event_name == 'push' && ' & Push' || '' }}
         uses: docker/build-push-action@v6
@@ -107,9 +148,27 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          # Convención de repos ECR: veo/<servicio> (registry sale del login OIDC; en PR queda tag local)
-          tags: |
-            ${{ steps.ecr.outputs.registry || 'localhost' }}/veo/${{ matrix.service }}:${{ github.sha }}
-            ${{ steps.ecr.outputs.registry || 'localhost' }}/veo/${{ matrix.service }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ── 3) Deploy al VPS (pull + up del compose por SSH) ─────────────────────────────────────
+  # Dormido hasta que actives vars.VPS_DEPLOY_ENABLED=true y cargues los secrets VPS_HOST/USER/SSH_KEY.
+  deploy:
+    needs: [detect, image]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.detect.outputs.has == 'true' && vars.VPS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull + up en el VPS (solo lo que cambió ya está en GHCR)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/veo
+            docker compose -f docker-compose.preview.yml pull
+            docker compose -f docker-compose.preview.yml up -d --remove-orphans
+            docker image prune -f

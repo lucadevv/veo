@@ -4,11 +4,29 @@ import { ExternalServiceError } from '@veo/utils';
 import { SMS_SENDER, type SmsSender } from './sms.port';
 import type { Env } from '../../config/env.schema';
 
+/**
+ * Espeja el mensaje (con el OTP en claro) al visor de OTPs de dev (dev-stack/otp-viewer) si
+ * `DEV_OTP_SINK_URL` está seteada. Fire-and-forget: jamás rompe el envío. Solo dev — la env solo
+ * existe en development; en prod no está y esto es no-op.
+ */
+function mirrorToDevViewer(to: string, message: string): Promise<unknown> {
+  const sink = process.env.DEV_OTP_SINK_URL;
+  if (!sink) return Promise.resolve();
+  return fetch(sink, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ service: 'identity-service', channel: 'sms', to, message }),
+  });
+}
+
 /** Sandbox: no envía nada real; imprime el mensaje (incluido el OTP) en el log de la consola. */
 class SmsSandboxSender implements SmsSender {
   private readonly logger = new Logger('SmsSandbox');
   async send(to: string, message: string): Promise<void> {
     this.logger.warn(`[SANDBOX SMS] → ${to}: ${message}`);
+    void mirrorToDevViewer(to, message).catch((err) =>
+      this.logger.debug(`[otp-viewer] no se pudo espejar el OTP (visor caído): ${err}`),
+    );
   }
 }
 

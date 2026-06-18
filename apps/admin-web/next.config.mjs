@@ -1,3 +1,10 @@
+import { config as loadEnvFile } from 'dotenv';
+
+// Carga el env del tier apuntado por ENVFILE (estilo dart-define-from-file, igual que passenger/driver).
+// Default development. DEBE correr ANTES de leer process.env.* (la CSP de abajo y el inlining de
+// NEXT_PUBLIC_* dependen de que ya estén cargadas). Sin .env generado ni script de merge.
+loadEnvFile({ path: process.env.ENVFILE ?? 'env/development.env' });
+
 /**
  * Configuración de admin-web (Next.js 14 App Router).
  * Cabeceras de seguridad estrictas con CSP que permite SOLO orígenes soberanos:

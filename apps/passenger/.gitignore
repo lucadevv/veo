@@ -14,7 +14,6 @@ android/keystore/release.keystore
 .env.local
 
 # Secretos de entorno (tokens reales: Mapbox pk, etc.). Solo `.env.example` se commitea.
-env/*.secret.env
 
 *.log
 .DS_Store

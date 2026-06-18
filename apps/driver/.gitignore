@@ -22,7 +22,6 @@ ios/*.xcworkspace/xcuserdata/
 .env.local
 
 # Secretos de entorno (tokens reales: Mapbox pk, etc.). Solo `.env.example` se commitea.
-env/*.secret.env
 
 # Mapbox iOS download token (sk.) — credencial de máquina/CI, nunca en el repo.
 .netrc

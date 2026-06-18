@@ -16,5 +16,3 @@ dev-stack
 infra
 
 # Secretos por-entorno: jamás al contexto de build (quedarían en la cache del builder).
-# El glob NO matchea `*.secret.env.example` (las plantillas tracked SÍ pueden ir; no llevan material).
-**/*.secret.env
