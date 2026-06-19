@@ -1,6 +1,7 @@
 /** DTOs de flota/compliance. */
 import {
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsISO8601,
@@ -8,6 +9,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -15,6 +17,7 @@ import {
   FleetDocumentType,
   FleetDocumentStatus,
   VehicleSegment,
+  VehicleType,
   EnergySource,
 } from '@veo/shared-types';
 
@@ -25,11 +28,20 @@ export class CreateVehicleDto {
   @IsString()
   plate!: string;
 
-  @IsString()
-  make!: string;
+  // F4 (C2): el operador elige un modelo del catálogo (modelSpecId APPROVED); fleet snapshotea
+  // make/model/vehicleType del spec. make/model libres siguen aceptados (seeds/scripts) — fleet exige uno
+  // de los dos caminos. El admin-bff solo proxya; la validación cruzada vive en fleet-service.
+  @IsOptional()
+  @IsUUID()
+  modelSpecId?: string;
 
+  @IsOptional()
   @IsString()
-  model!: string;
+  make?: string;
+
+  @IsOptional()
+  @IsString()
+  model?: string;
 
   @IsInt()
   @Min(1950)
@@ -81,6 +93,12 @@ export class CreateDocumentDto {
 export class ReviewDocumentDto {
   @IsIn(['VALID', 'REJECTED'])
   decision!: 'VALID' | 'REJECTED';
+
+  // M5: motivo del rechazo (solo REJECTED) — el conductor lo VE para saber qué corregir. Opcional.
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 export class CreateInspectionDto {
@@ -141,7 +159,13 @@ export class ListInspectionsQueryDto extends PaginatedQueryDto {
   vehicleId?: string;
 }
 
-export class ExpirationsQueryDto {
+/**
+ * Cola de vencimientos paginada (cursor + limit, igual que el resto de listas de flota). El cursor acá
+ * NO es un id uuidv7 sino el cursor COMPUESTO (expiresAt|id) que sirve fleet-service: el admin-bff lo
+ * trata como string opaco (solo lo proxya), por eso hereda el `@IsString()` de PaginatedQueryDto sin
+ * validar su forma interna. `days` filtra la ventana temporal.
+ */
+export class ExpirationsQueryDto extends PaginatedQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -155,6 +179,17 @@ export class ListModelReviewQueryDto extends PaginatedQueryDto {
   @IsOptional()
   @IsIn(VEHICLE_MODEL_STATUSES)
   status?: (typeof VEHICLE_MODEL_STATUSES)[number];
+}
+
+/** Catálogo APROBADO de modelos para el selector del alta admin (F4 · C2). Filtros: tipo + búsqueda libre. */
+export class ListVehicleModelsQueryDto extends PaginatedQueryDto {
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicleType?: VehicleType;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
 }
 
 /** Aprobación de una solicitud de modelo: el operador completa la ficha técnica (B5-2.c). */

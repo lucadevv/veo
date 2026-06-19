@@ -10,6 +10,7 @@ import type {
   FleetDocumentView,
   InspectionView,
   VehicleModelReviewView,
+  VehicleModelSpecView,
   VehicleView,
 } from '@veo/api-client';
 import { FleetService } from './fleet.service';
@@ -22,6 +23,7 @@ import {
   ListDocumentsQueryDto,
   ListInspectionsQueryDto,
   ListModelReviewQueryDto,
+  ListVehicleModelsQueryDto,
   ApproveVehicleModelDto,
   ExpirationsQueryDto,
 } from './dto/fleet.dto';
@@ -71,12 +73,14 @@ export class FleetController {
   }
 
   @Get('documents/expiring')
-  @ApiOperation({ summary: 'Documentos próximos a vencer (ventana de días)' })
+  @ApiOperation({
+    summary: 'Cola paginada de documentos próximos a vencer (ventana de días, cursor compuesto)',
+  })
   expirations(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpirationsQueryDto,
-  ): Promise<ExpiringDocumentView[]> {
-    return this.fleet.expirations(user, query.days);
+  ): Promise<Page<ExpiringDocumentView>> {
+    return this.fleet.expirations(user, query);
   }
 
   @Get('documents')
@@ -118,6 +122,15 @@ export class FleetController {
   }
 
   // ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ──
+
+  @Get('vehicle-models')
+  @ApiOperation({ summary: 'Catálogo APROBADO de modelos (selector del alta admin). Filtros: vehicleType, q' })
+  listModels(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListVehicleModelsQueryDto,
+  ): Promise<Page<VehicleModelSpecView>> {
+    return this.fleet.listModels(user, query);
+  }
 
   @Get('vehicle-models/review')
   @ApiOperation({ summary: 'Cola de revisión de modelos solicitados (default PENDING_REVIEW)' })

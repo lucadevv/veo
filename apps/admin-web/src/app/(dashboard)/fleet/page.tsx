@@ -379,14 +379,21 @@ export default function FleetPage() {
             {expiring.isError ? (
               <ErrorState onRetry={() => void expiring.refetch()} />
             ) : (
-              <DataTable
-                caption="Documentos por vencer"
-                columns={expiringColumns}
-                data={expiring.data ?? []}
-                loading={expiring.isLoading}
-                emptyTitle="Sin vencimientos próximos"
-                emptyDescription="Ningún documento vence pronto."
-              />
+              <>
+                <DataTable
+                  caption="Documentos por vencer"
+                  columns={expiringColumns}
+                  data={expiring.data?.pages.flatMap((p) => p.items) ?? []}
+                  loading={expiring.isLoading}
+                  emptyTitle="Sin vencimientos próximos"
+                  emptyDescription="Ningún documento vence pronto."
+                />
+                <LoadMore
+                  hasNextPage={!!expiring.hasNextPage}
+                  isFetching={expiring.isFetchingNextPage}
+                  onLoadMore={() => void expiring.fetchNextPage()}
+                />
+              </>
             )}
           </TabsContent>
         </Tabs>

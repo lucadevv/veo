@@ -13,10 +13,12 @@ import {
   dispatchRadiusConfigView,
   type ReplaceRadiusConfigRequest,
   driverApproval,
+  driverDetail,
   expiringDocumentView,
   fleetDocumentView,
   inspectionView,
   vehicleModelReviewView,
+  vehicleModelSpecView,
   type ApproveVehicleModelRequest,
   type LiveAccessRequest,
   liveViewerToken,
@@ -54,6 +56,7 @@ export const qk = {
   trips: (f: TripFilters) => ['trips', f] as const,
   trip: (id: string) => ['trip', id] as const,
   drivers: (status: string) => ['drivers', status] as const,
+  driver: (id: string) => ['driver', id] as const,
   driversPending: ['drivers-pending'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
@@ -63,6 +66,7 @@ export const qk = {
   expiring: ['fleet-expiring'] as const,
   documents: (status: string) => ['fleet-documents', status] as const,
   modelReview: (status: string) => ['vehicle-model-review', status] as const,
+  vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
@@ -146,6 +150,21 @@ export function useDrivers(status: string) {
   });
 }
 
+/**
+ * Detalle de revisión de un conductor (GET /ops/drivers/:id): core + biométrico + documentos con URLs
+ * presigned (TTL 120s). Mismo patrón que useTrip: cliente autenticado (el JWT lo adjunta el proxy
+ * server-side), schema del contrato (driverDetail de @veo/api-client). `refetch()` renueva las
+ * presigned URLs vencidas — el visor lo expone como botón "Recargar". Ruta gateada a Compliance+ por el bff.
+ */
+export function useDriverDetail(id: string) {
+  return useQuery({
+    queryKey: qk.driver(id),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/ops/drivers/${id}`, { schema: driverDetail, signal }),
+    enabled: id.length > 0,
+  });
+}
+
 export function useDriverDecision() {
   const qc = useQueryClient();
   return useMutation({
@@ -155,9 +174,11 @@ export function useDriverDecision() {
       apiClient().post(`/ops/drivers/${input.id}/${input.decision}`, {
         body: input.reason ? { reason: input.reason } : undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       void qc.invalidateQueries({ queryKey: ['drivers'] });
       void qc.invalidateQueries({ queryKey: qk.driversPending });
+      // El detalle de revisión refleja el nuevo estado de antecedentes tras aprobar/rechazar.
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
     },
   });
 }
@@ -174,6 +195,50 @@ export function useDriverSuspend() {
       apiClient().post(`/ops/drivers/${input.id}/suspend`, { body: { reason: input.reason } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['drivers'] });
+    },
+  });
+}
+
+/**
+ * REACTIVACIÓN MANUAL de un conductor suspendido (la inversa de useDriverSuspend, SAFETY). SIN body: el
+ * admin-bff proxya a identity-service, que limpia suspendedAt + suspensionSource (CAS, solo DISCIPLINARY)
+ * y emite driver.reactivated. Respuesta 204 vacía (no se parsea). El éxito refetchea la lista (y el detalle
+ * del conductor) para reflejar el estado ACTIVE proyectado por el read-model.
+ *
+ * FAIL-CLOSED: el backend devuelve 403 (ForbiddenError) si la suspensión era por documentos vencidos (no
+ * se levanta a mano) o si la licencia está vencida, y 409 (ConflictError) si el conductor no estaba
+ * suspendido. El ApiError viaja con `status`/`message` (igual que useDeleteDriver) para que el
+ * ConfirmDialog/llamador muestre el mensaje del server en vez del crudo.
+ */
+export function useReactivateDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/reactivate`),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: ['drivers'] });
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
+    },
+  });
+}
+
+/**
+ * Borrado en CASCADA de un conductor (DELETE /ops/drivers/:id) — IRREVERSIBLE: elimina al conductor, su
+ * usuario, documentos y archivos. SOLO SUPERADMIN + step-up MFA fresca (el admin-bff revalida @Roles +
+ * @RequireStepUpMfa server-side; la UI solo refleja con `drivers:delete`). Respuesta 204 vacía (no se
+ * parsea). El éxito invalida los listados de drivers; el redirect a /ops/drivers lo hace el llamador.
+ * El backend devuelve 409 (ConflictError, BR-S06) si el conductor tiene historial operativo, y 403 si el
+ * rol no es SUPERADMIN o la MFA no está fresca — el ApiError viaja con `status`/`message` para que el
+ * ConfirmDialog/llamador muestre el mensaje amigable del server en vez del crudo.
+ */
+export function useDeleteDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) => apiClient().delete(`/ops/drivers/${input.id}`),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: ['drivers'] });
+      void qc.invalidateQueries({ queryKey: qk.driversPending });
+      void qc.removeQueries({ queryKey: qk.driver(input.id) });
     },
   });
 }
@@ -333,14 +398,24 @@ export function useInspections() {
   });
 }
 
+/**
+ * Cola de vencimientos PAGINADA (cursor compuesto expiresAt|id que sirve fleet-service). Migrada de
+ * useQuery (array, cap silencioso de 25) a useInfiniteQuery: el operador recorre TODA la cola con
+ * "Cargar más", igual que documentos/vehículos/inspecciones. El cursor es opaco para la UI.
+ */
+const expiringPage = paginated(expiringDocumentView);
+
 export function useExpiringDocuments() {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.expiring,
-    queryFn: ({ signal }) =>
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
       apiClient().get('/fleet/documents/expiring', {
-        schema: z.array(expiringDocumentView),
+        schema: expiringPage,
         signal,
+        query: cleanQuery({ cursor: pageParam, limit: 50 }),
       }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 
@@ -349,14 +424,26 @@ export function useDocumentReview() {
   return useMutation({
     // El bff espera `POST /fleet/documents/:id/review` con `{ decision: 'VALID' | 'REJECTED' }`.
     // La UI habla en approve/reject; acá se traduce al contrato del servidor (que revalida).
-    mutationFn: (input: { id: string; decision: 'approve' | 'reject' }) =>
+    // `driverId` es OPCIONAL: cuando la revisión sale del visor de detalle del conductor, lo pasamos
+    // para invalidar su detalle (refresca StatusPill + gate de aprobación); fleet→documentos lo omite.
+    mutationFn: (input: {
+      id: string;
+      decision: 'approve' | 'reject';
+      driverId?: string;
+      // M5: motivo del rechazo (solo reject) — se persiste y el conductor lo ve. Opcional.
+      reason?: string;
+    }) =>
       apiClient().post(`/fleet/documents/${input.id}/review`, {
-        body: { decision: input.decision === 'approve' ? 'VALID' : 'REJECTED' },
+        body: {
+          decision: input.decision === 'approve' ? 'VALID' : 'REJECTED',
+          ...(input.reason ? { reason: input.reason } : {}),
+        },
         schema: fleetDocumentView,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       void qc.invalidateQueries({ queryKey: ['fleet-documents'] });
       void qc.invalidateQueries({ queryKey: qk.expiring });
+      if (input.driverId) void qc.invalidateQueries({ queryKey: qk.driver(input.driverId) });
     },
   });
 }
@@ -407,6 +494,26 @@ export function useModelReviewAction() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
     },
+  });
+}
+
+/**
+ * Catálogo APROBADO de modelos para el selector del alta admin (F4 · C2). Página única: el catálogo curado
+ * es chico (tope 100 server-side) — el selector lo ordena alfabético al render. El operador elige un modelo
+ * y manda su `modelSpecId`; el fleet-service snapshotea make/model/tipo (fuente única, sin texto libre).
+ */
+const modelSpecPage = paginated(vehicleModelSpecView);
+
+export function useVehicleModels() {
+  return useQuery({
+    queryKey: qk.vehicleModels,
+    queryFn: ({ signal }) =>
+      // DEUDA: el selector trae una sola página (no sigue nextCursor) · techo: si el catálogo aprobado supera 100 modelos, el selector trunca en silencio · gatillo: si el catálogo crece >100 → useInfiniteQuery + buscador server-side (q)
+      apiClient().get('/fleet/vehicle-models', {
+        schema: modelSpecPage,
+        signal,
+        query: { limit: 100 },
+      }),
   });
 }
 

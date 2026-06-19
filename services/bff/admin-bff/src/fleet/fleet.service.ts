@@ -10,6 +10,7 @@ import type {
   FleetDocumentView,
   InspectionView,
   VehicleModelReviewView,
+  VehicleModelSpecView,
   VehicleView,
 } from '@veo/api-client';
 import { REST_FLEET } from '../infra/tokens';
@@ -23,7 +24,9 @@ import type {
   ListDocumentsQueryDto,
   ListInspectionsQueryDto,
   ListModelReviewQueryDto,
+  ListVehicleModelsQueryDto,
   ApproveVehicleModelDto,
+  ExpirationsQueryDto,
 } from './dto/fleet.dto';
 
 /** Página con cursor que devuelve fleet-service; misma forma que `paginated()` del contrato admin-web. */
@@ -146,13 +149,14 @@ export class FleetService {
   ): Promise<FleetDocumentView> {
     const doc = await this.rest.post<FleetDocument>(`/documents/${id}/review`, {
       identity,
-      body: { decision: dto.decision },
+      // M5: el motivo del rechazo viaja a fleet (lo persiste y el conductor lo ve). Sin motivo ⇒ se omite.
+      body: dto.reason ? { decision: dto.decision, reason: dto.reason } : { decision: dto.decision },
     });
     await this.audit.record(identity, {
       action: 'document.review',
       resourceType: 'fleet_document',
       resourceId: id,
-      payload: { decision: dto.decision },
+      payload: dto.reason ? { decision: dto.decision, reason: dto.reason } : { decision: dto.decision },
     });
     return toFleetDocumentView(doc);
   }
@@ -171,12 +175,31 @@ export class FleetService {
     return ins;
   }
 
-  async expirations(identity: AuthenticatedUser, days?: number): Promise<ExpiringDocumentView[]> {
-    const docs = await this.rest.get<FleetDocument[]>('/fleet/expirations', {
+  /**
+   * Cola de vencimientos PAGINADA (cursor compuesto que sirve fleet-service). Proxy a fleet
+   * GET /fleet/expirations + proyección a expiringDocumentView. Reemplaza el contrato ARRAY previo
+   * (cap silencioso de 25): ahora el operador puede recorrer TODA la cola siguiendo `nextCursor`.
+   *
+   * FILTRO POST-MAP (decisión documentada): `toExpiringDocumentView` descarta docs sin `expiresAt`. El
+   * filtro corre DESPUÉS de paginar, así que una página PUEDE quedar con menos items que `limit` — está
+   * bien. El `nextCursor` lo decide fleet-service sobre su última fila DEVUELTA (antes del filtro del
+   * BFF), por lo que el avance del cursor NO se rompe: descartar items en el BFF no saltea ni duplica
+   * filas, solo achica la página visible. En la práctica el branch within-days ya filtra `expiresAt not
+   * null` en fleet, así que el descarte solo puede ocurrir en el branch sin `days` (EXPIRING_SOON/EXPIRED
+   * con expiresAt null, caso degenerado).
+   */
+  async expirations(
+    identity: AuthenticatedUser,
+    query: ExpirationsQueryDto,
+  ): Promise<Page<ExpiringDocumentView>> {
+    const page = await this.rest.get<Page<FleetDocument>>('/fleet/expirations', {
       identity,
-      query: { days },
+      query: { days: query.days, cursor: query.cursor, limit: query.limit },
     });
-    return docs.map(toExpiringDocumentView).filter((d): d is ExpiringDocumentView => d !== null);
+    const items = page.items
+      .map(toExpiringDocumentView)
+      .filter((d): d is ExpiringDocumentView => d !== null);
+    return { items, nextCursor: page.nextCursor };
   }
 
   /**
@@ -190,6 +213,26 @@ export class FleetService {
     return this.rest.get<Page<VehicleModelReviewView>>('/vehicle-models/review', {
       identity,
       query: { status: query.status, cursor: query.cursor, limit: query.limit },
+    });
+  }
+
+  /**
+   * Catálogo APROBADO de modelos para el selector del alta admin (F4 · C2). Proxy a fleet GET
+   * /vehicle-models (listApproved). La forma espeja 1:1 el contrato vehicleModelSpecView; el selector elige
+   * y manda el modelSpecId al crear el vehículo (fleet snapshotea make/model/tipo, server-authoritative).
+   */
+  listModels(
+    identity: AuthenticatedUser,
+    query: ListVehicleModelsQueryDto,
+  ): Promise<Page<VehicleModelSpecView>> {
+    return this.rest.get<Page<VehicleModelSpecView>>('/vehicle-models', {
+      identity,
+      query: {
+        vehicleType: query.vehicleType,
+        q: query.q,
+        cursor: query.cursor,
+        limit: query.limit,
+      },
     });
   }
 

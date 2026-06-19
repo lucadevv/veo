@@ -78,3 +78,76 @@ describe('FleetService.listModelReview · B5-2.c', () => {
     );
   });
 });
+
+describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
+  it('propaga days + cursor + limit a fleet GET /fleet/expirations y devuelve envelope con nextCursor', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'd1',
+            ownerType: 'DRIVER',
+            ownerId: 'drv-1',
+            type: 'LICENSE_A1',
+            status: 'EXPIRING_SOON',
+            expiresAt: '2026-07-10T00:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-07-10T00:00:00.000Z|d1',
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const audit = { record: vi.fn() };
+    const svc = new FleetService(rest as never, audit as never);
+
+    const page = await svc.expirations(operator, {
+      days: 30,
+      cursor: '2026-07-01T00:00:00.000Z|d0',
+      limit: 50,
+    } as never);
+
+    expect(rest.get).toHaveBeenCalledWith(
+      '/fleet/expirations',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          days: 30,
+          cursor: '2026-07-01T00:00:00.000Z|d0',
+          limit: 50,
+        }),
+      }),
+    );
+    expect(page.nextCursor).toBe('2026-07-10T00:00:00.000Z|d1');
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ id: 'd1', daysUntilExpiry: expect.any(Number) });
+  });
+
+  it('descarta items sin expiresAt en el map PERO preserva el nextCursor de fleet (filtro post-paginado)', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({
+        items: [
+          { id: 'd1', ownerType: 'DRIVER', ownerId: 'drv-1', type: 'LICENSE_A1', status: 'EXPIRING_SOON', expiresAt: null },
+          {
+            id: 'd2',
+            ownerType: 'VEHICLE',
+            ownerId: 'veh-1',
+            type: 'SOAT',
+            status: 'EXPIRED',
+            expiresAt: '2026-07-05T00:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-07-05T00:00:00.000Z|d2',
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const audit = { record: vi.fn() };
+    const svc = new FleetService(rest as never, audit as never);
+
+    const page = await svc.expirations(operator, {} as never);
+    // d1 (sin expiresAt) se descarta → página de 1, pero el cursor de avance NO se rompe.
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.id).toBe('d2');
+    expect(page.nextCursor).toBe('2026-07-05T00:00:00.000Z|d2');
+  });
+});

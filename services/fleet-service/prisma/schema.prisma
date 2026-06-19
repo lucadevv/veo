@@ -23,6 +23,10 @@ enum FleetDocumentType {
   BACKGROUND_CHECK
   ITV
 
+  // Foto del vehículo (Ola 1): foto del auto capturada en el alta del conductor. Sin número ni
+  // vencimiento. Espejo del FleetDocumentType de @veo/shared-types. Requerida para aprobar (admin-bff).
+  VEHICLE_PHOTO
+
   // B5-3.2 · certificaciones de operador de las verticales especiales (conductor). Misma maquinaria
   // FleetDocument (vencimiento + review). NO críticas: su vencimiento NO suspende, solo deshabilita la
   // vertical (que además está oculta). Espejo del FleetDocumentType de @veo/shared-types.
@@ -177,11 +181,16 @@ model FleetDocument {
   lastAlertedDays Int?                @map("last_alerted_days")
   verifiedAt      DateTime?           @map("verified_at") @db.Timestamptz
   verifiedBy      String?             @map("verified_by") @db.Uuid
+  /// Motivo del rechazo que escribe el operador (M5): el conductor lo VE para saber qué corregir.
+  /// null si no está rechazado o no se dio motivo (degradación honesta, nunca un motivo falso).
+  rejectionReason String?             @map("rejection_reason")
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([ownerType, ownerId])
-  @@index([status, expiresAt])
+  /// Cubre el orderBy compuesto de listExpirations `(expiresAt, id)` con `status IN (...)`: el `id` final
+  /// evita el Sort del keyset. Por leftmost-prefix también cubre los queries que filtran solo (status, expiresAt).
+  @@index([status, expiresAt, id])
   @@map("fleet_documents")
   @@schema("fleet")
 }

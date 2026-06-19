@@ -4,6 +4,9 @@ import {
   InternalIdentityGuard,
   RolesGuard,
   Roles,
+  AudienceGuard,
+  Audiences,
+  InternalAudience,
   CurrentUser,
   type AuthenticatedUser,
 } from '@veo/auth';
@@ -20,10 +23,21 @@ import type { Page } from '../infra/pagination';
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
+  // CAPA 1 transporte (confused deputy, FOUNDATION §14): subir un documento solo tiene callers
+  // legítimos en driver-rail (conductor sube SUS docs) y admin-rail (operador con RBAC). public-rail
+  // y service-rail NO tienen razón legítima de crear docs → AudienceGuard los corta fail-closed antes
+  // de tocar dominio. InternalIdentityGuard (a nivel clase) corre primero y adjunta req.user.
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL, InternalAudience.ADMIN_RAIL)
   @Post()
   @ApiOperation({ summary: 'Subir un documento (queda PENDING_REVIEW). BR-I04' })
-  create(@Body() dto: CreateDocumentDto): Promise<FleetDocument> {
-    return this.documents.create(dto);
+  create(
+    @Body() dto: CreateDocumentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<FleetDocument> {
+    // Anti-IDOR: fleet valida PERTENENCIA contra el principal autenticado (identidad interna firmada),
+    // no confía ciegamente en ownerId del body. DRIVER → driverId firmado; VEHICLE → dueño del vehículo.
+    return this.documents.create(dto, user);
   }
 
   @Get()
@@ -56,6 +70,6 @@ export class DocumentsController {
     @Body() dto: ReviewDocumentDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<FleetDocument> {
-    return this.documents.review(id, dto.decision, user.userId);
+    return this.documents.review(id, dto.decision, user.userId, dto.reason);
   }
 }
