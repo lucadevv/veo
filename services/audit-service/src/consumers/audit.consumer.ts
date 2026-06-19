@@ -8,7 +8,8 @@
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
  *  - Pagos:         payment.captured, payment.failed, payout.processed
  *  - Recompensas:   user.referred (vínculo creado), referral.rewarded, promo.redeemed, incentive.completed (movimientos de crédito · Ley 29733)
- *  - Video/Media:   media.recording_started, media.archived, media.access_granted
+ *  - Video/Media:   media.recording_started, media.archived, media.access_granted,
+ *                   media.access_viewed (reproducción efectiva · BR-S02), media.access_rejected (denegación · cadena de custodia)
  *  - Viaje (ciclo): trip.assigned/accepted/arriving/arrived/started/completed/cancelled/expired/failed
  *                   + trip.child_code_failed (solo IDs+estado, sin geo → ver nota en registerHandlers)
  *
@@ -215,6 +216,22 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       // (segmentId es optional en el contrato → resourceId cae a tripId).
       'media.access_granted': this.audited('media.access_granted', (p) => ({
         actorId: p.operatorId,
+        resourceType: 'media',
+        resourceId: p.segmentId ?? p.tripId,
+      })),
+      // Reproducción EFECTIVA de un video aprobado (BR-S02 · Ley 29733): cada visualización firma URL +
+      // watermark fresco y se audita aparte del grant → traza QUIÉN reprodujo QUÉ segmento, no solo quién
+      // obtuvo el permiso. actorId=viewedBy (quien reprodujo); segmentId es REQUERIDO en este contrato.
+      'media.access_viewed': this.audited('media.access_viewed', (p) => ({
+        actorId: p.viewedBy,
+        resourceType: 'media',
+        resourceId: p.segmentId,
+      })),
+      // DENEGACIÓN del supervisor (BR-S02 · cadena de custodia): el rechazo cierra la solicitud sin otorgar
+      // acceso y debe quedar en el WORM tanto como el grant. actorId=rejectedBy (quien denegó); recurso =
+      // segmento concreto si lo hay, fallback al viaje (segmentId es optional en el contrato).
+      'media.access_rejected': this.audited('media.access_rejected', (p) => ({
+        actorId: p.rejectedBy,
         resourceType: 'media',
         resourceId: p.segmentId ?? p.tripId,
       })),

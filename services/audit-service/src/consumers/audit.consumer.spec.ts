@@ -208,9 +208,11 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('registra handlers para los 5 eventos de compliance', () => {
+  it('registra handlers para los 7 eventos de compliance', () => {
     for (const t of [
       'media.access_granted',
+      'media.access_viewed',
+      'media.access_rejected',
       'user.kyc_verified',
       'user.email_verified',
       'trip.pii_erased',
@@ -272,6 +274,64 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
     await handlers.get('media.access_granted')!(envelope);
     const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
     expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'media', resourceId: 't-42' });
+  });
+
+  it('media.access_viewed → actorId=viewedBy, resourceType=media, resourceId=segmentId (reproducción efectiva)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.access_viewed',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-v1',
+        tripId: 't-1',
+        segmentId: 'seg-9',
+        operatorId: 'op-7',
+        operatorEmail: 'op-7@veo.pe',
+        viewedBy: 'op-7',
+        watermark: 'op-7@veo',
+        expiresAt: new Date().toISOString(),
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.access_viewed')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('media.access_viewed'));
+    expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'media', resourceId: 'seg-9' });
+  });
+
+  it('media.access_rejected con segmentId → actorId=rejectedBy, resourceType=media, resourceId=segmentId (denegación)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.access_rejected',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-r1',
+        tripId: 't-1',
+        segmentId: 'seg-9',
+        operatorId: 'op-7',
+        rejectedBy: 'sup-3',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.access_rejected')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('media.access_rejected'));
+    expect(mapping).toEqual({ actorId: 'sup-3', resourceType: 'media', resourceId: 'seg-9' });
+  });
+
+  it('media.access_rejected SIN segmentId → resourceId cae al tripId (fallback del optional)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.access_rejected',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-r2',
+        tripId: 't-42',
+        operatorId: 'op-7',
+        rejectedBy: 'sup-3',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.access_rejected')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'sup-3', resourceType: 'media', resourceId: 't-42' });
   });
 
   it('user.kyc_verified → actorId=resourceId=userId, resourceType=user', async () => {
