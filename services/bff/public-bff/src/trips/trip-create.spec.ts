@@ -5,7 +5,7 @@
  *  - PUJA (GAP #4): con `bidCents` lo reenvía a trip-service (→ puja); sin él, undefined (tarifa fija).
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { InternalRestClient } from '@veo/rpc';
 import { PaymentMethod } from '@veo/shared-types';
 import { KycRequiredError, TripsService } from './trips.service';
@@ -92,6 +92,7 @@ function makeService(
     restStub, // ratingRest (REST_RATING) — MI rating del enrich, no usado en createTrip
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     redis as unknown as Redis, // REDIS (cache KYC + deuda)
     {} as unknown as DriverEnrichmentService,
   );

@@ -1,6 +1,6 @@
 /** Test del gate anti-IDOR en la lectura del estado de pánico (PanicService.getPanic). */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { PanicService } from './panic.service';
 import type { PanicReply } from '../infra/grpc-types';
@@ -26,7 +26,7 @@ function makeService(reply: PanicReply) {
     call: vi.fn().mockResolvedValue(reply),
   } as unknown as GrpcServiceClient;
   const rest = {} as unknown as InternalRestClient;
-  return new PanicService(panicGrpc, rest, SECRET);
+  return new PanicService(panicGrpc, rest, SECRET, InternalAudience.PUBLIC_RAIL);
 }
 
 describe('PanicService.getPanic', () => {

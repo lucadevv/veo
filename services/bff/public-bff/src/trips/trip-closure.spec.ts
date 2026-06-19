@@ -3,7 +3,7 @@
  * delegación gRPC + gate anti-IDOR en close. Dobles sin Nest DI, al estilo de trip-tip.spec.ts.
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
@@ -64,6 +64,7 @@ function makeService(handlers: Record<string, (req: unknown) => unknown>) {
     ratingRestStub, // rating rest (MI rating del enrich)
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never,
     {} as unknown as DriverEnrichmentService,
   );

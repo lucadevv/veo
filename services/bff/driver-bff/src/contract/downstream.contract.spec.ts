@@ -11,7 +11,7 @@ interface SkippableContext {
   skip: () => void;
 }
 import { GrpcGateway } from '../infra/grpc.gateway';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { uuidv7 } from '@veo/utils';
 import type { SurgeReply, UserReply } from '../common/grpc-replies';
 
@@ -54,7 +54,7 @@ beforeAll(async () => {
 describe('contrato downstream (gRPC lecturas)', () => {
   it('identity GetUser responde con la forma UserReply', async (ctx) => {
     if (!identityUp) (ctx as unknown as SkippableContext).skip();
-    const grpc = new GrpcGateway(configStub as never, SECRET);
+    const grpc = new GrpcGateway(configStub as never, SECRET, InternalAudience.DRIVER_RAIL);
     const reply = await grpc.call<UserReply>('identity', 'GetUser', { id: uuidv7() }, identity);
     expect(reply).toHaveProperty('found');
     expect(typeof reply.found).toBe('boolean');
@@ -62,7 +62,7 @@ describe('contrato downstream (gRPC lecturas)', () => {
 
   it('dispatch GetSurge responde con la forma SurgeReply', async (ctx) => {
     if (!dispatchUp) (ctx as unknown as SkippableContext).skip();
-    const grpc = new GrpcGateway(configStub as never, SECRET);
+    const grpc = new GrpcGateway(configStub as never, SECRET, InternalAudience.DRIVER_RAIL);
     const reply = await grpc.call<SurgeReply>(
       'dispatch',
       'GetSurge',
@@ -74,7 +74,7 @@ describe('contrato downstream (gRPC lecturas)', () => {
   });
 
   it('los .proto requeridos se resuelven por @veo/rpc (sin servicios arriba)', () => {
-    const grpc = new GrpcGateway(configStub as never, SECRET);
+    const grpc = new GrpcGateway(configStub as never, SECRET, InternalAudience.DRIVER_RAIL);
     expect(grpc).toBeInstanceOf(GrpcGateway);
   });
 });

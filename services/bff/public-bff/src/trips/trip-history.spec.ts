@@ -4,7 +4,7 @@
  * normalizados, '' → null, SIN nombre de conductor). Dobles sin Nest DI, al estilo de trip-closure.spec.ts.
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
@@ -63,6 +63,7 @@ function makeService(reply: PassengerTripsReply) {
     restStub, // rating rest
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never,
     {} as unknown as DriverEnrichmentService,
   );

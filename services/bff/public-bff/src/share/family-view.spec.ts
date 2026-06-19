@@ -26,6 +26,8 @@ const driver: DriverReply = {
   faceEnrolledAt: '',
   lastVerifiedAt: '',
   phone: '',
+  documentId: '12345678',
+  birthDate: '1990-01-15',
 };
 const aggregate: AggregateReply = {
   subjectId: 'drv-1',

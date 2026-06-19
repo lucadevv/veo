@@ -7,7 +7,7 @@
  *    filtra por ese rater). El BFF NUNCA acepta un raterId del cliente.
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { DownstreamError, type GrpcServiceClient, type InternalRestClient } from '@veo/rpc';
 import { RatingsService } from './ratings.service';
 
@@ -27,7 +27,7 @@ const RATING = {
 function makeService(restGet: ReturnType<typeof vi.fn>) {
   const grpcStub = {} as unknown as GrpcServiceClient;
   const rest = { get: restGet, post: vi.fn() } as unknown as InternalRestClient;
-  return new RatingsService(grpcStub, rest, SECRET);
+  return new RatingsService(grpcStub, rest, SECRET, InternalAudience.PUBLIC_RAIL);
 }
 
 describe('RatingsService.getMyRatingForTrip', () => {

@@ -10,6 +10,7 @@ import {
   signInternalIdentity,
   INTERNAL_IDENTITY_HEADER,
   INTERNAL_IDENTITY_SIG_HEADER,
+  InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
 import type { ConfigService } from '@nestjs/config';
@@ -25,7 +26,7 @@ const config = { get: () => SECRET } as unknown as ConfigService<Env, true>;
 
 /** Metadata gRPC con la identidad interna FIRMADA (lo que el BFF propaga). */
 function signedMeta(user: AuthenticatedUser): Metadata {
-  const { header, signature } = signInternalIdentity(user, SECRET);
+  const { header, signature } = signInternalIdentity(user, SECRET, InternalAudience.PUBLIC_RAIL);
   const map: Record<string, string> = {
     [INTERNAL_IDENTITY_HEADER]: header,
     [INTERNAL_IDENTITY_SIG_HEADER]: signature,

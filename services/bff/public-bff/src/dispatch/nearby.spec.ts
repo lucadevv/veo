@@ -4,7 +4,7 @@
  * SIN driverId (privacidad por construcción: el reply gRPC no lo trae y el view tampoco lo declara).
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient } from '@veo/rpc';
 import { DispatchService } from './dispatch.service';
 import type { NearbyDriversReply } from '../infra/grpc-types';
@@ -15,7 +15,7 @@ const user: AuthenticatedUser = { userId: 'usr-1', type: 'passenger', roles: [],
 function makeService(reply: NearbyDriversReply) {
   const call = vi.fn().mockResolvedValue(reply);
   const grpc = { call } as unknown as GrpcServiceClient;
-  const svc = new DispatchService(grpc, SECRET);
+  const svc = new DispatchService(grpc, SECRET, InternalAudience.PUBLIC_RAIL);
   return { svc, call };
 }
 

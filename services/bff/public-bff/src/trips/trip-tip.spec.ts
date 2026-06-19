@@ -1,6 +1,6 @@
 /** Test de la propina del pasajero a su viaje (TripsService.tip): ownership + delegación firmada. */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
@@ -46,6 +46,7 @@ function makeService(trip: { found: boolean; passengerId: string }) {
     restStub, // ratingRest (REST_RATING) — MI rating del enrich, no usado en tip
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never, // REDIS (cache KYC, no usado acá)
     {} as unknown as DriverEnrichmentService,
   );

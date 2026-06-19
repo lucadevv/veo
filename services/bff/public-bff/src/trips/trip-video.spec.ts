@@ -1,6 +1,6 @@
 /** Test de la autorización del token de video del habitáculo para el pasajero (TripsService.videoGrant). */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
@@ -38,6 +38,7 @@ function makeService(opts: {
     rest, // ratingRest (REST_RATING) — MI rating del enrich, no usado en videoGrant
     opts.livekit ?? enabled,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never, // REDIS (cache KYC, no usado acá)
     {} as unknown as DriverEnrichmentService,
   );
