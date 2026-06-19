@@ -3,7 +3,7 @@
  * Lectura síncrona de metadatos de segmentos para otros servicios (panic, audit, compliance).
  * NUNCA expone URLs de video: la visualización exige el flujo de doble autorización (BR-S02).
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';

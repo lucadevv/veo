@@ -8,9 +8,15 @@
  * no responde, el gate FALLA-CERRADO (no se permite ofertar) — degradación honesta, nunca un conductor
  * no elegible colándose por un error de red.
  */
-import { anonymousIdentity, grpcIdentityMetadata } from '@veo/auth';
+import { anonymousIdentity, grpcIdentityMetadata, type InternalAudience } from '@veo/auth';
 import { createGrpcClient, type DriverReply, type GrpcServiceClient } from '@veo/rpc';
 import type { IdentityClient, IdentityDriver } from './identity-client.port';
+
+/**
+ * Audiencia de RIEL de esta llamada: es de SISTEMA (gate de elegibilidad, sin usuario final ni
+ * BFF detrás) → `service-rail`. Const TIPADA (InternalAudience), nunca string mágico.
+ */
+const SERVICE_RAIL: InternalAudience = 'service-rail';
 
 export class GrpcIdentityClient implements IdentityClient {
   private readonly client: GrpcServiceClient;
@@ -24,8 +30,9 @@ export class GrpcIdentityClient implements IdentityClient {
   async getDriver(driverId: string): Promise<IdentityDriver> {
     // Re-validación de elegibilidad: llamada de SISTEMA (no del usuario final). identity exige la
     // identidad interna firmada en la metadata; firmamos una identidad anónima de tipo 'driver'
-    // (sin sesión real) — la verificación HMAC pasa sin reusar la identidad del pasajero original.
-    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret);
+    // (sin sesión real) con audiencia `service-rail` — la verificación HMAC + aud fail-closed pasa
+    // sin reusar la identidad del pasajero original.
+    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
     const reply = await this.client.call<DriverReply>('GetDriver', { id: driverId }, meta);
     return {
       id: reply.id,

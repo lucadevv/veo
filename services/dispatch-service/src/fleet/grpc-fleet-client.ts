@@ -5,9 +5,15 @@
  * ACTIVO del conductor al aceptar una oferta. El caller aplica fail-soft (si fleet no responde, la
  * asignación sigue sin vehículo) — la trazabilidad es deseable, NO bloqueante del viaje.
  */
-import { anonymousIdentity, grpcIdentityMetadata } from '@veo/auth';
+import { anonymousIdentity, grpcIdentityMetadata, type InternalAudience } from '@veo/auth';
 import { createGrpcClient, type DriverVehiclesReply, type GrpcServiceClient } from '@veo/rpc';
 import type { FleetClient } from './fleet-client.port';
+
+/**
+ * Audiencia de RIEL de esta llamada: es de SISTEMA (resolución de vehículo al aceptar oferta, sin
+ * usuario final ni BFF detrás) → `service-rail`. Const TIPADA (InternalAudience), nunca string mágico.
+ */
+const SERVICE_RAIL: InternalAudience = 'service-rail';
 
 export class GrpcFleetClient implements FleetClient {
   private readonly client: GrpcServiceClient;
@@ -20,8 +26,9 @@ export class GrpcFleetClient implements FleetClient {
 
   async getActiveVehicleId(driverId: string): Promise<string | null> {
     // Llamada de SISTEMA al aceptar una oferta (no del usuario final). fleet exige la identidad
-    // interna firmada en la metadata; firmamos una identidad anónima de tipo 'driver' (sin sesión).
-    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret);
+    // interna firmada en la metadata; firmamos una identidad anónima de tipo 'driver' (sin sesión)
+    // con audiencia `service-rail` (verificada per-service, fail-closed).
+    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
     const reply = await this.client.call<DriverVehiclesReply>(
       'GetDriverVehicles',
       { id: driverId },

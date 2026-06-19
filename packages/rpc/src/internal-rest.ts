@@ -8,6 +8,7 @@ import {
   INTERNAL_IDENTITY_HEADER,
   INTERNAL_IDENTITY_SIG_HEADER,
   type AuthenticatedUser,
+  type InternalAudience,
 } from '@veo/auth';
 import { normalizeError, type ApiErrorLike } from './error.js';
 
@@ -16,6 +17,8 @@ export interface InternalRestOptions {
   baseUrl: string;
   /** Secreto HMAC compartido (VEO_INTERNAL_IDENTITY_SECRET). */
   secret: string;
+  /** Audiencia de riel con la que este cliente firma la identidad (public/driver/admin/service-rail). */
+  audience: InternalAudience;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -33,12 +36,14 @@ export interface InternalRequest {
 export class InternalRestClient {
   private readonly baseUrl: string;
   private readonly secret: string;
+  private readonly audience: InternalAudience;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: InternalRestOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
     this.secret = opts.secret;
+    this.audience = opts.audience;
     this.timeoutMs = opts.timeoutMs ?? 8000;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
@@ -66,7 +71,7 @@ export class InternalRestClient {
         if (v !== undefined) url.searchParams.set(k, String(v));
       }
     }
-    const { header, signature } = signInternalIdentity(req.identity, this.secret);
+    const { header, signature } = signInternalIdentity(req.identity, this.secret, this.audience);
     const headers: Record<string, string> = {
       Accept: 'application/json',
       [INTERNAL_IDENTITY_HEADER]: header,

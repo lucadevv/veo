@@ -13,8 +13,10 @@ import {
   JwtAuthGuard,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
   generateDevKeyPairPem,
   type JwtKeys,
+  type InternalAudience,
 } from '@veo/auth';
 import { redisProvider, RedisLifecycle, REDIS } from './redis';
 import { GrpcGateway } from './grpc.gateway';
@@ -67,6 +69,17 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
 };
 
+/**
+ * Audiencia de riel del emisor: el driver-bff firma SIEMPRE como 'driver-rail'.
+ * Es una constante de compilación (no env): el riel es fijo por servicio.
+ */
+const DRIVER_RAIL: InternalAudience = 'driver-rail';
+
+const internalAudienceProvider: Provider = {
+  provide: INTERNAL_IDENTITY_AUDIENCE,
+  useValue: DRIVER_RAIL,
+};
+
 /** Fachada de mapas OSM (Ola 2C · navegación turn-by-turn): OSRM con fallback al motor local. */
 const mapsProvider: Provider = {
   provide: MAPS,
@@ -88,6 +101,7 @@ const mapsProvider: Provider = {
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
     internalSecretProvider,
+    internalAudienceProvider,
     mapsProvider,
     JwtAuthGuard,
     GrpcGateway,
@@ -98,6 +112,7 @@ const mapsProvider: Provider = {
     JwtService,
     JWT_SERVICE,
     INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_AUDIENCE,
     MAPS,
     JwtAuthGuard,
     GrpcGateway,

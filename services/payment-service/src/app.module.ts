@@ -21,6 +21,7 @@ import { PayoutsModule } from './payouts/payouts.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { EventsModule } from './events/events.module';
+import { DriverPaymentsModule } from './drivers/driver-payments.module';
 import { PaymentGrpcController } from './grpc/payment.grpc.controller';
 
 const readinessProvider: Provider = {
@@ -55,6 +56,7 @@ const readinessProvider: Provider = {
     ReconciliationModule,
     AnalyticsModule,
     EventsModule,
+    DriverPaymentsModule,
   ],
   controllers: [HealthController, MetricsController, PaymentGrpcController],
   providers: [readinessProvider],

@@ -5,7 +5,13 @@
  */
 import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { createGrpcClient, type GrpcServiceClient, type ServiceName } from '@veo/rpc';
 import type { Env } from '../config/env.schema';
 
@@ -31,6 +37,7 @@ export class GrpcGateway implements OnModuleDestroy {
   constructor(
     private readonly config: ConfigService<Env, true>,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   /** Llama un método unario y propaga la identidad firmada por HMAC en la metadata. */
@@ -41,7 +48,7 @@ export class GrpcGateway implements OnModuleDestroy {
     identity: AuthenticatedUser,
   ): Promise<TRes> {
     const client = this.clientFor(service);
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     return client.call<TRes>(method, request, meta);
   }
 

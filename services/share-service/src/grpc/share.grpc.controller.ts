@@ -2,11 +2,11 @@
  * Controlador gRPC de share (paquete veo.share.v1.ShareService).
  * Lectura síncrona de contactos de confianza para notification/panic.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { ContactsService } from '../contacts/contacts.service';
 import type { Env } from '../config/env.schema';
 
@@ -32,6 +32,8 @@ export class ShareGrpcController {
   constructor(
     private readonly contacts: ContactsService,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
@@ -41,7 +43,9 @@ export class ShareGrpcController {
     { userId }: GetTrustedContactsRequest,
     metadata: Metadata,
   ): Promise<TrustedContactsReply> {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,

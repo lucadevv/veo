@@ -3,11 +3,11 @@
  * Lectura síncrona de vehículos y documentos para otros servicios (identity/admin).
  * Devuelve `found=false` en vez de lanzar, para que el llamante decida.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { deriveVehicleReviewStatus } from '../vehicles/vehicle-rules';
 import { FleetOwnerType, type Vehicle } from '../generated/prisma';
@@ -94,13 +94,15 @@ export class FleetGrpcController {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
   /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
   private requireIdentity(metadata: Metadata): void {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, { allowedAudiences: this.allowedAudiences });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
@@ -152,8 +154,8 @@ export class FleetGrpcController {
         status: d.status,
         expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
         fileS3Key: d.fileS3Key ?? '',
-        // DEUDA: rejectionReason no existe como columna en FleetDocument; se devuelve '' hasta agregar la migración.
-        rejectionReason: '',
+        // M5: motivo del rechazo que escribe el operador (proto3 default "" si no hay). El conductor lo ve.
+        rejectionReason: d.rejectionReason ?? '',
       })),
     };
   }

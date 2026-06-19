@@ -3,11 +3,11 @@
  * Lectura síncrona del viaje para otros servicios. Devuelve `found=false` en vez de lanzar,
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';

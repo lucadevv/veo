@@ -11,8 +11,10 @@ import {
   JwtService,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
   generateDevKeyPairPem,
   type JwtKeys,
+  type InternalAudience,
 } from '@veo/auth';
 import { type MapsMode } from '@veo/maps';
 import { createGrpcClient, InternalRestClient, type ServiceName } from '@veo/rpc';
@@ -85,6 +87,11 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
 };
 
+const internalAudienceProvider: Provider = {
+  provide: INTERNAL_IDENTITY_AUDIENCE,
+  useValue: 'public-rail' satisfies InternalAudience,
+};
+
 /** Crea el provider de un cliente gRPC para un servicio, leyendo su URL de la config. */
 function grpcProvider(token: symbol, service: ServiceName, urlKey: keyof Env): Provider {
   return {
@@ -107,6 +114,7 @@ function restProvider(token: symbol, urlKey: keyof Env): Provider {
       new InternalRestClient({
         baseUrl: config.getOrThrow<string>(urlKey),
         secret: config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
+        audience: 'public-rail' satisfies InternalAudience,
         timeoutMs: config.getOrThrow<number>('REST_TIMEOUT_MS'),
       }),
   };
@@ -166,6 +174,7 @@ const tokens = [
   JwtService,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
   MAPS,
   LIVEKIT,
   GRPC_IDENTITY,
@@ -196,6 +205,7 @@ const tokens = [
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
     internalSecretProvider,
+    internalAudienceProvider,
     mapsProvider,
     livekitProvider,
     ...grpcProviders,

@@ -3,11 +3,11 @@
  * Lectura síncrona del estado de un pánico para otros servicios. Devuelve `found=false` en vez de
  * lanzar, para que el llamante decida (evita ruido de errores cross-servicio).
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { PanicService } from '../panic/panic.service';
 import type { Env } from '../config/env.schema';
 
@@ -47,13 +47,17 @@ export class PanicGrpcController {
   constructor(
     private readonly panic: PanicService,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
   @GrpcMethod('PanicService', 'GetPanic')
   async getPanic({ id }: GetPanicRequest, metadata: Metadata): Promise<PanicReply> {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,

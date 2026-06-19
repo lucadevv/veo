@@ -13,4 +13,5 @@ export * from './tokens.js';
 export * from './guards/jwt-auth.guard.js';
 export * from './guards/internal-identity.guard.js';
 export * from './guards/roles.guard.js';
+export * from './guards/audience.guard.js';
 export * from './guards/step-up-mfa.guard.js';

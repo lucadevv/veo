@@ -7,9 +7,11 @@ import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
   InternalIdentityGuard,
   RolesGuard,
   StepUpMfaGuard,
+  type InternalAudience,
 } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
@@ -23,12 +25,19 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
+  'public-rail',
+  'driver-rail',
+  'admin-rail',
+];
+
 @Global()
 @Module({
   providers: [
     PrismaService,
     redisProvider,
     internalSecretProvider,
+    { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
     InternalIdentityGuard,
     RolesGuard,
@@ -38,6 +47,7 @@ const internalSecretProvider: Provider = {
     PrismaService,
     REDIS,
     INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,

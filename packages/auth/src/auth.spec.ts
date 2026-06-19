@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generateKeyPair, exportPKCS8, exportSPKI } from 'jose';
 import { JwtService, type JwtKeys } from './jwt.js';
-import { signInternalIdentity, verifyInternalIdentity } from './internal-identity.js';
+import {
+  signInternalIdentity,
+  verifyInternalIdentity,
+  isInternalAudience,
+  INTERNAL_AUDIENCES,
+} from './internal-identity.js';
 import { assertDriverOwnsResource } from './ownership.js';
 import type { AuthenticatedUser } from './jwt.js';
-import { ForbiddenError } from '@veo/utils';
+import { ForbiddenError, signHmac } from '@veo/utils';
 import { enrollTotp, verifyTotp, isMfaFresh } from './totp.js';
 import { authenticator } from 'otplib';
 import { RedisRefreshTokenStore, RefreshError } from './refresh-store.js';
@@ -64,15 +69,59 @@ describe('JwtService (ES256)', () => {
 describe('identidad interna BFF→servicio', () => {
   it('firma y verifica con HMAC', () => {
     const user = { userId: 'u1', type: 'passenger' as const, roles: [], sessionId: 's1' };
-    const { header, signature } = signInternalIdentity(user, 'internal-secret');
+    const { header, signature } = signInternalIdentity(user, 'internal-secret', 'public-rail');
     const verified = verifyInternalIdentity(header, signature, 'internal-secret');
     expect(verified?.userId).toBe('u1');
+    expect(verified?.aud).toBe('public-rail');
   });
   it('rechaza firma inválida y secreto incorrecto', () => {
     const user = { userId: 'u1', type: 'driver' as const, roles: [], sessionId: 's1' };
-    const { header, signature } = signInternalIdentity(user, 'internal-secret');
+    const { header, signature } = signInternalIdentity(user, 'internal-secret', 'driver-rail');
     expect(verifyInternalIdentity(header, signature, 'otro-secret')).toBeNull();
     expect(verifyInternalIdentity(header, 'deadbeef', 'internal-secret')).toBeNull();
+  });
+});
+
+describe('audience scoping de identidad interna (fail-closed)', () => {
+  const user = { userId: 'u1', type: 'passenger' as const, roles: [], sessionId: 's1' };
+
+  it('acepta cuando la audiencia firmada ∈ las audiencias permitidas', () => {
+    const { header, signature } = signInternalIdentity(user, 'sec', 'public-rail');
+    const verified = verifyInternalIdentity(header, signature, 'sec', {
+      allowedAudiences: ['public-rail', 'service-rail'],
+    });
+    expect(verified?.aud).toBe('public-rail');
+  });
+
+  it('RECHAZA cuando la audiencia firmada NO está permitida (riel ajeno)', () => {
+    const { header, signature } = signInternalIdentity(user, 'sec', 'public-rail');
+    // Un servicio admin-only no debe aceptar una identidad firmada por el riel público.
+    const verified = verifyInternalIdentity(header, signature, 'sec', {
+      allowedAudiences: ['admin-rail'],
+    });
+    expect(verified).toBeNull();
+  });
+
+  it('RECHAZA (fail-closed) una identidad sin claim aud cuando se exigen audiencias', () => {
+    // Header forjado SIN aud pero con HMAC válido (simula un emisor legacy/atacante con el secreto).
+    const legacy = { userId: 'u1', type: 'passenger', roles: [], sessionId: 's1', issuedAt: Date.now() };
+    const header = Buffer.from(JSON.stringify(legacy)).toString('base64url');
+    const signature = signHmac(header, 'sec');
+    const verified = verifyInternalIdentity(header, signature, 'sec', {
+      allowedAudiences: ['public-rail'],
+    });
+    expect(verified).toBeNull();
+  });
+
+  it('sin allowedAudiences (legacy/test) no verifica audiencia — backward-compat', () => {
+    const { header, signature } = signInternalIdentity(user, 'sec', 'driver-rail');
+    expect(verifyInternalIdentity(header, signature, 'sec')?.aud).toBe('driver-rail');
+  });
+
+  it('isInternalAudience reconoce solo las audiencias conocidas', () => {
+    for (const a of INTERNAL_AUDIENCES) expect(isInternalAudience(a)).toBe(true);
+    expect(isInternalAudience('hacker-rail')).toBe(false);
+    expect(isInternalAudience(undefined)).toBe(false);
   });
 });
 

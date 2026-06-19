@@ -14,6 +14,7 @@ import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { TripsModule } from './trips/trips.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { DriverTripsModule } from './drivers/driver-trips.module';
 import { TripGrpcController } from './grpc/trip.grpc.controller';
 
 const readinessProvider: Provider = {
@@ -41,6 +42,7 @@ const readinessProvider: Provider = {
     CoreModule,
     TripsModule,
     AnalyticsModule,
+    DriverTripsModule,
   ],
   controllers: [HealthController, MetricsController, TripGrpcController],
   providers: [readinessProvider],
