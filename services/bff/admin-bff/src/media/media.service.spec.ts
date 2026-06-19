@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { MediaService, type SegmentView } from './media.service';
 import type { InternalRestClient, GrpcServiceClient } from '@veo/rpc';
 import type { ConfigService } from '@nestjs/config';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 
@@ -30,6 +30,7 @@ function makeService(
   const svc = new MediaService(
     rest as unknown as InternalRestClient,
     tripGrpc as unknown as GrpcServiceClient,
+    InternalAudience.ADMIN_RAIL,
     audit as unknown as AuditRecorder,
     config,
   );

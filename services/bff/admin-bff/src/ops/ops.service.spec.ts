@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OpsService } from './ops.service';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import type { ConfigService } from '@nestjs/config';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { ConflictError, ForbiddenError, NotFoundError } from '@veo/utils';
 import { AdminRole, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import type { ReadModelService } from '../read-model/read-model.service';
@@ -31,6 +31,9 @@ const noopAudit = {
 const noopReadModel = {} as unknown as ReadModelService;
 const noopRest = {} as unknown as InternalRestClient;
 const noopMedia = {} as unknown as InternalRestClient;
+const noopTripRest = {} as unknown as InternalRestClient;
+const noopFleetRest = {} as unknown as InternalRestClient;
+const noopPaymentRest = {} as unknown as InternalRestClient;
 const noopFleet = grpc(() => ({})); // fleet sin vehículos → vehiclePlate null
 
 describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)', () => {
@@ -94,6 +97,10 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       fleetGrpc,
       noopRest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       noopAudit,
       config,
@@ -156,6 +163,10 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       fleetGrpc,
       noopRest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       noopAudit,
       config,
@@ -204,6 +215,10 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleet,
       noopRest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       noopAudit,
       config,
@@ -224,6 +239,10 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleet,
       noopRest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       noopAudit,
       config,
@@ -251,15 +270,16 @@ function fleetDoc(
   };
 }
 
-/** Las tres credenciales obligatorias, todas VALID → el gate pasa. */
+/** Las credenciales obligatorias (Ola 1: + foto del vehículo), todas VALID → el gate pasa. */
 const allValidDocs = [
   fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
   fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
   fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+  fleetDoc(FleetDocumentType.VEHICLE_PHOTO, FleetDocumentStatus.VALID),
 ];
 
 describe('OpsService.approveDriver · gate de documentos obligatorios (server-side, autoritativo)', () => {
-  it('aprueba vía REST y audita cuando LICENSE_A1+SOAT+PROPERTY_CARD están VALID', async () => {
+  it('aprueba vía REST y audita cuando LICENSE_A1+SOAT+PROPERTY_CARD+VEHICLE_PHOTO están VALID', async () => {
     const rest = {
       post: vi.fn().mockResolvedValue({ id: 'd1', backgroundCheckStatus: 'CLEARED' }),
     } as unknown as InternalRestClient;
@@ -275,6 +295,10 @@ describe('OpsService.approveDriver · gate de documentos obligatorios (server-si
       fleetGrpc,
       rest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       audit,
       config,
@@ -309,6 +333,10 @@ describe('OpsService.approveDriver · gate de documentos obligatorios (server-si
       fleetGrpc,
       rest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       audit,
       config,
@@ -341,26 +369,50 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
             faceEnrolledAt: '2026-06-02T08:00:00.000Z',
             lastVerifiedAt: '', // nunca verificó en vivo → null
             phone: '', // no registrado → null
+            documentId: '12345678', // DNI (F2 · M2)
+            birthDate: '1990-05-20', // yyyy-mm-dd (F2 · M2)
           }
         : {},
     );
-    const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments'
-        ? {
-            driverId: 'd1',
-            documents: [
-              fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID, {
-                id: 'doc-con-archivo',
-                expiresAt: '2027-01-01T00:00:00.000Z',
-                fileS3Key: 'drivers/d1/license.jpg',
-              }),
-              fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.PENDING_REVIEW, {
-                id: 'doc-sin-archivo',
-              }),
-            ],
-          }
-        : {},
-    );
+    const fleetGrpc = grpc((m) => {
+      if (m === 'GetDriverDocuments') {
+        return {
+          driverId: 'd1',
+          documents: [
+            fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID, {
+              id: 'doc-con-archivo',
+              expiresAt: '2027-01-01T00:00:00.000Z',
+              fileS3Key: 'drivers/d1/license.jpg',
+            }),
+            fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.PENDING_REVIEW, {
+              id: 'doc-sin-archivo',
+            }),
+          ],
+        };
+      }
+      // F2 · C1: ficha del vehículo (el ACTIVO se prefiere). Keyed por userId (driver.userId).
+      if (m === 'GetDriverVehicles') {
+        return {
+          driverId: 'u-d1',
+          vehicles: [
+            {
+              id: 'veh-1',
+              plate: 'ABC-123',
+              make: 'Toyota',
+              model: 'Yaris',
+              year: 2021,
+              color: 'Plata',
+              docStatus: 'PENDING_REVIEW',
+              active: true,
+              found: true,
+              vehicleType: 'CAR',
+              status: 'PENDING_REVIEW',
+            },
+          ],
+        };
+      }
+      return {};
+    });
     const mediaPost = vi.fn().mockResolvedValue({ url: 'https://signed' });
     const media = { post: mediaPost } as unknown as InternalRestClient;
     const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
@@ -371,6 +423,10 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       fleetGrpc,
       noopRest,
       media,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       audit,
       config,
@@ -386,6 +442,21 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
     expect(view.phone).toBeNull();
     expect(view.biometric.faceEnrolledAt).toBe('2026-06-02T08:00:00.000Z');
     expect(view.biometric.lastVerifiedAt).toBeNull();
+    // F2 · M2: DNI + fecha de nacimiento para la revisión del operador.
+    expect(view.dni).toBe('12345678');
+    expect(view.birthDate).toBe('1990-05-20');
+    // F2 · C1: ficha del vehículo ACTIVO (el operador ve el auto antes de aprobar).
+    expect(view.vehicle).toEqual({
+      id: 'veh-1',
+      plate: 'ABC-123',
+      make: 'Toyota',
+      model: 'Yaris',
+      year: 2021,
+      color: 'Plata',
+      vehicleType: 'CAR',
+      docStatus: 'PENDING_REVIEW',
+      active: true,
+    });
     // Doc con archivo → presigned url; doc sin archivo → null.
     const [withFile, withoutFile] = view.documents;
     expect(withFile?.url).toBe('https://signed');
@@ -416,6 +487,10 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       fleetGrpc,
       noopRest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       noopAudit,
       config,
@@ -436,6 +511,10 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       noopFleet,
       rest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       audit,
       config,
@@ -466,6 +545,10 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       noopFleet,
       rest,
       noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
       noopReadModel,
       audit,
       config,
@@ -480,5 +563,351 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       body: { email: 'op2@veo.pe', roles: [AdminRole.SUPPORT_L2] },
     });
     expect(record).toHaveBeenCalledOnce();
+  });
+});
+
+describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial', () => {
+  const superadmin: AuthenticatedUser = {
+    userId: 'sa1',
+    type: 'admin',
+    roles: [AdminRole.SUPERADMIN],
+    sessionId: 's1',
+  };
+
+  function restWith(impl: Partial<Record<'get' | 'post' | 'delete', unknown>>): InternalRestClient {
+    return impl as unknown as InternalRestClient;
+  }
+
+  // Cada caso fija su propio NODE_ENV (prod para el guard, dev para el cascade); restauramos siempre.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('GUARD (PROD): conductor con historial de viajes → 409 ConflictError, NO borra nada', async () => {
+    // El guard SOLO bloquea en entorno endurecido (NODE_ENV=production). Lo forzamos para este caso —
+    // en DEV el superadmin SÍ puede purgar conductores con viajes (data de prueba; ver el caso de abajo).
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      const tripRest = restWith({
+        get: vi.fn().mockResolvedValue({ driverId: 'd1', tripCount: 7, hasTrips: true }),
+      });
+      const identityDelete = vi.fn();
+      const identityRest = restWith({ delete: identityDelete });
+      const fleetDelete = vi.fn();
+      const fleetRest = restWith({ delete: fleetDelete });
+      const paymentDelete = vi.fn();
+      const paymentRest = restWith({ delete: paymentDelete });
+      const record = vi.fn();
+      const audit = { record } as unknown as AuditRecorder;
+      const svc = new OpsService(
+        grpc(() => ({})),
+        grpc(() => ({})),
+        noopFleet,
+        identityRest,
+        noopMedia,
+        tripRest,
+        fleetRest,
+        paymentRest,
+        InternalAudience.ADMIN_RAIL,
+        noopReadModel,
+        audit,
+        config,
+      );
+
+      const err = await svc.purgeDriver(superadmin, 'd1').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictError);
+      // fail-closed: ni identity ni fleet ni payment ni audit se tocaron.
+      expect(identityDelete).not.toHaveBeenCalled();
+      expect(fleetDelete).not.toHaveBeenCalled();
+      expect(paymentDelete).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('DEV-relajado: conductor CON viajes → el purge PROCEDE y cascada trips + payments (no bloquea)', async () => {
+    // En DEV (NODE_ENV != production) el guard NO bloquea aunque el conductor tenga viajes: es data de
+    // prueba. El cascade entonces hard-borra trips + payments para no dejar huérfanos.
+    vi.stubEnv('NODE_ENV', 'test');
+    // El guard destructivo ahora corre por VEO_DEPLOY_TIER (isProdTier), no por NODE_ENV: en dev/preview
+    // la purga PROCEDE (default seguro = production bloquea). Forzamos tier local para el caso DEV-relajado.
+    vi.stubEnv('VEO_DEPLOY_TIER', 'local');
+    const tripDelete = vi.fn().mockResolvedValue({ ...tripPurgeReply, trips: 7 });
+    const tripRest = restWith({
+      get: vi.fn().mockResolvedValue({ driverId: 'd1', tripCount: 7, hasTrips: true }),
+      delete: tripDelete,
+    });
+    const identityRest = restWith({
+      delete: vi.fn().mockResolvedValue({
+        userId: 'u1',
+        deleted: { driver: 1, authMethods: 0, biometricChecks: 0, consents: 0, user: 1 },
+      }),
+    });
+    const fleetRest = restWith({
+      delete: vi.fn().mockResolvedValue({ documents: 0, vehicles: 0, vehicleDocuments: 0 }),
+    });
+    const mediaRest = restWith({ delete: vi.fn().mockResolvedValue({ deleted: 0 }) });
+    const paymentDelete = vi.fn().mockResolvedValue(paymentPurgeReply);
+    const paymentRest = restWith({ delete: paymentDelete });
+    const removeDriver = vi.fn().mockResolvedValue(true);
+    const readModel = { removeDriver } as unknown as ReadModelService;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      noopFleet,
+      identityRest,
+      mediaRest,
+      tripRest,
+      fleetRest,
+      paymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.purgeDriver(superadmin, 'd1');
+
+    // NO bloqueó: borró trips + payments del conductor de prueba.
+    expect(out.trip?.trips).toBe(7);
+    expect(out.payment).toEqual(paymentPurgeReply);
+    expect(tripDelete).toHaveBeenCalledWith('/internal/drivers/d1/trips', { identity: superadmin });
+    expect(paymentDelete).toHaveBeenCalledWith('/internal/drivers/d1/payments', {
+      identity: superadmin,
+      query: { userId: 'u1' },
+    });
+    expect(out.partialFailures).toBeUndefined();
+  });
+
+  // Shapes de respuesta del cascade DEV (trip-service / payment-service).
+  const tripPurgeReply = { driverId: 'd1', trips: 3, tripEvents: 9, waypointProposals: 1 };
+  const paymentPurgeReply = {
+    driverId: 'd1',
+    userId: 'u1',
+    byDriverId: {
+      cancellationPenalties: 1,
+      incentiveProgress: 2,
+      incentiveTripCredits: 4,
+      payments: 5,
+      payouts: 1,
+      refunds: 2,
+      tipAdditions: 3,
+    },
+    byUserId: {
+      promoRedemptions: 1,
+      userCreditEntries: 2,
+      userCredits: 1,
+      walletAffiliations: 1,
+    },
+  };
+
+  it('sin viajes (DEV) → purga identity→fleet→media→trip→payment→proyección, audita y devuelve contadores', async () => {
+    // Forzamos DEV explícito: en CI (NODE_ENV=production) el cascade NO borraría trips/payments; este caso
+    // valida el camino DEV de forma determinista bajo cualquier env. `vi.unstubAllEnvs` restaura al final.
+    vi.stubEnv('NODE_ENV', 'test');
+    // El guard destructivo ahora corre por VEO_DEPLOY_TIER (isProdTier), no por NODE_ENV: en dev/preview
+    // la purga PROCEDE (default seguro = production bloquea). Forzamos tier local para el caso DEV-relajado.
+    vi.stubEnv('VEO_DEPLOY_TIER', 'local');
+    const tripDelete = vi.fn().mockResolvedValue(tripPurgeReply);
+    const tripRest = restWith({
+      get: vi.fn().mockResolvedValue({ driverId: 'd1', tripCount: 0, hasTrips: false }),
+      delete: tripDelete,
+    });
+    const identityRest = restWith({
+      delete: vi.fn().mockResolvedValue({
+        userId: 'u1',
+        deleted: { driver: 1, authMethods: 2, biometricChecks: 3, consents: 1, user: 1 },
+      }),
+    });
+    const fleetDelete = vi
+      .fn()
+      .mockResolvedValue({ documents: 2, vehicles: 1, vehicleDocuments: 1 });
+    const fleetRest = restWith({ delete: fleetDelete });
+    const mediaDelete = vi.fn().mockResolvedValue({ deleted: 4 });
+    const mediaRest = restWith({ delete: mediaDelete });
+    const paymentDelete = vi.fn().mockResolvedValue(paymentPurgeReply);
+    const paymentRest = restWith({ delete: paymentDelete });
+    const removeDriver = vi.fn().mockResolvedValue(true);
+    const readModel = { removeDriver } as unknown as ReadModelService;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      noopFleet,
+      identityRest,
+      mediaRest,
+      tripRest,
+      fleetRest,
+      paymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.purgeDriver(superadmin, 'd1');
+
+    expect(out.userId).toBe('u1');
+    expect(out.identity).toEqual({
+      driver: 1,
+      authMethods: 2,
+      biometricChecks: 3,
+      consents: 1,
+      user: 1,
+    });
+    expect(out.fleet).toEqual({ documents: 2, vehicles: 1, vehicleDocuments: 1 });
+    expect(out.media).toEqual({ deleted: 4 });
+    // En DEV el cascade SÍ borra trips + payments (sin huérfanos).
+    expect(out.trip).toEqual(tripPurgeReply);
+    expect(out.payment).toEqual(paymentPurgeReply);
+    expect(out.projection).toEqual({ removed: true });
+    expect(out.partialFailures).toBeUndefined();
+    // fleet recibe el DRIVERID en la ruta (indexa docs) + el userId en query (indexa vehículos).
+    expect(fleetDelete).toHaveBeenCalledWith('/vehicles/drivers/d1', {
+      identity: superadmin,
+      query: { userId: 'u1' },
+    });
+    // media recibe el DRIVERID (S3 organiza los binarios por drivers/<driverId>/).
+    expect(mediaDelete).toHaveBeenCalledWith('/media/internal/drivers/d1/documents', {
+      identity: superadmin,
+      body: { bucket: 'secret' },
+    });
+    // trip recibe el DRIVERID (Trip.driverId = driverId).
+    expect(tripDelete).toHaveBeenCalledWith('/internal/drivers/d1/trips', { identity: superadmin });
+    // payment recibe el DRIVERID en la ruta + el userId en query (indexa 4 tablas por user_id).
+    expect(paymentDelete).toHaveBeenCalledWith('/internal/drivers/d1/payments', {
+      identity: superadmin,
+      query: { userId: 'u1' },
+    });
+    expect(removeDriver).toHaveBeenCalledWith('d1');
+    expect(record).toHaveBeenCalledWith(
+      superadmin,
+      expect.objectContaining({ action: 'driver.purge', resourceType: 'driver', resourceId: 'd1' }),
+    );
+  });
+
+  it('RESILIENCIA: si falla fleet, igual limpia la proyección Redis y reporta el parcial (NO deja al conductor en la lista)', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    // El guard destructivo ahora corre por VEO_DEPLOY_TIER (isProdTier), no por NODE_ENV: en dev/preview
+    // la purga PROCEDE (default seguro = production bloquea). Forzamos tier local para el caso DEV-relajado.
+    vi.stubEnv('VEO_DEPLOY_TIER', 'local');
+    const tripRest = restWith({
+      get: vi.fn().mockResolvedValue({ driverId: 'd1', tripCount: 0, hasTrips: false }),
+    });
+    const identityRest = restWith({
+      delete: vi.fn().mockResolvedValue({
+        userId: 'u1',
+        deleted: { driver: 1, authMethods: 0, biometricChecks: 0, consents: 0, user: 1 },
+      }),
+    });
+    const fleetRest = restWith({ delete: vi.fn().mockRejectedValue(new Error('fleet down')) });
+    const mediaDelete = vi.fn().mockResolvedValue({ deleted: 4 });
+    const mediaRest = restWith({ delete: mediaDelete });
+    const tripDelete = vi.fn().mockResolvedValue(tripPurgeReply);
+    (tripRest as { delete?: unknown }).delete = tripDelete;
+    const paymentDelete = vi.fn().mockResolvedValue(paymentPurgeReply);
+    const paymentRest = restWith({ delete: paymentDelete });
+    const removeDriver = vi.fn().mockResolvedValue(true);
+    const readModel = { removeDriver } as unknown as ReadModelService;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      noopFleet,
+      identityRest,
+      mediaRest,
+      tripRest,
+      fleetRest,
+      paymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.purgeDriver(superadmin, 'd1');
+
+    // El conductor YA NO está en la proyección, aunque fleet haya fallado.
+    expect(removeDriver).toHaveBeenCalledWith('d1');
+    expect(out.projection).toEqual({ removed: true });
+    // media/trip/payment SÍ corren aunque fleet haya fallado (best-effort, no se aborta la cascada).
+    expect(mediaDelete).toHaveBeenCalledOnce();
+    expect(tripDelete).toHaveBeenCalledOnce();
+    expect(paymentDelete).toHaveBeenCalledOnce();
+    // El parcial se reporta honestamente (sin mentir "todo borrado") y SOLO incluye fleet.
+    expect(out.partialFailures).toEqual([{ stage: 'fleet', cause: 'fleet down' }]);
+    expect(out.fleet).toEqual({ documents: 0, vehicles: 0, vehicleDocuments: 0 });
+    expect(out.trip).toEqual(tripPurgeReply);
+    expect(out.payment).toEqual(paymentPurgeReply);
+    // Se audita la purga (incluido el parcial), porque identity SÍ borró.
+    expect(record).toHaveBeenCalledWith(
+      superadmin,
+      expect.objectContaining({
+        action: 'driver.purge',
+        payload: expect.objectContaining({
+          partialFailures: [{ stage: 'fleet', cause: 'fleet down' }],
+        }),
+      }),
+    );
+  });
+
+  it('RESILIENCIA: si falla media, igual limpia la proyección y reporta el parcial de media', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    // El guard destructivo ahora corre por VEO_DEPLOY_TIER (isProdTier), no por NODE_ENV: en dev/preview
+    // la purga PROCEDE (default seguro = production bloquea). Forzamos tier local para el caso DEV-relajado.
+    vi.stubEnv('VEO_DEPLOY_TIER', 'local');
+    const tripRest = restWith({
+      get: vi.fn().mockResolvedValue({ driverId: 'd1', tripCount: 0, hasTrips: false }),
+    });
+    const identityRest = restWith({
+      delete: vi.fn().mockResolvedValue({
+        userId: 'u1',
+        deleted: { driver: 1, authMethods: 0, biometricChecks: 0, consents: 0, user: 1 },
+      }),
+    });
+    const fleetDelete = vi
+      .fn()
+      .mockResolvedValue({ documents: 5, vehicles: 2, vehicleDocuments: 0 });
+    const fleetRest = restWith({ delete: fleetDelete });
+    const mediaRest = restWith({ delete: vi.fn().mockRejectedValue(new Error('s3 down')) });
+    const tripDelete = vi.fn().mockResolvedValue(tripPurgeReply);
+    (tripRest as { delete?: unknown }).delete = tripDelete;
+    const paymentDelete = vi.fn().mockResolvedValue(paymentPurgeReply);
+    const paymentRest = restWith({ delete: paymentDelete });
+    const removeDriver = vi.fn().mockResolvedValue(true);
+    const readModel = { removeDriver } as unknown as ReadModelService;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      noopFleet,
+      identityRest,
+      mediaRest,
+      tripRest,
+      fleetRest,
+      paymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.purgeDriver(superadmin, 'd1');
+
+    expect(removeDriver).toHaveBeenCalledWith('d1');
+    expect(out.projection).toEqual({ removed: true });
+    expect(out.fleet).toEqual({ documents: 5, vehicles: 2, vehicleDocuments: 0 });
+    expect(out.media).toEqual({ deleted: 0 });
+    // trip/payment SÍ corren aunque media haya fallado; el parcial SOLO incluye media.
+    expect(out.trip).toEqual(tripPurgeReply);
+    expect(out.payment).toEqual(paymentPurgeReply);
+    expect(out.partialFailures).toEqual([{ stage: 'media', cause: 's3 down' }]);
   });
 });
