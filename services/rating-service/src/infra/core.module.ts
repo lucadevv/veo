@@ -4,7 +4,13 @@
  */
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InternalIdentityGuard, RolesGuard, INTERNAL_IDENTITY_SECRET } from '@veo/auth';
+import {
+  InternalIdentityGuard,
+  RolesGuard,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
@@ -17,16 +23,31 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
+// Rieles que pueden llamar los endpoints internos de rating (REST /ratings + gRPC GetAggregate):
+//  - public-rail: el PASAJERO califica y lee SU rating del viaje (public-bff, POST/GET /ratings firmado).
+//  - driver-rail: el CONDUCTOR lee su agregado (driver-bff, gRPC GetAggregate vía GET /drivers/me).
+//  - admin-rail: el back-office consulta agregados de un sujeto (admin-bff, gRPC rating).
+// La ENTRADA de calificaciones por sistema (trip.completed) es event-driven (Kafka), no gateada por audiencia.
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = ['public-rail', 'driver-rail', 'admin-rail'];
+
 @Global()
 @Module({
   providers: [
     PrismaService,
     redisProvider,
     internalSecretProvider,
+    { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
     InternalIdentityGuard,
     RolesGuard,
   ],
-  exports: [PrismaService, REDIS, INTERNAL_IDENTITY_SECRET, InternalIdentityGuard, RolesGuard],
+  exports: [
+    PrismaService,
+    REDIS,
+    INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+    InternalIdentityGuard,
+    RolesGuard,
+  ],
 })
 export class CoreModule {}
