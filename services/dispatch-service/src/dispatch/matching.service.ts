@@ -67,6 +67,10 @@ export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
   private readonly offerTimeoutMs: number;
   private readonly maxKRing: number;
+  /** Presupuesto de avance por tick del sweep (cuántas ofertas vencidas reclamar+avanzar). */
+  private readonly sweepAdvanceBudget: number;
+  /** Deadline (ms) por tick del sweep: backstop ante un offerNext lento (corta antes de marcar la próxima). */
+  private readonly sweepDeadlineMs: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -81,6 +85,8 @@ export class MatchingService {
   ) {
     this.offerTimeoutMs = config.getOrThrow<number>('DISPATCH_OFFER_TIMEOUT_MS');
     this.maxKRing = config.getOrThrow<number>('DISPATCH_MAX_K_RING');
+    this.sweepAdvanceBudget = config.getOrThrow<number>('DISPATCH_SWEEP_ADVANCE_BUDGET');
+    this.sweepDeadlineMs = config.getOrThrow<number>('DISPATCH_SWEEP_DEADLINE_MS');
   }
 
   // ──────────────── Matching EVENT-DRIVEN (estado durable, sin Promise/timer en proceso) ────────────────
@@ -243,24 +249,46 @@ export class MatchingService {
    * Barrido DURABLE de ofertas vencidas (D2.3): reemplaza al setTimeout en proceso. Para cada oferta
    * OFFERED más vieja que el timeout, la reclama a TIMEOUT por CAS atómico (where outcome=OFFERED) y
    * avanza el matching (offerNext). Replica-safe: el CAS garantiza que UNA sola réplica toma cada oferta
-   * (las demás ven count=0). Lo invoca el reconciler (@Interval). Devuelve cuántas avanzó.
+   * (las demás ven count=0). Lo invoca el reconciler (@Interval cada 2s). Devuelve cuántas avanzó.
+   *
+   * ── ESCALABILIDAD: corte por PRESUPUESTO (K) + DEADLINE por tick ──
+   * El sweep es SECUENCIAL a propósito y NO se puede paralelizar: NO hay claim atómico del conductor — el
+   * pool (DriverPool.eligible) es read-only al ofertar y el conductor sale recién en markBusy al ACEPTAR
+   * (fuera de la tx); la anti-doble-oferta es per-trip en memoria (el Set `attempted` desde los DispatchMatch
+   * del MISMO tripId). Correr offerNext en paralelo entre tripIds distintos PODRÍA double-offerear al mismo
+   * conductor. Por eso NO usamos Promise.all/allSettled acá. El control de escala es el TOPE, no el paralelismo:
+   *  - `take = K` (DISPATCH_SWEEP_ADVANCE_BUDGET, default 25): a-lo-sumo-K ofertas vencidas por tick. Antes
+   *    `take=100` encadenaba hasta 100 ciclos de matching en un cron de 2s (O(100)×O(matching)). Con K chico
+   *    el costo por tick queda acotado; las ofertas no tomadas siguen OFFERED y las barre el próximo tick.
+   *  - DEADLINE (DISPATCH_SWEEP_DEADLINE_MS, default 1500 < 2000): backstop ante un offerNext patológico.
+   *
+   * NO se batchea el CAS (updateMany sobre los K ids de una): el marcado a TIMEOUT y el avance (offerNext)
+   * van ACOPLADOS por fila DENTRO del for — marcar TIMEOUT una oferta que NO se avanza la deja huérfana (el
+   * findMany(OFFERED) ya no la ve → su sesión sigue OPEN sin oferta viva y el sweep no la re-dispara). Marcar
+   * justo-antes-de-cada-offerNext garantiza que un corte por deadline NO deje huérfanas (las no marcadas
+   * siguen OFFERED). El "N+1" de K escrituras CAS es trivial: K=25 << 100 y sin los 100 matchings encadenados.
    */
-  async sweepExpiredOffers(limit = 100): Promise<number> {
+  async sweepExpiredOffers(limit = this.sweepAdvanceBudget): Promise<number> {
     const cutoff = new Date(Date.now() - this.offerTimeoutMs);
     const expired = await this.prisma.read.dispatchMatch.findMany({
       where: { outcome: DispatchOutcome.OFFERED, offeredAt: { lt: cutoff } },
       select: { id: true, tripId: true },
       orderBy: { offeredAt: 'asc' },
-      take: limit,
+      take: limit, // K: presupuesto de avance por tick (no 100). El resto lo toma el próximo tick.
     });
+    const tickStart = Date.now();
     let advanced = 0;
     for (const m of expired) {
+      // DEADLINE: cortamos ANTES de marcar la próxima fila. Las no procesadas siguen OFFERED (no huérfanas):
+      // el marcado a TIMEOUT y el avance van juntos por fila, así un corte por tiempo nunca deja una oferta
+      // marcada TIMEOUT sin re-oferta. Backstop raro (K ya es chico); protege solo casos patológicos.
+      if (Date.now() - tickStart > this.sweepDeadlineMs) break;
       const claimed = await this.prisma.write.dispatchMatch.updateMany({
         where: { id: m.id, outcome: DispatchOutcome.OFFERED },
         data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
       });
       if (claimed.count === 0) continue; // otra réplica (o un accept/reject) ya la tomó
-      await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez
+      await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez (idempotente)
       advanced += 1;
     }
     return advanced;

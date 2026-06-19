@@ -257,7 +257,13 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       domainEventsTotal.inc({ event: 'trip.cancelled', result: 'poison' });
       return;
     }
-    await this.offerBoard.cancelBoard(p.tripId);
+    // CAPA 2 (anti-IDOR): cancelBoard ancla el ownership del board al pasajero SOLICITANTE en el camino
+    // HTTP. ESTE camino NO es el cancel del pasajero: es la AUTORIDAD DEL VIAJE (trip.cancelled, evento de
+    // dominio CONFIABLE de trip-service) — el trip YA murió por otra vía y el board debe morir SIEMPRE,
+    // sin importar quién era el dueño (emitClosure=false: no re-emite cierre, anti-bucle). Un atacante no
+    // puede forjar un evento Kafka interno, así que el guard de ownership NO aplica acá: pasamos
+    // `system:true` para saltarlo explícitamente (camino de sistema, no de usuario final).
+    await this.offerBoard.cancelBoard(p.tripId, { system: true });
     // FIXED: el viaje murió ⇒ cerrar la sesión de matching secuencial (CANCELLED) para que el advance/
     // reconciler no sigan ofertando a un viaje cancelado. Idempotente (CAS); no-op si no había sesión (PUJA).
     await this.matching.cancelSession(p.tripId);

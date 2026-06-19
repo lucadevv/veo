@@ -54,6 +54,17 @@ export const envSchema = z
     DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
     /// Radio máximo del k-ring al expandir la búsqueda. El advance agota cada anillo antes de expandir.
     DISPATCH_MAX_K_RING: z.coerce.number().default(2),
+    /// PRESUPUESTO de avance por tick del sweep durable (sweepExpiredOffers). El barrido es SECUENCIAL
+    /// (no paraleliza offerNext: el pool es read-only al ofertar y el conductor sale recién en markBusy al
+    /// ACEPTAR → paralelizar entre tripIds distintos podría double-offerear al mismo conductor). Sin tope,
+    /// un tick podía marcar+avanzar hasta 100 ofertas vencidas, encadenando 100 ciclos de matching en un
+    /// cron de 2s. K acota cuántas ofertas vencidas se reclaman+avanzan por tick (las no tomadas siguen
+    /// OFFERED y las toma el próximo tick). Marcado (CAS) y avance van ACOPLADOS por fila → sin huérfanas.
+    DISPATCH_SWEEP_ADVANCE_BUDGET: z.coerce.number().int().positive().default(25),
+    /// DEADLINE (ms) por tick del sweep: backstop ante un offerNext patológicamente lento. Si el tick supera
+    /// este presupuesto temporal, corta el for ANTES de marcar la próxima fila (marcado y avance van juntos
+    /// por fila, así un corte por deadline NO deja huérfanas). Debe ser < 2000 (el @Interval del reconciler).
+    DISPATCH_SWEEP_DEADLINE_MS: z.coerce.number().int().positive().max(1_999).default(1_500),
 
     // Config de RADIOS (k-rings) editable en runtime por el admin: TTL (ms) del cache in-proc de UN slot
     // que sirve los k-rings al hot-path (feed de mapa + broadcast de pujas). La config cambia en el orden

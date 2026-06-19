@@ -5,13 +5,15 @@
  * (passenger/admin) no es conductor → 403.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { Reflector } from '@nestjs/core';
+import type { ExecutionContext } from '@nestjs/common';
 import { isDomainError } from '@veo/utils';
-import type { AuthenticatedUser } from '@veo/auth';
+import { AudienceGuard, InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { OfferBoardController } from './offer-board.controller';
 import type { OfferBoardService } from './offer-board.service';
 import type { Offer, OfferBoard } from './offer-board.port';
 import { VehicleType } from '@veo/shared-types';
-import type { SubmitOfferDto } from './dto/offer-board.dto';
+import type { AcceptOfferDto, SubmitOfferDto } from './dto/offer-board.dto';
 
 const TRIP = '00000000-0000-0000-0000-000000000001';
 const ORIGIN = { lat: -12.0464, lon: -77.0428 };
@@ -36,6 +38,7 @@ function makeController(): {
     submitOffer: ReturnType<typeof vi.fn>;
     listOpenBidsNear: ReturnType<typeof vi.fn>;
     getOffersView: ReturnType<typeof vi.fn>;
+    acceptOffer: ReturnType<typeof vi.fn>;
     cancelBoard: ReturnType<typeof vi.fn>;
   };
 } {
@@ -67,6 +70,7 @@ function makeController(): {
       board: { status: 'OPEN' as const, expiresAt: board.expiresAt },
       offers: [offer],
     })),
+    acceptOffer: vi.fn(async () => offer),
     cancelBoard: vi.fn(async () => undefined),
   };
   const ctrl = new OfferBoardController(svc as unknown as OfferBoardService);
@@ -130,18 +134,76 @@ describe('OfferBoardController — trust boundary del lado conductor (#9)', () =
   });
 
   it('FIX contrato · listOffers devuelve { board:{status,expiresAt}, offers } (no un array pelado)', async () => {
-    const { ctrl } = makeController();
-    const res = await ctrl.listOffers(TRIP);
+    const { ctrl, svc } = makeController();
+    const res = await ctrl.listOffers(TRIP, passengerUser());
     expect(res.board.status).toBe('OPEN');
     expect(typeof res.board.expiresAt).toBe('number');
     expect(res.offers).toHaveLength(1);
     expect(res.offers[0]?.driverId).toBe('signed-driver');
+    // CAPA 2 — el passengerId (userId FIRMADO) se propaga al service para el guard de ownership.
+    expect(svc.getOffersView).toHaveBeenCalledWith(TRIP, 'user-2');
   });
 
-  it('FIX cancel-puja · cancel del pasajero llama cancelBoard con emitClosure=true (cierra el VIAJE)', async () => {
+  it('CAPA 2 · accept pasa el passengerId FIRMADO al service y PRESERVA el driverId del body', async () => {
     const { ctrl, svc } = makeController();
-    const res = await ctrl.cancel(TRIP);
+    const dto: AcceptOfferDto = { driverId: 'chosen-driver' };
+    await ctrl.accept(TRIP, dto, passengerUser());
+    // (tripId, driverId-del-body, passengerId-FIRMADO): el pasajero elige conductor, el dueño se ancla.
+    expect(svc.acceptOffer).toHaveBeenCalledWith(TRIP, 'chosen-driver', 'user-2');
+  });
+
+  it('FIX cancel-puja · cancel del pasajero llama cancelBoard con passengerId + emitClosure=true', async () => {
+    const { ctrl, svc } = makeController();
+    const res = await ctrl.cancel(TRIP, passengerUser());
     expect(res).toEqual({ ok: true });
-    expect(svc.cancelBoard).toHaveBeenCalledWith(TRIP, { emitClosure: true });
+    // CAPA 2 — ahora son 3 args: (tripId, passengerId-FIRMADO, opts).
+    expect(svc.cancelBoard).toHaveBeenCalledWith(TRIP, 'user-2', { emitClosure: true });
+  });
+});
+
+/**
+ * CAPA 1 (frontera de transporte anti-confused-deputy): cada endpoint declara su RIEL aceptado vía
+ * @Audiences. El AudienceGuard (corre tras InternalIdentityGuard, fail-closed) rechaza una identidad
+ * de riel equivocado AUNQUE el HMAC sea válido. Verificamos el metadata real con un Reflector +
+ * AudienceGuard reales (sin `any`): el del pasajero exige PUBLIC_RAIL, el del conductor DRIVER_RAIL.
+ */
+describe('OfferBoardController — frontera de audiencia por endpoint (CAPA 1)', () => {
+  const reflector = new Reflector();
+  const guard = new AudienceGuard(reflector);
+
+  /** ExecutionContext mínimo apuntando a un handler real del controller, con un `aud` dado en req.user. */
+  function ctxFor(method: keyof OfferBoardController, aud: InternalAudience): ExecutionContext {
+    const handler = OfferBoardController.prototype[method] as (...args: unknown[]) => unknown;
+    const req = { user: { aud } };
+    return {
+      getHandler: () => handler,
+      getClass: () => OfferBoardController,
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+  }
+
+  const PASSENGER_ENDPOINTS = ['listOffers', 'accept', 'cancel'] as const;
+  const DRIVER_ENDPOINTS = ['listOpen', 'submitOffer'] as const;
+
+  it.each(PASSENGER_ENDPOINTS)('%s exige PUBLIC_RAIL (acepta public, rechaza driver)', (method) => {
+    expect(guard.canActivate(ctxFor(method, InternalAudience.PUBLIC_RAIL))).toBe(true);
+    let caught: unknown;
+    try {
+      guard.canActivate(ctxFor(method, InternalAudience.DRIVER_RAIL));
+    } catch (e) {
+      caught = e;
+    }
+    expect(isDomainError(caught) && caught.httpStatus === 403).toBe(true);
+  });
+
+  it.each(DRIVER_ENDPOINTS)('%s exige DRIVER_RAIL (acepta driver, rechaza public)', (method) => {
+    expect(guard.canActivate(ctxFor(method, InternalAudience.DRIVER_RAIL))).toBe(true);
+    let caught: unknown;
+    try {
+      guard.canActivate(ctxFor(method, InternalAudience.PUBLIC_RAIL));
+    } catch (e) {
+      caught = e;
+    }
+    expect(isDomainError(caught) && caught.httpStatus === 403).toBe(true);
   });
 });

@@ -22,6 +22,7 @@ import {
   neighbors,
   uuidv7,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   ValidationError,
   DISPATCH_H3_RESOLUTION,
@@ -386,9 +387,17 @@ export class OfferBoardService {
    * ACCEPTED y las demás LAPSED, emite `dispatch.offer_accepted` Y `dispatch.match_found` (para que
    * trip materialice ASSIGNED — se mantiene ese contrato). Idempotente: doble-tap → no-op.
    */
-  async acceptOffer(tripId: string, driverId: string): Promise<Offer> {
+  async acceptOffer(tripId: string, driverId: string, passengerId: string): Promise<Offer> {
     const board = await this.store.getBoard(tripId);
     if (!board) throw new NotFoundError('Puja no encontrada', { tripId });
+
+    // CAPA 2 (defensa en profundidad anti-IDOR/confused-deputy): el board pertenece al pasajero que
+    // abrió la puja. Va ANTES del getOffer y de cualquier corto-circuito idempotente: un pasajero ajeno
+    // (aud public-rail válido pero otro userId) NO puede materializar el match de un viaje que no es suyo.
+    // El driverId del body SE QUEDA intacto (el pasajero ELIGE conductor; lo que se ancla es el dueño).
+    if (board.passengerId !== passengerId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
+    }
 
     const chosen = await this.store.getOffer(tripId, driverId);
     if (!chosen) throw new NotFoundError('Oferta no encontrada', { tripId, driverId });
@@ -643,11 +652,18 @@ export class OfferBoardService {
    *    CLOSED_MATCHED o ausente (GONE), `offers = []` — nunca ofertas zombies de una puja ya muerta (el
    *    pasajero no debe poder aceptar sobre un board cerrado; el accept-guard las rechazaría igual).
    */
-  async getOffersView(tripId: string): Promise<OffersView> {
+  async getOffersView(tripId: string, passengerId: string): Promise<OffersView> {
     const board = await this.store.getBoard(tripId);
     if (!board) {
       // La key del board ya no existe en Redis (TTL): la puja se evaporó. GONE + sin ofertas.
+      // El guard de ownership va DESPUÉS de este check a propósito: un board evaporado no tiene
+      // passengerId que comparar y devolver GONE no leakea NADA (no expone ofertas ni estado ajeno).
       return { board: { status: ClientBoardStatus.GONE, expiresAt: null }, offers: [] };
+    }
+    // CAPA 2 (defensa en profundidad anti-IDOR): solo el dueño de la puja ve sus ofertas. Va tras el
+    // check GONE (ese ya no tiene ancla de ownership) y antes de exponer cualquier oferta del board.
+    if (board.passengerId !== passengerId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
     }
     // Solo un board OPEN expone ofertas elegibles; cualquier otro estado → [] (no zombies).
     const offers =
@@ -713,7 +729,45 @@ export class OfferBoardService {
    * LIMPIEZA: al cancelar purgamos también el HASH de ofertas (clearOffers) — hasta hoy solo se limpiaba en
    * openBoard/reopenBoard, dejando ofertas PENDING colgadas en Redis tras un cancel (zombies hasta su TTL).
    */
-  async cancelBoard(tripId: string, opts: { emitClosure?: boolean } = {}): Promise<void> {
+  /**
+   * Camino del PASAJERO (HTTP, public-rail): cancela la puja anclada a SU ownership (anti-IDOR, CAPA 2).
+   * `passengerId` viene de la identidad FIRMADA; el board debe pertenecerle o se rechaza con 403.
+   */
+  async cancelBoard(
+    tripId: string,
+    passengerId: string,
+    opts?: { emitClosure?: boolean },
+  ): Promise<void>;
+  /**
+   * Camino de SISTEMA (autoridad del viaje, p.ej. consumo de `trip.cancelled`): el trip ya murió por otra
+   * vía → el board muere SIEMPRE, sin ancla de ownership (un evento de dominio interno no es forjable).
+   */
+  async cancelBoard(tripId: string, opts: { system: true; emitClosure?: boolean }): Promise<void>;
+  async cancelBoard(
+    tripId: string,
+    ownerOrOpts: string | { system: true; emitClosure?: boolean },
+    maybeOpts: { emitClosure?: boolean } = {},
+  ): Promise<void> {
+    // Discrimina los dos llamadores SIN `any`: un string → camino del pasajero (con guard de ownership);
+    // un objeto `{ system: true }` → camino de sistema (sin guard, el board muere por autoridad del viaje).
+    const system = typeof ownerOrOpts !== 'string';
+    const passengerId = system ? null : ownerOrOpts;
+    const opts = system ? ownerOrOpts : maybeOpts;
+
+    // CAPA 2 (defensa en profundidad anti-IDOR): en el camino del PASAJERO, SI el board existe solo su dueño
+    // puede cancelarlo — un pasajero ajeno NO cancela la puja de otro. SI el board ya se evaporó por TTL
+    // (board null), NO hay ancla de ownership que validar: NO tiramos error y seguimos al cancelIfOpen/
+    // emitClosure tal cual (preserva el caso "cancelo a 95s": cancelIfOpen devuelve false pero con
+    // emitClosure=true el cierre del viaje se emite igual). LÍMITE RESIDUAL: un board efímero sin ancla
+    // tras TTL queda cubierto por CAPA 1 (AudienceGuard public-rail) + la autoridad DURABLE de trip-service
+    // (cancelFromBid guard-ea por estado: solo cierra desde REQUESTED/REASSIGNING). El camino de SISTEMA
+    // (`system:true`) salta el guard a propósito: el trip ya murió y el board debe morir sin importar dueño.
+    if (!system) {
+      const board = await this.store.getBoard(tripId);
+      if (board && board.passengerId !== passengerId) {
+        throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
+      }
+    }
     const cancelled = await this.store.cancelIfOpen(tripId);
     if (cancelled) {
       // Higiene: el board se canceló → ninguna oferta de esta ventana debe sobrevivir en el HASH.
