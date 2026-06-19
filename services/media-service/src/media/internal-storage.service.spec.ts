@@ -15,6 +15,7 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
+      deletePrefix: vi.fn(),
     };
     const svc = new InternalStorageService(storage);
 
@@ -29,6 +30,8 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       bucket: 'veo-documents-dev',
       key: 'fleet/driver-1/license.pdf',
       expiresSeconds: 300,
+      // Lo consume el operador en el browser del Mac → firma contra el host admin (localhost).
+      audience: 'admin',
     });
   });
 
@@ -38,6 +41,7 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
+      deletePrefix: vi.fn(),
     };
     const svc = new InternalStorageService(storage);
 
@@ -47,6 +51,7 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       bucket: 'veo-documents-dev',
       key: 'fleet/driver-1/license.pdf',
       expiresSeconds: DEFAULT_PRESIGN_GET_TTL_SECONDS,
+      audience: 'admin',
     });
   });
 
@@ -72,6 +77,7 @@ describe('InternalStorageService.presignPut · presigned PUT interno de un docum
       presignUploadUrl: vi.fn().mockResolvedValue('https://signed.example/upload'),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
+      deletePrefix: vi.fn(),
     };
   }
 

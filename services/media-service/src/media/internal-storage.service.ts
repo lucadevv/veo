@@ -14,6 +14,7 @@ import {
   type DocumentUploadContentType,
   type PresignGetView,
   type PresignPutView,
+  type PurgeDriverDocsView,
 } from './dto/internal-storage.dto';
 
 function isAllowedContentType(value: string): value is DocumentUploadContentType {
@@ -33,6 +34,9 @@ export class InternalStorageService {
       bucket: input.bucket,
       key: input.key,
       expiresSeconds: input.ttlSeconds ?? DEFAULT_PRESIGN_GET_TTL_SECONDS,
+      // Audiencia ADMIN: lo consume el operador en el browser DEL MAC (admin-web vía admin-bff). Se
+      // firma contra S3_ADMIN_BASE_URL (localhost), no contra el host LAN del device.
+      audience: 'admin',
     });
     return { url };
   }
@@ -65,5 +69,22 @@ export class InternalStorageService {
 
     // El cliente DEBE reenviar exactamente este Content-Type en el PUT (viaja firmado en la URL).
     return { url, requiredHeaders: { 'Content-Type': input.contentType } };
+  }
+
+  /**
+   * HARD purge de los binarios de documentos de un conductor (re-registro): barre TODOS los objetos bajo
+   * `drivers/<driverId>/` del bucket de documentos (las keys que el driver-bff firma al subir). El prefijo
+   * se CONSTRUYE acá a partir del `driverId` — nunca lo manda el cliente — para que el borrado masivo no
+   * pueda apuntar a un prefijo arbitrario. Idempotente: sin objetos devuelve 0.
+   */
+  async purgeDriverDocs(input: { bucket: string; driverId: string }): Promise<PurgeDriverDocsView> {
+    if (!input.driverId) {
+      throw new ValidationError('driverId requerido para el purge de documentos', {
+        field: 'driverId',
+      });
+    }
+    const prefix = `drivers/${input.driverId}/`;
+    const deleted = await this.storage.deletePrefix(input.bucket, prefix);
+    return { deleted };
   }
 }

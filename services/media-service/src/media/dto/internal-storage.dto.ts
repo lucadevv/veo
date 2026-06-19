@@ -114,3 +114,22 @@ export interface PresignPutView {
   url: string;
   requiredHeaders: Record<string, string>;
 }
+
+/**
+ * Body de `DELETE /media/internal/drivers/:driverId/documents`. Server-to-server (InternalIdentityGuard,
+ * SUPERADMIN aguas arriba en el admin-bff): barre TODOS los objetos del conductor bajo `drivers/<driverId>/`.
+ * El prefijo lo construye el SERVICIO a partir del `driverId` (nunca lo manda el cliente): un borrado
+ * masivo por prefijo arbitrario sería un pie de fuego. `driverId` aquí = User.id de identity (igual que
+ * las keys que el driver-bff firma al subir: `drivers/<userId>/documents/...`).
+ */
+export class PurgeDriverDocsDto {
+  @ApiProperty({ description: 'Bucket S3 de documentos', example: 'veo-documents-dev' })
+  @IsString()
+  @IsNotEmpty()
+  bucket!: string;
+}
+
+/** Respuesta: cuántos objetos se borraron bajo el prefijo del conductor. */
+export interface PurgeDriverDocsView {
+  deleted: number;
+}

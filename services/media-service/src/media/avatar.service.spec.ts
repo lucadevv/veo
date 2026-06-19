@@ -88,6 +88,7 @@ describe('AvatarService.confirmUpload · validación de cuota tras la subida', (
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn().mockResolvedValue(1_000_000),
+      deletePrefix: vi.fn(),
     };
     const svc = makeService(storage);
 
@@ -106,6 +107,7 @@ describe('AvatarService.confirmUpload · validación de cuota tras la subida', (
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn().mockResolvedValue(undefined),
       getObjectSize: vi.fn().mockResolvedValue(AVATAR_MAX_BYTES + 1),
+      deletePrefix: vi.fn(),
     };
     const svc = makeService(storage);
 
@@ -121,6 +123,7 @@ describe('AvatarService.confirmUpload · validación de cuota tras la subida', (
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn().mockResolvedValue(0),
+      deletePrefix: vi.fn(),
     };
     const svc = makeService(storage);
 
@@ -136,6 +139,7 @@ describe('AvatarService.confirmUpload · validación de cuota tras la subida', (
       presignUploadUrl: vi.fn(),
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
+      deletePrefix: vi.fn(),
     };
     const svc = makeService(storage);
 

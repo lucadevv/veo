@@ -9,13 +9,16 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ExternalServiceError } from '@veo/utils';
 import {
   STORAGE_PORT,
   type StoragePort,
+  type PresignAudience,
   type PresignDownloadInput,
   type PresignUploadInput,
 } from './storage.port';
@@ -28,13 +31,19 @@ interface S3Config {
    */
   endpoint: string;
   /**
-   * Endpoint PÚBLICO (client-reachable): el host que VERÁ el cliente que consume la URL prefirmada.
-   * SigV4 firma el `host` DENTRO de la firma, así que la URL prefirmada DEBE generarse con un cliente
-   * cuyo endpoint sea este host público — no se puede intercambiar el host a posteriori sin romper la
-   * firma (SignatureDoesNotMatch). En dev es la IP LAN del Mac (alcanzable desde el teléfono físico);
-   * en prod, el dominio público del bucket/CDN.
+   * Endpoint PÚBLICO (client-reachable por el DEVICE): el host que VERÁ la app del conductor/pasajero
+   * (teléfono físico) que consume la URL prefirmada. SigV4 firma el `host` DENTRO de la firma, así que
+   * la URL prefirmada DEBE generarse con un cliente cuyo endpoint sea este host — no se puede
+   * intercambiar el host a posteriori sin romper la firma (SignatureDoesNotMatch). En dev es la IP LAN
+   * del Mac (alcanzable desde el teléfono físico); en prod, el dominio público del bucket/CDN.
    */
   publicEndpoint: string;
+  /**
+   * Endpoint ADMIN (browser-reachable desde el MAC): el host que verá el operador en admin-web (vía
+   * admin-bff) al consumir la URL prefirmada del visor. El browser corre en el propio Mac, así que el
+   * host estable y siempre alcanzable es `localhost` — a diferencia de la IP LAN, no driftea con DHCP.
+   */
+  adminEndpoint: string;
   region: string;
   accessKey: string;
   secretKey: string;
@@ -45,17 +54,21 @@ interface S3Config {
 /**
  * Adapter LIVE: S3/MinIO real. forcePathStyle obligatorio para MinIO.
  *
- * DOS clientes por una razón de seguridad/correctitud, no de comodidad:
+ * TRES clientes por una razón de seguridad/correctitud, no de comodidad. SigV4 firma el `host` EN la
+ * firma, así que el cliente debe nacer apuntando al host que el consumidor realmente alcanzará:
  *  - `internalClient` (endpoint = S3_ENDPOINT): operaciones server-to-server reales (HeadObject,
  *    DeleteObject). Las hace ESTE servicio, que alcanza MinIO por el host interno.
- *  - `presignClient` (endpoint = S3_PUBLIC_BASE_URL): SOLO para firmar URLs prefirmadas. El cliente
- *    final (app/teléfono) no alcanza el host interno, y como SigV4 firma el `host`, la URL debe
- *    nacer firmada contra el host público para ser a la vez alcanzable Y válida.
- * Misma region/credenciales/forcePathStyle en ambos: lo único que cambia es el host.
+ *  - `devicePresignClient` (endpoint = S3_PUBLIC_BASE_URL): firma URLs que consume la app del
+ *    conductor/pasajero (teléfono físico) → host LAN del Mac. Audiencia `'device'` (default).
+ *  - `adminPresignClient` (endpoint = S3_ADMIN_BASE_URL): firma URLs que consume el operador en el
+ *    browser DEL MAC (admin-web vía admin-bff) → `localhost` (estable, no driftea con DHCP).
+ *    Audiencia `'admin'`.
+ * Misma region/credenciales/forcePathStyle en los tres: lo único que cambia es el host.
  */
 class S3LiveAdapter implements StoragePort {
   private readonly internalClient: S3Client;
-  private readonly presignClient: S3Client;
+  private readonly devicePresignClient: S3Client;
+  private readonly adminPresignClient: S3Client;
 
   constructor(private readonly cfg: S3Config) {
     const shared = {
@@ -64,7 +77,13 @@ class S3LiveAdapter implements StoragePort {
       credentials: { accessKeyId: cfg.accessKey, secretAccessKey: cfg.secretKey },
     } as const;
     this.internalClient = new S3Client({ ...shared, endpoint: cfg.endpoint });
-    this.presignClient = new S3Client({ ...shared, endpoint: cfg.publicEndpoint });
+    this.devicePresignClient = new S3Client({ ...shared, endpoint: cfg.publicEndpoint });
+    this.adminPresignClient = new S3Client({ ...shared, endpoint: cfg.adminEndpoint });
+  }
+
+  /** Elige el cliente de firma según QUIÉN consumirá la URL (default: device/LAN). */
+  private presignClientFor(audience: PresignAudience | undefined): S3Client {
+    return audience === 'admin' ? this.adminPresignClient : this.devicePresignClient;
   }
 
   async presignDownloadUrl(input: PresignDownloadInput): Promise<string> {
@@ -72,8 +91,10 @@ class S3LiveAdapter implements StoragePort {
       Bucket: input.bucket ?? this.cfg.bucket,
       Key: input.key,
     });
-    // Firma contra el host PÚBLICO: la URL debe ser alcanzable por el cliente final.
-    return getSignedUrl(this.presignClient, command, { expiresIn: input.expiresSeconds });
+    // Firma contra el host de la AUDIENCIA: la URL debe ser alcanzable por quien la consume.
+    return getSignedUrl(this.presignClientFor(input.audience), command, {
+      expiresIn: input.expiresSeconds,
+    });
   }
 
   async presignUploadUrl(input: PresignUploadInput): Promise<string> {
@@ -83,8 +104,10 @@ class S3LiveAdapter implements StoragePort {
       Key: input.key,
       ContentType: input.contentType,
     });
-    // Firma contra el host PÚBLICO: la URL debe ser alcanzable por el cliente final.
-    return getSignedUrl(this.presignClient, command, { expiresIn: input.expiresSeconds });
+    // Firma contra el host de la AUDIENCIA: la URL debe ser alcanzable por quien la consume.
+    return getSignedUrl(this.presignClientFor(input.audience), command, {
+      expiresIn: input.expiresSeconds,
+    });
   }
 
   async deleteObject(key: string, bucket?: string): Promise<void> {
@@ -109,6 +132,42 @@ class S3LiveAdapter implements StoragePort {
       return head.ContentLength ?? 0;
     } catch {
       return 0;
+    }
+  }
+
+  async deletePrefix(bucket: string, prefix: string): Promise<number> {
+    // Operación server-to-server: usa el host INTERNO. Pagina ListObjectsV2 (máx 1000/página) y borra
+    // en lotes con DeleteObjects (máx 1000/llamada) — el page-size de la lista ya cae dentro del límite.
+    try {
+      let deleted = 0;
+      let continuationToken: string | undefined;
+      do {
+        const listed = await this.internalClient.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        const objects = (listed.Contents ?? [])
+          .map((o) => o.Key)
+          .filter((k): k is string => typeof k === 'string')
+          .map((Key) => ({ Key }));
+        if (objects.length > 0) {
+          await this.internalClient.send(
+            new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects, Quiet: true } }),
+          );
+          deleted += objects.length;
+        }
+        continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      } while (continuationToken);
+      return deleted;
+    } catch (err) {
+      throw new ExternalServiceError('No se pudo borrar el prefijo en S3', {
+        bucket,
+        prefix,
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }
@@ -140,6 +199,12 @@ export class StorageSandboxAdapter implements StoragePort {
     // Tamaño determinista por debajo de cualquier cuota razonable (1 MiB) para el happy path de tests.
     return 1_048_576;
   }
+
+  async deletePrefix(bucket: string, prefix: string): Promise<number> {
+    // Sin red: el sandbox no mantiene objetos, así que el barrido es un no-op observable (log) y 0 borrados.
+    this.logger.warn(`[SANDBOX] deletePrefix ${bucket}/${prefix}`);
+    return 0;
+  }
 }
 
 const storageProvider: Provider = {
@@ -151,8 +216,10 @@ const storageProvider: Provider = {
     }
     return new S3LiveAdapter({
       endpoint: config.getOrThrow<string>('S3_ENDPOINT'),
-      // Host público alcanzable por el cliente final: las URLs prefirmadas se firman contra él.
+      // Host LAN alcanzable por el DEVICE (teléfono): presign de la app del conductor/pasajero.
       publicEndpoint: config.getOrThrow<string>('S3_PUBLIC_BASE_URL'),
+      // Host browser-reachable desde el MAC (localhost): presign del visor del operador (admin-bff).
+      adminEndpoint: config.getOrThrow<string>('S3_ADMIN_BASE_URL'),
       region: config.getOrThrow<string>('S3_REGION'),
       accessKey: config.getOrThrow<string>('S3_ACCESS_KEY'),
       secretKey: config.getOrThrow<string>('S3_SECRET_KEY'),

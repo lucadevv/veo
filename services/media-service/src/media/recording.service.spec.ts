@@ -130,6 +130,7 @@ function makeSpyStorage(): { storage: StoragePort; deletes: string[] } {
       deletes.push(key);
     },
     getObjectSize: async () => 0,
+    deletePrefix: async () => 0,
   };
   return { storage, deletes };
 }

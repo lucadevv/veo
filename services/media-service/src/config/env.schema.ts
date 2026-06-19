@@ -47,8 +47,14 @@ export const envSchema = z.object({
   S3_BUCKET_AVATAR: z.string().default('veo-avatars-dev'),
   /// Bucket de documentos de flota (certificados, licencias). PRIVADO: solo accesible vía URL firmada.
   S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
-  /// Base pública para componer la URL estable del avatar (path-style, coherente con MinIO/forcePathStyle).
+  /// Base pública (DEVICE/LAN) para firmar el presign de la app del conductor/pasajero (teléfono) y
+  /// componer la URL estable del avatar (path-style, coherente con MinIO/forcePathStyle). En dev es la
+  /// IP LAN del Mac, alcanzable desde el teléfono físico.
   S3_PUBLIC_BASE_URL: z.string().default('http://localhost:9002'),
+  /// Base ADMIN (browser del MAC) para firmar el presign-GET del visor del operador (admin-bff). El
+  /// browser corre en el propio Mac → `localhost` es estable y siempre alcanzable (no driftea con DHCP
+  /// como la IP LAN). Solo aplica a las URLs de audiencia `'admin'`; el device sigue usando la LAN.
+  S3_ADMIN_BASE_URL: z.string().default('http://localhost:9002'),
   /// Tamaño máximo permitido para el avatar, en bytes (BR: el presign no acota el body, se valida en
   /// el `confirm` tras la subida con HeadObject; si excede se borra y se rechaza). Default 5 MiB.
   AVATAR_MAX_BYTES: z.coerce

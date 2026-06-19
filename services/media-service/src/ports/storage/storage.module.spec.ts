@@ -11,12 +11,16 @@ import { describe, it, expect } from 'vitest';
 import { S3LiveAdapter, type S3Config } from './storage.module';
 
 const INTERNAL_ENDPOINT = 'http://localhost:9002';
-const PUBLIC_ENDPOINT = 'http://192.168.18.238:9002';
+const PUBLIC_ENDPOINT = 'http://192.168.18.224:9002';
+// Host ADMIN (browser del Mac): a propósito DISTINTO del público para probar la selección por
+// audiencia (puerto distinto → origin verificable, sin depender de localhost vs IP real).
+const ADMIN_ENDPOINT = 'http://localhost:9003';
 
 function buildAdapter(): S3LiveAdapter {
   const cfg: S3Config = {
     endpoint: INTERNAL_ENDPOINT,
     publicEndpoint: PUBLIC_ENDPOINT,
+    adminEndpoint: ADMIN_ENDPOINT,
     region: 'us-east-1',
     accessKey: 'veo_dev',
     secretKey: 'veo_dev_secret',
@@ -44,7 +48,7 @@ describe('S3LiveAdapter · las URLs prefirmadas se firman contra el host PÚBLIC
     expect(parsed.searchParams.get('X-Amz-Signature')).toBeTruthy();
   });
 
-  it('presignDownloadUrl (GET) devuelve una URL cuyo origin == S3_PUBLIC_BASE_URL (no S3_ENDPOINT)', async () => {
+  it('presignDownloadUrl (GET) sin audiencia (default device) firma contra S3_PUBLIC_BASE_URL', async () => {
     const url = await buildAdapter().presignDownloadUrl({
       bucket: 'veo-documents-dev',
       key: 'drivers/smoke/test.jpg',
@@ -55,6 +59,21 @@ describe('S3LiveAdapter · las URLs prefirmadas se firman contra el host PÚBLIC
     expect(parsed.origin).toBe(PUBLIC_ENDPOINT);
     expect(parsed.origin).not.toBe(INTERNAL_ENDPOINT);
     expect(parsed.pathname).toBe('/veo-documents-dev/drivers/smoke/test.jpg');
+    expect(parsed.searchParams.get('X-Amz-Signature')).toBeTruthy();
+  });
+
+  it("presignDownloadUrl (GET) con audience 'admin' firma contra S3_ADMIN_BASE_URL (no el host LAN)", async () => {
+    const url = await buildAdapter().presignDownloadUrl({
+      bucket: 'veo-documents-dev',
+      key: 'fleet/driver-1/license.pdf',
+      expiresSeconds: 120,
+      audience: 'admin',
+    });
+
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe(ADMIN_ENDPOINT);
+    expect(parsed.origin).not.toBe(PUBLIC_ENDPOINT);
+    expect(parsed.pathname).toBe('/veo-documents-dev/fleet/driver-1/license.pdf');
     expect(parsed.searchParams.get('X-Amz-Signature')).toBeTruthy();
   });
 });
