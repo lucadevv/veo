@@ -2,7 +2,7 @@
  * OPS — operación: viajes (listado/detalle), conductores y operadores (aprobación RBAC).
  * RBAC base: soporte/dispatcher pueden observar; aprobaciones exigen roles superiores.
  */
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
@@ -12,6 +12,7 @@ import {
   type PendingDriver,
   type OperatorSummary,
   type CreatedOperator,
+  type DriverPurgeSummary,
 } from './ops.service';
 import type { Page } from '../read-model/read-model.service';
 import {
@@ -56,7 +57,7 @@ export class OpsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListDriversQueryDto,
   ): Promise<Page<DriverApproval>> {
-    return this.ops.listDrivers(user.roles, query);
+    return this.ops.listDrivers(user, query);
   }
 
   @Get('drivers/pending')
@@ -112,6 +113,35 @@ export class OpsController {
     @Body() dto: SuspendDriverDto,
   ): Promise<void> {
     return this.ops.suspendDriver(user, id, dto.reason);
+  }
+
+  @Post('drivers/:id/reactivate')
+  @HttpCode(204)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({
+    summary: 'Reactiva a un conductor (solo suspensiones disciplinarias · compliance/admin)',
+  })
+  reactivateDriver(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.ops.reactivateDriver(user, id);
+  }
+
+  @Delete('drivers/:id')
+  @HttpCode(200)
+  @Roles(AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'HARD purge en cascada de un conductor NO-OPERADO (re-registro): identity + fleet + media + ' +
+      'proyección. Bloquea con 409 si tiene historial de viajes. SUPERADMIN + step-up MFA.',
+  })
+  purgeDriver(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<DriverPurgeSummary> {
+    return this.ops.purgeDriver(user, id);
   }
 
   // ── Gestión de operadores (admin) ──

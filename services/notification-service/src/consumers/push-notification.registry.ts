@@ -455,6 +455,31 @@ export const PUSH_NOTIFICATION_SPECS = {
     vars: (p) => ({ make: p.make, model: p.model }),
     data: (p) => ({ modelId: p.modelId }),
   }),
+
+  /**
+   * driver.verified → push al CONDUCTOR: el operador aprobó sus antecedentes, ya puede operar (cierra el
+   * loop del onboarding: sale de "En revisión"). recipient = userId (device-store). dedup
+   * `driver:{driverId}:verified` (un alta se aprueba UNA vez; redeliveries no duplican). Sin PII: data solo
+   * lleva driverId; la app abre su gate de registro (sin PUSH_SCREEN de onboarding todavía → sin deep-link).
+   */
+  'driver.verified': defineSpec('driver.verified', {
+    recipient: (p) => p.userId,
+    template: TEMPLATE_KEYS.DRIVER_APPROVED,
+    dedup: (p) => `driver:${p.driverId}:verified`,
+    data: (p) => ({ driverId: p.driverId }),
+  }),
+
+  /**
+   * driver.rejected → push al CONDUCTOR: el operador rechazó sus antecedentes, debe corregir y reenviar.
+   * El MOTIVO (p.reason) NO viaja en el push (es PII, §0.7) — la app lo resuelve en la pantalla de rechazo
+   * vía GET /drivers/me. dedup `driver:{driverId}:rejected`. data solo driverId.
+   */
+  'driver.rejected': defineSpec('driver.rejected', {
+    recipient: (p) => p.userId,
+    template: TEMPLATE_KEYS.DRIVER_REJECTED,
+    dedup: (p) => `driver:${p.driverId}:rejected`,
+    data: (p) => ({ driverId: p.driverId }),
+  }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 
 export type RegistryEventType = keyof typeof PUSH_NOTIFICATION_SPECS;

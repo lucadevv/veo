@@ -16,6 +16,16 @@ export interface UserReply {
   name: string;
 }
 
+/** identity.GetDriversByIds / mensaje DriverIdsRequest (lectura batch para listados del admin). */
+export interface DriverIdsRequest {
+  ids: string[];
+}
+
+/** identity.GetDriversByIds / mensaje DriversByIdsReply. Orden libre; el consumidor mapea por id. */
+export interface DriversByIdsReply {
+  drivers: DriverReply[];
+}
+
 /** identity.GetDriver / GetDriverByUser / mensaje DriverReply. */
 export interface DriverReply {
   id: string;
@@ -50,4 +60,8 @@ export interface DriverReply {
   lastVerifiedAt: string;
   /** Teléfono del usuario asociado (driver→user); "" si no registrado. */
   phone: string;
+  /** DNI del conductor (documento de identidad · Compliance+); "" si no registrado. */
+  documentId: string;
+  /** Fecha de nacimiento del conductor en `yyyy-mm-dd`; "" si no registrada. */
+  birthDate: string;
 }

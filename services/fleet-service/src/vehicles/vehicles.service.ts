@@ -13,6 +13,7 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
+import { OPERABLE_VEHICLE_CLASSES } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
@@ -37,6 +38,16 @@ import {
 import type { Env } from '../config/env.schema';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
 
+/**
+ * Ids del conductor para el HARD purge. Son DOS porque fleet indexa cada tabla con un id distinto:
+ *  - `driverId` (perfil Driver de identity) → FleetDocument ownerType DRIVER.
+ *  - `userId` (User.id de identity) → Vehicle.driverId.
+ */
+export interface PurgeDriverIds {
+  driverId: string;
+  userId: string;
+}
+
 @Injectable()
 export class VehiclesService {
   private readonly minYear: number;
@@ -46,6 +57,20 @@ export class VehiclesService {
     config: ConfigService<Env, true>,
   ) {
     this.minYear = config.getOrThrow<number>('VEHICLE_MIN_YEAR');
+  }
+
+  /**
+   * Gate server-side: la clase de vehículo debe ser OPERABLE hoy (catálogo `OPERABLE_VEHICLE_CLASSES`,
+   * fuente única). Mientras la mototaxi esté diferida, MOTO se rechaza acá AUNQUE el cliente lo mande —
+   * la UI no autoriza, el backend sí. Cuando se habilite la oferta MOTO, el set crece y deja de bloquear.
+   */
+  private assertOperableVehicleType(vehicleType: VehicleType): void {
+    if (!(OPERABLE_VEHICLE_CLASSES as readonly string[]).includes(vehicleType)) {
+      throw new ValidationError('Por ahora solo se registran autos; la mototaxi llega más adelante', {
+        vehicleType,
+        operable: OPERABLE_VEHICLE_CLASSES,
+      });
+    }
   }
 
   async create(input: CreateVehicleDto): Promise<Vehicle> {
@@ -61,6 +86,13 @@ export class VehiclesService {
       );
     }
 
+    // F4 (C2): si el operador eligió un modelo del CATÁLOGO, make/model/vehicleType se snapshotean del spec
+    // APPROVED (server-authoritative) — la MISMA resolución que el alta del conductor (fuente única, sin
+    // texto libre divergente); si no, cae al texto libre legacy (scripts/seeds). Resuelto ANTES del create.
+    const snapshot = await this.resolveModelSnapshot(input);
+    // "Solo autos" (Ola 1): valida la clase YA resuelta (cubre un spec MOTO del catálogo o un MOTO libre).
+    this.assertOperableVehicleType(snapshot.vehicleType);
+
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
     if (existing) throw new ConflictError('Ya existe un vehículo con esa placa', { plate });
 
@@ -68,15 +100,71 @@ export class VehiclesService {
       data: {
         id: uuidv7(),
         plate,
-        make: input.make.trim(),
-        model: input.model.trim(),
+        make: snapshot.make,
+        model: snapshot.model,
         year: input.year,
         color: input.color.trim(),
-        vehicleType: input.vehicleType ?? 'CAR',
+        vehicleType: snapshot.vehicleType,
+        modelSpecId: snapshot.modelSpecId,
         fleetId: input.fleetId ?? null,
         insuranceExpiresAt: input.insuranceExpiresAt ? new Date(input.insuranceExpiresAt) : null,
         active: input.active ?? true,
       },
+    });
+  }
+
+  /**
+   * HARD purge de TODA la flota documental de un conductor (re-registro de un conductor NO-OPERADO,
+   * orquestado por el admin-bff con guard de trips aguas arriba). Borra REALMENTE, en UNA transacción:
+   *  - sus documentos de OPERADOR (FleetDocument ownerType DRIVER, ownerId = driverId), y
+   *  - sus vehículos (Vehicle.driverId = userId), CON sus documentos de vehículo asociados.
+   *
+   * INVARIANTE DE ID (dos ids, NO uno — verificado contra la DB real): fleet indexa cada tabla con un id
+   * DISTINTO del mismo conductor, por cómo se escribieron históricamente:
+   *  - `FleetDocument` (ownerType DRIVER) usa el id de PERFIL **Driver** de identity (`driverId`), igual que
+   *    `GetDriverDocuments({ id: driverId })`. Los documentos del operador se crean con el driverId.
+   *  - `Vehicle.driverId` guarda el **User.id** de identity (`userId`), que es lo que el driver-bff propaga
+   *    al registrar el vehículo (`registerForDriver` recibe `identity.userId`).
+   * Por eso el admin-bff pasa AMBOS ids: el driverId (para los docs) y el userId (para los vehículos). Usar
+   * un solo id borraría 0 filas en una de las dos tablas (era el BUG: se pasaba userId a todo → docs 0 filas).
+   *
+   * NO emite eventos: es un borrado administrativo de algo que nunca operó (sin trips), no un hecho de
+   * dominio del ciclo de vida del conductor. Idempotente: re-correr sobre un conductor ya purgado devuelve
+   * contadores en 0 (deleteMany no falla si no hay filas).
+   */
+  async purgeForDriver(
+    ids: PurgeDriverIds,
+  ): Promise<{ documents: number; vehicles: number; vehicleDocuments: number }> {
+    const { driverId, userId } = ids;
+    return this.prisma.write.$transaction(async (tx) => {
+      // Vehículos del conductor: indexados por userId (lo que el driver-bff persistió en Vehicle.driverId).
+      const vehicles = await tx.vehicle.findMany({
+        where: { driverId: userId },
+        select: { id: true },
+      });
+      const vehicleIds = vehicles.map((v) => v.id);
+
+      // Documentos de los VEHÍCULOS del conductor (ownerType VEHICLE, ownerId ∈ vehicleIds): sin esto
+      // quedarían huérfanos (FleetDocument no tiene FK física a Vehicle, hay que borrarlos explícito).
+      const vehicleDocuments =
+        vehicleIds.length > 0
+          ? await tx.fleetDocument.deleteMany({
+              where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: vehicleIds } },
+            })
+          : { count: 0 };
+
+      // Documentos de OPERADOR del conductor (ownerType DRIVER, ownerId = driverId de perfil).
+      const documents = await tx.fleetDocument.deleteMany({
+        where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
+      });
+
+      const deletedVehicles = await tx.vehicle.deleteMany({ where: { driverId: userId } });
+
+      return {
+        documents: documents.count,
+        vehicles: deletedVehicles.count,
+        vehicleDocuments: vehicleDocuments.count,
+      };
     });
   }
 
@@ -128,8 +216,8 @@ export class VehiclesService {
    * P2002 y lo capturamos para RE-RESOLVER el dueño (no un 500): re-leemos por placa y caemos al
    * camino idempotente (mismo dueño) o al de conflicto (otro dueño). Espeja ConsentsService.record.
    *
-   * `driverId` es el **User.id** de identity (el `userId` del token propagado), NO el id de perfil
-   * `Driver` de identity; fleet lo persiste tal cual en `Vehicle.driverId` (sin traducir).
+   * `driverId` es el id de PERFIL `Driver` de identity (el que viaja propagado desde el driver-bff y el
+   * mismo que usa el admin-bff en el purge/approve); fleet lo persiste tal cual en `Vehicle.driverId`.
    */
   async registerForDriver(
     driverId: string,
@@ -150,6 +238,9 @@ export class VehiclesService {
     // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec
     // (server-authoritative); si no, caen al texto libre. Resuelto ANTES de la transacción.
     const snapshot = await this.resolveModelSnapshot(input);
+    // "Solo autos" (Ola 1): valida la clase YA resuelta — cubre ambos caminos (un spec MOTO del catálogo
+    // o un texto libre MOTO se rechazan igual). Server-authoritative, no confía en lo que declara la app.
+    this.assertOperableVehicleType(snapshot.vehicleType);
 
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
     if (existing) {
@@ -250,12 +341,19 @@ export class VehiclesService {
   }
 
   /**
-   * Resuelve marca/modelo/tipo del alta. Dos caminos (B5-2):
-   *  - CON modelSpecId → el conductor eligió un modelo del CATÁLOGO: se valida que exista y esté APPROVED
-   *    y se snapshotea make/model/vehicleType del spec (server-authoritative; ignora el texto libre).
-   *  - SIN modelSpecId → texto libre legacy: exige make+model y usa el vehicleType del body.
+   * Resuelve marca/modelo/tipo del alta. Compartido por el alta del CONDUCTOR (B5-2) y la del OPERADOR
+   * (F4 · C2) — la misma fuente única, sin duplicar la lógica del catálogo. Dos caminos:
+   *  - CON modelSpecId → se eligió un modelo del CATÁLOGO: se valida que exista y esté APPROVED y se
+   *    snapshotea make/model/vehicleType del spec (server-authoritative; ignora el texto libre).
+   *  - SIN modelSpecId → texto libre legacy: exige make+model y usa el vehicleType del body (default CAR
+   *    cuando el caller no lo especifica, p.ej. el alta admin donde el tipo es opcional).
    */
-  private async resolveModelSnapshot(input: RegisterDriverVehicleDto): Promise<{
+  private async resolveModelSnapshot(input: {
+    modelSpecId?: string;
+    make?: string;
+    model?: string;
+    vehicleType?: VehicleType;
+  }): Promise<{
     make: string;
     model: string;
     vehicleType: VehicleType;
@@ -286,7 +384,7 @@ export class VehiclesService {
         model: model ?? null,
       });
     }
-    return { make, model, vehicleType: input.vehicleType, modelSpecId: null };
+    return { make, model, vehicleType: input.vehicleType ?? VehicleType.CAR, modelSpecId: null };
   }
 
   /** Rehidrata los vehículos del conductor (más recientes primero), marcando cuál es el ACTIVO. */

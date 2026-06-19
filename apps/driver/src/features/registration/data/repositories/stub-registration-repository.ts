@@ -134,11 +134,14 @@ export class StubRegistrationRepository implements RegistrationRepository {
     await delay(400);
     return {
       type: input.type,
-      documentNumber: input.documentNumber,
+      // VEHICLE_PHOTO no trae número → '' (la vista lo expone como string no-null).
+      documentNumber: input.documentNumber ?? '',
       status: 'PENDING_REVIEW',
       simpleStatus: 'en_revision',
       expiresAt: input.expiresAt ?? null,
       ok: false,
+      // Recién enviado: no rechazado → sin motivo.
+      rejectionReason: null,
     };
   }
 

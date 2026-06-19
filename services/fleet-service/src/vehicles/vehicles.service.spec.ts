@@ -75,7 +75,8 @@ function makeService(opts: { spec?: ReturnType<typeof specRow> | null } = {}) {
   return { service, created, findFirst, txCreate };
 }
 
-const baseBody = { plate: 'ABC-123', year: 2022, vehicleType: SharedVehicleType.MOTO };
+// Ola 1 "solo autos": el cuerpo base usa CAR (clase operable). El rechazo de MOTO tiene su propio test.
+const baseBody = { plate: 'ABC-123', year: 2022, vehicleType: SharedVehicleType.CAR };
 
 describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
   it('CON modelSpecId APPROVED: snapshot make/model/vehicleType del spec (ignora texto libre)', async () => {
@@ -105,11 +106,25 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
 
   it('SIN modelSpecId: texto libre, modelSpecId queda null', async () => {
     const { service, created } = makeService();
-    await service.registerForDriver('driver-1', { ...baseBody, make: 'Honda', model: 'CG 150' });
+    await service.registerForDriver('driver-1', { ...baseBody, make: 'Honda', model: 'Civic' });
     expect(created.data?.make).toBe('Honda');
-    expect(created.data?.model).toBe('CG 150');
-    expect(created.data?.vehicleType).toBe(SharedVehicleType.MOTO);
+    expect(created.data?.model).toBe('Civic');
+    expect(created.data?.vehicleType).toBe(SharedVehicleType.CAR);
     expect(created.data?.modelSpecId).toBeNull();
+  });
+
+  it('texto libre con MOTO → ValidationError "solo autos" (Ola 1, mototaxi diferida)', async () => {
+    const { service, txCreate } = makeService();
+    await expect(
+      service.registerForDriver('driver-1', {
+        plate: 'ABC-123',
+        year: 2022,
+        vehicleType: SharedVehicleType.MOTO,
+        make: 'Honda',
+        model: 'CG 150',
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(txCreate).not.toHaveBeenCalled();
   });
 
   it('SIN modelSpecId y SIN make/model → ValidationError', async () => {
@@ -117,6 +132,85 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
     await expect(service.registerForDriver('driver-1', { ...baseBody })).rejects.toBeInstanceOf(
       ValidationError,
     );
+  });
+});
+
+/**
+ * Doble de prisma para el alta ADMIN (`create`): a diferencia del self-service, escribe con
+ * `prisma.write.vehicle.create` directo (sin outbox/transacción). Captura la data del create.
+ */
+function makeCreateService(opts: { spec?: ReturnType<typeof specRow> | null } = {}) {
+  const created: { data?: Record<string, unknown> } = {};
+  const writeCreate = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+    created.data = data;
+    return Promise.resolve({
+      ...data,
+      docStatus: VehicleDocStatus.VALID,
+      selectedAt: null,
+      createdAt: new Date('2026-06-16T00:00:00Z'),
+      updatedAt: new Date('2026-06-16T00:00:00Z'),
+    } as unknown as Vehicle);
+  });
+  const findFirst = vi.fn().mockResolvedValue(opts.spec ?? null);
+  const prisma = {
+    read: {
+      vehicle: { findUnique: vi.fn().mockResolvedValue(null) }, // sin duplicado de placa
+      vehicleModelSpec: { findFirst },
+    },
+    write: { vehicle: { create: writeCreate } },
+  };
+  const service = new VehiclesService(prisma as never, { getOrThrow: () => 2017 } as never);
+  return { service, created, findFirst, writeCreate };
+}
+
+/**
+ * Alta ADMIN por CATÁLOGO (F4 · C2): `create()` reusa la MISMA resolución que el self-service. El operador
+ * elige un modelSpecId APPROVED → snapshot server-authoritative; el texto libre legacy sigue aceptado
+ * (seeds/scripts); un spec MOTO se rechaza igual ("solo autos", Ola 1).
+ */
+describe('VehiclesService.create · F4 alta admin por catálogo', () => {
+  const adminBase = { plate: 'XYZ-789', year: 2022, color: 'Negro' };
+
+  it('CON modelSpecId APPROVED: snapshot make/model/vehicleType del spec (ignora texto libre) + guarda modelSpecId', async () => {
+    const { service, created, findFirst } = makeCreateService({ spec: specRow() });
+    await service.create({
+      ...adminBase,
+      modelSpecId: 'spec-1',
+      make: 'BASURA',
+      model: 'IGNORADA',
+    } as never);
+    expect(created.data?.make).toBe('Toyota');
+    expect(created.data?.model).toBe('Yaris');
+    expect(created.data?.vehicleType).toBe(VehicleType.CAR);
+    expect(created.data?.modelSpecId).toBe('spec-1');
+    expect(findFirst.mock.calls[0]![0].where.status).toBe(VehicleModelStatus.APPROVED);
+  });
+
+  it('modelSpecId inexistente/no-aprobado → ValidationError (no crea)', async () => {
+    const { service, writeCreate } = makeCreateService({ spec: null });
+    await expect(
+      service.create({ ...adminBase, modelSpecId: 'spec-x' } as never),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(writeCreate).not.toHaveBeenCalled();
+  });
+
+  it('SIN modelSpecId: texto libre legacy, vehicleType default CAR, modelSpecId null', async () => {
+    const { service, created } = makeCreateService();
+    await service.create({ ...adminBase, make: 'Honda', model: 'Civic' } as never);
+    expect(created.data?.make).toBe('Honda');
+    expect(created.data?.model).toBe('Civic');
+    expect(created.data?.vehicleType).toBe(VehicleType.CAR);
+    expect(created.data?.modelSpecId).toBeNull();
+  });
+
+  it('modelSpecId de un spec MOTO → ValidationError "solo autos" (no crea)', async () => {
+    const { service, writeCreate } = makeCreateService({
+      spec: specRow({ vehicleType: VehicleType.MOTO }),
+    });
+    await expect(
+      service.create({ ...adminBase, modelSpecId: 'spec-moto' } as never),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(writeCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -170,9 +264,9 @@ describe('VehiclesService.registerForDriver · idempotencia ownership-aware', ()
   const body = {
     plate: 'ABC-123',
     year: 2022,
-    vehicleType: VehicleType.MOTO,
+    vehicleType: VehicleType.CAR,
     make: 'Honda',
-    model: 'CG 150',
+    model: 'Civic',
   };
 
   it('mismo conductor reenvía SU placa → idempotente: UPDATE, sin 409, sin re-emitir el evento de alta', async () => {

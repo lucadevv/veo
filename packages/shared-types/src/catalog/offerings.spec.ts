@@ -19,9 +19,10 @@ describe('catálogo efectivo (overlay editable en caliente · B1)', () => {
   it('overlay null (DB vacía/caída) → cada oferta cae a su defaultEnabled (RIDE on, verticales off)', () => {
     const resolved = resolveCatalog(null);
     expect(resolved).toHaveLength(OFFERING_LIST.length);
-    // B5-4: las 3 RIDE (+moto) nacen visibles; las verticales especiales + EV nacen OCULTAS.
+    // B5-4 + Ola 1 "solo autos": las RIDE de AUTO nacen visibles; la moto (Ola 2B, DIFERIDA) y las
+    // verticales especiales + EV nacen OCULTAS (defaultEnabled:false). El admin la habilita por overlay.
     expect(resolved.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.enabled).toBe(true);
-    expect(resolved.find((o) => o.id === OfferingId.VEO_MOTO)?.enabled).toBe(true);
+    expect(resolved.find((o) => o.id === OfferingId.VEO_MOTO)?.enabled).toBe(false);
     expect(resolved.find((o) => o.id === OfferingId.VEO_AMBULANCE)?.enabled).toBe(false);
     expect(resolved.find((o) => o.id === OfferingId.VEO_TOW)?.enabled).toBe(false);
     expect(resolved.find((o) => o.id === OfferingId.VEO_MECHANIC)?.enabled).toBe(false);
@@ -305,14 +306,16 @@ describe('verticales especiales + EV (B5-4 · codeadas pero OCULTAS)', () => {
     OfferingId.VEO_ECONOMICO_EV,
   ];
 
-  it('sin overlay, el quote (activeOfferings) muestra SOLO las 3 RIDE + moto, NO las verticales', () => {
+  it('sin overlay, el quote (activeOfferings) muestra SOLO las 3 RIDE de AUTO, NO moto ni verticales', () => {
+    // Ola 1 "solo autos": la moto (Ola 2B) está DIFERIDA (defaultEnabled:false) → fuera del quote por
+    // defecto, igual que las verticales. El admin la reactiva por overlay cuando se lance el tier moto.
     const active = activeOfferings(null).map((o) => o.id);
     expect(active).toEqual([
-      OfferingId.VEO_MOTO,
       OfferingId.VEO_ECONOMICO,
       OfferingId.VEO_CONFORT,
       OfferingId.VEO_XL,
     ]);
+    expect(active).not.toContain(OfferingId.VEO_MOTO);
     for (const id of HIDDEN) expect(active).not.toContain(id);
   });
 

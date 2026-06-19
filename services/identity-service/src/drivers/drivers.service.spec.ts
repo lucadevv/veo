@@ -312,6 +312,51 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
   });
 });
 
+describe('DriversService.resubmit · reenvío a revisión (BR-I01 · M3)', () => {
+  it('transiciona REJECTED→PENDING, limpia el motivo y EMITE driver.resubmitted por outbox (misma tx)', async () => {
+    const outbox: { eventType: string }[] = [];
+    const driverUpdates: Record<string, unknown>[] = [];
+    const prisma = {
+      write: {
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            driver: {
+              findUnique: async () => ({
+                id: 'd1',
+                userId: 'u1',
+                backgroundCheckStatus: 'REJECTED',
+              }),
+              update: async (args: { data: Record<string, unknown> }) => {
+                driverUpdates.push(args.data);
+                return { id: 'd1', backgroundCheckStatus: 'PENDING' };
+              },
+            },
+            user: {
+              findUnique: async () => ({ id: 'u1', kycStatus: 'REJECTED' }),
+              update: async () => ({}),
+            },
+            outboxEvent: {
+              create: async (args: { data: { eventType: string } }) => {
+                outbox.push({ eventType: args.data.eventType });
+                return {};
+              },
+            },
+          }),
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+
+    const res = await svc.resubmit('u1');
+
+    expect(res.backgroundCheckStatus).toBe('PENDING');
+    // Limpia el motivo del rechazo previo.
+    expect(driverUpdates[0]).toMatchObject({ backgroundCheckStatus: 'PENDING', rejectionReason: null });
+    // EMITE el evento que cierra el double-source (admin-bff proyecta status=PENDING).
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('driver.resubmitted');
+  });
+});
+
 describe('DriversService.suspendByFleet · suspensión por fleet (cierre del lazo)', () => {
   /** Prisma doble que captura el where de updateMany y simula la fila ya-suspendida/no-suspendida. */
   function makeSuspendPrisma(alreadySuspended: boolean) {
@@ -344,7 +389,7 @@ describe('DriversService.suspendByFleet · suspensión por fleet (cierre del laz
     expect(applied).toBe(true);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.where).toEqual({ id: 'd1', suspendedAt: null });
-    expect(calls[0]?.data).toEqual({ suspendedAt: at });
+    expect(calls[0]?.data).toEqual({ suspendedAt: at, suspensionSource: 'DOCUMENT_EXPIRED' });
   });
 
   it('es idempotente: si ya estaba suspendido no aplica (count 0) y no reescribe el timestamp', async () => {
@@ -429,6 +474,137 @@ describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', (
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.suspend('ghost', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
     expect(updateManyCalls).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
+  });
+});
+
+describe('DriversService.reactivate · reactivación MANUAL por operador (SAFETY, fail-closed)', () => {
+  /**
+   * Prisma doble: reactivate lee el driver y hace CAS clear con updateMany DENTRO de la tx (espeja suspend).
+   * `casCount` simula el resultado del CAS; `txReread` simula la fila que ve el re-read tras un CAS fallido
+   * (carrera / source cambiado). Captura el where/data del CAS y el outbox.
+   */
+  function makeReactivatePrisma(
+    driver: unknown,
+    opts: { casCount?: number; txReread?: unknown } = {},
+  ) {
+    const updateManyCalls: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
+    const outbox: Record<string, unknown>[] = [];
+    let findCalls = 0;
+    const tx = {
+      driver: {
+        findUnique: async () => {
+          findCalls += 1;
+          // 1ra lectura: la fila inicial; 2da (solo si el CAS falló): el re-read del estado fresco.
+          return findCalls === 1 ? driver : (opts.txReread ?? driver);
+        },
+        updateMany: async (args: {
+          where: Record<string, unknown>;
+          data: Record<string, unknown>;
+        }) => {
+          updateManyCalls.push(args);
+          return { count: opts.casCount ?? 1 };
+        },
+      },
+      outboxEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          outbox.push(data);
+          return {};
+        },
+      },
+    };
+    return {
+      updateManyCalls,
+      outbox,
+      prisma: {
+        read: { driver: { findUnique: async () => driver } },
+        write: { $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx) },
+      },
+    };
+  }
+
+  const suspendedDisciplinary = {
+    ...okDriver,
+    suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+    suspensionSource: 'DISCIPLINARY',
+  };
+
+  it('happy path DISCIPLINARY: limpia suspendedAt+source (CAS) y emite driver.reactivated por outbox', async () => {
+    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma(suspendedDisciplinary);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivate('d1');
+    expect(updateManyCalls).toHaveLength(1);
+    expect(updateManyCalls[0]?.where).toMatchObject({
+      id: 'd1',
+      suspendedAt: { not: null },
+      suspensionSource: 'DISCIPLINARY',
+    });
+    expect(updateManyCalls[0]?.data).toEqual({ suspendedAt: null, suspensionSource: null });
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('driver.reactivated');
+    const envelope = outbox[0]?.envelope as { payload: { driverId: string; reactivatedAt: string } };
+    expect(envelope.payload.driverId).toBe('d1');
+    expect(typeof envelope.payload.reactivatedAt).toBe('string');
+  });
+
+  it('conductor NO suspendido → ConflictError sin tocar el CAS ni el outbox', async () => {
+    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma({
+      ...okDriver,
+      suspendedAt: null,
+      suspensionSource: null,
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(updateManyCalls).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('suspensión DOCUMENT_EXPIRED → ForbiddenError (fail-closed: no se levanta a mano)', async () => {
+    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma({
+      ...okDriver,
+      suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+      suspensionSource: 'DOCUMENT_EXPIRED',
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(updateManyCalls).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('source null (fila legacy) → ForbiddenError (fail-closed: ante la duda, no reactiva)', async () => {
+    const { prisma, updateManyCalls } = makeReactivatePrisma({
+      ...okDriver,
+      suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+      suspensionSource: null,
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(updateManyCalls).toHaveLength(0);
+  });
+
+  it('licencia vencida → ForbiddenError aunque la suspensión sea DISCIPLINARY', async () => {
+    const { prisma, outbox } = makeReactivatePrisma({
+      ...suspendedDisciplinary,
+      licenseExpiresAt: new Date(Date.now() - 1_000_000),
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('conductor inexistente → NotFoundError', async () => {
+    const { prisma } = makeReactivatePrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('ghost')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('CAS pierde por carrera (ya reactivado): re-read ve suspendedAt null → ConflictError honesto', async () => {
+    const { prisma, outbox } = makeReactivatePrisma(suspendedDisciplinary, {
+      casCount: 0,
+      txReread: { suspendedAt: null, suspensionSource: null },
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ConflictError);
     expect(outbox).toHaveLength(0);
   });
 });

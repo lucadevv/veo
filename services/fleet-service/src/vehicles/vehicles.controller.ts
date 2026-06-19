@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { InternalIdentityGuard, RolesGuard, Roles } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
+import { ValidationError } from '@veo/utils';
 import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/vehicle.dto';
 import { VehicleDocStatus, type Vehicle } from '../generated/prisma';
@@ -46,5 +47,30 @@ export class VehiclesController {
   @ApiOperation({ summary: 'Obtener un vehículo por id' })
   getById(@Param('id') id: string): Promise<Vehicle> {
     return this.vehicles.getById(id);
+  }
+
+  /**
+   * HARD purge de la flota de un conductor (re-registro). Recibe DOS ids porque fleet indexa cada tabla con
+   * un id distinto del mismo conductor: `:driverId` (perfil Driver de identity) → documentos de operador
+   * (FleetDocument ownerType DRIVER); `?userId=` (User.id de identity) → vehículos (Vehicle.driverId). El
+   * admin-bff (source of truth) provee ambos. SUPERADMIN; el guard de trips vive en el admin-bff. Devuelve
+   * contadores por tabla borrada (degradación/observabilidad honesta).
+   */
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.SUPERADMIN)
+  @Delete('drivers/:driverId')
+  @HttpCode(200)
+  @ApiQuery({ name: 'userId', required: true, description: 'User.id de identity (indexa los vehículos)' })
+  @ApiOperation({ summary: 'HARD purge de la flota (vehículos + documentos) de un conductor. SUPERADMIN.' })
+  purgeForDriver(
+    @Param('driverId') driverId: string,
+    @Query('userId') userId?: string,
+  ): Promise<{ documents: number; vehicles: number; vehicleDocuments: number }> {
+    if (!userId) {
+      throw new ValidationError('userId requerido para el purge de la flota del conductor', {
+        field: 'userId',
+      });
+    }
+    return this.vehicles.purgeForDriver({ driverId, userId });
   }
 }

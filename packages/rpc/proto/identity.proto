@@ -8,10 +8,21 @@ service IdentityService {
   rpc GetUser (GetByIdRequest) returns (UserReply);
   rpc GetDriver (GetByIdRequest) returns (DriverReply);
   rpc GetDriverByUser (GetByIdRequest) returns (DriverReply);
+  // Lectura BATCH para enriquecer listados del admin (nombre/teléfono por página, sin N+1). El admin-bff
+  // la llama UNA vez por página con los driverId visibles; devuelve los DriverReply hallados (orden libre).
+  rpc GetDriversByIds (DriverIdsRequest) returns (DriversByIdsReply);
 }
 
 message GetByIdRequest {
   string id = 1;
+}
+
+message DriverIdsRequest {
+  repeated string ids = 1;
+}
+
+message DriversByIdsReply {
+  repeated DriverReply drivers = 1;
 }
 
 message UserReply {
@@ -57,4 +68,8 @@ message DriverReply {
   string last_verified_at = 14;
   // Teléfono del usuario asociado (driver→user); "" si no registrado.
   string phone = 15;
+  // DNI del conductor (documento de identidad · Compliance+); "" si no registrado. Backward-compatible.
+  string document_id = 16;
+  // Fecha de nacimiento del conductor en yyyy-mm-dd; "" si no registrada. Backward-compatible.
+  string birth_date = 17;
 }

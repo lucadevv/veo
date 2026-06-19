@@ -143,6 +143,21 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
       });
       this.counted('driver.rejected');
     };
+    // El conductor RECHAZADO corrigió y reenvió a revisión (BR-I01): vuelve a PENDIENTE. Sin esto el
+    // read-model quedaba stale en REJECTED mientras identity (detalle) ya decía PENDING (double-source).
+    record['driver.resubmitted'] = async (e) => {
+      const p = e.payload as EventPayload<'driver.resubmitted'>;
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        userId: p.userId,
+        status: 'PENDING',
+        backgroundCheckStatus: 'PENDING',
+        // Reenvío ⇒ ya no hay rechazo vigente: limpiamos el motivo.
+        rejectionReason: null,
+        updatedAt: p.resubmittedAt,
+      });
+      this.counted('driver.resubmitted');
+    };
     record['driver.flagged'] = async (e) => {
       const p = e.payload as EventPayload<'driver.flagged'>;
       await this.readModel.upsertDriver({
@@ -171,6 +186,19 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         updatedAt: p.suspendedAt,
       });
       this.counted('driver.suspended');
+    };
+    // Reactivación MANUAL por un operador (la inversa de driver.suspended): saca al conductor de SUSPENDED
+    // y lo proyecta de vuelta a ACTIVE (el mismo status post-aprobación que usa driver.verified). El
+    // read-model solo guarda `status` (string) y NO conoce el estado pre-suspensión, por eso usamos ACTIVE.
+    // Idempotente (upsert por id). Solo se emite para suspensiones DISCIPLINARY (fail-closed en identity).
+    record['driver.reactivated'] = async (e) => {
+      const p = e.payload as EventPayload<'driver.reactivated'>;
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        status: 'ACTIVE',
+        updatedAt: p.reactivatedAt,
+      });
+      this.counted('driver.reactivated');
     };
     record['driver.location_updated'] = async (e) => {
       const p = e.payload as EventPayload<'driver.location_updated'>;

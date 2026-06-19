@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   ArrayNotEmpty,
@@ -19,7 +29,7 @@ import {
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { DriversService } from './drivers.service';
+import { DriversService, type DriverPurgeResult } from './drivers.service';
 import { DriverStatus } from '../generated/prisma';
 import { IsPlausibleBirthDate } from '../common/is-plausible-birth-date';
 
@@ -194,6 +204,30 @@ export class DriversController {
   })
   async suspend(@Param('id') id: string, @Body() dto: SuspendDriverDto): Promise<void> {
     await this.drivers.suspend(id, dto.reason);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/reactivate')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Reactivar a un conductor suspendido (solo suspensiones disciplinarias)',
+  })
+  async reactivate(@Param('id') id: string): Promise<void> {
+    await this.drivers.reactivate(id);
+  }
+
+  // ── HARD purge (SUPERADMIN) ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.SUPERADMIN)
+  @Delete(':id')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'HARD purge del conductor (re-registro): borra Driver + User + auth/biometría/consents. SUPERADMIN.',
+  })
+  purge(@Param('id') id: string): Promise<DriverPurgeResult> {
+    return this.drivers.purge(id);
   }
 
   // ── Self-service: reenvío a revisión tras corregir (resubmit) ──

@@ -28,15 +28,32 @@ export class CreateVehicleDto {
   @IsString()
   plate!: string;
 
-  @ApiProperty({ example: 'Toyota' })
-  @IsString()
-  @Length(1, 60)
-  make!: string;
+  @ApiPropertyOptional({
+    description:
+      'Id del modelo del catálogo (VehicleModelSpec APPROVED) que el operador eligió (F4). Si viene, ' +
+      'make/model/vehicleType se snapshotean del spec (server-authoritative) e ignoran el texto libre.',
+  })
+  @IsOptional()
+  @IsUUID()
+  modelSpecId?: string;
 
-  @ApiProperty({ example: 'Yaris' })
+  @ApiPropertyOptional({
+    example: 'Toyota',
+    description: 'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 60)
-  model!: string;
+  make?: string;
+
+  @ApiPropertyOptional({
+    example: 'Yaris',
+    description: 'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  model?: string;
 
   @ApiProperty({ example: 2020, description: 'BR-D04: año >= VEHICLE_MIN_YEAR (2017)' })
   @IsInt()

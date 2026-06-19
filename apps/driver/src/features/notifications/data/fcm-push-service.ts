@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import type {
   DevicePlatform,
+  OnPushDataMessage,
   PushMessage,
   PushRegistrationPort,
   PushService,
@@ -70,7 +71,10 @@ export class FcmPushService implements PushService {
   /** Último token FCM/APNs conocido; permite darlo de baja en el logout (mientras el JWT vive). */
   private currentToken: string | null = null;
 
-  async start(register: PushRegistrationPort): Promise<() => void> {
+  async start(
+    register: PushRegistrationPort,
+    onDataMessage?: OnPushDataMessage,
+  ): Promise<() => void> {
     const messaging = loadMessaging();
     if (!messaging) {
       if (__DEV__) {
@@ -78,6 +82,20 @@ export class FcmPushService implements PushService {
       }
       return NOOP;
     }
+
+    /**
+     * Procesa un push NO sensible (pánico filtrado): loguea en dev y delega el `data` a la presentación
+     * (refetch). NO muestra UI (regla #2). Único punto de manejo para foreground/abierto/quit.
+     */
+    const handleRelevant = (message: PushMessage): void => {
+      if (isPanicMessage(message)) {
+        return;
+      }
+      if (__DEV__) {
+        console.warn('[VEO] Push:', message?.data);
+      }
+      onDataMessage?.(message.data);
+    };
 
     try {
       const authStatus = await messaging().requestPermission();
@@ -108,32 +126,20 @@ export class FcmPushService implements PushService {
 
       // Foreground: solo procesamos mensajes inocuos; los de pánico se ignoran (sin UI).
       const unsubscribeForeground = messaging().onMessage(async (remoteMessage: PushMessage) => {
-        if (isPanicMessage(remoteMessage)) {
-          return;
-        }
-        if (__DEV__) {
-          console.warn('[VEO] Push en foreground:', remoteMessage?.data);
-        }
+        handleRelevant(remoteMessage);
       });
 
       // App abierta desde la notificación (quita/background→foreground): mismo filtro de pánico.
-      const unsubscribeOpened = messaging().onNotificationOpenedApp(
-        (remoteMessage: PushMessage) => {
-          if (isPanicMessage(remoteMessage)) {
-            return;
-          }
-          if (__DEV__) {
-            console.warn('[VEO] Push abrió la app:', remoteMessage?.data);
-          }
-        },
-      );
+      const unsubscribeOpened = messaging().onNotificationOpenedApp((remoteMessage: PushMessage) => {
+        handleRelevant(remoteMessage);
+      });
 
       // Notificación que arrancó la app desde estado "quit".
       messaging()
         .getInitialNotification()
         .then((remoteMessage: PushMessage | null) => {
-          if (remoteMessage && !isPanicMessage(remoteMessage) && __DEV__) {
-            console.warn('[VEO] Push arrancó la app:', remoteMessage.data);
+          if (remoteMessage) {
+            handleRelevant(remoteMessage);
           }
         })
         .catch(() => undefined);

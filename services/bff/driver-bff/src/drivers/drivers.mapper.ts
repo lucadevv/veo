@@ -86,6 +86,8 @@ export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail
     simpleStatus: toSimpleDocStatus(d.status),
     expiresAt: emptyToNull(d.expiresAt),
     ok: isDocApproved(d.status),
+    // M5: el motivo del rechazo viaja al conductor ("" del proto3 → null honesto).
+    rejectionReason: emptyToNull(d.rejectionReason),
   };
 }
 

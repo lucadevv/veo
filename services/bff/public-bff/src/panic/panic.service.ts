@@ -4,7 +4,13 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { GRPC_PANIC, REST_PANIC } from '../infra/downstream.tokens';
 import type { PanicReply } from '../infra/grpc-types';
@@ -16,6 +22,7 @@ export class PanicService {
     @Inject(GRPC_PANIC) private readonly panicGrpc: GrpcServiceClient,
     @Inject(REST_PANIC) private readonly panicRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   trigger(user: AuthenticatedUser, dto: TriggerPanicDto): Promise<PanicTriggerResult> {
@@ -34,7 +41,7 @@ export class PanicService {
    * pánico por id (fuga PII/ubicación, Ley 29733).
    */
   async getPanic(user: AuthenticatedUser, id: string): Promise<PanicView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.panicGrpc.call<PanicReply>('GetPanic', { id }, meta);
     if (!reply.found) throw new NotFoundError('Alerta de pánico no encontrada');
     if (reply.passengerId !== user.userId) {

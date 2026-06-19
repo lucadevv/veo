@@ -10,11 +10,17 @@ import {
   type TripReply,
   type UserReply,
   type DriverReply,
+  type DriversByIdsReply,
   type DriverVehiclesReply,
   type DriverDocumentsReply,
 } from '@veo/rpc';
-import { ConflictError, ForbiddenError, NotFoundError } from '@veo/utils';
-import { grpcIdentityMetadata, type AuthenticatedUser as AuthUser } from '@veo/auth';
+import { ConflictError, ForbiddenError, NotFoundError, isProdTier } from '@veo/utils';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser as AuthUser,
+  type InternalAudience,
+} from '@veo/auth';
 import {
   canGrantRoles,
   FleetDocumentType,
@@ -26,10 +32,20 @@ import type {
   DriverApproval,
   TripDetail,
   DriverDetail,
+  DriverVehicle,
   AdminDriverDocument,
   GeoPoint,
 } from '@veo/api-client';
-import { GRPC_TRIP, GRPC_IDENTITY, GRPC_FLEET, REST_IDENTITY, REST_MEDIA } from '../infra/tokens';
+import {
+  GRPC_TRIP,
+  GRPC_IDENTITY,
+  GRPC_FLEET,
+  REST_IDENTITY,
+  REST_MEDIA,
+  REST_TRIP,
+  REST_FLEET,
+  REST_PAYMENT,
+} from '../infra/tokens';
 import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
@@ -56,11 +72,19 @@ const REQUIRED_DRIVER_DOC_TYPES = [
   FleetDocumentType.LICENSE_A1,
   FleetDocumentType.SOAT,
   FleetDocumentType.PROPERTY_CARD,
+  // Ola 1 "solo autos": la FOTO del vehículo es obligatoria para aprobar — el operador NO aprueba sin
+  // ver el auto. Sube en el alta (paso Vehículo) como doc DRIVER-scoped y llega acá vía GetDriverDocuments.
+  FleetDocumentType.VEHICLE_PHOTO,
 ] as const;
 
 /** proto3 entrega "" para strings ausentes; el contrato del panel los quiere `null` honesto. */
 function emptyToNull(s: string): string | null {
   return s ? s : null;
+}
+
+/** Mensaje de causa legible de un error desconocido (para la degradación honesta del purge parcial). */
+function causeOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** Coords del proto (lng) → GeoPoint (lon); 0,0 (default proto3 = sin set) → null honesto. */
@@ -73,6 +97,8 @@ export interface PendingDriver {
   id: string;
   userId: string;
   licenseNumber: string | null;
+  /** Nombre legal del onboarding (lo que el conductor cargó en la app); null si no lo cargó aún. */
+  fullName: string | null;
 }
 export interface OperatorSummary {
   id: string;
@@ -89,6 +115,108 @@ export interface CreatedOperator {
   expiresAt: string;
 }
 
+/** Forma que devuelve identity en el HARD purge (DELETE /drivers/:id). */
+interface IdentityPurgeReply {
+  userId: string;
+  deleted: {
+    driver: number;
+    authMethods: number;
+    biometricChecks: number;
+    consents: number;
+    user: number;
+  };
+}
+
+/** Forma que devuelve trip-service en el guard de historial (GET /internal/drivers/:id/trip-count). */
+interface DriverTripCountReply {
+  driverId: string;
+  tripCount: number;
+  hasTrips: boolean;
+}
+
+/** Forma que devuelve fleet en el HARD purge (DELETE /vehicles/drivers/:driverId). */
+interface FleetPurgeReply {
+  documents: number;
+  vehicles: number;
+  vehicleDocuments: number;
+}
+
+/** Forma que devuelve media en el HARD purge (DELETE /media/internal/drivers/:driverId/documents). */
+interface MediaPurgeReply {
+  deleted: number;
+}
+
+/** Forma que devuelve trip-service en el HARD purge DEV (DELETE /internal/drivers/:driverId/trips). */
+interface TripPurgeReply {
+  driverId: string;
+  trips: number;
+  tripEvents: number;
+  waypointProposals: number;
+}
+
+/**
+ * Forma que devuelve payment-service en el HARD purge DEV
+ * (DELETE /internal/drivers/:driverId/payments?userId=...). Contadores por id que indexa cada tabla.
+ */
+interface PaymentPurgeReply {
+  driverId: string;
+  userId: string;
+  byDriverId: {
+    cancellationPenalties: number;
+    incentiveProgress: number;
+    incentiveTripCredits: number;
+    payments: number;
+    payouts: number;
+    refunds: number;
+    tipAdditions: number;
+  };
+  byUserId: {
+    promoRedemptions: number;
+    userCreditEntries: number;
+    userCredits: number;
+    walletAffiliations: number;
+  };
+}
+
+/**
+ * Fallo parcial de un paso downstream del purge (identity YA borró; el resto del cascade no completó).
+ * `trip`/`payment` solo aplican en el cascade DEV (en PROD el guard corta antes de borrar nada).
+ */
+export interface DriverPurgePartialFailure {
+  stage: 'fleet' | 'media' | 'trip' | 'payment';
+  cause: string;
+}
+
+/**
+ * Resumen del HARD purge en cascada de un conductor (DELETE /ops/drivers/:id). Contadores por servicio.
+ * `tripCount` documenta que el guard se evaluó (siempre 0 si el purge procedió). `projection.removed`
+ * indica si había proyección Redis que sacar.
+ */
+export interface DriverPurgeSummary {
+  driverId: string;
+  userId: string;
+  tripCount: number;
+  identity: IdentityPurgeReply['deleted'];
+  fleet: FleetPurgeReply;
+  media: MediaPurgeReply;
+  /**
+   * Cascade DEV-only de los VIAJES del conductor (trip-service). Ausente en PROD: ahí el guard de
+   * historial corta antes y el conductor va al flujo de olvido (BR-S06), nunca al hard-borrado de trips.
+   */
+  trip?: TripPurgeReply;
+  /**
+   * Cascade DEV-only del DINERO del conductor (payment-service). Ausente en PROD por el mismo motivo que
+   * `trip`. En PROD el dinero se ANONIMIZA por el derecho al olvido (consumer de user.deleted), no se borra.
+   */
+  payment?: PaymentPurgeReply;
+  projection: { removed: boolean };
+  /**
+   * Pasos downstream que NO completaron (identity SÍ borró y la proyección SÍ se limpió). Ausente cuando
+   * todo el cascade fue OK; presente ⇒ purga PARCIAL: quedan binarios S3 / filas de flota por limpiar a mano.
+   */
+  partialFailures?: DriverPurgePartialFailure[];
+}
+
 @Injectable()
 export class OpsService {
   private readonly secret: string;
@@ -100,6 +228,10 @@ export class OpsService {
     @Inject(GRPC_FLEET) private readonly fleetGrpc: GrpcServiceClient,
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
     @Inject(REST_MEDIA) private readonly mediaRest: InternalRestClient,
+    @Inject(REST_TRIP) private readonly tripRest: InternalRestClient,
+    @Inject(REST_FLEET) private readonly fleetRest: InternalRestClient,
+    @Inject(REST_PAYMENT) private readonly paymentRest: InternalRestClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly readModel: ReadModelService,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
@@ -121,15 +253,37 @@ export class OpsService {
     };
   }
 
-  async listDrivers(roles: AdminRole[], query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
+  async listDrivers(identity: AuthUser, query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
+    const roles = identity.roles;
     const limit = query.limit ?? DEFAULT_LIMIT;
     const page = await this.readModel.listDrivers(
       { status: query.status },
       query.cursor ?? null,
       limit,
     );
+
+    // Enriquecimiento de IDENTIDAD (nombre/teléfono) por página, SIN N+1: UNA lectura batch a identity
+    // (GetDriversByIds), y SOLO si el rol puede ver identidad (Compliance+). Sub-Compliance: no se
+    // consulta (cero fetch de PII) → el mapper redacta a null. La identidad no vive en el read-model
+    // (los eventos driver.* no llevan PII · Ley 29733): se resuelve on-read contra identity.
+    let identityById = new Map<string, { fullName: string | null; phone: string | null }>();
+    if (canSeeIdentity(roles) && page.items.length > 0) {
+      const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+      const reply = await this.identityGrpc.call<DriversByIdsReply>(
+        'GetDriversByIds',
+        { ids: page.items.map((r) => r.id) },
+        meta,
+      );
+      identityById = new Map(
+        reply.drivers.map((d) => [
+          d.id,
+          { fullName: emptyToNull(d.name), phone: emptyToNull(d.phone) },
+        ]),
+      );
+    }
+
     return {
-      items: page.items.map((r) => driverRecordToApproval(r, roles)),
+      items: page.items.map((r) => driverRecordToApproval(r, roles, identityById.get(r.id))),
       nextCursor: page.nextCursor,
     };
   }
@@ -141,7 +295,7 @@ export class OpsService {
    * eventos) va `null`/`[]` honesto — su enriquecimiento (tracking/fleet/trip-events) es follow-up.
    */
   async tripDetail(identity: AuthUser, tripId: string): Promise<TripDetail> {
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado', { tripId });
 
@@ -209,12 +363,37 @@ export class OpsService {
    * franja pasa canSeeIdentity → no se enmascara nada acá: el operador ve los datos completos para revisar).
    */
   async driverDetail(identity: AuthUser, driverId: string): Promise<DriverDetail> {
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const [driver, docs] = await Promise.all([
       this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta),
       this.fleetGrpc.call<DriverDocumentsReply>('GetDriverDocuments', { id: driverId }, meta),
     ]);
     if (!driver.found) throw new NotFoundError('Conductor no encontrado', { driverId });
+
+    // Ficha del VEHÍCULO (F2 · C1 — admin valida informado): fleet indexa Vehicle.driverId con el
+    // User.id (driver.userId), NO el driverId de perfil → consultamos por userId. Va después de GetDriver
+    // porque recién ahí tenemos el userId (un solo round-trip extra, no un loop).
+    const vehiclesReply = await this.fleetGrpc.call<DriverVehiclesReply>(
+      'GetDriverVehicles',
+      { id: driver.userId },
+      meta,
+    );
+    // proto3 `repeated` entrega [] por default; el `?? []` es degradación honesta ante un reply malformado.
+    const vehicles = vehiclesReply.vehicles ?? [];
+    const v = vehicles.find((x) => x.active) ?? vehicles[0] ?? null;
+    const vehicle: DriverVehicle | null = v
+      ? {
+          id: v.id,
+          plate: v.plate,
+          make: v.make,
+          model: v.model,
+          year: v.year,
+          color: v.color,
+          vehicleType: v.vehicleType,
+          docStatus: v.docStatus,
+          active: v.active,
+        }
+      : null;
 
     // Por cada documento: si tiene archivo (fileS3Key no vacío) acuñamos una presigned GET URL contra
     // media-service. fileS3Key '' = todavía no se subió archivo (estado real actual — DEUDA: el upload
@@ -243,6 +422,8 @@ export class OpsService {
       fullName: emptyToNull(driver.name),
       phone: emptyToNull(driver.phone),
       licenseNumber: emptyToNull(driver.licenseNumber),
+      dni: emptyToNull(driver.documentId),
+      birthDate: emptyToNull(driver.birthDate),
       backgroundCheckStatus: driver.backgroundCheckStatus,
       kycStatus: driver.kycStatus,
       currentStatus: driver.currentStatus,
@@ -253,6 +434,7 @@ export class OpsService {
         faceEnrolledAt: emptyToNull(driver.faceEnrolledAt),
         lastVerifiedAt: emptyToNull(driver.lastVerifiedAt),
       },
+      vehicle,
       documents,
     };
   }
@@ -277,9 +459,17 @@ export class OpsService {
   }
 
   async listPendingDrivers(identity: AuthUser): Promise<PendingDriver[]> {
-    const list = await this.identityRest.get<PendingDriver[]>('/drivers/pending-approval', {
-      identity,
-    });
+    // identity devuelve legalName (el nombre del onboarding); lo exponemos como fullName para que la
+    // cola muestre QUIÉN es el conductor, no un UUID.
+    const raw = await this.identityRest.get<
+      { id: string; userId: string; licenseNumber: string | null; legalName: string | null }[]
+    >('/drivers/pending-approval', { identity });
+    const list: PendingDriver[] = raw.map((d) => ({
+      id: d.id,
+      userId: d.userId,
+      licenseNumber: d.licenseNumber,
+      fullName: emptyToNull(d.legalName ?? ''),
+    }));
     // licenseNumber (DNI/licencia) = IDENTIDAD personal → Compliance+. Sub-Compliance: null honesto.
     if (canSeeIdentity(identity.roles)) return list;
     return list.map((d) => ({ ...d, licenseNumber: null }));
@@ -292,7 +482,7 @@ export class OpsService {
     // GATE autoritativo server-side (NO depende de la UI): un conductor solo se aprueba si TODOS los
     // documentos obligatorios existen con estado VALID. Ley 29733: la decisión de habilitar un conductor
     // exige documentación válida verificable. Corta ANTES de delegar la aprobación a identity-service.
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
       'GetDriverDocuments',
       { id: driverId },
@@ -350,6 +540,187 @@ export class OpsService {
       // El motivo queda en la traza inmutable junto a la decisión del operador (SAFETY).
       payload: { reason },
     });
+  }
+
+  async reactivateDriver(identity: AuthUser, driverId: string): Promise<void> {
+    // Sin body: identity-service limpia suspendedAt + suspensionSource (CAS, solo DISCIPLINARY) y emite
+    // driver.reactivated. FAIL-CLOSED: identity devuelve 403 si la suspensión era por documentos vencidos
+    // y 409 si el conductor no estaba suspendido — el error sube tal cual al panel (no lo enmascaramos).
+    await this.identityRest.post<void>(`/drivers/${driverId}/reactivate`, { identity });
+    await this.audit.record(identity, {
+      action: 'driver.reactivate',
+      resourceType: 'driver',
+      resourceId: driverId,
+    });
+  }
+
+  /**
+   * HARD PURGE en cascada de un conductor NO-OPERADO (re-registro). SUPERADMIN + step-up MFA (impuesto por
+   * los guards globales del controller). Orden SÍNCRONO con degradación HONESTA:
+   *   1) GUARD de historial: trip-service cuenta los viajes del conductor. Si tiene CUALQUIER viaje →
+   *      409 ConflictError (tiene historial operativo; va el flujo de olvido BR-S06, no el purge). El
+   *      guard corta ANTES de borrar nada — fail-closed: si trip-service no responde, NO se purga.
+   *   2) identity purge (Driver + User + auth/biometría/consents en UNA tx). SOURCE OF TRUTH del conductor.
+   *      Recibe el driverId y resuelve INTERNAMENTE el userId (user/auth/biometric/consents son por userId).
+   *   3) fleet purge (vehículos + documentos del conductor), indexado por el DRIVER id.
+   *   4) media purge (binarios S3 bajo drivers/<driverId>/).
+   *   5) trip purge (viajes + eventos + propuestas) — dev + preview (`!isProdTier()`).
+   *   6) payment purge (5 tablas por driver_id + 4 por user_id) — dev + preview (`!isProdTier()`).
+   *   7) read-model removeDriver (saca la proyección Redis de los listados del panel).
+   *   8) audit (traza inmutable de la decisión + contadores).
+   *
+   * INVARIANTE DE ID (la pieza que estaba al revés): `:id` = id de PERFIL Driver de identity (el mismo del
+   * trip-count, de approve/reject y de la proyección Redis). Fleet indexa SUS filas por ESTE driverId
+   * (`Vehicle.driverId` y `FleetDocument.ownerId` con `ownerType=DRIVER`), y media barre `drivers/<driverId>/`
+   * en S3. Por eso fleet y media reciben el DRIVERID, NO el userId. trip indexa por ESTE driverId
+   * (`Trip.driverId`); payment indexa 5 tablas por el driverId y 4 por el userId (verificado en DB), por eso
+   * recibe AMBOS. El userId lo resuelve identity adentro y nos lo devuelve para el resto del cascade + auditoría.
+   *
+   * TRIPS/PAYMENTS FUERA DE PROD (dev + preview): en el tier PROD el guard de historial (paso 1) corta ANTES
+   * de borrar nada y deriva al derecho al olvido (BR-S06), que ANONIMIZA el dinero (obligación contable) y
+   * conserva la traza — NUNCA se hard-borran trips/payments en prod. En dev + preview el superadmin purga data
+   * de PRUEBA sin dejar huérfanos. La condición `!isProdTier()` es defensa en profundidad: aunque en el tier
+   * prod el guard ya cortó, NO invocamos los purges destructivos de trip/payment en prod.
+   *
+   * RESILIENCIA DE LA PROYECCIÓN (BUG 3): apenas identity (source of truth) borró el conductor, este NO debe
+   * seguir apareciendo en los listados del panel (la lista lee de Redis). Por eso `removeDriver` corre en un
+   * `finally`: se ejecuta IGUAL aunque cualquier paso downstream falle aguas abajo. Si hay fallos parciales se
+   * acumulan y se reportan (log + summary `partialFailures` + estado del paso), pero la proyección se limpia
+   * SIEMPRE — el sistema nunca muestra un conductor ya borrado de identity. La respuesta indica la purga
+   * parcial sin mentir "todo borrado".
+   */
+  async purgeDriver(identity: AuthUser, driverId: string): Promise<DriverPurgeSummary> {
+    // 1) GUARD: historial operativo. fail-closed (sin try/catch): si el conteo no se puede obtener,
+    // la excepción sube y el purge NO procede — jamás se borra un conductor cuyo historial no pudimos verificar.
+    const trips = await this.tripRest.get<DriverTripCountReply>(
+      `/internal/drivers/${driverId}/trip-count`,
+      { identity },
+    );
+    // Solo el TIER de PRODUCCIÓN real bloquea si hay historial operativo: el conductor no se hard-borra, va
+    // al flujo de olvido (BR-S06) que anonimiza y conserva la traza. En DEV y PREVIEW el superadmin SÍ puede
+    // purgar conductores de prueba aunque tengan viajes (data de prueba) — el gate es por TIER (isProdTier),
+    // NO por endurecimiento (isHardenedEnv): preview es internet-facing/endurecido pero NO es prod, y ahí
+    // queremos probar el purge casi-prod. El cascade en dev+preview SÍ borra trips + payments (pasos 5/6),
+    // así no quedan huérfanos. El gate de ROL (@Roles SUPERADMIN) protege en TODOS los tiers.
+    // DEUDA: el purge no limpia dispatch.driver_stats · techo: queda una fila de stats huérfana en dev/preview · gatillo: si molesta, endpoint de purge en dispatch
+    if (trips.hasTrips && isProdTier()) {
+      throw new ConflictError(
+        'El conductor tiene historial operativo; usá el flujo de olvido (BR-S06), no el purge',
+        { driverId, tripCount: trips.tripCount },
+      );
+    }
+
+    // 2) identity purge (atómico, SOURCE OF TRUTH). Recibe el driverId; resuelve el userId adentro y nos lo
+    //    devuelve sólo para el resumen/auditoría. Si esto falla, sube la excepción y NADA se borró: ok.
+    const identityPurge = await this.identityRest.delete<IdentityPurgeReply>(`/drivers/${driverId}`, {
+      identity,
+    });
+    const { userId } = identityPurge;
+
+    // A partir de acá el conductor YA NO existe en la source of truth. Pase lo que pase aguas abajo, la
+    // proyección Redis DEBE limpiarse (finally) para que la lista del panel no muestre un conductor borrado.
+    const partialFailures: DriverPurgePartialFailure[] = [];
+    let fleet: FleetPurgeReply = { documents: 0, vehicles: 0, vehicleDocuments: 0 };
+    let media: MediaPurgeReply = { deleted: 0 };
+    // trip/payment: undefined fuera de DEV (no se invocan); se pueblan solo si el cascade DEV corre.
+    let trip: TripPurgeReply | undefined;
+    let payment: PaymentPurgeReply | undefined;
+    let projectionRemoved = false;
+
+    try {
+      // 3) fleet purge — fleet indexa cada tabla con un id DISTINTO del mismo conductor (verificado en DB):
+      //    documentos de operador por el DRIVER id (FleetDocument ownerType=DRIVER) y vehículos por el
+      //    User.id (Vehicle.driverId, que es lo que el driver-bff persistió al registrar). Por eso pasamos
+      //    AMBOS: driverId en la ruta + userId en el query. best-effort: un fallo NO debe dejar al conductor
+      //    en la lista; se acumula como parcial y la proyección igual se limpia en el finally.
+      try {
+        fleet = await this.fleetRest.delete<FleetPurgeReply>(`/vehicles/drivers/${driverId}`, {
+          identity,
+          query: { userId },
+        });
+      } catch (err) {
+        partialFailures.push({ stage: 'fleet', cause: causeOf(err) });
+      }
+
+      // 4) media purge — barre los binarios bajo drivers/<driverId>/ del bucket de documentos (S3 los
+      //    organiza por el DRIVER id de perfil). Mismo criterio best-effort que fleet.
+      try {
+        media = await this.mediaRest.delete<MediaPurgeReply>(
+          `/media/internal/drivers/${driverId}/documents`,
+          { identity, body: { bucket: this.documentsBucket } },
+        );
+      } catch (err) {
+        partialFailures.push({ stage: 'media', cause: causeOf(err) });
+      }
+
+      // 5/6) trip + payment purge — dev + preview (NO prod). En el tier de PROD el guard de historial cortó
+      //    antes y el dinero se anonimiza por el derecho al olvido (BR-S06), NUNCA se hard-borra. La condición
+      //    `!isProdTier()` es defensa en profundidad: aunque en prod el guard ya cortó, no disparamos estos
+      //    borrados destructivos en el tier prod. best-effort (mismo criterio que fleet/media): un fallo se
+      //    acumula como parcial y la proyección igual se limpia en el finally.
+      if (!isProdTier()) {
+        // 5) trip purge — viajes del conductor (+ eventos + propuestas), indexados por Trip.driverId = driverId.
+        try {
+          trip = await this.tripRest.delete<TripPurgeReply>(
+            `/internal/drivers/${driverId}/trips`,
+            { identity },
+          );
+        } catch (err) {
+          partialFailures.push({ stage: 'trip', cause: causeOf(err) });
+        }
+
+        // 6) payment purge — 5 tablas por driver_id + 4 por user_id (verificado en DB). Pasa AMBOS ids.
+        try {
+          payment = await this.paymentRest.delete<PaymentPurgeReply>(
+            `/internal/drivers/${driverId}/payments`,
+            { identity, query: { userId } },
+          );
+        } catch (err) {
+          partialFailures.push({ stage: 'payment', cause: causeOf(err) });
+        }
+      }
+    } finally {
+      // 5) read-model: saca la proyección Redis SIEMPRE (incluso si fleet/media fallaron). El dato
+      //    autoritativo YA se borró en identity; si Redis fallara, la proyección caduca por TTL y el
+      //    listado no resucita el conductor.
+      try {
+        projectionRemoved = await this.readModel.removeDriver(driverId);
+      } catch {
+        projectionRemoved = false;
+      }
+    }
+
+    // 8) audit (traza inmutable: quién purgó a quién y con qué efecto, incluidos los parciales). trip/payment
+    //    solo van en el payload si el cascade DEV corrió (en prod quedan undefined → se omiten).
+    await this.audit.record(identity, {
+      action: 'driver.purge',
+      resourceType: 'driver',
+      resourceId: driverId,
+      payload: {
+        userId,
+        tripCount: trips.tripCount,
+        identity: identityPurge.deleted,
+        fleet,
+        media,
+        ...(trip ? { trip } : {}),
+        ...(payment ? { payment } : {}),
+        projectionRemoved,
+        ...(partialFailures.length > 0 ? { partialFailures } : {}),
+      },
+    });
+
+    return {
+      driverId,
+      userId,
+      tripCount: trips.tripCount,
+      identity: identityPurge.deleted,
+      fleet,
+      media,
+      ...(trip ? { trip } : {}),
+      ...(payment ? { payment } : {}),
+      projection: { removed: projectionRemoved },
+      ...(partialFailures.length > 0 ? { partialFailures } : {}),
+    };
   }
 
   // ── Operadores ──

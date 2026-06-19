@@ -161,6 +161,8 @@ export const pendingDriver = z.object({
   id: z.string(),
   userId: z.string(),
   licenseNumber: z.string().nullable(),
+  /** Nombre legal del onboarding (lo que el conductor cargó en la app); null si no lo cargó. */
+  fullName: z.string().nullable(),
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
 
@@ -180,6 +182,7 @@ export const fleetDocumentType = z.enum([
   'AMBULANCE_OPERATOR',
   'TOW_OPERATOR',
   'MECHANIC_CERT',
+  'VEHICLE_PHOTO',
 ]);
 export type FleetDocumentTypeValue = z.infer<typeof fleetDocumentType>;
 
@@ -203,12 +206,33 @@ export type AdminDriverDocument = z.infer<typeof adminDriverDocument>;
  * Detalle de revisión de un conductor (GET /ops/drivers/:id): datos core + estado biométrico +
  * documentos. El operador lo usa para aprobar/rechazar antecedentes. Fechas ISO-8601 string.
  */
+/**
+ * Ficha del VEHÍCULO del conductor en el detalle de revisión (F2 · "admin valida informado"). El
+ * operador ve QUÉ auto opera antes de aprobar. Sale de fleet (GetDriverVehicles); `null` si el conductor
+ * aún no registró vehículo.
+ */
+export const driverVehicle = z.object({
+  id: z.string(),
+  plate: z.string(),
+  make: z.string(),
+  model: z.string(),
+  year: z.number(),
+  color: z.string(),
+  vehicleType: z.string(),
+  docStatus: z.string(),
+  active: z.boolean(),
+});
+export type DriverVehicle = z.infer<typeof driverVehicle>;
+
 export const driverDetail = z.object({
   id: z.string(),
   userId: z.string(),
   fullName: z.string().nullable(),
   phone: z.string().nullable(),
   licenseNumber: z.string().nullable(),
+  // DNI + fecha de nacimiento (IDENTIDAD personal · Compliance+); null si no registrados.
+  dni: z.string().nullable(),
+  birthDate: z.string().nullable(),
   backgroundCheckStatus: z.string(),
   kycStatus: z.string(),
   currentStatus: z.string(),
@@ -218,6 +242,8 @@ export const driverDetail = z.object({
     faceEnrolledAt: z.string().nullable(),
     lastVerifiedAt: z.string().nullable(),
   }),
+  // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
+  vehicle: driverVehicle.nullable(),
   documents: z.array(adminDriverDocument),
 });
 export type DriverDetail = z.infer<typeof driverDetail>;
@@ -556,18 +582,50 @@ export const approveVehicleModelRequest = z.object({
 export type ApproveVehicleModelRequest = z.infer<typeof approveVehicleModelRequest>;
 
 /* ── Flota: requests de alta (admin) ── */
-/** Alta de vehículo por el operador. `year` acotado; el fleet-service revalida BR-D04 (año mínimo + placa). */
-export const createVehicleRequest = z.object({
-  plate: z.string().min(1),
-  make: z.string().min(1),
-  model: z.string().min(1),
-  year: z.number().int().min(1950).max(2100),
-  color: z.string().min(1),
-  fleetId: z.string().optional(),
-  insuranceExpiresAt: z.string().optional(),
-  active: z.boolean().optional(),
-});
+/**
+ * Alta de vehículo por el operador (F4 · C2). El operador ELIGE un modelo del catálogo curado
+ * (`modelSpecId`, VehicleModelSpec APPROVED): make/model/vehicleType se snapshotean del spec server-side
+ * — la MISMA fuente única que usa el conductor en el onboarding, sin texto libre divergente. `make`/`model`
+ * libres siguen aceptados (scripts/seeds legacy): el `.refine` exige UNO de los dos caminos. `year` acotado;
+ * el fleet-service revalida BR-D04 (año mínimo + placa única + clase operable).
+ */
+export const createVehicleRequest = z
+  .object({
+    plate: z.string().min(1),
+    /** Id del modelo del catálogo APROBADO. Si viene, make/model/vehicleType salen del spec (server-authoritative). */
+    modelSpecId: z.string().uuid().optional(),
+    /** Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo. */
+    make: z.string().min(1).optional(),
+    /** Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo. */
+    model: z.string().min(1).optional(),
+    year: z.number().int().min(1950).max(2100),
+    color: z.string().min(1),
+    fleetId: z.string().optional(),
+    insuranceExpiresAt: z.string().optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => Boolean(v.modelSpecId) || (Boolean(v.make) && Boolean(v.model)), {
+    message: 'Elegí un modelo del catálogo o indicá marca y modelo',
+    path: ['modelSpecId'],
+  });
 export type CreateVehicleRequest = z.infer<typeof createVehicleRequest>;
+
+/**
+ * Un modelo del catálogo APROBADO (GET /fleet/vehicle-models · F4). Es lo que consume el SELECTOR del alta
+ * admin: solo los campos que necesita para elegir (id + identificación + rango de años + tipo + asientos).
+ * Espeja `VehicleModelSpecView` de fleet-service; los campos técnicos extra (segment/energía/eficiencia) se
+ * omiten acá (el selector no los muestra; zod descarta lo que sobra).
+ */
+export const vehicleModelSpecView = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  yearFrom: z.number().int(),
+  yearTo: z.number().int(),
+  vehicleType: z.string(),
+  seats: z.number().int(),
+});
+export type VehicleModelSpecView = z.infer<typeof vehicleModelSpecView>;
 
 /** Alta de documento (conductor/vehículo). Entra PENDING_REVIEW hasta que el operador lo valide. */
 export const createDocumentRequest = z.object({

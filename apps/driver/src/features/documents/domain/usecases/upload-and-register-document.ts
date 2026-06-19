@@ -8,7 +8,8 @@ import type { PickedImage } from '../ports/image-picker-service';
  * NO va aquí: lo fija la tarjeta del paso de documentos y se pasa por separado al ejecutar.
  */
 export interface DocumentMetadata {
-  documentNumber: string;
+  /** Número del documento. Opcional POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no lo tiene. */
+  documentNumber?: string;
   /** Vencimiento en ISO-8601 (si el conductor lo ingresó / es requerido). */
   expiresAt?: string;
 }
@@ -56,7 +57,7 @@ export class UploadAndRegisterDocumentUseCase {
     //    OK: jamás registramos un documento cuyo binario no se subió (honestidad de estado).
     return this.registrar.register({
       type: input.type,
-      documentNumber: input.metadata.documentNumber,
+      ...(input.metadata.documentNumber ? { documentNumber: input.metadata.documentNumber } : {}),
       ...(input.metadata.expiresAt ? { expiresAt: input.metadata.expiresAt } : {}),
       fileS3Key: uploaded.fileS3Key,
     });

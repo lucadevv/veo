@@ -28,13 +28,22 @@ export interface PushMessage {
   data?: Record<string, string | undefined>;
 }
 
+/**
+ * Callback de DATA de un push NO sensible (pánico se filtra antes): recibe el `data` (IDs/deep-link, sin
+ * PII). Lo usa la capa de presentación para REACCIONAR — p. ej. invalidar el gate de registro cuando llega
+ * un push de aprobación/rechazo del conductor — SIN acoplar el servicio de transporte a React Query.
+ */
+export type OnPushDataMessage = (data: PushMessage['data']) => void;
+
 export interface PushService {
   /**
    * Inicializa permisos + token, registra el token vía `register` y engancha los handlers
    * (foreground/quita). Devuelve una función de limpieza para desuscribir los listeners.
    * En dev (Firebase placeholder) degrada de forma silenciosa y devuelve un cleanup no-op.
+   * `onDataMessage` (opcional): se invoca con el `data` de cada push NO-pánico (foreground/abierto/quit)
+   * para que la presentación reaccione (refetch), sin que el servicio conozca el estado de la app.
    */
-  start(register: PushRegistrationPort): Promise<() => void>;
+  start(register: PushRegistrationPort, onDataMessage?: OnPushDataMessage): Promise<() => void>;
   /**
    * Da de baja en el backend el último token FCM/APNs conocido (logout). Best-effort: si no hay token
    * o Firebase no está configurado, no hace nada. Debe llamarse mientras el JWT del conductor sigue

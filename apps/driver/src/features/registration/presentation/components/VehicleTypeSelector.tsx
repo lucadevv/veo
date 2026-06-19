@@ -9,7 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Text, useTheme, useReducedMotion } from '@veo/ui-kit';
 import { useTranslation } from 'react-i18next';
-import { VehicleClass } from '@veo/shared-types';
+import { VehicleClass, OPERABLE_VEHICLE_CLASSES } from '@veo/shared-types';
 import { IconCar, IconMoto } from '../../../../shared/presentation/icons';
 import type { VehicleType } from '../../domain';
 
@@ -34,8 +34,12 @@ const VEHICLE_CLASS_OPTIONS: Record<VehicleClass, VehicleClassOption> = {
   [VehicleClass.CAR]: { labelKey: 'registration.vehicle.typeCar', Icon: IconCar, sortOrder: 1 },
 };
 
-/** Clases en orden de presentación del alta (Moto primero, como el flujo histórico). */
-const ORDERED_CLASSES: readonly VehicleClass[] = Object.values(VehicleClass).sort(
+/**
+ * Clases OPERABLES en orden de presentación del alta. Deriva de `OPERABLE_VEHICLE_CLASSES` (catálogo,
+ * fuente única) — hoy "solo autos" muestra UNA tarjeta (CAR); cuando se habilite la mototaxi (Ola 2B)
+ * MOTO reaparece sola, sin tocar este archivo. El registro `VEHICLE_CLASS_OPTIONS` sigue exhaustivo.
+ */
+const ORDERED_CLASSES: readonly VehicleClass[] = [...OPERABLE_VEHICLE_CLASSES].sort(
   (a, b) => VEHICLE_CLASS_OPTIONS[a].sortOrder - VEHICLE_CLASS_OPTIONS[b].sortOrder,
 );
 

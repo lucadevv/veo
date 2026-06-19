@@ -4,8 +4,10 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { FleetDocumentStatus } from '@veo/shared-types';
 import type { DriverProfile } from '../../../profile/domain';
 import { REGISTRATION_GATE_QUERY_KEY } from '../hooks/useRegistrationGate';
+import { useRegistrationDocuments } from '../hooks/useRegistrationDocuments';
 import { useResubmitRegistration } from '../hooks/useResubmitRegistration';
 import { IconLifebuoy } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
@@ -43,6 +45,14 @@ export const RejectedScreen = (): React.JSX.Element => {
   // El motivo viene del perfil cacheado por el gate (GET /drivers/me); null si no se dio motivo.
   const profile = queryClient.getQueryData<DriverProfile>(REGISTRATION_GATE_QUERY_KEY);
   const reason = profile?.rejectionReason ?? null;
+
+  // M5b: documentos rechazados POR el operador con su motivo (qué corregir y por qué). El rechazo puede
+  // ser a nivel antecedentes (reason de arriba) o por documento puntual — acá mostramos los segundos. El
+  // motivo por-documento vive en el doc-detalle (GET /drivers/me/documents), no en el perfil ligero.
+  const docs = useRegistrationDocuments();
+  const rejectedDocs = (docs.data ?? []).filter(
+    (d) => d.status === FleetDocumentStatus.REJECTED && d.rejectionReason,
+  );
 
   const onFix = () => {
     // Vuelve al wizard para corregir: marca `in_progress` (el RootNavigator conmuta a Registration).
@@ -126,6 +136,34 @@ export const RejectedScreen = (): React.JSX.Element => {
             </Text>
           </Reveal>
         )}
+
+        {rejectedDocs.length > 0 ? (
+          <Reveal delay={210} style={{ gap: theme.spacing.sm }}>
+            <Text variant="subhead" color="danger">
+              {t('registration.rejected.docsLabel')}
+            </Text>
+            {rejectedDocs.map((doc) => (
+              <View
+                key={doc.type}
+                style={[
+                  styles.reasonCard,
+                  {
+                    backgroundColor: hexAlpha(theme.colors.danger, 0.1),
+                    borderColor: hexAlpha(theme.colors.danger, 0.35),
+                    borderRadius: theme.radii.lg,
+                    padding: theme.spacing.lg,
+                    gap: theme.spacing.xs,
+                  },
+                ]}
+              >
+                <Text variant="subhead">
+                  {t(`documents.type.${doc.type}`, { defaultValue: doc.type })}
+                </Text>
+                <Text variant="bodyStrong">{doc.rejectionReason}</Text>
+              </View>
+            ))}
+          </Reveal>
+        ) : null}
 
         {resubmit.isError ? (
           <Text variant="subhead" color="danger" align="center">

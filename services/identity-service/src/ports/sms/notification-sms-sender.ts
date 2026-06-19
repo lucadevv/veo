@@ -10,7 +10,7 @@
  */
 import { Logger } from '@nestjs/common';
 import { ExternalServiceError, RateLimitError, ValidationError } from '@veo/utils';
-import { anonymousIdentity, type AuthenticatedUser } from '@veo/auth';
+import { anonymousIdentity, type AuthenticatedUser, type InternalAudience } from '@veo/auth';
 import { InternalRestClient, DownstreamError } from '@veo/rpc';
 import type { SmsSender } from './sms.port';
 
@@ -21,6 +21,12 @@ import type { SmsSender } from './sms.port';
  * declaran acá como constantes TIPADAS locales (mismo patrón que biometric.module). Si el catálogo
  * de notification cambia el nombre del template o el valor de prioridad, actualizar acá también.
  */
+/**
+ * Audiencia de RIEL del cliente REST interno: la llamada a notification-service es de SISTEMA
+ * (servicio→servicio, sin usuario final ni BFF detrás) → `service-rail`. Const TIPADA
+ * (InternalAudience), nunca string mágico.
+ */
+const SERVICE_RAIL: InternalAudience = 'service-rail';
 const CONTACT_OTP_TEMPLATE = 'contact.otp' as const;
 const SMS_CHANNEL = 'SMS' as const;
 /** NotificationPriority.Critical = 100: salta la cola del worker (orderBy priority desc). OTP UX. */
@@ -81,12 +87,14 @@ export class NotificationSmsSender implements SmsSender {
 
   constructor(baseUrl: string, secret: string, timeoutMs = 8000, fetchImpl?: typeof fetch) {
     // La llamada es servicio→servicio (no hay un usuario final): basta probar conocimiento del
-    // secreto compartido + frescura (anti-replay 30s del guard). Usamos identidad anónima 'driver'
-    // como hace biometric.module para sus llamadas de sistema.
+    // secreto compartido + frescura (anti-replay 30s del guard) + el riel de sistema (aud verificada
+    // per-service, fail-closed). Usamos identidad anónima 'driver' con audiencia `service-rail`, como
+    // hace biometric.module para sus llamadas de sistema.
     this.identity = anonymousIdentity('driver');
     this.client = new InternalRestClient({
       baseUrl,
       secret,
+      audience: SERVICE_RAIL,
       timeoutMs,
       ...(fetchImpl ? { fetchImpl } : {}),
     });

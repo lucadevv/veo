@@ -20,7 +20,13 @@ import {
   type BiometricChallenge,
   type BiometricProvider,
 } from '../ports/biometric/biometric.port';
-import { BackgroundCheckStatus, DriverStatus, KycStatus, Prisma } from '../generated/prisma';
+import {
+  BackgroundCheckStatus,
+  DriverStatus,
+  KycStatus,
+  Prisma,
+  SuspensionSource,
+} from '../generated/prisma';
 import { backgroundCheckMachine, isBackgroundCleared } from '../domain/background-check';
 import { driverStatusMachine, type SelfServiceDriverStatus } from '../domain/driver-status';
 import { kycStatusMachine } from '../domain/kyc-status';
@@ -80,6 +86,21 @@ export interface DriverPersonalInfoView {
   birthDate: string | null;
 }
 
+/**
+ * Resultado de un HARD purge del conductor: el `userId` liberado (para que el orquestador del admin-bff
+ * encadene el borrado en fleet/media, que indexan por User.id) + los contadores por tabla borrada.
+ */
+export interface DriverPurgeResult {
+  userId: string;
+  deleted: {
+    driver: number;
+    authMethods: number;
+    biometricChecks: number;
+    consents: number;
+    user: number;
+  };
+}
+
 @Injectable()
 export class DriversService {
   private readonly minScore: number;
@@ -132,10 +153,14 @@ export class DriversService {
     return { driverId: driver.id, backgroundCheckStatus: driver.backgroundCheckStatus };
   }
 
-  listPendingApproval(): Promise<{ id: string; userId: string; licenseNumber: string | null }[]> {
+  listPendingApproval(): Promise<
+    { id: string; userId: string; licenseNumber: string | null; legalName: string | null }[]
+  > {
+    // legalName = el nombre que el conductor cargó en el onboarding (lo que ve el operador en la cola;
+    // sin esto la tabla solo mostraba UUIDs y no se podía distinguir un conductor de otro).
     return this.prisma.read.driver.findMany({
       where: { backgroundCheckStatus: BackgroundCheckStatus.PENDING },
-      select: { id: true, userId: true, licenseNumber: true },
+      select: { id: true, userId: true, licenseNumber: true, legalName: true },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -253,7 +278,9 @@ export class DriversService {
       // CAS dentro de la tx: si ya estaba suspendido, count=0 → no hay evento (idempotencia extremo-a-extremo).
       const result = await tx.driver.updateMany({
         where: { id: driverId, suspendedAt: null },
-        data: { suspendedAt },
+        // El SOURCE (DISCIPLINARY) registra que esta suspensión la originó un operador: la reactivación
+        // manual (reactivate) SOLO puede levantar esta fuente (fail-closed contra levantar docs vencidos).
+        data: { suspendedAt, suspensionSource: SuspensionSource.DISCIPLINARY },
       });
       if (result.count === 0) return; // ya suspendido: no-op honesto, sin evento duplicado
       const envelope = createEnvelope({
@@ -276,12 +303,103 @@ export class DriversService {
   }
 
   /**
+   * REACTIVACIÓN MANUAL del conductor por un operador admin (la inversa de suspend(), acción de SAFETY).
+   * Limpia `Driver.suspendedAt` + `suspensionSource` —los mismos campos que el gate de inicio de turno
+   * (startShift) y el eligibility gate de dispatch leen para bloquear (BR-I02)—, así un conductor que
+   * estaba suspendido vuelve a poder iniciar turno (sujeto SIEMPRE al gate biométrico, ver punto 4). Emite
+   * `driver.reactivated` por OUTBOX en la MISMA tx (igual que suspend emite driver.suspended) para que
+   * audit/admin-bff reaccionen.
+   *
+   * FAIL-CLOSED (causa raíz del diseño): el operador SOLO puede revertir suspensiones que él originó
+   * (DISCIPLINARY). Una suspensión por documento crítico vencido (DOCUMENT_EXPIRED, vía
+   * fleet.driver_suspended) NO se levanta a mano —re-habilitar a un conductor con SOAT/licencia vencida
+   * es un bug de seguridad inaceptable—: se levanta cuando el conductor regulariza sus documentos. Las
+   * filas LEGACY con suspendedAt seteado pero suspensionSource null se tratan como NO-DISCIPLINARY (también
+   * rechazadas, fail-closed: ante la duda del origen, NO reactivamos).
+   *
+   * SEMÁNTICA (en orden):
+   *   1. Carga el driver en la tx; 404 si no existe.
+   *   2. Si NO está suspendido (suspendedAt null) → 409 (no hay nada que reactivar).
+   *   3. Si la suspensión NO es DISCIPLINARY (DOCUMENT_EXPIRED o source null legacy) → 403 (fail-closed).
+   *   4. Re-valida eligibility mínima: licencia vencida → 403. (El gate operativo COMPLETO —biometría, KYC—
+   *      lo sigue imponiendo startShift BR-I02; reactivar NO devuelve al conductor a AVAILABLE ni toca
+   *      currentStatus: solo limpia la suspensión.)
+   *   5. CAS clear (where suspendedAt not null + source DISCIPLINARY): si count 0, releemos para un error
+   *      HONESTO (ya reactivado por una carrera, o el source cambió bajo nuestros pies → 409/403).
+   *   6. Emite driver.reactivated por OUTBOX (misma tx).
+   */
+  async reactivate(driverId: string): Promise<void> {
+    await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado');
+      // 2) Reactivar a un conductor NO suspendido no tiene sentido (no es idempotente como suspend: no hay
+      //    estado al que llevar). 409 honesto en vez de un no-op silencioso que mentiría "reactivado".
+      if (driver.suspendedAt === null) {
+        throw new ConflictError('El conductor no está suspendido');
+      }
+      // 3) FAIL-CLOSED por ORIGEN: el operador solo revierte suspensiones DISCIPLINARY que él originó.
+      //    DOCUMENT_EXPIRED no se levanta a mano. Una fila legacy con source null se trata como
+      //    NO-DISCIPLINARY (ante la duda del origen, NO reactivamos — es la posición segura).
+      if (driver.suspensionSource !== SuspensionSource.DISCIPLINARY) {
+        throw new ForbiddenError(
+          'No se puede reactivar: la suspensión es por documentos vencidos; se levanta cuando el conductor regulariza sus documentos',
+        );
+      }
+      // 4) Re-validación mínima de eligibility: NO reactivamos sobre una licencia vencida. El gate operativo
+      //    completo (biometría, KYC) lo sigue imponiendo startShift (BR-I02); acá solo evitamos el caso
+      //    obvio de levantar la suspensión a un conductor cuya licencia ya venció.
+      if (driver.licenseExpiresAt && driver.licenseExpiresAt.getTime() < Date.now()) {
+        throw new ForbiddenError('No se puede reactivar: la licencia está vencida');
+      }
+      // 5) CAS clear: solo limpia si SIGUE suspendido Y la fuente SIGUE siendo DISCIPLINARY (defensa contra
+      //    una carrera que ya reactivó, o un fleet.driver_suspended que reescribió la fuente bajo nosotros).
+      const result = await tx.driver.updateMany({
+        where: { id: driverId, suspendedAt: { not: null }, suspensionSource: SuspensionSource.DISCIPLINARY },
+        data: { suspendedAt: null, suspensionSource: null },
+      });
+      if (result.count === 0) {
+        // Releemos para un error HONESTO (espeja startShift): o ya lo reactivó una carrera, o la fuente
+        // cambió a DOCUMENT_EXPIRED (un docto venció entre nuestra lectura y el CAS) → fail-closed.
+        const current = await tx.driver.findUnique({
+          where: { id: driverId },
+          select: { suspendedAt: true, suspensionSource: true },
+        });
+        if (!current) throw new NotFoundError('Conductor no encontrado');
+        if (current.suspendedAt === null) {
+          throw new ConflictError('El conductor ya fue reactivado');
+        }
+        throw new ForbiddenError(
+          'No se puede reactivar: la suspensión es por documentos vencidos; se levanta cuando el conductor regulariza sus documentos',
+        );
+      }
+      // 6) Emite driver.reactivated por OUTBOX en la MISMA tx (igual que suspend): admin-bff proyecta el
+      //    status de SUSPENDED de vuelta a ACTIVE; audit deja la traza inmutable de la decisión.
+      const envelope = createEnvelope({
+        eventType: 'driver.reactivated',
+        producer: 'identity-service',
+        payload: {
+          driverId: driver.id,
+          reactivatedAt: new Date().toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driver.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
+  /**
    * Reenvío a revisión del conductor RECHAZADO (resubmit, BR-I01): tras corregir sus datos en la app,
    * el conductor vuelve a la cola de aprobación. Lleva backgroundCheckStatus REJECTED→PENDING y el KYC
    * del usuario REJECTED→PENDING (ambas transiciones se abrieron en las máquinas), y LIMPIA el motivo
    * de rechazo. Idempotencia/seguridad: las máquinas RECHAZAN reenviar desde un estado que no sea
-   * REJECTED (p. ej. un conductor ya CLEARED no puede "reenviar"). Sin evento: el conductor vuelve a la
-   * cola de pendientes que el operador lista por estado PENDING (no hay consumidor de un "resubmitted").
+   * REJECTED (p. ej. un conductor ya CLEARED no puede "reenviar"). Emite `driver.resubmitted` por OUTBOX
+   * (misma tx) → el admin-bff proyecta status=PENDING en el read-model, cerrando el double-source (la
+   * lista dejaba de mostrar REJECTED stale frente al detalle PENDING en vivo).
    */
   async resubmit(userId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
     return this.prisma.write.$transaction(async (tx) => {
@@ -306,7 +424,68 @@ export class DriversService {
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.PENDING },
       });
+      // Emite driver.resubmitted por OUTBOX en la MISMA tx (igual que approve/reject): el admin-bff
+      // proyecta status=PENDING en el read-model → el conductor reaparece como PENDIENTE (no stale en
+      // REJECTED). Cierra el double-source entre la lista (read-model) y el detalle (identity en vivo).
+      const envelope = createEnvelope({
+        eventType: 'driver.resubmitted',
+        producer: 'identity-service',
+        payload: {
+          driverId: driver.id,
+          userId: driver.userId,
+          resubmittedAt: new Date().toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driver.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
       return { id: updated.id, backgroundCheckStatus: updated.backgroundCheckStatus };
+    });
+  }
+
+  /**
+   * HARD PURGE de un conductor NO-OPERADO (re-registro) — NO es el soft-delete BR-S06 del sweeper.
+   * Borra REALMENTE el agregado de identity en UNA transacción atómica: la fila Driver, y por su
+   * `userId` todos sus métodos de auth, intentos biométricos, consentimientos, y FINALMENTE la fila User
+   * (esto libera el teléfono `@unique` para que la persona pueda re-registrarse de cero).
+   *
+   * ORDEN del borrado (FK sin cascada cross-tabla salvo AuthMethod): primero Driver (FK → User sin
+   * onDelete), luego los hijos por `userId` (auth_methods/biometric_checks/consents), y al final el User.
+   * AuthMethod SÍ tiene onDelete: Cascade, pero lo borramos explícito igual para devolver un contador
+   * honesto y no depender del orden de cascada de la DB.
+   *
+   * El guard de "no tiene historial operativo" (trips) vive AGUAS ARRIBA en el admin-bff (dueño del dato
+   * de trips); aquí sólo se ejecuta el borrado de lo que ES de identity. Devuelve el `userId` liberado
+   * para que el orquestador encadene fleet/media (que indexan por User.id, no por Driver.id).
+   */
+  async purge(driverId: string): Promise<DriverPurgeResult> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
+      const { userId } = driver;
+
+      const deletedDriver = await tx.driver.delete({ where: { id: driverId } });
+      const authMethods = await tx.authMethod.deleteMany({ where: { userId } });
+      const biometricChecks = await tx.biometricCheck.deleteMany({ where: { userId } });
+      const consents = await tx.consent.deleteMany({ where: { userId } });
+      // Borra el User AL FINAL: libera el teléfono (@unique) para re-registro. delete (no deleteMany)
+      // para fallar ruidosamente si por alguna razón no existe (invariante: todo Driver tiene User).
+      await tx.user.delete({ where: { id: userId } });
+
+      return {
+        userId,
+        deleted: {
+          driver: deletedDriver ? 1 : 0,
+          authMethods: authMethods.count,
+          biometricChecks: biometricChecks.count,
+          consents: consents.count,
+          user: 1,
+        },
+      };
     });
   }
 
@@ -322,7 +501,9 @@ export class DriversService {
   async suspendByFleet(driverId: string, suspendedAt: Date): Promise<boolean> {
     const result = await this.prisma.write.driver.updateMany({
       where: { id: driverId, suspendedAt: null },
-      data: { suspendedAt },
+      // SOURCE DOCUMENT_EXPIRED: suspensión por documento crítico vencido. La reactivación manual del
+      // operador NO puede levantarla (solo se levanta cuando el conductor regulariza sus documentos).
+      data: { suspendedAt, suspensionSource: SuspensionSource.DOCUMENT_EXPIRED },
     });
     return result.count > 0;
   }

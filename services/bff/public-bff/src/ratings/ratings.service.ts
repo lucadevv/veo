@@ -4,7 +4,13 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { DownstreamError, GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { GRPC_RATING, REST_RATING } from '../infra/downstream.tokens';
 import type { AggregateReply } from '../infra/grpc-types';
 import {
@@ -20,6 +26,7 @@ export class RatingsService {
     @Inject(GRPC_RATING) private readonly ratingGrpc: GrpcServiceClient,
     @Inject(REST_RATING) private readonly ratingRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   create(user: AuthenticatedUser, dto: CreateRatingDto): Promise<RatingView> {
@@ -49,7 +56,7 @@ export class RatingsService {
   }
 
   async getAggregate(user: AuthenticatedUser, subjectId: string): Promise<AggregateView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId }, meta);
     return {
       subjectId: reply.subjectId,

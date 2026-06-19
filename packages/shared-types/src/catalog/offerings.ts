@@ -157,7 +157,11 @@ export const OFFERINGS = {
     pricing: { multiplier: 0.55, minFareCents: 300 },
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,
-    defaultEnabled: true,
+    // Ola 2B · mototaxi DIFERIDA: arrancamos "solo autos". La oferta queda CODEADA (matching/pricing
+    // listos) pero OCULTA por defecto; el admin la habilita por overlay cuando se lance el tier moto.
+    // Esta es la FUENTE ÚNICA de "MOTO no operable": de acá deriva OPERABLE_VEHICLE_CLASSES (abajo),
+    // que a su vez gobierna el selector del alta y la validación server-side de fleet.
+    defaultEnabled: false,
     sortOrder: 0,
   },
   [OfferingId.VEO_ECONOMICO]: {
@@ -281,6 +285,22 @@ export const OFFERINGS = {
 export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS).sort(
   (a, b) => a.sortOrder - b.sortOrder,
 );
+
+/**
+ * Clases de vehículo OPERABLES = aquellas con AL MENOS una oferta habilitada por defecto
+ * (`defaultEnabled`). Es la FUENTE ÚNICA de "qué se puede registrar/operar": el catálogo. Hoy, con
+ * VEO_MOTO y VEO_MECHANIC en `defaultEnabled:false`, el resultado es `[CAR]` → "solo autos". Cuando se
+ * habilite la mototaxi (Ola 2B, `defaultEnabled:true`), MOTO reaparece SOLA acá — y con ella el selector
+ * del alta y la validación de fleet — sin tocar otro archivo. El orden sale del enum `VehicleClass`.
+ */
+// DEUDA: OPERABLE_VEHICLE_CLASSES deriva del default ESTÁTICO del catálogo, no del overlay runtime del admin · techo: si el admin habilita una oferta MOTO por overlay, el alta del conductor la seguiría bloqueando · gatillo: cuando el alta deba respetar overlays del admin → mover esta verdad a un endpoint overlay-aware (fleet/bff)
+export const OPERABLE_VEHICLE_CLASSES: readonly VehicleClass[] = (() => {
+  const enabled = new Set(OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => o.vehicleClass));
+  return Object.values(VehicleClass).filter((c) => enabled.has(c));
+})();
+
+/** Clase de vehículo por DEFECTO del alta = la primera operable (hoy `CAR`). */
+export const DEFAULT_VEHICLE_CLASS: VehicleClass = OPERABLE_VEHICLE_CLASSES[0] ?? VehicleClass.CAR;
 
 /**
  * Lookup tolerante para input del cliente (string crudo): `undefined` si no existe — el caller decide.

@@ -6,7 +6,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import { GRPC_PAYMENT, GRPC_TRIP, REST_PAYMENT } from '../infra/downstream.tokens';
 import { REDIS } from '../infra/redis';
@@ -43,6 +49,7 @@ export class PaymentsService {
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(REST_PAYMENT) private readonly paymentRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
@@ -98,7 +105,7 @@ export class PaymentsService {
    * identidad firmada). NO exponer directo a una ruta sin gate previo.
    */
   private async fetchPaymentView(user: AuthenticatedUser, id: string): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.paymentGrpc.call<PaymentReply>('GetPayment', { id }, meta);
     return this.toPaymentView(reply);
   }
@@ -111,7 +118,7 @@ export class PaymentsService {
    * cobro (found=false) → 404 'Pago no encontrado'.
    */
   async getPaymentByTrip(user: AuthenticatedUser, tripId: string): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -129,7 +136,7 @@ export class PaymentsService {
    * el del JWT autenticado, nunca uno del cliente → el pasajero solo ve SU saldo.
    */
   async getUserCredit(user: AuthenticatedUser): Promise<{ balanceCents: number }> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.paymentGrpc.call<UserCreditReply>(
       'GetUserCredit',
       { userId: user.userId },

@@ -32,7 +32,7 @@ describe('mappers OPS', () => {
     });
   });
 
-  it('driverRecordToApproval: fullName/phone null honesto (read-model no los provee aún)', () => {
+  it('driverRecordToApproval: identidad enriquecida y redactada por rol (Compliance ve, sub-Compliance null)', () => {
     const rec: DriverRecord = {
       id: 'd1',
       userId: 'u1',
@@ -42,11 +42,15 @@ describe('mappers OPS', () => {
       rejectionReason: null,
       updatedAt: '2026-05-29T00:00:00.000Z',
     };
-    // Tanto Compliance como SUPPORT obtienen null hoy (la data aún no se enriquece desde identity);
-    // la redacción ya está cableada para cuando aterrice.
+    const identity = { fullName: 'Luis Conductor', phone: '+51987654321' };
+    // SIN enriquecimiento (no se pasó identity) → null honesto, aunque el rol pueda verla.
     expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
-    expect(driverRecordToApproval(rec, SUPPORT).fullName).toBeNull();
-    expect(driverRecordToApproval(rec, SUPPORT).phone).toBeNull();
+    // CON enriquecimiento: Compliance VE el nombre/teléfono…
+    expect(driverRecordToApproval(rec, COMPLIANCE, identity).fullName).toBe('Luis Conductor');
+    expect(driverRecordToApproval(rec, COMPLIANCE, identity).phone).toBe('+51987654321');
+    // …pero sub-Compliance (SUPPORT) sigue viendo null aunque la data esté presente (redacción server-side).
+    expect(driverRecordToApproval(rec, SUPPORT, identity).fullName).toBeNull();
+    expect(driverRecordToApproval(rec, SUPPORT, identity).phone).toBeNull();
   });
 
   it('mapea DriverRecord → driverSummary con rating nullable', () => {

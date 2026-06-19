@@ -32,6 +32,8 @@ const driver: DriverReply = {
   faceEnrolledAt: '',
   lastVerifiedAt: '',
   phone: '',
+  documentId: '',
+  birthDate: '',
 };
 
 const user: UserReply = {

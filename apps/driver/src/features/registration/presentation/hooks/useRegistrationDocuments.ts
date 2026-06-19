@@ -72,7 +72,8 @@ export interface UploadDocumentVars {
   type: FleetDocumentType;
   /** Archivo local capturado/elegido por el conductor (cámara o galería). */
   file: PickedImage;
-  documentNumber: string;
+  /** Número del documento. Opcional POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no lo tiene. */
+  documentNumber?: string;
   /** Vencimiento en ISO-8601 (si el conductor lo ingresó / es requerido). */
   expiresAt?: string;
 }
@@ -102,7 +103,7 @@ export function useUploadAndRegisterDocument() {
         type: vars.type,
         file: vars.file,
         metadata: {
-          documentNumber: vars.documentNumber,
+          ...(vars.documentNumber ? { documentNumber: vars.documentNumber } : {}),
           ...(vars.expiresAt ? { expiresAt: vars.expiresAt } : {}),
         },
       }),

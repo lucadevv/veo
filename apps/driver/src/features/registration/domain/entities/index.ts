@@ -90,7 +90,7 @@ export interface VehicleData {
  * (`VEHICLE_REGISTRATION` = "tarjeta de propiedad" en la UI); el valor que viaja al backend NO es
  * este label sino el `FleetDocumentType` canónico que devuelve `registrationDocTypeToBackend`.
  */
-export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION';
+export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION' | 'VEHICLE_PHOTO';
 
 /**
  * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige en el paso 3 (los tres documentos del
@@ -101,7 +101,8 @@ export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATIO
 export type RegistrationFleetDocumentType =
   | typeof FleetDocumentType.LICENSE_A1
   | typeof FleetDocumentType.SOAT
-  | typeof FleetDocumentType.PROPERTY_CARD;
+  | typeof FleetDocumentType.PROPERTY_CARD
+  | typeof FleetDocumentType.VEHICLE_PHOTO;
 
 /**
  * Mapea la etiqueta del wizard al `FleetDocumentType` CANÓNICO de `@veo/shared-types` que validan
@@ -121,6 +122,8 @@ export function registrationDocTypeToBackend(
       return FleetDocumentType.SOAT;
     case 'VEHICLE_REGISTRATION':
       return FleetDocumentType.PROPERTY_CARD;
+    case 'VEHICLE_PHOTO':
+      return FleetDocumentType.VEHICLE_PHOTO;
   }
 }
 

@@ -11,7 +11,12 @@ import {
   type UserReply,
   type DriverReply,
 } from '@veo/rpc';
-import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { GRPC_IDENTITY, GRPC_TRIP, REST_PANIC } from '../infra/tokens';
 import { canSeeIdentity } from '../redaction/redaction.policy';
@@ -46,6 +51,7 @@ export class SecurityService {
     @Inject(REST_PANIC) private readonly rest: InternalRestClient,
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
   ) {
@@ -89,7 +95,7 @@ export class SecurityService {
     p: PanicEntity,
   ): Promise<PanicDetail> {
     const base = toPanicDetail(p);
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const trip = await this.tripGrpc
       .call<TripReply>('GetTrip', { id: p.tripId }, meta)
       .catch(() => null);

@@ -5,7 +5,12 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { GrpcServiceClient, RecordReply } from '@veo/rpc';
-import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { GRPC_AUDIT } from '../infra/tokens';
 import type { Env } from '../config/env.schema';
 
@@ -22,6 +27,7 @@ export class AuditRecorder {
 
   constructor(
     @Inject(GRPC_AUDIT) private readonly grpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
@@ -37,7 +43,7 @@ export class AuditRecorder {
         resourceId: action.resourceId,
         payloadJson: JSON.stringify(action.payload ?? {}),
       },
-      grpcIdentityMetadata(identity, this.secret),
+      grpcIdentityMetadata(identity, this.secret, this.audience),
     );
   }
 }

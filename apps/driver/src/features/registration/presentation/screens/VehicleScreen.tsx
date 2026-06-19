@@ -15,6 +15,13 @@ import {
   useRegisterVehicle,
 } from '../hooks/useRegistrationWizard';
 import {
+  useRegistrationDocuments,
+  useUploadAndRegisterDocument,
+} from '../hooks/useRegistrationDocuments';
+import { useImagePicker } from '../../../../core/di/useDi';
+import {
+  DocumentUploadCard,
+  RegistrationDocumentSheet,
   RegistrationField,
   RegistrationHeader,
   RegistrationProgress,
@@ -22,7 +29,12 @@ import {
   VehicleStatusCard,
   VehicleTypeSelector,
 } from '../components';
-import type { VehicleModelOption } from '../../domain';
+import type {
+  DocumentUploadState,
+  RegistrationDocumentInput,
+} from '../components/RegistrationDocumentSheet';
+import { IconCar } from '../../../../shared/presentation/icons';
+import { registrationDocTypeToBackend, type VehicleModelOption } from '../../domain';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
 
@@ -43,6 +55,24 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const [errors, setErrors] = useState<VehicleErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
+
+  // Foto del vehículo (Ola 1): se captura ACÁ (paso 2) reusando el pipeline de documentos. Se registra
+  // como doc DRIVER-scoped (VEHICLE_PHOTO) y es REQUERIDA para aprobar (gate server-side en admin-bff).
+  const documents = useRegistrationStore((s) => s.documents);
+  const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
+  const serverDocs = useRegistrationDocuments();
+  const uploadDocument = useUploadAndRegisterDocument();
+  const imagePicker = useImagePicker();
+  const photoBackendType = registrationDocTypeToBackend('VEHICLE_PHOTO');
+
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [photoUploadState, setPhotoUploadState] = useState<DocumentUploadState>('idle');
+  const [photoError, setPhotoError] = useState<unknown>(null);
+
+  // Subida confirmada: local (recién capturada) o ya presente en el servidor (conductor que vuelve).
+  const photoUploaded =
+    documents.find((d) => d.type === 'VEHICLE_PHOTO')?.status === 'uploaded' ||
+    (serverDocs.data?.some((d) => d.type === photoBackendType) ?? false);
 
   const canContinue =
     vehicle.plate.trim().length > 0 &&
@@ -72,6 +102,25 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const onChangeType = (type: typeof vehicle.type) => {
     setVehicleType(type);
     setVehicle({ modelSpecId: '', brand: '', model: '' });
+  };
+
+  /** Sube+registra la foto del vehículo (reusa el pipeline de documentos; sin número ni vencimiento). */
+  const onSubmitPhoto = async (input: RegistrationDocumentInput) => {
+    setPhotoError(null);
+    setPhotoUploadState('uploading');
+    try {
+      await uploadDocument.mutateAsync({ type: photoBackendType, file: input.file });
+      setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
+      setPhotoUploadState('success');
+      // Cierra el sheet tras el check de éxito (igual que el paso de documentos).
+      setTimeout(() => {
+        setPhotoSheetOpen(false);
+        setPhotoUploadState('idle');
+      }, 900);
+    } catch (e) {
+      setPhotoError(e);
+      setPhotoUploadState('error');
+    }
   };
 
   const goNext = () => {
@@ -123,7 +172,8 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
           variant="accent"
           fullWidth
           loading={registerVehicle.isPending}
-          disabled={!existingVehicle && !canContinue}
+          // La foto del vehículo es REQUERIDA para avanzar (en alta nueva Y con vehículo ya registrado).
+          disabled={(!existingVehicle && !canContinue) || !photoUploaded}
           onPress={onContinue}
         />
       }
@@ -208,7 +258,45 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
             </View>
           </>
         )}
+
+        {/* Foto del vehículo (Ola 1): se captura ACÁ (junto a los datos del auto), es REQUERIDA para
+            aprobar. Reusa el sheet de captura + el pipeline de subida de documentos (foto sin número). */}
+        <Reveal delay={250}>
+          <DocumentUploadCard
+            icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+            label={t('registration.vehicle.photoLabel')}
+            status={photoUploaded ? 'uploaded' : 'pending'}
+            uploadedLabel={t('registration.documents.uploaded')}
+            pendingLabel={t('registration.documents.pending')}
+            busy={uploadDocument.isPending}
+            accessibilityLabel={t('registration.documents.uploadAccessibility', {
+              document: t('registration.vehicle.photoLabel'),
+            })}
+            onPress={() => {
+              setPhotoError(null);
+              setPhotoUploadState('idle');
+              setPhotoSheetOpen(true);
+            }}
+          />
+        </Reveal>
       </View>
+
+      {photoSheetOpen ? (
+        <RegistrationDocumentSheet
+          visible
+          onClose={() => {
+            if (photoUploadState !== 'uploading') {
+              setPhotoSheetOpen(false);
+            }
+          }}
+          documentLabel={t('registration.vehicle.photoLabel')}
+          documentType={photoBackendType}
+          uploadState={photoUploadState}
+          errorMessage={photoError ? toErrorMessage(photoError, t) : undefined}
+          onPick={(source) => imagePicker.pick(source)}
+          onSubmit={onSubmitPhoto}
+        />
+      ) : null}
     </SafeScreen>
   );
 };

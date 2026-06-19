@@ -21,10 +21,22 @@ describe('sync api-client ↔ catálogo de offerings (@veo/shared-types)', () =>
    * del contrato es `Object.keys(OFFERINGS)` — los mismos ids del JSDoc de
    * `createTripRequest.category` (`veo_moto | veo_economico | veo_confort | veo_xl`).
    */
-  it('los ids de OFFERINGS son exactamente el universo documentado del quote/createTrip', () => {
-    const documentedQuoteIds = ['veo_moto', 'veo_economico', 'veo_confort', 'veo_xl'];
-    expect(Object.keys(OFFERINGS).sort()).toEqual([...documentedQuoteIds].sort());
-    expect(Object.values(OfferingId).sort()).toEqual([...documentedQuoteIds].sort());
+  it('los ids de OFFERINGS son exactamente el universo CODEADO del catálogo (RIDE + verticales ocultas)', () => {
+    // B5-4: el catálogo codea las 4 RIDE (visibles) + 4 verticales OCULTAS (defaultEnabled:false). El
+    // contrato cubre TODOS los ids codeados (no solo los visibles del quote); la visibilidad la decide
+    // `defaultEnabled`/overlay, no la membresía del enum.
+    const documentedIds = [
+      'veo_moto',
+      'veo_economico',
+      'veo_confort',
+      'veo_xl',
+      'veo_economico_ev',
+      'veo_ambulance',
+      'veo_tow',
+      'veo_mechanic',
+    ];
+    expect(Object.keys(OFFERINGS).sort()).toEqual([...documentedIds].sort());
+    expect(Object.values(OfferingId).sort()).toEqual([...documentedIds].sort());
   });
 
   it('todo id del catálogo es aceptado por el wire actual (quoteOption.id / createTrip.category)', () => {

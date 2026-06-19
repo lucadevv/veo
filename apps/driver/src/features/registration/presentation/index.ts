@@ -12,7 +12,7 @@ export { useRegistrationStore, REGISTRATION_TOTAL_STEPS } from './state/registra
 export { FaceCaptureProvider, useFaceCapture } from './providers/FaceCaptureProvider';
 export { RealFaceCaptureProvider } from './providers/RealFaceCaptureProvider';
 export { useRegistrationSubmit } from './hooks/useRegistrationSubmit';
-export { useRegistrationGate } from './hooks/useRegistrationGate';
+export { useRegistrationGate, REGISTRATION_GATE_QUERY_KEY } from './hooks/useRegistrationGate';
 export { useResubmitRegistration } from './hooks/useResubmitRegistration';
 export { useRegistrationFaceCapture } from './hooks/useRegistrationFaceCapture';
 export {

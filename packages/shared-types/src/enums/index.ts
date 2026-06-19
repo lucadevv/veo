@@ -332,6 +332,10 @@ export const FleetDocumentType = {
   PROPERTY_CARD: 'PROPERTY_CARD',
   BACKGROUND_CHECK: 'BACKGROUND_CHECK',
   ITV: 'ITV',
+  // Foto del vehículo (Ola 1): captura del auto en el alta del conductor. NO tiene número ni vencimiento
+  // (es una foto, no un documento numerado) — la validación del número es contextual por tipo. El operador
+  // la revisa en el panel antes de aprobar (es requerida para la aprobación).
+  VEHICLE_PHOTO: 'VEHICLE_PHOTO',
   // B5-3.2 · CERTIFICACIONES de las verticales especiales (conductor): credencial de operador con la MISMA
   // maquinaria FleetDocument (vencimiento + review del operador). NO son críticas (su vencimiento NO suspende
   // al conductor — solo lo vuelve inelegible para ESA vertical, que además está oculta). Una oferta vertical

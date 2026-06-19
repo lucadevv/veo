@@ -38,6 +38,8 @@ export const TEMPLATE_KEYS = {
   CONTACT_OTP: 'contact.otp',
   VEHICLE_MODEL_APPROVED: 'fleet.vehicle_model_approved',
   VEHICLE_MODEL_REJECTED: 'fleet.vehicle_model_rejected',
+  DRIVER_APPROVED: 'driver.approved',
+  DRIVER_REJECTED: 'driver.rejected',
 } as const;
 
 /** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
@@ -309,5 +311,23 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Modelo rechazado',
     body: 'Tu solicitud de {{make}} {{model}} no fue aprobada. Contacta a soporte.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador APRUEBA sus antecedentes: ya puede operar (cierra el loop, el
+    // conductor sale de "En revisión"). Sin PII en el payload (§0.7); la app abre su gate de registro.
+    key: TEMPLATE_KEYS.DRIVER_APPROVED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: '¡Ya puedes manejar!',
+    body: 'Tu cuenta de conductor fue aprobada. Abre VEO y empieza tu primer turno.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador RECHAZA sus antecedentes: debe corregir y reenviar. El MOTIVO
+    // NO viaja en el push (es PII) — la app lo resuelve en la pantalla de rechazo vía GET /drivers/me.
+    key: TEMPLATE_KEYS.DRIVER_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Revisá tu solicitud',
+    body: 'Tu solicitud de conductor necesita correcciones. Abre VEO para ver el motivo y reenviar.',
   },
 ];

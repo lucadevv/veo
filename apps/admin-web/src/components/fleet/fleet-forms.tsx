@@ -8,6 +8,7 @@ import {
   useCreateDocument,
   useCreateInspection,
   useCreateVehicle,
+  useVehicleModels,
 } from '@/lib/api/queries';
 import { certificationTypesForEnabledOfferings, documentTypeLabel } from '@/lib/certifications';
 import { useToast } from '@/components/ui/toast';
@@ -42,24 +43,35 @@ function CreateTrigger({ label }: { label: string }) {
   );
 }
 
-/* ── Alta de vehículo ── */
+/* ── Alta de vehículo (F4 · C2: por CATÁLOGO, no texto libre) ── */
 export function CreateVehicleDialog() {
   const create = useCreateVehicle();
+  // El operador elige un modelo del catálogo curado (mismo origen que el conductor en el onboarding): make/
+  // model/tipo los snapshotea el fleet-service del spec elegido (server-authoritative), sin texto libre.
+  const models = useVehicleModels();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     plate: '',
-    make: '',
-    model: '',
+    modelSpecId: '',
     year: '',
     color: '',
     insuranceExpiresAt: '',
   });
 
-  const valid =
-    form.plate.trim() && form.make.trim() && form.model.trim() && form.color.trim() && form.year;
+  // Catálogo ordenado alfabético para el selector (la query trae una página; el catálogo curado es chico).
+  const modelItems = useMemo(
+    () =>
+      [...(models.data?.items ?? [])].sort((a, b) =>
+        `${a.make} ${a.model}`.localeCompare(`${b.make} ${b.model}`),
+      ),
+    [models.data],
+  );
+  const selectedModel = modelItems.find((m) => m.id === form.modelSpecId);
+
+  const valid = Boolean(form.plate.trim() && form.modelSpecId && form.color.trim() && form.year);
 
   async function submit() {
     setError(null);
@@ -67,15 +79,14 @@ export function CreateVehicleDialog() {
     try {
       await create.mutateAsync({
         plate: form.plate.trim().toUpperCase(),
-        make: form.make.trim(),
-        model: form.model.trim(),
+        modelSpecId: form.modelSpecId,
         year: Number(form.year),
         color: form.color.trim(),
         insuranceExpiresAt: form.insuranceExpiresAt || undefined,
       });
       toast({ tone: 'success', title: 'Vehículo registrado' });
       setOpen(false);
-      setForm({ plate: '', make: '', model: '', year: '', color: '', insuranceExpiresAt: '' });
+      setForm({ plate: '', modelSpecId: '', year: '', color: '', insuranceExpiresAt: '' });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo registrar el vehículo.');
     } finally {
@@ -94,54 +105,63 @@ export function CreateVehicleDialog() {
         <DialogHeader>
           <DialogTitle>Registrar vehículo</DialogTitle>
           <DialogDescription>
-            El año mínimo y la placa los revalida el servidor (BR-D04).
+            El modelo sale del catálogo curado; el año mínimo y la placa los revalida el servidor (BR-D04).
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-1">
-          <Field label="Placa">
-            <Input
-              value={form.plate}
-              onChange={(e) => setForm({ ...form, plate: e.target.value })}
-              placeholder="ABC-123"
-            />
+        <div className="grid gap-3 py-1">
+          <Field label="Modelo (catálogo)">
+            <select
+              className={selectClass}
+              value={form.modelSpecId}
+              onChange={(e) => setForm({ ...form, modelSpecId: e.target.value })}
+              disabled={models.isLoading}
+            >
+              <option value="" disabled>
+                {models.isLoading
+                  ? 'Cargando catálogo…'
+                  : modelItems.length
+                    ? 'Elegí un modelo…'
+                    : 'No hay modelos aprobados en el catálogo'}
+              </option>
+              {modelItems.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.make} {m.model} · {m.yearFrom}–{m.yearTo}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Año">
-            <Input
-              type="number"
-              inputMode="numeric"
-              value={form.year}
-              onChange={(e) => setForm({ ...form, year: e.target.value })}
-              placeholder="2020"
-            />
-          </Field>
-          <Field label="Marca">
-            <Input
-              value={form.make}
-              onChange={(e) => setForm({ ...form, make: e.target.value })}
-              placeholder="Toyota"
-            />
-          </Field>
-          <Field label="Modelo">
-            <Input
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
-              placeholder="Yaris"
-            />
-          </Field>
-          <Field label="Color">
-            <Input
-              value={form.color}
-              onChange={(e) => setForm({ ...form, color: e.target.value })}
-              placeholder="Gris"
-            />
-          </Field>
-          <Field label="Vence seguro (opcional)">
-            <Input
-              type="date"
-              value={form.insuranceExpiresAt}
-              onChange={(e) => setForm({ ...form, insuranceExpiresAt: e.target.value })}
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Placa">
+              <Input
+                value={form.plate}
+                onChange={(e) => setForm({ ...form, plate: e.target.value })}
+                placeholder="ABC-123"
+              />
+            </Field>
+            <Field label="Año">
+              <Input
+                type="number"
+                inputMode="numeric"
+                value={form.year}
+                onChange={(e) => setForm({ ...form, year: e.target.value })}
+                placeholder={selectedModel ? `${selectedModel.yearFrom}–${selectedModel.yearTo}` : '2020'}
+              />
+            </Field>
+            <Field label="Color">
+              <Input
+                value={form.color}
+                onChange={(e) => setForm({ ...form, color: e.target.value })}
+                placeholder="Gris"
+              />
+            </Field>
+            <Field label="Vence seguro (opcional)">
+              <Input
+                type="date"
+                value={form.insuranceExpiresAt}
+                onChange={(e) => setForm({ ...form, insuranceExpiresAt: e.target.value })}
+              />
+            </Field>
+          </div>
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <DialogFooter>

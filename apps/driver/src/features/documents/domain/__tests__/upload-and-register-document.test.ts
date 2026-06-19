@@ -24,6 +24,7 @@ function registeredDoc(): DriverDocument {
     simpleStatus: 'en_revision',
     expiresAt: '2027-01-01T00:00:00.000Z',
     ok: true,
+    rejectionReason: null,
   };
 }
 

@@ -72,3 +72,13 @@ export function mapProfileToRegistrationStatus(profile: DriverProfileView): Regi
   //    Conservador: si no faltan documentos por subir y no hay rechazo, NUNCA volvemos al wizard.
   return 'in_review';
 }
+
+/**
+ * ¿El alta está EN REVISIÓN (envió todo, espera la validación del backend)? Predicado de DOMINIO para
+ * que la UI sondee como RED DE SEGURIDAD mientras espera — el push de aprobación/rechazo es best-effort
+ * (puede no llegar: Firebase sin configurar, permiso denegado, red flaky), así que el conductor debe
+ * enterarse SÍ o SÍ. El literal del estado vive UNA vez (junto a su mapeo canónico), no esparcido.
+ */
+export function isAwaitingReview(status: RegistrationStatus): boolean {
+  return status === 'in_review';
+}

@@ -16,6 +16,7 @@ function doc(
     simpleStatus: partial.simpleStatus,
     expiresAt: partial.expiresAt ?? null,
     ok: partial.ok ?? true,
+    rejectionReason: partial.rejectionReason ?? null,
   };
 }
 

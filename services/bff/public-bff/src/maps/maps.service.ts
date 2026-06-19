@@ -8,7 +8,13 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
 import type { GeocodeResult, MapsClient } from '@veo/maps';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
@@ -118,6 +124,7 @@ export class MapsService {
     // romper los specs que construyen/subclasean el servicio con 3 args; sin ellos el quote no trae preview.
     @Optional() @Inject(GRPC_PAYMENT) private readonly paymentGrpc?: GrpcServiceClient,
     @Optional() @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret?: string,
+    @Optional() @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience?: InternalAudience,
   ) {
     this.energyModelEnabled = config.getOrThrow<boolean>('PRICING_ENERGY_MODEL_ENABLED');
   }
@@ -549,11 +556,17 @@ export class MapsService {
    *    muestra el aplicado real al cobrar).
    */
   private async fetchCreditBalance(identity: AuthenticatedUser): Promise<number> {
-    if (!this.paymentGrpc || !this.secret || identity === ANONYMOUS_IDENTITY || !identity.userId) {
+    if (
+      !this.paymentGrpc ||
+      !this.secret ||
+      !this.audience ||
+      identity === ANONYMOUS_IDENTITY ||
+      !identity.userId
+    ) {
       return 0;
     }
     try {
-      const meta = grpcIdentityMetadata(identity, this.secret);
+      const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
       const reply = await this.paymentGrpc.call<UserCreditReply>(
         'GetUserCredit',
         { userId: identity.userId },

@@ -46,15 +46,20 @@ export function driverRecordToSummary(r: DriverRecord): DriverSummary {
  * (vienen de identity) → null honesto; el enriquecimiento por identity es follow-up. `submittedAt` se
  * aproxima con `updatedAt` (última señal del registro). El contrato exige las claves presentes (nullable).
  */
-export function driverRecordToApproval(r: DriverRecord, roles: readonly AdminRole[]): DriverApproval {
-  // IDENTIDAD (fullName/phone) = Compliance+. Hoy el read-model no los provee (null honesto), pero
-  // la redacción ya está cableada: cuando el enriquecimiento por identity aterrice, sub-Compliance
-  // seguirá viendo `null`. NUNCA se inventa data.
+export function driverRecordToApproval(
+  r: DriverRecord,
+  roles: readonly AdminRole[],
+  identity?: { fullName: string | null; phone: string | null },
+): DriverApproval {
+  // IDENTIDAD (fullName/phone) = Compliance+. El admin-bff enriquece la página con identity (lectura
+  // BATCH, sin N+1) SOLO cuando el rol puede verla; sub-Compliance recibe `null` (redacción server-side,
+  // la UI no decide). Los eventos driver.* NO llevan PII (Ley 29733) → la identidad NO vive en el
+  // read-model, se resuelve on-read contra identity. NUNCA se inventa data: sin enriquecimiento → null.
   const identityVisible = canSeeIdentity(roles);
   return {
     ...driverRecordToSummary(r),
-    fullName: identityVisible ? null : null,
-    phone: identityVisible ? null : null,
+    fullName: identityVisible ? identity?.fullName ?? null : null,
+    phone: identityVisible ? identity?.phone ?? null : null,
     submittedAt: r.updatedAt,
     // Motivo del último rechazo (proyectado del evento driver.rejected); null si no está rechazado.
     rejectionReason: r.rejectionReason,

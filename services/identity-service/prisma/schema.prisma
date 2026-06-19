@@ -49,6 +49,18 @@ enum BackgroundCheckStatus {
   @@schema("identity")
 }
 
+/// ORIGEN de una suspensión del conductor (discriminador del `suspendedAt`, fail-closed). El modelo
+/// Driver modela la suspensión 100% por el timestamp `suspendedAt`, pero hay DOS fuentes con semánticas
+/// de reversión distintas que antes no se podían distinguir: la reactivación del operador NO debe poder
+/// levantar una suspensión por documentos vencidos (re-habilitar a un conductor con SOAT/licencia
+/// vencida es un bug de seguridad inaceptable). Este enum permite gatear la reactivación por origen.
+enum SuspensionSource {
+  DISCIPLINARY // suspensión MANUAL del operador (suspend()) — reversible por el operador
+  DOCUMENT_EXPIRED // suspensión AUTOMÁTICA por documento crítico vencido (fleet.driver_suspended) — NO reversible a mano
+
+  @@schema("identity")
+}
+
 enum BiometricCheckType {
   SHIFT_START
   REVERIFY
@@ -196,6 +208,12 @@ model Driver {
   /// Momento del enrolamiento facial. Null = no enrolado.
   faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
   suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
+  /// ORIGEN de la suspensión vigente (POR QUÉ el conductor está suspendido). Null cuando NO está suspendido.
+  /// Discrimina la reversión: la reactivación del operador solo puede levantar suspensiones DISCIPLINARY
+  /// (las que él originó); las DOCUMENT_EXPIRED (documento crítico vencido) NO se levantan a mano — se
+  /// levantan cuando el conductor regulariza sus documentos (fail-closed, seguridad Ley 29733). Filas
+  /// legacy con suspendedAt seteado pero suspensionSource null se tratan como NO-DISCIPLINARY (rechazadas).
+  suspensionSource      SuspensionSource?     @map("suspension_source")
   /// Motivo del último rechazo de antecedentes (texto del operador). Null si nunca fue rechazado o si se
   /// re-aprobó / reenvió. Lo expone el driver-bff (GET /drivers/me) para la pantalla de rechazo de la app.
   rejectionReason       String?               @map("rejection_reason")

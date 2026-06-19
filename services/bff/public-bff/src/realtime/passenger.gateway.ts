@@ -31,10 +31,12 @@ import {
 import {
   grpcIdentityMetadata,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
   JWT_SERVICE,
   Public,
   toAuthenticatedUser,
   type AuthenticatedUser,
+  type InternalAudience,
   type JwtService,
 } from '@veo/auth';
 import { GrpcServiceClient } from '@veo/rpc';
@@ -81,6 +83,7 @@ export class PassengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     @Inject(JWT_SERVICE) private readonly jwt: JwtService,
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly state: RealtimeStateService,
   ) {}
 
@@ -181,7 +184,7 @@ export class PassengerGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   /** Verifica vía gRPC que el viaje exista, sea de este pasajero y siga activo. */
   private async authorizeTrip(user: AuthenticatedUser, tripId: string): Promise<void> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new Error('viaje no encontrado');
     if (trip.passengerId !== user.userId) throw new Error('el viaje no pertenece al pasajero');

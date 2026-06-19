@@ -141,6 +141,8 @@ export function RegistrationDocumentSheet({
   // si vence). La fuente es el mapa tipado y exhaustivo, no flags sueltos.
   const formConfig = REGISTRATION_DOCUMENT_FORM_CONFIG[documentType];
   const requireExpiry = formConfig.hasExpiry;
+  // La foto del vehículo (VEHICLE_PHOTO) NO tiene número: el campo no se muestra ni se exige.
+  const hasNumber = formConfig.hasNumber;
 
   // Acota el picker de vencimiento a partir de hoy (un documento vencido no es válido).
   const today = new Date();
@@ -177,10 +179,10 @@ export function RegistrationDocumentSheet({
 
   const numberError = useMemo(
     () =>
-      touched && documentNumber.trim().length === 0
+      touched && hasNumber && documentNumber.trim().length === 0
         ? t('registration.documents.numberRequired')
         : undefined,
-    [touched, documentNumber, t],
+    [touched, hasNumber, documentNumber, t],
   );
 
   const expiryError = useMemo(() => {
@@ -227,7 +229,7 @@ export function RegistrationDocumentSheet({
     if (!file) {
       return;
     }
-    if (documentNumber.trim().length === 0) {
+    if (hasNumber && documentNumber.trim().length === 0) {
       return;
     }
     const trimmedExpiry = expiry.trim();
@@ -239,7 +241,8 @@ export function RegistrationDocumentSheet({
       return;
     }
     onSubmit({
-      documentNumber: documentNumber.trim(),
+      // La foto no tiene número → '' (el backend lo acepta solo para VEHICLE_PHOTO, validación por tipo).
+      documentNumber: hasNumber ? documentNumber.trim() : '',
       ...(parsed ? { expiresAtIso: parsed.iso } : {}),
       file,
     });
@@ -332,17 +335,21 @@ export function RegistrationDocumentSheet({
           />
         </View>
 
-        <TextField
-          label={t(formConfig.numberLabelKey)}
-          placeholder={t(formConfig.numberPlaceholderKey)}
-          value={documentNumber}
-          onChangeText={setDocumentNumber}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          editable={!captureDisabled}
-          error={numberError}
-          required
-        />
+        {/* El campo de número se muestra SOLO para documentos numerados (licencia/SOAT/tarjeta). La foto
+            del vehículo (VEHICLE_PHOTO) es solo imagen: no se pide número. */}
+        {hasNumber ? (
+          <TextField
+            label={t(formConfig.numberLabelKey ?? '')}
+            placeholder={t(formConfig.numberPlaceholderKey ?? '')}
+            value={documentNumber}
+            onChangeText={setDocumentNumber}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            editable={!captureDisabled}
+            error={numberError}
+            required
+          />
+        ) : null}
         {/* El vencimiento se pide SOLO para documentos que vencen (licencia/SOAT). La tarjeta de
             propiedad no vence en Perú: no se muestra el campo ni se exige, y se envía sin `expiresAt`. */}
         {formConfig.hasExpiry ? (

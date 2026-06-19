@@ -7,6 +7,7 @@ import {
   INTERNAL_IDENTITY_SIG_HEADER,
   anonymousIdentity,
   signInternalIdentity,
+  type InternalAudience,
 } from '@veo/auth';
 import {
   BIOMETRIC_PROVIDER,
@@ -77,6 +78,12 @@ interface VerifyServiceResponse {
   reason: string;
 }
 
+/**
+ * Audiencia de RIEL de la llamada a biometric-service: es de SISTEMA (server-to-server, sin usuario
+ * final ni BFF detrás) → `service-rail`. Const TIPADA (InternalAudience), nunca string mágico.
+ */
+const SERVICE_RAIL: InternalAudience = 'service-rail';
+
 /** Live: llama al biometric-service PROPIO (Python/ONNX) por HTTP con su contrato real. */
 export class BiometricServiceClient implements BiometricProvider {
   constructor(
@@ -90,8 +97,9 @@ export class BiometricServiceClient implements BiometricProvider {
   /**
    * Firma la identidad interna (HMAC, esquema @veo/auth `signInternalIdentity`) y propaga los headers
    * `x-veo-identity` + `x-veo-identity-sig` — el biometric-service ahora EXIGE este gate (server-to-server).
-   * Usamos `anonymousIdentity('driver')`: la llamada es de servicio (el driverId real va en el body), así
-   * que basta probar que el caller conoce el secreto compartido + frescura (anti-replay 30s). No reusamos
+   * Usamos `anonymousIdentity('driver')` con audiencia `service-rail`: la llamada es de servicio (el
+   * driverId real va en el body), así que basta probar que el caller conoce el secreto compartido +
+   * frescura (anti-replay 30s) + el riel de sistema (aud verificada per-service, fail-closed). No reusamos
    * `@veo/rpc` InternalRestClient para conservar el patrón de timeout con `AbortSignal.timeout` (sin leak
    * de timer) y no acoplar este puerto al cliente gRPC.
    */
@@ -99,6 +107,7 @@ export class BiometricServiceClient implements BiometricProvider {
     const { header, signature } = signInternalIdentity(
       anonymousIdentity('driver'),
       this.internalSecret,
+      SERVICE_RAIL,
     );
     let res: Response;
     try {

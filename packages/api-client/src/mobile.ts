@@ -1814,17 +1814,32 @@ export const driverDocument = z.object({
   simpleStatus: driverDocumentSimpleStatus,
   expiresAt: z.string().nullable(),
   ok: z.boolean(),
+  // M5: motivo del rechazo que escribió el operador; el conductor lo VE para saber qué corregir. null
+  // si el documento no está rechazado o el operador no dio motivo (degradación honesta, nunca falso).
+  rejectionReason: z.string().nullable(),
 });
 export type DriverDocument = z.infer<typeof driverDocument>;
 
-/** POST /drivers/me/documents → body. Registra/actualiza un documento (queda en revisión manual). */
-export const addDocumentRequest = z.object({
-  type: z.string().min(1),
-  documentNumber: z.string().min(1),
-  issuedAt: z.string().optional(),
-  expiresAt: z.string().optional(),
-  fileS3Key: z.string().optional(),
-});
+/** Espeja `FleetDocumentType.VEHICLE_PHOTO` de @veo/shared-types: el único tipo SIN número (es una foto). */
+const FLEET_DOC_VEHICLE_PHOTO = 'VEHICLE_PHOTO';
+
+/**
+ * POST /drivers/me/documents → body. Registra/actualiza un documento (queda en revisión manual).
+ * `documentNumber` es requerido POR TIPO: la foto del vehículo (`VEHICLE_PHOTO`) no tiene número; el
+ * resto de los documentos (licencia/SOAT/tarjeta/…) SÍ lo exigen. El `refine` lo valida contextual.
+ */
+export const addDocumentRequest = z
+  .object({
+    type: z.string().min(1),
+    documentNumber: z.string().optional(),
+    issuedAt: z.string().optional(),
+    expiresAt: z.string().optional(),
+    fileS3Key: z.string().optional(),
+  })
+  .refine((d) => d.type === FLEET_DOC_VEHICLE_PHOTO || (d.documentNumber?.length ?? 0) >= 1, {
+    message: 'documentNumber requerido para este tipo de documento',
+    path: ['documentNumber'],
+  });
 export type AddDocumentRequest = z.infer<typeof addDocumentRequest>;
 
 /**

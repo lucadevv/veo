@@ -6,7 +6,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { DriverEnrichmentService } from './driver-enrichment.service';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { DomainError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import {
   canAccessLiveCabin,
@@ -98,6 +104,7 @@ export class TripsService {
     @Inject(REST_RATING) private readonly ratingRest: InternalRestClient,
     @Inject(LIVEKIT) private readonly livekit: LiveKitConfig,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly enrichment: DriverEnrichmentService,
   ) {}
@@ -160,7 +167,7 @@ export class TripsService {
     } catch {
       // Redis no disponible: caemos a la verificación autoritativa (no bypass).
     }
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const me = await this.identityGrpc.call<UserReply>('GetUser', { id: user.userId }, meta);
     if (me.kycStatus !== KycStatus.VERIFIED) {
       throw new KycRequiredError();
@@ -238,7 +245,7 @@ export class TripsService {
     cursor?: string,
     limit?: number,
   ): Promise<TripHistoryPageView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const page = await this.tripGrpc.call<PassengerTripsReply>(
       'ListPassengerTrips',
       // passengerId del JWT, NUNCA del query (anti-IDOR). El limit lo CLAMPea trip-service.
@@ -261,7 +268,7 @@ export class TripsService {
 
   /** Detalle agregado del viaje: trip + conductor (identity) + rating + vehículo (fleet). */
   async getTripDetail(user: AuthenticatedUser, tripId: string): Promise<TripDetailView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -277,7 +284,7 @@ export class TripsService {
    * trip-service (LIVE_STATES). Sin viaje activo NO es error: devolvemos null (la app muestra el home).
    */
   async getActiveTrip(user: AuthenticatedUser): Promise<TripDetailView | null> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'GetActiveTrip',
       { passengerId: user.userId },
@@ -295,7 +302,7 @@ export class TripsService {
    * activa (conductor/vehículo/rating, best-effort). Sin pendiente NO es error: devolvemos null (204).
    */
   async getPendingSettlement(user: AuthenticatedUser): Promise<TripDetailView | null> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'GetPendingSettlementTrip',
       { passengerId: user.userId },
@@ -313,7 +320,7 @@ export class TripsService {
    */
   async close(user: AuthenticatedUser, tripId: string): Promise<TripDetailView> {
     await this.assertOwnsTrip(user, tripId);
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'CloseTripByPassenger',
       { id: tripId, passengerId: user.userId },
@@ -415,7 +422,7 @@ export class TripsService {
    * viaje ajeno por id.
    */
   async getTripState(user: AuthenticatedUser, tripId: string): Promise<TripStateView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -436,7 +443,7 @@ export class TripsService {
     if (!liveKitEnabled(this.livekit)) {
       throw new NotFoundError('El video del habitáculo no está disponible');
     }
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -507,7 +514,7 @@ export class TripsService {
    * que un reintento del cliente con la misma propina sea idempotente (no la duplica).
    */
   async tip(user: AuthenticatedUser, tripId: string, tipCents: number): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -550,7 +557,7 @@ export class TripsService {
 
   /** Verifica que el viaje exista y pertenezca al pasajero autenticado (anti-IDOR). Lanza si no. */
   private async assertOwnsTrip(user: AuthenticatedUser, tripId: string): Promise<void> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -570,7 +577,7 @@ export class TripsService {
       identity: user,
     });
     // BE-1 · enriquecer cada oferta con rating + vehículo del conductor (gRPC a rating/fleet, cacheado).
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const offers = await Promise.all(
       view.offers.map(async (o) => ({ ...o, ...(await this.enrichment.enrich(o.driverId, meta)) })),
     );

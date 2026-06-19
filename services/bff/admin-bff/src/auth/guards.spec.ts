@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { RolesGuard, StepUpMfaGuard, type AuthenticatedUser } from '@veo/auth';
@@ -42,22 +42,36 @@ describe('RolesGuard (RBAC)', () => {
 });
 
 describe('StepUpMfaGuard', () => {
+  // El step-up SOLO endurece en entorno ENDURECIDO (isHardenedEnv = NODE_ENV=production: preview+prod).
+  // En dev/local se RELAJA (menos fricción). Los casos de enforcement fijan el entorno endurecido.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('permite cuando no se exige step-up', () => {
     const guard = new StepUpMfaGuard(reflectorReturning(false));
     expect(guard.canActivate(ctxWithUser(financeUser))).toBe(true);
   });
 
-  it('rechaza si se exige step-up y la MFA no es fresca', () => {
+  it('rechaza si se exige step-up y la MFA no es fresca (entorno endurecido)', () => {
+    vi.stubEnv('NODE_ENV', 'production');
     const guard = new StepUpMfaGuard(reflectorReturning(true));
     expect(() => guard.canActivate(ctxWithUser(financeUser))).toThrow(ForbiddenError);
   });
 
-  it('permite si se exige step-up y la MFA es reciente', () => {
+  it('permite si se exige step-up y la MFA es reciente (entorno endurecido)', () => {
+    vi.stubEnv('NODE_ENV', 'production');
     const guard = new StepUpMfaGuard(reflectorReturning(true));
     const fresh: AuthenticatedUser = {
       ...financeUser,
       mfaVerifiedAt: Math.floor(Date.now() / 1000),
     };
     expect(guard.canActivate(ctxWithUser(fresh))).toBe(true);
+  });
+
+  it('en DEV (no endurecido) se RELAJA: permite aunque se exija step-up sin MFA fresca', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    const guard = new StepUpMfaGuard(reflectorReturning(true));
+    expect(guard.canActivate(ctxWithUser(financeUser))).toBe(true);
   });
 });

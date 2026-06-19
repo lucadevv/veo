@@ -16,6 +16,7 @@ export type Permission =
   | 'drivers:view'
   | 'drivers:approve'
   | 'drivers:suspend'
+  | 'drivers:delete'
   | 'operators:view'
   | 'operators:create'
   | 'panics:view'
@@ -57,6 +58,9 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'drivers:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   // ops.controller drivers/:id/suspend: suspensión manual (SAFETY). Mismos roles que approve/reject.
   'drivers:suspend': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // ops.controller DELETE drivers/:id: borrado en cascada del conductor (irreversible). SOLO SUPERADMIN +
+  // step-up MFA fresca (el bff revalida @Roles(SUPERADMIN) + @RequireStepUpMfa; la UI solo refleja).
+  'drivers:delete': [SUPERADMIN],
   // ops.controller GET operators + operators/:id/reinvite|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
   'operators:view': [ADMIN, SUPERADMIN],
   // ops.controller POST operators (crear operador con roles → INVITED + link de invitación; step-up MFA).

@@ -341,7 +341,8 @@ export class DriversService {
     identity: AuthenticatedUser,
     input: {
       type: string;
-      documentNumber: string;
+      // Opcional POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no tiene número (validado aguas arriba).
+      documentNumber?: string;
       issuedAt?: string;
       expiresAt?: string;
       fileS3Key?: string;
@@ -356,8 +357,12 @@ export class DriversService {
     if (!driver.found) {
       throw new NotFoundError('No existe un perfil de conductor para este usuario');
     }
+    // Anti-IDOR: el driverId resuelto server-side se FIRMA en la identidad propagada (igual que
+    // dispatch/payments/trips), no solo en el body. fleet valida `ownerId === identity.driverId`
+    // (assertDriverOwnsResource), así un conductor no puede atribuir un doc a OTRO driverId.
+    const signedIdentity: AuthenticatedUser = { ...identity, driverId: driver.id };
     const created = await this.rest.client('fleet').post<FleetDocumentReply>('/documents', {
-      identity,
+      identity: signedIdentity,
       body: {
         ownerType: 'DRIVER',
         ownerId: driver.id,

@@ -292,35 +292,26 @@ describe('MapsService.quote', () => {
     // En FIXED no se exponen pista de puja.
     expect(out.bidFloorCents).toBeUndefined();
     expect(out.suggestedCents).toBeUndefined();
-    // Ola 2B: la primera opción es el tier MOTO (mototaxi, vehicleType MOTO). MISMOS montos que
-    // antes del ADR 013 (la política se MOVIÓ al catálogo, no cambió) + campos additive.
+    // Ola 1 "solo autos": la moto está DIFERIDA (defaultEnabled:false) → la primera opción del quote es
+    // el VEO Económico (auto). Montos deterministas (la política vive en el catálogo) + campos additive.
     expect(out.options[0]).toEqual({
-      id: 'veo_moto',
-      name: 'VEO Moto',
-      vehicleType: 'MOTO',
-      etaSeconds: 600,
-      priceCents: categoryFareCents(5000, 600, 0.55, 300),
-      // Sin paymentGrpc inyectado (spec construye con 3 args) → fetchCreditBalance devuelve 0 → sin preview.
-      creditAppliedCents: 0,
-      currency: 'PEN',
-      mode: 'FIXED',
-      labelKey: 'offering.veo_moto.name',
-      icon: 'moto',
-    });
-    // La opción económica (auto) sigue presente con su precio determinista (el precio firme).
-    const economico = out.options.find((o) => o.id === 'veo_economico');
-    expect(economico).toEqual({
       id: 'veo_economico',
       name: 'VEO Económico',
       vehicleType: 'CAR',
       etaSeconds: 600,
       priceCents: categoryFareCents(5000, 600, 1.0),
+      // Sin paymentGrpc inyectado (spec construye con 3 args) → fetchCreditBalance devuelve 0 → sin preview.
       creditAppliedCents: 0,
       currency: 'PEN',
       mode: 'FIXED',
       labelKey: 'offering.veo_economico.name',
       icon: 'car',
     });
+    // Otra opción de auto (confort) sigue presente con su precio determinista (el precio firme).
+    const confort = out.options.find((o) => o.id === 'veo_confort');
+    expect(confort?.vehicleType).toBe('CAR');
+    expect(confort?.priceCents).toBe(categoryFareCents(5000, 600, 1.25, 500));
+    expect(confort?.mode).toBe('FIXED');
     expect(out.options.every((o) => o.currency === 'PEN')).toBe(true);
     // Convierte lng→lon al pedir la ruta y pasa lat/lon del ORIGEN al resolver el modo.
     expect(fake.lastRoute?.origin).toEqual({ lat: -12.0464, lon: -77.0428 });
@@ -333,9 +324,9 @@ describe('MapsService.quote', () => {
   // económica cara topa en el saldo). Sin paymentGrpc inyectado el campo es 0 (cubierto por el test FIXED).
   it('FIXED · enriquece cada opción con creditAppliedCents = min(saldo, priceCents) (server-side)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
-    const motoFare = categoryFareCents(5000, 600, 0.55, 300);
-    // Saldo que ALCANZA para topear la moto (más barata) pero NO la económica (más cara) → prueba ambos topes.
-    const balanceCents = motoFare + 1;
+    const ecoFare = categoryFareCents(5000, 600, 1.0);
+    // Saldo que ALCANZA para topear el económico (más barato) pero NO el confort (más caro) → prueba ambos topes.
+    const balanceCents = ecoFare + 1;
     const paymentGrpc = { call: async () => ({ balanceCents }) };
     const service = new MapsService(
       fake,
@@ -346,13 +337,13 @@ describe('MapsService.quote', () => {
     );
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
-    const moto = out.options.find((o) => o.id === 'veo_moto');
     const economico = out.options.find((o) => o.id === 'veo_economico');
+    const confort = out.options.find((o) => o.id === 'veo_confort');
 
-    // Saldo > tarifa moto → el crédito TOPA en la tarifa (no se descuenta más que el precio).
-    expect(moto?.creditAppliedCents).toBe(motoFare);
-    // Saldo < tarifa económica → el crédito TOPA en el saldo (no se aplica más de lo que hay).
-    expect(economico?.creditAppliedCents).toBe(balanceCents);
+    // Saldo > tarifa económica → el crédito TOPA en la tarifa (no se descuenta más que el precio).
+    expect(economico?.creditAppliedCents).toBe(ecoFare);
+    // Saldo < tarifa confort → el crédito TOPA en el saldo (no se aplica más de lo que hay).
+    expect(confort?.creditAppliedCents).toBe(balanceCents);
   });
 
   // S2 (M5) — un quote de RESERVA reenvía scheduledFor como `at` → el preview muestra el modo de la HORA
@@ -404,19 +395,19 @@ describe('MapsService.quote', () => {
       expect(o.bidFloorCents).toBe(700);
     }
 
-    // Y DIFIEREN entre ofertas (moto ×0.55 < económico ×1.0): no todas anclan al precio del auto.
-    const moto = out.options.find((o) => o.id === OfferingId.VEO_MOTO);
+    // Y DIFIEREN entre ofertas (económico ×1.0 < confort ×1.25): no todas anclan al mismo precio.
     const economico = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
-    expect(moto?.suggestedCents).toBeLessThan(economico?.suggestedCents ?? 0);
+    const confort = out.options.find((o) => o.id === OfferingId.VEO_CONFORT);
+    expect(economico?.suggestedCents).toBeLessThan(confort?.suggestedCents ?? 0);
   });
 
   it('ADR 010 §9.3 · PUJA: el piso es PER-OFERTA (override del admin gana; sin override cae al default)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
-    // Config del admin: moto S/3 (300), confort S/9 (900); el resto (económico/xl) cae al default S/7.
+    // Config del admin: económico S/3 (300), confort S/9 (900); el resto (xl) cae al default S/7.
     const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, 0, undefined, {
       defaultFloorCents: 700,
       overrides: [
-        { zone: 'GLOBAL', offeringId: OfferingId.VEO_MOTO, floorCents: 300 },
+        { zone: 'GLOBAL', offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
         { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
       ],
     });
@@ -425,9 +416,8 @@ describe('MapsService.quote', () => {
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
 
     const floorOf = (id: OfferingId) => out.options.find((o) => o.id === id)?.bidFloorCents;
-    expect(floorOf(OfferingId.VEO_MOTO)).toBe(300); // override
+    expect(floorOf(OfferingId.VEO_ECONOMICO)).toBe(300); // override
     expect(floorOf(OfferingId.VEO_CONFORT)).toBe(900); // override
-    expect(floorOf(OfferingId.VEO_ECONOMICO)).toBe(700); // sin override → default
     expect(floorOf(OfferingId.VEO_XL)).toBe(700); // sin override → default
   });
 
@@ -491,8 +481,8 @@ describe('MapsService.quote', () => {
     const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
     expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 2.0, 500)); // efectivo, no el de código (1.0)
     // Otra oferta sin override conserva su pricing de código.
-    const moto = out.options.find((o) => o.id === OfferingId.VEO_MOTO);
-    expect(moto?.priceCents).toBe(categoryFareCents(5000, 600, 0.55, 300));
+    const confort = out.options.find((o) => o.id === OfferingId.VEO_CONFORT);
+    expect(confort?.priceCents).toBe(categoryFareCents(5000, 600, 1.25, 500));
   });
 
   it('B3 · el recargo de combustible (admin) se refleja en el priceCents del quote', async () => {
@@ -542,7 +532,7 @@ describe('MapsService.quote', () => {
     expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe(
       PricingMode.FIXED,
     ); // pin gana
-    expect(out.options.find((o) => o.id === OfferingId.VEO_MOTO)?.mode).toBe(PricingMode.PUJA); // sin pin → schedule
+    expect(out.options.find((o) => o.id === OfferingId.VEO_CONFORT)?.mode).toBe(PricingMode.PUJA); // sin pin → schedule
   });
 
   it('B1c · admin APAGÓ todo (vacío legítimo) → quote SIN opciones (≠ catálogo caído, que mostraría todas)', async () => {
@@ -607,16 +597,16 @@ describe('MapsService.quote', () => {
  * ADR 013 §1.3 (Lote C) · doble con una oferta RESTRINGIDA (solo FIXED) vía el seam protected
  * `quotedOfferings` — mismo patrón que `TripsService.resolveOffering`: el catálogo real aún no
  * tiene ofertas con `allowedModes ≠ [PUJA, FIXED]` y NO se inventa una entrada fantasma en
- * producción. Reusa `veo_moto` con los modos recortados.
+ * producción. Reusa `veo_confort` (auto operable) con los modos recortados (moto está diferida).
  */
-const RESTRICTED_FIXED_ONLY_MOTO: OfferingSpec = {
-  ...OFFERINGS[OfferingId.VEO_MOTO],
+const RESTRICTED_FIXED_ONLY: OfferingSpec = {
+  ...OFFERINGS[OfferingId.VEO_CONFORT],
   allowedModes: [PricingMode.FIXED],
 };
 
 class RestrictedCatalogMapsService extends MapsService {
   protected override quotedOfferings(): readonly OfferingSpec[] {
-    return [RESTRICTED_FIXED_ONLY_MOTO, OFFERINGS[OfferingId.VEO_ECONOMICO]];
+    return [RESTRICTED_FIXED_ONLY, OFFERINGS[OfferingId.VEO_ECONOMICO]];
   }
 }
 
@@ -662,7 +652,7 @@ describe('MapsService.quote · catálogo de offerings (ADR 013)', () => {
     expect(out.mode).toBe('PUJA');
     expect(out.bidFloorCents).toBe(DEFAULT_BID_FLOOR_CENTS);
     // La oferta restringida GANA con su modo preferido (allowedModes[0] = FIXED).
-    expect(out.options.find((o) => o.id === OfferingId.VEO_MOTO)?.mode).toBe('FIXED');
+    expect(out.options.find((o) => o.id === OfferingId.VEO_CONFORT)?.mode).toBe('FIXED');
     // La oferta que sí permite el modo del schedule lo refleja tal cual.
     expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe('PUJA');
   });

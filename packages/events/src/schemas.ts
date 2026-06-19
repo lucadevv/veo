@@ -67,6 +67,29 @@ export const driverSuspended = z.object({
   reason: z.string(),
   suspendedAt: z.string(),
 });
+/// El conductor RECHAZADO corrigió sus datos y REENVIÓ a revisión (BR-I01). identity-service lo emite por
+/// OUTBOX en la MISMA tx que lleva backgroundCheckStatus REJECTED→PENDING + KYC REJECTED→PENDING y limpia el
+/// motivo. Downstream: admin-bff proyecta status=PENDING en el read-model → el conductor reaparece como
+/// PENDIENTE (no stale en REJECTED) cerrando el double-source. `resubmittedAt` ISO-8601 del reenvío.
+export const driverResubmitted = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  resubmittedAt: z.string(),
+});
+/// El operador LEVANTÓ una suspensión DISCIPLINARIA del conductor desde el panel (la inversa de
+/// driver.suspended). identity-service lo emite por OUTBOX en la MISMA tx que el CAS que limpia
+/// `Driver.suspendedAt` + `suspensionSource` (así nunca hay reactivación sin evento ni evento sin
+/// reactivación). FAIL-CLOSED: solo se emite para suspensiones DISCIPLINARY (las que originó el operador);
+/// una suspensión por documento vencido (DOCUMENT_EXPIRED, vía fleet.driver_suspended) NO se puede
+/// reactivar a mano y por ende NUNCA emite este evento. Downstream: audit-service (traza inmutable de la
+/// decisión) y admin-bff (proyecta status de SUSPENDED de vuelta a ACTIVE en el read-model para que el
+/// panel lo refleje). La reactivación SOLO limpia la suspensión: NO devuelve al conductor a AVAILABLE — el
+/// gate biométrico de inicio de turno (BR-I02) sigue siendo el que lo habilita a operar. `reactivatedAt`
+/// ISO-8601 del momento efectivo de la reactivación.
+export const driverReactivated = z.object({
+  driverId: z.string(),
+  reactivatedAt: z.string(),
+});
 export const userKycVerified = z.object({
   userId: z.string(),
   kycStatus: z.string(),
@@ -893,6 +916,8 @@ export const EVENT_SCHEMAS = {
   'driver.verified': driverVerified,
   'driver.rejected': driverRejected,
   'driver.suspended': driverSuspended,
+  'driver.resubmitted': driverResubmitted,
+  'driver.reactivated': driverReactivated,
   'biometric.failed': biometricFailed,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,

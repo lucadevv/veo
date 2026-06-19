@@ -7,6 +7,7 @@ import {
   IsISO8601,
   IsInt,
   IsNumber,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -14,6 +15,7 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { FleetDocumentType, VehicleType } from '@veo/shared-types';
 
@@ -88,9 +90,13 @@ export class AddDocumentDto {
   @IsString()
   type!: string;
 
-  @ApiProperty({ description: 'Número del documento' })
+  // Número requerido POR TIPO: la foto del vehículo (VEHICLE_PHOTO) es una foto sin número; el resto
+  // (licencia/SOAT/tarjeta/…) lo exige. @ValidateIf saltea la validación solo para la foto.
+  @ApiPropertyOptional({ description: 'Número del documento (requerido salvo VEHICLE_PHOTO)' })
+  @ValidateIf((o: AddDocumentDto) => o.type !== FleetDocumentType.VEHICLE_PHOTO)
   @IsString()
-  documentNumber!: string;
+  @IsNotEmpty()
+  documentNumber?: string;
 
   @ApiPropertyOptional({ description: 'Fecha de emisión (ISO-8601)' })
   @IsOptional()
@@ -189,6 +195,8 @@ export interface DriverDocumentDetail {
   expiresAt: string | null;
   /** true si el documento está vigente (VALID o EXPIRING_SOON). */
   ok: boolean;
+  /** M5: motivo del rechazo (operador); null si no rechazado o sin motivo. El conductor lo VE. */
+  rejectionReason: string | null;
 }
 
 /**

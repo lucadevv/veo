@@ -35,7 +35,9 @@ interface PersistedRegistration {
 
 const emptyPersonal: PersonalData = { fullName: '', dni: '', birthdate: '' };
 const emptyVehicle: VehicleData = {
-  type: VehicleType.MOTO,
+  // "Solo autos" (Ola 1): el alta arranca en CAR. La clase real OPERABLE la gobierna el catálogo
+  // (OPERABLE_VEHICLE_CLASSES) vía el selector; este es solo el valor semilla del wizard.
+  type: VehicleType.CAR,
   plate: '',
   year: '',
   modelSpecId: '',
@@ -46,6 +48,9 @@ const initialDocuments: RegistrationDocument[] = [
   { type: 'LICENSE', status: 'pending' },
   { type: 'SOAT', status: 'pending' },
   { type: 'VEHICLE_REGISTRATION', status: 'pending' },
+  // Foto del vehículo (Ola 1): se captura en el paso 2 (Vehículo) pero se trackea como documento
+  // (reusa el pipeline de subida y aparece en el visor del admin). Requerida para aprobar.
+  { type: 'VEHICLE_PHOTO', status: 'pending' },
 ];
 
 export interface RegistrationState {
@@ -157,9 +162,16 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     },
 
     setDocumentStatus: (type, status) => {
-      set((state) => ({
-        documents: state.documents.map((doc) => (doc.type === type ? { ...doc, status } : doc)),
-      }));
+      // UPSERT: actualiza la entrada si existe, o la agrega. Robusto ante snapshots persistidos viejos
+      // que no incluyen un tipo nuevo (p. ej. VEHICLE_PHOTO en un wizard a medias de una versión previa).
+      set((state) => {
+        const exists = state.documents.some((doc) => doc.type === type);
+        return {
+          documents: exists
+            ? state.documents.map((doc) => (doc.type === type ? { ...doc, status } : doc))
+            : [...state.documents, { type, status }],
+        };
+      });
       persist();
     },
 

@@ -4,7 +4,7 @@ import { ApiError } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
-import { mapProfileToRegistrationStatus } from '../../domain';
+import { isAwaitingReview, mapProfileToRegistrationStatus } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 
 /** `true` si el error es un 404 del backend: el conductor aún no existe (alta no iniciada). */
@@ -14,6 +14,13 @@ function isNotFound(error: unknown): boolean {
 
 /** Clave de caché del perfil usado SOLO para resolver el estado del alta (aislada del ProfileScreen). */
 export const REGISTRATION_GATE_QUERY_KEY = ['registration', 'gate', 'me'] as const;
+
+/**
+ * Intervalo de sondeo (ms) del gate como RED DE SEGURIDAD del push: el aviso de aprobación/rechazo es
+ * best-effort (puede no llegar). Mientras el alta está EN REVISIÓN, sondeamos cada 60s para que el
+ * conductor pase a aprobado/rechazado SÍ o SÍ. Para al resolverse; no corre en background (sin batería).
+ */
+const REGISTRATION_GATE_POLL_MS = 60_000;
 
 export interface RegistrationGate {
   /**
@@ -60,6 +67,15 @@ export function useRegistrationGate(): RegistrationGate {
     // errores reintentables (red / 5xx / 429, vía `ApiError.retryable`); cualquier 4xx termina ya.
     retry: (failureCount, error) =>
       error instanceof ApiError && error.retryable && failureCount < 2,
+    // RED DE SEGURIDAD del push (best-effort): mientras el alta está EN REVISIÓN, sondeá para que el
+    // conductor pase a aprobado/rechazado aunque el push no llegue. Para al resolverse (approved/rejected/
+    // not_started → false). No corre en background (default) → sin drenaje de batería.
+    refetchInterval: (query) => {
+      const profile = query.state.data;
+      return profile && isAwaitingReview(mapProfileToRegistrationStatus(profile))
+        ? REGISTRATION_GATE_POLL_MS
+        : false;
+    },
   });
 
   const { data, error, isError } = query;

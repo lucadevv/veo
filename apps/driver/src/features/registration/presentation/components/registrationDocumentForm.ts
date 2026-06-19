@@ -19,10 +19,16 @@ export type RegistrationDocumentFormType = RegistrationFleetDocumentType;
  *    guarda nullable — sin cambio de backend).
  */
 export interface RegistrationDocumentFormConfig {
-  /** Clave i18n de la etiqueta del campo de número (propia del tipo). */
-  readonly numberLabelKey: string;
-  /** Clave i18n del placeholder del campo de número (propia del tipo). */
-  readonly numberPlaceholderKey: string;
+  /**
+   * `true` si el documento tiene NÚMERO (licencia/SOAT/tarjeta). La foto del vehículo (VEHICLE_PHOTO)
+   * NO lo tiene: el sheet oculta el campo y NO lo exige. La validación del número es contextual por tipo
+   * (espeja el `@ValidateIf` del backend) — la foto se registra sin `documentNumber`.
+   */
+  readonly hasNumber: boolean;
+  /** Clave i18n de la etiqueta del campo de número (propia del tipo). Solo si `hasNumber`. */
+  readonly numberLabelKey?: string;
+  /** Clave i18n del placeholder del campo de número (propia del tipo). Solo si `hasNumber`. */
+  readonly numberPlaceholderKey?: string;
   /** `true` si el documento vence: el `DateField` de vencimiento se muestra y se exige. */
   readonly hasExpiry: boolean;
 }
@@ -38,21 +44,30 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
   RegistrationDocumentFormConfig
 > = {
   [FleetDocumentType.LICENSE_A1]: {
+    hasNumber: true,
     numberLabelKey: 'registration.documents.number.LICENSE_A1.label',
     numberPlaceholderKey: 'registration.documents.number.LICENSE_A1.placeholder',
     // La licencia de conducir vence.
     hasExpiry: true,
   },
   [FleetDocumentType.SOAT]: {
+    hasNumber: true,
     numberLabelKey: 'registration.documents.number.SOAT.label',
     numberPlaceholderKey: 'registration.documents.number.SOAT.placeholder',
     // El SOAT vence.
     hasExpiry: true,
   },
   [FleetDocumentType.PROPERTY_CARD]: {
+    hasNumber: true,
     numberLabelKey: 'registration.documents.number.PROPERTY_CARD.label',
     numberPlaceholderKey: 'registration.documents.number.PROPERTY_CARD.placeholder',
     // La tarjeta de propiedad NO vence en Perú: no se pide vencimiento ni se envía `expiresAt`.
+    hasExpiry: false,
+  },
+  [FleetDocumentType.VEHICLE_PHOTO]: {
+    // La foto del vehículo es solo una imagen: SIN número y SIN vencimiento. El sheet muestra únicamente
+    // la captura. Se registra sin `documentNumber` (validación contextual por tipo, espeja el backend).
+    hasNumber: false,
     hasExpiry: false,
   },
 };

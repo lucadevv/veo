@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useDrivers, useDriversPending } from '@/lib/api/queries';
 import type { DriverApproval, PendingDriver } from '@/lib/api/schemas';
@@ -8,7 +9,7 @@ import { dateTime } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
-import { Lock } from 'lucide-react';
+import { Eye, Lock } from 'lucide-react';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { useSession } from '@/lib/session-context';
@@ -17,6 +18,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PendingDriverActions } from '@/components/drivers/pending-driver-actions';
 import { RejectedDriverActions } from '@/components/drivers/rejected-driver-actions';
 import { ActiveDriverActions } from '@/components/drivers/active-driver-actions';
+
+/** Link al detalle de revisión (visor de documentos). Drill-down a /ops/drivers/:id, sin romper las acciones inline. */
+function ReviewLink({ id }: { id: string }) {
+  return (
+    <Link
+      href={`/ops/drivers/${id}`}
+      className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-ink transition-colors hover:bg-surface-2"
+    >
+      <Eye className="size-4" aria-hidden />
+      Revisar
+    </Link>
+  );
+}
 
 /** Columnas de la flota verificada (ACTIVE/ALL · read-model). Acción de SAFETY: suspender (aprobar/rechazar es del tab Pendientes). */
 const columns: ColumnDef<DriverApproval, unknown>[] = [
@@ -63,21 +77,24 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
     id: 'actions',
     header: 'Acciones',
     enableSorting: false,
-    cell: ({ row }) => <ActiveDriverActions driver={row.original} />,
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <ReviewLink id={row.original.id} />
+        <ActiveDriverActions driver={row.original} />
+      </div>
+    ),
   },
 ];
 
 /** Columnas de la COLA de pendientes de aprobación (identity pending-approval). */
 const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
   {
-    accessorKey: 'id',
+    accessorKey: 'fullName',
     header: 'Conductor',
     cell: ({ row }) => (
       <div className="flex flex-col">
-        <span className="font-mono text-xs text-ink">{row.original.id.slice(0, 8)}</span>
-        <span className="font-mono text-xs text-ink-muted">
-          usuario {row.original.userId.slice(0, 8)}
-        </span>
+        <span className="text-ink">{row.original.fullName ?? 'Sin nombre'}</span>
+        <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
       </div>
     ),
   },
@@ -92,7 +109,12 @@ const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
     id: 'actions',
     header: 'Acciones',
     enableSorting: false,
-    cell: ({ row }) => <PendingDriverActions driver={row.original} />,
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <ReviewLink id={row.original.id} />
+        <PendingDriverActions driver={row.original} />
+      </div>
+    ),
   },
 ];
 
@@ -127,13 +149,19 @@ const rejectedColumns: ColumnDef<DriverApproval, unknown>[] = [
     id: 'actions',
     header: 'Acciones',
     enableSorting: false,
-    cell: ({ row }) => <RejectedDriverActions driver={row.original} />,
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <ReviewLink id={row.original.id} />
+        <RejectedDriverActions driver={row.original} />
+      </div>
+    ),
   },
 ];
 
 export default function DriversPage() {
   const user = useSession();
-  const [tab, setTab] = useState('PENDING');
+  // Default a "Todos" (vista completa): el usuario no quiere arrancar en la cola de Pendientes.
+  const [tab, setTab] = useState('ALL');
   // La cola de pendientes viene de identity (pending-approval), NO del read-model (que solo tiene ACTIVE/SUSPENDED).
   const pending = useDriversPending();
   // El read-model sirve la flota verificada (ACTIVE) y el listado completo (ALL), paginado por cursor.
@@ -167,10 +195,10 @@ export default function DriversPage() {
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         <Tabs value={tab} onValueChange={setTab} className="pt-4">
           <TabsList>
-            <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
-            <TabsTrigger value="ACTIVE">Activos</TabsTrigger>
-            <TabsTrigger value="REJECTED">Rechazados</TabsTrigger>
             <TabsTrigger value="ALL">Todos</TabsTrigger>
+            <TabsTrigger value="ACTIVE">Activos</TabsTrigger>
+            <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
+            <TabsTrigger value="REJECTED">Rechazados</TabsTrigger>
           </TabsList>
 
           <TabsContent value="PENDING">

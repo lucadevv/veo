@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsISO8601, IsOptional, IsString, Length } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional, IsString, Length, ValidateIf } from 'class-validator';
 import { FleetDocumentType } from '@veo/shared-types';
 import { FleetOwnerType } from '../../generated/prisma';
 
@@ -16,10 +16,12 @@ export class CreateDocumentDto {
   @IsEnum(FleetDocumentType)
   type!: FleetDocumentType;
 
-  @ApiProperty({ example: 'Q-12345678' })
+  // Requerido POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no tiene número; el resto (licencia/SOAT/…) sí.
+  @ApiPropertyOptional({ example: 'Q-12345678', description: 'Número (requerido salvo VEHICLE_PHOTO)' })
+  @ValidateIf((o: CreateDocumentDto) => o.type !== FleetDocumentType.VEHICLE_PHOTO)
   @IsString()
   @Length(1, 60)
-  documentNumber!: string;
+  documentNumber?: string;
 
   @ApiPropertyOptional({ example: '2024-01-15T00:00:00.000Z' })
   @IsOptional()
@@ -49,4 +51,12 @@ export class ReviewDocumentDto {
   })
   @IsEnum(ReviewDecision)
   decision!: ReviewDecision;
+
+  // M5: motivo OBLIGATORIO cuando se RECHAZA — el conductor lo necesita para saber qué corregir; un rechazo
+  // sin motivo derrota el propósito. @ValidateIf lo exige SOLO en REJECTED (en VALID se omite y se ignora).
+  @ApiPropertyOptional({ description: 'Motivo del rechazo (OBLIGATORIO si REJECTED); visible para el conductor' })
+  @ValidateIf((o: ReviewDocumentDto) => o.decision === ReviewDecision.REJECTED)
+  @IsString()
+  @Length(1, 500)
+  reason?: string;
 }
