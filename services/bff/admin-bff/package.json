@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:int": "RUN_INTEGRATION=1 vitest run src/**/*.int.spec.ts",
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
@@ -52,6 +53,7 @@
     "@types/cookie-parser": "^1.4.7",
     "@types/node": "^20.16.10",
     "rimraf": "^6.0.1",
+    "testcontainers": "^10.13.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vitest": "^2.1.2"
