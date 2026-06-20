@@ -2,9 +2,9 @@
  * StepUpMfaGuard — exige verificación MFA fresca (TOTP) para acciones marcadas con @RequireStepUpMfa
  * (acceso a video, gestión RBAC, payouts > S/5K — BR-S07).
  */
-import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import { Injectable, Inject, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ForbiddenError, isHardenedEnv } from '@veo/utils';
+import { ForbiddenError, isHardenedEnv, CLOCK, type Clock } from '@veo/utils';
 import { REQUIRE_MFA_KEY } from '../decorators.js';
 import { isMfaFresh } from '../totp.js';
 import type { AuthenticatedUser } from '../jwt.js';
@@ -14,7 +14,10 @@ export class StepUpMfaGuard implements CanActivate {
   /** Antigüedad máxima de la verificación MFA en segundos. */
   private readonly maxAgeSec = 300;
 
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const required = this.reflector.getAllAndOverride<boolean>(REQUIRE_MFA_KEY, [
@@ -29,7 +32,7 @@ export class StepUpMfaGuard implements CanActivate {
     if (!isHardenedEnv()) return true;
 
     const req = context.switchToHttp().getRequest<{ user?: AuthenticatedUser }>();
-    if (!isMfaFresh(req.user?.mfaVerifiedAt, this.maxAgeSec)) {
+    if (!isMfaFresh(req.user?.mfaVerifiedAt, this.maxAgeSec, this.clock.now())) {
       throw new ForbiddenError('Se requiere verificación MFA reciente (step-up)', {
         maxAgeSec: this.maxAgeSec,
       });

@@ -6,6 +6,7 @@
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { CLOCK, SystemClock } from '@veo/utils';
 import {
   JwtService,
   RedisRefreshTokenStore,
@@ -84,6 +85,7 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
     internalSecretProvider,
     { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
+    { provide: CLOCK, useValue: new SystemClock() },
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,
@@ -96,6 +98,7 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
     RedisRefreshTokenStore,
     INTERNAL_IDENTITY_SECRET,
     INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+    CLOCK,
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,
