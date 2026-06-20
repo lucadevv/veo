@@ -12,8 +12,11 @@ import { useResubmitRegistration } from '../hooks/useResubmitRegistration';
 import { IconLifebuoy } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { env } from '../../../../core/config/env';
+import { correctionStepForRejectedDocTypes, RegistrationStep } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
-import { VeoWordmark, hexAlpha } from '../components';
+import { useRegistrationExit } from '../hooks/useRegistrationExit';
+import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
+import { RegistrationExitSheet, VeoWordmark, hexAlpha } from '../components';
 
 /** Ilustración de alerta (line art) para la pantalla de rechazo. */
 function RejectGlyph({ color }: { color: string }): React.JSX.Element {
@@ -39,8 +42,13 @@ export const RejectedScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
-  const setStatus = useRegistrationStore((s) => s.setStatus);
+  const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   const resubmit = useResubmitRegistration();
+
+  // Pantalla RAÍZ del estado `rejected`: además de corregir/reenviar, el conductor debe poder salir.
+  // Reusa el mismo logout/clearSession + guard del back de hardware (que de otro modo cerraría la app).
+  const exit = useRegistrationExit();
+  useRegistrationExitGuard(exit.handleHardwareBack);
 
   // El motivo viene del perfil cacheado por el gate (GET /drivers/me); null si no se dio motivo.
   const profile = queryClient.getQueryData<DriverProfile>(REGISTRATION_GATE_QUERY_KEY);
@@ -55,8 +63,16 @@ export const RejectedScreen = (): React.JSX.Element => {
   );
 
   const onFix = () => {
-    // Vuelve al wizard para corregir: marca `in_progress` (el RootNavigator conmuta a Registration).
-    setStatus('in_progress');
+    // Vuelve al wizard para corregir. `setCurrentStep` ya marca `in_progress` (el RootNavigator
+    // conmuta a Registration) Y fija el paso inicial del wizard (`RegistrationNavigator` lo lee del
+    // store). Antes solo cambiaba el status y reabría en el `currentStep` persistido (típicamente 4 =
+    // KYC), desorientando al conductor. Ahora derivamos el PRIMER paso a corregir del motivo real:
+    // si hay documentos rechazados, al paso que los captura (foto→Vehículo, resto→Documentos); si el
+    // rechazo es de antecedentes/KYC (sin documento derivable), caemos al paso 1 para re-recorrer en
+    // orden en vez de aterrizar en el último paso persistido.
+    const rejectedTypes = rejectedDocs.map((doc) => doc.type);
+    const targetStep = correctionStepForRejectedDocTypes(rejectedTypes) ?? RegistrationStep.PERSONAL_DATA;
+    setCurrentStep(targetStep);
   };
 
   const onContactSupport = () => {
@@ -64,6 +80,7 @@ export const RejectedScreen = (): React.JSX.Element => {
   };
 
   return (
+    <>
     <SafeScreen
       scroll
       footer={
@@ -87,6 +104,13 @@ export const RejectedScreen = (): React.JSX.Element => {
             fullWidth
             leftIcon={<IconLifebuoy size={18} color={theme.colors.accent} strokeWidth={2} />}
             onPress={onContactSupport}
+          />
+          <Button
+            label={t('registration.exit')}
+            variant="ghost"
+            fullWidth
+            loading={exit.isLoggingOut}
+            onPress={exit.requestExit}
           />
         </View>
       }
@@ -172,6 +196,8 @@ export const RejectedScreen = (): React.JSX.Element => {
         ) : null}
       </View>
     </SafeScreen>
+    <RegistrationExitSheet exit={exit} />
+    </>
   );
 };
 

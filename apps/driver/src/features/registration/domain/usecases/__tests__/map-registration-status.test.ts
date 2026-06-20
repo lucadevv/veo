@@ -20,6 +20,12 @@ function profile(opts: {
   kycStatus: string;
   backgroundCheckStatus: string;
   docs: DocSpec[];
+  /**
+   * ¿El conductor enroló su biometría facial? Eje SEPARADO de los documentos. Default `true` para que
+   * los casos "envió todo" lleguen a `in_review` sin ruido; los tests del gate biométrico lo setean
+   * explícito a `false`.
+   */
+  biometricEnrolled?: boolean;
 }): DriverProfileView {
   const documents = opts.docs.map((d) => ({
     type: d.type,
@@ -51,6 +57,7 @@ function profile(opts: {
       rejected,
       submittedAllRequired,
       allApproved,
+      biometricEnrolled: opts.biometricEnrolled ?? true,
     },
   };
 }
@@ -118,6 +125,26 @@ describe('mapProfileToRegistrationStatus', () => {
       ],
     });
     expect(mapProfileToRegistrationStatus(p)).toBe('rejected');
+  });
+
+  it('GATE BIOMÉTRICO: docs completos pero biometricEnrolled=false ⇒ NO in_review (in_progress, vuelve al wizard KYC)', () => {
+    const p = profile({
+      kycStatus: 'VERIFIED',
+      backgroundCheckStatus: 'PENDING',
+      docs: allDocs(FleetDocumentStatus.PENDING_REVIEW),
+      biometricEnrolled: false,
+    });
+    expect(mapProfileToRegistrationStatus(p)).toBe('in_progress');
+  });
+
+  it('GATE BIOMÉTRICO: docs completos + biometricEnrolled=true ⇒ in_review', () => {
+    const p = profile({
+      kycStatus: 'VERIFIED',
+      backgroundCheckStatus: 'PENDING',
+      docs: allDocs(FleetDocumentStatus.PENDING_REVIEW),
+      biometricEnrolled: true,
+    });
+    expect(mapProfileToRegistrationStatus(p)).toBe('in_review');
   });
 
   it('KYC rechazado ⇒ rejected aunque los documentos estén enviados', () => {

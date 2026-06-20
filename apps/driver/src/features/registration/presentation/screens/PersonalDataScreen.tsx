@@ -8,15 +8,26 @@ import { Reveal } from '../../../../shared/presentation/components/motion';
 import { DateField } from '../../../../shared/presentation/components/DateField';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
-import { PersonalDataValidationError, type PersonalDataErrors } from '../../domain';
+import {
+  PersonalDataValidationError,
+  maxBirthDate,
+  minBirthDate,
+  type PersonalDataErrors,
+} from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useUpdatePersonalData } from '../hooks/useRegistrationWizard';
-import { RegistrationField, RegistrationHeader, RegistrationProgress } from '../components';
+import { useRegistrationExit } from '../hooks/useRegistrationExit';
+import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
+import {
+  RegistrationExitSheet,
+  RegistrationField,
+  RegistrationHeader,
+  RegistrationProgress,
+  ScanDniSheet,
+} from '../components';
+import type { DniAutofillResult } from '../hooks/useScanDni';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
-
-/** Año mínimo de nacimiento aceptado (coincide con MIN_BIRTH_YEAR del dominio: evita fechas absurdas). */
-const MIN_BIRTHDATE = new Date(1920, 0, 1, 12, 0, 0, 0);
 
 /** Paso 1 del alta: datos personales como aparecen en el DNI (drv-04). PATCH /drivers/me/personal. */
 export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
@@ -27,24 +38,59 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   const updatePersonalData = useUpdatePersonalData();
 
+  // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación), así que
+  // es un dead-end sin esto. El confirm + logout se reusa vía `useRegistrationExit`; el guard intercepta
+  // el back de hardware de Android (que de otro modo cerraría la app) y lo redirige al mismo confirm.
+  const exit = useRegistrationExit();
+  useRegistrationExitGuard(exit.handleHardwareBack);
+
   // Errores de validación por campo (códigos del dominio → mensajes) y error de servidor.
   const [errors, setErrors] = useState<PersonalDataErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
 
-  // Acota el picker de nacimiento a hoy (sin futuro); la regla dura vive en el dominio.
-  const today = new Date();
+  // Sheet de escaneo del DNI (sub-lote 3B) y los marcadores "Extraído de tu DNI — confirma" por campo.
+  // Un campo marcado significa que su valor vino del OCR; al editarlo a mano, el marcador se limpia (la
+  // corrección manual gana). El prellenado en sí es NO destructivo (solo escribe campos vacíos).
+  const [scanOpen, setScanOpen] = useState(false);
+  const [autoFields, setAutoFields] = useState<DniAutofillResult>({
+    fullName: false,
+    dni: false,
+    birthdate: false,
+  });
+
+  /** Marca qué campos prellenó el OCR del DNI (para mostrar el aviso de confirmación junto a cada uno). */
+  const onDniAutofill = (result: DniAutofillResult): void => {
+    setAutoFields((prev) => ({
+      fullName: prev.fullName || result.fullName,
+      dni: prev.dni || result.dni,
+      birthdate: prev.birthdate || result.birthdate,
+    }));
+  };
+
+  /** Limpia el marcador "extraído" de un campo cuando el conductor lo edita a mano. */
+  const clearAutoMark = (field: keyof DniAutofillResult): void => {
+    setAutoFields((prev) => (prev[field] ? { ...prev, [field]: false } : prev));
+  };
+
+  // Acota el picker a la ventana de edad válida [18, 100] años (BR-I04), derivada de la MISMA fuente
+  // que la validación de dominio para no quedar más laxa que el backend. La regla dura vive igual en
+  // el dominio; esto solo evita que el usuario pueda elegir una fecha fuera de rango.
+  const minBirthdate = minBirthDate();
+  const maxBirthdate = maxBirthDate();
 
   const canContinue =
     personal.fullName.trim().length > 0 &&
     personal.dni.trim().length > 0 &&
     personal.birthdate.trim().length > 0;
 
-  /** Actualiza un campo y limpia su error (validación inline al editar). */
+  /** Actualiza un campo, limpia su error (validación inline) y su marcador "extraído del DNI". */
   const update = (patch: Partial<typeof personal>, field: keyof PersonalDataErrors) => {
     setPersonal(patch);
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
+    // `PersonalDataErrors` y `DniAutofillResult` comparten las claves fullName/dni/birthdate.
+    clearAutoMark(field);
   };
 
   const onContinue = async () => {
@@ -74,9 +120,10 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   };
 
   return (
+    <>
     <SafeScreen
       scroll
-      header={<RegistrationHeader showLogo wings peru />}
+      header={<RegistrationHeader showLogo wings peru onExit={exit.requestExit} />}
       footer={
         <Button
           label={t('common.continue')}
@@ -106,6 +153,20 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
           </Text>
         </Reveal>
 
+        {/* Atajo PRINCIPAL: escanear el DNI (anverso + reverso). El OCR prellena estos campos de forma
+            NO destructiva (solo los vacíos) y sube el DNI; tipear a mano sigue siendo válido. */}
+        <Reveal delay={100} from="scale">
+          <Button
+            label={t('registration.personal.scanDni.cta')}
+            variant="secondary"
+            fullWidth
+            onPress={() => setScanOpen(true)}
+          />
+          <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
+            {t('registration.personal.scanDni.hint')}
+          </Text>
+        </Reveal>
+
         {serverError ? (
           <Reveal>
             <Banner
@@ -118,45 +179,73 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
 
         <View style={[styles.form, { gap: theme.spacing.lg }]}>
           <Reveal delay={120} from="scale">
-            <RegistrationField
-              label={t('registration.personal.nameLabel')}
-              placeholder={t('registration.personal.namePlaceholder')}
-              value={personal.fullName}
-              onChangeText={(text) => update({ fullName: text }, 'fullName')}
-              autoCapitalize="words"
-              textContentType="name"
-              error={fieldError('fullName')}
-              rightIcon={<IconAccount size={24} color={theme.colors.accent} strokeWidth={1.8} />}
-            />
+            <View style={styles.fieldGroup}>
+              <RegistrationField
+                label={t('registration.personal.nameLabel')}
+                placeholder={t('registration.personal.namePlaceholder')}
+                value={personal.fullName}
+                onChangeText={(text) => update({ fullName: text }, 'fullName')}
+                autoCapitalize="words"
+                textContentType="name"
+                error={fieldError('fullName')}
+                rightIcon={<IconAccount size={24} color={theme.colors.accent} strokeWidth={1.8} />}
+              />
+              {autoFields.fullName && !fieldError('fullName') ? (
+                <Text variant="footnote" color="inkSubtle">
+                  {t('registration.personal.scanDni.fieldExtracted')}
+                </Text>
+              ) : null}
+            </View>
           </Reveal>
 
           <Reveal delay={160} from="scale">
-            <RegistrationField
-              label={t('registration.personal.dniLabel')}
-              placeholder={t('registration.personal.dniPlaceholder')}
-              value={personal.dni}
-              onChangeText={(text) => update({ dni: text }, 'dni')}
-              keyboardType="number-pad"
-              maxLength={11}
-              error={fieldError('dni')}
-              rightIcon={<IconDocument size={24} color={theme.colors.accent} strokeWidth={1.8} />}
-            />
+            <View style={styles.fieldGroup}>
+              <RegistrationField
+                label={t('registration.personal.dniLabel')}
+                placeholder={t('registration.personal.dniPlaceholder')}
+                value={personal.dni}
+                onChangeText={(text) => update({ dni: text }, 'dni')}
+                keyboardType="number-pad"
+                maxLength={11}
+                error={fieldError('dni')}
+                rightIcon={<IconDocument size={24} color={theme.colors.accent} strokeWidth={1.8} />}
+              />
+              {autoFields.dni && !fieldError('dni') ? (
+                <Text variant="footnote" color="inkSubtle">
+                  {t('registration.personal.scanDni.fieldExtracted')}
+                </Text>
+              ) : null}
+            </View>
           </Reveal>
 
           <Reveal delay={200} from="scale">
-            <DateField
-              label={t('registration.personal.birthdateLabel')}
-              placeholder={t('registration.personal.birthdatePlaceholder')}
-              value={personal.birthdate}
-              onChange={(iso) => update({ birthdate: iso }, 'birthdate')}
-              minimumDate={MIN_BIRTHDATE}
-              maximumDate={today}
-              error={fieldError('birthdate')}
-            />
+            <View style={styles.fieldGroup}>
+              <DateField
+                label={t('registration.personal.birthdateLabel')}
+                placeholder={t('registration.personal.birthdatePlaceholder')}
+                value={personal.birthdate}
+                onChange={(iso) => update({ birthdate: iso }, 'birthdate')}
+                minimumDate={minBirthdate}
+                maximumDate={maxBirthdate}
+                error={fieldError('birthdate')}
+              />
+              {autoFields.birthdate && !fieldError('birthdate') ? (
+                <Text variant="footnote" color="inkSubtle">
+                  {t('registration.personal.scanDni.fieldExtracted')}
+                </Text>
+              ) : null}
+            </View>
           </Reveal>
         </View>
       </View>
     </SafeScreen>
+    <RegistrationExitSheet exit={exit} />
+    <ScanDniSheet
+      visible={scanOpen}
+      onClose={() => setScanOpen(false)}
+      onAutofill={onDniAutofill}
+    />
+    </>
   );
 };
 
@@ -164,4 +253,6 @@ const styles = StyleSheet.create({
   body: { paddingTop: 12 },
   intro: { gap: 6 },
   form: {},
+  scanHint: { marginTop: 6 },
+  fieldGroup: { gap: 4 },
 });

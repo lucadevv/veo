@@ -58,6 +58,18 @@ jest.mock('react-native-image-picker', () => ({
   launchImageLibrary: jest.fn().mockResolvedValue({ didCancel: true }),
 }));
 
+// VeoDocumentScanner: el escáner de documentos nativo (iOS VisionKit / Android MLKit) no existe en
+// Jest. Lo registramos en `NativeModules` (asignación directa, sin tocar el grafo del módulo) para
+// que el servicio (`native-document-scanner`) lo encuentre enlazado por defecto; `scan` rechaza con
+// `E_CANCELLED` (cancelado), igual que el picker defaultea a "cancelado". Los tests que ejercitan el
+// escaneo sobre-mockean `NativeModules.VeoDocumentScanner`.
+{
+  const { NativeModules } = require('react-native');
+  NativeModules.VeoDocumentScanner = {
+    scan: jest.fn().mockRejectedValue({ code: 'E_CANCELLED', message: 'cancelled' }),
+  };
+}
+
 // @react-native-community/datetimepicker: el picker nativo de fecha no existe en Jest. El default
 // export es el componente (iOS) y `DateTimePickerAndroid.open` la API imperativa (Android). Mockeamos
 // el componente como passthrough (no renderiza nada) y `open`/`dismiss` como no-ops; los tests que
@@ -73,6 +85,25 @@ jest.mock('@react-native-community/datetimepicker', () => {
     },
   };
 });
+
+// BiometricCameraPreview: la vista nativa de cámara (`requireNativeComponent('BiometricCameraPreview')`)
+// no existe en Jest. El preset de RN ya auto-mockea `requireNativeComponent` (devuelve un host stub),
+// pero mockeamos el wrapper explícitamente para que la pantalla del KYC renderice predecible y para que
+// los tests puedan disparar `onCameraReady`/`onCameraError`. Es un passthrough que NO abre cámara.
+jest.mock(
+  './src/features/registration/presentation/components/BiometricCameraPreview',
+  () => {
+    const React = require('react');
+    const { View } = require('react-native');
+    const BiometricCameraPreview = (props) =>
+      React.createElement(View, { ...props, testID: 'biometric-camera-preview' });
+    return {
+      __esModule: true,
+      default: BiometricCameraPreview,
+      BIOMETRIC_CAMERA_PREVIEW_NAME: 'BiometricCameraPreview',
+    };
+  },
+);
 
 // react-native-keychain: almacén seguro nativo no disponible en Jest.
 jest.mock('react-native-keychain', () => ({

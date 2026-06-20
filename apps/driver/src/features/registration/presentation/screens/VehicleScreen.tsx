@@ -9,6 +9,7 @@ import { isConflictError, toErrorMessage } from '../../../../shared/presentation
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { VehicleValidationError, type VehicleErrors } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
+import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
 import {
   REGISTRATION_VEHICLES_QUERY_KEY,
   useDriverVehicles,
@@ -18,10 +19,11 @@ import {
   useRegistrationDocuments,
   useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
-import { useImagePicker } from '../../../../core/di/useDi';
+import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import {
   DocumentUploadCard,
   RegistrationDocumentSheet,
+  RegistrationExitSheet,
   RegistrationField,
   RegistrationHeader,
   RegistrationProgress,
@@ -48,6 +50,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const setVehicleType = useRegistrationStore((s) => s.setVehicleType);
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
 
+  // Back robusto del paso: reconstruye la pila al reanudar (si quedó superficial) y nunca dispara un
+  // GO_BACK muerto (si no hay paso previo, abre el exit-confirm del Lote 1). Cubre software + hardware.
+  const back = useRegistrationStepBack();
+
   // Rehidrata el vehículo ya registrado (si existe) para mostrar su estado y bloquear el re-alta.
   const vehiclesQuery = useDriverVehicles();
   const registerVehicle = useRegisterVehicle();
@@ -63,6 +69,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const serverDocs = useRegistrationDocuments();
   const uploadDocument = useUploadAndRegisterDocument();
   const imagePicker = useImagePicker();
+  const documentScanner = useDocumentScanner();
   const photoBackendType = registrationDocTypeToBackend('VEHICLE_PHOTO');
 
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
@@ -163,9 +170,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   };
 
   return (
+    <>
     <SafeScreen
       scroll
-      header={<RegistrationHeader showLogo={false} onBack={navigation.goBack} />}
+      header={<RegistrationHeader showLogo={false} onBack={back.onBack} />}
       footer={
         <Button
           label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
@@ -294,10 +302,17 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
           uploadState={photoUploadState}
           errorMessage={photoError ? toErrorMessage(photoError, t) : undefined}
           onPick={(source) => imagePicker.pick(source)}
+          // La foto del vehículo NO es un documento con bordes, pero ofrecemos el MISMO escáner para
+          // mantener una sola superficie de captura: el nativo igual encuadra/recorta y, si no aplica
+          // bien o no está disponible (E_UNAVAILABLE), el conductor cae a la galería sin fricción. No
+          // se justifica una cámara aparte solo para esta foto: reúsa el sheet + el pipeline de subida.
+          onScan={() => documentScanner.scan()}
           onSubmit={onSubmitPhoto}
         />
       ) : null}
     </SafeScreen>
+    <RegistrationExitSheet exit={back.exit} />
+    </>
   );
 };
 

@@ -4,7 +4,9 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark, hexAlpha } from '../components';
+import { useRegistrationExit } from '../hooks/useRegistrationExit';
+import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
+import { RegistrationExitSheet, VeoWordmark, hexAlpha } from '../components';
 
 /** Ilustración de "sin conexión / reintentar" (line art) para la pantalla de reintento del gate. */
 function RetryGlyph({ color }: { color: string }): React.JSX.Element {
@@ -46,15 +48,31 @@ export const RegistrationGateRetryScreen = ({
 }: RegistrationGateRetryScreenProps): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+
+  // Escape CRÍTICO de la "sesión zombie": el gate no resuelve el perfil y, sin esto, "Reintentar" es el
+  // único botón → dead-end si el reintento sigue fallando. La salida reusa el mismo logout/clearSession.
+  const exit = useRegistrationExit();
+  useRegistrationExitGuard(exit.handleHardwareBack);
+
   return (
+    <>
     <SafeScreen
       footer={
-        <Button
-          label={t('registration.gateRetry.retry')}
-          variant="primary"
-          fullWidth
-          onPress={onRetry}
-        />
+        <View style={{ gap: theme.spacing.sm }}>
+          <Button
+            label={t('registration.gateRetry.retry')}
+            variant="primary"
+            fullWidth
+            onPress={onRetry}
+          />
+          <Button
+            label={t('registration.exit')}
+            variant="ghost"
+            fullWidth
+            loading={exit.isLoggingOut}
+            onPress={exit.requestExit}
+          />
+        </View>
       }
     >
       <View style={styles.container}>
@@ -83,6 +101,8 @@ export const RegistrationGateRetryScreen = ({
         </Reveal>
       </View>
     </SafeScreen>
+    <RegistrationExitSheet exit={exit} />
+    </>
   );
 };
 

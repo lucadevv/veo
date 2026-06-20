@@ -1,6 +1,6 @@
 import { FleetDocumentStatus } from '@veo/shared-types';
 import type { DriverProfileView } from '@veo/api-client';
-import type { RegistrationStatus } from '../entities';
+import { RegistrationStatus } from '../entities';
 
 /**
  * Estados crudos (identity/fleet) que consideramos RECHAZO definitivo del KYC o de antecedentes.
@@ -38,13 +38,16 @@ function isApproved(raw: string): boolean {
  *     i.e. genuinamente ausente). El store decide si conserva progreso local (`in_progress`).
  *  3. APROBADO → `approved`: TODOS los documentos requeridos aprobados (`compliance.allApproved`) +
  *     KYC verificado + antecedentes CLEARED ⇒ entra a la app (tabs).
- *  4. EN REVISIÓN → `in_review`: ya envió TODO lo requerido (`compliance.submittedAllRequired`) pero
- *     el backend aún valida — hay documentos en revisión o los antecedentes/KYC siguen pendientes.
- *     Este es el camino del conductor con 3 docs PENDING_REVIEW + backgroundCheck PENDING.
+ *  4. EN REVISIÓN → `in_review`: ya envió TODO lo requerido (`compliance.submittedAllRequired`) Y
+ *     enroló su biometría facial (`compliance.biometricEnrolled`) — está LISTO para revisión, aunque
+ *     el backend aún valide (docs en revisión o antecedentes/KYC pendientes). Camino del conductor con
+ *     3 docs PENDING_REVIEW + backgroundCheck PENDING + biometría enrolada.
  *
- * Nota: la biometría (rostro de referencia) se enrola en el paso 4 del wizard ANTES de poder enviar
- * los documentos, así que "todos los documentos enviados" implica que el enrolamiento ya ocurrió; no
- * hace falta un check biométrico separado para `in_review` (el perfil no expone `faceEnrolledAt`).
+ * Biometría: es un EJE SEPARADO e INDEPENDIENTE de los documentos (server-truth: el conductor está
+ * listo para `in_review` solo si `submittedAllRequired && biometricEnrolled`). Subir todos los
+ * documentos NO implica que el enrolamiento ya ocurrió: se chequea EXPLÍCITAMENTE. Si los documentos
+ * están completos pero falta la biometría (`biometricEnrolled === false`), el conductor NO pasa a
+ * `in_review`: vuelve al wizard como `in_progress` para completar el KYC (paso 4 / IdentityVerification).
  */
 export function mapProfileToRegistrationStatus(profile: DriverProfileView): RegistrationStatus {
   const { kycStatus, backgroundCheckStatus, compliance, documents } = profile;
@@ -54,23 +57,30 @@ export function mapProfileToRegistrationStatus(profile: DriverProfileView): Regi
     compliance.rejected.length > 0 ||
     documents.some((doc) => doc.status === FleetDocumentStatus.REJECTED);
   if (isRejected(kycStatus) || isRejected(backgroundCheckStatus) || hasRejectedDoc) {
-    return 'rejected';
+    return RegistrationStatus.REJECTED;
   }
 
   // 2) Falta SUBIR algún documento requerido (presencia) ⇒ todavía no terminó el alta.
   if (!compliance.submittedAllRequired) {
-    return 'not_started';
+    return RegistrationStatus.NOT_STARTED;
   }
 
   // 3) Todo aprobado + identidad/antecedentes verificados ⇒ aprobado (entra a la app).
   const identityClear = isApproved(kycStatus) && isApproved(backgroundCheckStatus);
   if (compliance.allApproved && identityClear) {
-    return 'approved';
+    return RegistrationStatus.APPROVED;
   }
 
-  // 4) Envió todo lo requerido pero falta validación (docs en revisión o KYC/antecedentes pendientes).
-  //    Conservador: si no faltan documentos por subir y no hay rechazo, NUNCA volvemos al wizard.
-  return 'in_review';
+  // 4) Subió todos los documentos PERO aún no enroló la biometría (eje SEPARADO). NO está listo para
+  //    revisión: vuelve al wizard como `in_progress` para completar el KYC (paso 4 / IdentityVerification).
+  //    Defense-in-depth en el cliente: el reflejo del server-truth `submittedAllRequired && biometricEnrolled`.
+  if (!compliance.biometricEnrolled) {
+    return RegistrationStatus.IN_PROGRESS;
+  }
+
+  // 5) Envió todo lo requerido Y enroló su biometría, pero falta validación (docs en revisión o
+  //    KYC/antecedentes pendientes). Listo para revisión: no volvemos al wizard.
+  return RegistrationStatus.IN_REVIEW;
 }
 
 /**
@@ -80,5 +90,5 @@ export function mapProfileToRegistrationStatus(profile: DriverProfileView): Regi
  * enterarse SÍ o SÍ. El literal del estado vive UNA vez (junto a su mapeo canónico), no esparcido.
  */
 export function isAwaitingReview(status: RegistrationStatus): boolean {
-  return status === 'in_review';
+  return status === RegistrationStatus.IN_REVIEW;
 }

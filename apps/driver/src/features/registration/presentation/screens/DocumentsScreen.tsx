@@ -9,7 +9,11 @@ import { Reveal } from '../../../../shared/presentation/components/motion';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { useRegistrationStore } from '../state/registrationStore';
+import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
 import {
+  DocumentUploadStatus,
+  RegistrationStep,
+  isAcceptableServerDocStatus,
   registrationDocTypeToBackend,
   type RegistrationDocumentServerStatus,
   type RegistrationDocumentType,
@@ -19,10 +23,11 @@ import {
   useRegistrationDocuments,
   useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
-import { useImagePicker } from '../../../../core/di/useDi';
+import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import {
   DocumentUploadCard,
   RegistrationDocumentSheet,
+  RegistrationExitSheet,
   RegistrationHeader,
   RegistrationProgress,
   type DocumentCardTone,
@@ -75,11 +80,16 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
   const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
 
+  // Back robusto del paso: reconstruye la pila al reanudar (si quedó superficial) y nunca dispara un
+  // GO_BACK muerto (si no hay paso previo, abre el exit-confirm del Lote 1). Cubre software + hardware.
+  const back = useRegistrationStepBack();
+
   // Rehidrata el estado real de los documentos (chips reflejan `simpleStatus`).
   const serverDocs = useRegistrationDocuments();
   const uploadDocument = useUploadAndRegisterDocument();
   const onboardLicense = useOnboardLicense();
   const imagePicker = useImagePicker();
+  const documentScanner = useDocumentScanner();
 
   // Documento cuyo sheet de captura está abierto (null = cerrado).
   const [activeType, setActiveType] = useState<RegistrationDocumentType | null>(null);
@@ -88,7 +98,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
   const [uploadState, setUploadState] = useState<DocumentUploadState>('idle');
 
   const statusOf = (type: RegistrationDocumentType) =>
-    documents.find((d) => d.type === type)?.status ?? 'pending';
+    documents.find((d) => d.type === type)?.status ?? DocumentUploadStatus.PENDING;
 
   /** Estado del servidor para un documento del wizard (si ya existe en `GET /drivers/me/documents`). */
   const serverStateOf = (type: RegistrationDocumentType) => {
@@ -144,7 +154,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         });
       }
       // Éxito real: marca el avance local (permite continuar el wizard) y refresca los chips.
-      setDocumentStatus(activeType, 'uploaded');
+      setDocumentStatus(activeType, DocumentUploadStatus.UPLOADED);
       setUploadState('success');
       // Cierra el sheet tras un breve instante para que el conductor vea el check de éxito.
       setTimeout(() => {
@@ -157,27 +167,49 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
     }
   };
 
+  /**
+   * ¿El servidor YA tiene este documento en un estado ACEPTABLE para avanzar el alta? Misma fuente de
+   * verdad que `VehicleScreen` para la foto: si el conductor reinstaló o cambió de device, el store
+   * local arranca en `pending` pero el backend ya tiene el doc subido y en revisión/vigente, así que
+   * debe contar como subido. Un doc RECHAZADO o VENCIDO NO cuenta: hay que re-subirlo (el chip lo
+   * muestra en rojo). El predicado tipado del dominio (`isAcceptableServerDocStatus`) decide qué
+   * estados crudos de fleet cuentan; un estado desconocido cae en "no cuenta" (default seguro).
+   */
+  const serverHasValidDoc = (type: RegistrationDocumentType): boolean => {
+    const backendType = registrationDocTypeToBackend(type);
+    return (
+      serverDocs.data?.some(
+        (doc) => doc.type === backendType && isAcceptableServerDocStatus(doc.status),
+      ) ?? false
+    );
+  };
+
   // Gating del paso 3: NO se puede avanzar a la verificación de identidad sin TODOS los documentos
   // requeridos subidos (licencia/SOAT/tarjeta de propiedad). Coherente con `isDraftComplete` y con la
-  // regla de negocio (no se completa el alta con documentación faltante). `DOCS` es el catálogo de
-  // requeridos; cada uno debe estar en `uploaded` localmente (el chip del servidor es informativo).
-  const allRequiredUploaded = DOCS.every((doc) => statusOf(doc.type) === 'uploaded');
+  // regla de negocio (no se completa el alta con documentación faltante). Un documento cuenta como
+  // subido si el avance local lo marca `uploaded` O si el servidor YA lo tiene en estado válido
+  // (conductor que vuelve/reinstala): sin esto el gate quedaba bloqueado para siempre pese a que el
+  // backend ya tenía los docs. Espeja `photoUploaded` de `VehicleScreen` (misma fuente de verdad).
+  const allRequiredUploaded = DOCS.every(
+    (doc) => statusOf(doc.type) === DocumentUploadStatus.UPLOADED || serverHasValidDoc(doc.type),
+  );
 
   const onContinue = () => {
     // Guarda defensiva además del `disabled` del botón: jamás avanzar con documentos pendientes.
     if (!allRequiredUploaded) {
       return;
     }
-    setCurrentStep(4);
+    setCurrentStep(RegistrationStep.IDENTITY_VERIFICATION);
     navigation.navigate('IdentityVerification');
   };
 
   const submitting = uploadDocument.isPending || onboardLicense.isPending;
 
   return (
+    <>
     <SafeScreen
       scroll
-      header={<RegistrationHeader showLogo wings peru onBack={navigation.goBack} />}
+      header={<RegistrationHeader showLogo wings peru onBack={back.onBack} />}
       footer={
         <Button
           label={t('common.continue')}
@@ -256,10 +288,13 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
           uploadState={uploadState}
           errorMessage={submitError ? toErrorMessage(submitError, t) : undefined}
           onPick={(source) => imagePicker.pick(source)}
+          onScan={() => documentScanner.scan()}
           onSubmit={onSubmitDocument}
         />
       ) : null}
     </SafeScreen>
+    <RegistrationExitSheet exit={back.exit} />
+    </>
   );
 };
 

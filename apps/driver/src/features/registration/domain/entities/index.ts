@@ -3,11 +3,12 @@
  * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
  * global de la solicitud que conmuta la navegación.
  */
-import { FleetDocumentType, VehicleClass } from '@veo/shared-types';
+import { FleetDocumentStatus, FleetDocumentType, VehicleClass } from '@veo/shared-types';
 import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,
   DriverBiometricEnrollResult,
+  DriverLivenessChallengeResponse,
   DriverDocument,
   DriverDocumentSimpleStatus,
   DriverOnboardRequest,
@@ -37,6 +38,12 @@ export type RegistrationDocumentServerStatus = DriverDocumentSimpleStatus;
 export type LicenseOnboardInput = DriverOnboardRequest;
 export type BiometricEnrollInput = DriverBiometricEnrollRequest;
 export type BiometricEnrollResult = DriverBiometricEnrollResult;
+/**
+ * Reto de liveness ACTIVO del enrolamiento del alta (= driverLivenessChallengeResponse): `challengeId`
+ * de un solo uso + `action` (gesto tipado) + `instructions` (prompt humano que emite el servidor) +
+ * `expiresAt`. La pantalla guía al conductor a ejecutar `action` y captura frames mientras lo hace.
+ */
+export type LivenessChallenge = DriverLivenessChallengeResponse;
 export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
 export type VehicleRegisterInput = RegisterVehicleRequest;
@@ -90,7 +97,12 @@ export interface VehicleData {
  * (`VEHICLE_REGISTRATION` = "tarjeta de propiedad" en la UI); el valor que viaja al backend NO es
  * este label sino el `FleetDocumentType` canónico que devuelve `registrationDocTypeToBackend`.
  */
-export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION' | 'VEHICLE_PHOTO';
+export type RegistrationDocumentType =
+  | 'LICENSE'
+  | 'SOAT'
+  | 'VEHICLE_REGISTRATION'
+  | 'VEHICLE_PHOTO'
+  | 'DNI';
 
 /**
  * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige en el paso 3 (los tres documentos del
@@ -102,7 +114,8 @@ export type RegistrationFleetDocumentType =
   | typeof FleetDocumentType.LICENSE_A1
   | typeof FleetDocumentType.SOAT
   | typeof FleetDocumentType.PROPERTY_CARD
-  | typeof FleetDocumentType.VEHICLE_PHOTO;
+  | typeof FleetDocumentType.VEHICLE_PHOTO
+  | typeof FleetDocumentType.DNI;
 
 /**
  * Mapea la etiqueta del wizard al `FleetDocumentType` CANÓNICO de `@veo/shared-types` que validan
@@ -124,11 +137,96 @@ export function registrationDocTypeToBackend(
       return FleetDocumentType.PROPERTY_CARD;
     case 'VEHICLE_PHOTO':
       return FleetDocumentType.VEHICLE_PHOTO;
+    // El DNI se sube como documento de 2 caras (FRONT+BACK vía el presign múltiple del 3A); su cara
+    // FRONT la usará el face-match (3C).
+    case 'DNI':
+      return FleetDocumentType.DNI;
   }
 }
 
-/** Estado de carga de un documento del alta. */
+/**
+ * Deriva el PRIMER paso del wizard a corregir a partir de los tipos de documento rechazados por el
+ * operador (los `type` crudos de `GET /drivers/me/documents`, que son `FleetDocumentType`). La foto
+ * del vehículo (`VEHICLE_PHOTO`) se captura en el paso 2 (Vehículo); el resto de la documentación del
+ * alta (licencia/SOAT/tarjeta) en el paso 3 (Documentos). Se prioriza el paso MÁS TEMPRANO presente
+ * para que el conductor re-recorra en orden. Si NINGÚN tipo rechazado es derivable a un paso (rechazo
+ * de antecedentes/KYC, que no expone documento), devuelve `null`: el llamador decide el fallback.
+ */
+export function correctionStepForRejectedDocTypes(
+  rejectedTypes: readonly string[],
+): RegistrationStep | null {
+  const photo: string = FleetDocumentType.VEHICLE_PHOTO;
+  const wizardDocs: readonly string[] = [
+    FleetDocumentType.LICENSE_A1,
+    FleetDocumentType.SOAT,
+    FleetDocumentType.PROPERTY_CARD,
+  ];
+  if (rejectedTypes.includes(photo)) {
+    return RegistrationStep.VEHICLE;
+  }
+  if (rejectedTypes.some((type) => wizardDocs.includes(type))) {
+    return RegistrationStep.DOCUMENTS;
+  }
+  return null;
+}
+
+/**
+ * Deriva el paso del wizard al que un conductor EXISTENTE (`GET /drivers/me`) debe REANUDAR cuando el
+ * backend lo dejó `in_progress`. Hoy el único caso "docs-completos-pero-falta-algo" del cliente es la
+ * BIOMETRÍA: el conductor subió todos los documentos (`submittedAllRequired`) pero NO enroló su rostro
+ * (`biometricEnrolled === false`), así que `mapProfileToRegistrationStatus` lo devuelve a `in_progress`.
+ * Ese conductor debe caer en el paso 4 (IdentityVerification / KYC) para completar la biometría, NO en
+ * el paso 1. Si no aplica (faltan documentos, o ya tiene biometría), devuelve `null`: el llamador
+ * conserva el avance local persistido del wizard (no fuerza ningún salto).
+ */
+export function resumeStepForProfile(compliance: {
+  submittedAllRequired: boolean;
+  biometricEnrolled: boolean;
+}): RegistrationStep | null {
+  if (compliance.submittedAllRequired && !compliance.biometricEnrolled) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
+  }
+  return null;
+}
+
+/**
+ * Estados CRUDOS de `FleetDocumentStatus` que cuentan como "documento presente y aceptable para
+ * avanzar el onboarding": el server YA tiene el doc y NO hay que re-subirlo.
+ *  - `PENDING_REVIEW`: subido, en revisión del operador (avanza; el operador decidirá).
+ *  - `VALID`: aprobado y vigente.
+ *  - `EXPIRING_SOON`: aprobado y AÚN vigente (todavía no venció).
+ * Quedan FUERA (no cuentan → re-subir): `EXPIRED` (venció) y `REJECTED` (rechazado). Derivar el set
+ * de los miembros del enum (no strings crudos) hace que un estado nuevo de fleet sea una decisión
+ * EXPLÍCITA aquí, no un bug mudo que se cuela por el lado equivocado del gate.
+ */
+const ACCEPTABLE_SERVER_DOC_STATUSES: ReadonlySet<string> = new Set<FleetDocumentStatus>([
+  FleetDocumentStatus.PENDING_REVIEW,
+  FleetDocumentStatus.VALID,
+  FleetDocumentStatus.EXPIRING_SOON,
+]);
+
+/**
+ * ¿El estado CRUDO del documento del server (el `status` de `DriverDocument`, tipado como `string`,
+ * no como el enum) cuenta como "presente y aceptable" para avanzar el alta? Default seguro: un estado
+ * desconocido (que el backend pudiera introducir) NO cuenta → el conductor re-sube. Así `EXPIRED` y
+ * `REJECTED` (vencido/rechazado) bloquean el avance igual que un doc faltante, coherente con que el
+ * chip los pinta en rojo.
+ */
+export function isAcceptableServerDocStatus(status: string): boolean {
+  return ACCEPTABLE_SERVER_DOC_STATUSES.has(status);
+}
+
+/** Estado de carga LOCAL de un documento del alta (avance del wizard, no el estado del servidor). */
 export type DocumentUploadStatus = 'pending' | 'uploaded';
+
+/**
+ * Valores CANÓNICOS del estado de carga local (mismo patrón que `RegistrationStatus`): evita los
+ * strings mágicos `'uploaded'`/`'pending'` al gatear el avance y al pintar los chips del wizard.
+ */
+export const DocumentUploadStatus = {
+  PENDING: 'pending',
+  UPLOADED: 'uploaded',
+} as const satisfies Record<string, DocumentUploadStatus>;
 
 export interface RegistrationDocument {
   type: RegistrationDocumentType;
@@ -166,6 +264,34 @@ export type RegistrationStatus =
   | 'in_review'
   | 'approved'
   | 'rejected';
+
+/**
+ * Valores CANÓNICOS del estado global del alta. Espeja el union `RegistrationStatus` como objeto de
+ * constantes (mismo patrón que `VehicleType`) para que la presentación y los hooks conmuten estado
+ * SIN strings mágicos (`RegistrationStatus.IN_PROGRESS` en vez de `'in_progress'`). El `satisfies`
+ * garantiza que cada valor pertenece al union: un typo es un ERROR DE COMPILACIÓN, no un bug mudo.
+ */
+export const RegistrationStatus = {
+  NOT_STARTED: 'not_started',
+  IN_PROGRESS: 'in_progress',
+  IN_REVIEW: 'in_review',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+} as const satisfies Record<string, RegistrationStatus>;
+
+/**
+ * Pasos del wizard de alta (1..4) como constantes tipadas. Espeja el orden de `STEP_ROUTES` del
+ * `RegistrationNavigator` (1=Datos · 2=Vehículo · 3=Documentos · 4=KYC). Tiparlos evita los números
+ * mágicos en `setCurrentStep(...)` y deja que la corrección post-rechazo derive el paso por nombre.
+ */
+export const RegistrationStep = {
+  PERSONAL_DATA: 1,
+  VEHICLE: 2,
+  DOCUMENTS: 3,
+  IDENTITY_VERIFICATION: 4,
+} as const;
+
+export type RegistrationStep = (typeof RegistrationStep)[keyof typeof RegistrationStep];
 
 /** Borrador completo del registro que se envía al backend al finalizar el wizard. */
 export interface RegistrationDraft {

@@ -8,12 +8,21 @@ export {
   RejectedScreen,
   RegistrationGateRetryScreen,
 } from './screens';
+export { BIOMETRIC_CAMERA_PREVIEW_NAME } from './components';
 export { useRegistrationStore, REGISTRATION_TOTAL_STEPS } from './state/registrationStore';
 export { FaceCaptureProvider, useFaceCapture } from './providers/FaceCaptureProvider';
 export { RealFaceCaptureProvider } from './providers/RealFaceCaptureProvider';
+export { LivenessCaptureProvider, useLivenessGrabber } from './providers/LivenessCaptureProvider';
+export { RealLivenessCaptureProvider } from './providers/RealLivenessCaptureProvider';
 export { useRegistrationSubmit } from './hooks/useRegistrationSubmit';
 export { useRegistrationGate, REGISTRATION_GATE_QUERY_KEY } from './hooks/useRegistrationGate';
 export { useResubmitRegistration } from './hooks/useResubmitRegistration';
+export { useRegistrationExit, type RegistrationExit } from './hooks/useRegistrationExit';
+export { useRegistrationExitGuard } from './hooks/useRegistrationExitGuard';
+export {
+  useRegistrationStepBack,
+  type RegistrationStepBack,
+} from './hooks/useRegistrationStepBack';
 export { useRegistrationFaceCapture } from './hooks/useRegistrationFaceCapture';
 export {
   useUpdatePersonalData,
@@ -29,4 +38,6 @@ export {
   useSubmitRegistrationDocument,
   useOnboardLicense,
   useEnrollBiometric,
+  useLivenessChallenge,
+  REGISTRATION_LIVENESS_CHALLENGE_QUERY_KEY,
 } from './hooks/useRegistrationDocuments';

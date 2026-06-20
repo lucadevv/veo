@@ -106,6 +106,64 @@ describe('validatePersonalData', () => {
   });
 });
 
+describe('validatePersonalData · regla de edad (BR-I04, espejo del backend)', () => {
+  // Construye un ISO yyyy-mm-dd a partir de "hoy" (UTC) desplazado por años/días, para tests
+  // deterministas que dependen de la fecha actual (igual criterio que el backend: comparación UTC).
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const isoFromTodayUtc = (deltaYears: number, deltaDays = 0): string => {
+    const today = new Date();
+    const d = new Date(
+      Date.UTC(today.getUTCFullYear() + deltaYears, today.getUTCMonth(), today.getUTCDate()),
+    );
+    if (deltaDays !== 0) {
+      d.setUTCDate(d.getUTCDate() + deltaDays);
+    }
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  };
+
+  it('acepta exactamente 18 años cumplidos hoy (cumple 18 hoy)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-18) });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe(isoFromTodayUtc(-18));
+    }
+  });
+
+  it('rechaza 17 años y 364 días (cumple 18 mañana) como underage', () => {
+    // Hoy menos 18 años, más 1 día → aún no cumplió 18.
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-18, 1) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_underage');
+    }
+  });
+
+  it('acepta exactamente 100 años cumplidos hoy', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-100) });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe(isoFromTodayUtc(-100));
+    }
+  });
+
+  it('rechaza 101 años (un día antes de cumplir 100 sería válido; 101 no) como invalid_age', () => {
+    // Hoy menos 100 años, menos 1 día → ya tiene 100 años + 1 día... usamos -101 para >100 claro.
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-101) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid_age');
+    }
+  });
+
+  it('rechaza una fecha futura antes de evaluar la edad', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(1) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_future');
+    }
+  });
+});
+
 describe('validateVehicle', () => {
   it('normaliza la placa (mayúsculas), convierte el año y envía modelSpecId (no make/model libre)', () => {
     const result = validateVehicle(baseVehicle);

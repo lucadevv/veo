@@ -3,6 +3,7 @@ import {
   addDocumentRequest,
   driverBiometricEnrollRequest,
   driverBiometricEnrollResult,
+  driverLivenessChallengeResponse,
   driverDocument,
   driverOnboardRequest,
   driverPersonalData,
@@ -21,6 +22,7 @@ import { mapProfileToRegistrationStatus } from '../../domain';
 import type {
   BiometricEnrollInput,
   BiometricEnrollResult,
+  LivenessChallenge,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -115,6 +117,14 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     const body = driverOnboardRequest.parse(input);
     // El backend responde el perfil agregado; lo validamos pero no necesitamos su valor aquí.
     await this.http.post('/drivers/onboard', { body, schema: driverProfileView });
+  }
+
+  getLivenessChallenge(): Promise<LivenessChallenge> {
+    // Reto de liveness ACTIVO de un solo uso para el enrolamiento del alta. Mismo schema que el reto
+    // del turno (`driverLivenessChallengeResponse`), pero distinto endpoint (GET, sin body).
+    return this.http.get('/drivers/me/biometric/liveness/challenge', {
+      schema: driverLivenessChallengeResponse,
+    });
   }
 
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {

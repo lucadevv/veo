@@ -19,6 +19,7 @@ const PROFILE: DriverProfile = {
     rejected: [],
     submittedAllRequired: true,
     allApproved: true,
+    biometricEnrolled: true,
   },
 };
 

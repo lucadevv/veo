@@ -1,6 +1,7 @@
 import type {
   BiometricEnrollInput,
   BiometricEnrollResult,
+  LivenessChallenge,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -71,7 +72,17 @@ export interface RegistrationRepository {
   /** POST /drivers/onboard — alta de licencia del conductor (`driverOnboardRequest`). */
   onboardLicense(input: LicenseOnboardInput): Promise<void>;
 
-  /** POST /drivers/biometric/enroll — enrola el rostro de referencia (foto en base64). */
+  /**
+   * GET /drivers/me/biometric/liveness/challenge — pide un reto de liveness ACTIVO de UN SOLO USO para
+   * el enrolamiento del alta. El conductor debe ejecutar `action` (girar la cabeza, asentir, sonreír)
+   * mientras la app captura frames; reintentar exige pedir un reto NUEVO (un reto consumido no se reusa).
+   */
+  getLivenessChallenge(): Promise<LivenessChallenge>;
+
+  /**
+   * POST /drivers/biometric/enroll — enrola el rostro de referencia CON LIVENESS: el `challengeId` del
+   * reto + los `frames` capturados mientras el conductor ejecutaba la acción (anti-spoofing).
+   */
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult>;
 
   /**
