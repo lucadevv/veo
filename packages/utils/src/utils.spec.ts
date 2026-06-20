@@ -100,4 +100,15 @@ describe('validación dominio peruano', () => {
     expect(parseOrThrow(childCodeSchema, '4729')).toBe('4729');
     expect(() => parseOrThrow(childCodeSchema, '12')).toThrow(ValidationError);
   });
+  it('acepta placa de AUTO (ABC-123) y de MOTO (7351-NB), rechaza basura', () => {
+    expect(parseOrThrow(plateSchema, 'ABC-123')).toBe('ABC-123');
+    expect(parseOrThrow(plateSchema, 'A1B-234')).toBe('A1B-234');
+    // Moto/vehículo menor (categoría L): 4 dígitos + 2 letras (placa real de una KTM).
+    expect(parseOrThrow(plateSchema, '7351-NB')).toBe('7351-NB');
+    expect(parseOrThrow(plateSchema, '123-AB')).toBe('123-AB');
+    // Guion opcional y minúsculas (la placa se normaliza a mayúsculas).
+    expect(parseOrThrow(plateSchema, '7351nb')).toBe('7351NB');
+    expect(() => parseOrThrow(plateSchema, '12-3')).toThrow(ValidationError);
+    expect(() => parseOrThrow(plateSchema, 'AB-12')).toThrow(ValidationError);
+  });
 });

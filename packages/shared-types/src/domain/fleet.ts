@@ -67,6 +67,9 @@ export interface ExtractedLicenseA1Data {
   documentNumber?: string;
   /** Vencimiento de la licencia, ISO `YYYY-MM-DD`. */
   expiresAt?: string;
+  /** Categoría canónica leída por OCR (`A-I`/`B-IIb`/…). Clase + categoría del documento real, combinadas.
+   *  Conveniencia para validar elegibilidad auto/moto en el backend a futuro; NO es dato crítico. */
+  category?: string;
 }
 
 /**

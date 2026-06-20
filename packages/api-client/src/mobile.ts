@@ -1913,6 +1913,8 @@ export const extractedLicenseA1Data = z.object({
   type: z.literal('LICENSE_A1'),
   documentNumber: ocrId.optional(),
   expiresAt: ocrIsoDate.optional(),
+  /** Categoría canónica leída por OCR (`A-I`/`B-IIb`/…): clase + categoría del documento real, combinadas. */
+  category: ocrId.optional(),
 });
 export type ExtractedLicenseA1Data = z.infer<typeof extractedLicenseA1Data>;
 
@@ -2149,6 +2151,14 @@ export const registerVehicleRequest = z
       .min(2005)
       .max(new Date().getUTCFullYear() + 1),
     color: z.string().min(1).max(30).optional(),
+    /**
+     * LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad (`M1`, `L3`, `N1`…). Es la FUENTE DE
+     * VERDAD del tipo: fleet DERIVA `vehicleType` de acá (M1→CAR, L*→MOTO; resto→hint del body). Ausente en
+     * la carga manual del tipo (sin tarjeta leída). Cap de 16 chars ALINEADO con el DTO de fleet
+     * (`RegisterDriverVehicleDto.mtcCategory` @Length(1,16)): un OCR ruidoso más largo se corta en el wire
+     * con un error de campo accionable, en vez de pasar y reventar con un 400 sin campo aguas abajo.
+     */
+    mtcCategory: z.string().min(1).max(16).optional(),
   })
   .refine((v) => Boolean(v.modelSpecId) || (Boolean(v.make) && Boolean(v.model)), {
     message: 'Elegí un modelo del catálogo (modelSpecId) o indicá marca y modelo',

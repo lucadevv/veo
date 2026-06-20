@@ -2,7 +2,15 @@
  * Helpers de validación con Zod, narrowing estructural + esquemas reutilizables del dominio peruano.
  */
 import { z } from 'zod';
+import { PLATE_PATTERN, PLATE_INVALID_MESSAGE } from '@veo/shared-types';
 import { ValidationError } from './errors.js';
+
+/**
+ * Patrón y mensaje canónicos de placa peruana. FUENTE ÚNICA en `@veo/shared-types` (RN-safe, sin node:*):
+ * se re-exportan acá para no romper a los backends que ya los importan de `@veo/utils`. La app RN los
+ * importa DIRECTO de `@veo/shared-types` (importar `@veo/utils` arrastra node:crypto al bundle de Metro).
+ */
+export { PLATE_PATTERN, PLATE_INVALID_MESSAGE } from '@veo/shared-types';
 
 /** Parsea con Zod y, si falla, lanza ValidationError de dominio (no ZodError crudo). */
 export function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown, context?: string): T {
@@ -38,12 +46,12 @@ export const dniSchema = z
   .trim()
   .regex(/^\d{8}$/, 'DNI inválido (8 dígitos)');
 
-/** Placa vehicular peruana: ABC-123 / A1B-234. */
+/** Placa vehicular peruana: auto `ABC-123`/`A1B-234` o moto `7351-NB`. */
 export const plateSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(/^[A-Z0-9]{3}-[A-Z0-9]{3}$/, 'Placa inválida (formato XXX-XXX)');
+  .regex(PLATE_PATTERN, PLATE_INVALID_MESSAGE);
 
 export const geoPointSchema = z.object({
   lat: z.number().min(-90).max(90),
