@@ -207,6 +207,13 @@ model Driver {
   faceEmbedding         Float[]               @map("face_embedding")
   /// Momento del enrolamiento facial. Null = no enrolado.
   faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
+  /// Sub-lote 3C · BINDING DNI↔selfie. Resultado del face-match entre la foto FRONT del DNI (de S3, que el
+  /// admin-bff baja) y el `faceEmbedding` de referencia GUARDADO del conductor. El operador lo VE antes de
+  /// aprobar (no aprueba a ciegas). Nullable = aún no se corrió el match. `dniFaceMatched` = veredicto
+  /// (true coincide / false no coincide); `dniFaceMatchScore` = 0..100; `dniFaceMatchedAt` = cuándo se corrió.
+  dniFaceMatched        Boolean?              @map("dni_face_matched")
+  dniFaceMatchScore     Float?                @map("dni_face_match_score")
+  dniFaceMatchedAt      DateTime?             @map("dni_face_matched_at") @db.Timestamptz
   suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
   /// ORIGEN de la suspensión vigente (POR QUÉ el conductor está suspendido). Null cuando NO está suspendido.
   /// Discrimina la reversión: la reactivación del operador solo puede levantar suspensiones DISCIPLINARY

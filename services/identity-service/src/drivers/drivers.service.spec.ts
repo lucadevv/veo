@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '@veo/utils';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+  UnprocessableEntityError,
+} from '@veo/utils';
 import { DriversService } from './drivers.service';
 import { InvalidStatusTransition } from '../domain/state-machine';
 import type { Env } from '../config/env.schema';
@@ -38,8 +44,16 @@ function makePrisma(driver: unknown, txDriver: unknown = driver) {
     bioChecks.push(args);
     return {};
   };
-  const tx = txDriver as { suspendedAt?: Date | null; currentStatus?: string };
-  const casMatches = !tx?.suspendedAt && AVAILABLE_SOURCES.has(tx?.currentStatus ?? '');
+  const tx = txDriver as {
+    suspendedAt?: Date | null;
+    currentStatus?: string;
+    faceEmbedding?: number[] | null;
+  };
+  // Espeja el WHERE del CAS atómico: NO suspendido, estado fuente válido Y embedding no vacío
+  // (`faceEmbedding: { isEmpty: false }`) — todo sobre el dato FRESCO de la tx.
+  const txHasEmbedding = Array.isArray(tx?.faceEmbedding) && tx.faceEmbedding.length > 0;
+  const casMatches =
+    !tx?.suspendedAt && AVAILABLE_SOURCES.has(tx?.currentStatus ?? '') && txHasEmbedding;
   return {
     bioChecks,
     read: { driver: { findUnique: async () => driver } },
@@ -91,9 +105,17 @@ const bio = {
   async createChallenge() {
     return {
       challengeId: 'c1',
-      action: 'TURN_LEFT',
+      action: 'TURN_LEFT' as const,
       instructions: 'Gira la cabeza',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+  },
+  async enrollWithLiveness() {
+    return {
+      livenessPassed: true,
+      embedding: [0.4, 0.5, 0.6],
+      reason: null,
+      takenAt: new Date().toISOString(),
     };
   },
   async embed() {
@@ -102,11 +124,26 @@ const bio = {
   async verify() {
     return { score: 96, livenessPassed: true, matchPassed: true };
   },
+  async matchDniFace() {
+    return { matched: true, score: 96, reason: null };
+  },
 };
 const bioFail = {
   ...bio,
   async verify() {
     return { score: 40, livenessPassed: false, matchPassed: false };
+  },
+};
+/** Motor cuya prueba de vida del enroll NO pasa (embedding null + reason) → el enroll debe lanzar 422. */
+const bioLivenessFail = {
+  ...bio,
+  async enrollWithLiveness() {
+    return {
+      livenessPassed: false,
+      embedding: null,
+      reason: 'rostro no detectado',
+      takenAt: new Date().toISOString(),
+    };
   },
 };
 
@@ -155,16 +192,81 @@ describe('DriversService.verifyBiometric · minteo de sessionRef (BR-I02)', () =
   });
 });
 
-describe('DriversService.enrollFace · enrolamiento (BR-I02)', () => {
-  it('guarda el embedding de referencia', async () => {
+describe('DriversService.createEnrollChallenge · reto de liveness del enrolamiento (BR-I02)', () => {
+  it('devuelve el shape del reto (challengeId, action tipado, instructions, expiresAt)', async () => {
     const svc = new DriversService(
       makePrisma(okDriver) as never,
       makeRedis() as never,
       bio,
       config,
     );
-    const out = await svc.enrollFace('u1', { photo: 'Zm90bw==' });
+    const out = await svc.createEnrollChallenge('u1');
+    expect(out.challengeId).toBe('c1');
+    expect(out.action).toBe('TURN_LEFT');
+    expect(out.instructions).toBeTruthy();
+    expect(out.expiresAt).toBeTruthy();
+  });
+
+  it('404 si el conductor no existe', async () => {
+    const svc = new DriversService(
+      makePrisma(null) as never,
+      makeRedis() as never,
+      bio,
+      config,
+    );
+    await expect(svc.createEnrollChallenge('u1')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('DriversService.enrollFace · enrolamiento CON liveness (BR-I02)', () => {
+  /** Prisma que captura el `data` del driver.update para aseverar que se persiste el embedding del motor. */
+  function makeEnrollPrisma(driver: unknown) {
+    const updates: { faceEmbedding?: number[]; faceEnrolledAt?: Date }[] = [];
+    return {
+      updates,
+      read: { driver: { findUnique: async () => driver } },
+      write: {
+        driver: {
+          update: async (args: { data: { faceEmbedding?: number[]; faceEnrolledAt?: Date } }) => {
+            updates.push(args.data);
+            return {};
+          },
+        },
+      },
+    };
+  }
+
+  it('liveness PASS → guarda el embedding derivado del motor + faceEnrolledAt', async () => {
+    const prisma = makeEnrollPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] });
     expect(out.enrolled).toBe(true);
+    expect(prisma.updates).toHaveLength(1);
+    const [persisted] = prisma.updates;
+    // Persiste EXACTAMENTE el embedding que devolvió enrollWithLiveness (no uno inventado).
+    expect(persisted?.faceEmbedding).toEqual([0.4, 0.5, 0.6]);
+    expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
+  });
+
+  it('liveness FAIL → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
+    const prisma = makeEnrollPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioLivenessFail, config);
+    await expect(
+      svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('404 si el conductor no existe', async () => {
+    const svc = new DriversService(
+      makeEnrollPrisma(null) as never,
+      makeRedis() as never,
+      bio,
+      config,
+    );
+    await expect(
+      svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -309,6 +411,36 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
       config,
     );
     await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('GATE BIOMÉTRICO (TOCTOU): CLEARED pero faceEmbedding vacío en la réplica → ConflictError, NO transiciona', async () => {
+    // La invariante "CLEARED ⟹ tiene embedding" se rompe cuando el sweeper de borrado vacía faceEmbedding
+    // sin tocar backgroundCheckStatus. El gate barato de startShift (hasFaceEmbedding) corta ANTES del CAS:
+    // ni siquiera consume sessionRef ni audita — falla rápido y closed.
+    const prisma = makePrisma({ ...okDriver, faceEmbedding: [] });
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ConflictError);
+    expect(prisma.bioChecks).toHaveLength(0);
+  });
+
+  it('GATE BIOMÉTRICO (TOCTOU/carrera): la réplica tiene embedding pero el sweeper lo vació entre réplica y tx → CAS no matchea → ConflictError, auditoría PERSISTE', async () => {
+    // Réplica desactualizada: faceEmbedding presente (pasa el gate barato). La fila FRESCA de la tx ya tiene
+    // faceEmbedding vacío (borrado concurrente): el CAS (isEmpty:false) NO matchea (count 0) → ConflictError
+    // honesto "Biometría no enrolada". La evidencia del intento exitoso YA se persistió antes del CAS (#13).
+    const prisma = makePrisma(okDriver, { ...okDriver, faceEmbedding: [] });
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ConflictError);
+    expect(prisma.bioChecks).toHaveLength(1);
   });
 });
 
@@ -890,6 +1022,30 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
   });
 
+  it('GATE BIOMÉTRICO: rechaza la aprobación con 409 si el conductor NO enroló biometría (faceEmbedding vacío)', async () => {
+    // Diferenciador no negociable VEO: sin embedding de referencia NO hay aprobación. El gate corta
+    // ANTES de los asserts de máquina y de toda escritura (fail-closed, cero efectos).
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING', faceEmbedding: [] },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
+  it('GATE BIOMÉTRICO: rechaza la aprobación con 409 si faceEmbedding es null (nunca enroló)', async () => {
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING', faceEmbedding: null },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
   it('re-aprueba un REJECTED (apelación): REJECTED → CLEARED es válida', async () => {
     const { prisma, driverWrites } = makeApprovalPrisma(
       { ...okDriver, backgroundCheckStatus: 'REJECTED' },
@@ -979,5 +1135,76 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reject('d1', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
     expect(driverWrites).toHaveLength(0);
+  });
+});
+
+describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', () => {
+  /** Prisma que captura el `data` del driver.update para aseverar que el resultado del match se GUARDA. */
+  function makeMatchPrisma(driver: unknown) {
+    const updates: {
+      dniFaceMatched?: boolean;
+      dniFaceMatchScore?: number;
+      dniFaceMatchedAt?: Date;
+    }[] = [];
+    return {
+      updates,
+      read: { driver: { findUnique: async () => driver } },
+      write: {
+        driver: {
+          update: async (args: { data: (typeof updates)[number] }) => {
+            updates.push(args.data);
+            return {};
+          },
+        },
+      },
+    };
+  }
+
+  it('corre el match contra el embedding GUARDADO y PERSISTE el resultado (matched/score/at)', async () => {
+    const prisma = makeMatchPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.matchDniFace('d1', { image: 'base64-dni-front' });
+    // Devuelve el veredicto del motor (sandbox bio → matched true, score 96).
+    expect(out).toEqual({ matched: true, score: 96, reason: null });
+    // GUARDA el resultado en una sola escritura: veredicto + score + momento.
+    expect(prisma.updates).toHaveLength(1);
+    const [persisted] = prisma.updates;
+    expect(persisted?.dniFaceMatched).toBe(true);
+    expect(persisted?.dniFaceMatchScore).toBe(96);
+    expect(persisted?.dniFaceMatchedAt).toBeInstanceOf(Date);
+  });
+
+  it('sin biometría enrolada → 409 (ConflictError) y NO escribe nada', async () => {
+    const prisma = makeMatchPrisma({ ...okDriver, faceEmbedding: [] });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(
+      svc.matchDniFace('d1', { image: 'base64-dni-front' }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('404 si el conductor no existe', async () => {
+    const prisma = makeMatchPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(
+      svc.matchDniFace('d1', { image: 'base64-dni-front' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('NO coincide → persiste matched=false con el score y el motivo del motor', async () => {
+    const prisma = makeMatchPrisma(okDriver);
+    // Motor que reporta no-coincidencia (espeja el biometric-service real / el sandbox con threshold).
+    const bioNoMatch = {
+      ...bio,
+      async matchDniFace() {
+        return { matched: false, score: 33, reason: 'no coincide' };
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, config);
+    const out = await svc.matchDniFace('d1', { image: 'base64-dni-front' });
+    expect(out.matched).toBe(false);
+    expect(prisma.updates[0]?.dniFaceMatched).toBe(false);
+    expect(prisma.updates[0]?.dniFaceMatchScore).toBe(33);
   });
 });

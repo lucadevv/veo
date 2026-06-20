@@ -52,6 +52,65 @@ describe('BiometricServiceClient timeout', () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
+  it('enrollWithLiveness POST /v1/enroll: manda { driverId, challengeId, frames } y mapea livenessPassed + embedding', async () => {
+    let receivedUrl: string | undefined;
+    let receivedBody: unknown;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+      receivedUrl = String(url);
+      receivedBody = JSON.parse(String(init?.body));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            livenessPassed: true,
+            embedding: [0.1, 0.2, 0.3],
+            reason: null,
+            takenAt: '2026-06-19T00:00:00.000Z',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    });
+
+    const client = new BiometricServiceClient('http://biometric.local', 20_000, SECRET);
+    const out = await client.enrollWithLiveness({
+      driverId: 'd1',
+      challengeId: 'c1',
+      frames: ['f1', 'f2'],
+    });
+
+    expect(receivedUrl).toBe('http://biometric.local/v1/enroll');
+    expect(receivedBody).toEqual({ driverId: 'd1', challengeId: 'c1', frames: ['f1', 'f2'] });
+    expect(out).toEqual({
+      livenessPassed: true,
+      embedding: [0.1, 0.2, 0.3],
+      reason: null,
+      takenAt: '2026-06-19T00:00:00.000Z',
+    });
+  });
+
+  it('matchDniFace POST /v1/face-match: manda { image, referenceEmbedding } y reescala score 0..1 → 0..100', async () => {
+    let receivedUrl: string | undefined;
+    let receivedBody: unknown;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+      receivedUrl = String(url);
+      receivedBody = JSON.parse(String(init?.body));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ matched: true, score: 0.93, reason: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    });
+
+    const client = new BiometricServiceClient('http://biometric.local', 20_000, SECRET);
+    const out = await client.matchDniFace({ image: 'base64-dni', referenceEmbedding: [0.1, 0.2] });
+
+    expect(receivedUrl).toBe('http://biometric.local/v1/face-match');
+    expect(receivedBody).toEqual({ image: 'base64-dni', referenceEmbedding: [0.1, 0.2] });
+    // score 0..1 del servicio → 0..100 del dominio (igual que verify).
+    expect(out).toEqual({ matched: true, score: 93, reason: null });
+  });
+
   it('pasa el signal de timeout a fetch y mapea el caso feliz sin abortar', async () => {
     let receivedSignal: AbortSignal | undefined;
     let receivedHeaders: Record<string, string> | undefined;

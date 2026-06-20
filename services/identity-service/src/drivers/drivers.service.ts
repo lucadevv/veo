@@ -11,6 +11,7 @@ import {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
+  UnprocessableEntityError,
   uuidv7,
 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
@@ -18,6 +19,7 @@ import { REDIS } from '../infra/redis';
 import {
   BIOMETRIC_PROVIDER,
   type BiometricChallenge,
+  type BiometricDniMatchResult,
   type BiometricProvider,
 } from '../ports/biometric/biometric.port';
 import {
@@ -28,6 +30,7 @@ import {
   SuspensionSource,
 } from '../generated/prisma';
 import { backgroundCheckMachine, isBackgroundCleared } from '../domain/background-check';
+import { hasFaceEmbedding } from '../domain/face-embedding';
 import { driverStatusMachine, type SelfServiceDriverStatus } from '../domain/driver-status';
 import { kycStatusMachine } from '../domain/kyc-status';
 import type { Env } from '../config/env.schema';
@@ -165,13 +168,44 @@ export class DriversService {
     });
   }
 
-  /** Operador aprueba antecedentes → conductor habilitado (KYC VERIFIED). Emite driver.verified. */
+  /**
+   * Operador aprueba antecedentes → conductor habilitado (KYC VERIFIED). Emite driver.verified.
+   *
+   * GATE BIOMÉTRICO SERVER-SIDE (defensa en profundidad · diferenciador no negociable VEO): un conductor
+   * NO puede ser aprobado —es decir, alcanzar KYC VERIFIED— sin haber enrolado su biometría facial de
+   * referencia (`faceEmbedding`). Este es el choke point AUTORITATIVO y curl-proof: aunque la UI o el
+   * admin-bff fallaran en chequearlo, la transición a aprobado se BLOQUEA aquí, dentro de la MISMA tx que
+   * valida los antecedentes, antes de cualquier escritura (fail-closed, cero efectos). El gate de TURNO
+   * (startShift, BR-I02) ya exigía el embedding para verificar en vivo; este lo exige ANTES, en la
+   * aprobación, para que un conductor sin biometría no llegue siquiera a quedar habilitado. La lectura del
+   * embedding vive DENTRO de la tx (sobre el dato fresco, no la réplica): sin TOCTOU con un enrollFace
+   * concurrente. Error tipado 409 (ConflictError) `biometría no enrolada`.
+   *
+   * DECISIÓN sub-lote 3C · el face-match DNI↔selfie NO es gate DURO de aprobación (a propósito): este gate
+   * sigue exigiendo solo el ENROLAMIENTO biométrico (`hasFaceEmbedding`), no que el binding DNI↔selfie haya
+   * dado MATCHED. Razones: (1) gradualidad — exigir el match rompería a los conductores ya en cola que se
+   * enrolaron antes de existir el binding (mismo criterio que el DNI/documentos requeridos, que se sumaron
+   * gradual aguas arriba en el admin-bff); (2) el match puede dar NO_MATCH por una foto de DNI de mala
+   * calidad sin que haya fraude — un falso negativo NO debe bloquear mecánicamente la habilitación; la
+   * decisión es del operador. El requisito de PRODUCTO ("no aprobar a ciegas") se cumple haciendo que el
+   * operador VEA el binding (UI 3C) antes de decidir. Si en el futuro se quiere endurecer, el lugar es ACÁ
+   * (server-truth, curl-proof), leyendo `dniFaceMatched` dentro de esta misma tx — pero como gate gradual y
+   * documentado, NO un cambio silencioso que rompa el flujo actual.
+   */
   async approve(driverId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
     return this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
       if (!driver) throw new NotFoundError('Conductor no encontrado');
       const user = await tx.user.findUnique({ where: { id: driver.userId } });
       if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
+      // GATE BIOMÉTRICO (server-truth, fail-closed): sin embedding de referencia enrolado NO hay
+      // aprobación. Mismo predicado que el gate de turno (`hasFaceEmbedding`) → fuente única de
+      // "biométricamente enrolado". Corta ANTES de los asserts de máquina y de toda escritura.
+      if (!hasFaceEmbedding(driver)) {
+        throw new ConflictError('No se puede aprobar: el conductor no enroló su biometría facial', {
+          driverId,
+        });
+      }
       backgroundCheckMachine.assertTransition(
         driver.backgroundCheckStatus,
         BackgroundCheckStatus.CLEARED,
@@ -354,7 +388,11 @@ export class DriversService {
       // 5) CAS clear: solo limpia si SIGUE suspendido Y la fuente SIGUE siendo DISCIPLINARY (defensa contra
       //    una carrera que ya reactivó, o un fleet.driver_suspended que reescribió la fuente bajo nosotros).
       const result = await tx.driver.updateMany({
-        where: { id: driverId, suspendedAt: { not: null }, suspensionSource: SuspensionSource.DISCIPLINARY },
+        where: {
+          id: driverId,
+          suspendedAt: { not: null },
+          suspensionSource: SuspensionSource.DISCIPLINARY,
+        },
         data: { suspendedAt: null, suspensionSource: null },
       });
       if (result.count === 0) {
@@ -509,27 +547,105 @@ export class DriversService {
   }
 
   /**
-   * Enrolamiento facial mínimo (BR-I02): calcula el embedding de referencia de una foto vía
-   * biometric-service y lo guarda en el conductor. Sin enrolamiento no hay verificación en live.
+   * Enrolamiento facial CON LIVENESS (BR-I02 · diferenciador no negociable VEO): en vez de una foto suelta
+   * (spoofeable con una imagen), el conductor ejecuta un reto de liveness activo y manda los FRAMES. El
+   * biometric-service confirma que hay una persona VIVA frente a la cámara (anti-spoofing) y, solo si pasa,
+   * deriva el embedding de referencia. Flujo:
+   *   1. La app pide el reto: GET /drivers/me/biometric/liveness/challenge (createEnrollChallenge).
+   *   2. Captura los frames mientras el conductor hace la acción (TURN_LEFT/NOD/SMILE…).
+   *   3. POST /drivers/biometric/enroll con { challengeId, frames }.
+   *
+   * Si la prueba de vida NO pasa → 422 tipado (UnprocessableEntityError) con el `reason` del motor: el
+   * enrolamiento se RECHAZA y no se guarda nada (fail-closed, sin embedding falso). Si PASA, persiste el
+   * embedding + `faceEnrolledAt` en UNA escritura (igual que antes) — el gate `hasFaceEmbedding`
+   * (aprobación del operador + inicio de turno) lo lee como fuente única de "biométricamente enrolado".
    */
   async enrollFace(
     userId: string,
-    input: { photo: string },
+    input: { challengeId: string; frames: string[] },
   ): Promise<{ enrolled: true; enrolledAt: string }> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
 
-    const embedding = await this.biometric.embed(input.photo);
-    if (!embedding.length) {
-      throw new ConflictError('No se pudo calcular el embedding facial de referencia');
+    const result = await this.biometric.enrollWithLiveness({
+      driverId: d.id,
+      challengeId: input.challengeId,
+      frames: input.frames,
+    });
+
+    // GATE DE VIDA (fail-closed): sin prueba de vida superada NO hay enrolamiento. 422 tipado con el
+    // motivo del motor — la app degrada HONESTO ("Prueba de vida no superada") y pide reintentar el reto.
+    if (!result.livenessPassed || !result.embedding || !result.embedding.length) {
+      throw new UnprocessableEntityError('Prueba de vida no superada', {
+        reason: result.reason ?? 'liveness_failed',
+      });
     }
 
     const enrolledAt = new Date();
     await this.prisma.write.driver.update({
       where: { id: d.id },
-      data: { faceEmbedding: embedding, faceEnrolledAt: enrolledAt },
+      data: { faceEmbedding: result.embedding, faceEnrolledAt: enrolledAt },
     });
     return { enrolled: true, enrolledAt: enrolledAt.toISOString() };
+  }
+
+  /**
+   * Sub-lote 3C · FACE-MATCH DNI↔selfie (BINDING). Corre el match entre la foto FRONT del DNI (que el
+   * admin-bff baja de S3 y nos pasa como base64) y el `faceEmbedding` de referencia GUARDADO del conductor
+   * (el que enroló con liveness), GUARDA el resultado y lo devuelve para que el operador lo VEA antes de
+   * aprobar (no aprueba a ciegas).
+   *
+   * GARANTÍA DE SEGURIDAD (causa raíz del diseño): el match usa SIEMPRE el embedding GUARDADO del conductor
+   * (leído de la DB, NUNCA uno que mande el caller) + la imagen del DNI REAL (bytes de S3 que el admin-bff
+   * bajó del documento que el conductor subió, no una imagen arbitraria). El caller solo aporta la imagen del
+   * DNI; la biometría de referencia es server-truth. Así el binding liga la cara del DNI con la biometría
+   * enrolada, sin que un caller malicioso pueda inyectar un embedding que "coincida".
+   *
+   * Sin biometría enrolada → 409 tipado (ConflictError): no hay referencia contra la cual cotejar (mismo
+   * predicado `hasFaceEmbedding` que el gate de aprobación y el de turno). El guardado va en UNA escritura
+   * atómica (driver.update con los 3 campos del resultado) — el operador lee siempre un resultado coherente.
+   */
+  async matchDniFace(
+    driverId: string,
+    input: { image: string },
+  ): Promise<BiometricDniMatchResult> {
+    const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
+    if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
+    // Gate: sin embedding de referencia enrolado NO hay match (no hay contra qué cotejar). 409 tipado,
+    // mismo predicado que approve()/startShift() (fuente única de "biométricamente enrolado").
+    if (!hasFaceEmbedding(driver)) {
+      throw new ConflictError('El conductor no tiene biometría facial enrolada', { driverId });
+    }
+
+    // El match usa el embedding GUARDADO (server-truth, NO uno del caller) + la imagen del DNI REAL (S3).
+    const result = await this.biometric.matchDniFace({
+      image: input.image,
+      referenceEmbedding: driver.faceEmbedding,
+    });
+
+    // GUARDA el resultado en UNA escritura atómica: el operador siempre lee un binding coherente
+    // (veredicto + score + momento juntos). El score se redondea a entero (escala 0..100, igual que verify).
+    await this.prisma.write.driver.update({
+      where: { id: driverId },
+      data: {
+        dniFaceMatched: result.matched,
+        dniFaceMatchScore: result.score,
+        dniFaceMatchedAt: new Date(),
+      },
+    });
+
+    return result;
+  }
+
+  /**
+   * Emite un reto de liveness activo para el ENROLAMIENTO del conductor (BR-I02). Mismo contrato que el
+   * reto de turno (createBiometricChallenge): reusa el puerto `createChallenge()`. Se separa por endpoint
+   * (GET /drivers/me/biometric/liveness/challenge) porque es un paso del onboarding, no del turno.
+   */
+  async createEnrollChallenge(userId: string): Promise<BiometricChallenge> {
+    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    if (!d) throw new NotFoundError('Conductor no encontrado');
+    return this.biometric.createChallenge();
   }
 
   /** Emite un reto de liveness activo para el inicio de turno (BR-I02). */
@@ -551,7 +667,7 @@ export class DriversService {
   ): Promise<BiometricVerifyMint> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
-    if (!d.faceEmbedding || d.faceEmbedding.length === 0) {
+    if (!hasFaceEmbedding(d)) {
       throw new ConflictError('Conductor no enrolado biométricamente');
     }
 
@@ -611,6 +727,13 @@ export class DriversService {
     if (d.licenseExpiresAt && d.licenseExpiresAt.getTime() < Date.now()) {
       throw new ForbiddenError('Licencia vencida');
     }
+    // GATE BIOMÉTRICO en el CHOKE POINT OPERATIVO (TOCTOU fix): la invariante "CLEARED ⟹ tiene embedding"
+    // NO se sostiene sola — el sweeper de borrado (BR-S06) vacía `faceEmbedding` SIN tocar
+    // `backgroundCheckStatus`, así que un conductor CLEARED puede quedarse sin biometría de referencia. Por
+    // eso re-validamos el enrolamiento AQUÍ, igual que `approve()` (mismo `hasFaceEmbedding`). Este es el gate
+    // BARATO de fail-fast sobre la réplica; la AUTORIDAD final es el CAS atómico de abajo (`isEmpty: false` en
+    // el where), que cierra la ventana de carrera contra un borrado concurrente sobre el dato FRESCO.
+    if (!hasFaceEmbedding(d)) throw new ConflictError('Biometría facial no enrolada');
 
     const lockKey = bioLockKey(d.id);
     const fails = Number((await this.redis.get(lockKey)) ?? 0);
@@ -669,14 +792,17 @@ export class DriversService {
     // evidencia. Es una sola escritura previa e independiente de la tx del CAS — no comparte destino transaccional.
     await this.prisma.write.biometricCheck.create({ data: biometricCheckData });
 
-    // #2 + #10 — TRANSICIÓN POR CAS ATÓMICO: el estado fuente válido (derivado de la máquina, cero strings
-    // mágicos) Y `suspendedAt: null` (dato FRESCO, no la réplica) viajan en el WHERE. Dos startShift
-    // concurrentes: solo UNO matchea un estado fuente y gana el claim (el otro ve count=0 → carrera).
+    // #2 + #10 + TOCTOU biométrico — TRANSICIÓN POR CAS ATÓMICO: el estado fuente válido (derivado de la
+    // máquina, cero strings mágicos), `suspendedAt: null` Y `faceEmbedding` no vacío (`isEmpty: false`)
+    // viajan en el WHERE — TODO sobre el dato FRESCO, no la réplica. Dos startShift concurrentes: solo UNO
+    // matchea (el otro ve count=0 → carrera). Y si un borrado (sweeper) vació el embedding entre la réplica
+    // y la tx, el `isEmpty: false` hace que NO matchee (count 0) → fail-closed, sin biometría no hay turno.
     await this.prisma.write.$transaction(async (tx) => {
       const claim = await tx.driver.updateMany({
         where: {
           id: d.id,
           suspendedAt: null,
+          faceEmbedding: { isEmpty: false },
           currentStatus: { in: driverStatusSources(DriverStatus.AVAILABLE) },
         },
         data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
@@ -685,10 +811,12 @@ export class DriversService {
         // Releemos para un error HONESTO con el estado real (la auditoría del intento YA quedó persistida).
         const current = await tx.driver.findUnique({
           where: { id: d.id },
-          select: { currentStatus: true, suspendedAt: true },
+          select: { currentStatus: true, suspendedAt: true, faceEmbedding: true },
         });
         if (!current) throw new NotFoundError('Conductor no encontrado');
         if (current.suspendedAt) throw new ForbiddenError('Conductor suspendido');
+        // Biometría borrada bajo nuestros pies (sweeper concurrente): error tipado claro, no un falso "carrera".
+        if (!hasFaceEmbedding(current)) throw new ConflictError('Biometría facial no enrolada');
         // No estaba suspendido pero el estado fuente no matcheó: o la máquina rechaza la transición, o
         // otro startShift concurrente ya lo movió (double-shift evitado). assertTransition discrimina:
         // si el estado actual no permite → AVAILABLE lanza InvalidStatusTransition (409); si SÍ permitía

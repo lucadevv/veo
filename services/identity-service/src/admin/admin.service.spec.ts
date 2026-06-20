@@ -1,14 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { authenticator } from 'otplib';
 import argon2 from 'argon2';
-import { enrollTotp } from '@veo/auth';
+import { enrollTotp, generateTotp } from '@veo/auth';
 import {
   ForbiddenError,
   NotFoundError,
   RateLimitError,
   UnauthorizedError,
   ValidationError,
+  SystemClock,
+  FixedClock,
+  type Clock,
 } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 import { AdminService } from './admin.service';
@@ -73,6 +75,7 @@ function makeService(
   redis: unknown = fakeRedis(),
   jwt: unknown = {},
   sessions: unknown = {},
+  clock: Clock = new SystemClock(),
 ): AdminService {
   return new AdminService(
     prisma as never,
@@ -80,6 +83,7 @@ function makeService(
     sessions as never,
     email,
     redis as never,
+    clock,
     config,
   );
 }
@@ -491,10 +495,34 @@ describe('AdminService.login · lockout anti brute-force', () => {
     }
     expect(redis._store.get(ATTEMPTS_KEY)).toBe('3');
 
-    const validTotp = authenticator.generate(secret);
+    const validTotp = generateTotp(secret);
     const tokens = await svc.login(EMAIL, PASSWORD, validTotp);
     expect(tokens).toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
     expect(redis._store.get(ATTEMPTS_KEY)).toBeUndefined();
     expect(redis._store.get(LOCK_KEY)).toBeUndefined();
+  });
+
+  it('DETERMINISTA: con un FixedClock inyectado, el login verifica el TOTP en ESE instante (incl. 2026)', async () => {
+    const { admin, secret } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    // Reloj fijado a 2026: el servicio NO depende del reloj de pared para verificar el código.
+    const clock = new FixedClock(Date.UTC(2026, 5, 20));
+    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions(), clock);
+
+    // El código se genera para EL MISMO instante del reloj inyectado.
+    const totpAt2026 = generateTotp(secret, clock.now());
+    const tokens = await svc.login(EMAIL, PASSWORD, totpAt2026);
+    expect(tokens).toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+  });
+
+  it('DETERMINISTA: un código de hace 60s NO verifica (el servicio usa el clock inyectado, fuera de ventana)', async () => {
+    const { admin, secret } = await makeActiveAdmin();
+    const redis = fakeRedis();
+    const clock = new FixedClock(Date.UTC(2026, 5, 20));
+    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions(), clock);
+
+    // Código generado 60s ANTES del instante del reloj del servicio → fuera de window:1.
+    const staleTotp = generateTotp(secret, clock.now() - 60_000);
+    await expect(svc.login(EMAIL, PASSWORD, staleTotp)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 });

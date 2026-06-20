@@ -16,6 +16,8 @@ import {
   RateLimitError,
   UnauthorizedError,
   ValidationError,
+  CLOCK,
+  type Clock,
 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
@@ -73,6 +75,7 @@ export class AdminService {
     private readonly sessions: RedisRefreshTokenStore,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(CLOCK) private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
     this.totpEncKey = config.getOrThrow<string>('TOTP_ENC_KEY');
@@ -298,7 +301,7 @@ export class AdminService {
       typ: 'admin',
       roles: admin.roles as AdminRole[],
       sid: 'stepup', // el sid real lo mantiene el refresh; este token solo eleva MFA
-      mfaAt: Math.floor(Date.now() / 1000),
+      mfaAt: Math.floor(this.clock.now() / 1000),
       email: admin.email, // operador staff: email legible para watermark/audit (BR-S02)
     });
     return { accessToken };
@@ -338,7 +341,7 @@ export class AdminService {
    */
   private async assertTotp(totpSecretEnc: string | null, totp: string, email?: string): Promise<void> {
     if (!totpSecretEnc) throw new UnauthorizedError('TOTP no configurado');
-    if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey))) {
+    if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey), this.clock.now())) {
       if (email) await this.registerAdminLoginFailure(email);
       throw new UnauthorizedError('Código TOTP incorrecto');
     }
@@ -401,7 +404,7 @@ export class AdminService {
       typ: 'admin',
       roles: roles as AdminRole[],
       sid: sessionId,
-      mfaAt: Math.floor(Date.now() / 1000),
+      mfaAt: Math.floor(this.clock.now() / 1000),
       email, // operador staff: email legible para watermark/audit (BR-S02)
     });
     const refreshToken = await this.jwt.signRefreshToken({

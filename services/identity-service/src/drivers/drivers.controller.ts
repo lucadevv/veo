@@ -11,9 +11,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsBase64,
   IsISO8601,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -54,9 +57,40 @@ class StartShiftDto {
   geoLon?: number;
 }
 
-class EnrollFaceDto {
+/**
+ * Tope de longitud del base64 POR FRAME (chars). El liveness manda varios frames en un solo body (límite
+ * del parser 'json' 5mb ≈ 6.99M chars base64 TOTAL). Con hasta `ENROLL_FRAMES_MAX` frames, cada uno se
+ * acota para que la suma no reviente el body parser y un frame suelto no sea desproporcionado.
+ */
+const FRAME_BASE64_MAX = 1_500_000;
+/**
+ * Piso de longitud del base64 POR FRAME: un frame JPEG real son decenas de KB → decenas de miles de chars
+ * base64. 2000 descarta trivialidades (`"x"`, `"AAAA"`) sin rozar el happy path de un frame real.
+ */
+const FRAME_BASE64_MIN = 2_000;
+/** Tope de frames del reto de liveness: 30 (una secuencia corta, no un video largo). El piso (≥1) lo da @ArrayNotEmpty. */
+const ENROLL_FRAMES_MAX = 30;
+
+/**
+ * POST /drivers/biometric/enroll → body. Enrolamiento CON LIVENESS (BR-I02): el conductor manda el
+ * `challengeId` del reto + los `frames` capturados mientras ejecutaba la acción. ENDURECIMIENTO del payload
+ * (gate biométrico server-side): challengeId no vacío y cada frame base64 VÁLIDO y NO trivial (mín/máx por
+ * frame), con un tope de cantidad de frames. Errores tipados (400) en el borde; el liveness real lo resuelve
+ * el biometric-service. Reemplaza el viejo `{ photo }` (una foto suelta era spoofeable con una imagen).
+ */
+export class EnrollFaceDto {
   @IsString()
-  photo!: string;
+  @IsNotEmpty()
+  challengeId!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(ENROLL_FRAMES_MAX)
+  @IsString({ each: true })
+  @IsBase64({}, { each: true })
+  @MinLength(FRAME_BASE64_MIN, { each: true })
+  @MaxLength(FRAME_BASE64_MAX, { each: true })
+  frames!: string[];
 }
 
 class VerifyBiometricDto {
@@ -67,6 +101,21 @@ class VerifyBiometricDto {
   @ArrayNotEmpty()
   @IsString({ each: true })
   frames!: string[];
+}
+
+/**
+ * POST /drivers/:id/dni-face-match → body (sub-lote 3C · BINDING). El admin-bff baja la foto FRONT del DNI
+ * de S3 y la pasa como base64 (`image`). El embedding de referencia NO viaja en el body: lo lee el servicio
+ * de la fila GUARDADA del conductor (server-truth · garantía de seguridad). Endurecimiento del payload:
+ * base64 válido y no trivial, con tope alineado al de los frames de enroll (mismo orden de magnitud).
+ */
+class DniFaceMatchDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsBase64()
+  @MinLength(FRAME_BASE64_MIN)
+  @MaxLength(FRAME_BASE64_MAX)
+  image!: string;
 }
 
 class RejectDriverDto {
@@ -119,9 +168,15 @@ export class DriversController {
     return this.drivers.onboard(user.userId, dto);
   }
 
+  @Get('me/biometric/liveness/challenge')
+  @ApiOperation({ summary: 'Emitir reto de liveness para enrolar el rostro (BR-I02)' })
+  enrollChallenge(@CurrentUser() user: AuthenticatedUser) {
+    return this.drivers.createEnrollChallenge(user.userId);
+  }
+
   @Post('biometric/enroll')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor (BR-I02)' })
+  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor con liveness (BR-I02)' })
   enrollFace(@CurrentUser() user: AuthenticatedUser, @Body() dto: EnrollFaceDto) {
     return this.drivers.enrollFace(user.userId, dto);
   }
@@ -184,6 +239,18 @@ export class DriversController {
   @ApiOperation({ summary: 'Aprobar antecedentes del conductor (KYC VERIFIED)' })
   approve(@Param('id') id: string) {
     return this.drivers.approve(id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/dni-face-match')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Face-match DNI↔selfie: cotejar la foto FRONT del DNI vs la biometría enrolada del conductor (BINDING · 3C)',
+  })
+  dniFaceMatch(@Param('id') id: string, @Body() dto: DniFaceMatchDto) {
+    return this.drivers.matchDniFace(id, { image: dto.image });
   }
 
   @UseGuards(RolesGuard)

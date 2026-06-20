@@ -41,9 +41,17 @@ const bioPass = {
   async createChallenge() {
     return {
       challengeId: 'c1',
-      action: 'TURN_LEFT',
+      action: 'TURN_LEFT' as const,
       instructions: 'Gira la cabeza',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+  },
+  async enrollWithLiveness() {
+    return {
+      livenessPassed: true,
+      embedding: [0.4, 0.5, 0.6],
+      reason: null,
+      takenAt: new Date().toISOString(),
     };
   },
   async embed() {
@@ -51,6 +59,9 @@ const bioPass = {
   },
   async verify() {
     return { score: 96, livenessPassed: true, matchPassed: true };
+  },
+  async matchDniFace() {
+    return { matched: true, score: 96, reason: null };
   },
 };
 

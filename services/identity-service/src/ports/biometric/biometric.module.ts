@@ -9,9 +9,14 @@ import {
   signInternalIdentity,
   type InternalAudience,
 } from '@veo/auth';
+import { LivenessAction } from '@veo/shared-types';
 import {
   BIOMETRIC_PROVIDER,
   type BiometricChallenge,
+  type BiometricDniMatchInput,
+  type BiometricDniMatchResult,
+  type BiometricEnrollInput,
+  type BiometricEnrollResult,
   type BiometricProvider,
   type BiometricVerifyInput,
   type BiometricVerifyResult,
@@ -22,41 +27,113 @@ import type { Env } from '../../config/env.schema';
 const EMBEDDING_DIM = 512;
 /** TTL del reto sandbox (s); se alinea con `challenge_ttl_seconds` del biometric-service. */
 const SANDBOX_CHALLENGE_TTL_SECONDS = 60;
+/**
+ * Umbral de similitud coseno del face-match SANDBOX (sub-lote 3C). Dos embeddings deterministas derivados
+ * de la MISMA imagen dan coseno 1; de imágenes distintas, ~0 (vectores quasi-ortogonales del hash). 0.99
+ * exige prácticamente identidad de imagen → el sandbox da `matched=true` solo si la foto del DNI es la
+ * misma que generó el embedding de referencia (degradación honesta, no un `true` mágico).
+ */
+const SANDBOX_MATCH_THRESHOLD = 0.99;
+
+/** Similitud coseno entre dos vectores (ambos ya unitarios en el sandbox, pero no asumimos norma 1). */
+function cosineSimilarity(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < n; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    dot += av * bv;
+    na += av * av;
+    nb += bv * bv;
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Embedding unitario DETERMINISTA derivado del hash de la entrada (foto o primer frame del reto): mismo
+ * input → mismo vector, y depende realmente de la entrada (no es un valor mágico). Base de la degradación
+ * HONESTA del sandbox: sin device ni modelos ONNX, igual produce un embedding estable y verificable.
+ */
+function deterministicEmbedding(seed: string): number[] {
+  const out: number[] = [];
+  let block = createHash('sha256').update(seed).digest();
+  while (out.length < EMBEDDING_DIM) {
+    for (let i = 0; i + 4 <= block.length && out.length < EMBEDDING_DIM; i += 4) {
+      out.push(block.readUInt32BE(i) / 0xffffffff);
+    }
+    block = createHash('sha256').update(block).digest();
+  }
+  const norm = Math.sqrt(out.reduce((acc, v) => acc + v * v, 0)) || 1;
+  return out.map((v) => v / norm);
+}
 
 /**
  * Sandbox determinista (seleccionable por env VEO_BIOMETRIC_MODE=sandbox, documentado en Ola 1).
  * Permite verificación dev/CI sin device ni modelos ONNX. NO es un mock de tests:
- *  - El reto falla si `challengeId` contiene 'fail' (permite probar el bloqueo de turno).
- *  - El embedding se deriva de forma DETERMINISTA del hash de la foto (no hay valores mágicos).
+ *  - El reto/enroll falla si `challengeId` contiene 'fail' (permite probar el bloqueo de turno y el 422 de enroll).
+ *  - El embedding se deriva de forma DETERMINISTA del hash de la entrada (no hay valores mágicos).
  */
 class BiometricSandboxProvider implements BiometricProvider {
   async createChallenge(): Promise<BiometricChallenge> {
     return {
       challengeId: uuidv7(),
-      action: 'TURN_LEFT',
+      action: LivenessAction.TURN_LEFT,
       instructions: 'Gira lentamente la cabeza hacia la izquierda',
       expiresAt: new Date(Date.now() + SANDBOX_CHALLENGE_TTL_SECONDS * 1000).toISOString(),
     };
   }
 
-  async embed(photo: string): Promise<number[]> {
-    // Vector unitario derivado del hash de la foto: determinista y dependiente de la entrada.
-    const out: number[] = [];
-    let block = createHash('sha256').update(photo).digest();
-    while (out.length < EMBEDDING_DIM) {
-      for (let i = 0; i + 4 <= block.length && out.length < EMBEDDING_DIM; i += 4) {
-        out.push(block.readUInt32BE(i) / 0xffffffff);
-      }
-      block = createHash('sha256').update(block).digest();
+  /**
+   * Enrolamiento CON liveness en sandbox: degradación HONESTA — sin motor ONNX, simula que la prueba de
+   * vida pasó (livenessPassed: true) y deriva el embedding del PRIMER frame (hash determinista). Si el
+   * `challengeId` contiene 'fail', simula un liveness fallido (embedding null + reason) para poder probar
+   * el 422 del enroll en dev/CI. No inventa un embedding cuando "falla": espeja el contrato del motor real.
+   */
+  async enrollWithLiveness(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
+    const takenAt = new Date().toISOString();
+    if (input.challengeId.includes('fail')) {
+      return {
+        livenessPassed: false,
+        embedding: null,
+        reason: 'Prueba de vida no superada (sandbox)',
+        takenAt,
+      };
     }
-    const norm = Math.sqrt(out.reduce((acc, v) => acc + v * v, 0)) || 1;
-    return out.map((v) => v / norm);
+    return {
+      livenessPassed: true,
+      embedding: deterministicEmbedding(input.frames[0] ?? ''),
+      reason: null,
+      takenAt,
+    };
+  }
+
+  async embed(photo: string): Promise<number[]> {
+    return deterministicEmbedding(photo);
   }
 
   async verify(input: BiometricVerifyInput): Promise<BiometricVerifyResult> {
     const fail = input.challengeId.includes('fail');
     const score = fail ? 40 : 96;
     return { score, livenessPassed: !fail, matchPassed: !fail };
+  }
+
+  /**
+   * Face-match DNI↔selfie en sandbox: degradación HONESTA y DETERMINISTA — sin motor ONNX no cotejamos
+   * caras reales, pero el resultado depende de la entrada (no es un valor mágico): comparamos el embedding
+   * de referencia GUARDADO contra el embedding DETERMINISTA derivado de la imagen del DNI (mismo hash que
+   * usa enroll/embed). Si la imagen del DNI fuera la MISMA que se enroló, ambos embeddings coinciden y el
+   * match da `true` con score alto — coherente con el flujo real. Score fijo alto (96) para el caso match,
+   * bajo (40) para el no-match. Permite probar el binding en dev/CI sin device.
+   */
+  async matchDniFace(input: BiometricDniMatchInput): Promise<BiometricDniMatchResult> {
+    const imageEmbedding = deterministicEmbedding(input.image);
+    const matched = cosineSimilarity(imageEmbedding, input.referenceEmbedding) >= SANDBOX_MATCH_THRESHOLD;
+    return matched
+      ? { matched: true, score: 96, reason: null }
+      : { matched: false, score: 40, reason: 'El rostro del DNI no coincide con la biometría enrolada (sandbox)' };
   }
 }
 
@@ -76,6 +153,21 @@ interface VerifyServiceResponse {
   livenessPassed: boolean;
   matchPassed: boolean;
   reason: string;
+}
+
+/** Respuesta cruda de biometric-service POST /v1/enroll (enrolamiento CON liveness). */
+interface EnrollServiceResponse {
+  livenessPassed: boolean;
+  embedding: number[] | null;
+  reason: string | null;
+  takenAt: string;
+}
+
+/** Respuesta cruda de biometric-service POST /v1/face-match (score en 0..1). */
+interface FaceMatchServiceResponse {
+  matched: boolean;
+  score: number;
+  reason: string | null;
 }
 
 /**
@@ -144,6 +236,20 @@ export class BiometricServiceClient implements BiometricProvider {
     return this.request<BiometricChallenge>('/v1/liveness/challenge', {});
   }
 
+  async enrollWithLiveness(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
+    const out = await this.request<EnrollServiceResponse>('/v1/enroll', {
+      driverId: input.driverId,
+      challengeId: input.challengeId,
+      frames: input.frames,
+    });
+    return {
+      livenessPassed: out.livenessPassed,
+      embedding: out.embedding,
+      reason: out.reason,
+      takenAt: out.takenAt,
+    };
+  }
+
   async embed(photo: string): Promise<number[]> {
     const out = await this.request<{ embedding: number[] }>('/v1/embed', { photo });
     return out.embedding;
@@ -161,6 +267,19 @@ export class BiometricServiceClient implements BiometricProvider {
       score: Math.round(out.score * 100),
       livenessPassed: out.livenessPassed,
       matchPassed: out.matchPassed,
+    };
+  }
+
+  async matchDniFace(input: BiometricDniMatchInput): Promise<BiometricDniMatchResult> {
+    const out = await this.request<FaceMatchServiceResponse>('/v1/face-match', {
+      image: input.image,
+      referenceEmbedding: input.referenceEmbedding,
+    });
+    // biometric-service entrega el score en 0..1; identity-service trabaja en 0..100 (igual que verify).
+    return {
+      matched: out.matched,
+      score: Math.round(out.score * 100),
+      reason: out.reason,
     };
   }
 }

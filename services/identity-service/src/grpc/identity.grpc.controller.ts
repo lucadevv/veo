@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
+import { DniFaceMatchStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -52,6 +53,12 @@ interface DriverReply {
   documentId: string;
   /** Fecha de nacimiento del conductor en `yyyy-mm-dd`; "" si no registrada. */
   birthDate: string;
+  /** Sub-lote 3C · estado del binding DNI↔selfie (NOT_RUN/MATCHED/NO_MATCH). */
+  dniFaceMatchStatus: string;
+  /** Score del face-match en 0..100; 0 si no se corrió. */
+  dniFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
+  dniFaceMatchedAt: string;
 }
 
 /** Request batch de GetDriversByIds (lectura para listados del admin). */
@@ -82,6 +89,9 @@ const EMPTY_DRIVER: DriverReply = {
   phone: '',
   documentId: '',
   birthDate: '',
+  dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  dniFaceMatchScore: 0,
+  dniFaceMatchedAt: '',
 };
 
 @Controller()
@@ -183,6 +193,9 @@ export class IdentityGrpcController {
     createdAt: Date;
     faceEnrolledAt: Date | null;
     lastVerifiedAt: Date | null;
+    dniFaceMatched: boolean | null;
+    dniFaceMatchScore: number | null;
+    dniFaceMatchedAt: Date | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
   }): DriverReply {
     return {
@@ -209,6 +222,17 @@ export class IdentityGrpcController {
       // @db.Date → yyyy-mm-dd; "" cuando no hay dato (proto3 default, nunca null).
       documentId: d.documentId ?? '',
       birthDate: d.birthDate ? d.birthDate.toISOString().slice(0, 10) : '',
+      // Sub-lote 3C · binding DNI↔selfie GUARDADO. El estado se DERIVA del veredicto persistido (null = aún
+      // no se corrió → NOT_RUN; true → MATCHED; false → NO_MATCH): estado tipado explícito, sin la
+      // ambigüedad del bool. Score 0 / fecha "" cuando no se corrió (proto3 default honesto).
+      dniFaceMatchStatus:
+        d.dniFaceMatched === null || d.dniFaceMatched === undefined
+          ? DniFaceMatchStatus.NOT_RUN
+          : d.dniFaceMatched
+            ? DniFaceMatchStatus.MATCHED
+            : DniFaceMatchStatus.NO_MATCH,
+      dniFaceMatchScore: d.dniFaceMatchScore ?? 0,
+      dniFaceMatchedAt: d.dniFaceMatchedAt ? d.dniFaceMatchedAt.toISOString() : '',
     };
   }
 }
