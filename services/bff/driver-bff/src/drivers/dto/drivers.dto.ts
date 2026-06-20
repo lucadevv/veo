@@ -20,7 +20,15 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { DocumentSide, FleetDocumentType, VehicleType } from '@veo/shared-types';
+import {
+  DocumentSide,
+  FleetDocumentType,
+  OCR_ENGINES,
+  OcrEngine,
+  VehicleType,
+  type ExtractedDocumentData,
+} from '@veo/shared-types';
+import { EXTRACTED_DATA_TYPE_OPTIONS } from './extracted-data.dto';
 
 /** Año mínimo razonable para el alta de vehículo (sanity check; BR-D04 >=2017 lo revalida fleet). */
 const MIN_REASONABLE_VEHICLE_YEAR = 2005;
@@ -161,6 +169,31 @@ export class AddDocumentDto {
   @ValidateNested({ each: true })
   @Type(() => AddDocumentImageDto)
   images?: AddDocumentImageDto[];
+
+  /**
+   * Onboarding sin-formularios (Lote 0): data extraída por OCR on-device (contrato `ExtractedDocumentData`
+   * de @veo/shared-types, unión discriminada por `type`). BORDE PÚBLICO → validación FUERTE: `@ValidateNested`
+   * + `@Type` con discriminador por `type` (= FleetDocumentType) enruta a la sub-clase y, con
+   * `forbidNonWhitelisted`, acota campos/tamaño y rechaza claves arbitrarias ANTES de proxyar a fleet.
+   * Opcional → backward-compatible (registrar SIN OCR sigue OK). Sin `any`.
+   */
+  @ApiPropertyOptional({ description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => Object, EXTRACTED_DATA_TYPE_OPTIONS)
+  extractedData?: ExtractedDocumentData;
+
+  /** Motor de OCR que produjo `extractedData`. ENUM CERRADO (anti-spoof de texto libre). Trazabilidad. */
+  @ApiPropertyOptional({ enum: OcrEngine, description: 'Motor de OCR que extrajo la data (enum cerrado)' })
+  @IsOptional()
+  @IsIn(OCR_ENGINES)
+  ocrEngine?: OcrEngine;
+
+  /** Momento en que el cliente extrajo la data por OCR (ISO-8601). */
+  @ApiPropertyOptional({ example: '2026-06-20T10:00:00.000Z', description: 'Instante de la extracción OCR' })
+  @IsOptional()
+  @IsISO8601()
+  ocrAt?: string;
 }
 
 /**

@@ -5,9 +5,13 @@
  */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundError, uuidv7 } from '@veo/utils';
+import { ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import { createLogger, type Logger } from '@veo/observability';
-import { DocumentSide, type FleetDocumentType } from '@veo/shared-types';
+import {
+  DocumentSide,
+  type ExtractedDocumentData,
+  type FleetDocumentType,
+} from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { Env } from '../config/env.schema';
 import type {
@@ -357,6 +361,11 @@ export class DriversService {
       fileS3Key?: string;
       // Sub-lote 3A: las N imágenes (caras) ya subidas vía presign. Se reenvían tal cual a fleet.
       images?: { s3Key: string; side: DocumentSide }[];
+      // Onboarding sin-formularios (Lote 0): data extraída por OCR on-device + trazabilidad del motor.
+      // Se reenvían tal cual a fleet, que las persiste en la misma transacción. Opcionales (backward-compat).
+      extractedData?: ExtractedDocumentData;
+      ocrEngine?: string;
+      ocrAt?: string;
     },
   ): Promise<DriverDocumentDetail> {
     const driver = await this.grpc.call<DriverReply>(
@@ -368,6 +377,13 @@ export class DriversService {
     if (!driver.found) {
       throw new NotFoundError('No existe un perfil de conductor para este usuario');
     }
+    // Anti-IDOR de STORAGE (borde público, Ley 29733): el cliente manda las KEYS S3. El presign las
+    // genera DRIVER-SCOPED server-side (`drivers/{driverId}/...`), pero el register las recibe del body.
+    // Si no se acotan, un conductor podría registrar un doc apuntando a `drivers/{OTRO}/documents/...` y
+    // filtrar PII ajena cuando el operador presigna el GET de esa key. Validamos TODA key entrante contra
+    // el prefijo del conductor autenticado (resuelto server-side), espejando `avatar.service.assertOwnsKey`.
+    this.assertDocumentKeysOwnedByDriver(driver.id, input.fileS3Key, input.images);
+
     // Anti-IDOR: el driverId resuelto server-side se FIRMA en la identidad propagada (igual que
     // dispatch/payments/trips), no solo en el body. fleet valida `ownerId === identity.driverId`
     // (assertDriverOwnsResource), así un conductor no puede atribuir un doc a OTRO driverId.
@@ -385,6 +401,11 @@ export class DriversService {
         fileS3Key: input.fileS3Key,
         // Sub-lote 3A: las N caras ya subidas. fleet persiste una DocumentImage por elemento (atómico).
         images: input.images,
+        // Onboarding sin-formularios (Lote 0): data OCR on-device de punta a punta. fleet la persiste en
+        // la MISMA transacción que el doc. Opcionales → si no vino OCR viajan undefined (backward-compat).
+        extractedData: input.extractedData,
+        ocrEngine: input.ocrEngine,
+        ocrAt: input.ocrAt,
       },
     });
     return buildDriverDocument(created);
@@ -460,6 +481,31 @@ export class DriversService {
     );
 
     return { tickets, expiresAt };
+  }
+
+  /**
+   * Anti-IDOR de STORAGE (borde público): valida que TODA clave S3 entrante (`fileS3Key` legacy + cada
+   * `images[].s3Key`) viva bajo el prefijo del conductor autenticado (`drivers/{driverId}/`). Es la MISMA
+   * frontera que produce `buildDocumentKey` server-side; aquí se vuelve a chequear porque el register
+   * recibe la key del cliente. Fail-closed: cualquier key fuera del prefijo (cross-driver o sin prefijo) →
+   * ForbiddenError (403). Espeja `media-service avatar.service.assertOwnsKey` (`avatars/${userId}/`).
+   */
+  private assertDocumentKeysOwnedByDriver(
+    driverId: string,
+    fileS3Key: string | undefined,
+    images: { s3Key: string; side: DocumentSide }[] | undefined,
+  ): void {
+    const prefix = `drivers/${driverId}/`;
+    const keys = [...(fileS3Key ? [fileS3Key] : []), ...(images ?? []).map((i) => i.s3Key)];
+    for (const key of keys) {
+      if (!key.startsWith(prefix)) {
+        throw new ForbiddenError('La key no pertenece al conductor autenticado', {
+          field: 's3Key',
+          driverId,
+          key,
+        });
+      }
+    }
   }
 
   /**

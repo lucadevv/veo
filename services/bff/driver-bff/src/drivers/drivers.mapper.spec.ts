@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
+import { DniFaceMatchStatus, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import {
   buildDriverModelRequest,
   buildDriverProfile,
@@ -35,6 +35,9 @@ const driver: DriverReply = {
   phone: '',
   documentId: '',
   birthDate: '',
+  dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  dniFaceMatchScore: 0,
+  dniFaceMatchedAt: '',
 };
 
 const user: UserReply = {

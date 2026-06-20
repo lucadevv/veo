@@ -37,7 +37,10 @@ async function bootstrap(): Promise<void> {
     origin: parseCors(config.getOrThrow<string>('CORS_ORIGINS')),
     credentials: true,
   });
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
+  // Convención del repo (espeja admin-bff/public-bff/trip-service). Endurece `extractedData` (Lote 0):
+  // una clave arbitraria en el JSONB OCR se RECHAZA en el borde público, no solo se strippea.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('driver-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('driver-bff'));
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'metrics'] });
