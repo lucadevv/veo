@@ -81,7 +81,12 @@ export interface PersonalData {
  * etiqueta de presentación de ese modelo (para mostrar la elección y rehidratar). Vacíos hasta elegir.
  */
 export interface VehicleData {
-  type: VehicleType;
+  /**
+   * LOTE 1: el tipo se DERIVA de la categoría MTC de la tarjeta (fuente de verdad) o se elige a mano en el
+   * fallback. Arranca en `null` (NO hay "Auto" por omisión): el alta no asume tipo. Read-only en la pantalla
+   * cuando la tarjeta lo derivó; selector manual SOLO como fallback cuando no se pudo derivar.
+   */
+  type: VehicleType | null;
   plate: string;
   year: string;
   /** Id del VehicleModelSpec elegido del catálogo (lo que se envía en `POST /drivers/vehicles`). */
@@ -90,12 +95,18 @@ export interface VehicleData {
   brand: string;
   /** Modelo elegido — solo presentación. */
   model: string;
+  /**
+   * LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad (`M1`, `L3`, `N1`…). Viaja al backend como
+   * FUENTE DE VERDAD del tipo (el servidor deriva `vehicleType` de acá). Vacía en la carga manual (sin tarjeta).
+   */
+  mtcCategory: string;
 }
 
 /**
- * Documentos requeridos en el alta (paso 3). Es una etiqueta INTERNA, app-friendly, del wizard
+ * Documentos requeridos en el alta. Es una etiqueta INTERNA, app-friendly, del wizard
  * (`VEHICLE_REGISTRATION` = "tarjeta de propiedad" en la UI); el valor que viaja al backend NO es
  * este label sino el `FleetDocumentType` canónico que devuelve `registrationDocTypeToBackend`.
+ * LOTE B: la LICENSE se captura en el paso 1 (Conductor); SOAT/tarjeta/foto en el paso 2 (Vehículo).
  */
 export type RegistrationDocumentType =
   | 'LICENSE'
@@ -105,8 +116,8 @@ export type RegistrationDocumentType =
   | 'DNI';
 
 /**
- * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige en el paso 3 (los tres documentos del
- * wizard: licencia A1, SOAT y tarjeta de propiedad). Es el rango EXACTO de `registrationDocTypeToBackend`
+ * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige (licencia A1, SOAT, tarjeta de propiedad,
+ * foto del vehículo y DNI). Es el rango EXACTO de `registrationDocTypeToBackend`
  * — tiparlo así (en vez del enum completo) deja que la presentación derive su config contextual del
  * formulario sin castear, y que un tipo nuevo del alta sea un error de compilación.
  */
@@ -146,26 +157,29 @@ export function registrationDocTypeToBackend(
 
 /**
  * Deriva el PRIMER paso del wizard a corregir a partir de los tipos de documento rechazados por el
- * operador (los `type` crudos de `GET /drivers/me/documents`, que son `FleetDocumentType`). La foto
- * del vehículo (`VEHICLE_PHOTO`) se captura en el paso 2 (Vehículo); el resto de la documentación del
- * alta (licencia/SOAT/tarjeta) en el paso 3 (Documentos). Se prioriza el paso MÁS TEMPRANO presente
- * para que el conductor re-recorra en orden. Si NINGÚN tipo rechazado es derivable a un paso (rechazo
- * de antecedentes/KYC, que no expone documento), devuelve `null`: el llamador decide el fallback.
+ * operador (los `type` crudos de `GET /drivers/me/documents`, que son `FleetDocumentType`). LOTE B
+ * (reagrupación por DUEÑO del documento): la documentación del CONDUCTOR (DNI + LICENSE_A1) se captura en
+ * el paso 1 (Conductor); la documentación del VEHÍCULO (PROPERTY_CARD + SOAT + VEHICLE_PHOTO) en el paso 2
+ * (Vehículo). Se prioriza el paso MÁS TEMPRANO presente para que el conductor re-recorra en orden. Si
+ * NINGÚN tipo rechazado es derivable a un paso (rechazo de antecedentes/KYC, que no expone documento),
+ * devuelve `null`: el llamador decide el fallback.
  */
 export function correctionStepForRejectedDocTypes(
   rejectedTypes: readonly string[],
 ): RegistrationStep | null {
-  const photo: string = FleetDocumentType.VEHICLE_PHOTO;
-  const wizardDocs: readonly string[] = [
-    FleetDocumentType.LICENSE_A1,
-    FleetDocumentType.SOAT,
+  // Docs del CONDUCTOR (paso 1 · Conductor): DNI + licencia de conducir.
+  const driverDocs: readonly string[] = [FleetDocumentType.DNI, FleetDocumentType.LICENSE_A1];
+  // Docs del VEHÍCULO (paso 2 · Vehículo): tarjeta de propiedad + SOAT + foto del vehículo.
+  const vehicleDocs: readonly string[] = [
     FleetDocumentType.PROPERTY_CARD,
+    FleetDocumentType.SOAT,
+    FleetDocumentType.VEHICLE_PHOTO,
   ];
-  if (rejectedTypes.includes(photo)) {
-    return RegistrationStep.VEHICLE;
+  if (rejectedTypes.some((type) => driverDocs.includes(type))) {
+    return RegistrationStep.PERSONAL_DATA;
   }
-  if (rejectedTypes.some((type) => wizardDocs.includes(type))) {
-    return RegistrationStep.DOCUMENTS;
+  if (rejectedTypes.some((type) => vehicleDocs.includes(type))) {
+    return RegistrationStep.VEHICLE;
   }
   return null;
 }
@@ -253,7 +267,7 @@ export interface FaceCapture {
 
 /**
  * Estado global del registro del conductor. Conmuta la navegación raíz:
- *  - `not_started` / `in_progress` → wizard de 4 pasos
+ *  - `not_started` / `in_progress` → wizard de 3 pasos
  *  - `in_review` → pantalla "Estamos revisando tus datos"
  *  - `approved` → app operativa (tabs)
  *  - `rejected` → wizard para corregir (reservado; el backend definirá el detalle)
@@ -280,15 +294,18 @@ export const RegistrationStatus = {
 } as const satisfies Record<string, RegistrationStatus>;
 
 /**
- * Pasos del wizard de alta (1..4) como constantes tipadas. Espeja el orden de `STEP_ROUTES` del
- * `RegistrationNavigator` (1=Datos · 2=Vehículo · 3=Documentos · 4=KYC). Tiparlos evita los números
- * mágicos en `setCurrentStep(...)` y deja que la corrección post-rechazo derive el paso por nombre.
+ * Pasos del wizard de alta (1..3) como constantes tipadas. Espeja el orden de `STEP_ROUTES` del
+ * `RegistrationNavigator` (1=Conductor · 2=Vehículo · 3=KYC). Tiparlos evita los números mágicos en
+ * `setCurrentStep(...)` y deja que la corrección post-rechazo derive el paso por nombre.
+ *
+ * LOTE B (reagrupación por DUEÑO del documento): el paso DOCUMENTS desapareció. Los documentos se agrupan
+ * por su dueño: la LICENCIA (doc del conductor) baja al paso 1 (Conductor, junto al DNI) y el SOAT (doc del
+ * vehículo) baja al paso 2 (Vehículo, junto a la tarjeta de propiedad y la foto). La biometría es el paso 3.
  */
 export const RegistrationStep = {
   PERSONAL_DATA: 1,
   VEHICLE: 2,
-  DOCUMENTS: 3,
-  IDENTITY_VERIFICATION: 4,
+  IDENTITY_VERIFICATION: 3,
 } as const;
 
 export type RegistrationStep = (typeof RegistrationStep)[keyof typeof RegistrationStep];

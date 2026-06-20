@@ -25,13 +25,14 @@ import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
-import { LIVENESS_FRAME_GRABBER_UNAVAILABLE } from '../../domain';
+import { LIVENESS_FRAME_GRABBER_UNAVAILABLE, RegistrationStep } from '../../domain';
 import {
   useRegistrationFaceCapture,
   LivenessPhase,
 } from '../hooks/useRegistrationFaceCapture';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
 import { livenessFailReason } from '../kycEnrollError';
+import { REGISTRATION_TOTAL_STEPS } from '../state/registrationStore';
 import {
   BiometricCameraPreview,
   FaceGuideRing,
@@ -342,12 +343,15 @@ export const IdentityVerificationScreen = (_props: Props): React.JSX.Element => 
       <SafeScreen header={<RegistrationHeader showLogo onBack={back.onBack} peruRight />}>
         <View style={[styles.body, { gap: theme.spacing.lg }]}>
           <Reveal>
-            <RegistrationProgress current={4} />
+            <RegistrationProgress current={RegistrationStep.IDENTITY_VERIFICATION} />
           </Reveal>
 
           <Reveal delay={40} style={styles.intro}>
             <Text variant="caption" color="inkMuted" align="center">
-              {t('registration.stepOf', { current: 4, total: 4 })}
+              {t('registration.stepOf', {
+                current: RegistrationStep.IDENTITY_VERIFICATION,
+                total: REGISTRATION_TOTAL_STEPS,
+              })}
             </Text>
             <Text variant="title1" align="center">
               {t('registration.kyc.title')}

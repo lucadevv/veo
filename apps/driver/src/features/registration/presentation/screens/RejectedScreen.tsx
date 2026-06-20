@@ -66,8 +66,9 @@ export const RejectedScreen = (): React.JSX.Element => {
     // Vuelve al wizard para corregir. `setCurrentStep` ya marca `in_progress` (el RootNavigator
     // conmuta a Registration) Y fija el paso inicial del wizard (`RegistrationNavigator` lo lee del
     // store). Antes solo cambiaba el status y reabría en el `currentStep` persistido (típicamente 4 =
-    // KYC), desorientando al conductor. Ahora derivamos el PRIMER paso a corregir del motivo real:
-    // si hay documentos rechazados, al paso que los captura (foto→Vehículo, resto→Documentos); si el
+    // KYC), desorientando al conductor. Ahora derivamos el PRIMER paso a corregir del motivo real
+    // (LOTE B, agrupación por DUEÑO del documento): `correctionStepForRejectedDocTypes` devuelve el paso
+    // Conductor (doc del conductor: DNI/licencia) o Vehículo (doc del vehículo: tarjeta/SOAT/foto); si el
     // rechazo es de antecedentes/KYC (sin documento derivable), caemos al paso 1 para re-recorrer en
     // orden en vez de aterrizar en el último paso persistido.
     const rejectedTypes = rejectedDocs.map((doc) => doc.type);

@@ -9,12 +9,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Text, useTheme, useReducedMotion } from '@veo/ui-kit';
 import { useTranslation } from 'react-i18next';
-import { VehicleClass, OPERABLE_VEHICLE_CLASSES } from '@veo/shared-types';
+import { VehicleClass } from '@veo/shared-types';
 import { IconCar, IconMoto } from '../../../../shared/presentation/icons';
 import type { VehicleType } from '../../domain';
 
 interface VehicleTypeSelectorProps {
-  value: VehicleType;
+  /** Tipo seleccionado, o `null` cuando aún no se eligió (fallback sin "Auto" por omisión · LOTE 1). */
+  value: VehicleType | null;
   onChange: (type: VehicleType) => void;
 }
 
@@ -35,11 +36,13 @@ const VEHICLE_CLASS_OPTIONS: Record<VehicleClass, VehicleClassOption> = {
 };
 
 /**
- * Clases OPERABLES en orden de presentación del alta. Deriva de `OPERABLE_VEHICLE_CLASSES` (catálogo,
- * fuente única) — hoy "solo autos" muestra UNA tarjeta (CAR); cuando se habilite la mototaxi (Ola 2B)
- * MOTO reaparece sola, sin tocar este archivo. El registro `VEHICLE_CLASS_OPTIONS` sigue exhaustivo.
+ * LOTE 1 · clases REGISTRABLES en orden de presentación del alta. El registro está DESACOPLADO de la
+ * operabilidad (el gate de operabilidad/dispatch es de otro lote): el selector de ALTA ofrece TODOS los
+ * tipos registrables (CAR|MOTO), no `OPERABLE_VEHICLE_CLASSES` (que hoy es solo CAR). Itera los valores del
+ * enum canónico `VehicleClass`; el registro `VEHICLE_CLASS_OPTIONS` sigue exhaustivo (no compila sin la
+ * entrada de una clase nueva), así que ampliar el enum surfacea su tarjeta sola.
  */
-const ORDERED_CLASSES: readonly VehicleClass[] = [...OPERABLE_VEHICLE_CLASSES].sort(
+const ORDERED_CLASSES: readonly VehicleClass[] = Object.values(VehicleClass).sort(
   (a, b) => VEHICLE_CLASS_OPTIONS[a].sortOrder - VEHICLE_CLASS_OPTIONS[b].sortOrder,
 );
 

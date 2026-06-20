@@ -9,25 +9,24 @@ import type { RegistrationStackParamList } from './types';
  */
 
 /**
- * Pantalla del wizard que corresponde a cada paso (1..4). Indexado por el valor TIPADO de
+ * Pantalla del wizard que corresponde a cada paso (1..3). Indexado por el valor TIPADO de
  * `RegistrationStep` (no números mágicos): el orden de `ORDERED_STEPS` ES el orden de los pasos.
+ * LOTE B: el paso DOCUMENTS desapareció (los docs se reagrupan por dueño: licencia→Conductor, SOAT→Vehículo).
  */
 export const STEP_ROUTES: Record<RegistrationStep, keyof RegistrationStackParamList> = {
   [RegistrationStep.PERSONAL_DATA]: 'PersonalData',
   [RegistrationStep.VEHICLE]: 'Vehicle',
-  [RegistrationStep.DOCUMENTS]: 'Documents',
   [RegistrationStep.IDENTITY_VERIFICATION]: 'IdentityVerification',
 };
 
-/** Pasos del wizard en ORDEN (1..4), derivados del enum tipado: la fuente de verdad de la pila. */
+/** Pasos del wizard en ORDEN (1..3), derivados del enum tipado: la fuente de verdad de la pila. */
 export const ORDERED_STEPS: readonly RegistrationStep[] = [
   RegistrationStep.PERSONAL_DATA,
   RegistrationStep.VEHICLE,
-  RegistrationStep.DOCUMENTS,
   RegistrationStep.IDENTITY_VERIFICATION,
 ];
 
-/** ¿`step` es un paso válido del wizard (1..4)? Narrowing del `number` del store al enum tipado. */
+/** ¿`step` es un paso válido del wizard (1..3)? Narrowing del `number` del store al enum tipado. */
 export function isRegistrationStep(step: number): step is RegistrationStep {
   return (ORDERED_STEPS as readonly number[]).includes(step);
 }

@@ -44,12 +44,12 @@ export type RootStackParamList = {
 };
 
 /**
- * Stack del wizard de registro (alta de socio conductor). Los 4 pasos se presentan con slide
- * horizontal; el estado de los datos vive en el store del feature, no en params.
+ * Stack del wizard de registro (alta de socio conductor). Los 3 pasos se presentan con slide
+ * horizontal; el estado de los datos vive en el store del feature, no en params. LOTE B: el paso
+ * Documents desapareció (los docs se reagrupan por dueño: licencia→Conductor, SOAT→Vehículo).
  */
 export type RegistrationStackParamList = {
   PersonalData: undefined;
   Vehicle: undefined;
-  Documents: undefined;
   IdentityVerification: undefined;
 };

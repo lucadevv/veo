@@ -200,6 +200,7 @@ describe('RegistrationDocumentSheet · "Capturado ✓" auto-envío (sin formular
       type: FleetDocumentType.LICENSE_A1,
       documentNumber: 'Q12345678',
       expiresAt: '2028-06-30',
+      category: 'A-I',
     });
     expect(hasPreviewWithUri(renderer, `data:image/jpeg;base64,${SCANNED_BASE64}`)).toBe(true);
   });

@@ -25,7 +25,7 @@ export interface RegistrationStepBack {
 }
 
 /**
- * Back robusto de los pasos 2/3/4 del wizard (Vehículo/Documentos/KYC). Une la RECONSTRUCCIÓN del
+ * Back robusto de los pasos 2/3 del wizard (LOTE B, 3 pasos: Vehículo/KYC). Une la RECONSTRUCCIÓN del
  * stack al reanudar (Opción A) con un back que NUNCA muere (Opción B), todo desde DENTRO de la pila de
  * registro (acá `useNavigation()` resuelve la navegación del wizard, no la del root).
  *

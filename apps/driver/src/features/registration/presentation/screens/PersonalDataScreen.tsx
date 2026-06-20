@@ -3,31 +3,72 @@ import { Image, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { IconCheck } from '../../../../shared/presentation/icons';
+import { IconCheck, IconDocument } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { hexAlpha } from '../components';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
-import { RegistrationStep } from '../../domain';
-import { useRegistrationStore } from '../state/registrationStore';
+import {
+  DocumentUploadStatus,
+  RegistrationStep,
+  isAcceptableServerDocStatus,
+  registrationDocTypeToBackend,
+  type RegistrationDocumentServerStatus,
+  type RegistrationDocumentType,
+} from '../../domain';
+import { REGISTRATION_TOTAL_STEPS, useRegistrationStore } from '../state/registrationStore';
 import { usePersonalDataContinue } from '../hooks/usePersonalDataContinue';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
 import {
+  useOnboardLicense,
+  useRegistrationDocuments,
+  useUploadAndRegisterDocument,
+} from '../hooks/useRegistrationDocuments';
+import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
+import {
+  DocumentUploadCard,
+  RegistrationDocumentSheet,
   RegistrationExitSheet,
   RegistrationHeader,
   RegistrationProgress,
   ScanDniSheet,
+  type DocumentCardTone,
 } from '../components';
+import type {
+  DocumentUploadState,
+  RegistrationDocumentInput,
+} from '../components/RegistrationDocumentSheet';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
 
+/** Etiqueta del wizard de la LICENCIA de conducir (documento del CONDUCTOR; mapea a LICENSE_A1). */
+const LICENSE_DOC_TYPE: RegistrationDocumentType = 'LICENSE';
+
+/** Tono del chip según el `simpleStatus` real del documento (espeja el dominio de documentos). */
+function serverStatusTone(status: RegistrationDocumentServerStatus): DocumentCardTone {
+  switch (status) {
+    case 'vigente':
+      return 'success';
+    case 'por_vencer':
+      return 'warn';
+    case 'vencido':
+    case 'rechazado':
+      return 'danger';
+    case 'en_revision':
+    default:
+      return 'neutral';
+  }
+}
+
 /**
- * Paso 1 del alta: datos personales del DNI (drv-04) · onboarding SIN formularios (Lote 1). El conductor
- * ESCANEA el DNI; el OCR lee nombre/DNI/nacimiento y se muestran en una tarjeta "Capturado ✓" READ-ONLY
- * (texto, NO inputs). Al continuar: `PATCH /drivers/me/personal` con la data OCR + subida del DNI con su
- * `extractedData`. NO hay tipeo manual: si el OCR no leyó el NÚMERO de DNI (campo crítico), se pide
- * reescanear (degradación honesta), nunca un formulario.
+ * Paso 1 del alta · CONDUCTOR (LOTE B · reagrupación por dueño del documento). Reúne los documentos del
+ * CONDUCTOR: el DNI (scan-first, onboarding SIN formularios · Lote 1) Y la LICENCIA de conducir (bajada
+ * desde el viejo paso "Documentos"). El conductor ESCANEA el DNI (OCR lee nombre/DNI/nacimiento → tarjeta
+ * "Capturado ✓" READ-ONLY) y ESCANEA la licencia (reusa el componente CANÓNICO `RegistrationDocumentSheet`
+ * + el parser `parseLicense` calibrado en Lote A). Al continuar: `PATCH /drivers/me/personal` + subida
+ * DIFERIDA del DNI. La licencia se sube/registra al capturarla (mismo pipeline que tenía DocumentsScreen,
+ * incluido el `POST /drivers/onboard`). El gating del "Continuar" exige DNI leído + licencia subida.
  */
 export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -45,11 +86,26 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   const exit = useRegistrationExit();
   useRegistrationExitGuard(exit.handleHardwareBack);
 
+  // LICENCIA (doc del conductor): mismo pipeline canónico que usaba DocumentsScreen (subida+registro +
+  // onboarding de licencia + chip de estado de servidor + 409-como-éxito).
+  const documents = useRegistrationStore((s) => s.documents);
+  const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
+  const serverDocs = useRegistrationDocuments();
+  const uploadDocument = useUploadAndRegisterDocument();
+  const onboardLicense = useOnboardLicense();
+  const imagePicker = useImagePicker();
+  const documentScanner = useDocumentScanner();
+
   const [serverError, setServerError] = useState<unknown>(null);
   // El PATCH /personal creó el driver, pero la subida DIFERIDA del DNI falló. NO perdemos las caras
   // capturadas (siguen en `pendingDni`): aviso + reintento al volver a tocar Continuar (PATCH idempotente).
   const [dniUploadFailed, setDniUploadFailed] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+
+  // Estado de la captura de la LICENCIA (sheet canónico). Mismo patrón que DocumentsScreen.
+  const [licenseSheetOpen, setLicenseSheetOpen] = useState(false);
+  const [licenseUploadState, setLicenseUploadState] = useState<DocumentUploadState>('idle');
+  const [licenseError, setLicenseError] = useState<unknown>(null);
 
   // El DNI (número) es el campo CRÍTICO: sin él no se puede registrar el documento ni avanzar. El nombre y
   // el nacimiento son deseables pero el gating duro es el número leído. Honestidad: solo avanza con el OCR.
@@ -58,10 +114,87 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   // documento viaja aunque el OCR no extraiga texto (p. ej. binario nativo sin la capa OCR). Así NUNCA se
   // muestra una tarjeta "vacía" que parece OK ni se oculta el fallback honesto cuando el OCR no leyó nada.
   const hasCapture = pendingDni != null;
-  const canContinue = hasReadDni;
+
+  const licenseBackendType = registrationDocTypeToBackend(LICENSE_DOC_TYPE);
+
+  /** ¿El servidor YA tiene la licencia en un estado aceptable? (conductor que vuelve/reinstala). */
+  const serverHasLicense =
+    serverDocs.data?.some(
+      (doc) => doc.type === licenseBackendType && isAcceptableServerDocStatus(doc.status),
+    ) ?? false;
+
+  // La licencia cuenta como subida si el avance local la marca `uploaded` O el servidor ya la tiene válida.
+  const licenseUploaded =
+    documents.find((d) => d.type === LICENSE_DOC_TYPE)?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasLicense;
+
+  // Estado de SERVIDOR de la licencia para el chip (si existe en `GET /drivers/me/documents`).
+  const licenseServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === licenseBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: serverStatusTone(match.simpleStatus),
+    };
+  })();
+
+  // Gating del paso CONDUCTOR (LOTE B): se exige DNI leído + LICENCIA subida para avanzar al Vehículo.
+  const canContinue = hasReadDni && licenseUploaded;
+
+  /** Sube+registra la licencia (reusa el pipeline canónico de documentos + onboarding de licencia). */
+  const onSubmitLicense = async (input: RegistrationDocumentInput) => {
+    setLicenseError(null);
+    setLicenseUploadState('uploading');
+    try {
+      await uploadDocument.mutateAsync({
+        type: licenseBackendType,
+        file: input.file,
+        ...(input.documentNumber ? { documentNumber: input.documentNumber } : {}),
+        ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
+        ...(input.extractedData ? { extractedData: input.extractedData } : {}),
+        ...(input.ocrEngine ? { ocrEngine: input.ocrEngine } : {}),
+        ...(input.ocrAt ? { ocrAt: input.ocrAt } : {}),
+      });
+      // La licencia alimenta el onboarding del conductor (driverOnboardRequest). Exige número Y vencimiento:
+      // ambos son crítico-faltante para la licencia (gating de `isCriticalFieldMissing`), así que si el doc
+      // llegó al envío, los dos están presentes. El guard explícito narrowa para el contrato.
+      if (input.documentNumber && input.expiresAtIso) {
+        await onboardLicense.mutateAsync({
+          licenseNumber: input.documentNumber,
+          licenseExpiresAt: input.expiresAtIso,
+        });
+      }
+      markLicenseCaptured();
+    } catch (e) {
+      // 409 = la licencia YA fue registrada en un intento previo → ÉXITO, no error (mismo patrón que el
+      // DNI/foto/tarjeta). Detectado por status 409 tipado (`isConflictError`), no por el texto.
+      if (isConflictError(e)) {
+        markLicenseCaptured();
+        return;
+      }
+      setLicenseError(e);
+      setLicenseUploadState('error');
+    }
+  };
+
+  /** Marca la licencia como capturada (subida) y cierra el sheet tras mostrar el check de éxito. */
+  function markLicenseCaptured(): void {
+    setDocumentStatus(LICENSE_DOC_TYPE, DocumentUploadStatus.UPLOADED);
+    setLicenseUploadState('success');
+    setTimeout(() => {
+      setLicenseSheetOpen(false);
+      setLicenseUploadState('idle');
+    }, 900);
+  }
 
   const onContinue = async (): Promise<void> => {
     if (personalContinue.isPending) {
+      return;
+    }
+    // Guarda defensiva además del `disabled`: jamás avanzar sin DNI leído + licencia subida.
+    if (!canContinue) {
       return;
     }
     setServerError(null);
@@ -114,7 +247,7 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
 
           <Reveal delay={40}>
             <Text variant="caption" color="inkMuted" align="center">
-              {t('registration.stepOf', { current: 1, total: 4 })}
+              {t('registration.stepOf', { current: 1, total: REGISTRATION_TOTAL_STEPS })}
             </Text>
           </Reveal>
 
@@ -208,7 +341,58 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
               />
             </Reveal>
           ) : null}
+
+          {serverDocs.isError ? (
+            <Reveal>
+              <Banner
+                tone="warn"
+                title={t('errors.generic')}
+                description={toErrorMessage(serverDocs.error, t)}
+              />
+            </Reveal>
+          ) : null}
+
+          {/* LICENCIA de conducir (LOTE B · doc del CONDUCTOR, bajada del viejo paso Documentos). Reusa el
+              componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseLicense` (Lote A). Requerida
+              para avanzar (gating: DNI + licencia). */}
+          <Reveal delay={160}>
+            <DocumentUploadCard
+              icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              label={t('registration.documents.license')}
+              status={licenseUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+              uploadedLabel={t('registration.documents.uploaded')}
+              pendingLabel={t('registration.documents.pending')}
+              serverState={licenseServerState}
+              busy={uploadDocument.isPending || onboardLicense.isPending}
+              accessibilityLabel={t('registration.documents.uploadAccessibility', {
+                document: t('registration.documents.license'),
+              })}
+              onPress={() => {
+                setLicenseError(null);
+                setLicenseUploadState('idle');
+                setLicenseSheetOpen(true);
+              }}
+            />
+          </Reveal>
         </View>
+
+        {licenseSheetOpen ? (
+          <RegistrationDocumentSheet
+            visible
+            onClose={() => {
+              if (licenseUploadState !== 'uploading') {
+                setLicenseSheetOpen(false);
+              }
+            }}
+            documentLabel={t('registration.documents.license')}
+            documentType={licenseBackendType}
+            uploadState={licenseUploadState}
+            errorMessage={licenseError ? toErrorMessage(licenseError, t) : undefined}
+            onPick={(source) => imagePicker.pick(source)}
+            onScan={() => documentScanner.scan()}
+            onSubmit={onSubmitLicense}
+          />
+        ) : null}
       </SafeScreen>
       <RegistrationExitSheet exit={exit} />
       <ScanDniSheet visible={scanOpen} onClose={() => setScanOpen(false)} />

@@ -2,7 +2,6 @@ export {
   PersonalDataScreen,
   VehicleScreen,
   VehiclesScreen,
-  DocumentsScreen,
   IdentityVerificationScreen,
   UnderReviewScreen,
   RejectedScreen,

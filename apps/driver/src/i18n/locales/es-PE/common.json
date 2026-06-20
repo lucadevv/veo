@@ -86,7 +86,7 @@
       "retry": "Reintentar"
     },
     "personal": {
-      "title": "Tus datos personales",
+      "title": "Tus datos de conductor",
       "subtitle": "Como aparecen en tu DNI.",
       "nameLabel": "Nombre completo",
       "namePlaceholder": "Ej. Carlos Quispe Mamani",
@@ -145,6 +145,7 @@
         "readPlate": "Placa",
         "readVehicle": "Marca y modelo",
         "readYear": "Año",
+        "readType": "Tipo de vehículo",
         "typeCar": "Auto",
         "typeMoto": "Moto",
         "confirm": "Usar esta tarjeta",
@@ -157,7 +158,11 @@
         "uploadFailed": "No se pudo subir tu tarjeta de propiedad. Inténtalo de nuevo.",
         "uploadRetryHint": "Tu vehículo se registró y la foto de la tarjeta no se perdió. Toca Registrar para reintentar la subida.",
         "yearMissingTitle": "Revisa el año de tu vehículo",
-        "yearMissingBody": "No pudimos leer un año válido en tu tarjeta. Ingresa el año de fabricación para continuar."
+        "yearMissingBody": "No pudimos leer un año válido en tu tarjeta. Ingresa el año de fabricación para continuar.",
+        "typePrompt": "Tipo de vehículo",
+        "typeConfirmHint": "Confírmalo para continuar.",
+        "typeNeedsConfirmTitle": "Elige el tipo de tu vehículo",
+        "typeNeedsConfirmBody": "No pudimos leer el tipo en tu tarjeta. Selecciónalo para continuar."
       },
       "docStatusLabel": "Documentación: {{status}}",
       "typeMoto": "Moto",
@@ -208,14 +213,10 @@
       }
     },
     "documents": {
-      "title": "Sube tus documentos",
-      "subtitle": "Fotos claras y legibles.",
       "license": "Licencia de conducir",
       "soat": "SOAT vigente",
-      "property": "Tarjeta de propiedad",
       "uploaded": "Subido",
       "pending": "Pendiente",
-      "formats": "Formatos aceptados: JPG, PNG o PDF. Tamaño máx. 10 MB.",
       "uploadAccessibility": "Subir {{document}}",
       "numberLabel": "Número del documento",
       "number": {

@@ -108,7 +108,8 @@ export function useRegistrationGate(): RegistrationGate {
       applyBackendStatus(mapProfileToRegistrationStatus(data));
       // Defense-in-depth de routing: un conductor con TODOS los documentos pero SIN biometría enrolada
       // vuelve al wizard como `in_progress` (ver `mapProfileToRegistrationStatus`). Debe REANUDAR en el
-      // paso 4 (IdentityVerification / KYC) para completar la biometría, no en el paso 1. Solo forzamos
+      // paso 3 (IdentityVerification / KYC, último del wizard de 3 pasos) para completar la biometría, no
+      // en el paso 1. Solo forzamos
       // el paso cuando aplica (helper devuelve null en cualquier otro caso ⇒ se conserva el avance local).
       const resumeStep = resumeStepForProfile(data.compliance);
       if (resumeStep !== null) {

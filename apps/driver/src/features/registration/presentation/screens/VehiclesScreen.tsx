@@ -40,6 +40,10 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Vehicles'>;
 
+// "Mis vehículos" (gestión post-onboarding, NO el wizard): alta de un 2do vehículo por SELECCIÓN MANUAL del
+// catálogo (sin OCR de tarjeta). El catálogo se filtra por tipo, así que el form arranca con un tipo elegible
+// (CAR) que el conductor cambia con el selector (ambos tipos visibles). No es el "seed silencioso" del alta
+// scan-first (ahí el tipo lo DERIVA la tarjeta o arranca null); acá el tipo es una elección activa del form.
 const EMPTY_FORM: VehicleData = {
   type: VehicleType.CAR,
   plate: '',
@@ -47,6 +51,7 @@ const EMPTY_FORM: VehicleData = {
   modelSpecId: '',
   brand: '',
   model: '',
+  mtcCategory: '',
 };
 
 /** El status `ACTIVE` (vehicle-rules de fleet) = verificado por el operador; el resto, en revisión. */
@@ -196,9 +201,11 @@ export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
         </Text>
         <VehicleTypeSelector value={form.type} onChange={onChangeType} />
         <View style={styles.form}>
-          {/* B5-2: el modelo se ELIGE del catálogo curado (filtrado por tipo), no a texto libre. */}
+          {/* B5-2: el modelo se ELIGE del catálogo curado (filtrado por tipo), no a texto libre. En este
+              flujo el tipo del form SIEMPRE está definido (arranca CAR, el selector ofrece ambos); el `??`
+              es defensa de tipos por el `VehicleType | null` de VehicleData, no un seed silencioso. */}
           <VehicleModelSelector
-            vehicleType={form.type}
+            vehicleType={form.type ?? VehicleType.CAR}
             value={{ modelSpecId: form.modelSpecId, brand: form.brand, model: form.model }}
             onChange={onPickModel}
             error={fieldError('model')}

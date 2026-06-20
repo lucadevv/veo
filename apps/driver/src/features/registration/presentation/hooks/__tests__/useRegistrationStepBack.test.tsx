@@ -62,27 +62,32 @@ describe('useRegistrationStepBack · reconstrucción + back seguro (fix del GO_B
   });
 
   it('reanudar en el paso 3 con pila superficial reconstruye [1,2,3] vía CommonActions.reset', () => {
-    // Reanuda en Documentos (paso 3): MMKV persistido. La pila arranca superficial (`[Documents]`).
-    useRegistrationStore.setState({ currentStep: RegistrationStep.DOCUMENTS });
+    // LOTE B: el paso 3 es KYC (IdentityVerification); el viejo paso Documentos desapareció. Reanuda en
+    // KYC (paso 3): MMKV persistido. La pila arranca superficial (`[IdentityVerification]`).
+    useRegistrationStore.setState({ currentStep: RegistrationStep.IDENTITY_VERIFICATION });
     mockNav.canGoBack.mockReturnValue(false);
 
     act(() => {
       TestRenderer.create(<HookHost onReady={() => undefined} />);
     });
 
-    // Se sembró la pila completa `[PersonalData, Vehicle, Documents]` con índice 2 (Documentos arriba),
+    // Se sembró la pila completa `[PersonalData, Vehicle, IdentityVerification]` con índice 2 (KYC arriba),
     // exactamente lo que produce `CommonActions.reset` con esa forma.
     expect(mockNav.dispatch).toHaveBeenCalledTimes(1);
     expect(mockNav.dispatch).toHaveBeenCalledWith(
       CommonActions.reset({
         index: 2,
-        routes: [{ name: 'PersonalData' }, { name: 'Vehicle' }, { name: 'Documents' }],
+        routes: [
+          { name: 'PersonalData' },
+          { name: 'Vehicle' },
+          { name: 'IdentityVerification' },
+        ],
       }),
     );
   });
 
   it('NO reconstruye si la pila ya tiene pasos previos (navegación normal, canGoBack=true)', () => {
-    useRegistrationStore.setState({ currentStep: RegistrationStep.DOCUMENTS });
+    useRegistrationStore.setState({ currentStep: RegistrationStep.IDENTITY_VERIFICATION });
     mockNav.canGoBack.mockReturnValue(true);
 
     act(() => {
@@ -104,8 +109,8 @@ describe('useRegistrationStepBack · reconstrucción + back seguro (fix del GO_B
     expect(mockNav.dispatch).not.toHaveBeenCalled();
   });
 
-  it('onBack desde Documentos con paso previo retrocede (goBack), NUNCA un GO_BACK muerto', () => {
-    useRegistrationStore.setState({ currentStep: RegistrationStep.DOCUMENTS });
+  it('onBack desde KYC con paso previo retrocede (goBack), NUNCA un GO_BACK muerto', () => {
+    useRegistrationStore.setState({ currentStep: RegistrationStep.IDENTITY_VERIFICATION });
     // Tras la reconstrucción hay pasos debajo → `canGoBack()` true: el back camina al paso anterior.
     mockNav.canGoBack.mockReturnValue(true);
 
@@ -124,7 +129,7 @@ describe('useRegistrationStepBack · reconstrucción + back seguro (fix del GO_B
   });
 
   it('onBack sin paso previo (caso límite) abre el exit-confirm en vez de morir', () => {
-    useRegistrationStore.setState({ currentStep: RegistrationStep.DOCUMENTS });
+    useRegistrationStore.setState({ currentStep: RegistrationStep.IDENTITY_VERIFICATION });
     // Pila superficial persistente (la reconstrucción no aplicó): el back NO puede morir.
     mockNav.canGoBack.mockReturnValue(false);
 

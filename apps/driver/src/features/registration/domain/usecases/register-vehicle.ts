@@ -1,3 +1,4 @@
+import { PLATE_PATTERN } from '@veo/shared-types';
 import type { RegistrationRepository } from '../repositories/registration-repository';
 import type { VehicleData, VehicleRegisterInput, VehicleView } from '../entities';
 
@@ -14,13 +15,17 @@ export type VehicleFieldError =
   // deja pasar la placa PROPIA, así que un 409 que llega a la app es siempre "placa ajena".
   | 'plate_taken'
   | 'model_not_selected'
-  | 'year_invalid';
+  | 'year_invalid'
+  // LOTE 1: no se derivó (categoría no leída/no soportada) ni se eligió el tipo a mano → no hay tipo que
+  // enviar. La UI ya gatea el botón con esto; este error es la red de seguridad del dominio (sin "Auto" mudo).
+  | 'type_required';
 
 /** Errores de validación por campo del vehículo. */
 export interface VehicleErrors {
   plate?: VehicleFieldError;
   model?: VehicleFieldError;
   year?: VehicleFieldError;
+  type?: VehicleFieldError;
 }
 
 /** Resultado de validar/mapear los datos del wizard al body del contrato. */
@@ -46,9 +51,6 @@ export function isVehicleYearValid(year: string): boolean {
 
 /** Longitud máxima de `make`/`model` a texto libre del contrato (`registerVehicleRequest`: 1..60). */
 const FREETEXT_MAX = 60;
-
-/** Placa peruana: 3 caracteres alfanuméricos + 3 (guion opcional). fleet la normaliza y revalida. */
-const PLATE_PATTERN = /^[A-Z0-9]{3}-?[A-Z0-9]{3}$/;
 
 /**
  * Valida y mapea los datos del vehículo del wizard al body de `POST /drivers/vehicles`. Lógica pura
@@ -89,14 +91,27 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
     errors.year = 'year_invalid';
   }
 
-  if (errors.plate || errors.model || errors.year) {
+  // LOTE 1: SIN seed "Auto". Sin un tipo derivado de la tarjeta o elegido a mano (`null`) no hay nada que
+  // enviar — el alta no asume tipo. La UI ya bloquea el botón; esto evita un envío sin tipo si se sortea.
+  const vehicleType = vehicle.type;
+  if (vehicleType === null) {
+    errors.type = 'type_required';
+  }
+
+  // El return sobre `vehicleType === null` (no solo `errors.type`) hace que TS NARROWEE `vehicleType` a un
+  // `VehicleType` no nulo en el resto de la función (el chequeo de `errors.type` no liga el tipo por sí solo).
+  if (vehicleType === null || errors.plate || errors.model || errors.year) {
     return { ok: false, errors };
   }
+  // LOTE 1: la categoría MTC cruda de la tarjeta viaja como FUENTE DE VERDAD del tipo (el servidor deriva
+  // `vehicleType` de acá). Vacía en la carga manual → se omite del body (queda el `vehicleType` como hint).
+  const mtcCategory = vehicle.mtcCategory.trim();
+  const mtcField = mtcCategory.length > 0 ? { mtcCategory } : {};
   // RAMA CATÁLOGO gana si hay `modelSpecId` (el backend snapshotea del spec e IGNORA el texto libre).
   // Si no, RAMA TEXTO LIBRE: viaja make+model (Lote 3 hará fuzzy-match a catálogo + crecimiento del mismo).
   const request: VehicleRegisterInput = hasCatalogModel
-    ? { vehicleType: vehicle.type, plate, year, modelSpecId }
-    : { vehicleType: vehicle.type, plate, year, make, model };
+    ? { vehicleType, plate, year, modelSpecId, ...mtcField }
+    : { vehicleType, plate, year, make, model, ...mtcField };
   return { ok: true, request };
 }
 

@@ -45,6 +45,7 @@ describe('documentCaptureReadout · "Capturado ✓" + gating del campo crítico'
       type: FleetDocumentType.LICENSE_A1,
       documentNumber: 'Q12345678',
       expiresAt: '2028-06-30',
+      category: 'A-I',
     });
     expect(isCriticalFieldMissing(FleetDocumentType.LICENSE_A1, readout)).toBe(false);
   });

@@ -62,7 +62,8 @@ function Segment({ filled, index }: { filled: boolean; index: number }): React.J
 }
 
 /**
- * Barra de progreso del wizard: 4 segmentos redondeados. Los pasos alcanzados se rellenan en cian
+ * Barra de progreso del wizard: un segmento redondeado por paso (la cantidad se DERIVA de
+ * `REGISTRATION_TOTAL_STEPS`, sin número mágico). Los pasos alcanzados se rellenan en cian
  * con una animación de crecimiento (ease-out, <320ms) escalonada; respeta reduce-motion. Es un
  * indicador puramente visual con etiqueta accesible del progreso global.
  */

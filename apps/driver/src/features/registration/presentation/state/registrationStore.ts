@@ -2,15 +2,17 @@ import { create } from 'zustand';
 import type { ExtractedDniData, ExtractedPropertyCardData } from '@veo/api-client';
 import type { PickedImage } from '../../../documents/domain';
 import { prefsStore } from '../../../../core/storage/mmkv';
-import {
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import { RegistrationStep } from '../../domain';
+import type {
+  FaceCapture,
+  PersonalData,
+  RegistrationDocument,
+  RegistrationDocumentType,
+  RegistrationDraft,
+  RegistrationStatus,
+  VehicleData,
   VehicleType,
-  type FaceCapture,
-  type PersonalData,
-  type RegistrationDocument,
-  type RegistrationDocumentType,
-  type RegistrationDraft,
-  type RegistrationStatus,
-  type VehicleData,
 } from '../../domain';
 
 /**
@@ -55,8 +57,11 @@ export interface PendingPropertyCardCapture {
   extractedData: ExtractedPropertyCardData | null;
 }
 
-/** Total de pasos del wizard (Datos · Vehículo · Documentos · KYC). */
-export const REGISTRATION_TOTAL_STEPS = 4;
+/**
+ * Total de pasos del wizard (LOTE B: Conductor · Vehículo · KYC). DERIVADO de `ORDERED_STEPS` (la fuente
+ * única tipada de la pila) — NUNCA un número mágico: si se agrega/quita un paso, este total lo sigue solo.
+ */
+export const REGISTRATION_TOTAL_STEPS = ORDERED_STEPS.length;
 
 /**
  * Clave de preferencias para persistir el progreso del alta.
@@ -64,6 +69,21 @@ export const REGISTRATION_TOTAL_STEPS = 4;
  * del wizard se persiste localmente para no perderlo entre sesiones.
  */
 const REGISTRATION_PREF_KEY = 'pref.registration.v1';
+
+/**
+ * Versión del esquema del wizard persistido. LOTE B (reagrupación 4→3 pasos) introdujo la `v2`: hasta
+ * `v1` el wizard tenía 4 pasos (1=Datos · 2=Vehículo · 3=Documentos · 4=KYC); en `v2` son 3 (1=Conductor ·
+ * 2=Vehículo · 3=KYC). Un snapshot SIN `schemaVersion` (o `< 2`) se MIGRA al rehidratar (ver
+ * `migratePersisted`): el `currentStep` legacy se remapea al paso nuevo correcto, no se confía a ciegas.
+ */
+const REGISTRATION_SCHEMA_VERSION = 2;
+
+/** Total de pasos del layout legacy (`v1`): 1=Datos · 2=Vehículo · 3=Documentos · 4=KYC. */
+const LEGACY_TOTAL_STEPS_V1 = 4;
+/** Paso legacy "Documentos" (`v1`, paso 3): desapareció en `v2` — se remapea a Vehículo (donde vive el SOAT). */
+const LEGACY_DOCUMENTS_STEP_V1 = 3;
+/** Paso legacy "KYC" (`v1`, paso 4): en `v2` la biometría es el paso 3. */
+const LEGACY_KYC_STEP_V1 = 4;
 
 /** Forma del snapshot persistido en MMKV. */
 interface PersistedRegistration {
@@ -75,18 +95,24 @@ interface PersistedRegistration {
   faceCapture: FaceCapture | null;
   /** Si el `status` ya fue confirmado por el backend al menos una vez (evita parpadeos al arrancar). */
   statusResolvedFromBackend: boolean;
+  /**
+   * Versión del esquema (LOTE B). Ausente en snapshots `v1` (pre-reagrupación): `loadPersisted` los detecta
+   * por la ausencia y los migra. Siempre `REGISTRATION_SCHEMA_VERSION` en los snapshots que escribimos hoy.
+   */
+  schemaVersion?: number;
 }
 
 const emptyPersonal: PersonalData = { fullName: '', dni: '', birthdate: '' };
 const emptyVehicle: VehicleData = {
-  // "Solo autos" (Ola 1): el alta arranca en CAR. La clase real OPERABLE la gobierna el catálogo
-  // (OPERABLE_VEHICLE_CLASSES) vía el selector; este es solo el valor semilla del wizard.
-  type: VehicleType.CAR,
+  // LOTE 1: SIN seed "Auto". El tipo arranca en `null` y se DERIVA de la categoría MTC de la tarjeta (fuente
+  // de verdad) o se elige a mano en el fallback. El alta NO asume tipo: nunca se registra "Auto" en silencio.
+  type: null,
   plate: '',
   year: '',
   modelSpecId: '',
   brand: '',
   model: '',
+  mtcCategory: '',
 };
 const initialDocuments: RegistrationDocument[] = [
   { type: 'LICENSE', status: 'pending' },
@@ -108,7 +134,7 @@ export interface RegistrationState {
    * default local (sin confirmar) del estado real del servidor y evitar parpadeos al arrancar.
    */
   statusResolvedFromBackend: boolean;
-  /** Paso actual del wizard (1..4). */
+  /** Paso actual del wizard (1..3). */
   currentStep: number;
   personal: PersonalData;
   vehicle: VehicleData;
@@ -127,7 +153,8 @@ export interface RegistrationState {
   pendingPropertyCard: PendingPropertyCardCapture | null;
 
   setPersonal(data: Partial<PersonalData>): void;
-  setVehicleType(type: VehicleType): void;
+  /** Fija el tipo del vehículo (derivado de la tarjeta o elegido a mano). `null` lo deja sin definir. */
+  setVehicleType(type: VehicleType | null): void;
   setVehicle(data: Partial<VehicleData>): void;
   setDocumentStatus(type: RegistrationDocumentType, status: RegistrationDocument['status']): void;
   setFaceCapture(capture: FaceCapture): void;
@@ -164,16 +191,54 @@ export interface RegistrationState {
   reset(): void;
 }
 
-/** Lee el snapshot persistido (si existe) para rehidratar el store al crearse. */
+/**
+ * Remapea el `currentStep` de un snapshot legacy (`v1`, 4 pasos) al layout `v2` (3 pasos) de LOTE B:
+ *  - paso 3 legacy (Documentos, que YA NO existe) → paso 2 (Vehículo): el conductor re-recorre el paso donde
+ *    ahora vive el SOAT, y el back desde ahí llega al paso 1 (Conductor) donde ahora vive la licencia. Nunca
+ *    salta a KYC con docs a medias.
+ *  - paso 4 legacy (KYC) → paso 3 (la biometría es el último paso en `v2`).
+ *  - pasos 1 y 2 quedan igual (Datos/Conductor y Vehículo no cambiaron de índice).
+ *  - cualquier otro valor fuera de rango → paso 1 (degradación segura, nunca un índice inválido).
+ */
+function migrateLegacyStep(step: number): number {
+  if (step === LEGACY_DOCUMENTS_STEP_V1) {
+    return RegistrationStep.VEHICLE;
+  }
+  if (step === LEGACY_KYC_STEP_V1) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
+  }
+  if (step >= 1 && step <= LEGACY_TOTAL_STEPS_V1) {
+    return step;
+  }
+  return RegistrationStep.PERSONAL_DATA;
+}
+
+/**
+ * Lee el snapshot persistido (si existe) y, si es un esquema viejo (`v1`, sin `schemaVersion`), lo MIGRA al
+ * layout `v2` de LOTE B (4→3 pasos): el `currentStep` legacy se remapea con `migrateLegacyStep`. Así un
+ * conductor que cerró la app en el viejo paso "Documentos" (3) REANUDA en Vehículo (2) en vez de aterrizar
+ * en KYC con el SOAT/licencia sin capturar — degradación limpia, sin crash ni paso huérfano.
+ */
 function loadPersisted(): PersistedRegistration | null {
-  return prefsStore.getObject<PersistedRegistration>(REGISTRATION_PREF_KEY) ?? null;
+  const raw = prefsStore.getObject<PersistedRegistration>(REGISTRATION_PREF_KEY) ?? null;
+  if (!raw) {
+    return null;
+  }
+  if ((raw.schemaVersion ?? 1) >= REGISTRATION_SCHEMA_VERSION) {
+    return raw;
+  }
+  return {
+    ...raw,
+    currentStep: migrateLegacyStep(raw.currentStep),
+    schemaVersion: REGISTRATION_SCHEMA_VERSION,
+  };
 }
 
 const persisted = loadPersisted();
 
 /**
  * Store del wizard de registro (Zustand): única fuente de verdad del alta en la app. El estado del
- * wizard (datos de los 4 pasos + estado global) vive aquí; nunca en `setState` de componentes.
+ * wizard (datos de los 3 pasos + estado global) vive aquí; nunca en `setState` de componentes.
  * El snapshot se persiste en MMKV (preferencias) tras cada cambio para no perder el avance.
  */
 export const useRegistrationStore = create<RegistrationState>((set, get) => {
@@ -196,6 +261,9 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       vehicle,
       documents,
       faceCapture,
+      // LOTE B: sella el snapshot con la versión actual del esquema (3 pasos) para que un futuro cambio de
+      // layout pueda detectar y migrar este snapshot igual que migramos los `v1` (4 pasos) al rehidratar.
+      schemaVersion: REGISTRATION_SCHEMA_VERSION,
     };
     prefsStore.setObject(REGISTRATION_PREF_KEY, snapshot);
   };

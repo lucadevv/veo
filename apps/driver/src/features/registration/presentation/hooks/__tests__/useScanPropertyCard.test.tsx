@@ -62,6 +62,16 @@ const CARD_OLD_YEAR_LINES: string[] = [
   'Año de Fab.: 2003',
 ];
 
+/** Tarjeta L3 (moto · vehículo menor): categoría → MOTO, con placa de moto `7351-NB` (4 díg + 2 letras). */
+const CARD_L3_LINES: string[] = [
+  'Tarjeta de Identificacion Vehicular',
+  'Placa N°: 7351-NB',
+  'Categoría: L3',
+  'Marca: KTM',
+  'Modelo: DUKE 200',
+  'Año de Fab.: 2022',
+];
+
 function scanOf(lines: string[]): ScannedDocument {
   return { images: ['/9j/card-base64'], textLines: [lines] };
 }
@@ -130,6 +140,8 @@ describe('useScanPropertyCard', () => {
     expect(vehicle.brand).toBe('TOYOTA');
     expect(vehicle.model).toBe('YARIS');
     expect(vehicle.modelSpecId).toBe('');
+    // LOTE 1: la categoría MTC cruda se persiste en el store (viaja al backend como fuente de verdad).
+    expect(vehicle.mtcCategory).toBe('M1');
 
     expect(handle.current?.state).toBe('captured');
     expect(outcome?.derivedType).toBe(VehicleType.CAR);
@@ -170,13 +182,17 @@ describe('useScanPropertyCard', () => {
     expect(outcome?.mtcUnsupported).toBe(true);
     expect(handle.current?.autofilled.vehicleType).toBe(false);
 
-    // El tipo del store queda en su default (CAR semilla del wizard): el scan NO lo cambió (honesto).
+    // LOTE 1: SIN seed "Auto". El tipo del store queda en `null` (el scan NO derivó ni inventó): cae al
+    // selector de FALLBACK (ambos tipos) y Registrar queda bloqueado hasta elegir. Nunca un "Auto" mudo.
     const vehicle = useRegistrationStore.getState().vehicle;
-    expect(vehicle.type).toBe(VehicleType.CAR);
+    expect(vehicle.type).toBeNull();
     // El resto SÍ se prellenó (placa/marca/modelo/año): solo el TIPO cae a manual.
     expect(vehicle.plate).toBe('XYZ-789');
     expect(vehicle.brand).toBe('HYUNDAI');
-    // La categoría cruda viaja en la data OCR (el backend la conserva); el mapeo a tipo es del flujo.
+    // LOTE 1: la categoría MTC cruda se PERSISTE en el store (viaja al backend como fuente de verdad)
+    // aunque no derive a un tier soportado: el servidor la guarda y deriva el tipo server-authoritative.
+    expect(vehicle.mtcCategory).toBe('N1');
+    // La categoría cruda viaja también en la data OCR (el backend la conserva); el mapeo a tipo es del flujo.
     expect(useRegistrationStore.getState().pendingPropertyCard?.extractedData?.mtcCategory).toBe('N1');
   });
 
@@ -238,6 +254,35 @@ describe('useScanPropertyCard', () => {
     expect(handle.current?.autofilled.plate).toBe(false);
     // Los campos vacíos sí se prellenan.
     expect(vehicle.brand).toBe('TOYOTA');
+  });
+
+  it('re-escaneo M1→L3: actualiza mtcCategory Y tipo JUNTOS (no deja mtcCategory STALE en M1)', async () => {
+    // FIX LOTE 1: mtcCategory y vehicleType son DERIVADOS del documento y deben moverse JUNTOS. Antes
+    // mtcCategory era no-destructivo (solo-si-vacío) mientras el tipo se reescribía siempre: un re-escaneo
+    // dejaba {mtcCategory:'M1', type:MOTO} → el backend re-derivaba CAR de M1 y descartaba el hint MOTO
+    // (divergencia "auto silencioso"). Ahora la categoría se reescribe en sincronía con el tipo.
+    const scanner: ScannerDouble = {
+      scan: jest
+        .fn<Promise<ScannedDocument>, [options?: { maxPages?: number }]>()
+        .mockResolvedValueOnce(scanOf(CARD_M1_LINES))
+        .mockResolvedValueOnce(scanOf(CARD_L3_LINES)),
+    };
+    const handle = renderHookWith(fakeContainer(scanner));
+
+    // Escaneo 1: M1 → CAR, mtcCategory M1.
+    await act(async () => {
+      await handle.current?.scan();
+    });
+    expect(useRegistrationStore.getState().vehicle.type).toBe(VehicleType.CAR);
+    expect(useRegistrationStore.getState().vehicle.mtcCategory).toBe('M1');
+
+    // Escaneo 2: L3 → MOTO. La categoría DEBE actualizarse a L3 (no quedar stale en M1).
+    await act(async () => {
+      await handle.current?.scan();
+    });
+    const vehicle = useRegistrationStore.getState().vehicle;
+    expect(vehicle.type).toBe(VehicleType.MOTO);
+    expect(vehicle.mtcCategory).toBe('L3');
   });
 
   it('E_UNAVAILABLE: cae al fallback manual sin crash y NO toca el store', async () => {

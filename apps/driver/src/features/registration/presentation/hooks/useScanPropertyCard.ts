@@ -163,6 +163,14 @@ export function useScanPropertyCard() {
     if (Object.keys(patch).length > 0) {
       setVehicle(patch);
     }
+    // LOTE 1: `mtcCategory` y `vehicleType` son AMBOS DERIVADOS de la tarjeta (no editables por el usuario)
+    // y deben moverse JUNTOS en cada escaneo — NO de forma no-destructiva. Si se escribiera mtcCategory solo
+    // cuando está vacía pero el tipo se reescribiera siempre, un re-escaneo dejaría la categoría STALE (la
+    // previa) y el tipo nuevo: el backend re-deriva de la categoría vieja y descarta el tipo (divergencia
+    // "auto silencioso"). Por eso, cuando el OCR trae categoría, se setea SIEMPRE, en sincronía con el tipo.
+    if (parsed.mtcCategory) {
+      setVehicle({ mtcCategory: parsed.mtcCategory });
+    }
     // Tipo derivado de la categoría MTC impresa: solo se fija si es soportado (M1→CAR / L*→MOTO). Para una
     // categoría no soportada (null) NO se inventa un tipo → la pantalla muestra el selector manual.
     if (type !== null) {
@@ -203,6 +211,7 @@ export function useScanPropertyCard() {
       // Deriva el `VehicleType` de la categoría MTC impresa (M1→CAR, L*→MOTO, resto→null). Si la tarjeta
       // TRAE categoría pero no es soportada hoy (N1/M2/M3/*SC), `mtcUnsupported` activa el selector manual.
       const type = parsed.mtcCategory ? mapMtcCategoryToVehicleType(parsed.mtcCategory) : null;
+
       const unsupported = parsed.mtcCategory != null && type === null;
 
       const result = applyAutofill(parsed, type);

@@ -16,6 +16,8 @@ const baseVehicle: VehicleData = {
   modelSpecId: 'spec-123',
   brand: 'Honda',
   model: 'CB 190R',
+  // LOTE 1: sin categoría MTC leída (carga manual del tipo) → se omite del body (el `vehicleType` es hint).
+  mtcCategory: '',
 };
 
 describe('validatePersonalData', () => {
@@ -186,6 +188,14 @@ describe('validateVehicle', () => {
     }
   });
 
+  it('acepta placa de MOTO (7351-NB · categoría L)', () => {
+    const result = validateVehicle({ ...baseVehicle, plate: '7351-NB' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.plate).toBe('7351-NB');
+    }
+  });
+
   it('rechaza año fuera de rango', () => {
     const result = validateVehicle({ ...baseVehicle, year: '1990' });
     expect(result.ok).toBe(false);
@@ -215,6 +225,28 @@ describe('validateVehicle', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.model).toBe('model_not_selected');
+    }
+  });
+
+  it('LOTE 1: rechaza con type=null (sin tipo derivado ni elegido) → type_required (sin "Auto" mudo)', () => {
+    const result = validateVehicle({ ...baseVehicle, type: null });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.type).toBe('type_required');
+    }
+  });
+
+  it('LOTE 1: la categoría MTC cruda de la tarjeta viaja al body (fuente de verdad del tipo)', () => {
+    const result = validateVehicle({ ...baseVehicle, mtcCategory: 'L3' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request).toEqual({
+        vehicleType: 'MOTO',
+        plate: 'ABC-123',
+        modelSpecId: 'spec-123',
+        year: 2021,
+        mtcCategory: 'L3',
+      });
     }
   });
 });

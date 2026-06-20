@@ -7,10 +7,10 @@ import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { VehicleType } from '@veo/shared-types';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { IconCheck } from '../../../../shared/presentation/icons';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { RegistrationStep, type VehicleErrors } from '../../domain';
-import { useRegistrationStore } from '../state/registrationStore';
+import { REGISTRATION_TOTAL_STEPS, useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
 import {
   REGISTRATION_VEHICLES_QUERY_KEY,
@@ -19,10 +19,11 @@ import {
 import { useVehicleContinue } from '../hooks/useVehicleContinue';
 import type { PropertyCardScanOutcome } from '../hooks/useScanPropertyCard';
 import {
+  REGISTRATION_DOCUMENTS_QUERY_KEY,
   useRegistrationDocuments,
   useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
-import { useImagePicker } from '../../../../core/di/useDi';
+import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import {
   DocumentUploadCard,
   hexAlpha,
@@ -34,15 +35,37 @@ import {
   ScanPropertyCardSheet,
   VehicleStatusCard,
   VehicleTypeSelector,
+  type DocumentCardTone,
 } from '../components';
 import type {
   DocumentUploadState,
   RegistrationDocumentInput,
 } from '../components/RegistrationDocumentSheet';
-import { IconCar } from '../../../../shared/presentation/icons';
-import { registrationDocTypeToBackend } from '../../domain';
+import { IconCar, IconShield } from '../../../../shared/presentation/icons';
+import {
+  DocumentUploadStatus,
+  isAcceptableServerDocStatus,
+  registrationDocTypeToBackend,
+  type RegistrationDocumentServerStatus,
+} from '../../domain';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
+
+/** Tono del chip del SOAT según el `simpleStatus` real del documento (espeja el dominio de documentos). */
+function soatStatusTone(status: RegistrationDocumentServerStatus): DocumentCardTone {
+  switch (status) {
+    case 'vigente':
+      return 'success';
+    case 'por_vencer':
+      return 'warn';
+    case 'vencido':
+    case 'rechazado':
+      return 'danger';
+    case 'en_revision':
+    default:
+      return 'neutral';
+  }
+}
 
 /**
  * Paso 2 del alta · SCAN-FIRST (Lote 2 · onboarding sin formularios). La acción PRINCIPAL es ESCANEAR la
@@ -56,6 +79,12 @@ type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
  * SOLO para la placa (nunca se inventa). Categoría no soportada (N1 furgón / M2·M3 buses / *SC ambulancia)
  * → selector manual de tipo (ampliar el enum `VehicleType` para esas categorías es un lote futuro). La FOTO
  * del vehículo se mantiene EXACTAMENTE igual (cámara normal, sin OCR). POST /drivers/vehicles + GET.
+ *
+ * LOTE B (reagrupación por DUEÑO del documento): este paso reúne la documentación del VEHÍCULO. Además de la
+ * tarjeta de propiedad (scan-first) y la foto, AHORA captura el SOAT (bajado del viejo paso "Documentos"),
+ * reusando el componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. El SOAT es un
+ * documento DRIVER-scoped (igual que la foto): se sube/registra al capturarlo (mismo pipeline que la foto).
+ * El gating de "Registrar vehículo"/"Continuar" exige tarjeta (datos del vehículo) + foto + SOAT.
  */
 export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -85,14 +114,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   // (sigue en `pendingPropertyCard`): aviso + reintento al volver a tocar Registrar (alta idempotente).
   const [cardUploadFailed, setCardUploadFailed] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-  // El conductor pidió cargar a mano (fallback accesible): muestra el formulario completo (tipo/placa/año/
-  // marca/modelo). NO es el camino por defecto: el scan-first manda.
+  // El conductor pidió cargar a mano (fallback accesible): muestra el formulario completo (placa/año/
+  // marca/modelo + el selector de tipo). NO es el camino por defecto: el scan-first manda.
   const [manualMode, setManualMode] = useState(false);
-  // El escaneo trajo una categoría MTC NO soportada (N1/M2/M3/*SC): el OCR NO pudo derivar el tipo, así que
-  // el tipo del store sigue en su SEMILLA (CAR) — NO se puede registrar con ese default silencioso. El
-  // conductor DEBE elegir el tipo a mano (VehicleTypeSelector). Se limpia cuando el conductor toca el
-  // selector (confirmación explícita) — así no se registra un furgón como auto por omisión. (FIX 3)
-  const [typeNeedsConfirmation, setTypeNeedsConfirmation] = useState(false);
 
   // Foto del vehículo (Ola 1): se captura ACÁ reusando el pipeline de documentos. Se registra como doc
   // DRIVER-scoped (VEHICLE_PHOTO) y es REQUERIDA para aprobar. NO SE TOCA (cámara normal, sin OCR).
@@ -101,6 +125,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const serverDocs = useRegistrationDocuments();
   const uploadDocument = useUploadAndRegisterDocument();
   const imagePicker = useImagePicker();
+  const documentScanner = useDocumentScanner();
   const photoBackendType = registrationDocTypeToBackend('VEHICLE_PHOTO');
 
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
@@ -112,6 +137,36 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     documents.find((d) => d.type === 'VEHICLE_PHOTO')?.status === 'uploaded' ||
     (serverDocs.data?.some((d) => d.type === photoBackendType) ?? false);
 
+  // SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos): documento numerado que VENCE. Se
+  // captura con el componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Es DRIVER-scoped
+  // (como la foto): se sube/registra al capturarlo (NO necesita el vehículo creado; solo el driver, que ya
+  // existe tras el paso 1). Requerido para avanzar.
+  const soatBackendType = registrationDocTypeToBackend('SOAT');
+  const [soatSheetOpen, setSoatSheetOpen] = useState(false);
+  const [soatUploadState, setSoatUploadState] = useState<DocumentUploadState>('idle');
+  const [soatError, setSoatError] = useState<unknown>(null);
+
+  /** ¿El servidor YA tiene el SOAT en un estado aceptable? (conductor que vuelve/reinstala). */
+  const serverHasSoat =
+    serverDocs.data?.some(
+      (doc) => doc.type === soatBackendType && isAcceptableServerDocStatus(doc.status),
+    ) ?? false;
+  const soatUploaded =
+    documents.find((d) => d.type === 'SOAT')?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasSoat;
+
+  /** Estado de SERVIDOR del SOAT para el chip (si existe en `GET /drivers/me/documents`). */
+  const soatServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === soatBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
   // ¿Se capturó una tarjeta? (señal = imagen, NO los campos OCR). ¿El OCR leyó la PLACA (campo crítico)?
   const hasCapture = pendingPropertyCard != null;
   const hasReadPlate = vehicle.plate.trim().length > 0;
@@ -122,10 +177,11 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const hasModel =
     vehicle.modelSpecId.trim().length > 0 ||
     (vehicle.brand.trim().length > 0 && vehicle.model.trim().length > 0);
-  // Para registrar: placa + año + modelo Y el tipo confirmado (si el scan trajo categoría no soportada, el
-  // conductor debe haber elegido el tipo a mano — no se registra con el CAR semilla por omisión). (FIX 3)
-  const hasVehicleData =
-    hasReadPlate && hasReadYear && hasModel && !typeNeedsConfirmation;
+  // Para registrar: placa + año + modelo Y un TIPO definido (LOTE 1: sin seed "Auto"). El tipo viene
+  // DERIVADO de la categoría MTC de la tarjeta, o elegido a mano en el fallback. Si `vehicle.type` sigue en
+  // `null` (no se derivó ni se eligió) NO se puede registrar: nunca un "Auto" silencioso.
+  const hasType = vehicle.type !== null;
+  const hasVehicleData = hasReadPlate && hasReadYear && hasModel && hasType;
 
   /** Actualiza un campo del vehículo y limpia su error inline. */
   const update = (patch: Partial<typeof vehicle>, field: keyof VehicleErrors) => {
@@ -148,41 +204,100 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
         setPhotoUploadState('idle');
       }, 900);
     } catch (e) {
+      // Retry legítimo del "subí y listo": la foto YA fue registrada en un intento previo y el backend
+      // responde 409 ConflictError (un VEHICLE_PHOTO activo ya existe para el conductor). La foto YA está
+      // → es ÉXITO, no error: marcamos el doc como `uploaded` (mismo mecanismo que el éxito normal, que
+      // habilita "Registrar vehículo" vía `photoUploaded`), cerramos el sheet y NO mostramos error.
+      // Detectado por status 409 tipado (`isConflictError`), no por el texto del mensaje. MISMO patrón que
+      // `useVehicleContinue.uploadPendingCard` (tarjeta) y el DNI (usePersonalDataContinue).
+      if (isConflictError(e)) {
+        setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
+        // Reconcilia el estado de SERVIDOR: el 409 prueba que el doc YA existe del lado del servidor, pero
+        // `serverDocs` puede estar stale (no se hizo el `onSuccess` que invalida). Invalidamos la MISMA key
+        // que el `onSuccess` de `useUploadAndRegisterDocument`/`useRegistrationDocuments` → el listado se
+        // refetchea y `photoUploaded` queda respaldado por el servidor, no solo por el flag local.
+        void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+        setPhotoUploadState('success');
+        setTimeout(() => {
+          setPhotoSheetOpen(false);
+          setPhotoUploadState('idle');
+        }, 900);
+        return;
+      }
       setPhotoError(e);
       setPhotoUploadState('error');
     }
   };
 
-  const goNext = () => {
-    setCurrentStep(RegistrationStep.DOCUMENTS);
-    navigation.navigate('Documents');
-  };
-
-  /**
-   * Resuelve el camino tras un escaneo CAPTURADO según el outcome (honestidad de estado):
-   *  - Categoría MTC NO soportada (`mtcUnsupported`): el OCR no derivó el tipo y el store quedó en el CAR
-   *    semilla → exigimos que el conductor ELIJA el tipo a mano (abrimos el formulario manual + marcamos
-   *    `typeNeedsConfirmation`, que bloquea Registrar hasta que toque el selector). NO se registra CAR por
-   *    omisión. (FIX 3)
-   *  - Año NO leído o fuera de rango (`autofilled.year === false`): el año quedó vacío (no se prellenó un
-   *    valor que el alta rechazaría) → la pantalla ofrece un input de año corregible en el camino scan. (FIX 4)
-   *  - Categoría soportada y año OK: el tipo lo fijó el scan; no hace falta confirmación.
-   */
-  const onCaptured = (outcome: PropertyCardScanOutcome) => {
-    setScanOpen(false);
-    if (outcome.mtcUnsupported) {
-      setManualMode(true);
-      setTypeNeedsConfirmation(true);
-    } else {
-      setTypeNeedsConfirmation(false);
+  /** Sube+registra el SOAT (reusa el componente CANÓNICO + el parser `parseSoat`). DRIVER-scoped, inmediato. */
+  const onSubmitSoat = async (input: RegistrationDocumentInput) => {
+    setSoatError(null);
+    setSoatUploadState('uploading');
+    try {
+      await uploadDocument.mutateAsync({
+        type: soatBackendType,
+        file: input.file,
+        ...(input.documentNumber ? { documentNumber: input.documentNumber } : {}),
+        ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
+        ...(input.extractedData ? { extractedData: input.extractedData } : {}),
+        ...(input.ocrEngine ? { ocrEngine: input.ocrEngine } : {}),
+        ...(input.ocrAt ? { ocrAt: input.ocrAt } : {}),
+      });
+      markSoatCaptured();
+    } catch (e) {
+      // 409 = el SOAT YA fue registrado en un intento previo → ÉXITO, no error (mismo patrón que la foto/
+      // tarjeta/DNI). Reconcilia el estado de servidor invalidando el listado y marca el doc subido.
+      if (isConflictError(e)) {
+        void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+        markSoatCaptured();
+        return;
+      }
+      setSoatError(e);
+      setSoatUploadState('error');
     }
   };
 
-  /** El conductor eligió el tipo a mano → confirma el tipo (limpia el gating de categoría no soportada). */
+  /** Marca el SOAT como capturado (subido) y cierra el sheet tras mostrar el check de éxito. */
+  function markSoatCaptured(): void {
+    setDocumentStatus('SOAT', DocumentUploadStatus.UPLOADED);
+    setSoatUploadState('success');
+    setTimeout(() => {
+      setSoatSheetOpen(false);
+      setSoatUploadState('idle');
+    }, 900);
+  }
+
+  const goNext = () => {
+    setCurrentStep(RegistrationStep.IDENTITY_VERIFICATION);
+    navigation.navigate('IdentityVerification');
+  };
+
+  /**
+   * Resuelve el camino tras un escaneo CAPTURADO (LOTE 1 · la tarjeta es la fuente de verdad del tipo):
+   *  - Tipo DERIVADO (`derivedType != null`: Moto si L*, Auto si M1): el hook YA fijó `vehicle.type` en el
+   *    store. La pantalla lo muestra como FILA READ-ONLY ("Tipo de vehículo: Moto"), igual que las otras
+   *    filas de la tarjeta capturada — SIN selector (no es editable: la tarjeta manda).
+   *  - Tipo NO derivado (`derivedType == null`: categoría no leída o no soportada N1/M2/M3/*SC): el tipo
+   *    del store queda en `null` (sin seed "Auto"). Cae al VehicleTypeSelector de FALLBACK, que ofrece AMBOS
+   *    tipos (CAR|MOTO) y bloquea Registrar hasta que el conductor elija (vía `hasType`). Nunca "Auto" mudo.
+   *  - Año NO leído o fuera de rango: el año quedó vacío → input de año corregible en el camino scan.
+   */
+  const onCaptured = (_outcome: PropertyCardScanOutcome) => {
+    setScanOpen(false);
+    // No hace falta estado extra: el tipo derivado (o su ausencia) vive en `vehicle.type` (store, reactivo).
+    // La pantalla deriva read-only vs selector-fallback de `vehicle.type !== null`.
+  };
+
+  /** El conductor eligió el tipo a mano en el FALLBACK (categoría no derivable). */
   const onChangeVehicleType = (type: VehicleType) => {
     setVehicleType(type);
-    setTypeNeedsConfirmation(false);
   };
+
+  /** Etiqueta i18n del tipo de vehículo (para la fila read-only de la tarjeta capturada). */
+  const vehicleTypeLabel = (type: VehicleType): string =>
+    type === VehicleType.MOTO
+      ? t('registration.vehicle.typeMoto')
+      : t('registration.vehicle.typeCar');
 
   const onContinue = async () => {
     // Si ya hay un vehículo registrado (en revisión), solo avanzamos: no se vuelve a registrar.
@@ -227,20 +342,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     return code ? t(`registration.vehicle.errors.${code}`) : undefined;
   };
 
-  // ¿Mostrar el selector manual de TIPO? Cuando el conductor pidió carga manual, cuando el escáner no
-  // capturó nada aún (y eligió manual), o cuando la categoría MTC escaneada no es soportada (honesto).
-  // Si el scan derivó un tipo soportado, el tipo queda fijo (sin selector) — la tarjeta lo muestra.
+  // ¿La captura del scan rindió una tarjeta usable (con placa)? Entonces mostramos la tarjeta "capturada".
   const derivedFromScan = hasCapture && hasReadPlate;
   const showManualForm = manualMode;
-  // El tipo derivado del OCR (no soportado) o la carga manual exigen el selector; si el scan lo derivó OK
-  // y no estamos en manual, el tipo NO se muestra (queda el que fijó el scan).
-  const showTypeSelector = showManualForm;
-
-  /** El nombre legible del tipo derivado (para la tarjeta capturada). */
-  const derivedTypeLabel =
-    vehicle.type === VehicleType.MOTO
-      ? t('registration.vehicle.scanCard.typeMoto')
-      : t('registration.vehicle.scanCard.typeCar');
 
   return (
     <>
@@ -253,8 +357,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
             variant="accent"
             fullWidth
             loading={vehicleContinue.isPending}
-            // La foto del vehículo es REQUERIDA para avanzar (alta nueva Y vehículo ya registrado).
-            disabled={(!existingVehicle && !hasVehicleData) || !photoUploaded}
+            // LOTE B: la foto Y el SOAT del vehículo son REQUERIDOS para avanzar (alta nueva Y vehículo ya
+            // registrado). Espejan el gating de la documentación del vehículo agrupada en este paso.
+            disabled={(!existingVehicle && !hasVehicleData) || !photoUploaded || !soatUploaded}
             onPress={() => {
               void onContinue();
             }}
@@ -268,7 +373,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
 
           <Reveal delay={40} style={styles.intro}>
             <Text variant="caption" color="inkMuted" align="center">
-              {t('registration.stepOf', { current: 2, total: 4 })}
+              {t('registration.stepOf', { current: 2, total: REGISTRATION_TOTAL_STEPS })}
             </Text>
             <Text variant="title1" align="center">
               {t('registration.vehicle.title')}
@@ -350,11 +455,19 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                         </Text>
                       </View>
                       <ReadRow label={t('registration.vehicle.scanCard.readPlate')} value={vehicle.plate} />
-                      {/* El tipo SOLO se muestra si el scan lo derivó (categoría soportada). */}
-                      {!manualMode ? (
+                      {/* LOTE 1: el TIPO DERIVADO de la categoría MTC es una fila READ-ONLY (la tarjeta es la
+                          fuente de verdad), igual que placa/marca/año — SIN selector. Solo cuando la tarjeta
+                          NO lo derivó (`vehicle.type === null`) cae al VehicleTypeSelector de fallback (abajo). */}
+                      {vehicle.type !== null ? (
+                        <ReadRow
+                          label={t('registration.vehicle.scanCard.readType')}
+                          value={vehicleTypeLabel(vehicle.type)}
+                        />
+                      ) : null}
+                      {`${vehicle.brand} ${vehicle.model}`.trim().length > 0 ? (
                         <ReadRow
                           label={t('registration.vehicle.scanCard.readVehicle')}
-                          value={`${derivedTypeLabel} · ${`${vehicle.brand} ${vehicle.model}`.trim()}`.trim()}
+                          value={`${vehicle.brand} ${vehicle.model}`.trim()}
                         />
                       ) : null}
                       {vehicle.year.trim().length > 0 ? (
@@ -415,6 +528,25 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                 </Reveal>
               ) : null}
 
+              {/* SELECTOR DE TIPO de FALLBACK en el camino SCAN (LOTE 1): SOLO aparece cuando la tarjeta NO
+                  derivó el tipo (`vehicle.type === null`: categoría no leída o no soportada N1/M2/M3/*SC). Si
+                  la derivó, el tipo es una FILA READ-ONLY en la tarjeta capturada (arriba) y este selector NO
+                  se muestra (la tarjeta manda). Ofrece AMBOS tipos (CAR|MOTO) y un banner pide elegirlo;
+                  Registrar queda BLOQUEADO hasta que el conductor toque una opción (vía `hasType`, reactivo
+                  por Zustand). Nunca un "Auto" por omisión. El formulario manual trae su propio selector. */}
+              {derivedFromScan && !manualMode && vehicle.type === null ? (
+                <Reveal delay={150} from="scale">
+                  <View style={{ gap: theme.spacing.md }}>
+                    <Banner
+                      tone="warn"
+                      title={t('registration.vehicle.scanCard.typeNeedsConfirmTitle')}
+                      description={t('registration.vehicle.scanCard.typeNeedsConfirmBody')}
+                    />
+                    <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+                  </View>
+                </Reveal>
+              ) : null}
+
               {/* Toggle del fallback manual (accesible, NO por defecto). Oculto cuando el scan capturó bien
                   con tipo soportado (ahí el camino es escanear/reescanear). */}
               {!manualMode ? (
@@ -433,9 +565,16 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                   Marca/modelo van a TEXTO LIBRE (sin catálogo) — coherente con la rama del contrato. */}
               {showManualForm ? (
                 <View style={[styles.form, { gap: theme.spacing.lg }]}>
-                  {showTypeSelector ? (
-                    <Reveal delay={100}>
-                      <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+                  {/* Carga a mano (fallback): el selector de tipo ofrece AMBOS tipos (CAR|MOTO). Arranca sin
+                      selección (`null`) — Registrar queda bloqueado hasta elegir (sin "Auto" por omisión). */}
+                  <Reveal delay={100}>
+                    <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+                  </Reveal>
+                  {vehicle.type === null ? (
+                    <Reveal delay={110}>
+                      <Text variant="footnote" color="inkMuted">
+                        {t('registration.vehicle.scanCard.typePrompt')}
+                      </Text>
                     </Reveal>
                   ) : null}
 
@@ -508,6 +647,29 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
               }}
             />
           </Reveal>
+
+          {/* SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos). Reusa el componente
+              CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Documento numerado que vence;
+              DRIVER-scoped, se sube/registra al capturarlo. REQUERIDO para avanzar. */}
+          <Reveal delay={270}>
+            <DocumentUploadCard
+              icon={<IconShield size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              label={t('registration.documents.soat')}
+              status={soatUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+              uploadedLabel={t('registration.documents.uploaded')}
+              pendingLabel={t('registration.documents.pending')}
+              serverState={soatServerState}
+              busy={uploadDocument.isPending}
+              accessibilityLabel={t('registration.documents.uploadAccessibility', {
+                document: t('registration.documents.soat'),
+              })}
+              onPress={() => {
+                setSoatError(null);
+                setSoatUploadState('idle');
+                setSoatSheetOpen(true);
+              }}
+            />
+          </Reveal>
         </View>
 
         {photoSheetOpen ? (
@@ -527,6 +689,26 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
             // inyecta `onScan`. El pipeline de subida (presign + PUT + registro) es el mismo.
             onPick={(source) => imagePicker.pick(source)}
             onSubmit={onSubmitPhoto}
+          />
+        ) : null}
+
+        {soatSheetOpen ? (
+          <RegistrationDocumentSheet
+            visible
+            onClose={() => {
+              if (soatUploadState !== 'uploading') {
+                setSoatSheetOpen(false);
+              }
+            }}
+            documentLabel={t('registration.documents.soat')}
+            // El tipo CANÓNICO selecciona la config contextual del formulario (etiqueta del número + que
+            // vence) y el parser de OCR (`parseSoat`). El mapeo es el mismo que viaja al backend.
+            documentType={soatBackendType}
+            uploadState={soatUploadState}
+            errorMessage={soatError ? toErrorMessage(soatError, t) : undefined}
+            onPick={(source) => imagePicker.pick(source)}
+            onScan={() => documentScanner.scan()}
+            onSubmit={onSubmitSoat}
           />
         ) : null}
       </SafeScreen>
