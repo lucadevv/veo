@@ -90,14 +90,30 @@ describe('HttpBiometricBackendPort', () => {
     await expect(port.requestChallenge()).rejects.toBeInstanceOf(BiometricBackendUnavailableError);
   });
 
-  it('enroll envía la foto y devuelve enrolledAt', async () => {
+  it('requestEnrollChallenge pega al endpoint de liveness del alta (GET)', async () => {
+    const fake = new FakeHttpClient(() => ({
+      challengeId: 'enr-1',
+      action: 'SMILE',
+      instructions: 'Sonríe',
+      expiresAt: '2026-05-29T00:00:00Z',
+    }));
+    const port = new HttpBiometricBackendPort(asHttp(fake));
+
+    const challenge = await port.requestEnrollChallenge();
+
+    expect(challenge.challengeId).toBe('enr-1');
+    expect(fake.calls[0]?.method).toBe('GET');
+    expect(fake.calls[0]?.path).toBe('/drivers/me/biometric/liveness/challenge');
+  });
+
+  it('enroll envía el contrato con liveness { challengeId, frames } y devuelve enrolledAt', async () => {
     const fake = new FakeHttpClient(() => ({ enrolled: true, enrolledAt: '2026-05-29T00:00:00Z' }));
     const port = new HttpBiometricBackendPort(asHttp(fake));
 
-    const result = await port.enroll('Zm90bw==');
+    const result = await port.enroll({ challengeId: 'enr-1', frames: ['ZnJhbWUx'] });
 
     expect(result.enrolledAt).toBe('2026-05-29T00:00:00Z');
     expect(fake.calls[0]?.path).toBe('/drivers/biometric/enroll');
-    expect(fake.calls[0]?.opts.body).toEqual({ photo: 'Zm90bw==' });
+    expect(fake.calls[0]?.opts.body).toEqual({ challengeId: 'enr-1', frames: ['ZnJhbWUx'] });
   });
 });

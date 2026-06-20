@@ -6,7 +6,7 @@ import type {
 /**
  * Frame-grabber STUB — SOLO desarrollo en simulador (sin cámara). Devuelve frames JPEG sintéticos en
  * vez de capturar de la cámara frontal, para poder ejercer el gate biométrico de inicio de turno y el
- * enrolamiento en el simulador.
+ * re-enrolamiento de rostro (ambos capturan una secuencia de frames) en el simulador.
  *
  * Por qué es seguro / honesto:
  *  - NO es un mock del flujo: se sigue usando el `LivenessBiometricCaptureService` REAL y el backend
@@ -40,11 +40,6 @@ export class StubBiometricFrameGrabber implements BiometricFrameGrabber {
   async captureSequence(plan: FrameCapturePlan): Promise<string[]> {
     await delay(Math.min(plan.frameCount * plan.intervalMs, MAX_SIMULATED_CAPTURE_MS));
     return Array.from({ length: plan.frameCount }, () => SYNTHETIC_JPEG_BASE64);
-  }
-
-  async capturePhoto(): Promise<string> {
-    await delay(400);
-    return SYNTHETIC_JPEG_BASE64;
   }
 }
 

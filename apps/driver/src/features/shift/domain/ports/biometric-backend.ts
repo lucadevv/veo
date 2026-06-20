@@ -3,9 +3,11 @@
  *
  * El procesamiento ONNX (detección facial + match + liveness) vive en el `biometric-service` (Python)
  * tras identity-service. El driver-bff lo expone al conductor (JWT driver):
- *   1. `POST /drivers/biometric/enroll` body `{ photo }` → enrolamiento de rostro (una vez).
- *   2. `POST /drivers/shift/biometric/challenge` → `{ challengeId, action, instructions, expiresAt }`.
- *   3. `POST /drivers/shift/biometric/verify` body `{ challengeId, frames }` →
+ *   1. `GET  /drivers/me/biometric/liveness/challenge` → reto de liveness para RE-enrolar el rostro.
+ *   2. `POST /drivers/biometric/enroll` body `{ challengeId, frames }` → RE-enrolamiento de rostro CON
+ *      LIVENESS (anti-spoofing; reemplazó a la foto suelta `{ photo }`). Mismo contrato que el alta.
+ *   3. `POST /drivers/shift/biometric/challenge` → `{ challengeId, action, instructions, expiresAt }`.
+ *   4. `POST /drivers/shift/biometric/verify` body `{ challengeId, frames }` →
  *      `{ sessionRef, score, livenessPassed, matchPassed }` (sessionRef de un solo uso).
  *
  * El `sessionRef` resultante es el que consume `POST /drivers/shift/start`.
@@ -46,12 +48,20 @@ export interface BiometricEnrollResult {
 }
 
 export interface BiometricBackendPort {
-  /** Solicita un reto de liveness al backend. */
+  /** Solicita un reto de liveness para el GATE de inicio de turno (`POST …/shift/biometric/challenge`). */
   requestChallenge(): Promise<BiometricChallenge>;
   /** Envía los frames capturados y obtiene el resultado (sessionRef + flags). */
   verify(input: BiometricVerificationInput): Promise<BiometricVerifyOutcome>;
-  /** Enrola el rostro de referencia del conductor (foto base64). */
-  enroll(photoBase64: string): Promise<BiometricEnrollResult>;
+  /**
+   * Solicita un reto de liveness para RE-ENROLAR el rostro de referencia
+   * (`GET /drivers/me/biometric/liveness/challenge`). Distinto endpoint que el reto del turno.
+   */
+  requestEnrollChallenge(): Promise<BiometricChallenge>;
+  /**
+   * RE-enrola el rostro de referencia del conductor CON LIVENESS: el `challengeId` del reto de
+   * enrolamiento + los `frames` capturados (anti-spoofing). Mismo contrato que el alta de onboarding.
+   */
+  enroll(input: BiometricVerificationInput): Promise<BiometricEnrollResult>;
 }
 
 /* ── Errores de dominio tipados (sin mocks: reflejan respuestas reales del backend) ── */

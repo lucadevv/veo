@@ -1,102 +1,176 @@
-import { useCallback, useRef, useState } from 'react';
-import type { FaceCapture } from '../../domain';
-import { useRegistrationStore } from '../state/registrationStore';
-import { useFaceCapture } from '../providers/FaceCaptureProvider';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LivenessAction } from '@veo/shared-types';
+import { planForChallenge } from '../../domain';
+import { useLivenessGrabber } from '../providers/LivenessCaptureProvider';
+import { classifyKycEnrollError, type KycEnrollErrorKind } from '../kycEnrollError';
 import { useRegistrationSubmit } from './useRegistrationSubmit';
-import { useEnrollBiometric } from './useRegistrationDocuments';
+import { useEnrollBiometric, useLivenessChallenge } from './useRegistrationDocuments';
 
 /**
- * Fase del flujo de KYC del alta (estado de PRESENTACIÓN, no de negocio):
- *  - `idle`: guía en pantalla, listo para capturar.
- *  - `capturing`: cámara nativa abierta tomando la foto.
- *  - `preview`: foto capturada en pantalla; el conductor confirma o vuelve a tomar.
- *  - `submitting`: enrolando la foto (`POST /drivers/biometric/enroll`) + cerrando el alta.
+ * Fases del flujo de KYC del alta con LIVENESS REACTIVO (estado de PRESENTACIÓN, no de negocio). Reemplaza
+ * el viejo `idle|capturing|preview|submitting` (foto única) por la máquina del reto activo estilo banca:
+ *  - `requesting-challenge`: pidiendo el reto al servidor (`GET …/liveness/challenge`).
+ *  - `ready`: reto recibido; la pantalla muestra el prompt + el cue direccional y espera que el conductor
+ *    inicie el gesto.
+ *  - `performing`: capturando frames mientras el conductor ejecuta el gesto (progreso real 0..1).
+ *  - `submitting`: enrolando `{ challengeId, frames }` y cerrando el alta.
+ *  - `success`: enroló + cerró; el `RootNavigator` conmuta de pantalla (server-driven).
+ *  - `failed`: error (reto / captura / enroll / liveness 422 / red). La pantalla muestra un banner humano y
+ *    el reintento pide un reto NUEVO (los retos son de un solo uso).
  */
-export type FaceCapturePhase = 'idle' | 'capturing' | 'preview' | 'submitting';
+export type LivenessPhase =
+  | 'requesting-challenge'
+  | 'ready'
+  | 'performing'
+  | 'submitting'
+  | 'success'
+  | 'failed';
 
 /**
- * Orquesta la captura facial REAL del alta: captura (cámara nativa) → preview/reintento → confirmar
- * (enrolar la foto + cerrar el alta). La lógica vive en el servicio inyectado (`FaceCaptureService`)
- * y en las mutaciones (`useEnrollBiometric`/`useRegistrationSubmit`); aquí solo se gobierna la fase
- * de UI. Al cerrar el alta, el store pasa a `in_review` y el `RootNavigator` conmuta de pantalla.
+ * Valores CANÓNICOS de la fase del liveness (mismo patrón que `RegistrationStatus`): conmutar el estado
+ * SIN strings mágicos. El `satisfies` garantiza que cada valor pertenece al union — un typo es un ERROR
+ * DE COMPILACIÓN, no un bug mudo.
+ */
+export const LivenessPhase = {
+  REQUESTING_CHALLENGE: 'requesting-challenge',
+  READY: 'ready',
+  PERFORMING: 'performing',
+  SUBMITTING: 'submitting',
+  SUCCESS: 'success',
+  FAILED: 'failed',
+} as const satisfies Record<string, LivenessPhase>;
+
+/**
+ * Origen del último error, para que la presentación elija el mensaje correcto sin re-inspeccionar el error:
+ *  - `challenge`: falló pedir el reto (red / backend). El reintento vuelve a pedirlo.
+ *  - `capture`: falló capturar los frames (módulo nativo no disponible, permiso, timeout de cámara).
+ *  - `enroll`: falló confirmar (enroll/submit); aquí aplica el mapeo liveness/rostro/red/genérico.
+ */
+export type LivenessErrorSource = 'challenge' | 'capture' | 'enroll';
+
+/**
+ * Orquesta el LIVENESS REACTIVO del alta: la PANTALLA es dueña de la máquina de estados; este hook la
+ * implementa sobre IO inyectado:
+ *  - reto: `useLivenessChallenge` (React Query, `GET /drivers/me/biometric/liveness/challenge`),
+ *  - captura: `useLivenessGrabber().captureFrames(plan, onProgress)` (cámara frontal nativa),
+ *  - enroll + cierre: `useEnrollBiometric` (`POST /drivers/biometric/enroll`) → `useRegistrationSubmit`.
+ *
+ * SEGURIDAD (defense-in-depth): el enroll CON LIVENESS es REQUISITO para cerrar el alta — `submit` solo
+ * corre si el enroll resolvió. La guarda anti-reentrada (`submittingRef`) garantiza que un doble toque del
+ * CTA no dispare la secuencia dos veces. Los retos son de UN SOLO USO: `retry()` pide un reto NUEVO.
  */
 export function useRegistrationFaceCapture() {
-  const faceCapture = useFaceCapture();
-  const setFaceCapture = useRegistrationStore((s) => s.setFaceCapture);
+  const grabber = useLivenessGrabber();
+  const challenge = useLivenessChallenge();
   const enroll = useEnrollBiometric();
   const submit = useRegistrationSubmit();
 
-  const [phase, setPhase] = useState<FaceCapturePhase>('idle');
-  const [capture, setCapture] = useState<FaceCapture | null>(null);
+  // Fase de UI. Arranca pidiendo el reto; los efectos de la query la promueven a `ready`/`failed`.
+  const [phase, setPhase] = useState<LivenessPhase>(LivenessPhase.REQUESTING_CHALLENGE);
+  const [captureProgress, setCaptureProgress] = useState(0);
   const [error, setError] = useState<unknown>(null);
-  // Guarda anti-reentrada de `confirm`: el estado (`phase`) se actualiza de forma asíncrona, así que
-  // un doble toque rápido entraría dos veces antes del re-render. El ref se marca SÍNCRONAMENTE para
-  // garantizar que enroll+submit se ejecuten una sola vez por captura.
-  const submittingRef = useRef(false);
+  const [errorSource, setErrorSource] = useState<LivenessErrorSource | null>(null);
+  // Guarda anti-reentrada de la secuencia performing→submitting: la fase se actualiza async, así que un
+  // doble toque rápido entraría dos veces antes del re-render. El ref se marca SÍNCRONO para garantizar
+  // que la captura+enroll+submit corran una sola vez por reto.
+  const runningRef = useRef(false);
 
-  /** Abre la cámara nativa, captura la foto y pasa a preview (persiste la referencia en el store). */
-  const startCapture = useCallback(async () => {
-    setError(null);
-    setPhase('capturing');
-    try {
-      const result = await faceCapture.captureForRegistration();
-      setCapture(result);
-      setFaceCapture(result);
-      setPhase('preview');
-    } catch (e) {
-      setPhase('idle');
-      setError(e);
-    }
-  }, [faceCapture, setFaceCapture]);
-
-  /** Descarta la foto y vuelve a la guía para reintentar. */
-  const retake = useCallback(() => {
-    setError(null);
-    setCapture(null);
-    submittingRef.current = false;
-    setPhase('idle');
-  }, []);
+  // Datos del reto activo (derivados de la query). Disponibles solo cuando la query resolvió.
+  const challengeData = challenge.data;
+  const action: LivenessAction | null = challengeData?.action ?? null;
+  const instructions: string | null = challengeData?.instructions ?? null;
 
   /**
-   * Confirma la foto: la enrola en el backend (si el proveedor entregó base64 real) y cierra el alta
-   * (queda `in_review`). Ante error, vuelve a preview para reintentar sin perder la foto.
-   *
-   * PRODUCTO: este enroll del ALTA captura la FOTO DE REFERENCIA del conductor (sin liveness, por
-   * decisión de producto). El liveness/anti-spoofing NO vive aquí: se exige en el GATE DE TURNO
-   * (verificación biométrica obligatoria al iniciar turno), que compara contra esta referencia. No
-   * cambiar este flujo para añadir liveness en el alta.
-   *
-   * SEGURIDAD/UX: guarda anti-reentrada — un doble toque del botón confirmar NO debe disparar
-   * enroll+submit dos veces. El ref se marca síncrono y se libera solo si el intento falla (para
-   * permitir reintentar desde preview); en éxito el alta avanza y el componente se desmonta.
+   * Sincroniza la fase con el ciclo de la query del reto, pero SOLO mientras estamos esperando el reto
+   * (fase `requesting-challenge`): así un éxito de captura/enroll posterior NO se pisa cuando la query
+   * sigue "success" en background. Reto OK → `ready`; reto con error → `failed` (source `challenge`).
    */
-  const confirm = useCallback(async () => {
-    if (submittingRef.current) {
+  useEffect(() => {
+    if (phase !== LivenessPhase.REQUESTING_CHALLENGE) {
       return;
     }
-    submittingRef.current = true;
-    setError(null);
-    setPhase('submitting');
-    try {
-      if (capture?.photoBase64) {
-        await enroll.mutateAsync({ photo: capture.photoBase64 });
-      }
-      await submit.mutateAsync();
-    } catch (e) {
-      submittingRef.current = false;
-      setPhase('preview');
-      setError(e);
+    if (challenge.isSuccess && challengeData) {
+      setPhase(LivenessPhase.READY);
+      return;
     }
-  }, [capture, enroll, submit]);
+    if (challenge.isError) {
+      setError(challenge.error);
+      setErrorSource('challenge');
+      setPhase(LivenessPhase.FAILED);
+    }
+  }, [phase, challenge.isSuccess, challenge.isError, challenge.error, challengeData]);
+
+  /**
+   * Inicia el gesto: captura los frames del liveness (progreso real) y, al completarlos, enrola
+   * `{ challengeId, frames }` y cierra el alta (MISMO orden enroll→submit que el flujo previo). El enroll
+   * es prerequisito del cierre: si falla, `submit` NO corre y la fase pasa a `failed` con el error tipado.
+   */
+  const start = useCallback(async () => {
+    if (runningRef.current || !challengeData) {
+      return;
+    }
+    runningRef.current = true;
+    setError(null);
+    setErrorSource(null);
+    setCaptureProgress(0);
+    setPhase(LivenessPhase.PERFORMING);
+    // Marca de en qué etapa estamos para clasificar el error sin re-inspeccionarlo: hasta superar la
+    // captura, cualquier fallo es de cámara (`capture`); a partir del enroll, es de cierre (`enroll`).
+    let stage: LivenessErrorSource = 'capture';
+    try {
+      const plan = planForChallenge(challengeData.action);
+      const frames = await grabber.captureFrames(plan, setCaptureProgress);
+      stage = 'enroll';
+      setPhase(LivenessPhase.SUBMITTING);
+      // Enroll CON LIVENESS (OBLIGATORIO) y, solo si resolvió, cierre del alta (server-driven).
+      await enroll.mutateAsync({ challengeId: challengeData.challengeId, frames });
+      await submit.mutateAsync();
+      setPhase(LivenessPhase.SUCCESS);
+    } catch (e) {
+      runningRef.current = false;
+      setError(e);
+      setErrorSource(stage);
+      setPhase(LivenessPhase.FAILED);
+    }
+  }, [challengeData, grabber, enroll, submit]);
+
+  /**
+   * Reintenta tras un fallo. Los retos son de UN SOLO USO, así que NO se reusa el reto consumido: se
+   * resetea la guarda + el estado y se pide un reto NUEVO (`refetch`), volviendo a `requesting-challenge`.
+   */
+  const retry = useCallback(() => {
+    runningRef.current = false;
+    setError(null);
+    setErrorSource(null);
+    setCaptureProgress(0);
+    setPhase(LivenessPhase.REQUESTING_CHALLENGE);
+    void challenge.refetch();
+  }, [challenge]);
+
+  /**
+   * Clasificación del error de CONFIRMAR (liveness / rostro / red / genérico) para que la pantalla muestre
+   * el mensaje específico. Solo aplica cuando el error vino del enroll; ante un error de reto o captura es
+   * `null` (esos casos los cubren los banners de reto/cámara con su propio reintento).
+   */
+  const enrollErrorKind: KycEnrollErrorKind | null = useMemo(
+    () => (error && errorSource === 'enroll' ? classifyKycEnrollError(error) : null),
+    [error, errorSource],
+  );
 
   return {
     phase,
-    capture,
+    action,
+    instructions,
+    captureProgress,
     error,
-    isCapturing: phase === 'capturing',
-    isSubmitting: phase === 'submitting',
-    startCapture,
-    retake,
-    confirm,
+    errorSource,
+    enrollErrorKind,
+    isRequestingChallenge: phase === LivenessPhase.REQUESTING_CHALLENGE,
+    isPerforming: phase === LivenessPhase.PERFORMING,
+    isSubmitting: phase === LivenessPhase.SUBMITTING,
+    isSuccess: phase === LivenessPhase.SUCCESS,
+    isFailed: phase === LivenessPhase.FAILED,
+    start,
+    retry,
   };
 }

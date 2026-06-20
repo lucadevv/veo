@@ -13,6 +13,7 @@ import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import com.veodriver.biometric.BiometricFrameGrabberPackage
 import com.veodriver.foreground.ShiftForegroundPackage
+import com.veodriver.scanner.VeoDocumentScannerPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -23,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
               // Módulos propios (no autoenlazables): se registran manualmente aquí.
               add(ShiftForegroundPackage())
               add(BiometricFrameGrabberPackage())
+              add(VeoDocumentScannerPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

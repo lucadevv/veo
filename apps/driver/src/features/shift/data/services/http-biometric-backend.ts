@@ -42,6 +42,18 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
     }
   }
 
+  async requestEnrollChallenge(): Promise<BiometricChallenge> {
+    try {
+      // Reto de liveness para RE-enrolar el rostro: GET sin cuerpo (mismo schema que el reto del turno,
+      // distinto endpoint). Espeja `getLivenessChallenge` del repositorio de alta.
+      return await this.http.get('/drivers/me/biometric/liveness/challenge', {
+        schema: biometricChallenge,
+      });
+    } catch (error) {
+      throw this.mapError(error);
+    }
+  }
+
   async verify(input: BiometricVerificationInput): Promise<BiometricVerifyOutcome> {
     let result;
     try {
@@ -64,9 +76,14 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
     return result;
   }
 
-  async enroll(photoBase64: string): Promise<BiometricEnrollResult> {
+  async enroll(input: BiometricVerificationInput): Promise<BiometricEnrollResult> {
     try {
-      const body = driverBiometricEnrollRequest.parse({ photo: photoBase64 });
+      // RE-enrolamiento CON LIVENESS: el contrato del alta ya no acepta `{ photo }` (spoofeable), sino el
+      // reto + los frames capturados. El cuerpo se valida con el esquema del contrato antes de enviarlo.
+      const body = driverBiometricEnrollRequest.parse({
+        challengeId: input.challengeId,
+        frames: input.frames,
+      });
       const result = await this.http.post('/drivers/biometric/enroll', {
         body,
         schema: driverBiometricEnrollResult,

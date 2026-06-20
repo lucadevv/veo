@@ -9,8 +9,6 @@ import {
 interface NativeFrameGrabberModule {
   /** Captura `frameCount` JPEG (base64) de la cámara frontal con `intervalMs` entre frames. */
   captureFrames(frameCount: number, intervalMs: number): Promise<string[]>;
-  /** Captura una sola foto JPEG (base64) de la cámara frontal (enrolamiento). */
-  capturePhoto(): Promise<string>;
 }
 
 /** Acceso tipado al módulo nativo (undefined si no está enlazado en esta plataforma/build). */
@@ -18,8 +16,6 @@ const nativeModule = NativeModules.VeoBiometricFrameGrabber as NativeFrameGrabbe
 
 /** Margen fijo (ms) que damos al nativo además del tiempo teórico de captura antes de abortar. */
 const CAPTURE_TIMEOUT_BUFFER_MS = 8_000;
-/** Timeout (ms) para la captura de una sola foto (enrolamiento). */
-const PHOTO_TIMEOUT_MS = 12_000;
 
 /**
  * Envuelve una promesa nativa con un timeout. Sin esto, si la cámara nunca entrega un sample (cámara
@@ -70,18 +66,6 @@ export class NativeBiometricFrameGrabber implements BiometricFrameGrabber {
       );
     }
     return frames;
-  }
-
-  async capturePhoto(): Promise<string> {
-    if (!nativeModule) {
-      throw new BiometricFrameGrabberUnavailableError();
-    }
-    await ensureCameraPermission();
-    const photo = await withCaptureTimeout(nativeModule.capturePhoto(), PHOTO_TIMEOUT_MS);
-    if (!photo) {
-      throw new BiometricFrameGrabberUnavailableError('La captura de la foto no produjo imagen');
-    }
-    return photo;
   }
 }
 

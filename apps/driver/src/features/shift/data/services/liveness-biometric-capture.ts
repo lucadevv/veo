@@ -18,7 +18,8 @@ import {
  * Combina el frame-grabber nativo (cámara frontal) con el backend biométrico del driver-bff:
  *  - Inicio de turno: reto de liveness → captura de la secuencia de frames según `action` →
  *    verificación → `sessionRef` (de un solo uso) que consume `POST /drivers/shift/start`.
- *  - Enrolamiento: foto de rostro → `POST /drivers/biometric/enroll`.
+ *  - RE-enrolamiento: reto de liveness de enrolamiento → captura de la secuencia de frames según
+ *    `action` → `POST /drivers/biometric/enroll` con `{ challengeId, frames }` (anti-spoofing).
  *
  * No es un mock: los frames provienen de la cámara real y los veredictos los emite el backend. Los
  * errores tipados (no enrolado, rechazado, bloqueado, no disponible) los propaga sin alterarlos.
@@ -45,7 +46,15 @@ export class LivenessBiometricCaptureService
   }
 
   async enroll(): Promise<BiometricEnrollResult> {
-    const photo = await this.grabber.capturePhoto();
-    return this.backend.enroll(photo);
+    // 1) Reto de liveness de ENROLAMIENTO (puede lanzar BiometricLocked/Unavailable). Distinto endpoint
+    //    que el reto del turno; el alta y el re-enrolamiento comparten el mismo contrato de liveness.
+    const challenge = await this.backend.requestEnrollChallenge();
+
+    // 2) Captura REAL de la secuencia de frames guiada por la acción del reto (mismo plan que el turno).
+    const plan = planForChallenge(challenge.action);
+    const frames = await this.grabber.captureSequence(plan);
+
+    // 3) RE-enrola el rostro de referencia con `{ challengeId, frames }` (anti-spoofing).
+    return this.backend.enroll({ challengeId: challenge.challengeId, frames });
   }
 }
