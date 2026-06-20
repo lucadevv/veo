@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConflictError, ForbiddenError, ValidationError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
-import { FleetDocumentType, OcrEngine } from '@veo/shared-types';
+import { FleetDocumentStatus, FleetDocumentType, OcrEngine } from '@veo/shared-types';
 import { DocumentSide, FleetOwnerType, type FleetDocument } from '../generated/prisma';
 import { DocumentsService } from './documents.service';
 
@@ -129,11 +129,39 @@ function makeService(
     ),
   );
   const txCreate = vi.fn((args: { data: Record<string, unknown> }) => docCreate(args));
+
+  // Rama UPSERT (reemplazo de un doc activo existente): el `update` captura el patch y devuelve el doc
+  // fusionado (existente + patch); `deleteMany` borra el set de imágenes viejo antes de recrearlo.
+  const updated: { where?: Record<string, unknown>; data?: Record<string, unknown> } = {};
+  const docUpdate = vi.fn(
+    ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      updated.where = where;
+      updated.data = data;
+      return Promise.resolve({
+        id: where.id,
+        ...data,
+        createdAt: new Date('2026-06-19T00:00:00Z'),
+        updatedAt: new Date('2026-06-20T00:00:00Z'),
+      } as unknown as FleetDocument);
+    },
+  );
+  const imageDeleteMany = vi.fn(() => {
+    // El reemplazo TOTAL vacía el set de imágenes antes de recrearlo (no se mergean).
+    imagesCreated.data = [];
+    return Promise.resolve({ count: 0 });
+  });
+  const txUpdate = vi.fn((args: { where: Record<string, unknown>; data: Record<string, unknown> }) =>
+    docUpdate(args),
+  );
   const $transaction = vi.fn(
     (fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
       fn({
-        fleetDocument: { create: txCreate },
-        documentImage: { createMany: imageCreateMany, findMany: imageFindMany },
+        fleetDocument: { create: txCreate, update: txUpdate },
+        documentImage: {
+          createMany: imageCreateMany,
+          findMany: imageFindMany,
+          deleteMany: imageDeleteMany,
+        },
       }),
   );
 
@@ -156,7 +184,10 @@ function makeService(
   return {
     service,
     created,
+    updated,
     docCreate,
+    docUpdate,
+    imageDeleteMany,
     vehicleFindUnique,
     docFindMany,
     imagesCreated,
@@ -347,8 +378,8 @@ describe('DocumentsService.create · data OCR extraída (onboarding sin-formular
   });
 });
 
-describe('DocumentsService.create · dedup read-your-writes (replica-lag)', () => {
-  it('(e) el chequeo de duplicado lee del PRIMARY (write.findFirst), NUNCA de la réplica (read.findFirst)', async () => {
+describe('DocumentsService.create · lookup del doc activo read-your-writes (replica-lag)', () => {
+  it('(e) el lookup del doc activo lee del PRIMARY (write.findFirst), NUNCA de la réplica (read.findFirst)', async () => {
     const { service, docFindFirst, readFindFirstSpy } = makeService();
 
     await service.create(
@@ -356,15 +387,122 @@ describe('DocumentsService.create · dedup read-your-writes (replica-lag)', () =
       driverIdentity({ driverId: 'driver-profile-1' }),
     );
 
-    // El dedup consultó el primary…
+    // El lookup del doc activo consultó el primary…
     expect(docFindFirst).toHaveBeenCalledTimes(1);
     // …y JAMÁS la réplica (read.fleetDocument.findFirst). Si alguien revirtiera a `read`, esto rompería.
     expect(readFindFirstSpy).not.toHaveBeenCalled();
   });
+});
 
-  it('(e) un duplicado ACTIVO hallado en el primary → ConflictError (no se crea el doc)', async () => {
-    const { service, docFindFirst, docCreate } = makeService();
-    docFindFirst.mockResolvedValueOnce({ id: 'existing-doc' } as unknown as FleetDocument);
+describe('DocumentsService.create · UPSERT ACOTADO por status (no des-verificar docs aprobados)', () => {
+  /**
+   * Doc activo PENDING_REVIEW (aún en cola, NO aprobado): re-subir es una corrección pre-revisión legítima
+   * (onboarding) → REEMPLAZA (`replaceActiveDocument`). Es el ÚNICO status que gatilla el reemplazo.
+   */
+  const pendingActive = {
+    id: 'existing-doc-1',
+    ownerType: FleetOwnerType.DRIVER,
+    ownerId: 'driver-profile-1',
+    type: FleetDocumentType.LICENSE_A1,
+    status: FleetDocumentStatus.PENDING_REVIEW,
+    documentNumber: 'A1-VIEJO',
+    verifiedAt: null,
+    verifiedBy: null,
+    rejectionReason: null,
+  } as unknown as FleetDocument;
+
+  /**
+   * Doc activo APROBADO por el operador (VALID): re-subir NO debe des-verificarlo en silencio → 409
+   * ConflictError. Trae verifiedAt/verifiedBy poblados que NO deben tocarse (el update ni se llama).
+   */
+  const validActive = {
+    ...pendingActive,
+    status: FleetDocumentStatus.VALID,
+    verifiedAt: new Date('2026-06-01T00:00:00Z'),
+    verifiedBy: 'admin-1',
+  } as unknown as FleetDocument;
+
+  /** Doc activo APROBADO por vencer (EXPIRING_SOON): mismo trato que VALID → 409, no des-verifica. */
+  const expiringActive = {
+    ...validActive,
+    status: FleetDocumentStatus.EXPIRING_SOON,
+  } as unknown as FleetDocument;
+
+  it('(d) SIN doc activo (primera subida) → CREATE normal (no update)', async () => {
+    const { service, docCreate, docUpdate } = makeService();
+    await service.create(
+      { ...driverDoc, ownerId: 'driver-profile-1' },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+    expect(docCreate).toHaveBeenCalledTimes(1);
+    expect(docUpdate).not.toHaveBeenCalled();
+  });
+
+  it('(a) CON doc PENDING_REVIEW → UPDATE del MISMO id (reemplazo onboarding), NO crea uno nuevo ni lanza 409', async () => {
+    const { service, docFindFirst, docCreate, docUpdate, updated } = makeService();
+    docFindFirst.mockResolvedValueOnce(pendingActive);
+
+    const doc = await service.create(
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-1',
+        documentNumber: 'A1-NUEVO',
+        images: [
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/nuevo.jpg',
+            side: DocumentSide.SINGLE,
+          },
+        ],
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    // No se creó un doc nuevo: se actualizó el existente (id estable).
+    expect(docCreate).not.toHaveBeenCalled();
+    expect(docUpdate).toHaveBeenCalledTimes(1);
+    expect(updated.where?.id).toBe('existing-doc-1');
+    expect(doc.id).toBe('existing-doc-1');
+    // El contenido se reemplazó; sigue PENDING_REVIEW (no estaba aprobado, así que el reset es no-op).
+    expect(updated.data?.status).toBe(FleetDocumentStatus.PENDING_REVIEW);
+    expect(updated.data?.documentNumber).toBe('A1-NUEVO');
+    expect(updated.data?.fileS3Key).toBe(
+      'drivers/driver-profile-1/documents/LICENSE_A1/nuevo.jpg',
+    );
+  });
+
+  it('(b) CON doc VALID (aprobado) → ConflictError 409, NO des-verifica (NO update, verifiedAt/verifiedBy intactos)', async () => {
+    const { service, docFindFirst, docCreate, docUpdate } = makeService();
+    docFindFirst.mockResolvedValueOnce(validActive);
+
+    await expect(
+      service.create(
+        {
+          ...driverDoc,
+          ownerId: 'driver-profile-1',
+          documentNumber: 'A1-NUEVO',
+          images: [
+            {
+              s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/nuevo.jpg',
+              side: DocumentSide.SINGLE,
+            },
+          ],
+        },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    // El doc aprobado NO se tocó: no se reemplazó ni se reseteó a PENDING_REVIEW. verifiedAt/verifiedBy
+    // del doble (`validActive`) quedan intactos porque el update JAMÁS se invocó.
+    expect(docUpdate).not.toHaveBeenCalled();
+    expect(docCreate).not.toHaveBeenCalled();
+    expect(validActive.verifiedAt).toEqual(new Date('2026-06-01T00:00:00Z'));
+    expect(validActive.verifiedBy).toBe('admin-1');
+    expect(validActive.status).toBe(FleetDocumentStatus.VALID);
+  });
+
+  it('(c) CON doc EXPIRING_SOON (aprobado por vencer) → ConflictError 409, tampoco des-verifica', async () => {
+    const { service, docFindFirst, docCreate, docUpdate } = makeService();
+    docFindFirst.mockResolvedValueOnce(expiringActive);
 
     await expect(
       service.create(
@@ -372,7 +510,64 @@ describe('DocumentsService.create · dedup read-your-writes (replica-lag)', () =
         driverIdentity({ driverId: 'driver-profile-1' }),
       ),
     ).rejects.toBeInstanceOf(ConflictError);
+
+    expect(docUpdate).not.toHaveBeenCalled();
     expect(docCreate).not.toHaveBeenCalled();
+    expect(expiringActive.status).toBe(FleetDocumentStatus.EXPIRING_SOON);
+  });
+
+  it('(a) CON doc PENDING_REVIEW: reemplaza las imágenes (borra el set viejo y crea el nuevo)', async () => {
+    const { service, docFindFirst, imageDeleteMany, imagesCreated } = makeService();
+    docFindFirst.mockResolvedValueOnce(pendingActive);
+
+    await service.create(
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-1',
+        images: [
+          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r1.jpg', side: DocumentSide.SINGLE },
+          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r2.jpg', side: DocumentSide.SINGLE },
+        ],
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    // El set viejo se borró antes de recrear (reemplazo total, no merge).
+    expect(imageDeleteMany).toHaveBeenCalledTimes(1);
+    expect(imagesCreated.data).toHaveLength(2);
+    expect(imagesCreated.data.map((i) => i.s3Key)).toEqual([
+      'drivers/driver-profile-1/documents/LICENSE_A1/r1.jpg',
+      'drivers/driver-profile-1/documents/LICENSE_A1/r2.jpg',
+    ]);
+  });
+
+  it('(a) CON doc PENDING_REVIEW: reemplaza extractedData/ocrEngine/ocrAt con la data OCR de la re-subida', async () => {
+    const { service, docFindFirst, updated } = makeService();
+    docFindFirst.mockResolvedValueOnce(pendingActive);
+
+    const extractedData = {
+      type: FleetDocumentType.DNI,
+      fullName: 'JUAN PEREZ',
+      documentNumber: '12345678',
+      birthdate: '1990-05-20',
+    } as const;
+
+    await service.create(
+      {
+        ownerType: FleetOwnerType.DRIVER,
+        type: FleetDocumentType.DNI,
+        documentNumber: '12345678',
+        ownerId: 'driver-profile-1',
+        extractedData,
+        ocrEngine: OcrEngine.ANDROID_MLKIT,
+        ocrAt: '2026-06-20T10:00:00.000Z',
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    expect(updated.data?.extractedData).toEqual(extractedData);
+    expect(updated.data?.ocrEngine).toBe(OcrEngine.ANDROID_MLKIT);
+    expect(updated.data?.ocrAt).toEqual(new Date('2026-06-20T10:00:00.000Z'));
   });
 });
 

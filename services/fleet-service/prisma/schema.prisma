@@ -125,7 +125,13 @@ model Vehicle {
   year               Int
   color              String
   /// Ola 2B · tier moto-taxi: tipo de vehículo. Default CAR (compatibilidad con la flota existente).
+  /// LOTE 1: el `vehicleType` lo DERIVA el servidor de `mtcCategory` (la tarjeta es la fuente de verdad);
+  /// el del body es solo un HINT/fallback cuando la categoría no es derivable (ver VehiclesService).
   vehicleType        VehicleType      @default(CAR) @map("vehicle_type")
+  /// LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad / TIVe (`M1`, `L3`, `N1`, `M1SC`…). Es la
+  /// FUENTE DE VERDAD del tipo: `vehicleType` se deriva de acá (M1→CAR, L*→MOTO; resto→hint del body). Se
+  /// persiste cruda para auditoría/re-derivación si el enum se amplía. Null = alta sin categoría (manual/legacy).
+  mtcCategory        String?          @map("mtc_category")
   fleetId            String?          @map("fleet_id")
   /// Conductor que registró el vehículo en el onboarding self-service.
   /// IMPORTANTE: `driver_id` es el **User.id** de identity-service (el `userId` del token propagado),

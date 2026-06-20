@@ -4,13 +4,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  uuidv7,
-  NotFoundError,
-  ConflictError,
-  ValidationError,
-  ForbiddenError,
-} from '@veo/utils';
+import { uuidv7, NotFoundError, ValidationError, ForbiddenError, ConflictError } from '@veo/utils';
 import { assertDriverOwnsResource, type AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import {
@@ -27,6 +21,7 @@ import {
   isCriticalDocument,
   normalizeDocumentImages,
   primaryS3Key,
+  type NormalizedDocumentImage,
 } from './document-rules';
 import { ReviewDecision } from './dto/document.dto';
 import type { CreateDocumentDto } from './dto/document.dto';
@@ -112,13 +107,14 @@ export class DocumentsService {
       }
     }
 
-    // Read-your-writes (cierra la ALTA del replica-lag): el chequeo de duplicado DEBE leer del primary
-    // (`write`), no de la réplica. Un doc recién creado puede no haberse replicado aún → leer de `read`
-    // dejaría pasar un duplicado en una ventana de lag (@veo/database read-write.ts §14: "NUNCA leer de
-    // `read` un registro recién escrito en un flujo crítico... usar `write`"). DEUDA: bajo concurrencia
-    // pura (dos altas simultáneas) esto sigue siendo TOCTOU — el cierre definitivo es un partial unique
-    // index (ownerType, ownerId, type) WHERE status activo, fuera de scope de este lote (lo decide el dueño).
-    const duplicate = await this.prisma.write.fleetDocument.findFirst({
+    // Read-your-writes (cierra la ALTA del replica-lag): el chequeo del doc activo existente DEBE leer del
+    // primary (`write`), no de la réplica. Un doc recién creado puede no haberse replicado aún → leer de
+    // `read` dejaría pasar un duplicado/desincronizar el upsert en una ventana de lag (@veo/database
+    // read-write.ts §14: "NUNCA leer de `read` un registro recién escrito en un flujo crítico... usar
+    // `write`"). DEUDA: bajo concurrencia pura (dos altas simultáneas) esto sigue siendo TOCTOU — el cierre
+    // definitivo es un partial unique index (ownerType, ownerId, type) WHERE status activo, fuera de scope
+    // de este lote (lo decide el dueño).
+    const existingActive = await this.prisma.write.fleetDocument.findFirst({
       where: {
         ownerType: input.ownerType,
         ownerId: input.ownerId,
@@ -132,12 +128,6 @@ export class DocumentsService {
         },
       },
     });
-    if (duplicate) {
-      throw new ConflictError('Ya existe un documento activo de ese tipo para el dueño', {
-        ownerId: input.ownerId,
-        type: input.type,
-      });
-    }
 
     // Sub-lote 3A: normaliza/valida las imágenes (camino nuevo `images[]` o legacy `fileS3Key`). Lanza
     // ValidationError si las caras son incoherentes (p.ej. FRONT sin BACK). Puede ser [] (doc sin archivo aún).
@@ -148,6 +138,35 @@ export class DocumentsService {
     // podría apuntar a `drivers/{OTRO}/documents/...` y filtrar PII ajena al presignar el operador su GET.
     // Cubre TODAS las fuentes (images[] + fileS3Key legacy, ya unificadas en `images`). 403 fail-closed.
     assertS3KeysBelongToOwner(input.ownerType, input.ownerId, images);
+
+    // UPSERT ACOTADO por status del doc activo (FOUNDATION §14: transiciones autorizadas). El set activo
+    // (PENDING_REVIEW/VALID/EXPIRING_SOON) NO es homogéneo: re-subir NO puede des-verificar en silencio un
+    // doc que el operador YA APROBÓ. Ramificamos por el status del `existingActive`:
+    //
+    //  - PENDING_REVIEW (aún en cola, no aprobado): re-subir es una CORRECCIÓN pre-revisión legítima
+    //    (caso onboarding: el conductor re-escanea antes de que el operador valide). → `replaceActiveDocument`
+    //    (reemplaza imágenes/OCR/metadatos; el reset de verifiedAt/verifiedBy es un no-op, ya estaban nulos).
+    //
+    //  - VALID / EXPIRING_SOON (APROBADO por el operador): re-subir NO debe resetear a PENDING_REVIEW ni
+    //    limpiar verifiedAt/verifiedBy — eso DES-VERIFICARÍA el doc en silencio, sin transición autorizada.
+    //    Este endpoint es general (no solo onboarding) → lanzamos 409 ConflictError, como era antes. El
+    //    cliente trata el 409 como éxito y el doc aprobado QUEDA intacto.
+    //    DEUDA: renovar un doc aprobado es un flujo EXPLÍCITO/AUDITADO futuro (transición autorizada con
+    //    su propio endpoint), NO una re-subida silenciosa sobre este POST general.
+    //
+    // (REJECTED no está en el set activo → cae al `create` de abajo, sin cambio.)
+    if (existingActive) {
+      if (existingActive.status === FleetDocumentStatus.PENDING_REVIEW) {
+        return this.replaceActiveDocument(existingActive, input, images);
+      }
+      // VALID o EXPIRING_SOON: aprobado → no des-verificar en silencio.
+      throw new ConflictError('Ya tenés un documento aprobado de este tipo', {
+        ownerType: input.ownerType,
+        ownerId: input.ownerId,
+        type: input.type,
+        status: existingActive.status,
+      });
+    }
 
     const documentId = uuidv7();
 
@@ -197,6 +216,75 @@ export class DocumentsService {
         orderBy: { order: 'asc' },
       });
       return { ...document, images: created };
+    });
+  }
+
+  /**
+   * UPSERT · rama de REEMPLAZO: re-subida sobre un doc activo existente. Actualiza ESE mismo doc (id
+   * estable) en una transacción ATÓMICA: reemplaza por completo el set de imágenes (borra las viejas y
+   * crea las nuevas), repuebla `fileS3Key` (backward-compat), reemplaza la data OCR
+   * (extractedData/ocrEngine/ocrAt), el documentNumber/issuedAt/expiresAt, y RESETEA el status a
+   * PENDING_REVIEW (el contenido cambió → re-revisión). Todo o nada: o se reemplaza el doc completo, o no
+   * se toca nada. Devuelve el doc actualizado con sus imágenes (orden estable, lectura post-write en la
+   * misma transacción).
+   *
+   * ACOTADO a PENDING_REVIEW: esta rama SOLO se alcanza cuando el doc activo está en PENDING_REVIEW (la
+   * ramificación de `create()` manda VALID/EXPIRING_SOON a 409 para no des-verificar un doc aprobado). Por
+   * eso el reset de status/verifiedAt/verifiedBy es un no-op de estado aquí (el doc nunca estuvo aprobado):
+   * limpiar verifiedAt/verifiedBy/rejectionReason queda como defensa-en-profundidad idempotente.
+   */
+  private replaceActiveDocument(
+    existing: FleetDocument,
+    input: CreateDocumentDto,
+    images: readonly NormalizedDocumentImage[],
+  ): Promise<FleetDocumentWithImages> {
+    const documentId = existing.id;
+    return this.prisma.write.$transaction(async (tx) => {
+      const document = await tx.fleetDocument.update({
+        where: { id: documentId },
+        data: {
+          // VEHICLE_PHOTO no trae número (foto sin numerar) → '' honesto (la columna es no-null).
+          documentNumber: (input.documentNumber ?? '').trim(),
+          issuedAt: input.issuedAt ? new Date(input.issuedAt) : null,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          fileS3Key: primaryS3Key(images),
+          // Reemplazo de la data OCR: si la re-subida NO trae OCR, las columnas se LIMPIAN a null (el doc
+          // nuevo no tiene OCR) — coherente con "reemplazar", no "mergear". `null` es un set explícito en
+          // Prisma (a diferencia de `undefined`, que omitiría el campo).
+          extractedData: input.extractedData
+            ? (input.extractedData as unknown as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
+          ocrEngine: input.ocrEngine ?? null,
+          ocrAt: input.ocrAt ? new Date(input.ocrAt) : null,
+          // Re-subir REVISA de nuevo: el contenido cambió → vuelve a la cola del operador.
+          status: FleetDocumentStatus.PENDING_REVIEW,
+          // El reemplazo invalida cualquier revisión previa (verificación/rechazo del doc anterior).
+          verifiedAt: null,
+          verifiedBy: null,
+          rejectionReason: null,
+        },
+      });
+
+      // Reemplazo TOTAL del set de imágenes: borra las viejas y crea las nuevas (no se mergean). Atómico
+      // con el update del doc dentro de la misma transacción.
+      await tx.documentImage.deleteMany({ where: { documentId } });
+      if (images.length > 0) {
+        await tx.documentImage.createMany({
+          data: images.map((img) => ({
+            id: uuidv7(),
+            documentId,
+            s3Key: img.s3Key,
+            side: img.side,
+            order: img.order,
+          })),
+        });
+      }
+
+      const updatedImages = await tx.documentImage.findMany({
+        where: { documentId },
+        orderBy: { order: 'asc' },
+      });
+      return { ...document, images: updatedImages };
     });
   }
 

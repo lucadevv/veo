@@ -120,6 +120,13 @@ export class ExtractedLicenseA1DataDto {
   @IsString()
   @Matches(ISO_DATE_PATTERN, { message: 'expiresAt debe tener formato YYYY-MM-DD' })
   expiresAt?: string;
+
+  /** Categoría canónica leída por OCR (`A-I`/`B-IIb`/…): clase + categoría del documento real, combinadas.
+   *  Conveniencia para validar elegibilidad auto/moto a futuro; NO crítica. */
+  @IsOptional()
+  @IsString()
+  @Length(1, OCR_ID_MAX)
+  category?: string;
 }
 
 /**

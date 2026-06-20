@@ -13,7 +13,7 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
-import { OPERABLE_VEHICLE_CLASSES } from '@veo/shared-types';
+import { OPERABLE_VEHICLE_CLASSES, mapMtcCategoryToVehicleType } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
@@ -266,22 +266,34 @@ export class VehiclesService {
       );
     }
 
+    // LOTE 1 · LA CATEGORÍA DE LA TARJETA SE PREFIERE SOBRE EL HINT: si el alta trae la categoría MTC cruda,
+    // el servidor DERIVA el tipo de ahí (M1→CAR, L*→MOTO) y el `vehicleType` del body pasa a ser un
+    // HINT/fallback (solo se usa cuando la categoría NO es derivable: no soportada hoy, o alta SIN categoría).
+    // OJO — esto NO es "server-authoritative": tanto `mtcCategory` como `vehicleType` son ASERCIÓN DEL CLIENTE
+    // (OCR on-device del conductor), no un re-OCR de confianza del servidor. La corroboración real contra la
+    // imagen de la tarjeta es la VERIFICACIÓN DEL OPERADOR en el panel admin (gate de operabilidad, pendiente)
+    // + un futuro re-OCR server-side. Acá solo se prefiere una aserción del cliente (categoría) sobre la otra.
+    const derivedType = input.mtcCategory
+      ? mapMtcCategoryToVehicleType(input.mtcCategory)
+      : null;
+    const resolvedInput = { ...input, vehicleType: derivedType ?? input.vehicleType };
+
     // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec
-    // (server-authoritative); si no, caen al texto libre. LOTE 3: en el alta del conductor (OCR onboarding)
-    // el texto libre pasa por el FUZZY-MATCH (link a un aprobado parecido, o encolar source=OCR). El contexto
-    // `fuzzy` activa ese camino — el alta admin (create) NO lo pasa (carga deliberada, no encola auto).
-    // Resuelto ANTES de la transacción del vehículo (entidad de catálogo independiente; ver resolveModelSnapshot).
-    const snapshot = await this.resolveModelSnapshot(input, {
+    // (server-authoritative); si no, caen al texto libre (acá ya con el tipo derivado de la categoría).
+    // LOTE 3: en el alta del conductor (OCR onboarding) el texto libre pasa por el FUZZY-MATCH (link a un
+    // aprobado parecido, o encolar source=OCR). El contexto `fuzzy` activa ese camino — el alta admin (create)
+    // NO lo pasa. Resuelto ANTES de la transacción del vehículo (entidad de catálogo independiente).
+    const snapshot = await this.resolveModelSnapshot(resolvedInput, {
       requestedBy: driverId,
       source: VehicleModelSource.OCR,
     });
-    // "Solo autos" (Ola 1): valida la clase YA resuelta — cubre ambos caminos (un spec MOTO del catálogo
-    // o un texto libre MOTO se rechazan igual). Server-authoritative, no confía en lo que declara la app.
-    this.assertOperableVehicleType(snapshot.vehicleType);
+    // LOTE 1: el registro está ABIERTO a todo tipo derivable (CAR|MOTO). NO se bloquea por operabilidad acá
+    // (el gate de operabilidad/aprobación es de otro lote); el `@IsEnum(VehicleType)` del DTO ya garantiza
+    // que el tipo es válido. La operabilidad para dispatch se resuelve aguas abajo, no en el alta.
 
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
     if (existing) {
-      return this.resolveExistingForDriver(driverId, existing, input, snapshot);
+      return this.resolveExistingForDriver(driverId, existing, resolvedInput, snapshot);
     }
 
     let vehicle: Vehicle;
@@ -296,6 +308,8 @@ export class VehiclesService {
             year: input.year,
             color: input.color?.trim() ?? '',
             vehicleType: snapshot.vehicleType,
+            // LOTE 1: la categoría MTC cruda de la tarjeta (fuente de verdad del tipo). Null si no vino.
+            mtcCategory: input.mtcCategory ?? null,
             modelSpecId: snapshot.modelSpecId,
             driverId,
             // Onboarding: pendiente de verificación, no se activa automáticamente.
@@ -324,7 +338,7 @@ export class VehiclesService {
       // Re-resolvemos el dueño en vez de un 500: mismo dueño → idempotente; otro → conflicto.
       if (isUniqueViolation(err, 'plate')) {
         const raced = await this.prisma.write.vehicle.findUnique({ where: { plate } });
-        if (raced) return this.resolveExistingForDriver(driverId, raced, input, snapshot);
+        if (raced) return this.resolveExistingForDriver(driverId, raced, resolvedInput, snapshot);
       }
       throw err;
     }
@@ -372,6 +386,8 @@ export class VehiclesService {
         year: input.year,
         color: input.color?.trim() ?? '',
         vehicleType: snapshot.vehicleType,
+        // LOTE 1: re-scan/corrección del wizard puede traer una categoría nueva → la persistimos.
+        mtcCategory: input.mtcCategory ?? null,
         modelSpecId: snapshot.modelSpecId,
       },
     });

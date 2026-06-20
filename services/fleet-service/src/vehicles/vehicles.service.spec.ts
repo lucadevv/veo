@@ -296,7 +296,8 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
     errSpy.mockRestore();
   });
 
-  it('texto libre con MOTO → ValidationError "solo autos" (Ola 1, mototaxi diferida)', async () => {
+  it('LOTE 1 · registro ABIERTO: texto libre con MOTO → alta EXITOSA (sin bloqueo "solo autos")', async () => {
+    // El bloqueo de operabilidad en el alta del conductor se quitó (LOTE 1): el registro acepta CAR|MOTO.
     const { service, txCreate } = makeService();
     await expect(
       service.registerForDriver('driver-1', {
@@ -306,8 +307,33 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
         make: 'Honda',
         model: 'CG 150',
       }),
-    ).rejects.toBeInstanceOf(ValidationError);
-    expect(txCreate).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(txCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ vehicleType: SharedVehicleType.MOTO }) }),
+    );
+  });
+
+  it('LOTE 1 · la categoría MTC es la fuente de verdad: mtcCategory L3 deriva MOTO y se persiste cruda', async () => {
+    // El body declara CAR (hint), pero la TARJETA dice L3 → el servidor DERIVA MOTO (server-authoritative)
+    // e ignora el hint. La categoría cruda se persiste en `mtcCategory`.
+    const { service, txCreate } = makeService();
+    await service.registerForDriver('driver-1', {
+      plate: 'ABC-123',
+      year: 2022,
+      vehicleType: SharedVehicleType.CAR,
+      mtcCategory: 'L3',
+      make: 'Honda',
+      model: 'CG 150',
+    });
+    expect(txCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          vehicleType: SharedVehicleType.MOTO,
+          mtcCategory: 'L3',
+        }),
+      }),
+    );
   });
 
   it('SIN modelSpecId y SIN make/model → ValidationError', async () => {
@@ -515,6 +541,7 @@ function vehicleRow(over: Partial<Vehicle> = {}): Vehicle {
     year: 2022,
     color: 'Plata',
     vehicleType: VehicleType.CAR,
+    mtcCategory: null,
     fleetId: null,
     driverId: 'driver-1',
     docStatus: VehicleDocStatus.VALID,
