@@ -25,6 +25,8 @@ import {
   FleetDocumentType,
   OCR_ENGINES,
   OcrEngine,
+  PLATE_PATTERN,
+  PLATE_INVALID_MESSAGE,
   VehicleType,
   type ExtractedDocumentData,
 } from '@veo/shared-types';
@@ -33,9 +35,6 @@ import { EXTRACTED_DATA_TYPE_OPTIONS } from './extracted-data.dto';
 /** Año mínimo razonable para el alta de vehículo (sanity check; BR-D04 >=2017 lo revalida fleet). */
 const MIN_REASONABLE_VEHICLE_YEAR = 2005;
 const CURRENT_YEAR = new Date().getUTCFullYear();
-
-/** Placa peruana XXX-XXX (guion opcional). fleet normaliza y revalida con plateSchema. */
-const PLATE_PATTERN = /^[A-Z0-9]{3}-?[A-Z0-9]{3}$/i;
 
 /** Fecha de nacimiento en formato calendario yyyy-mm-dd (sin hora). */
 const BIRTH_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -363,9 +362,12 @@ export class RegisterVehicleDto {
   @IsEnum(VehicleType)
   vehicleType!: VehicleType;
 
-  @ApiProperty({ example: 'ABC-123', description: 'Placa peruana (XXX-XXX, guion opcional)' })
+  @ApiProperty({
+    example: 'ABC-123',
+    description: 'Placa peruana (auto ABC-123 o moto 1234-AB, guion opcional)',
+  })
   @IsString()
-  @Matches(PLATE_PATTERN, { message: 'Placa inválida (formato XXX-XXX)' })
+  @Matches(PLATE_PATTERN, { message: PLATE_INVALID_MESSAGE })
   plate!: string;
 
   @ApiPropertyOptional({

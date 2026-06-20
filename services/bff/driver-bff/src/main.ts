@@ -37,10 +37,17 @@ async function bootstrap(): Promise<void> {
     origin: parseCors(config.getOrThrow<string>('CORS_ORIGINS')),
     credentials: true,
   });
-  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
-  // Convención del repo (espeja admin-bff/public-bff/trip-service). Endurece `extractedData` (Lote 0):
-  // una clave arbitraria en el JSONB OCR se RECHAZA en el borde público, no solo se strippea.
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  // driver-bff es CLIENT-FACING: debe ser TOLERANTE a campos extra del cliente, NO fail-loud.
+  // La app RN consume schemas COMPARTIDOS del api-client que pueden traer campos que un DTO PUNTUAL
+  // del BFF no espeja (ej. `otpRequest` manda `{phone, type}`, pero `RequestOtpDto` solo declara `phone`).
+  // Con `whitelist: true` esos campos extra TOP-LEVEL se STRIPEAN (no 400) — el comportamiento seguro
+  // original. Por eso acá NO va `forbidNonWhitelisted` (eso rompía el OTP con 400).
+  // OJO: esto NO debilita la validación de `extractedData` (Lote 0): esa seguridad la da
+  // `@ValidateNested` + `@Type` con las clases discriminadas (las claves ANIDADAS no-whitelisteadas
+  // se siguen recortando vía whitelist+nested), no `forbidNonWhitelisted`.
+  // A DIFERENCIA de los servicios INTERNOS (fleet): ahí `forbidNonWhitelisted` SÍ va (contrato estricto
+  // entre servicios, sin cliente que mande campos de más).
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('driver-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('driver-bff'));
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'metrics'] });
