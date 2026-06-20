@@ -17,12 +17,14 @@ import type { ProfileRepository } from '../../features/profile/domain';
 import { HttpProfileRepository } from '../../features/profile/data';
 import type {
   DocumentsRepository,
+  DocumentScannerService,
   DocumentUploader,
   ImagePickerService,
 } from '../../features/documents/domain';
 import {
   HttpDocumentsRepository,
   HttpDocumentUploader,
+  nativeDocumentScanner,
   nativeImagePickerService,
 } from '../../features/documents/data';
 import type { RegistrationRepository } from '../../features/registration/domain';
@@ -68,6 +70,8 @@ export interface AppContainer {
   documentUploader: DocumentUploader;
   /** Captura/selección de imagen (cámara o galería) para el binario de documentos. */
   imagePicker: ImagePickerService;
+  /** Escáner nativo de documentos (bordes + auto-captura + corrección) para el binario de documentos. */
+  documentScanner: DocumentScannerService;
 }
 
 /**
@@ -110,6 +114,7 @@ function buildContainer(): AppContainer {
     // por `fetch` crudo (sin el Bearer del BFF) que el uploader inyecta por defecto.
     documentUploader: new HttpDocumentUploader(httpClient),
     imagePicker: nativeImagePickerService,
+    documentScanner: nativeDocumentScanner,
   };
 }
 

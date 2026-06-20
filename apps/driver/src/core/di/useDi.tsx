@@ -40,3 +40,8 @@ export function useDocumentUploader(): AppContainer['documentUploader'] {
 export function useImagePicker(): AppContainer['imagePicker'] {
   return useDi().imagePicker;
 }
+
+/** Atajo para el escáner nativo de documentos (bordes + auto-captura) del binario de documentos. */
+export function useDocumentScanner(): AppContainer['documentScanner'] {
+  return useDi().documentScanner;
+}
