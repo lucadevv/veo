@@ -220,6 +220,25 @@ export const KycStatus = {
 export type KycStatus = (typeof KycStatus)[keyof typeof KycStatus];
 
 /**
+ * Acción del reto de liveness ACTIVO (diferenciador no negociable VEO). FUENTE ÚNICA del contrato:
+ * el biometric-service (Python/ONNX) EMITE uno de estos valores en POST /v1/liveness/challenge, y la
+ * app debe guiar al conductor a ejecutarlo (girar la cabeza, asentir, sonreír) para que el motor
+ * confirme que hay una persona viva frente a la cámara (anti-spoofing de foto/video). Reemplaza el
+ * `action: string` suelto que estaba desparramado por el puerto biométrico, el reto del enroll y el del
+ * turno: tiparlo hace que cualquier comparación contra un valor fuera del set rompa el typecheck.
+ */
+export const LivenessAction = {
+  TURN_LEFT: 'TURN_LEFT',
+  TURN_RIGHT: 'TURN_RIGHT',
+  NOD: 'NOD',
+  SMILE: 'SMILE',
+} as const;
+export type LivenessAction = (typeof LivenessAction)[keyof typeof LivenessAction];
+
+/** Valores de `LivenessAction` para validadores de borde (`@IsIn`) y `z.enum`. Derivado del const, no re-tipeado. */
+export const LIVENESS_ACTIONS = Object.values(LivenessAction) as [LivenessAction, ...LivenessAction[]];
+
+/**
  * Tipo de actor humano de la plataforma: PASSENGER (pasajero) · DRIVER (conductor). Es la FUENTE ÚNICA
  * de este dominio — reemplaza las uniones inline `'PASSENGER' | 'DRIVER'` y los `@IsIn(['PASSENGER',
  * 'DRIVER'])` crudos que estaban duplicados por los servicios (auth, chat, trip, rating…).
@@ -336,6 +355,10 @@ export const FleetDocumentType = {
   // (es una foto, no un documento numerado) — la validación del número es contextual por tipo. El operador
   // la revisa en el panel antes de aprobar (es requerida para la aprobación).
   VEHICLE_PHOTO: 'VEHICLE_PHOTO',
+  // DNI = documento de identidad del conductor (anverso+reverso vía DocumentImage FRONT/BACK del 3A).
+  // La imagen FRONT es la que el face-match (sub-lote 3C) usará para el match contra la biometría.
+  // Documento de 2 caras.
+  DNI: 'DNI',
   // B5-3.2 · CERTIFICACIONES de las verticales especiales (conductor): credencial de operador con la MISMA
   // maquinaria FleetDocument (vencimiento + review del operador). NO son críticas (su vencimiento NO suspende
   // al conductor — solo lo vuelve inelegible para ESA vertical, que además está oculta). Una oferta vertical
@@ -345,6 +368,33 @@ export const FleetDocumentType = {
   MECHANIC_CERT: 'MECHANIC_CERT',
 } as const;
 export type FleetDocumentType = (typeof FleetDocumentType)[keyof typeof FleetDocumentType];
+
+/**
+ * Sub-lote 3A · cara/lado de una IMAGEN de documento (múltiples imágenes por documento). Espejo del
+ * enum Prisma `DocumentSide` de fleet-service. SINGLE = una sola cara/foto (licencia/SOAT/tarjeta/foto
+ * de vehículo); FRONT/BACK = anverso/reverso (DNI). Fuente de verdad tipada (cero string suelto).
+ */
+export const DocumentSide = {
+  FRONT: 'FRONT',
+  BACK: 'BACK',
+  SINGLE: 'SINGLE',
+} as const;
+export type DocumentSide = (typeof DocumentSide)[keyof typeof DocumentSide];
+
+/**
+ * Sub-lote 3C · estado del BINDING face-match DNI↔selfie. El operador VE este resultado en la ficha del
+ * conductor antes de aprobar (no aprueba a ciegas). Estado tipado explícito (cero magic string) que evita
+ * la ambigüedad de un bool: NOT_RUN (el match aún no se corrió) ≠ NO_MATCH (se corrió y NO coincide).
+ *  - NOT_RUN: aún no se cotejó el DNI contra la biometría enrolada.
+ *  - MATCHED: la cara del DNI coincide con la biometría de referencia del conductor.
+ *  - NO_MATCH: se cotejó y NO coincide (revisar manualmente · posible suplantación).
+ */
+export const DniFaceMatchStatus = {
+  NOT_RUN: 'NOT_RUN',
+  MATCHED: 'MATCHED',
+  NO_MATCH: 'NO_MATCH',
+} as const;
+export type DniFaceMatchStatus = (typeof DniFaceMatchStatus)[keyof typeof DniFaceMatchStatus];
 
 export const FleetDocumentStatus = {
   PENDING_REVIEW: 'PENDING_REVIEW',

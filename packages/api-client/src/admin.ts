@@ -5,7 +5,14 @@
  * Montos en céntimos PEN (enteros). Fechas ISO-8601 string.
  */
 import { z } from 'zod';
-import { geoPoint, tripStatus, tripSummary, driverSummary, fleetDocumentStatus } from './types.js';
+import {
+  geoPoint,
+  tripStatus,
+  tripSummary,
+  driverSummary,
+  fleetDocumentStatus,
+  documentSide,
+} from './types.js';
 import { pricingMode } from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
@@ -166,6 +173,30 @@ export const pendingDriver = z.object({
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
 
+/* ── Sub-lote 3C · BINDING face-match DNI↔selfie ── */
+
+/**
+ * Estado del binding DNI↔selfie. Espeja `DniFaceMatchStatus` de @veo/shared-types (fuente de verdad
+ * server-side). Se define acá como enum del CONTRATO para que admin-web lo tipe sin importar shared-types.
+ *  - NOT_RUN: el match aún no se corrió.
+ *  - MATCHED: la cara del DNI coincide con la biometría enrolada.
+ *  - NO_MATCH: se corrió y NO coincide (revisar · posible suplantación).
+ */
+export const dniFaceMatchStatus = z.enum(['NOT_RUN', 'MATCHED', 'NO_MATCH']);
+export type DniFaceMatchStatusValue = z.infer<typeof dniFaceMatchStatus>;
+
+/**
+ * Resultado de POST /ops/drivers/:id/dni-face-match: lo que devuelve el admin-bff (proxy de identity) al
+ * disparar el match. `matched` = veredicto; `score` 0..100; `reason` = motivo legible si NO coincide (null
+ * si coincide). El resultado además queda GUARDADO en identity (lo refleja `driverDetail.biometric`).
+ */
+export const dniFaceMatchResult = z.object({
+  matched: z.boolean(),
+  score: z.number(),
+  reason: z.string().nullable(),
+});
+export type DniFaceMatchResult = z.infer<typeof dniFaceMatchResult>;
+
 /* ── Revisión detallada de conductor (GET /ops/drivers/:id) ── */
 
 /**
@@ -183,14 +214,27 @@ export const fleetDocumentType = z.enum([
   'TOW_OPERATOR',
   'MECHANIC_CERT',
   'VEHICLE_PHOTO',
+  'DNI',
 ]);
 export type FleetDocumentTypeValue = z.infer<typeof fleetDocumentType>;
 
 /**
- * Un documento del conductor en la vista de revisión del operador. `url` es una presigned GET URL
- * (acceso temporal al archivo); `null` si todavía no se subió ningún archivo. `rejectionReason` lo
- * escribe el operador. Nombrado `adminDriverDocument` para no colisionar con el `driverDocument` de
- * ./mobile (vista del conductor en su app, otra forma: usa `simpleStatus`, no `fleetDocumentStatus`).
+ * Una IMAGEN de un documento en la vista de revisión del operador (sub-lote 3A). `url` es una presigned
+ * GET URL (acceso temporal al binario); `null` si la firma falló (fail-soft). `side` es la cara tipada.
+ */
+export const adminDocumentImage = z.object({
+  side: documentSide,
+  order: z.number().int(),
+  url: z.string().nullable(),
+});
+export type AdminDocumentImage = z.infer<typeof adminDocumentImage>;
+
+/**
+ * Un documento del conductor en la vista de revisión del operador. `images` son las N caras (sub-lote
+ * 3A · DNI anverso+reverso, N fotos de vehículo), cada una con su presigned GET URL. `url` es la URL de
+ * la PRIMERA imagen (DEPRECADO · backward-compat para el render de 1 imagen); `null` si no hay archivo.
+ * `rejectionReason` lo escribe el operador. Nombrado `adminDriverDocument` para no colisionar con el
+ * `driverDocument` de ./mobile (vista del conductor en su app, otra forma: usa `simpleStatus`).
  */
 export const adminDriverDocument = z.object({
   id: z.string(),
@@ -198,7 +242,10 @@ export const adminDriverDocument = z.object({
   status: fleetDocumentStatus,
   expiresAt: z.string().nullable(),
   rejectionReason: z.string().nullable(),
+  /** DEPRECADO (sub-lote 3A): URL de la primera imagen. Usar `images`. null si no hay archivo aún. */
   url: z.string().nullable(),
+  /** Las N imágenes del documento con su presigned GET URL (ordenadas). [] si no se subió ninguna. */
+  images: z.array(adminDocumentImage),
 });
 export type AdminDriverDocument = z.infer<typeof adminDriverDocument>;
 
@@ -241,6 +288,14 @@ export const driverDetail = z.object({
   biometric: z.object({
     faceEnrolledAt: z.string().nullable(),
     lastVerifiedAt: z.string().nullable(),
+    /**
+     * Sub-lote 3C · BINDING DNI↔selfie. El operador VE este resultado antes de aprobar (no aprueba a
+     * ciegas). `dniFaceMatchStatus` tipado (NOT_RUN/MATCHED/NO_MATCH); `dniFaceMatchScore` 0..100 (null si
+     * no se corrió); `dniFaceMatchedAt` ISO-8601 (null si no se corrió). Lo corre identity, acá solo se VE.
+     */
+    dniFaceMatchStatus: dniFaceMatchStatus,
+    dniFaceMatchScore: z.number().nullable(),
+    dniFaceMatchedAt: z.string().nullable(),
   }),
   // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
   vehicle: driverVehicle.nullable(),
@@ -627,7 +682,17 @@ export const vehicleModelSpecView = z.object({
 });
 export type VehicleModelSpecView = z.infer<typeof vehicleModelSpecView>;
 
-/** Alta de documento (conductor/vehículo). Entra PENDING_REVIEW hasta que el operador lo valide. */
+/** Una imagen del documento en el alta (sub-lote 3A): clave S3 ya subida + cara tipada. */
+export const createDocumentImage = z.object({
+  s3Key: z.string().min(1),
+  side: documentSide,
+});
+export type CreateDocumentImage = z.infer<typeof createDocumentImage>;
+
+/**
+ * Alta de documento (conductor/vehículo). Entra PENDING_REVIEW hasta que el operador lo valide.
+ * Sub-lote 3A: `images` (1..N caras) es el camino nuevo; `fileS3Key` queda DEPRECADO (backward-compat).
+ */
 export const createDocumentRequest = z.object({
   ownerType: z.enum(['DRIVER', 'VEHICLE']),
   ownerId: z.string().min(1),
@@ -635,7 +700,10 @@ export const createDocumentRequest = z.object({
   documentNumber: z.string().min(1),
   issuedAt: z.string().optional(),
   expiresAt: z.string().optional(),
+  /** DEPRECADO (sub-lote 3A): clave singular. Usar `images`. */
   fileS3Key: z.string().optional(),
+  /** Imágenes del documento (1..N caras). DNI → [FRONT, BACK]; foto de vehículo → N SINGLE. */
+  images: z.array(createDocumentImage).min(1).optional(),
 });
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequest>;
 

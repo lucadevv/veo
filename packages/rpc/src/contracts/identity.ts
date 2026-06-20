@@ -64,4 +64,15 @@ export interface DriverReply {
   documentId: string;
   /** Fecha de nacimiento del conductor en `yyyy-mm-dd`; "" si no registrada. */
   birthDate: string;
+  // ── Sub-lote 3C · BINDING DNI↔selfie (campos 18-20 del proto). Resultado GUARDADO del face-match. ──
+  /**
+   * Estado del binding DNI↔selfie tipado: 'NOT_RUN' (aún no se corrió), 'MATCHED' (coincide), 'NO_MATCH'
+   * (no coincide). String de estado explícito para evitar la ambigüedad del bool proto3 (false = no
+   * coincide vs no corrido). proto3 default → 'NOT_RUN' (el grpc controller lo materializa, nunca "").
+   */
+  dniFaceMatchStatus: string;
+  /** Score del face-match en 0..100; 0 si no se corrió. Solo significativo si dniFaceMatchStatus != NOT_RUN. */
+  dniFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
+  dniFaceMatchedAt: string;
 }

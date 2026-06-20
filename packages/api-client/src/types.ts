@@ -175,6 +175,14 @@ export const fleetDocumentStatus = z.enum([
   'REJECTED',
 ]);
 
+/**
+ * Sub-lote 3A · cara/lado de una IMAGEN de documento (múltiples imágenes por documento). Espeja el enum
+ * `DocumentSide` de fleet-service (Prisma) y @veo/shared-types. SINGLE = una sola cara/foto; FRONT/BACK =
+ * anverso/reverso (DNI). Definido acá (base compartida) para que admin.ts y mobile.ts lo reusen sin colisión.
+ */
+export const documentSide = z.enum(['FRONT', 'BACK', 'SINGLE']);
+export type DocumentSideValue = z.infer<typeof documentSide>;
+
 export const fleetDocumentView = z.object({
   id: z.string(),
   ownerType: z.enum(['DRIVER', 'VEHICLE']),

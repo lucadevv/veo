@@ -27,6 +27,13 @@ export interface DriverVehiclesReply {
   vehicles: VehicleReply[];
 }
 
+/** Imagen de un documento (sub-lote 3A · múltiples imágenes). `side` = FRONT|BACK|SINGLE (string del enum). */
+export interface DocumentImageReply {
+  s3Key: string;
+  side: string;
+  order: number;
+}
+
 /** Documento de flota (de conductor o vehículo). */
 export interface FleetDocumentReply {
   id: string;
@@ -36,10 +43,12 @@ export interface FleetDocumentReply {
   documentNumber: string;
   status: string;
   expiresAt: string;
-  /** Interno (admin review). NO se proyecta al conductor; el driver-bff mapea un subconjunto explícito. */
+  /** DEPRECADO (sub-lote 3A): primera imagen (backward-compat). Usar `images`. NO se proyecta al conductor. */
   fileS3Key: string;
   /** Interno (admin review). NO se proyecta al conductor; el driver-bff mapea un subconjunto explícito. */
   rejectionReason: string;
+  /** Imágenes del documento (1..N caras). Admin review las firma; el driver-bff mapea un subconjunto. */
+  images: DocumentImageReply[];
 }
 
 /** fleet.GetDriverDocuments / mensaje DriverDocumentsReply. */

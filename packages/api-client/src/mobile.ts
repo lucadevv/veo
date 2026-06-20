@@ -10,7 +10,7 @@
  *  - Conductor → driver-bff  REST `/api/v1/*` + Socket.IO namespace `/driver`    (Bearer JWT, type driver).
  */
 import { z } from 'zod';
-import { geoPoint, payoutStatus, tripStatus } from './types.js';
+import { documentSide, geoPoint, payoutStatus, tripStatus } from './types.js';
 import type { TripStatus } from './types.js';
 import type { DriverLocationMsg, TripUpdateMsg } from './socket.js';
 
@@ -1724,10 +1724,38 @@ export const driverShiftStateView = z.object({
 });
 export type DriverShiftStateView = z.infer<typeof driverShiftStateView>;
 
-/* ── Gate biométrico de turno (BR-I02) ── */
+/* ── Gate biométrico de turno + enrolamiento con liveness (BR-I02) ── */
 
-/** POST /drivers/biometric/enroll → body. Foto de referencia del rostro en base64. */
-export const driverBiometricEnrollRequest = z.object({ photo: z.string().min(1) });
+/**
+ * Acción del reto de liveness ACTIVO. Espeja `LivenessAction` de @veo/shared-types: el biometric-service
+ * emite uno de estos valores y la app guía al conductor a ejecutarlo. Tiparlo como `z.enum` (no
+ * `z.string()`) hace que comparar contra un literal fuera del set rompa el typecheck en la app.
+ */
+export const livenessAction = z.enum(['TURN_LEFT', 'TURN_RIGHT', 'NOD', 'SMILE']);
+export type LivenessAction = z.infer<typeof livenessAction>;
+
+/**
+ * Reto de liveness activo (mismo shape para el enroll y el turno). Lo emite:
+ *  - GET /drivers/me/biometric/liveness/challenge (enrolamiento del conductor)
+ *  - POST /drivers/shift/biometric/challenge (gate de inicio de turno)
+ */
+export const driverLivenessChallengeResponse = z.object({
+  challengeId: z.string(),
+  action: livenessAction,
+  instructions: z.string(),
+  expiresAt: z.string(),
+});
+export type DriverLivenessChallengeResponse = z.infer<typeof driverLivenessChallengeResponse>;
+
+/**
+ * POST /drivers/biometric/enroll → body. Enrolamiento CON LIVENESS: el `challengeId` del reto emitido por
+ * GET /drivers/me/biometric/liveness/challenge + los `frames` capturados mientras el conductor ejecutaba la
+ * acción (anti-spoofing). Reemplaza la foto suelta `{ photo }` (spoofeable con una imagen).
+ */
+export const driverBiometricEnrollRequest = z.object({
+  challengeId: z.string().min(1),
+  frames: z.array(z.string().min(1)).min(1).max(30),
+});
 export type DriverBiometricEnrollRequest = z.infer<typeof driverBiometricEnrollRequest>;
 
 /** POST /drivers/biometric/enroll → respuesta. */
@@ -1737,13 +1765,11 @@ export const driverBiometricEnrollResult = z.object({
 });
 export type DriverBiometricEnrollResult = z.infer<typeof driverBiometricEnrollResult>;
 
-/** POST /drivers/shift/biometric/challenge → reto de liveness activo. */
-export const biometricChallenge = z.object({
-  challengeId: z.string(),
-  action: z.string(),
-  instructions: z.string(),
-  expiresAt: z.string(),
-});
+/**
+ * Reto de liveness del TURNO (POST /drivers/shift/biometric/challenge). Mismo shape que
+ * `driverLivenessChallengeResponse` (alias retro-compatible para los consumidores existentes).
+ */
+export const biometricChallenge = driverLivenessChallengeResponse;
 export type DriverBiometricChallenge = z.infer<typeof biometricChallenge>;
 
 /** POST /drivers/shift/biometric/verify → body. Reto + frames del liveness en base64. */
@@ -1807,6 +1833,16 @@ export type DriverDocumentSimpleStatus = z.infer<typeof driverDocumentSimpleStat
  * `status` es el crudo de fleet (VALID/EXPIRING_SOON/EXPIRED/PENDING_REVIEW/REJECTED);
  * `simpleStatus` es el estado en español para la UI. POST /drivers/me/documents devuelve el creado.
  */
+/**
+ * Cara del documento proyectada al conductor (sub-lote 3A · SIN la key S3 interna). La app la usa para
+ * saber qué caras ya subió (p.ej. DNI: FRONT y/o BACK). El binario solo lo firma el admin-bff.
+ */
+export const driverDocumentImage = z.object({
+  side: documentSide,
+  order: z.number().int(),
+});
+export type DriverDocumentImage = z.infer<typeof driverDocumentImage>;
+
 export const driverDocument = z.object({
   type: z.string(),
   documentNumber: z.string(),
@@ -1817,6 +1853,8 @@ export const driverDocument = z.object({
   // M5: motivo del rechazo que escribió el operador; el conductor lo VE para saber qué corregir. null
   // si el documento no está rechazado o el operador no dio motivo (degradación honesta, nunca falso).
   rejectionReason: z.string().nullable(),
+  // Sub-lote 3A: las caras del documento (side + order). [] si todavía no se subió ninguna imagen.
+  images: z.array(driverDocumentImage),
 });
 export type DriverDocument = z.infer<typeof driverDocument>;
 
@@ -1828,13 +1866,23 @@ const FLEET_DOC_VEHICLE_PHOTO = 'VEHICLE_PHOTO';
  * `documentNumber` es requerido POR TIPO: la foto del vehículo (`VEHICLE_PHOTO`) no tiene número; el
  * resto de los documentos (licencia/SOAT/tarjeta/…) SÍ lo exigen. El `refine` lo valida contextual.
  */
+/** Una imagen del documento en el alta (sub-lote 3A): clave S3 ya subida (vía presign) + cara tipada. */
+export const addDocumentImage = z.object({
+  s3Key: z.string().min(1),
+  side: documentSide,
+});
+export type AddDocumentImage = z.infer<typeof addDocumentImage>;
+
 export const addDocumentRequest = z
   .object({
     type: z.string().min(1),
     documentNumber: z.string().optional(),
     issuedAt: z.string().optional(),
     expiresAt: z.string().optional(),
+    // DEPRECADO (sub-lote 3A): clave singular. El camino nuevo es `images` (1..N caras).
     fileS3Key: z.string().optional(),
+    // Imágenes del documento (1..N caras). DNI → [FRONT, BACK]; foto de vehículo → N SINGLE; resto → [SINGLE].
+    images: z.array(addDocumentImage).min(1).optional(),
   })
   .refine((d) => d.type === FLEET_DOC_VEHICLE_PHOTO || (d.documentNumber?.length ?? 0) >= 1, {
     message: 'documentNumber requerido para este tipo de documento',
@@ -1851,27 +1899,39 @@ export const documentUploadContentType = z.enum(['image/jpeg', 'image/png', 'app
 export type DocumentUploadContentType = z.infer<typeof documentUploadContentType>;
 
 /**
- * POST /drivers/me/documents/presign → body. La app pide un ticket para subir el binario de un
- * documento de flota. `type` es el tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | ...);
- * `contentType` el del archivo a subir. El driver-bff resuelve el driverId desde la identidad.
+ * POST /drivers/me/documents/presign → body (sub-lote 3A · N imágenes). La app pide N tickets (uno POR
+ * CARA) para subir los binarios de un documento. `type` es el tipo (LICENSE_A1 | SOAT | ...);
+ * `contentType` el del archivo; `sides` las caras (FRONT|BACK|SINGLE). El driver-bff resuelve el driverId.
+ *
+ * Backward-compat: `sides` es OPCIONAL. Omitido → [SINGLE] (1 imagen, comportamiento histórico). DNI →
+ * [FRONT, BACK]; foto de vehículo → N [SINGLE, ...].
  */
 export const documentUploadTicketRequest = z.object({
   type: z.string().min(1),
   contentType: documentUploadContentType,
+  sides: z.array(documentSide).min(1).optional(),
 });
 export type DocumentUploadTicketRequest = z.infer<typeof documentUploadTicketRequest>;
 
-/**
- * POST /drivers/me/documents/presign → respuesta. Ticket de subida directa al storage soberano:
- *  - `uploadUrl`: URL PUT prefirmada de corta vida (el binario NO pasa por la API).
- *  - `fileS3Key`: key driver-scoped que la app reenvía luego a POST /drivers/me/documents.
- *  - `requiredHeaders`: headers que el cliente DEBE reenviar exactos en el PUT (Content-Type firmado).
- *  - `expiresAt`: vencimiento del ticket (ISO-8601).
- */
-export const documentUploadTicket = z.object({
+/** Un ticket de subida por CARA (sub-lote 3A): la cara + la URL PUT prefirmada + la key S3 + headers. */
+export const documentUploadSideTicket = z.object({
+  side: documentSide,
   uploadUrl: z.string(),
   fileS3Key: z.string(),
   requiredHeaders: z.record(z.string(), z.string()),
+});
+export type DocumentUploadSideTicket = z.infer<typeof documentUploadSideTicket>;
+
+/**
+ * POST /drivers/me/documents/presign → respuesta (sub-lote 3A · N imágenes). Ticket(s) de subida directa
+ * al storage soberano (el binario NO pasa por la API):
+ *  - `tickets`: uno POR CARA (side + uploadUrl + fileS3Key + requiredHeaders). Para 1 imagen, un solo SINGLE.
+ *  - `expiresAt`: vencimiento común de los tickets (ISO-8601).
+ * La app sube cada binario con un PUT a su `uploadUrl`, luego llama POST /drivers/me/documents con
+ * `images: [{ s3Key, side }]` (una por cara).
+ */
+export const documentUploadTicket = z.object({
+  tickets: z.array(documentUploadSideTicket).min(1),
   expiresAt: z.string(),
 });
 export type DocumentUploadTicket = z.infer<typeof documentUploadTicket>;
@@ -1905,8 +1965,14 @@ export const driverProfileView = z.object({
    * ciclo de vida real de cada tipo requerido y NO lo confunde con antecedentes/KYC (ejes aparte):
    *  - `missing`: tipos SIN ningún documento subido (presencia → wizard).
    *  - `rejected`: tipos cuyo documento fue rechazado (corregir-y-reenviar).
-   *  - `submittedAllRequired`: ya subió TODOS los requeridos (a revisión o aprobados → in_review).
+   *  - `submittedAllRequired`: ya subió TODOS los requeridos (a revisión o aprobados).
+   *  - `biometricEnrolled`: enroló su biometría facial (diferenciador no negociable VEO).
    *  - `allApproved`/`compliant`: TODOS los requeridos aprobados (VALID/EXPIRING_SOON).
+   *
+   * CONDICIÓN DE `in_review` (server-truth): el conductor está LISTO PARA REVISIÓN cuando
+   * `submittedAllRequired && biometricEnrolled`. La biometría es un eje SEPARADO de los documentos a
+   * propósito (no se mezcla dentro de `submittedAllRequired`). El gate FUERTE curl-proof vive en la
+   * APROBACIÓN del operador (identity rechaza con 409 si falta el embedding); estos flags son el reflejo.
    */
   compliance: z.object({
     /** TODOS los requeridos aprobados (alias de `allApproved`; mantiene compat con ProfileScreen). */
@@ -1921,6 +1987,11 @@ export const driverProfileView = z.object({
     submittedAllRequired: z.boolean(),
     /** true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON). */
     allApproved: z.boolean(),
+    /**
+     * true si el conductor enroló su biometría facial de referencia (diferenciador no negociable VEO).
+     * Eje SEPARADO de los documentos: in_review requiere (submittedAllRequired && biometricEnrolled).
+     */
+    biometricEnrolled: z.boolean(),
   }),
 });
 export type DriverProfileView = z.infer<typeof driverProfileView>;

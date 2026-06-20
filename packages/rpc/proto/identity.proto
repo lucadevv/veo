@@ -72,4 +72,14 @@ message DriverReply {
   string document_id = 16;
   // Fecha de nacimiento del conductor en yyyy-mm-dd; "" si no registrada. Backward-compatible.
   string birth_date = 17;
+  // ── Sub-lote 3C · BINDING DNI↔selfie (admin-bff GET /ops/drivers/:id). Resultado GUARDADO del face-match
+  // entre la foto FRONT del DNI y la biometría de referencia del conductor. El operador lo VE antes de
+  // aprobar. Campos 18-20. Backward-compatible (proto3 defaults: "" / 0 / false cuando no se corrió). ──
+  // Estado del binding tipado: NOT_RUN (aún no se corrió), MATCHED (coincide), NO_MATCH (no coincide). Evita
+  // ambigüedad del bool proto3 (false = no coincide vs no corrido): usamos un string de estado explícito.
+  string dni_face_match_status = 18;
+  // Score del face-match en 0..100; 0 si no se corrió. Solo significativo si dni_face_match_status != NOT_RUN.
+  double dni_face_match_score = 19;
+  // ISO-8601 de cuándo se corrió el face-match; "" si no se corrió.
+  string dni_face_matched_at = 20;
 }
