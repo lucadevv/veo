@@ -12,9 +12,23 @@ export function formatPEN(cents: number | null | undefined): string {
   return formatPENRaw(typeof cents === 'number' && Number.isFinite(cents) ? cents : 0);
 }
 
-/** Fecha corta es-PE (ej. "29 may 2026") a partir de un ISO-8601; vacío si la fecha es inválida. */
+/** Patrón de una fecha canónica `YYYY-MM-DD` (el formato de los contratos y del `DateField`). */
+const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Fecha corta es-PE (ej. "29 may 2026") a partir de un ISO-8601; vacío si la fecha es inválida.
+ *
+ * OJO timezone: `new Date('YYYY-MM-DD')` se interpreta a MEDIANOCHE UTC y, al localizar en un huso
+ * negativo (Lima = UTC-5), RETROCEDE un día ("1998-12-07" → "06 dic"). Por eso, para un date-only
+ * canónico construimos el `Date` con los componentes en HORA LOCAL (mediodía, lejos de cualquier salto
+ * de DST), de modo que el día mostrado sea EXACTAMENTE el del string. Para otros formatos ISO (con hora
+ * y huso explícitos) se respeta el `Date` nativo.
+ */
 export function formatShortDate(iso: string): string {
-  const date = new Date(iso);
+  const dateOnly = ISO_DATE_ONLY.exec(iso.trim());
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12, 0, 0, 0)
+    : new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return '';
   }

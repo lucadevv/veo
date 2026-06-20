@@ -10,3 +10,4 @@ export {
   nativeDocumentScannerLinked,
 } from './services/native-document-scanner';
 export { scannedImageToPickedImage } from './scanned-image-to-picked-image';
+export { ocrEngineForPlatform, ocrTimestampNow } from './ocr-engine';

@@ -12,6 +12,10 @@ export {
 } from './DocumentUploadCard';
 export { RegistrationDocumentSheet } from './RegistrationDocumentSheet';
 export { ScanDniSheet, type ScanDniSheetProps } from './ScanDniSheet';
+export {
+  ScanPropertyCardSheet,
+  type ScanPropertyCardSheetProps,
+} from './ScanPropertyCardSheet';
 export { FaceGuideRing } from './FaceGuideRing';
 export {
   default as BiometricCameraPreview,

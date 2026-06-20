@@ -5,8 +5,11 @@
  */
 export * from './parsed-document';
 export * from './license-category';
+export * from './vehicle-category';
 export * from './parse-dni';
+export * from './parse-mrz-td1';
 export * from './parse-license';
 export * from './parse-soat';
 export * from './parse-property-card';
 export * from './parse-document';
+export * from './extracted-data-mapper';

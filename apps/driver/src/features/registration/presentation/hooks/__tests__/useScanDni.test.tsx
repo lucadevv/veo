@@ -9,12 +9,14 @@ import { useScanDni } from '../useScanDni';
 
 /**
  * Pruebas del flujo de escaneo del DNI (sub-lote 3B): el hook `useScanDni` orquesta escaneo → OCR
- * (`parseDni`) → prellenado NO destructivo del store → subida del DNI como documento de 2 caras.
+ * (`parseDni`) → prellenado NO destructivo del store → GUARDADO de las caras como `pendingDni` para
+ * subirlas DESPUÉS del PATCH /personal (BUG de secuencia: el presign del DNI exige que el driver YA
+ * exista, así que el escaneo NUNCA sube en el momento).
  *
- * El escáner y el uploader se inyectan por DI con dobles (el hook NO conoce el módulo nativo ni la red).
- * Se valida: prellenado de los 3 campos, captura del reverso, subida FRONT+BACK (presign con sides
- * [FRONT,BACK] y register con images de 2 entradas), fallback honesto ante `E_UNAVAILABLE`, y que el OCR
- * NO pisa un campo que el conductor ya tipeó.
+ * El escáner se inyecta por DI con un doble (el hook NO conoce el módulo nativo). Se valida: prellenado de
+ * los 3 campos, captura del reverso, que el escaneo NO sube (no toca el uploader) y deja las caras en
+ * `pendingDni`, que confirmar (`submit`) deja el estado `ready` con las caras guardadas, fallback honesto
+ * ante `E_UNAVAILABLE`, y que el OCR NO pisa un campo que el conductor ya tipeó.
  */
 
 /** Texto OCR del FRENTE de un DNI peruano (palabras clave + 8 dígitos + nacimiento + apellidos/nombres). */
@@ -138,28 +140,11 @@ describe('useScanDni', () => {
     expect(handle.current?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
   });
 
-  it('sube el DNI como FRONT+BACK: presign con sides [FRONT,BACK] y register con images de 2 caras', async () => {
+  it('NO sube en el momento del escaneo: deja las caras (FRONT+BACK) en `pendingDni` para subir tras el PATCH', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScan()) };
-    // Doble del uploader REAL del hook: devuelve las images por cara (lo que produciría el presign múltiple).
-    const upload = jest.fn(async () => ({
-      images: [
-        { s3Key: 'drivers/d-1/dni-front.jpg', side: 'FRONT' },
-        { s3Key: 'drivers/d-1/dni-back.jpg', side: 'BACK' },
-      ],
-    }));
-    const submitDocument = jest.fn(async () => ({
-      type: 'DNI',
-      documentNumber: '70123456',
-      status: 'PENDING_REVIEW',
-      simpleStatus: 'en_revision',
-      expiresAt: null,
-      ok: false,
-      rejectionReason: null,
-      images: [
-        { side: 'FRONT', order: 0 },
-        { side: 'BACK', order: 1 },
-      ],
-    }));
+    // El uploader NO debe tocarse durante el escaneo (la subida está DIFERIDA al continue del paso 1).
+    const upload = jest.fn();
+    const submitDocument = jest.fn();
     const handle = renderHookWith(
       fakeContainer(scanner, { upload }, { submitDocument }),
     );
@@ -167,35 +152,39 @@ describe('useScanDni', () => {
     await act(async () => {
       await handle.current?.scan();
     });
+
+    // BUG de secuencia corregido: el escaneo NUNCA sube (el driver aún no existe → presign 404).
+    expect(upload).not.toHaveBeenCalled();
+    expect(submitDocument).not.toHaveBeenCalled();
+
+    // Las caras quedan GUARDADAS en el store, listas para que el `onContinue` las suba tras el PATCH.
+    const pending = useRegistrationStore.getState().pendingDni;
+    expect(pending).not.toBeNull();
+    expect(pending?.front.uri).toBe('data:image/jpeg;base64,/9j/front-base64');
+    expect(pending?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
+  });
+
+  it('confirmar (`submit`) deja el estado `ready` con las caras guardadas — sigue SIN subir', async () => {
+    const scanner: ScannerDouble = { scan: jest.fn(async () => dniScan()) };
+    const upload = jest.fn();
+    const submitDocument = jest.fn();
+    const handle = renderHookWith(
+      fakeContainer(scanner, { upload }, { submitDocument }),
+    );
+
     await act(async () => {
-      await handle.current?.submit();
+      await handle.current?.scan();
+    });
+    act(() => {
+      handle.current?.submit();
     });
 
-    // El uploader recibe el tipo DNI y AMBAS caras (FRONT + BACK), cada una con su archivo.
-    expect(upload).toHaveBeenCalledTimes(1);
-    const uploadCall = upload.mock.calls[0] as unknown as [
-      string,
-      { side: string; file: { uri: string } }[],
-    ];
-    const [type, sides] = uploadCall;
-    expect(type).toBe('DNI');
-    expect(sides.map((s) => s.side)).toEqual(['FRONT', 'BACK']);
-    expect(sides[0]?.file.uri).toBe('data:image/jpeg;base64,/9j/front-base64');
-    expect(sides[1]?.file.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
-
-    // El registro lleva las DOS imágenes (con su cara) y el número confirmado del store.
-    expect(submitDocument).toHaveBeenCalledTimes(1);
-    const submitCall = submitDocument.mock.calls[0] as unknown as [
-      { type: string; documentNumber: string; images: { s3Key: string; side: string }[] },
-    ];
-    const body = submitCall[0];
-    expect(body.type).toBe('DNI');
-    expect(body.documentNumber).toBe('70123456');
-    expect(body.images).toEqual([
-      { s3Key: 'drivers/d-1/dni-front.jpg', side: 'FRONT' },
-      { s3Key: 'drivers/d-1/dni-back.jpg', side: 'BACK' },
-    ]);
-    expect(handle.current?.state).toBe('success');
+    expect(handle.current?.state).toBe('ready');
+    expect(upload).not.toHaveBeenCalled();
+    // Las caras siguen disponibles para la subida diferida.
+    const pending = useRegistrationStore.getState().pendingDni;
+    expect(pending?.front.uri).toBe('data:image/jpeg;base64,/9j/front-base64');
+    expect(pending?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
   });
 
   it('E_UNAVAILABLE: cae al fallback manual sin crash y deja los campos como estaban (editables)', async () => {

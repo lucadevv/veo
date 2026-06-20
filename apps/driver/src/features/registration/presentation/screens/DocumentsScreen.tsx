@@ -6,7 +6,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { IconCar, IconDocument, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
@@ -145,27 +145,50 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         file: input.file,
         documentNumber: input.documentNumber,
         ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
+        // Lote 1 (sin formularios): la data OCR leída + su trazabilidad viajan al backend. Solo si el
+        // escaneo la produjo (degradación honesta: una foto sin OCR se sube sin estos campos).
+        ...(input.extractedData ? { extractedData: input.extractedData } : {}),
+        ...(input.ocrEngine ? { ocrEngine: input.ocrEngine } : {}),
+        ...(input.ocrAt ? { ocrAt: input.ocrAt } : {}),
       });
-      // La licencia, además, alimenta el onboarding del conductor (driverOnboardRequest).
-      if (activeType === 'LICENSE' && input.expiresAtIso) {
+      // La licencia, además, alimenta el onboarding del conductor (driverOnboardRequest). Exige número Y
+      // vencimiento: ambos son crítico-faltante para la licencia (gating de `isCriticalFieldMissing`), así
+      // que si el doc llegó al envío, los dos están presentes. El guard explícito narrowa para el contrato.
+      if (activeType === 'LICENSE' && input.documentNumber && input.expiresAtIso) {
         await onboardLicense.mutateAsync({
           licenseNumber: input.documentNumber,
           licenseExpiresAt: input.expiresAtIso,
         });
       }
       // Éxito real: marca el avance local (permite continuar el wizard) y refresca los chips.
-      setDocumentStatus(activeType, DocumentUploadStatus.UPLOADED);
-      setUploadState('success');
-      // Cierra el sheet tras un breve instante para que el conductor vea el check de éxito.
-      setTimeout(() => {
-        setActiveType((current) => (current === activeType ? null : current));
-        setUploadState('idle');
-      }, 900);
+      markDocumentCaptured(activeType);
     } catch (e) {
+      // Retry legítimo en el flujo "escaneá y listo": el documento YA fue registrado en un intento previo
+      // y el backend responde 409 ConflictError ("Ya existe un documento activo de ese tipo"). El doc YA
+      // está → es ÉXITO, no error. Se marca "Capturado ✓" igual (sin banner feo). Detectado por status 409
+      // tipado (`isConflictError`/`ApiError`), no por el texto del mensaje.
+      if (isConflictError(e)) {
+        markDocumentCaptured(activeType);
+        return;
+      }
       setSubmitError(e);
       setUploadState('error');
     }
   };
+
+  /**
+   * Marca el documento como CAPTURADO (subido) y cierra el sheet tras un breve instante para que el
+   * conductor vea el check de éxito. Camino COMÚN del éxito real y del 409 "ya estaba registrado": en
+   * ambos el documento existe en el backend, así que el wizard debe avanzar igual (sin éxito falso).
+   */
+  function markDocumentCaptured(type: RegistrationDocumentType): void {
+    setDocumentStatus(type, DocumentUploadStatus.UPLOADED);
+    setUploadState('success');
+    setTimeout(() => {
+      setActiveType((current) => (current === type ? null : current));
+      setUploadState('idle');
+    }, 900);
+  }
 
   /**
    * ¿El servidor YA tiene este documento en un estado ACEPTABLE para avanzar el alta? Misma fuente de

@@ -1,26 +1,34 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path, Polyline, Rect } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
-import { Banner, BottomSheet, Button, Text, TextField, useTheme } from '@veo/ui-kit';
+import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
+import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import {
   ImagePickError,
   isDocumentScannerError,
   isParsableDocumentType,
   parseDocument,
   type ImageSource,
-  type ParsedDocument,
   type PickedImage,
   type ScannedDocument,
 } from '../../../documents/domain';
-import { scannedImageToPickedImage } from '../../../documents/data';
+import {
+  ocrEngineForPlatform,
+  ocrTimestampNow,
+  scannedImageToPickedImage,
+} from '../../../documents/data';
 import { IconCheck } from '../../../../shared/presentation/icons';
-import { DateField } from '../../../../shared/presentation/components/DateField';
 import { hexAlpha } from './color';
 import {
   REGISTRATION_DOCUMENT_FORM_CONFIG,
   type RegistrationDocumentFormType,
 } from './registrationDocumentForm';
+import {
+  isCriticalFieldMissing,
+  readoutFromParsed,
+  type CapturedReadout,
+} from './documentCaptureReadout';
 
 /** Glifo de galería/imagen (inline). */
 function ImageGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
@@ -39,11 +47,25 @@ function ImageGlyph({ color, size = 18 }: { color: string; size?: number }): Rea
   );
 }
 
+/** Glifo de cámara (inline): cuerpo de cámara con lente. Para la captura de FOTO (no documento). */
+function CameraGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={12.5} r={3.2} stroke={color} strokeWidth={1.8} />
+    </Svg>
+  );
+}
+
 /** Glifo de escáner de documento (inline): marco con esquinas + línea de escaneo. */
 function ScanGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      {/* Esquinas del marco de escaneo (no un rectángulo cerrado: evoca la guía de bordes). */}
       <Path
         d="M4 8V6a2 2 0 0 1 2-2h2"
         stroke={color}
@@ -72,7 +94,6 @@ function ScanGlyph({ color, size = 18 }: { color: string; size?: number }): Reac
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* Línea de escaneo. */}
       <Path d="M4 12h16" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
     </Svg>
   );
@@ -94,15 +115,30 @@ export type DocumentUploadState = 'idle' | 'picking' | 'ready' | 'uploading' | '
  * Añade `scanning` (escáner nativo abierto) a los estados previos de selección. Se mantiene separado
  * del `DocumentUploadState` público para no exponer un estado que la pantalla no controla.
  */
-export type DocumentCaptureLocalState = 'idle' | 'picking' | 'scanning' | 'ready';
+export type DocumentCaptureLocalState = 'idle' | 'picking' | 'scanning' | 'captured';
 
-/** Resultado del formulario: metadatos + archivo local elegido para subir. */
+/**
+ * Resultado del flujo "Capturado ✓" (Lote 1 · sin formularios): metadatos LEÍDOS por OCR (no tipeados) +
+ * el archivo + la data OCR mapeada al contrato. El sheet ya NO tiene campos editables: el número y el
+ * vencimiento salen del parser, y `extractedData`/`ocrEngine`/`ocrAt` viajan al backend para trazabilidad.
+ */
 export interface RegistrationDocumentInput {
-  documentNumber: string;
-  /** Vencimiento en ISO-8601 (si el conductor lo ingresó / es requerido). */
+  /**
+   * Número leído por OCR (licencia/SOAT/tarjeta). Solo presente cuando el tipo es numerado Y el OCR lo
+   * leyó (el gating crítico garantiza que para los tipos numerados que llegan al envío hay número). Para
+   * los tipos sin número (foto del vehículo) se OMITE — coherente con `addDocumentRequest` (opcional por tipo).
+   */
+  documentNumber?: string;
+  /** Vencimiento en ISO-8601 si el OCR lo leyó (licencia/SOAT). Ausente si el documento no vence o no se leyó. */
   expiresAtIso?: string;
-  /** Archivo local capturado/elegido (cámara o galería). El binario se sube ANTES de registrar. */
+  /** Archivo local capturado/elegido. El binario se sube ANTES de registrar. */
   file: PickedImage;
+  /** Data OCR mapeada a la variante del contrato (`ExtractedDocumentData`). Solo si el OCR la produjo. */
+  extractedData?: ExtractedDocumentData;
+  /** Motor de OCR que la produjo (enum cerrado). Solo si hay `extractedData`. */
+  ocrEngine?: OcrEngineValue;
+  /** Instante de la extracción OCR (ISO-8601). Solo si hay `extractedData`. */
+  ocrAt?: string;
 }
 
 export interface RegistrationDocumentSheetProps {
@@ -112,90 +148,44 @@ export interface RegistrationDocumentSheetProps {
   documentLabel: string;
   /**
    * Tipo CANÓNICO del documento que se está capturando (`FleetDocumentType` del subconjunto del alta).
-   * Selecciona la configuración contextual del formulario (`REGISTRATION_DOCUMENT_FORM_CONFIG`): la
-   * etiqueta/placeholder propios del número y si el documento vence (y por tanto se pide vencimiento).
+   * Selecciona la configuración contextual (`REGISTRATION_DOCUMENT_FORM_CONFIG`) y el parser de OCR.
    */
   documentType: RegistrationDocumentFormType;
   /**
    * Estado de la subida controlado por la pantalla (refleja la mutación de subida+registro). El sheet
-   * gestiona `idle`/`picking`/`ready` por su cuenta y la pantalla impone `uploading`/`success`/`error`.
+   * gestiona `idle`/`picking`/`scanning`/`captured` por su cuenta y la pantalla impone `uploading`/`success`/`error`.
    */
   uploadState: DocumentUploadState;
   /** Mensaje de error (de la subida/registro) a mostrar en un Banner. */
   errorMessage?: string;
   /**
-   * Selección del archivo desde la GALERÍA (fallback secundario). La pantalla inyecta el
-   * `ImagePickerService` por DI; el sheet NO conoce el SDK nativo. Cancelar resuelve `null`; los
-   * fallos accionables lanzan `ImagePickError`.
+   * Selección del archivo desde la GALERÍA (fallback secundario, solo modo foto / escáner no disponible).
+   * Cancelar resuelve `null`; los fallos accionables lanzan `ImagePickError`.
    */
   onPick: (source: ImageSource) => Promise<PickedImage | null>;
   /**
-   * Escaneo del documento con la cámara nativa (bordes + auto-captura + corrección + OCR on-device). Es
-   * la acción PRINCIPAL. La pantalla inyecta el `DocumentScannerService` por DI; el sheet NO conoce el
-   * módulo nativo. Resuelve con `{ images, textLines }`: el sheet toma `images[0]` como archivo y pasa
-   * `textLines[0]` al parser del tipo actual para PRE-LLENAR número/vencimiento. Lanza
-   * `DocumentScannerError`: `E_CANCELLED` (cancelar, no error), `E_UNAVAILABLE` (cae a galería),
-   * `E_SCAN_FAILED` (error con reintento).
+   * Escaneo del documento con la cámara nativa (bordes + auto-captura + OCR on-device). Es la acción
+   * PRINCIPAL del modo `'document'`. Resuelve con `{ images, textLines }`: el sheet toma `images[0]` como
+   * archivo y `textLines[0]` para el parser. Lanza `DocumentScannerError`: `E_CANCELLED`, `E_UNAVAILABLE`,
+   * `E_SCAN_FAILED`. Opcional: el modo `'photo'` (foto del vehículo) usa la cámara normal, sin escáner.
    */
-  onScan: () => Promise<ScannedDocument>;
-  /** Dispara la subida+registro con los metadatos y el archivo elegido. */
+  onScan?: () => Promise<ScannedDocument>;
+  /**
+   * Dispara la subida+registro con el archivo + la data OCR. El sheet lo invoca AUTOMÁTICAMENTE tras un
+   * escaneo válido (sin paso de formulario): es un flujo "escaneá y listo".
+   */
   onSubmit: (input: RegistrationDocumentInput) => void;
 }
 
 /**
- * Campos del FORMULARIO que el OCR pudo extraer del documento escaneado: el número propio del tipo y el
- * vencimiento en `AAAA-MM-DD` (el formato que consume el `DateField`/`parseExpiry`). Mapea el resultado
- * tipado del parser (`ParsedDocument`, discriminado por `kind`) a los dos campos que el sheet edita. Solo
- * incluye un campo si el parser lo extrajo con confianza (degradación honesta: lo ausente queda manual).
- */
-function formFieldsFromParsed(parsed: ParsedDocument): { number?: string; expiry?: string } {
-  switch (parsed.kind) {
-    case 'license':
-      return {
-        ...(parsed.number ? { number: parsed.number } : {}),
-        ...(parsed.expiresAt ? { expiry: parsed.expiresAt } : {}),
-      };
-    case 'soat':
-      return {
-        ...(parsed.policyNumber ? { number: parsed.policyNumber } : {}),
-        ...(parsed.expiresAt ? { expiry: parsed.expiresAt } : {}),
-      };
-    case 'propertyCard':
-      // La tarjeta de propiedad no vence: el OCR aporta la PLACA como número de referencia del campo.
-      return parsed.plate ? { number: parsed.plate } : {};
-    case 'dni':
-      // El DNI no se escanea en este flujo (su parser queda listo para el lote futuro); no aplica al sheet.
-      return {};
-  }
-}
-
-/** Acepta `AAAA-MM-DD` y valida que sea un día real; devuelve el ISO o null. */
-function parseExpiry(raw: string): { iso: string } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-  if (!match) {
-    return null;
-  }
-  const [, y, m, d] = match;
-  const year = Number(y);
-  const month = Number(m);
-  const day = Number(d);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return { iso: date.toISOString() };
-}
-
-/**
- * Formulario en bottom sheet para registrar un documento del alta: captura del binario (cámara o
- * galería) + número + vencimiento. El tipo es fijo (lo decide la tarjeta del paso de documentos), por
- * eso no se elige aquí. El flujo sube el binario al almacén soberano y luego registra el documento con
- * su `fileS3Key`; el documento queda "en revisión". Estados HONESTOS: nunca se marca éxito sin que el
- * PUT del binario y el registro hayan resuelto bien.
+ * Hoja de captura "escaneá y listo" (Lote 1 · onboarding SIN formularios). El conductor escanea el
+ * documento; el OCR lee número/vencimiento; se muestra una tarjeta "Capturado ✓" READ-ONLY (los datos
+ * leídos como TEXTO, no inputs) con la miniatura, y se ENVÍA AUTOMÁTICAMENTE (sube el binario + registra
+ * con `extractedData`/`ocrEngine`/`ocrAt`). SIN campos editables ni validación manual.
+ *
+ * Fallback HONESTO: si el OCR no leyó el campo CRÍTICO del tipo (licencia/SOAT → número), NO se envía: se
+ * muestra "no pudimos leer X, reescaneá" + la acción de re-escaneo. Nunca se inventa un campo ni se marca
+ * un éxito que no ocurrió.
  */
 export function RegistrationDocumentSheet({
   visible,
@@ -211,48 +201,32 @@ export function RegistrationDocumentSheet({
   const { t } = useTranslation();
   const theme = useTheme();
 
-  // Configuración contextual del formulario para ESTE tipo de documento (etiqueta del número +
-  // si vence). La fuente es el mapa tipado y exhaustivo, no flags sueltos.
   const formConfig = REGISTRATION_DOCUMENT_FORM_CONFIG[documentType];
-  const requireExpiry = formConfig.hasExpiry;
-  // La foto del vehículo (VEHICLE_PHOTO) NO tiene número: el campo no se muestra ni se exige.
+  const isPhoto = formConfig.captureMode === 'photo';
   const hasNumber = formConfig.hasNumber;
+  const hasExpiry = formConfig.hasExpiry;
 
-  // Acota el picker de vencimiento a partir de hoy (un documento vencido no es válido).
-  const today = new Date();
-
-  const [documentNumber, setDocumentNumber] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [touched, setTouched] = useState(false);
   const [file, setFile] = useState<PickedImage | null>(null);
-  // Estado LOCAL del selector (idle/scanning/ready). La pantalla impone uploading/success/error vía prop.
+  const [readout, setReadout] = useState<CapturedReadout | null>(null);
   const [localState, setLocalState] = useState<DocumentCaptureLocalState>('idle');
   const [pickError, setPickError] = useState<string | null>(null);
-  // Aviso (no error) de degradación honesta: el escáner no está disponible → se ofrece la galería.
   const [scanUnavailable, setScanUnavailable] = useState(false);
-  // ¿El número / vencimiento del formulario fueron PRE-LLENADOS desde el OCR del escaneo? Sirve para
-  // marcar visualmente "Extraído del documento — confirmá" y para limpiar el aviso si el conductor
-  // edita el campo (un valor corregido a mano ya no es "el extraído").
-  const [autoNumber, setAutoNumber] = useState(false);
-  const [autoExpiry, setAutoExpiry] = useState(false);
+  // Campo crítico ausente tras el parse: el OCR no leyó lo que el documento NECESITA → reescaneo (no form).
+  const [missingCritical, setMissingCritical] = useState(false);
 
-  // Reinicia el formulario cada vez que el sheet se abre (cambia de documento).
+  // Reinicia el flujo cada vez que el sheet se abre (cambia de documento).
   useEffect(() => {
     if (visible) {
-      setDocumentNumber('');
-      setExpiry('');
-      setTouched(false);
       setFile(null);
+      setReadout(null);
       setLocalState('idle');
       setPickError(null);
       setScanUnavailable(false);
-      setAutoNumber(false);
-      setAutoExpiry(false);
+      setMissingCritical(false);
     }
   }, [visible]);
 
-  // El estado efectivo: la pantalla manda mientras sube/termina/falla; si no, manda el local (que
-  // puede ser `scanning`/`picking`/`ready`/`idle`).
+  // El estado efectivo: la pantalla manda mientras sube/termina/falla; si no, manda el local.
   const effectiveState: DocumentUploadState | DocumentCaptureLocalState =
     uploadState === 'uploading' || uploadState === 'success' || uploadState === 'error'
       ? uploadState
@@ -262,45 +236,134 @@ export function RegistrationDocumentSheet({
   const isSuccess = effectiveState === 'success';
   const isScanning = effectiveState === 'scanning';
   const isPicking = effectiveState === 'picking';
+  const isCaptured = effectiveState === 'captured';
   const captureDisabled = isUploading || isSuccess || isScanning || isPicking;
 
-  const numberError = useMemo(
-    () =>
-      touched && hasNumber && documentNumber.trim().length === 0
-        ? t('registration.documents.numberRequired')
-        : undefined,
-    [touched, hasNumber, documentNumber, t],
-  );
+  /**
+   * Dispara la subida+registro con el archivo leído + la data OCR mapeada. Solo se llama cuando el campo
+   * crítico está presente (gating previo). Adjunta `extractedData`/`ocrEngine`/`ocrAt` SOLO si el OCR
+   * produjo data (degradación honesta: un documento sin data se sube sin esos campos).
+   */
+  const submitCaptured = (picked: PickedImage, data: CapturedReadout): void => {
+    onSubmit({
+      // Solo se manda `documentNumber` si el tipo es numerado Y el OCR lo leyó (coherencia con el contrato:
+      // el campo es opcional por tipo; mandar '' es frágil aunque hoy aguante por truthiness downstream).
+      ...(hasNumber && data.number ? { documentNumber: data.number } : {}),
+      ...(hasExpiry && data.expiry ? { expiresAtIso: data.expiry } : {}),
+      file: picked,
+      ...(data.extractedData
+        ? {
+            extractedData: data.extractedData,
+            ocrEngine: ocrEngineForPlatform(),
+            ocrAt: ocrTimestampNow(),
+          }
+        : {}),
+    });
+  };
 
-  const expiryError = useMemo(() => {
-    if (!touched) {
-      return undefined;
+  /**
+   * Procesa el resultado del escaneo: parsea, mapea a `CapturedReadout` y aplica el GATING del campo
+   * crítico. Si el tipo es numerado (licencia/SOAT/tarjeta) y el OCR NO leyó el número → fallback honesto
+   * (reescaneo, sin formulario). Si el campo crítico está → tarjeta "Capturado ✓" + auto-submit.
+   */
+  const processScan = (picked: PickedImage, lines: readonly string[]): void => {
+    if (!isParsableDocumentType(documentType) || lines.length === 0) {
+      // Sin parser/sin texto: no podemos leer el campo crítico → reescaneo honesto.
+      setFile(picked);
+      setReadout(null);
+      setMissingCritical(hasNumber);
+      setLocalState('captured');
+      return;
     }
-    const trimmed = expiry.trim();
-    if (trimmed.length === 0) {
-      return requireExpiry ? t('registration.documents.expiryRequired') : undefined;
+    const parsed = parseDocument(documentType, lines);
+    const data = readoutFromParsed(parsed);
+    setFile(picked);
+    setReadout(data);
+    // Gating del campo CRÍTICO (lógica PURA compartida): el tipo numerado EXIGE número. Sin él, no enviamos.
+    const critical = isCriticalFieldMissing(documentType, data);
+    setMissingCritical(critical);
+    setLocalState('captured');
+    if (!critical) {
+      // "Escaneá y listo": auto-envío sin paso de formulario.
+      submitCaptured(picked, data);
     }
-    return parseExpiry(trimmed) ? undefined : t('registration.documents.expiryInvalid');
-  }, [touched, expiry, requireExpiry, t]);
+  };
 
-  /** Abre cámara o galería; al obtener archivo pasa a `ready`. Cancelar no es error (vuelve a idle). */
-  const pickFrom = (source: ImageSource) => async () => {
+  /** Reintenta el escaneo (desde el fallback de campo crítico o desde la tarjeta). Limpia el estado leído. */
+  const resetCapture = (): void => {
+    setFile(null);
+    setReadout(null);
+    setMissingCritical(false);
+    setLocalState('idle');
+    setPickError(null);
+  };
+
+  /**
+   * Acción PRINCIPAL: abre el escáner nativo. Al obtener la imagen, la procesa (parse + gating + auto-submit).
+   * Degradación HONESTA por código tipado: `E_CANCELLED` (no error), `E_UNAVAILABLE` (cae a galería),
+   * `E_SCAN_FAILED`/desconocido (banner accionable).
+   */
+  const handleScan = async (): Promise<void> => {
+    if (captureDisabled || !onScan) {
+      return;
+    }
+    setPickError(null);
+    setScanUnavailable(false);
+    setMissingCritical(false);
+    setLocalState('scanning');
+    try {
+      const { images, textLines } = await onScan();
+      const first = images[0];
+      if (!first) {
+        setLocalState('idle');
+        setPickError(t('registration.documents.scanFailed'));
+        return;
+      }
+      processScan(scannedImageToPickedImage(first), textLines[0] ?? []);
+    } catch (e) {
+      setLocalState('idle');
+      if (isDocumentScannerError(e, 'E_CANCELLED')) {
+        setPickError(t('registration.documents.scanCancelled'));
+        return;
+      }
+      if (isDocumentScannerError(e, 'E_UNAVAILABLE')) {
+        setScanUnavailable(true);
+        return;
+      }
+      setPickError(t('registration.documents.scanFailed'));
+    }
+  };
+
+  /**
+   * Captura por FOTO (modo foto del vehículo) o galería (fallback del escáner). La foto del vehículo NO se
+   * parsea (no tiene campos): se sube directo. La galería en modo documento tampoco trae texto OCR, así
+   * que se trata como captura sin lectura → para tipos numerados, fallback de campo crítico (reescaneo).
+   */
+  const pickFrom = (source: ImageSource) => async (): Promise<void> => {
     if (captureDisabled) {
       return;
     }
     setPickError(null);
+    setMissingCritical(false);
     setLocalState('picking');
     try {
       const picked = await onPick(source);
       if (!picked) {
-        // El conductor canceló: si no había archivo previo, vuelve a idle; si lo había, lo conserva.
-        setLocalState(file ? 'ready' : 'idle');
+        setLocalState(file ? 'captured' : 'idle');
         return;
       }
-      setFile(picked);
-      setLocalState('ready');
+      if (isPhoto) {
+        // Foto libre del vehículo: sin OCR, se envía directo (sin número ni vencimiento).
+        setFile(picked);
+        setReadout(null);
+        setLocalState('captured');
+        submitCaptured(picked, { extractedData: null });
+        return;
+      }
+      // Galería en modo documento: no hay texto OCR del picker → no podemos leer el campo crítico.
+      processScan(picked, []);
     } catch (e) {
-      setLocalState(file ? 'ready' : 'idle');
+      setLocalState(file ? 'captured' : 'idle');
       setPickError(
         e instanceof ImagePickError && e.reason === 'permission'
           ? t('registration.documents.permissionDenied')
@@ -309,129 +372,20 @@ export function RegistrationDocumentSheet({
     }
   };
 
-  /**
-   * Pre-llena el formulario con los campos que el OCR extrajo de la primera página escaneada. Rutea por
-   * el tipo CANÓNICO del documento (solo los parseables: licencia/SOAT/tarjeta; la foto del vehículo no
-   * se parsea). Best-effort y NO destructivo: solo escribe un campo si el OCR lo extrajo con confianza
-   * (lo ausente queda como esté), y marca cada campo escrito como "auto-extraído" para que la UI invite a
-   * confirmarlo. Nunca inventa ni bloquea el submit.
-   */
-  const applyOcrAutofill = (lines: readonly string[]): void => {
-    if (!isParsableDocumentType(documentType) || lines.length === 0) {
-      return;
-    }
-    const parsed = parseDocument(documentType, lines);
-    const fields = formFieldsFromParsed(parsed);
-    if (hasNumber && fields.number) {
-      setDocumentNumber(fields.number);
-      setAutoNumber(true);
-    }
-    if (requireExpiry && fields.expiry && parseExpiry(fields.expiry)) {
-      setExpiry(fields.expiry);
-      setAutoExpiry(true);
-    }
-  };
-
-  /**
-   * Acción PRINCIPAL: abre el escáner nativo (bordes + auto-captura + corrección). Al obtener la
-   * imagen croppeada pasa a `ready` con el preview. Degradación HONESTA por código tipado:
-   *  - `E_CANCELLED`: el conductor cerró el escáner → NO es error (conserva el estado previo).
-   *  - `E_UNAVAILABLE`: el módulo no está → aviso + se ofrece la galería (no se inventa captura).
-   *  - `E_SCAN_FAILED` / desconocido: banner de error accionable (reintentar o usar galería).
-   */
-  const handleScan = async () => {
-    if (captureDisabled) {
-      return;
-    }
-    setPickError(null);
-    setScanUnavailable(false);
-    setLocalState('scanning');
-    try {
-      const { images, textLines } = await onScan();
-      // 1 imagen por documento por ahora (el backend N-imágenes es Lote 3): tomamos la primera.
-      const first = images[0];
-      if (!first) {
-        // El escáner resolvió sin imágenes: lo tratamos como fallo de captura (no éxito silencioso).
-        setLocalState(file ? 'ready' : 'idle');
-        setPickError(t('registration.documents.scanFailed'));
-        return;
-      }
-      setFile(scannedImageToPickedImage(first));
-      setLocalState('ready');
-      // AUTO-LLENADO: parsea el texto OCR de la primera página y pre-llena los campos extraídos. Es
-      // BEST-EFFORT: si el OCR no extrajo algo, el campo queda manual (nunca bloquea ni inventa).
-      applyOcrAutofill(textLines[0] ?? []);
-    } catch (e) {
-      setLocalState(file ? 'ready' : 'idle');
-      if (isDocumentScannerError(e, 'E_CANCELLED')) {
-        // Cancelar NO es un fallo: solo informamos que puede reintentar o usar la galería.
-        setPickError(t('registration.documents.scanCancelled'));
-        return;
-      }
-      if (isDocumentScannerError(e, 'E_UNAVAILABLE')) {
-        // Degradación honesta: el escáner no existe en este device → la galería pasa a ser el camino.
-        setScanUnavailable(true);
-        return;
-      }
-      setPickError(t('registration.documents.scanFailed'));
-    }
-  };
-
-  const canSubmit = file !== null && !isUploading && !isSuccess;
-
-  const handleSubmit = () => {
-    setTouched(true);
-    if (!file) {
-      return;
-    }
-    if (hasNumber && documentNumber.trim().length === 0) {
-      return;
-    }
-    const trimmedExpiry = expiry.trim();
-    const parsed = trimmedExpiry.length > 0 ? parseExpiry(trimmedExpiry) : null;
-    if (requireExpiry && !parsed) {
-      return;
-    }
-    if (trimmedExpiry.length > 0 && !parsed) {
-      return;
-    }
-    onSubmit({
-      // La foto no tiene número → '' (el backend lo acepta solo para VEHICLE_PHOTO, validación por tipo).
-      documentNumber: hasNumber ? documentNumber.trim() : '',
-      ...(parsed ? { expiresAtIso: parsed.iso } : {}),
-      file,
-    });
-  };
-
-  const ctaLabel = isSuccess
-    ? t('registration.documents.uploaded')
-    : effectiveState === 'error'
-      ? t('common.retry')
-      : t('registration.documents.save');
+  // El footer cambia según el momento: capturando → solo cerrar; tras éxito → cerrar.
+  const footer = (
+    <View style={styles.footer}>
+      <Button
+        label={isSuccess ? t('common.close') : t('common.cancel')}
+        variant={isSuccess ? 'primary' : 'secondary'}
+        onPress={onClose}
+        disabled={isUploading}
+      />
+    </View>
+  );
 
   return (
-    <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title={documentLabel}
-      footer={
-        <View style={styles.footer}>
-          <Button
-            label={isSuccess ? t('common.close') : t('common.cancel')}
-            variant="secondary"
-            onPress={onClose}
-            disabled={isUploading}
-          />
-          <Button
-            label={ctaLabel}
-            variant="primary"
-            loading={isUploading}
-            disabled={!canSubmit && effectiveState !== 'error'}
-            onPress={handleSubmit}
-          />
-        </View>
-      }
-    >
+    <BottomSheet visible={visible} onClose={onClose} title={documentLabel} footer={footer}>
       <View style={[styles.body, { gap: theme.spacing.lg }]}>
         {/* Preview / placeholder del archivo capturado. */}
         <View
@@ -448,9 +402,13 @@ export function RegistrationDocumentSheet({
             <Image source={{ uri: file.uri }} style={styles.previewImage} resizeMode="cover" />
           ) : (
             <View style={[styles.previewEmpty, { gap: theme.spacing.sm }]}>
-              <ScanGlyph size={28} color={theme.colors.inkSubtle} />
+              {isPhoto ? (
+                <CameraGlyph size={28} color={theme.colors.inkSubtle} />
+              ) : (
+                <ScanGlyph size={28} color={theme.colors.inkSubtle} />
+              )}
               <Text variant="footnote" color="inkSubtle">
-                {t('registration.documents.noFile')}
+                {t(isPhoto ? 'registration.documents.photo.noFile' : 'registration.documents.noFile')}
               </Text>
             </View>
           )}
@@ -474,95 +432,91 @@ export function RegistrationDocumentSheet({
             <View style={[styles.previewOverlay, { backgroundColor: theme.colors.overlay }]}>
               <IconCheck size={32} color={theme.colors.success} strokeWidth={2.6} />
               <Text variant="footnote" color="success">
-                {t('registration.documents.uploadSuccess')}
+                {t(
+                  isPhoto
+                    ? 'registration.documents.photo.uploadSuccess'
+                    : 'registration.documents.uploadSuccess',
+                )}
               </Text>
             </View>
           ) : null}
         </View>
 
-        {/* Acción PRINCIPAL: escanear (bordes + auto-captura). La galería es el fallback secundario. */}
-        <View style={[styles.captureCol, { gap: theme.spacing.sm }]}>
-          <ScanButton
-            label={file ? t('registration.documents.rescan') : t('registration.documents.scan')}
-            hint={t('registration.documents.scanHint')}
-            onPress={() => {
-              void handleScan();
-            }}
-            disabled={captureDisabled}
-            busy={isScanning}
+        {/* TARJETA "Capturado ✓" READ-ONLY: los datos leídos por OCR como TEXTO (no inputs). Solo cuando
+            hay captura válida con campo crítico presente (modo documento) y no estamos en error de subida. */}
+        {isCaptured && !missingCritical && !isPhoto ? (
+          <CapturedCard
+            number={readout?.number}
+            numberLabel={t(formConfig.numberLabelKey ?? 'registration.documents.numberLabel')}
+            expiry={hasExpiry ? readout?.expiry : undefined}
+            expiryLabel={t('registration.documents.expiryLabel')}
           />
-          <CaptureButton
-            label={t('registration.documents.fromGallery')}
-            icon={<ImageGlyph size={18} color={theme.colors.ink} />}
-            onPress={pickFrom('library')}
-            disabled={captureDisabled}
-            busy={isPicking}
-          />
-        </View>
+        ) : null}
 
-        {/* Degradación honesta: si el escáner no está disponible, lo decimos y la galería es el camino. */}
+        {/* Fallback HONESTO del campo crítico: el OCR no leyó el número → reescaneo (NO un formulario). */}
+        {missingCritical && effectiveState !== 'uploading' && effectiveState !== 'success' ? (
+          <Banner
+            tone="warn"
+            title={t('registration.documents.criticalMissing.title')}
+            description={t('registration.documents.criticalMissing.body')}
+          />
+        ) : null}
+
+        {/* Acción de captura según el modo. En estado "capturado" válido el envío es automático: el botón
+            pasa a ser "volver a escanear". El botón de galería es el camino secundario del modo documento. */}
+        {!isSuccess ? (
+          <View style={[styles.captureCol, { gap: theme.spacing.sm }]}>
+            {isPhoto ? (
+              <PrimaryCaptureButton
+                label={
+                  file
+                    ? t('registration.documents.photo.retake')
+                    : t('registration.documents.photo.take')
+                }
+                hint={t('registration.documents.photo.hint')}
+                icon={<CameraGlyph size={20} color={theme.colors.accent} />}
+                onPress={pickFrom('camera')}
+                disabled={captureDisabled}
+                busy={isPicking}
+              />
+            ) : (
+              <PrimaryCaptureButton
+                label={
+                  file || missingCritical
+                    ? t('registration.documents.rescan')
+                    : t('registration.documents.scan')
+                }
+                hint={t('registration.documents.scanHint')}
+                icon={<ScanGlyph size={20} color={theme.colors.accent} />}
+                onPress={() => {
+                  // Desde un estado capturado/crítico, reescanear limpia primero el readout previo.
+                  if (file || missingCritical) {
+                    resetCapture();
+                  }
+                  void handleScan();
+                }}
+                disabled={captureDisabled}
+                busy={isScanning}
+              />
+            )}
+            {!isPhoto ? (
+              <CaptureButton
+                label={t('registration.documents.fromGallery')}
+                icon={<ImageGlyph size={18} color={theme.colors.ink} />}
+                onPress={pickFrom('library')}
+                disabled={captureDisabled}
+                busy={isPicking}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {scanUnavailable ? (
           <Banner
             tone="warn"
             title={t('registration.documents.scanUnavailable')}
             description={t('registration.documents.fromGallery')}
           />
-        ) : null}
-
-        {/* El campo de número se muestra SOLO para documentos numerados (licencia/SOAT/tarjeta). La foto
-            del vehículo (VEHICLE_PHOTO) es solo imagen: no se pide número. */}
-        {hasNumber ? (
-          <TextField
-            label={t(formConfig.numberLabelKey ?? '')}
-            placeholder={t(formConfig.numberPlaceholderKey ?? '')}
-            value={documentNumber}
-            onChangeText={(text) => {
-              setDocumentNumber(text);
-              // Si el conductor corrige el valor, deja de ser "el extraído": ocultamos el aviso.
-              if (autoNumber) {
-                setAutoNumber(false);
-              }
-            }}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            editable={!captureDisabled}
-            error={numberError}
-            // Degradación honesta: si el número vino del OCR, lo decimos y pedimos confirmarlo.
-            helperText={
-              autoNumber && !numberError
-                ? t('registration.documents.autofill.extracted')
-                : undefined
-            }
-            required
-          />
-        ) : null}
-        {/* El vencimiento se pide SOLO para documentos que vencen (licencia/SOAT). La tarjeta de
-            propiedad no vence en Perú: no se muestra el campo ni se exige, y se envía sin `expiresAt`. */}
-        {formConfig.hasExpiry ? (
-          <View style={{ gap: theme.spacing.xs }}>
-            <DateField
-              label={t('registration.documents.expiryLabel')}
-              value={expiry}
-              onChange={(iso) => {
-                setExpiry(iso);
-                // Una fecha elegida a mano deja de ser "la extraída": ocultamos el aviso.
-                if (autoExpiry) {
-                  setAutoExpiry(false);
-                }
-              }}
-              placeholder={t('registration.documents.expiryPlaceholder')}
-              // Un documento ya vencido no es válido: el picker no permite elegir fechas pasadas.
-              minimumDate={today}
-              disabled={captureDisabled}
-              error={expiryError}
-            />
-            {/* Degradación honesta: si el vencimiento vino del OCR, lo decimos y pedimos confirmarlo. */}
-            {autoExpiry && !expiryError ? (
-              <Text variant="footnote" color="inkSubtle">
-                {t('registration.documents.autofill.extracted')}
-              </Text>
-            ) : null}
-          </View>
         ) : null}
 
         {pickError ? (
@@ -573,7 +527,11 @@ export function RegistrationDocumentSheet({
         ) : null}
 
         <Text variant="footnote" color="inkSubtle">
-          {t('registration.documents.reviewNote')}
+          {t(
+            isPhoto
+              ? 'registration.documents.photo.reviewNote'
+              : 'registration.documents.reviewNote',
+          )}
         </Text>
       </View>
     </BottomSheet>
@@ -581,19 +539,81 @@ export function RegistrationDocumentSheet({
 }
 
 /**
- * Botón PRINCIPAL de escaneo: destacado (tinte de acento), con ícono de escáner, etiqueta y una pista
- * corta de cómo funciona. Comunica que esta es la acción preferida (bordes + auto-captura). Usa solo
- * tokens del tema.
+ * Tarjeta "Capturado ✓" READ-ONLY: muestra los datos que el OCR LEYÓ como TEXTO (no inputs), con un check
+ * de éxito. Es el corazón del flujo sin-formularios: el conductor VE lo que se leyó, no lo edita. Usa solo
+ * tokens del tema (colores/espaciado/radios + `hexAlpha` para el tinte de éxito).
  */
-function ScanButton({
+function CapturedCard({
+  number,
+  numberLabel,
+  expiry,
+  expiryLabel,
+}: {
+  number?: string;
+  numberLabel: string;
+  expiry?: string;
+  expiryLabel: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.capturedCard,
+        {
+          backgroundColor: hexAlpha(theme.colors.success, 0.1),
+          borderColor: hexAlpha(theme.colors.success, 0.4),
+          borderRadius: theme.radii.lg,
+          padding: theme.spacing.md,
+          gap: theme.spacing.sm,
+        },
+      ]}
+    >
+      <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
+        <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
+        <Text variant="headline" color="success">
+          {t('registration.documents.captured.title')}
+        </Text>
+      </View>
+      {number ? <ReadonlyRow label={numberLabel} value={number} /> : null}
+      {expiry ? <ReadonlyRow label={expiryLabel} value={expiry} /> : null}
+      <Text variant="footnote" color="inkSubtle">
+        {t('registration.documents.captured.hint')}
+      </Text>
+    </View>
+  );
+}
+
+/** Fila READ-ONLY etiqueta + valor (texto, NO input). */
+function ReadonlyRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View style={[styles.readonlyRow, { gap: theme.spacing.xs }]}>
+      <Text variant="footnote" color="inkSubtle">
+        {label}
+      </Text>
+      <Text variant="body" color="ink">
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Botón PRINCIPAL de captura: destacado (tinte de acento), con ícono, etiqueta y pista corta. Usa solo
+ * tokens del tema. El ícono lo provee el llamador para no acoplar el botón al modo.
+ */
+function PrimaryCaptureButton({
   label,
   hint,
+  icon,
   onPress,
   disabled,
   busy,
 }: {
   label: string;
   hint: string;
+  icon: React.ReactNode;
   onPress: () => void;
   disabled: boolean;
   busy: boolean;
@@ -621,11 +641,7 @@ function ScanButton({
       ]}
     >
       <View style={[styles.scanButtonRow, { gap: theme.spacing.sm }]}>
-        {busy ? (
-          <ActivityIndicator color={theme.colors.accent} />
-        ) : (
-          <ScanGlyph size={20} color={theme.colors.accent} />
-        )}
+        {busy ? <ActivityIndicator color={theme.colors.accent} /> : icon}
         <Text variant="headline" color="accent">
           {label}
         </Text>
@@ -695,6 +711,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  capturedCard: { borderWidth: 1 },
+  capturedHeader: { flexDirection: 'row', alignItems: 'center' },
+  readonlyRow: { flexDirection: 'column' },
   captureCol: { flexDirection: 'column' },
   scanButton: {
     flexDirection: 'column',

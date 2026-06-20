@@ -38,12 +38,22 @@ export interface ParsedSoat {
   expiresAt?: string;
 }
 
-/** Campos extraíbles de la tarjeta de propiedad vehicular. */
+/**
+ * Campos extraíbles de la tarjeta de propiedad / TIVe vehicular (GROUND TRUTH, imágenes oficiales). Espeja
+ * `ExtractedPropertyCardData` del contrato (Lote 0): placa, marca, modelo, año de fabricación y la
+ * categoría vehicular MTC (`M1`/`N1`/`L3`/`M1SC`…), que la tarjeta imprime EXPLÍCITA.
+ */
 export interface ParsedPropertyCard {
   /** Placa del vehículo (formato peruano, p. ej. `ABC-123`). */
   plate?: string;
-  /** Propietario (nombre o razón social) tal como figura en la tarjeta. */
-  owner?: string;
+  /** Marca del vehículo (`Marca:`). */
+  make?: string;
+  /** Modelo del vehículo (`Modelo:`). */
+  model?: string;
+  /** Año de fabricación (`Año de Fab.:`), como número de 4 dígitos. */
+  year?: number;
+  /** Código de categoría vehicular MTC impreso explícito (`Categoría: M1`). Formato `[LMNO]\d[A-Z]*`. */
+  mtcCategory?: string;
 }
 
 /**

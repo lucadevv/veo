@@ -194,8 +194,24 @@ describe('validateVehicle', () => {
     }
   });
 
-  it('rechaza si no se eligió un modelo del catálogo (modelSpecId vacío)', () => {
+  it('RAMA TEXTO LIBRE (Lote 2 · scan-first): sin modelSpecId pero con make+model → envía make/model', () => {
+    // Tarjeta escaneada: el OCR dejó marca/modelo a texto libre y NO hay modelSpecId (catálogo no tocado).
+    // El contrato (`registerVehicleRequest.refine`) acepta esta rama; el body lleva make+model, no modelSpecId.
     const result = validateVehicle({ ...baseVehicle, modelSpecId: '   ' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request).toEqual({
+        vehicleType: 'MOTO',
+        plate: 'ABC-123',
+        year: 2021,
+        make: 'Honda',
+        model: 'CB 190R',
+      });
+    }
+  });
+
+  it('rechaza si no hay NI modelo del catálogo NI marca/modelo a texto libre', () => {
+    const result = validateVehicle({ ...baseVehicle, modelSpecId: '', brand: '', model: '' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.model).toBe('model_not_selected');

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DocumentSide, type FleetDocumentType } from '@veo/shared-types';
+import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
 import { useDocumentUploader, useRepositories } from '../../../../core/di/useDi';
 import {
   UploadAndRegisterDocumentUseCase,
@@ -109,6 +110,12 @@ export interface UploadDocumentVars {
   documentNumber?: string;
   /** Vencimiento en ISO-8601 (si el conductor lo ingresó / es requerido). */
   expiresAt?: string;
+  /** Lote 1: data extraída por OCR on-device (unión discriminada). Solo si el escaneo la produjo. */
+  extractedData?: ExtractedDocumentData;
+  /** Motor de OCR que produjo `extractedData` (enum cerrado). Trazabilidad. Solo si hay `extractedData`. */
+  ocrEngine?: OcrEngineValue;
+  /** Instante de la extracción OCR (ISO-8601). Solo si hay `extractedData`. */
+  ocrAt?: string;
 }
 
 /**
@@ -153,6 +160,9 @@ export function useUploadAndRegisterDocument() {
         metadata: {
           ...(vars.documentNumber ? { documentNumber: vars.documentNumber } : {}),
           ...(vars.expiresAt ? { expiresAt: vars.expiresAt } : {}),
+          ...(vars.extractedData ? { extractedData: vars.extractedData } : {}),
+          ...(vars.ocrEngine ? { ocrEngine: vars.ocrEngine } : {}),
+          ...(vars.ocrAt ? { ocrAt: vars.ocrAt } : {}),
         },
       }),
     onSuccess: () => {

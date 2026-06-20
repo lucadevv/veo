@@ -53,6 +53,37 @@ export function isDocumentScannerError(
   return code === undefined || error.code === code;
 }
 
+/**
+ * RESULTADO ACCIONABLE de un intento de escaneo que NO produjo captura, tipado como union (nunca un
+ * string de dominio suelto comparado contra un literal). Es el "motivo" que los hooks de escaneo
+ * (`useScanDni`/`useScanPropertyCard`) exponen para que la presentación muestre el banner correcto:
+ *  - `scan-cancelled`: el conductor cerró el escáner sin capturar (`E_CANCELLED`). Reintentable.
+ *  - `scan-failed`: la captura falló (sin imágenes, o `E_SCAN_FAILED` real). Reintentable.
+ *
+ * `E_UNAVAILABLE` NO viaja por acá: se surfacea como `unavailable` (fallback a carga manual), no como
+ * mensaje de error. La SUBIDA fallida tampoco: la resuelve el `*Continue` con su propio resultado tipado.
+ */
+export type ScanMessage = 'scan-cancelled' | 'scan-failed';
+
+/**
+ * Mapea el `ScanMessage` tipado a su clave i18n completa (`registration.documents.*`). El `switch`
+ * exhaustivo sobre el union (con `satisfies never` en el default) garantiza en COMPILACIÓN que todo
+ * caso nuevo del union se contemple acá — sin comparar el valor de dominio contra un literal suelto.
+ */
+export function scanMessageI18nKey(message: ScanMessage): string {
+  switch (message) {
+    case 'scan-cancelled':
+      return 'registration.documents.scanCancelled';
+    case 'scan-failed':
+      return 'registration.documents.scanFailed';
+    default: {
+      // Exhaustividad en compilación: si se agrega un caso al union y no se mapea, esto NO compila.
+      const exhaustive: never = message;
+      return exhaustive;
+    }
+  }
+}
+
 /** Opciones del escaneo (la implementación aplica defaults sensatos). */
 export interface DocumentScanOptions {
   /**

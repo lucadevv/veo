@@ -1,5 +1,4 @@
 import React, { type ReactElement } from 'react';
-import { TextInput } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 import TestRenderer, { act } from 'react-test-renderer';
 import { ThemeProvider, driverTheme } from '@veo/ui-kit';
@@ -11,16 +10,18 @@ import {
 } from '../RegistrationDocumentSheet';
 import {
   DocumentScannerError,
+  type ImageSource,
   type PickedImage,
   type ScannedDocument,
 } from '../../../../documents/domain';
 import type { RegistrationDocumentFormType } from '../registrationDocumentForm';
 
 /**
- * El sheet de captura de documentos del alta es CONTEXTUAL por tipo:
- *  - LICENSE_A1 / SOAT: muestran y EXIGEN el campo de vencimiento, y el número usa su etiqueta propia.
- *  - PROPERTY_CARD: NO muestra vencimiento (la tarjeta de propiedad no vence en Perú) y se envía SIN
- *    `expiresAt` (el contrato `addDocumentRequest.expiresAt` es opcional — sin cambio de backend).
+ * El sheet de captura de documentos del alta es el flujo "Capturado ✓" SIN formularios (Lote 1):
+ *  - El conductor ESCANEA; el OCR lee número/vencimiento y se ENVÍA AUTOMÁTICAMENTE (sin campos editables).
+ *  - El payload lleva `extractedData` (mapeada al contrato) + `ocrEngine` + `ocrAt` para trazabilidad.
+ *  - Si el OCR NO leyó el campo CRÍTICO (número), NO se envía: se pide REESCANEAR (fallback honesto).
+ *  - VEHICLE_PHOTO (modo foto) se captura con cámara normal (sin OCR) y se envía directo.
  */
 
 const SAFE_AREA_METRICS: Metrics = {
@@ -36,7 +37,7 @@ function withProviders(node: ReactElement): React.JSX.Element {
   );
 }
 
-/** Archivo capturado de mentira: el flujo lo trata como opaco (la foto es la fuente de verdad). */
+/** Archivo capturado de mentira (galería/cámara): el flujo lo trata como opaco. */
 const FILE: PickedImage = {
   uri: 'file:///tmp/doc.jpg',
   mimeType: 'image/jpeg',
@@ -49,21 +50,32 @@ const FILE: PickedImage = {
 /** Imagen base64 (sin prefijo data:) que devuelve el escáner nativo (croppeada + corregida). */
 const SCANNED_BASE64 = '/9j/scanned-doc-base64';
 
-/** Resultado del escáner por defecto: una imagen y SIN texto OCR (página sin texto reconocible). */
-const SCANNED_NO_TEXT: ScannedDocument = { images: [SCANNED_BASE64], textLines: [[]] };
+/** Texto OCR de un SOAT legible (GROUND TRUTH: N° Póliza - Certificado combinado + Hasta). */
+const SOAT_POLICY_NUMBER = '2012044701 - 1';
+const SOAT_LINES = [
+  'SOAT',
+  'N° Póliza - Certificado: 2012044701 - 1',
+  'Vigencia Desde 01/01/2026 Hasta 31/12/2026',
+];
+/** Texto OCR de una licencia legible (GROUND TRUTH: Nro de Licencia + Fecha de Revalidacion). */
+const LICENSE_LINES = ['Nro de Licencia Q12345678', 'Categoría A-I', 'Fecha de Revalidacion 30/06/2028'];
 
 interface Harness {
   renderer: TestRenderer.ReactTestRenderer;
   onSubmit: jest.Mock<void, [RegistrationDocumentInput]>;
   onScan: jest.Mock<Promise<ScannedDocument>, []>;
-  onPick: jest.Mock<Promise<PickedImage | null>, []>;
+  onPick: jest.Mock<Promise<PickedImage | null>, [ImageSource]>;
 }
 
 interface RenderOverrides {
-  /** Comportamiento del escáner nativo (por defecto: una imagen escaneada, sin texto OCR). */
   onScan?: () => Promise<ScannedDocument>;
-  /** Comportamiento de la galería (por defecto: devuelve un archivo). */
-  onPick?: () => Promise<PickedImage | null>;
+  onPick?: (source: ImageSource) => Promise<PickedImage | null>;
+  /** `false` espeja el modo foto de la pantalla (no se inyecta `onScan`). */
+  withScan?: boolean;
+}
+
+function scanned(lines: string[]): ScannedDocument {
+  return { images: [SCANNED_BASE64], textLines: [lines] };
 }
 
 function renderSheet(
@@ -71,15 +83,13 @@ function renderSheet(
   overrides: RenderOverrides = {},
 ): Harness {
   const onSubmit = jest.fn<void, [RegistrationDocumentInput]>();
-  // Por defecto el escáner devuelve una imagen real SIN texto OCR (el conductor escaneó OK; el
-  // auto-llenado se prueba aparte con líneas explícitas).
   const onScan = jest.fn<Promise<ScannedDocument>, []>(
-    overrides.onScan ?? (async () => SCANNED_NO_TEXT),
+    overrides.onScan ?? (async () => scanned([])),
   );
-  // Por defecto la galería devuelve un archivo (fallback feliz).
-  const onPick = jest.fn<Promise<PickedImage | null>, []>(
+  const onPick = jest.fn<Promise<PickedImage | null>, [ImageSource]>(
     overrides.onPick ?? (async () => FILE),
   );
+  const withScan = overrides.withScan ?? true;
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
     renderer = TestRenderer.create(
@@ -91,7 +101,7 @@ function renderSheet(
           uploadState="idle"
           onClose={jest.fn()}
           onPick={onPick}
-          onScan={onScan}
+          {...(withScan ? { onScan } : {})}
           onSubmit={onSubmit}
         />,
       ),
@@ -103,18 +113,6 @@ function renderSheet(
 /** Texto exacto resuelto por i18n (la app corre es-PE). */
 function tr(key: string): string {
   return i18n.t(key);
-}
-
-/** ¿Existe un nodo con este accessibilityLabel? (el DateField expone su label así). */
-function hasAccessibilityLabel(renderer: TestRenderer.ReactTestRenderer, label: string): boolean {
-  return (
-    renderer.root.findAll((node) => node.props.accessibilityLabel === label).length > 0
-  );
-}
-
-/** Encuentra todos los TextInput montados (el campo de número es el único). */
-function findInputs(renderer: TestRenderer.ReactTestRenderer): TestRenderer.ReactTestInstance[] {
-  return renderer.root.findAllByType(TextInput);
 }
 
 /** Invoca el onPress del botón con este accessibilityLabel (el último si hay varios). */
@@ -139,20 +137,14 @@ async function scan(renderer: TestRenderer.ReactTestRenderer): Promise<void> {
   });
 }
 
-/** Elige una imagen de la galería (fallback) resolviendo las microtareas del onPick asíncrono. */
-async function pickFromGallery(renderer: TestRenderer.ReactTestRenderer): Promise<void> {
+/** Toma una foto con la cámara (acción principal del modo foto) resolviendo el onPick asíncrono. */
+async function takePhoto(renderer: TestRenderer.ReactTestRenderer): Promise<void> {
   await act(async () => {
-    pressByLabel(renderer, tr('registration.documents.fromGallery'));
+    pressByLabel(renderer, tr('registration.documents.photo.take'));
   });
 }
 
-/** Escanea el documento (habilita el envío) y dispara el CTA "Guardar". */
-async function captureAndSubmit(renderer: TestRenderer.ReactTestRenderer): Promise<void> {
-  await scan(renderer);
-  pressByLabel(renderer, tr('registration.documents.save'));
-}
-
-/** ¿Hay un preview de imagen montado con esta URI? (el preview usa <Image source={{ uri }}>). */
+/** ¿Hay un preview/imagen montado con esta URI? */
 function hasPreviewWithUri(renderer: TestRenderer.ReactTestRenderer, uri: string): boolean {
   return (
     renderer.root.findAll(
@@ -161,113 +153,92 @@ function hasPreviewWithUri(renderer: TestRenderer.ReactTestRenderer, uri: string
   );
 }
 
-/** ¿Hay algún nodo cuyo texto sea exactamente `text`? (para verificar banners/avisos por su título). */
+/** ¿Hay algún nodo cuyo texto sea exactamente `text`? */
 function hasText(renderer: TestRenderer.ReactTestRenderer, text: string): boolean {
   return renderer.root.findAll((node) => node.props.children === text).length > 0;
 }
 
-describe('RegistrationDocumentSheet · formulario contextual por tipo de documento', () => {
-  it('LICENSE_A1: usa la etiqueta de número de la licencia y MUESTRA el campo de vencimiento', () => {
-    const { renderer } = renderSheet(FleetDocumentType.LICENSE_A1);
-    const numberLabel = tr('registration.documents.number.LICENSE_A1.label');
-    const expiryLabel = tr('registration.documents.expiryLabel');
-
-    // El campo de número expone su etiqueta propia (el TextField pasa el label como accessibilityLabel/placeholder).
-    const numberPlaceholder = tr('registration.documents.number.LICENSE_A1.placeholder');
-    const input = findInputs(renderer)[0];
-    expect(input?.props.placeholder).toBe(numberPlaceholder);
-    expect(numberLabel).toBe('N° de licencia');
-
-    // El DateField de vencimiento está presente (la licencia vence).
-    expect(hasAccessibilityLabel(renderer, expiryLabel)).toBe(true);
-  });
-
-  it('SOAT: usa la etiqueta de número del SOAT y MUESTRA el campo de vencimiento', () => {
-    const { renderer } = renderSheet(FleetDocumentType.SOAT);
-    const numberPlaceholder = tr('registration.documents.number.SOAT.placeholder');
-    const expiryLabel = tr('registration.documents.expiryLabel');
-
-    expect(tr('registration.documents.number.SOAT.label')).toBe('N° de póliza (SOAT)');
-    expect(findInputs(renderer)[0]?.props.placeholder).toBe(numberPlaceholder);
-    expect(hasAccessibilityLabel(renderer, expiryLabel)).toBe(true);
-  });
-
-  it('PROPERTY_CARD: usa su etiqueta de número y NO muestra el campo de vencimiento', () => {
-    const { renderer } = renderSheet(FleetDocumentType.PROPERTY_CARD);
-    const expiryLabel = tr('registration.documents.expiryLabel');
-
-    expect(tr('registration.documents.number.PROPERTY_CARD.label')).toBe(
-      'N° de tarjeta de propiedad',
-    );
-    // La tarjeta de propiedad no vence: el DateField NO se monta.
-    expect(hasAccessibilityLabel(renderer, expiryLabel)).toBe(false);
-  });
-
-  it('PROPERTY_CARD: envía el documento SIN expiresAtIso (expiresAt opcional en el contrato)', async () => {
-    const { renderer, onSubmit } = renderSheet(FleetDocumentType.PROPERTY_CARD);
-
-    // Llena el número (PROPERTY_CARD no exige vencimiento, así que con número + foto basta).
-    const input = findInputs(renderer)[0];
-    act(() => {
-      input?.props.onChangeText('TP-12345');
+describe('RegistrationDocumentSheet · "Capturado ✓" auto-envío (sin formularios)', () => {
+  it('SOAT legible: escanear → auto-envía con extractedData + ocrEngine + ocrAt (sin paso de form)', async () => {
+    const { renderer, onSubmit } = renderSheet(FleetDocumentType.SOAT, {
+      onScan: async () => scanned(SOAT_LINES),
     });
-
-    await captureAndSubmit(renderer);
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const payload = onSubmit.mock.calls[0]?.[0];
-    expect(payload?.documentNumber).toBe('TP-12345');
-    // El sheet NO incluye `expiresAtIso` para un documento que no vence.
-    expect(payload && 'expiresAtIso' in payload).toBe(false);
-    // El archivo enviado es el del ESCÁNER (acción principal), modelado como data: URI jpeg.
-    expect(payload?.file.uri).toBe(`data:image/jpeg;base64,${SCANNED_BASE64}`);
-    expect(payload?.file.mimeType).toBe('image/jpeg');
-  });
-
-  it('LICENSE_A1: NO envía mientras falte el vencimiento (requerido para documentos que vencen)', async () => {
-    const { renderer, onSubmit } = renderSheet(FleetDocumentType.LICENSE_A1);
-
-    const input = findInputs(renderer)[0];
-    act(() => {
-      input?.props.onChangeText('Q-99887766');
-    });
-
-    // Escanea + intenta enviar SIN fecha de vencimiento → el sheet bloquea el envío.
-    await captureAndSubmit(renderer);
-
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-});
-
-describe('RegistrationDocumentSheet · escáner de documentos (escanear / cancelar / no disponible)', () => {
-  it('escaneo OK: convierte la imagen base64 en un data: URI y la muestra en el preview', async () => {
-    const { renderer, onScan } = renderSheet(FleetDocumentType.PROPERTY_CARD);
 
     await scan(renderer);
 
-    expect(onScan).toHaveBeenCalledTimes(1);
-    // El sheet toma images[0] y la modela como data: URI para reusar el pipeline de subida tal cual.
-    expect(hasPreviewWithUri(renderer, `data:image/jpeg;base64,${SCANNED_BASE64}`)).toBe(true);
+    // Auto-envío inmediato tras el escaneo válido (no hay botón "Guardar" intermedio).
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload?.documentNumber).toBe(SOAT_POLICY_NUMBER);
+    // El archivo es el del ESCÁNER, modelado como data: URI jpeg.
+    expect(payload?.file.uri).toBe(`data:image/jpeg;base64,${SCANNED_BASE64}`);
+    // Lote 1: la data OCR mapeada al contrato (ExtractedSoatData) + trazabilidad del motor.
+    expect(payload?.extractedData).toEqual({
+      type: FleetDocumentType.SOAT,
+      policyNumber: SOAT_POLICY_NUMBER,
+      expiresAt: '2026-12-31',
+    });
+    expect(['ios-visionkit', 'android-mlkit']).toContain(payload?.ocrEngine);
+    expect(typeof payload?.ocrAt).toBe('string');
+    // El vencimiento (fin de vigencia) viaja como ISO.
+    expect(payload?.expiresAtIso?.slice(0, 10)).toBe('2026-12-31');
+    // Se muestra la tarjeta "Capturado ✓".
+    expect(hasText(renderer, tr('registration.documents.captured.title'))).toBe(true);
   });
 
-  it('escaneo OK → permite enviar: onSubmit recibe el file escaneado (data: URI, mime jpeg)', async () => {
-    const { renderer, onSubmit } = renderSheet(FleetDocumentType.PROPERTY_CARD);
-
-    const input = findInputs(renderer)[0];
-    act(() => {
-      input?.props.onChangeText('TP-55555');
+  it('licencia legible: escanear → auto-envía con ExtractedLicenseA1Data (number→documentNumber)', async () => {
+    const { renderer, onSubmit } = renderSheet(FleetDocumentType.LICENSE_A1, {
+      onScan: async () => scanned(LICENSE_LINES),
     });
 
-    await captureAndSubmit(renderer);
+    await scan(renderer);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     const payload = onSubmit.mock.calls[0]?.[0];
-    expect(payload?.file.uri).toBe(`data:image/jpeg;base64,${SCANNED_BASE64}`);
-    expect(payload?.file.mimeType).toBe('image/jpeg');
+    expect(payload?.documentNumber).toBe('Q12345678');
+    expect(payload?.extractedData).toEqual({
+      type: FleetDocumentType.LICENSE_A1,
+      documentNumber: 'Q12345678',
+      expiresAt: '2028-06-30',
+    });
+    expect(hasPreviewWithUri(renderer, `data:image/jpeg;base64,${SCANNED_BASE64}`)).toBe(true);
   });
 
-  it('E_CANCELLED: el conductor cancela → NO hay preview ni error de fallo (cancelar no es fallo)', async () => {
-    const { renderer, onSubmit } = renderSheet(FleetDocumentType.PROPERTY_CARD, {
+  it('campo CRÍTICO faltante (SOAT sin número): NO envía y pide REESCANEAR (no un form)', async () => {
+    // El OCR no ancla el número de póliza (sin la etiqueta "Póliza" no se adivina) → crítico ausente.
+    const { renderer, onSubmit } = renderSheet(FleetDocumentType.SOAT, {
+      onScan: async () => scanned(['texto', 'sin', 'campos', 'reconocibles']),
+    });
+
+    await scan(renderer);
+
+    // No se envía nada (degradación honesta) y aparece el aviso de reescaneo (título del banner).
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(hasText(renderer, tr('registration.documents.criticalMissing.title'))).toBe(true);
+    // NO se muestra la tarjeta "Capturado ✓" (no hubo lectura válida).
+    expect(hasText(renderer, tr('registration.documents.captured.title'))).toBe(false);
+    // La acción ofrecida es REESCANEAR (no un formulario editable).
+    expect(hasText(renderer, tr('registration.documents.rescan'))).toBe(true);
+  });
+
+  it('FIX B · SOAT con número pero SIN vencimiento: NO envía y pide REESCANEAR (validez legal)', async () => {
+    // El OCR ancla la póliza pero no hay líneas de vigencia → el vencimiento (crítico para un tipo que
+    // vence) queda ausente: el gating bloquea el auto-envío en silencio.
+    const { renderer, onSubmit } = renderSheet(FleetDocumentType.SOAT, {
+      onScan: async () => scanned(['SOAT', 'N° Póliza - Certificado: 2012044701 - 1']),
+    });
+
+    await scan(renderer);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(hasText(renderer, tr('registration.documents.criticalMissing.title'))).toBe(true);
+    expect(hasText(renderer, tr('registration.documents.captured.title'))).toBe(false);
+  });
+});
+
+describe('RegistrationDocumentSheet · escáner (cancelar / no disponible / falla)', () => {
+  it('E_CANCELLED: cancelar no es fallo → ni preview ni banner de error, y no se envió', async () => {
+    const { renderer, onSubmit } = renderSheet(FleetDocumentType.SOAT, {
       onScan: async () => {
         throw new DocumentScannerError('E_CANCELLED');
       },
@@ -275,16 +246,13 @@ describe('RegistrationDocumentSheet · escáner de documentos (escanear / cancel
 
     await scan(renderer);
 
-    // No quedó imagen capturada y el sheet NO muestra el banner de fallo de escaneo.
     expect(hasPreviewWithUri(renderer, `data:image/jpeg;base64,${SCANNED_BASE64}`)).toBe(false);
     expect(hasText(renderer, tr('registration.documents.scanFailed'))).toBe(false);
-    // El aviso de cancelación es informativo (no bloquea): intentar enviar sin archivo no llama a onSubmit.
-    pressByLabel(renderer, tr('registration.documents.save'));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('E_UNAVAILABLE: el escáner no está → muestra el aviso de fallback y la galería sí captura', async () => {
-    const { renderer, onPick } = renderSheet(FleetDocumentType.PROPERTY_CARD, {
+  it('E_UNAVAILABLE: el escáner no está → aviso de fallback de galería', async () => {
+    const { renderer } = renderSheet(FleetDocumentType.SOAT, {
       onScan: async () => {
         throw new DocumentScannerError('E_UNAVAILABLE');
       },
@@ -292,17 +260,11 @@ describe('RegistrationDocumentSheet · escáner de documentos (escanear / cancel
 
     await scan(renderer);
 
-    // Degradación honesta: aparece el aviso de "escáner no disponible" (título del banner de fallback).
     expect(hasText(renderer, tr('registration.documents.scanUnavailable'))).toBe(true);
-
-    // La galería (fallback) sigue capturando: tras elegir, hay preview con el archivo de la galería.
-    await pickFromGallery(renderer);
-    expect(onPick).toHaveBeenCalledTimes(1);
-    expect(hasPreviewWithUri(renderer, FILE.uri)).toBe(true);
   });
 
-  it('E_SCAN_FAILED: el escaneo falla → muestra el banner de error de escaneo (reintentable)', async () => {
-    const { renderer } = renderSheet(FleetDocumentType.PROPERTY_CARD, {
+  it('E_SCAN_FAILED: el escaneo falla → banner de error de escaneo (reintentable)', async () => {
+    const { renderer } = renderSheet(FleetDocumentType.SOAT, {
       onScan: async () => {
         throw new DocumentScannerError('E_SCAN_FAILED');
       },
@@ -314,53 +276,39 @@ describe('RegistrationDocumentSheet · escáner de documentos (escanear / cancel
   });
 });
 
-describe('RegistrationDocumentSheet · auto-llenado desde el OCR del escaneo', () => {
-  it('SOAT: pre-llena número de póliza + vencimiento desde textLines y avisa "extraído del documento"', async () => {
-    const { renderer } = renderSheet(FleetDocumentType.SOAT, {
-      onScan: async (): Promise<ScannedDocument> => ({
-        images: [SCANNED_BASE64],
-        textLines: [['SOAT', 'N° de Póliza: POL-2024-99887', 'Vigencia Desde 01/01/2026 Hasta 31/12/2026']],
-      }),
+describe('RegistrationDocumentSheet · modo foto (vehículo, sin OCR)', () => {
+  it('VEHICLE_PHOTO: cámara normal → auto-envía sin número, sin OCR, con el file de la cámara', async () => {
+    const { renderer, onPick, onScan, onSubmit } = renderSheet(FleetDocumentType.VEHICLE_PHOTO, {
+      withScan: false,
     });
 
-    await scan(renderer);
+    // Acción principal es "Tomar foto" (no "Escanear documento"); copy de foto.
+    expect(hasText(renderer, tr('registration.documents.photo.take'))).toBe(true);
+    expect(hasText(renderer, tr('registration.documents.scan'))).toBe(false);
+    expect(hasText(renderer, tr('registration.documents.photo.reviewNote'))).toBe(true);
 
-    // El número de póliza quedó pre-llenado en el campo (el TextField refleja el value extraído).
-    expect(findInputs(renderer)[0]?.props.value).toBe('POL-2024-99887');
-    // El aviso de degradación honesta aparece (campo auto-extraído → confirmá).
-    expect(hasText(renderer, tr('registration.documents.autofill.extracted'))).toBe(true);
-  });
+    await takePhoto(renderer);
 
-  it('SOAT: el envío usa el vencimiento extraído (fin de vigencia 31/12/2026, no el inicio)', async () => {
-    const { renderer, onSubmit } = renderSheet(FleetDocumentType.SOAT, {
-      onScan: async (): Promise<ScannedDocument> => ({
-        images: [SCANNED_BASE64],
-        textLines: [['Póliza: POL-77', 'Vigencia Desde 01/01/2026 Hasta 31/12/2026']],
-      }),
-    });
-
-    await scan(renderer);
-    pressByLabel(renderer, tr('registration.documents.save'));
-
+    // La cámara se abrió vía el image-picker con source "camera"; el escáner NUNCA se invocó.
+    expect(onPick).toHaveBeenCalledWith('camera');
+    expect(onScan).not.toHaveBeenCalled();
+    expect(hasPreviewWithUri(renderer, FILE.uri)).toBe(true);
+    // Auto-envío directo: sin número, sin expiresAt, sin extractedData (no hay OCR de la foto).
     expect(onSubmit).toHaveBeenCalledTimes(1);
     const payload = onSubmit.mock.calls[0]?.[0];
-    expect(payload?.documentNumber).toBe('POL-77');
-    // El sheet normaliza AAAA-MM-DD a ISO; el día (UTC) es el 31/12/2026 (fin de vigencia).
-    expect(payload?.expiresAtIso?.slice(0, 10)).toBe('2026-12-31');
+    // FIX D-1: para los tipos SIN número (foto del vehículo) el campo `documentNumber` se OMITE del payload
+    // (no se manda `''`) — coherente con el contrato `addDocumentRequest` (opcional por tipo).
+    expect(payload && 'documentNumber' in payload).toBe(false);
+    expect(payload?.documentNumber).toBeUndefined();
+    expect(payload && 'expiresAtIso' in payload).toBe(false);
+    expect(payload?.extractedData).toBeUndefined();
+    expect(payload?.file.uri).toBe(FILE.uri);
   });
 
-  it('OCR sin texto útil: NO pre-llena nada (no inventa) y el aviso de extraído no aparece', async () => {
-    const { renderer } = renderSheet(FleetDocumentType.SOAT, {
-      onScan: async (): Promise<ScannedDocument> => ({
-        images: [SCANNED_BASE64],
-        textLines: [['texto', 'sin', 'campos', 'reconocibles']],
-      }),
-    });
-
-    await scan(renderer);
-
-    // El campo de número sigue vacío (degradación honesta: tipeo manual).
-    expect(findInputs(renderer)[0]?.props.value).toBe('');
-    expect(hasText(renderer, tr('registration.documents.autofill.extracted'))).toBe(false);
+  it('LICENSE_A1: modo documento → acción principal es el ESCÁNER (copy de documento)', () => {
+    const { renderer } = renderSheet(FleetDocumentType.LICENSE_A1);
+    expect(hasText(renderer, tr('registration.documents.scan'))).toBe(true);
+    expect(hasText(renderer, tr('registration.documents.photo.take'))).toBe(false);
+    expect(hasText(renderer, tr('registration.documents.reviewNote'))).toBe(true);
   });
 });

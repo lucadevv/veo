@@ -1,0 +1,81 @@
+import { FleetDocumentType } from '@veo/shared-types';
+import {
+  parsedDniToExtracted,
+  parsedLicenseToExtracted,
+  parsedSoatToExtracted,
+} from '../ocr/extracted-data-mapper';
+import type { ParsedDni, ParsedLicense, ParsedSoat } from '../ocr/parsed-document';
+
+/**
+ * Pruebas del MAPPER `ParsedX → ExtractedDocumentData` (Lote 1 · onboarding sin-formularios). El mapper
+ * es el seam load-bearing del contrato cliente→backend: discrimina por `FleetDocumentType`, TRADUCE los
+ * nombres divergentes (parser↔contrato) y OMITE lo que el OCR no leyó. Si esto falla, el backend tira 400
+ * (`forbidNonWhitelisted`) o se envía data inventada.
+ */
+describe('extracted-data-mapper · ParsedX → ExtractedDocumentData (degradación honesta)', () => {
+  describe('DNI · parsedDniToExtracted', () => {
+    it('mapea los 3 campos y TRADUCE birthDate → birthdate (minúscula del contrato)', () => {
+      const parsed: ParsedDni = {
+        fullName: 'QUISPE MAMANI CARLOS',
+        documentNumber: '70123456',
+        birthDate: '1990-03-15',
+      };
+      expect(parsedDniToExtracted(parsed)).toEqual({
+        type: FleetDocumentType.DNI,
+        fullName: 'QUISPE MAMANI CARLOS',
+        documentNumber: '70123456',
+        birthdate: '1990-03-15',
+      });
+    });
+
+    it('OMITE los campos que el OCR no leyó (no inyecta undefined)', () => {
+      const result = parsedDniToExtracted({ documentNumber: '70123456' });
+      expect(result).toEqual({ type: FleetDocumentType.DNI, documentNumber: '70123456' });
+      expect(result).not.toHaveProperty('fullName');
+      expect(result).not.toHaveProperty('birthdate');
+    });
+
+    it('un parse vacío produce SOLO el discriminante (señal de "nada leído" para el gating)', () => {
+      expect(parsedDniToExtracted({})).toEqual({ type: FleetDocumentType.DNI });
+    });
+  });
+
+  describe('SOAT · parsedSoatToExtracted', () => {
+    it('mapea policyNumber + expiresAt con el discriminante SOAT', () => {
+      const parsed: ParsedSoat = { policyNumber: 'POL-2026-0099', expiresAt: '2027-01-31' };
+      expect(parsedSoatToExtracted(parsed)).toEqual({
+        type: FleetDocumentType.SOAT,
+        policyNumber: 'POL-2026-0099',
+        expiresAt: '2027-01-31',
+      });
+    });
+
+    it('OMITE expiresAt cuando el OCR solo leyó la póliza', () => {
+      const result = parsedSoatToExtracted({ policyNumber: 'POL-1' });
+      expect(result).toEqual({ type: FleetDocumentType.SOAT, policyNumber: 'POL-1' });
+      expect(result).not.toHaveProperty('expiresAt');
+    });
+  });
+
+  describe('Licencia · parsedLicenseToExtracted', () => {
+    it('TRADUCE number → documentNumber y DESCARTA category (no está en el contrato)', () => {
+      const parsed: ParsedLicense = {
+        number: 'Q12345678',
+        category: 'A-I',
+        expiresAt: '2028-06-30',
+      };
+      const result = parsedLicenseToExtracted(parsed);
+      expect(result).toEqual({
+        type: FleetDocumentType.LICENSE_A1,
+        documentNumber: 'Q12345678',
+        expiresAt: '2028-06-30',
+      });
+      // La categoría NO viaja (el contrato de la licencia no la tiene).
+      expect(result).not.toHaveProperty('category');
+    });
+
+    it('OMITE lo no leído (parse vacío → solo discriminante)', () => {
+      expect(parsedLicenseToExtracted({})).toEqual({ type: FleetDocumentType.LICENSE_A1 });
+    });
+  });
+});

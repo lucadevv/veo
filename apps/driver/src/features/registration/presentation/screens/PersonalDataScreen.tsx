@@ -1,250 +1,217 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { IconAccount, IconDocument } from '../../../../shared/presentation/icons';
+import { IconCheck } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { DateField } from '../../../../shared/presentation/components/DateField';
+import { hexAlpha } from '../components';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
-import {
-  PersonalDataValidationError,
-  maxBirthDate,
-  minBirthDate,
-  type PersonalDataErrors,
-} from '../../domain';
+import { RegistrationStep } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
-import { useUpdatePersonalData } from '../hooks/useRegistrationWizard';
+import { usePersonalDataContinue } from '../hooks/usePersonalDataContinue';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
 import {
   RegistrationExitSheet,
-  RegistrationField,
   RegistrationHeader,
   RegistrationProgress,
   ScanDniSheet,
 } from '../components';
-import type { DniAutofillResult } from '../hooks/useScanDni';
 
 type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
 
-/** Paso 1 del alta: datos personales como aparecen en el DNI (drv-04). PATCH /drivers/me/personal. */
+/**
+ * Paso 1 del alta: datos personales del DNI (drv-04) · onboarding SIN formularios (Lote 1). El conductor
+ * ESCANEA el DNI; el OCR lee nombre/DNI/nacimiento y se muestran en una tarjeta "Capturado ✓" READ-ONLY
+ * (texto, NO inputs). Al continuar: `PATCH /drivers/me/personal` con la data OCR + subida del DNI con su
+ * `extractedData`. NO hay tipeo manual: si el OCR no leyó el NÚMERO de DNI (campo crítico), se pide
+ * reescanear (degradación honesta), nunca un formulario.
+ */
 export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const personal = useRegistrationStore((s) => s.personal);
-  const setPersonal = useRegistrationStore((s) => s.setPersonal);
+  // Las caras del DNI escaneado (anverso = miniatura de la tarjeta "DNI capturado ✓"). Es la fuente de
+  // verdad de "se capturó un DNI" INDEPENDIENTE del OCR: la imagen viaja aunque el texto no se lea.
+  const pendingDni = useRegistrationStore((s) => s.pendingDni);
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
-  const updatePersonalData = useUpdatePersonalData();
+  // Orquesta el continue: PATCH /personal (crea el driver) → subida DIFERIDA del DNI escaneado (con su
+  // `extractedData`). La subida NO puede pasar antes del PATCH (el presign exige que el driver exista).
+  const personalContinue = usePersonalDataContinue();
 
-  // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación), así que
-  // es un dead-end sin esto. El confirm + logout se reusa vía `useRegistrationExit`; el guard intercepta
-  // el back de hardware de Android (que de otro modo cerraría la app) y lo redirige al mismo confirm.
+  // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación).
   const exit = useRegistrationExit();
   useRegistrationExitGuard(exit.handleHardwareBack);
 
-  // Errores de validación por campo (códigos del dominio → mensajes) y error de servidor.
-  const [errors, setErrors] = useState<PersonalDataErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
-
-  // Sheet de escaneo del DNI (sub-lote 3B) y los marcadores "Extraído de tu DNI — confirma" por campo.
-  // Un campo marcado significa que su valor vino del OCR; al editarlo a mano, el marcador se limpia (la
-  // corrección manual gana). El prellenado en sí es NO destructivo (solo escribe campos vacíos).
+  // El PATCH /personal creó el driver, pero la subida DIFERIDA del DNI falló. NO perdemos las caras
+  // capturadas (siguen en `pendingDni`): aviso + reintento al volver a tocar Continuar (PATCH idempotente).
+  const [dniUploadFailed, setDniUploadFailed] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-  const [autoFields, setAutoFields] = useState<DniAutofillResult>({
-    fullName: false,
-    dni: false,
-    birthdate: false,
-  });
 
-  /** Marca qué campos prellenó el OCR del DNI (para mostrar el aviso de confirmación junto a cada uno). */
-  const onDniAutofill = (result: DniAutofillResult): void => {
-    setAutoFields((prev) => ({
-      fullName: prev.fullName || result.fullName,
-      dni: prev.dni || result.dni,
-      birthdate: prev.birthdate || result.birthdate,
-    }));
-  };
+  // El DNI (número) es el campo CRÍTICO: sin él no se puede registrar el documento ni avanzar. El nombre y
+  // el nacimiento son deseables pero el gating duro es el número leído. Honestidad: solo avanza con el OCR.
+  const hasReadDni = personal.dni.trim().length > 0;
+  // ¿Se capturó un DNI? La señal es la IMAGEN del anverso en `pendingDni`, NO los campos OCR: la foto del
+  // documento viaja aunque el OCR no extraiga texto (p. ej. binario nativo sin la capa OCR). Así NUNCA se
+  // muestra una tarjeta "vacía" que parece OK ni se oculta el fallback honesto cuando el OCR no leyó nada.
+  const hasCapture = pendingDni != null;
+  const canContinue = hasReadDni;
 
-  /** Limpia el marcador "extraído" de un campo cuando el conductor lo edita a mano. */
-  const clearAutoMark = (field: keyof DniAutofillResult): void => {
-    setAutoFields((prev) => (prev[field] ? { ...prev, [field]: false } : prev));
-  };
-
-  // Acota el picker a la ventana de edad válida [18, 100] años (BR-I04), derivada de la MISMA fuente
-  // que la validación de dominio para no quedar más laxa que el backend. La regla dura vive igual en
-  // el dominio; esto solo evita que el usuario pueda elegir una fecha fuera de rango.
-  const minBirthdate = minBirthDate();
-  const maxBirthdate = maxBirthDate();
-
-  const canContinue =
-    personal.fullName.trim().length > 0 &&
-    personal.dni.trim().length > 0 &&
-    personal.birthdate.trim().length > 0;
-
-  /** Actualiza un campo, limpia su error (validación inline) y su marcador "extraído del DNI". */
-  const update = (patch: Partial<typeof personal>, field: keyof PersonalDataErrors) => {
-    setPersonal(patch);
-    if (errors[field]) {
-      setErrors((prev) => ({ ...prev, [field]: undefined }));
-    }
-    // `PersonalDataErrors` y `DniAutofillResult` comparten las claves fullName/dni/birthdate.
-    clearAutoMark(field);
-  };
-
-  const onContinue = async () => {
-    if (updatePersonalData.isPending) {
+  const onContinue = async (): Promise<void> => {
+    if (personalContinue.isPending) {
       return;
     }
-    setErrors({});
     setServerError(null);
-    try {
-      await updatePersonalData.mutateAsync(personal);
-      setCurrentStep(2);
-      navigation.navigate('Vehicle');
-    } catch (e) {
-      // Errores de validación de cliente → junto a cada campo; el resto → banner de servidor.
-      if (e instanceof PersonalDataValidationError) {
-        setErrors(e.errors);
-      } else {
-        setServerError(e);
-      }
-    }
-  };
+    setDniUploadFailed(false);
 
-  /** Traduce un código de error de campo a su mensaje (o `undefined` si no hay error). */
-  const fieldError = (field: keyof PersonalDataErrors): string | undefined => {
-    const code = errors[field];
-    return code ? t(`registration.personal.errors.${code}`) : undefined;
+    // El hook orquesta PATCH /personal (crea el driver) → subida DIFERIDA del DNI escaneado (con OCR). El
+    // resultado discriminado dice exactamente qué pintar (sin strings mágicos) y si se puede avanzar.
+    const result = await personalContinue.submit(personal);
+    switch (result.status) {
+      case 'ok':
+        setCurrentStep(RegistrationStep.VEHICLE);
+        navigation.navigate('Vehicle');
+        return;
+      case 'field-errors':
+        // Sin formulario editable no debería ocurrir (el OCR alimenta los campos), pero si el backend
+        // valida algo, lo surfaceamos como error de servidor para no dejar al conductor sin feedback.
+        setServerError(new Error(t('registration.personal.scanDni.invalidData')));
+        return;
+      case 'server-error':
+        setServerError(result.error);
+        return;
+      case 'dni-upload-failed':
+        setDniUploadFailed(true);
+        return;
+    }
   };
 
   return (
     <>
-    <SafeScreen
-      scroll
-      header={<RegistrationHeader showLogo wings peru onExit={exit.requestExit} />}
-      footer={
-        <Button
-          label={t('common.continue')}
-          variant="accent"
-          fullWidth
-          loading={updatePersonalData.isPending}
-          disabled={!canContinue}
-          onPress={onContinue}
-        />
-      }
-    >
-      <View style={[styles.body, { gap: theme.spacing.xl }]}>
-        <Reveal>
-          <RegistrationProgress current={1} />
-        </Reveal>
-
-        <Reveal delay={40}>
-          <Text variant="caption" color="inkMuted" align="center">
-            {t('registration.stepOf', { current: 1, total: 4 })}
-          </Text>
-        </Reveal>
-
-        <Reveal delay={80} style={styles.intro}>
-          <Text variant="title1">{t('registration.personal.title')}</Text>
-          <Text variant="callout" color="inkMuted">
-            {t('registration.personal.subtitle')}
-          </Text>
-        </Reveal>
-
-        {/* Atajo PRINCIPAL: escanear el DNI (anverso + reverso). El OCR prellena estos campos de forma
-            NO destructiva (solo los vacíos) y sube el DNI; tipear a mano sigue siendo válido. */}
-        <Reveal delay={100} from="scale">
+      <SafeScreen
+        scroll
+        header={<RegistrationHeader showLogo wings peru onExit={exit.requestExit} />}
+        footer={
           <Button
-            label={t('registration.personal.scanDni.cta')}
-            variant="secondary"
+            label={t('common.continue')}
+            variant="accent"
             fullWidth
-            onPress={() => setScanOpen(true)}
+            loading={personalContinue.isPending}
+            disabled={!canContinue}
+            onPress={() => {
+              void onContinue();
+            }}
           />
-          <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
-            {t('registration.personal.scanDni.hint')}
-          </Text>
-        </Reveal>
-
-        {serverError ? (
+        }
+      >
+        <View style={[styles.body, { gap: theme.spacing.xl }]}>
           <Reveal>
-            <Banner
-              tone="danger"
-              title={t('errors.generic')}
-              description={toErrorMessage(serverError, t)}
+            <RegistrationProgress current={1} />
+          </Reveal>
+
+          <Reveal delay={40}>
+            <Text variant="caption" color="inkMuted" align="center">
+              {t('registration.stepOf', { current: 1, total: 4 })}
+            </Text>
+          </Reveal>
+
+          <Reveal delay={80} style={styles.intro}>
+            <Text variant="title1">{t('registration.personal.title')}</Text>
+            <Text variant="callout" color="inkMuted">
+              {t('registration.personal.scanSubtitle')}
+            </Text>
+          </Reveal>
+
+          {/* Acción PRINCIPAL: escanear el DNI (anverso + reverso). El OCR lee los datos; no se tipean. */}
+          <Reveal delay={100} from="scale">
+            <Button
+              label={
+                hasCapture
+                  ? t('registration.personal.scanDni.rescan')
+                  : t('registration.personal.scanDni.cta')
+              }
+              variant={hasCapture ? 'secondary' : 'accent'}
+              fullWidth
+              onPress={() => setScanOpen(true)}
             />
-          </Reveal>
-        ) : null}
-
-        <View style={[styles.form, { gap: theme.spacing.lg }]}>
-          <Reveal delay={120} from="scale">
-            <View style={styles.fieldGroup}>
-              <RegistrationField
-                label={t('registration.personal.nameLabel')}
-                placeholder={t('registration.personal.namePlaceholder')}
-                value={personal.fullName}
-                onChangeText={(text) => update({ fullName: text }, 'fullName')}
-                autoCapitalize="words"
-                textContentType="name"
-                error={fieldError('fullName')}
-                rightIcon={<IconAccount size={24} color={theme.colors.accent} strokeWidth={1.8} />}
-              />
-              {autoFields.fullName && !fieldError('fullName') ? (
-                <Text variant="footnote" color="inkSubtle">
-                  {t('registration.personal.scanDni.fieldExtracted')}
-                </Text>
-              ) : null}
-            </View>
+            <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
+              {t('registration.personal.scanDni.hint')}
+            </Text>
           </Reveal>
 
-          <Reveal delay={160} from="scale">
-            <View style={styles.fieldGroup}>
-              <RegistrationField
-                label={t('registration.personal.dniLabel')}
-                placeholder={t('registration.personal.dniPlaceholder')}
-                value={personal.dni}
-                onChangeText={(text) => update({ dni: text }, 'dni')}
-                keyboardType="number-pad"
-                maxLength={11}
-                error={fieldError('dni')}
-                rightIcon={<IconDocument size={24} color={theme.colors.accent} strokeWidth={1.8} />}
+          {serverError ? (
+            <Reveal>
+              <Banner
+                tone="danger"
+                title={t('errors.generic')}
+                description={toErrorMessage(serverError, t)}
               />
-              {autoFields.dni && !fieldError('dni') ? (
-                <Text variant="footnote" color="inkSubtle">
-                  {t('registration.personal.scanDni.fieldExtracted')}
-                </Text>
-              ) : null}
-            </View>
-          </Reveal>
+            </Reveal>
+          ) : null}
 
-          <Reveal delay={200} from="scale">
-            <View style={styles.fieldGroup}>
-              <DateField
-                label={t('registration.personal.birthdateLabel')}
-                placeholder={t('registration.personal.birthdatePlaceholder')}
-                value={personal.birthdate}
-                onChange={(iso) => update({ birthdate: iso }, 'birthdate')}
-                minimumDate={minBirthdate}
-                maximumDate={maxBirthdate}
-                error={fieldError('birthdate')}
+          {dniUploadFailed ? (
+            <Reveal>
+              <Banner
+                tone="danger"
+                title={t('registration.personal.scanDni.uploadFailed')}
+                description={t('registration.personal.scanDni.uploadRetryHint')}
               />
-              {autoFields.birthdate && !fieldError('birthdate') ? (
-                <Text variant="footnote" color="inkSubtle">
-                  {t('registration.personal.scanDni.fieldExtracted')}
-                </Text>
-              ) : null}
-            </View>
-          </Reveal>
+            </Reveal>
+          ) : null}
+
+          {/* TARJETA "DNI capturado ✓" MINIMALISTA: tilde de éxito + miniatura del anverso, SIN mostrar los
+              valores (nombre/dni/nacimiento). Se muestra cuando hay captura Y el campo CRÍTICO (número) se
+              leyó: una captura que parece OK SOLO cuando de verdad lo está. */}
+          {hasCapture && hasReadDni && pendingDni ? (
+            <Reveal delay={120} from="scale">
+              <View
+                style={[
+                  styles.capturedCard,
+                  {
+                    backgroundColor: hexAlpha(theme.colors.success, 0.1),
+                    borderColor: hexAlpha(theme.colors.success, 0.4),
+                    borderRadius: theme.radii.lg,
+                    padding: theme.spacing.md,
+                    gap: theme.spacing.md,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: pendingDni.front.uri }}
+                  style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
+                  resizeMode="cover"
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
+                  <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
+                  <Text variant="headline" color="success">
+                    {t('registration.personal.scanDni.capturedTitle')}
+                  </Text>
+                </View>
+              </View>
+            </Reveal>
+          ) : null}
+
+          {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto del DNI pero el OCR NO leyó el número →
+              reescaneo (NO un formulario, NO una tarjeta vacía que finge éxito). Se gatilla por la IMAGEN
+              capturada (no por los campos OCR), así un OCR que no leyó NADA igual cae acá en vez de quedar
+              mudo. Sin el número no se puede registrar el documento ni avanzar. */}
+          {hasCapture && !hasReadDni ? (
+            <Reveal>
+              <Banner
+                tone="warn"
+                title={t('registration.personal.scanDni.criticalMissingTitle')}
+                description={t('registration.personal.scanDni.criticalMissingBody')}
+              />
+            </Reveal>
+          ) : null}
         </View>
-      </View>
-    </SafeScreen>
-    <RegistrationExitSheet exit={exit} />
-    <ScanDniSheet
-      visible={scanOpen}
-      onClose={() => setScanOpen(false)}
-      onAutofill={onDniAutofill}
-    />
+      </SafeScreen>
+      <RegistrationExitSheet exit={exit} />
+      <ScanDniSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
     </>
   );
 };
@@ -252,7 +219,8 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
 const styles = StyleSheet.create({
   body: { paddingTop: 12 },
   intro: { gap: 6 },
-  form: {},
   scanHint: { marginTop: 6 },
-  fieldGroup: { gap: 4 },
+  capturedCard: { borderWidth: 1, alignItems: 'center' },
+  capturedThumb: { width: '100%', height: 160 },
+  capturedHeader: { flexDirection: 'row', alignItems: 'center' },
 });

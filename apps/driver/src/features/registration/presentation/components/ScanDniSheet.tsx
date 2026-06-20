@@ -3,8 +3,9 @@ import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
+import { scanMessageI18nKey } from '../../../documents/domain';
 import { hexAlpha } from './color';
-import { useScanDni, type DniAutofillResult } from '../hooks/useScanDni';
+import { useScanDni } from '../hooks/useScanDni';
 
 /**
  * Sheet de captura del DNI por ESCANEO (sub-lote 3B). Acción del paso 1 (Datos Personales): escanea el
@@ -19,30 +20,9 @@ import { useScanDni, type DniAutofillResult } from '../hooks/useScanDni';
 export interface ScanDniSheetProps {
   visible: boolean;
   onClose: () => void;
-  /**
-   * Notifica a la pantalla qué campos personales se PRELLENARON desde el OCR del DNI, para que muestre
-   * el marcador "Extraído de tu DNI — confirma" junto a cada uno (y lo limpie cuando el conductor edite).
-   * Best-effort: solo se invoca tras una captura que prellenó al menos un campo.
-   */
-  onAutofill?: (result: DniAutofillResult) => void;
 }
 
-/** Mensajes de "Extraído de tu DNI" por campo (para el resumen de lo prellenado). */
-function autofilledSummaryKeys(autofilled: DniAutofillResult): string[] {
-  const keys: string[] = [];
-  if (autofilled.fullName) {
-    keys.push('registration.personal.nameLabel');
-  }
-  if (autofilled.dni) {
-    keys.push('registration.personal.dniLabel');
-  }
-  if (autofilled.birthdate) {
-    keys.push('registration.personal.birthdateLabel');
-  }
-  return keys;
-}
-
-export function ScanDniSheet({ visible, onClose, onAutofill }: ScanDniSheetProps): React.JSX.Element {
+export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const theme = useTheme();
   const dni = useScanDni();
@@ -57,48 +37,49 @@ export function ScanDniSheet({ visible, onClose, onAutofill }: ScanDniSheetProps
   }, [visible]);
 
   const isScanning = dni.state === 'scanning';
-  const isUploading = dni.state === 'uploading';
-  const isSuccess = dni.state === 'success';
+  // `ready` = caras guardadas para subir DESPUÉS del PATCH /personal (el escaneo NO sube en el momento:
+  // el presign del DNI exige que el driver ya exista, y eso ocurre recién en el continue del paso 1).
+  const isReady = dni.state === 'ready';
   const isCaptured = dni.state === 'captured';
   const isError = dni.state === 'error';
-  const busy = isScanning || isUploading;
+  const busy = isScanning;
 
-  const summaryKeys = autofilledSummaryKeys(dni.autofilled);
+  // Campo CRÍTICO del DNI: el número. Si el OCR no lo leyó (binario nativo sin OCR, foto borrosa, etc.) NO
+  // mostramos un "capturado ✓" que finge éxito: caemos al fallback honesto de reescaneo. La señal es el
+  // número en el store tras la captura (lo escribe el prellenado no destructivo de `useScanDni`).
+  const hasReadDniNumber = dni.personal.dni.trim().length > 0;
 
-  /** Escanea y notifica a la pantalla los campos prellenados (si los hubo) para los marcadores. */
+  /** Escanea el DNI (el hook corre el OCR y prellena el store de forma no destructiva). */
   const runScan = async (): Promise<void> => {
-    const outcome = await dni.scan();
-    if (outcome) {
-      const { autofilled } = outcome;
-      if (autofilled.dni || autofilled.fullName || autofilled.birthdate) {
-        onAutofill?.(autofilled);
-      }
-    }
+    await dni.scan();
   };
 
-  // CTA principal: escanear si aún no hay captura; subir si ya se capturó; cerrar si terminó.
+  // CTA principal: escanear si aún no hay captura; CONFIRMAR (guardar las caras para subir tras el PATCH)
+  // si ya se capturó CON el número leído; REESCANEAR si la captura no leyó el número (gating crítico) o si
+  // el escaneo falló sin caras. NUNCA sube aquí (eso pasa en el continue del paso 1).
+  const canConfirm = isCaptured && dni.front != null && hasReadDniNumber;
   const onPrimary = (): void => {
-    if (isSuccess) {
+    if (isReady) {
       onClose();
       return;
     }
-    if (isCaptured || isError) {
-      // Si ya hay caras, el primario sube; si el error fue del escaneo (sin caras), reescanea.
-      if (dni.front) {
-        void dni.submit();
-      } else {
-        void runScan();
-      }
+    if (canConfirm) {
+      // Hay caras Y el número crítico se leyó: el primario las CONFIRMA (guarda en el store).
+      dni.submit();
       return;
     }
+    // Sin captura, captura sin número crítico, o error de escaneo → (re)escanear. NUNCA confirmamos un DNI
+    // sin su número: sería un éxito fingido. Honestidad de estado.
     void runScan();
   };
 
-  const primaryLabel = isSuccess
+  const primaryLabel = isReady
     ? t('common.close')
-    : dni.front
-      ? t('registration.personal.scanDni.upload')
-      : t('registration.personal.scanDni.cta');
+    : canConfirm
+      ? t('registration.personal.scanDni.confirm')
+      : dni.front
+        ? t('registration.personal.scanDni.rescan')
+        : t('registration.personal.scanDni.cta');
 
   return (
     <BottomSheet
@@ -108,10 +89,10 @@ export function ScanDniSheet({ visible, onClose, onAutofill }: ScanDniSheetProps
       footer={
         <View style={styles.footer}>
           <Button
-            label={isSuccess ? t('common.close') : t('common.cancel')}
+            label={isReady ? t('common.close') : t('common.cancel')}
             variant="secondary"
             onPress={onClose}
-            disabled={isUploading}
+            disabled={busy}
           />
           <Button
             label={primaryLabel}
@@ -142,35 +123,43 @@ export function ScanDniSheet({ visible, onClose, onAutofill }: ScanDniSheetProps
           />
         </View>
 
-        {isUploading ? (
-          <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
-            <ActivityIndicator color={theme.colors.accent} />
-            <Text variant="footnote" color="ink">
-              {t('registration.documents.uploading')}
-            </Text>
-          </View>
-        ) : null}
-
-        {isSuccess ? (
+        {/* Listo: las caras quedaron guardadas; se subirán al confirmar los datos personales (tras el PATCH
+            que crea el driver). NO decimos "subido" porque aún no se subió — honestidad de estado. */}
+        {isReady ? (
           <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
             <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
             <Text variant="footnote" color="success">
-              {t('registration.documents.uploadSuccess')}
+              {t('registration.personal.scanDni.readyToUpload')}
             </Text>
           </View>
         ) : null}
 
-        {/* Resumen NO destructivo: qué campos se prellenaron desde el OCR (pide confirmarlos en el form). */}
-        {isCaptured && summaryKeys.length > 0 ? (
+        {/* "DNI capturado ✓" MINIMALISTA: solo tilde + título. NO listamos valores (nombre/dni/nacimiento):
+            las miniaturas de arriba ya muestran el documento. Se muestra SOLO cuando el número crítico se
+            leyó (captura realmente válida). */}
+        {isCaptured && hasReadDniNumber ? (
+          <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
+            <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
+            <Text variant="footnote" color="success">
+              {t('registration.personal.scanDni.capturedTitle')}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto pero el OCR NO leyó el número de DNI →
+            reescaneo (NO una tarjeta vacía que finge éxito). Se gatilla por la captura, no por los campos
+            OCR: un OCR que no leyó NADA igual cae acá en vez de quedar mudo. */}
+        {isCaptured && !hasReadDniNumber ? (
           <Banner
-            tone="info"
-            title={t('registration.personal.scanDni.extracted')}
-            description={summaryKeys.map((key) => t(key)).join(' · ')}
+            tone="warn"
+            title={t('registration.personal.scanDni.criticalMissingTitle')}
+            description={t('registration.personal.scanDni.criticalMissingBody')}
           />
         ) : null}
 
-        {/* Honestidad: si solo vino el anverso, lo decimos (el conductor puede reescanear el reverso). */}
-        {isCaptured && !dni.hasBack ? (
+        {/* Honestidad: si solo vino el anverso, lo decimos (el conductor puede reescanear el reverso). Solo
+            relevante cuando la captura SÍ leyó el número (si no, ya pedimos reescaneo por el crítico). */}
+        {isCaptured && hasReadDniNumber && !dni.hasBack ? (
           <Banner
             tone="warn"
             title={t('registration.personal.scanDni.backMissing')}
@@ -187,31 +176,18 @@ export function ScanDniSheet({ visible, onClose, onAutofill }: ScanDniSheetProps
           />
         ) : null}
 
-        {/* Mensaje accionable (cancelación/fallo de escaneo/subida): clave i18n bajo registration.documents.*. */}
+        {/* Mensaje accionable (cancelación/fallo de escaneo): el motivo TIPADO (`ScanMessage`) se mapea a
+            su clave i18n con el mapper exhaustivo del dominio — sin comparar el valor contra literales. */}
         {dni.message ? (
           <Banner
             tone={isError ? 'danger' : 'warn'}
             title={t('errors.generic')}
-            description={t(messageKey(dni.message))}
+            description={t(scanMessageI18nKey(dni.message))}
           />
         ) : null}
       </View>
     </BottomSheet>
   );
-}
-
-/** Mapea la clave corta del hook a su ruta i18n completa (sin strings mágicos desperdigados). */
-function messageKey(message: string): string {
-  switch (message) {
-    case 'scanCancelled':
-      return 'registration.documents.scanCancelled';
-    case 'scanFailed':
-      return 'registration.documents.scanFailed';
-    case 'uploadFailed':
-      return 'registration.personal.scanDni.uploadFailed';
-    default:
-      return 'errors.generic';
-  }
 }
 
 /** Preview de una cara del DNI: imagen capturada o placeholder con su etiqueta (anverso/reverso). */

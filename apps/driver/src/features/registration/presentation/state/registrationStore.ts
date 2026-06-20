@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import type { ExtractedDniData, ExtractedPropertyCardData } from '@veo/api-client';
+import type { PickedImage } from '../../../documents/domain';
 import { prefsStore } from '../../../../core/storage/mmkv';
 import {
   VehicleType,
@@ -10,6 +12,48 @@ import {
   type RegistrationStatus,
   type VehicleData,
 } from '../../domain';
+
+/**
+ * Caras del DNI escaneadas en el paso 1 (anverso siempre; reverso si se capturó), a la ESPERA de subir
+ * DESPUÉS de que el `PATCH /drivers/me/personal` cree el perfil del conductor. Hasta entonces el presign
+ * del DNI devuelve 404 (no existe driver), así que la subida NO puede ocurrir en el momento del scan.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): son base64 con PII del DNI (Ley 29733) y su único
+ * propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingDniCapture {
+  /** Anverso del DNI listo para subir (siempre presente cuando hay captura). */
+  front: PickedImage;
+  /** Reverso si el escáner capturó la 2ª página; `null` si solo vino el anverso. */
+  back: PickedImage | null;
+  /**
+   * Lote 1: data extraída por OCR del DNI (`ExtractedDniData`), ya mapeada del parser al contrato. Se
+   * captura JUNTO a las caras en el momento del scan y se envía al registrar el DNI tras el PATCH. `null`
+   * si el escaneo no extrajo ningún campo con confianza (degradación honesta: se sube sin `extractedData`).
+   */
+  extractedData: ExtractedDniData | null;
+}
+
+/**
+ * Tarjeta de propiedad escaneada en el paso 2 (Vehículo · Lote 2 · scan-first), a la ESPERA de subir
+ * DESPUÉS de que `POST /drivers/vehicles` cree el vehículo. Mismo patrón que `PendingDniCapture`: el
+ * documento NO se sube en el momento del escaneo (se sube DIFERIDO tras crear el vehículo, reusando el
+ * mismo uploader y tratando un 409 como éxito). Es la fuente de verdad de "se capturó una tarjeta"
+ * INDEPENDIENTE del OCR: la imagen viaja aunque el texto no se lea.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): es base64 de un documento (peso + dato del vehículo) y
+ * su único propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingPropertyCardCapture {
+  /** Imagen de la tarjeta de propiedad lista para subir (siempre presente cuando hay captura). */
+  front: PickedImage;
+  /**
+   * Lote 2: data extraída por OCR de la tarjeta (`ExtractedPropertyCardData`), ya mapeada del parser al
+   * contrato. Se captura JUNTO a la imagen en el momento del scan y se envía al registrar el documento
+   * tras crear el vehículo. `null` si el OCR no extrajo ningún campo (se sube sin `extractedData`).
+   */
+  extractedData: ExtractedPropertyCardData | null;
+}
 
 /** Total de pasos del wizard (Datos · Vehículo · Documentos · KYC). */
 export const REGISTRATION_TOTAL_STEPS = 4;
@@ -70,12 +114,31 @@ export interface RegistrationState {
   vehicle: VehicleData;
   documents: RegistrationDocument[];
   faceCapture: FaceCapture | null;
+  /**
+   * DNI escaneado en el paso 1, a la espera de subir tras el `PATCH /drivers/me/personal` (que crea el
+   * driver). `null` si el conductor no escaneó (tipeó a mano) o si el DNI ya se subió. NO se persiste.
+   */
+  pendingDni: PendingDniCapture | null;
+  /**
+   * Tarjeta de propiedad escaneada en el paso 2 (Vehículo), a la espera de subir tras `POST
+   * /drivers/vehicles` (que crea el vehículo). `null` si el conductor no escaneó (carga manual) o si ya
+   * se subió. NO se persiste (base64 de un documento; handoff scan→continue efímero).
+   */
+  pendingPropertyCard: PendingPropertyCardCapture | null;
 
   setPersonal(data: Partial<PersonalData>): void;
   setVehicleType(type: VehicleType): void;
   setVehicle(data: Partial<VehicleData>): void;
   setDocumentStatus(type: RegistrationDocumentType, status: RegistrationDocument['status']): void;
   setFaceCapture(capture: FaceCapture): void;
+  /** Guarda las caras del DNI escaneado para subirlas tras el PATCH /personal (idempotente: reemplaza). */
+  setPendingDni(capture: PendingDniCapture): void;
+  /** Descarta el DNI pendiente (tras subirlo con éxito, o al reiniciar el escaneo). */
+  clearPendingDni(): void;
+  /** Guarda la tarjeta de propiedad escaneada para subirla tras crear el vehículo (idempotente: reemplaza). */
+  setPendingPropertyCard(capture: PendingPropertyCardCapture): void;
+  /** Descarta la tarjeta de propiedad pendiente (tras subirla con éxito, o al reiniciar el escaneo). */
+  clearPendingPropertyCard(): void;
   setCurrentStep(step: number): void;
   setStatus(status: RegistrationStatus): void;
   /**
@@ -145,6 +208,10 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     vehicle: persisted?.vehicle ?? emptyVehicle,
     documents: persisted?.documents ?? initialDocuments,
     faceCapture: persisted?.faceCapture ?? null,
+    // En memoria: nunca se rehidrata desde MMKV (base64 con PII del DNI; handoff scan→continue efímero).
+    pendingDni: null,
+    // En memoria: igual que `pendingDni` (base64 de un documento; handoff scan→continue efímero del paso 2).
+    pendingPropertyCard: null,
 
     setPersonal: (data) => {
       set((state) => ({ personal: { ...state.personal, ...data } }));
@@ -178,6 +245,24 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     setFaceCapture: (capture) => {
       set({ faceCapture: capture });
       persist();
+    },
+
+    setPendingDni: (capture) => {
+      // Solo en memoria: NO se llama a persist() (las caras del DNI no van a MMKV por PII/peso base64).
+      set({ pendingDni: capture });
+    },
+
+    clearPendingDni: () => {
+      set({ pendingDni: null });
+    },
+
+    setPendingPropertyCard: (capture) => {
+      // Solo en memoria: NO se llama a persist() (base64 de un documento; no va a MMKV por peso).
+      set({ pendingPropertyCard: capture });
+    },
+
+    clearPendingPropertyCard: () => {
+      set({ pendingPropertyCard: null });
     },
 
     setCurrentStep: (step) => {
@@ -238,6 +323,8 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
         vehicle: emptyVehicle,
         documents: initialDocuments,
         faceCapture: null,
+        pendingDni: null,
+        pendingPropertyCard: null,
       });
       prefsStore.remove(REGISTRATION_PREF_KEY);
     },

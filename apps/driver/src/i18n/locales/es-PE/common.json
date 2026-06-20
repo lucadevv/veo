@@ -94,19 +94,28 @@
       "dniPlaceholder": "70 123 456",
       "birthdateLabel": "Fecha de nacimiento",
       "birthdatePlaceholder": "Selecciona tu fecha",
+      "scanSubtitle": "Escanea tu DNI y leemos tus datos por ti. No necesitas escribir nada.",
       "scanDni": {
         "title": "Escanea tu DNI",
         "cta": "Escanear DNI",
-        "hint": "Escanea el anverso y el reverso: leemos tus datos y completamos el formulario por ti.",
+        "rescan": "Volver a escanear",
+        "hint": "Encuadra el documento: se captura solo al enfocar, o toca el botón de captura para tomar la foto. Leemos tus datos por ti.",
         "front": "Anverso",
         "back": "Reverso",
-        "upload": "Subir DNI",
-        "extracted": "Extraído de tu DNI — confirma que sea correcto.",
-        "fieldExtracted": "Extraído de tu DNI — confirma que sea correcto.",
+        "confirm": "Usar este DNI",
+        "readyToUpload": "DNI listo: lo subiremos al confirmar tus datos.",
+        "extracted": "Esto leímos de tu DNI:",
+        "fieldExtracted": "Extraído de tu DNI.",
+        "capturedTitle": "DNI capturado",
+        "capturedHint": "Tu DNI quedó capturado. Si la foto no coincide, vuelve a escanear.",
+        "criticalMissingTitle": "No pudimos leer tu número de DNI",
+        "criticalMissingBody": "La foto quedó borrosa o incompleta. Vuelve a escanear tu DNI con buena luz para leer el número.",
+        "invalidData": "Los datos leídos no son válidos. Vuelve a escanear tu DNI.",
         "backMissing": "Falta el reverso",
         "backMissingHint": "Solo capturamos el anverso. Vuelve a escanear para incluir el reverso.",
-        "manualFallback": "Puedes ingresar tus datos a mano más abajo.",
-        "uploadFailed": "No se pudo subir tu DNI. Inténtalo de nuevo."
+        "manualFallback": "Vuelve a escanear tu DNI para leer tus datos.",
+        "uploadFailed": "No se pudo subir tu DNI. Inténtalo de nuevo.",
+        "uploadRetryHint": "Tus datos se guardaron y la foto de tu DNI no se perdió. Toca Continuar para reintentar la subida."
       },
       "errors": {
         "name_required": "Ingresa tu nombre completo",
@@ -121,9 +130,35 @@
     },
     "vehicle": {
       "title": "Tu vehículo",
-      "subtitle": "Elige el tipo y completa los datos.",
+      "subtitle": "Escanea tu tarjeta de propiedad. Leemos los datos por ti.",
       "registeredSubtitle": "Tu vehículo está registrado y en revisión.",
       "register": "Registrar vehículo",
+      "manualToggle": "Prefiero cargarlo a mano",
+      "manualTitle": "Datos del vehículo",
+      "scanCard": {
+        "cta": "Escanear tarjeta de propiedad",
+        "rescan": "Volver a escanear",
+        "title": "Escanea tu tarjeta de propiedad",
+        "hint": "Encuadra la tarjeta: detectamos los bordes y leemos placa, marca, modelo y año por ti.",
+        "preview": "Tarjeta de propiedad",
+        "capturedTitle": "Tarjeta capturada",
+        "readPlate": "Placa",
+        "readVehicle": "Marca y modelo",
+        "readYear": "Año",
+        "typeCar": "Auto",
+        "typeMoto": "Moto",
+        "confirm": "Usar esta tarjeta",
+        "criticalMissingTitle": "No pudimos leer la placa",
+        "criticalMissingBody": "La foto quedó borrosa o incompleta. Vuelve a escanear con buena luz, o ingresa solo la placa a mano.",
+        "plateOnlyLabel": "Placa",
+        "unsupportedTitle": "Tipo de vehículo no reconocido",
+        "unsupportedBody": "Tu tarjeta indica un tipo que aún no manejamos automáticamente. Elige el tipo a mano para continuar.",
+        "manualFallback": "El escáner no está disponible en este dispositivo. Carga los datos de tu vehículo a mano.",
+        "uploadFailed": "No se pudo subir tu tarjeta de propiedad. Inténtalo de nuevo.",
+        "uploadRetryHint": "Tu vehículo se registró y la foto de la tarjeta no se perdió. Toca Registrar para reintentar la subida.",
+        "yearMissingTitle": "Revisa el año de tu vehículo",
+        "yearMissingBody": "No pudimos leer un año válido en tu tarjeta. Ingresa el año de fabricación para continuar."
+      },
       "docStatusLabel": "Documentación: {{status}}",
       "typeMoto": "Moto",
       "typeCar": "Auto",
@@ -222,6 +257,22 @@
       "autofill": {
         "extracted": "Extraído del documento — confirma que sea correcto.",
         "confirm": "Confirma los datos antes de guardar."
+      },
+      "captured": {
+        "title": "Capturado",
+        "hint": "Esto leímos de tu documento. Lo enviamos para revisión automáticamente."
+      },
+      "criticalMissing": {
+        "title": "No pudimos leer tu documento",
+        "body": "La foto quedó borrosa o incompleta. Vuelve a escanear con buena luz para leer el número."
+      },
+      "photo": {
+        "take": "Tomar foto",
+        "retake": "Volver a tomar la foto",
+        "hint": "Encuadra el vehículo completo y con buena luz.",
+        "noFile": "Toma una foto o elígela de tu galería",
+        "uploadSuccess": "Foto subida",
+        "reviewNote": "La foto se sube de forma segura y queda en revisión."
       }
     },
     "kyc": {

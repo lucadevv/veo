@@ -31,14 +31,38 @@ export type VehicleValidation =
 /** Año mínimo aceptado por el contrato (`registerVehicleRequest.year`). fleet aplica BR-D04 (>=2017). */
 const MIN_VEHICLE_YEAR = 2005;
 
+/**
+ * ¿El año (texto del wizard) cae en el rango ACEPTADO por el contrato (`MIN_VEHICLE_YEAR`..año actual+1)?
+ * Predicado PURO y única fuente de verdad del rango: lo usa `validateVehicle` (gating del alta) y el flujo
+ * scan-first (`useScanPropertyCard`) para decidir si un año leído por OCR es PRELLENABLE o debe quedar
+ * CORREGIBLE (el parser del OCR acepta 1950..2099, más laxo que el contrato). Evita prellenar un año que el
+ * alta va a rechazar y mostrar un falso "capturada ✓".
+ */
+export function isVehicleYearValid(year: string): boolean {
+  const n = Number(year.trim());
+  const maxYear = new Date().getUTCFullYear() + 1;
+  return Number.isInteger(n) && n >= MIN_VEHICLE_YEAR && n <= maxYear;
+}
+
+/** Longitud máxima de `make`/`model` a texto libre del contrato (`registerVehicleRequest`: 1..60). */
+const FREETEXT_MAX = 60;
+
 /** Placa peruana: 3 caracteres alfanuméricos + 3 (guion opcional). fleet la normaliza y revalida. */
 const PLATE_PATTERN = /^[A-Z0-9]{3}-?[A-Z0-9]{3}$/;
 
 /**
  * Valida y mapea los datos del vehículo del wizard al body de `POST /drivers/vehicles`. Lógica pura
- * y testeable: normaliza la placa (mayúsculas, sin espacios) y convierte el año a número. B5-2: la
- * marca/modelo NO viajan a texto libre — el conductor eligió un modelo del catálogo, así que el body
- * lleva `modelSpecId` y el backend snapshotea make/model del spec.
+ * y testeable: normaliza la placa (mayúsculas, sin espacios) y convierte el año a número.
+ *
+ * DOS RAMAS del contrato (`registerVehicleRequest.refine`: `modelSpecId` O bien `make`+`model`):
+ *  - RAMA CATÁLOGO (B5-2 · selección manual): el conductor ELIGE un modelo del catálogo → el body lleva
+ *    `modelSpecId` y el backend snapshotea make/model/vehicleType del spec (ignora texto libre).
+ *  - RAMA TEXTO LIBRE (Lote 2 · scan-first): el OCR de la tarjeta de propiedad leyó make/model como TEXTO
+ *    y NO hay `modelSpecId` (el catálogo aún no tiene fuzzy-match — Lote 3). El body lleva `make`+`model`
+ *    a texto libre y el backend toma `vehicleType` derivado de la categoría MTC del documento.
+ *
+ * El gating de "modelo" se satisface con CUALQUIERA de las dos ramas: hay `modelSpecId`, o hay make+model.
+ * Si no hay ninguna → `model_not_selected` (sin modelo el vehículo no se puede registrar).
  */
 export function validateVehicle(vehicle: VehicleData): VehicleValidation {
   const errors: VehicleErrors = {};
@@ -51,21 +75,29 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
   }
 
   const modelSpecId = vehicle.modelSpecId.trim();
-  if (modelSpecId.length === 0) {
+  // Texto libre del OCR (scan-first): recortado a los 60 chars del contrato (`make`/`model` 1..60).
+  const make = vehicle.brand.trim().slice(0, FREETEXT_MAX);
+  const model = vehicle.model.trim().slice(0, FREETEXT_MAX);
+  const hasCatalogModel = modelSpecId.length > 0;
+  const hasFreetextModel = make.length > 0 && model.length > 0;
+  if (!hasCatalogModel && !hasFreetextModel) {
     errors.model = 'model_not_selected';
   }
 
   const year = Number(vehicle.year.trim());
-  const maxYear = new Date().getUTCFullYear() + 1;
-  const isValidYear = Number.isInteger(year) && year >= MIN_VEHICLE_YEAR && year <= maxYear;
-  if (!isValidYear) {
+  if (!isVehicleYearValid(vehicle.year)) {
     errors.year = 'year_invalid';
   }
 
   if (errors.plate || errors.model || errors.year) {
     return { ok: false, errors };
   }
-  return { ok: true, request: { vehicleType: vehicle.type, plate, year, modelSpecId } };
+  // RAMA CATÁLOGO gana si hay `modelSpecId` (el backend snapshotea del spec e IGNORA el texto libre).
+  // Si no, RAMA TEXTO LIBRE: viaja make+model (Lote 3 hará fuzzy-match a catálogo + crecimiento del mismo).
+  const request: VehicleRegisterInput = hasCatalogModel
+    ? { vehicleType: vehicle.type, plate, year, modelSpecId }
+    : { vehicleType: vehicle.type, plate, year, make, model };
+  return { ok: true, request };
 }
 
 /**

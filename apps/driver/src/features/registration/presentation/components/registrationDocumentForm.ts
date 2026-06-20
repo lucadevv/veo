@@ -10,6 +10,17 @@ import type { RegistrationFleetDocumentType } from '../../domain';
 export type RegistrationDocumentFormType = RegistrationFleetDocumentType;
 
 /**
+ * Modo de CAPTURA del binario, tipado (sin string suelto). Decide la SUPERFICIE de captura y el framing
+ * del sheet, no el pipeline de subida (que es el mismo para ambos):
+ *  - `'document'`: el binario ES un documento con bordes (licencia/SOAT/tarjeta/DNI). Acción principal =
+ *    escáner nativo (bordes + auto-captura + corrección + OCR). Copy/iconografía de "documento".
+ *  - `'photo'`: el binario es una FOTO LIBRE (la foto del vehículo). Acción principal = cámara normal
+ *    (sin escáner de bordes ni OCR). Galería como secundaria. Copy/iconografía de "foto".
+ * Es un union cerrado: un tipo nuevo debe declarar su modo en el `Record` (no hay default silencioso).
+ */
+export type RegistrationDocumentCaptureMode = 'document' | 'photo';
+
+/**
  * Configuración CONTEXTUAL del formulario por tipo de documento. El sheet pide SOLO los campos que
  * aplican a cada tipo (la foto es la fuente de verdad; no se piden aseguradora/categoría/placa):
  *  - `numberLabelKey` / `numberPlaceholderKey`: claves i18n del campo de número, propias del tipo.
@@ -19,6 +30,12 @@ export type RegistrationDocumentFormType = RegistrationFleetDocumentType;
  *    guarda nullable — sin cambio de backend).
  */
 export interface RegistrationDocumentFormConfig {
+  /**
+   * Superficie de captura del binario para este tipo. `'document'` = escáner de bordes + OCR (copy de
+   * documento); `'photo'` = cámara normal de foto libre (copy de foto, sin escáner ni OCR). El upload es
+   * el MISMO en ambos modos: solo cambia la captura y el framing (copy/ícono).
+   */
+  readonly captureMode: RegistrationDocumentCaptureMode;
   /**
    * `true` si el documento tiene NÚMERO (licencia/SOAT/tarjeta). La foto del vehículo (VEHICLE_PHOTO)
    * NO lo tiene: el sheet oculta el campo y NO lo exige. La validación del número es contextual por tipo
@@ -44,6 +61,7 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
   RegistrationDocumentFormConfig
 > = {
   [FleetDocumentType.LICENSE_A1]: {
+    captureMode: 'document',
     hasNumber: true,
     numberLabelKey: 'registration.documents.number.LICENSE_A1.label',
     numberPlaceholderKey: 'registration.documents.number.LICENSE_A1.placeholder',
@@ -51,6 +69,7 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
     hasExpiry: true,
   },
   [FleetDocumentType.SOAT]: {
+    captureMode: 'document',
     hasNumber: true,
     numberLabelKey: 'registration.documents.number.SOAT.label',
     numberPlaceholderKey: 'registration.documents.number.SOAT.placeholder',
@@ -58,6 +77,7 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
     hasExpiry: true,
   },
   [FleetDocumentType.PROPERTY_CARD]: {
+    captureMode: 'document',
     hasNumber: true,
     numberLabelKey: 'registration.documents.number.PROPERTY_CARD.label',
     numberPlaceholderKey: 'registration.documents.number.PROPERTY_CARD.placeholder',
@@ -65,12 +85,15 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
     hasExpiry: false,
   },
   [FleetDocumentType.VEHICLE_PHOTO]: {
-    // La foto del vehículo es solo una imagen: SIN número y SIN vencimiento. El sheet muestra únicamente
-    // la captura. Se registra sin `documentNumber` (validación contextual por tipo, espeja el backend).
+    // La foto del vehículo es una FOTO LIBRE (no un documento con bordes): cámara normal, sin escáner ni
+    // OCR. Copy/ícono de foto. SIN número y SIN vencimiento; solo la captura. Se registra sin
+    // `documentNumber` (validación contextual por tipo, espeja el backend).
+    captureMode: 'photo',
     hasNumber: false,
     hasExpiry: false,
   },
   [FleetDocumentType.DNI]: {
+    captureMode: 'document',
     // El DNI tiene NÚMERO (8 dígitos). Se sube como documento de 2 caras (FRONT+BACK vía el presign
     // múltiple del 3A); la cara FRONT es la que consume el face-match (sub-lote 3C).
     hasNumber: true,

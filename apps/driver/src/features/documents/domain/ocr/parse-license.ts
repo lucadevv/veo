@@ -3,12 +3,13 @@
  * vencimiento de los que está razonablemente seguro. Ancla a palabras clave + formato; lo que no puede
  * anclar lo OMITE (degradación honesta — nunca inventa).
  *
- * Heurística:
- *  - **Número**: el número de licencia peruano suele ser la letra de clase + 8 dígitos (`Q12345678`) o
- *    9 dígitos. Se busca en la línea con "Licencia"/"N°"; si no hay etiqueta, el patrón alfanumérico de
- *    licencia más probable. Se prefiere la etiqueta para no confundir con el DNI (que también aparece).
+ * Heurística (GROUND TRUTH, imágenes oficiales):
+ *  - **Número**: rótulo real `Nro de Licencia`; formato `[A-Z]\d{8}` (ej. `Q70128450`). Se busca en la
+ *    línea con "Licencia"/"N°"; si no hay etiqueta, el patrón de licencia más probable. Se prefiere la
+ *    etiqueta para no confundir con el DNI (que también aparece).
  *  - **Categoría**: junto a "Categoría"/"CLASE", normalizada al catálogo tipado `LicenseCategory`.
- *  - **Vencimiento**: la fecha junto a "Vencimiento"/"Revalidación"/"Fecha de Vencimiento".
+ *  - **Vencimiento**: rótulo real `Fecha de Revalidacion` (NO "vence"/"válida hasta"). NO confundir con
+ *    `Fecha de Expedicion` (emisión), que se excluye explícitamente.
  */
 
 import { normalizePeruvianDate } from './ocr-date';
@@ -16,31 +17,30 @@ import { normalizeLicenseCategory } from './license-category';
 import { canonicalize, lineMatchesAnyKeyword } from './ocr-text';
 import type { ParsedLicense } from './parsed-document';
 
-const NUMBER_KEYWORDS = ['licencia', 'numero', 'n°', 'no.', 'license'] as const;
+const NUMBER_KEYWORDS = ['nro de licencia', 'licencia', 'numero', 'n°', 'no.', 'license'] as const;
 const CATEGORY_KEYWORDS = ['categoria', 'clase', 'category'] as const;
+/**
+ * GROUND TRUTH: el rótulo de vencimiento real es `Fecha de Revalidacion`. Se mantienen sinónimos defensivos
+ * por si alguna variante/OCR usa otra palabra, pero "revalidacion" es el ancla principal.
+ */
 const EXPIRY_KEYWORDS = [
-  'vencimiento',
   'revalidacion',
+  'fecha de revalidacion',
+  'vencimiento',
   'caducidad',
-  'fecha de vencimiento',
   'valido hasta',
-  'expira',
 ] as const;
-/** Palabras clave que delatan que la fecha de la línea es de EMISIÓN, no de vencimiento (se excluye). */
+/** Palabras clave que delatan que la fecha de la línea es de EMISIÓN/EXPEDICIÓN, no de revalidación (se excluye). */
 const ISSUE_KEYWORDS = ['expedicion', 'emision', 'expedida'] as const;
 
 /**
- * Número de licencia: letra de clase opcional + 8–9 dígitos (`Q12345678`) o un bloque de 9 dígitos.
+ * Número de licencia (GROUND TRUTH): letra de clase + 8 dígitos (`Q70128450`, formato `[A-Z]\d{8}`).
  * Devuelve el primer match plausible de una línea.
  */
 function licenseNumberInLine(line: string): string | undefined {
   const compact = line.toUpperCase();
   const withLetter = /\b([A-Z]\d{8})\b/.exec(compact);
-  if (withLetter) {
-    return withLetter[1];
-  }
-  const nineDigits = /(?<!\d)\d{9}(?!\d)/.exec(compact);
-  return nineDigits ? nineDigits[0] : undefined;
+  return withLetter ? withLetter[1] : undefined;
 }
 
 /** Extrae el número de licencia, priorizando la línea etiquetada para no confundirlo con el DNI. */
