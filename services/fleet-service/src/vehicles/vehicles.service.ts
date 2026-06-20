@@ -2,7 +2,7 @@
  * VehiclesService — alta y consulta de vehículos (BR-D04: año mínimo, placa válida).
  * El estado documental agregado (docStatus) lo mantiene el cron de vencimientos (ExpirySweeper).
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   uuidv7,
@@ -15,6 +15,7 @@ import {
 import { isUniqueViolation } from '@veo/database';
 import { OPERABLE_VEHICLE_CLASSES } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
+import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
   deriveVehicleReviewStatus,
@@ -31,6 +32,7 @@ import {
   FleetOwnerType,
   Prisma,
   VehicleDocStatus,
+  VehicleModelSource,
   VehicleModelStatus,
   VehicleType,
   type Vehicle,
@@ -48,12 +50,41 @@ export interface PurgeDriverIds {
   userId: string;
 }
 
+/**
+ * LOTE 3 · señal de "encolar modelo OCR DESPUÉS del alta". El fuzzy-match (read) NO escribe: cuando no hay
+ * match, devuelve estos datos para que el caller encole el modelo PENDING_REVIEW (write) SOLO si el vehículo
+ * se creó con éxito. Así un alta fallida o spam (placa duplicada, etc.) NO ensucia la cola del operador.
+ */
+interface PendingOcrModel {
+  make: string;
+  model: string;
+  vehicleType: VehicleType;
+  year: number | undefined;
+  requestedBy: string;
+  source: VehicleModelSource;
+}
+
+/**
+ * Resultado de resolver el snapshot del modelo. `pendingOcrModel` solo viene poblado en el alta del conductor
+ * (fuzzy) cuando el texto libre NO matcheó el catálogo: el caller lo encola POST-éxito (best-effort). En todos
+ * los demás caminos (match, modelSpecId, freetext legacy admin) es `null` y no se encola nada.
+ */
+interface ModelSnapshot {
+  make: string;
+  model: string;
+  vehicleType: VehicleType;
+  modelSpecId: string | null;
+  pendingOcrModel: PendingOcrModel | null;
+}
+
 @Injectable()
 export class VehiclesService {
+  private readonly logger = new Logger(VehiclesService.name);
   private readonly minYear: number;
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly vehicleModels: VehicleModelsService,
     config: ConfigService<Env, true>,
   ) {
     this.minYear = config.getOrThrow<number>('VEHICLE_MIN_YEAR');
@@ -236,8 +267,14 @@ export class VehiclesService {
     }
 
     // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec
-    // (server-authoritative); si no, caen al texto libre. Resuelto ANTES de la transacción.
-    const snapshot = await this.resolveModelSnapshot(input);
+    // (server-authoritative); si no, caen al texto libre. LOTE 3: en el alta del conductor (OCR onboarding)
+    // el texto libre pasa por el FUZZY-MATCH (link a un aprobado parecido, o encolar source=OCR). El contexto
+    // `fuzzy` activa ese camino — el alta admin (create) NO lo pasa (carga deliberada, no encola auto).
+    // Resuelto ANTES de la transacción del vehículo (entidad de catálogo independiente; ver resolveModelSnapshot).
+    const snapshot = await this.resolveModelSnapshot(input, {
+      requestedBy: driverId,
+      source: VehicleModelSource.OCR,
+    });
     // "Solo autos" (Ola 1): valida la clase YA resuelta — cubre ambos caminos (un spec MOTO del catálogo
     // o un texto libre MOTO se rechazan igual). Server-authoritative, no confía en lo que declara la app.
     this.assertOperableVehicleType(snapshot.vehicleType);
@@ -292,6 +329,13 @@ export class VehiclesService {
       throw err;
     }
 
+    // LOTE 3 · DoS de la cola: el modelo OCR se encola SOLO ahora, tras el alta EXITOSA del vehículo (un alta
+    // fallida o spam NO ensucia la cola del operador). Best-effort: si falla, el vehículo igual queda creado con
+    // su freetext (ver enqueueOcrModel). Solo se llega acá por el camino del `create` real (NO el idempotente).
+    if (snapshot.pendingOcrModel) {
+      await this.enqueueOcrModel(snapshot.pendingOcrModel);
+    }
+
     // El alta puede convertir al nuevo vehículo en el activo (si es el primero/único operable): lo
     // resolvemos sobre la flota completa del conductor para no mentir el `isActive` de la respuesta.
     const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
@@ -308,12 +352,9 @@ export class VehiclesService {
     driverId: string,
     existing: Vehicle,
     input: RegisterDriverVehicleDto,
-    snapshot: {
-      make: string;
-      model: string;
-      vehicleType: VehicleType;
-      modelSpecId: string | null;
-    },
+    // `snapshot.pendingOcrModel` NO se encola por este camino a propósito: es el UPDATE idempotente del wizard
+    // (o el conflicto de otro dueño), NO un alta REAL nueva → no debe alimentar la cola del operador.
+    snapshot: ModelSnapshot,
   ): Promise<DriverVehicleResponse> {
     if (existing.driverId !== driverId) {
       throw new ConflictError('Esa placa ya está registrada por otro conductor', {
@@ -342,23 +383,33 @@ export class VehiclesService {
 
   /**
    * Resuelve marca/modelo/tipo del alta. Compartido por el alta del CONDUCTOR (B5-2) y la del OPERADOR
-   * (F4 · C2) — la misma fuente única, sin duplicar la lógica del catálogo. Dos caminos:
+   * (F4 · C2) — la misma fuente única, sin duplicar la lógica del catálogo. Caminos:
    *  - CON modelSpecId → se eligió un modelo del CATÁLOGO: se valida que exista y esté APPROVED y se
    *    snapshotea make/model/vehicleType del spec (server-authoritative; ignora el texto libre).
-   *  - SIN modelSpecId → texto libre legacy: exige make+model y usa el vehicleType del body (default CAR
-   *    cuando el caller no lo especifica, p.ej. el alta admin donde el tipo es opcional).
+   *  - SIN modelSpecId, con `fuzzy` (alta del conductor · OCR) → el texto libre pasa por el FUZZY-MATCH del
+   *    catálogo (LOTE 3): si hay un aprobado parecido (>= umbral), se LINKEA ese modelSpecId y se snapshotea
+   *    del spec (reusa el modelo curado, evita duplicados "TOYOTA" vs "Toyota Yaris"); si NO, se ENCOLA con
+   *    requestModel(source: OCR) → PENDING_REVIEW (el catálogo crece de registros reales, el operador lo cura)
+   *    y el vehículo se crea con el FREETEXT (modelSpecId null, snapshot del texto libre).
+   *  - SIN modelSpecId, sin `fuzzy` (alta admin/seed) → texto libre legacy puro: exige make+model y usa el
+   *    vehicleType del body (default CAR). El operador carga deliberadamente, no se auto-encola.
+   *
+   * FRONTERA TRANSACCIONAL (monolito-1-DB, ACID, NO saga): el modelo del catálogo es un AGREGADO independiente
+   * del vehículo. Este método es READ-ONLY: el link (fuzzy-match) es una lectura, y el encolado (write) NO ocurre
+   * acá — cuando no hay match devuelve `pendingOcrModel` para que el caller lo encole DESPUÉS de que el vehículo
+   * se creó con éxito (best-effort, fuera de la tx ACID del vehículo). Así SOLO un alta real alimenta la cola del
+   * operador: un alta fallida (placa duplicada de otro conductor, etc.) o spam con texto variado NO la ensucia.
    */
-  private async resolveModelSnapshot(input: {
-    modelSpecId?: string;
-    make?: string;
-    model?: string;
-    vehicleType?: VehicleType;
-  }): Promise<{
-    make: string;
-    model: string;
-    vehicleType: VehicleType;
-    modelSpecId: string | null;
-  }> {
+  private async resolveModelSnapshot(
+    input: {
+      modelSpecId?: string;
+      make?: string;
+      model?: string;
+      vehicleType?: VehicleType;
+      year?: number;
+    },
+    fuzzy?: { requestedBy: string; source: VehicleModelSource },
+  ): Promise<ModelSnapshot> {
     if (input.modelSpecId) {
       const spec = await this.prisma.read.vehicleModelSpec.findFirst({
         where: { id: input.modelSpecId, status: VehicleModelStatus.APPROVED },
@@ -373,6 +424,7 @@ export class VehiclesService {
         model: spec.model,
         vehicleType: spec.vehicleType,
         modelSpecId: spec.id,
+        pendingOcrModel: null,
       };
     }
 
@@ -384,7 +436,82 @@ export class VehiclesService {
         model: model ?? null,
       });
     }
-    return { make, model, vehicleType: input.vehicleType ?? VehicleType.CAR, modelSpecId: null };
+    const vehicleType = input.vehicleType ?? VehicleType.CAR;
+
+    // LOTE 3 · alta del conductor con texto libre (OCR): fuzzy-match (read) → link o señalar pendiente. El alta
+    // admin no pasa `fuzzy` y cae directo al freetext legacy de abajo (sin encolar, carga deliberada).
+    if (fuzzy) {
+      const match = await this.vehicleModels.findBestApprovedMatch(make, model, vehicleType);
+      if (match) {
+        // Match fuerte: reusa el modelo curado (server-authoritative) y evita el duplicado.
+        return {
+          make: match.spec.make,
+          model: match.spec.model,
+          vehicleType: match.spec.vehicleType,
+          modelSpecId: match.spec.id,
+          pendingOcrModel: null,
+        };
+      }
+      // Sin match: NO encolamos acá (sería antes de crear el vehículo → DoS de la cola: un conductor inflaría
+      // el catálogo reenviando texto variado SIN alta real). Devolvemos la señal para que el caller encole SOLO
+      // si el vehículo se crea con éxito. El vehículo queda con el freetext (modelSpecId null) — degradación honesta.
+      return {
+        make,
+        model,
+        vehicleType,
+        modelSpecId: null,
+        pendingOcrModel: { make, model, vehicleType, year: input.year, ...fuzzy },
+      };
+    }
+
+    return { make, model, vehicleType, modelSpecId: null, pendingOcrModel: null };
+  }
+
+  /**
+   * LOTE 3 · encola un modelo NUEVO nacido del OCR (sin match en el catálogo) reusando requestModel. Se llama
+   * POST-éxito del alta del vehículo (best-effort): SOLO un registro REAL alimenta la cola del operador. El alta
+   * del vehículo solo conoce `year` (no el rango ni los asientos del catálogo): usamos yearFrom=yearTo=year y
+   * dejamos que el OPERADOR complete la ficha al aprobar (no inventamos asientos). `seats` lo fija el operador;
+   * acá va un placeholder mínimo válido (1) que el approve corrige.
+   *
+   * BEST-EFFORT (no revierte el vehículo): si el encolado falla, el vehículo YA está creado con su freetext
+   * (modelSpecId null) — el modelo pendiente es nice-to-have, lo recupera el operador o el próximo alta. NO se
+   * traga el error en silencio:
+   *  - ConflictError (dedup): otro conductor ya lo pidió/curó → es el resultado deseado, se loguea como debug.
+   *  - Cualquier otro error: se loguea como error (NO se propaga: el alta del vehículo ya tuvo éxito).
+   */
+  private async enqueueOcrModel(pending: PendingOcrModel): Promise<void> {
+    const yearValue = pending.year ?? new Date().getUTCFullYear();
+    try {
+      await this.vehicleModels.requestModel(
+        pending.requestedBy,
+        {
+          make: pending.make,
+          model: pending.model,
+          yearFrom: yearValue,
+          yearTo: yearValue,
+          vehicleType: pending.vehicleType,
+          // El operador fija los asientos reales al aprobar; placeholder mínimo válido (ficha incompleta es
+          // la norma de un PENDING_REVIEW).
+          seats: 1,
+        },
+        pending.source,
+      );
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        // Dedup: el modelo ya está en la cola/curado. Resultado deseado; no es un fallo. Visible en debug.
+        this.logger.debug(
+          `Modelo OCR ya solicitado/curado (dedup), no se re-encola: ${pending.make} ${pending.model}`,
+        );
+        return;
+      }
+      // Fallo inesperado del encolado post-éxito: el vehículo YA quedó creado con freetext. No revertimos ni
+      // propagamos (el alta tuvo éxito), pero NO lo tragamos en silencio: queda en el log para diagnóstico.
+      this.logger.error(
+        `No se pudo encolar el modelo OCR pendiente tras el alta (${pending.make} ${pending.model}); el vehículo quedó con freetext (modelSpecId=null)`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   /** Rehidrata los vehículos del conductor (más recientes primero), marcando cuál es el ACTIVO. */

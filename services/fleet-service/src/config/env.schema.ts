@@ -30,6 +30,13 @@ export const envSchema = z.object({
   VEHICLE_MIN_YEAR: z.coerce.number().default(2017),
   INSPECTION_INTERVAL_MONTHS: z.coerce.number().default(3),
 
+  // LOTE 3 · umbral de similitud (pg_trgm) para linkear un alta a TEXTO LIBRE (OCR) contra un modelo APROBADO
+  // del catálogo. Rango [0,1]: 1 = idéntico, 0 = sin parecido. La similitud combinada de marca+modelo debe
+  // ser >= este umbral para reusar el modelo curado (evita duplicados "TOYOTA" vs "Toyota Yaris"); por debajo,
+  // se encola como PENDING_REVIEW (source=OCR) y el operador lo cura. 0.45 es un default conservador
+  // (matchea variantes/typos razonables sin linkear modelos distintos). Ajustable por entorno.
+  VEHICLE_MODEL_MATCH_THRESHOLD: z.coerce.number().min(0).max(1).default(0.45),
+
   // Puerto externo de verificación de antecedentes (fase 4; hoy revisión manual del operador).
   VEO_BACKGROUND_CHECK_MODE: z.enum(['manual', 'live']).default('manual'),
 

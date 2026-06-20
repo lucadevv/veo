@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsEnum,
+  IsIn,
   IsISO8601,
   IsOptional,
   IsString,
@@ -12,8 +13,14 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { FleetDocumentType } from '@veo/shared-types';
+import {
+  FleetDocumentType,
+  OCR_ENGINES,
+  OcrEngine,
+  type ExtractedDocumentData,
+} from '@veo/shared-types';
 import { DocumentSide, FleetOwnerType } from '../../generated/prisma';
+import { EXTRACTED_DATA_TYPE_OPTIONS } from './extracted-data.dto';
 
 /** Tope defensivo de imágenes por documento (DNI = 2; foto de vehículo N). Evita payloads abusivos. */
 export const MAX_DOCUMENT_IMAGES = 10;
@@ -85,6 +92,32 @@ export class CreateDocumentDto {
   @ValidateNested({ each: true })
   @Type(() => DocumentImageInputDto)
   images?: DocumentImageInputDto[];
+
+  /**
+   * Onboarding sin-formularios (Lote 0): data extraída por OCR on-device, contrato tipado
+   * `ExtractedDocumentData` (unión discriminada por `type` de @veo/shared-types). Validación FUERTE de
+   * defensa en profundidad (fleet es interno, recibe del BFF firmado): `@ValidateNested` + `@Type` con
+   * discriminador por `type` (= FleetDocumentType) enruta a la sub-clase y, con `forbidNonWhitelisted`,
+   * acota campos/tamaño y rechaza claves arbitrarias antes de tocar el JSONB. Opcional → backward-compatible
+   * (registrar SIN OCR sigue OK). Sin `any`: el tipo declarado es exacto.
+   */
+  @ApiPropertyOptional({ description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => Object, EXTRACTED_DATA_TYPE_OPTIONS)
+  extractedData?: ExtractedDocumentData;
+
+  /** Motor de OCR que produjo `extractedData`. ENUM CERRADO (anti-spoof de texto libre). Trazabilidad. */
+  @ApiPropertyOptional({ enum: OcrEngine, description: 'Motor de OCR que extrajo la data (enum cerrado)' })
+  @IsOptional()
+  @IsIn(OCR_ENGINES)
+  ocrEngine?: OcrEngine;
+
+  /** Momento en que el cliente extrajo la data por OCR (ISO-8601). */
+  @ApiPropertyOptional({ example: '2026-06-20T10:00:00.000Z', description: 'Instante de la extracción OCR' })
+  @IsOptional()
+  @IsISO8601()
+  ocrAt?: string;
 }
 
 export enum ReviewDecision {

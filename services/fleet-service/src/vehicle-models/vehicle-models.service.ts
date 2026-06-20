@@ -7,10 +7,12 @@
  * aprobación por el operador son B5-2.c. La elección por el conductor (Vehicle.modelSpecId) es B5-2.b.
  */
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { uuidv7, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
 import { VehicleSegment, EnergySource } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
+import type { Env } from '../config/env.schema';
 import {
   buildFleetEvent,
   FleetEventType,
@@ -18,11 +20,13 @@ import {
 } from '../events/fleet-events';
 import {
   Prisma,
+  VehicleModelSource,
   VehicleModelStatus,
   VehicleType,
   type VehicleModelSpec,
 } from '../generated/prisma';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
+import { normalizeModelTerm } from './vehicle-model-normalize';
 import type {
   ApproveVehicleModelDto,
   RequestVehicleModelDto,
@@ -30,9 +34,82 @@ import type {
   VehicleModelSpecView,
 } from './dto/vehicle-model.dto';
 
+/** Resultado del fuzzy-match: el modelo APROBADO más parecido y su score [0,1]. */
+export interface VehicleModelMatch {
+  spec: VehicleModelSpec;
+  score: number;
+}
+
+/** Fila cruda del $queryRaw del fuzzy-match: el id del mejor candidato + su score combinado. */
+interface FuzzyMatchRow {
+  id: string;
+  score: number;
+}
+
 @Injectable()
 export class VehicleModelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly matchThreshold: number;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    config: ConfigService<Env, true>,
+  ) {
+    this.matchThreshold = config.getOrThrow<number>('VEHICLE_MODEL_MATCH_THRESHOLD');
+  }
+
+  /**
+   * LOTE 3 · FUZZY-MATCH del catálogo: dado make/model a TEXTO LIBRE (del OCR) y el tipo de vehículo, busca
+   * el modelo APROBADO más parecido usando pg_trgm (`similarity()` sobre las columnas normalizadas con índice
+   * GIN trigram). Devuelve `{spec, score}` si el score combinado >= umbral (VEHICLE_MODEL_MATCH_THRESHOLD), o
+   * `null` si nada supera el umbral (→ el caller encola con requestModel(source: OCR) y el catálogo crece).
+   *
+   * Score combinado = MÍNIMO de similarity(make) y similarity(model): conservador a propósito — AMBOS deben
+   * parecerse para reusar el modelo curado. Evita que "TOYOTA loquesea" matchee un "Toyota Yaris" solo por la
+   * marca (linkearía modelos distintos). El normalizado TS (`normalizeModelTerm`) espeja exactamente las
+   * columnas generadas make_norm/model_norm, así parametriza el query contra lo que el índice GIN contiene.
+   *
+   * SEGURIDAD: $queryRaw 100% PARAMETRIZADO (placeholders Prisma `${...}`), NO concatena strings → no inyectable.
+   * El enum vehicleType y los términos normalizados viajan como parámetros bindeados, no interpolados.
+   */
+  async findBestApprovedMatch(
+    make: string,
+    model: string,
+    vehicleType: VehicleType,
+  ): Promise<VehicleModelMatch | null> {
+    const makeNorm = normalizeModelTerm(make);
+    const modelNorm = normalizeModelTerm(model);
+    // Sin términos normalizados no hay nada con qué comparar (degradación honesta: el caller encolará).
+    if (!makeNorm || !modelNorm) return null;
+
+    // $queryRaw PARAMETRIZADO: cada `${...}` es un placeholder bindeado por el driver (no interpolación de
+    // string) → NO inyectable. `fleet.similarity()` usa el índice GIN trigram de make_norm/model_norm. La
+    // función se CALIFICA con el schema `fleet` porque pg_trgm se instaló ahí (no en public): así el match es
+    // independiente del search_path de la conexión (gotcha verificado contra la DB). Los enums status/
+    // vehicleType viajan como parámetros bindeados y se castean al tipo del schema en el borde.
+    const rows = await this.prisma.read.$queryRaw<FuzzyMatchRow[]>`
+      SELECT "id",
+             LEAST(
+               fleet.similarity("make_norm", ${makeNorm}),
+               fleet.similarity("model_norm", ${modelNorm})
+             ) AS score
+      FROM "fleet"."vehicle_model_specs"
+      WHERE "status" = ${VehicleModelStatus.APPROVED}::"fleet"."VehicleModelStatus"
+        AND "vehicle_type" = ${vehicleType}::"fleet"."VehicleType"
+      ORDER BY score DESC
+      LIMIT 1
+    `;
+
+    const best = rows[0];
+    // El score puede llegar como string desde el driver (float8). Number() lo normaliza; sin fila → null.
+    if (!best) return null;
+    const score = Number(best.score);
+    if (!Number.isFinite(score) || score < this.matchThreshold) return null;
+
+    // Rehidrata el spec completo (el query trajo solo id+score para no acoplar el SELECT al shape del modelo).
+    const spec = await this.prisma.read.vehicleModelSpec.findUnique({ where: { id: best.id } });
+    if (!spec) return null;
+    return { spec, score };
+  }
 
   /**
    * Catálogo APROBADO, paginado por cursor. El keyset es por `id` (mismo campo que el `orderBy`, para que
@@ -86,10 +163,16 @@ export class VehicleModelsService {
    * B5-2.c · el conductor SOLICITA un modelo que no está en el catálogo. Entra PENDING_REVIEW con lo que
    * conoce (make/model/años/tipo/asientos); el operador completa la ficha técnica al aprobar. Dedup por
    * (make, model, yearFrom): si ya existe, no se crea un duplicado — se informa según su estado.
+   *
+   * LOTE 3 · `source` distingue el ORIGEN del alta (tipado fuerte, sin string mágico): DRIVER_REQUEST cuando
+   * el conductor elige "mi modelo no está" en el onboarding (default); OCR cuando nace de un alta a texto
+   * libre que el fuzzy-match NO logró linkear a un aprobado (el catálogo crece de registros reales, el gate
+   * del operador garantiza calidad). Reusado por VehiclesService — NO se duplica la lógica de alta.
    */
   async requestModel(
     requestedBy: string,
     input: RequestVehicleModelDto,
+    source: VehicleModelSource = VehicleModelSource.DRIVER_REQUEST,
   ): Promise<VehicleModelReviewView> {
     if (input.yearTo < input.yearFrom) {
       throw new ValidationError('El año "hasta" no puede ser menor que el año "desde"', {
@@ -126,6 +209,7 @@ export class VehicleModelsService {
           energySource: null,
           efficiency: null,
           status: VehicleModelStatus.PENDING_REVIEW,
+          source,
           requestedBy,
         },
       });

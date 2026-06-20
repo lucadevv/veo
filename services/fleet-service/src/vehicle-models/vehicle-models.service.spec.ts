@@ -7,8 +7,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { VehicleSegment, EnergySource } from '@veo/shared-types';
-import { VehicleModelStatus, VehicleType, type VehicleModelSpec } from '../generated/prisma';
+import {
+  VehicleModelSource,
+  VehicleModelStatus,
+  VehicleType,
+  type VehicleModelSpec,
+} from '../generated/prisma';
 import { VehicleModelsService } from './vehicle-models.service';
+
+/** Config doble: solo expone el umbral del fuzzy-match (LOTE 3). */
+const fakeConfig = { getOrThrow: () => 0.45 } as never;
 
 function row(over: Partial<VehicleModelSpec> = {}): VehicleModelSpec {
   return {
@@ -23,6 +31,7 @@ function row(over: Partial<VehicleModelSpec> = {}): VehicleModelSpec {
     energySource: 'GASOLINE_95',
     efficiency: 17,
     status: VehicleModelStatus.APPROVED,
+    source: VehicleModelSource.SEED,
     requestedBy: null,
     verifiedBy: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -44,7 +53,7 @@ function makeService(rows: VehicleModelSpec[]) {
       ),
     );
   const prisma = { read: { vehicleModelSpec: { findMany, findFirst } } };
-  const service = new VehicleModelsService(prisma as never);
+  const service = new VehicleModelsService(prisma as never, fakeConfig);
   return { service, findMany, findFirst };
 }
 
@@ -211,7 +220,7 @@ function makeReviewService(rows: VehicleModelSpec[]) {
       $transaction: (fn: (tx: typeof writeClient) => unknown) => Promise.resolve(fn(writeClient)),
     },
   };
-  const service = new VehicleModelsService(prisma as never);
+  const service = new VehicleModelsService(prisma as never, fakeConfig);
   return { service, captured, create, updateMany };
 }
 
@@ -249,6 +258,116 @@ describe('VehicleModelsService.requestModel · B5-2.c', () => {
     ]);
     await expect(service.requestModel('driver-1', reqInput)).rejects.toBeInstanceOf(ConflictError);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('LOTE 3 · source default DRIVER_REQUEST (el conductor lo eligió de "mi modelo no está")', async () => {
+    const { service, captured } = makeReviewService([]);
+    await service.requestModel('driver-1', reqInput);
+    expect(captured.create!.source).toBe(VehicleModelSource.DRIVER_REQUEST);
+  });
+
+  it('LOTE 3 · source=OCR cuando lo encola el alta a texto libre (fuzzy sin match)', async () => {
+    const { service, captured } = makeReviewService([]);
+    await service.requestModel('driver-1', reqInput, VehicleModelSource.OCR);
+    expect(captured.create!.source).toBe(VehicleModelSource.OCR);
+    expect(captured.create!.status).toBe(VehicleModelStatus.PENDING_REVIEW);
+  });
+});
+
+/**
+ * LOTE 3 · FUZZY-MATCH (pg_trgm). El método ejecuta un $queryRaw que devuelve {id, score}; el doble captura
+ * el TemplateStringsArray + los valores para asertar que (a) la query usa fleet.similarity sobre las columnas
+ * normalizadas, y (b) los términos viajan como PARÁMETROS BINDEADOS (no concatenados en el SQL → no inyectable).
+ */
+function makeMatchService(opts: {
+  queryRows: { id: string; score: number }[];
+  spec?: VehicleModelSpec | null;
+  threshold?: number;
+}) {
+  const captured: { sql?: TemplateStringsArray; values?: unknown[] } = {};
+  const queryRaw = vi
+    .fn()
+    .mockImplementation((sql: TemplateStringsArray, ...values: unknown[]) => {
+      captured.sql = sql;
+      captured.values = values;
+      return Promise.resolve(opts.queryRows);
+    });
+  const findUnique = vi.fn().mockResolvedValue(opts.spec ?? null);
+  const prisma = {
+    read: { $queryRaw: queryRaw, vehicleModelSpec: { findUnique } },
+  };
+  const config = { getOrThrow: () => opts.threshold ?? 0.45 } as never;
+  const service = new VehicleModelsService(prisma as never, config);
+  return { service, captured, queryRaw, findUnique };
+}
+
+describe('VehicleModelsService.findBestApprovedMatch · LOTE 3 fuzzy-match', () => {
+  it('match fuerte (score >= umbral) → devuelve {spec, score} (linkea el modelo curado)', async () => {
+    const spec = row({ id: 'spec-yaris', make: 'Toyota', model: 'Yaris' });
+    const { service } = makeMatchService({
+      queryRows: [{ id: 'spec-yaris', score: 0.9 }],
+      spec,
+      threshold: 0.45,
+    });
+    const match = await service.findBestApprovedMatch('toyota', 'yaris', VehicleType.CAR);
+    expect(match).not.toBeNull();
+    expect(match!.spec.id).toBe('spec-yaris');
+    expect(match!.score).toBe(0.9);
+  });
+
+  it('score por DEBAJO del umbral → null (sin link; el caller encolará)', async () => {
+    const { service, findUnique } = makeMatchService({
+      queryRows: [{ id: 'spec-x', score: 0.2 }],
+      threshold: 0.45,
+    });
+    const match = await service.findBestApprovedMatch('Marca Rara', 'XYZ', VehicleType.CAR);
+    expect(match).toBeNull();
+    // no rehidrata el spec si no superó el umbral
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it('sin candidatos (catálogo vacío para ese tipo) → null', async () => {
+    const { service } = makeMatchService({ queryRows: [], threshold: 0.45 });
+    expect(await service.findBestApprovedMatch('Toyota', 'Yaris', VehicleType.CAR)).toBeNull();
+  });
+
+  it('make/model que normalizan a vacío (solo espacios) → null sin tocar la DB', async () => {
+    const { service, queryRaw } = makeMatchService({ queryRows: [], threshold: 0.45 });
+    expect(await service.findBestApprovedMatch('   ', 'Yaris', VehicleType.CAR)).toBeNull();
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('$queryRaw PARAMETRIZADO: términos normalizados van como VALORES bindeados, no en el SQL (no inyectable)', async () => {
+    const spec = row({ id: 's1' });
+    const { service, captured } = makeMatchService({
+      queryRows: [{ id: 's1', score: 0.8 }],
+      spec,
+    });
+    // Un intento de inyección clásico en el make: debe viajar como PARÁMETRO, nunca interpolado en el texto SQL.
+    const evil = "x'; DROP TABLE fleet.vehicle_model_specs; --";
+    await service.findBestApprovedMatch(evil, 'yaris', VehicleType.CAR);
+
+    const sqlText = captured.sql!.join('?');
+    // El SQL estático NO contiene el payload: el tagged-template lo separó en `values`.
+    expect(sqlText).not.toContain('DROP TABLE');
+    expect(sqlText).toContain('fleet.similarity');
+    expect(sqlText).toContain('make_norm');
+    expect(sqlText).toContain('model_norm');
+    // El payload, ya NORMALIZADO (uppercase), está entre los valores bindeados (parametrizado).
+    expect(captured.values).toContain(evil.trim().toUpperCase());
+    expect(captured.values).toContain('YARIS');
+    // El status y el vehicleType también viajan bindeados (no interpolados).
+    expect(captured.values).toContain(VehicleModelStatus.APPROVED);
+    expect(captured.values).toContain(VehicleType.CAR);
+  });
+
+  it('umbral configurable: con umbral 0.95 un score 0.9 ya NO matchea', async () => {
+    const { service } = makeMatchService({
+      queryRows: [{ id: 's1', score: 0.9 }],
+      spec: row({ id: 's1' }),
+      threshold: 0.95,
+    });
+    expect(await service.findBestApprovedMatch('toyota', 'yaris', VehicleType.CAR)).toBeNull();
   });
 });
 

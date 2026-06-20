@@ -22,6 +22,7 @@ import {
 } from '../infra/pagination';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
+  assertS3KeysBelongToOwner,
   deriveExpiryStatus,
   isCriticalDocument,
   normalizeDocumentImages,
@@ -111,7 +112,13 @@ export class DocumentsService {
       }
     }
 
-    const duplicate = await this.prisma.read.fleetDocument.findFirst({
+    // Read-your-writes (cierra la ALTA del replica-lag): el chequeo de duplicado DEBE leer del primary
+    // (`write`), no de la réplica. Un doc recién creado puede no haberse replicado aún → leer de `read`
+    // dejaría pasar un duplicado en una ventana de lag (@veo/database read-write.ts §14: "NUNCA leer de
+    // `read` un registro recién escrito en un flujo crítico... usar `write`"). DEUDA: bajo concurrencia
+    // pura (dos altas simultáneas) esto sigue siendo TOCTOU — el cierre definitivo es un partial unique
+    // index (ownerType, ownerId, type) WHERE status activo, fuera de scope de este lote (lo decide el dueño).
+    const duplicate = await this.prisma.write.fleetDocument.findFirst({
       where: {
         ownerType: input.ownerType,
         ownerId: input.ownerId,
@@ -136,6 +143,12 @@ export class DocumentsService {
     // ValidationError si las caras son incoherentes (p.ej. FRONT sin BACK). Puede ser [] (doc sin archivo aún).
     const images = normalizeDocumentImages({ images: input.images, fileS3Key: input.fileS3Key });
 
+    // Anti-IDOR de STORAGE (defensa en profundidad): el `ownerId` ya quedó probado contra el principal
+    // (arriba), pero las KEYS S3 vienen del cliente. Si no se acotan al prefijo del dueño, un doc DRIVER
+    // podría apuntar a `drivers/{OTRO}/documents/...` y filtrar PII ajena al presignar el operador su GET.
+    // Cubre TODAS las fuentes (images[] + fileS3Key legacy, ya unificadas en `images`). 403 fail-closed.
+    assertS3KeysBelongToOwner(input.ownerType, input.ownerId, images);
+
     const documentId = uuidv7();
 
     // Transacción ATÓMICA: el documento y sus N imágenes se persisten juntos o no se persiste nada.
@@ -152,6 +165,16 @@ export class DocumentsService {
           issuedAt: input.issuedAt ? new Date(input.issuedAt) : null,
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
           fileS3Key: primaryS3Key(images),
+          // Onboarding sin-formularios (Lote 0): la data extraída por OCR on-device se persiste EN LA
+          // MISMA transacción atómica que el doc + sus imágenes. Opcional → si no vino OCR, las 3 columnas
+          // quedan null (Prisma omite el set con `undefined`), y el registro legacy sigue idéntico.
+          // `extractedData` es Json?: el contrato tipado ExtractedDocumentData se serializa tal cual; el
+          // cast a InputJsonValue es el puente al tipo Json de Prisma (no hay `any`).
+          extractedData: input.extractedData
+            ? (input.extractedData as unknown as Prisma.InputJsonValue)
+            : undefined,
+          ocrEngine: input.ocrEngine ?? undefined,
+          ocrAt: input.ocrAt ? new Date(input.ocrAt) : undefined,
           status: FleetDocumentStatus.PENDING_REVIEW,
         },
       });

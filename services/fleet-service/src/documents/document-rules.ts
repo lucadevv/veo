@@ -2,9 +2,9 @@
  * Reglas de dominio puras de documentos de flota (BR-I04). Sin I/O ni dependencias de Nest:
  * funciones puras y deterministas → 100% testeables. La capa de servicio/cron las orquesta.
  */
-import { ValidationError } from '@veo/utils';
+import { ValidationError, ForbiddenError } from '@veo/utils';
 import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
-import { DocumentSide } from '../generated/prisma';
+import { DocumentSide, FleetOwnerType } from '../generated/prisma';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -161,6 +161,47 @@ export function primaryS3Key(images: readonly NormalizedDocumentImage[]): string
   const first = images[0];
   if (!first) return null;
   return images.reduce((min, i) => (i.order < min.order ? i : min), first).s3Key;
+}
+
+/**
+ * Anti-IDOR de STORAGE (Ley 29733, defensa en profundidad · FOUNDATION §14): el prefijo S3 que un
+ * documento puede referenciar está ACOTADO al dueño. Un conductor solo puede registrar un doc cuyas
+ * keys vivan bajo SU propio prefijo `drivers/{ownerId}/` — el mismo que el presign genera server-side
+ * (driver-bff `buildDocumentKey`). Sin esto, un cliente podía mandar un `s3Key` apuntando a
+ * `drivers/{OTRO}/documents/...` y, al presignar el operador un GET de esa key, ver PII ajena.
+ *
+ * El prefijo NO es un literal de dominio suelto: se CONSTRUYE del `ownerType`+`ownerId` (la frontera es
+ * el id del dueño, no una cadena mágica). Espeja el patrón ya existente de `avatar.service.assertOwnsKey`
+ * (`avatars/${userId}/`). Para `ownerType` que aún no tiene un prefijo storage acotado (p.ej. VEHICLE,
+ * cuyo onboarding driver-scoped no emite keys vehicle-scoped) devuelve `null`: no se fuerza un prefijo
+ * que no corresponde (no romper el flujo legítimo), la pertenencia del owner ya la cubre `create`.
+ */
+export function expectedS3KeyPrefix(ownerType: FleetOwnerType, ownerId: string): string | null {
+  if (ownerType === FleetOwnerType.DRIVER) return `drivers/${ownerId}/`;
+  return null;
+}
+
+/**
+ * Valida que TODAS las claves S3 de un documento (las imágenes ya normalizadas) pertenezcan al prefijo
+ * del dueño. Fail-closed: si alguna key no arranca con el prefijo esperado → ForbiddenError (403). Si el
+ * `ownerType` no tiene prefijo acotado (`expectedS3KeyPrefix` → null), es no-op (no aplica este riel).
+ */
+export function assertS3KeysBelongToOwner(
+  ownerType: FleetOwnerType,
+  ownerId: string,
+  images: readonly NormalizedDocumentImage[],
+): void {
+  const prefix = expectedS3KeyPrefix(ownerType, ownerId);
+  if (prefix === null) return;
+  for (const img of images) {
+    if (!img.s3Key.startsWith(prefix)) {
+      throw new ForbiddenError('La clave de archivo no pertenece al dueño del documento', {
+        ownerType,
+        ownerId,
+        s3Key: img.s3Key,
+      });
+    }
+  }
 }
 
 /** Días (fraccionarios) hasta el vencimiento. Negativo si ya pasó. */

@@ -9,9 +9,9 @@
  *  - Identidades admin/compliance (type !== 'driver') pasan: su authz la gobierna el RolesGuard.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenError, ValidationError } from '@veo/utils';
+import { ConflictError, ForbiddenError, ValidationError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
-import { FleetDocumentType } from '@veo/shared-types';
+import { FleetDocumentType, OcrEngine } from '@veo/shared-types';
 import { DocumentSide, FleetOwnerType, type FleetDocument } from '../generated/prisma';
 import { DocumentsService } from './documents.service';
 
@@ -137,16 +137,32 @@ function makeService(
       }),
   );
 
+  // El chequeo de duplicado (dedup) lee del PRIMARY (`write`) por read-your-writes (replica-lag): por eso
+  // `findFirst` vive en `write.fleetDocument`. `read.fleetDocument.findFirst` queda como espía que DEBE
+  // permanecer SIN llamar (si el service regresara a leer de la réplica, este espía lo delataría).
+  const readFindFirstSpy = vi.fn().mockResolvedValue(null);
   const prisma = {
     read: {
       vehicle: { findUnique: vehicleFindUnique },
-      fleetDocument: { findFirst: docFindFirst, findMany: docFindMany },
+      fleetDocument: { findFirst: readFindFirstSpy, findMany: docFindMany },
     },
-    write: { fleetDocument: { create: docCreate }, $transaction },
+    write: {
+      fleetDocument: { findFirst: docFindFirst, create: docCreate },
+      $transaction,
+    },
   };
   const config = { getOrThrow: () => 30 };
   const service = new DocumentsService(prisma as never, config as never);
-  return { service, created, docCreate, vehicleFindUnique, docFindMany, imagesCreated };
+  return {
+    service,
+    created,
+    docCreate,
+    vehicleFindUnique,
+    docFindMany,
+    imagesCreated,
+    docFindFirst,
+    readFindFirstSpy,
+  };
 }
 
 const driverDoc = {
@@ -207,8 +223,8 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
         ...driverDoc,
         ownerId: 'driver-profile-1',
         images: [
-          { s3Key: 'drivers/d/documents/LICENSE_A1/back.jpg', side: DocumentSide.BACK },
-          { s3Key: 'drivers/d/documents/LICENSE_A1/front.jpg', side: DocumentSide.FRONT },
+          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/back.jpg', side: DocumentSide.BACK },
+          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/front.jpg', side: DocumentSide.FRONT },
         ],
       },
       driverIdentity({ driverId: 'driver-profile-1' }),
@@ -222,7 +238,7 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
     expect(byOrder[0]).toMatchObject({ side: DocumentSide.FRONT, order: 0, documentId: doc.id });
     expect(byOrder[1]).toMatchObject({ side: DocumentSide.BACK, order: 1, documentId: doc.id });
     // fileS3Key (deprecado) se puebla con la primera imagen por orden (backward-compat).
-    expect(created.data?.fileS3Key).toBe('drivers/d/documents/LICENSE_A1/front.jpg');
+    expect(created.data?.fileS3Key).toBe('drivers/driver-profile-1/documents/LICENSE_A1/front.jpg');
     // El doc devuelto trae sus imágenes.
     expect(doc.images).toHaveLength(2);
   });
@@ -253,7 +269,11 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
     const { service, imagesCreated } = makeService();
 
     await service.create(
-      { ...driverDoc, ownerId: 'driver-profile-1', fileS3Key: 'legacy/key.jpg' },
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-1',
+        fileS3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/legacy.jpg',
+      },
       driverIdentity({ driverId: 'driver-profile-1' }),
     );
 
@@ -261,7 +281,7 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
     expect(imagesCreated.data[0]).toMatchObject({
       side: DocumentSide.SINGLE,
       order: 0,
-      s3Key: 'legacy/key.jpg',
+      s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/legacy.jpg',
     });
   });
 
@@ -278,6 +298,80 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
         driverIdentity({ driverId: 'driver-profile-1' }),
       ),
     ).rejects.toBeInstanceOf(ValidationError);
+    expect(docCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('DocumentsService.create · data OCR extraída (onboarding sin-formularios, Lote 0)', () => {
+  it('persiste extractedData + ocrEngine + ocrAt en la MISMA transacción del create', async () => {
+    const { service, created } = makeService();
+
+    const extractedData = {
+      type: FleetDocumentType.DNI,
+      fullName: 'JUAN PEREZ',
+      documentNumber: '12345678',
+      birthdate: '1990-05-20',
+    } as const;
+
+    const doc = await service.create(
+      {
+        ownerType: FleetOwnerType.DRIVER,
+        type: FleetDocumentType.DNI,
+        documentNumber: '12345678',
+        ownerId: 'driver-profile-1',
+        extractedData,
+        ocrEngine: OcrEngine.ANDROID_MLKIT,
+        ocrAt: '2026-06-20T10:00:00.000Z',
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    // La data OCR viaja al create del documento (misma transacción que el doc + imágenes).
+    expect(created.data?.extractedData).toEqual(extractedData);
+    expect(created.data?.ocrEngine).toBe(OcrEngine.ANDROID_MLKIT);
+    expect(created.data?.ocrAt).toEqual(new Date('2026-06-20T10:00:00.000Z'));
+    expect(doc.type).toBe(FleetDocumentType.DNI);
+  });
+
+  it('backward-compat: SIN data OCR → extractedData/ocrEngine/ocrAt quedan undefined (no rompe el alta legacy)', async () => {
+    const { service, created } = makeService();
+
+    await service.create(
+      { ...driverDoc, ownerId: 'driver-profile-1' },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    expect(created.data?.extractedData).toBeUndefined();
+    expect(created.data?.ocrEngine).toBeUndefined();
+    expect(created.data?.ocrAt).toBeUndefined();
+  });
+});
+
+describe('DocumentsService.create · dedup read-your-writes (replica-lag)', () => {
+  it('(e) el chequeo de duplicado lee del PRIMARY (write.findFirst), NUNCA de la réplica (read.findFirst)', async () => {
+    const { service, docFindFirst, readFindFirstSpy } = makeService();
+
+    await service.create(
+      { ...driverDoc, ownerId: 'driver-profile-1' },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    // El dedup consultó el primary…
+    expect(docFindFirst).toHaveBeenCalledTimes(1);
+    // …y JAMÁS la réplica (read.fleetDocument.findFirst). Si alguien revirtiera a `read`, esto rompería.
+    expect(readFindFirstSpy).not.toHaveBeenCalled();
+  });
+
+  it('(e) un duplicado ACTIVO hallado en el primary → ConflictError (no se crea el doc)', async () => {
+    const { service, docFindFirst, docCreate } = makeService();
+    docFindFirst.mockResolvedValueOnce({ id: 'existing-doc' } as unknown as FleetDocument);
+
+    await expect(
+      service.create(
+        { ...driverDoc, ownerId: 'driver-profile-1' },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
     expect(docCreate).not.toHaveBeenCalled();
   });
 });
@@ -328,6 +422,95 @@ describe('DocumentsService.create · confused deputy (denylist fail-closed)', ()
       service.create({ ...driverDoc, ownerId: 'driver-profile-cualquiera' }, passengerIdentity()),
     ).rejects.toBeInstanceOf(ForbiddenError);
     expect(docCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('DocumentsService.create · anti-IDOR STORAGE (s3Key cross-driver, Ley 29733)', () => {
+  it('OK: doc DRIVER con images bajo SU propio prefijo `drivers/{ownerId}/` → pasa (camino legítimo)', async () => {
+    const { service, created } = makeService();
+    const doc = await service.create(
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-1',
+        images: [
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/abc.jpg',
+            side: DocumentSide.SINGLE,
+          },
+        ],
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+    expect(doc.ownerId).toBe('driver-profile-1');
+    expect(created.data?.fileS3Key).toBe('drivers/driver-profile-1/documents/LICENSE_A1/abc.jpg');
+  });
+
+  it('RECHAZA: doc DRIVER con una image apuntando a `drivers/{OTRO}/...` → ForbiddenError, NO persiste', async () => {
+    const { service, docCreate } = makeService();
+    await expect(
+      service.create(
+        {
+          ...driverDoc,
+          ownerId: 'driver-profile-1',
+          images: [
+            {
+              s3Key: 'drivers/driver-profile-OTRO/documents/LICENSE_A1/leak.jpg',
+              side: DocumentSide.SINGLE,
+            },
+          ],
+        },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(docCreate).not.toHaveBeenCalled();
+  });
+
+  it('RECHAZA: doc DRIVER con fileS3Key legacy cross-driver → ForbiddenError, NO persiste', async () => {
+    const { service, docCreate } = makeService();
+    await expect(
+      service.create(
+        {
+          ...driverDoc,
+          ownerId: 'driver-profile-1',
+          fileS3Key: 'drivers/driver-profile-OTRO/documents/LICENSE_A1/leak.jpg',
+        },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(docCreate).not.toHaveBeenCalled();
+  });
+
+  it('RECHAZA: doc DRIVER con una image SIN prefijo driver-scoped → ForbiddenError', async () => {
+    const { service, docCreate } = makeService();
+    await expect(
+      service.create(
+        {
+          ...driverDoc,
+          ownerId: 'driver-profile-1',
+          images: [{ s3Key: 'arbitrary/key.jpg', side: DocumentSide.SINGLE }],
+        },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(docCreate).not.toHaveBeenCalled();
+  });
+
+  it('admin: doc DRIVER de OTRO con key driver-scoped del MISMO ownerId → pasa (la key sigue acotada al owner)', async () => {
+    const { service, created } = makeService();
+    await service.create(
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-cualquiera',
+        images: [
+          {
+            s3Key: 'drivers/driver-profile-cualquiera/documents/LICENSE_A1/x.jpg',
+            side: DocumentSide.SINGLE,
+          },
+        ],
+      },
+      adminIdentity(),
+    );
+    expect(created.data?.ownerId).toBe('driver-profile-cualquiera');
   });
 });
 

@@ -40,8 +40,14 @@ export class DocumentsController {
     return this.documents.create(dto, user);
   }
 
+  // CAPA 2 autorización (RBAC): `list` expone PII de CUALQUIER dueño (incluida la `extractedData` OCR:
+  // DNI/SOAT/licencia) y su único caller legítimo es el operador (admin-bff con rol admin). Es ADMIN-ONLY:
+  // mismos roles que `review` (compliance/admin/superadmin). Sin esto, cualquier riel con HMAC válido leía
+  // PII. NO se toca `create` (driver-rail sube SUS docs vía AudienceGuard) — RolesGuard admin lo rompería.
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get()
-  @ApiOperation({ summary: 'Listar documentos (paginado cursor). Filtros: status, ownerId' })
+  @ApiOperation({ summary: 'Listar documentos (paginado cursor). Filtros: status, ownerId. ADMIN-ONLY' })
   @ApiQuery({ name: 'status', required: false, enum: FleetDocumentStatus })
   @ApiQuery({ name: 'ownerId', required: false })
   @ApiQuery({ name: 'cursor', required: false })

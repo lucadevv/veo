@@ -102,6 +102,20 @@ enum VehicleModelStatus {
   @@schema("fleet")
 }
 
+/// LOTE 3 · ORIGEN del alta de un modelo del catálogo (de dónde vino la fila). Tipado fuerte (sin string
+/// mágico). SEED = curado/seedeado por el operador; DRIVER_REQUEST = el conductor lo solicitó eligiendo
+/// "mi modelo no está" en el onboarding; OCR = nació de un alta self-service a TEXTO LIBRE (marca/modelo del
+/// OCR) que NO matcheó ningún aprobado → el fuzzy-match lo encoló como PENDING_REVIEW (así el catálogo crece
+/// de registros reales, pero el gate del operador garantiza calidad). El default coherente para filas viejas
+/// es DRIVER_REQUEST (la migración re-marca los seeds históricos a SEED).
+enum VehicleModelSource {
+  SEED
+  DRIVER_REQUEST
+  OCR
+
+  @@schema("fleet")
+}
+
 /// Vehículo de la flota (BR-D04: año >= 2017; SOAT e ITV vigentes; inspección trimestral).
 model Vehicle {
   id                 String           @id @db.Uuid
@@ -168,11 +182,21 @@ model VehicleModelSpec {
   /// Rendimiento en km por unidad de energía (km/L o km/kWh). Lo pone el operador al aprobar. NULL en PENDING.
   efficiency   Int?
   status       VehicleModelStatus @default(PENDING_REVIEW)
+  /// LOTE 3 · ORIGEN del alta (SEED|DRIVER_REQUEST|OCR). Distingue las altas que nacieron de un OCR a texto
+  /// libre (fuzzy sin match → encolado) de las solicitadas por el conductor o seedeadas. Default coherente
+  /// para filas existentes: DRIVER_REQUEST (la migración re-marca los seeds históricos a SEED).
+  source       VehicleModelSource @default(DRIVER_REQUEST)
   /// User.id (identity) del conductor que solicitó el alta (null para los seedeados/curados por operador).
   requestedBy  String?            @map("requested_by") @db.Uuid
   verifiedBy   String?            @map("verified_by") @db.Uuid
   createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// LOTE 3 · columnas NORMALIZADAS (uppercase + trim + colapso de espacios + sin tildes) y sus índices GIN
+  /// trigram (pg_trgm) viven SOLO en la migración raw (20260620140000_fleet_vehicle_model_spec_fuzzy_match):
+  /// son `GENERATED ALWAYS ... STORED` (auto-mantenidas por Postgres) y el fuzzy-match las lee por $queryRaw,
+  /// no por el client. No se declaran acá porque Prisma no modela generated-stored columns declarativamente;
+  /// `prisma migrate diff` no las toca (la columna física existe, fuera del modelo) — invariante a vigilar.
 
   /// Un modelo es único por make+model+añoDesde (evita duplicados al curar/solicitar).
   @@unique([make, model, yearFrom])
@@ -202,6 +226,15 @@ model FleetDocument {
   /// Motivo del rechazo que escribe el operador (M5): el conductor lo VE para saber qué corregir.
   /// null si no está rechazado o no se dio motivo (degradación honesta, nunca un motivo falso).
   rejectionReason String?             @map("rejection_reason")
+  /// Onboarding sin-formularios (Lote 0): data extraída por OCR on-device del documento (DNI/SOAT/
+  /// tarjeta/licencia). Contrato tipado `ExtractedDocumentData` de @veo/shared-types (unión discriminada
+  /// por `type`). NULLABLE: un documento registrado SIN OCR (camino legacy) sigue siendo válido — la data
+  /// es una conveniencia de pre-llenado, NO dato crítico (el operador la re-verifica al aprobar).
+  extractedData   Json?               @map("extracted_data")
+  /// Motor de OCR que produjo `extractedData` (ej. "mlkit-android"). Trazabilidad. Null si no hubo OCR.
+  ocrEngine       String?             @map("ocr_engine")
+  /// Momento en que el cliente extrajo la data por OCR. Null si no hubo OCR.
+  ocrAt           DateTime?           @map("ocr_at") @db.Timestamptz
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
