@@ -70,4 +70,14 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
     hasNumber: false,
     hasExpiry: false,
   },
+  [FleetDocumentType.DNI]: {
+    // El DNI tiene NÚMERO (8 dígitos). Se sube como documento de 2 caras (FRONT+BACK vía el presign
+    // múltiple del 3A); la cara FRONT es la que consume el face-match (sub-lote 3C).
+    hasNumber: true,
+    numberLabelKey: 'registration.documents.number.DNI.label',
+    numberPlaceholderKey: 'registration.documents.number.DNI.placeholder',
+    // El DNI peruano vence, pero el vencimiento queda FUERA de alcance de este sub-lote (el OCR del DNI
+    // está diferido): en el alta lo tratamos como no-vencedor y NO exigimos `expiresAt`.
+    hasExpiry: false,
+  },
 };

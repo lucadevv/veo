@@ -1,13 +1,16 @@
 import {
   type DocumentUploadContentType,
+  type DocumentUploadSideTicket,
   documentUploadTicket,
   type HttpClient,
 } from '@veo/api-client';
 import type { FleetDocumentType } from '@veo/shared-types';
 import {
+  type DocumentSideFile,
   DocumentUploadError,
   type DocumentUploader,
   type UploadedDocumentBinary,
+  type UploadedDocumentImage,
 } from '../../domain/ports/document-uploader';
 import type { PickedImage } from '../../domain/ports/image-picker-service';
 
@@ -49,29 +52,67 @@ export class HttpDocumentUploader implements DocumentUploader {
     private readonly fetchImpl: typeof fetch = (input, init) => globalThis.fetch(input, init),
   ) {}
 
-  async upload(type: FleetDocumentType, file: PickedImage): Promise<UploadedDocumentBinary> {
-    // 0) Deriva el contentType del archivo (allowlist del contrato); si no casa, falla pronto.
-    const contentType = this.resolveContentType(file);
+  async upload(
+    type: FleetDocumentType,
+    sides: DocumentSideFile[],
+  ): Promise<UploadedDocumentBinary> {
+    // 0) Sin caras no hay nada que subir: el caso de uso siempre pasa ≥1 (defensa de borde igualmente).
+    const [firstSide] = sides;
+    if (!firstSide) {
+      throw new DocumentUploadError('read', 'No se entregó ninguna imagen para subir');
+    }
 
-    // 1) Ticket prefirmado: ESTA llamada va por el cliente autenticado del BFF (Bearer).
+    // 0-bis) Deriva el contentType de CADA archivo (allowlist del contrato); si alguno no casa, falla
+    //    pronto. El presign del contrato lleva UN `contentType` por documento (todas las caras comparten
+    //    formato: el escáner siempre entrega JPEG), así que usamos el de la primera cara para el ticket.
+    const contentType = this.resolveContentType(firstSide.file);
+    for (const { file } of sides) {
+      this.resolveContentType(file);
+    }
+
+    // 1) Tickets prefirmados (uno POR CARA): ESTA llamada va por el cliente autenticado del BFF (Bearer).
+    //    Enviamos las `sides` pedidas; el BFF devuelve un ticket por cara (`tickets[]`).
+    const requestedSides = sides.map(({ side }) => side);
     let ticket: ReturnType<typeof documentUploadTicket.parse>;
     try {
       ticket = await this.http.post(DOCUMENTS_PRESIGN_PATH, {
-        body: { type, contentType },
+        body: { type, contentType, sides: requestedSides },
         schema: documentUploadTicket,
       });
     } catch (error) {
       throw new DocumentUploadError('presign', (error as Error).message);
     }
 
-    // 2) Lee el binario local como blob. La URI puede ser `file://…` (iOS/Android) o `content://…`
-    //    (Android Storage Access Framework). Separamos lectura de red para distinguir un fallo de
-    //    ACCESO al archivo (`read`) de un fallo de red.
+    // 2) Sube cada cara emparejando el ticket con su archivo POR `side` (no por orden: el BFF podría
+    //    reordenar). Si falta un ticket para una cara pedida, es un fallo de presign (no inventamos).
+    const images: UploadedDocumentImage[] = [];
+    for (const { side, file } of sides) {
+      const sideTicket = ticket.tickets.find((candidate) => candidate.side === side);
+      if (!sideTicket) {
+        throw new DocumentUploadError(
+          'presign',
+          `El presign no devolvió un ticket para la cara ${side}`,
+        );
+      }
+      const s3Key = await this.putSide(sideTicket, file);
+      images.push({ s3Key, side });
+    }
+
+    // 3) Devuelve las keys subidas por cara: el caso de uso las reenvía como `images` al registrar.
+    return { images };
+  }
+
+  /**
+   * Sube el binario de UNA cara con el ticket prefirmado correspondiente y devuelve su `fileS3Key`.
+   *  - Lee el binario local como blob (fallo de acceso → `read`, distinto de un fallo de red).
+   *  - PUT de bytes crudos DIRECTO al almacén soberano con los `requiredHeaders` firmados del ticket
+   *    (incluye el `Content-Type` firmado en la URL); el `Authorization` del BFF NO se incluye (el
+   *    `fetchImpl` crudo no lo inyecta).
+   */
+  private async putSide(ticket: DocumentUploadSideTicket, file: PickedImage): Promise<string> {
+    // La URI puede ser `file://…` (iOS/Android), `content://…` (Android SAF) o `data:…` (escáner).
     const blob = await this.readLocalBlob(file.uri);
 
-    // 3) PUT de bytes crudos DIRECTO al almacén soberano. Reenvía EXACTOS los `requiredHeaders`
-    //    firmados del ticket (incluye el `Content-Type` que viajó firmado en la URL prefirmada); el
-    //    `Authorization` del BFF NO se incluye (el `fetchImpl` crudo no lo inyecta).
     let uploadResponse: Response;
     try {
       uploadResponse = await this.fetchImpl(ticket.uploadUrl, {
@@ -89,8 +130,7 @@ export class HttpDocumentUploader implements DocumentUploader {
       );
     }
 
-    // 4) Devuelve la key del objeto subido: el caso de uso la reenvía como `fileS3Key` al registrar.
-    return { fileS3Key: ticket.fileS3Key };
+    return ticket.fileS3Key;
   }
 
   /**

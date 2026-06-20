@@ -25,49 +25,92 @@ function registeredDoc(): DriverDocument {
     expiresAt: '2027-01-01T00:00:00.000Z',
     ok: true,
     rejectionReason: null,
+    // Sub-lote 3A/3B: caras del documento ya subidas (1 imagen SINGLE para la licencia de este fixture).
+    images: [{ side: 'SINGLE', order: 0 }],
   };
 }
 
+/** Cara única (compat 1 imagen) construida sobre el `FILE` de prueba. */
+const SINGLE = [{ side: 'SINGLE' as const, file: FILE }];
+
 describe('UploadAndRegisterDocumentUseCase', () => {
-  it('happy path: sube el binario y LUEGO registra con el fileS3Key devuelto', async () => {
+  it('happy path: sube los binarios y LUEGO registra con las images devueltas', async () => {
     const created = registeredDoc();
-    const upload = jest.fn(async () => ({ fileS3Key: 'drivers/d-1/license-abc.jpg' }));
+    const upload = jest.fn(async () => ({
+      images: [{ s3Key: 'drivers/d-1/license-abc.jpg', side: 'SINGLE' as const }],
+    }));
     const register = jest.fn(async () => created);
     const uploader: DocumentUploader = { upload };
     const registrar: DocumentRegistrar = { register };
 
     const out = await new UploadAndRegisterDocumentUseCase(uploader, registrar).execute({
       type: 'LICENSE_A1',
-      file: FILE,
+      sides: SINGLE,
       metadata: { documentNumber: 'Q12345', expiresAt: '2027-01-01T00:00:00.000Z' },
     });
 
-    // El binario se sube con el tipo y el archivo elegidos.
-    expect(upload).toHaveBeenCalledWith('LICENSE_A1', FILE);
-    // El registro recibe la key REAL del binario subido + los metadatos del formulario.
+    // El binario se sube con el tipo y las caras elegidas.
+    expect(upload).toHaveBeenCalledWith('LICENSE_A1', SINGLE);
+    // El registro recibe las keys REALES de los binarios subidos (images) + los metadatos del formulario.
     expect(register).toHaveBeenCalledWith({
       type: 'LICENSE_A1',
       documentNumber: 'Q12345',
       expiresAt: '2027-01-01T00:00:00.000Z',
-      fileS3Key: 'drivers/d-1/license-abc.jpg',
+      images: [{ s3Key: 'drivers/d-1/license-abc.jpg', side: 'SINGLE' }],
     });
     expect(out).toBe(created);
   });
 
+  it('DNI: sube FRONT+BACK y registra con images de las dos caras', async () => {
+    const front: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,FRONT' };
+    const back: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,BACK' };
+    const dniSides = [
+      { side: 'FRONT' as const, file: front },
+      { side: 'BACK' as const, file: back },
+    ];
+    const upload = jest.fn(async () => ({
+      images: [
+        { s3Key: 'drivers/d-1/dni-front.jpg', side: 'FRONT' as const },
+        { s3Key: 'drivers/d-1/dni-back.jpg', side: 'BACK' as const },
+      ],
+    }));
+    const register = jest.fn(async (_input: RegisterDocumentInput) => registeredDoc());
+
+    await new UploadAndRegisterDocumentUseCase({ upload }, { register }).execute({
+      type: 'DNI',
+      sides: dniSides,
+      metadata: { documentNumber: '70123456' },
+    });
+
+    // El uploader recibe AMBAS caras (FRONT + BACK).
+    expect(upload).toHaveBeenCalledWith('DNI', dniSides);
+    // El registro lleva las dos imágenes con su cara correcta.
+    expect(register).toHaveBeenCalledWith({
+      type: 'DNI',
+      documentNumber: '70123456',
+      images: [
+        { s3Key: 'drivers/d-1/dni-front.jpg', side: 'FRONT' },
+        { s3Key: 'drivers/d-1/dni-back.jpg', side: 'BACK' },
+      ],
+    });
+  });
+
   it('omite expiresAt cuando el formulario no lo capturó (documento sin vencimiento)', async () => {
-    const upload = jest.fn(async () => ({ fileS3Key: 'drivers/d-1/soat.png' }));
+    const upload = jest.fn(async () => ({
+      images: [{ s3Key: 'drivers/d-1/soat.png', side: 'SINGLE' as const }],
+    }));
     const register = jest.fn(async (_input: RegisterDocumentInput) => registeredDoc());
 
     await new UploadAndRegisterDocumentUseCase({ upload }, { register }).execute({
       type: 'SOAT',
-      file: FILE,
+      sides: SINGLE,
       metadata: { documentNumber: 'SOAT-99' },
     });
 
     expect(register).toHaveBeenCalledWith({
       type: 'SOAT',
       documentNumber: 'SOAT-99',
-      fileS3Key: 'drivers/d-1/soat.png',
+      images: [{ s3Key: 'drivers/d-1/soat.png', side: 'SINGLE' }],
     });
     // Sin `expiresAt` en el body (no se envía undefined).
     const firstCall = register.mock.calls[0];
@@ -84,7 +127,7 @@ describe('UploadAndRegisterDocumentUseCase', () => {
     await expect(
       useCase.execute({
         type: 'LICENSE_A1',
-        file: FILE,
+        sides: SINGLE,
         metadata: { documentNumber: 'Q12345' },
       }),
     ).rejects.toMatchObject({ name: 'DocumentUploadError', reason: 'upload' });
@@ -94,14 +137,16 @@ describe('UploadAndRegisterDocumentUseCase', () => {
   });
 
   it('propaga un fallo del registro tras una subida exitosa (el binario ya está, falla el POST)', async () => {
-    const upload = jest.fn(async () => ({ fileS3Key: 'drivers/d-1/x.jpg' }));
+    const upload = jest.fn(async () => ({
+      images: [{ s3Key: 'drivers/d-1/x.jpg', side: 'SINGLE' as const }],
+    }));
     const register = jest.fn(async () => {
       throw new Error('HTTP 500');
     });
     const useCase = new UploadAndRegisterDocumentUseCase({ upload }, { register });
 
     await expect(
-      useCase.execute({ type: 'SOAT', file: FILE, metadata: { documentNumber: 'S-1' } }),
+      useCase.execute({ type: 'SOAT', sides: SINGLE, metadata: { documentNumber: 'S-1' } }),
     ).rejects.toThrow('HTTP 500');
     expect(upload).toHaveBeenCalledTimes(1);
   });

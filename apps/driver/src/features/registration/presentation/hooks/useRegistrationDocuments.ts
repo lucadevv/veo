@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { FleetDocumentType } from '@veo/shared-types';
+import { DocumentSide, type FleetDocumentType } from '@veo/shared-types';
 import { useDocumentUploader, useRepositories } from '../../../../core/di/useDi';
 import {
   UploadAndRegisterDocumentUseCase,
   type DocumentRegistrar,
+  type DocumentSideFile,
   type DriverDocument,
   type PickedImage,
   type RegisterDocumentInput,
@@ -11,6 +12,7 @@ import {
 import type {
   BiometricEnrollInput,
   LicenseOnboardInput,
+  LivenessChallenge,
   RegistrationDocumentRequest,
 } from '../../domain';
 
@@ -66,16 +68,62 @@ export function useEnrollBiometric() {
   });
 }
 
-/** Entrada de la subida+registro del documento desde la presentación (tipo fleet + archivo + metadatos). */
+/** Clave de caché del reto de liveness del alta. El reto es de UN SOLO USO: no se cachea entre montajes. */
+export const REGISTRATION_LIVENESS_CHALLENGE_QUERY_KEY = ['registration', 'liveness-challenge'] as const;
+
+/**
+ * Query: reto de liveness ACTIVO del enrolamiento del alta (`GET /drivers/me/biometric/liveness/challenge`).
+ * La pantalla de KYC lo pide al montar para guiar al conductor a ejecutar el gesto (`action`) mientras
+ * captura frames. El reto es de UN SOLO USO: `staleTime`/`gcTime` en 0 y sin refetch en foco evitan reusar
+ * un reto consumido; el reintento del flujo llama a `refetch()` para pedir un reto NUEVO (no reciclar).
+ */
+export function useLivenessChallenge() {
+  const { registration } = useRepositories();
+  return useQuery<LivenessChallenge>({
+    queryKey: REGISTRATION_LIVENESS_CHALLENGE_QUERY_KEY,
+    queryFn: () => registration.getLivenessChallenge(),
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+}
+
+/**
+ * Entrada de la subida+registro del documento desde la presentación (tipo fleet + caras + metadatos).
+ *
+ * Dos formas mutuamente excluyentes para la(s) imagen(es):
+ *  - `file`: UNA imagen (caso histórico licencia/SOAT/tarjeta/foto). El hook la envía como cara `SINGLE`.
+ *  - `sides`: N caras tipadas (sub-lote 3B · DNI → `[{ side: FRONT, file }, { side: BACK, file }]`).
+ * Se exige al menos una. Si se pasan ambas, `sides` manda (es el camino explícito multi-cara).
+ */
 export interface UploadDocumentVars {
-  /** `FleetDocumentType` canónico (p. ej. `LICENSE_A1` | `SOAT` | `PROPERTY_CARD`), no string libre. */
+  /** `FleetDocumentType` canónico (p. ej. `LICENSE_A1` | `SOAT` | `PROPERTY_CARD` | `DNI`), no string libre. */
   type: FleetDocumentType;
-  /** Archivo local capturado/elegido por el conductor (cámara o galería). */
-  file: PickedImage;
+  /** Archivo local de UNA cara (compat). El hook lo mapea a `[{ side: SINGLE, file }]`. */
+  file?: PickedImage;
+  /** Caras tipadas (1..N) cuando el documento tiene varias imágenes (DNI → FRONT + BACK). */
+  sides?: DocumentSideFile[];
   /** Número del documento. Opcional POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no lo tiene. */
   documentNumber?: string;
   /** Vencimiento en ISO-8601 (si el conductor lo ingresó / es requerido). */
   expiresAt?: string;
+}
+
+/**
+ * Normaliza las caras a subir desde `UploadDocumentVars`: prioriza `sides` (camino multi-cara explícito);
+ * si no, envuelve `file` como una única cara `SINGLE` (compat con licencia/SOAT/tarjeta/foto). Lanza si
+ * no se entregó ninguna imagen (error de programación de la presentación, no del conductor).
+ */
+function resolveSides(vars: UploadDocumentVars): DocumentSideFile[] {
+  if (vars.sides && vars.sides.length > 0) {
+    return vars.sides;
+  }
+  if (vars.file) {
+    return [{ side: DocumentSide.SINGLE, file: vars.file }];
+  }
+  throw new Error('UploadDocumentVars requiere `file` o `sides` con al menos una imagen');
 }
 
 /**
@@ -101,7 +149,7 @@ export function useUploadAndRegisterDocument() {
     mutationFn: (vars: UploadDocumentVars): Promise<DriverDocument> =>
       new UploadAndRegisterDocumentUseCase(uploader, registrar).execute({
         type: vars.type,
-        file: vars.file,
+        sides: resolveSides(vars),
         metadata: {
           ...(vars.documentNumber ? { documentNumber: vars.documentNumber } : {}),
           ...(vars.expiresAt ? { expiresAt: vars.expiresAt } : {}),

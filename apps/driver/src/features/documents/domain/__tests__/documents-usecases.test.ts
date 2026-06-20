@@ -17,6 +17,8 @@ function doc(
     expiresAt: partial.expiresAt ?? null,
     ok: partial.ok ?? true,
     rejectionReason: partial.rejectionReason ?? null,
+    // Sub-lote 3A: caras del documento (vacío en estos fixtures: se prueban el orden y el conteo, no las imágenes).
+    images: partial.images ?? [],
   };
 }
 

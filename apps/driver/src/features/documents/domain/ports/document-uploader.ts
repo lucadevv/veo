@@ -11,7 +11,7 @@
  */
 
 import type { DocumentUploadContentType } from '@veo/api-client';
-import type { FleetDocumentType } from '@veo/shared-types';
+import type { DocumentSide, FleetDocumentType } from '@veo/shared-types';
 import type { PickedImage } from './image-picker-service';
 
 /** Motivo accionable por el que la subida del binario del documento falló (feedback claro). */
@@ -46,29 +46,49 @@ export interface ResolvedContentType {
   contentType: DocumentUploadContentType;
 }
 
-/** Resultado de subir el binario: la key driver-scoped que luego viaja a `POST /drivers/me/documents`. */
+/** Una CARA del documento a subir: la imagen local + el lado tipado (FRONT/BACK/SINGLE) que ocupa. */
+export interface DocumentSideFile {
+  /** Cara del documento (sub-lote 3A): `SINGLE` para 1 imagen; `FRONT`/`BACK` para el DNI. */
+  side: DocumentSide;
+  /** Imagen/archivo local capturado/elegido para esa cara. */
+  file: PickedImage;
+}
+
+/** Una imagen ya subida: su key driver-scoped + la cara que ocupa, lista para `images` del registro. */
+export interface UploadedDocumentImage {
+  /** Key del objeto subido al almacén soberano (viaja en `images[].s3Key` al registrar). */
+  s3Key: string;
+  /** Cara del documento a la que corresponde la imagen (FRONT/BACK/SINGLE). */
+  side: DocumentSide;
+}
+
+/**
+ * Resultado de subir el binario del documento: las imágenes subidas (1..N caras), cada una con su key
+ * y su cara. El caso de uso las reenvía como `images: [{ s3Key, side }]` a `POST /drivers/me/documents`.
+ */
 export interface UploadedDocumentBinary {
-  /** Key del objeto subido al almacén soberano (se reenvía en `fileS3Key` al registrar). */
-  fileS3Key: string;
+  /** Imágenes subidas (una por cara), alineadas con las caras pedidas. Para 1 imagen, un solo SINGLE. */
+  images: UploadedDocumentImage[];
 }
 
 /** Subida del binario del documento encapsulada tras una interfaz de dominio. */
 export interface DocumentUploader {
   /**
-   * Sube el binario local del documento y resuelve con su `fileS3Key`. El flujo:
-   *  1. Deriva el `contentType` del archivo (allowlist jpeg/png/pdf); si no casa, lanza
+   * Sube los binarios locales del documento (1..N caras) y resuelve con sus `s3Key` por cara. El flujo:
+   *  1. Deriva el `contentType` de cada archivo (allowlist jpeg/png/pdf); si no casa, lanza
    *     `DocumentUploadError('unsupported-type')`.
-   *  2. Pide un ticket prefirmado al driver-bff (`POST /drivers/me/documents/presign`).
-   *  3. Lee el binario local (si es ilegible → `read`).
-   *  4. Sube el binario crudo (PUT) DIRECTO al almacén con los `requiredHeaders` del ticket (sin el
-   *     `Authorization` del BFF).
-   * Lanza `DocumentUploadError` ante fallos accionables. El registro del documento (con el
-   * `fileS3Key`) lo realiza el caso de uso, no este puerto.
+   *  2. Pide los tickets prefirmados al driver-bff (`POST /drivers/me/documents/presign`) con las `sides`.
+   *  3. Lee cada binario local (si es ilegible → `read`).
+   *  4. Sube cada binario crudo (PUT) DIRECTO al almacén con los `requiredHeaders` de su ticket (sin el
+   *     `Authorization` del BFF), emparejando ticket↔archivo por `side`.
+   * Lanza `DocumentUploadError` ante fallos accionables. El registro del documento (con las `images`)
+   * lo realiza el caso de uso, no este puerto.
    *
    * @param type `FleetDocumentType` canónico de `@veo/shared-types` (p. ej. `LICENSE_A1` | `SOAT` |
-   *   `PROPERTY_CARD`). Tipado al enum, NO string libre: el presign valida `@IsEnum(FleetDocumentType)`,
-   *   así que un valor fuera del enum es error de compilación, no un 400 en runtime.
-   * @param file Imagen/archivo local elegido por el conductor.
+   *   `PROPERTY_CARD` | `DNI`). Tipado al enum, NO string libre: el presign valida
+   *   `@IsEnum(FleetDocumentType)`, así que un valor fuera del enum es error de compilación, no un 400.
+   * @param sides Las caras a subir, cada una con su archivo local. 1 imagen → `[{ side: 'SINGLE', file }]`;
+   *   DNI → `[{ side: 'FRONT', file }, { side: 'BACK', file }]`. NO vacío.
    */
-  upload(type: FleetDocumentType, file: PickedImage): Promise<UploadedDocumentBinary>;
+  upload(type: FleetDocumentType, sides: DocumentSideFile[]): Promise<UploadedDocumentBinary>;
 }

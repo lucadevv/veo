@@ -1,7 +1,10 @@
 import type { FleetDocumentType } from '@veo/shared-types';
 import type { DriverDocument, RegisterDocumentInput } from '../entities';
-import type { DocumentUploader, UploadedDocumentBinary } from '../ports/document-uploader';
-import type { PickedImage } from '../ports/image-picker-service';
+import type {
+  DocumentSideFile,
+  DocumentUploader,
+  UploadedDocumentBinary,
+} from '../ports/document-uploader';
 
 /**
  * Metadatos que el formulario ya captura para un documento (número + vencimiento opcional). El tipo
@@ -20,16 +23,19 @@ export interface DocumentRegistrar {
 }
 
 /**
- * Entrada del orquestador: el tipo de documento (fleet), el archivo local ya elegido por el
- * conductor y los metadatos del formulario. La SELECCIÓN del archivo (cámara/galería) la hace la
- * presentación con el `ImagePickerService` ANTES de invocar el caso de uso, para mantener el flujo
- * de UI (preview + reintento de captura) fuera del dominio.
+ * Entrada del orquestador: el tipo de documento (fleet), las CARAS ya capturadas/elegidas por el
+ * conductor (1..N) y los metadatos del formulario. La SELECCIÓN del archivo (cámara/galería/escáner) la
+ * hace la presentación con el `ImagePickerService`/`DocumentScannerService` ANTES de invocar el caso de
+ * uso, para mantener el flujo de UI (preview + reintento de captura) fuera del dominio.
  */
 export interface UploadAndRegisterDocumentInput {
-  /** `FleetDocumentType` canónico (p. ej. `LICENSE_A1` | `SOAT` | `PROPERTY_CARD`), no string libre. */
+  /** `FleetDocumentType` canónico (p. ej. `LICENSE_A1` | `SOAT` | `PROPERTY_CARD` | `DNI`), no string libre. */
   type: FleetDocumentType;
-  /** Archivo local capturado/elegido. */
-  file: PickedImage;
+  /**
+   * Caras a subir, cada una con su archivo local. 1 imagen → `[{ side: 'SINGLE', file }]`; DNI →
+   * `[{ side: 'FRONT', file }, { side: 'BACK', file }]`. NO vacío.
+   */
+  sides: DocumentSideFile[];
   /** Metadatos del formulario (número + vencimiento). */
   metadata: DocumentMetadata;
 }
@@ -50,16 +56,17 @@ export class UploadAndRegisterDocumentUseCase {
   ) {}
 
   async execute(input: UploadAndRegisterDocumentInput): Promise<DriverDocument> {
-    // 1) Sube el binario al almacén soberano (presign + PUT crudo). Propaga `DocumentUploadError`.
-    const uploaded: UploadedDocumentBinary = await this.uploader.upload(input.type, input.file);
+    // 1) Sube los binarios al almacén soberano (presign + PUT crudo por cara). Propaga `DocumentUploadError`.
+    const uploaded: UploadedDocumentBinary = await this.uploader.upload(input.type, input.sides);
 
-    // 2) Registra el documento CON la key real del binario subido. Solo se llega aquí si el PUT fue
-    //    OK: jamás registramos un documento cuyo binario no se subió (honestidad de estado).
+    // 2) Registra el documento CON las keys reales de los binarios subidos (1..N caras). Solo se llega
+    //    aquí si TODOS los PUT fueron OK: jamás registramos un documento cuyo binario no se subió
+    //    (honestidad de estado).
     return this.registrar.register({
       type: input.type,
       ...(input.metadata.documentNumber ? { documentNumber: input.metadata.documentNumber } : {}),
       ...(input.metadata.expiresAt ? { expiresAt: input.metadata.expiresAt } : {}),
-      fileS3Key: uploaded.fileS3Key,
+      images: uploaded.images.map(({ s3Key, side }) => ({ s3Key, side })),
     });
   }
 }

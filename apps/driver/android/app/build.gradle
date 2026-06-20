@@ -118,4 +118,15 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // MLKit Document Scanner (on-device, soberano, gratis): detección de bordes + auto-captura + crop +
+    // corrección de perspectiva vía la UI nativa de Play Services. Consumido por VeoDocumentScannerModule.
+    // Versión estable vigente (jun 2026). Ver https://developers.google.com/ml-kit/vision/doc-scanner/android
+    implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
+
+    // MLKit Text Recognition v2 (escritura latina, on-device, soberano, gratis): OCR por página tras el
+    // escaneo, para auto-llenado. Modelo BUNDLED en el APK (no descarga en runtime). Consumido por
+    // VeoDocumentScannerModule (TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)).
+    // Versión estable vigente (jun 2026). Ver https://developers.google.com/ml-kit/vision/text-recognition/v2/android
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 }
