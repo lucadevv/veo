@@ -24,7 +24,7 @@ export interface ParsedDni {
 export interface ParsedLicense {
   /** Número de la licencia. */
   number?: string;
-  /** Categoría (clase A) normalizada al catálogo tipado. */
+  /** Categoría (clase A auto o clase B moto) normalizada al catálogo tipado. */
   category?: LicenseCategory;
   /** Fecha de vencimiento/revalidación en `YYYY-MM-DD`. */
   expiresAt?: string;

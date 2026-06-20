@@ -7,7 +7,11 @@ import { parsePropertyCard } from '../parse-property-card';
 import { mapMtcCategoryToVehicleType } from '../vehicle-category';
 import { parseDocument, isParsableDocumentType } from '../parse-document';
 import { normalizePeruvianDate } from '../ocr-date';
-import { normalizeLicenseCategory } from '../license-category';
+import {
+  normalizeLicenseCategory,
+  normalizeLicenseClass,
+  combineClassAndCategory,
+} from '../license-category';
 
 /**
  * Tests de los parsers PUROS de OCR con líneas REALISTAS de documentos peruanos (DNI, licencia, SOAT,
@@ -36,7 +40,7 @@ describe('normalizePeruvianDate · normaliza fechas peruanas a YYYY-MM-DD', () =
   });
 });
 
-describe('normalizeLicenseCategory · mapea a la unión tipada', () => {
+describe('normalizeLicenseCategory · mapea la forma COMBINADA a la unión tipada (clase A y B)', () => {
   it('reconoce variantes de A-IIb', () => {
     expect(normalizeLicenseCategory('A-IIb')).toBe('A-IIb');
     expect(normalizeLicenseCategory('A IIB')).toBe('A-IIb');
@@ -46,8 +50,46 @@ describe('normalizeLicenseCategory · mapea a la unión tipada', () => {
     expect(normalizeLicenseCategory('Categoría A-I')).toBe('A-I');
     expect(normalizeLicenseCategory('A-IIIa')).toBe('A-IIIa');
   });
+  it('reconoce CLASE B (moto): B-I, B-IIa, B-IIb, B-IIc', () => {
+    expect(normalizeLicenseCategory('B-I')).toBe('B-I');
+    expect(normalizeLicenseCategory('B IIA')).toBe('B-IIa');
+    expect(normalizeLicenseCategory('BIIB')).toBe('B-IIb');
+    expect(normalizeLicenseCategory('B-IIc')).toBe('B-IIc');
+  });
   it('texto sin categoría → null', () => {
     expect(normalizeLicenseCategory('NINGUNA CLASE AQUI XYZ')).toBeNull();
+  });
+  it('combinación inexistente en el catálogo → null (no inventa)', () => {
+    expect(normalizeLicenseCategory('B-IIIa')).toBeNull(); // clase B no llega a IIIa
+  });
+});
+
+describe('normalizeLicenseClass · A/B desde el rótulo Clase', () => {
+  it('reconoce la clase del rótulo o del valor suelto', () => {
+    expect(normalizeLicenseClass('Clase: A')).toBe('A');
+    expect(normalizeLicenseClass('Clase B')).toBe('B');
+    expect(normalizeLicenseClass('A')).toBe('A');
+  });
+  it('texto sin clase → null', () => {
+    expect(normalizeLicenseClass('Categoria Uno')).toBeNull();
+  });
+});
+
+describe('combineClassAndCategory · Clase + Categoría-palabra → canónica', () => {
+  it('Clase A + Uno → A-I (palabra ordinal española)', () => {
+    expect(combineClassAndCategory('A', 'Uno')).toBe('A-I');
+  });
+  it('Clase B + "Dos B" → B-IIb (palabra ordinal + sub-letra)', () => {
+    expect(combineClassAndCategory('B', 'Dos B')).toBe('B-IIb');
+  });
+  it('Clase A + romano "IIb" también combina (por si el OCR lo da en romano)', () => {
+    expect(combineClassAndCategory('A', 'IIb')).toBe('A-IIb');
+  });
+  it('Clase A + "Tres C" → A-IIIc', () => {
+    expect(combineClassAndCategory('A', 'Tres C')).toBe('A-IIIc');
+  });
+  it('combinación inexistente → null (Clase B + Tres no existe)', () => {
+    expect(combineClassAndCategory('B', 'Tres')).toBeNull();
   });
 });
 
@@ -276,16 +318,77 @@ describe('parseMrzTd1 · MRZ TD1 del DNIe (función pura)', () => {
   });
 });
 
-describe('parseLicense · licencia de conducir peruana (GROUND TRUTH: Nro de Licencia + Fecha de Revalidacion)', () => {
-  it('extrae número (Q\\d{8}), categoría y vencimiento (Fecha de Revalidacion)', () => {
-    // Rótulos REALES: "Nro de Licencia" + "Fecha de Revalidacion" (NO "vence"/"válida hasta").
+describe('parseLicense · licencia de conducir peruana (GROUND TRUTH: documento real, Clase + Categoría partidos)', () => {
+  it('DOC REAL clase A: número F73694046, Clase A + Categoría Uno → A-I, Fecha de Revalidación = vencimiento', () => {
+    // Rótulos REALES del documento (anverso): número = letra de depto + DNI (`F73694046`); la categoría
+    // viene PARTIDA: `Clase A` + `Categoría Uno` (la PALABRA ordinal); el vencimiento es la REVALIDACIÓN
+    // (17/10/2032), NO la EXPEDICIÓN (17/10/2022).
     const lines = [
       'MINISTERIO DE TRANSPORTES Y COMUNICACIONES',
       'LICENCIA DE CONDUCIR',
-      'Nro de Licencia Q70128450',
-      'Categoría: A-IIb',
-      'Fecha de Revalidacion 15/06/2028',
+      'Nro de Licencia F73694046',
+      'Clase A',
+      'Categoría Uno',
+      'Fecha de Expedición 17/10/2022',
+      'Fecha de Revalidación 17/10/2032',
     ];
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'A-I',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('CLASE B (moto): Clase B + Categoría "Dos B" → B-IIb', () => {
+    const lines = [
+      'LICENCIA DE CONDUCIR',
+      'Nro de Licencia F73694046',
+      'Clase B',
+      'Categoría Dos B',
+      'Fecha de Revalidación 17/10/2032',
+    ];
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'B-IIb',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('OCR DISPERSO/rotado: rótulo Clase/Categoría SOLO + valor en la línea siguiente → combina igual', () => {
+    // El anverso rota/dispersa el texto: el rótulo y su valor quedan en renglones distintos.
+    const lines = [
+      'Clase',
+      'A',
+      'Categoría',
+      'Uno',
+      'Nro de Licencia',
+      'F73694046',
+      'Fecha de Revalidación',
+      '17/10/2032',
+    ];
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'A-I',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('ignora la Fecha de Expedición y toma la de Revalidación (NO confundirlas)', () => {
+    const lines = [
+      'Clase A',
+      'Categoría Uno',
+      'Fecha de Expedición 15/06/2024',
+      'Fecha de Revalidación 15/06/2029',
+      'Nro de Licencia F98765432',
+    ];
+    const parsed = parseLicense(lines);
+    expect(parsed.expiresAt).toBe('2029-06-15');
+    expect(parsed.category).toBe('A-I');
+    expect(parsed.number).toBe('F98765432');
+  });
+
+  it('respaldo: categoría YA combinada en la línea de Categoría (sin rótulo Clase) sigue funcionando', () => {
+    const lines = ['Categoría: A-IIb', 'Nro de Licencia Q70128450', 'Fecha de Revalidación 15/06/2028'];
     expect(parseLicense(lines)).toEqual({
       number: 'Q70128450',
       category: 'A-IIb',
@@ -293,17 +396,102 @@ describe('parseLicense · licencia de conducir peruana (GROUND TRUTH: Nro de Lic
     });
   });
 
-  it('ignora la Fecha de Expedicion y toma la de Revalidacion (NO confundirlas)', () => {
+  it('DATA REAL del device (escaneo 1): layout en COLUMNAS, rótulos y valores AGRUPADOS → A-I + max-fecha', () => {
+    // textLines REALES del OCR (escaneo 1 del documento real). El layout es en COLUMNAS: los rótulos van
+    // juntos (`Categoria`,`Clase`) y los valores juntos (`Uno`,`A`); las dos fechas también agrupadas. La
+    // proximidad rótulo→línea-siguiente NO sirve (la línea tras `Categoria` es OTRO rótulo `Clase`). El
+    // parser usa escaneo GLOBAL (clase `A` + ordinal `Uno` = A-I) y MAX-fecha (revalidación 17/10/2032).
     const lines = [
-      'Categoría A-I',
-      'Fecha de Expedicion 15/06/2024',
-      'Fecha de Revalidacion 15/06/2029',
-      'Nro de Licencia Q98765432',
+      'REPUBLICA DEL PERU',
+      'MINISTERIO DE TRANSPORTES Y COMUNICACIONES',
+      'DIRECCION GENERAL DE AUTORIZACIONES EN TRANSPORTES',
+      'LICENCIA DE CONDUCIR',
+      'Apellidos',
+      'CARRANZA SALDAÑA',
+      'LUIS IVAN',
+      'Nro de Licencia',
+      'F73694046',
+      'Categoria',
+      'Clase',
+      'Uno',
+      'A',
+      'Fecha de Revalidación',
+      'Fecha de Expedición',
+      '17/10/2032',
+      '17/10/2022',
+      'FIRMA DEL TITULAR',
     ];
-    const parsed = parseLicense(lines);
-    expect(parsed.expiresAt).toBe('2029-06-15');
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'A-I',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('DATA REAL del device (escaneo 2): MISMO documento, ORDEN distinto e inestable → mismo resultado', () => {
+    // Segundo escaneo del MISMO documento: el OCR devolvió las líneas en OTRO orden (rótulos/valores y
+    // fechas reordenados). Como el parser es order-independent (escaneo global + max-fecha), el resultado
+    // es idéntico al escaneo 1.
+    const lines = [
+      'REPUBLICA DEL PERU',
+      'MINISTERIO DE TRANSPORTES Y COMUNICACIONES',
+      'DIRECCION GENERAL DE AUTORIZACIONES EN TRANSPORTES',
+      'LICENCIA DE CONDUCIR',
+      'Apellidos',
+      'CARRANZA SALDAÑA',
+      'Nombres',
+      'LUIS IVAN',
+      'Nro de Licencia',
+      'F73694046',
+      'Clase',
+      'Categoría',
+      'A',
+      'Uno',
+      'Fecha de Revalidación',
+      'Fecha de Expedición',
+      '17/10/2022',
+      '17/10/2032',
+      'FIRMA DEL TITULAR',
+    ];
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'A-I',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('CLASE B (moto) en layout COLUMNAS dispersas: clase `B` + ordinal `Dos B` sueltos → B-IIb', () => {
+    // Valores `B` y `Dos B` sueltos (columna de valores), lejos de sus rótulos: el escaneo global los une.
+    const lines = [
+      'LICENCIA DE CONDUCIR',
+      'Categoria',
+      'Clase',
+      'Dos B',
+      'B',
+      'Nro de Licencia',
+      'F73694046',
+      'Fecha de Revalidación',
+      '17/10/2032',
+    ];
+    expect(parseLicense(lines)).toEqual({
+      number: 'F73694046',
+      category: 'B-IIb',
+      expiresAt: '2032-10-17',
+    });
+  });
+
+  it('degradado: SIN fecha → expiresAt undefined (no crash)', () => {
+    const parsed = parseLicense(['Clase', 'A', 'Categoria', 'Uno', 'Nro de Licencia', 'F73694046']);
+    expect(parsed.expiresAt).toBeUndefined();
+    expect(parsed.number).toBe('F73694046');
     expect(parsed.category).toBe('A-I');
-    expect(parsed.number).toBe('Q98765432');
+  });
+
+  it('degradado: categoría que NO arma (clase sin ordinal) → category undefined', () => {
+    const parsed = parseLicense(['Nro de Licencia', 'F73694046', 'Clase', 'A', 'Fecha de Revalidación', '17/10/2032']);
+    expect(parsed.category).toBeUndefined();
+    expect(parsed.number).toBe('F73694046');
+    expect(parsed.expiresAt).toBe('2032-10-17');
   });
 
   it('texto basura → objeto vacío (no inventa)', () => {
@@ -353,6 +541,66 @@ describe('parseSoat · SOAT (GROUND TRUTH: N° Póliza - Certificado combinado +
 
   it('texto basura → objeto vacío (no inventa)', () => {
     expect(parseSoat(['xx', 'yy'])).toEqual({});
+  });
+
+  it('SOAT REAL (Certificado Electrónico DS 015-2016 MTC) — orden normal: Nº Póliza - Certificado combinado + max-fecha', () => {
+    // GROUND TRUTH del PDF oficial (La Positiva): el SOAT REAL es el Certificado Electrónico (NO la boleta
+    // de pago). El número es el campo COMBINADO `143139370 - 0`; las dos vigencias van Desde 2026 / Hasta
+    // 2027 → el vencimiento es la fecha MÁS TARDÍA (Hasta 13/06/2027).
+    const lines = [
+      'Certificado Electrónico',
+      'Decreto Supremo 015 - 2016 MTC',
+      'SOAT',
+      'LA POSITIVA SEGUROS Y REASEGUROS',
+      'Nº Póliza - Certificado: 143139370 - 0',
+      'VIGENCIA DE LA PÓLIZA',
+      'Desde 13/06/2026 Hasta 13/06/2027',
+      'CERTIFICADO SOAT - CONTROL POLICIAL',
+      'Desde 13/06/2026 Hasta 13/06/2027',
+      'Placa 7351NB',
+      'Vehiculo Menor',
+      'Particular',
+      'VIN VBKJYC402MC067338',
+      'CARRANZA SALDAÑA, LUIS IVAN',
+      'Prima S/. 699',
+      'Fecha emisión 13/06/2026',
+    ];
+    expect(parseSoat(lines)).toEqual({
+      policyNumber: '143139370 - 0',
+      expiresAt: '2027-06-13',
+    });
+  });
+
+  it('SOAT REAL — orden DISPERSO (device): etiqueta y valor separados, "Hasta" sin fecha adyacente, fechas agrupadas', () => {
+    // El OCR del device DISPERSA: "Nº Póliza - Certificado" queda LEJOS de su valor `143139370 - 0`; las
+    // etiquetas "Desde"/"Hasta" quedan sin su fecha al lado; las fechas se agrupan en otro bloque. Como el
+    // parser es order-independent (fallback GLOBAL del token combinado + max-fecha), el resultado es idéntico.
+    const lines = [
+      'Certificado Electrónico',
+      'SOAT',
+      'LA POSITIVA SEGUROS Y REASEGUROS',
+      'Nº Póliza - Certificado',
+      'VIGENCIA DE LA PÓLIZA',
+      'Desde',
+      'Hasta',
+      'CERTIFICADO SOAT - CONTROL POLICIAL',
+      'Desde',
+      'Hasta',
+      'Placa',
+      '7351NB',
+      'VIN',
+      'VBKJYC402MC067338',
+      '13/06/2026',
+      '13/06/2027',
+      '13/06/2026',
+      '13/06/2027',
+      '13/06/2026',
+      '143139370 - 0',
+    ];
+    expect(parseSoat(lines)).toEqual({
+      policyNumber: '143139370 - 0',
+      expiresAt: '2027-06-13',
+    });
   });
 
   it('DATA REAL: BOLETA de venta electrónica (La Positiva) — POLIZA standalone + FIN VIG. DOC/POL', () => {
@@ -462,6 +710,64 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
       'Form. Rod. : 2X1',
     ];
     expect(parsePropertyCard(noise).plate).toBeUndefined();
+  });
+
+  describe('OCR DISPERSO: etiqueta SOLA + valor en la LÍNEA SIGUIENTE (PDF en pantalla)', () => {
+    it('"Modelo" sola + "RC 200" en la línea siguiente → extrae model', () => {
+      const lines = ['Modelo', 'RC 200'];
+      expect(parsePropertyCard(lines).model).toBe('RC 200');
+    });
+
+    it('"Categoria" sola + "L3" en la línea siguiente → mtcCategory L3', () => {
+      const lines = ['Categoria', 'L3'];
+      expect(parsePropertyCard(lines).mtcCategory).toBe('L3');
+    });
+
+    it('marca/modelo/año/categoría TODOS dispersos (etiqueta arriba, valor abajo)', () => {
+      const lines = [
+        'SUNARP - TARJETA DE IDENTIFICACIÓN VEHICULAR',
+        'Categoria',
+        'L3',
+        'Marca',
+        'KTM',
+        'Modelo',
+        'RC 200',
+        'Año Modelo',
+        '2021',
+        'Placa N°',
+        '7351-NB',
+      ];
+      expect(parsePropertyCard(lines)).toEqual({
+        plate: '7351-NB',
+        make: 'KTM',
+        model: 'RC 200',
+        year: 2021,
+        mtcCategory: 'L3',
+      });
+    });
+
+    it('NO captura una etiqueta-vecina como valor disperso ("Modelo" sola seguida de "Año Modelo")', () => {
+      // "Modelo" queda sola y la línea de abajo es OTRA etiqueta conocida ("Año Modelo"): NO se toma como
+      // valor. El modelo real ("COROLLA") está disperso más abajo bajo su propia etiqueta.
+      const lines = ['Modelo', 'Año Modelo', '2021', 'Modelo', 'COROLLA'];
+      const parsed = parsePropertyCard(lines);
+      expect(parsed.model).toBe('COROLLA');
+    });
+
+    it('NO captura la etiqueta vecina como categoría ("Categoria" sola seguida de "Marca")', () => {
+      const lines = ['Categoria', 'Marca', 'KTM'];
+      expect(parsePropertyCard(lines).mtcCategory).toBeUndefined();
+    });
+
+    it('el caso INLINE sigue funcionando intacto (valor al lado tras ":")', () => {
+      const lines = ['Modelo: YARIS', 'Categoría: M1', 'Marca: TOYOTA', 'Año de Fab.: 2019'];
+      expect(parsePropertyCard(lines)).toEqual({
+        make: 'TOYOTA',
+        model: 'YARIS',
+        year: 2019,
+        mtcCategory: 'M1',
+      });
+    });
   });
 });
 

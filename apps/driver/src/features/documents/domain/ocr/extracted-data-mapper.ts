@@ -11,8 +11,9 @@
  *  3. OMITE cada campo `undefined` (spread condicional): un OCR parcial produce un objeto parcial VÁLIDO;
  *     nunca se inyecta una clave con `undefined` (el backend usa `forbidNonWhitelisted`, pero además un
  *     objeto sin la clave es lo honesto: "no se leyó" ≠ "se leyó vacío").
- *  4. NO mapea campos que el contrato no tiene: `ParsedLicense.category` se DESCARTA (no está en
- *     `ExtractedLicenseA1Data`; la categoría es del parser de tarjeta del Lote 2, no de la licencia).
+ *  4. MAPEA la categoría de la licencia (`ParsedLicense.category` → `ExtractedLicenseA1Data.category`): el
+ *     contrato ya la admite (clase A auto / clase B moto, canónica), para validar elegibilidad auto/moto en
+ *     el backend a futuro. Es conveniencia (no dato crítico); se omite si el OCR no la pudo leer.
  *
  * El retorno está tipado a la VARIANTE exacta (no a la unión), así que el discriminante y los campos
  * quedan verificados en compilación contra el contrato de @veo/api-client.
@@ -52,14 +53,15 @@ export function parsedSoatToExtracted(p: ParsedSoat): ExtractedSoatData {
 }
 
 /**
- * Licencia → `ExtractedLicenseA1Data`. Traduce `number`→`documentNumber`; DESCARTA `category` (no está en
- * el contrato de la licencia); omite los campos que el OCR no extrajo.
+ * Licencia → `ExtractedLicenseA1Data`. Traduce `number`→`documentNumber`; MAPEA `category` (clase A auto /
+ * clase B moto, canónica); omite los campos que el OCR no extrajo.
  */
 export function parsedLicenseToExtracted(p: ParsedLicense): ExtractedLicenseA1Data {
   return {
     type: FleetDocumentType.LICENSE_A1,
     ...(p.number ? { documentNumber: p.number } : {}),
     ...(p.expiresAt ? { expiresAt: p.expiresAt } : {}),
+    ...(p.category ? { category: p.category } : {}),
   };
 }
 

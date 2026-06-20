@@ -105,29 +105,72 @@ function extractPlate(lines: readonly string[]): string | undefined {
 }
 
 /**
- * Valor AL LADO de una etiqueta tras `:` en la MISMA línea (layout de la TIVe). El keyword se busca en el
- * SEGMENTO de la ETIQUETA (lo que está ANTES del `:`), no en el valor — así `Modelo:` no se confunde con
- * `Año Modelo:` (cuya etiqueta es "ano modelo", que no es la keyword "modelo" exacta) ni con un valor que
- * casualmente contenga la palabra. Si la etiqueta no trae `:` o no hay nada después, devuelve `undefined`
- * (la TIVe pone el valor inline, no en la línea de abajo).
+ * Forma CANÓNICA de la ETIQUETA de una línea para el match EXACTO: lo que está ANTES del `:` (o la línea
+ * entera si no hay `:`, caso "etiqueta sola"), canonicalizada y sin puntos (abreviaturas `Año de Fab.`).
+ * Se usa tanto para detectar la etiqueta buscada como para reconocer que la línea SIGUIENTE es OTRA
+ * etiqueta conocida (y por tanto NO un valor disperso).
+ */
+function labelKeyOf(line: string): string {
+  const head = line.includes(':') ? line.slice(0, line.indexOf(':')) : line;
+  return canonicalize(head).replace(/\./g, '').trim();
+}
+
+/**
+ * TODAS las etiquetas por-campo conocidas de la TIVe (canónicas, sin tilde, sin punto). Sirve de GUARDA
+ * del fallback "etiqueta sola → valor en la línea siguiente": una línea cuyo `labelKeyOf` calza alguna de
+ * estas ES una etiqueta vecina (p. ej. "Año Modelo" debajo de "Modelo"), NUNCA un valor disperso. El
+ * matching es EXACTO (igualdad), no `includes`, igual que el de los campos — sin strings mágicos de dominio.
+ */
+const ALL_KNOWN_LABELS: readonly string[] = [
+  ...PLATE_KEYWORDS,
+  ...CATEGORY_KEYWORDS,
+  ...MAKE_KEYWORDS,
+  ...MODEL_KEYWORDS,
+  ...YEAR_KEYWORDS,
+  ...YEAR_FALLBACK_KEYWORDS,
+];
+
+/** ¿El `labelKeyOf` de la línea calza EXACTO alguna etiqueta conocida (es una etiqueta vecina)? */
+function isKnownLabelLine(line: string): boolean {
+  const key = labelKeyOf(line);
+  return key.length > 0 && ALL_KNOWN_LABELS.some((label) => key === label);
+}
+
+/**
+ * Valor de una etiqueta por-campo, tolerante a la DISPERSIÓN del OCR del device (PDF en pantalla):
+ *  1. INLINE (layout nominal de la TIVe): la etiqueta trae el valor en la MISMA línea tras `:`
+ *     (`Modelo: YARIS`). El keyword se busca en el SEGMENTO de la ETIQUETA (antes del `:`), match EXACTO,
+ *     así `Modelo:` no se confunde con `Año Modelo:` ni con un valor que casualmente contenga la palabra.
+ *  2. LÍNEA SIGUIENTE (fallback de dispersión): la etiqueta queda SOLA (sin `:`, o con `:` vacío) y el
+ *     valor cae en la línea de ABAJO (`Modelo` / `RC 200`). Se toma esa línea SIEMPRE que NO sea otra
+ *     etiqueta conocida (evita capturar "Año Modelo" como valor de "Modelo", etc.).
+ * Si ni el inline ni la línea siguiente aportan un valor, devuelve `undefined` (degradación honesta).
  */
 function inlineValueForLabel(
   lines: readonly string[],
   keywords: readonly string[],
 ): string | undefined {
-  for (const line of lines) {
-    if (!line.includes(':')) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    // Match EXACTO de la etiqueta (sobre el segmento antes del `:`, o la línea entera si no hay `:`).
+    if (!keywords.some((k) => labelKeyOf(line) === k)) {
       continue;
     }
-    // Etiqueta = lo que está antes del `:`, canonicalizada y sin puntos (abreviaturas `Año de Fab.`).
-    const labelSegment = canonicalize(line.slice(0, line.indexOf(':'))).replace(/\./g, '').trim();
-    // Match EXACTO de la etiqueta: evita que "ano modelo" matchee la keyword "modelo".
-    if (!keywords.some((k) => labelSegment === k)) {
-      continue;
+    // (1) Valor INLINE tras `:` en la misma línea.
+    if (line.includes(':')) {
+      const inline = collapseWhitespace(line.slice(line.indexOf(':') + 1));
+      if (inline.length > 0) {
+        return inline;
+      }
     }
-    const value = collapseWhitespace(line.slice(line.indexOf(':') + 1));
-    if (value.length > 0) {
-      return value;
+    // (2) Etiqueta SOLA (sin `:` o con `:` vacío) → valor en la línea SIGUIENTE, salvo que esa línea sea
+    // otra etiqueta conocida (falso positivo) o esté vacía.
+    const next = lines[i + 1];
+    if (next !== undefined && !isKnownLabelLine(next)) {
+      const value = collapseWhitespace(next);
+      if (value.length > 0) {
+        return value;
+      }
     }
   }
   return undefined;
@@ -135,17 +178,33 @@ function inlineValueForLabel(
 
 /**
  * Extrae el código de categoría MTC impreso explícito (`Categoría: M1`). Ancla a la etiqueta y captura el
- * código `[LMNO]\d[A-Z]*` (admite sufijos como `SC` de especiales). Devuelve el código en mayúsculas o
- * `undefined` si la etiqueta no trae un código válido al lado.
+ * código `[LMNO]\d[A-Z]*` (admite sufijos como `SC` de especiales). Tolera la DISPERSIÓN del OCR: si la
+ * etiqueta "Categoría" trae el código en su MISMA línea lo toma; si la etiqueta queda SOLA, busca el código
+ * en la línea SIGUIENTE (salvo que esa línea sea otra etiqueta conocida). Devuelve el código en mayúsculas o
+ * `undefined` si no encuentra un código válido.
  */
 function extractMtcCategory(lines: readonly string[]): string | undefined {
-  for (const line of lines) {
+  const codeIn = (text: string): string | undefined => {
+    const match = /\b([LMNO]\d[A-Z]*)\b/.exec(text.toUpperCase());
+    return match?.[1];
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
     if (!lineMatchesAnyKeyword(canonicalize(line), CATEGORY_KEYWORDS)) {
       continue;
     }
-    const match = /\b([LMNO]\d[A-Z]*)\b/.exec(line.toUpperCase());
-    if (match?.[1]) {
-      return match[1];
+    // (1) Código en la MISMA línea de la etiqueta (inline).
+    const inline = codeIn(line);
+    if (inline) {
+      return inline;
+    }
+    // (2) Etiqueta SOLA → código en la línea SIGUIENTE, salvo que sea otra etiqueta conocida.
+    const next = lines[i + 1];
+    if (next !== undefined && !isKnownLabelLine(next)) {
+      const fromNext = codeIn(next);
+      if (fromNext) {
+        return fromNext;
+      }
     }
   }
   return undefined;

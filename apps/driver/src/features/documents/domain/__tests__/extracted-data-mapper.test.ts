@@ -58,7 +58,7 @@ describe('extracted-data-mapper · ParsedX → ExtractedDocumentData (degradaci�
   });
 
   describe('Licencia · parsedLicenseToExtracted', () => {
-    it('TRADUCE number → documentNumber y DESCARTA category (no está en el contrato)', () => {
+    it('TRADUCE number → documentNumber y MAPEA category (clase A auto / clase B moto)', () => {
       const parsed: ParsedLicense = {
         number: 'Q12345678',
         category: 'A-I',
@@ -69,9 +69,13 @@ describe('extracted-data-mapper · ParsedX → ExtractedDocumentData (degradaci�
         type: FleetDocumentType.LICENSE_A1,
         documentNumber: 'Q12345678',
         expiresAt: '2028-06-30',
+        category: 'A-I',
       });
-      // La categoría NO viaja (el contrato de la licencia no la tiene).
-      expect(result).not.toHaveProperty('category');
+    });
+
+    it('MAPEA la categoría de CLASE B (moto)', () => {
+      const result = parsedLicenseToExtracted({ number: 'F73694046', category: 'B-IIb' });
+      expect(result.category).toBe('B-IIb');
     });
 
     it('OMITE lo no leído (parse vacío → solo discriminante)', () => {
