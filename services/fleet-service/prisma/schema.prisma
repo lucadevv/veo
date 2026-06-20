@@ -27,12 +27,27 @@ enum FleetDocumentType {
   // vencimiento. Espejo del FleetDocumentType de @veo/shared-types. Requerida para aprobar (admin-bff).
   VEHICLE_PHOTO
 
+  // DNI = documento de identidad del conductor, 2 caras (FRONT+BACK vía DocumentImage del 3A). Espejo del
+  // FleetDocumentType de @veo/shared-types. La cara FRONT la usará el face-match (sub-lote 3C).
+  DNI
+
   // B5-3.2 · certificaciones de operador de las verticales especiales (conductor). Misma maquinaria
   // FleetDocument (vencimiento + review). NO críticas: su vencimiento NO suspende, solo deshabilita la
   // vertical (que además está oculta). Espejo del FleetDocumentType de @veo/shared-types.
   AMBULANCE_OPERATOR
   TOW_OPERATOR
   MECHANIC_CERT
+
+  @@schema("fleet")
+}
+
+/// Cara/lado de una imagen de documento (sub-lote 3A · múltiples imágenes por documento).
+/// SINGLE = documento de una sola cara/foto (licencia, SOAT, tarjeta, foto de vehículo).
+/// FRONT/BACK = anverso/reverso (DNI). Tipado fuerte: NO se compara contra strings sueltos.
+enum DocumentSide {
+  FRONT
+  BACK
+  SINGLE
 
   @@schema("fleet")
 }
@@ -175,6 +190,9 @@ model FleetDocument {
   documentNumber  String              @map("document_number")
   issuedAt        DateTime?           @map("issued_at") @db.Timestamptz
   expiresAt       DateTime?           @map("expires_at") @db.Timestamptz
+  /// DEPRECADO (sub-lote 3A): el archivo singular migró a `images` (DocumentImage, 1-a-N). Se conserva
+  /// por backward-compat (NO se borra en esta migración): el código nuevo lee/escribe `images`; el legacy
+  /// que aún toque `fileS3Key` sigue andando (espejo de la primera imagen al crear). Eliminar en un lote futuro.
   fileS3Key       String?             @map("file_s3_key")
   status          FleetDocumentStatus @default(PENDING_REVIEW)
   /// Último hito de alerta (en días) ya emitido para no duplicar (30/15/7/1). BR-I04.
@@ -187,11 +205,36 @@ model FleetDocument {
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
+  /// Imágenes del documento (sub-lote 3A · 1-a-N). DNI → FRONT+BACK; foto de vehículo → N SINGLE; el
+  /// resto (licencia/SOAT/…) → 1 SINGLE. onDelete Cascade: borrar el documento borra sus imágenes.
+  images          DocumentImage[]
+
   @@index([ownerType, ownerId])
   /// Cubre el orderBy compuesto de listExpirations `(expiresAt, id)` con `status IN (...)`: el `id` final
   /// evita el Sort del keyset. Por leftmost-prefix también cubre los queries que filtran solo (status, expiresAt).
   @@index([status, expiresAt, id])
   @@map("fleet_documents")
+  @@schema("fleet")
+}
+
+/// Imagen de un documento de flota (sub-lote 3A · múltiples imágenes por documento). Habilita DNI
+/// anverso+reverso (FRONT+BACK) y N fotos de vehículo (SINGLE con order). Cada fila guarda UNA clave S3
+/// driver/vehicle-scoped (la frontera de seguridad sigue siendo el prefijo de la key). El conjunto se
+/// ordena por `order` (estable). Reemplaza el `FleetDocument.fileS3Key` singular (deprecado).
+model DocumentImage {
+  id         String        @id @db.Uuid
+  documentId String        @map("document_id") @db.Uuid
+  document   FleetDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  /// Clave del binario en S3 (gestionado por media-service). Driver/vehicle-scoped (frontera de seguridad).
+  s3Key      String        @map("s3_key")
+  /// Cara del documento (FRONT|BACK|SINGLE). Tipado fuerte — sin string suelto.
+  side       DocumentSide
+  /// Orden estable dentro del documento (0-based). DNI: FRONT=0, BACK=1; foto de vehículo: 0..N-1.
+  order      Int           @default(0)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([documentId, order])
+  @@map("document_images")
   @@schema("fleet")
 }
 

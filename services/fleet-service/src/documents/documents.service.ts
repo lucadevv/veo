@@ -21,16 +21,25 @@ import {
   type Page,
 } from '../infra/pagination';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
-import { deriveExpiryStatus, isCriticalDocument } from './document-rules';
+import {
+  deriveExpiryStatus,
+  isCriticalDocument,
+  normalizeDocumentImages,
+  primaryS3Key,
+} from './document-rules';
 import { ReviewDecision } from './dto/document.dto';
 import type { CreateDocumentDto } from './dto/document.dto';
 import {
   FleetDocumentStatus,
   FleetOwnerType,
   Prisma,
+  type DocumentImage,
   type FleetDocument,
 } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
+
+/** Documento con sus imágenes (sub-lote 3A): lo que devuelven create/list al consumidor nuevo. */
+export type FleetDocumentWithImages = FleetDocument & { images: DocumentImage[] };
 
 @Injectable()
 export class DocumentsService {
@@ -63,7 +72,10 @@ export class DocumentsService {
    *  - VEHICLE: el vehículo debe EXISTIR y, si no es admin, PERTENECERLE
    *    (`Vehicle.driverId === user.userId`, por el invariante de id documentado en VehiclesService).
    */
-  async create(input: CreateDocumentDto, user: AuthenticatedUser): Promise<FleetDocument> {
+  async create(
+    input: CreateDocumentDto,
+    user: AuthenticatedUser,
+  ): Promise<FleetDocumentWithImages> {
     // Solo el operador admin se exime de probar pertenencia (su authz va por RolesGuard/admin-rail).
     // Todo lo demás cae en el camino fail-closed. Sin string mágico: SubjectType 'admin' del contrato.
     const isAdminPrincipal = user.type === 'admin';
@@ -120,26 +132,56 @@ export class DocumentsService {
       });
     }
 
-    return this.prisma.write.fleetDocument.create({
-      data: {
-        id: uuidv7(),
-        ownerType: input.ownerType,
-        ownerId: input.ownerId,
-        type: input.type,
-        // VEHICLE_PHOTO no trae número (foto sin numerar) → '' honesto (la columna es no-null).
-        documentNumber: (input.documentNumber ?? '').trim(),
-        issuedAt: input.issuedAt ? new Date(input.issuedAt) : null,
-        expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-        fileS3Key: input.fileS3Key ?? null,
-        status: FleetDocumentStatus.PENDING_REVIEW,
-      },
+    // Sub-lote 3A: normaliza/valida las imágenes (camino nuevo `images[]` o legacy `fileS3Key`). Lanza
+    // ValidationError si las caras son incoherentes (p.ej. FRONT sin BACK). Puede ser [] (doc sin archivo aún).
+    const images = normalizeDocumentImages({ images: input.images, fileS3Key: input.fileS3Key });
+
+    const documentId = uuidv7();
+
+    // Transacción ATÓMICA: el documento y sus N imágenes se persisten juntos o no se persiste nada.
+    // `fileS3Key` se sigue poblando con la primera imagen (backward-compat: consumidores legacy que aún lo lean).
+    return this.prisma.write.$transaction(async (tx) => {
+      const document = await tx.fleetDocument.create({
+        data: {
+          id: documentId,
+          ownerType: input.ownerType,
+          ownerId: input.ownerId,
+          type: input.type,
+          // VEHICLE_PHOTO no trae número (foto sin numerar) → '' honesto (la columna es no-null).
+          documentNumber: (input.documentNumber ?? '').trim(),
+          issuedAt: input.issuedAt ? new Date(input.issuedAt) : null,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          fileS3Key: primaryS3Key(images),
+          status: FleetDocumentStatus.PENDING_REVIEW,
+        },
+      });
+
+      if (images.length > 0) {
+        await tx.documentImage.createMany({
+          data: images.map((img) => ({
+            id: uuidv7(),
+            documentId,
+            s3Key: img.s3Key,
+            side: img.side,
+            order: img.order,
+          })),
+        });
+      }
+
+      // Devuelve el doc con sus imágenes (orden estable) en la MISMA transacción (lectura consistente).
+      const created = await tx.documentImage.findMany({
+        where: { documentId },
+        orderBy: { order: 'asc' },
+      });
+      return { ...document, images: created };
     });
   }
 
-  listByOwner(ownerId: string): Promise<FleetDocument[]> {
+  listByOwner(ownerId: string): Promise<FleetDocumentWithImages[]> {
     return this.prisma.read.fleetDocument.findMany({
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
+      include: { images: { orderBy: { order: 'asc' } } },
     });
   }
 

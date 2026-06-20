@@ -180,9 +180,36 @@ function makeReviewService(rows: VehicleModelSpec[]) {
       },
     );
 
+  // findUniqueOrThrow: la relectura post-CAS dentro de la tx (transition() lee la fila ya transicionada
+  // para proyectarla al view). Espeja findUnique pero LANZA si no existe (invariante: el CAS ya validó id).
+  const findUniqueOrThrow = vi
+    .fn()
+    .mockImplementation(({ where }: { where: { id: string } }) => {
+      const found = store.find((r) => r.id === where.id);
+      if (!found) return Promise.reject(new Error(`No VehicleModelSpec found for id ${where.id}`));
+      return Promise.resolve(found);
+    });
+  // outboxEvent.create: el evento VEHICLE_MODEL_REVIEWED que transition() emite en la MISMA tx tras
+  // aprobar/rechazar. El doble solo lo registra (no asertamos su contenido acá); devuelve la fila creada.
+  const outboxCreate = vi
+    .fn()
+    .mockImplementation(({ data }: { data: Record<string, unknown> }) => Promise.resolve(data));
+
+  // El service envuelve la transición en `this.prisma.write.$transaction(async (tx) => ...)`. El doble de
+  // $transaction ejecuta el callback con el MISMO write mock como `tx` (patrón estándar: la tx comparte los
+  // mismos dobles que el cliente fuera de la tx → un solo store en memoria, sin divergencia de estado).
+  // `findUnique` dentro de la tx: el branch CAS-fail de transition() la usa para distinguir NotFound vs
+  // Conflict (re-lee la fila tras un updateMany count 0).
+  const writeClient = {
+    vehicleModelSpec: { create, updateMany, findUnique, findUniqueOrThrow },
+    outboxEvent: { create: outboxCreate },
+  };
   const prisma = {
     read: { vehicleModelSpec: { findFirst, findUnique } },
-    write: { vehicleModelSpec: { create, updateMany } },
+    write: {
+      ...writeClient,
+      $transaction: (fn: (tx: typeof writeClient) => unknown) => Promise.resolve(fn(writeClient)),
+    },
   };
   const service = new VehicleModelsService(prisma as never);
   return { service, captured, create, updateMany };

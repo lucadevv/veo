@@ -9,10 +9,10 @@
  *  - Identidades admin/compliance (type !== 'driver') pasan: su authz la gobierna el RolesGuard.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenError } from '@veo/utils';
+import { ForbiddenError, ValidationError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { FleetDocumentType } from '@veo/shared-types';
-import { FleetOwnerType, type FleetDocument } from '../generated/prisma';
+import { DocumentSide, FleetOwnerType, type FleetDocument } from '../generated/prisma';
 import { DocumentsService } from './documents.service';
 
 /** Identidad de conductor con driverId resuelto+firmado por el BFF (anti-IDOR). */
@@ -113,16 +113,40 @@ function makeService(
       },
     );
 
+  // Sub-lote 3A: el create persiste el doc + sus N DocumentImage en una transacción. El doble de `tx`
+  // captura las imágenes creadas (createMany) y las devuelve por findMany(order asc) — emula la lectura
+  // post-write dentro de la misma transacción.
+  const imagesCreated: { data: Record<string, unknown>[] } = { data: [] };
+  const imageCreateMany = vi.fn(({ data }: { data: Record<string, unknown>[] }) => {
+    imagesCreated.data = data;
+    return Promise.resolve({ count: data.length });
+  });
+  const imageFindMany = vi.fn(() =>
+    Promise.resolve(
+      [...imagesCreated.data].sort(
+        (a, b) => (a.order as number) - (b.order as number),
+      ) as unknown[],
+    ),
+  );
+  const txCreate = vi.fn((args: { data: Record<string, unknown> }) => docCreate(args));
+  const $transaction = vi.fn(
+    (fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
+      fn({
+        fleetDocument: { create: txCreate },
+        documentImage: { createMany: imageCreateMany, findMany: imageFindMany },
+      }),
+  );
+
   const prisma = {
     read: {
       vehicle: { findUnique: vehicleFindUnique },
       fleetDocument: { findFirst: docFindFirst, findMany: docFindMany },
     },
-    write: { fleetDocument: { create: docCreate } },
+    write: { fleetDocument: { create: docCreate }, $transaction },
   };
   const config = { getOrThrow: () => 30 };
   const service = new DocumentsService(prisma as never, config as never);
-  return { service, created, docCreate, vehicleFindUnique, docFindMany };
+  return { service, created, docCreate, vehicleFindUnique, docFindMany, imagesCreated };
 }
 
 const driverDoc = {
@@ -171,6 +195,90 @@ describe('DocumentsService.create · anti-IDOR DRIVER', () => {
     const { service, created } = makeService();
     await service.create({ ...driverDoc, ownerId: 'driver-profile-cualquiera' }, adminIdentity());
     expect(created.data?.ownerId).toBe('driver-profile-cualquiera');
+  });
+});
+
+describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => {
+  it('DNI FRONT+BACK: persiste 2 DocumentImage (order canónico 0/1) y fileS3Key = primera imagen', async () => {
+    const { service, created, imagesCreated } = makeService();
+
+    const doc = await service.create(
+      {
+        ...driverDoc,
+        ownerId: 'driver-profile-1',
+        images: [
+          { s3Key: 'drivers/d/documents/LICENSE_A1/back.jpg', side: DocumentSide.BACK },
+          { s3Key: 'drivers/d/documents/LICENSE_A1/front.jpg', side: DocumentSide.FRONT },
+        ],
+      },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    // 2 imágenes persistidas, normalizadas a FRONT=0, BACK=1 (orden canónico, no el orden de envío).
+    expect(imagesCreated.data).toHaveLength(2);
+    const byOrder = [...imagesCreated.data].sort(
+      (a, b) => (a.order as number) - (b.order as number),
+    );
+    expect(byOrder[0]).toMatchObject({ side: DocumentSide.FRONT, order: 0, documentId: doc.id });
+    expect(byOrder[1]).toMatchObject({ side: DocumentSide.BACK, order: 1, documentId: doc.id });
+    // fileS3Key (deprecado) se puebla con la primera imagen por orden (backward-compat).
+    expect(created.data?.fileS3Key).toBe('drivers/d/documents/LICENSE_A1/front.jpg');
+    // El doc devuelto trae sus imágenes.
+    expect(doc.images).toHaveLength(2);
+  });
+
+  it('N fotos SINGLE (foto de vehículo): persiste N DocumentImage con order 0..N-1', async () => {
+    const { service, imagesCreated } = makeService({ vehicle: { id: 'veh-1', driverId: 'user-1' } });
+
+    await service.create(
+      {
+        ownerType: FleetOwnerType.VEHICLE,
+        type: FleetDocumentType.VEHICLE_PHOTO,
+        ownerId: 'veh-1',
+        images: [
+          { s3Key: 'a.jpg', side: DocumentSide.SINGLE },
+          { s3Key: 'b.jpg', side: DocumentSide.SINGLE },
+          { s3Key: 'c.jpg', side: DocumentSide.SINGLE },
+        ],
+      },
+      driverIdentity({ userId: 'user-1' }),
+    );
+
+    expect(imagesCreated.data).toHaveLength(3);
+    expect(imagesCreated.data.map((i) => i.order)).toEqual([0, 1, 2]);
+    expect(imagesCreated.data.every((i) => i.side === DocumentSide.SINGLE)).toBe(true);
+  });
+
+  it('legacy fileS3Key sin images: se normaliza a 1 DocumentImage SINGLE order 0 (backward-compat)', async () => {
+    const { service, imagesCreated } = makeService();
+
+    await service.create(
+      { ...driverDoc, ownerId: 'driver-profile-1', fileS3Key: 'legacy/key.jpg' },
+      driverIdentity({ driverId: 'driver-profile-1' }),
+    );
+
+    expect(imagesCreated.data).toHaveLength(1);
+    expect(imagesCreated.data[0]).toMatchObject({
+      side: DocumentSide.SINGLE,
+      order: 0,
+      s3Key: 'legacy/key.jpg',
+    });
+  });
+
+  it('caras incoherentes (FRONT sin BACK) → ValidationError, NO persiste nada', async () => {
+    const { service, docCreate } = makeService();
+
+    await expect(
+      service.create(
+        {
+          ...driverDoc,
+          ownerId: 'driver-profile-1',
+          images: [{ s3Key: 'front.jpg', side: DocumentSide.FRONT }],
+        },
+        driverIdentity({ driverId: 'driver-profile-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(docCreate).not.toHaveBeenCalled();
   });
 });
 

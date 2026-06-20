@@ -11,7 +11,7 @@ import {
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { DocumentsService } from './documents.service';
+import { DocumentsService, type FleetDocumentWithImages } from './documents.service';
 import { CreateDocumentDto, ReviewDocumentDto } from './dto/document.dto';
 import { FleetDocumentStatus, type FleetDocument } from '../generated/prisma';
 import type { Page } from '../infra/pagination';
@@ -34,7 +34,7 @@ export class DocumentsController {
   create(
     @Body() dto: CreateDocumentDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<FleetDocument> {
+  ): Promise<FleetDocumentWithImages> {
     // Anti-IDOR: fleet valida PERTENENCIA contra el principal autenticado (identidad interna firmada),
     // no confía ciegamente en ownerId del body. DRIVER → driverId firmado; VEHICLE → dueño del vehículo.
     return this.documents.create(dto, user);

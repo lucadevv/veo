@@ -38,6 +38,13 @@ interface DriverVehiclesReply {
   vehicles: VehicleReply[];
 }
 
+/// Imagen de un documento (sub-lote 3A): clave S3 + cara (FRONT|BACK|SINGLE) + orden.
+interface DocumentImageReply {
+  s3Key: string;
+  side: string;
+  order: number;
+}
+
 interface FleetDocumentReply {
   id: string;
   ownerType: string;
@@ -46,9 +53,11 @@ interface FleetDocumentReply {
   documentNumber: string;
   status: string;
   expiresAt: string;
-  /// Interno (admin review). El driver-bff mapea un subconjunto explícito y NO lo proyecta al conductor.
+  /// DEPRECADO (sub-lote 3A): primera imagen (backward-compat). El driver-bff NO lo proyecta al conductor.
   fileS3Key: string;
   rejectionReason: string;
+  /// Imágenes del documento (1..N caras). Admin review las firma; el driver-bff mapea un subconjunto.
+  images: DocumentImageReply[];
 }
 
 interface DriverDocumentsReply {
@@ -142,6 +151,7 @@ export class FleetGrpcController {
     const docs = await this.prisma.read.fleetDocument.findMany({
       where: { ownerType: FleetOwnerType.DRIVER, ownerId: id },
       orderBy: { createdAt: 'desc' },
+      include: { images: { orderBy: { order: 'asc' } } },
     });
     return {
       driverId: id,
@@ -153,9 +163,12 @@ export class FleetGrpcController {
         documentNumber: d.documentNumber,
         status: d.status,
         expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        // DEPRECADO: primera imagen (backward-compat). proto3 default "" si no hay archivo aún.
         fileS3Key: d.fileS3Key ?? '',
         // M5: motivo del rechazo que escribe el operador (proto3 default "" si no hay). El conductor lo ve.
         rejectionReason: d.rejectionReason ?? '',
+        // Sub-lote 3A: las N imágenes (ordenadas). Admin las firma; el conductor recibe un subconjunto.
+        images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
       })),
     };
   }
