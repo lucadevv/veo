@@ -38,6 +38,15 @@ VERIFY_LATENCY = Histogram(
     "veo_biometric_verify_seconds",
     "Latencia del endpoint /verify en segundos",
 )
+FACE_MATCH_TOTAL = Counter(
+    "veo_biometric_face_match_total",
+    "Comparaciones rostro-DNI vs selfie enrolada por veredicto",
+    labelnames=("matched",),
+)
+FACE_MATCH_LATENCY = Histogram(
+    "veo_biometric_face_match_seconds",
+    "Latencia del endpoint /face-match en segundos",
+)
 
 
 def metrics_payload() -> tuple[bytes, str]:

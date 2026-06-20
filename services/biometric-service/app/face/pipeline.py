@@ -46,6 +46,19 @@ class PipelineOutput:
     faces_in_primary_frame: int
 
 
+@dataclass(frozen=True)
+class EnrollOutput:
+    """Salida del enrolamiento con liveness (POST /v1/enroll).
+
+    Si `liveness.passed` es True, `embedding` trae el vector 512-d del mejor frame; si es
+    False, `embedding` es None (no se gasta cómputo de embedding sobre una sesión no viva).
+    """
+
+    liveness: LivenessResult
+    embedding: Optional[NDArrayF]
+    best_frame_index: Optional[int]
+
+
 def thresholds_from_settings(settings: Settings) -> LivenessThresholds:
     return LivenessThresholds(
         min_frames=settings.min_frames_for_liveness,
@@ -226,3 +239,80 @@ class BiometricPipeline:
         return PipelineOutput(
             decision=decision, liveness=liveness, faces_in_primary_frame=faces_count
         )
+
+    def _frame_quality(self, frame_bgr: NDArrayU8, signal: FrameSignals) -> float:
+        """Puntúa la calidad de un frame para elegir el "mejor" del enrolamiento.
+
+        Combina (mayor = mejor):
+          - frontalidad: penaliza yaw/pitch fuera del eje (el gesto de liveness mueve la cabeza;
+            para la FOTO de referencia queremos el frame más frontal, no el del extremo del giro);
+          - confianza de detección del SCRFD;
+          - nitidez: varianza del Laplaciano (un frame borroso o movido da varianza baja).
+        Es una heurística de selección, NO un umbral de seguridad: no decide PASS/FAIL.
+        """
+        import cv2  # carga perezosa
+
+        frontality = -(abs(signal.yaw_deg) + abs(signal.pitch_deg))
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        # Escalas: frontality en grados (~0..-180), sharpness en cientos. Normalizamos sharpness
+        # para que no domine y mantenga frontalidad/confianza como criterios de primer orden.
+        return frontality + signal.detection_confidence * 50.0 + min(sharpness, 500.0) / 10.0
+
+    def enroll(
+        self,
+        *,
+        action: ChallengeAction,
+        challenge_valid: bool,
+        frames_bgr: Sequence[NDArrayU8],
+    ) -> EnrollOutput:
+        """Enrolamiento del rostro CON prueba de vida (challenge-response).
+
+        Reusa el MISMO motor que `verify`:
+          - `extract_signals` (detección SCRFD por frame) + `evaluate_liveness` (mismo `_thresholds`)
+            para la prueba de vida contra `action`.
+          - `best_detection` + `embed` (ArcFace) para el embedding de referencia.
+
+        Si el reto es inválido/vencido o el liveness no pasa → embedding None (no se calcula).
+        Si pasa → se elige el frame más frontal/nítido con un único rostro y se devuelve su embedding.
+        """
+        if not challenge_valid:
+            liveness = LivenessResult(
+                passed=False, action=action, reason="reto inválido/vencido"
+            )
+            return EnrollOutput(liveness=liveness, embedding=None, best_frame_index=None)
+
+        signals = self.extract_signals(frames_bgr)
+        liveness = evaluate_liveness(action, signals, self._thresholds)
+        if not liveness.passed:
+            # Liveness FAIL → NO calculamos embedding (no gastamos inferencia sobre sesión no viva).
+            return EnrollOutput(liveness=liveness, embedding=None, best_frame_index=None)
+
+        # Liveness PASS: elegimos el MEJOR frame entre los que tienen exactamente un rostro claro.
+        valid_idxs = [i for i, s in enumerate(signals) if s.face_count == 1]
+        if not valid_idxs:
+            # Defensa: evaluate_liveness ya exige min_frames con un rostro, pero si por la
+            # configuración de umbrales pasara sin frames válidos, degradamos honesto.
+            failed = LivenessResult(
+                passed=False,
+                action=action,
+                reason="sin frames con un rostro claro para enrolar",
+                detail=liveness.detail,
+            )
+            return EnrollOutput(liveness=failed, embedding=None, best_frame_index=None)
+
+        best_idx = max(valid_idxs, key=lambda i: self._frame_quality(frames_bgr[i], signals[i]))
+        count, detection = self.best_detection(frames_bgr[best_idx])
+        if count != 1 or detection is None:
+            # El re-chequeo del detector no encontró exactamente un rostro en el frame elegido
+            # (carrera improbable entre extract_signals y best_detection): degradamos honesto.
+            failed = LivenessResult(
+                passed=False,
+                action=action,
+                reason="no se pudo aislar un rostro claro en el mejor frame",
+                detail=liveness.detail,
+            )
+            return EnrollOutput(liveness=failed, embedding=None, best_frame_index=None)
+
+        embedding = self.embed(frames_bgr[best_idx], detection)
+        return EnrollOutput(liveness=liveness, embedding=embedding, best_frame_index=best_idx)

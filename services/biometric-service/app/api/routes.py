@@ -17,6 +17,10 @@ from app.api.schemas import (
     ChallengeResponse,
     EmbedRequest,
     EmbedResponse,
+    EnrollRequest,
+    EnrollResponse,
+    FaceMatchRequest,
+    FaceMatchResponse,
     HealthResponse,
     ReadyResponse,
     VerifyRequest,
@@ -30,6 +34,8 @@ from app.face.pipeline import BiometricPipeline
 from app.security.internal_identity import require_internal_identity
 from app.telemetry import (
     CHALLENGE_ISSUED_TOTAL,
+    FACE_MATCH_LATENCY,
+    FACE_MATCH_TOTAL,
     LIVENESS_TOTAL,
     MATCH_SCORE,
     VERIFY_LATENCY,
@@ -196,6 +202,71 @@ def embed_reference(
     return EmbedResponse(embedding=embedding, dimensions=len(embedding))
 
 
+@router.post(
+    "/v1/enroll",
+    response_model=EnrollResponse,
+    response_model_exclude_none=False,
+    tags=["enroll"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def enroll_with_liveness(
+    payload: EnrollRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    store: ChallengeStore = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> EnrollResponse:
+    """Enrolamiento del rostro CON prueba de vida (challenge-response).
+
+    A diferencia de /v1/embed (1 foto suelta, sin liveness), exige que la secuencia de frames
+    supere el reto de liveness del `challengeId` ANTES de calcular el embedding de referencia.
+    Reusa el MISMO motor que /v1/verify: store.consume (anti-replay one-shot), extract_signals +
+    evaluate_liveness, y best_detection + embed (ArcFace). Endpoint sync (`def`) → threadpool de
+    FastAPI, así la inferencia ONNX (CPU-bound) no bloquea el event loop.
+
+    Caminos infelices (sin crashear):
+      - challenge inválido/vencido → livenessPassed=false, embedding=null, reason="Reto ...".
+      - liveness no superado / sin rostro → livenessPassed=false, embedding=null, reason=<motivo>.
+      - frames mal formados o demasiados/grandes → 422 (mismo gate anti-DoS que /v1/verify).
+    """
+    _require_models_ready(pipeline)
+    _check_frame_count(len(payload.frames), settings)
+    for f in payload.frames:
+        _check_b64_image_size(f, settings)
+    try:
+        frames = [decode_base64_image(f) for f in payload.frames]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Frame inválido: {exc}") from exc
+
+    # One-shot: consumimos el reto (anti-replay), igual que /v1/verify.
+    challenge = store.consume(payload.challenge_id)
+    action = challenge.action if challenge is not None else ChallengeAction.TURN_LEFT
+
+    with _domain_errors_as_422():
+        out = pipeline.enroll(
+            action=action,
+            challenge_valid=challenge is not None,
+            frames_bgr=frames,
+        )
+
+    LIVENESS_TOTAL.labels(passed=str(out.liveness.passed).lower()).inc()
+    embedding = out.embedding.tolist() if out.embedding is not None else None
+    # Audit trail (Ley 29733): atribuye el enrolamiento al conductor. SIN PII biométrica
+    # (nunca el embedding ni imágenes), solo el ID + veredicto de liveness.
+    logger.info(
+        "biometric.enroll",
+        extra={
+            "driverId": payload.driver_id,
+            "livenessPassed": out.liveness.passed,
+            "reason": out.liveness.reason,
+        },
+    )
+    return EnrollResponse(
+        livenessPassed=out.liveness.passed,
+        embedding=embedding,
+        reason=None if out.liveness.passed else out.liveness.reason,
+    )
+
+
 def _resolve_reference(
     pipeline: BiometricPipeline,
     reference_embedding: Optional[List[float]],
@@ -292,6 +363,83 @@ def verify_json(
             frames_bgr=frames,
             reference_embedding=reference,
         )
+
+
+@router.post(
+    "/v1/face-match",
+    response_model=FaceMatchResponse,
+    tags=["verify"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def face_match(
+    payload: FaceMatchRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
+) -> FaceMatchResponse:
+    """Compara el ROSTRO de la foto del DNI contra el embedding de la selfie enrolada.
+
+    Cierra el hueco de seguridad: confirma que la persona enrolada ES la del documento.
+    NO hay liveness (el DNI es una foto estática); reusa el MISMO motor que /v1/verify:
+    decode (EXIF) → SCRFD (best_detection, exige 1 rostro claro) → ArcFace (embed) →
+    match coseno (match_score) contra `referenceEmbedding` con el MISMO umbral de config
+    (settings.match_threshold, BR-I02). Endpoint sync (`def`) → threadpool de FastAPI, así
+    la inferencia ONNX (CPU-bound) no bloquea el event loop.
+
+    Degradación honesta (nunca un PASS inventado):
+      - modelos ausentes → 503.
+      - imagen mal formada / base64 inválido / demasiado grande → 422.
+      - referenceEmbedding mal formado (dim≠512/NaN/vacío) → 422.
+      - rostro del DNI no detectable o varios rostros → matched=false + reason explícito.
+    """
+    _require_models_ready(pipeline)
+    _check_b64_image_size(payload.image, settings)
+    try:
+        image = decode_base64_image(payload.image)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Imagen inválida: {exc}") from exc
+
+    from app.face.matcher import match_score, to_vector
+
+    started = time.perf_counter()
+    with _domain_errors_as_422():
+        # Valida el embedding de referencia ANTES de gastar inferencia (dim/NaN/vacío → 422).
+        reference = to_vector(payload.reference_embedding)
+        count, detection = pipeline.best_detection(image)
+
+    if count != 1 or detection is None:
+        # Sin rostro o varios en el DNI: degradación honesta, NUNCA un match inventado.
+        reason = (
+            "No se detectó un rostro en la imagen del DNI"
+            if count == 0
+            else f"Se detectaron {count} rostros en la imagen del DNI (se requiere exactamente uno)"
+        )
+        FACE_MATCH_TOTAL.labels(matched="false").inc()
+        FACE_MATCH_LATENCY.observe(time.perf_counter() - started)
+        logger.info("biometric.face_match", extra={"matched": False, "reason": reason})
+        return FaceMatchResponse(matched=False, score=0.0, reason=reason)
+
+    with _domain_errors_as_422():
+        probe = pipeline.embed(image, detection)
+        # Mismo motor de match que /v1/verify: similitud coseno mapeada a [0,1].
+        score = match_score(probe, reference)
+
+    threshold = settings.match_threshold
+    matched = score >= threshold
+    reason = None if matched else f"Similitud {score:.4f} por debajo del umbral {threshold:.2f}"
+
+    FACE_MATCH_TOTAL.labels(matched=str(matched).lower()).inc()
+    MATCH_SCORE.observe(score)
+    FACE_MATCH_LATENCY.observe(time.perf_counter() - started)
+    # Audit trail (Ley 29733): SIN PII biométrica (nunca embeddings ni imágenes), solo veredicto.
+    logger.info(
+        "biometric.face_match",
+        extra={"matched": matched, "score": round(score, 6)},
+    )
+    return FaceMatchResponse(
+        matched=matched,
+        score=round(score, 6),
+        reason=reason,
+    )
 
 
 def _process_multipart_verify(
