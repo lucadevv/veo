@@ -1862,6 +1862,81 @@ export type DriverDocument = z.infer<typeof driverDocument>;
 const FLEET_DOC_VEHICLE_PHOTO = 'VEHICLE_PHOTO';
 
 /**
+ * Onboarding sin-formularios (Lote 1 · cliente) · DATA EXTRAÍDA por OCR on-device que el cliente ENVÍA al
+ * borde. Espeja el contrato `ExtractedDocumentData` de @veo/shared-types (unión discriminada por `type`) y
+ * sus cotas EXACTAS del DTO del driver-bff/fleet-service. Se ESPEJA (no se importa shared-types) por la
+ * misma convención que `fleetDocumentType`/`FLEET_DOC_VEHICLE_PHOTO`: el contrato móvil declara sus formas
+ * con zod para que las apps RN no arrastren shared-types al bundle de Metro. Si el backend cambia las
+ * cotas, este espejo debe seguirlo (igual que el DTO espeja shared-types server-side).
+ *
+ * Cotas (deben coincidir con `extracted-data.dto.ts`): strings de id 1..40, strings de texto 1..120,
+ * fechas calendario `YYYY-MM-DD`. TODOS los campos opcionales (el OCR degrada campo a campo). El
+ * discriminante `type` usa los valores canónicos de `FleetDocumentType` (mismos strings que el enum).
+ */
+const OCR_ID_MAX = 40;
+const OCR_TEXT_MAX = 120;
+/** Fecha calendario ISO `YYYY-MM-DD` (sin hora). Espeja `ISO_DATE_PATTERN` del DTO del backend. */
+const ocrIsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha debe tener formato YYYY-MM-DD');
+const ocrId = z.string().min(1).max(OCR_ID_MAX);
+const ocrText = z.string().min(1).max(OCR_TEXT_MAX);
+
+/** DNI: data extraída del documento de identidad (espeja `ExtractedDniData`). */
+export const extractedDniData = z.object({
+  type: z.literal('DNI'),
+  fullName: ocrText.optional(),
+  documentNumber: ocrId.optional(),
+  birthdate: ocrIsoDate.optional(),
+});
+export type ExtractedDniData = z.infer<typeof extractedDniData>;
+
+/** SOAT: data extraída de la póliza (espeja `ExtractedSoatData`). */
+export const extractedSoatData = z.object({
+  type: z.literal('SOAT'),
+  policyNumber: ocrId.optional(),
+  expiresAt: ocrIsoDate.optional(),
+});
+export type ExtractedSoatData = z.infer<typeof extractedSoatData>;
+
+/** Tarjeta de propiedad: paridad con el backend (el cliente NO la PRODUCE hasta el Lote 2). */
+export const extractedPropertyCardData = z.object({
+  type: z.literal('PROPERTY_CARD'),
+  plate: ocrId.optional(),
+  make: ocrText.optional(),
+  model: ocrText.optional(),
+  year: z.number().int().optional(),
+  mtcCategory: ocrId.optional(),
+});
+export type ExtractedPropertyCardData = z.infer<typeof extractedPropertyCardData>;
+
+/** Licencia A1: data extraída de la licencia (espeja `ExtractedLicenseA1Data`). */
+export const extractedLicenseA1Data = z.object({
+  type: z.literal('LICENSE_A1'),
+  documentNumber: ocrId.optional(),
+  expiresAt: ocrIsoDate.optional(),
+});
+export type ExtractedLicenseA1Data = z.infer<typeof extractedLicenseA1Data>;
+
+/**
+ * Data extraída por OCR, UNIÓN DISCRIMINADA por `type` (espeja `ExtractedDocumentData`). Paridad COMPLETA
+ * con el backend (las 4 variantes) aunque el cliente hoy solo PRODUCE DNI/SOAT/LICENSE_A1. `forbidNonWhitelisted`
+ * del backend rechaza claves extra, así que el cliente debe enviar EXACTO la forma de la variante.
+ */
+export const extractedDocumentData = z.discriminatedUnion('type', [
+  extractedDniData,
+  extractedSoatData,
+  extractedPropertyCardData,
+  extractedLicenseA1Data,
+]);
+export type ExtractedDocumentData = z.infer<typeof extractedDocumentData>;
+
+/**
+ * Motor de OCR que produjo la `extractedData` (espeja el enum CERRADO `OcrEngine` de @veo/shared-types).
+ * `@IsIn(OCR_ENGINES)` del backend rechaza cualquier otro valor: este `z.enum` debe coincidir 1:1.
+ */
+export const ocrEngine = z.enum(['ios-visionkit', 'android-mlkit', 'paddleocr-server']);
+export type OcrEngineValue = z.infer<typeof ocrEngine>;
+
+/**
  * POST /drivers/me/documents → body. Registra/actualiza un documento (queda en revisión manual).
  * `documentNumber` es requerido POR TIPO: la foto del vehículo (`VEHICLE_PHOTO`) no tiene número; el
  * resto de los documentos (licencia/SOAT/tarjeta/…) SÍ lo exigen. El `refine` lo valida contextual.
@@ -1883,6 +1958,15 @@ export const addDocumentRequest = z
     fileS3Key: z.string().optional(),
     // Imágenes del documento (1..N caras). DNI → [FRONT, BACK]; foto de vehículo → N SINGLE; resto → [SINGLE].
     images: z.array(addDocumentImage).min(1).optional(),
+    // Onboarding sin-formularios (Lote 1): data extraída por OCR on-device + trazabilidad del motor. El
+    // backend valida la forma (unión discriminada acotada) y la persiste como `FleetDocument.extractedData`.
+    // Opcional → backward-compatible (registrar SIN OCR sigue OK). El `type` del documento NO tiene por qué
+    // coincidir con el `extractedData.type` aquí (el backend revalida); el cliente envía coherente por DI.
+    extractedData: extractedDocumentData.optional(),
+    /** Motor de OCR que extrajo la data (enum cerrado, anti-spoof). Trazabilidad. */
+    ocrEngine: ocrEngine.optional(),
+    /** Instante de la extracción OCR (ISO-8601). Espeja la cota del backend (`@IsISO8601()`): valida el formato. */
+    ocrAt: z.string().datetime({ offset: true }).optional(),
   })
   .refine((d) => d.type === FLEET_DOC_VEHICLE_PHOTO || (d.documentNumber?.length ?? 0) >= 1, {
     message: 'documentNumber requerido para este tipo de documento',
