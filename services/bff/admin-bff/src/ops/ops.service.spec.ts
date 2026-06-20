@@ -499,6 +499,102 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
   });
 });
 
+describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lote 3C)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** DNI con imagen FRONT (sub-lote 3A) — la cara que el face-match usa. */
+  const dniWithFront = {
+    id: 'doc-dni',
+    ownerType: 'DRIVER',
+    ownerId: 'd1',
+    type: FleetDocumentType.DNI,
+    documentNumber: '12345678',
+    status: FleetDocumentStatus.PENDING_REVIEW,
+    expiresAt: '',
+    fileS3Key: '',
+    rejectionReason: '',
+    images: [
+      { s3Key: 'drivers/d1/dni-front.jpg', side: 'FRONT', order: 0 },
+      { s3Key: 'drivers/d1/dni-back.jpg', side: 'BACK', order: 1 },
+    ],
+  };
+
+  it('baja la foto FRONT del DNI de S3, la pasa a identity y devuelve + audita el resultado', async () => {
+    // fetch (descarga del binario S3 vía presigned) → bytes → base64.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }),
+    );
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [dniWithFront] } : {},
+    );
+    const presignPost = vi.fn().mockResolvedValue({ url: 'https://signed/dni-front' });
+    const media = { post: presignPost } as unknown as InternalRestClient;
+    const identityPost = vi
+      .fn()
+      .mockResolvedValue({ matched: true, score: 94, reason: null });
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      identityRest,
+      media,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.runDniFaceMatch(identity, 'd1');
+
+    expect(out).toEqual({ matched: true, score: 94, reason: null });
+    // Presignó la clave de la imagen FRONT (no la BACK).
+    expect(presignPost.mock.calls[0]?.[1]?.body?.key).toBe('drivers/d1/dni-front.jpg');
+    // Llamó al identity con la imagen en base64 (los bytes [1,2,3,4]).
+    expect(identityPost).toHaveBeenCalledWith(
+      '/drivers/d1/dni-face-match',
+      expect.objectContaining({ body: { image: Buffer.from([1, 2, 3, 4]).toString('base64') } }),
+    );
+    // Auditó la verificación (Ley 29733).
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'driver.dni-face-match' }),
+    );
+  });
+
+  it('sin foto FRONT del DNI → 409 (ConflictError) sin llamar a identity', async () => {
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [] } : {},
+    );
+    const identityPost = vi.fn();
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      identityRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    await expect(svc.runDniFaceMatch(identity, 'd1')).rejects.toBeInstanceOf(ConflictError);
+    expect(identityPost).not.toHaveBeenCalled();
+  });
+});
+
 describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
   it('ADMIN → [SUPERADMIN]: ForbiddenError 403 que CORTA antes de identityRest.post', async () => {
     const post = vi.fn();

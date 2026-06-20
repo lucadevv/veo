@@ -7,7 +7,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundError, uuidv7 } from '@veo/utils';
 import { createLogger, type Logger } from '@veo/observability';
-import type { FleetDocumentType } from '@veo/shared-types';
+import { DocumentSide, type FleetDocumentType } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { Env } from '../config/env.schema';
 import type {
@@ -44,6 +44,7 @@ import {
 import {
   DOCUMENT_EXTENSION_BY_CONTENT_TYPE,
   type DocumentUploadContentType,
+  type DocumentUploadSideTicket,
   type DocumentUploadTicketView,
 } from './dto/drivers.dto';
 import type {
@@ -216,7 +217,15 @@ export class DriversService {
     return buildDriverVehicleFromRest(updated);
   }
 
-  /** Enrolamiento facial de referencia (BR-I02) → identity-service. */
+  /** Emite el reto de liveness para ENROLAR el rostro (BR-I02) → identity-service (GET). */
+  enrollChallenge(identity: AuthenticatedUser): Promise<DriverBiometricChallenge> {
+    return this.identity().get<DriverBiometricChallenge>(
+      '/drivers/me/biometric/liveness/challenge',
+      { identity },
+    );
+  }
+
+  /** Enrolamiento facial de referencia CON LIVENESS (BR-I02) → identity-service. */
   enrollFace(
     identity: AuthenticatedUser,
     dto: EnrollFaceDto,
@@ -346,6 +355,8 @@ export class DriversService {
       issuedAt?: string;
       expiresAt?: string;
       fileS3Key?: string;
+      // Sub-lote 3A: las N imágenes (caras) ya subidas vía presign. Se reenvían tal cual a fleet.
+      images?: { s3Key: string; side: DocumentSide }[];
     },
   ): Promise<DriverDocumentDetail> {
     const driver = await this.grpc.call<DriverReply>(
@@ -370,7 +381,10 @@ export class DriversService {
         documentNumber: input.documentNumber,
         issuedAt: input.issuedAt,
         expiresAt: input.expiresAt,
+        // DEPRECADO: se mantiene por backward-compat; el camino nuevo es `images` (fleet normaliza ambos).
         fileS3Key: input.fileS3Key,
+        // Sub-lote 3A: las N caras ya subidas. fleet persiste una DocumentImage por elemento (atómico).
+        images: input.images,
       },
     });
     return buildDriverDocument(created);
@@ -390,7 +404,12 @@ export class DriversService {
    */
   async presignDocumentUpload(
     identity: AuthenticatedUser,
-    input: { type: FleetDocumentType; contentType: DocumentUploadContentType },
+    input: {
+      type: FleetDocumentType;
+      contentType: DocumentUploadContentType;
+      // Sub-lote 3A: caras a subir (1..N). Si se omite → [SINGLE] (backward-compat, 1 imagen).
+      sides?: DocumentSide[];
+    },
   ): Promise<DocumentUploadTicketView> {
     const driver = await this.grpc.call<DriverReply>(
       'identity',
@@ -402,35 +421,45 @@ export class DriversService {
       throw new NotFoundError('No existe un perfil de conductor para este usuario');
     }
 
-    const fileS3Key = this.buildDocumentKey(driver.id, input.type, input.contentType);
+    // Backward-compat: sin `sides` → una sola cara SINGLE (el comportamiento histórico de 1 ticket).
+    const sides = input.sides && input.sides.length > 0 ? input.sides : [DocumentSide.SINGLE];
 
-    const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
-      '/media/internal/presign-put',
-      {
-        identity,
-        body: {
-          bucket: this.documentsBucket,
-          key: fileS3Key,
-          contentType: input.contentType,
-          ttlSeconds: this.documentUploadTtl,
-        },
-      },
+    // Un ticket POR CARA: una key DRIVER-SCOPED distinta por cara (el uuid de buildDocumentKey las separa)
+    // y un presign-put de media por key. En paralelo (cada cara es independiente). La frontera de seguridad
+    // (prefijo `drivers/{driverId}/`) se preserva cara por cara: el driverId siempre se resuelve server-side.
+    const tickets: DocumentUploadSideTicket[] = await Promise.all(
+      sides.map(async (side) => {
+        const fileS3Key = this.buildDocumentKey(driver.id, input.type, input.contentType);
+        const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
+          '/media/internal/presign-put',
+          {
+            identity,
+            body: {
+              bucket: this.documentsBucket,
+              key: fileS3Key,
+              contentType: input.contentType,
+              ttlSeconds: this.documentUploadTtl,
+            },
+          },
+        );
+        return {
+          side,
+          uploadUrl: ticket.url,
+          fileS3Key,
+          requiredHeaders: ticket.requiredHeaders,
+        };
+      }),
     );
 
     const expiresAt = new Date(Date.now() + this.documentUploadTtl * 1000).toISOString();
 
-    // Observabilidad: se loguea driverId + type (metadatos), NUNCA el binario ni la URL firmada.
+    // Observabilidad: driverId + type + cantidad de caras (metadatos), NUNCA el binario ni las URLs firmadas.
     this.logger.info(
-      { driverId: driver.id, type: input.type, contentType: input.contentType },
-      'ticket de subida de documento emitido (presigned PUT, driver-scoped)',
+      { driverId: driver.id, type: input.type, contentType: input.contentType, sides: sides.length },
+      'tickets de subida de documento emitidos (presigned PUT, driver-scoped, 1 por cara)',
     );
 
-    return {
-      uploadUrl: ticket.url,
-      fileS3Key,
-      requiredHeaders: ticket.requiredHeaders,
-      expiresAt,
-    };
+    return { tickets, expiresAt };
   }
 
   /**

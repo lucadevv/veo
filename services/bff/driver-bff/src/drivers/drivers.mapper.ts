@@ -3,7 +3,7 @@
  * identity (driver+user), rating (agregado) y fleet (documentos) en una vista de cumplimiento.
  * Aislado del service para poder testearlo directamente.
  */
-import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
+import { DocumentSide, DriverStatus, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import type {
   AggregateReply,
   DriverDocumentsReply,
@@ -41,6 +41,33 @@ export const REQUIRED_DRIVER_DOCS: FleetDocumentType[] = [
   FleetDocumentType.PROPERTY_CARD,
 ];
 
+/**
+ * El set de requeridos para el alta NUEVA incluye el DNI (documento de identidad del conductor). Se
+ * aplica SOLO a conductores que aún están en onboarding (no operativos), para no regresar a los
+ * conductores ya aprobados que entraron ANTES de que el DNI fuese requerido (backward-compat).
+ * El DNI se sube como documento de 2 caras (FRONT+BACK · sub-lote 3A); su cara FRONT la consume el
+ * face-match (sub-lote 3C). Mantener `REQUIRED_DRIVER_DOCS` como base legacy intacta es deliberado:
+ * agregar el DNI ahí marcaría retroactivamente a TODO conductor previo como no-compliant.
+ */
+export const REQUIRED_DRIVER_DOCS_WITH_IDENTITY: FleetDocumentType[] = [
+  ...REQUIRED_DRIVER_DOCS,
+  FleetDocumentType.DNI,
+];
+
+/**
+ * Estados de conductor que prueban que YA pasó el onboarding (fue aprobado y operó alguna vez). Para
+ * estos NO se exige el DNI retroactivamente (grace de backward-compat). OFFLINE queda EXCLUIDO a
+ * propósito: es también el default de identity para un conductor recién creado en pleno onboarding, así
+ * que NO prueba que haya sido aprobado. SUSPENDED sí se incluye: fue aprobado en su momento.
+ */
+const OPERATIONAL_DRIVER_STATUSES: ReadonlySet<DriverStatus> = new Set<DriverStatus>([
+  DriverStatus.AVAILABLE,
+  DriverStatus.ASSIGNED,
+  DriverStatus.ON_TRIP,
+  DriverStatus.ON_BREAK,
+  DriverStatus.SUSPENDED,
+]);
+
 /** Un documento está APROBADO/vigente si está VALID o por vencer (EXPIRING_SOON). */
 function isDocApproved(status: string): boolean {
   return status === FleetDocumentStatus.VALID || status === FleetDocumentStatus.EXPIRING_SOON;
@@ -77,6 +104,14 @@ export function toSimpleDocStatus(status: string): DriverDocumentSimpleStatus {
   }
 }
 
+/** Espejo de los valores de DocumentSide para narrowear el string del wire gRPC sin `as` ciego. */
+const DOCUMENT_SIDE_VALUES = new Set<string>(Object.values(DocumentSide));
+
+/** Narrowea el `side` string del wire al enum tipado; descarta valores desconocidos (degradación honesta). */
+function toDocumentSide(side: string): DocumentSide | null {
+  return DOCUMENT_SIDE_VALUES.has(side) ? (side as DocumentSide) : null;
+}
+
 /** Vista detallada de un documento del conductor. */
 export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail {
   return {
@@ -88,6 +123,13 @@ export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail
     ok: isDocApproved(d.status),
     // M5: el motivo del rechazo viaja al conductor ("" del proto3 → null honesto).
     rejectionReason: emptyToNull(d.rejectionReason),
+    // Sub-lote 3A: las caras (side + order), SIN la key S3 interna. proto3 entrega [] si no hay imágenes.
+    images: (d.images ?? [])
+      .map((img) => {
+        const side = toDocumentSide(img.side);
+        return side ? { side, order: img.order } : null;
+      })
+      .filter((img): img is { side: DocumentSide; order: number } => img !== null),
   };
 }
 
@@ -216,23 +258,48 @@ export function buildDriverProfile(
   const docFor = (type: FleetDocumentType): DriverDocumentView | undefined =>
     documents.find((d) => d.type === type);
 
+  // BACKWARD-COMPAT (sub-lote 3B · DNI requerido para el alta NUEVA): el DNI se exige solo a conductores
+  // que SIGUEN en onboarding. Un conductor "ya pasó el onboarding" (legacy, DNI NO retroactivo) si CUALQUIERA:
+  //  (a) ya tenía aprobados los 3 docs LEGACY (era compliant bajo las reglas viejas), o
+  //  (b) está en un estado OPERATIVO/aprobado (currentStatus ∈ OPERATIONAL_DRIVER_STATUSES; OFFLINE NO
+  //      cuenta porque es también el default de un conductor recién creado en pleno onboarding).
+  // Así los conductores ya aprobados/operativos conservan la semántica de 3 docs (compliant intacto), y
+  // solo el alta NUEVA (OFFLINE, sin docs aprobados aún) debe sumar el DNI para llegar a submittedAllRequired.
+  const legacyAllApproved = REQUIRED_DRIVER_DOCS.every((type) => docFor(type)?.ok === true);
+  const alreadyOnboarded =
+    legacyAllApproved || OPERATIONAL_DRIVER_STATUSES.has(driver.currentStatus as DriverStatus);
+  const effectiveRequired = alreadyOnboarded
+    ? REQUIRED_DRIVER_DOCS
+    : REQUIRED_DRIVER_DOCS_WITH_IDENTITY;
+
   // PRESENCIA: faltan los tipos para los que NO hay NINGÚN documento subido (a cualquier estado).
   // Un PENDING_REVIEW YA está subido → no es "faltante".
-  const missing = REQUIRED_DRIVER_DOCS.filter((type) => {
+  const missing = effectiveRequired.filter((type) => {
     const doc = docFor(type);
     return doc === undefined || !isDocSubmitted(doc.status);
   });
 
   // RECHAZO: tipos requeridos cuyo documento fue rechazado (el conductor debe corregir-y-reenviar).
-  const rejected = REQUIRED_DRIVER_DOCS.filter(
+  const rejected = effectiveRequired.filter(
     (type) => docFor(type)?.status === FleetDocumentStatus.REJECTED,
   );
 
-  // ENVIADO TODO: cada tipo requerido tiene un documento (a cualquier estado).
+  // ENVIADO TODO: cada tipo requerido (efectivo) tiene un documento (a cualquier estado).
   const submittedAllRequired = missing.length === 0;
 
-  // APROBADO TODO: cada tipo requerido tiene un documento VALID/EXPIRING_SOON.
-  const allApproved = REQUIRED_DRIVER_DOCS.every((type) => docFor(type)?.ok === true);
+  // APROBADO TODO: cada tipo requerido (efectivo) tiene un documento VALID/EXPIRING_SOON. Para un
+  // conductor ya-onboarded `effectiveRequired` es el set legacy, así que reusamos `legacyAllApproved`.
+  const allApproved = alreadyOnboarded
+    ? legacyAllApproved
+    : effectiveRequired.every((type) => docFor(type)?.ok === true);
+
+  // BIOMETRÍA ENROLADA (diferenciador no negociable VEO): el conductor enroló su rostro de referencia.
+  // Eje SEPARADO de los documentos a propósito (decisión de diseño): `submittedAllRequired` es de DOCS;
+  // la biometría es su propio hecho. La condición de "listo para revisión" (in_review) es
+  // (submittedAllRequired AND biometricEnrolled), y el cliente la compone con AMBOS flags explícitos.
+  // FUENTE: `faceEnrolledAt` del DriverReply gRPC (proto3 entrega "" si aún no enroló) — server-truth,
+  // espeja `Driver.faceEnrolledAt`/`faceEmbedding` que identity exige en el gate de aprobación.
+  const biometricEnrolled = driver.faceEnrolledAt.length > 0;
 
   return {
     driverId: driver.id,
@@ -258,7 +325,9 @@ export function buildDriverProfile(
       // era `missing.length === 0` con `missing`=no-aprobados, que coincidía; ahora que `missing` es
       // PRESENCIA, el gate de aprobado se expresa explícito como `allApproved`.
       compliant: allApproved,
-      requiredTypes: REQUIRED_DRIVER_DOCS,
+      // El set EFECTIVO de requeridos: legacy (3) para conductores ya-onboarded; legacy+DNI (4) para el
+      // alta NUEVA. Así el cliente del onboarding ve el DNI como pendiente y el conductor ya aprobado no.
+      requiredTypes: effectiveRequired,
       // PRESENCIA: tipos sin ningún documento subido (genuinamente faltantes), NO los no-aprobados.
       missing,
       // Tipos requeridos cuyo documento fue rechazado por el operador.
@@ -267,6 +336,9 @@ export function buildDriverProfile(
       submittedAllRequired,
       // true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON).
       allApproved,
+      // true si el conductor enroló su biometría facial (faceEnrolledAt presente). Eje SEPARADO de los
+      // documentos: la condición de in_review es (submittedAllRequired AND biometricEnrolled).
+      biometricEnrolled,
     },
   };
 }

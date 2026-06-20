@@ -6,6 +6,7 @@ bootstrapOtel({ serviceName: 'driver-bff' });
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -24,8 +25,12 @@ async function bootstrap(): Promise<void> {
   const logger = createLogger('driver-bff');
   initDefaultMetrics('driver-bff');
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const config = app.get(ConfigService<Env, true>);
+
+  // Body JSON hasta 5MB: el enroll biométrico manda la selfie en base64 (alineado con identity-service).
+  // Sin esto, el default de Nest/Express (100kb) rechaza la foto con 413 antes de proxearla a identity.
+  app.useBodyParser('json', { limit: '5mb' });
 
   app.use(helmet());
   app.enableCors({

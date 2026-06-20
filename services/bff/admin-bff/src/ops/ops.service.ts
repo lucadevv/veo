@@ -23,6 +23,8 @@ import {
 } from '@veo/auth';
 import {
   canGrantRoles,
+  DniFaceMatchStatus,
+  DocumentSide,
   FleetDocumentType,
   FleetDocumentStatus,
   type AdminRole,
@@ -33,7 +35,11 @@ import type {
   TripDetail,
   DriverDetail,
   DriverVehicle,
+  AdminDocumentImage,
   AdminDriverDocument,
+  DocumentSideValue,
+  DniFaceMatchStatusValue,
+  DniFaceMatchResult,
   GeoPoint,
 } from '@veo/api-client';
 import {
@@ -61,6 +67,17 @@ import type { ListTripsQueryDto, ListDriversQueryDto } from './dto/ops.dto';
 
 const DEFAULT_LIMIT = 25;
 
+/** Valores válidos de DocumentSide (sub-lote 3A) para narrowear el `side` string del wire gRPC. */
+const DOCUMENT_SIDE_VALUES = new Set<string>(Object.values(DocumentSide));
+
+/**
+ * Narrowea el `side` string del wire gRPC al enum tipado del contrato. Un valor desconocido degrada a
+ * SINGLE (degradación honesta: el operador igual ve la imagen; el render no se rompe por un side raro).
+ */
+function toDocumentSide(side: string): DocumentSideValue {
+  return DOCUMENT_SIDE_VALUES.has(side) ? (side as DocumentSideValue) : DocumentSide.SINGLE;
+}
+
 /**
  * Documentos OBLIGATORIOS para aprobar a un conductor (gate server-side autoritativo · Ley 29733).
  * Tipos del enum canónico de flota (NO magic strings): licencia A1 + SOAT + tarjeta de propiedad.
@@ -80,6 +97,19 @@ const REQUIRED_DRIVER_DOC_TYPES = [
 /** proto3 entrega "" para strings ausentes; el contrato del panel los quiere `null` honesto. */
 function emptyToNull(s: string): string | null {
   return s ? s : null;
+}
+
+/** Valores válidos de DniFaceMatchStatus (sub-lote 3C) para narrowear el string del wire gRPC. */
+const DNI_FACE_MATCH_STATUS_VALUES = new Set<string>(Object.values(DniFaceMatchStatus));
+
+/**
+ * Narrowea el estado del binding DNI↔selfie del wire gRPC al enum tipado del contrato. Un valor desconocido
+ * (o "" del proto3 default) degrada a NOT_RUN (degradación honesta: ante la duda, "no se corrió").
+ */
+function toDniFaceMatchStatus(status: string): DniFaceMatchStatusValue {
+  return DNI_FACE_MATCH_STATUS_VALUES.has(status)
+    ? (status as DniFaceMatchStatusValue)
+    : DniFaceMatchStatus.NOT_RUN;
 }
 
 /** Mensaje de causa legible de un error desconocido (para la degradación honesta del purge parcial). */
@@ -395,18 +425,39 @@ export class OpsService {
         }
       : null;
 
-    // Por cada documento: si tiene archivo (fileS3Key no vacío) acuñamos una presigned GET URL contra
-    // media-service. fileS3Key '' = todavía no se subió archivo (estado real actual — DEUDA: el upload
-    // del archivo del documento no está implementado) → url null. Las firmas van en paralelo.
+    // Sub-lote 3A · MÚLTIPLES imágenes por documento: por cada doc, acuñamos una presigned GET URL POR
+    // IMAGEN (DNI anverso+reverso, N fotos de vehículo). Backward-compat: si el doc NO trae imágenes pero
+    // sí el legacy fileS3Key, lo tratamos como una sola imagen SINGLE (no se pierde el render de 1 imagen).
+    // `url` (deprecado) = la URL de la primera imagen, para el render legacy. Todas las firmas en paralelo.
     const documents: AdminDriverDocument[] = await Promise.all(
-      docs.documents.map(async (doc) => ({
-        id: doc.id,
-        type: doc.type as AdminDriverDocument['type'],
-        status: doc.status as AdminDriverDocument['status'],
-        expiresAt: emptyToNull(doc.expiresAt),
-        rejectionReason: emptyToNull(doc.rejectionReason),
-        url: await this.presignDocument(identity, doc.fileS3Key),
-      })),
+      docs.documents.map(async (doc) => {
+        // Fuente de imágenes: las N reales o, si no hay, la degradación al legacy fileS3Key (1 SINGLE).
+        const rawImages: { s3Key: string; side: string; order: number }[] =
+          doc.images && doc.images.length > 0
+            ? doc.images
+            : doc.fileS3Key
+              ? [{ s3Key: doc.fileS3Key, side: DocumentSide.SINGLE, order: 0 }]
+              : [];
+
+        const images: AdminDocumentImage[] = await Promise.all(
+          rawImages.map(async (img) => ({
+            side: toDocumentSide(img.side),
+            order: img.order,
+            url: await this.presignDocument(identity, img.s3Key),
+          })),
+        );
+
+        return {
+          id: doc.id,
+          type: doc.type as AdminDriverDocument['type'],
+          status: doc.status as AdminDriverDocument['status'],
+          expiresAt: emptyToNull(doc.expiresAt),
+          rejectionReason: emptyToNull(doc.rejectionReason),
+          // DEPRECADO: URL de la primera imagen (backward-compat con el render de 1 imagen).
+          url: images[0]?.url ?? null,
+          images,
+        };
+      }),
     );
 
     await this.audit.record(identity, {
@@ -433,10 +484,96 @@ export class OpsService {
       biometric: {
         faceEnrolledAt: emptyToNull(driver.faceEnrolledAt),
         lastVerifiedAt: emptyToNull(driver.lastVerifiedAt),
+        // Sub-lote 3C · BINDING DNI↔selfie GUARDADO (lo corre identity, acá solo se EXPONE para que el
+        // operador lo VEA junto a la biometría antes de aprobar). El status viene tipado de identity
+        // (NOT_RUN/MATCHED/NO_MATCH · narrowing defensivo a NOT_RUN ante un valor desconocido del wire).
+        dniFaceMatchStatus: toDniFaceMatchStatus(driver.dniFaceMatchStatus),
+        dniFaceMatchScore: driver.dniFaceMatchedAt ? driver.dniFaceMatchScore : null,
+        dniFaceMatchedAt: emptyToNull(driver.dniFaceMatchedAt),
       },
       vehicle,
       documents,
     };
+  }
+
+  /**
+   * Sub-lote 3C · ORQUESTA el face-match DNI↔selfie (POST /ops/drivers/:id/dni-face-match). Pasos:
+   *   1) Trae los documentos del conductor (gRPC GetDriverDocuments) y ubica el DNI → su imagen FRONT
+   *      (sub-lote 3A: DocumentImage con side=FRONT). El admin NO inventa la imagen: sale del documento
+   *      REAL que el conductor subió a S3.
+   *   2) Baja los BYTES del binario de S3 vía la MISMA presigned GET URL que usa el DocumentViewer, y los
+   *      codifica a base64.
+   *   3) Llama al identity `POST /drivers/:id/dni-face-match { image }`. identity usa el `faceEmbedding`
+   *      GUARDADO del conductor (server-truth, NO uno del caller), corre el match, lo GUARDA y lo devuelve.
+   *   4) Devuelve el resultado al panel + lo audita (Ley 29733: correr una verificación biométrica deja traza).
+   *
+   * GARANTÍA DE SEGURIDAD: la imagen sale del DNI real (S3, no arbitraria) y el embedding de referencia es el
+   * GUARDADO del conductor (lo resuelve identity, el caller no lo manda). El admin-bff solo transporta los
+   * bytes del DNI; nunca elige la biometría contra la que se cotea.
+   */
+  async runDniFaceMatch(
+    identity: AuthUser,
+    driverId: string,
+  ): Promise<DniFaceMatchResult> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
+      'GetDriverDocuments',
+      { id: driverId },
+      meta,
+    );
+    // Ubica el DNI y su imagen FRONT (sub-lote 3A). Sin DNI / sin FRONT → 409 honesto: no hay foto que cotear.
+    const dni = docs.documents.find((d) => d.type === FleetDocumentType.DNI);
+    const frontKey =
+      dni?.images?.find((img) => img.side === DocumentSide.FRONT)?.s3Key ??
+      // Backward-compat: un DNI legacy con una sola imagen (fileS3Key) se trata como el FRONT.
+      (dni?.fileS3Key || null);
+    if (!frontKey) {
+      throw new ConflictError(
+        'No se puede verificar el rostro: el conductor no tiene la foto FRONT del DNI cargada',
+        { driverId },
+      );
+    }
+
+    // Baja los bytes del DNI de S3 (misma presigned GET que el visor) y los codifica a base64.
+    const image = await this.fetchDocumentImageBase64(identity, frontKey);
+    if (!image) {
+      throw new ConflictError('No se pudo descargar la imagen del DNI para la verificación', {
+        driverId,
+      });
+    }
+
+    const result = await this.identityRest.post<DniFaceMatchResult>(
+      `/drivers/${driverId}/dni-face-match`,
+      { identity, body: { image } },
+    );
+    await this.audit.record(identity, {
+      action: 'driver.dni-face-match',
+      resourceType: 'driver',
+      resourceId: driverId,
+      payload: { matched: result.matched, score: result.score },
+    });
+    return result;
+  }
+
+  /**
+   * Baja los BYTES de un binario de S3 (vía la presigned GET de media) y los codifica a base64. Reusa
+   * `presignDocument` (server-to-server, TTL corto). Devuelve null si no se pudo firmar o descargar
+   * (degradación honesta — el caller lo traduce a un 409 claro, no a un 500 opaco).
+   */
+  private async fetchDocumentImageBase64(
+    identity: AuthUser,
+    fileS3Key: string,
+  ): Promise<string | null> {
+    const url = await this.presignDocument(identity, fileS3Key);
+    if (!url) return null;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.toString('base64');
+    } catch {
+      return null;
+    }
   }
 
   /**

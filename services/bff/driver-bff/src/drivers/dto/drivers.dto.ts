@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsEnum,
@@ -16,8 +18,9 @@ import {
   Max,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
-import { FleetDocumentType, VehicleType } from '@veo/shared-types';
+import { DocumentSide, FleetDocumentType, VehicleType } from '@veo/shared-types';
 
 /** Año mínimo razonable para el alta de vehículo (sanity check; BR-D04 >=2017 lo revalida fleet). */
 const MIN_REASONABLE_VEHICLE_YEAR = 2005;
@@ -62,11 +65,26 @@ export class StartShiftDto {
   geoLon?: number;
 }
 
-/** POST /drivers/biometric/enroll → body. Foto de referencia en base64 (BR-I02). */
+/**
+ * POST /drivers/biometric/enroll → body. Enrolamiento CON LIVENESS (BR-I02): el reto emitido por
+ * GET /drivers/me/biometric/liveness/challenge + los frames capturados. El BFF solo valida shape y proxya a
+ * identity-service, que aplica el liveness real (endurecimiento fino por frame vive en identity).
+ */
 export class EnrollFaceDto {
-  @ApiProperty({ description: 'Foto de referencia del rostro en base64' })
+  @ApiProperty({ description: 'Id del reto de liveness emitido en /me/biometric/liveness/challenge' })
   @IsString()
-  photo!: string;
+  @IsNotEmpty()
+  challengeId!: string;
+
+  @ApiProperty({
+    description: 'Frames del reto de liveness en base64 (orden temporal, 1..30)',
+    type: [String],
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  frames!: string[];
 }
 
 /** POST /drivers/shift/biometric/verify → body. Reto + frames del liveness (BR-I02). */
@@ -80,6 +98,24 @@ export class VerifyBiometricDto {
   @ArrayNotEmpty()
   @IsString({ each: true })
   frames!: string[];
+}
+
+/** Tope de imágenes por documento/presign (DNI=2; foto de vehículo N). Espeja MAX_DOCUMENT_IMAGES de fleet. */
+export const MAX_DOCUMENT_UPLOAD_SIDES = 10;
+
+/**
+ * Una imagen del documento (sub-lote 3A): la clave S3 ya subida (vía presign) + la cara. Tipado fuerte
+ * en `side` (DocumentSide) — sin string suelto. El driver-bff la reenvía a fleet en `images[]`.
+ */
+export class AddDocumentImageDto {
+  @ApiProperty({ description: 'Clave S3 del binario ya subido (devuelta por el presign)' })
+  @IsString()
+  @IsNotEmpty()
+  s3Key!: string;
+
+  @ApiProperty({ enum: DocumentSide, description: 'Cara del documento: FRONT | BACK | SINGLE' })
+  @IsEnum(DocumentSide)
+  side!: DocumentSide;
 }
 
 /** POST /drivers/me/documents → body. Registra/actualiza un documento del conductor (BR-I04). */
@@ -108,10 +144,23 @@ export class AddDocumentDto {
   @IsISO8601()
   expiresAt?: string;
 
-  @ApiPropertyOptional({ description: 'Clave S3 del archivo, si la app ya lo subió por otra vía' })
+  @ApiPropertyOptional({ description: 'DEPRECADO: usar `images`. Clave S3 singular del archivo' })
   @IsOptional()
   @IsString()
   fileS3Key?: string;
+
+  /**
+   * Imágenes del documento (sub-lote 3A · camino nuevo, 1..N caras). DNI → [FRONT, BACK]; foto de
+   * vehículo → N SINGLE; el resto → [SINGLE]. Opcional para no romper a quien aún mande `fileS3Key`.
+   */
+  @ApiPropertyOptional({ type: [AddDocumentImageDto], description: 'Imágenes del documento (1..N caras)' })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_DOCUMENT_UPLOAD_SIDES)
+  @ValidateNested({ each: true })
+  @Type(() => AddDocumentImageDto)
+  images?: AddDocumentImageDto[];
 }
 
 /**
@@ -137,8 +186,12 @@ export const DOCUMENT_EXTENSION_BY_CONTENT_TYPE: Record<DocumentUploadContentTyp
 };
 
 /**
- * POST /drivers/me/documents/presign → body. La app pide un ticket de subida para el binario de un
- * documento. `type` es un FleetDocumentType real (enum tipado) y `contentType` está en la allowlist.
+ * POST /drivers/me/documents/presign → body. La app pide N tickets de subida (uno POR CARA) para el
+ * binario de un documento (sub-lote 3A · múltiples imágenes). `type` es un FleetDocumentType tipado;
+ * `contentType` está en la allowlist; `sides` son las caras a subir (FRONT|BACK|SINGLE) — 1..N.
+ *
+ * Backward-compat: `sides` es OPCIONAL. Si la app NO lo manda, se asume `[SINGLE]` (una imagen, el
+ * comportamiento histórico de 1 ticket). DNI → `[FRONT, BACK]`; foto de vehículo → N `[SINGLE, SINGLE, ...]`.
  */
 export class DocumentUploadTicketDto {
   @ApiProperty({
@@ -154,16 +207,37 @@ export class DocumentUploadTicketDto {
   })
   @IsIn(DOCUMENT_UPLOAD_CONTENT_TYPES)
   contentType!: DocumentUploadContentType;
+
+  @ApiPropertyOptional({
+    enum: DocumentSide,
+    isArray: true,
+    description: 'Caras a subir (1..N). Default [SINGLE] si se omite (backward-compat 1 imagen).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_DOCUMENT_UPLOAD_SIDES)
+  @IsEnum(DocumentSide, { each: true })
+  sides?: DocumentSide[];
 }
 
-/**
- * Ticket de subida que el driver-bff devuelve a la app: la URL PUT prefirmada, la key S3 (que la app
- * reenvía luego a POST /drivers/me/documents), los headers obligatorios y el vencimiento del ticket.
- */
-export interface DocumentUploadTicketView {
+/** Un ticket de subida por CARA: la cara, la URL PUT prefirmada, la key S3 y los headers obligatorios. */
+export interface DocumentUploadSideTicket {
+  side: DocumentSide;
   uploadUrl: string;
   fileS3Key: string;
   requiredHeaders: Record<string, string>;
+}
+
+/**
+ * Ticket(s) de subida que el driver-bff devuelve a la app (sub-lote 3A · N imágenes):
+ *  - `tickets`: uno por cara (side + uploadUrl + fileS3Key + requiredHeaders).
+ *  - `expiresAt`: vencimiento común de los tickets (ISO-8601).
+ * La app sube cada binario con un PUT a su `uploadUrl`, luego llama POST /drivers/me/documents con las
+ * `images: [{ s3Key, side }]` (una por cara). Compat: para 1 imagen, `tickets` trae un solo elemento SINGLE.
+ */
+export interface DocumentUploadTicketView {
+  tickets: DocumentUploadSideTicket[];
   expiresAt: string;
 }
 
@@ -184,6 +258,12 @@ export type DriverDocumentSimpleStatus =
   | 'en_revision'
   | 'rechazado';
 
+/** Cara de una imagen del documento proyectada al conductor (sub-lote 3A · SIN la key S3 interna). */
+export interface DriverDocumentImageView {
+  side: DocumentSide;
+  order: number;
+}
+
 /** Vista detallada de un documento del conductor (GET /drivers/me/documents). */
 export interface DriverDocumentDetail {
   type: string;
@@ -197,6 +277,11 @@ export interface DriverDocumentDetail {
   ok: boolean;
   /** M5: motivo del rechazo (operador); null si no rechazado o sin motivo. El conductor lo VE. */
   rejectionReason: string | null;
+  /**
+   * Sub-lote 3A: las caras del documento (side + order), SIN la key S3 (interna). La app las usa para
+   * saber qué caras ya subió (p.ej. DNI: FRONT y/o BACK). El binario solo lo firma el admin-bff.
+   */
+  images: DriverDocumentImageView[];
 }
 
 /**
@@ -429,5 +514,12 @@ export interface DriverProfileView {
     submittedAllRequired: boolean;
     /** true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON). */
     allApproved: boolean;
+    /**
+     * true si el conductor enroló su biometría facial de referencia (diferenciador no negociable VEO).
+     * Eje SEPARADO de los documentos: la condición de "listo para revisión" (in_review) es
+     * (submittedAllRequired AND biometricEnrolled). El gate FUERTE server-side vive en la APROBACIÓN
+     * del operador (identity `approve`, 409 sin embedding); este flag es el reflejo para el cliente.
+     */
+    biometricEnrolled: boolean;
   };
 }

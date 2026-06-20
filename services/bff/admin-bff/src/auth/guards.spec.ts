@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { RolesGuard, StepUpMfaGuard, type AuthenticatedUser } from '@veo/auth';
-import { ForbiddenError } from '@veo/utils';
+import { ForbiddenError, SystemClock } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 
 function reflectorReturning(value: unknown): Reflector {
@@ -49,19 +49,19 @@ describe('StepUpMfaGuard', () => {
   });
 
   it('permite cuando no se exige step-up', () => {
-    const guard = new StepUpMfaGuard(reflectorReturning(false));
+    const guard = new StepUpMfaGuard(reflectorReturning(false), new SystemClock());
     expect(guard.canActivate(ctxWithUser(financeUser))).toBe(true);
   });
 
   it('rechaza si se exige step-up y la MFA no es fresca (entorno endurecido)', () => {
     vi.stubEnv('NODE_ENV', 'production');
-    const guard = new StepUpMfaGuard(reflectorReturning(true));
+    const guard = new StepUpMfaGuard(reflectorReturning(true), new SystemClock());
     expect(() => guard.canActivate(ctxWithUser(financeUser))).toThrow(ForbiddenError);
   });
 
   it('permite si se exige step-up y la MFA es reciente (entorno endurecido)', () => {
     vi.stubEnv('NODE_ENV', 'production');
-    const guard = new StepUpMfaGuard(reflectorReturning(true));
+    const guard = new StepUpMfaGuard(reflectorReturning(true), new SystemClock());
     const fresh: AuthenticatedUser = {
       ...financeUser,
       mfaVerifiedAt: Math.floor(Date.now() / 1000),
@@ -71,7 +71,7 @@ describe('StepUpMfaGuard', () => {
 
   it('en DEV (no endurecido) se RELAJA: permite aunque se exija step-up sin MFA fresca', () => {
     vi.stubEnv('NODE_ENV', 'test');
-    const guard = new StepUpMfaGuard(reflectorReturning(true));
+    const guard = new StepUpMfaGuard(reflectorReturning(true), new SystemClock());
     expect(guard.canActivate(ctxWithUser(financeUser))).toBe(true);
   });
 });

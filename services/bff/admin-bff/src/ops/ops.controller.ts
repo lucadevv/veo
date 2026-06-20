@@ -6,7 +6,13 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@ne
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { TripSummary, DriverApproval, TripDetail, DriverDetail } from '@veo/api-client';
+import type {
+  TripSummary,
+  DriverApproval,
+  TripDetail,
+  DriverDetail,
+  DniFaceMatchResult,
+} from '@veo/api-client';
 import {
   OpsService,
   type PendingDriver,
@@ -87,6 +93,20 @@ export class OpsController {
     @Param('id') id: string,
   ): Promise<{ id: string; backgroundCheckStatus: string }> {
     return this.ops.approveDriver(user, id);
+  }
+
+  @Post('drivers/:id/dni-face-match')
+  @HttpCode(200)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({
+    summary:
+      'Verificar rostro DNI↔selfie: baja la foto FRONT del DNI de S3 y la cotea con la biometría enrolada (BINDING · 3C)',
+  })
+  dniFaceMatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<DniFaceMatchResult> {
+    return this.ops.runDniFaceMatch(user, id);
   }
 
   @Post('drivers/:id/reject')

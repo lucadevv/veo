@@ -16,6 +16,7 @@ import {
   INTERNAL_IDENTITY_SECRET,
   generateDevKeyPairPem,
 } from '@veo/auth';
+import { CLOCK, SystemClock } from '@veo/utils';
 import { LOGGER, type Logger } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 
@@ -54,7 +55,12 @@ const internalSecretProvider: Provider = {
 
 @Global()
 @Module({
-  providers: [jwtServiceProvider, internalSecretProvider],
-  exports: [JWT_SERVICE, INTERNAL_IDENTITY_SECRET],
+  // CLOCK: el StepUpMfaGuard (APP_GUARD) depende del puerto Clock por DI; el BFF inyecta el adaptador real.
+  providers: [
+    jwtServiceProvider,
+    internalSecretProvider,
+    { provide: CLOCK, useValue: new SystemClock() },
+  ],
+  exports: [JWT_SERVICE, INTERNAL_IDENTITY_SECRET, CLOCK],
 })
 export class AuthCoreModule {}

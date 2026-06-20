@@ -1,5 +1,8 @@
 /** DTOs de flota/compliance. */
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsIn,
@@ -11,15 +14,29 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
+  DocumentSide,
   FleetDocumentType,
   FleetDocumentStatus,
   VehicleSegment,
   VehicleType,
   EnergySource,
 } from '@veo/shared-types';
+
+/** Tope de imágenes por documento (sub-lote 3A). Espeja MAX_DOCUMENT_IMAGES de fleet-service. */
+const MAX_DOCUMENT_IMAGES = 10;
+
+/** Una imagen del documento en el alta del operador (sub-lote 3A): clave S3 ya subida + cara tipada. */
+export class CreateDocumentImageDto {
+  @IsString()
+  s3Key!: string;
+
+  @IsEnum(DocumentSide)
+  side!: DocumentSide;
+}
 
 /** Estados de revisión del catálogo de modelos (espeja VehicleModelStatus de fleet-service). */
 const VEHICLE_MODEL_STATUSES = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const;
@@ -85,9 +102,19 @@ export class CreateDocumentDto {
   @IsISO8601()
   expiresAt?: string;
 
+  /** DEPRECADO (sub-lote 3A): clave singular. Usar `images`. */
   @IsOptional()
   @IsString()
   fileS3Key?: string;
+
+  /** Imágenes del documento (sub-lote 3A · 1..N caras). DNI → [FRONT, BACK]; foto de vehículo → N SINGLE. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_DOCUMENT_IMAGES)
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentImageDto)
+  images?: CreateDocumentImageDto[];
 }
 
 export class ReviewDocumentDto {
