@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 import { Check, ImageOff, RefreshCw, X } from 'lucide-react';
-import type { AdminDriverDocument, FleetDocumentTypeValue } from '@/lib/api/schemas';
+import type {
+  AdminDocumentImage,
+  AdminDriverDocument,
+  DocumentSideValue,
+  FleetDocumentTypeValue,
+} from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
 import { useDocumentReview } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
@@ -42,6 +47,17 @@ const DOCUMENT_TYPE_LABEL: Record<FleetDocumentTypeValue, string> = {
   TOW_OPERATOR: 'Operador de grúa',
   MECHANIC_CERT: 'Certificado de mecánico',
   VEHICLE_PHOTO: 'Foto del vehículo',
+  DNI: 'DNI (Documento de identidad)',
+};
+
+/**
+ * Label por CARA (sub-lote 3A · múltiples imágenes). Record TIPADO contra `DocumentSideValue`: sumar una
+ * cara al contrato sin mapearla acá es error de compilación — cero magic strings (`=== 'FRONT'` suelto).
+ */
+const DOCUMENT_SIDE_LABEL: Record<DocumentSideValue, string> = {
+  FRONT: 'Anverso',
+  BACK: 'Reverso',
+  SINGLE: 'Documento',
 };
 
 interface DocumentViewerProps {
@@ -124,7 +140,7 @@ function DocumentCard({
         <StatusPill status={doc.status} />
       </div>
 
-      <DocumentImage doc={doc} onReload={onReload} isReloading={isReloading} />
+      <DocumentGallery doc={doc} onReload={onReload} isReloading={isReloading} />
 
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between text-sm">
@@ -142,12 +158,13 @@ function DocumentCard({
 }
 
 /**
- * Imagen del documento con su propio ciclo de vida de error. Estado 4: la presigned URL puede venir
- * `null` (archivo no subido aún) o vencerse (TTL 120s) → `onError` del <img> levanta el fallback con
- * botón Recargar, que dispara `onReload` (re-pide el detalle → renueva la firma). `key` por url para
- * resetear el estado de error cuando llega una URL nueva tras recargar.
+ * Galería de las N imágenes del documento (sub-lote 3A · múltiples imágenes). DNI → anverso+reverso lado
+ * a lado; foto de vehículo → N tiles; documento de 1 cara → un solo tile (idéntico al render previo).
+ *
+ * Backward-compat: si el doc NO trae `images` (contrato viejo o sin archivo) pero sí el `url` legacy, se
+ * sintetiza una imagen SINGLE con ese url. Si no hay ninguna fuente, se muestra el fallback "sin archivo".
  */
-function DocumentImage({
+function DocumentGallery({
   doc,
   onReload,
   isReloading,
@@ -156,46 +173,99 @@ function DocumentImage({
   onReload: () => void;
   isReloading: boolean;
 }) {
-  const [broken, setBroken] = useState(false);
-  const unavailable = doc.url === null || broken;
+  // Normaliza la fuente: las N imágenes reales o, si no hay, el legacy `url` como una sola cara SINGLE.
+  const images: AdminDocumentImage[] =
+    doc.images.length > 0
+      ? doc.images
+      : doc.url !== null
+        ? [{ side: 'SINGLE', order: 0, url: doc.url }]
+        : [];
 
-  if (unavailable) {
+  // Sin ninguna imagen: el archivo aún no se subió (mismo fallback que antes, sin botón Recargar).
+  if (images.length === 0) {
     return (
       <div className="flex h-56 flex-col items-center justify-center gap-3 bg-surface-2 px-6 text-center">
         <div className="grid size-12 place-items-center rounded-lg bg-surface text-ink-muted">
           <ImageOff className="size-6" aria-hidden />
         </div>
-        <p className="text-sm text-ink-muted">
-          {doc.url === null
-            ? 'El archivo aún no fue subido.'
-            : 'No se pudo cargar la imagen (el enlace pudo vencer).'}
-        </p>
-        {doc.url !== null ? (
-          <Button variant="secondary" size="sm" loading={isReloading} onClick={onReload}>
-            <RefreshCw className="size-4" aria-hidden />
-            Recargar
-          </Button>
-        ) : null}
+        <p className="text-sm text-ink-muted">El archivo aún no fue subido.</p>
       </div>
     );
   }
 
+  // 1 imagen → ocupa el ancho completo (idéntico al render histórico). 2+ → grilla lado a lado.
+  const single = images.length === 1;
+
   return (
-    <a
-      href={doc.url ?? undefined}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block bg-surface-2"
-    >
-      <img
-        // `key` ligado a la url: al recargar, una firma nueva remonta el <img> y limpia el estado broken.
-        key={doc.url}
-        src={doc.url ?? undefined}
-        alt={DOCUMENT_TYPE_LABEL[doc.type]}
-        className="h-56 w-full object-contain"
-        onError={() => setBroken(true)}
-      />
-    </a>
+    <div className={single ? 'bg-surface-2' : 'grid grid-cols-2 gap-px bg-border'}>
+      {images.map((image) => (
+        <DocumentImageTile
+          // `key` por (side+order+url): firma nueva tras recargar remonta el tile y limpia su estado broken.
+          key={`${image.side}-${image.order}-${image.url ?? 'null'}`}
+          image={image}
+          docTypeLabel={DOCUMENT_TYPE_LABEL[doc.type]}
+          showSideLabel={!single}
+          onReload={onReload}
+          isReloading={isReloading}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Un tile de imagen (una cara) con su propio ciclo de vida de error. La presigned URL puede venir `null`
+ * (firma fallida, fail-soft) o vencerse (TTL 120s) → `onError` del <img> levanta el fallback con botón
+ * Recargar, que dispara `onReload` (re-pide el detalle → renueva TODAS las firmas de una).
+ */
+function DocumentImageTile({
+  image,
+  docTypeLabel,
+  showSideLabel,
+  onReload,
+  isReloading,
+}: {
+  image: AdminDocumentImage;
+  docTypeLabel: string;
+  showSideLabel: boolean;
+  onReload: () => void;
+  isReloading: boolean;
+}) {
+  const [broken, setBroken] = useState(false);
+  const unavailable = image.url === null || broken;
+  const alt = showSideLabel ? `${docTypeLabel} · ${DOCUMENT_SIDE_LABEL[image.side]}` : docTypeLabel;
+
+  return (
+    <div className="relative bg-surface-2">
+      {showSideLabel ? (
+        <span className="absolute left-2 top-2 z-10 rounded bg-surface/90 px-2 py-0.5 text-xs font-medium text-ink-muted">
+          {DOCUMENT_SIDE_LABEL[image.side]}
+        </span>
+      ) : null}
+
+      {unavailable ? (
+        <div className="flex h-56 flex-col items-center justify-center gap-3 px-6 text-center">
+          <div className="grid size-12 place-items-center rounded-lg bg-surface text-ink-muted">
+            <ImageOff className="size-6" aria-hidden />
+          </div>
+          <p className="text-sm text-ink-muted">No se pudo cargar la imagen (el enlace pudo vencer).</p>
+          <Button variant="secondary" size="sm" loading={isReloading} onClick={onReload}>
+            <RefreshCw className="size-4" aria-hidden />
+            Recargar
+          </Button>
+        </div>
+      ) : (
+        <a href={image.url ?? undefined} target="_blank" rel="noopener noreferrer" className="block">
+          <img
+            key={image.url}
+            src={image.url ?? undefined}
+            alt={alt}
+            className="h-56 w-full object-contain"
+            onError={() => setBroken(true)}
+          />
+        </a>
+      )}
+    </div>
   );
 }
 

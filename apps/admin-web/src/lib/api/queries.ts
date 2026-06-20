@@ -14,6 +14,7 @@ import {
   type ReplaceRadiusConfigRequest,
   driverApproval,
   driverDetail,
+  dniFaceMatchResult,
   expiringDocumentView,
   fleetDocumentView,
   inspectionView,
@@ -162,6 +163,25 @@ export function useDriverDetail(id: string) {
     queryFn: ({ signal }) =>
       apiClient().get(`/ops/drivers/${id}`, { schema: driverDetail, signal }),
     enabled: id.length > 0,
+  });
+}
+
+/**
+ * Sub-lote 3C · dispara el FACE-MATCH DNI↔selfie (POST /ops/drivers/:id/dni-face-match). El admin-bff baja
+ * la foto FRONT del DNI de S3, la cotea con la biometría enrolada del conductor (en identity, con el
+ * embedding GUARDADO — server-truth) y GUARDA el resultado. El éxito invalida el detalle del conductor para
+ * que la ficha refleje el binding recién guardado (Coincide ✓ / No coincide ✗ + score). El backend devuelve
+ * 409 (ConflictError) si no hay biometría enrolada o si falta la foto FRONT del DNI — el ApiError viaja con
+ * `status`/`message` para que el llamador muestre el mensaje del server.
+ */
+export function useDniFaceMatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/dni-face-match`, { schema: dniFaceMatchResult }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
+    },
   });
 }
 

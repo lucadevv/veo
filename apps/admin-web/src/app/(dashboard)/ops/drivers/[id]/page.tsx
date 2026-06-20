@@ -2,9 +2,15 @@
 
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
-import { Car, Check, Lock, Trash2 } from 'lucide-react';
+import { Car, Check, Lock, ScanFace, Trash2, X } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
-import { useDriverDetail, useDriverDecision, useDeleteDriver } from '@/lib/api/queries';
+import type { DriverDetail } from '@veo/api-client';
+import {
+  useDriverDetail,
+  useDriverDecision,
+  useDeleteDriver,
+  useDniFaceMatch,
+} from '@/lib/api/queries';
 import { dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -118,12 +124,18 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
               <CardHeader>
                 <CardTitle>Verificación biométrica</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <Detail label="Rostro enrolado" value={dateTime(driver.biometric.faceEnrolledAt)} />
-                <Detail
-                  label="Última verificación"
-                  value={dateTime(driver.biometric.lastVerifiedAt)}
-                />
+              <CardContent className="space-y-4 text-sm">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <Detail
+                    label="Rostro enrolado"
+                    value={dateTime(driver.biometric.faceEnrolledAt)}
+                  />
+                  <Detail
+                    label="Última verificación"
+                    value={dateTime(driver.biometric.lastVerifiedAt)}
+                  />
+                </div>
+                <DniFaceMatchPanel driver={driver} />
               </CardContent>
             </Card>
           </div>
@@ -186,6 +198,73 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
     <div>
       <dt className="text-xs text-ink-muted">{label}</dt>
       <dd className={mono ? 'font-mono text-ink tabular' : 'text-ink'}>{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * Sub-lote 3C · BINDING DNI↔selfie. Muestra el resultado GUARDADO del face-match (Coincide ✓ verde / No
+ * coincide ✗ rojo + score%) junto a la biometría, y un botón "Verificar rostro vs DNI" que dispara la
+ * acción del admin-bff (baja la foto FRONT del DNI de S3 → cotea con la biometría enrolada → guarda). El
+ * operador VE el binding antes de aprobar (no aprueba a ciegas). El gate REAL es server-side; esto refleja.
+ */
+function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
+  const { toast } = useToast();
+  const match = useDniFaceMatch();
+  const { dniFaceMatchStatus, dniFaceMatchScore, dniFaceMatchedAt } = driver.biometric;
+
+  const runMatch = async () => {
+    try {
+      const res = await match.mutateAsync({ id: driver.id });
+      toast({
+        tone: res.matched ? 'success' : 'danger',
+        title: res.matched ? 'Rostro coincide con el DNI' : 'El rostro NO coincide con el DNI',
+        description: res.reason ?? undefined,
+      });
+    } catch (error) {
+      toast({
+        tone: 'danger',
+        title: 'No se pudo verificar el rostro',
+        description:
+          error instanceof ApiError
+            ? error.message
+            : 'Revisá que el conductor tenga biometría enrolada y la foto FRONT del DNI cargada.',
+      });
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <dt className="text-xs text-ink-muted">Rostro vs DNI</dt>
+        <Button size="sm" variant="secondary" onClick={() => void runMatch()} disabled={match.isPending}>
+          <ScanFace className="size-4" aria-hidden />
+          {dniFaceMatchStatus === 'NOT_RUN' ? 'Verificar rostro vs DNI' : 'Volver a verificar'}
+        </Button>
+      </div>
+      {dniFaceMatchStatus === 'NOT_RUN' ? (
+        <p className="text-xs text-ink-muted">
+          Aún no se verificó el rostro del DNI contra la biometría enrolada.
+        </p>
+      ) : dniFaceMatchStatus === 'MATCHED' ? (
+        <div className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-success">
+          <Check className="size-4" aria-hidden />
+          <span className="font-medium">Coincide</span>
+          {dniFaceMatchScore !== null ? (
+            <span className="tabular text-xs text-success/80">{Math.round(dniFaceMatchScore)}%</span>
+          ) : null}
+          <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-md bg-danger/10 px-3 py-2 text-danger">
+          <X className="size-4" aria-hidden />
+          <span className="font-medium">No coincide</span>
+          {dniFaceMatchScore !== null ? (
+            <span className="tabular text-xs text-danger/80">{Math.round(dniFaceMatchScore)}%</span>
+          ) : null}
+          <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
+        </div>
+      )}
     </div>
   );
 }
