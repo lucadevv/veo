@@ -28,6 +28,7 @@
     "veo:up": "bash dev-stack/veo.sh up",
     "veo:down": "bash dev-stack/veo.sh down",
     "veo:status": "bash dev-stack/veo.sh status",
+    "veo:monitor": "bash dev-stack/veo.sh monitor",
     "veo:logs": "bash dev-stack/veo.sh logs",
     "veo:restart": "bash dev-stack/veo.sh restart",
     "veo:migrate": "bash dev-stack/veo.sh migrate",

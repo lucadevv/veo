@@ -24,6 +24,8 @@
 #                      pkill por patrón). Con --infra además baja los contenedores.
 #   status             El TABLERO: una fila por servicio (puerto, health, pid,
 #                      último error de log, dist ¿fresco?) + infra docker.
+#   monitor            El ESCÁNER EN VIVO: sigue los logs de los 18 servicios en
+#                      tiempo real y muestra SOLO los errores en el momento que pasan.
 #   restart <svc>      down de ESE servicio (pidfile/puerto) + build + boot.
 #   logs <svc> [-f]    tail (o tail -f con -f) de dev-stack/logs/<svc>.log.
 #   migrate            Solo el paso de migraciones (prisma migrate deploy) — seguro/idempotente.
@@ -522,20 +524,88 @@ dist_fresh() {
   if [[ -n "$smax" && "$smax" -gt "$dmax" ]]; then printf 'stale'; else printf 'fresh'; fi
 }
 
-# Última línea con "level":"error" del log del servicio, resumida.
+# ÚLTIMO ERROR — HONESTO ("el tablero del auto"): un error solo es alarma si es
+# MÁS RECIENTE que la última request exitosa (2xx) del servicio. Si después del
+# error hubo un 2xx, el servicio se RECUPERÓ → no gritamos falsa alarma.
+#
+# Contrato: imprime UN token con prefijo de estado que el caller colorea:
+#   "ERR\t<resumen>"        → error ACTUAL  (caller lo pinta en ROJO)
+#   "OK\trecuperado (...)"  → error viejo ya recuperado (caller lo pinta DIM)
+#   ""  (vacío)             → nunca hubo error  (caller muestra "—")
+#
+# Decisión recuperado-vs-actual: comparamos el "time" (ISO-8601, offset Z
+# uniforme → orden lexicográfico == orden cronológico, sin date -d de GNU que
+# en darwin/BSD no existe) del último error contra el de la última 2xx.
 last_error() {
-  local svc="$1" logf="$LOGS_DIR/$svc.log"
+  local svc="$1"
+  local logf="$LOGS_DIR/$svc.log"   # decl. separada: bajo `set -u`, $svc debe
+                                    # estar ya ligado antes de usarse en el RHS.
   [[ -f "$logf" ]] || { printf ''; return; }
-  local line
-  line="$(rg '"level":"error"' "$logf" 2>/dev/null | tail -1)"
-  [[ -z "$line" ]] && { printf ''; return; }
-  # Intentamos extraer 'code'/'msg' para resumir; si no, recortamos crudo.
-  local code msg
-  code="$(printf '%s' "$line" | rg -No '"code":"[^"]*"' | head -1 | sed 's/"code"://; s/"//g')"
-  msg="$(printf '%s' "$line" | rg -No '"(msg|message)":"[^"]*"' | head -1 | sed 's/"\(msg\|message\)"://; s/"//g')"
-  local out="${code:+[$code] }${msg}"
-  [[ -z "$out" ]] && out="$(printf '%s' "$line" | cut -c1-60)"
-  printf '%s' "$(printf '%s' "$out" | cut -c1-50)"
+
+  # Última línea con error: "level":"error" O un status 5xx (cualquiera cuenta).
+  local errline
+  errline="$(rg '"level":"error"|"status":5[0-9][0-9]' "$logf" 2>/dev/null | tail -1)"
+  [[ -z "$errline" ]] && { printf ''; return; }   # sin errores nunca → limpio.
+
+  # Última línea exitosa: status 2xx (incluye /health 200).
+  local okline
+  okline="$(rg '"status":2[0-9][0-9]' "$logf" 2>/dev/null | tail -1)"
+
+  # Parseo + decisión en python3 (seguro en darwin; parsea JSON robusto y mide
+  # "hace Xm" sin depender de date -d). Le pasamos ambas líneas por env.
+  ERRLINE="$errline" OKLINE="$okline" python3 - <<'PY'
+import os, json, re, sys
+from datetime import datetime, timezone
+
+def field_time(line):
+    if not line:
+        return None
+    try:
+        return json.loads(line).get("time")
+    except Exception:
+        m = re.search(r'"time":"([^"]+)"', line)
+        return m.group(1) if m else None
+
+def summarize(line):
+    try:
+        o = json.loads(line)
+        code = o.get("code")
+        msg = o.get("msg") or o.get("message") or ""
+    except Exception:
+        code = (re.search(r'"code":"([^"]*)"', line) or [None, None])[1] if '"code"' in line else None
+        mm = re.search(r'"(?:msg|message)":"([^"]*)"', line)
+        msg = mm.group(1) if mm else line[:60]
+    # Saneamos: los stacks de Prisma traen \n reales → una sola línea, sin tabs.
+    msg = re.sub(r'\s+', ' ', str(msg)).strip()
+    out = (f"[{code}] " if code else "") + msg
+    return out[:50] if out else line[:50]
+
+def parse(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+err_raw = os.environ.get("ERRLINE", "")
+ok_raw  = os.environ.get("OKLINE", "")
+err_ts = field_time(err_raw)
+ok_ts  = field_time(ok_raw)
+
+# Comparación: si la última 2xx es >= último error → recuperado.
+recovered = bool(err_ts and ok_ts and ok_ts >= err_ts)
+
+if recovered:
+    edt = parse(err_ts)
+    ago = ""
+    if edt:
+        mins = (datetime.now(timezone.utc) - edt).total_seconds() / 60.0
+        ago = f" (últ err hace {int(mins)}m)" if mins >= 1 else " (últ err hace <1m)"
+    sys.stdout.write(f"OK\trecuperado{ago}")
+else:
+    sys.stdout.write("ERR\t" + summarize(err_raw))
+PY
 }
 
 cmd_status() {
@@ -598,8 +668,17 @@ cmd_status() {
       dicon=" "; dcolor="$C_DIM"; dlabel="—"  # python/go no tienen dist node.
     fi
 
+    # ÚLTIMO ERROR honesto: last_error decide recuperado-vs-actual por timestamp.
+    # Devuelve "ERR\t<msg>" (error ACTUAL → rojo), "OK\trecuperado…" (viejo → dim)
+    # o vacío (nunca hubo error → "—").
+    local dstate=""
     derr="$(last_error "$svc")"
-    [[ -n "$derr" ]] && derr="${C_RED}${derr}${C_RESET}" || derr="${C_DIM}—${C_RESET}"
+    dstate="${derr%%$'\t'*}"; derr="${derr#*$'\t'}"
+    case "$dstate" in
+      ERR) derr="${C_RED}${derr}${C_RESET}" ;;
+      OK)  derr="${C_DIM}${derr}${C_RESET}" ;;
+      *)   derr="${C_DIM}—${C_RESET}" ;;
+    esac
 
     # Layout: icono-health · svc · port · health-label · pid · icono-dist · dist-label · error.
     printf '  %b %-14s %-5s %b%-22s%b %-8s %b %b%-9s%b %b\n' \
@@ -624,6 +703,217 @@ cmd_logs() {
     exit 1
   fi
   if [[ "$follow" == "-f" ]]; then tail -f "$logf"; else tail -n 80 "$logf"; fi
+}
+
+# ── SUBCOMANDO: monitor (EL ESCÁNER EN VIVO) ──────────────────────────────────
+# El "escáner en vivo" del tablero: sigue los logs de TODOS los servicios desde
+# AHORA (no historia) y muestra SOLO los errores en el momento que pasan, en UNA
+# línea legible y coloreada (no el JSON crudo). Hermano de `status`: mismo parseo
+# con python3 (robusto en darwin, sin date -d de GNU), mismos colores/iconos.
+#
+# Qué cuenta como error: "level":"error"/"fatal" o status 4xx/5xx.
+# Ruido benigno que EXCLUIMOS: el 401 auth-gated del admin-bff (esperado) y las
+# requests a /health (chequeos de salud, no errores reales).
+#
+# Robustez: si una línea no parsea como JSON, NO crasheamos — la degradamos a su
+# forma cruda truncada. El `tail -n0 -F` arranca en el fin de cada log (solo
+# nuevas líneas) y muere con el script (trap → kill del tail → exit limpio).
+cmd_monitor() {
+  # Nº de servicios con log presente (los que realmente vamos a vigilar).
+  local nlogs; nlogs="$(ls "$LOGS_DIR"/*.log 2>/dev/null | grep -v '/_build.log$' | wc -l | tr -d ' ')"
+
+  printf '\n%s== VEO · ESCÁNER EN VIVO ==%s\n' "$C_BOLD$C_BLUE" "$C_RESET"
+  printf '  %svigilando %s servicios · solo errores en vivo · Ctrl-C para salir%s\n\n' \
+    "$C_DIM" "${nlogs:-?}" "$C_RESET"
+
+  if [[ "${nlogs:-0}" == "0" ]]; then
+    red "  no hay logs en $LOGS_DIR — ¿levantaste el stack? (veo.sh up)"
+    exit 1
+  fi
+
+  # Arrancamos el seguidor: tail -n0 -F (BSD/darwin: sigue desde el final de cada
+  # archivo, re-abre en rotación) PIPEADO a un filtro python3 line-buffered. El
+  # tail corre en background con su PID conocido para matarlo limpio en el trap →
+  # no deja procesos colgados. Los colores van por env (modo no-tty → vacíos → sin
+  # ANSI). Usamos un FIFO efímero para que el trap pueda matar el tail por PID
+  # exacto (no por patrón), evitando el problema clásico del pipe donde el PID del
+  # tail se pierde dentro del subshell del pipeline.
+  local fifo filt
+  fifo="$PIDS_DIR/.monitor.fifo"
+  filt="$PIDS_DIR/.monitor-filter.py"
+  rm -f "$fifo" 2>/dev/null
+  mkfifo "$fifo" 2>/dev/null || { red "  no pude crear el FIFO $fifo"; exit 1; }
+
+  # Volcamos el filtro python a un archivo (NO podemos usar a la vez heredoc para
+  # el SCRIPT y redirección del FIFO para los DATOS en el mismo `python3 -`: el
+  # heredoc se llevaría el stdin). Con el filtro en archivo, stdin queda libre
+  # para el FIFO de datos.
+  cat > "$filt" <<'PY'
+import os, sys, json, re, signal
+from datetime import datetime
+
+# Salida limpia ante Ctrl-C / cierre del FIFO: nunca un traceback de python.
+signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except Exception:
+    pass
+
+R   = os.environ.get("C_RESET", "")
+RED = os.environ.get("C_RED", "")
+YEL = os.environ.get("C_YEL", "")
+DIM = os.environ.get("C_DIM", "")
+
+def short_time(ts):
+    # ISO-8601 → HH:MM:SS local. Sin date -d de GNU: parseamos con datetime.
+    if not ts:
+        return "--:--:--"
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%H:%M:%S")
+    except Exception:
+        # Fallback: si trae "T", agarramos los 8 chars de hora.
+        m = re.search(r"T(\d{2}:\d{2}:\d{2})", str(ts))
+        return m.group(1) if m else "--:--:--"
+
+def collapse(s, n=90):
+    s = re.sub(r"\s+", " ", str(s)).strip()
+    return (s[: n - 1] + "…") if len(s) > n else s
+
+for raw in sys.stdin:
+    line = raw.rstrip("\n")
+    # tail -F intercala separadores "==> file <==" al seguir múltiples archivos:
+    # los ignoramos en silencio.
+    if not line.strip() or line.startswith("==>"):
+        continue
+
+    try:
+        o = json.loads(line)
+        # json.loads acepta strings/números/listas sueltos; SOLO un objeto JSON
+        # (dict) tiene los campos pino. Si no es dict → tratamos como no-parseado
+        # (cae a la degradación cruda; nunca .get() sobre un str → AttributeError).
+        parsed = isinstance(o, dict)
+    except Exception:
+        parsed = False
+    if not parsed:
+        o = {}
+
+    if parsed:
+        level = str(o.get("level", "")).lower()
+        status = o.get("status")
+        try:
+            status_i = int(status) if status is not None else None
+        except Exception:
+            status_i = None
+        service = str(o.get("service", "?"))
+        route = o.get("route") or o.get("url") or ""
+
+        is_err_level = level in ("error", "fatal")
+        is_err_status = status_i is not None and 400 <= status_i <= 599
+
+        # No es error → no nos interesa (el escáner muestra SOLO errores).
+        if not (is_err_level or is_err_status):
+            continue
+
+        # Ruido benigno EXCLUIDO:
+        #   1) el 401 auth-gated del admin-bff (esperado, no es falla).
+        #   2) cualquier request a /health (chequeo de salud).
+        if status_i == 401 and service == "admin-bff":
+            continue
+        if str(route).startswith("/health"):
+            continue
+
+        # ── Formato legible ──
+        t = short_time(o.get("time"))
+        svc = service[:-8] if service.endswith("-service") else service  # saca "-service".
+        trace = str(o.get("traceId", ""))[:8]
+
+        # Color/etiqueta: 5xx o error/fatal → rojo; 4xx o warn → amarillo.
+        if is_err_status and 500 <= status_i <= 599:
+            col, lvl = RED, "ERROR"
+        elif is_err_level:
+            col, lvl = (RED, "ERROR") if level in ("error", "fatal") else (YEL, "WARN")
+        else:  # 4xx
+            col, lvl = YEL, "WARN"
+
+        parts = [f"{DIM}{t}{R}", f"{col}{svc:<12}{R}", f"{col}{lvl:<5}{R}"]
+        if status_i is not None:
+            parts.append(f"status={status_i}")
+        method = o.get("method")
+        if method and route:
+            parts.append(f"{method} {route}")
+        if trace:
+            parts.append(f"{DIM}trace={trace}{R}")
+
+        # Resumen del mensaje: msg, o err.message si es objeto, o code.
+        err = o.get("err")
+        msg = o.get("msg") or o.get("message") or ""
+        if isinstance(err, dict):
+            emsg = err.get("message") or ""
+            if emsg:
+                msg = f"{msg} {emsg}".strip() if msg else emsg
+        elif isinstance(err, str):
+            msg = f"{msg} {err}".strip() if msg else err
+        code = o.get("code")
+        summary = collapse((f"[{code}] " if code else "") + str(msg)) if (msg or code) else ""
+        if summary:
+            parts.append(summary)
+
+        sys.stdout.write("  " + "  ".join(parts) + "\n")
+        sys.stdout.flush()
+    else:
+        # Degradación segura: una línea que NO parseó. Solo nos interesa la que
+        # ITENTÓ ser pino JSON (arranca con "{") pero quedó truncada/corrupta — esa
+        # SÍ la mostramos cruda en vez de crashear. Exigimos que ARRANQUE con "{" Y
+        # traiga los campos tempranos de pino ("level"/"time") → así solo cae acá
+        # una línea pino REAL que quedó truncada/corrupta, no fragmentos ("{" suelto
+        # de un JSON pretty-printed, continuaciones de stack, Nest multilínea ANSI).
+        # Default seguro: nunca un stacktrace de python, nunca un firehose.
+        ls = line.lstrip()
+        if ls.startswith("{") and ('"level"' in ls or '"time"' in ls):
+            sys.stdout.write(f"  {DIM}(raw){R} {collapse(line, 110)}\n")
+            sys.stdout.flush()
+PY
+
+  # Lista de logs a seguir: TODOS los *.log MENOS _build.log (transcript de turbo,
+  # no pino JSON → solo generaría ruido crudo). Array para no romper con espacios.
+  local logfiles=() f
+  for f in "$LOGS_DIR"/*.log; do
+    [[ -e "$f" ]] || continue
+    [[ "$(basename "$f")" == "_build.log" ]] && continue
+    logfiles+=("$f")
+  done
+
+  # Seguidor: tail -n0 -F (BSD/darwin sigue desde el final y re-abre en rotación)
+  # vuelca al FIFO; el filtro python lee del FIFO. Ambos en background con PID
+  # conocido para un cleanup por PID exacto (sin pkill por patrón).
+  tail -n0 -F "${logfiles[@]}" 2>/dev/null > "$fifo" &
+  local tail_pid=$!
+  C_RESET="$C_RESET" C_RED="$C_RED" C_YEL="$C_YEL" C_DIM="$C_DIM" C_GREEN="$C_GREEN" \
+    python3 -u "$filt" < "$fifo" &
+  local py_pid=$!
+
+  # Cleanup IDEMPOTENTE: matamos tail + python por PID exacto, borramos FIFO y el
+  # filtro temporal. Lo enganchamos a INT/TERM (Ctrl-C / kill) y TAMBIÉN a EXIT,
+  # así pase lo que pase (señal, EOF, error) NO quedan procesos colgados ni temp
+  # files. El guard `_cleaned` evita el doble mensaje cuando EXIT corre tras INT.
+  # NB: bajo `set -u`, el trap puede dispararse en un punto donde `_cleaned` aún no
+  # esté ligado → usamos `${_cleaned:-0}` para nunca explotar con "unbound variable".
+  _cleaned=0
+  cleanup() {
+    [[ "${_cleaned:-0}" == "1" ]] && return 0
+    _cleaned=1
+    kill "${tail_pid:-0}" "${py_pid:-0}" 2>/dev/null
+    rm -f "$fifo" "$filt" 2>/dev/null
+    printf '\n%s  escáner detenido.%s\n' "$C_DIM" "$C_RESET"
+  }
+  trap 'cleanup; exit 0' INT TERM
+  trap cleanup EXIT
+
+  # Esperamos al filtro. Si el tail muere (raro), el filtro recibe EOF del FIFO y
+  # termina → wait retorna → el trap EXIT limpia igual.
+  wait "$py_pid"
 }
 
 # ── SUBCOMANDO: restart <svc> ─────────────────────────────────────────────────
@@ -685,6 +975,7 @@ case "${1:-}" in
   up)      cmd_up ;;
   down)    shift; cmd_down "${1:-}" ;;
   status)  cmd_status ;;
+  monitor) cmd_monitor ;;
   restart) shift; cmd_restart "${1:-}" ;;
   logs)    shift; cmd_logs "${1:-}" "${2:-}" ;;
   migrate) cmd_migrate ;;
@@ -695,6 +986,7 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}up${C_RESET}                 Ignición completa (infra → secrets → build → migrate → boot → tablero)
   ${C_BOLD}down${C_RESET} [--infra]     Apagado limpio en capas (pidfiles → puertos → patrón). --infra baja docker
   ${C_BOLD}status${C_RESET}             El tablero (health/pid/dist/último error por servicio + infra)
+  ${C_BOLD}monitor${C_RESET}            El escáner EN VIVO: sigue todos los logs y muestra solo errores al pasar
   ${C_BOLD}restart${C_RESET} <svc>      down + build + boot de ESE servicio
   ${C_BOLD}logs${C_RESET} <svc> [-f]    tail (o tail -f) de dev-stack/logs/<svc>.log
   ${C_BOLD}migrate${C_RESET}            prisma migrate deploy de todos los servicios (idempotente)
