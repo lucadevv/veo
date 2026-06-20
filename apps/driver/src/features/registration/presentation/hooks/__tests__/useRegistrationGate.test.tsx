@@ -46,6 +46,7 @@ const APPROVED_PROFILE: DriverProfile = {
     rejected: [],
     submittedAllRequired: true,
     allApproved: true,
+    biometricEnrolled: true,
   },
 };
 
@@ -74,7 +75,15 @@ function withProviders(node: ReactElement, client: QueryClient, container: AppCo
 async function renderGate(getMe: jest.Mock): Promise<{ last: () => RegistrationGate }> {
   const container = makeContainer(getMe);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  let last: RegistrationGate = { resolving: true, needsRetry: false, retry: () => undefined };
+  let last: RegistrationGate = {
+    resolving: true,
+    needsRetry: false,
+    retry: () => undefined,
+    profile: undefined,
+    isRefreshing: false,
+    refreshError: false,
+    refresh: () => undefined,
+  };
   await act(async () => {
     TestRenderer.create(
       withProviders(<GateProbe onResult={(g) => (last = g)} />, client, container),

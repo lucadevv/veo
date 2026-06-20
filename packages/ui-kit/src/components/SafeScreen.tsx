@@ -1,5 +1,12 @@
-import { type ReactNode } from 'react';
-import { ScrollView, StatusBar, StyleSheet, View, type ViewStyle } from 'react-native';
+import { type ReactElement, type ReactNode } from 'react';
+import {
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  View,
+  type RefreshControlProps,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -23,6 +30,12 @@ export interface SafeScreenProps {
   backgroundColor?: string;
   contentContainerStyle?: ViewStyle;
   style?: ViewStyle;
+  /**
+   * `RefreshControl` para el pull-to-refresh nativo. Solo aplica cuando `scroll` está activo (se pasa
+   * tal cual al `ScrollView` interno). Tiparlo al `RefreshControl` de RN evita exponer toda la API del
+   * `ScrollView` por una sola necesidad concreta.
+   */
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
 /**
@@ -39,6 +52,7 @@ export function SafeScreen({
   contentContainerStyle,
   style,
   topInset = true,
+  refreshControl,
 }: SafeScreenProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -53,6 +67,7 @@ export function SafeScreen({
       ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
       style={styles.flex}
     >
       {children}

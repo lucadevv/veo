@@ -180,20 +180,30 @@ export const RootNavigator = (): React.JSX.Element => {
   }
 
   // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
+  // En `in_review` y `rejected` el conductor YA está autenticado (userId/token válidos): montamos el
+  // `PushManager` igual que en la rama aprobada para que el push de aprobación/rechazo invalide el gate
+  // al instante y la pantalla conmute SIN esperar el sondeo de 60s. No se monta en `resolving`/
+  // `needsRetry`/`unauthenticated` (sesión aún no resuelta / no hay sesión).
   if (registrationStatus === 'in_review') {
     return (
-      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
-        <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
-      </Stack.Navigator>
+      <>
+        <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
+          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+        </Stack.Navigator>
+        <PushManager />
+      </>
     );
   }
 
   // Alta RECHAZADA: pantalla propia con el motivo + corregir-y-reenviar (NO cae al wizard mudo).
   if (registrationStatus === 'rejected') {
     return (
-      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
-        <Stack.Screen name="Rejected" component={RejectedScreen} />
-      </Stack.Navigator>
+      <>
+        <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
+          <Stack.Screen name="Rejected" component={RejectedScreen} />
+        </Stack.Navigator>
+        <PushManager />
+      </>
     );
   }
 

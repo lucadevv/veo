@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ApiError } from '@veo/api-client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, type DriverProfileView } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
-import { isAwaitingReview, mapProfileToRegistrationStatus } from '../../domain';
+import { isAwaitingReview, mapProfileToRegistrationStatus, resumeStepForProfile } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 
 /** `true` si el error es un 404 del backend: el conductor aún no existe (alta no iniciada). */
@@ -38,6 +38,27 @@ export interface RegistrationGate {
   needsRetry: boolean;
   /** Reintenta resolver el perfil del conductor (recupera del estado `needsRetry`). */
   retry(): void;
+  /**
+   * Perfil agregado del conductor (`GET /drivers/me`) tal como vive en el cache del gate, o `undefined`
+   * si todavía no resolvió la primera vez (cache miss). La pantalla "En revisión" deriva su checklist
+   * REAL de acá (documentos/biometría enviados) — la misma fuente de verdad que conmuta la navegación.
+   */
+  profile: DriverProfileView | undefined;
+  /**
+   * `true` mientras una re-consulta del gate está en vuelo (sondeo, pull-to-refresh o "Verificar mi
+   * estado"), INCLUSO después de la primera resolución (a diferencia de `resolving`, que solo cubre la
+   * carga inicial). Alimenta el spinner del pull-to-refresh y el estado de carga del botón.
+   */
+  isRefreshing: boolean;
+  /**
+   * `true` cuando una re-consulta del gate falló PERO ya habíamos resuelto antes (mantenemos el último
+   * perfil bueno en pantalla). A diferencia de `needsRetry` —que solo cubre el primer fallo y bloquea
+   * con la pantalla de reintento—, esto solo señala un banner no bloqueante: el conductor sigue viendo
+   * "En revisión" mientras reintenta.
+   */
+  refreshError: boolean;
+  /** Fuerza una re-consulta del gate contra el backend (invalida la query → refetch). */
+  refresh(): void;
 }
 
 /**
@@ -53,9 +74,11 @@ export interface RegistrationGate {
  */
 export function useRegistrationGate(): RegistrationGate {
   const { profile } = useRepositories();
+  const queryClient = useQueryClient();
   const sessionStatus = useSessionStore((s) => s.status);
   const setUser = useSessionStore((s) => s.setUser);
   const applyBackendStatus = useRegistrationStore((s) => s.applyBackendStatus);
+  const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   const forceWizard = useRegistrationStore((s) => s.forceWizard);
   const resolvedFromBackend = useRegistrationStore((s) => s.statusResolvedFromBackend);
 
@@ -83,6 +106,14 @@ export function useRegistrationGate(): RegistrationGate {
     if (data) {
       // Sincroniza el cache del servidor → store de dominio mediante una acción (no setState suelto).
       applyBackendStatus(mapProfileToRegistrationStatus(data));
+      // Defense-in-depth de routing: un conductor con TODOS los documentos pero SIN biometría enrolada
+      // vuelve al wizard como `in_progress` (ver `mapProfileToRegistrationStatus`). Debe REANUDAR en el
+      // paso 4 (IdentityVerification / KYC) para completar la biometría, no en el paso 1. Solo forzamos
+      // el paso cuando aplica (helper devuelve null en cualquier otro caso ⇒ se conserva el avance local).
+      const resumeStep = resumeStepForProfile(data.compliance);
+      if (resumeStep !== null) {
+        setCurrentStep(resumeStep);
+      }
       // Compone el `user` de sesión del conductor existente (el login ya no lo fetchea).
       setUser(profileToSessionUser(data));
     } else if (isError && isNotFound(error)) {
@@ -91,7 +122,7 @@ export function useRegistrationGate(): RegistrationGate {
       // nuevo a las tabs sin aprobación). `forceWizard` descarta cualquier estado resuelto heredado.
       forceWizard();
     }
-  }, [data, isError, error, applyBackendStatus, forceWizard, setUser]);
+  }, [data, isError, error, applyBackendStatus, setCurrentStep, forceWizard, setUser]);
 
   // Solo "resolviendo" si el conductor está autenticado, aún no hay confirmación del backend y la
   // query sigue en vuelo (sin error).
@@ -103,5 +134,22 @@ export function useRegistrationGate(): RegistrationGate {
   const needsRetry =
     sessionStatus === 'authenticated' && !resolvedFromBackend && isError && !isNotFound(error);
 
-  return { resolving, needsRetry, retry: () => void query.refetch() };
+  // Re-consulta en vuelo (sondeo / pull-to-refresh / botón) tras la primera resolución. `isFetching`
+  // cubre cualquier fetch activo del gate; el spinner del pull-to-refresh y el loading del botón lo leen.
+  const isRefreshing = query.isFetching;
+
+  // Fallo de una RE-consulta cuando ya teníamos un perfil resuelto: banner no bloqueante (no pantalla de
+  // reintento). El 404 (conductor inexistente) no aplica acá: ese fuerza el wizard, no un refresh fallido.
+  const refreshError = resolvedFromBackend && isError && !isNotFound(error);
+
+  return {
+    resolving,
+    needsRetry,
+    retry: () => void query.refetch(),
+    profile: data,
+    isRefreshing,
+    refreshError,
+    // Invalida la query del gate → dispara un refetch contra `GET /drivers/me` (server-authoritative).
+    refresh: () => void queryClient.invalidateQueries({ queryKey: REGISTRATION_GATE_QUERY_KEY }),
+  };
 }
