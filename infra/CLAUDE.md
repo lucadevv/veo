@@ -1,7 +1,7 @@
 # CLAUDE.md · VEO Infrastructure
 
-> 🟢 **Estado global y handoff:** lee `../veo-platform/docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
-> `../veo-platform/docs/FOUNDATION.md` (contrato + decisiones). **Regla maestra:** soberanía tecnológica (todo propio, sin SaaS de terceros).
+> 🟢 **Estado global y handoff:** lee `../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
+> `../../docs/FOUNDATION.md` (contrato + decisiones). **Regla maestra:** soberanía tecnológica (todo propio, sin SaaS de terceros).
 > Infra (Ola 5) aún no implementada a detalle. Decisión clave: **RDS por servicio crítico** (identity/payment/panic/audit). CI GitHub Actions por repo.
 
 ## Repo
@@ -77,4 +77,4 @@ Cualquier PR que toque estos archivos debe etiquetarse `security-review` y bloqu
 ## Documentos
 
 - Blueprint: `../VEO_Blueprint.pdf` (Cap. 10 infra)
-- ADRs: `../veo-platform/docs/adr/` (compartidos)
+- ADRs: `../../docs/adr/` (compartidos)

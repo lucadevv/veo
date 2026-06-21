@@ -25,8 +25,8 @@ Lee `/Users/jaxximize/Desktop/ecritrorio/00_Proyectos/VEO/VEO_Blueprint.pdf` o `
 
 > 🟢 **ANTES DE CODEAR, LEE EN ORDEN:**
 >
-> 1. **`docs/STATUS.md`** — qué se hizo, dónde quedamos y qué falta (handoff actualizado; punto de entrada para cualquier agente/Cursor).
-> 2. **`docs/FOUNDATION.md`** — contrato técnico canónico (convenciones, anatomía de servicio, §0.7 soberanía, §14 todas las decisiones).
+> 1. **`../docs/STATUS.md`** — qué se hizo, dónde quedamos y qué falta (handoff actualizado; punto de entrada para cualquier agente/Cursor).
+> 2. **`../docs/FOUNDATION.md`** — contrato técnico canónico (convenciones, anatomía de servicio, §0.7 soberanía, §14 todas las decisiones).
 > 3. Este `CLAUDE.md` — reglas no negociables.
 >
 > **Regla maestra del cliente:** soberanía tecnológica = **control del DATO y el CÓMPUTO sensibles** (seguridad/privacidad Ley 29733): biometría, video en vivo, pánico, audit, PII → **propios/self-hosted, jamás a un tercero**. Los **rieles de transporte externos inevitables** (push FCM/APNs, red de pagos Yape/Plin, SMS de operador, APNs de Apple) **SÍ se usan**, detrás de un puerto propio intercambiable y **sin PII en el payload** (IDs/deep-links, el contenido se resuelve en el cliente). Soberanía es seguridad del dato, NO “cero proveedores”. (ver FOUNDATION §0.7).
@@ -69,9 +69,9 @@ docs/        ←  Por qué decidimos lo que decidimos (ADRs, runbooks)
 2. Asigna puerto en `.env.example` (rango 3001-3099 para microservicios, 4001-4099 BFFs, 5000+ frontends)
 3. Agrega manifest K8s desde `infra/k8s/base/_template-service.yaml`
 4. Si publica eventos, schemas en `packages/events/`
-5. Si toca PII, documentar en `docs/compliance/ley-29733/`
-6. Runbook esqueleto en `docs/runbooks/<name>-service.md`
-7. ADR si la decisión es no-trivial (`docs/adr/NNN-<title>.md`)
+5. Si toca PII, documentar en `../docs/compliance/ley-29733/`
+6. Runbook esqueleto en `../docs/runbooks/<name>-service.md`
+7. ADR si la decisión es no-trivial (`../docs/adr/NNN-<title>.md`)
 
 ## Cuando toques pánico, video o KYC
 

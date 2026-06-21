@@ -98,5 +98,5 @@ kubectl apply -f argocd/applications/veo-dev.yaml
 
 - [CLAUDE.md](./CLAUDE.md) — contexto para futuras sesiones AI
 - [terraform/README.md](./terraform/README.md) — módulos y entornos
-- [docs/runbooks/](./docs/runbooks/) — runbooks operativos (TODO)
+- [docs/runbooks/](../../docs/runbooks/) — runbooks operativos (TODO)
 - Blueprint maestro: `../VEO_Blueprint.pdf` (Cap. 10 infra AWS + observabilidad)

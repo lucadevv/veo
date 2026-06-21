@@ -1,7 +1,7 @@
 # CLAUDE.md · VEO Driver App
 
-> 🟢 **Estado global y handoff:** lee `../veo-platform/docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
-> `../veo-platform/docs/FOUNDATION.md` (contrato + decisiones). **Regla maestra:** soberanía tecnológica (todo propio, sin SaaS de terceros).
+> 🟢 **Estado global y handoff:** lee `../../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
+> `../../../docs/FOUNDATION.md` (contrato + decisiones). **Regla maestra:** soberanía tecnológica (todo propio, sin SaaS de terceros).
 > Esta app (Ola 4) aún no empieza; el backend `identity-service` ya está listo como referencia (incluye gate biométrico de turno).
 
 ## Repo
