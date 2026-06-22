@@ -9,9 +9,11 @@ import {
 } from '@veo/utils';
 import { DriversService } from './drivers.service';
 import { InvalidStatusTransition } from '../domain/state-machine';
+import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
-const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90 });
+const DRIVER_DNI_ENC_KEY = 'k'.repeat(32);
+const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90, DRIVER_DNI_ENC_KEY });
 const futureLicense = new Date(Date.now() + 1_000_000_000);
 const okDriver = {
   id: 'd1',
@@ -134,16 +136,11 @@ const bioFail = {
     return { score: 40, livenessPassed: false, matchPassed: false };
   },
 };
-/** Motor cuya prueba de vida del enroll NO pasa (embedding null + reason) → el enroll debe lanzar 422. */
-const bioLivenessFail = {
+/** Motor que NO detecta rostro en la selfie (embed devuelve []) → el enroll debe lanzar 422 (no_face). */
+const bioNoFace = {
   ...bio,
-  async enrollWithLiveness() {
-    return {
-      livenessPassed: false,
-      embedding: null,
-      reason: 'rostro no detectado',
-      takenAt: new Date().toISOString(),
-    };
+  async embed() {
+    return [] as number[];
   },
 };
 
@@ -218,7 +215,7 @@ describe('DriversService.createEnrollChallenge · reto de liveness del enrolamie
   });
 });
 
-describe('DriversService.enrollFace · enrolamiento CON liveness (BR-I02)', () => {
+describe('DriversService.enrollFace · enrolamiento KYC selfie-only (Lote 1, sin liveness)', () => {
   /** Prisma que captura el `data` del driver.update para aseverar que se persiste el embedding del motor. */
   function makeEnrollPrisma(driver: unknown) {
     const updates: { faceEmbedding?: number[]; faceEnrolledAt?: Date }[] = [];
@@ -236,23 +233,23 @@ describe('DriversService.enrollFace · enrolamiento CON liveness (BR-I02)', () =
     };
   }
 
-  it('liveness PASS → guarda el embedding derivado del motor + faceEnrolledAt', async () => {
+  it('rostro detectado → guarda el embedding derivado de la selfie + faceEnrolledAt', async () => {
     const prisma = makeEnrollPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    const out = await svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] });
+    const out = await svc.enrollFace('u1', { photo: 'selfie-base64' });
     expect(out.enrolled).toBe(true);
     expect(prisma.updates).toHaveLength(1);
     const [persisted] = prisma.updates;
-    // Persiste EXACTAMENTE el embedding que devolvió enrollWithLiveness (no uno inventado).
+    // Persiste EXACTAMENTE el embedding que devolvió embed (no uno inventado).
     expect(persisted?.faceEmbedding).toEqual([0.4, 0.5, 0.6]);
     expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
   });
 
-  it('liveness FAIL → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
+  it('sin rostro (embed → []) → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
     const prisma = makeEnrollPrisma(okDriver);
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioLivenessFail, config);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoFace, config);
     await expect(
-      svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] }),
+      svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(UnprocessableEntityError);
     expect(prisma.updates).toHaveLength(0);
   });
@@ -265,7 +262,7 @@ describe('DriversService.enrollFace · enrolamiento CON liveness (BR-I02)', () =
       config,
     );
     await expect(
-      svc.enrollFace('u1', { challengeId: 'c1', frames: ['frame-1'] }),
+      svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 });
@@ -768,10 +765,12 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
             }) => {
               upsertCalls.push({ create, update });
               // Sin fila previa → la rama create define el estado final; con fila previa → merge update.
+              // El DNI se persiste CIFRADO (`document_id_enc`); la vista NO se arma de esta fila sino del input
+              // plano (enmascarado), así que el shape de la fila solo se usa para inspeccionar el upsert.
               const data = existing ? { ...existing, ...update } : create;
               return {
                 legalName: (data.legalName as string | null) ?? null,
-                documentId: (data.documentId as string | null) ?? null,
+                documentIdEnc: (data.documentIdEnc as string | null) ?? null,
                 birthDate: (data.birthDate as Date | null) ?? null,
               };
             },
@@ -781,7 +780,7 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     };
   }
 
-  it('persiste y devuelve los datos con birthDate en yyyy-mm-dd (fila previa existente)', async () => {
+  it('NO devuelve el DNI crudo al conductor: lo enmascara (últimos 4) en la vista (PII Ley 29733)', async () => {
     const { prisma } = makePersonalPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     const out = await svc.updatePersonalInfo('u1', {
@@ -789,7 +788,25 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       dni: '12345678',
       birthDate: '1990-05-20',
     });
-    expect(out).toEqual({ legalName: 'Juan Pérez', dni: '12345678', birthDate: '1990-05-20' });
+    // El conductor YA tipeó el DNI; se le confirma ENMASCARADO, nunca el crudo ni el ciphertext.
+    expect(out).toEqual({ legalName: 'Juan Pérez', dni: '****5678', birthDate: '1990-05-20' });
+    expect(out.dni).not.toBe('12345678');
+  });
+
+  it('persiste el DNI CIFRADO (no en claro) y round-trip: open(documentIdEnc) === dni original', async () => {
+    const { prisma, upsertCalls } = makePersonalPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const dni = '12345678';
+    await svc.updatePersonalInfo('u1', { legalName: 'Juan', dni, birthDate: '1990-05-20' });
+    const persisted = upsertCalls[0]?.create.documentIdEnc as string;
+    // (a) lo persistido NO es el DNI en claro
+    expect(persisted).toBeTypeOf('string');
+    expect(persisted).not.toBe(dni);
+    expect(persisted).not.toContain(dni);
+    // (b) round-trip reversible: descifrado === DNI original (compliance lo muestra al operador)
+    expect(open(persisted, DRIVER_DNI_ENC_KEY)).toBe(dni);
+    // El upsert NO escribe la columna en claro `documentId` (eliminada del schema).
+    expect(upsertCalls[0]?.create).not.toHaveProperty('documentId');
   });
 
   it('personal-first: SIN fila Driver previa crea el cascarón y fija los datos (ya NO 404, fix P0)', async () => {
@@ -800,7 +817,7 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       dni: '87654321',
       birthDate: '1992-01-10',
     });
-    expect(out).toEqual({ legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    expect(out).toEqual({ legalName: 'Ana', dni: '****4321', birthDate: '1992-01-10' });
     // El cascarón se materializa con los defaults tipados del agregado (sin strings mágicos).
     expect(upsertCalls).toHaveLength(1);
     expect(upsertCalls[0]?.create).toMatchObject({
@@ -808,8 +825,9 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       currentStatus: 'OFFLINE',
       backgroundCheckStatus: 'PENDING',
       legalName: 'Ana',
-      documentId: '87654321',
     });
+    // El DNI va CIFRADO (round-trip), nunca en claro en la fila.
+    expect(open(upsertCalls[0]?.create.documentIdEnc as string, DRIVER_DNI_ENC_KEY)).toBe('87654321');
   });
 
   it('re-submit idempotente: llamar dos veces no rompe ni duplica (upsert por userId)', async () => {

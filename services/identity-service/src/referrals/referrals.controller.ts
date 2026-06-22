@@ -1,7 +1,14 @@
 import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsString, MaxLength, MinLength } from 'class-validator';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  Audiences,
+  AudienceGuard,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { ReferralsService, type ReferralSummary } from './referrals.service';
 
 /** POST /referrals/redeem → body. */
@@ -14,7 +21,8 @@ class RedeemReferralDto {
 
 @ApiTags('referrals')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(InternalAudience.PUBLIC_RAIL)
 @Controller('referrals')
 export class ReferralsController {
   constructor(private readonly referrals: ReferralsService) {}

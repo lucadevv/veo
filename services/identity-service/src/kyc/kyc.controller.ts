@@ -1,7 +1,14 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ArrayNotEmpty, IsArray, IsString } from 'class-validator';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  Audiences,
+  AudienceGuard,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { KycService } from './kyc.service';
 
 class VerifyKycDto {
@@ -16,7 +23,8 @@ class VerifyKycDto {
 
 @ApiTags('users-kyc')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(InternalAudience.PUBLIC_RAIL)
 @Controller('users/kyc')
 export class KycController {
   constructor(private readonly kyc: KycService) {}

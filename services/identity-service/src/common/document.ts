@@ -51,6 +51,21 @@ export function maskDocument(document: string | null | undefined): string {
 }
 
 /**
+ * Enmascara el DNI para una VISTA dirigida al PROPIO conductor (no a compliance): conserva los últimos
+ * `VISIBLE_DNI_TAIL` dígitos y oculta el resto. A diferencia de `maskDocument` (para log/audit, devuelve el
+ * sentinel `∅`), aquí preservamos `null` para respetar el contrato de la vista (`dni: string | null`) y la
+ * degradación honesta del cliente RN. El conductor YA tipeó el DNI; devolverle el enmascarado confirma la
+ * persistencia SIN re-exponer la PII completa ni filtrar el ciphertext. Ej. '12345678' → '****5678'.
+ */
+export const VISIBLE_DNI_TAIL = 4;
+
+export function maskDniForOwner(dni: string | null | undefined): string | null {
+  if (dni == null) return null;
+  if (dni.length <= VISIBLE_DNI_TAIL) return '*'.repeat(dni.length);
+  return '*'.repeat(dni.length - VISIBLE_DNI_TAIL) + dni.slice(-VISIBLE_DNI_TAIL);
+}
+
+/**
  * Decorador de propiedad: valida `document` SEGÚN el `documentType` hermano del DTO. Custom porque
  * la regla es condicional (depende de otra propiedad), algo que los decoradores sueltos no expresan.
  * Si `documentType` está ausente, falla (no se puede validar la forma sin el tipo).

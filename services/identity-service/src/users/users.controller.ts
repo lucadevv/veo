@@ -9,7 +9,14 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  Audiences,
+  AudienceGuard,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { PaymentMethod } from '@veo/shared-types';
 import { DOCUMENT_TYPES, IsValidDocument, type DocumentTypeValue } from '../common/document';
 import { UsersService, type ProfileView } from './users.service';
@@ -62,7 +69,8 @@ class UpdateProfileDto {
 
 @ApiTags('users')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(InternalAudience.PUBLIC_RAIL)
 @Controller('users')
 export class UsersController {
   constructor(

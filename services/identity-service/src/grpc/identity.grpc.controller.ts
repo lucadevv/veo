@@ -3,13 +3,14 @@
  * Lectura síncrona de identidad para otros servicios. Devuelve `found=false` en vez de lanzar,
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
-import { Controller, Inject } from '@nestjs/common';
+import { Controller, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
+import { verifyGrpcIdentity, InternalAudience, type InternalIdentity } from '@veo/auth';
 import { DniFaceMatchStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
+import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
@@ -94,33 +95,85 @@ const EMPTY_DRIVER: DriverReply = {
   dniFaceMatchedAt: '',
 };
 
+/**
+ * Métodos gRPC de IdentityService scopeados por RIEL. Cada RPC declara EXACTAMENTE qué rieles puede
+ * invocarla (derivado de los callers reales · cross-rail / confused-deputy H7): el HMAC válido NO basta,
+ * el `aud` firmado del caller DEBE estar en esta lista o se rechaza fail-closed (PERMISSION_DENIED).
+ * Mapa tipado y centralizado — NUNCA un string mágico ni un `ALLOWED_AUDIENCES` global que deje pasar
+ * cualquier riel a cualquier método.
+ */
+const GRPC_METHOD_AUDIENCES = {
+  GetUser: [
+    InternalAudience.DRIVER_RAIL,
+    InternalAudience.PUBLIC_RAIL,
+    InternalAudience.ADMIN_RAIL,
+  ],
+  GetDriver: [
+    InternalAudience.PUBLIC_RAIL,
+    InternalAudience.ADMIN_RAIL,
+    InternalAudience.SERVICE_RAIL,
+  ],
+  GetDriverByUser: [InternalAudience.DRIVER_RAIL],
+  // BATCH de conductores. DOS rieles, ambos verificados contra los callers reales:
+  //  - ADMIN_RAIL (admin-bff `listDrivers`): nombre/teléfono por página de la lista del operador.
+  //  - SERVICE_RAIL (booking-service · enriquecimiento de la BÚSQUEDA de carpooling F2): resuelve los
+  //    datos PÚBLICOS del conductor (name/averageRating + ejes de elegibilidad) para los N viajes de la
+  //    página en UNA sola llamada (anti-N+1). El batch NO descifra el DNI ni emite PII sensible
+  //    (minimización 5b · `toDriverReply` sin `includeSensitivePii`), así que es seguro que un servicio
+  //    interno (service-rail) lo consuma. El scoping admin-only era correcto SOLO cuando el único caller
+  //    era admin-bff; al cablearse booking (service-rail) la búsqueda caía fail-closed → resultados vacíos.
+  // Mínimo privilegio: NO se abre a public-rail ni driver-rail (no son callers legítimos del batch).
+  GetDriversByIds: [InternalAudience.ADMIN_RAIL, InternalAudience.SERVICE_RAIL],
+} as const satisfies Record<string, readonly InternalAudience[]>;
+
+type GrpcMethodName = keyof typeof GRPC_METHOD_AUDIENCES;
+
 @Controller()
 export class IdentityGrpcController {
+  private readonly logger = new Logger(IdentityGrpcController.name);
   private readonly secret: string;
+  /** Clave de cifrado del DNI del conductor en reposo (AES-256-GCM · secret-box). Identity es el dueño del
+   * dato y del secret: descifra acá, en el borde, ANTES de mandar el DNI al admin-bff (gateado Compliance+).
+   * El secret NO se reparte a otros servicios. */
+  private readonly dniEncKey: string;
 
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
-    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
-    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
+    this.dniEncKey = config.get('DRIVER_DNI_ENC_KEY', { infer: true });
   }
 
-  /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
-  private requireIdentity(metadata: Metadata): void {
-    const identity = verifyGrpcIdentity(metadata, this.secret, { allowedAudiences: this.allowedAudiences });
+  /**
+   * Verifica la identidad interna firmada (HMAC) Y acota el RIEL emisor al conjunto permitido del MÉTODO
+   * (scoping por-RPC · confused-deputy). Dos rechazos distintos y honestos:
+   *  - firma ausente/inválida → UNAUTHENTICATED (no probó quién es).
+   *  - firma válida pero riel no autorizado para este método → PERMISSION_DENIED (probó quién es, no puede).
+   */
+  private requireIdentity(method: GrpcMethodName, metadata: Metadata): InternalIdentity {
+    // Paso 1: firma. Sin allowedAudiences acá → distinguimos "no autenticado" de "autenticado pero sin permiso".
+    const identity = verifyGrpcIdentity(metadata, this.secret);
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
         message: 'Identidad interna inválida o ausente',
       });
     }
+    // Paso 2: riel. El `aud` firmado del caller debe estar en la lista del método (fail-closed).
+    const allowed: readonly InternalAudience[] = GRPC_METHOD_AUDIENCES[method];
+    if (!allowed.includes(identity.aud)) {
+      throw new RpcException({
+        code: GrpcStatus.PERMISSION_DENIED,
+        message: 'Riel no autorizado para esta operación',
+      });
+    }
+    return identity;
   }
 
   @GrpcMethod('IdentityService', 'GetUser')
   async getUser({ id }: GetByIdRequest, metadata: Metadata): Promise<UserReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetUser', metadata);
     const u = await this.prisma.read.user.findUnique({ where: { id } });
     if (!u) {
       return { id: '', phone: '', type: '', kycStatus: '', deleted: false, found: false, name: '' };
@@ -138,19 +191,31 @@ export class IdentityGrpcController {
 
   @GrpcMethod('IdentityService', 'GetDriver')
   async getDriver({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverReply> {
-    this.requireIdentity(metadata);
+    const identity = this.requireIdentity('GetDriver', metadata);
+    // MINIMIZACIÓN POR RIEL (Ley 29733 · H8 confused-deputy de DATO): GetDriver lo invocan TRES rieles
+    // con necesidades distintas — verificado contra los consumidores reales del DriverReply:
+    //  - PUBLIC_RAIL (public-bff: detalle/listado/share): lee SOLO name/userId/status/rating → datos que
+    //    el PASAJERO ve. NO lee DNI, licencia, fecha-nac ni biometría.
+    //  - SERVICE_RAIL (dispatch: re-validar elegibilidad): lee SOLO id/userId/currentStatus/suspendedAt.
+    //  - ADMIN_RAIL (admin-bff: revisión Compliance+): SÍ valida el DNI/licencia/fecha-nac/biometría a ojo.
+    // Por eso la PII SENSIBLE (DNI descifrado, licencia, fecha de nacimiento, timestamps biométricos y el
+    // binding DNI↔selfie) se descifra/emite SOLO si el caller es ADMIN_RAIL. Para los demás rieles NO se
+    // descifra el DNI (no viaja por el cable) y los otros campos PII se omiten (proto3 default '').
+    const includeSensitivePii = identity.aud === InternalAudience.ADMIN_RAIL;
     // BE-1b — `include: user` trae los scalars del Driver (incluido legalName) + el nombre/kyc/phone
     // del usuario (driver→user, ambos en identity: NO es join cross-servicio).
     const d = await this.prisma.read.driver.findUnique({
       where: { id },
       include: { user: { select: { name: true, kycStatus: true, phone: true } } },
     });
-    return d ? this.toDriverReply(d) : EMPTY_DRIVER;
+    // El descifrado del DNI (único path costoso/peligroso) ocurre ÚNICAMENTE para ADMIN_RAIL, y aun ahí con
+    // guarda (`openDniSafely`): un blob corrupto degrada a "" en vez de tumbar la RPC con un 500.
+    return d ? this.toDriverReply(d, includeSensitivePii) : EMPTY_DRIVER;
   }
 
   @GrpcMethod('IdentityService', 'GetDriverByUser')
   async getDriverByUser({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetDriverByUser', metadata);
     // `include: user` trae los scalars del Driver (incluido legalName) + nombre/kyc/phone del usuario.
     const d = await this.prisma.read.driver.findUnique({
       where: { userId: id },
@@ -169,16 +234,62 @@ export class IdentityGrpcController {
     { ids }: DriverIdsRequest,
     metadata: Metadata,
   ): Promise<DriversByIdsReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetDriversByIds', metadata);
     if (!ids || ids.length === 0) return { drivers: [] };
     const drivers = await this.prisma.read.driver.findMany({
       where: { id: { in: ids } },
       include: { user: { select: { name: true, kycStatus: true, phone: true } } },
     });
+    // BATCH/lista: NO se descifra el DNI (`includeDni` ausente → false). El admin-bff `listDrivers` consume
+    // SOLO name/phone de este reply (jamás documentId), así que descifrar acá sería over-decryption de PII y
+    // —peor— una fila con ciphertext corrupto/de-otra-clave tumbaría la página ENTERA de conductores. El DNI
+    // se descifra únicamente en el GetDriver single (detalle Compliance+).
     return { drivers: drivers.map((d) => this.toDriverReply(d)) };
   }
 
-  private toDriverReply(d: {
+  /**
+   * Descifra el DNI del conductor con GUARDA (defensa en profundidad). `open()` LANZA ante un ciphertext
+   * con formato inválido o un tag GCM que no valida (rotación de clave, escritura parcial): acá lo
+   * envolvemos para que un blob corrupto DEGRADE a "" (campo vacío) en vez de tumbar la RPC con un 500.
+   * El fallo NO se traga en silencio: se loguea structured `warn` con el driverId — NUNCA el ciphertext
+   * ni la clave (no se filtra material sensible ni el blob al log).
+   */
+  private openDniSafely(documentIdEnc: string, driverId: string): string {
+    try {
+      return open(documentIdEnc, this.dniEncKey);
+    } catch (err) {
+      this.logger.warn({
+        msg: 'No se pudo descifrar el DNI del conductor (ciphertext corrupto o clave incompatible); se degrada a vacío',
+        driverId,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+      return '';
+    }
+  }
+
+  /**
+   * Mapea una fila de Driver al reply gRPC. `includeSensitivePii` gobierna SOLO la PII VERDADERAMENTE
+   * SENSIBLE (minimización por riel · Ley 29733 / H8): el DNI descifrado (`documentId`), la licencia
+   * (`licenseNumber`), la fecha de nacimiento (`birthDate`) y el binding DNI↔selfie (`dniFaceMatch*`).
+   * Esos son los datos que SOLO la revisión Compliance+ del admin valida a ojo — verificado contra los
+   * consumidores reales: ni el pasajero (public-bff) ni el dispatch (service-rail) NI el propio conductor
+   * (driver-bff sobre SU record) los leen. Por defecto `false` → NADA de eso se emite y el DNI NI SIQUIERA
+   * se descifra (documentId: ''):
+   *  - GetDriversByIds (BATCH/lista admin) y GetDriverByUser (driver-bff, deriva su propio id) pasan el
+   *    default → evitan over-decryption + la superficie de crash del descifrado.
+   *  - GetDriver con caller PUBLIC_RAIL/SERVICE_RAIL idem: el pasajero y dispatch NO ven esos campos.
+   * Solo GetDriver con caller ADMIN_RAIL pasa `true`, y aun ahí el descifrado del DNI va con guarda
+   * (`openDniSafely`): un blob corrupto degrada a "" sin tirar 500.
+   *
+   * IMPORTANTE — `faceEnrolledAt`/`lastVerifiedAt` NO están bajo este flag: son timestamps de ESTADO de
+   * enrollment/verificación (no PII de identidad), y el PROPIO conductor los necesita en claro para su
+   * onboarding (driver-bff `drivers.mapper.ts` deriva `biometricEnrolled = faceEnrolledAt.length > 0`, que
+   * compone el gate `in_review`). Se emiten INCONDICIONAL en todos los rieles (al pasajero no le hacen daño:
+   * es "verificado el X"). Meterlos en el set admin-only (regresión del lote 5b) dejaba al conductor con
+   * `faceEnrolledAt=''` SIEMPRE en el driver-rail → trabado en el onboarding.
+   */
+  private toDriverReply(
+    d: {
     id: string;
     userId: string;
     currentStatus: string;
@@ -188,7 +299,7 @@ export class IdentityGrpcController {
     legalName: string | null;
     rejectionReason: string | null;
     licenseNumber: string | null;
-    documentId: string | null;
+    documentIdEnc: string | null;
     birthDate: Date | null;
     createdAt: Date;
     faceEnrolledAt: Date | null;
@@ -197,7 +308,9 @@ export class IdentityGrpcController {
     dniFaceMatchScore: number | null;
     dniFaceMatchedAt: Date | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
-  }): DriverReply {
+    },
+    includeSensitivePii = false,
+  ): DriverReply {
     return {
       id: d.id,
       userId: d.userId,
@@ -211,28 +324,46 @@ export class IdentityGrpcController {
       name: d.legalName || d.user?.name || '',
       // Motivo del último rechazo (dead-end fix); "" si no está rechazado o no se dio motivo.
       rejectionReason: d.rejectionReason ?? '',
-      // Campos de revisión del operador (admin-bff GET /ops/drivers/:id). "" cuando no hay dato.
-      licenseNumber: d.licenseNumber ?? '',
+      // PII SENSIBLE · ADMIN-ONLY (minimización por riel · Ley 29733 / H8). Estos campos los consume SOLO la
+      // revisión Compliance+ del admin-bff (GET /ops/drivers/:id valida licencia/DNI/fecha-nac/binding a
+      // ojo). Verificado contra los consumidores reales: ni public-bff (detalle/listado/share del pasajero),
+      // ni dispatch (re-validación de elegibilidad), NI el propio conductor (driver-bff sobre su record) los
+      // leen. Con caller no-admin → omitidos (proto3 ''):
+      licenseNumber: includeSensitivePii ? (d.licenseNumber ?? '') : '',
       kycStatus: d.user?.kycStatus ?? '',
       createdAt: d.createdAt.toISOString(),
+      // Timestamps de ESTADO de enrollment/verificación biométrica: INCONDICIONAL en todos los rieles. NO es
+      // PII sensible de identidad — es la señal de "el conductor enroló/verificó su rostro" que el PROPIO
+      // conductor necesita en su onboarding (driver-bff deriva `biometricEnrolled = faceEnrolledAt.length > 0`,
+      // que compone el gate `in_review`). Al pasajero tampoco le hace daño (es "verificado el X"). Gatearlos
+      // por riel (regresión 5b) trababa al conductor con faceEnrolledAt='' en el driver-rail.
       faceEnrolledAt: d.faceEnrolledAt ? d.faceEnrolledAt.toISOString() : '',
       lastVerifiedAt: d.lastVerifiedAt ? d.lastVerifiedAt.toISOString() : '',
       phone: d.user?.phone ?? '',
-      // DNI + fecha de nacimiento para la revisión del operador (admin valida informado). birthDate es
-      // @db.Date → yyyy-mm-dd; "" cuando no hay dato (proto3 default, nunca null).
-      documentId: d.documentId ?? '',
-      birthDate: d.birthDate ? d.birthDate.toISOString().slice(0, 10) : '',
-      // Sub-lote 3C · binding DNI↔selfie GUARDADO. El estado se DERIVA del veredicto persistido (null = aún
-      // no se corrió → NOT_RUN; true → MATCHED; false → NO_MATCH): estado tipado explícito, sin la
-      // ambigüedad del bool. Score 0 / fecha "" cuando no se corrió (proto3 default honesto).
+      // DNI + fecha de nacimiento para la revisión del operador (admin valida informado). El DNI vive CIFRADO
+      // en reposo (PII Ley 29733): identity lo DESCIFRA acá, en el borde (es dueño del dato y del secret), antes
+      // de mandarlo al admin-bff (gateado Compliance+). El secret NO se reparte. "" cuando no hay dato (proto3
+      // default, nunca null). birthDate es @db.Date → yyyy-mm-dd; "" cuando no hay dato.
+      // SOLO se descifra/emite cuando el caller es ADMIN_RAIL (`includeSensitivePii`). public-bff/dispatch
+      // pasan `false` → el DNI NI se descifra (no viaja por el cable) y birthDate se omite: ni over-decryption
+      // de PII de gusto, ni fuga cross-rail, ni superficie de crash del descifrado para esos rieles. Y cuando
+      // SÍ se descifra, va con guarda (`openDniSafely`): un blob corrupto degrada a "" en vez de tirar un 500.
+      documentId:
+        includeSensitivePii && d.documentIdEnc ? this.openDniSafely(d.documentIdEnc, d.id) : '',
+      birthDate: includeSensitivePii && d.birthDate ? d.birthDate.toISOString().slice(0, 10) : '',
+      // Sub-lote 3C · binding DNI↔selfie GUARDADO. ADMIN-ONLY (es señal del proceso KYC/DNI). El estado se
+      // DERIVA del veredicto persistido (null = aún no se corrió → NOT_RUN; true → MATCHED; false → NO_MATCH):
+      // estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0/"" (proto3
+      // default honesto: el pasajero/dispatch no ven el binding biométrico del conductor).
       dniFaceMatchStatus:
-        d.dniFaceMatched === null || d.dniFaceMatched === undefined
+        !includeSensitivePii || d.dniFaceMatched === null || d.dniFaceMatched === undefined
           ? DniFaceMatchStatus.NOT_RUN
           : d.dniFaceMatched
             ? DniFaceMatchStatus.MATCHED
             : DniFaceMatchStatus.NO_MATCH,
-      dniFaceMatchScore: d.dniFaceMatchScore ?? 0,
-      dniFaceMatchedAt: d.dniFaceMatchedAt ? d.dniFaceMatchedAt.toISOString() : '',
+      dniFaceMatchScore: includeSensitivePii ? (d.dniFaceMatchScore ?? 0) : 0,
+      dniFaceMatchedAt:
+        includeSensitivePii && d.dniFaceMatchedAt ? d.dniFaceMatchedAt.toISOString() : '',
     };
   }
 }

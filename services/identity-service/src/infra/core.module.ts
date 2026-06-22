@@ -13,6 +13,7 @@ import {
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
   INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  INTERNAL_AUDIENCES,
   InternalIdentityGuard,
   RolesGuard,
   StepUpMfaGuard,
@@ -67,12 +68,16 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
-const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
-  'public-rail',
-  'driver-rail',
-  'admin-rail',
-  'service-rail',
-];
+/**
+ * Base de MEMBRESÍA del HMAC para `InternalIdentityGuard` (HTTP) — ya NO es la fuente de AUTORIZACIÓN por
+ * riel. Antes este set global dejaba que cualquiera de los 4 rieles entrara a cualquier endpoint
+ * (confused-deputy H7). Ahora la AUTORIZACIÓN por-endpoint la hace `@Audiences(...)` + `AudienceGuard`
+ * (fail-closed, por handler) y el gRPC scopea por-método (`GRPC_METHOD_AUDIENCES`). Este token se conserva
+ * SOLO porque `InternalIdentityGuard` exige una lista para validar que el `aud` firmado sea un riel CONOCIDO
+ * (que la firma porte una audiencia válida del set cerrado); el QUÉ-puede-pedir-QUÉ vive en @Audiences.
+ * Se usa la constante tipada `INTERNAL_AUDIENCES` (fuente única) en vez de literales sueltos.
+ */
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
 
 @Global()
 @Module({

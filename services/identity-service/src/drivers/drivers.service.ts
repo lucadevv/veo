@@ -15,6 +15,8 @@ import {
   uuidv7,
 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
+import { seal } from '../common/secret-box';
+import { maskDniForOwner } from '../common/document';
 import { REDIS } from '../infra/redis';
 import {
   BIOMETRIC_PROVIDER,
@@ -107,6 +109,8 @@ export interface DriverPurgeResult {
 @Injectable()
 export class DriversService {
   private readonly minScore: number;
+  /** Clave de cifrado del DNI del conductor en reposo (AES-256-GCM · secret-box). KMS en prod. */
+  private readonly dniEncKey: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -115,6 +119,7 @@ export class DriversService {
     config: ConfigService<Env, true>,
   ) {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
+    this.dniEncKey = config.getOrThrow<string>('DRIVER_DNI_ENC_KEY');
   }
 
   /**
@@ -547,44 +552,37 @@ export class DriversService {
   }
 
   /**
-   * Enrolamiento facial CON LIVENESS (BR-I02 · diferenciador no negociable VEO): en vez de una foto suelta
-   * (spoofeable con una imagen), el conductor ejecuta un reto de liveness activo y manda los FRAMES. El
-   * biometric-service confirma que hay una persona VIVA frente a la cámara (anti-spoofing) y, solo si pasa,
-   * deriva el embedding de referencia. Flujo:
-   *   1. La app pide el reto: GET /drivers/me/biometric/liveness/challenge (createEnrollChallenge).
-   *   2. Captura los frames mientras el conductor hace la acción (TURN_LEFT/NOD/SMILE…).
-   *   3. POST /drivers/biometric/enroll con { challengeId, frames }.
+   * Enrolamiento KYC con UNA selfie, SIN prueba de vida (decisión Lote 1): el conductor manda una sola foto
+   * y biometric-service `POST /v1/embed` deriva el embedding de referencia ArcFace (exige 1 rostro claro,
+   * sin reto girar/asentir/sonreír). La defensa anti-suplantación ya NO vive acá (liveness), sino en el
+   * face-match DNI↔selfie del binding (matchDniFace), que el operador VE antes de aprobar. Flujo:
+   *   1. La app captura UNA selfie.
+   *   2. POST /drivers/biometric/enroll con { photo } (base64 sin prefijo data:).
    *
-   * Si la prueba de vida NO pasa → 422 tipado (UnprocessableEntityError) con el `reason` del motor: el
-   * enrolamiento se RECHAZA y no se guarda nada (fail-closed, sin embedding falso). Si PASA, persiste el
-   * embedding + `faceEnrolledAt` en UNA escritura (igual que antes) — el gate `hasFaceEmbedding`
-   * (aprobación del operador + inicio de turno) lo lee como fuente única de "biométricamente enrolado".
+   * Si el motor NO detecta un rostro (embedding vacío) → 422 tipado (UnprocessableEntityError, reason
+   * 'no_face'): el enrolamiento se RECHAZA y no se guarda nada (fail-closed, degradación HONESTA, sin
+   * embedding falso). Si hay rostro, persiste el embedding + `faceEnrolledAt` en UNA escritura — el gate
+   * `hasFaceEmbedding` (aprobación del operador + inicio de turno) lo lee como fuente única de "enrolado".
    */
   async enrollFace(
     userId: string,
-    input: { challengeId: string; frames: string[] },
+    input: { photo: string },
   ): Promise<{ enrolled: true; enrolledAt: string }> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
 
-    const result = await this.biometric.enrollWithLiveness({
-      driverId: d.id,
-      challengeId: input.challengeId,
-      frames: input.frames,
-    });
+    const embedding = await this.biometric.embed(input.photo);
 
-    // GATE DE VIDA (fail-closed): sin prueba de vida superada NO hay enrolamiento. 422 tipado con el
-    // motivo del motor — la app degrada HONESTO ("Prueba de vida no superada") y pide reintentar el reto.
-    if (!result.livenessPassed || !result.embedding || !result.embedding.length) {
-      throw new UnprocessableEntityError('Prueba de vida no superada', {
-        reason: result.reason ?? 'liveness_failed',
-      });
+    // GATE DE ROSTRO (fail-closed): si el motor no detecta una cara, el embedding viene vacío → 422 tipado.
+    // La app degrada HONESTO ("No detectamos tu rostro") y pide reintentar la selfie. Nunca un PASS inventado.
+    if (!embedding.length) {
+      throw new UnprocessableEntityError('No detectamos tu rostro', { reason: 'no_face' });
     }
 
     const enrolledAt = new Date();
     await this.prisma.write.driver.update({
       where: { id: d.id },
-      data: { faceEmbedding: result.embedding, faceEnrolledAt: enrolledAt },
+      data: { faceEmbedding: embedding, faceEnrolledAt: enrolledAt },
     });
     return { enrolled: true, enrolledAt: enrolledAt.toISOString() };
   }
@@ -872,34 +870,32 @@ export class DriversService {
     input: { legalName: string; dni: string; birthDate: string },
   ): Promise<DriverPersonalInfoView> {
     const birthDate = new Date(`${input.birthDate}T00:00:00.000Z`);
-    const updated = await this.prisma.write.driver.upsert({
+    // PII Ley 29733: el DNI se persiste CIFRADO en reposo (AES-256-GCM · secret-box), nunca en claro. Es
+    // cifrado REVERSIBLE (no hash) porque compliance debe MOSTRARLO al operador para verificación manual:
+    // identity descifra en el borde gRPC (toDriverReply) antes de mandarlo al admin-bff (gateado Compliance+).
+    const documentIdEnc = seal(input.dni, this.dniEncKey);
+    await this.prisma.write.driver.upsert({
       where: { userId },
       create: {
         userId,
         currentStatus: DriverStatus.OFFLINE,
         backgroundCheckStatus: BackgroundCheckStatus.PENDING,
         legalName: input.legalName,
-        documentId: input.dni,
+        documentIdEnc,
         birthDate,
       },
       update: {
         legalName: input.legalName,
-        documentId: input.dni,
+        documentIdEnc,
         birthDate,
       },
     });
-    return this.toPersonalInfoView(updated);
-  }
-
-  private toPersonalInfoView(d: {
-    legalName: string | null;
-    documentId: string | null;
-    birthDate: Date | null;
-  }): DriverPersonalInfoView {
+    // La vista vuelve al PROPIO conductor (que ya tipeó el DNI): se devuelve ENMASCARADO (últimos 4 dígitos),
+    // nunca el crudo ni el ciphertext. Se arma desde el input plano (no se re-descifra de la fila escrita).
     return {
-      legalName: d.legalName,
-      dni: d.documentId,
-      birthDate: d.birthDate ? d.birthDate.toISOString().slice(0, 10) : null,
+      legalName: input.legalName,
+      dni: maskDniForOwner(input.dni),
+      birthDate: input.birthDate,
     };
   }
 

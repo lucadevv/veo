@@ -193,8 +193,12 @@ model Driver {
   licenseExpiresAt      DateTime?             @map("license_expires_at") @db.Timestamptz
   /// Datos personales del conductor (BR-I04 cumplimiento). Opcionales hasta que el conductor los registra.
   legalName             String?               @map("legal_name")
-  /// DNI peruano (8 dígitos). Se valida en el borde (DTO). Nota: se persiste para cumplimiento del conductor.
-  documentId            String?               @map("document_id")
+  /// DNI peruano (8 dígitos). PII Ley 29733: se persiste CIFRADO en reposo (AES-256-GCM, secret-box,
+  /// formato `iv.tag.enc` base64) — NUNCA en claro. Compliance lo MUESTRA al operador para verificación
+  /// manual contra el documento, por eso es cifrado REVERSIBLE (no hash): identity descifra en el borde
+  /// gRPC con `open()` antes de mandarlo al admin-bff (ya gateado Compliance+). El `User.dniHash` es OTRO
+  /// caso (matching interno irreversible) — no se mezcla con este. Nullable hasta que el conductor lo registra.
+  documentIdEnc         String?               @map("document_id_enc")
   birthDate             DateTime?             @map("birth_date") @db.Date
   currentStatus         DriverStatus          @default(OFFLINE) @map("current_status")
   averageRating         Decimal               @default(5.0) @map("average_rating") @db.Decimal(3, 2)

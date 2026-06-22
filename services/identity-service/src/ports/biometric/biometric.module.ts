@@ -176,6 +176,13 @@ interface FaceMatchServiceResponse {
  */
 const SERVICE_RAIL: InternalAudience = 'service-rail';
 
+/**
+ * Señal interna (no error) para `/v1/embed`: el servicio respondió 422 (foto sin rostro claro). Se
+ * resuelve a embedding vacío para que drivers.service lo traduzca a `no_face` (422 del conductor), en vez
+ * de un 502 genérico. Symbol único → imposible de confundir con una respuesta válida (no es un string).
+ */
+const NO_FACE = Symbol('biometric.embed.no_face');
+
 /** Live: llama al biometric-service PROPIO (Python/ONNX) por HTTP con su contrato real. */
 export class BiometricServiceClient implements BiometricProvider {
   constructor(
@@ -232,6 +239,53 @@ export class BiometricServiceClient implements BiometricProvider {
     return (await res.json()) as T;
   }
 
+  /**
+   * Variante de `request` para `/v1/embed` que distingue el 422 "sin rostro procesable" del resto de
+   * fallos. Es el ÚNICO endpoint cuyo 422 es responsabilidad del input del conductor (foto sin rostro),
+   * no del servicio: lo devolvemos como `NO_FACE` para que el caller lo traduzca a embedding vacío. El
+   * timeout/red sigue cayendo en el `catch` de `request`-style (ExternalServiceError 502).
+   */
+  private async requestEmbed(
+    path: string,
+    body: unknown,
+  ): Promise<{ embedding: number[] } | typeof NO_FACE> {
+    const { header, signature } = signInternalIdentity(
+      anonymousIdentity('driver'),
+      this.internalSecret,
+      SERVICE_RAIL,
+    );
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          [INTERNAL_IDENTITY_HEADER]: header,
+          [INTERNAL_IDENTITY_SIG_HEADER]: signature,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      if (isTimeoutAbort(err)) {
+        throw new ExternalServiceError('biometric-service no respondió a tiempo', {
+          timeoutMs: this.timeoutMs,
+          path,
+        });
+      }
+      throw new ExternalServiceError('biometric-service inaccesible', { cause: String(err) });
+    }
+    // 422 = la foto no contiene un rostro claro procesable (contrato real de /v1/embed). NO es un fallo
+    // del servicio: el conductor debe reintentar la selfie. Lo señalamos para mapear a embedding vacío.
+    if (res.status === 422) {
+      return NO_FACE;
+    }
+    if (!res.ok) {
+      throw new ExternalServiceError('biometric-service devolvió error', { status: res.status });
+    }
+    return (await res.json()) as { embedding: number[] };
+  }
+
   async createChallenge(): Promise<BiometricChallenge> {
     return this.request<BiometricChallenge>('/v1/liveness/challenge', {});
   }
@@ -250,9 +304,20 @@ export class BiometricServiceClient implements BiometricProvider {
     };
   }
 
+  /**
+   * Embedding de referencia de UNA foto (`POST /v1/embed`). Contrato real del biometric-service: si NO
+   * detecta EXACTAMENTE un rostro claro (o la foto es inválida/grande) responde **422** con `detail`
+   * legible (ver routes.py `_embed_single_face`); cualquier otro fallo (5xx/red/timeout/auth) NO es un
+   * problema del rostro. Mapeo HONESTO (no a ciegas):
+   *  - 422 → embedding VACÍO (`[]`): el conductor mandó una foto sin rostro procesable. drivers.service
+   *    lo traduce a `UnprocessableEntityError('No detectamos tu rostro', { reason: 'no_face' })` por su
+   *    gate `!embedding.length` — un 422 tipado para el conductor, NO un 502 genérico.
+   *  - resto → `ExternalServiceError` (502): biometric-service caído/colgado degrada honesto, NO se
+   *    enmascara como "sin rostro".
+   */
   async embed(photo: string): Promise<number[]> {
-    const out = await this.request<{ embedding: number[] }>('/v1/embed', { photo });
-    return out.embedding;
+    const out = await this.requestEmbed('/v1/embed', { photo });
+    return out === NO_FACE ? [] : out.embedding;
   }
 
   async verify(input: BiometricVerifyInput): Promise<BiometricVerifyResult> {

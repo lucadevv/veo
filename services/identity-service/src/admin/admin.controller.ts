@@ -1,9 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
+  Audiences,
+  AudienceGuard,
   Public,
   Roles,
   CurrentUser,
+  InternalAudience,
   InternalIdentityGuard,
   RolesGuard,
   type AuthenticatedUser,
@@ -19,6 +22,7 @@ import {
 } from './dto/admin.dto';
 
 @ApiTags('admin')
+@Audiences(InternalAudience.ADMIN_RAIL)
 @Controller('admin')
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
@@ -52,7 +56,7 @@ export class AdminController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(InternalIdentityGuard)
+  @UseGuards(InternalIdentityGuard, AudienceGuard)
   @Post('step-up')
   @HttpCode(200)
   @ApiOperation({ summary: 'Step-up MFA (TOTP) para acciones sensibles (BR-S07)' })
@@ -64,7 +68,7 @@ export class AdminController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('operators')
   @ApiOperation({ summary: 'Listar todos los operadores (gestión de staff)' })
@@ -73,7 +77,7 @@ export class AdminController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post('operators')
   @HttpCode(200)
@@ -86,7 +90,7 @@ export class AdminController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post('operators/:id/reinvite')
   @HttpCode(200)
@@ -99,7 +103,7 @@ export class AdminController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post('operators/:id/reject')
   @HttpCode(204)

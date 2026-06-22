@@ -5,12 +5,20 @@ import { z } from 'zod';
 import { secret } from '@veo/utils';
 
 /**
- * Modos del puerto biométrico (enum tipado, fuente única — sin string mágico esparcido). `live` llama al
- * biometric-service propio (ONNX); `sandbox` deriva el embedding de sha256(photo) para dev/CI sin device.
- * El fail-fast de entorno productivo (superRefine) compara contra `BIOMETRIC_LIVE_MODE`, no contra un literal.
+ * Modos de puerto intercambiable (enum tipado, fuente única — sin string mágico esparcido). `live` usa el
+ * proveedor real/propio; `sandbox` usa un sustituto inseguro para dev/CI (loguea, no envía, no verifica firma,
+ * deriva embeddings de sha256). El fail-fast de entorno productivo (superRefine) compara contra `LIVE_MODE`,
+ * la constante tipada — nunca contra un literal `'live'` esparcido.
  */
-export const BIOMETRIC_MODES = ['live', 'sandbox'] as const;
-export const BIOMETRIC_LIVE_MODE = 'live' satisfies (typeof BIOMETRIC_MODES)[number];
+export const PORT_MODES = ['live', 'sandbox'] as const;
+export const LIVE_MODE = 'live' satisfies (typeof PORT_MODES)[number];
+
+/**
+ * Alias retrocompatibles del puerto biométrico. Conservados para no romper imports existentes; ambos apuntan
+ * a la fuente única (`PORT_MODES`/`LIVE_MODE`).
+ */
+export const BIOMETRIC_MODES = PORT_MODES;
+export const BIOMETRIC_LIVE_MODE = LIVE_MODE;
 
 export const envSchema = z
   .object({
@@ -45,6 +53,11 @@ export const envSchema = z
 
     // Clave para cifrar el secreto TOTP de operadores en reposo (KMS en prod)
     TOTP_ENC_KEY: secret('dev-totp-enc-key-change-me'),
+
+    // Clave para cifrar el DNI del conductor en reposo (PII Ley 29733 · AES-256-GCM secret-box). Cifrado
+    // REVERSIBLE (no hash): compliance descifra para mostrarlo al operador. `secret()` → fail-fast en prod
+    // (requerido + rechaza el valor de dev). KMS en prod, NO compartir con otros servicios.
+    DRIVER_DNI_ENC_KEY: secret('dev-driver-dni-enc-key-change-me'),
 
     // URL pública del panel admin-web (NO secreto). Base del link de invitación de operadores
     // (`${ADMIN_WEB_URL}/accept-invite?token=...`). Requerida: fail-fast si falta.
@@ -120,20 +133,48 @@ export const envSchema = z
     GRPC_URL: z.string().default('0.0.0.0:50051'),
   })
   .superRefine((env, ctx) => {
-    // FAIL-FAST DE SEGURIDAD (regla ENTORNOS · diferenciador biométrico VEO): en un entorno PRODUCTIVO
-    // (internet-facing) el modo biométrico DEBE ser `live`. `NODE_ENV=production` es la señal canónica de
+    // FAIL-FAST DE SEGURIDAD (regla ENTORNOS · diferenciador VEO): en un entorno PRODUCTIVO (internet-facing)
+    // TODOS los puertos intercambiables DEBEN estar en `live`. `NODE_ENV=production` es la señal canónica de
     // "entorno endurecido" del repo (cubre preview Y prod, ver @veo/utils isHardenedEnv) — el MISMO criterio
-    // que `secret()` usa para rechazar secretos de dev. En `sandbox` el embedding es sha256(photo): CUALQUIER
-    // string produce un embedding válido que pasa el gate → la biometría sería decorativa. En local/development
-    // `sandbox` SIGUE permitido (no rompe el dev/CI sin device ni modelos ONNX). Sin string mágico: el enum del
-    // modo es la fuente, y la comparación de entorno se apoya en el valor ya validado de NODE_ENV.
-    if (env.NODE_ENV === 'production' && env.VEO_BIOMETRIC_MODE !== BIOMETRIC_LIVE_MODE) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['VEO_BIOMETRIC_MODE'],
-        message:
-          'VEO_BIOMETRIC_MODE debe ser "live" en entornos productivos (NODE_ENV=production): el modo sandbox vuelve la biometría decorativa',
-      });
+    // que `secret()` usa para rechazar secretos de dev. En `sandbox` cada puerto usa un sustituto inseguro
+    // (biometría decorativa, OTP en claro al log sin enviar SMS, OAuth que acepta id_token forjado sin verificar
+    // firma, emails solo logueados): en producción cualquiera de esos es un agujero de seguridad/funcionalidad.
+    // En local/development `sandbox` SIGUE permitido (no rompe el dev/CI sin device ni proveedores reales).
+    // DRY + sin string mágico: un solo loop sobre la tabla de puertos, comparando contra `LIVE_MODE` (la
+    // constante tipada) — nunca contra el literal `'live'` esparcido.
+    const PRODUCTION_LIVE_PORTS = [
+      {
+        env: 'VEO_BIOMETRIC_MODE',
+        value: env.VEO_BIOMETRIC_MODE,
+        reason: 'el modo sandbox vuelve la biometría decorativa (el embedding es sha256(photo))',
+      },
+      {
+        env: 'VEO_OAUTH_MODE',
+        value: env.VEO_OAUTH_MODE,
+        reason: 'el modo sandbox acepta id_token forjado sin verificar la firma del JWKS de Google (account takeover)',
+      },
+      {
+        env: 'VEO_SMS_MODE',
+        value: env.VEO_SMS_MODE,
+        reason: 'el modo sandbox imprime el OTP en claro al log y NO lo envía (login roto + fuga de OTP)',
+      },
+      {
+        env: 'VEO_EMAIL_MODE',
+        value: env.VEO_EMAIL_MODE,
+        reason: 'el modo sandbox solo loguea los correos de verificación y NO los envía',
+      },
+    ] as const;
+
+    if (env.NODE_ENV === 'production') {
+      for (const port of PRODUCTION_LIVE_PORTS) {
+        if (port.value !== LIVE_MODE) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [port.env],
+            message: `${port.env} debe ser "${LIVE_MODE}" en entornos productivos (NODE_ENV=production): ${port.reason}`,
+          });
+        }
+      }
     }
   });
 
