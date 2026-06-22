@@ -8,7 +8,7 @@ import {
   type OutboxPrismaClient,
 } from './outbox.js';
 import { tombstone, deletedPlaceholder, type UpdatableDelegate } from './tombstone.js';
-import { isUniqueViolation } from './prisma-errors.js';
+import { isUniqueViolation, isRecordNotFound } from './prisma-errors.js';
 import { createEnvelope } from '@veo/events';
 
 class FakeClient implements PrismaLike {
@@ -181,5 +181,25 @@ describe('isUniqueViolation (P2002 estructural, cross-cliente-generado)', () => 
 
   it('sin meta.target fiable, asume el unique esperado (no rompe la idempotencia)', () => {
     expect(isUniqueViolation(prismaError('P2002'), 'dedupKey')).toBe(true);
+  });
+});
+
+describe('isRecordNotFound (P2025 estructural, cross-cliente-generado)', () => {
+  function prismaError(code: string): Error {
+    const err = new Error('Record to update not found') as Error & { code: string };
+    err.name = 'PrismaClientKnownRequestError';
+    err.code = code;
+    return err;
+  }
+
+  it('matchea P2025 (update/delete con where que afecta 0 filas — UPDATE atómico condicionado)', () => {
+    expect(isRecordNotFound(prismaError('P2025'))).toBe(true);
+  });
+
+  it('rechaza otros códigos, errores ajenos y no-errores', () => {
+    expect(isRecordNotFound(prismaError('P2002'))).toBe(false);
+    expect(isRecordNotFound(new Error('P2025'))).toBe(false); // name no es PrismaClientKnownRequestError
+    expect(isRecordNotFound(null)).toBe(false);
+    expect(isRecordNotFound('P2025')).toBe(false);
   });
 });

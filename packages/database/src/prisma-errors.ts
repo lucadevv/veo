@@ -12,6 +12,14 @@
 /** Código Prisma de violación de UNIQUE (P2002, "Unique constraint failed"). */
 export const PRISMA_UNIQUE_VIOLATION = 'P2002';
 
+/**
+ * Código Prisma de "no se encontró el registro a mutar" (P2025, "An operation failed because it depends
+ * on one or more records that were required but not found"). Lo lanza `update`/`delete`/`updateMany`-vía-
+ * `update` cuando el `where` no matchea NINGUNA fila — el caso canónico de un UPDATE ATÓMICO CONDICIONADO
+ * (where con `estado: { in: [...] }`): si la fila cambió de estado en la PRIMARIA, 0 filas matchean → P2025.
+ */
+export const PRISMA_RECORD_NOT_FOUND = 'P2025';
+
 const PRISMA_KNOWN_REQUEST_ERROR_NAME = 'PrismaClientKnownRequestError';
 
 /**
@@ -53,6 +61,27 @@ export function isUniqueViolation(
   if (known.code !== PRISMA_UNIQUE_VIOLATION) return false;
   if (column === undefined) return true;
   return targetsColumn(known.meta?.target, column);
+}
+
+/**
+ * ¿`err` es un P2025 ("record required but not found") de Prisma? Detección ESTRUCTURAL (mismo motivo
+ * cross-cliente-generado que `isUniqueViolation`: cada servicio genera su propio runtime → `instanceof`
+ * no sirve). Su uso canónico: un UPDATE ATÓMICO CONDICIONADO POR ESTADO (`where: { id, driverId, estado:
+ * { in: [...] } }`) que afecta 0 filas porque el estado en la PRIMARIA ya no es válido → Prisma lanza P2025
+ * → el repo lo traduce a un ConflictError tipado ("el recurso cambió de estado, recargá"), NUNCA un 500 ni
+ * el mensaje interno de Prisma filtrado al cliente. Cierra la ventana TOCTOU sin lock pesimista.
+ *
+ * @example
+ * try {
+ *   await tx.publishedTrip.update({ where: { id, driverId, estado: { in: editables } }, data });
+ * } catch (err) {
+ *   if (isRecordNotFound(err)) throw new ConflictError('el viaje cambió de estado, recargá');
+ *   throw err;
+ * }
+ */
+export function isRecordNotFound(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== PRISMA_KNOWN_REQUEST_ERROR_NAME) return false;
+  return (err as { code?: unknown }).code === PRISMA_RECORD_NOT_FOUND;
 }
 
 function targetsColumn(target: unknown, column: string): boolean {

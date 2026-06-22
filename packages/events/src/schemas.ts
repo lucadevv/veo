@@ -905,6 +905,87 @@ export const fleetVehicleModelReviewed = z.object({
   reviewedAt: z.string(),
 });
 
+/* ── booking (marketplace de carpooling PROGRAMADO · ADR-014) ── */
+/// Se PUBLICÓ un PublishedTrip (la oferta del conductor pasó a BORRADOR → PUBLICADO). booking-service lo
+/// emite por OUTBOX en la MISMA tx que crea la oferta (FOUNDATION §6 / ADR-014 §7). Topic 'booking'
+/// (el prefijo `booking.` mantiene el topic; `topicForEvent` corta antes del punto), key = publishedTripId.
+/// Downstream núcleo: notification. Dinero en céntimos PEN (Int).
+///
+/// NOMBRE (ADR-014 §7.1, alineado): este evento es la PUBLICACIÓN del PublishedTrip, NO la creación de un
+/// Booking. Antes se llamaba `booking.created` (nombre invertido: §7.1 reserva `booking.created` para "se
+/// crea un Booking"). Se renombra a `booking.published` para que el nombre refleje el agregado real (la
+/// OFERTA), sin cambiar el topic 'booking'.
+export const bookingPublished = z.object({
+  publishedTripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string(),
+  asientosTotales: z.number().int(),
+  precioBase: z.number().int(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']),
+  fechaHoraSalida: z.string(),
+  pais: z.string(),
+  moneda: z.string(),
+});
+/// Se CREÓ un Booking en modo REVISION → PENDIENTE_APROBACION (espera al conductor). ADR-014 §7.1:
+/// `booking.requested` = "Booking → PENDIENTE_APROBACION". SOLO se emite en REVISION_CADA_SOLICITUD; en
+/// INSTANT el Booking NACE APROBADO y emite `booking.approved` (no `booking.requested`). booking-service lo
+/// emite por OUTBOX en la MISMA tx que crea la reserva. Topic 'booking', key = bookingId.
+export const bookingRequested = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN = base + specialRequest
+  modoReserva: z.literal('REVISION_CADA_SOLICITUD'),
+  estado: z.literal('PENDIENTE_APROBACION'),
+});
+/// El Booking quedó APROBADO. ADR-014 §7.1: `booking.approved` = "APROBADO (dispara CHARGE async)". Dos
+/// orígenes: (a) INSTANT_BOOKING, el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2);
+/// (b) REVISION, el conductor aprueba (F1). El campo `origen` distingue ambos para el consumidor. En F0 solo
+/// se emite el caso INSTANT (la aprobación del conductor es F1). Topic 'booking', key = bookingId.
+export const bookingApproved = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']),
+  estado: z.literal('APROBADO'),
+  origen: z.enum(['INSTANT_BOOKING', 'APROBACION_CONDUCTOR']),
+});
+/// El conductor EDITÓ su oferta publicada (F1a). Solo es editable mientras está PUBLICADO (sin reservas
+/// confirmadas / pre-EN_RUTA): itinerario/precio/asientos/modoReserva/reglas. Se emite por OUTBOX en la
+/// MISMA tx que la mutación (espeja booking.published). Topic 'booking', key = publishedTripId. Los campos
+/// son OPCIONALES: el evento lleva solo lo que cambió (patch), más el publishedTripId/driverId de contexto.
+export const bookingUpdated = z.object({
+  publishedTripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string().optional(),
+  origenLat: z.number().optional(),
+  origenLon: z.number().optional(),
+  destinoLat: z.number().optional(),
+  destinoLon: z.number().optional(),
+  asientosTotales: z.number().int().optional(),
+  precioBase: z.number().int().optional(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']).optional(),
+  fechaHoraSalida: z.string().optional(),
+  reglas: z.string().nullable().optional(),
+});
+/// El conductor (o admin) CANCELÓ la oferta publicada (F1a). Transición a CANCELADO desde cualquier estado
+/// PRE-EN_RUTA. El fan-out de Refund a las reservas activas lo gestiona payment-service (F3). booking-service
+/// lo emite por OUTBOX en la MISMA tx que la transición. Topic 'booking', key = publishedTripId.
+export const bookingCancelled = z.object({
+  publishedTripId: z.string(),
+  driverId: z.string(),
+  estado: z.literal('CANCELADO'),
+  /// Estado del que se canceló (auditoría / decisión de Refund downstream).
+  estadoAnterior: z.string(),
+});
+// Los demás eventos del topic 'booking' (booking.rejected/expired/confirmed/started/completed ·
+// ADR-014 §7.1) se DECLARAN al implementar F1-F4 (su emisión vive en la fase que la gatilla).
+
 /** Registro central: eventType → schema del payload. */
 export const EVENT_SCHEMAS = {
   'user.registered': userRegistered,
@@ -987,6 +1068,11 @@ export const EVENT_SCHEMAS = {
   'fleet.vehicle_suspended': fleetVehicleSuspended,
   'fleet.vehicle_registered': fleetVehicleRegistered,
   'fleet.vehicle_model_reviewed': fleetVehicleModelReviewed,
+  'booking.published': bookingPublished,
+  'booking.requested': bookingRequested,
+  'booking.approved': bookingApproved,
+  'booking.updated': bookingUpdated,
+  'booking.cancelled': bookingCancelled,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EventType = keyof typeof EVENT_SCHEMAS;
