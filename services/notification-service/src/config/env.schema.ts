@@ -7,6 +7,15 @@ import { secret } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
 import { SmsProvider } from '../ports/sms/sms.port';
 
+/**
+ * Modos de puerto intercambiable EMAIL (enum tipado, fuente única — sin string mágico esparcido). `live`
+ * usa el SMTP real; `sandbox` solo loguea, no envía. El fail-fast productivo (superRefine) compara contra
+ * `LIVE_MODE`, la constante tipada — nunca contra un literal `'live'` suelto. (PUSH y SMS tienen sus
+ * propias constantes tipadas en sus puertos: `PushMode.Live` y `SmsProvider.*`.)
+ */
+export const PORT_MODES = ['live', 'sandbox'] as const;
+export const LIVE_MODE = 'live' satisfies (typeof PORT_MODES)[number];
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3008),
@@ -45,7 +54,7 @@ export const envSchema = z.object({
   SMS_PROVIDER: z
     .enum([SmsProvider.Sandbox, SmsProvider.Smpp, SmsProvider.Twilio, SmsProvider.WhatsApp])
     .optional(),
-  VEO_EMAIL_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
+  VEO_EMAIL_MODE: z.enum(PORT_MODES).default('sandbox'),
   VEO_WEBHOOK_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
 
   // ---- PUSH: FCM HTTP v1 (google-auth-library) ----
@@ -116,6 +125,60 @@ export const envSchema = z.object({
   SHARE_GRPC_URL: z.string().default('localhost:50059'),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+}).superRefine((env, ctx) => {
+  // FAIL-FAST DE SEGURIDAD (regla ENTORNOS · diferenciador VEO): en un entorno PRODUCTIVO (internet-facing)
+  // TODOS los canales de entrega DEBEN apuntar a un proveedor REAL. `NODE_ENV=production` es la señal canónica
+  // de "entorno endurecido" del repo (cubre preview Y prod, ver @veo/utils isHardenedEnv) — el MISMO criterio
+  // que `secret()` usa para rechazar secretos de dev. En sandbox cada canal usa un sustituto que SOLO loguea y
+  // NO entrega (SMS sandbox loguea el OTP en claro, email sandbox loguea el correo, push sandbox no llega al
+  // device): en producción cualquiera de esos es login/notificaciones rotas + fuga de datos. En local/development
+  // sandbox SIGUE permitido (no rompe el dev/CI sin proveedores reales).
+  //
+  // MATIZ — predicado POR ENTRADA: cada canal define su propia condición de "está en producción-seguro" porque
+  // NO comparten forma. EMAIL y PUSH son MODOS (basta `=== live`). SMS es distinto: la fuente ACTIVA es
+  // `SMS_PROVIDER` (un proveedor concreto: smpp/twilio/whatsapp), no un modo live/sandbox — debe estar DEFINIDO y
+  // NO ser `sandbox`. Por eso la tabla lleva un `check(env) => boolean` por fila, manteniendo un solo loop (DRY)
+  // sin forzar a todos al mismo predicado. Todo contra constantes tipadas (`SmsProvider.Sandbox`, `PushMode.Live`,
+  // `LIVE_MODE`) — nunca contra el literal `'live'`/`'sandbox'` esparcido.
+  //
+  // VEO_SMS_MODE NO se valida acá A PROPÓSITO: es código MUERTO. `resolveProvider()` en sms.module.ts hace
+  // `if (SMS_PROVIDER) return SMS_PROVIDER` ANTES de leer VEO_SMS_MODE — con `SMS_PROVIDER` definido (lo que este
+  // gate EXIGE en prod), VEO_SMS_MODE jamás se evalúa. Validar su valor sería endurecer un flag que en producción
+  // ya no decide nada: arreglar un fantasma. La fuente única real en prod es `SMS_PROVIDER`.
+  type ResolvedEnv = typeof env;
+  const PRODUCTION_LIVE_CHANNELS = [
+    {
+      env: 'SMS_PROVIDER',
+      // Definido Y distinto de sandbox: undefined cae a sandbox (resolveProvider), y 'sandbox' explícito solo
+      // loguea el OTP sin enviarlo. Solo un proveedor real (smpp/twilio/whatsapp) entrega el SMS.
+      check: (e: ResolvedEnv): boolean =>
+        e.SMS_PROVIDER !== undefined && e.SMS_PROVIDER !== SmsProvider.Sandbox,
+      reason:
+        'sin un SMS_PROVIDER real (smpp/twilio/whatsapp) los SMS no se envían (sandbox solo loguea el OTP en claro)',
+    },
+    {
+      env: 'VEO_EMAIL_MODE',
+      check: (e: ResolvedEnv): boolean => e.VEO_EMAIL_MODE === LIVE_MODE,
+      reason: 'el modo sandbox solo loguea los correos, no los envía',
+    },
+    {
+      env: 'VEO_PUSH_MODE',
+      check: (e: ResolvedEnv): boolean => e.VEO_PUSH_MODE === PushMode.Live,
+      reason: 'el modo sandbox no entrega push reales (FCM/APNs)',
+    },
+  ] as const;
+
+  if (env.NODE_ENV === 'production') {
+    for (const channel of PRODUCTION_LIVE_CHANNELS) {
+      if (!channel.check(env)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [channel.env],
+          message: `${channel.env} debe apuntar a un proveedor real en entornos productivos (NODE_ENV=production): ${channel.reason}`,
+        });
+      }
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
