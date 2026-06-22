@@ -125,41 +125,51 @@ const passengerColors: ThemeColors = {
   skeletonHighlight: '#2A2A30',
 };
 
-/* ── Driver · marca oficial VEO · noche, acento VEO Cyan ──────────────────────
- * Alineado al VEO Brand Book (entrega de marca): MISMO sistema de color que el pasajero —
- * lienzo NEGRO PURO de marca (#000000, ideal OLED para turnos largos), tipografía de alto
- * contraste y un único acento VEO Cyan #00E5FF de uso DISCIPLINADO (acción primaria, estado
- * activo, ruta). El conductor NO se diferencia por el theme sino por el app icon (fondo negro,
- * V cyan) y el lockup "VEO | Conductores". Antes el driver usaba un navy #121824 + cyan lavado
- * #39BCDF que DIVERGÍA del Brand Book; se corrigió en el pase de marca del conductor. */
+/* ── Driver · AZUL ELÉCTRICO · noche, acento azul de confianza ─────────────────
+ * Dirección visual propia del CONDUCTOR: AZUL ELÉCTRICO (#2D7FF9) — confianza + premium para
+ * movilidad segura. El pasajero queda en cyan; el conductor se diferencia por su paleta azul.
+ * Lienzo near-black AZULADO (#0A0B0F, NO negro plano — tinta levemente el neutral hacia el azul,
+ * ideal OLED para turnos largos) y un único acento azul de uso DISCIPLINADO (acción primaria,
+ * estado activo, ruta). El azul nunca rellena áreas grandes; cuando lo hace (botón primario) el
+ * texto encima es BLANCO. Neutrales tintados hacia azul/frío, nunca #000/#fff planos.
+ *
+ * Contraste AA verificado (calculado, ratios reales WCAG 2.1):
+ *   · ink #F5F7FA sobre bg #0A0B0F → 18.33:1 (AAA holgado)
+ *   · inkMuted #C4CBD6 sobre bg #0A0B0F → 12.05:1 (pasa AA texto normal ≥4.5)
+ *   · inkSubtle #8A929E sobre bg #0A0B0F → 6.26:1 (terciario/placeholder, igual pasa AA)
+ *   · onAccent/onBrand #FFFFFF sobre brand/accent #2D7FF9 → 3.81:1 (pasa AA-large 3:1; el texto
+ *     de botón es semibold/grande, así que NO hace falta oscurecer el azul)
+ *   · onDanger #1A0306 sobre danger #FF4D6A → 6.15:1 (texto oscuro sobre rojo brillante)
+ *   · onSafe #04160D sobre safe/success #34D399 → 9.70:1
+ *   · onWarn #201301 sobre warn #F2AF48 → 9.52:1 */
 const driverColors: ThemeColors = {
-  bg: '#000000',
-  surface: '#0E0E11',
-  surfaceElevated: '#1C1C22',
-  ink: '#F4F6F8',
-  inkMuted: '#CFD3DA',
-  inkSubtle: '#8A909C',
-  border: '#17171B',
-  borderStrong: '#2A2A30',
-  brand: '#00E5FF',
-  brandHover: '#00B8CC',
-  onBrand: '#000000',
-  accent: '#00E5FF',
-  accentHover: '#33EAFF',
-  onAccent: '#000000',
+  bg: '#0A0B0F',
+  surface: '#14161C',
+  surfaceElevated: '#1E212A',
+  ink: '#F5F7FA',
+  inkMuted: '#C4CBD6',
+  inkSubtle: '#8A929E',
+  border: '#1C1F27',
+  borderStrong: '#2B2F3A',
+  brand: '#2D7FF9',
+  brandHover: '#1E6AE0',
+  onBrand: '#FFFFFF',
+  accent: '#2D7FF9',
+  accentHover: '#5598FB',
+  onAccent: '#FFFFFF',
   safe: '#34D399',
   onSafe: '#04160D',
   success: '#34D399',
   onSuccess: '#04160D',
   warn: '#F2AF48',
   onWarn: '#201301',
-  danger: '#FF3B5C',
-  dangerHover: '#E62E4D',
-  onDanger: '#000000',
-  focus: '#00E5FF',
-  overlay: 'rgba(0,0,0,0.66)',
-  skeleton: '#1C1C22',
-  skeletonHighlight: '#2A2A30',
+  danger: '#FF4D6A',
+  dangerHover: '#E63A56',
+  onDanger: '#1A0306',
+  focus: '#2D7FF9',
+  overlay: 'rgba(5,7,12,0.7)',
+  skeleton: '#14161C',
+  skeletonHighlight: '#1E212A',
 };
 
 // Marca VEO: la elevación se expresa con superficie + sombras tenues (modo noche),
@@ -292,16 +302,16 @@ export const passengerMapRoute: MapRouteTokens = {
 };
 
 /**
- * Tokens de ruta para el CONDUCTOR ("Midnight Motion" variante cian). Mismo lenguaje que el
- * pasajero (halo translúcido + línea nítida) pero con el acento cian del `driverTheme`, para que
+ * Tokens de ruta para el CONDUCTOR (variante AZUL ELÉCTRICO). Mismo lenguaje que el pasajero
+ * (halo translúcido + línea nítida) pero con el acento azul #2D7FF9 del `driverTheme`, para que
  * la ruta dibujada en MapLibre sea consistente con el resto de la app del conductor.
  */
 export const driverMapRoute: MapRouteTokens = {
-  routeColor: '#00E5FF',
+  routeColor: '#2D7FF9',
   routeWidth: 6,
-  routeGlowColor: 'rgba(0,229,255,0.35)',
+  routeGlowColor: 'rgba(45,127,249,0.35)',
   routeGlowWidth: 14,
-  originColor: '#00E5FF',
-  destinationColor: '#00E5FF',
-  userDotColor: '#00E5FF',
+  originColor: '#2D7FF9',
+  destinationColor: '#2D7FF9',
+  userDotColor: '#2D7FF9',
 };
