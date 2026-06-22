@@ -37,3 +37,18 @@ export const CurrentUser = createParamDecorator(
     return req.user;
   },
 );
+
+/**
+ * Inyecta el RIEL emisor (`InternalIdentity.aud`) de la identidad interna firmada que adjuntó
+ * InternalIdentityGuard. Ortogonal a `@CurrentUser` (que da el principal): el riel dice QUIÉN emitió la
+ * identidad (public/driver/admin o una llamada de SISTEMA service-rail). Útil para endpoints de DOBLE
+ * PROPÓSITO que se comportan distinto según el riel — p.ej. un on-behalf-of: el riel de sistema lee el
+ * sujeto de un parámetro; el riel de cliente lo deriva de la identidad firmada (anti-IDOR). `undefined` si
+ * no hay identidad (no debería ocurrir tras InternalIdentityGuard, salvo en endpoints @Public).
+ */
+export const CurrentRail = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): InternalAudience | undefined => {
+    const req = ctx.switchToHttp().getRequest<{ user?: { aud?: InternalAudience } }>();
+    return req.user?.aud;
+  },
+);
