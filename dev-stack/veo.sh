@@ -338,6 +338,8 @@ boot_biometric() {
   local svc port dir kind health
   IFS='|' read -r svc port dir kind health <<<"$line"
   local svc_dir="$ROOT_DIR/$dir" logf="$LOGS_DIR/$svc.log" pidf="$PIDS_DIR/$svc.pid"
+  # APP_ENV puede no estar seteado al restartear SOLO biometric (no pasa por el boot de node que lo exporta).
+  : "${APP_ENV:=development}"
 
   if port_in_use "$port"; then
     blue "  · biometric ya corre en :$port (pid $(pid_on_port "$port")) — idempotente, no duplico"
