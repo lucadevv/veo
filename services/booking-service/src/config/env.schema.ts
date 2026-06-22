@@ -1,0 +1,105 @@
+/**
+ * Validación de entorno del booking-service (FOUNDATION §4 · fail-fast al boot). Si falta una var
+ * requerida, el servicio NO arranca. Mismo patrón que identity-service.
+ *
+ * Puertos fijos del servicio (ADR-014 §12): REST 3016, gRPC 50054.
+ */
+import { z } from 'zod';
+import { secret } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
+
+// ── SOBERANÍA DE ROUTING (FOUNDATION §0.7, regla maestra) ────────────────────────────────────────
+// El routing respalda el tope LEGAL de cost-sharing (F1b): es DATO sensible (coordenadas reales del
+// viaje) y por tanto SOBERANO — motor propio self-hosted (OSM: OSRM/Valhalla en prod, motor local
+// determinista en dev/CI). Mapbox (SaaS de tercero) queda EXCLUIDO A PROPÓSITO: mandar las coordenadas
+// del viaje a un tercero viola soberanía + privacidad (Ley 29733). Aunque `@veo/maps.MAPS_MODES` aún
+// expone 'mapbox' (drift de contrato del paquete, ver follow-up de soberanía transversal), booking-service
+// FILTRA ese modo acá para que NUNCA pueda seleccionarlo, ni siquiera por env mal configurado.
+type SovereignMapsMode = Exclude<(typeof MAPS_MODES)[number], 'mapbox'>;
+const SOVEREIGN_MAPS_MODES = MAPS_MODES.filter(
+  (m): m is SovereignMapsMode => m !== 'mapbox',
+) as [SovereignMapsMode, ...SovereignMapsMode[]];
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(3016),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Base de datos (read/write split). Schema lógico propio "booking" (DB-per-service).
+  DATABASE_URL: z.string().url(),
+  DATABASE_URL_REPLICA: z.string().url().optional(),
+
+  // Redis (reservado para gates/locks de fases futuras; el lock de asientos del §6 es F3).
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+
+  // Kafka (outbox relay → topic 'booking').
+  KAFKA_BROKERS: z.string().default('localhost:9094'),
+
+  // Secreto de identidad interna que el BFF propaga a servicios (InternalIdentityGuard). DEBE ser
+  // IDÉNTICO en todos los services y BFFs; si difiere, el guard interno rechaza la request.
+  INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
+
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+
+  // gRPC (lectura síncrona desde otros servicios; expone booking.GetPublishedTrip/GetBooking — F2+).
+  GRPC_URL: z.string().default('0.0.0.0:50054'),
+
+  // ── Puertos gRPC SALIENTES (consumo síncrono) ──
+  // identity.GetDriver (gate F1a: status/suspensión/KYC/antecedentes del conductor antes de publicar).
+  IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
+  // fleet.GetDriverVehicles (gate F1a anti-IDOR: pertenencia + vigencia del vehículo al publicar).
+  // Default verificado contra dispatch-service / BFFs (fleet gRPC = localhost:50062).
+  FLEET_GRPC_URL: z.string().default('localhost:50062'),
+  // payment.GetPayment (validar método al reservar + derivar gate de deuda — F1/F3).
+  PAYMENT_GRPC_URL: z.string().default('localhost:50052'),
+
+  // ── BÚSQUEDA GEO H3 (F2 · §6.2) ─────────────────────────────────────────────────────────────────
+  // k del anillo H3 de búsqueda (neighbors(celda, k)). k=1 → 7 celdas (≈ la celda + su corona), buen
+  // balance urbano Lima (res 9 ≈ 174m). Si la búsqueda con k=1 da CERO resultados, el service EXPANDE a
+  // SEARCH_H3_K_RING_EXPAND (k=2 → 19 celdas) una vez. TUNABLES por env sin redeploy. Subir k agranda el
+  // radio (más resultados, menos precisión de "cerca"); bajarlo lo achica. Defaults conservadores.
+  SEARCH_H3_K_RING: z.coerce.number().int().min(0).max(5).default(1),
+  SEARCH_H3_K_RING_EXPAND: z.coerce.number().int().min(0).max(8).default(2),
+
+  // ── @veo/maps (F1b · tope de cost-sharing por distancia) · ROUTING SOBERANO (§0.7) ────────────
+  // El tope legal anti-lucro se calcula sobre la DISTANCIA real de la ruta (km) × costo/km. La distancia
+  // sale SÓLO de @veo/maps (paquete workspace, soberanía OSM self-hosted §0.7 — NUNCA un tercero SaaS),
+  // detrás de un puerto propio (MapsModule), idéntico patrón a trip-service/dispatch-service.
+  // 'local' = motor determinista propio (dev/CI sin red, default). 'osrm' = infra OSM self-hosted (prod).
+  // Enum = SOVEREIGN_MAPS_MODES (MAPS_MODES SIN 'mapbox'): mapbox queda EXCLUIDO a propósito porque
+  // mandaría las coordenadas del viaje a un tercero (violación de soberanía + privacidad Ley 29733).
+  VEO_MAPS_MODE: z.enum(SOVEREIGN_MAPS_MODES).default('local'),
+  OSRM_BASE_URL: z.string().default('http://localhost:5000'),
+  NOMINATIM_BASE_URL: z.string().default('http://localhost:8080'),
+  // Timeout por request al motor de rutas (ms). Gate de publicación FAIL-CLOSED: si OSRM no responde en
+  // este tiempo, no se publica (mejor bloquear que publicar sin validar el tope legal).
+  MAPS_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
+  // ── Costo de referencia por km, por país (F1b · ESCUDO LEGAL anti-lucro, ADR-014 §8) ──────────
+  // ⚠️ VALORES PROVISIONALES — NO son definitivos. El tope de cost-sharing existe para que la oferta sea
+  // COMPARTIR COSTOS, no lucro (carpooling, no taxi informal): precio del asiento ≤ (distancia_km ×
+  // costo/km) / asientosTotales. Estos defaults (PE: S/1.00/km = 100 céntimos; EC: 50 céntimos) son una
+  // ESTIMACIÓN INICIAL razonable; el DUEÑO debe VALIDARLOS con legal/finanzas ANTES de lanzar a producción
+  // (combustible + desgaste + peajes reales por país). Hasta entonces, tratar como placeholder configurable.
+  COST_PER_KM_CENTS_PE: z.coerce.number().int().positive().default(100),
+  COST_PER_KM_CENTS_EC: z.coerce.number().int().positive().default(50),
+})
+  .superRefine((env, ctx) => {
+    // Routing SOBERANO fail-fast (§0.7): en prod el gate legal F1b NO puede correr sobre el motor 'local'
+    // (estimación determinista de dev/CI, sin red). Prod EXIGE 'osrm' (infra OSM self-hosted), si no el
+    // tope de cost-sharing se validaría con distancias aproximadas. Falla temprano y claro al boot.
+    if (env.NODE_ENV === 'production' && env.VEO_MAPS_MODE !== 'osrm') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['VEO_MAPS_MODE'],
+        message:
+          "En producción VEO_MAPS_MODE debe ser 'osrm' (routing soberano OSM self-hosted, §0.7); 'local' es solo dev/CI.",
+      });
+    }
+  });
+
+export type Env = z.infer<typeof envSchema>;
+
+export function validateEnv(config: Record<string, unknown>): Env {
+  return envSchema.parse(config);
+}
