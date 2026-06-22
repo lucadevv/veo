@@ -381,9 +381,10 @@ def face_match(
     Cierra el hueco de seguridad: confirma que la persona enrolada ES la del documento.
     NO hay liveness (el DNI es una foto estática); reusa el MISMO motor que /v1/verify:
     decode (EXIF) → SCRFD (best_detection, exige 1 rostro claro) → ArcFace (embed) →
-    match coseno (match_score) contra `referenceEmbedding` con el MISMO umbral de config
-    (settings.match_threshold, BR-I02). Endpoint sync (`def`) → threadpool de FastAPI, así
-    la inferencia ONNX (CPU-bound) no bloquea el event loop.
+    match coseno (match_score) contra `referenceEmbedding` con el umbral SEPARADO del doc-match
+    (settings.doc_match_threshold, default 0.30, NO el de turno match_threshold). El DNI es foto
+    vieja/baja-res → la misma persona cae más bajo que un live selfie-vs-selfie. Endpoint sync
+    (`def`) → threadpool de FastAPI, así la inferencia ONNX (CPU-bound) no bloquea el event loop.
 
     Degradación honesta (nunca un PASS inventado):
       - modelos ausentes → 503.
@@ -423,7 +424,10 @@ def face_match(
         # Mismo motor de match que /v1/verify: similitud coseno mapeada a [0,1].
         score = match_score(probe, reference)
 
-    threshold = settings.match_threshold
+    # Doc-match usa su PROPIO umbral (settings.doc_match_threshold, default 0.30), NO el de turno
+    # (match_threshold, 0.40). El DNI es foto vieja/baja-res → la misma persona cae más bajo; el umbral
+    # de turno la rechazaría. Ver config.py:doc_match_threshold.
+    threshold = settings.doc_match_threshold
     matched = score >= threshold
     reason = None if matched else f"Similitud {score:.4f} por debajo del umbral {threshold:.2f}"
 

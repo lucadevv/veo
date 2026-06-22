@@ -98,6 +98,30 @@ def test_face_match_embedding_distinto_no_matchea(monkeypatch: pytest.MonkeyPatc
     assert "umbral" in body["reason"].lower()
 
 
+def test_face_match_coseno_040_matchea_con_umbral_doc_030(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix doc-match: un coseno ~0.40 (legítimo doc-vs-selfie, DNI viejo/baja-res) AHORA matchea con el
+    umbral SEPARADO del doc (doc_match_threshold=0.30). Con el umbral de turno (0.40) caería al borde y
+    rechazaría a la persona real. Construimos probe = ref·cos(θ) + ortogonal·sin(θ) con cos(θ)=0.40."""
+    rng = np.random.default_rng(7)
+    ref = rng.standard_normal(512).astype(np.float32)
+    ref /= np.linalg.norm(ref)
+    # Vector ortogonal a ref (Gram-Schmidt) para componer un coseno exacto.
+    raw = rng.standard_normal(512).astype(np.float32)
+    ortho = raw - np.dot(raw, ref) * ref
+    ortho /= np.linalg.norm(ortho)
+    target = 0.40
+    probe = (target * ref + np.sqrt(1.0 - target**2) * ortho).astype(np.float32)
+
+    client = _build_client(monkeypatch, _FakePipeline(embedding=probe))
+    res = client.post("/v1/face-match", json=_body(reference=ref.tolist()))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["score"] == pytest.approx(0.40, abs=1e-3)
+    # 0.40 >= doc_match_threshold (0.30) → MATCHED. (Con match_threshold de turno 0.40 sería el borde.)
+    assert body["matched"] is True
+    assert body["reason"] is None
+
+
 def test_face_match_sin_rostro_es_matched_false_con_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _build_client(monkeypatch, _FakePipeline(faces=0))
     res = client.post("/v1/face-match", json=_body())

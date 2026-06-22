@@ -73,25 +73,16 @@ export class StartShiftDto {
 }
 
 /**
- * POST /drivers/biometric/enroll → body. Enrolamiento CON LIVENESS (BR-I02): el reto emitido por
- * GET /drivers/me/biometric/liveness/challenge + los frames capturados. El BFF solo valida shape y proxya a
- * identity-service, que aplica el liveness real (endurecimiento fino por frame vive en identity).
+ * POST /drivers/biometric/enroll → body. Enrolamiento KYC con UNA selfie, SIN prueba de vida (Lote 1): el
+ * conductor manda una sola foto en base64 (`photo`, sin prefijo data:). El BFF solo valida shape y proxya a
+ * identity-service, que deriva el embedding de referencia vía biometric-service `/v1/embed`. Reemplaza el
+ * contrato de liveness `{ challengeId, frames }` (el alta ya no corre el reto girar/asentir).
  */
 export class EnrollFaceDto {
-  @ApiProperty({ description: 'Id del reto de liveness emitido en /me/biometric/liveness/challenge' })
+  @ApiProperty({ description: 'Selfie de referencia en base64 (sin prefijo data:)' })
   @IsString()
   @IsNotEmpty()
-  challengeId!: string;
-
-  @ApiProperty({
-    description: 'Frames del reto de liveness en base64 (orden temporal, 1..30)',
-    type: [String],
-  })
-  @IsArray()
-  @ArrayNotEmpty()
-  @ArrayMaxSize(30)
-  @IsString({ each: true })
-  frames!: string[];
+  photo!: string;
 }
 
 /** POST /drivers/shift/biometric/verify → body. Reto + frames del liveness (BR-I02). */

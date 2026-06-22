@@ -128,7 +128,8 @@ class FaceMatchRequest(BaseModel):
     Compara el ROSTRO de una imagen (la foto del DNI, anverso) contra el embedding de
     referencia de la selfie enrolada. Cierra el hueco de seguridad: confirma que la
     persona enrolada ES la del documento. NO hay liveness (el DNI es una foto estática);
-    el match coseno usa el MISMO umbral que /v1/verify (config, BR-I02).
+    el match coseno usa el umbral SEPARADO del doc-match (config doc_match_threshold, default
+    0.30, más laxo que el de turno: el DNI es foto vieja/baja-res, BR-I02).
     """
 
     image: str = Field(..., min_length=1, description="Foto del DNI (anverso) en base64")

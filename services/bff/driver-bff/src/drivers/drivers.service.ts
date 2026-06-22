@@ -229,7 +229,7 @@ export class DriversService {
     );
   }
 
-  /** Enrolamiento facial de referencia CON LIVENESS (BR-I02) → identity-service. */
+  /** Enrolamiento facial de referencia con UNA selfie, sin liveness (Lote 1) → identity-service. */
   enrollFace(
     identity: AuthenticatedUser,
     dto: EnrollFaceDto,

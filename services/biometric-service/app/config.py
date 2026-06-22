@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     # etiquetado de la población real (recomputar EER/FMR). Configurable por VEO_BIO_MATCH_THRESHOLD.
     match_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
 
+    # Umbral coseno SEPARADO para el doc-match (DNI↔selfie, /v1/face-match), distinto del de turno
+    # (selfie-vs-selfie, /v1/verify). El match doc-vs-selfie cae naturalmente más bajo: la foto del DNI es
+    # vieja/baja-res/con holograma → la misma persona da coseno ~0.30–0.40, no el ~0.40–0.60 de un live
+    # selfie-vs-selfie. Reusar 0.40 (umbral de turno) rechaza a la persona legítima. Default 0.30: borde
+    # inferior de la franja oficial InsightFace (buffalo_l/w600k_r50). Configurable por
+    # VEO_BIO_DOC_MATCH_THRESHOLD. NO toca el umbral de turno.
+    # DEUDA: umbral doc-match 0.30 heuristica de dominio · techo: FMR no calibrado a poblacion real · gatillo: calibrar con validation set etiquetado (EER/FMR) antes de prod
+    doc_match_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
+
     # Consistencia de identidad intra-secuencia (anti-spoofing/splicing): el frame de match debe ser la
     # MISMA persona que hizo el gesto de liveness. Umbral coseno bajo (de la franja oficial 0.30–0.45):
     # intra-sesión la misma persona da coseno alto (>0.6), una persona distinta cae bajo (<0.3) → separa

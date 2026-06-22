@@ -1748,13 +1748,17 @@ export const driverLivenessChallengeResponse = z.object({
 export type DriverLivenessChallengeResponse = z.infer<typeof driverLivenessChallengeResponse>;
 
 /**
- * POST /drivers/biometric/enroll → body. Enrolamiento CON LIVENESS: el `challengeId` del reto emitido por
- * GET /drivers/me/biometric/liveness/challenge + los `frames` capturados mientras el conductor ejecutaba la
- * acción (anti-spoofing). Reemplaza la foto suelta `{ photo }` (spoofeable con una imagen).
+ * POST /drivers/biometric/enroll → body. Enrolamiento KYC con UNA selfie (SIN prueba de vida): el conductor
+ * manda una sola foto en base64 (`photo`, sin prefijo data:) → biometric-service deriva el embedding ArcFace
+ * de referencia (1 rostro detectado). El match contra el DNI lo resuelve después el face-match del binding.
+ * Reemplaza el contrato de liveness `{ challengeId, frames }` (el alta ya no ejecuta el reto girar/asentir).
+ *
+ * Cota de tamaño base64 (chars), alineada con FRAME_BASE64_MIN/MAX del borde server: una selfie JPEG real
+ * son decenas de KB → decenas de miles de chars base64; el piso descarta trivialidades, el techo acota el
+ * body parser. NO valida `data:` prefix: el cliente manda el base64 crudo.
  */
 export const driverBiometricEnrollRequest = z.object({
-  challengeId: z.string().min(1),
-  frames: z.array(z.string().min(1)).min(1).max(30),
+  photo: z.string().min(2_000).max(1_500_000),
 });
 export type DriverBiometricEnrollRequest = z.infer<typeof driverBiometricEnrollRequest>;
 
@@ -1809,6 +1813,13 @@ export const driverOnboardRequest = z.object({
   licenseExpiresAt: z.string(),
 });
 export type DriverOnboardRequest = z.infer<typeof driverOnboardRequest>;
+
+/** Forma que devuelve `POST /drivers/onboard`: perfil FINO (driverId + estado de antecedentes), NO el perfil agregado de `GET /drivers/me`. */
+export const driverOnboardResult = z.object({
+  driverId: z.string(),
+  backgroundCheckStatus: z.string(),
+});
+export type DriverOnboardResult = z.infer<typeof driverOnboardResult>;
 
 export const driverDocumentView = z.object({
   type: z.string(),
