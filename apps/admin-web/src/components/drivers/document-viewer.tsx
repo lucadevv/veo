@@ -8,7 +8,7 @@ import type {
   DocumentSideValue,
   FleetDocumentTypeValue,
 } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
+import { date } from '@/lib/formatters';
 import { useDocumentReview } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -145,7 +145,7 @@ function DocumentCard({
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between text-sm">
           <span className="text-ink-muted">Vencimiento</span>
-          <span className="text-ink tabular">{dateTime(doc.expiresAt)}</span>
+          <span className="text-ink tabular">{date(doc.expiresAt)}</span>
         </div>
         {/* El motivo de rechazo es read-only acá: lo persiste fleet cuando exista (ver DEUDA en las acciones). */}
         {doc.rejectionReason ? (

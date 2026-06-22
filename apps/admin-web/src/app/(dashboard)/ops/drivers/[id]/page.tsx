@@ -11,7 +11,7 @@ import {
   useDeleteDriver,
   useDniFaceMatch,
 } from '@/lib/api/queries';
-import { dateTime } from '@/lib/formatters';
+import { date, dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -96,7 +96,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
                 <Detail label="Nombre" value={driver.fullName ?? '—'} />
                 <Detail label="Teléfono" value={driver.phone ?? '—'} mono />
                 <Detail label="DNI" value={driver.dni ?? '—'} mono />
-                <Detail label="Fecha de nacimiento" value={driver.birthDate ?? '—'} />
+                <Detail label="Fecha de nacimiento" value={driver.birthDate ? date(driver.birthDate) : '—'} />
                 <Detail label="Licencia" value={driver.licenseNumber ?? '—'} mono />
                 <Detail label="Alta" value={dateTime(driver.createdAt)} />
                 <div>
@@ -208,6 +208,22 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
  * acción del admin-bff (baja la foto FRONT del DNI de S3 → cotea con la biometría enrolada → guarda). El
  * operador VE el binding antes de aprobar (no aprueba a ciegas). El gate REAL es server-side; esto refleja.
  */
+/**
+ * El `dniFaceMatchScore` GUARDADO está en escala 0..100 (= similitud coseno ArcFace × 100). Mostrarlo como
+ * "{score}%" ENGAÑA: un 0.40 de coseno legítimo (DNI viejo/baja-res, misma persona) se LEE como "40% de
+ * confianza" → el operador cree que hay 60% de que NO sea la persona, cuando en realidad 0.40 es un coseno
+ * sano para doc-vs-selfie (el umbral del doc-match es 0.30, más laxo que el de turno 0.40). Devolvemos el
+ * coseno REAL (no un porcentaje de confianza inventado) + una banda cualitativa honesta.
+ */
+function formatFaceMatchScore(score0to100: number): { cosine: string; band: string } {
+  const cosine = score0to100 / 100;
+  // Bandas cualitativas sobre el coseno ArcFace (doc-vs-selfie). NO son probabilidades: orientan al
+  // operador sin fingir precisión que no tenemos (sin calibración FMR a población real).
+  const band =
+    cosine >= 0.5 ? 'similitud alta' : cosine >= 0.3 ? 'similitud media' : 'similitud baja';
+  return { cosine: cosine.toFixed(2), band };
+}
+
 function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
   const { toast } = useToast();
   const match = useDniFaceMatch();
@@ -251,7 +267,9 @@ function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
           <Check className="size-4" aria-hidden />
           <span className="font-medium">Coincide</span>
           {dniFaceMatchScore !== null ? (
-            <span className="tabular text-xs text-success/80">{Math.round(dniFaceMatchScore)}%</span>
+            <span className="tabular text-xs text-success/80">
+              {`similitud ${formatFaceMatchScore(dniFaceMatchScore).cosine} · ${formatFaceMatchScore(dniFaceMatchScore).band}`}
+            </span>
           ) : null}
           <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
         </div>
@@ -260,7 +278,9 @@ function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
           <X className="size-4" aria-hidden />
           <span className="font-medium">No coincide</span>
           {dniFaceMatchScore !== null ? (
-            <span className="tabular text-xs text-danger/80">{Math.round(dniFaceMatchScore)}%</span>
+            <span className="tabular text-xs text-danger/80">
+              {`similitud ${formatFaceMatchScore(dniFaceMatchScore).cosine} · ${formatFaceMatchScore(dniFaceMatchScore).band}`}
+            </span>
           ) : null}
           <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
         </div>

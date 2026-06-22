@@ -16,7 +16,7 @@ import type {
   VehicleModelReviewView,
   VehicleView,
 } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
+import { date, dateTime } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -62,7 +62,7 @@ const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
   {
     accessorKey: 'expiresAt',
     header: 'Vence',
-    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.expiresAt)}</span>,
+    cell: ({ row }) => <span className="text-ink-muted">{date(row.original.expiresAt)}</span>,
   },
   {
     id: 'actions',
@@ -167,7 +167,7 @@ const expiringColumns: ColumnDef<ExpiringDocumentView, unknown>[] = [
   {
     accessorKey: 'expiresAt',
     header: 'Vence',
-    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.expiresAt)}</span>,
+    cell: ({ row }) => <span className="text-ink-muted">{date(row.original.expiresAt)}</span>,
   },
   {
     accessorKey: 'daysUntilExpiry',
