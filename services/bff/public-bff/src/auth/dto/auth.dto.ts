@@ -8,7 +8,15 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
-import { type ActorType, ACTOR_TYPES } from '@veo/shared-types';
+import { ActorType, ACTOR_TYPES } from '@veo/shared-types';
+
+/**
+ * Tipo de actor reenviado a identity en los flujos OTP de ESTE BFF. El public-bff es el BFF del
+ * PASAJERO: NUNCA emite OTP de conductor. Por eso el `type` se fija server-side a passenger y NO se
+ * acepta del cliente (defensa en profundidad: el JWT guard cierra las rutas protegidas, pero el login
+ * del propio BFF también se acota). Constante tipada del dominio — sin string mágico.
+ */
+export const OTP_ACTOR_TYPE: ActorType = ActorType.PASSENGER;
 
 /** Teléfono peruano (formato BR-I06): 9XXXXXXXX, opcionalmente con prefijo de país 51/+51. */
 const PERU_PHONE = /^\+?(?:51)?9\d{8}$/;
@@ -16,15 +24,17 @@ const PERU_PHONE = /^\+?(?:51)?9\d{8}$/;
 /** Versión del mensaje canónico de la firma de pánico (debe coincidir con panic-service). */
 export const PANIC_SIGNATURE_VERSION = 'panic.trigger:v1';
 
+/**
+ * El `type` del OTP NO se acepta del cliente: el service lo fija a {@link OTP_ACTOR_TYPE} (passenger).
+ * Un payload con `type` se descarta por el whitelist del ValidationPipe (no se reenvía a identity).
+ */
 export class RequestOtpDto {
   @IsString()
   @Matches(PERU_PHONE, { message: 'Teléfono peruano inválido' })
   phone!: string;
-
-  @IsIn(ACTOR_TYPES)
-  type!: ActorType;
 }
 
+/** Igual que {@link RequestOtpDto}: el `type` se fija server-side a passenger, no llega del cliente. */
 export class VerifyOtpDto {
   @IsString()
   @Matches(PERU_PHONE, { message: 'Teléfono peruano inválido' })
@@ -33,9 +43,6 @@ export class VerifyOtpDto {
   @IsString()
   @Length(6, 6, { message: 'El OTP tiene 6 dígitos' })
   code!: string;
-
-  @IsIn(ACTOR_TYPES)
-  type!: ActorType;
 }
 
 /**

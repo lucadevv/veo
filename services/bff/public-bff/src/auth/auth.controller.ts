@@ -38,7 +38,7 @@ export class AuthController {
   @HttpCode(200)
   // Borde anti-flood SMS: 5 cada 10min por IP+teléfono (identity ya tiene cooldown 30s + maxAttempts).
   @RateLimit({ max: 5, windowMs: TEN_MIN, by: ['ip', 'phone'] })
-  @ApiOperation({ summary: 'Solicitar OTP por SMS' })
+  @ApiOperation({ summary: 'Solicitar código de verificación (WhatsApp con respaldo SMS)' })
   requestOtp(@Body() dto: RequestOtpDto): Promise<{ sent: true }> {
     return this.auth.requestOtp(dto);
   }
@@ -112,6 +112,10 @@ export class AuthController {
   @Public()
   @Post('oauth/google')
   @HttpCode(200)
+  // Anti-abuso de OAuth (fuerza bruta de id_token / spam de verificación): 10 cada 10min por IP.
+  // El body no porta phone/email estables (vienen del id_token verificado server-side), así que la IP
+  // es el ancla del borde; identity valida el id_token contra Google y es la defensa de fondo.
+  @RateLimit({ max: 10, windowMs: TEN_MIN, by: ['ip'] })
   @ApiOperation({ summary: 'Iniciar sesión con Google (verifica el id_token server-side)' })
   loginWithGoogle(@Body() dto: GoogleOAuthDto): Promise<AuthTokens> {
     return this.auth.loginWithGoogle(dto);
@@ -120,6 +124,10 @@ export class AuthController {
   @Public()
   @Post('oauth/apple')
   @HttpCode(200)
+  // Anti-abuso de OAuth (fuerza bruta de identityToken / spam de verificación): 10 cada 10min por IP.
+  // Mismo criterio que google: la IP es el ancla del borde; identity valida el identityToken contra
+  // Apple y es la defensa de fondo.
+  @RateLimit({ max: 10, windowMs: TEN_MIN, by: ['ip'] })
   @ApiOperation({ summary: 'Iniciar sesión con Apple (verifica el identityToken server-side)' })
   loginWithApple(@Body() dto: AppleOAuthDto): Promise<AuthTokens> {
     return this.auth.loginWithApple(dto);

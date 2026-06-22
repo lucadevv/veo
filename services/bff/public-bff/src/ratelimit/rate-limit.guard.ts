@@ -18,11 +18,11 @@ interface RequestLike {
   method?: string;
   url?: string;
   ip?: string;
-  ips?: string[];
   route?: { path?: string };
   user?: AuthenticatedUser;
   socket?: { remoteAddress?: string };
   body?: Record<string, unknown>;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 @Injectable()
@@ -86,9 +86,33 @@ export class RateLimitGuard implements CanActivate {
     return `${ip}:${userId}:${method}:${route}`;
   }
 
-  /** IP del cliente (respeta el primer hop confiable de `req.ips` cuando hay trust proxy). */
+  /**
+   * IP real del cliente. Detrás de cloudflared/ALB, `req.ip` y `x-forwarded-for` resuelven al túnel
+   * (todos los clientes comparten la IP del proxy → un único cubo global, rate-limit inútil). Por eso
+   * `cf-connecting-ip` (la IP real que pone Cloudflare, no spoofeable si el tráfico entra por
+   * Cloudflare) tiene PRECEDENCIA. Si no está, caemos a `x-forwarded-for` (primer hop) y por último a
+   * `req.ip`/socket. Lógica consistente con admin-bff y driver-bff.
+   *
+   * NOTA (follow-up C2): leer `x-forwarded-for` CRUDO es spoofeable. El fix de plataforma definitivo es
+   * `app.set('trust proxy', <hops conocidos>)` en los 3 main.ts para que `req.ip` sea un-spoofeable.
+   */
   private clientIp(req: RequestLike): string {
-    return req.ips?.[0] ?? req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+    const headers = req.headers;
+    if (headers) {
+      const cf = this.firstHeader(headers['cf-connecting-ip']);
+      if (cf) return cf;
+      const fwd = headers['x-forwarded-for'];
+      if (typeof fwd === 'string' && fwd.length > 0) return (fwd.split(',')[0] ?? fwd).trim();
+      if (Array.isArray(fwd) && fwd.length > 0) return fwd[0]?.trim() ?? 'unknown';
+    }
+    return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  }
+
+  /** Primer valor no vacío de un header string | string[]; undefined si no aplica. */
+  private firstHeader(value: string | string[] | undefined): string | undefined {
+    if (typeof value === 'string' && value.length > 0) return value.trim();
+    if (Array.isArray(value) && value.length > 0) return value[0]?.trim() || undefined;
+    return undefined;
   }
 
   /**

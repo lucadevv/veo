@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { JwtAuthGuard } from '@veo/auth';
+import { EXPECTED_SUBJECT_TYPE, JwtAuthGuard, type SubjectType } from '@veo/auth';
 import { MetricsModule } from '@veo/observability';
 import { validateEnv } from './config/env.schema';
 import { CoreModule } from './infra/core.module';
@@ -54,6 +54,10 @@ import { RealtimeModule } from './realtime/realtime.module';
     SupportModule,
   ],
   providers: [
+    // public-bff SOLO acepta tokens de tipo 'passenger' (el JwtAuthGuard rechaza conductor/admin
+    // aunque la firma/audiencia sean válidas, mismo iss/aud/clave) — defensa en profundidad, igual
+    // que admin-bff con 'admin' y driver-bff con 'driver'. No depende solo del RBAC.
+    { provide: EXPECTED_SUBJECT_TYPE, useValue: 'passenger' satisfies SubjectType },
     // El JWT se valida primero (puebla req.user); luego el rate limiter usa la identidad.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
