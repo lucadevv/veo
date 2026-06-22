@@ -940,10 +940,24 @@ export const bookingRequested = z.object({
   modoReserva: z.literal('REVISION_CADA_SOLICITUD'),
   estado: z.literal('PENDIENTE_APROBACION'),
 });
+/// Origen de un `booking.approved` (ADR-014 §7.1): por qué el Booking quedó APROBADO. FUENTE ÚNICA tipada,
+/// exportada JUNTO al schema para que el PRODUCTOR (booking-service) y el SCHEMA publicado NO puedan divergir
+/// (el bug clásico: el productor emite un literal mágico `'DRIVER_APPROVAL'` que NO está en el enum → el relay
+/// hace schema.parse() → LANZA → poison message reintentado para siempre, nunca llega a Kafka). El productor
+/// importa `BookingApprovedOrigen.X`, NUNCA un string suelto. Los valores son los EXACTOS del `z.enum` de abajo.
+export const BookingApprovedOrigen = {
+  /// INSTANT_BOOKING: el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2).
+  INSTANT_BOOKING: 'INSTANT_BOOKING',
+  /// El conductor aprobó una solicitud en REVISION (PENDIENTE_APROBACION → APROBADO, F1/F3b).
+  APROBACION_CONDUCTOR: 'APROBACION_CONDUCTOR',
+} as const;
+export type BookingApprovedOrigen = (typeof BookingApprovedOrigen)[keyof typeof BookingApprovedOrigen];
+
 /// El Booking quedó APROBADO. ADR-014 §7.1: `booking.approved` = "APROBADO (dispara CHARGE async)". Dos
 /// orígenes: (a) INSTANT_BOOKING, el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2);
-/// (b) REVISION, el conductor aprueba (F1). El campo `origen` distingue ambos para el consumidor. En F0 solo
-/// se emite el caso INSTANT (la aprobación del conductor es F1). Topic 'booking', key = bookingId.
+/// (b) REVISION, el conductor aprueba (F1). El campo `origen` distingue ambos para el consumidor. Topic
+/// 'booking', key = bookingId. El enum del `origen` es la fuente única `BookingApprovedOrigen` (arriba): el
+/// `z.enum` toma sus valores de ahí para que productor y schema NO diverjan (cero strings mágicos sueltos).
 export const bookingApproved = z.object({
   bookingId: z.string(),
   publishedTripId: z.string(),
@@ -953,7 +967,10 @@ export const bookingApproved = z.object({
   precioAcordado: z.number().int(), // céntimos PEN
   modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']),
   estado: z.literal('APROBADO'),
-  origen: z.enum(['INSTANT_BOOKING', 'APROBACION_CONDUCTOR']),
+  origen: z.enum([
+    BookingApprovedOrigen.INSTANT_BOOKING,
+    BookingApprovedOrigen.APROBACION_CONDUCTOR,
+  ]),
 });
 /// El conductor EDITÓ su oferta publicada (F1a). Solo es editable mientras está PUBLICADO (sin reservas
 /// confirmadas / pre-EN_RUTA): itinerario/precio/asientos/modoReserva/reglas. Se emite por OUTBOX en la
@@ -973,14 +990,42 @@ export const bookingUpdated = z.object({
   fechaHoraSalida: z.string().optional(),
   reglas: z.string().nullable().optional(),
 });
-/// El conductor (o admin) CANCELÓ la oferta publicada (F1a). Transición a CANCELADO desde cualquier estado
-/// PRE-EN_RUTA. El fan-out de Refund a las reservas activas lo gestiona payment-service (F3). booking-service
-/// lo emite por OUTBOX en la MISMA tx que la transición. Topic 'booking', key = publishedTripId.
+/// Razón TIPADA de un `booking.cancelled` de un BOOKING individual (F3b). FUENTE ÚNICA (espeja
+/// BookingApprovedOrigen): el productor emite `BookingCancelledRazon.X`, NUNCA un literal suelto. Hoy un único
+/// valor (el cobro síncrono rechazó al disparar); el fan-out de Refund por cancelación-de-oferta NO lleva razón.
+export const BookingCancelledRazon = {
+  /// El CHARGE rechazó SÍNCRONAMENTE al dispararlo (decline DEBT/FAILED, o error PERMANENTE 4xx de payment ·
+  /// ADR-014 §5.4 "falla permanente → CANCELADO"). El asiento NO se decrementó (charge-on-approval sin hold).
+  COBRO_RECHAZADO: 'COBRO_RECHAZADO',
+} as const;
+export type BookingCancelledRazon = (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
+
+/// `booking.cancelled` cubre DOS formas distintas que comparten topic/nombre, resueltas de forma ADITIVA
+/// (los campos nuevos son OPCIONALES → el caso viejo sigue parseando IGUAL):
+///   (A) CANCELACIÓN DE LA OFERTA (PublishedTrip · F1a): el conductor/admin cancela su viaje publicado. Lleva
+///       `publishedTripId` + `driverId` + `estadoAnterior` del PublishedTrip. NO lleva `bookingId` ni `razon`.
+///       key = publishedTripId. El fan-out de Refund a las reservas activas lo gestiona payment-service.
+///   (B) CANCELACIÓN DE UN BOOKING INDIVIDUAL (F3b · ADR-014 §5.4): el cobro síncrono rechazó al disparar el
+///       CHARGE (decline DEBT/FAILED o error PERMANENTE 4xx) → APROBADO → CANCELADO. Lleva `bookingId` +
+///       `razon` (BookingCancelledRazon) + `estadoAnterior='APROBADO'`. key = bookingId. payment-service NO
+///       hace Refund (no se capturó nada: charge-on-approval sin hold).
+/// DECISIÓN (aditiva, no romper): se mantiene UN solo schema con `publishedTripId`/`driverId` OPCIONALES y se
+/// AÑADEN `bookingId`/`razon` OPCIONALES. Así el caso (A) existente parsea sin cambios (siempre trae
+/// publishedTripId+driverId+estadoAnterior) y el caso (B) nuevo también valida. Un `z.union` discriminado se
+/// evaluó pero rompería la firma del payload existente (consumers que asumen `publishedTripId` presente); los
+/// campos opcionales son el mínimo cambio que NO toca el camino vivo. `estado` y `estadoAnterior` son comunes.
 export const bookingCancelled = z.object({
-  publishedTripId: z.string(),
-  driverId: z.string(),
+  /// (A) la oferta cancelada. Presente en la cancelación-de-oferta; ausente en la de booking individual.
+  publishedTripId: z.string().optional(),
+  /// (A) dueño de la oferta. Presente en la cancelación-de-oferta; ausente en la de booking individual.
+  driverId: z.string().optional(),
+  /// (B) el booking individual cancelado (F3b · cobro rechazado). Ausente en la cancelación-de-oferta.
+  bookingId: z.string().optional(),
+  /// (B) por qué se canceló el booking individual (TIPADO). Ausente en la cancelación-de-oferta.
+  razon: z.enum([BookingCancelledRazon.COBRO_RECHAZADO]).optional(),
   estado: z.literal('CANCELADO'),
-  /// Estado del que se canceló (auditoría / decisión de Refund downstream).
+  /// Estado del que se canceló (auditoría / decisión de Refund downstream). (A) estado del PublishedTrip;
+  /// (B) 'APROBADO' (el booking se cancela desde APROBADO al fallar el cobro síncrono).
   estadoAnterior: z.string(),
 });
 // Los demás eventos del topic 'booking' (booking.rejected/expired/confirmed/started/completed ·

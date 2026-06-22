@@ -460,3 +460,40 @@ describe('driver.location_updated · certificaciones del conductor (B5-3.2)', ()
     expect(EVENT_SCHEMAS['driver.location_updated'].safeParse(bad).success).toBe(false);
   });
 });
+
+/**
+ * `booking.cancelled` cubre DOS formas (contrato ADITIVO, FIX 3): la cancelación de la OFERTA (PublishedTrip,
+ * F1a) y la de un BOOKING individual por cobro rechazado (F3b). Estos tests CRISTALIZAN que AMBAS parsean — en
+ * particular que la forma OFERTA existente sigue válida tras agregar los campos opcionales bookingId/razon.
+ */
+describe('booking.cancelled · contrato aditivo (oferta + booking individual)', () => {
+  it('forma OFERTA (existente) sigue parseando: publishedTripId + driverId + estadoAnterior, SIN bookingId/razon', () => {
+    const ofertaCancelada = {
+      publishedTripId: 'pt1',
+      driverId: 'd1',
+      estado: 'CANCELADO',
+      estadoAnterior: 'PUBLICADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(ofertaCancelada).success).toBe(true);
+  });
+
+  it('forma BOOKING individual (F3b): bookingId + razon=COBRO_RECHAZADO + estadoAnterior=APROBADO parsea', () => {
+    const bookingCancelado = {
+      bookingId: 'b1',
+      razon: 'COBRO_RECHAZADO',
+      estado: 'CANCELADO',
+      estadoAnterior: 'APROBADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bookingCancelado).success).toBe(true);
+  });
+
+  it('rechaza una razon fuera del enum tipado (no es un BookingCancelledRazon)', () => {
+    const bad = { bookingId: 'b1', razon: 'PORQUE_SI', estado: 'CANCELADO', estadoAnterior: 'APROBADO' };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
+  });
+
+  it('rechaza estado != CANCELADO (el literal del evento)', () => {
+    const bad = { publishedTripId: 'pt1', driverId: 'd1', estado: 'PUBLICADO', estadoAnterior: 'PUBLICADO' };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
+  });
+});
