@@ -42,8 +42,9 @@ export class BookingsRepository {
 
   /**
    * Crea el Booking y emite su evento en UNA transacción (outbox-in-transaction). O ambos, o ninguno.
-   * NOTA F0: NO se decrementa `asientosDisponibles` acá — el decremento ocurre al CONFIRMAR (handler de
-   * payment.captured, §6) que es F3. La creación de la reserva no toca el cupo de la oferta.
+   * NOTA F0: NO se decrementa `asientosDisponibles` acá — el decremento ocurrirá al CONFIRMAR (handler de
+   * payment.captured, §6), que es F3b · PENDIENTE (aún no existe). La creación de la reserva no toca el cupo
+   * de la oferta; el decremento atómico se construirá en F3b.
    */
   async createWithEvent(data: CreateBookingData, intent: OutboxIntent): Promise<Booking> {
     return this.prisma.write.$transaction(async (tx) => {

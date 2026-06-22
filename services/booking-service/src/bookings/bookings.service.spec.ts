@@ -1,9 +1,27 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ConflictError, NotFoundError, ValidationError, isUuidV7, uuidv7 } from '@veo/utils';
+import {
+  ConflictError,
+  ExternalServiceError,
+  NotFoundError,
+  UnprocessableEntityError,
+  ValidationError,
+  isUuidV7,
+  uuidv7,
+} from '@veo/utils';
 import { BookingState, ModoReserva, PublishedTripState } from '../generated/prisma';
 import { BookingsService } from './bookings.service';
 import type { BookingsRepository, CreateBookingData, OutboxIntent } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
+import { FakePaymentGateway, type FakePaymentGatewayOptions } from '../ports/payment/fake-payment-gateway';
+
+/**
+ * Construye el service con el repo fake + un PaymentGateway fake (gate de deuda · §5.4). Por default el
+ * gateway NO reporta deuda (el pasajero puede reservar): los smoke/idempotencia no se ven afectados. Los
+ * tests del gate pasan opciones (deuda presente, payment caído).
+ */
+function makeService(repo: BookingsRepository, gatewayOpts?: FakePaymentGatewayOptions): BookingsService {
+  return new BookingsService(repo, new FakePaymentGateway(gatewayOpts));
+}
 
 /**
  * Smoke del create/read del BookingsService (sin Nest DI ni DB — repo fake). Verifica que el estado
@@ -66,7 +84,7 @@ function makeRepo(trip: Record<string, unknown> | null) {
 describe('BookingsService · smoke create/read', () => {
   it('REVISION: la reserva nace PENDIENTE_APROBACION, precioAcordado = base + specialRequest, evento booking.requested', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
 
     await service.reserve(PASSENGER_ID, makeDto({ specialRequest: 500 }), IDEMPOTENCY_KEY);
 
@@ -89,7 +107,7 @@ describe('BookingsService · smoke create/read', () => {
     const { repo, createWithEventIdempotent } = makeRepo(
       makeTrip({ modoReserva: ModoReserva.INSTANT_BOOKING }),
     );
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
 
     await service.reserve(PASSENGER_ID, makeDto());
 
@@ -104,7 +122,7 @@ describe('BookingsService · smoke create/read', () => {
 
   it('idempotencia de request: MISMO Idempotency-Key (reintento del mismo submit) → MISMA dedupKey', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
 
     // Mismo submit reintentado: el cliente reusa la misma Idempotency-Key entre reintentos.
     await service.reserve(PASSENGER_ID, makeDto(), IDEMPOTENCY_KEY);
@@ -121,7 +139,7 @@ describe('BookingsService · smoke create/read', () => {
     // alcanzable (RECHAZADO/EXPIRADO/CANCELADO) re-derivaba la MISMA key → P2002 → devolvía la reserva muerta.
     // Con el modelo correcto, un submit NUEVO trae una key NUEVA → dedupKey distinta → crea una reserva nueva.
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     const KEY_INTENTO_1 = uuidv7();
     const KEY_INTENTO_2 = uuidv7();
 
@@ -141,7 +159,7 @@ describe('BookingsService · smoke create/read', () => {
     // de B chocaba P2002 → la recovery devolvía la reserva de A (PII ajena). Con el namespace por passengerId,
     // A y B derivan dedupKeys DISTINTAS → NUNCA colisionan → B jamás toca la fila de A.
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     const PASSENGER_A = '00000000-0000-0000-0000-00000000000a';
     const PASSENGER_B = '00000000-0000-0000-0000-00000000000b';
     const SHARED_KEY = uuidv7(); // el MISMO header que A usó, reusado por el atacante B
@@ -166,7 +184,7 @@ describe('BookingsService · smoke create/read', () => {
 
   it('sin Idempotency-Key: NO bloquea por passenger × trip — genera una key única server-side (uuidv7), sin lockout', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
 
     await service.reserve(PASSENGER_ID, makeDto()); // sin header
     await service.reserve(PASSENGER_ID, makeDto()); // sin header, mismo passenger × trip
@@ -184,7 +202,7 @@ describe('BookingsService · smoke create/read', () => {
 
   it('Idempotency-Key malformado (no UUID) → ValidationError (no se degrada en silencio a "sin header")', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     await expect(service.reserve(PASSENGER_ID, makeDto(), 'no-es-uuid')).rejects.toBeInstanceOf(
       ValidationError,
     );
@@ -193,7 +211,7 @@ describe('BookingsService · smoke create/read', () => {
 
   it('rechaza reservar más asientos que los disponibles (409)', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip({ asientosDisponibles: 1 }));
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     await expect(service.reserve(PASSENGER_ID, makeDto({ asientos: 2 }))).rejects.toBeInstanceOf(
       ConflictError,
     );
@@ -202,20 +220,20 @@ describe('BookingsService · smoke create/read', () => {
 
   it('rechaza reservar sobre una oferta no abierta (LLENO → 409)', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip({ estado: PublishedTripState.LLENO }));
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ConflictError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 
   it('404 tipado si la oferta no existe', async () => {
     const { repo } = makeRepo(null);
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('anti-IDOR: el DUEÑO lee su reserva; un NO-DUEÑO → NotFoundError (no se filtra existencia)', async () => {
     const { repo, findById } = makeRepo(makeTrip());
-    const service = new BookingsService(repo);
+    const service = makeService(repo);
     const OTHER_PASSENGER = '00000000-0000-0000-0000-0000000000c2';
 
     // Dueño: lee OK.
@@ -237,5 +255,61 @@ describe('BookingsService · smoke create/read', () => {
     // Inexistente: 404 (mismo error que el ajeno, indistinguible).
     findById.mockResolvedValueOnce(null);
     await expect(service.getById('missing', PASSENGER_ID)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+/**
+ * GATE DE DEUDA al reservar (ADR-014 §5.2 paso 1 · §5.4). Caminos felices E INFELICES:
+ *  - pasajero CON deuda → rechazado (PassengerHasDebtError · 422), NO se crea la reserva.
+ *  - pasajero sin deuda → reserva OK (smoke arriba ya lo cubre; acá verificamos que se CONSULTÓ payment).
+ *  - payment CAÍDO/timeout → DEGRADACIÓN fail-OPEN (deja reservar + loguea), decisión explícita §5.4.
+ */
+describe('BookingsService · gate de deuda al reservar (§5.4)', () => {
+  it('pasajero CON deuda → PassengerHasDebtError (422) y NO se crea la reserva', async () => {
+    const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
+    const service = makeService(repo, {
+      debt: {
+        hasDebt: true,
+        totalCents: 1500,
+        items: [
+          {
+            paymentId: '00000000-0000-0000-0000-0000000000e1',
+            tripId: '00000000-0000-0000-0000-0000000000b9',
+            amountCents: 1500,
+            reason: 'declined',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+
+    await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(
+      UnprocessableEntityError,
+    );
+    // El gate corta ANTES de persistir: el deudor no entra a la reserva.
+    expect(createWithEventIdempotent).not.toHaveBeenCalled();
+  });
+
+  it('pasajero SIN deuda → reserva OK y consultó la deuda con el passengerId server-truth', async () => {
+    const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
+    const gateway = new FakePaymentGateway(); // sin deuda por default
+    const service = new BookingsService(repo, gateway);
+
+    await service.reserve(PASSENGER_ID, makeDto());
+
+    expect(createWithEventIdempotent).toHaveBeenCalledOnce();
+    // El gate consultó payment con el passengerId server-truth (anti-IDOR: nunca un valor del body).
+    expect(gateway.debtCalls).toEqual([PASSENGER_ID]);
+  });
+
+  it('DEGRADACIÓN fail-OPEN: payment caído/timeout NO bloquea la reserva (reservar no mueve plata)', async () => {
+    const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
+    const service = makeService(repo, {
+      debtError: new ExternalServiceError('payment-service inaccesible para el gate de deuda al reservar'),
+    });
+
+    // payment está caído, pero la reserva PROCEDE (fail-open): el cobro real re-valida en F3b.
+    await service.reserve(PASSENGER_ID, makeDto());
+    expect(createWithEventIdempotent).toHaveBeenCalledOnce();
   });
 });

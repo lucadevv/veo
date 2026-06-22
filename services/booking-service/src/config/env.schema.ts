@@ -50,8 +50,18 @@ export const envSchema = z.object({
   // fleet.GetDriverVehicles (gate F1a anti-IDOR: pertenencia + vigencia del vehículo al publicar).
   // Default verificado contra dispatch-service / BFFs (fleet gRPC = localhost:50062).
   FLEET_GRPC_URL: z.string().default('localhost:50062'),
-  // payment.GetPayment (validar método al reservar + derivar gate de deuda — F1/F3).
-  PAYMENT_GRPC_URL: z.string().default('localhost:50052'),
+  // payment.GetPayment (leer estado/recibo del cobro ya disparado — gRPC, §5.4). El gate de deuda y el
+  // charge NO son gRPC (ver PAYMENT_INTERNAL_URL abajo).
+  // Default coherente con el puerto gRPC REAL de payment-service (env.schema → GRPC_URL :50055), NO :50052
+  // (ese es trip-service): apuntar a 50052 hacía que booking llamara a trip-service creyendo hablar con
+  // payment. Mismo patrón de default-coherente que IDENTITY_GRPC_URL/FLEET_GRPC_URL (apuntan al puerto real).
+  PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
+  // ── Borde REST de payment (ADR-014 §5.5) ──
+  // El CHARGE (POST /charge · firmado service-rail · F3b) y el gate de DEUDA al reservar (GET /debt · F3a)
+  // son REST, no gRPC (corrección as-built del contrato real de payment). Apunta a la API interna de
+  // payment-service (/api/v1). Mismo patrón que share-service→notification (NOTIFICATION_INTERNAL_URL).
+  // payment-service corre en el puerto 3005. Fail-fast: si falta/inválida, booking NO arranca.
+  PAYMENT_INTERNAL_URL: z.string().url().default('http://localhost:3005/api/v1'),
 
   // ── BÚSQUEDA GEO H3 (F2 · §6.2) ─────────────────────────────────────────────────────────────────
   // k del anillo H3 de búsqueda (neighbors(celda, k)). k=1 → 7 celdas (≈ la celda + su corona), buen

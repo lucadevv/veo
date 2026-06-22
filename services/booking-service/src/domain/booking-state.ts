@@ -10,8 +10,8 @@
  *   PENDIENTE_APROBACION ──conductor rechaza──► RECHAZADO   (terminal, no se cobró nada)
  *   PENDIENTE_APROBACION ──TTL ~5min vence──►   EXPIRADO    (terminal, no se cobró nada)
  *   APROBADO ──dispara CHARGE (async, dedupKey)──► COBRO_PENDIENTE   (asiento NO decrementa todavía)
- *   COBRO_PENDIENTE ──[payment.captured]──► CONFIRMADO   (txn atómica §6: lock + decremento de asiento — F3)
- *   COBRO_PENDIENTE ──[payment.failed perm. / asiento-lleno]──► CANCELADO   (Refund — F3)
+ *   COBRO_PENDIENTE ──[payment.captured]──► CONFIRMADO   (txn atómica §6: lock + decremento de asiento — F3b · PENDIENTE)
+ *   COBRO_PENDIENTE ──[payment.failed perm. / asiento-lleno]──► CANCELADO   (Refund — F3b · PENDIENTE)
  *   CONFIRMADO ──viaje arranca──► EN_RUTA ──► COMPLETADO
  *   CONFIRMADO ──pasajero/conductor cancela──► CANCELADO   (booking.cancelled con tier → Refund — F3/F5)
  *
@@ -20,9 +20,10 @@
  * COMPLETAS desde ya (la máquina es del eje, no de los endpoints de hoy) para que ninguna sea "un bug" sino
  * una transición imposible por construcción.
  *
- * NOTA de degradación honesta: el consumer de payment.captured/payment.failed que dispara
- * COBRO_PENDIENTE→CONFIRMADO/CANCELADO es F3 (el cobro). La tabla YA permite esas transiciones; lo que se
- * difiere es el HANDLER que las gatilla, no la legalidad de la transición.
+ * NOTA de degradación honesta: el consumer de payment.captured/payment.failed que disparará
+ * COBRO_PENDIENTE→CONFIRMADO/CANCELADO es F3b y AÚN NO EXISTE (pendiente). La tabla YA permite esas
+ * transiciones; lo que se difiere es el HANDLER que las gatilla, no la legalidad de la transición. Hoy esas
+ * transiciones NO se ejercitan en runtime: ningún código las dispara hasta que F3b se construya.
  */
 import { BookingState } from '../generated/prisma';
 import { createStateMachine, type StateMachine } from './state-machine';

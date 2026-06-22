@@ -41,10 +41,11 @@
  *  - La VALIDACIÓN del método de pago al reservar (gRPC `payment.GetPayment`, §5.2 paso 1) es F1/F3: F0 NO
  *    consulta payment. El gate "pasajero con deuda no puede reservar" (PaymentStatus.DEBT derivado) es F3.
  *  - El gate gRPC `identity.GetDriver` y el cobro (CHARGE async → COBRO_PENDIENTE → CONFIRMADO) son F1/F3.
- *  - El lock atómico de asientos (§6) corre en el handler de payment.captured (F3): F0 valida cupo de forma
- *    NO transaccional (chequeo barato anti-overbooking obvio); la garantía dura del cupo llega con el lock en F3.
+ *  - El lock atómico de asientos (§6) SE CONSTRUIRÁ en el handler de payment.captured (F3b · PENDIENTE, aún
+ *    no existe): hoy F0 valida cupo de forma NO transaccional (chequeo barato anti-overbooking obvio); la
+ *    garantía dura del cupo llegará con ese lock en F3b. NO describir el handler como si ya corriera.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConflictError, NotFoundError, ValidationError, isUuid, uuidv7 } from '@veo/utils';
 import {
   BookingState,
@@ -53,7 +54,9 @@ import {
   type Booking,
 } from '../generated/prisma';
 import { bookingMachine } from '../domain/booking-state';
+import { PassengerHasDebtError } from '../domain/payment-charge';
 import { BookingEventType } from '../events/booking-events';
+import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/payment/payment-gateway.port';
 import { BookingsRepository, type CreateBookingData } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 
@@ -66,7 +69,51 @@ const REQUEST_DEDUP_NAMESPACE = 'booking:req:' as const;
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly repo: BookingsRepository) {}
+  private readonly logger = new Logger(BookingsService.name);
+
+  constructor(
+    private readonly repo: BookingsRepository,
+    @Inject(PAYMENT_GATEWAY) private readonly payment: PaymentGateway,
+  ) {}
+
+  /**
+   * Gate de DEUDA al reservar (ADR-014 §5.2 paso 1 · §5.4): un pasajero con deuda pendiente (cobros en
+   * PaymentStatus.DEBT) NO puede reservar. La deuda es DERIVADA de payment-service (getDebt vía REST firmado
+   * service-rail) — booking NO tiene un flag DEBT propio (sería una segunda fuente de verdad).
+   *
+   * DEGRADACIÓN HONESTA — decisión EXPLÍCITA y documentada: si payment NO responde (timeout/caído), este gate
+   * hace **FAIL-OPEN con observabilidad** (deja reservar + loguea warn estructurado). Por qué fail-OPEN y no
+   * fail-closed: RESERVAR no mueve plata (charge-on-approval · §5.1) — y un deudor que se cuela en la reserva
+   * igual no captura asiento hasta `payment.captured`. Bloquear TODAS las reservas porque payment tose sería
+   * peor (caída de payment = caída del producto) que el riesgo acotado de que un deudor reserve sin que aún se
+   * le cobre. El log deja rastro para auditar el bypass. CONTRASTE con el gate de PUBLICAR (identity/fleet ·
+   * F1a), que SÍ es fail-closed: ahí dejar pasar a un conductor no elegible es un riesgo de SEGURIDAD, no un
+   * cobro diferido recuperable.
+   *
+   * ⚠️ RED DE SEGURIDAD PENDIENTE: la justificación del fail-open se apoya en "el cobro real RE-VALIDA la
+   * deuda en la aprobación". Ese re-check (CHARGE / handler de aprobación) es F3b y AÚN NO EXISTE. Hasta que
+   * F3b se construya, NO hay segunda barrera: un deudor que se cuela por un fail-open transitorio NO es
+   * re-validado aguas abajo. Tener presente al evaluar el riesgo del fail-open hoy.
+   */
+  private async assertNoDebt(passengerId: string): Promise<void> {
+    let summary;
+    try {
+      summary = await this.payment.getDebt(passengerId);
+    } catch (err) {
+      // FAIL-OPEN: payment caído/timeout no bloquea la reserva (no mueve plata). El re-check del cobro que
+      // sería la segunda barrera es F3b y AÚN NO EXISTE (pendiente). Se loguea para observabilidad/auditoría
+      // del bypass — nunca se traga en silencio.
+      this.logger.warn({
+        msg: 'Gate de deuda DEGRADADO (payment-service inaccesible): se permite reservar (fail-open). El re-check del cobro (segunda barrera) es F3b · PENDIENTE',
+        passengerId,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    if (summary.hasDebt) {
+      throw new PassengerHasDebtError(summary.totalCents);
+    }
+  }
 
   /**
    * Reserva un asiento. `passengerId` viene de la identidad firmada del pasajero (server-truth, NO del
@@ -95,13 +142,19 @@ export class BookingsService {
       });
     }
     // Cupo: asientos pedidos ≤ disponibles. Chequeo BARATO (no transaccional) — la garantía dura contra
-    // overbooking concurrente vive en el lock atómico del handler de payment.captured (§6, F3).
+    // overbooking concurrente SE CONSTRUIRÁ en el lock atómico del handler de payment.captured (§6, F3b ·
+    // PENDIENTE, aún no existe). Hoy solo este chequeo barato cubre el overbooking obvio.
     if (dto.asientos > trip.asientosDisponibles) {
       throw new ConflictError('No hay asientos suficientes disponibles', {
         pedidos: dto.asientos,
         disponibles: trip.asientosDisponibles,
       });
     }
+
+    // GATE DE DEUDA (ADR-014 §5.2 paso 1 · §5.4): un pasajero con deuda pendiente (DEBT derivado de payment)
+    // NO puede reservar. Va DESPUÉS de los chequeos locales baratos (existe/disponible/cupo) — no consultamos
+    // payment por una oferta inexistente. Fail-OPEN con observabilidad si payment no responde (ver assertNoDebt).
+    await this.assertNoDebt(passengerId);
 
     // Precio acordado = base + specialRequest (céntimos PEN, Int). F0 usa el precio full-route; el pricing
     // por TRAMO (precioPorTramo según pickup/dropoff) es F1.
