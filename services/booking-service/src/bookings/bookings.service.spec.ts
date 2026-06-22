@@ -2,25 +2,58 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   ConflictError,
   ExternalServiceError,
+  ForbiddenError,
   NotFoundError,
   UnprocessableEntityError,
   ValidationError,
   isUuidV7,
   uuidv7,
 } from '@veo/utils';
+import { DriverStatus, KycStatus } from '@veo/shared-types';
+import { PaymentMethod, PaymentStatus } from '@veo/shared-types';
+import { schemaForEvent } from '@veo/events';
 import { BookingState, ModoReserva, PublishedTripState } from '../generated/prisma';
 import { BookingsService } from './bookings.service';
 import type { BookingsRepository, CreateBookingData, OutboxIntent } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 import { FakePaymentGateway, type FakePaymentGatewayOptions } from '../ports/payment/fake-payment-gateway';
+import { ChargePermanentlyRejectedError } from '../domain/payment-charge';
+import { BACKGROUND_CHECK_CLEARED } from '../domain/driver-eligibility';
+import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
+
+/** Conductor ACTIVO/no-suspendido por default (gate approve/reject · F3b); los tests negativos sobrescriben. */
+function makeDriver(over: Partial<IdentityDriver> = {}): IdentityDriver {
+  return {
+    id: '00000000-0000-0000-0000-0000000000d1',
+    userId: '00000000-0000-0000-0000-0000000000u1',
+    currentStatus: DriverStatus.AVAILABLE,
+    backgroundCheckStatus: BACKGROUND_CHECK_CLEARED,
+    kycStatus: KycStatus.VERIFIED,
+    suspendedAt: null,
+    found: true,
+    name: 'Conductor Demo',
+    averageRating: 4.8,
+    ...over,
+  };
+}
+
+/** IdentityClient fake (gate de driver activo en approve/reject). Por default devuelve un conductor activo. */
+function makeIdentity(driver: IdentityDriver | (() => Promise<IdentityDriver>) = makeDriver()): IdentityClient {
+  const getDriver = vi.fn(typeof driver === 'function' ? driver : async () => driver);
+  return { getDriver };
+}
 
 /**
- * Construye el service con el repo fake + un PaymentGateway fake (gate de deuda · §5.4). Por default el
- * gateway NO reporta deuda (el pasajero puede reservar): los smoke/idempotencia no se ven afectados. Los
- * tests del gate pasan opciones (deuda presente, payment caído).
+ * Construye el service con el repo fake + un PaymentGateway fake (gate de deuda · §5.4; charge · F3b) + un
+ * IdentityClient fake (gate de driver activo · F3b). Por default el gateway NO reporta deuda y el conductor
+ * está activo: los smoke/idempotencia no se ven afectados. Los tests del gate pasan opciones.
  */
-function makeService(repo: BookingsRepository, gatewayOpts?: FakePaymentGatewayOptions): BookingsService {
-  return new BookingsService(repo, new FakePaymentGateway(gatewayOpts));
+function makeService(
+  repo: BookingsRepository,
+  gatewayOpts?: FakePaymentGatewayOptions,
+  identity?: IdentityClient,
+): BookingsService {
+  return new BookingsService(repo, new FakePaymentGateway(gatewayOpts), identity ?? makeIdentity());
 }
 
 /**
@@ -42,6 +75,9 @@ function makeDto(over: Partial<CreateBookingDto> = {}): CreateBookingDto {
   return {
     publishedTripId: '00000000-0000-0000-0000-0000000000a1',
     asientos: 2,
+    // Método de pago elegido por el pasajero al reservar (ADR-014 §5.5). YAPE por default; los tests del
+    // charge verifican que viaja al gateway.
+    paymentMethod: PaymentMethod.YAPE,
     pickupLat: -12.05,
     pickupLon: -77.04,
     dropoffLat: -13.52,
@@ -73,12 +109,45 @@ function makeRepo(trip: Record<string, unknown> | null) {
     ) => ({ ...data }),
   );
   const findById = vi.fn();
+  // F3b: el read crítico del gate approve/reject va al PRIMARY. Por default no devuelve nada (los tests del
+  // gate lo sobrescriben con la reserva concreta).
+  const findByIdFromPrimary = vi.fn();
+  // F3b: transición de estado + outbox (approve/reject). Devuelve un booking con el estado nuevo aplicado.
+  const transitionWithEvent = vi.fn(
+    async (
+      id: string,
+      _allowed: BookingState[],
+      data: { estado?: BookingState },
+      _intent: OutboxIntent,
+    ) => ({ id, ...data }),
+  );
+  // F3b: tx2 del charge (APROBADO → COBRO_PENDIENTE + paymentId). Devuelve el booking con el estado nuevo.
+  const markChargePending = vi.fn(async (id: string, paymentId: string) => ({
+    id,
+    paymentId,
+    estado: BookingState.COBRO_PENDIENTE,
+  }));
+  // F3b: listado de solicitudes de un viaje (driver-rail). Por default vacío; los tests lo sobrescriben.
+  const findByPublishedTripId = vi.fn(async () => [] as unknown[]);
   const repo = {
     findPublishedTrip,
     createWithEventIdempotent,
     findById,
+    findByIdFromPrimary,
+    transitionWithEvent,
+    markChargePending,
+    findByPublishedTripId,
   } as unknown as BookingsRepository;
-  return { repo, findPublishedTrip, createWithEventIdempotent, findById };
+  return {
+    repo,
+    findPublishedTrip,
+    createWithEventIdempotent,
+    findById,
+    findByIdFromPrimary,
+    transitionWithEvent,
+    markChargePending,
+    findByPublishedTripId,
+  };
 }
 
 describe('BookingsService · smoke create/read', () => {
@@ -118,6 +187,11 @@ describe('BookingsService · smoke create/read', () => {
     // El evento refleja el ESTADO REAL: APROBADO → booking.approved (emitir booking.requested mentiría).
     expect(intent.eventType).toBe('booking.approved');
     expect(intent.payload).toMatchObject({ estado: BookingState.APROBADO, origen: 'INSTANT_BOOKING' });
+    // FIX 1 — el payload EMITIDO valida contra el SCHEMA PUBLICADO de booking.approved (@veo/events). Un test
+    // que hubiera cazado el poison message: si `origen` no estuviera en el z.enum del schema, esto fallaría.
+    const schema = schemaForEvent('booking.approved');
+    expect(schema).toBeDefined();
+    expect(schema!.safeParse(intent.payload).success).toBe(true);
   });
 
   it('idempotencia de request: MISMO Idempotency-Key (reintento del mismo submit) → MISMA dedupKey', async () => {
@@ -293,7 +367,7 @@ describe('BookingsService · gate de deuda al reservar (§5.4)', () => {
   it('pasajero SIN deuda → reserva OK y consultó la deuda con el passengerId server-truth', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
     const gateway = new FakePaymentGateway(); // sin deuda por default
-    const service = new BookingsService(repo, gateway);
+    const service = new BookingsService(repo, gateway, makeIdentity());
 
     await service.reserve(PASSENGER_ID, makeDto());
 
@@ -311,5 +385,354 @@ describe('BookingsService · gate de deuda al reservar (§5.4)', () => {
     // payment está caído, pero la reserva PROCEDE (fail-open): el cobro real re-valida en F3b.
     await service.reserve(PASSENGER_ID, makeDto());
     expect(createWithEventIdempotent).toHaveBeenCalledOnce();
+  });
+});
+
+// ── F3b ─────────────────────────────────────────────────────────────────────────────────────────────────
+const DRIVER_ID = '00000000-0000-0000-0000-0000000000d1';
+const BOOKING_ID = '00000000-0000-0000-0000-0000000000b1';
+const TRIP_ID = '00000000-0000-0000-0000-0000000000a1';
+
+/** Fila Booking fake (forma mínima que el service toca). Override por test. */
+function makeBooking(over: Record<string, unknown> = {}) {
+  return {
+    id: BOOKING_ID,
+    publishedTripId: TRIP_ID,
+    passengerId: PASSENGER_ID,
+    asientos: 2,
+    precioAcordado: 5000,
+    paymentMethod: PaymentMethod.YAPE,
+    paymentId: null,
+    estado: BookingState.PENDIENTE_APROBACION,
+    ...over,
+  };
+}
+
+/**
+ * INSTANT_BOOKING dispara el CHARGE al reservar (ADR-014 §4.2/§5.2): nace APROBADO → triggerCharge →
+ * COBRO_PENDIENTE. Antes quedaba en APROBADO sin cobrar (hueco F3b). Verifica que el charge viaja con el
+ * método elegido + precio + passenger y que se registra COBRO_PENDIENTE.
+ */
+describe('BookingsService · INSTANT dispara el CHARGE al reservar (§4.2/§5.2)', () => {
+  it('INSTANT: tras crear APROBADO, dispara el charge (método/precio/passenger) y marca COBRO_PENDIENTE', async () => {
+    const { repo, markChargePending } = makeRepo(makeTrip({ modoReserva: ModoReserva.INSTANT_BOOKING }));
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    const result = await service.reserve(PASSENGER_ID, makeDto({ paymentMethod: PaymentMethod.PLIN }));
+
+    // El charge se disparó UNA vez con el método elegido (PLIN), el precio acordado y el passenger server-truth.
+    expect(gateway.chargeCalls).toHaveLength(1);
+    expect(gateway.chargeCalls[0]).toMatchObject({
+      method: PaymentMethod.PLIN,
+      passengerId: PASSENGER_ID,
+    });
+    // grossCents = precioBase(4500) + sin specialRequest. bookingId viaja como tripId opaco (el port lo nombra bookingId).
+    expect(gateway.chargeCalls[0]!.grossCents).toBe(4500);
+    // tx2: APROBADO → COBRO_PENDIENTE + paymentId del charge.
+    expect(markChargePending).toHaveBeenCalledOnce();
+    expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+  });
+});
+
+/**
+ * RESULTADO SÍNCRONO del CHARGE (FIX 2/3 · ADR-014 §5.4) — el disparo del cobro NO siempre devuelve PENDING ni
+ * lanza: payment puede declinar SÍNCRONO (200 + status DEBT/FAILED) o lanzar un rechazo PERMANENTE (4xx). En
+ * ambos el booking NO debe quedar COLGADO en COBRO_PENDIENTE (el handler F3c que reconciliaría no existe) ni en
+ * un LOOP APROBADO re-disparable: va a CANCELADO (terminal) + booking.cancelled. Un transitorio (5xx/timeout) SÍ
+ * queda APROBADO re-ejecutable. Se ejercita vía approve() (mismo triggerCharge que INSTANT).
+ */
+describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)', () => {
+  function approveSetup(chargeOpts: FakePaymentGatewayOptions) {
+    const harness = makeRepo(makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }));
+    harness.findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    // tx1 aprueba OK → devuelve el booking APROBADO (el estado real que triggerCharge inspecciona).
+    harness.transitionWithEvent.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
+    const gateway = new FakePaymentGateway(chargeOpts);
+    const service = new BookingsService(harness.repo, gateway, makeIdentity());
+    return { ...harness, gateway, service };
+  }
+
+  it('decline SÍNCRONO status=DEBT → booking CANCELADO (NO COBRO_PENDIENTE) + booking.cancelled (razon=COBRO_RECHAZADO)', async () => {
+    const { service, markChargePending, transitionWithEvent } = approveSetup({
+      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.DEBT },
+    });
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    // NO marca COBRO_PENDIENTE (no queda colgado esperando una captura que no llega).
+    expect(markChargePending).not.toHaveBeenCalled();
+    expect(result.estado).toBe(BookingState.CANCELADO);
+    // La 2da llamada a transitionWithEvent es la cancelación (la 1ra fue la aprobación tx1).
+    const cancelCall = transitionWithEvent.mock.calls[1];
+    if (!cancelCall) throw new Error('no se llamó la transición de cancelación');
+    const [, allowed, data, intent] = cancelCall;
+    expect(allowed).toEqual([BookingState.APROBADO]); // where atómico: solo cancela desde APROBADO
+    expect(data).toMatchObject({ estado: BookingState.CANCELADO });
+    expect(intent.eventType).toBe('booking.cancelled');
+    expect(intent.payload).toMatchObject({
+      bookingId: BOOKING_ID,
+      razon: 'COBRO_RECHAZADO',
+      estado: BookingState.CANCELADO,
+      estadoAnterior: BookingState.APROBADO,
+    });
+    // El payload del booking individual valida contra el schema PUBLICADO booking.cancelled (forma B, aditiva).
+    const schema = schemaForEvent('booking.cancelled');
+    expect(schema!.safeParse(intent.payload).success).toBe(true);
+  });
+
+  it('decline SÍNCRONO status=FAILED → booking CANCELADO', async () => {
+    const { service, markChargePending } = approveSetup({
+      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.FAILED },
+    });
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    expect(result.estado).toBe(BookingState.CANCELADO);
+    expect(markChargePending).not.toHaveBeenCalled();
+  });
+
+  it('charge THROW PERMANENTE (4xx) → booking CANCELADO (NO loop, NO COBRO_PENDIENTE)', async () => {
+    const { service, markChargePending, transitionWithEvent } = approveSetup({
+      chargeError: new ChargePermanentlyRejectedError({ upstreamStatus: 422, code: 'PAYMENT_METHOD_INVALID' }),
+    });
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    expect(result.estado).toBe(BookingState.CANCELADO);
+    expect(markChargePending).not.toHaveBeenCalled();
+    const cancelCall = transitionWithEvent.mock.calls[1];
+    if (!cancelCall) throw new Error('no se llamó la transición de cancelación');
+    expect(cancelCall[3].eventType).toBe('booking.cancelled');
+  });
+
+  it('charge THROW TRANSITORIO (5xx/timeout) → booking APROBADO re-ejecutable + se PROPAGA ExternalServiceError (502)', async () => {
+    const { service, markChargePending, transitionWithEvent } = approveSetup({
+      chargeError: new ExternalServiceError('payment-service inaccesible (timeout)'),
+    });
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ExternalServiceError);
+    // tx1 corrió (aprobó); NO se canceló (la 2da transición no se llama) ni se marcó COBRO_PENDIENTE.
+    expect(transitionWithEvent).toHaveBeenCalledOnce();
+    expect(markChargePending).not.toHaveBeenCalled();
+  });
+
+  it('charge PENDING (camino normal) → COBRO_PENDIENTE, no cancela', async () => {
+    const { service, markChargePending, transitionWithEvent } = approveSetup({
+      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.PENDING },
+    });
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+    expect(markChargePending).toHaveBeenCalledOnce();
+    // Solo la tx1 (aprobación); NO hubo 2da transición de cancelación.
+    expect(transitionWithEvent).toHaveBeenCalledOnce();
+  });
+
+  it('charge CAPTURED síncrono → tratado IGUAL que PENDING (COBRO_PENDIENTE, NO confirma/decrementa acá: eso es F3c)', async () => {
+    const { service, markChargePending } = approveSetup({
+      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.CAPTURED },
+    });
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    // CAPTURED síncrono NO confirma acá (saltearía el seat-lock §6 → oversold): va a COBRO_PENDIENTE.
+    expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+    expect(markChargePending).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * APROBAR/RECHAZAR (driver-rail · ADR-014 §8/§10) — caminos felices E INFELICES:
+ * gate de ownership (dueño del PublishedTrip), gate de driver activo (fail-closed), doble-tap (ConflictError),
+ * charge fallido (queda APROBADO, re-ejecutable), reject idempotente.
+ */
+describe('BookingsService · approve (driver-rail, §8/§10)', () => {
+  it('happy path: PENDIENTE_APROBACION → APROBADO (booking.approved) → dispara CHARGE → COBRO_PENDIENTE', async () => {
+    const { repo, transitionWithEvent, markChargePending, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    // tx1: transición condicionada por PENDIENTE_APROBACION + outbox booking.approved.
+    expect(transitionWithEvent).toHaveBeenCalledOnce();
+    const [, allowed, data, intent] = transitionWithEvent.mock.calls[0]!;
+    expect(allowed).toEqual([BookingState.PENDIENTE_APROBACION]);
+    expect(data).toMatchObject({ estado: BookingState.APROBADO });
+    expect(intent.eventType).toBe('booking.approved');
+    // FIX 1 — el payload de approve() (origen=APROBACION_CONDUCTOR) valida contra el schema PUBLICADO. Antes
+    // emitía el literal mágico 'DRIVER_APPROVAL' (NO en el z.enum) → schema.parse() lanzaba → poison message.
+    expect(intent.payload).toMatchObject({ origen: 'APROBACION_CONDUCTOR' });
+    const approvedSchema = schemaForEvent('booking.approved');
+    expect(approvedSchema!.safeParse(intent.payload).success).toBe(true);
+    // charge disparado FUERA de tx + tx2 COBRO_PENDIENTE.
+    expect(gateway.chargeCalls).toHaveLength(1);
+    expect(markChargePending).toHaveBeenCalledOnce();
+    expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+  });
+
+  it('anti-IDOR: NO-DUEÑO del PublishedTrip → NotFoundError (no dispara transición ni charge)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: '00000000-0000-0000-0000-0000000000d9' }), // viaje de OTRO conductor
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+    expect(gateway.chargeCalls).toHaveLength(0);
+  });
+
+  it('fail-closed: conductor SUSPENDIDO → ForbiddenError (403), no aprueba ni cobra', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const suspended = makeIdentity(makeDriver({ suspendedAt: new Date().toISOString() }));
+    const service = new BookingsService(repo, gateway, suspended);
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+    expect(gateway.chargeCalls).toHaveLength(0);
+  });
+
+  it('fail-closed: identity caída → ForbiddenError (403), no aprueba (nunca un suspendido por error de red)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const identity = makeIdentity(async () => {
+      throw new ExternalServiceError('identity caída');
+    });
+    const service = new BookingsService(repo, new FakePaymentGateway(), identity);
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('doble-tap: el 2º approve no matchea PENDIENTE_APROBACION en el where atómico → ConflictError', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    // El repo simula el UPDATE atómico: 0 filas (estado ya cambió) → ConflictError (P2025 traducido).
+    transitionWithEvent.mockRejectedValueOnce(new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }));
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('charge FALLA: queda APROBADO (la tx2 no corre), el error se PROPAGA (re-ejecutable)', async () => {
+    const { repo, transitionWithEvent, markChargePending, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    // tx1 aprueba OK (devuelve APROBADO); el charge falla.
+    transitionWithEvent.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
+    const gateway = new FakePaymentGateway({ chargeError: new ExternalServiceError('payment rechazó el charge') });
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ExternalServiceError);
+    // tx1 corrió (se aprobó + emitió booking.approved), pero la tx2 (COBRO_PENDIENTE) NO: el booking queda APROBADO.
+    expect(transitionWithEvent).toHaveBeenCalledOnce();
+    expect(markChargePending).not.toHaveBeenCalled();
+  });
+
+  it('RE-EJECUTABLE: approve sobre un booking YA APROBADO re-dispara el charge SIN re-emitir booking.approved', async () => {
+    const { repo, transitionWithEvent, markChargePending, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    // El booking ya está APROBADO (un approve previo aprobó pero el charge había fallado).
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    const result = await service.approve(BOOKING_ID, DRIVER_ID);
+
+    // NO se re-emite booking.approved (la tx1 se saltea): solo se re-dispara el charge (idempotente por dedupKey).
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+    expect(gateway.chargeCalls).toHaveLength(1);
+    expect(markChargePending).toHaveBeenCalledOnce();
+    expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+  });
+});
+
+describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
+  it('happy path: PENDIENTE_APROBACION → RECHAZADO (booking.rejected), NO cobra', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    await service.reject(BOOKING_ID, DRIVER_ID);
+
+    const [, allowed, data, intent] = transitionWithEvent.mock.calls[0]!;
+    expect(allowed).toEqual([BookingState.PENDIENTE_APROBACION]);
+    expect(data).toMatchObject({ estado: BookingState.RECHAZADO });
+    expect(intent.eventType).toBe('booking.rejected');
+    // reject NO cobra (terminal sin movimiento de plata).
+    expect(gateway.chargeCalls).toHaveLength(0);
+  });
+
+  it('idempotente: reject sobre un booking YA RECHAZADO → ConflictError (where atómico no matchea PENDIENTE)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    // El booking ya está RECHAZADO: el assertTransition de PENDIENTE_APROBACION→RECHAZADO pasa (se evalúa el
+    // `from` esperado), pero el where atómico no matchea → ConflictError. Simulamos el 0-filas del repo.
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking({ estado: BookingState.RECHAZADO }));
+    transitionWithEvent.mockRejectedValueOnce(new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }));
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+
+    await expect(service.reject(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('anti-IDOR: NO-DUEÑO → NotFoundError (no transiciona)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: '00000000-0000-0000-0000-0000000000d9' }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+
+    await expect(service.reject(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('BookingsService · listRequestsForTrip (driver-rail, ownership)', () => {
+  it('DUEÑO: lista las solicitudes del viaje (keyset paginado)', async () => {
+    const { repo, findByPublishedTripId } = makeRepo(makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }));
+    findByPublishedTripId.mockResolvedValueOnce([makeBooking()]);
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+
+    const result = await service.listRequestsForTrip(TRIP_ID, DRIVER_ID, { limit: 10 });
+
+    expect(result).toHaveLength(1);
+    expect(findByPublishedTripId).toHaveBeenCalledWith(TRIP_ID, 10, undefined);
+  });
+
+  it('anti-IDOR: NO-DUEÑO del viaje → NotFoundError (no lista)', async () => {
+    const { repo, findByPublishedTripId } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: '00000000-0000-0000-0000-0000000000d9' }),
+    );
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+
+    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(findByPublishedTripId).not.toHaveBeenCalled();
+  });
+
+  it('viaje inexistente → NotFoundError', async () => {
+    const { repo } = makeRepo(null);
+    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity());
+    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

@@ -63,6 +63,22 @@ enum ModoReserva {
   @@schema("booking")
 }
 
+// ── Método de pago elegido por el pasajero al RESERVAR — ADR-014 §5.5 (decisión del dueño 2026-06-22). ──
+// El pasajero ELIGE el método al reservar (paridad con on-demand, donde el método viene del Trip). El CHARGE
+// al aprobar (o al reservar si INSTANT, F3b) lo usa. ESPEJA `PaymentMethod` de @veo/shared-types (fuente única
+// del monorepo): YAPE/PLIN/CASH/CARD/PAGOEFECTIVO. La afiliación Yape on-file (QR-vs-on-file) la resuelve
+// payment server-side (resolveActiveWalletUid); booking NO valida afiliación, solo pasa el método elegido.
+// DB-per-service: este enum es la cara LOCAL del contrato compartido (no se importa la tabla de payment).
+enum PaymentMethod {
+  YAPE
+  PLIN
+  CASH
+  CARD
+  PAGOEFECTIVO
+
+  @@schema("booking")
+}
+
 /// PublishedTrip — la OFERTA del conductor (raíz del agregado). ADR-014 §2.1.
 /// Geo: lat/lon + celda H3 (índice de búsqueda propio, F2 — el campo existe, la búsqueda geo se difiere).
 /// `stopovers` y `precioPorTramo` se modelan como JSON (estructuras `{lat,lon,orden}` /
@@ -149,7 +165,12 @@ model Booking {
   precioAcordado  Int           @map("precio_acordado") // céntimos PEN = base + specialRequest
   mensajeIntro    String?       @map("mensaje_intro") @db.Text
   specialRequest  Int?          @map("special_request") // +X céntimos sobre la base (top-up)
-  paymentId       String?       @map("payment_id") @db.Uuid // seteado en el CHARGE (F3)
+  // Método de pago ELEGIDO por el pasajero al RESERVAR (ADR-014 §5.5 · decisión del dueño 2026-06-22). El
+  // CHARGE al aprobar (o al reservar si INSTANT, F3b) lo usa: `charge({ method: booking.paymentMethod, ... })`.
+  // OBLIGATORIO (NOT NULL): el DTO lo exige con @IsEnum. La afiliación Yape on-file la resuelve payment
+  // server-side — booking solo persiste y pasa el método elegido.
+  paymentMethod   PaymentMethod @map("payment_method")
+  paymentId       String?       @map("payment_id") @db.Uuid // seteado en el CHARGE (F3b: respuesta del charge)
   dedupKey        String        @map("dedup_key") // idempotencia de REQUEST namespaceada por passengerId; @@unique = anti-IDOR cross-tenant (NUNCA derivar del bookingId). CHARGE de F3 = key separada per-booking
 
   estado          BookingState  @default(SOLICITADO)
@@ -161,6 +182,11 @@ model Booking {
 
   @@unique([dedupKey])
   @@index([publishedTripId, estado])
+  // FIX 5 — respalda GET /published-trips/:id/bookings: WHERE published_trip_id = ? ORDER BY id DESC (keyset por
+  // id uuidv7 time-ordered, espeja [driverId, id] de PublishedTrip). El índice [publishedTripId, estado] NO
+  // sirve para ese ORDER BY id (la 2da col es estado, no id) → Postgres ordenaba en memoria por viaje. El
+  // compuesto (publishedTripId, id) deja que el planner haga scope + orden por índice (sin sort).
+  @@index([publishedTripId, id])
   @@index([passengerId])
   @@map("bookings")
   @@schema("booking")

@@ -37,28 +37,49 @@
  * SOLO si es del dueño; si no, 404 tipado (NO 403: no se filtra la EXISTENCIA de una reserva ajena). Espeja
  * el write path, que ya toma `passengerId` de la identidad firmada (nunca del body).
  *
+ * F3b (este lote): aprobar/rechazar (driver-rail) + el CHARGE charge-on-approval. `approve` aplica el gate
+ * server-side (dueño del PublishedTrip + driver activo · §8) y dispara el CHARGE async vía `triggerCharge`
+ * (APROBADO → REST charge fuera de tx → COBRO_PENDIENTE). `reject` transiciona a RECHAZADO sin cobrar.
+ * INSTANT_BOOKING también dispara `triggerCharge` al reservar (mismo método, DRY). El método de pago lo
+ * ELIGE el pasajero al reservar (persistido en el Booking, §5.5) y el CHARGE lo usa.
+ *
  * DIFERIDO (degradación honesta, ADR-014):
- *  - La VALIDACIÓN del método de pago al reservar (gRPC `payment.GetPayment`, §5.2 paso 1) es F1/F3: F0 NO
- *    consulta payment. El gate "pasajero con deuda no puede reservar" (PaymentStatus.DEBT derivado) es F3.
- *  - El gate gRPC `identity.GetDriver` y el cobro (CHARGE async → COBRO_PENDIENTE → CONFIRMADO) son F1/F3.
- *  - El lock atómico de asientos (§6) SE CONSTRUIRÁ en el handler de payment.captured (F3b · PENDIENTE, aún
- *    no existe): hoy F0 valida cupo de forma NO transaccional (chequeo barato anti-overbooking obvio); la
- *    garantía dura del cupo llegará con ese lock en F3b. NO describir el handler como si ya corriera.
+ *  - El handler de `payment.captured` / `payment.failed` (COBRO_PENDIENTE → CONFIRMADO/CANCELADO) + el LOCK
+ *    ATÓMICO de asientos (§6, decremento en CONFIRMADO) + BR-P02 + el Refund de asiento-lleno son F3c · PENDIENTE
+ *    (aún NO existen). Hoy el cupo se valida de forma NO transaccional al reservar (chequeo barato anti-overbooking
+ *    obvio); la garantía dura del cupo llega con ese lock en F3c. NO describir el handler como si ya corriera.
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConflictError, NotFoundError, ValidationError, isUuid, uuidv7 } from '@veo/utils';
+import {
+  ConflictError,
+  ExternalServiceError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  isUuid,
+  uuidv7,
+} from '@veo/utils';
 import {
   BookingState,
   ModoReserva,
   PublishedTripState,
   type Booking,
+  type PaymentMethod,
 } from '../generated/prisma';
+import { BookingApprovedOrigen, BookingCancelledRazon } from '@veo/events';
 import { bookingMachine } from '../domain/booking-state';
-import { PassengerHasDebtError } from '../domain/payment-charge';
+import {
+  ChargePermanentlyRejectedError,
+  PassengerHasDebtError,
+  isSyncDeclineStatus,
+} from '../domain/payment-charge';
+import { isDriverActive } from '../domain/driver-eligibility';
 import { BookingEventType } from '../events/booking-events';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/payment/payment-gateway.port';
+import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { BookingsRepository, type CreateBookingData } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
+import type { ListTripBookingsPageDto } from './dto/list-trip-bookings-page.dto';
 
 /**
  * Prefijo de la dedupKey de REQUEST (idempotencia del POST /bookings). Aísla este espacio de claves del
@@ -67,6 +88,9 @@ import type { CreateBookingDto } from './dto/create-booking.dto';
  */
 const REQUEST_DEDUP_NAMESPACE = 'booking:req:' as const;
 
+/** Default de tamaño de página de GET /published-trips/:id/bookings si el cliente no pide `limit`. Acotado por @Max en el DTO. */
+const DEFAULT_TRIP_BOOKINGS_PAGE_SIZE = 20;
+
 @Injectable()
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
@@ -74,6 +98,7 @@ export class BookingsService {
   constructor(
     private readonly repo: BookingsRepository,
     @Inject(PAYMENT_GATEWAY) private readonly payment: PaymentGateway,
+    @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
   ) {}
 
   /**
@@ -90,21 +115,25 @@ export class BookingsService {
    * F1a), que SÍ es fail-closed: ahí dejar pasar a un conductor no elegible es un riesgo de SEGURIDAD, no un
    * cobro diferido recuperable.
    *
-   * ⚠️ RED DE SEGURIDAD PENDIENTE: la justificación del fail-open se apoya en "el cobro real RE-VALIDA la
-   * deuda en la aprobación". Ese re-check (CHARGE / handler de aprobación) es F3b y AÚN NO EXISTE. Hasta que
-   * F3b se construya, NO hay segunda barrera: un deudor que se cuela por un fail-open transitorio NO es
-   * re-validado aguas abajo. Tener presente al evaluar el riesgo del fail-open hoy.
+   * RED DE SEGURIDAD: el fail-open se apoya en que el CHARGE re-valida el método/saldo al dispararlo. Ese
+   * DISPARO del CHARGE (approve() / reserve()-INSTANT → triggerCharge) es F3b y YA EXISTE (construido): un
+   * deudor que se cuela por un fail-open transitorio igual choca con el cobro server-side de payment como
+   * segunda barrera real, y un decline SÍNCRONO (DEBT/FAILED) o un rechazo PERMANENTE ya CANCELA el booking en
+   * triggerCharge (no queda colgado). Lo que AÚN NO existe es el RE-CHECK ASÍNCRONO de la deuda: el handler de
+   * `payment.captured`/`payment.failed` que CONFIRMA o cancela cuando la captura resuelve por webhook/poll
+   * minutos después — eso es F3c · PENDIENTE; hasta entonces un cobro que arrancó PENDING queda en COBRO_PENDIENTE.
    */
   private async assertNoDebt(passengerId: string): Promise<void> {
     let summary;
     try {
       summary = await this.payment.getDebt(passengerId);
     } catch (err) {
-      // FAIL-OPEN: payment caído/timeout no bloquea la reserva (no mueve plata). El re-check del cobro que
-      // sería la segunda barrera es F3b y AÚN NO EXISTE (pendiente). Se loguea para observabilidad/auditoría
-      // del bypass — nunca se traga en silencio.
+      // FAIL-OPEN: payment caído/timeout no bloquea la reserva (no mueve plata). La segunda barrera real es el
+      // DISPARO del CHARGE al aprobar (F3b · CONSTRUIDO), que ya cancela el booking ante un decline síncrono o
+      // un rechazo permanente; el RE-CHECK ASÍNCRONO de la deuda (handler payment.captured/failed) es F3c ·
+      // PENDIENTE. Se loguea para observabilidad/auditoría del bypass — nunca se traga en silencio.
       this.logger.warn({
-        msg: 'Gate de deuda DEGRADADO (payment-service inaccesible): se permite reservar (fail-open). El re-check del cobro (segunda barrera) es F3b · PENDIENTE',
+        msg: 'Gate de deuda DEGRADADO (payment-service inaccesible): se permite reservar (fail-open). La 2da barrera es el CHARGE al aprobar (F3b · construido); el re-check async de la deuda es F3c · PENDIENTE',
         passengerId,
         cause: err instanceof Error ? err.message : String(err),
       });
@@ -142,7 +171,7 @@ export class BookingsService {
       });
     }
     // Cupo: asientos pedidos ≤ disponibles. Chequeo BARATO (no transaccional) — la garantía dura contra
-    // overbooking concurrente SE CONSTRUIRÁ en el lock atómico del handler de payment.captured (§6, F3b ·
+    // overbooking concurrente SE CONSTRUIRÁ en el lock atómico del handler de payment.captured (§6, F3c ·
     // PENDIENTE, aún no existe). Hoy solo este chequeo barato cubre el overbooking obvio.
     if (dto.asientos > trip.asientosDisponibles) {
       throw new ConflictError('No hay asientos suficientes disponibles', {
@@ -197,7 +226,11 @@ export class BookingsService {
       precioAcordado,
       mensajeIntro: dto.mensajeIntro ?? null,
       specialRequest: dto.specialRequest ?? null,
-      paymentId: null, // se setea en el CHARGE (F3)
+      // MÉTODO DE PAGO elegido por el pasajero al reservar (ADR-014 §5.5 · decisión del dueño 2026-06-22). Se
+      // PERSISTE acá y el CHARGE al aprobar (o al reservar si INSTANT) lo usa: `charge({ method: ... })`. El DTO
+      // ya lo validó con @IsEnum (tipado, cero strings mágicos); va server-truth tal cual al Booking.
+      paymentMethod: dto.paymentMethod,
+      paymentId: null, // se setea en el CHARGE (al aprobar / al reservar si INSTANT, abajo)
       dedupKey,
       estado: estadoInicial,
     };
@@ -214,7 +247,9 @@ export class BookingsService {
           precioAcordado,
           modoReserva: trip.modoReserva,
           estado: estadoInicial,
-          origen: 'INSTANT_BOOKING',
+          // origen TIPADO desde @veo/events (fuente única del schema bookingApproved): NUNCA un literal suelto.
+          // Un string mágico que no matchee el z.enum del schema → poison message en el relay (lo que cazó el gate).
+          origen: BookingApprovedOrigen.INSTANT_BOOKING,
         }
       : {
           bookingId: id,
@@ -230,11 +265,21 @@ export class BookingsService {
     // Idempotencia de request: dos POST con el MISMO Idempotency-Key (reintento del mismo submit) comparten
     // la dedupKey → el UNIQUE hace fallar el 2º con P2002 → devolvemos el Booking ya creado (no fila nueva,
     // no 500). Keys distintas (submits distintos) → reservas distintas, sin lockout.
-    return this.repo.createWithEventIdempotent(dedupKey, passengerId, data, {
+    const booking = await this.repo.createWithEventIdempotent(dedupKey, passengerId, data, {
       eventType,
       aggregateId: id,
       payload,
     });
+
+    // INSTANT_BOOKING (ADR-014 §4.2 · §7.1): el Booking nace APROBADO sin pasar por el conductor → el CHARGE
+    // se dispara YA (mismo `triggerCharge` que usa approve(), DRY). Lo lleva a COBRO_PENDIENTE. Antes de F3b
+    // un INSTANT quedaba en APROBADO sin cobrar (hueco); ahora cobra al reservar. La idempotencia de REQUEST
+    // (P2002 → existente) puede devolver un booking que ya pasó de APROBADO: `triggerCharge` es tolerante a
+    // un estado ya avanzado (no re-dispara si no está APROBADO) — un reintento del mismo submit no doble-cobra.
+    if (booking.estado === BookingState.APROBADO) {
+      return this.triggerCharge(booking);
+    }
+    return booking;
   }
 
   /**
@@ -250,6 +295,306 @@ export class BookingsService {
       throw new NotFoundError('Reserva no encontrada', { id });
     }
     return booking;
+  }
+
+  /**
+   * APRUEBA una solicitud (POST /bookings/:id/approve · driver-rail · ADR-014 §8). Gate server-side (capa
+   * 2/3, no solo el guard): el conductor debe ser DUEÑO del PublishedTrip de la reserva (server-truth) Y estar
+   * ACTIVO/no-suspendido (gRPC GetDriver, fail-closed). No-dueño → NotFoundError (anti-IDOR: no se filtra la
+   * existencia de una reserva ajena).
+   *
+   * ATOMICIDAD CROSS-SERVICE (§5.2 · el punto delicado) — el CHARGE es REST (I/O externa) → NUNCA dentro de
+   * una $transaction Prisma. El patrón es DOS transacciones con el charge EN MEDIO:
+   *   1. Gate (dueño + driver activo).
+   *   2. tx1 (`transitionWithEvent`): PENDIENTE_APROBACION → APROBADO + outbox `booking.approved`. COMMIT.
+   *   3. CHARGE REST (`triggerCharge`): fuera de toda tx. dedupKey determinista → idempotente.
+   *   4. charge OK → tx2 (`markChargePending`): APROBADO → COBRO_PENDIENTE + guarda paymentId. COMMIT.
+   *   5. charge FALLA (ExternalServiceError) → el booking queda en APROBADO; approve es RE-EJECUTABLE: re-llamar
+   *      approve sobre un booking YA APROBADO RE-DISPARA el charge (idempotente por dedupKey) sin re-emitir el
+   *      evento (tx1 ya no aplica: APROBADO no está en el `from` permitido para `booking.approved`). Ver abajo.
+   *
+   * RE-EJECUCIÓN (charge fallido) — POR QUÉ así: si el charge cae tras aprobar, el dinero NO se movió y el
+   * booking quedó en APROBADO (el evento `booking.approved` ya se emitió, idempotente). Un retry del conductor
+   * NO debe re-emitir `booking.approved` (la máquina rechaza APROBADO→APROBADO) ni crear un cobro nuevo (la
+   * dedupKey lo dedupea). Por eso, si el booking YA está APROBADO al entrar, se SALTEA la tx1 y se va directo
+   * a `triggerCharge` → COBRO_PENDIENTE. Así la operación es re-ejecutable hasta que el charge prenda, sin
+   * romper la máquina de estados ni doble-cobrar. Doble-tap del happy-path: el 2º intento no matchea
+   * PENDIENTE_APROBACION en el where atómico → ConflictError (la 1ª aprobación ya ganó).
+   */
+  async approve(bookingId: string, driverId: string): Promise<Booking> {
+    const booking = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+
+    // RE-EJECUCIÓN: si el booking YA está APROBADO (un approve previo aprobó pero el charge falló), NO se
+    // re-emite booking.approved — se va directo a re-disparar el charge (idempotente por dedupKey). Esto vuelve
+    // approve seguro de reintentar tras un charge fallido sin romper la máquina ni doble-cobrar.
+    if (booking.estado === BookingState.APROBADO) {
+      return this.triggerCharge(booking);
+    }
+
+    // LA REGLA, NO EL IF: validar contra el estado REAL del agregado (FIX 6: `booking.estado`, NO el literal
+    // PENDIENTE_APROBACION hardcodeado — eso era teatro, validaba un from fijo aunque el booking estuviera en
+    // otro estado). A esta altura ya pasó el early-return de APROBADO, así que en el happy path es
+    // PENDIENTE_APROBACION; si llegara en otro estado (EXPIRADO/RECHAZADO/COBRO_PENDIENTE/...), la máquina lanza
+    // ANTES del where atómico (mejor mensaje). El where condicionado del UPDATE sigue como defensa en profundidad.
+    bookingMachine.assertTransition(booking.estado, BookingState.APROBADO);
+
+    // tx1 — APROBADO + outbox booking.approved, atómico y condicionado por estado (doble-tap → ConflictError).
+    const approved = await this.repo.transitionWithEvent(
+      bookingId,
+      [BookingState.PENDIENTE_APROBACION],
+      { estado: BookingState.APROBADO },
+      {
+        eventType: BookingEventType.APPROVED,
+        aggregateId: bookingId,
+        payload: {
+          bookingId,
+          publishedTripId: booking.publishedTripId,
+          passengerId: booking.passengerId,
+          driverId,
+          asientos: booking.asientos,
+          precioAcordado: booking.precioAcordado,
+          // El schema bookingApproved EXIGE `modoReserva` (z.enum, NO opcional). El conductor solo aprueba
+          // solicitudes en REVISION (INSTANT se auto-aprueba al reservar y NUNCA pasa por approve()), así que
+          // acá es definicionalmente REVISION_CADA_SOLICITUD (tipado, cero strings mágicos). Sin esto el payload
+          // tampoco parseaba contra el schema publicado → habría sido un SEGUNDO poison message (lo cazó el test).
+          modoReserva: ModoReserva.REVISION_CADA_SOLICITUD,
+          estado: BookingState.APROBADO,
+          // FIX 1 — origen TIPADO del schema publicado: APROBACION_CONDUCTOR (el conductor aprobó). Antes era el
+          // literal mágico 'DRIVER_APPROVAL', que NO está en el z.enum de bookingApproved → schema.parse() en el
+          // relay LANZABA → poison message reintentado para siempre, el evento NUNCA llegaba a Kafka.
+          origen: BookingApprovedOrigen.APROBACION_CONDUCTOR,
+        },
+      },
+    );
+
+    // tx1 commiteó (booking.approved emitido). AHORA el CHARGE REST, fuera de toda tx → tx2 COBRO_PENDIENTE.
+    return this.triggerCharge(approved);
+  }
+
+  /**
+   * RECHAZA una solicitud (POST /bookings/:id/reject · driver-rail · ADR-014 §4.2/§8). Mismo gate que approve
+   * (dueño del PublishedTrip + driver activo). Transición PENDIENTE_APROBACION → RECHAZADO + outbox
+   * `booking.rejected` en UNA $transaction (outbox-in-transaction). NO cobra (terminal sin movimiento de
+   * plata). Idempotente: re-rechazar un booking ya RECHAZADO → el where atómico no matchea PENDIENTE_APROBACION
+   * → 0 filas → ConflictError, sin re-emitir el evento.
+   */
+  async reject(bookingId: string, driverId: string): Promise<Booking> {
+    const booking = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+
+    // LA REGLA, NO EL IF: validar contra el estado REAL del agregado (FIX 6: `booking.estado`, NO el literal
+    // hardcodeado). Si el booking ya no es rechazable (APROBADO/COBRO_PENDIENTE/terminal), la máquina lanza
+    // ANTES del where con un mensaje claro. El where atómico del UPDATE sigue sellando la idempotencia (doble-rechazo).
+    bookingMachine.assertTransition(booking.estado, BookingState.RECHAZADO);
+
+    return this.repo.transitionWithEvent(
+      bookingId,
+      [BookingState.PENDIENTE_APROBACION],
+      { estado: BookingState.RECHAZADO },
+      {
+        eventType: BookingEventType.REJECTED,
+        aggregateId: bookingId,
+        payload: {
+          bookingId,
+          publishedTripId: booking.publishedTripId,
+          passengerId: booking.passengerId,
+          driverId,
+          estado: BookingState.RECHAZADO,
+        },
+      },
+    );
+  }
+
+  /**
+   * Lista las solicitudes de un viaje del conductor (GET /published-trips/:id/bookings · driver-rail). SOLO el
+   * DUEÑO del PublishedTrip (server-truth); no-dueño / inexistente → NotFoundError (anti-IDOR, no filtra
+   * existencia). Keyset paginado (mismo patrón que las otras listas). Devuelve los Bookings del viaje.
+   */
+  async listRequestsForTrip(
+    publishedTripId: string,
+    driverId: string,
+    page: ListTripBookingsPageDto = {},
+  ): Promise<Booking[]> {
+    const trip = await this.repo.findPublishedTrip(publishedTripId);
+    // Ownership server-truth: el viaje debe existir Y ser de ESTE conductor. Miss → 404 (no revela que existe
+    // pero es de otro: mismo patrón anti-IDOR que getById). El Booking no porta driverId; el dueño es el del
+    // PublishedTrip, así que la autorización se ancla acá, no en un filtro por driverId de la query de bookings.
+    if (trip?.driverId !== driverId) {
+      throw new NotFoundError('Viaje publicado no encontrado', { id: publishedTripId });
+    }
+    const take = page.limit ?? DEFAULT_TRIP_BOOKINGS_PAGE_SIZE;
+    return this.repo.findByPublishedTripId(publishedTripId, take, page.cursor);
+  }
+
+  /**
+   * triggerCharge — ÚNICO punto que dispara el CHARGE del carpooling y registra COBRO_PENDIENTE (DRY: lo usan
+   * approve() Y reserve()-INSTANT · ADR-014 §5.2 paso 2). El charge es REST (I/O externa) → corre FUERA de toda
+   * $transaction Prisma; recién su resultado se persiste en una tx propia (`markChargePending`).
+   *
+   * Precondición: `booking` está en APROBADO. (approve/reserve garantizan esto antes de llamar.)
+   *
+   * Idempotencia financiera: el adapter deriva `dedupKey = booking-charge:{bookingId}` (determinista) → un
+   * reintento (mismo booking) NO duplica el cobro. Por eso re-ejecutar approve tras un charge fallido es seguro.
+   *
+   * RESULTADO del charge (FIX 2/3 · ADR-014 §5.4 "falla permanente → CANCELADO") — el disparo NO siempre lanza
+   * ni devuelve PENDING; se INSPECCIONA `charge.status` (PaymentStatus tipado, cero strings mágicos):
+   *   · PENDING                 → markChargePending (APROBADO → COBRO_PENDIENTE). Camino async normal.
+   *   · CAPTURED (raro síncrono) → SE TRATA IGUAL QUE PENDING → COBRO_PENDIENTE. NO se decrementa el asiento ni
+   *                                se confirma acá: eso es F3c (el handler de payment.captured corre la txn
+   *                                atómica del §6 con el seat-lock). Confirmar acá saltearía el lock → oversold.
+   *   · DEBT / FAILED           → decline SÍNCRONO (el cobro falló al iniciar) → APROBADO → CANCELADO + outbox
+   *                                booking.cancelled (razon=COBRO_RECHAZADO). Sin Refund (no se capturó nada).
+   *
+   * CATCH (el charge LANZA) — permanente vs transitorio (la causa raíz del loop):
+   *   · ChargePermanentlyRejectedError (4xx no-reintentable) → APROBADO → CANCELADO (terminal, NO loop).
+   *   · ExternalServiceError (5xx/408/429/timeout/red, TRANSITORIO) → se PROPAGA: el booking queda en APROBADO
+   *     RE-EJECUTABLE (re-llamar approve re-entra acá, idempotente por dedupKey). El asiento NO se toca (F3c).
+   *
+   * NINGÚN camino deja el booking colgado: o COBRO_PENDIENTE (async sigue), o CANCELADO (terminal), o APROBADO
+   * re-ejecutable (transitorio, con salida). El doble-cobro lo corta la dedupKey determinista (§5.3).
+   */
+  private async triggerCharge(booking: Booking): Promise<Booking> {
+    // El método de pago lo eligió el pasajero al reservar y vive en el Booking (server-truth). El tipo Prisma
+    // PaymentMethod es la cara LOCAL del contrato compartido y es ESTRUCTURALMENTE el mismo set que el
+    // PaymentMethod de @veo/shared-types que espera el puerto (mismos miembros) → asignable directo, sin cast.
+    const method: PaymentMethod = booking.paymentMethod;
+    let charge;
+    try {
+      charge = await this.payment.charge({
+        bookingId: booking.id, // = tripId opaco para payment (§5.5); el adapter deriva la dedupKey financiera.
+        grossCents: booking.precioAcordado,
+        method,
+        passengerId: booking.passengerId,
+      });
+    } catch (err) {
+      // RECHAZO PERMANENTE (4xx no-reintentable): el booking NO puede prosperar — reintentar daría el mismo
+      // rechazo (misma dedupKey) → LOOP. Salida TERMINAL: APROBADO → CANCELADO (razon=COBRO_RECHAZADO).
+      if (err instanceof ChargePermanentlyRejectedError) {
+        this.logger.warn({
+          msg: 'CHARGE del carpooling RECHAZADO PERMANENTEMENTE al disparar: el booking se CANCELA (terminal, NO loop). El dinero NO se movió (sin Refund)',
+          bookingId: booking.id,
+          cause: err.message,
+        });
+        return this.cancelForChargeRejected(booking, { upstream: err.details });
+      }
+      // TRANSITORIO: el booking queda en APROBADO (la tx2 no corre). Se PROPAGA un ExternalServiceError para
+      // que el caller reintente — re-llamar approve re-dispara el charge (idempotente por dedupKey). NO se traga.
+      this.logger.warn({
+        msg: 'CHARGE del carpooling FALLÓ (TRANSITORIO) tras aprobar: el booking queda en APROBADO (re-ejecutable vía approve). El dinero NO se movió; el re-disparo es idempotente por dedupKey',
+        bookingId: booking.id,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+      if (err instanceof ExternalServiceError) throw err;
+      throw new ExternalServiceError('Falló el CHARGE del carpooling al aprobar', {
+        bookingId: booking.id,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // DECLINE SÍNCRONO (payment respondió 200 con status DEBT/FAILED): el cobro falló al iniciar → el booking
+    // NO debe quedar en COBRO_PENDIENTE esperando una captura que nunca llegará (quedaría COLGADO: el handler
+    // F3c que reconciliaría no existe). Salida TERMINAL: APROBADO → CANCELADO (razon=COBRO_RECHAZADO). Sin Refund.
+    if (isSyncDeclineStatus(charge.status)) {
+      this.logger.warn({
+        msg: 'CHARGE del carpooling DECLINADO SÍNCRONAMENTE (DEBT/FAILED) al disparar: el booking se CANCELA (terminal). El dinero NO se capturó (sin Refund)',
+        bookingId: booking.id,
+        status: charge.status,
+      });
+      return this.cancelForChargeRejected(booking, { status: charge.status, paymentId: charge.paymentId });
+    }
+
+    // charge OK (PENDING — o un CAPTURED síncrono, tratado IGUAL): tx2 atómica → APROBADO → COBRO_PENDIENTE +
+    // guarda el paymentId. La CONFIRMACIÓN (decremento de asiento bajo seat-lock §6) la corre el handler de
+    // payment.captured de F3c (PENDIENTE) — NO acá: confirmar/decrementar acá saltearía el lock → oversold.
+    return this.repo.markChargePending(booking.id, charge.paymentId);
+  }
+
+  /**
+   * Transición TERMINAL del booking por cobro rechazado (decline síncrono DEBT/FAILED, o 4xx permanente ·
+   * ADR-014 §5.4): APROBADO → CANCELADO + outbox `booking.cancelled` (razon=COBRO_RECHAZADO, estadoAnterior=
+   * APROBADO) en UNA tx (outbox-en-transacción). REUSA `transitionWithEvent` (allowedStates=[APROBADO], where
+   * atómico): si dos disparos compiten, solo uno matchea APROBADO → el 2º choca 0 filas → ConflictError, sin
+   * doble-cancelar ni doble-evento. La REGLA primero (assertTransition contra el estado real) por consistencia
+   * con approve/reject. El payload del booking individual valida contra el schema bookingCancelled (forma B,
+   * aditiva). NO hay Refund: charge-on-approval sin hold → no se capturó nada que devolver.
+   */
+  private async cancelForChargeRejected(
+    booking: Booking,
+    details: Record<string, unknown>,
+  ): Promise<Booking> {
+    // La REGLA contra el estado REAL (FIX 6): precondición de triggerCharge → booking.estado === APROBADO.
+    bookingMachine.assertTransition(booking.estado, BookingState.CANCELADO);
+    return this.repo.transitionWithEvent(
+      booking.id,
+      [BookingState.APROBADO],
+      { estado: BookingState.CANCELADO },
+      {
+        eventType: BookingEventType.CANCELLED,
+        aggregateId: booking.id,
+        payload: {
+          bookingId: booking.id,
+          razon: BookingCancelledRazon.COBRO_RECHAZADO,
+          estado: BookingState.CANCELADO,
+          estadoAnterior: BookingState.APROBADO,
+          ...details,
+        },
+      },
+    );
+  }
+
+  /**
+   * Gate server-side del driver-rail (capa 2/3) para approve/reject (ADR-014 §8 · §10). DOS ejes:
+   *  1. DUEÑO del PublishedTrip de la reserva (server-truth): lee el Booking desde el PRIMARY (estado fresco),
+   *     resuelve su PublishedTrip y exige `trip.driverId === driverId`. Booking inexistente, o de un viaje
+   *     ajeno → NotFoundError (anti-IDOR: el conductor no-dueño no distingue "no existe" de "no es tuyo").
+   *  2. Conductor ACTIVO/no-suspendido (gRPC GetDriver, fail-closed): un conductor suspendido ENTRE publicar y
+   *     aprobar no puede operar sus ofertas vivas → 403. Si identity no responde → 403 (fail-closed, espeja el
+   *     gate de publish). Predicado ÚNICO `isDriverActive` (cero strings mágicos, enum DriverStatus.SUSPENDED).
+   * Devuelve el Booking (leído del PRIMARY) para que el caller opere sin re-leerlo.
+   */
+  private async assertDriverOwnsBookingTrip(bookingId: string, driverId: string): Promise<Booking> {
+    // Read CRÍTICO desde el PRIMARY: la decisión (estado + ownership) no puede apoyarse en una réplica stale.
+    const booking = await this.repo.findByIdFromPrimary(bookingId);
+    if (!booking) {
+      throw new NotFoundError('Reserva no encontrada', { id: bookingId });
+    }
+    // Ownership: el dueño es el conductor del PublishedTrip de la reserva (el Booking no porta driverId).
+    const trip = await this.repo.findPublishedTrip(booking.publishedTripId);
+    if (trip?.driverId !== driverId) {
+      // No-dueño → 404 (anti-IDOR, NO 403: no se filtra la existencia de una reserva de un viaje ajeno).
+      throw new NotFoundError('Reserva no encontrada', { id: bookingId });
+    }
+    // Conductor activo/no-suspendido (fail-closed): suspensión sobreviniente entre publicar y aprobar → 403.
+    await this.assertDriverActive(driverId);
+    return booking;
+  }
+
+  /**
+   * Gate de SUSPENSIÓN SOBREVINIENTE del conductor (approve/reject · ADR-014 §8/§10). Re-valida contra identity
+   * (server-truth) que el conductor sigue ACTIVO. FALLA-CERRADO: si identity no responde → ForbiddenError (403)
+   * — nunca un conductor suspendido operando por un error de red (espeja el gate de publish de F1a). Predicado
+   * ÚNICO `isDriverActive` (más laxo que el de publish: acá solo importa la suspensión, no KYC/antecedentes —
+   * esos se validaron al publicar; ver DriverActiveView en domain/driver-eligibility).
+   */
+  private async assertDriverActive(driverId: string): Promise<void> {
+    let driver;
+    try {
+      driver = await this.identity.getDriver(driverId);
+    } catch (err) {
+      // fail-closed: identity caída / timeout → no se permite aprobar/rechazar.
+      throw new ForbiddenError('No se pudo verificar el estado del conductor (identity no disponible)', {
+        driverId,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (isDriverActive(driver)) return;
+    if (!driver.found) {
+      throw new ForbiddenError('Conductor no encontrado', { driverId });
+    }
+    throw new ForbiddenError('Conductor suspendido: no puede operar sus solicitudes', {
+      driverId,
+      suspendedAt: driver.suspendedAt,
+      currentStatus: driver.currentStatus,
+    });
   }
 
   /**

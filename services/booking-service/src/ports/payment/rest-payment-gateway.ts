@@ -19,7 +19,10 @@ import { Logger } from '@nestjs/common';
 import { ExternalServiceError } from '@veo/utils';
 import { anonymousIdentity, InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { InternalRestClient, DownstreamError } from '@veo/rpc';
-import { deriveBookingChargeDedupKey } from '../../domain/payment-charge';
+import {
+  ChargePermanentlyRejectedError,
+  deriveBookingChargeDedupKey,
+} from '../../domain/payment-charge';
 import {
   PaymentMethod,
   PaymentStatus,
@@ -110,7 +113,11 @@ export class RestPaymentGateway implements Pick<PaymentGateway, 'charge' | 'getD
       });
       return { paymentId: res.id, status: toPaymentStatus(res.status) || PaymentStatus.PENDING };
     } catch (err) {
-      throw this.toExternalError(err, 'el CHARGE del carpooling');
+      // CLASIFICA permanente vs transitorio (FIX 3): un 4xx no-reintentable de payment (método inválido,
+      // pasajero bloqueado) → ChargePermanentlyRejectedError (terminal, el service cancela el booking, NO loop).
+      // 5xx/408/429/timeout/red → ExternalServiceError (502, transitorio, re-ejecutable). La CAUSA RAÍZ del bug
+      // era colapsar TODO en ExternalServiceError "reintentable" → re-approve → mismo rechazo → loop infinito.
+      throw this.classifyChargeError(err);
     }
   }
 
@@ -146,7 +153,8 @@ export class RestPaymentGateway implements Pick<PaymentGateway, 'charge' | 'getD
   /**
    * Traduce un fallo del cliente REST a un error de dominio TIPADO de booking (502, reintentable), preservando
    * status/code del downstream en details. El caller decide la degradación: para el gate de deuda, fail-open
-   * con observabilidad (reservar NO mueve plata); para el charge, compensación.
+   * con observabilidad (reservar NO mueve plata). Lo usa getDebt — para el CHARGE se usa `classifyChargeError`,
+   * que ADEMÁS distingue el 4xx PERMANENTE (no-reintentable) del transitorio.
    */
   private toExternalError(err: unknown, what: string): ExternalServiceError {
     if (err instanceof DownstreamError) {
@@ -159,4 +167,34 @@ export class RestPaymentGateway implements Pick<PaymentGateway, 'charge' | 'getD
       cause: String(err),
     });
   }
+
+  /**
+   * Clasifica un fallo del CHARGE en PERMANENTE vs TRANSITORIO (FIX 3 · ADR-014 §5.4). La CAUSA RAÍZ del bug
+   * era que `toExternalError` COLAPSABA todo `DownstreamError` en un `ExternalServiceError` "reintentable",
+   * perdiendo el status: un 4xx no-reintentable (método inválido, pasajero bloqueado) dejaba el booking en
+   * APROBADO → el conductor re-aprobaba → MISMA dedupKey → MISMO rechazo → LOOP infinito sin salida terminal.
+   *
+   * REGLA (el `status` del DownstreamError ya viene preservado, @veo/rpc): un 4xx EXCLUYENDO 408/429 es
+   * PERMANENTE → ChargePermanentlyRejectedError (el service cancela el booking, terminal). 5xx, 408, 429,
+   * timeout o error de red (no-DownstreamError) son TRANSITORIOS → ExternalServiceError (502, re-ejecutable).
+   */
+  private classifyChargeError(err: unknown): Error {
+    if (err instanceof DownstreamError && isPermanentHttpStatus(err.status)) {
+      return new ChargePermanentlyRejectedError({
+        upstreamStatus: err.status,
+        code: err.code,
+      });
+    }
+    return this.toExternalError(err, 'el CHARGE del carpooling');
+  }
+}
+
+/**
+ * ¿Es un status HTTP downstream PERMANENTE (no-reintentable)? Un 4xx — EXCLUYENDO 408 (Request Timeout) y 429
+ * (Too Many Requests), que SÍ son transitorios (reintentar puede prender). 5xx y cualquier cosa fuera de
+ * [400,500) son transitorios. Predicado puro tipado (cero strings mágicos): un único punto define la frontera.
+ */
+function isPermanentHttpStatus(status: number): boolean {
+  const TRANSIENT_4XX = new Set([408, 429]);
+  return status >= 400 && status < 500 && !TRANSIENT_4XX.has(status);
 }

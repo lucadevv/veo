@@ -14,6 +14,7 @@ import {
 } from '@veo/auth';
 import { PaymentMethod, PaymentStatus } from '@veo/shared-types';
 import { RestPaymentGateway } from './rest-payment-gateway';
+import { ChargePermanentlyRejectedError } from '../../domain/payment-charge';
 
 const SECRET = 'test-internal-secret';
 const BASE_URL = 'http://payment.local/api/v1';
@@ -153,7 +154,7 @@ describe('RestPaymentGateway (booking-service)', () => {
     expect(identity?.aud).toBe('service-rail');
   });
 
-  it('charge: non-2xx de payment → ExternalServiceError (502, no 500 opaco)', async () => {
+  it('charge: 5xx de payment → ExternalServiceError (502 TRANSITORIO, re-ejecutable)', async () => {
     stubFetch(502, { code: 'EXTERNAL', message: 'upstream down' });
     const gw = new RestPaymentGateway(BASE_URL, SECRET);
 
@@ -165,6 +166,33 @@ describe('RestPaymentGateway (booking-service)', () => {
         passengerId: PASSENGER_ID,
       }),
     ).rejects.toBeInstanceOf(ExternalServiceError);
+  });
+
+  it('charge: 4xx PERMANENTE (422 método inválido) → ChargePermanentlyRejectedError (NO ExternalServiceError → NO loop)', async () => {
+    // CAUSA RAÍZ del FIX 3: antes el adapter COLAPSABA este 4xx en un ExternalServiceError "reintentable" → el
+    // booking quedaba APROBADO → re-approve → misma dedupKey → mismo rechazo → LOOP. Ahora se clasifica PERMANENTE.
+    stubFetch(422, { error: { code: 'PAYMENT_METHOD_INVALID', message: 'método inválido' } });
+    const gw = new RestPaymentGateway(BASE_URL, SECRET);
+
+    const err = await gw
+      .charge({ bookingId: BOOKING_ID, grossCents: 5000, method: PaymentMethod.YAPE, passengerId: PASSENGER_ID })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ChargePermanentlyRejectedError);
+    // NO debe ser un ExternalServiceError (eso reintentaría → loop).
+    expect(err).not.toBeInstanceOf(ExternalServiceError);
+  });
+
+  it('charge: 429/408 son TRANSITORIOS (no permanentes) → ExternalServiceError (reintentar puede prender)', async () => {
+    for (const status of [429, 408]) {
+      stubFetch(status, { error: { code: 'RATE_LIMIT', message: 'slow down' } });
+      const gw = new RestPaymentGateway(BASE_URL, SECRET);
+      const err = await gw
+        .charge({ bookingId: BOOKING_ID, grossCents: 5000, method: PaymentMethod.YAPE, passengerId: PASSENGER_ID })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ExternalServiceError);
+      expect(err).not.toBeInstanceOf(ChargePermanentlyRejectedError);
+      vi.restoreAllMocks();
+    }
   });
 
   it('getDebt: timeout/red caída → ExternalServiceError (502 reintentable)', async () => {

@@ -16,7 +16,8 @@
  *
  * NOTA de scope: la BÚSQUEDA (GET /published-trips/search?ruta&fecha&asientos, §8 · F2 · índice geo H3) YA
  * está implementada acá (handler `search`, public-rail anónimo). El listado de solicitudes de una oferta
- * (GET /published-trips/:id/bookings) sigue diferido a F3.
+ * (GET /published-trips/:id/bookings, driver-rail · F3b) vive acá porque su path es /published-trips/...,
+ * pero delega a BookingsService (el dominio de la reserva); la autorización es OWNERSHIP del PublishedTrip.
  */
 import {
   Body,
@@ -46,6 +47,8 @@ import { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 import { ListMinePageDto } from './dto/list-mine-page.dto';
 import { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
+import { BookingsService } from '../bookings/bookings.service';
+import { ListTripBookingsPageDto } from '../bookings/dto/list-trip-bookings-page.dto';
 
 @ApiTags('published-trips')
 @ApiBearerAuth()
@@ -54,7 +57,12 @@ import { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
 @UseGuards(InternalIdentityGuard, AudienceGuard)
 @Controller('published-trips')
 export class PublishedTripsController {
-  constructor(private readonly trips: PublishedTripsService) {}
+  constructor(
+    private readonly trips: PublishedTripsService,
+    // BookingsService: el listado de solicitudes de un viaje (F3b) es del dominio de la reserva, pero su path
+    // cuelga de /published-trips/:id/bookings → se cablea acá y delega. La autorización es ownership del viaje.
+    private readonly bookings: BookingsService,
+  ) {}
 
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Post()
@@ -114,6 +122,22 @@ export class PublishedTripsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.trips.cancel(id, this.requireDriverId(user));
+  }
+
+  // GET /:id/bookings (driver-rail) ANTES de GET /:id (public-rail): rutas con distinto largo de segmentos no
+  // colisionan, pero se agrupa por claridad. Ownership del PublishedTrip (server-truth) → no-dueño = 404.
+  @Audiences(InternalAudience.DRIVER_RAIL)
+  @Get(':id/bookings')
+  @ApiOperation({
+    summary: 'Listar las solicitudes (reservas) de un viaje propio (paginado keyset) · driver-rail',
+  })
+  listTripBookings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() page: ListTripBookingsPageDto,
+  ) {
+    // driverId server-truth (no del path · anti-IDOR). El service exige ownership del PublishedTrip → 404 si ajeno.
+    return this.bookings.listRequestsForTrip(id, this.requireDriverId(user), page);
   }
 
   @Audiences(InternalAudience.PUBLIC_RAIL)

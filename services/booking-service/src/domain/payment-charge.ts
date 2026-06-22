@@ -4,6 +4,7 @@
  * tipado del gate de deuda. CERO strings mágicos: el prefijo y el error son constantes/tipos del dominio.
  */
 import { UnprocessableEntityError } from '@veo/utils';
+import { PaymentStatus } from '@veo/shared-types';
 
 /**
  * Prefijo de la dedupKey FINANCIERA del CHARGE del carpooling (§5.3). DISTINTO del `trip-completed:{tripId}`
@@ -34,4 +35,34 @@ export class PassengerHasDebtError extends UnprocessableEntityError {
       totalCents,
     });
   }
+}
+
+/**
+ * El CHARGE del carpooling fue RECHAZADO de forma PERMANENTE — reintentar NUNCA va a funcionar (ADR-014 §5.4
+ * "falla permanente → CANCELADO"). DOS orígenes, ambos terminales para ESTE booking:
+ *   1. Decline SÍNCRONO: payment respondió HTTP 200 con `status` DEBT/FAILED (el cobro falló al iniciar, el
+ *      adapter ya lo mapeó a PaymentStatus tipado). NO lanza — el service inspecciona `charge.status`.
+ *   2. Error PERMANENTE: payment respondió un 4xx NO-reintentable (método inválido, pasajero bloqueado, etc.;
+ *      EXCLUYE 408/429, que SÍ son transitorios). El adapter (`toExternalError`) lo clasifica y LANZA ESTO.
+ *
+ * Por qué un error de dominio PROPIO (httpStatus 422) y no el `ExternalServiceError` (502, reintentable): si
+ * el booking se quedara con un 502 "reintentable", el conductor re-aprobaría → MISMA dedupKey → MISMO rechazo
+ * → LOOP infinito sin salida terminal. Marcándolo PERMANENTE, `triggerCharge` lo atrapa y transiciona
+ * APROBADO → CANCELADO (booking.cancelled, razon=COBRO_RECHAZADO): salida terminal, NO loop. `details.status`
+ * lleva el PaymentStatus del decline (cuando vino por el camino 1); `cause`/`upstreamStatus`, el del 4xx.
+ */
+export class ChargePermanentlyRejectedError extends UnprocessableEntityError {
+  constructor(details?: Record<string, unknown>) {
+    super('El cobro del carpooling fue rechazado de forma permanente al dispararlo', details);
+  }
+}
+
+/**
+ * El `PaymentStatus` que devuelve `charge()` SÍNCRONAMENTE es un DECLINE permanente (el cobro falló al iniciar,
+ * no es el camino async normal PENDING→captura). DEBT/FAILED son declines; PENDING (y un CAPTURED síncrono, raro
+ * pero benigno) NO lo son. Predicado ÚNICO tipado (cero strings mágicos): el service decide la transición con
+ * ESTO, no comparando literales. ADR-014 §5.4: DEBT/FAILED síncronos → CANCELADO.
+ */
+export function isSyncDeclineStatus(status: PaymentStatus): boolean {
+  return status === PaymentStatus.DEBT || status === PaymentStatus.FAILED;
 }

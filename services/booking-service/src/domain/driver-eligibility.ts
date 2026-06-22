@@ -83,3 +83,33 @@ export function isDriverEligible(driver: DriverEligibilityView): boolean {
   if (driver.backgroundCheckStatus !== BACKGROUND_CHECK_CLEARED) return false;
   return true;
 }
+
+/**
+ * Sub-vista MÍNIMA del gate de APROBAR/RECHAZAR una solicitud (F3b · ADR-014 §8): solo los ejes de
+ * "el conductor sigue ACTIVO / no suspendido". DELIBERADAMENTE más laxo que `isDriverEligible` (publish):
+ * al APROBAR, el conductor YA pasó el gate FULL de publish (KYC/antecedentes one-shot al publicar su oferta);
+ * lo que F3b re-valida es que NO haya sido SUSPENDIDO entre publicar y aprobar — un conductor suspendido no
+ * puede seguir operando sobre sus ofertas vivas. No re-pedimos KYC/antecedentes acá porque (a) ya se validaron
+ * al publicar y (b) el riesgo es de SUSPENSIÓN sobreviniente, no de un alta no verificada.
+ */
+export interface DriverActiveView {
+  /** ¿identity encontró al conductor? false → no activo (no resolvible). */
+  found: boolean;
+  /** Estado operativo del conductor (DriverStatus); SUSPENDED → no activo. */
+  currentStatus: string;
+  /** ISO-8601 de suspensión; null/"" si NO está suspendido. No-null/no-vacío → no activo. */
+  suspendedAt: string | null;
+}
+
+/**
+ * Predicado del gate de APROBAR/RECHAZAR (F3b): el conductor está ACTIVO si fue encontrado, NO está
+ * suspendido (ni por timestamp ni por estado). Predicado ENFOCADO en suspensión sobreviniente — ver
+ * `DriverActiveView` para el porqué de no re-validar KYC/antecedentes acá. CERO strings mágicos: compara
+ * contra el enum TIPADO DriverStatus.SUSPENDED.
+ */
+export function isDriverActive(driver: DriverActiveView): boolean {
+  if (!driver.found) return false;
+  if (driver.suspendedAt !== null && driver.suspendedAt !== '') return false;
+  if (driver.currentStatus === DriverStatus.SUSPENDED) return false;
+  return true;
+}

@@ -16,6 +16,7 @@ import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
 import { CostCapService } from './cost-cap.service';
 import { MapsModule } from '../ports/maps/maps.module';
+import { BookingsModule } from '../bookings/bookings.module';
 import { PAIS, type CostPerKmConfig } from '../domain/cost-cap';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
@@ -88,7 +89,8 @@ const costPerKmConfigProvider: Provider = {
 };
 
 @Module({
-  imports: [MapsModule],
+  // BookingsModule exporta BookingsService (lo consume el handler GET /:id/bookings del controller, F3b).
+  imports: [MapsModule, BookingsModule],
   providers: [
     PublishedTripsService,
     PublishedTripsRepository,

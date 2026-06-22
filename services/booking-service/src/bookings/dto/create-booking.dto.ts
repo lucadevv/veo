@@ -4,6 +4,7 @@
  * anti-IDOR). Dinero (specialRequest) en céntimos PEN (Int), nunca float.
  */
 import {
+  IsEnum,
   IsInt,
   IsLatitude,
   IsLongitude,
@@ -14,6 +15,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { PaymentMethod } from '@veo/shared-types';
 
 export class CreateBookingDto {
   // Oferta sobre la que se reserva (PublishedTrip, mismo schema 'booking').
@@ -24,6 +26,13 @@ export class CreateBookingDto {
   @Min(1)
   @Max(8)
   asientos!: number;
+
+  // MÉTODO DE PAGO elegido por el pasajero al reservar (ADR-014 §5.5 · decisión del dueño 2026-06-22).
+  // OBLIGATORIO y TIPADO: @IsEnum contra el PaymentMethod de @veo/shared-types (fuente única del monorepo,
+  // CERO strings mágicos). El CHARGE al aprobar (o al reservar si INSTANT) lo usa. La afiliación Yape on-file
+  // (QR-vs-on-file) la decide payment server-side — booking NO valida afiliación, solo pasa el método.
+  @IsEnum(PaymentMethod)
+  paymentMethod!: PaymentMethod;
 
   @IsLatitude()
   pickupLat!: number;

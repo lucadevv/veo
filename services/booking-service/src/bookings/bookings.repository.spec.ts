@@ -2,7 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConflictError } from '@veo/utils';
 import { BookingsRepository, type CreateBookingData, type OutboxIntent } from './bookings.repository';
 import type { PrismaService } from '../infra/prisma.service';
+import { BookingState } from '../generated/prisma';
 import { BookingEventType } from '../events/booking-events';
+
+const BOOKING_ID = '00000000-0000-0000-0000-0000000000b1';
+
+/** Fabrica un P2025 (record not found) que isRecordNotFound reconoce (name + code estructurales de Prisma). */
+function p2025(): Error {
+  const err = new Error('Record to update not found') as Error & { name: string; code: string };
+  err.name = 'PrismaClientKnownRequestError';
+  err.code = 'P2025';
+  return err;
+}
 
 /**
  * Idempotencia de request del repo (ADR-014 §5.3 + FOUNDATION idempotencia): un doble-POST con la MISMA
@@ -141,5 +152,96 @@ describe('BookingsRepository · idempotencia de request (doble-POST → 1 fila)'
     await expect(
       repo.createWithEventIdempotent(DEDUP_KEY, ATTACKER_PASSENGER_B, makeData(), intent),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+/**
+ * F3b — `transitionWithEvent` (approve/reject): la transición de estado + el outbox van en UNA transacción
+ * (atomicidad estado↔evento), condicionada por `estado: { in: allowed }` (UPDATE atómico). 0 filas (doble-tap
+ * / estado ya cambiado) → P2025 → ConflictError tipado (no un 500). El evento se emite UNA sola vez.
+ */
+describe('BookingsRepository · transitionWithEvent (outbox-in-transaction, F3b)', () => {
+  const intent: OutboxIntent = {
+    eventType: BookingEventType.APPROVED,
+    aggregateId: BOOKING_ID,
+    payload: { bookingId: BOOKING_ID },
+  };
+
+  it('transición OK: update + outbox en la MISMA tx, devuelve el booking con el estado nuevo', async () => {
+    const updated = { id: BOOKING_ID, estado: BookingState.APROBADO };
+    const tx = {
+      booking: { update: vi.fn(async () => updated) },
+      outboxEvent: { create: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
+    } as unknown as PrismaService;
+
+    const repo = new BookingsRepository(prisma);
+    const result = await repo.transitionWithEvent(
+      BOOKING_ID,
+      [BookingState.PENDIENTE_APROBACION],
+      { estado: BookingState.APROBADO },
+      intent,
+    );
+
+    expect(result).toMatchObject({ estado: BookingState.APROBADO });
+    // El where es CONDICIONADO por estado (UPDATE atómico): id + estado IN allowed.
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, estado: { in: [BookingState.PENDIENTE_APROBACION] } },
+      data: { estado: BookingState.APROBADO },
+    });
+    expect(tx.outboxEvent.create).toHaveBeenCalledOnce(); // evento UNA sola vez (atomicidad)
+  });
+
+  it('0 filas (doble-tap / estado ya cambiado) → P2025 → ConflictError tipado, no un 500', async () => {
+    const tx = {
+      booking: { update: vi.fn(async () => { throw p2025(); }) },
+      outboxEvent: { create: vi.fn() },
+    };
+    const prisma = {
+      write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
+    } as unknown as PrismaService;
+
+    const repo = new BookingsRepository(prisma);
+    await expect(
+      repo.transitionWithEvent(
+        BOOKING_ID,
+        [BookingState.PENDIENTE_APROBACION],
+        { estado: BookingState.APROBADO },
+        intent,
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+/**
+ * F3b — `markChargePending` (tx2 del charge): APROBADO → COBRO_PENDIENTE + paymentId, condicionado por
+ * `estado: APROBADO`. Si ya no está APROBADO (cobro ya registrado) → P2025 → ConflictError (idempotente).
+ */
+describe('BookingsRepository · markChargePending (tx2 del charge, F3b)', () => {
+  const PAYMENT_ID = '00000000-0000-0000-0000-0000000000f1';
+
+  it('APROBADO → COBRO_PENDIENTE + guarda paymentId (where condicionado por APROBADO)', async () => {
+    const updated = { id: BOOKING_ID, estado: BookingState.COBRO_PENDIENTE, paymentId: PAYMENT_ID };
+    const update = vi.fn(async () => updated);
+    const prisma = { write: { booking: { update } } } as unknown as PrismaService;
+
+    const repo = new BookingsRepository(prisma);
+    const result = await repo.markChargePending(BOOKING_ID, PAYMENT_ID);
+
+    expect(result).toMatchObject({ estado: BookingState.COBRO_PENDIENTE, paymentId: PAYMENT_ID });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, estado: BookingState.APROBADO },
+      data: { estado: BookingState.COBRO_PENDIENTE, paymentId: PAYMENT_ID },
+    });
+  });
+
+  it('ya no está APROBADO (cobro ya registrado) → P2025 → ConflictError (idempotente)', async () => {
+    const update = vi.fn(async () => { throw p2025(); });
+    const prisma = { write: { booking: { update } } } as unknown as PrismaService;
+
+    const repo = new BookingsRepository(prisma);
+    await expect(repo.markChargePending(BOOKING_ID, PAYMENT_ID)).rejects.toBeInstanceOf(ConflictError);
   });
 });
