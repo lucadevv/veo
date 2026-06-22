@@ -1,6 +1,5 @@
 import React from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
@@ -12,22 +11,11 @@ import { useResubmitRegistration } from '../hooks/useResubmitRegistration';
 import { IconLifebuoy } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { env } from '../../../../core/config/env';
-import { correctionStepForRejectedDocTypes, RegistrationStep } from '../../domain';
+import { correctionStepForRejection, isRejectedStatus, RegistrationStep } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
 import { RegistrationExitSheet, VeoWordmark, hexAlpha } from '../components';
-
-/** Ilustración de alerta (line art) para la pantalla de rechazo. */
-function RejectGlyph({ color }: { color: string }): React.JSX.Element {
-  return (
-    <Svg width={132} height={132} viewBox="0 0 132 132" fill="none">
-      <Circle cx={66} cy={66} r={44} stroke={color} strokeWidth={2.4} />
-      <Path d="M66 40v34" stroke={color} strokeWidth={2.8} strokeLinecap="round" />
-      <Circle cx={66} cy={90} r={2.6} fill={color} />
-    </Svg>
-  );
-}
 
 /**
  * Pantalla de RECHAZO del alta (drv-09). El conductor llega aquí cuando identity rechazó sus
@@ -43,6 +31,10 @@ export const RejectedScreen = (): React.JSX.Element => {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
+  const markCorrectionStarted = useRegistrationStore((s) => s.markCorrectionStarted);
+  // U4: gobierna "Reenviar a revisión" — solo se habilita tras una corrección detectable (el conductor
+  // entró al wizard vía "Corregir mis datos" en esta sesión), para no re-mandar lo MISMO que fue rechazado.
+  const hasCorrected = useRegistrationStore((s) => s.hasCorrectedAfterRejection);
   const resubmit = useResubmitRegistration();
 
   // Pantalla RAÍZ del estado `rejected`: además de corregir/reenviar, el conductor debe poder salir.
@@ -66,13 +58,24 @@ export const RejectedScreen = (): React.JSX.Element => {
     // Vuelve al wizard para corregir. `setCurrentStep` ya marca `in_progress` (el RootNavigator
     // conmuta a Registration) Y fija el paso inicial del wizard (`RegistrationNavigator` lo lee del
     // store). Antes solo cambiaba el status y reabría en el `currentStep` persistido (típicamente 4 =
-    // KYC), desorientando al conductor. Ahora derivamos el PRIMER paso a corregir del motivo real
-    // (LOTE B, agrupación por DUEÑO del documento): `correctionStepForRejectedDocTypes` devuelve el paso
-    // Conductor (doc del conductor: DNI/licencia) o Vehículo (doc del vehículo: tarjeta/SOAT/foto); si el
-    // rechazo es de antecedentes/KYC (sin documento derivable), caemos al paso 1 para re-recorrer en
-    // orden en vez de aterrizar en el último paso persistido.
-    const rejectedTypes = rejectedDocs.map((doc) => doc.type);
-    const targetStep = correctionStepForRejectedDocTypes(rejectedTypes) ?? RegistrationStep.PERSONAL_DATA;
+    // KYC), desorientando al conductor.
+    //
+    // U4: derivamos el paso del EJE REAL del rechazo (no del paso 1 por omisión). El rechazo tiene tres
+    // ejes independientes (espejo de `mapProfileToRegistrationStatus`): documentos del operador
+    // (`rejectedDocs`), KYC/biometría (`kycStatus`) y antecedentes (`backgroundCheckStatus`).
+    //  - Si hay docs rechazados derivables a un paso → ese paso (Conductor/Vehículo).
+    //  - Si el rechazo es de BIOMETRÍA/identidad o ANTECEDENTES (sin documento del alta derivable) →
+    //    paso KYC (`IDENTITY_VERIFICATION`), NO el paso 1: el conductor NO debe re-recorrer datos +
+    //    vehículo + docs que estaban BIEN solo porque le rechazaron la selfie/antecedentes.
+    //  - Degradación honesta: si no se puede derivar ningún eje, caemos al paso 1 para re-recorrer en orden.
+    const targetStep =
+      correctionStepForRejection({
+        rejectedDocTypes: rejectedDocs.map((doc) => doc.type),
+        kycRejected: profile ? isRejectedStatus(profile.kycStatus) : false,
+        backgroundCheckRejected: profile ? isRejectedStatus(profile.backgroundCheckStatus) : false,
+      }) ?? RegistrationStep.PERSONAL_DATA;
+    // U4: marca la corrección de ESTA sesión → habilita "Reenviar a revisión" (rompe el loop de reenvío).
+    markCorrectionStarted();
     setCurrentStep(targetStep);
   };
 
@@ -84,8 +87,11 @@ export const RejectedScreen = (): React.JSX.Element => {
     <>
     <SafeScreen
       scroll
+      // `padded={false}`: el gutter (24 = `2xl`, editorial de Login/Onboarding) lo controla la pantalla.
+      // Sin esto SafeScreen sumaba su 20 al 24 del body → 44, desalineado del footer. Una sola fuente.
+      padded={false}
       footer={
-        <View style={{ gap: theme.spacing.sm }}>
+        <View style={{ paddingHorizontal: theme.spacing['2xl'], gap: theme.spacing.sm }}>
           <Button
             label={t('registration.rejected.fix')}
             variant="primary"
@@ -97,10 +103,16 @@ export const RejectedScreen = (): React.JSX.Element => {
             variant="secondary"
             fullWidth
             loading={resubmit.isPending}
+            disabled={!hasCorrected}
             onPress={() => resubmit.mutate()}
           />
+          {!hasCorrected ? (
+            <Text variant="footnote" color="inkMuted" align="center">
+              {t('registration.rejected.resubmitHint')}
+            </Text>
+          ) : null}
           <Button
-            label={t('registration.rejected.contactSupport')}
+            label={t('registration.support.contact')}
             variant="ghost"
             fullWidth
             leftIcon={<IconLifebuoy size={18} color={theme.colors.accent} strokeWidth={2} />}
@@ -116,20 +128,17 @@ export const RejectedScreen = (): React.JSX.Element => {
         </View>
       }
     >
-      <View style={[styles.body, { gap: theme.spacing.xl }]}>
+      <View style={[styles.body, { gap: theme.spacing.xl, paddingHorizontal: theme.spacing['2xl'] }]}>
         <Reveal style={styles.brand}>
           <VeoWordmark size="sm" peru />
         </Reveal>
 
-        <Reveal delay={60} spring style={styles.illustration}>
-          <RejectGlyph color={theme.colors.danger} />
-        </Reveal>
-
+        {/* Sin glyph 132px ni barra de color: el ancla es la TIPOGRAFÍA. Título display alineado a la
+            izquierda (gutter 2xl, como Onboarding) — jerarquía por escala + aire; el foco real es la
+            reason card de abajo. */}
         <Reveal delay={120} style={styles.intro}>
-          <Text variant="title1" align="center">
-            {t('registration.rejected.title')}
-          </Text>
-          <Text variant="callout" color="inkMuted" align="center">
+          <Text variant="display">{t('registration.rejected.title')}</Text>
+          <Text variant="callout" color="inkMuted">
             {t('registration.rejected.subtitle')}
           </Text>
         </Reveal>
@@ -205,7 +214,6 @@ export const RejectedScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   body: { paddingTop: 16, alignItems: 'stretch' },
   brand: { alignItems: 'center', gap: 6 },
-  illustration: { alignItems: 'center' },
-  intro: { gap: 8 },
+  intro: { gap: 12, alignSelf: 'stretch' },
   reasonCard: { alignSelf: 'stretch' },
 });

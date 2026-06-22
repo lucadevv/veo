@@ -58,19 +58,23 @@
     "skip": "Saltar",
     "next": "Siguiente",
     "start": "Empezar",
-    "earningsLabel": "Ganancias de hoy (ejemplo)",
-    "earningsValue": "S/ 142.50",
     "slides": {
-      "earnings": {
-        "title": "Tú decides cuándo manejar",
-        "body": "Gana por viaje con tarifas claras y retira tus ganancias cuando quieras."
+      "modes": {
+        "eyebrow": "Dos formas de ganar",
+        "title": "Maneja a tu manera",
+        "body": "Publica tu viaje y llena asientos, o recibe viajes al instante. Tú decides cuándo conectarte."
+      },
+      "price": {
+        "eyebrow": "Tu precio",
+        "title": "Tú pones el precio",
+        "body": "Recibe la oferta y acéptala, o haz tu contraoferta. Cada viaje, tu decisión."
       },
       "protected": {
-        "title": "Manejas protegido",
-        "body": "Verificación de identidad, soporte y viajes monitoreados para tu tranquilidad."
+        "eyebrow": "Protegido",
+        "title": "Maneja protegido",
+        "body": "Conductor verificado y viaje monitoreado en vivo. Tu seguridad y la de tu pasajero, siempre."
       }
-    },
-    "pagination": "Diapositiva {{current}} de {{total}}"
+    }
   },
   "registration": {
     "country": "Perú",
@@ -82,8 +86,20 @@
     "exitConfirmBody": "Vas a cerrar sesión y tendrás que empezar el registro de nuevo.",
     "gateRetry": {
       "title": "No pudimos cargar tu cuenta",
-      "body": "Revisa tu conexión a internet e inténtalo de nuevo. Tu sesión sigue activa.",
-      "retry": "Reintentar"
+      "body": "Revisa tu conexión a internet e inténtalo de nuevo. Tu sesión sigue activa."
+    },
+    "actions": {
+      "retryCamera": "Reintentar cámara",
+      "retake": "Volver a tomar",
+      "rescan": "Volver a escanear",
+      "refreshStatus": "Actualizar estado",
+      "retry": "Reintentar",
+      "useDni": "Usar este DNI",
+      "usePhoto": "Usar esta foto",
+      "useCard": "Usar esta tarjeta"
+    },
+    "support": {
+      "contact": "Contactar a soporte"
     },
     "personal": {
       "title": "Tus datos de conductor",
@@ -95,14 +111,17 @@
       "birthdateLabel": "Fecha de nacimiento",
       "birthdatePlaceholder": "Selecciona tu fecha",
       "scanSubtitle": "Escanea tu DNI y leemos tus datos por ti. No necesitas escribir nada.",
+      "missing": {
+        "label": "Te falta: {{detail}}",
+        "dni": "escanear tu DNI",
+        "license": "tu licencia de conducir"
+      },
       "scanDni": {
         "title": "Escanea tu DNI",
         "cta": "Escanear DNI",
-        "rescan": "Volver a escanear",
         "hint": "Encuadra el documento: se captura solo al enfocar, o toca el botón de captura para tomar la foto. Leemos tus datos por ti.",
         "front": "Anverso",
         "back": "Reverso",
-        "confirm": "Usar este DNI",
         "readyToUpload": "DNI listo: lo subiremos al confirmar tus datos.",
         "extracted": "Esto leímos de tu DNI:",
         "fieldExtracted": "Extraído de tu DNI.",
@@ -133,11 +152,16 @@
       "subtitle": "Escanea tu tarjeta de propiedad. Leemos los datos por ti.",
       "registeredSubtitle": "Tu vehículo está registrado y en revisión.",
       "register": "Registrar vehículo",
+      "missing": {
+        "label": "Te falta: {{detail}}",
+        "card": "escanear tu tarjeta de propiedad",
+        "photo": "la foto de tu vehículo",
+        "soat": "tu SOAT vigente"
+      },
       "manualToggle": "Prefiero cargarlo a mano",
       "manualTitle": "Datos del vehículo",
       "scanCard": {
         "cta": "Escanear tarjeta de propiedad",
-        "rescan": "Volver a escanear",
         "title": "Escanea tu tarjeta de propiedad",
         "hint": "Encuadra la tarjeta: detectamos los bordes y leemos placa, marca, modelo y año por ti.",
         "preview": "Tarjeta de propiedad",
@@ -148,7 +172,6 @@
         "readType": "Tipo de vehículo",
         "typeCar": "Auto",
         "typeMoto": "Moto",
-        "confirm": "Usar esta tarjeta",
         "criticalMissingTitle": "No pudimos leer la placa",
         "criticalMissingBody": "La foto quedó borrosa o incompleta. Vuelve a escanear con buena luz, o ingresa solo la placa a mano.",
         "plateOnlyLabel": "Placa",
@@ -202,20 +225,30 @@
         "year_invalid": "Ingresa un año válido (desde 2005)"
       },
       "status": {
-        "PENDING_REVIEW": "En revisión",
-        "PENDING": "Pendiente",
-        "ACTIVE": "Activo",
-        "APPROVED": "Aprobado",
-        "VALID": "Vigente",
+        "PENDING_REVIEW": "Enviado · en revisión",
+        "PENDING": "Enviado · en revisión",
+        "ACTIVE": "Verificado",
+        "APPROVED": "Verificado",
+        "VALID": "Verificado",
         "EXPIRING_SOON": "Por vencer",
         "REJECTED": "Rechazado",
         "EXPIRED": "Vencido"
       }
     },
     "documents": {
+      "dni": "Documento de identidad (DNI)",
       "license": "Licencia de conducir",
       "soat": "SOAT vigente",
-      "uploaded": "Subido",
+      "licenseUploadFailed": "No se pudo subir tu licencia. Inténtalo de nuevo.",
+      "licenseUploadRetryHint": "Tus datos se guardaron y la foto de tu licencia no se perdió. Toca Continuar para reintentar la subida.",
+      "state": {
+        "ready": "Listo para enviar",
+        "inReview": "Enviado · en revisión",
+        "verified": "Verificado",
+        "expiring": "Por vencer",
+        "expired": "Vencido",
+        "rejected": "Rechazado"
+      },
       "pending": "Pendiente",
       "uploadAccessibility": "Subir {{document}}",
       "numberLabel": "Número del documento",
@@ -247,7 +280,6 @@
       "scanCancelled": "Escaneo cancelado. Puedes intentarlo de nuevo o elegir una imagen de tu galería.",
       "scanFailed": "No se pudo escanear el documento. Inténtalo de nuevo o elige una imagen de tu galería.",
       "scanUnavailable": "El escáner no está disponible en este dispositivo. Elige una imagen del documento desde tu galería.",
-      "rescan": "Volver a escanear",
       "fromGallery": "Elegir de galería",
       "noFile": "Escanea el documento o elige una imagen de tu galería",
       "uploading": "Subiendo…",
@@ -269,7 +301,6 @@
       },
       "photo": {
         "take": "Tomar foto",
-        "retake": "Volver a tomar la foto",
         "hint": "Encuadra el vehículo completo y con buena luz.",
         "noFile": "Toma una foto o elígela de tu galería",
         "uploadSuccess": "Foto subida",
@@ -285,8 +316,6 @@
       "privacy": "Tu rostro se usa solo para verificar que eres tú.",
       "takePhoto": "Tomar foto",
       "capturing": "Procesando…",
-      "retake": "Volver a tomar",
-      "confirm": "Confirmar",
       "captured": "Rostro capturado",
       "unavailableTitle": "Cámara no disponible",
       "unavailableBody": "Activa el permiso de cámara para verificar tu identidad. Revísalo en los ajustes del sistema e inténtalo de nuevo.",
@@ -296,7 +325,6 @@
       "openSettings": "Abrir Ajustes",
       "cameraErrorTitle": "No pudimos iniciar la cámara",
       "cameraErrorBody": "Revisa que ninguna otra app la esté usando e inténtalo de nuevo.",
-      "retryCamera": "Reintentar",
       "enrollMissingCaptureTitle": "Falta tu verificación facial",
       "enrollMissingCaptureBody": "Necesitás completar la verificación facial para continuar.",
       "enrollFaceTitle": "No detectamos bien tu rostro",
@@ -340,12 +368,9 @@
       "eta": "24 a 48 horas hábiles",
       "etaDetail": "Te avisamos por notificación y acá mismo apenas haya novedades.",
       "understood": "Entendido",
-      "checkStatus": "Verificar mi estado",
       "updating": "Actualizando…",
-      "retry": "Reintentar",
       "refreshErrorTitle": "No pudimos actualizar",
-      "refreshErrorBody": "Estamos reintentando. Revisá tu conexión si el problema sigue.",
-      "contactSupport": "Contactar a soporte"
+      "refreshErrorBody": "Estamos reintentando. Revisa tu conexión si el problema sigue."
     },
     "rejected": {
       "title": "Tu alta fue\nrechazada",
@@ -355,8 +380,8 @@
       "docsLabel": "Documentos a corregir",
       "fix": "Corregir mis datos",
       "resubmit": "Reenviar a revisión",
-      "resubmitError": "No se pudo reenviar tu solicitud. Intentá de nuevo.",
-      "contactSupport": "Contactar a soporte"
+      "resubmitHint": "Primero corregí lo observado para poder reenviar.",
+      "resubmitError": "No se pudo reenviar tu solicitud. Intentá de nuevo."
     }
   },
   "shift": {
@@ -438,7 +463,7 @@
     "empty": "Todavía no registraste ningún vehículo.",
     "active": "Activo",
     "verified": "Verificado",
-    "inReview": "En revisión",
+    "inReview": "Enviado · en revisión",
     "setActive": "Usar este vehículo"
   },
   "trips": {
@@ -598,7 +623,7 @@
     "backgroundCheck": "Antecedentes",
     "currentStatus": "Estado actual",
     "documentsTitle": "Documentos",
-    "documentValid": "Vigente",
+    "documentValid": "Verificado",
     "documentInvalid": "Requiere atención",
     "complianceOk": "Documentación al día",
     "complianceMissing": "Faltan documentos: {{items}}",
@@ -636,9 +661,9 @@
       "ITV": "Revisión técnica (ITV)"
     },
     "docStatus": {
-      "VALID": "Vigente",
-      "PENDING": "En revisión",
-      "PENDING_REVIEW": "En revisión",
+      "VALID": "Verificado",
+      "PENDING": "Enviado · en revisión",
+      "PENDING_REVIEW": "Enviado · en revisión",
       "EXPIRING_SOON": "Por vencer",
       "EXPIRED": "Vencido",
       "REJECTED": "Rechazado"
@@ -654,10 +679,10 @@
     "expiresOn": "Vence el {{date}}",
     "noExpiry": "Sin fecha de vencimiento",
     "status": {
-      "vigente": "Vigente",
+      "vigente": "Verificado",
       "por_vencer": "Por vencer",
       "vencido": "Vencido",
-      "en_revision": "En revisión",
+      "en_revision": "Enviado · en revisión",
       "rechazado": "Rechazado"
     },
     "type": {

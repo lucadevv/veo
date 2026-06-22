@@ -8,6 +8,7 @@ import '../../../../../i18n';
 import { Button } from '@veo/ui-kit';
 import { VehicleScreen } from '../VehicleScreen';
 import {
+  RegistrationField,
   ScanPropertyCardSheet,
   VehicleTypeSelector,
 } from '../../components';
@@ -40,6 +41,7 @@ const NOOP_AUTOFILL: PropertyCardAutofillResult = {
   year: true,
   make: true,
   model: true,
+  color: false,
   vehicleType: false,
 };
 
@@ -66,6 +68,7 @@ jest.mock('../../hooks/useScanPropertyCard', () => ({
       year: false,
       make: false,
       model: false,
+      color: false,
       vehicleType: false,
     },
     derivedType: null,
@@ -73,7 +76,7 @@ jest.mock('../../hooks/useScanPropertyCard', () => ({
     // El sheet solo lee estos campos para su preview; la pantalla lee el store directamente. Stub estático
     // (no referenciar el store acá: la fábrica de jest.mock se hoistea y no puede usar variables externas).
     // LOTE 1: sin seed "Auto" → `type: null`.
-    vehicle: { type: null, plate: '', year: '', modelSpecId: '', brand: '', model: '', mtcCategory: '' },
+    vehicle: { type: null, plate: '', year: '', modelSpecId: '', brand: '', model: '', mtcCategory: '', color: '' },
     scan: jest.fn(),
     reset: jest.fn(),
   }),
@@ -251,6 +254,74 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     });
     expect(useRegistrationStore.getState().vehicle.type).toBe(VehicleType.MOTO);
     expect(registerButton(renderer)?.props.disabled).toBe(false);
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  // ── U2 · dedup (DUP #4): UN solo camino de ingreso (scan primario, manual subordinado) ─────────────
+  //
+  // El toggle "cargar a mano" es un FALLBACK SUBORDINADO: se OCULTA cuando el scan ya rindió una captura
+  // válida (placa+año+tipo leídos), y los dos sets de inputs (parche del scan vs formulario manual) NUNCA
+  // coexisten — solo uno visible a la vez.
+
+  /** El toggle manual (ahora link de texto): Pressable con accessibilityLabel "Prefiero cargarlo a mano". */
+  function manualToggles(renderer: TestRenderer.ReactTestRenderer) {
+    return renderer.root.findAll(
+      (node) =>
+        typeof node.props?.accessibilityLabel === 'string' &&
+        node.props.accessibilityLabel === 'Prefiero cargarlo a mano' &&
+        typeof node.props.onPress === 'function',
+    );
+  }
+
+  it('captura VÁLIDA del scan (placa+año+tipo) → el toggle "cargar a mano" NO aparece (fallback subordinado oculto)', () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+      );
+    });
+
+    // emitScan siembra placa '7351-NB' + año '2021'; con derivedType=MOTO el tipo queda definido → captura VÁLIDA.
+    emitScan(renderer, VehicleType.MOTO, false);
+
+    // El toggle manual está OCULTO: con la captura completa, el camino es escanear/reescanear, no cargar a mano.
+    expect(manualToggles(renderer)).toHaveLength(0);
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('captura INCOMPLETA (sin tipo) → el toggle aparece; al abrir manual NUNCA coexisten los dos sets de inputs', () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+      );
+    });
+
+    // Scan capturado con placa+año pero SIN tipo derivado → captura incompleta: el toggle subordinado aparece.
+    emitScan(renderer, null, false);
+    const toggles = manualToggles(renderer);
+    expect(toggles).toHaveLength(1);
+
+    // Con la captura del scan, el selector de tipo de FALLBACK del camino scan está visible (un set).
+    const scanSelectors = renderer.root.findAllByType(VehicleTypeSelector);
+    expect(scanSelectors).toHaveLength(1);
+
+    // El conductor abre el modo manual.
+    act(() => {
+      (toggles[0]!.props.onPress as () => void)();
+    });
+
+    // En modo manual NUNCA coexisten los dos sets: hay EXACTAMENTE un VehicleTypeSelector (el del form manual,
+    // el del camino scan se ocultó por `!manualMode`). Antes podían renderizarse los dos a la vez.
+    expect(renderer.root.findAllByType(VehicleTypeSelector)).toHaveLength(1);
+    // Y el formulario manual rinde su propio set de campos (placa/año/marca/modelo) → varios RegistrationField.
+    expect(renderer.root.findAllByType(RegistrationField).length).toBeGreaterThanOrEqual(4);
 
     act(() => {
       renderer.unmount();

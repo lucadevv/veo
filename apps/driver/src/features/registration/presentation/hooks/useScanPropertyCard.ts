@@ -38,6 +38,8 @@ export interface PropertyCardAutofillResult {
   year: boolean;
   make: boolean;
   model: boolean;
+  /** El color de carrocería se leyó de la tarjeta (`Color:`) y se prellenó en el store. */
+  color: boolean;
   /** El tipo de vehículo se derivó de la categoría MTC (M1→CAR / L*→MOTO) y se fijó en el store. */
   vehicleType: boolean;
 }
@@ -63,6 +65,7 @@ const NO_AUTOFILL: PropertyCardAutofillResult = {
   year: false,
   make: false,
   model: false,
+  color: false,
   vehicleType: false,
 };
 
@@ -131,7 +134,7 @@ export function useScanPropertyCard() {
     type: VehicleType | null,
   ): PropertyCardAutofillResult => {
     const current = useRegistrationStore.getState().vehicle;
-    const isEmpty = (field: 'plate' | 'year' | 'brand' | 'model'): boolean =>
+    const isEmpty = (field: 'plate' | 'year' | 'brand' | 'model' | 'color'): boolean =>
       current[field].trim().length === 0;
 
     const patch: Partial<VehicleData> = {};
@@ -158,6 +161,12 @@ export function useScanPropertyCard() {
     if (parsed.model && isEmpty('model')) {
       patch.model = parsed.model;
       result.model = true;
+    }
+    // Color de carrocería leído de la tarjeta (`Color:`): no destructivo, igual que marca/modelo. Viaja
+    // opcional al backend (`registerVehicleRequest.color`); vacío si el OCR no lo leyó (degradación honesta).
+    if (parsed.color && isEmpty('color')) {
+      patch.color = parsed.color;
+      result.color = true;
     }
 
     if (Object.keys(patch).length > 0) {

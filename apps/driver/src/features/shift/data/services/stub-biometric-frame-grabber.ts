@@ -41,6 +41,12 @@ export class StubBiometricFrameGrabber implements BiometricFrameGrabber {
     await delay(Math.min(plan.frameCount * plan.intervalMs, MAX_SIMULATED_CAPTURE_MS));
     return Array.from({ length: plan.frameCount }, () => SYNTHETIC_JPEG_BASE64);
   }
+
+  /** Re-enrolamiento selfie en simulador: una sola foto sintética (el sandbox no inspecciona el pixel). */
+  async capturePhoto(): Promise<string> {
+    await delay(MAX_SIMULATED_CAPTURE_MS);
+    return SYNTHETIC_JPEG_BASE64;
+  }
 }
 
 /** Singleton del frame-grabber stub para la composición dev (simulador). */

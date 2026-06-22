@@ -73,15 +73,18 @@ export interface RegistrationRepository {
   onboardLicense(input: LicenseOnboardInput): Promise<void>;
 
   /**
-   * GET /drivers/me/biometric/liveness/challenge — pide un reto de liveness ACTIVO de UN SOLO USO para
-   * el enrolamiento del alta. El conductor debe ejecutar `action` (girar la cabeza, asentir, sonreír)
-   * mientras la app captura frames; reintentar exige pedir un reto NUEVO (un reto consumido no se reusa).
+   * GET /drivers/me/biometric/liveness/challenge — pide un reto de liveness ACTIVO de UN SOLO USO.
+   *
+   * DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2): el enroll ya NO usa
+   * reto/frames, así que este método quedó SIN CONSUMIDORES en la app. Se conserva el contrato porque el
+   * endpoint del backend aún existe. Techo: queda muerto en la app. Gatillo: borrar este método (+ el tipo
+   * `LivenessChallenge` y su uso en la impl HTTP/stub) cuando el backend confirme que retira el endpoint.
    */
   getLivenessChallenge(): Promise<LivenessChallenge>;
 
   /**
-   * POST /drivers/biometric/enroll — enrola el rostro de referencia CON LIVENESS: el `challengeId` del
-   * reto + los `frames` capturados mientras el conductor ejecutaba la acción (anti-spoofing).
+   * POST /drivers/biometric/enroll — enrola el rostro de referencia con UNA SELFIE: `{ photo }` (JPEG
+   * base64, sin prefijo `data:`). El backend valida que la imagen contenga exactamente un rostro claro.
    */
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult>;
 

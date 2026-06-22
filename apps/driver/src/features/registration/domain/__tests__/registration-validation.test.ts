@@ -18,6 +18,8 @@ const baseVehicle: VehicleData = {
   model: 'CB 190R',
   // LOTE 1: sin categoría MTC leída (carga manual del tipo) → se omite del body (el `vehicleType` es hint).
   mtcCategory: '',
+  // Sin color leído (carga manual) → se omite del body.
+  color: '',
 };
 
 describe('validatePersonalData', () => {
@@ -247,6 +249,22 @@ describe('validateVehicle', () => {
         year: 2021,
         mtcCategory: 'L3',
       });
+    }
+  });
+
+  it('el color leído por OCR viaja opcional al body (registerVehicleRequest.color)', () => {
+    const result = validateVehicle({ ...baseVehicle, color: 'NEGRO' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.color).toBe('NEGRO');
+    }
+  });
+
+  it('sin color (carga manual) → el campo color se OMITE del body', () => {
+    const result = validateVehicle({ ...baseVehicle, color: '' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect('color' in result.request).toBe(false);
     }
   });
 });

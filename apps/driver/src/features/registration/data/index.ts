@@ -10,11 +10,3 @@ export {
   nativeFacePhotoGrabber,
   nativeFaceCaptureService,
 } from './services/native-face-capture';
-export {
-  NativeLivenessFrameGrabber,
-  nativeLivenessFrameGrabber,
-} from './services/native-liveness-frame-grabber';
-export {
-  StubLivenessFrameGrabber,
-  stubLivenessFrameGrabber,
-} from './services/stub-liveness-frame-grabber';

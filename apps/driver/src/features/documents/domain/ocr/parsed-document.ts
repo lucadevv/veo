@@ -54,6 +54,8 @@ export interface ParsedPropertyCard {
   year?: number;
   /** Código de categoría vehicular MTC impreso explícito (`Categoría: M1`). Formato `[LMNO]\d[A-Z]*`. */
   mtcCategory?: string;
+  /** Color de carrocería (`Color:`), normalizado a mayúsculas sin tildes (`NEGRO`, `AZUL MARINO`). */
+  color?: string;
 }
 
 /**

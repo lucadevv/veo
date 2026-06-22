@@ -1,13 +1,18 @@
 import React, { useRef, useState } from 'react';
 import {
+  Image,
+  type ImageSourcePropType,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   ScrollView,
+  StatusBar,
   StyleSheet,
   useWindowDimensions,
   View,
 } from 'react-native';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import Animated, {
   Easing,
@@ -15,162 +20,31 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { Button, SafeScreen, Text, useTheme, useReducedMotion } from '@veo/ui-kit';
+import { Button, Text, useTheme, useReducedMotion } from '@veo/ui-kit';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
 import { useOnboardingStore } from '../state/onboardingStore';
+
+/**
+ * Fotos POV reales de conductor (verticales), bundleadas por Metro vía `require`. Una por slide,
+ * ya optimizadas (1290px de ancho, <300KB c/u) — pesan ~750KB las tres juntas. Van a sangre
+ * completa (cover) ocupando TODO el slide. La ruta sube 5 niveles desde `…/auth/presentation/
+ * screens/` hasta la raíz de `apps/driver/` y baja a `assets/images/onboarding/`.
+ */
+const SLIDE_PHOTOS: Record<string, ImageSourcePropType> = {
+  modes: require('../../../../../assets/images/onboarding/slide1.jpg') as ImageSourcePropType,
+  price: require('../../../../../assets/images/onboarding/slide2.jpg') as ImageSourcePropType,
+  protected: require('../../../../../assets/images/onboarding/slide3.jpg') as ImageSourcePropType,
+};
 
 interface SlideContent {
   key: string;
+  eyebrow: string;
   title: string;
   body: string;
-  art: 'earnings' | 'protected';
+  photo: ImageSourcePropType;
 }
 
-/** Ilustración line-art de cada slide (motivo de ruta + ciudad, evitando figuras "dibujadas"). */
-function SlideArt({
-  variant,
-  color,
-  ink,
-}: {
-  variant: SlideContent['art'];
-  color: string;
-  ink: string;
-}): React.JSX.Element {
-  return (
-    <Svg width="100%" height={200} viewBox="0 0 320 200" fill="none">
-      {/* Silueta de ciudad. */}
-      <Path
-        d="M0 168h320"
-        stroke={ink}
-        strokeWidth={1.5}
-        strokeOpacity={0.25}
-        strokeLinecap="round"
-      />
-      <Rect
-        x={184}
-        y={120}
-        width={20}
-        height={48}
-        stroke={ink}
-        strokeWidth={1.5}
-        strokeOpacity={0.35}
-      />
-      <Rect
-        x={210}
-        y={100}
-        width={24}
-        height={68}
-        stroke={ink}
-        strokeWidth={1.5}
-        strokeOpacity={0.35}
-      />
-      <Rect
-        x={240}
-        y={132}
-        width={18}
-        height={36}
-        stroke={ink}
-        strokeWidth={1.5}
-        strokeOpacity={0.35}
-      />
-      {/* Ruta cian que sube hacia el pin. */}
-      <Path
-        d="M20 168 C 80 168, 70 96, 140 96 S 250 60, 280 30"
-        stroke={color}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        fill="none"
-      />
-      <Path
-        d="M20 168 C 80 168, 70 96, 140 96 S 250 60, 280 30"
-        stroke={color}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        strokeDasharray="1 10"
-        strokeOpacity={0.6}
-        fill="none"
-      />
-      <Circle cx={283} cy={28} r={7} fill={color} />
-      <Circle cx={20} cy={168} r={5} fill="none" stroke={color} strokeWidth={2.5} />
-      {variant === 'earnings' ? (
-        <>
-          {/* Moneda "S/" de ganancias. */}
-          <Circle cx={92} cy={70} r={28} stroke={color} strokeWidth={2.5} />
-          <Path
-            d="M101 60c-3-4-13-4-15 1-2 4 3 6 7 7 5 1 9 3 7 8-2 4-12 5-16 1"
-            stroke={color}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            fill="none"
-          />
-          <Path d="M96 50v36" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-        </>
-      ) : (
-        <>
-          {/* Escudo de protección. */}
-          <Path
-            d="M92 44 70 53v20c0 14 10 23 22 28 12-5 22-14 22-28V53L92 44Z"
-            stroke={color}
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-            fill="none"
-          />
-          <Path
-            d="M83 73l6 6 12-13"
-            stroke={color}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </>
-      )}
-    </Svg>
-  );
-}
-
-/** Chip de "Ganancias de hoy" mostrado sobre la ilustración del primer slide. */
-function EarningsChip(): React.JSX.Element {
-  const theme = useTheme();
-  const { t } = useTranslation();
-  return (
-    <View
-      style={[
-        styles.chip,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radii.lg,
-          padding: theme.spacing.lg,
-          gap: theme.spacing.lg,
-        },
-      ]}
-    >
-      <View style={styles.chipText}>
-        <Text variant="footnote" color="inkMuted">
-          {t('onboarding.earningsLabel')}
-        </Text>
-        <Text variant="title2" tabular>
-          {t('onboarding.earningsValue')}
-        </Text>
-      </View>
-      <View style={[styles.chipArrow, { backgroundColor: theme.colors.accent }]}>
-        <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-          <Path
-            d="M12 19V6M6 12l6-6 6 6"
-            stroke={theme.colors.onAccent}
-            strokeWidth={2.4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </Svg>
-      </View>
-    </View>
-  );
-}
-
-/** Punto de paginación animado (el activo se ensancha y colorea en cian). */
+/** Punto de paginación fino: el activo se ensancha y colorea en azul (transición suave). */
 function Dot({ active }: { active: boolean }): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -184,8 +58,8 @@ function Dot({ active }: { active: boolean }): React.JSX.Element {
   }, [active, reduced, theme, value]);
 
   const dotStyle = useAnimatedStyle(() => ({
-    width: 8 + value.value * 16,
-    opacity: 0.4 + value.value * 0.6,
+    width: 6 + value.value * 18,
+    opacity: 0.35 + value.value * 0.65,
   }));
 
   return (
@@ -200,30 +74,48 @@ function Dot({ active }: { active: boolean }): React.JSX.Element {
 }
 
 /**
- * Onboarding del conductor (drv-02). Carrusel paginado de 2 slides con dots animados y acciones
- * "Saltar"/"Siguiente". Al completar (o saltar) persiste el flag en el store y el RootNavigator
- * conmuta al Login. La primera diapositiva replica el mockup (ganancias del día).
+ * Onboarding del conductor (drv-02), dirección visual TESLA con FOTO real a SANGRE COMPLETA: carrusel
+ * paginado de 3 slides, cada uno una sola imagen continua que llena TODO el slide (absoluteFill,
+ * cover) — cero costura, cero "dos zonas". El copy (eyebrow azul + título grande `display` + cuerpo
+ * gris corto) FLOTA sobre el tercio inferior, legible gracias a un scrim (degradado SVG) que oscurece
+ * solo esa franja inferior. El footer (dots + UN CTA primario azul + "Saltar") también flota, absoluto
+ * sobre el scrim. Al completar (o saltar) persiste el flag y el RootNavigator conmuta al Login.
+ * Respeta safe-area (foto a sangre bajo la status bar, íconos en `light-content`) y reduce-motion.
  */
 export const OnboardingScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
-  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const complete = useOnboardingStore((s) => s.complete);
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
+  // Alto REAL del área de scroll (toda la pantalla), medido vía onLayout: define el alto del slide.
+  const [scrollH, setScrollH] = useState(0);
+  // Alto REAL del footer flotante, medido vía onLayout: el copy se separa esto para no quedar tapado.
+  const [footerH, setFooterH] = useState(0);
 
   const slides: SlideContent[] = [
     {
-      key: 'earnings',
-      title: t('onboarding.slides.earnings.title'),
-      body: t('onboarding.slides.earnings.body'),
-      art: 'earnings',
+      key: 'modes',
+      eyebrow: t('onboarding.slides.modes.eyebrow'),
+      title: t('onboarding.slides.modes.title'),
+      body: t('onboarding.slides.modes.body'),
+      photo: SLIDE_PHOTOS.modes!,
+    },
+    {
+      key: 'price',
+      eyebrow: t('onboarding.slides.price.eyebrow'),
+      title: t('onboarding.slides.price.title'),
+      body: t('onboarding.slides.price.body'),
+      photo: SLIDE_PHOTOS.price!,
     },
     {
       key: 'protected',
+      eyebrow: t('onboarding.slides.protected.eyebrow'),
       title: t('onboarding.slides.protected.title'),
       body: t('onboarding.slides.protected.body'),
-      art: 'protected',
+      photo: SLIDE_PHOTOS.protected!,
     },
   ];
   const isLast = index === slides.length - 1;
@@ -244,28 +136,16 @@ export const OnboardingScreen = (): React.JSX.Element => {
     setIndex(index + 1);
   };
 
+  // Cuerpo a ancho controlado (line-length cómoda) con margen lateral generoso.
+  const sideGutter = theme.spacing['2xl'];
+  // Alto del slide: el área medida, con fallback al alto de ventana en el primer render.
+  const slideH = scrollH || height;
+  // Separación inferior del copy: el footer real + un respiro; fallback razonable antes de medirlo.
+  const copyBottomInset = (footerH || (theme.spacing['5xl'] ?? 160)) + theme.spacing.lg;
+
   return (
-    <SafeScreen
-      padded={false}
-      footer={
-        <View
-          style={[styles.footer, { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.lg }]}
-        >
-          <Button label={t('onboarding.skip')} variant="ghost" onPress={complete} />
-          <View style={styles.footerNext}>
-            <Button
-              label={isLast ? t('onboarding.start') : t('onboarding.next')}
-              variant="accent"
-              fullWidth
-              onPress={onNext}
-            />
-          </View>
-        </View>
-      }
-    >
-      <View style={[styles.brand, { paddingTop: theme.spacing.sm }]}>
-        <VeoWordmark size="sm" />
-      </View>
+    <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
+      <StatusBar barStyle="light-content" />
 
       <ScrollView
         ref={scrollRef}
@@ -273,58 +153,101 @@ export const OnboardingScreen = (): React.JSX.Element => {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScrollEnd}
+        onLayout={(e: LayoutChangeEvent) => setScrollH(e.nativeEvent.layout.height)}
         style={styles.flex}
       >
         {slides.map((slide) => (
-          <View
-            key={slide.key}
-            style={[styles.slide, { width, paddingHorizontal: theme.spacing.xl }]}
-          >
-            <View style={styles.art}>
-              <SlideArt variant={slide.art} color={theme.colors.accent} ink={theme.colors.ink} />
+          <View key={slide.key} style={{ width, height: slideH }}>
+            {/* Foto a SANGRE COMPLETA: ocupa todo el slide, una sola imagen continua. */}
+            <Image source={slide.photo} style={StyleSheet.absoluteFill} resizeMode="cover" />
+
+            {/* Scrim: oscurece SOLO el tercio inferior (más un velo leve arriba para la status bar)
+                para que el copy y el footer floten legibles sobre la foto. Decorativo. */}
+            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+              <Defs>
+                <LinearGradient id={`photoScrim-${slide.key}`} x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.15} />
+                  <Stop offset="0.35" stopColor={theme.colors.bg} stopOpacity={0} />
+                  <Stop offset="0.62" stopColor={theme.colors.bg} stopOpacity={0.55} />
+                  <Stop offset="0.82" stopColor={theme.colors.bg} stopOpacity={0.9} />
+                  <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
+                </LinearGradient>
+              </Defs>
+              <Rect
+                x={0}
+                y={0}
+                width={width}
+                height={slideH}
+                fill={`url(#photoScrim-${slide.key})`}
+              />
+            </Svg>
+
+            {/* Copy anclado ABAJO, flotando sobre el scrim; jerarquía por escala + color. */}
+            <View
+              style={[
+                styles.copyAnchor,
+                { paddingHorizontal: sideGutter, paddingBottom: copyBottomInset },
+              ]}
+            >
+              <Reveal delay={60}>
+                <Text variant="label" color="accent">
+                  {slide.eyebrow.toUpperCase()}
+                </Text>
+                <Text variant="display" color="ink" style={styles.title}>
+                  {slide.title}
+                </Text>
+                <Text variant="callout" color="inkMuted" style={styles.body}>
+                  {slide.body}
+                </Text>
+              </Reveal>
             </View>
-            {slide.art === 'earnings' ? <EarningsChip /> : null}
-            <Reveal delay={60} style={[styles.copy, { gap: theme.spacing.sm }]}>
-              <Text variant="title1">{slide.title}</Text>
-              <Text variant="body" color="inkMuted">
-                {slide.body}
-              </Text>
-            </Reveal>
           </View>
         ))}
       </ScrollView>
 
-      <View style={[styles.dots, { gap: theme.spacing.sm }]}>
-        {slides.map((slide, i) => (
-          <Dot key={slide.key} active={i === index} />
-        ))}
+      {/* Pie FLOTANTE (absoluto) sobre el scrim inferior: hermano del ScrollView, va después para
+          quedar por encima. Sin línea divisoria: aire Tesla. */}
+      <View
+        onLayout={(e: LayoutChangeEvent) => setFooterH(e.nativeEvent.layout.height)}
+        style={[
+          styles.footer,
+          {
+            paddingHorizontal: sideGutter,
+            paddingBottom: insets.bottom + theme.spacing.xl,
+            gap: theme.spacing.xl,
+          },
+        ]}
+      >
+        <View style={[styles.dots, { gap: theme.spacing.sm }]}>
+          {slides.map((slide, i) => (
+            <Dot key={slide.key} active={i === index} />
+          ))}
+        </View>
+
+        <Button
+          label={isLast ? t('onboarding.start') : t('onboarding.next')}
+          variant="accent"
+          size="lg"
+          fullWidth
+          onPress={onNext}
+        />
+
+        <View style={styles.skipRow}>
+          <Button label={t('onboarding.skip')} variant="ghost" onPress={complete} />
+        </View>
       </View>
-    </SafeScreen>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   flex: { flex: 1 },
-  brand: { alignItems: 'center' },
-  slide: { justifyContent: 'center', gap: 24 },
-  art: { alignItems: 'center' },
-  copy: {},
-  chip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
-  chipText: { flex: 1, gap: 2 },
-  chipArrow: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  dot: { height: 8, borderRadius: 4 },
-  footer: { flexDirection: 'row', alignItems: 'center' },
-  footerNext: { flex: 1 },
+  copyAnchor: { flex: 1, justifyContent: 'flex-end' },
+  title: { marginTop: 12 },
+  body: { marginTop: 16, maxWidth: 340 },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'stretch' },
+  dots: { flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center' },
+  dot: { height: 6, borderRadius: 3 },
+  skipRow: { alignItems: 'center' },
 });

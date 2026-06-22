@@ -1,11 +1,13 @@
 import type { HttpClient } from '@veo/api-client';
 import {
+  ApiError,
   addDocumentRequest,
   driverBiometricEnrollRequest,
   driverBiometricEnrollResult,
   driverLivenessChallengeResponse,
   driverDocument,
   driverOnboardRequest,
+  driverOnboardResult,
   driverPersonalData,
   driverPersonalDataRequest,
   driverProfileView,
@@ -103,8 +105,21 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     });
   }
 
-  listDocuments(): Promise<RegistrationDocumentView[]> {
-    return this.http.get('/drivers/me/documents', { schema: driverDocumentList });
+  async listDocuments(): Promise<RegistrationDocumentView[]> {
+    // Un conductor NUEVO (recién pasó OTP) aún NO tiene perfil en el backend hasta el
+    // `PATCH /drivers/me/personal`, así que este endpoint responde 404 "No existe un perfil de
+    // conductor para este usuario". Eso NO es un error de la app: es la MISMA filosofía con la que el
+    // gate trata el 404 de `GET /drivers/me` (conductor nuevo ⇒ wizard, no error). Conductor sin perfil
+    // = sin documentos ⇒ lista VACÍA. Se detecta por status 404 TIPADO (`ApiError`), no por el texto.
+    // Cualquier otro error (red/5xx/401) se PROPAGA: no lo tragamos (no fingimos "sin documentos").
+    try {
+      return await this.http.get('/drivers/me/documents', { schema: driverDocumentList });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return [];
+      }
+      throw e;
+    }
   }
 
   submitDocument(input: RegistrationDocumentRequest): Promise<RegistrationDocumentView> {
@@ -115,19 +130,24 @@ export class HttpRegistrationRepository implements RegistrationRepository {
 
   async onboardLicense(input: LicenseOnboardInput): Promise<void> {
     const body = driverOnboardRequest.parse(input);
-    // El backend responde el perfil agregado; lo validamos pero no necesitamos su valor aquí.
-    await this.http.post('/drivers/onboard', { body, schema: driverProfileView });
+    // `POST /drivers/onboard` responde el perfil FINO (`{ driverId, backgroundCheckStatus }`), NO el
+    // perfil agregado de `GET /drivers/me`. Validamos con el schema que matchea esa forma real; el
+    // valor no se usa aquí (la app deriva el estado del gate con `GET /drivers/me`).
+    await this.http.post('/drivers/onboard', { body, schema: driverOnboardResult });
   }
 
+  // DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2). Este método quedó SIN
+  // CONSUMIDORES en la app (el enroll ya no usa reto/frames). Se conserva porque el endpoint del backend
+  // aún existe. Gatillo: borrar este método (+ `LivenessChallenge` / `driverLivenessChallengeResponse`)
+  // cuando el backend confirme que retira `GET /drivers/me/biometric/liveness/challenge`.
   getLivenessChallenge(): Promise<LivenessChallenge> {
-    // Reto de liveness ACTIVO de un solo uso para el enrolamiento del alta. Mismo schema que el reto
-    // del turno (`driverLivenessChallengeResponse`), pero distinto endpoint (GET, sin body).
     return this.http.get('/drivers/me/biometric/liveness/challenge', {
       schema: driverLivenessChallengeResponse,
     });
   }
 
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
+    // Body NUEVO (Lote 2): una sola foto base64 (`{ photo }`), sin challengeId/frames.
     const body = driverBiometricEnrollRequest.parse(input);
     return this.http.post('/drivers/biometric/enroll', {
       body,

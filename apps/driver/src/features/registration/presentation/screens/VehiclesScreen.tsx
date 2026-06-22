@@ -52,6 +52,8 @@ const EMPTY_FORM: VehicleData = {
   brand: '',
   model: '',
   mtcCategory: '',
+  // "Mis vehículos" es alta manual por catálogo (sin OCR de tarjeta): el color queda vacío y se omite del body.
+  color: '',
 };
 
 /** El status `ACTIVE` (vehicle-rules de fleet) = verificado por el operador; el resto, en revisión. */

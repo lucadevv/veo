@@ -9,8 +9,6 @@ interface RegistrationHeaderProps {
   onBack?: () => void;
   /** Muestra el lockup de marca centrado (algunos pasos solo llevan el chevron). */
   showLogo?: boolean;
-  /** Variante del logo con alas de velocidad y sello PERÚ. */
-  wings?: boolean;
   peru?: boolean;
   /** Muestra "Perú" + bandera en la esquina derecha (drv-07). */
   peruRight?: boolean;
@@ -30,7 +28,6 @@ interface RegistrationHeaderProps {
 export function RegistrationHeader({
   onBack,
   showLogo = true,
-  wings = false,
   peru = false,
   peruRight = false,
   onExit,
@@ -51,7 +48,7 @@ export function RegistrationHeader({
         ) : null}
       </View>
       <View style={styles.center}>
-        {showLogo ? <VeoWordmark size="sm" showRoute={wings} peru={peru} /> : null}
+        {showLogo ? <VeoWordmark size="sm" peru={peru} /> : null}
       </View>
       <View style={[styles.side, styles.right]}>
         {onExit ? (

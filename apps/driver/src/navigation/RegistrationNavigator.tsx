@@ -7,7 +7,6 @@ import {
   IdentityVerificationScreen,
   PersonalDataScreen,
   RealFaceCaptureProvider,
-  RealLivenessCaptureProvider,
   useRegistrationStore,
   VehicleScreen,
 } from '../features/registration/presentation';
@@ -16,9 +15,9 @@ const Stack = createNativeStackNavigator<RegistrationStackParamList>();
 
 /**
  * Wizard de registro: 3 pasos presentados con slide horizontal (`slide_from_right`). El estado del
- * alta vive en el store del feature; la captura de LIVENESS REAL (cámara frontal nativa) se inyecta vía
- * `RealLivenessCaptureProvider` (puerto propio del registro, independiente de la captura del turno). Se
- * conserva `RealFaceCaptureProvider` por compatibilidad con consumidores previos del puerto de foto.
+ * alta vive en el store del feature; la captura de la SELFIE del KYC (cámara frontal nativa, una foto)
+ * se inyecta vía `RealFaceCaptureProvider` (puerto propio del registro, independiente de la captura del
+ * turno). Lote 2: el liveness DIY (reto/frames) se retiró; el enroll usa una sola foto.
  *
  * `initialRouteName` se deriva del `currentStep` del store (`resolveInitialRoute`) y fija el paso N
  * como pantalla SUPERIOR: el primer paint ya es la pantalla correcta al reanudar. En native-stack
@@ -35,20 +34,18 @@ export const RegistrationNavigator = (): React.JSX.Element => {
   const initialRouteName = resolveInitialRoute(useRegistrationStore.getState().currentStep);
   return (
     <RealFaceCaptureProvider>
-      <RealLivenessCaptureProvider>
-        <Stack.Navigator
-          initialRouteName={initialRouteName}
-          screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            contentStyle: { backgroundColor: driverTheme.colors.bg },
-          }}
-        >
-          <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
-          <Stack.Screen name="Vehicle" component={VehicleScreen} />
-          <Stack.Screen name="IdentityVerification" component={IdentityVerificationScreen} />
-        </Stack.Navigator>
-      </RealLivenessCaptureProvider>
+      <Stack.Navigator
+        initialRouteName={initialRouteName}
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          contentStyle: { backgroundColor: driverTheme.colors.bg },
+        }}
+      >
+        <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
+        <Stack.Screen name="Vehicle" component={VehicleScreen} />
+        <Stack.Screen name="IdentityVerification" component={IdentityVerificationScreen} />
+      </Stack.Navigator>
     </RealFaceCaptureProvider>
   );
 };

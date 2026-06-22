@@ -556,3 +556,92 @@ export function IconLifebuoy(props: IconProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Cámara (tomar foto): cuerpo redondeado simple + círculo de lente, sin detalle de fuelle/flash. */
+export function IconCamera(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={12.5} r={3} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Imagen / galería: marco + un círculo (sol) + una línea mínima de "montaña". */
+export function IconImage(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={3.5} y={4.5} width={17} height={15} rx={2} stroke={color} strokeWidth={strokeWidth} />
+      <Circle cx={8.5} cy={9} r={1.6} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="m4 16 4.5-4.5L13 16"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Escanear documento: 4 corchetes de esquina + línea central de barrido (sin marco de cámara). */
+export function IconScan(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8V6a2 2 0 0 1 2-2h2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M16 4h2a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M20 16v2a2 2 0 0 1-2 2h-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8 20H6a2 2 0 0 1-2-2v-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M4 12h16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Rostro escaneado (KYC / biometría): corchetes de esquina + cara mínima (círculo + arco de sonrisa). */
+export function IconFace(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Circle cx={12} cy={11} r={2.5} stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M8.5 16a4 4 0 0 1 7 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}

@@ -14,7 +14,7 @@
  *  - El QR es una URL de verificación SUNARP (no data) → NO se depende del QR.
  */
 
-import { canonicalize, collapseWhitespace, lineMatchesAnyKeyword } from './ocr-text';
+import { canonicalize, collapseWhitespace, lineMatchesAnyKeyword, stripDiacritics } from './ocr-text';
 import type { ParsedPropertyCard } from './parsed-document';
 
 const PLATE_KEYWORDS = ['placa', 'plate'] as const;
@@ -22,6 +22,8 @@ const PLATE_KEYWORDS = ['placa', 'plate'] as const;
 const CATEGORY_KEYWORDS = ['categoria'] as const;
 const MAKE_KEYWORDS = ['marca'] as const;
 const MODEL_KEYWORDS = ['modelo'] as const;
+/** Etiqueta del color de carrocería (`Color:`), canonicalizada (sin tilde, minúscula). */
+const COLOR_KEYWORDS = ['color'] as const;
 /**
  * Año de FABRICACIÓN (`Año de Fab.:`) primero; `Año Modelo` (`ano modelo`) como FALLBACK cuando la TIVe
  * (p. ej. TIVe electrónica de moto) no imprime "Año de Fab." sino solo "Año Modelo". Canonicalizado.
@@ -128,6 +130,7 @@ const ALL_KNOWN_LABELS: readonly string[] = [
   ...MODEL_KEYWORDS,
   ...YEAR_KEYWORDS,
   ...YEAR_FALLBACK_KEYWORDS,
+  ...COLOR_KEYWORDS,
 ];
 
 /** ¿El `labelKeyOf` de la línea calza EXACTO alguna etiqueta conocida (es una etiqueta vecina)? */
@@ -231,6 +234,70 @@ function extractYear(lines: readonly string[]): number | undefined {
 }
 
 /**
+ * Colores de carrocería CONOCIDOS (canónicos, en mayúsculas, sin tilde). NO son estados de dominio: se usan
+ * solo como ANCLA para LIMPIAR el ruido del OCR — si el valor crudo de "Color:" trae uno de estos, nos
+ * quedamos con la frase de color y descartamos lo que venga después (p. ej. `NEGRO ##### ####`). Un color
+ * fuera de esta lista igual se acepta si quedó como palabra(s) alfabética(s) limpias (degradación honesta:
+ * no inventamos, pero tampoco descartamos un color real solo por no estar en la lista).
+ */
+const KNOWN_BODY_COLORS: readonly string[] = [
+  'NEGRO',
+  'BLANCO',
+  'ROJO',
+  'GRIS',
+  'PLATA',
+  'PLATEADO',
+  'AZUL',
+  'VERDE',
+  'AMARILLO',
+  'NARANJA',
+  'MARRON',
+  'BEIGE',
+  'DORADO',
+  'CELESTE',
+  'VINO',
+  'PLOMO',
+];
+
+/**
+ * Limpia el valor crudo de "Color:" del ruido típico del OCR (`NEGRO ##########`, `NEGRO ##### ####`): se
+ * queda con las PALABRAS alfabéticas iniciales (un color de carrocería son letras, sin dígitos ni símbolos)
+ * y corta en el primer token NO alfabético (el ruido). Tolera colores compuestos (`AZUL MARINO`). Devuelve
+ * el color en MAYÚSCULAS sin diacríticos, o `undefined` si no quedó ninguna palabra de color.
+ */
+function cleanColorValue(raw: string): string | undefined {
+  const upper = stripDiacritics(raw).toUpperCase();
+  const tokens = upper.split(/\s+/).filter((t) => t.length > 0);
+  const words: string[] = [];
+  for (const token of tokens) {
+    // Solo palabras alfabéticas (A–Z); el primer token con dígito/símbolo (ruido `####`) corta la frase.
+    if (/^[A-Z]+$/.test(token)) {
+      words.push(token);
+    } else {
+      break;
+    }
+  }
+  if (words.length === 0) {
+    return undefined;
+  }
+  // Si aparece un color conocido, lo usamos como ANCLA: la frase termina en ese color (descarta cola de
+  // ruido alfabético improbable que el OCR pudiera agregar tras un color reconocido).
+  const anchorIndex = words.findIndex((w) => KNOWN_BODY_COLORS.includes(w));
+  const phrase = anchorIndex >= 0 ? words.slice(0, anchorIndex + 1) : words;
+  return phrase.join(' ');
+}
+
+/**
+ * Extrae el color de carrocería (`Color: NEGRO`). Ancla a la etiqueta "Color" (inline o dispersa, igual que
+ * los otros campos vía `inlineValueForLabel`) y LIMPIA el ruido del valor (`cleanColorValue`). `undefined`
+ * si no hay etiqueta o el valor no dejó ninguna palabra de color (degradación honesta).
+ */
+function extractColor(lines: readonly string[]): string | undefined {
+  const raw = inlineValueForLabel(lines, COLOR_KEYWORDS);
+  return raw === undefined ? undefined : cleanColorValue(raw);
+}
+
+/**
  * Parsea las líneas OCR de una tarjeta de propiedad / TIVe peruana. Devuelve solo lo que extrajo con
  * confianza; texto basura → `{}` (no inventa).
  */
@@ -256,6 +323,10 @@ export function parsePropertyCard(lines: readonly string[]): ParsedPropertyCard 
   const mtcCategory = extractMtcCategory(lines);
   if (mtcCategory) {
     result.mtcCategory = mtcCategory;
+  }
+  const color = extractColor(lines);
+  if (color) {
+    result.color = color;
   }
   return result;
 }

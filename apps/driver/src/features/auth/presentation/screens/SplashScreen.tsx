@@ -121,7 +121,7 @@ export const SplashScreen = (): React.JSX.Element => {
       <View style={styles.center}>
         {/* El splash anima su propia ruta cian (arriba), por eso el wordmark va sin motivo. */}
         <Animated.View style={[styles.wordmark, wordmarkStyle]}>
-          <VeoWordmark size="xl" showRoute={false} />
+          <VeoWordmark size="xl" />
         </Animated.View>
       </View>
 

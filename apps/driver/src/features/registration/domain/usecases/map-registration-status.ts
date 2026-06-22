@@ -16,7 +16,13 @@ function normalize(raw: string): string {
   return raw.trim().toUpperCase();
 }
 
-function isRejected(raw: string): boolean {
+/**
+ * ¿El estado crudo de identity (`kycStatus`/`backgroundCheckStatus`) cuenta como RECHAZO definitivo?
+ * Tolerante a variantes (`REJECTED`/`FAILED`/`DENIED`/`BLOCKED`, sin distinguir mayúsculas). Exportado
+ * para que la navegación de corrección derive el EJE del rechazo del MISMO criterio que el gate, sin
+ * duplicar los tokens ni introducir strings mágicos.
+ */
+export function isRejectedStatus(raw: string): boolean {
   return REJECTED_TOKENS.includes(normalize(raw));
 }
 
@@ -56,7 +62,7 @@ export function mapProfileToRegistrationStatus(profile: DriverProfileView): Regi
   const hasRejectedDoc =
     compliance.rejected.length > 0 ||
     documents.some((doc) => doc.status === FleetDocumentStatus.REJECTED);
-  if (isRejected(kycStatus) || isRejected(backgroundCheckStatus) || hasRejectedDoc) {
+  if (isRejectedStatus(kycStatus) || isRejectedStatus(backgroundCheckStatus) || hasRejectedDoc) {
     return RegistrationStatus.REJECTED;
   }
 

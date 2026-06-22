@@ -52,6 +52,9 @@ export function isVehicleYearValid(year: string): boolean {
 /** Longitud máxima de `make`/`model` a texto libre del contrato (`registerVehicleRequest`: 1..60). */
 const FREETEXT_MAX = 60;
 
+/** Longitud máxima del `color` del contrato (`registerVehicleRequest.color`: 1..30). */
+const COLOR_MAX = 30;
+
 /**
  * Valida y mapea los datos del vehículo del wizard al body de `POST /drivers/vehicles`. Lógica pura
  * y testeable: normaliza la placa (mayúsculas, sin espacios) y convierte el año a número.
@@ -107,11 +110,15 @@ export function validateVehicle(vehicle: VehicleData): VehicleValidation {
   // `vehicleType` de acá). Vacía en la carga manual → se omite del body (queda el `vehicleType` como hint).
   const mtcCategory = vehicle.mtcCategory.trim();
   const mtcField = mtcCategory.length > 0 ? { mtcCategory } : {};
+  // Color de carrocería (leído por OCR de la tarjeta o vacío en la carga manual): opcional en el contrato,
+  // recortado a los 30 chars de `registerVehicleRequest.color`. Vacío → se omite del body (no se envía '').
+  const color = vehicle.color.trim().slice(0, COLOR_MAX);
+  const colorField = color.length > 0 ? { color } : {};
   // RAMA CATÁLOGO gana si hay `modelSpecId` (el backend snapshotea del spec e IGNORA el texto libre).
   // Si no, RAMA TEXTO LIBRE: viaja make+model (Lote 3 hará fuzzy-match a catálogo + crecimiento del mismo).
   const request: VehicleRegisterInput = hasCatalogModel
-    ? { vehicleType, plate, year, modelSpecId, ...mtcField }
-    : { vehicleType, plate, year, make, model, ...mtcField };
+    ? { vehicleType, plate, year, modelSpecId, ...mtcField, ...colorField }
+    : { vehicleType, plate, year, make, model, ...mtcField, ...colorField };
   return { ok: true, request };
 }
 

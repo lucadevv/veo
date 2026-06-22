@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path, Polyline, Rect } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
@@ -18,7 +17,12 @@ import {
   ocrTimestampNow,
   scannedImageToPickedImage,
 } from '../../../documents/data';
-import { IconCheck } from '../../../../shared/presentation/icons';
+import {
+  IconCamera,
+  IconCheck,
+  IconImage,
+  IconScan,
+} from '../../../../shared/presentation/icons';
 import { hexAlpha } from './color';
 import {
   REGISTRATION_DOCUMENT_FORM_CONFIG,
@@ -29,75 +33,6 @@ import {
   readoutFromParsed,
   type CapturedReadout,
 } from './documentCaptureReadout';
-
-/** Glifo de galería/imagen (inline). */
-function ImageGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={3} y={4} width={18} height={16} rx={2} stroke={color} strokeWidth={1.8} />
-      <Circle cx={8.5} cy={9} r={1.6} stroke={color} strokeWidth={1.8} />
-      <Polyline
-        points="4,17 9,12 13,15 17,11 20,14"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
-/** Glifo de cámara (inline): cuerpo de cámara con lente. Para la captura de FOTO (no documento). */
-function CameraGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinejoin="round"
-      />
-      <Circle cx={12} cy={12.5} r={3.2} stroke={color} strokeWidth={1.8} />
-    </Svg>
-  );
-}
-
-/** Glifo de escáner de documento (inline): marco con esquinas + línea de escaneo. */
-function ScanGlyph({ color, size = 18 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M4 8V6a2 2 0 0 1 2-2h2"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path
-        d="M16 4h2a2 2 0 0 1 2 2v2"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path
-        d="M20 16v2a2 2 0 0 1-2 2h-2"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path
-        d="M8 20H6a2 2 0 0 1-2-2v-2"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path d="M4 12h16" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    </Svg>
-  );
-}
 
 /**
  * Estado de la subida del binario del documento. Honestidad de estado (sin éxito falso):
@@ -403,9 +338,9 @@ export function RegistrationDocumentSheet({
           ) : (
             <View style={[styles.previewEmpty, { gap: theme.spacing.sm }]}>
               {isPhoto ? (
-                <CameraGlyph size={28} color={theme.colors.inkSubtle} />
+                <IconCamera size={28} color={theme.colors.inkSubtle} strokeWidth={1.8} />
               ) : (
-                <ScanGlyph size={28} color={theme.colors.inkSubtle} />
+                <IconScan size={28} color={theme.colors.inkSubtle} strokeWidth={1.8} />
               )}
               <Text variant="footnote" color="inkSubtle">
                 {t(isPhoto ? 'registration.documents.photo.noFile' : 'registration.documents.noFile')}
@@ -470,11 +405,11 @@ export function RegistrationDocumentSheet({
               <PrimaryCaptureButton
                 label={
                   file
-                    ? t('registration.documents.photo.retake')
+                    ? t('registration.actions.retake')
                     : t('registration.documents.photo.take')
                 }
                 hint={t('registration.documents.photo.hint')}
-                icon={<CameraGlyph size={20} color={theme.colors.accent} />}
+                icon={<IconCamera size={20} color={theme.colors.accent} strokeWidth={1.8} />}
                 onPress={pickFrom('camera')}
                 disabled={captureDisabled}
                 busy={isPicking}
@@ -483,11 +418,11 @@ export function RegistrationDocumentSheet({
               <PrimaryCaptureButton
                 label={
                   file || missingCritical
-                    ? t('registration.documents.rescan')
+                    ? t('registration.actions.rescan')
                     : t('registration.documents.scan')
                 }
                 hint={t('registration.documents.scanHint')}
-                icon={<ScanGlyph size={20} color={theme.colors.accent} />}
+                icon={<IconScan size={20} color={theme.colors.accent} strokeWidth={1.8} />}
                 onPress={() => {
                   // Desde un estado capturado/crítico, reescanear limpia primero el readout previo.
                   if (file || missingCritical) {
@@ -502,7 +437,7 @@ export function RegistrationDocumentSheet({
             {!isPhoto ? (
               <CaptureButton
                 label={t('registration.documents.fromGallery')}
-                icon={<ImageGlyph size={18} color={theme.colors.ink} />}
+                icon={<IconImage size={18} color={theme.colors.ink} strokeWidth={1.8} />}
                 onPress={pickFrom('library')}
                 disabled={captureDisabled}
                 busy={isPicking}

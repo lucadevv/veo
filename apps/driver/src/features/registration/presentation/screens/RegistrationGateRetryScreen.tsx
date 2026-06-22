@@ -60,7 +60,7 @@ export const RegistrationGateRetryScreen = ({
       footer={
         <View style={{ gap: theme.spacing.sm }}>
           <Button
-            label={t('registration.gateRetry.retry')}
+            label={t('registration.actions.retry')}
             variant="primary"
             fullWidth
             onPress={onRetry}

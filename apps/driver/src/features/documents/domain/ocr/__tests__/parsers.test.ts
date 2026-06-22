@@ -647,7 +647,25 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
       model: 'YARIS',
       year: 2019,
       mtcCategory: 'M1',
+      color: 'PLATA',
     });
+  });
+
+  it('extrae el color (Color : NEGRO, valor al lado)', () => {
+    expect(parsePropertyCard(['Color : NEGRO']).color).toBe('NEGRO');
+  });
+
+  it('limpia el ruido del OCR tras el color (NEGRO ##### ####) y se queda con el color', () => {
+    expect(parsePropertyCard(['Color: NEGRO ##### ####']).color).toBe('NEGRO');
+    expect(parsePropertyCard(['Color : BLANCO ##########']).color).toBe('BLANCO');
+  });
+
+  it('color disperso: etiqueta "Color" sola + valor en la línea siguiente', () => {
+    expect(parsePropertyCard(['Color', 'ROJO']).color).toBe('ROJO');
+  });
+
+  it('sin etiqueta de color → color ausente (no inventa)', () => {
+    expect(parsePropertyCard(['Placa: ABC-123']).color).toBeUndefined();
   });
 
   it('no confunde "Modelo" con "Año Modelo" (toma el Modelo del vehículo, no el año modelo)', () => {

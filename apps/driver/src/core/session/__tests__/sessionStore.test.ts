@@ -21,6 +21,7 @@ function makeRegistrationDirty(): void {
       brand: 'Honda',
       model: 'CB 190R',
       mtcCategory: '',
+      color: '',
     },
     documents: [{ type: 'LICENSE', status: 'uploaded' }],
     faceCapture: { ref: 'face-ref-123', score: 0.99, capturedAt: '2026-05-30T10:00:00.000Z' },

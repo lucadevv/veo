@@ -2,25 +2,31 @@ import { LivenessBiometricCaptureService } from '../services/liveness-biometric-
 import type {
   BiometricBackendPort,
   BiometricChallenge,
+  BiometricEnrollInput,
   BiometricEnrollResult,
   BiometricVerificationInput,
   BiometricVerifyOutcome,
 } from '../../domain';
 import type { BiometricFrameGrabber, FrameCapturePlan } from '../../domain';
 
-/** Frame-grabber de prueba: devuelve frames sintéticos y registra el plan recibido. */
+/** Frame-grabber de prueba: devuelve frames/foto sintéticos y registra el plan recibido. */
 class FakeGrabber implements BiometricFrameGrabber {
   lastPlan: FrameCapturePlan | null = null;
+  photoCalls = 0;
   captureSequence(plan: FrameCapturePlan): Promise<string[]> {
     this.lastPlan = plan;
     return Promise.resolve(Array.from({ length: plan.frameCount }, (_, i) => `frame-${i}`));
+  }
+  capturePhoto(): Promise<string> {
+    this.photoCalls += 1;
+    return Promise.resolve('selfie-base64');
   }
 }
 
 /** Backend de prueba que captura las entradas y responde con valores fijos. */
 class FakeBackend implements BiometricBackendPort {
   verifyInput: BiometricVerificationInput | null = null;
-  enrollInput: BiometricVerificationInput | null = null;
+  enrollInput: BiometricEnrollInput | null = null;
   requestChallenge(): Promise<BiometricChallenge> {
     return Promise.resolve({
       challengeId: 'c-1',
@@ -38,15 +44,7 @@ class FakeBackend implements BiometricBackendPort {
       matchPassed: true,
     });
   }
-  requestEnrollChallenge(): Promise<BiometricChallenge> {
-    return Promise.resolve({
-      challengeId: 'enr-1',
-      action: 'SMILE',
-      instructions: 'Sonríe',
-      expiresAt: '2026-05-29T00:00:00Z',
-    });
-  }
-  enroll(input: BiometricVerificationInput): Promise<BiometricEnrollResult> {
+  enroll(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     this.enrollInput = input;
     return Promise.resolve({ enrolledAt: '2026-05-29T00:00:00Z' });
   }
@@ -67,18 +65,17 @@ describe('LivenessBiometricCaptureService', () => {
     expect(result).toEqual({ sessionRef: 'sess-9', score: 0.95 });
   });
 
-  it('enroll orquesta reto de enrolamiento → captura (plan por acción) → enroll con liveness', async () => {
+  it('enroll captura UNA selfie y enrola { photo } (sin liveness, sin reto)', async () => {
     const grabber = new FakeGrabber();
     const backend = new FakeBackend();
     const service = new LivenessBiometricCaptureService(grabber, backend);
 
     const result = await service.enroll();
 
-    // El re-enrolamiento usa el reto de ENROLAMIENTO (SMILE → 8 frames), no el del turno.
-    expect(grabber.lastPlan?.action).toBe('SMILE');
-    expect(grabber.lastPlan?.frameCount).toBe(8);
-    expect(backend.enrollInput).toEqual({ challengeId: 'enr-1', frames: expect.any(Array) });
-    expect(backend.enrollInput?.frames).toHaveLength(8);
+    // El re-enrolamiento es selfie-only: una sola foto, sin secuencia de frames ni reto de liveness.
+    expect(grabber.photoCalls).toBe(1);
+    expect(grabber.lastPlan).toBeNull();
+    expect(backend.enrollInput).toEqual({ photo: 'selfie-base64' });
     expect(result.enrolledAt).toBe('2026-05-29T00:00:00Z');
   });
 });

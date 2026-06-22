@@ -29,6 +29,7 @@ const VALID_VEHICLE: VehicleData = {
   model: 'YARIS',
   // LOTE 1: tarjeta M1 → categoría cruda que viaja al backend como fuente de verdad del tipo.
   mtcCategory: 'M1',
+  color: '',
 };
 
 /** Imagen de la tarjeta de mentira (el flujo la trata como opaca). */

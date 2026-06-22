@@ -6,6 +6,7 @@ import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 import { isAwaitingReview, mapProfileToRegistrationStatus, resumeStepForProfile } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
+import { useRegistrationHydration } from './useRegistrationHydration';
 
 /** `true` si el error es un 404 del backend: el conductor aún no existe (alta no iniciada). */
 function isNotFound(error: unknown): boolean {
@@ -81,6 +82,13 @@ export function useRegistrationGate(): RegistrationGate {
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   const forceWizard = useRegistrationStore((s) => s.forceWizard);
   const resolvedFromBackend = useRegistrationStore((s) => s.statusResolvedFromBackend);
+
+  // HIDRATA el avance local del wizard desde el SERVIDOR (`GET /drivers/me/documents`) al reanudar, para
+  // que TODOS los pasos document-backed (DNI, licencia, SOAT, tarjeta, foto) deriven "hecho" de la MISMA
+  // fuente de verdad (el server) — coherente. Antes el DNI miraba solo el estado local de sesión (vacío al
+  // reanudar) y se re-pedía, mientras la licencia ya miraba el server: incoherencia. Corre una vez al
+  // resolver los documentos; no destructivo (no pisa lo que el conductor escribe en esta sesión).
+  useRegistrationHydration();
 
   const query = useQuery({
     queryKey: REGISTRATION_GATE_QUERY_KEY,

@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import type { ExtractedDniData, ExtractedPropertyCardData } from '@veo/api-client';
+import type {
+  ExtractedDniData,
+  ExtractedDocumentData,
+  ExtractedPropertyCardData,
+} from '@veo/api-client';
 import type { PickedImage } from '../../../documents/domain';
 import { prefsStore } from '../../../../core/storage/mmkv';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
@@ -58,6 +62,33 @@ export interface PendingPropertyCardCapture {
 }
 
 /**
+ * Licencia de conducir escaneada en el paso 1 (CONDUCTOR · LOTE B), a la ESPERA de subir DESPUÉS de que el
+ * `PATCH /drivers/me/personal` cree el perfil del conductor. MISMO patrón que `PendingDniCapture`: para un
+ * conductor NUEVO el presign de la licencia devuelve 404 (no existe driver) si se intenta subir en el
+ * momento del escaneo, así que la subida + el `POST /drivers/onboard` se DIFIEREN al "Continuar" (tras el
+ * PATCH). Es la fuente de verdad de "se capturó una licencia" INDEPENDIENTE del OCR: la imagen viaja aunque
+ * el texto no se lea, pero el `documentNumber` y el `expiresAt` son CRÍTICOS (el sheet solo entrega la
+ * captura cuando el OCR los leyó), por eso van como string no nulo.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): base64 de un documento con PII (Ley 29733); su único
+ * propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingLicenseCapture {
+  /** Imagen de la licencia lista para subir (siempre presente cuando hay captura). */
+  file: PickedImage;
+  /** Número de licencia leído por OCR (crítico: el sheet solo captura cuando lo leyó). Alimenta el onboarding. */
+  documentNumber: string;
+  /** Vencimiento de la licencia en ISO-8601 (crítico: idem). Alimenta el onboarding (`licenseExpiresAt`). */
+  expiresAt: string;
+  /**
+   * Data extraída por OCR de la licencia (variante `LICENSE_A1` de `ExtractedDocumentData`), ya mapeada del
+   * parser al contrato. Se captura JUNTO a la imagen y viaja al registrar el documento tras el PATCH. `null`
+   * si el escaneo no produjo data OCR (se sube sin `extractedData`, igual que el DNI/tarjeta).
+   */
+  extractedData: ExtractedDocumentData | null;
+}
+
+/**
  * Total de pasos del wizard (LOTE B: Conductor · Vehículo · KYC). DERIVADO de `ORDERED_STEPS` (la fuente
  * única tipada de la pila) — NUNCA un número mágico: si se agrega/quita un paso, este total lo sigue solo.
  */
@@ -113,6 +144,7 @@ const emptyVehicle: VehicleData = {
   brand: '',
   model: '',
   mtcCategory: '',
+  color: '',
 };
 const initialDocuments: RegistrationDocument[] = [
   { type: 'LICENSE', status: 'pending' },
@@ -151,6 +183,24 @@ export interface RegistrationState {
    * se subió. NO se persiste (base64 de un documento; handoff scan→continue efímero).
    */
   pendingPropertyCard: PendingPropertyCardCapture | null;
+  /**
+   * Licencia escaneada en el paso 1 (CONDUCTOR), a la espera de subir tras el `PATCH /drivers/me/personal`
+   * (que crea el driver). `null` si el conductor no la escaneó aún o si ya se subió. NO se persiste (base64
+   * de un documento con PII; handoff scan→continue efímero, mismo criterio que `pendingDni`).
+   */
+  pendingLicense: PendingLicenseCapture | null;
+  /**
+   * U4: marca de que el conductor RECHAZADO entró al wizard a CORREGIR algo en ESTA sesión (tocó
+   * "Corregir mis datos" en la pantalla de rechazo). Gobierna "Reenviar a revisión": el reenvío
+   * (REJECTED → PENDING) SOLO se habilita tras una corrección detectable, para no re-mandar a la cola
+   * lo MISMO que ya fue rechazado (loop de reenvío). VIVE SOLO EN MEMORIA: es una señal de sesión, no
+   * un estado del alta — un reinicio de la app vuelve a exigir corregir antes de reenviar (degradación
+   * honesta y conservadora).
+   *
+   * DEUDA: señal server-truth de "hubo corrección" (un doc rechazado que pasó de REJECTED a otro
+   * estado, o un timestamp de última edición del perfil) en vez de un flag de sesión local.
+   */
+  hasCorrectedAfterRejection: boolean;
 
   setPersonal(data: Partial<PersonalData>): void;
   /** Fija el tipo del vehículo (derivado de la tarjeta o elegido a mano). `null` lo deja sin definir. */
@@ -166,7 +216,16 @@ export interface RegistrationState {
   setPendingPropertyCard(capture: PendingPropertyCardCapture): void;
   /** Descarta la tarjeta de propiedad pendiente (tras subirla con éxito, o al reiniciar el escaneo). */
   clearPendingPropertyCard(): void;
+  /** Guarda la licencia escaneada para subirla tras el PATCH /personal (idempotente: reemplaza). */
+  setPendingLicense(capture: PendingLicenseCapture): void;
+  /** Descarta la licencia pendiente (tras subirla con éxito, o al reiniciar el escaneo). */
+  clearPendingLicense(): void;
   setCurrentStep(step: number): void;
+  /**
+   * U4: marca que el conductor entró al wizard a corregir tras un rechazo (habilita "Reenviar a
+   * revisión"). Lo llama la pantalla de rechazo al tocar "Corregir mis datos".
+   */
+  markCorrectionStarted(): void;
   setStatus(status: RegistrationStatus): void;
   /**
    * Aplica el estado mapeado desde `GET /drivers/me`. Marca `statusResolvedFromBackend`. Para no
@@ -280,6 +339,11 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     pendingDni: null,
     // En memoria: igual que `pendingDni` (base64 de un documento; handoff scan→continue efímero del paso 2).
     pendingPropertyCard: null,
+    // En memoria: igual que `pendingDni` (base64 con PII de la licencia; handoff scan→continue efímero del paso 1).
+    pendingLicense: null,
+    // U4: señal de sesión (NO se rehidrata de MMKV): arranca en false en cada arranque de la app, así
+    // un conductor rechazado debe tocar "Corregir mis datos" antes de poder reenviar a revisión.
+    hasCorrectedAfterRejection: false,
 
     setPersonal: (data) => {
       set((state) => ({ personal: { ...state.personal, ...data } }));
@@ -333,12 +397,26 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       set({ pendingPropertyCard: null });
     },
 
+    setPendingLicense: (capture) => {
+      // Solo en memoria: NO se llama a persist() (la imagen de la licencia no va a MMKV por PII/peso base64).
+      set({ pendingLicense: capture });
+    },
+
+    clearPendingLicense: () => {
+      set({ pendingLicense: null });
+    },
+
     setCurrentStep: (step) => {
       set({
         currentStep: Math.min(Math.max(step, 1), REGISTRATION_TOTAL_STEPS),
         status: 'in_progress',
       });
       persist();
+    },
+
+    markCorrectionStarted: () => {
+      // Solo en memoria (NO persiste): habilita "Reenviar a revisión" en esta sesión tras corregir.
+      set({ hasCorrectedAfterRejection: true });
     },
 
     setStatus: (status) => {
@@ -393,6 +471,8 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
         faceCapture: null,
         pendingDni: null,
         pendingPropertyCard: null,
+        pendingLicense: null,
+        hasCorrectedAfterRejection: false,
       });
       prefsStore.remove(REGISTRATION_PREF_KEY);
     },

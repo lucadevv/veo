@@ -1,12 +1,12 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { ApiError } from '@veo/api-client';
-import { LivenessAction } from '@veo/shared-types';
-import type { LivenessChallenge, LivenessFrameGrabber } from '../../../domain';
+import type { FaceCapture, FaceCaptureService } from '../../../domain';
+import { FacePhotoGrabberUnavailableError } from '../../../domain';
 import {
   useRegistrationFaceCapture,
-  LivenessPhase,
-  type LivenessErrorSource,
+  SelfiePhase,
+  type SelfieErrorSource,
 } from '../useRegistrationFaceCapture';
 
 // MMKV nativo no existe en Jest: stubeamos el storage para que el store no reviente al persistir.
@@ -27,65 +27,41 @@ jest.mock('../../../../../core/storage/mmkv', () => ({
   },
 }));
 
-// Spies de las mutaciones reales (enroll/submit). Los controla cada test para verificar el orden y el
-// gate: `submit` NUNCA debe correr sin un `enroll` exitoso previo. El prefijo `mock` es OBLIGATORIO:
-// jest hoistea las factories de `jest.mock()` por encima de estas declaraciones y solo permite
-// referenciar variables fuera de scope cuyo nombre empiece con `mock` (case-insensitive).
+// Spies de las mutaciones reales (enroll/submit). El prefijo `mock` es OBLIGATORIO: jest hoistea las
+// factories de `jest.mock()` por encima de estas declaraciones y solo permite referenciar variables fuera
+// de scope cuyo nombre empiece con `mock` (case-insensitive).
 const mockEnrollMutateAsync = jest.fn<Promise<unknown>, [unknown]>();
 const mockSubmitMutateAsync = jest.fn<Promise<unknown>, []>();
 
-// El reto de liveness lo entrega `useLivenessChallenge` (React Query). Lo mockeamos como una query ya
-// resuelta (success) con el reto que el test configure, y un `refetch` espía para verificar el reintento
-// (los retos son de un solo uso: `retry()` debe pedir un reto NUEVO, no reusar el consumido).
-let mockChallengeData: LivenessChallenge | undefined;
-let mockChallengeIsError = false;
-let mockChallengeError: unknown = null;
-const mockRefetch = jest.fn(() => Promise.resolve({ data: mockChallengeData }));
-
 jest.mock('../useRegistrationDocuments', () => ({
   useEnrollBiometric: () => ({ mutateAsync: mockEnrollMutateAsync }),
-  useLivenessChallenge: () => ({
-    data: mockChallengeData,
-    isSuccess: !mockChallengeIsError && mockChallengeData !== undefined,
-    isError: mockChallengeIsError,
-    error: mockChallengeError,
-    refetch: mockRefetch,
-  }),
 }));
 
 jest.mock('../useRegistrationSubmit', () => ({
   useRegistrationSubmit: () => ({ mutateAsync: mockSubmitMutateAsync }),
 }));
 
-// El grabber de liveness inyectado: captura los frames marcadores que el test configure y reporta
-// progreso. Solo se invoca al iniciar el gesto (`start`).
-let mockFrames: string[] = ['frame1', 'frame2', 'frame3'];
-const mockCaptureFrames = jest.fn<Promise<string[]>, Parameters<LivenessFrameGrabber['captureFrames']>>(
-  async (_plan, onProgress) => {
-    onProgress?.(0.5);
-    onProgress?.(1);
-    return mockFrames;
-  },
-);
+// El servicio de captura facial inyectado: entrega la `FaceCapture` que el test configure (o lanza).
+const mockCaptureForRegistration = jest.fn<Promise<FaceCapture>, []>();
 
-jest.mock('../../providers/LivenessCaptureProvider', () => ({
-  useLivenessGrabber: (): LivenessFrameGrabber =>
-    ({ captureFrames: mockCaptureFrames }) as unknown as LivenessFrameGrabber,
+jest.mock('../../providers/FaceCaptureProvider', () => ({
+  useFaceCapture: (): FaceCaptureService =>
+    ({ captureForRegistration: mockCaptureForRegistration }) as FaceCaptureService,
 }));
 
 interface HookSnapshot {
-  phase: LivenessPhase;
-  action: LivenessAction | null;
-  instructions: string | null;
-  captureProgress: number;
+  phase: SelfiePhase;
+  photo: string | null;
   error: unknown;
-  errorSource: LivenessErrorSource | null;
+  errorSource: SelfieErrorSource | null;
   enrollErrorKind: ReturnType<typeof useRegistrationFaceCapture>['enrollErrorKind'];
-  start: () => Promise<void>;
+  capture: () => Promise<void>;
+  confirm: () => Promise<void>;
+  retake: () => void;
   retry: () => void;
 }
 
-/** Probe: expone el resultado del hook para manejarlo desde el test (patrón del gate test). */
+/** Probe: expone el resultado del hook para manejarlo desde el test. */
 function Probe({ onRender }: { onRender: (snap: HookSnapshot) => void }) {
   const hook = useRegistrationFaceCapture();
   onRender(hook);
@@ -99,136 +75,205 @@ async function tick(): Promise<void> {
 }
 
 async function mountHook(): Promise<{ current: () => HookSnapshot }> {
-  let latest: HookSnapshot = {
-    phase: LivenessPhase.REQUESTING_CHALLENGE,
-    action: null,
-    instructions: null,
-    captureProgress: 0,
-    error: null,
-    errorSource: null,
-    enrollErrorKind: null,
-    start: async () => undefined,
-    retry: () => undefined,
-  };
+  let latest = {} as HookSnapshot;
   await act(async () => {
     TestRenderer.create(<Probe onRender={(snap) => (latest = snap)} />);
   });
   return { current: () => latest };
 }
 
-const TURN_LEFT_CHALLENGE: LivenessChallenge = {
-  challengeId: 'chal-1',
-  action: LivenessAction.TURN_LEFT,
-  instructions: 'Gira la cabeza a la izquierda',
-  expiresAt: '2026-06-19T00:01:00.000Z',
-};
+const PHOTO = 'a'.repeat(3000);
 
-describe('useRegistrationFaceCapture · liveness reactivo del alta', () => {
+function faceCapture(photoBase64?: string): FaceCapture {
+  return { ref: 'kyc-1', score: 1, capturedAt: '2026-06-20T00:00:00.000Z', photoBase64 };
+}
+
+describe('useRegistrationFaceCapture · KYC de una selfie del alta', () => {
   beforeEach(() => {
     mockEnrollMutateAsync.mockReset().mockResolvedValue(undefined);
     mockSubmitMutateAsync.mockReset().mockResolvedValue(undefined);
-    mockCaptureFrames.mockClear();
-    mockRefetch.mockClear();
-    mockFrames = ['frame1', 'frame2', 'frame3'];
-    mockChallengeData = TURN_LEFT_CHALLENGE;
-    mockChallengeIsError = false;
-    mockChallengeError = null;
+    mockCaptureForRegistration.mockReset().mockResolvedValue(faceCapture(PHOTO));
   });
 
-  it('reto OK ⇒ ready → performing → captura frames → enrola { challengeId, frames } y LUEGO cierra (orden enroll→submit) ⇒ success', async () => {
+  it('arranca en idle (cámara encuadrando), sin foto ni error', async () => {
     const hook = await mountHook();
-    // El efecto de la query promueve a `ready` con el reto resuelto (acción + instrucciones del server).
-    await tick();
-    expect(hook.current().phase).toBe(LivenessPhase.READY);
-    expect(hook.current().action).toBe(LivenessAction.TURN_LEFT);
-    expect(hook.current().instructions).toBe('Gira la cabeza a la izquierda');
+    expect(hook.current().phase).toBe(SelfiePhase.IDLE);
+    expect(hook.current().photo).toBeNull();
+    expect(hook.current().error).toBeNull();
+  });
 
+  it('capture ⇒ toma 1 foto y pasa a preview (NO enrola todavía)', async () => {
+    const hook = await mountHook();
     await act(async () => {
-      await hook.current().start();
+      await hook.current().capture();
     });
     await tick();
 
-    // Captura: el grabber recibió un plan y reportó progreso real hasta 1.
-    expect(mockCaptureFrames).toHaveBeenCalledTimes(1);
-    expect(hook.current().captureProgress).toBe(1);
+    expect(mockCaptureForRegistration).toHaveBeenCalledTimes(1);
+    expect(hook.current().phase).toBe(SelfiePhase.PREVIEW);
+    expect(hook.current().photo).toBe(PHOTO);
+    // El enroll/submit NO corren hasta confirmar.
+    expect(mockEnrollMutateAsync).not.toHaveBeenCalled();
+    expect(mockSubmitMutateAsync).not.toHaveBeenCalled();
+  });
 
-    // Enroll con el contrato NUEVO: { challengeId, frames } (NO { photo }).
-    expect(mockEnrollMutateAsync).toHaveBeenCalledTimes(1);
-    expect(mockEnrollMutateAsync).toHaveBeenCalledWith({
-      challengeId: 'chal-1',
-      frames: ['frame1', 'frame2', 'frame3'],
+  it('confirm ⇒ enrola { photo } y LUEGO cierra (orden enroll→submit) ⇒ success', async () => {
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
     });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+
+    expect(mockEnrollMutateAsync).toHaveBeenCalledTimes(1);
+    expect(mockEnrollMutateAsync).toHaveBeenCalledWith({ photo: PHOTO });
     expect(mockSubmitMutateAsync).toHaveBeenCalledTimes(1);
-    // Orden: enroll antes que submit (el enroll es prerequisito del cierre).
     const enrollOrder = mockEnrollMutateAsync.mock.invocationCallOrder[0];
     const submitOrder = mockSubmitMutateAsync.mock.invocationCallOrder[0];
-    expect(enrollOrder).toBeDefined();
-    expect(submitOrder).toBeDefined();
     expect(enrollOrder).toBeLessThan(submitOrder as number);
 
-    expect(hook.current().phase).toBe(LivenessPhase.SUCCESS);
+    expect(hook.current().phase).toBe(SelfiePhase.SUCCESS);
     expect(hook.current().error).toBeNull();
   });
 
-  it('liveness-fail (enroll rechaza 422 con details.reason) ⇒ failed clasificado liveness; retry() pide un reto NUEVO y vuelve a ready', async () => {
-    mockEnrollMutateAsync.mockReset().mockRejectedValueOnce(
-      new ApiError(422, 'UNPROCESSABLE', 'Prueba de vida no superada', {
-        reason: 'gesto incompleto',
-      }),
-    );
+  it('captura sin foto real (stub) ⇒ failed clasificado missing-capture; NO enrola', async () => {
+    mockCaptureForRegistration.mockResolvedValueOnce(faceCapture(undefined));
     const hook = await mountHook();
-    await tick();
-    expect(hook.current().phase).toBe(LivenessPhase.READY);
-
     await act(async () => {
-      await hook.current().start();
+      await hook.current().capture();
     });
     await tick();
 
-    // El enroll corrió pero falló: NO se cerró el alta y el error se clasifica como liveness.
+    expect(mockEnrollMutateAsync).not.toHaveBeenCalled();
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+    expect(hook.current().errorSource).toBe('capture');
+  });
+
+  it('cámara no disponible ⇒ failed con source capture (módulo nativo no enlazado)', async () => {
+    mockCaptureForRegistration.mockRejectedValueOnce(new FacePhotoGrabberUnavailableError());
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+    expect(hook.current().errorSource).toBe('capture');
+    expect(hook.current().enrollErrorKind).toBeNull();
+  });
+
+  it('enroll rechaza 422 "rostro" ⇒ failed clasificado face; NO cierra', async () => {
+    mockEnrollMutateAsync
+      .mockReset()
+      .mockRejectedValueOnce(
+        new ApiError(422, 'UNPROCESSABLE', 'La imagen debe contener exactamente un rostro'),
+      );
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+
     expect(mockEnrollMutateAsync).toHaveBeenCalledTimes(1);
     expect(mockSubmitMutateAsync).not.toHaveBeenCalled();
-    expect(hook.current().phase).toBe(LivenessPhase.FAILED);
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
     expect(hook.current().errorSource).toBe('enroll');
-    expect(hook.current().enrollErrorKind).toBe('liveness');
+    expect(hook.current().enrollErrorKind).toBe('face');
+  });
 
-    // Reintento: pide un reto NUEVO (refetch) y vuelve a `requesting-challenge` → `ready`.
-    // Simulamos que el server emite un reto distinto (challengeId nuevo) tras el refetch.
-    mockChallengeData = { ...TURN_LEFT_CHALLENGE, challengeId: 'chal-2' };
+  it('enroll falla por red (status 0) ⇒ failed clasificado network; NO cierra', async () => {
+    mockEnrollMutateAsync
+      .mockReset()
+      .mockRejectedValueOnce(new ApiError(0, 'NETWORK', 'Sin conexión'));
+    const hook = await mountHook();
     await act(async () => {
-      hook.current().retry();
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
     });
     await tick();
 
-    expect(mockRefetch).toHaveBeenCalledTimes(1);
-    expect(hook.current().phase).toBe(LivenessPhase.READY);
-    expect(hook.current().error).toBeNull();
-    expect(hook.current().enrollErrorKind).toBeNull();
-
-    // Un segundo gesto exitoso usa el challengeId NUEVO (el consumido no se recicla).
-    await act(async () => {
-      await hook.current().start();
-    });
-    await tick();
-    expect(mockEnrollMutateAsync).toHaveBeenLastCalledWith({
-      challengeId: 'chal-2',
-      frames: ['frame1', 'frame2', 'frame3'],
-    });
+    expect(mockSubmitMutateAsync).not.toHaveBeenCalled();
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+    expect(hook.current().enrollErrorKind).toBe('network');
   });
 
   it('si el enroll falla, NO se llama a submit (el cierre depende del enroll)', async () => {
     mockEnrollMutateAsync.mockReset().mockRejectedValueOnce(new Error('enroll boom'));
     const hook = await mountHook();
-    await tick();
-
     await act(async () => {
-      await hook.current().start();
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
     });
     await tick();
 
     expect(mockEnrollMutateAsync).toHaveBeenCalledTimes(1);
     expect(mockSubmitMutateAsync).not.toHaveBeenCalled();
-    expect(hook.current().phase).toBe(LivenessPhase.FAILED);
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
     expect(hook.current().errorSource).toBe('enroll');
+  });
+
+  it('retake desde preview ⇒ vuelve a idle y descarta la foto', async () => {
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    expect(hook.current().phase).toBe(SelfiePhase.PREVIEW);
+
+    await act(async () => {
+      hook.current().retake();
+    });
+    await tick();
+    expect(hook.current().phase).toBe(SelfiePhase.IDLE);
+    expect(hook.current().photo).toBeNull();
+  });
+
+  it('retry tras fallo ⇒ vuelve a idle; una segunda captura+confirm exitosa cierra', async () => {
+    mockEnrollMutateAsync
+      .mockReset()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValue(undefined);
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+
+    await act(async () => {
+      hook.current().retry();
+    });
+    await tick();
+    expect(hook.current().phase).toBe(SelfiePhase.IDLE);
+    expect(hook.current().photo).toBeNull();
+
+    // Segundo intento completo: captura → confirm → success.
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+    expect(mockSubmitMutateAsync).toHaveBeenCalledTimes(1);
+    expect(hook.current().phase).toBe(SelfiePhase.SUCCESS);
   });
 });

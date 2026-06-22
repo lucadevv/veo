@@ -11,12 +11,12 @@ export {
   type DocumentCardTone,
 } from './DocumentUploadCard';
 export { RegistrationDocumentSheet } from './RegistrationDocumentSheet';
+export { firstMissingRequirement, type StepRequirement } from './missingRequirement';
 export { ScanDniSheet, type ScanDniSheetProps } from './ScanDniSheet';
 export {
   ScanPropertyCardSheet,
   type ScanPropertyCardSheetProps,
 } from './ScanPropertyCardSheet';
-export { FaceGuideRing } from './FaceGuideRing';
 export {
   default as BiometricCameraPreview,
   BIOMETRIC_CAMERA_PREVIEW_NAME,

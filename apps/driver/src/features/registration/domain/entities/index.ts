@@ -100,6 +100,12 @@ export interface VehicleData {
    * FUENTE DE VERDAD del tipo (el servidor deriva `vehicleType` de acá). Vacía en la carga manual (sin tarjeta).
    */
   mtcCategory: string;
+  /**
+   * Color de carrocería del vehículo (`NEGRO`, `BLANCO`…). Lo PRELLENA el OCR de la tarjeta de propiedad
+   * (`Color:`) de forma no destructiva; viaja opcional al backend (`registerVehicleRequest.color`). Vacío si
+   * el OCR no lo leyó o no hubo tarjeta — el alta no lo exige.
+   */
+  color: string;
 }
 
 /**
@@ -180,6 +186,49 @@ export function correctionStepForRejectedDocTypes(
   }
   if (rejectedTypes.some((type) => vehicleDocs.includes(type))) {
     return RegistrationStep.VEHICLE;
+  }
+  return null;
+}
+
+/**
+ * EJES del rechazo de un alta. El backend rechaza por TRES vías independientes (espejo de
+ * `mapProfileToRegistrationStatus`): documentos del operador, KYC/identidad, antecedentes. La
+ * navegación de corrección debe llevar al conductor al paso del eje REAL del rechazo — no al paso 1
+ * por omisión cuando le rechazaron la selfie/antecedentes (y sus datos/vehículo/docs estaban BIEN).
+ *
+ *  - `rejectedDocTypes`: `FleetDocumentType` crudos de los documentos REJECTED (eje del operador).
+ *  - `kycRejected`: la identidad/biometría (KYC) fue rechazada (eje de identidad → paso KYC).
+ *  - `backgroundCheckRejected`: los antecedentes fueron rechazados (eje de identidad → paso KYC).
+ */
+export interface RejectionAxes {
+  readonly rejectedDocTypes: readonly string[];
+  readonly kycRejected: boolean;
+  readonly backgroundCheckRejected: boolean;
+}
+
+/**
+ * Deriva el PRIMER paso del wizard a corregir a partir del EJE REAL del rechazo (no del último paso
+ * persistido ni del paso 1 por omisión). Prioridad por proximidad al inicio del wizard:
+ *
+ *  1. Si hay documentos rechazados derivables a un paso (Conductor/Vehículo), va a ESE paso — es lo
+ *     más temprano y concreto que el conductor puede arreglar (comportamiento previo correcto).
+ *  2. Si NO hay documento derivable pero la BIOMETRÍA/identidad (KYC) o los ANTECEDENTES fueron
+ *     rechazados, va al paso KYC (`IDENTITY_VERIFICATION`) — NO al paso 1: re-recorrer datos
+ *     personales + vehículo + documentos que estaban bien solo porque la selfie/antecedentes fallaron
+ *     es exactamente el dead-end que cerramos.
+ *  3. Si no se puede derivar ningún eje (degradación honesta), devuelve `null`: el llamador decide el
+ *     fallback (hoy, el paso 1, para re-recorrer en orden).
+ *
+ * Los ejes se distinguen por TIPO (`RejectionAxes`), no por strings mágicos: el llamador traduce los
+ * estados crudos del perfil (`kycStatus`/`backgroundCheckStatus`/doc statuses) a estos flags.
+ */
+export function correctionStepForRejection(axes: RejectionAxes): RegistrationStep | null {
+  const docStep = correctionStepForRejectedDocTypes(axes.rejectedDocTypes);
+  if (docStep !== null) {
+    return docStep;
+  }
+  if (axes.kycRejected || axes.backgroundCheckRejected) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
   }
   return null;
 }

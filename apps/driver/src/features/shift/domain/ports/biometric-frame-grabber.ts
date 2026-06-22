@@ -22,9 +22,14 @@ export interface FrameCapturePlan {
 export interface BiometricFrameGrabber {
   /**
    * Captura una secuencia temporal de frames JPEG (base64, sin encabezado data URI) siguiendo el
-   * plan derivado del reto. Abre y libera la cámara frontal.
+   * plan derivado del reto. Abre y libera la cámara frontal. Es el camino del GATE DE TURNO (liveness).
    */
   captureSequence(plan: FrameCapturePlan): Promise<string[]>;
+  /**
+   * Captura UNA sola foto JPEG frontal (base64, sin encabezado data URI). Es el camino del RE-ENROLAMIENTO
+   * con selfie (sin liveness): mismo módulo nativo de cámara, una imagen. Abre y libera la cámara frontal.
+   */
+  capturePhoto(): Promise<string>;
 }
 
 /** Cantidad de frames por acción de liveness (defaults sensatos; el servidor valida el resultado). */

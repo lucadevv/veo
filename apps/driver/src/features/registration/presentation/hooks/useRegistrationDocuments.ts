@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DocumentSide, type FleetDocumentType } from '@veo/shared-types';
-import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
+import { ApiError, type ExtractedDocumentData, type OcrEngineValue } from '@veo/api-client';
 import { useDocumentUploader, useRepositories } from '../../../../core/di/useDi';
+import { useSessionStore } from '../../../../core/session/sessionStore';
 import {
   UploadAndRegisterDocumentUseCase,
   type DocumentRegistrar,
@@ -13,7 +14,6 @@ import {
 import type {
   BiometricEnrollInput,
   LicenseOnboardInput,
-  LivenessChallenge,
   RegistrationDocumentRequest,
 } from '../../domain';
 
@@ -26,9 +26,18 @@ export const REGISTRATION_DOCUMENTS_QUERY_KEY = ['registration', 'documents'] as
  */
 export function useRegistrationDocuments() {
   const { registration } = useRepositories();
+  const sessionStatus = useSessionStore((s) => s.status);
   return useQuery({
     queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY,
     queryFn: () => registration.listDocuments(),
+    // Mismo guard de auth que el gate del perfil (useRegistrationGate): NO dispares
+    // `GET /drivers/me/documents` sin sesión autenticada — un conductor nuevo daría 404/401. La
+    // hidratación del resume corre vía el gate, así que sin este guard pegaría igual al reanudar sin sesión.
+    enabled: sessionStatus === 'authenticated',
+    // Mismo criterio de reintento que el gate: el 4xx (404 conductor sin docs) es DEFINITIVO; solo se
+    // reintentan errores reintentables (red / 5xx / 429, vía `ApiError.retryable`).
+    retry: (failureCount, error) =>
+      error instanceof ApiError && error.retryable && failureCount < 2,
   });
 }
 
@@ -59,35 +68,14 @@ export function useOnboardLicense() {
 }
 
 /**
- * Mutación: enrolamiento biométrico del alta (`POST /drivers/biometric/enroll`, foto en base64).
- * La presentación solo la invoca cuando el proveedor de captura entrega una foto real.
+ * Mutación: enrolamiento biométrico del alta (`POST /drivers/biometric/enroll`, UNA foto en base64).
+ * La presentación solo la invoca cuando el proveedor de captura entrega una foto real (Lote 2: selfie
+ * simple, sin reto/frames de liveness).
  */
 export function useEnrollBiometric() {
   const { registration } = useRepositories();
   return useMutation({
     mutationFn: (input: BiometricEnrollInput) => registration.enrollBiometric(input),
-  });
-}
-
-/** Clave de caché del reto de liveness del alta. El reto es de UN SOLO USO: no se cachea entre montajes. */
-export const REGISTRATION_LIVENESS_CHALLENGE_QUERY_KEY = ['registration', 'liveness-challenge'] as const;
-
-/**
- * Query: reto de liveness ACTIVO del enrolamiento del alta (`GET /drivers/me/biometric/liveness/challenge`).
- * La pantalla de KYC lo pide al montar para guiar al conductor a ejecutar el gesto (`action`) mientras
- * captura frames. El reto es de UN SOLO USO: `staleTime`/`gcTime` en 0 y sin refetch en foco evitan reusar
- * un reto consumido; el reintento del flujo llama a `refetch()` para pedir un reto NUEVO (no reciclar).
- */
-export function useLivenessChallenge() {
-  const { registration } = useRepositories();
-  return useQuery<LivenessChallenge>({
-    queryKey: REGISTRATION_LIVENESS_CHALLENGE_QUERY_KEY,
-    queryFn: () => registration.getLivenessChallenge(),
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
   });
 }
 

@@ -219,7 +219,7 @@ describe('RegistrationDocumentSheet · "Capturado ✓" auto-envío (sin formular
     // NO se muestra la tarjeta "Capturado ✓" (no hubo lectura válida).
     expect(hasText(renderer, tr('registration.documents.captured.title'))).toBe(false);
     // La acción ofrecida es REESCANEAR (no un formulario editable).
-    expect(hasText(renderer, tr('registration.documents.rescan'))).toBe(true);
+    expect(hasText(renderer, tr('registration.actions.rescan'))).toBe(true);
   });
 
   it('FIX B · SOAT con número pero SIN vencimiento: NO envía y pide REESCANEAR (validez legal)', async () => {

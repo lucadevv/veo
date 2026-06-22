@@ -38,6 +38,8 @@ function face(uri: string): PickedImage {
 interface RepoDouble {
   updatePersonalData: jest.Mock;
   submitDocument: jest.Mock;
+  /** `POST /drivers/onboard` (alta de licencia). Lo invoca la subida DIFERIDA de la licencia tras el PATCH. */
+  onboardLicense?: jest.Mock;
 }
 
 interface UploaderDouble {
@@ -138,7 +140,7 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
-      result = await handle.current?.submit(VALID_PERSONAL);
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
     });
 
     expect(result).toEqual({ status: 'ok' });
@@ -190,7 +192,7 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
-      result = await handle.current?.submit(VALID_PERSONAL);
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
     });
 
     expect(result).toEqual({ status: 'ok' });
@@ -226,10 +228,10 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
-      result = await handle.current?.submit(VALID_PERSONAL);
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
     });
 
-    expect(result).toEqual({ status: 'dni-upload-failed' });
+    expect(result).toEqual({ status: 'document-upload-failed', document: 'dni' });
     // El PATCH se hizo (el driver existe); solo falló el binario. NO perdemos las caras → reintento posible.
     expect(repo.updatePersonalData).toHaveBeenCalledTimes(1);
     expect(useRegistrationStore.getState().pendingDni).not.toBeNull();
@@ -264,7 +266,7 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
-      result = await handle.current?.submit(VALID_PERSONAL);
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
     });
 
     // El 409 NO produce `dni-upload-failed`: el DNI ya está → el wizard avanza al paso de vehículo.
@@ -303,11 +305,11 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
-      result = await handle.current?.submit(VALID_PERSONAL);
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
     });
 
     // Un error que NO es 409 sigue siendo fallo: la pantalla muestra el aviso y conserva las caras.
-    expect(result).toEqual({ status: 'dni-upload-failed' });
+    expect(result).toEqual({ status: 'document-upload-failed', document: 'dni' });
     expect(repo.updatePersonalData).toHaveBeenCalledTimes(1);
     expect(useRegistrationStore.getState().pendingDni).not.toBeNull();
   });
@@ -332,7 +334,10 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
     let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
     await act(async () => {
       // DNI de 7 dígitos: la validación de cliente del use-case lo rechaza ANTES de tocar la red.
-      result = await handle.current?.submit({ ...VALID_PERSONAL, dni: '7012345' });
+      result = await handle.current?.submit({
+        personal: { ...VALID_PERSONAL, dni: '7012345' },
+        driverExists: false,
+      });
     });
 
     expect(result?.status).toBe('field-errors');
@@ -341,5 +346,291 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
     expect(uploader.upload).not.toHaveBeenCalled();
     // Las caras siguen pendientes (no se perdió el escaneo por un error de validación corregible).
     expect(useRegistrationStore.getState().pendingDni).not.toBeNull();
+  });
+});
+
+/**
+ * Licencia escaneada en el paso 1 (LOTE B · BUG #2). MISMO patrón que el DNI: la subida + el onboarding se
+ * DIFIEREN al "Continuar" (tras el PATCH que crea el driver), porque para un conductor NUEVO el presign de
+ * la licencia da 404 "no existe perfil" si se intenta en el momento del escaneo.
+ */
+describe('usePersonalDataContinue · subida DIFERIDA de la licencia (BUG #2)', () => {
+  /** Licencia de mentira pendiente: imagen + número + vencimiento (críticos, garantizados por el sheet). */
+  function pendingLicense() {
+    return {
+      file: face('data:image/jpeg;base64,/9j/license'),
+      documentNumber: 'Q12345678',
+      expiresAt: '2030-12-31',
+      extractedData: null,
+    };
+  }
+
+  it('PATCH → DNI → LICENCIA + onboard en ORDEN, limpia ambos pendings → ok', async () => {
+    const order: string[] = [];
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(async () => {
+        order.push('patch');
+        return { legalName: 'QUISPE MAMANI CARLOS', dni: '70123456', birthDate: '1990-03-15' };
+      }),
+      submitDocument: jest.fn(async () => ({ type: 'DOC', images: [] })),
+      onboardLicense: jest.fn(async () => {
+        order.push('onboard');
+      }),
+    };
+    const uploader: UploaderDouble = {
+      upload: jest.fn(async (type: string) => {
+        order.push(`upload:${type}`);
+        return { images: [{ s3Key: `drivers/d-1/${type}.jpg`, side: 'SINGLE' }] };
+      }),
+    };
+
+    act(() => {
+      useRegistrationStore.getState().setPendingDni({
+        front: face('data:image/jpeg;base64,/9j/front'),
+        back: null,
+        extractedData: null,
+      });
+      useRegistrationStore.getState().setPendingLicense(pendingLicense());
+    });
+
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
+    });
+
+    expect(result).toEqual({ status: 'ok' });
+    // ORDEN: PATCH (crea driver) → sube DNI → sube licencia → onboard de la licencia. Todo tras el PATCH.
+    expect(order).toEqual(['patch', 'upload:DNI', 'upload:LICENSE_A1', 'onboard']);
+    // El onboarding recibió número + vencimiento de la captura pendiente.
+    expect(repo.onboardLicense).toHaveBeenCalledWith({
+      licenseNumber: 'Q12345678',
+      licenseExpiresAt: '2030-12-31',
+    });
+    // Tras subir, ambas capturas pendientes se limpian (no se re-suben si el conductor vuelve a entrar).
+    expect(useRegistrationStore.getState().pendingDni).toBeNull();
+    expect(useRegistrationStore.getState().pendingLicense).toBeNull();
+  });
+
+  it('sin licencia escaneada: hace PATCH (+ DNI si lo hay) y NO toca onboard → ok', async () => {
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(async () => ({
+        legalName: 'QUISPE MAMANI CARLOS',
+        dni: '70123456',
+        birthDate: '1990-03-15',
+      })),
+      submitDocument: jest.fn(),
+      onboardLicense: jest.fn(),
+    };
+    const uploader: UploaderDouble = { upload: jest.fn() };
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
+    });
+
+    expect(result).toEqual({ status: 'ok' });
+    // Sin licencia escaneada no hay subida ni onboarding de licencia.
+    expect(uploader.upload).not.toHaveBeenCalled();
+    expect(repo.onboardLicense).not.toHaveBeenCalled();
+  });
+
+  it('la subida de la LICENCIA falla TRAS el PATCH: document-upload-failed (license) y CONSERVA pendingLicense', async () => {
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(async () => ({
+        legalName: 'QUISPE MAMANI CARLOS',
+        dni: '70123456',
+        birthDate: '1990-03-15',
+      })),
+      submitDocument: jest.fn(async () => ({ type: 'DOC', images: [] })),
+      onboardLicense: jest.fn(),
+    };
+    // El DNI sube OK; la licencia (2ª subida) falla con un 500: el driver YA existe, solo falló el binario.
+    const uploader: UploaderDouble = {
+      upload: jest.fn(async (type: string) => {
+        if (type === 'LICENSE_A1') {
+          throw new ApiError(500, 'INTERNAL', 'Algo salió mal');
+        }
+        return { images: [{ s3Key: `drivers/d-1/${type}.jpg`, side: 'SINGLE' }] };
+      }),
+    };
+
+    act(() => {
+      useRegistrationStore.getState().setPendingDni({
+        front: face('data:image/jpeg;base64,/9j/front'),
+        back: null,
+        extractedData: null,
+      });
+      useRegistrationStore.getState().setPendingLicense(pendingLicense());
+    });
+
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
+    });
+
+    // CAMINO INFELIZ: la licencia falló → no avanza, conserva la captura para reintentar (PATCH idempotente).
+    expect(result).toEqual({ status: 'document-upload-failed', document: 'license' });
+    // El DNI sí subió (se limpió); la licencia NO (se conserva). El onboarding NUNCA corrió (subida falló antes).
+    expect(useRegistrationStore.getState().pendingDni).toBeNull();
+    expect(useRegistrationStore.getState().pendingLicense).not.toBeNull();
+    expect(repo.onboardLicense).not.toHaveBeenCalled();
+  });
+
+  it('la licencia (o su onboarding) devuelve 409: lo trata como ÉXITO → ok, limpia pendingLicense', async () => {
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(async () => ({
+        legalName: 'QUISPE MAMANI CARLOS',
+        dni: '70123456',
+        birthDate: '1990-03-15',
+      })),
+      submitDocument: jest.fn(async () => ({ type: 'DOC', images: [] })),
+      // El onboarding responde 409 (la licencia YA fue dada de alta en un intento previo) → ÉXITO, no error.
+      onboardLicense: jest.fn(async () => {
+        throw new ApiError(409, 'CONFLICT', 'Ya existe una licencia activa');
+      }),
+    };
+    const uploader: UploaderDouble = {
+      upload: jest.fn(async (type: string) => ({
+        images: [{ s3Key: `drivers/d-1/${type}.jpg`, side: 'SINGLE' }],
+      })),
+    };
+
+    act(() => {
+      useRegistrationStore.getState().setPendingLicense(pendingLicense());
+    });
+
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
+    });
+
+    // El 409 NO produce fallo: la licencia ya está → el wizard avanza y se limpia la captura.
+    expect(result).toEqual({ status: 'ok' });
+    expect(useRegistrationStore.getState().pendingLicense).toBeNull();
+  });
+});
+
+/**
+ * RESUME unificado (Lote A · `driverExists`): el conductor REANUDA un alta cuyo driver YA existe en el
+ * servidor. Causa raíz del dead-end "los datos leídos no son válidos": el `personal` LOCAL está vacío al
+ * reanudar (`fullName`/`birthdate` no se rehidratan: el contrato del server no los expone), así que un PATCH
+ * con ese payload vacío hacía rechazar la validación (`field-errors`) SIN campo editable. El fix: cuando el
+ * driver YA existe, NO se re-PATCHea — sus datos personales ya están server-side; solo se navega (y se
+ * corren las subidas diferidas, que en un resume puro no existen → null → no hacen nada).
+ */
+describe('usePersonalDataContinue · RESUME (driverExists) — NO re-PATCHea', () => {
+  it('driverExists=true con personal VACÍO y SIN pendientes: NO llama updatePersonalData ni el uploader → ok', async () => {
+    const repo: RepoDouble = {
+      // Si esto se llegara a llamar, el test FALLA (el resume NO debe re-PATCHear con payload vacío).
+      updatePersonalData: jest.fn(),
+      submitDocument: jest.fn(),
+      onboardLicense: jest.fn(),
+    };
+    const uploader: UploaderDouble = { upload: jest.fn() };
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    // `personal` VACÍO: espeja el estado real al reanudar (fullName/birthdate no rehidratados).
+    const EMPTY_PERSONAL: PersonalData = { fullName: '', dni: '', birthdate: '' };
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: EMPTY_PERSONAL, driverExists: true });
+    });
+
+    // Navega (ok) SIN field-errors ni "datos no válidos": no se tocó la red de datos personales.
+    expect(result).toEqual({ status: 'ok' });
+    expect(repo.updatePersonalData).not.toHaveBeenCalled();
+    // Sin pendientes en un resume puro, tampoco hay subidas.
+    expect(uploader.upload).not.toHaveBeenCalled();
+    expect(repo.onboardLicense).not.toHaveBeenCalled();
+  });
+
+  it('driverExists=true CON pendientes (re-escaneo en resume): NO PATCHea pero SÍ sube los diferidos → ok', async () => {
+    const order: string[] = [];
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(),
+      submitDocument: jest.fn(async () => ({ type: 'DOC', images: [] })),
+      onboardLicense: jest.fn(async () => {
+        order.push('onboard');
+      }),
+    };
+    const uploader: UploaderDouble = {
+      upload: jest.fn(async (type: string) => {
+        order.push(`upload:${type}`);
+        return { images: [{ s3Key: `drivers/d-1/${type}.jpg`, side: 'SINGLE' }] };
+      }),
+    };
+
+    act(() => {
+      useRegistrationStore.getState().setPendingDni({
+        front: face('data:image/jpeg;base64,/9j/front'),
+        back: null,
+        extractedData: null,
+      });
+      useRegistrationStore.getState().setPendingLicense({
+        file: face('data:image/jpeg;base64,/9j/license'),
+        documentNumber: 'Q12345678',
+        expiresAt: '2030-12-31',
+        extractedData: null,
+      });
+    });
+
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: true });
+    });
+
+    expect(result).toEqual({ status: 'ok' });
+    // El PATCH NO corre (driver existe), pero las subidas diferidas SÍ (el conductor re-escaneó en resume).
+    expect(repo.updatePersonalData).not.toHaveBeenCalled();
+    expect(order).toEqual(['upload:DNI', 'upload:LICENSE_A1', 'onboard']);
+    expect(useRegistrationStore.getState().pendingDni).toBeNull();
+    expect(useRegistrationStore.getState().pendingLicense).toBeNull();
+  });
+
+  it('driverExists=false (alta FRESCA): SÍ PATCHea (crea el driver) y luego sube los pendientes', async () => {
+    const order: string[] = [];
+    const repo: RepoDouble = {
+      updatePersonalData: jest.fn(async () => {
+        order.push('patch');
+        return { legalName: 'QUISPE MAMANI CARLOS', dni: '70123456', birthDate: '1990-03-15' };
+      }),
+      submitDocument: jest.fn(async () => ({ type: 'DOC', images: [] })),
+    };
+    const uploader: UploaderDouble = {
+      upload: jest.fn(async (type: string) => {
+        order.push(`upload:${type}`);
+        return { images: [{ s3Key: `drivers/d-1/${type}.jpg`, side: 'SINGLE' }] };
+      }),
+    };
+
+    act(() => {
+      useRegistrationStore.getState().setPendingDni({
+        front: face('data:image/jpeg;base64,/9j/front'),
+        back: null,
+        extractedData: null,
+      });
+    });
+
+    const handle = renderHookWith(fakeContainer(repo, uploader));
+
+    let result: Awaited<ReturnType<NonNullable<HookHandle['current']>['submit']>> | undefined;
+    await act(async () => {
+      result = await handle.current?.submit({ personal: VALID_PERSONAL, driverExists: false });
+    });
+
+    expect(result).toEqual({ status: 'ok' });
+    // En alta fresca el PATCH crea el driver ANTES de subir el DNI escaneado (orden conservado).
+    expect(repo.updatePersonalData).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['patch', 'upload:DNI']);
   });
 });

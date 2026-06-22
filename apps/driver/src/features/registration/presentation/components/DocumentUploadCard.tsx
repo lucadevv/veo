@@ -1,9 +1,8 @@
 import React, { type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
 import { Text, useTheme } from '@veo/ui-kit';
 import { hexAlpha } from './color';
-import { IconAlert, IconCheck } from '../../../../shared/presentation/icons';
+import { IconAlert, IconCamera, IconCheck } from '../../../../shared/presentation/icons';
 import type { DocumentUploadStatus } from '../../domain';
 
 /** Tono semántico del chip de estado del documento. */
@@ -13,21 +12,6 @@ export type DocumentCardTone = 'success' | 'warn' | 'danger' | 'neutral' | 'acce
 export interface DocumentServerState {
   label: string;
   tone: DocumentCardTone;
-}
-
-/** Glifo de cámara (chip "Pendiente"). Inline para no depender del set global. */
-function CameraGlyph({ color, size = 14 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h5L16 6H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-      />
-      <Circle cx={12} cy={13} r={3} stroke={color} strokeWidth={2} />
-    </Svg>
-  );
 }
 
 interface StatusChipProps {
@@ -70,14 +54,14 @@ function StatusChip({
 
   if (serverState) {
     const tint = toneColor(serverState.tone, theme);
+    // Aplanado: tinte de fondo suave + texto del color semántico + iconito. SIN borde — el color del
+    // tono ya comunica el estado; el borde solo agregaba ruido (una caja más).
     return (
       <View
         style={[
           styles.chip,
-          styles.chipBordered,
           {
             backgroundColor: hexAlpha(tint, 0.16),
-            borderColor: hexAlpha(tint, 0.55),
             borderRadius: theme.radii.pill,
             gap: theme.spacing.xs,
           },
@@ -91,28 +75,30 @@ function StatusChip({
     );
   }
 
-  const uploaded = status === 'uploaded';
-  const tint = uploaded ? theme.colors.success : theme.colors.accent;
+  // Estado LOCAL "uploaded" = capturado en el dispositivo, PENDIENTE de subir ("Listo para enviar"). NO es
+  // "Verificado": el tono honesto es ámbar (warn), no verde. El verde (success) solo lo pinta el chip de
+  // SERVIDOR (`serverState`) cuando el doc ya está realmente aprobado. Antes pintaba verde + check y decía
+  // "Subido" antes de subir: mentía. Ahora el check ámbar comunica "listo, falta enviarlo".
+  const captured = status === 'uploaded';
+  const tint = captured ? theme.colors.warn : theme.colors.accent;
   return (
     <View
       style={[
         styles.chip,
         {
           backgroundColor: hexAlpha(tint, 0.16),
-          borderColor: uploaded ? 'transparent' : hexAlpha(tint, 0.55),
-          borderWidth: uploaded ? 0 : 1,
           borderRadius: theme.radii.pill,
           gap: theme.spacing.xs,
         },
       ]}
     >
-      {uploaded ? (
+      {captured ? (
         <IconCheck size={14} color={tint} strokeWidth={2.6} />
       ) : (
-        <CameraGlyph color={tint} />
+        <IconCamera size={14} color={tint} strokeWidth={2} />
       )}
-      <Text variant="caption" color={uploaded ? 'success' : 'accent'}>
-        {uploaded ? uploadedLabel : pendingLabel}
+      <Text variant="caption" style={{ color: tint }}>
+        {captured ? uploadedLabel : pendingLabel}
       </Text>
     </View>
   );
@@ -132,7 +118,7 @@ function StatusGlyph({
   if (tone === 'warn' || tone === 'danger') {
     return <IconAlert size={14} color={color} strokeWidth={2.2} />;
   }
-  return <CameraGlyph color={color} />;
+  return <IconCamera size={14} color={color} strokeWidth={2} />;
 }
 
 interface DocumentUploadCardProps {
@@ -147,6 +133,37 @@ interface DocumentUploadCardProps {
   serverState?: DocumentServerState;
   /** Muestra un spinner en el chip mientras se registra/refresca el documento. */
   busy?: boolean;
+  /**
+   * Número de PASO de la secuencia de captura (U3 · jerarquía 1-2-3). Cuando se provee, la card pinta un
+   * badge "N" antes del ícono para comunicar el ORDEN ("primero 1, después 2…"). Reemplaza el ícono-glifo
+   * como ancla visual: así DNI/licencia/tarjeta/foto/SOAT comparten UN patrón de card numerada y el ojo
+   * sabe la secuencia. Sin número (`undefined`) la card mantiene su look clásico (solo ícono).
+   */
+  stepNumber?: number;
+}
+
+/**
+ * Badge numérico del paso (U3): círculo SUTIL lleno con el número de orden — sin borde (una caja menos).
+ * El relleno tenue (accent al 12%) y el número en accent comunican "paso N" sin encajonar. Tokens del
+ * tema, sin hex suelto. CONSERVA el `value` (los tests de jerarquía U3 dependen de que el número exista).
+ */
+function StepBadge({ value }: { value: number }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.stepBadge,
+        {
+          backgroundColor: hexAlpha(theme.colors.accent, 0.12),
+          borderRadius: theme.radii.pill,
+        },
+      ]}
+    >
+      <Text variant="caption" color="accent">
+        {String(value)}
+      </Text>
+    </View>
+  );
 }
 
 /**
@@ -165,6 +182,7 @@ export function DocumentUploadCard({
   onPress,
   serverState,
   busy = false,
+  stepNumber,
 }: DocumentUploadCardProps): React.JSX.Element {
   const theme = useTheme();
 
@@ -178,24 +196,20 @@ export function DocumentUploadCard({
       style={({ pressed }) => [
         styles.card,
         {
+          // Card aplanada: un pelo elevada del fondo (`surface`), SIN borde. Más aire vertical. La
+          // jerarquía la dan el aire + la escala, no cajas anidadas.
           backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
           borderRadius: theme.radii.lg,
           paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.lg,
+          paddingVertical: theme.spacing.xl,
           gap: theme.spacing.md,
           opacity: pressed || busy ? 0.9 : 1,
         },
       ]}
     >
-      <View
-        style={[
-          styles.iconBox,
-          { backgroundColor: hexAlpha(theme.colors.accent, 0.14), borderRadius: theme.radii.md },
-        ]}
-      >
-        {icon}
-      </View>
+      {stepNumber !== undefined ? <StepBadge value={stepNumber} /> : null}
+      {/* Ícono PLANO inline: sin caja ni fondo tintado. Sobrio, deja respirar la fila. */}
+      <View style={styles.icon}>{icon}</View>
       <Text variant="bodyStrong" style={styles.label} numberOfLines={1}>
         {label}
       </Text>
@@ -214,9 +228,17 @@ export function DocumentUploadCard({
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, alignSelf: 'stretch' },
-  iconBox: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Sin `borderWidth`: la card es plana, separada del fondo solo por su `surface`.
+  card: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+  // Sin `borderWidth`: círculo lleno sutil.
+  stepBadge: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Ícono inline (sin caja 44×44): solo centra el glifo en un ancho fijo para alinear las filas.
+  icon: { width: 28, alignItems: 'center', justifyContent: 'center' },
   label: { flex: 1 },
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
-  chipBordered: { borderWidth: 1 },
 });

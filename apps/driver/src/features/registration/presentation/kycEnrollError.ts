@@ -77,6 +77,11 @@ function hasEmbeddedUnprocessableStatus(details: unknown): boolean {
  * Motivo de fallo de liveness embebido por el backend en `details.reason` del 422 "Prueba de vida no
  * superada". Lo devolvemos para que la pantalla pueda APENDARLO al mensaje i18n (de forma humana, nunca
  * como único texto crudo). Devuelve `null` si no hay un reason string utilizable.
+ *
+ * DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2). La pantalla ya no
+ * consume este helper (no hay reto de liveness en el alta). Se conserva junto al kind `'liveness'` del
+ * clasificador por si el backend sigue emitiendo ese 422. Gatillo: borrar `livenessFailReason` + el kind
+ * `'liveness'` cuando se confirme que el enroll del alta nunca devuelve "prueba de vida no superada".
  */
 export function livenessFailReason(error: unknown): string | null {
   if (!(error instanceof ApiError) || !error.details || typeof error.details !== 'object') {

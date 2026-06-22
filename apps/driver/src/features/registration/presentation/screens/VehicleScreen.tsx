@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,7 +10,7 @@ import { IconCheck } from '../../../../shared/presentation/icons';
 import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { RegistrationStep, type VehicleErrors } from '../../domain';
-import { REGISTRATION_TOTAL_STEPS, useRegistrationStore } from '../state/registrationStore';
+import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
 import {
   REGISTRATION_VEHICLES_QUERY_KEY,
@@ -26,6 +26,7 @@ import {
 import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import {
   DocumentUploadCard,
+  firstMissingRequirement,
   hexAlpha,
   RegistrationDocumentSheet,
   RegistrationExitSheet,
@@ -36,6 +37,7 @@ import {
   VehicleStatusCard,
   VehicleTypeSelector,
   type DocumentCardTone,
+  type StepRequirement,
 } from '../components';
 import type {
   DocumentUploadState,
@@ -44,8 +46,8 @@ import type {
 import { IconCar, IconShield } from '../../../../shared/presentation/icons';
 import {
   DocumentUploadStatus,
-  isAcceptableServerDocStatus,
   registrationDocTypeToBackend,
+  serverHasAcceptableDoc,
   type RegistrationDocumentServerStatus,
 } from '../../domain';
 
@@ -132,10 +134,11 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const [photoUploadState, setPhotoUploadState] = useState<DocumentUploadState>('idle');
   const [photoError, setPhotoError] = useState<unknown>(null);
 
-  // Subida confirmada: local (recién capturada) o ya presente en el servidor (conductor que vuelve).
+  // Subida confirmada: local (recién capturada) o ya presente en el servidor en estado ACEPTABLE
+  // (conductor que vuelve). Mismo criterio server-aware que la licencia/SOAT/DNI vía el helper canónico.
   const photoUploaded =
-    documents.find((d) => d.type === 'VEHICLE_PHOTO')?.status === 'uploaded' ||
-    (serverDocs.data?.some((d) => d.type === photoBackendType) ?? false);
+    documents.find((d) => d.type === 'VEHICLE_PHOTO')?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasAcceptableDoc(serverDocs.data, 'VEHICLE_PHOTO');
 
   // SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos): documento numerado que VENCE. Se
   // captura con el componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Es DRIVER-scoped
@@ -147,10 +150,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const [soatError, setSoatError] = useState<unknown>(null);
 
   /** ¿El servidor YA tiene el SOAT en un estado aceptable? (conductor que vuelve/reinstala). */
-  const serverHasSoat =
-    serverDocs.data?.some(
-      (doc) => doc.type === soatBackendType && isAcceptableServerDocStatus(doc.status),
-    ) ?? false;
+  const serverHasSoat = serverHasAcceptableDoc(serverDocs.data, 'SOAT');
   const soatUploaded =
     documents.find((d) => d.type === 'SOAT')?.status === DocumentUploadStatus.UPLOADED ||
     serverHasSoat;
@@ -345,6 +345,23 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   // ¿La captura del scan rindió una tarjeta usable (con placa)? Entonces mostramos la tarjeta "capturada".
   const derivedFromScan = hasCapture && hasReadPlate;
   const showManualForm = manualMode;
+  // U2 · dedup (DUP #4): el toggle "cargar a mano" es un FALLBACK SUBORDINADO. Se OCULTA cuando el scan ya
+  // rindió una captura VÁLIDA (placa + año + tipo leídos): ahí el camino es escanear/reescanear, no cargar a
+  // mano (cumple la promesa del comentario que prometía ocultarlo tras un scan exitoso). Tampoco se muestra
+  // si ya estás en modo manual (el form está abierto).
+  const scanCaptureComplete = hasCapture && hasReadPlate && hasReadYear && hasType;
+  const showManualToggle = !manualMode && !scanCaptureComplete;
+
+  // U3 · CTA que dice QUÉ falta: derivado del MISMO gating del footer (datos del vehículo vía tarjeta/manual +
+  // foto + SOAT). El orden refleja la SECUENCIA de pasos (1 · Tarjeta, 2 · Foto, 3 · SOAT): se muestra el
+  // PRIMER requisito incumplido, pegado al CTA. En vehículo YA registrado el botón solo avanza (sin gating de
+  // alta): no hay nada que falte, por eso el hint solo aplica al alta NUEVA.
+  const vehicleRequirements: readonly StepRequirement[] = [
+    { satisfied: hasVehicleData, missingKey: 'registration.vehicle.missing.card' },
+    { satisfied: photoUploaded, missingKey: 'registration.vehicle.missing.photo' },
+    { satisfied: soatUploaded, missingKey: 'registration.vehicle.missing.soat' },
+  ];
+  const missingKey = existingVehicle ? null : firstMissingRequirement(vehicleRequirements);
 
   return (
     <>
@@ -352,33 +369,41 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
         scroll
         header={<RegistrationHeader showLogo={false} onBack={back.onBack} />}
         footer={
-          <Button
-            label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
-            variant="accent"
-            fullWidth
-            loading={vehicleContinue.isPending}
-            // LOTE B: la foto Y el SOAT del vehículo son REQUERIDOS para avanzar (alta nueva Y vehículo ya
-            // registrado). Espejan el gating de la documentación del vehículo agrupada en este paso.
-            disabled={(!existingVehicle && !hasVehicleData) || !photoUploaded || !soatUploaded}
-            onPress={() => {
-              void onContinue();
-            }}
-          />
+          <View style={styles.footer}>
+            {/* U3 · feedback PEGADO al CTA: cuando "Registrar/Continuar" está disabled, decimos QUÉ falta (el
+                primer requisito incumplido del gating: tarjeta → foto → SOAT), no un banner lejano. Tipado
+                (clave i18n derivada), sin string mágico. Desaparece cuando todo está listo. */}
+            {missingKey ? (
+              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
+                {t('registration.vehicle.missing.label', { detail: t(missingKey) })}
+              </Text>
+            ) : null}
+            <Button
+              label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
+              variant="accent"
+              fullWidth
+              loading={vehicleContinue.isPending}
+              // LOTE B: la foto Y el SOAT del vehículo son REQUERIDOS para avanzar (alta nueva Y vehículo ya
+              // registrado). Espejan el gating de la documentación del vehículo agrupada en este paso.
+              disabled={(!existingVehicle && !hasVehicleData) || !photoUploaded || !soatUploaded}
+              onPress={() => {
+                void onContinue();
+              }}
+            />
+          </View>
         }
       >
-        <View style={[styles.body, { gap: theme.spacing.xl }]}>
+        <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
+          {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
+              (`registration.stepOf`) se ELIMINÓ — redundante con la barra. El título display manda. */}
           <Reveal>
             <RegistrationProgress current={2} />
           </Reveal>
 
+          {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
           <Reveal delay={40} style={styles.intro}>
-            <Text variant="caption" color="inkMuted" align="center">
-              {t('registration.stepOf', { current: 2, total: REGISTRATION_TOTAL_STEPS })}
-            </Text>
-            <Text variant="title1" align="center">
-              {t('registration.vehicle.title')}
-            </Text>
-            <Text variant="callout" color="inkMuted" align="center">
+            <Text variant="display">{t('registration.vehicle.title')}</Text>
+            <Text variant="callout" color="inkMuted">
               {existingVehicle
                 ? t('registration.vehicle.registeredSubtitle')
                 : t('registration.vehicle.subtitle')}
@@ -411,16 +436,27 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
             </Reveal>
           ) : (
             <>
-              {/* Acción PRINCIPAL: escanear la tarjeta de propiedad. El OCR lee los datos y deriva el tipo. */}
+              {/* PASO 1 · Tarjeta de propiedad (U3 · jerarquía 1-2-3). El "Escanear tarjeta" YA NO es un Button
+                  accent que compite con el CTA del footer ni con la foto/SOAT: es la CARD DE PASO NUMERADA
+                  "1 · Tarjeta de propiedad" — MISMO patrón visual que la foto (2) y el SOAT (3) —, presionable,
+                  que abre el sheet de escaneo. El chip refleja la verdad: "Listo para enviar" cuando la placa
+                  crítica ya se leyó (captura usable), si no "Pendiente". El selector se mantiene la captura
+                  read-only debajo (verificación). */}
               <Reveal delay={100} from="scale">
-                <Button
-                  label={
+                <DocumentUploadCard
+                  icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+                  stepNumber={1}
+                  label={t('registration.vehicle.scanCard.preview')}
+                  status={
+                    derivedFromScan ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING
+                  }
+                  uploadedLabel={t('registration.documents.state.ready')}
+                  pendingLabel={t('registration.documents.pending')}
+                  accessibilityLabel={
                     hasCapture
-                      ? t('registration.vehicle.scanCard.rescan')
+                      ? t('registration.actions.rescan')
                       : t('registration.vehicle.scanCard.cta')
                   }
-                  variant={hasCapture ? 'secondary' : 'accent'}
-                  fullWidth
                   onPress={() => setScanOpen(true)}
                 />
               </Reveal>
@@ -480,8 +516,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
 
               {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto pero el OCR NO leyó la placa →
                   reescaneo O un input mínimo SOLO para la placa (NUNCA se inventa). Se gatilla por la
-                  captura, no por los campos OCR. */}
-              {hasCapture && !hasReadPlate ? (
+                  captura, no por los campos OCR. U2 · dedup (DUP #4): `!manualMode` para que este input-parche
+                  del scan NUNCA coexista con el campo placa del formulario manual (un solo set visible). */}
+              {hasCapture && !hasReadPlate && !manualMode ? (
                 <Reveal delay={120}>
                   <View style={{ gap: theme.spacing.md }}>
                     <Banner
@@ -547,16 +584,23 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                 </Reveal>
               ) : null}
 
-              {/* Toggle del fallback manual (accesible, NO por defecto). Oculto cuando el scan capturó bien
-                  con tipo soportado (ahí el camino es escanear/reescanear). */}
-              {!manualMode ? (
+              {/* Toggle del fallback manual SUBORDINADO (U2 · dedup · DUP #4): NO es un Button full-width del
+                  mismo peso que "Escanear" — es un link de texto discreto, para que el escaneo siga siendo el
+                  ÚNICO camino primario. Oculto cuando el scan ya rindió una captura válida (placa+año+tipo) o
+                  cuando ya estás en modo manual (`showManualToggle`). */}
+              {showManualToggle ? (
                 <Reveal delay={160}>
-                  <Button
-                    label={t('registration.vehicle.manualToggle')}
-                    variant="ghost"
-                    fullWidth
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('registration.vehicle.manualToggle')}
                     onPress={() => setManualMode(true)}
-                  />
+                    style={styles.manualLink}
+                    hitSlop={8}
+                  >
+                    <Text variant="footnote" color="accent" align="center">
+                      {t('registration.vehicle.manualToggle')}
+                    </Text>
+                  </Pressable>
                 </Reveal>
               ) : null}
 
@@ -632,9 +676,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
           <Reveal delay={250}>
             <DocumentUploadCard
               icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              stepNumber={2}
               label={t('registration.vehicle.photoLabel')}
               status={photoUploaded ? 'uploaded' : 'pending'}
-              uploadedLabel={t('registration.documents.uploaded')}
+              uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
               busy={uploadDocument.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
@@ -654,9 +699,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
           <Reveal delay={270}>
             <DocumentUploadCard
               icon={<IconShield size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              stepNumber={3}
               label={t('registration.documents.soat')}
               status={soatUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
-              uploadedLabel={t('registration.documents.uploaded')}
+              uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
               serverState={soatServerState}
               busy={uploadDocument.isPending}
@@ -740,9 +786,13 @@ function ReadRow({ label, value }: { label: string; value: string }): React.JSX.
 }
 
 const styles = StyleSheet.create({
-  body: { paddingTop: 12 },
-  intro: { gap: 6 },
+  body: { paddingTop: 20 },
+  // Aire Tesla bajo la barra: el bloque héroe respira; título+subtítulo juntos por su gap.
+  intro: { gap: 10, marginTop: 12 },
+  footer: { gap: 10 },
+  missingHint: {},
   form: {},
+  manualLink: { alignSelf: 'center', paddingVertical: 8 },
   capturedCard: { borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
   capturedThumb: { width: 96, height: 96 },
   capturedBody: { flex: 1 },

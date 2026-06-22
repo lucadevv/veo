@@ -78,9 +78,9 @@ export function ScanPropertyCardSheet({
   };
 
   const primaryLabel = canConfirm
-    ? t('registration.vehicle.scanCard.confirm')
+    ? t('registration.actions.useCard')
     : card.front
-      ? t('registration.vehicle.scanCard.rescan')
+      ? t('registration.actions.rescan')
       : t('registration.vehicle.scanCard.cta');
 
   return (

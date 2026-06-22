@@ -142,7 +142,7 @@ describe('UnderReviewScreen · "Verificar mi estado" no aprueba localmente', () 
       renderer = TestRenderer.create(withProviders(<UnderReviewScreen />, queryClient));
     });
 
-    const onCheckStatus = findButtonPress(renderer, 'Verificar mi estado');
+    const onCheckStatus = findButtonPress(renderer, 'Actualizar estado');
     act(() => {
       onCheckStatus();
     });
@@ -178,22 +178,20 @@ describe('UnderReviewScreen · "Verificar mi estado" no aprueba localmente', () 
     });
   });
 
-  it('refleja el checklist REAL del perfil: identidad/biometría enrolada se muestra como ✓ (no spinner)', () => {
+  it('diseño minimal: muestra el estado de revisión sin inventar progreso por eje', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(withProviders(<UnderReviewScreen />, queryClient));
     });
 
-    // El bug histórico pintaba "Verificación facial → En revisión" con un spinner perpetuo (imposible:
-    // en `in_review` la biometría YA está enrolada). Ahora la fila de identidad existe y, como el perfil
-    // sembrado tiene `biometricEnrolled: true`, NO debe haber ninguna celda "En revisión" en el checklist
-    // de "tu parte" (todas las 4 filas son ✓). El único pendiente es el paso del equipo ("En curso").
+    // Rediseño Tesla-minimal: se quitó el timeline de checks + el latido (se sentían sobre-diseñados).
+    // La pantalla es espartana — título de revisión + tiempo estimado concreto — y NUNCA inventa
+    // progreso por eje ni un spinner perpetuo (el bug histórico de la fila de identidad ya no existe
+    // porque no hay checklist que pueda mentir).
     const texts = renderer.root.findAllByType(Text).map((n) => n.props.children);
-    expect(texts).toContain('Identidad y biometría');
-    // Ninguna fila enviada por el conductor queda "En revisión" (todas completas → ✓).
+    expect(texts).toContain('Estamos revisando\ntus datos');
+    expect(texts).toContain('24 a 48 horas hábiles');
     expect(texts).not.toContain('En revisión');
-    // El paso activo del equipo VEO es el único "en curso".
-    expect(texts).toContain('En curso');
 
     act(() => {
       renderer.unmount();
@@ -203,8 +201,10 @@ describe('UnderReviewScreen · "Verificar mi estado" no aprueba localmente', () 
 
 /**
  * Estado de error de refresco: cuando una RE-consulta del gate falla pero ya teníamos un perfil
- * resuelto, la pantalla muestra un banner NO bloqueante (no la pantalla de reintento) y el botón pasa
- * a "Reintentar". Mockeamos el hook para aislar el contrato de UI del error (`refreshError: true`).
+ * resuelto, la pantalla muestra un banner NO bloqueante (no la pantalla de reintento). El botón
+ * mantiene su acción única "Actualizar estado" (vocabulario canónico: un término por intención); el
+ * error se comunica por el banner, no cambiando el label. Mockeamos el hook para aislar el contrato de
+ * UI del error (`refreshError: true`).
  */
 describe('UnderReviewScreen · estado de error de refresco', () => {
   beforeEach(() => {
@@ -227,7 +227,7 @@ describe('UnderReviewScreen · estado de error de refresco', () => {
     mockGateOverride = null;
   });
 
-  it('muestra el banner "No pudimos actualizar" y el botón en "Reintentar" cuando `refreshError` es true', () => {
+  it('muestra el banner "No pudimos actualizar" y el botón sigue en "Actualizar estado" cuando `refreshError` es true', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     let renderer!: TestRenderer.ReactTestRenderer;
@@ -241,9 +241,9 @@ describe('UnderReviewScreen · estado de error de refresco', () => {
     expect(banners[0]?.props.tone).toBe('warn');
     expect(banners[0]?.props.title).toBe('No pudimos actualizar');
 
-    // El botón primario pasa a "Reintentar".
+    // El botón primario mantiene su acción única "Actualizar estado" (no muta el label en error).
     const labels = renderer.root.findAllByType(Button).map((n) => n.props.label);
-    expect(labels).toContain('Reintentar');
+    expect(labels).toContain('Actualizar estado');
 
     act(() => {
       renderer.unmount();

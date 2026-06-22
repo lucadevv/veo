@@ -14,6 +14,7 @@ import {
   BiometricRejectedError,
   type BiometricBackendPort,
   type BiometricChallenge,
+  type BiometricEnrollInput,
   type BiometricEnrollResult,
   type BiometricVerificationInput,
   type BiometricVerifyOutcome,
@@ -35,18 +36,6 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
   async requestChallenge(): Promise<BiometricChallenge> {
     try {
       return await this.http.post('/drivers/shift/biometric/challenge', {
-        schema: biometricChallenge,
-      });
-    } catch (error) {
-      throw this.mapError(error);
-    }
-  }
-
-  async requestEnrollChallenge(): Promise<BiometricChallenge> {
-    try {
-      // Reto de liveness para RE-enrolar el rostro: GET sin cuerpo (mismo schema que el reto del turno,
-      // distinto endpoint). Espeja `getLivenessChallenge` del repositorio de alta.
-      return await this.http.get('/drivers/me/biometric/liveness/challenge', {
         schema: biometricChallenge,
       });
     } catch (error) {
@@ -76,14 +65,11 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
     return result;
   }
 
-  async enroll(input: BiometricVerificationInput): Promise<BiometricEnrollResult> {
+  async enroll(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     try {
-      // RE-enrolamiento CON LIVENESS: el contrato del alta ya no acepta `{ photo }` (spoofeable), sino el
-      // reto + los frames capturados. El cuerpo se valida con el esquema del contrato antes de enviarlo.
-      const body = driverBiometricEnrollRequest.parse({
-        challengeId: input.challengeId,
-        frames: input.frames,
-      });
+      // RE-enrolamiento con UNA SELFIE: el contrato del alta acepta `{ photo }` (base64 de una foto
+      // frontal). El cuerpo se valida con el esquema del contrato antes de enviarlo.
+      const body = driverBiometricEnrollRequest.parse({ photo: input.photo });
       const result = await this.http.post('/drivers/biometric/enroll', {
         body,
         schema: driverBiometricEnrollResult,

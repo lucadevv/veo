@@ -76,9 +76,9 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
   const primaryLabel = isReady
     ? t('common.close')
     : canConfirm
-      ? t('registration.personal.scanDni.confirm')
+      ? t('registration.actions.useDni')
       : dni.front
-        ? t('registration.personal.scanDni.rescan')
+        ? t('registration.actions.rescan')
         : t('registration.personal.scanDni.cta');
 
   return (

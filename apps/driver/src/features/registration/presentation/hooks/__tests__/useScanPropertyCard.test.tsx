@@ -27,6 +27,7 @@ const CARD_M1_LINES: string[] = [
   'Marca: TOYOTA',
   'Modelo: YARIS',
   'Año de Fab.: 2021',
+  'Color: PLATA',
 ];
 
 /** Tarjeta N1 (furgón): categoría NO soportada hoy → `mapMtcCategoryToVehicleType` = null → manual. */
@@ -142,6 +143,9 @@ describe('useScanPropertyCard', () => {
     expect(vehicle.modelSpecId).toBe('');
     // LOTE 1: la categoría MTC cruda se persiste en el store (viaja al backend como fuente de verdad).
     expect(vehicle.mtcCategory).toBe('M1');
+    // Color de carrocería leído de la tarjeta (`Color: PLATA`) → prellenado en el store (viaja al backend
+    // opcional vía `registerVehicleRequest.color`).
+    expect(vehicle.color).toBe('PLATA');
 
     expect(handle.current?.state).toBe('captured');
     expect(outcome?.derivedType).toBe(VehicleType.CAR);
@@ -151,6 +155,7 @@ describe('useScanPropertyCard', () => {
       year: true,
       make: true,
       model: true,
+      color: true,
       vehicleType: true,
     });
 

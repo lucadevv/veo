@@ -105,6 +105,11 @@ jest.mock(
   },
 );
 
+// Lote 2: el liveness DIY (vision-camera v5 + face-detector + Nitro) se retiró. El KYC del alta usa una
+// SELFIE simple sobre la vista nativa `BiometricCameraPreview` (mockeada arriba) + el módulo nativo
+// `VeoBiometricFrameGrabber.capturePhoto()`. Ya nadie en `src` importa vision-camera/face-detector/nitro,
+// así que sus mocks (y sus entradas en transformIgnorePatterns) se eliminaron.
+
 // react-native-keychain: almacén seguro nativo no disponible en Jest.
 jest.mock('react-native-keychain', () => ({
   getSupportedBiometryType: jest.fn().mockResolvedValue(null),
