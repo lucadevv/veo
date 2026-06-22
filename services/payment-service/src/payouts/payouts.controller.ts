@@ -17,6 +17,8 @@ import {
   InternalIdentityGuard,
   AudienceGuard,
   RolesGuard,
+  RequireStepUpMfa,
+  StepUpMfaGuard,
   InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
@@ -70,13 +72,20 @@ export class PayoutsController {
     return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
   }
 
-  // ── Disparo manual (BR-P05): rol FINANCE. Step-up MFA si el total supera S/5000 (validado en el servicio). ──
-  @UseGuards(RolesGuard)
-  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // ── Disparo manual (BR-P05): mutación de PLATA → finance:payout es EXCLUSIVO de FINANCE (VEO_SPEC_ADMIN
+  // L98/L246: "ni ADMIN ni SUPERADMIN lo ven; el servidor los negaría"). El servidor es la última línea:
+  // aunque el admin-bff ya restringe a FINANCE en su borde, este servicio NO confía en el caller y exige
+  // FINANCE por sí mismo (defensa en profundidad, mínimo privilegio). Step-up MFA en DOS capas: el guard de
+  // BORDE @RequireStepUpMfa rechaza ANTES de entrar al service (en entornos hardened); el service vuelve a
+  // exigir step-up FRESCO cuando el total supera S/5000 (BR-S07) — el borde es por-acción, el service es
+  // por-monto. Ninguna sustituye a la otra. ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @Post('run')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Correr la liquidación de payouts (FINANCE). >S/5000 requiere step-up MFA',
+    summary: 'Correr la liquidación de payouts (EXCLUSIVO FINANCE). Step-up MFA; >S/5000 re-valida en el servicio',
   })
   run(@Body() dto: RunPayoutsDto, @CurrentUser() user: AuthenticatedUser) {
     const fallback = previousWeek(new Date());
@@ -87,14 +96,17 @@ export class PayoutsController {
 
   // ── Camino de VUELTA de driver.flagged (S4): el review del conductor se resolvió → liberar sus
   // payouts HELD (HELD→PROCESSED + payout.processed por outbox) y levantar la retención (srem).
-  // Mutación de PLATA: mismos roles que /run; >S/5000 exige step-up MFA (validado en el servicio). ──
-  @UseGuards(RolesGuard)
-  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Mutación de PLATA: EXCLUSIVO de FINANCE igual que /run (VEO_SPEC_ADMIN L102/L254 — ni ADMIN ni
+  // SUPERADMIN). Step-up MFA en el borde (@RequireStepUpMfa) + re-validación por-monto >S/5000 en el
+  // servicio (BR-S07). ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @Post('drivers/:driverId/release')
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — FINANCE/ADMIN. Idempotente',
+      'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — EXCLUSIVO FINANCE. Idempotente',
   })
   release(
     @Param('driverId', ParseUUIDPipe) driverId: string,
