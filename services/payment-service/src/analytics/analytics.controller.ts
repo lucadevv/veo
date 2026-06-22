@@ -5,12 +5,16 @@
  */
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard } from '@veo/auth';
+import { Audiences, InternalIdentityGuard, AudienceGuard, InternalAudience } from '@veo/auth';
 import { AnalyticsService, type RevenueAnalytics } from './analytics.service';
 
+// KPI de recaudación = SOLO el dashboard admin (admin-rail). NO service-rail (mínimo privilegio ·
+// ADR-014 §5.5): @Audiences(admin-rail) + AudienceGuard restaura el fence fail-closed que la membresía global
+// daba antes de admitir service-rail por charge/debt/GetPayment.
 @ApiTags('analytics')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(InternalAudience.ADMIN_RAIL)
 @Controller('internal/analytics')
 export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}

@@ -75,6 +75,25 @@ export class ChangeMethodDto {
   method!: PaymentMethod;
 }
 
+/**
+ * Query del gate de deuda (GET /payments/debt). El `passengerId` es ON-BEHALF-OF: SÓLO lo respeta el
+ * controller cuando el caller es SERVICE_RAIL (booking-service consultando la deuda del pasajero que
+ * reserva, que firma identidad anónima de sistema → el passengerId no viaja en la identidad y debe ir
+ * explícito). Para los rieles de CLIENTE (public/driver/admin) este campo se IGNORA y el passengerId sale
+ * SIEMPRE de la identidad firmada (anti-IDOR: un cliente no puede espiar deuda ajena pasando un query).
+ */
+export class DebtQueryDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Pasajero cuya deuda se consulta. SOLO se respeta para llamadas de SISTEMA (service-rail, ' +
+      'on-behalf-of). Ignorado para rieles de cliente (passengerId = identidad firmada, anti-IDOR).',
+  })
+  @IsOptional()
+  @IsUUID()
+  passengerId?: string;
+}
+
 export class CashConfirmDto {
   @ApiProperty({ enum: ['driver', 'passenger'], description: 'Quién confirma' })
   @IsEnum({ driver: 'driver', passenger: 'passenger' })

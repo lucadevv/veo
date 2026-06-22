@@ -2,11 +2,11 @@
  * Controlador gRPC de payment (paquete veo.payment.v1.PaymentService).
  * Lectura síncrona de un pago para otros servicios. Devuelve `found=false` en vez de lanzar.
  */
-import { Controller, Inject } from '@nestjs/common';
+import { Controller } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
+import { verifyGrpcIdentity, InternalAudience, type InternalAudience as Rail } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import type { Payment } from '../generated/prisma';
@@ -72,6 +72,46 @@ const EMPTY: PaymentReply = {
   failureReason: '',
 };
 
+/**
+ * Métodos gRPC de PaymentService scopeados POR RIEL (per-RPC · confused-deputy H7). Antes este controller
+ * verificaba el HMAC contra el `ALLOWED_AUDIENCES` GLOBAL `[public, driver, admin]` de core.module — un set
+ * único que dejaba pasar cualquiera de esos rieles a cualquier método, y que NO incluía `service-rail`. F3a
+ * (ADR-014 §5.5) replica el patrón de identity-service (`GRPC_METHOD_AUDIENCES`): cada RPC declara EXACTAMENTE
+ * qué rieles puede invocarla. El HMAC válido NO basta — el `aud` firmado del caller DEBE estar en la lista del
+ * método o se rechaza fail-closed (PERMISSION_DENIED). Mapa tipado y centralizado, jamás un string mágico.
+ *
+ * Mínimo privilegio (decisión del dueño 2026-06-22):
+ *  - GetPayment SUMA `service-rail`: booking-service lee el estado/recibo del cobro ya disparado (paymentId
+ *    guardado en el Booking al aprobar · §5.4). Conserva los rieles previos (public/driver/admin) para los
+ *    callers actuales del recibo (BFFs), que NO se rompen.
+ *  - GetPaymentByTrip / GetUserCredit NO se abren a service-rail (mínimo privilegio): el carpooling correlaciona
+ *    el Booking por el `tripId` opaco del evento `payment.captured`, no por GetPaymentByTrip. Siguen
+ *    `[public, driver, admin]` exactamente como estaban (compat con los BFFs).
+ */
+export const GRPC_METHOD_AUDIENCES = {
+  // GetPayment: recibo/estado del cobro. SUMA service-rail (booking lee el cobro del carpooling tras aprobar).
+  GetPayment: [
+    InternalAudience.PUBLIC_RAIL,
+    InternalAudience.DRIVER_RAIL,
+    InternalAudience.ADMIN_RAIL,
+    InternalAudience.SERVICE_RAIL,
+  ],
+  // GetPaymentByTrip: recibo canónico por tripId. NO se abre a service-rail (compat exacta con el set previo).
+  GetPaymentByTrip: [
+    InternalAudience.PUBLIC_RAIL,
+    InternalAudience.DRIVER_RAIL,
+    InternalAudience.ADMIN_RAIL,
+  ],
+  // GetUserCredit: saldo de crédito del usuario (lectura del BFF). NO se abre a service-rail (compat exacta).
+  GetUserCredit: [
+    InternalAudience.PUBLIC_RAIL,
+    InternalAudience.DRIVER_RAIL,
+    InternalAudience.ADMIN_RAIL,
+  ],
+} as const satisfies Record<string, readonly Rail[]>;
+
+type GrpcMethodName = keyof typeof GRPC_METHOD_AUDIENCES;
+
 @Controller()
 export class PaymentGrpcController {
   private readonly secret: string;
@@ -79,26 +119,38 @@ export class PaymentGrpcController {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
-    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
-    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
-  /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
-  private requireIdentity(metadata: Metadata): void {
-    const identity = verifyGrpcIdentity(metadata, this.secret, { allowedAudiences: this.allowedAudiences });
+  /**
+   * Verifica el HMAC Y acota el RIEL emisor al conjunto permitido del MÉTODO (scoping per-RPC). Dos rechazos
+   * honestos y distintos (espeja identity-service):
+   *  - firma ausente/inválida → UNAUTHENTICATED (no probó quién es).
+   *  - firma válida pero riel no autorizado para este método → PERMISSION_DENIED (probó quién es, no puede).
+   */
+  private requireIdentity(method: GrpcMethodName, metadata: Metadata): void {
+    // Paso 1: firma. Sin allowedAudiences acá → distinguimos "no autenticado" de "autenticado sin permiso".
+    const identity = verifyGrpcIdentity(metadata, this.secret);
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
         message: 'Identidad interna inválida o ausente',
       });
     }
+    // Paso 2: riel. El `aud` firmado del caller debe estar en la lista del método (fail-closed).
+    const allowed: readonly Rail[] = GRPC_METHOD_AUDIENCES[method];
+    if (!allowed.includes(identity.aud)) {
+      throw new RpcException({
+        code: GrpcStatus.PERMISSION_DENIED,
+        message: 'Riel no autorizado para esta operación',
+      });
+    }
   }
 
   @GrpcMethod('PaymentService', 'GetPayment')
   async getPayment({ id }: GetPaymentRequest, metadata: Metadata): Promise<PaymentReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetPayment', metadata);
     const p = await this.prisma.read.payment.findUnique({ where: { id } });
     if (!p) return EMPTY;
     return this.toReply(p);
@@ -116,7 +168,7 @@ export class PaymentGrpcController {
     { tripId }: GetPaymentByTripRequest,
     metadata: Metadata,
   ): Promise<PaymentReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetPaymentByTrip', metadata);
     const p = await this.prisma.read.payment.findUnique({
       where: { dedupKey: deriveTripChargeDedupKey(tripId) },
     });
@@ -134,7 +186,7 @@ export class PaymentGrpcController {
     { userId }: GetUserCreditRequest,
     metadata: Metadata,
   ): Promise<UserCreditReply> {
-    this.requireIdentity(metadata);
+    this.requireIdentity('GetUserCredit', metadata);
     const credit = await this.prisma.read.userCredit.findUnique({ where: { userId } });
     return { balanceCents: credit?.balanceCents ?? 0 };
   }

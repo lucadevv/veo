@@ -12,9 +12,12 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   Roles,
+  Audiences,
   CurrentUser,
   InternalIdentityGuard,
+  AudienceGuard,
   RolesGuard,
+  InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
@@ -28,9 +31,19 @@ import {
 } from './payouts.service';
 import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
 
+// Riel del conductor/operador (NO service-rail · mínimo privilegio ADR-014 §5.5): declara explícito el set
+// previo a F3a para que el AudienceGuard rechace fail-closed a un service-rail (la membresía global ahora
+// admite service-rail solo por charge/debt/GetPayment).
+const PASSENGER_RAILS = [
+  InternalAudience.PUBLIC_RAIL,
+  InternalAudience.DRIVER_RAIL,
+  InternalAudience.ADMIN_RAIL,
+] as const;
+
 @ApiTags('payouts')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(...PASSENGER_RAILS)
 @Controller('payouts')
 export class PayoutsController {
   constructor(private readonly payouts: PayoutsService) {}

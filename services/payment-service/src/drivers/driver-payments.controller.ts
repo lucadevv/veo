@@ -15,7 +15,7 @@
  */
 import { Controller, Delete, HttpCode, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard, RolesGuard, Roles } from '@veo/auth';
+import { InternalIdentityGuard, AudienceGuard, RolesGuard, Roles, Audiences, InternalAudience } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import { DriverPaymentsService, type DriverPaymentsPurgeView } from './driver-payments.service';
@@ -26,7 +26,11 @@ import { DriverPaymentsService, type DriverPaymentsPurgeView } from './driver-pa
 export class DriverPaymentsController {
   constructor(private readonly driverPayments: DriverPaymentsService) {}
 
-  @UseGuards(InternalIdentityGuard, RolesGuard)
+  // El purge SOLO lo invoca admin-bff (admin-rail) + RBAC SUPERADMIN. NO service-rail (mínimo privilegio ·
+  // ADR-014 §5.5): @Audiences(admin-rail) hace que el AudienceGuard rechace fail-closed cualquier otro riel,
+  // restaurando el fence que la membresía global daba antes de admitir service-rail.
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Audiences(InternalAudience.ADMIN_RAIL)
   @Roles(AdminRole.SUPERADMIN)
   @Delete(':driverId/payments')
   @HttpCode(200)
