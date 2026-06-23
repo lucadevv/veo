@@ -148,6 +148,23 @@ export class OpsController {
     return this.ops.reactivateDriver(user, id);
   }
 
+  @Post('drivers/:id/reactivate-compliance')
+  @HttpCode(204)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Override manual: reactiva a un conductor suspendido por documentos/ITV vencidos (DOCUMENT_EXPIRED + ' +
+      'INSPECTION_EXPIRED). UNA escritura autoritativa: levanta los holds en identity (sin paso en fleet — el ' +
+      'latch fue eliminado con el refactor a holds). Compliance+ con step-up MFA.',
+  })
+  reactivateDriverForCompliance(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.ops.reactivateDriverForCompliance(user, id);
+  }
+
   @Delete('drivers/:id')
   @HttpCode(200)
   @Roles(AdminRole.SUPERADMIN)

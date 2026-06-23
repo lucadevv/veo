@@ -1,0 +1,13 @@
+-- DROP del latch `inspection_suspended_at` (refactor de la suspensión a modelo de HOLDS en identity).
+--
+-- Por qué se elimina: el latch era el anti-duplicado LOCAL de fleet para no re-emitir `fleet.driver_suspended`
+-- por ITV en cada corrida del cron. Con la suspensión modelada como HOLDS idempotentes en identity
+-- (`DriverSuspensionHold` con `@@unique([driverId, cause, causeRef])`), re-emitir una suspensión de una causa
+-- YA-tenida es un NO-OP en identity (upsert dedup por el natural key). El latch ya NO es necesario para
+-- correctness: el sweeper re-evalúa cada corrida y re-emite si la ITV sigue vencida → identity dedup-ea
+-- (1 evento/día por conductor con ITV vencida, idempotente). Eliminarlo borra de raíz dos bugs cross-service:
+--   - el selector de `clearInspectionLatchForDriver` filtraba docStatus=EXPIRED (pickActiveVehicle) → no
+--     encontraba el vehículo del conductor suspendido (cuyos docs justamente están vencidos);
+--   - la orquestación admin-bff del clear-latch era un segundo paso cross-service no-atómico que podía fallar.
+-- El override manual ahora es UNA sola escritura autoritativa en identity (levanta holds), sin paso en fleet.
+ALTER TABLE "fleet"."vehicles" DROP COLUMN "inspection_suspended_at";

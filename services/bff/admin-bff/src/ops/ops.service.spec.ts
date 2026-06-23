@@ -620,6 +620,63 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       identity,
       expect.objectContaining({ action: 'driver.documents.view', resourceType: 'driver', resourceId: 'd1' }),
     );
+    // FIX 3: conductor NO suspendido (proto omite suspensionCauses) → [] honesto (degradación del repeated).
+    expect(view.suspensionCauses).toEqual([]);
+  });
+
+  it('FIX 3: expone las CAUSAS de suspensión para que el panel elija el endpoint de reactivación', async () => {
+    // El conductor está suspendido por DOS causas: un documento vencido (→ /reactivate-compliance) y una
+    // disciplinaria (→ /reactivate). El panel necesita VER ambas para ofrecer la(s) acción(es) correcta(s).
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriver'
+        ? {
+            id: 'd1',
+            userId: 'u-d1',
+            currentStatus: 'SUSPENDED',
+            backgroundCheckStatus: 'CLEARED',
+            averageRating: 4.5,
+            found: true,
+            suspendedAt: '2026-06-01T00:00:00.000Z',
+            name: 'Khalid Ríos',
+            rejectionReason: '',
+            licenseNumber: 'A1-998877',
+            kycStatus: 'VERIFIED',
+            createdAt: '2026-06-01T10:00:00.000Z',
+            faceEnrolledAt: '',
+            lastVerifiedAt: '',
+            phone: '',
+            documentId: '',
+            birthDate: '',
+            suspensionCauses: ['DOCUMENT_EXPIRED', 'DISCIPLINARY'],
+          }
+        : {},
+    );
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [] } : {},
+    );
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      fleetGrpc,
+      noopRest,
+      { post: vi.fn() } as unknown as InternalRestClient,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    const view = await svc.driverDetail(identity, 'd1');
+
+    // El panel distingue las causas → ofrece /reactivate (DISCIPLINARY) y /reactivate-compliance (DOCUMENT_EXPIRED).
+    expect(view.suspensionCauses).toEqual(['DOCUMENT_EXPIRED', 'DISCIPLINARY']);
+    // El flag derivado de "está suspendido" se mantiene en paralelo.
+    expect(view.currentStatus).toBe('SUSPENDED');
   });
 
   it('lanza NotFoundError si el conductor no existe', async () => {
@@ -1225,5 +1282,182 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
     expect(out.trip).toEqual(tripPurgeReply);
     expect(out.payment).toEqual(paymentPurgeReply);
     expect(out.partialFailures).toEqual([{ stage: 'media', cause: 's3 down' }]);
+  });
+});
+
+describe('OpsService.listDrivers · reconciliación del badge contra el suspendedAt autoritativo de identity', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  /** read-model que devuelve los registros dados (status crudo del read-model). */
+  function readModelWith(records: Record<string, unknown>[]): ReadModelService {
+    return {
+      listDrivers: vi.fn().mockResolvedValue({ items: records, nextCursor: null }),
+    } as unknown as ReadModelService;
+  }
+
+  const rmDriver = (id: string, status: string) => ({
+    id,
+    userId: `u-${id}`,
+    status,
+    averageRating: null,
+    backgroundCheckStatus: 'CLEARED',
+    rejectionReason: null,
+    updatedAt: '2026-06-20T00:00:00.000Z',
+  });
+
+  it('read-model SUSPENDED + identity LIBRE (auto-reactivación) → badge ACTIVE (gap [4] cerrado)', async () => {
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriversByIds'
+        ? { drivers: [{ id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true }] }
+        : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModelWith([rmDriver('d1', 'SUSPENDED')]),
+      noopAudit,
+      config,
+    );
+
+    const page = await svc.listDrivers(identity, {});
+    // identity (autoridad) dice libre (suspendedAt "") → el badge stale del read-model se baja a ACTIVE.
+    expect(page.items[0]?.status).toBe('ACTIVE');
+  });
+
+  it('read-model ACTIVE + identity SUSPENDIDO (ITV por userId, no proyectada) → badge SUSPENDED', async () => {
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriversByIds'
+        ? {
+            drivers: [
+              { id: 'd1', name: 'Nora', phone: '', suspendedAt: '2026-06-21T00:00:00.000Z', found: true },
+            ],
+          }
+        : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModelWith([rmDriver('d1', 'ACTIVE')]),
+      noopAudit,
+      config,
+    );
+
+    const page = await svc.listDrivers(identity, {});
+    expect(page.items[0]?.status).toBe('SUSPENDED');
+  });
+
+  it('reconcilia el badge AUNQUE el rol sea sub-Compliance (suspendedAt NO es PII), pero redacta nombre/teléfono', async () => {
+    const support: AuthenticatedUser = { ...identity, roles: [AdminRole.SUPPORT_L1] };
+    const grpcCall = vi.fn((m: string) =>
+      Promise.resolve(
+        m === 'GetDriversByIds'
+          ? { drivers: [{ id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true }] }
+          : {},
+      ),
+    );
+    const identityGrpc = { call: grpcCall } as unknown as GrpcServiceClient;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModelWith([rmDriver('d1', 'SUSPENDED')]),
+      noopAudit,
+      config,
+    );
+
+    const page = await svc.listDrivers(support, {});
+    // El badge se reconcilia para TODOS los roles (suspendedAt es estado, no PII)…
+    expect(page.items[0]?.status).toBe('ACTIVE');
+    // …pero la PII (nombre/teléfono) sigue redactada para sub-Compliance.
+    expect(page.items[0]?.fullName).toBeNull();
+    expect(page.items[0]?.phone).toBeNull();
+    // Se consultó identity igual (para el badge), aunque el rol no vea PII.
+    expect(grpcCall).toHaveBeenCalledWith('GetDriversByIds', expect.anything(), expect.anything());
+  });
+});
+
+describe('OpsService.reactivateDriverForCompliance · override manual (compliance holds) — UNA escritura', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it('UNA escritura autoritativa: levanta los holds de compliance en identity y audita, SIN tocar fleet', async () => {
+    const identityPost = vi.fn().mockResolvedValue(undefined);
+    // fleet NO debe tocarse: el latch fue eliminado con el refactor a holds → cero segundo paso cross-service.
+    const fleetPost = vi.fn();
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const fleetRest = { post: fleetPost } as unknown as InternalRestClient;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpcWithDriver,
+      noopFleet,
+      identityRest,
+      noopMedia,
+      noopTripRest,
+      fleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    await svc.reactivateDriverForCompliance(identity, 'd1');
+
+    // Levanta los holds DOCUMENT_EXPIRED + INSPECTION_EXPIRED en identity (source of truth, UNA tx).
+    expect(identityPost).toHaveBeenCalledWith('/drivers/d1/reactivate-compliance', { identity });
+    // SIN segundo paso cross-service: el latch ya no existe → fleet no se toca (override atómico).
+    expect(fleetPost).not.toHaveBeenCalled();
+    // Audita la acción específica del override (distinta de la reactivación disciplinaria), sin flags de latch.
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({
+        action: 'driver.reactivate-compliance',
+        resourceId: 'd1',
+      }),
+    );
+  });
+
+  it('FAIL-CLOSED: si identity rechaza (403), el error sube y NO se audita', async () => {
+    const forbidden = new ForbiddenError('no es de compliance');
+    const identityPost = vi.fn().mockRejectedValue(forbidden);
+    const record = vi.fn();
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpcWithDriver,
+      noopFleet,
+      { post: identityPost } as unknown as InternalRestClient,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      { record } as unknown as AuditRecorder,
+      config,
+    );
+
+    await expect(svc.reactivateDriverForCompliance(identity, 'd1')).rejects.toBe(forbidden);
+    expect(record).not.toHaveBeenCalled(); // el levantamiento falló → no se audita.
   });
 });

@@ -15,6 +15,7 @@ export const FleetEventType = {
   DOCUMENT_EXPIRING: 'fleet.document_expiring',
   DOCUMENT_EXPIRED: 'fleet.document_expired',
   DRIVER_SUSPENDED: 'fleet.driver_suspended',
+  DRIVER_REACTIVATED: 'fleet.driver_reactivated',
   VEHICLE_SUSPENDED: 'fleet.vehicle_suspended',
   VEHICLE_REGISTERED: 'fleet.vehicle_registered',
   VEHICLE_MODEL_REVIEWED: 'fleet.vehicle_model_reviewed',
@@ -41,12 +42,52 @@ export interface DocumentExpiredPayload {
   critical: boolean;
 }
 
+/**
+ * Suspensión AUTOMÁTICA de un conductor por compliance. El SUJETO viaja por UNA de dos claves, según el
+ * origen (el consumer de identity exige exactamente una):
+ *  - `driverId` (id de PERFIL Driver) → por DOCUMENTO crítico vencido. fleet lo conoce porque el
+ *    `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+ *  - `userId` (User.id = `Vehicle.driverId`) → por INSPECCIÓN técnica (ITV) vencida. fleet SOLO tiene el
+ *    User.id del dueño del vehículo (no traduce a id de perfil): identity resuelve User.id → Driver.id en
+ *    SU consumer. NUNCA mandamos un User.id en el campo `driverId` (ese era el bug a evitar: suspender al
+ *    conductor equivocado por confundir User.id con Driver.id de perfil).
+ */
 export interface DriverSuspendedPayload {
-  driverId: string;
+  driverId?: string;
+  userId?: string;
   reason: string;
-  documentId: string;
-  documentType: string;
+  documentId?: string;
+  documentType?: string;
+  /** Trazabilidad de la suspensión por ITV (ausentes en la suspensión por documento). */
+  vehicleId?: string;
+  inspectionId?: string;
+  nextDueAt?: string;
   suspendedAt: string;
+}
+
+/**
+ * AUTO-reactivación de un conductor por compliance (INVERSA de DriverSuspendedPayload): el conductor
+ * REGULARIZÓ lo que lo tenía suspendido por DOCUMENT_EXPIRED. El SUJETO viaja por UNA de dos claves, según
+ * el origen (el consumer de identity exige exactamente una, espejo de la suspensión):
+ *  - `userId` (User.id = `Vehicle.driverId`) → se registró una INSPECCIÓN técnica (ITV) NUEVA y VIGENTE.
+ *    fleet SOLO tiene el User.id; identity resuelve User.id → Driver.id en SU consumer.
+ *  - `driverId` (id de PERFIL Driver) → un DOCUMENTO crítico DRIVER-scoped volvió a VALID. fleet lo conoce
+ *    porque `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+ * NUNCA mandamos un User.id en `driverId` (mismo filo que la suspensión: confundirlos reactivaría al
+ * conductor equivocado). identity reactiva SOLO suspensiones DOCUMENT_EXPIRED (una DISCIPLINARY queda intacta).
+ */
+export interface DriverReactivatedPayload {
+  driverId?: string;
+  userId?: string;
+  reason: string;
+  /** Trazabilidad de la reactivación por ITV (ausentes en la reactivación por documento). */
+  vehicleId?: string;
+  inspectionId?: string;
+  nextDueAt?: string;
+  /** Trazabilidad de la reactivación por documento (ausentes en la reactivación por ITV). */
+  documentId?: string;
+  documentType?: string;
+  reactivatedAt: string;
 }
 
 export interface VehicleSuspendedPayload {
@@ -82,6 +123,7 @@ type FleetPayload =
   | DocumentExpiringPayload
   | DocumentExpiredPayload
   | DriverSuspendedPayload
+  | DriverReactivatedPayload
   | VehicleSuspendedPayload
   | VehicleRegisteredPayload
   | VehicleModelReviewedPayload;

@@ -68,6 +68,19 @@ function makeService(opts: {
   });
 
   const findInspectionUnique = vi.fn().mockResolvedValue(opts.existing ?? null);
+  // Auto-reactivación por ITV (modelo de HOLDS, sin latch): solo capturamos el outbox. La reactivación se emite
+  // INCONDICIONALMENTE cuando la ITV nueva es vigente y el vehículo tiene conductor — identity dedup-ea por hold.
+  const outbox: Record<string, unknown>[] = [];
+  const outboxCreate = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+    outbox.push(data);
+    return Promise.resolve({});
+  });
+
+  // tx: inspection.create + outboxEvent.create dentro de $transaction. SIN vehicle.updateMany (el latch se eliminó).
+  const tx = {
+    inspection: { create: wrappedCreate },
+    outboxEvent: { create: outboxCreate },
+  };
 
   const prisma = {
     read: {
@@ -78,11 +91,13 @@ function makeService(opts: {
       },
       inspection: { findUnique: findInspectionUnique },
     },
-    write: { inspection: { create: wrappedCreate } },
+    write: {
+      $transaction: (fn: (t: unknown) => Promise<unknown>) => fn(tx),
+    },
   };
   const config = { getOrThrow: () => INTERVAL_MONTHS };
   const service = new InspectionsService(prisma as never, config as never);
-  return { service, captured, wrappedCreate, findInspectionUnique };
+  return { service, captured, wrappedCreate, findInspectionUnique, outbox };
 }
 
 describe('InspectionsService.create · FIX 1 (inspectorId = actor autenticado, no spoofeable)', () => {
@@ -160,5 +175,48 @@ describe('InspectionsService.create · FIX 2 (idempotencia: un re-POST no duplic
       service.create({ vehicleId: VEHICLE_ID, passed: true }, AUTHENTICATED_INSPECTOR),
     ).rejects.toBe(boom);
     expect(findInspectionUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('InspectionsService.create · AUTO-reactivación por ITV (modelo de HOLDS, sin latch)', () => {
+  const USER_ID = '44444444-4444-7444-8444-444444444444';
+  const vehicleWithDriver = { id: VEHICLE_ID, driverId: USER_ID } as Vehicle;
+
+  it('ITV VIGENTE (passed) + vehículo con conductor → emite fleet.driver_reactivated por userId (identity dedup-ea)', async () => {
+    const { service, outbox } = makeService({ vehicle: vehicleWithDriver });
+    await service.create({ vehicleId: VEHICLE_ID, passed: true }, AUTHENTICATED_INSPECTOR);
+
+    // SIN latch: se emite INCONDICIONALMENTE cuando la ITV nueva es vigente. identity quita el hold
+    // INSPECTION_EXPIRED de forma idempotente (no-op si no había). KEYEADO POR userId (= Vehicle.driverId).
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('fleet.driver_reactivated');
+    expect(outbox[0]?.aggregateId).toBe(USER_ID);
+    const env = outbox[0]?.envelope as { payload: { userId: string; driverId?: string } };
+    expect(env.payload.userId).toBe(USER_ID);
+    expect(env.payload.driverId).toBeUndefined();
+  });
+
+  it('idempotencia por HOLDS: dos ITV vigentes seguidas emiten cada una (identity dedup-ea aguas abajo)', async () => {
+    // Sin latch local que frene la 2da emisión: el evento se emite cada vez que llega una ITV vigente; la
+    // idempotencia (no re-reactivar) vive en identity (borrar 0 holds = no-op). Espeja al sweeper.
+    const { service, outbox } = makeService({ vehicle: vehicleWithDriver });
+    await service.create({ vehicleId: VEHICLE_ID, passed: true }, AUTHENTICATED_INSPECTOR);
+    await service.create({ vehicleId: VEHICLE_ID, passed: true }, AUTHENTICATED_INSPECTOR);
+    expect(outbox).toHaveLength(2);
+    expect(outbox.every((d) => d.eventType === 'fleet.driver_reactivated')).toBe(true);
+  });
+
+  it('ITV REPROBADA (passed=false) → NO emite (no es vigente, no regulariza)', async () => {
+    const { service, outbox } = makeService({ vehicle: vehicleWithDriver });
+    await service.create({ vehicleId: VEHICLE_ID, passed: false }, AUTHENTICATED_INSPECTOR);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('vehículo SIN driverId → no emite (no hay conductor que reactivar)', async () => {
+    const { service, outbox } = makeService({
+      vehicle: { id: VEHICLE_ID, driverId: null } as Vehicle,
+    });
+    await service.create({ vehicleId: VEHICLE_ID, passed: true }, AUTHENTICATED_INSPECTOR);
+    expect(outbox).toHaveLength(0);
   });
 });

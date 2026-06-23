@@ -393,3 +393,75 @@ describe('IdentityGrpcController · GetDriverByUser (driver-rail) emite el estad
     expect(reply.dniFaceMatchedAt).toBe('');
   });
 });
+
+/**
+ * FIX 3 (habilitar UI de reactivación) — `GetDriver` EXPONE las CAUSAS ACTIVAS de la suspensión (modelo de
+ * HOLDS) en `suspensionCauses[]`. El admin-bff las usa para distinguir DISCIPLINARY (→ /reactivate) de
+ * DOCUMENT_EXPIRED/INSPECTION_EXPIRED (→ /reactivate-compliance). `suspendedAt` (flag derivado) se mantiene;
+ * esto añade el PORQUÉ. Un conductor con varias causas las muestra TODAS (dedup por `cause` distinta).
+ */
+describe('IdentityGrpcController · GetDriver expone las CAUSAS de suspensión (FIX 3 · habilita la UI de reactivación)', () => {
+  beforeEach(() => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('GetDriver incluye los holds en el query (include suspensionHolds: select cause)', async () => {
+    const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }) });
+    const prismaFindUnique = (ctrl as unknown as { prisma: { read: { driver: { findUnique: ReturnType<typeof vi.fn> } } } })
+      .prisma.read.driver.findUnique;
+
+    await ctrl.getDriver({ id: 'd1' }, signedMeta());
+
+    expect(prismaFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          suspensionHolds: { select: { cause: true } },
+        }),
+      }),
+    );
+  });
+
+  it('conductor con UNA causa (INSPECTION_EXPIRED) → suspensionCauses = ["INSPECTION_EXPIRED"]', async () => {
+    const ctrl = makeController({
+      findUnique: () => ({
+        ...baseDriverRow,
+        suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+        suspensionHolds: [{ cause: 'INSPECTION_EXPIRED' }],
+      }),
+    });
+    const reply = await ctrl.getDriver({ id: 'd1' }, signedMeta());
+
+    expect(reply.suspensionCauses).toEqual(['INSPECTION_EXPIRED']);
+    // El flag derivado se mantiene en paralelo.
+    expect(reply.suspendedAt).not.toBe('');
+  });
+
+  it('conductor con VARIAS causas (doc + disciplinaria) → las muestra TODAS, dedup por cause distinta', async () => {
+    const ctrl = makeController({
+      findUnique: () => ({
+        ...baseDriverRow,
+        suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+        // 2 holds DOCUMENT_EXPIRED de docs distintos (SOAT + LICENSE_A1) + 1 DISCIPLINARY → 2 causas DISTINTAS.
+        suspensionHolds: [
+          { cause: 'DOCUMENT_EXPIRED' },
+          { cause: 'DOCUMENT_EXPIRED' },
+          { cause: 'DISCIPLINARY' },
+        ],
+      }),
+    });
+    const reply = await ctrl.getDriver({ id: 'd1' }, signedMeta());
+
+    expect(reply.suspensionCauses).toHaveLength(2);
+    expect(reply.suspensionCauses).toEqual(
+      expect.arrayContaining(['DOCUMENT_EXPIRED', 'DISCIPLINARY']),
+    );
+  });
+
+  it('conductor NO suspendido (0 holds) → suspensionCauses = []', async () => {
+    const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }) });
+    const reply = await ctrl.getDriver({ id: 'd1' }, signedMeta());
+
+    expect(reply.suspensionCauses).toEqual([]);
+    expect(reply.suspendedAt).toBe('');
+  });
+});

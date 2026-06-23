@@ -32,7 +32,7 @@ describe('mappers OPS', () => {
     });
   });
 
-  it('driverRecordToApproval: identidad enriquecida y redactada por rol (Compliance ve, sub-Compliance null)', () => {
+  it('driverRecordToApproval: proyecta el enriquecimiento YA redactado (la redacción por rol vive en ops.service)', () => {
     const rec: DriverRecord = {
       id: 'd1',
       userId: 'u1',
@@ -42,15 +42,61 @@ describe('mappers OPS', () => {
       rejectionReason: null,
       updatedAt: '2026-05-29T00:00:00.000Z',
     };
-    const identity = { fullName: 'Luis Conductor', phone: '+51987654321' };
-    // SIN enriquecimiento (no se pasó identity) → null honesto, aunque el rol pueda verla.
+    // El `enrichment` llega PRE-redactado: ops.service.listDrivers pone fullName/phone a null para sub-Compliance
+    // ANTES de pasarlo. El mapper solo proyecta lo que recibe (no decide redacción).
+    const visible = { fullName: 'Luis Conductor', phone: '+51987654321', suspendedAt: null };
+    const redacted = { fullName: null, phone: null, suspendedAt: null };
+    // SIN enriquecimiento (página vacía / sin reply) → null honesto.
     expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
-    // CON enriquecimiento: Compliance VE el nombre/teléfono…
-    expect(driverRecordToApproval(rec, COMPLIANCE, identity).fullName).toBe('Luis Conductor');
-    expect(driverRecordToApproval(rec, COMPLIANCE, identity).phone).toBe('+51987654321');
-    // …pero sub-Compliance (SUPPORT) sigue viendo null aunque la data esté presente (redacción server-side).
-    expect(driverRecordToApproval(rec, SUPPORT, identity).fullName).toBeNull();
-    expect(driverRecordToApproval(rec, SUPPORT, identity).phone).toBeNull();
+    // CON enriquecimiento visible: se proyecta tal cual.
+    expect(driverRecordToApproval(rec, COMPLIANCE, visible).fullName).toBe('Luis Conductor');
+    expect(driverRecordToApproval(rec, COMPLIANCE, visible).phone).toBe('+51987654321');
+    // Enriquecimiento ya redactado (lo que ops.service arma para sub-Compliance) → null.
+    expect(driverRecordToApproval(rec, SUPPORT, redacted).fullName).toBeNull();
+    expect(driverRecordToApproval(rec, SUPPORT, redacted).phone).toBeNull();
+  });
+
+  describe('driverRecordToApproval · reconciliación del badge de suspensión (autoridad: identity)', () => {
+    const base: DriverRecord = {
+      id: 'd1',
+      userId: 'u1',
+      status: 'SUSPENDED',
+      averageRating: null,
+      backgroundCheckStatus: 'CLEARED',
+      rejectionReason: null,
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+    const enrich = (suspendedAt: string | null) => ({ fullName: null, phone: null, suspendedAt });
+
+    it('read-model SUSPENDED pero identity LIBRE (auto-reactivación) → badge ACTIVE', () => {
+      // El conductor regularizó su documento/ITV: identity quitó el hold (suspendedAt null) SIN emitir
+      // driver.reactivated → el read-model quedó stale en SUSPENDED. La reconciliación lo baja a ACTIVE.
+      expect(driverRecordToApproval(base, COMPLIANCE, enrich(null)).status).toBe('ACTIVE');
+    });
+
+    it('read-model ACTIVE pero identity SUSPENDIDO (ITV por userId, no proyectada) → badge SUSPENDED', () => {
+      const active = { ...base, status: 'ACTIVE' };
+      expect(
+        driverRecordToApproval(active, COMPLIANCE, enrich('2026-06-02T08:00:00.000Z')).status,
+      ).toBe('SUSPENDED');
+    });
+
+    it('NO toca PENDING/REJECTED aunque identity diga libre (solo cruza SUSPENDED↔ACTIVE)', () => {
+      const pending = { ...base, status: 'PENDING' };
+      const rejected = { ...base, status: 'REJECTED' };
+      expect(driverRecordToApproval(pending, COMPLIANCE, enrich(null)).status).toBe('PENDING');
+      expect(driverRecordToApproval(rejected, COMPLIANCE, enrich(null)).status).toBe('REJECTED');
+    });
+
+    it('SIN enriquecimiento (página vacía / sin reply) → conserva el status del read-model (degradación honesta)', () => {
+      expect(driverRecordToApproval(base, COMPLIANCE).status).toBe('SUSPENDED');
+    });
+
+    it('identity confirma SUSPENDED → se mantiene SUSPENDED (idempotente)', () => {
+      expect(
+        driverRecordToApproval(base, COMPLIANCE, enrich('2026-06-02T08:00:00.000Z')).status,
+      ).toBe('SUSPENDED');
+    });
   });
 
   it('mapea DriverRecord → driverSummary con rating nullable', () => {

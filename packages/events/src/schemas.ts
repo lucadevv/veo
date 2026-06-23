@@ -76,16 +76,20 @@ export const driverResubmitted = z.object({
   userId: z.string(),
   resubmittedAt: z.string(),
 });
-/// El operador LEVANTÓ una suspensión DISCIPLINARIA del conductor desde el panel (la inversa de
-/// driver.suspended). identity-service lo emite por OUTBOX en la MISMA tx que el CAS que limpia
-/// `Driver.suspendedAt` + `suspensionSource` (así nunca hay reactivación sin evento ni evento sin
-/// reactivación). FAIL-CLOSED: solo se emite para suspensiones DISCIPLINARY (las que originó el operador);
-/// una suspensión por documento vencido (DOCUMENT_EXPIRED, vía fleet.driver_suspended) NO se puede
-/// reactivar a mano y por ende NUNCA emite este evento. Downstream: audit-service (traza inmutable de la
-/// decisión) y admin-bff (proyecta status de SUSPENDED de vuelta a ACTIVE en el read-model para que el
-/// panel lo refleje). La reactivación SOLO limpia la suspensión: NO devuelve al conductor a AVAILABLE — el
-/// gate biométrico de inicio de turno (BR-I02) sigue siendo el que lo habilita a operar. `reactivatedAt`
-/// ISO-8601 del momento efectivo de la reactivación.
+/// El OPERADOR levantó una suspensión del conductor desde el panel (la inversa de driver.suspended).
+/// identity-service lo emite por OUTBOX en la MISMA tx que QUITA el/los hold(s) y RECOMPUTA `Driver.suspendedAt`
+/// derivado (modelo de HOLDS; así nunca hay reactivación sin evento ni evento sin reactivación). Lo emiten DOS
+/// vías del operador, según qué hold levantan:
+///   - `reactivate()` → levanta SOLO el hold DISCIPLINARY (la suspensión que el operador originó).
+///   - `reactivateForCompliance()` → override manual: levanta los holds DOCUMENT_EXPIRED + INSPECTION_EXPIRED.
+/// En ambas, si tras quitar su(s) hold(s) QUEDAN otros, el conductor SIGUE suspendido (`suspendedAt` recomputado
+/// sigue seteado): el evento marca que se revirtió ESA causa, no que el conductor quedó libre. (La AUTO-reactivación
+/// disparada por fleet —`reactivateByFleet`/`reactivateByFleetForUser`, cuando el conductor regulariza por su
+/// cuenta— NO emite este evento: solo quita el hold; el badge de la lista se reconcilia on-read contra el
+/// `suspendedAt` autoritativo de identity.) Downstream: audit-service (traza inmutable) y admin-bff (proyecta
+/// status de SUSPENDED de vuelta a ACTIVE en el read-model). La reactivación SOLO levanta la suspensión: NO
+/// devuelve al conductor a AVAILABLE — el gate biométrico de inicio de turno (BR-I02) sigue siendo el que lo
+/// habilita a operar. `reactivatedAt` ISO-8601 del momento efectivo de la reactivación.
 export const driverReactivated = z.object({
   driverId: z.string(),
   reactivatedAt: z.string(),
@@ -877,13 +881,65 @@ export const fleetDocumentExpired = z.object({
   expiresAt: z.string(),
   critical: z.boolean(),
 });
-export const fleetDriverSuspended = z.object({
-  driverId: z.string(),
-  reason: z.string(),
-  documentId: z.string().optional(),
-  documentType: z.string().optional(),
-  suspendedAt: z.string(),
-});
+export const fleetDriverSuspended = z
+  .object({
+    // SUJETO de la suspensión: el conductor llega por UNA de dos claves, según el ORIGEN:
+    //  - `driverId` (id de PERFIL Driver de identity) → suspensión por DOCUMENTO crítico vencido. fleet lo
+    //    conoce porque `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+    //  - `userId` (User.id de identity = `Vehicle.driverId`) → suspensión por INSPECCIÓN técnica (ITV) vencida.
+    //    fleet SOLO tiene el User.id del dueño del vehículo (no traduce a id de perfil): identity resuelve
+    //    User.id → Driver.id en SU consumer (es el dueño del mapeo). Mantiene fleet desacoplado de identity.
+    // El consumer EXIGE exactamente una vía (ver refine); nunca confunde un User.id con un Driver.id de perfil.
+    driverId: z.string().optional(),
+    userId: z.string().optional(),
+    reason: z.string(),
+    documentId: z.string().optional(),
+    documentType: z.string().optional(),
+    // Trazabilidad de la suspensión por ITV (opcionales; ausentes en la suspensión por documento).
+    vehicleId: z.string().optional(),
+    inspectionId: z.string().optional(),
+    nextDueAt: z.string().optional(),
+    suspendedAt: z.string(),
+  })
+  .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
+    message: 'fleetDriverSuspended exige EXACTAMENTE uno de driverId (perfil) o userId (User.id)',
+  });
+/// AUTO-reactivación de un conductor por compliance: el conductor REGULARIZÓ lo que lo tenía suspendido por
+/// `DOCUMENT_EXPIRED`/`INSPECTION_EXPIRED` (la INVERSA AUTOMÁTICA de `fleet.driver_suspended`). fleet-service lo
+/// emite por OUTBOX en la MISMA tx que registra la regularización (escritura + evento atómicos, FOUNDATION §6).
+/// Espeja el XOR de claves de la suspensión, según el ORIGEN de la regularización:
+///   - `userId` (User.id = `Vehicle.driverId`) → se registró una INSPECCIÓN técnica (ITV) NUEVA y VIGENTE para
+///     el vehículo operado: fleet emite por userId (fleet NO traduce a id de perfil; identity resuelve
+///     User.id → Driver.id en SU consumer, igual que en la suspensión). Ya NO hay un latch local de ITV en fleet
+///     (eliminado con el refactor a holds): la idempotencia vive en el `@@unique` del hold en identity.
+///   - `driverId` (id de PERFIL Driver) → un DOCUMENTO crítico DRIVER-scoped vencido volvió a VALID (revisión del
+///     operador): fleet lo conoce porque `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+/// El consumer de identity EXIGE exactamente una vía (refine, espejo de la suspensión) y QUITA SOLO el hold de
+/// ESA causa (DOCUMENT_EXPIRED de ese documentType por la vía driverId, o INSPECTION_EXPIRED por la vía userId);
+/// las demás causas (otro documento, ITV, DISCIPLINARY) quedan intactas — fail-closed por modelo de HOLDS.
+/// Downstream: identity recomputa `Driver.suspendedAt` derivado del conjunto de holds (idempotente; el difunto
+/// `suspensionSource` fue DROPeado con el refactor a holds). Esta AUTO-reactivación de fleet NO emite el evento de
+/// dominio `driver.reactivated` (ese solo lo emite la reactivación del OPERADOR) → el badge de la lista del panel
+/// se reconcilia on-read contra el `suspendedAt` autoritativo de identity, no por proyección de evento.
+/// La reactivación SOLO levanta el hold: NO devuelve al conductor a AVAILABLE (eso lo decide el gate biométrico
+/// de inicio de turno, BR-I02). `reactivatedAt` ISO-8601 del momento efectivo de la regularización.
+export const fleetDriverReactivated = z
+  .object({
+    driverId: z.string().optional(),
+    userId: z.string().optional(),
+    reason: z.string(),
+    // Trazabilidad de la reactivación por ITV (opcionales; ausentes en la reactivación por documento).
+    vehicleId: z.string().optional(),
+    inspectionId: z.string().optional(),
+    nextDueAt: z.string().optional(),
+    // Trazabilidad de la reactivación por documento (opcionales; ausentes en la reactivación por ITV).
+    documentId: z.string().optional(),
+    documentType: z.string().optional(),
+    reactivatedAt: z.string(),
+  })
+  .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
+    message: 'fleetDriverReactivated exige EXACTAMENTE uno de driverId (perfil) o userId (User.id)',
+  });
 export const fleetVehicleSuspended = z.object({
   vehicleId: z.string(),
   reason: z.string(),
@@ -1157,6 +1213,7 @@ export const EVENT_SCHEMAS = {
   'fleet.document_expiring': fleetDocumentExpiring,
   'fleet.document_expired': fleetDocumentExpired,
   'fleet.driver_suspended': fleetDriverSuspended,
+  'fleet.driver_reactivated': fleetDriverReactivated,
   'fleet.vehicle_suspended': fleetVehicleSuspended,
   'fleet.vehicle_registered': fleetVehicleRegistered,
   'fleet.vehicle_model_reviewed': fleetVehicleModelReviewed,

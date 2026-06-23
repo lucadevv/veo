@@ -49,14 +49,22 @@ enum BackgroundCheckStatus {
   @@schema("identity")
 }
 
-/// ORIGEN de una suspensión del conductor (discriminador del `suspendedAt`, fail-closed). El modelo
-/// Driver modela la suspensión 100% por el timestamp `suspendedAt`, pero hay DOS fuentes con semánticas
-/// de reversión distintas que antes no se podían distinguir: la reactivación del operador NO debe poder
-/// levantar una suspensión por documentos vencidos (re-habilitar a un conductor con SOAT/licencia
-/// vencida es un bug de seguridad inaceptable). Este enum permite gatear la reactivación por origen.
-enum SuspensionSource {
-  DISCIPLINARY // suspensión MANUAL del operador (suspend()) — reversible por el operador
-  DOCUMENT_EXPIRED // suspensión AUTOMÁTICA por documento crítico vencido (fleet.driver_suspended) — NO reversible a mano
+/// CAUSA de un HOLD de suspensión del conductor (modelo de HOLDS · decisión del dueño · fail-closed). La
+/// suspensión del conductor ya NO es UN flag colapsado: es el CONJUNTO de holds activos (`DriverSuspensionHold`).
+/// Un conductor está suspendido ⟺ tiene ≥1 hold; vuelve a estar libre SOLO con 0 holds. Cada hold lleva su
+/// CAUSA distinta para que regularizar UNA (ej. SOAT) NUNCA quite las otras (ej. ITV vencida) — la causa raíz
+/// de la CRÍTICA que el flag único `suspensionSource` provocaba (colapsaba SOAT e ITV a DOCUMENT_EXPIRED, así
+/// que reactivar una reactivaba al conductor con la otra aún vigente → bypass del gate de turno).
+///   - DISCIPLINARY: suspensión MANUAL del operador (suspend()). La levanta SOLO reactivate() (override manual).
+///   - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD). El `causeRef`
+///     del hold guarda el documentType → un hold POR documento distinto (regularizar el SOAT no quita la licencia).
+///   - INSPECTION_EXPIRED: inspección técnica (ITV) vencida del vehículo operado. `causeRef` vacío (una sola ITV).
+/// DOCUMENT_EXPIRED + INSPECTION_EXPIRED se levantan por la vía de compliance (reactivateForCompliance / fleet);
+/// una DISCIPLINARY NUNCA se toca por esas vías (y viceversa) — la separación de causas se respeta extremo-a-extremo.
+enum SuspensionCause {
+  DISCIPLINARY
+  DOCUMENT_EXPIRED
+  INSPECTION_EXPIRED
 
   @@schema("identity")
 }
@@ -218,13 +226,17 @@ model Driver {
   dniFaceMatched        Boolean?              @map("dni_face_matched")
   dniFaceMatchScore     Float?                @map("dni_face_match_score")
   dniFaceMatchedAt      DateTime?             @map("dni_face_matched_at") @db.Timestamptz
+  /// Suspensión DERIVADA del conjunto de holds (modelo de HOLDS). INVARIANTE: `suspendedAt != null` ⟺ el
+  /// conductor tiene ≥1 `DriverSuspensionHold` activo; `null` ⟺ 0 holds. Es un campo MANTENIDO, no la fuente:
+  /// se recomputa TRANSACCIONALMENTE junto a cada add/remove de hold (helper `recomputeSuspendedAt`). Se
+  /// conserva como campo porque TODOS los lectores externos (startShift, eligibility gate de dispatch/booking
+  /// vía gRPC `toDriverReply.suspendedAt`, badge admin-bff) leen ESTE campo — ninguno lee los holds. Así el
+  /// refactor a holds NO cambia ningún lector externo: solo cambia la lógica de ESCRITURA interna. El CAS de
+  /// startShift (`where suspendedAt: null`) sigue válido (refleja "0 holds"). Valor = createdAt del primer hold.
   suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
-  /// ORIGEN de la suspensión vigente (POR QUÉ el conductor está suspendido). Null cuando NO está suspendido.
-  /// Discrimina la reversión: la reactivación del operador solo puede levantar suspensiones DISCIPLINARY
-  /// (las que él originó); las DOCUMENT_EXPIRED (documento crítico vencido) NO se levantan a mano — se
-  /// levantan cuando el conductor regulariza sus documentos (fail-closed, seguridad Ley 29733). Filas
-  /// legacy con suspendedAt seteado pero suspensionSource null se tratan como NO-DISCIPLINARY (rechazadas).
-  suspensionSource      SuspensionSource?     @map("suspension_source")
+  /// Holds de suspensión activos (modelo de HOLDS). El conductor está suspendido ⟺ tiene ≥1. Cada causa
+  /// distinta es un hold separado (`@@unique([driverId, cause, causeRef])`): regularizar UNA no quita las otras.
+  suspensionHolds       DriverSuspensionHold[]
   /// Motivo del último rechazo de antecedentes (texto del operador). Null si nunca fue rechazado o si se
   /// re-aprobó / reenvió. Lo expone el driver-bff (GET /drivers/me) para la pantalla de rechazo de la app.
   rejectionReason       String?               @map("rejection_reason")
@@ -235,6 +247,37 @@ model Driver {
 
   @@index([currentStatus])
   @@map("drivers")
+  @@schema("identity")
+}
+
+/// HOLD de suspensión de un conductor (modelo de HOLDS · decisión del dueño · compliance/seguridad). Una
+/// suspensión es el CONJUNTO de holds activos de un conductor: está suspendido ⟺ tiene ≥1 hold; libre SOLO
+/// con 0. Cada hold representa UNA causa distinta (cause + causeRef), así regularizar UNA (ej. el SOAT) quita
+/// SOLO ESE hold y NUNCA las otras (ej. ITV vencida, o una suspensión disciplinaria) — la causa raíz de la
+/// CRÍTICA que el flag único `suspensionSource` provocaba (colapsaba SOAT e ITV → reactivar una liberaba con la
+/// otra vigente). `Driver.suspendedAt` es DERIVADO de la existencia de holds (recomputado en la misma tx).
+model DriverSuspensionHold {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId  String          @map("driver_id") @db.Uuid
+  driver    Driver          @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  /// POR QUÉ está el hold (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). Discrimina qué vía de
+  /// reactivación puede levantarlo (separación de causas extremo-a-extremo, fail-closed).
+  cause     SuspensionCause
+  /// Referencia que SUBDIVIDE una causa para que coexistan varios holds de la misma causa. Para DOCUMENT_EXPIRED
+  /// es el documentType (SOAT/LICENSE_A1/PROPERTY_CARD): un hold POR documento → regularizar el SOAT no quita la
+  /// licencia. Para DISCIPLINARY e INSPECTION_EXPIRED es `''` (vacío, una sola instancia por causa). NO nullable
+  /// con default `''`: Postgres trata NULL como DISTINTO en un UNIQUE, lo que ROMPERÍA la idempotencia del upsert
+  /// (`@@unique([driverId, cause, causeRef])`) — con `''` el natural key es estable y el re-suspender es no-op.
+  causeRef  String          @default("") @map("cause_ref")
+  /// Motivo legible (texto del operador o de fleet). Viaja al audit/evento; no participa del natural key.
+  reason    String
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  /// Natural key: UN hold por (conductor, causa, causeRef). El re-suspender la MISMA causa es un upsert no-op
+  /// (idempotencia por DB, sin check-then-act). Postgres exige causeRef NOT NULL para que el UNIQUE colapse.
+  @@unique([driverId, cause, causeRef])
+  @@index([driverId])
+  @@map("driver_suspension_holds")
   @@schema("identity")
 }
 

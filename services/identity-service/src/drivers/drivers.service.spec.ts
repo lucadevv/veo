@@ -605,235 +605,323 @@ describe('DriversService.resubmit → approve · el binding reseteado VUELVE A M
   });
 });
 
-describe('DriversService.suspendByFleet · suspensión por fleet (cierre del lazo)', () => {
-  /** Prisma doble que captura el where de updateMany y simula la fila ya-suspendida/no-suspendida. */
-  function makeSuspendPrisma(alreadySuspended: boolean) {
-    const calls: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
-    return {
-      calls,
-      prisma: {
-        read: { driver: { findUnique: async () => null } },
-        write: {
-          driver: {
-            updateMany: async (args: {
-              where: Record<string, unknown>;
-              data: Record<string, unknown>;
-            }) => {
-              calls.push(args);
-              // El where exige suspendedAt: null → si ya estaba suspendido no matchea ninguna fila.
-              return { count: alreadySuspended ? 0 : 1 };
-            },
-          },
-        },
-      },
-    };
+/**
+ * FAKE de la tabla `DriverSuspensionHold` + el `Driver` derivado, en memoria, con la SEMÁNTICA REAL del modelo
+ * de HOLDS (natural key `[driverId, cause, causeRef]`, upsert idempotente, deleteMany por where, count, findFirst
+ * por createdAt asc) y la DERIVACIÓN de `suspendedAt` (createdAt del hold más viejo, o null con 0 holds). Así los
+ * tests verifican el COMPORTAMIENTO del modelo (multi-causa, idempotencia, derivación) y no el shape de un CAS.
+ *
+ * Cada hold: `{ driverId, cause, causeRef, reason, createdAt }`. El driver arranca con `suspendedAt` derivado de
+ * los holds iniciales. Una sola "tx" (no hace falta aislar: los métodos corren una tx que envuelve todo).
+ */
+interface Hold {
+  driverId: string;
+  cause: string;
+  causeRef: string;
+  reason: string;
+  createdAt: Date;
+}
+function holdMatches(h: Hold, where: Record<string, unknown>): boolean {
+  for (const [k, v] of Object.entries(where)) {
+    if (k === 'driverId') {
+      if (h.driverId !== v) return false;
+    } else if (k === 'cause') {
+      // cause puede ser un valor escalar o `{ in: [...] }`.
+      if (v && typeof v === 'object' && 'in' in (v as Record<string, unknown>)) {
+        if (!(v as { in: string[] }).in.includes(h.cause)) return false;
+      } else if (h.cause !== v) return false;
+    } else if (k === 'causeRef') {
+      if (h.causeRef !== v) return false;
+    }
   }
+  return true;
+}
+/**
+ * @param driverExists  si false, el findUnique del driver devuelve null (evento antes del onboarding).
+ * @param initialHolds  holds preexistentes del conductor (para los escenarios multi-causa).
+ * @param driverId      id de perfil del conductor del fake (default 'd1').
+ * @param userId        userId del conductor (para resolver userId→driverId en las vías por-user).
+ */
+function makeHoldPrisma(opts: {
+  driverExists?: boolean;
+  initialHolds?: Hold[];
+  driverId?: string;
+  userId?: string;
+  driver?: Record<string, unknown>;
+} = {}) {
+  const driverId = opts.driverId ?? 'd1';
+  const userId = opts.userId ?? 'u1';
+  const holds: Hold[] = [...(opts.initialHolds ?? [])];
+  const outbox: Record<string, unknown>[] = [];
+  const driverExists = opts.driverExists ?? true;
 
-  it('escribe suspendedAt y reporta que aplicó cuando el conductor no estaba suspendido', async () => {
-    const { prisma, calls } = makeSuspendPrisma(false);
+  const deriveSuspendedAt = (): Date | null => {
+    const mine = holds.filter((h) => h.driverId === driverId);
+    if (mine.length === 0) return null;
+    return mine.reduce((min, h) => (h.createdAt < min ? h.createdAt : min), mine[0]!.createdAt);
+  };
+  // El driver derivado: suspendedAt SIEMPRE refleja los holds actuales (se relee fresco en cada findUnique).
+  const driverRow = () =>
+    driverExists
+      ? { id: driverId, userId, licenseExpiresAt: futureLicense, ...opts.driver, suspendedAt: deriveSuspendedAt() }
+      : null;
+
+  const holdClient = {
+    findUnique: async ({
+      where,
+    }: {
+      where: { driverId_cause_causeRef: { driverId: string; cause: string; causeRef: string } };
+    }) => {
+      const k = where.driverId_cause_causeRef;
+      return holds.find(
+        (h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef,
+      ) ?? null;
+    },
+    findFirst: async ({ where }: { where: { driverId: string } }) => {
+      const mine = holds
+        .filter((h) => h.driverId === where.driverId)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      return mine[0] ?? null;
+    },
+    count: async ({ where }: { where: Record<string, unknown> }) =>
+      holds.filter((h) => holdMatches(h, where)).length,
+    upsert: async ({
+      where,
+      create,
+    }: {
+      where: { driverId_cause_causeRef: { driverId: string; cause: string; causeRef: string } };
+      create: Hold;
+    }) => {
+      const k = where.driverId_cause_causeRef;
+      const found = holds.find(
+        (h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef,
+      );
+      // update vacío → no-op si existe (preserva createdAt); create si no (idempotencia por natural key).
+      if (!found) holds.push({ ...create, createdAt: create.createdAt ?? new Date() });
+      return {};
+    },
+    deleteMany: async ({ where }: { where: Record<string, unknown> }) => {
+      const before = holds.length;
+      for (let i = holds.length - 1; i >= 0; i--) {
+        if (holdMatches(holds[i]!, where)) holds.splice(i, 1);
+      }
+      return { count: before - holds.length };
+    },
+  };
+
+  const tx = {
+    driver: {
+      findUnique: async ({ where }: { where: { id?: string; userId?: string } }) => {
+        // resuelve por id o por userId (las vías por-user resuelven userId→driverId).
+        if (where.userId !== undefined && where.userId !== userId) return null;
+        if (where.id !== undefined && where.id !== driverId) return null;
+        return driverRow();
+      },
+      // recomputeSuspendedAt escribe el campo derivado. FIEL A LA DB REAL: si el Driver NO existe, Prisma
+      // `update({ where: { id } })` LANZA P2025 (record-not-found) — NO devuelve {}. El fake viejo devolvía {}
+      // incondicional y enmascaraba el POISON-PILL (reactivateByFleet sin guard recomputaba sobre un driver
+      // inexistente sin reventar en test, pero en prod lanzaba P2025 → Kafka reintenta ∞). Con esto, un update
+      // sobre un driver ausente revienta como en prod → el guard de existencia se vuelve TESTEABLE.
+      update: async () => {
+        if (!driverExists) {
+          const err = new Error(
+            'An operation failed because it depends on one or more records that were required but not found.',
+          );
+          err.name = 'PrismaClientKnownRequestError';
+          (err as unknown as { code: string }).code = 'P2025';
+          throw err;
+        }
+        return {};
+      },
+    },
+    driverSuspensionHold: holdClient,
+    outboxEvent: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        outbox.push(data);
+        return {};
+      },
+    },
+  };
+
+  return {
+    holds,
+    outbox,
+    deriveSuspendedAt,
+    prisma: {
+      read: { driver: { findUnique: async () => driverRow() } },
+      write: {
+        driver: { findUnique: tx.driver.findUnique },
+        driverSuspensionHold: holdClient,
+        $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
+      },
+    },
+  };
+}
+
+/** Hold helper para armar estados iniciales en los tests. */
+function hold(cause: string, causeRef: string, createdAt: string, driverId = 'd1'): Hold {
+  return { driverId, cause, causeRef, reason: `seed ${cause}`, createdAt: new Date(createdAt) };
+}
+
+describe('DriversService.suspendByFleet · suspensión por DOCUMENTO (hold DOCUMENT_EXPIRED, causeRef=docType)', () => {
+  it('agrega un hold DOCUMENT_EXPIRED con causeRef=documentType y deriva suspendedAt', async () => {
+    const { prisma, holds } = makeHoldPrisma();
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     const at = new Date('2026-06-04T10:00:00.000Z');
-    const applied = await svc.suspendByFleet('d1', at);
+    const applied = await svc.suspendByFleet('d1', at, 'SOAT');
     expect(applied).toBe(true);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.where).toEqual({ id: 'd1', suspendedAt: null });
-    expect(calls[0]?.data).toEqual({ suspendedAt: at, suspensionSource: 'DOCUMENT_EXPIRED' });
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({
+      driverId: 'd1',
+      cause: 'DOCUMENT_EXPIRED',
+      causeRef: 'SOAT',
+      createdAt: at,
+    });
   });
 
-  it('es idempotente: si ya estaba suspendido no aplica (count 0) y no reescribe el timestamp', async () => {
-    const { prisma } = makeSuspendPrisma(true);
+  it('es IDEMPOTENTE: re-suspender el MISMO documento (mismo causeRef) → no crea otro hold, reporta false', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    const applied = await svc.suspendByFleet('d1', new Date('2026-06-04T12:00:00.000Z'));
+    const applied = await svc.suspendByFleet('d1', new Date('2026-06-04T12:00:00.000Z'), 'SOAT');
     expect(applied).toBe(false);
+    expect(holds).toHaveLength(1); // sigue siendo 1: el upsert fue no-op (preserva el createdAt original).
+    expect(holds[0]?.createdAt).toEqual(new Date('2026-06-01T00:00:00.000Z'));
+  });
+
+  it('DOS documentos distintos (SOAT + LICENSE_A1) → DOS holds (causeRef distinto)', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const applied = await svc.suspendByFleet('d1', new Date('2026-06-05T00:00:00.000Z'), 'LICENSE_A1');
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(2);
+  });
+
+  it('conductor inexistente (evento antes del onboarding) → no-op silencioso false, sin holds', async () => {
+    const { prisma, holds } = makeHoldPrisma({ driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.suspendByFleet('ghost', new Date(), 'SOAT')).toBe(false);
+    expect(holds).toHaveLength(0);
   });
 });
 
-describe('DriversService.suspend · suspensión MANUAL por operador (SAFETY)', () => {
-  /**
-   * Prisma doble: suspend lee el driver y hace CAS con updateMany DENTRO de la tx (espeja reject + suspendByFleet).
-   * `alreadySuspended` simula la fila ya-suspendida (count 0 → no-op, sin evento). Captura writes y outbox.
-   */
-  function makeSuspendPrisma(driver: unknown, alreadySuspended = false) {
-    const updateManyCalls: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
-    const outbox: Record<string, unknown>[] = [];
-    const tx = {
-      driver: {
-        findUnique: async () => driver,
-        updateMany: async (args: {
-          where: Record<string, unknown>;
-          data: Record<string, unknown>;
-        }) => {
-          updateManyCalls.push(args);
-          return { count: alreadySuspended ? 0 : 1 };
-        },
-      },
-      outboxEvent: {
-        create: async ({ data }: { data: Record<string, unknown> }) => {
-          outbox.push(data);
-          return {};
-        },
-      },
-    };
-    return {
-      updateManyCalls,
-      outbox,
-      prisma: {
-        read: { driver: { findUnique: async () => driver } },
-        write: { $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx) },
-      },
-    };
-  }
+describe('DriversService.suspendByFleetForUser · suspensión por ITV (keyeada por User.id → hold INSPECTION_EXPIRED)', () => {
+  it('resuelve userId→driverId y agrega un hold INSPECTION_EXPIRED (causeRef vacío) — NO trata userId como id de perfil', async () => {
+    const { prisma, holds } = makeHoldPrisma({ userId: 'user-1' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const at = new Date('2026-06-23T03:00:00.000Z');
+    const applied = await svc.suspendByFleetForUser('user-1', at);
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(1);
+    // CLAVE: el hold se ata al DRIVER cuyo userId = user-1 (driverId 'd1'), NO al userId como id de perfil.
+    expect(holds[0]).toMatchObject({ driverId: 'd1', cause: 'INSPECTION_EXPIRED', causeRef: '' });
+  });
 
-  it('suspende un conductor no suspendido: CAS escribe suspendedAt y emite driver.suspended por outbox', async () => {
-    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma({
-      ...okDriver,
-      suspendedAt: null,
+  it('idempotente: cron repetido (ya hay hold ITV) → no-op false', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      userId: 'user-1',
+      initialHolds: [hold('INSPECTION_EXPIRED', '', '2026-06-23T03:00:00.000Z')],
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.suspendByFleetForUser('user-1', new Date('2026-06-23T04:00:00.000Z'))).toBe(false);
+    expect(holds).toHaveLength(1);
+  });
+
+  it('sin perfil (evento prematuro) → no-op false', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'user-1', driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.suspendByFleetForUser('user-1', new Date())).toBe(false);
+  });
+});
+
+describe('DriversService.suspend · suspensión MANUAL por operador (hold DISCIPLINARY)', () => {
+  it('agrega un hold DISCIPLINARY, deriva suspendedAt y emite driver.suspended por outbox', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await svc.suspend('d1', 'Conducta peligrosa reportada');
-    expect(updateManyCalls).toHaveLength(1);
-    expect(updateManyCalls[0]?.where).toEqual({ id: 'd1', suspendedAt: null });
-    expect(updateManyCalls[0]?.data.suspendedAt).toBeInstanceOf(Date);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ cause: 'DISCIPLINARY', causeRef: '', reason: 'Conducta peligrosa reportada' });
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.suspended');
     const envelope = outbox[0]?.envelope as {
       payload: { driverId: string; reason: string; suspendedAt: string };
     };
-    expect(envelope.payload).toMatchObject({
-      driverId: 'd1',
-      reason: 'Conducta peligrosa reportada',
-    });
+    expect(envelope.payload).toMatchObject({ driverId: 'd1', reason: 'Conducta peligrosa reportada' });
     expect(typeof envelope.payload.suspendedAt).toBe('string');
   });
 
-  it('es idempotente: si ya estaba suspendido (count 0) NO emite evento ni reescribe el timestamp', async () => {
-    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma(
-      { ...okDriver, suspendedAt: new Date('2026-06-01T00:00:00.000Z') },
-      true,
-    );
+  it('es idempotente: si YA tiene hold DISCIPLINARY → NO crea otro NI re-emite el evento', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.suspend('d1', 'motivo')).resolves.toBeUndefined();
-    expect(updateManyCalls).toHaveLength(1); // intentó el CAS
-    expect(outbox).toHaveLength(0); // pero no hubo evento (no-op honesto)
+    expect(holds).toHaveLength(1); // no se duplicó
+    expect(outbox).toHaveLength(0); // no-op honesto: sin evento duplicado
   });
 
-  it('conductor inexistente → NotFoundError sin tocar el CAS ni el outbox', async () => {
-    const { prisma, updateManyCalls, outbox } = makeSuspendPrisma(null);
+  it('conductor inexistente → NotFoundError sin crear holds ni outbox', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({ driverExists: false });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.suspend('ghost', 'motivo')).rejects.toBeInstanceOf(NotFoundError);
-    expect(updateManyCalls).toHaveLength(0);
+    expect(holds).toHaveLength(0);
     expect(outbox).toHaveLength(0);
   });
 });
 
-describe('DriversService.reactivate · reactivación MANUAL por operador (SAFETY, fail-closed)', () => {
-  /**
-   * Prisma doble: reactivate lee el driver y hace CAS clear con updateMany DENTRO de la tx (espeja suspend).
-   * `casCount` simula el resultado del CAS; `txReread` simula la fila que ve el re-read tras un CAS fallido
-   * (carrera / source cambiado). Captura el where/data del CAS y el outbox.
-   */
-  function makeReactivatePrisma(
-    driver: unknown,
-    opts: { casCount?: number; txReread?: unknown } = {},
-  ) {
-    const updateManyCalls: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
-    const outbox: Record<string, unknown>[] = [];
-    let findCalls = 0;
-    const tx = {
-      driver: {
-        findUnique: async () => {
-          findCalls += 1;
-          // 1ra lectura: la fila inicial; 2da (solo si el CAS falló): el re-read del estado fresco.
-          return findCalls === 1 ? driver : (opts.txReread ?? driver);
-        },
-        updateMany: async (args: {
-          where: Record<string, unknown>;
-          data: Record<string, unknown>;
-        }) => {
-          updateManyCalls.push(args);
-          return { count: opts.casCount ?? 1 };
-        },
-      },
-      outboxEvent: {
-        create: async ({ data }: { data: Record<string, unknown> }) => {
-          outbox.push(data);
-          return {};
-        },
-      },
-    };
-    return {
-      updateManyCalls,
-      outbox,
-      prisma: {
-        read: { driver: { findUnique: async () => driver } },
-        write: { $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx) },
-      },
-    };
-  }
-
-  const suspendedDisciplinary = {
-    ...okDriver,
-    suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
-    suspensionSource: 'DISCIPLINARY',
-  };
-
-  it('happy path DISCIPLINARY: limpia suspendedAt+source (CAS) y emite driver.reactivated por outbox', async () => {
-    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma(suspendedDisciplinary);
+describe('DriversService.reactivate · reactivación MANUAL (quita SOLO el hold DISCIPLINARY, fail-closed)', () => {
+  it('happy path: quita el hold DISCIPLINARY, deriva suspendedAt=null y emite driver.reactivated', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await svc.reactivate('d1');
-    expect(updateManyCalls).toHaveLength(1);
-    expect(updateManyCalls[0]?.where).toMatchObject({
-      id: 'd1',
-      suspendedAt: { not: null },
-      suspensionSource: 'DISCIPLINARY',
-    });
-    expect(updateManyCalls[0]?.data).toEqual({ suspendedAt: null, suspensionSource: null });
+    expect(holds).toHaveLength(0); // se quitó el hold disciplinario → 0 holds → libre.
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.reactivated');
     const envelope = outbox[0]?.envelope as { payload: { driverId: string; reactivatedAt: string } };
     expect(envelope.payload.driverId).toBe('d1');
-    expect(typeof envelope.payload.reactivatedAt).toBe('string');
   });
 
-  it('conductor NO suspendido → ConflictError sin tocar el CAS ni el outbox', async () => {
-    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma({
-      ...okDriver,
-      suspendedAt: null,
-      suspensionSource: null,
+  it('NUNCA toca holds de documento/ITV: con DISCIPLINARY + DOCUMENT_EXPIRED, quita solo el DISCIPLINARY (sigue suspendido)', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({
+      initialHolds: [
+        hold('DISCIPLINARY', '', '2026-06-02T00:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z'),
+      ],
     });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivate('d1');
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DOCUMENT_EXPIRED'); // el de documento INTACTO
+    expect(deriveSuspendedAt()).not.toBeNull(); // SIGUE suspendido (hold de documento vigente)
+  });
+
+  it('conductor NO suspendido (0 holds) → ConflictError, sin tocar nada', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma();
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ConflictError);
-    expect(updateManyCalls).toHaveLength(0);
+    expect(holds).toHaveLength(0);
     expect(outbox).toHaveLength(0);
   });
 
-  it('suspensión DOCUMENT_EXPIRED → ForbiddenError (fail-closed: no se levanta a mano)', async () => {
-    const { prisma, updateManyCalls, outbox } = makeReactivatePrisma({
-      ...okDriver,
-      suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
-      suspensionSource: 'DOCUMENT_EXPIRED',
+  it('suspendido SOLO por DOCUMENT_EXPIRED (sin DISCIPLINARY) → ForbiddenError (fail-closed: va por compliance)', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
-    expect(updateManyCalls).toHaveLength(0);
+    expect(holds).toHaveLength(1); // el hold de documento intacto
     expect(outbox).toHaveLength(0);
   });
 
-  it('source null (fila legacy) → ForbiddenError (fail-closed: ante la duda, no reactiva)', async () => {
-    const { prisma, updateManyCalls } = makeReactivatePrisma({
-      ...okDriver,
-      suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
-      suspensionSource: null,
-    });
-    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
-    expect(updateManyCalls).toHaveLength(0);
-  });
-
-  it('licencia vencida → ForbiddenError aunque la suspensión sea DISCIPLINARY', async () => {
-    const { prisma, outbox } = makeReactivatePrisma({
-      ...suspendedDisciplinary,
-      licenseExpiresAt: new Date(Date.now() - 1_000_000),
+  it('licencia vencida → ForbiddenError aunque tenga hold DISCIPLINARY', async () => {
+    const { prisma, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+      driver: { licenseExpiresAt: new Date(Date.now() - 1_000_000) },
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ForbiddenError);
@@ -841,19 +929,200 @@ describe('DriversService.reactivate · reactivación MANUAL por operador (SAFETY
   });
 
   it('conductor inexistente → NotFoundError', async () => {
-    const { prisma } = makeReactivatePrisma(null);
+    const { prisma } = makeHoldPrisma({ driverExists: false });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reactivate('ghost')).rejects.toBeInstanceOf(NotFoundError);
   });
+});
 
-  it('CAS pierde por carrera (ya reactivado): re-read ve suspendedAt null → ConflictError honesto', async () => {
-    const { prisma, outbox } = makeReactivatePrisma(suspendedDisciplinary, {
-      casCount: 0,
-      txReread: { suspendedAt: null, suspensionSource: null },
+describe('DriversService.reactivateByFleet · AUTO-reactivación por documento (quita SOLO ese causeRef)', () => {
+  it('quita SOLO el hold DOCUMENT_EXPIRED de ESE documentType y reporta true', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
-    await expect(svc.reactivate('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(true);
+    expect(holds).toHaveLength(0);
+  });
+
+  it('NO toca otro documento: regularizar SOAT con LICENSE_A1 aún vencida → queda el hold LICENSE_A1', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'LICENSE_A1', '2026-06-02T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.causeRef).toBe('LICENSE_A1');
+  });
+
+  it('una DISCIPLINARY NUNCA matchea por esta vía (causa distinta) → no-op false', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(false);
+    expect(holds).toHaveLength(1);
+  });
+
+  it('idempotente: hold ya regularizado (inexistente) → no-op false', async () => {
+    const { prisma } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(false);
+  });
+
+  it('POISON-PILL: driver INEXISTENTE (purgado/no-onboardeado) → no-op false, NO lanza (sin guard, recompute lanzaría P2025 → Kafka reintenta ∞ → bloquea la partición)', async () => {
+    // El fake ahora es FIEL a la DB: tx.driver.update sobre un driver ausente lanza P2025. SIN el guard de
+    // existencia, reactivateByFleet iría a removeHolds → recomputeSuspendedAt → tx.driver.update → P2025, el
+    // consumer re-lanzaría y Kafka reintentaría infinito (poison-pill platform-wide). El guard lo evita.
+    const { prisma, holds } = makeHoldPrisma({ driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivateByFleet('ghost', 'SOAT')).resolves.toBe(false);
+    expect(holds).toHaveLength(0); // no tocó nada (no llegó a removeHolds).
+  });
+});
+
+describe('DriversService.reactivateByFleetForUser · AUTO-reactivación por ITV (keyeada por User.id)', () => {
+  it('resuelve userId→driverId y quita SOLO el hold INSPECTION_EXPIRED', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      userId: 'user-1',
+      initialHolds: [hold('INSPECTION_EXPIRED', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleetForUser('user-1')).toBe(true);
+    expect(holds).toHaveLength(0);
+  });
+
+  it('NO toca un hold de documento: ITV regularizada con SOAT aún vencido → queda el hold de documento', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      userId: 'user-1',
+      initialHolds: [
+        hold('INSPECTION_EXPIRED', '', '2026-06-01T00:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-02T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleetForUser('user-1')).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DOCUMENT_EXPIRED');
+  });
+
+  it('idempotente / sin perfil → no-op false', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'user-1', driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.reactivateByFleetForUser('user-1')).toBe(false);
+  });
+});
+
+describe('DriversService.reactivateForCompliance · OVERRIDE del operador (quita DOCUMENT_EXPIRED + INSPECTION_EXPIRED, fail-closed)', () => {
+  it('happy path: quita TODOS los holds de doc/ITV, deriva suspendedAt=null y emite driver.reactivated', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z'),
+        hold('INSPECTION_EXPIRED', '', '2026-06-02T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivateForCompliance('d1');
+    expect(holds).toHaveLength(0);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('driver.reactivated');
+  });
+
+  it('NUNCA toca DISCIPLINARY: con DISCIPLINARY + DOCUMENT_EXPIRED, quita solo el de doc (sigue suspendido)', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({
+      initialHolds: [
+        hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-02T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivateForCompliance('d1');
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DISCIPLINARY'); // INTACTO
+    expect(deriveSuspendedAt()).not.toBeNull(); // SIGUE suspendido
+  });
+
+  it('suspendido SOLO por DISCIPLINARY → ForbiddenError (no se levanta por compliance; va por reactivate())', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivateForCompliance('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(holds).toHaveLength(1);
     expect(outbox).toHaveLength(0);
+  });
+
+  it('conductor NO suspendido (0 holds) → ConflictError', async () => {
+    const { prisma } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivateForCompliance('d1')).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('licencia vencida → ForbiddenError aunque la suspensión sea de compliance', async () => {
+    const { prisma, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
+      driver: { licenseExpiresAt: new Date(Date.now() - 1_000_000) },
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivateForCompliance('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('conductor inexistente → NotFoundError', async () => {
+    const { prisma } = makeHoldPrisma({ driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.reactivateForCompliance('ghost')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('Modelo de HOLDS · EL ESCENARIO DE LA CRÍTICA (multi-causa, derivación de suspendedAt)', () => {
+  it('SOAT vencido + ITV vencida = 2 holds → regularizar SOLO el SOAT deja 1 hold → SIGUE suspendido; regularizar la ITV → 0 holds → LIBRE', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({ userId: 'user-1' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+
+    // 1) Se vencen AMBOS: SOAT (vía documento) + ITV (vía user). → 2 holds, suspendido.
+    await svc.suspendByFleet('d1', new Date('2026-06-01T00:00:00.000Z'), 'SOAT');
+    await svc.suspendByFleetForUser('user-1', new Date('2026-06-02T00:00:00.000Z'));
+    expect(holds).toHaveLength(2);
+    expect(deriveSuspendedAt()).toEqual(new Date('2026-06-01T00:00:00.000Z')); // el hold MÁS VIEJO fija el momento.
+
+    // 2) Regulariza SOLO el SOAT. → quita 1 hold, queda la ITV → DEBE seguir suspendido (el bug viejo lo liberaba).
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('INSPECTION_EXPIRED');
+    expect(deriveSuspendedAt()).not.toBeNull(); // ← LA CRÍTICA, resuelta: SIGUE SUSPENDIDO por la ITV.
+
+    // 3) Regulariza también la ITV. → 0 holds → LIBRE.
+    expect(await svc.reactivateByFleetForUser('user-1')).toBe(true);
+    expect(holds).toHaveLength(0);
+    expect(deriveSuspendedAt()).toBeNull(); // ← ahora SÍ se libera (0 holds).
+  });
+
+  it('una DISCIPLINARY queda INTACTA cuando se regulariza un documento', async () => {
+    const { prisma, holds } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.suspend('d1', 'Conducta peligrosa');
+    await svc.suspendByFleet('d1', new Date('2026-06-02T00:00:00.000Z'), 'SOAT');
+    expect(holds).toHaveLength(2);
+
+    // Regularizar el SOAT (vía documento) NO debe tocar la disciplinaria.
+    expect(await svc.reactivateByFleet('d1', 'SOAT')).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DISCIPLINARY'); // ← INTACTA.
+  });
+
+  it('derivación: suspendedAt = createdAt del hold MÁS VIEJO; regularizar uno NO rejuvenece el timestamp', async () => {
+    const { prisma, deriveSuspendedAt } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.suspendByFleet('d1', new Date('2026-06-01T00:00:00.000Z'), 'SOAT'); // más viejo
+    await svc.suspendByFleet('d1', new Date('2026-06-10T00:00:00.000Z'), 'LICENSE_A1'); // más nuevo
+    expect(deriveSuspendedAt()).toEqual(new Date('2026-06-01T00:00:00.000Z'));
+    // Regularizo el SOAT (el más viejo) → suspendedAt pasa al siguiente más viejo (la licencia), NO a null.
+    await svc.reactivateByFleet('d1', 'SOAT');
+    expect(deriveSuspendedAt()).toEqual(new Date('2026-06-10T00:00:00.000Z'));
   });
 });
 

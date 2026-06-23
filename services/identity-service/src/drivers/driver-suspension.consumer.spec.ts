@@ -10,14 +10,18 @@ import { DriverSuspensionConsumer } from './driver-suspension.consumer';
  * directamente y verificar parsing + delegación + idempotencia. La validación zod del consumer
  * (`fleetDriverSuspended`) es la real.
  */
-const captured: { handler?: EventHandler } = {};
+const captured: { handler?: EventHandler; byEvent: Record<string, EventHandler> } = { byEvent: {} };
 
 vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
   this: KafkaEventConsumer,
-  _eventType: string,
+  eventType: string,
   handler: EventHandler,
 ) {
-  captured.handler = handler;
+  // El consumer registra DOS handlers (suspended + reactivated). Capturamos por eventType para invocar el
+  // que corresponda; `handler` mantiene el ÚLTIMO registrado (compat con los specs de suspensión previos,
+  // que invocan `captured.handler` y el envelope lleva el eventType de suspensión).
+  captured.byEvent[eventType] = handler;
+  captured.handler = captured.byEvent['fleet.driver_suspended'] ?? handler;
   return this;
 });
 vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
@@ -43,17 +47,63 @@ const validPayload = {
   suspendedAt: '2026-06-04T10:00:00.000Z',
 };
 
+/** Suspensión por ITV (Lote B): keyeada por userId (User.id), SIN driverId de perfil. */
+const itvPayload = {
+  userId: 'user-1',
+  reason: 'Inspección técnica (ITV) vencida',
+  vehicleId: 'veh-1',
+  inspectionId: 'insp-1',
+  nextDueAt: '2026-05-01T00:00:00.000Z',
+  suspendedAt: '2026-06-23T03:00:00.000Z',
+};
+
+/** Doble de DriversService con ambas vías de suspensión. */
+function makeDrivers() {
+  return {
+    suspendByFleet: vi.fn(async () => true),
+    suspendByFleetForUser: vi.fn(async () => true),
+  };
+}
+
 describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspendedAt', () => {
   beforeEach(() => {
     captured.handler = undefined;
   });
 
-  it('suspende al conductor con el suspendedAt del evento', async () => {
-    const drivers = { suspendByFleet: vi.fn(async () => true) };
+  it('vía DOCUMENTO (driverId de perfil): suspende directo con suspendByFleet', async () => {
+    const drivers = makeDrivers();
     await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await captured.handler?.(envelope(validPayload));
     expect(drivers.suspendByFleet).toHaveBeenCalledTimes(1);
-    expect(drivers.suspendByFleet).toHaveBeenCalledWith('d1', new Date('2026-06-04T10:00:00.000Z'));
+    // Modelo de HOLDS: la vía de documento pasa el `documentType` (causeRef del hold DOCUMENT_EXPIRED).
+    expect(drivers.suspendByFleet).toHaveBeenCalledWith(
+      'd1',
+      new Date('2026-06-04T10:00:00.000Z'),
+      'LICENSE',
+    );
+    // No toca la vía por userId.
+    expect(drivers.suspendByFleetForUser).not.toHaveBeenCalled();
+  });
+
+  it('vía ITV (userId): resuelve por userId con suspendByFleetForUser — NUNCA pasa el userId a suspendByFleet', async () => {
+    const drivers = makeDrivers();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.handler?.(envelope(itvPayload));
+    expect(drivers.suspendByFleetForUser).toHaveBeenCalledTimes(1);
+    expect(drivers.suspendByFleetForUser).toHaveBeenCalledWith(
+      'user-1',
+      new Date('2026-06-23T03:00:00.000Z'),
+    );
+    // EL FILO: el User.id NUNCA cae en suspendByFleet (que lo trataría como id de perfil → conductor errado).
+    expect(drivers.suspendByFleet).not.toHaveBeenCalled();
+  });
+
+  it('descarta un payload con AMBAS claves (driverId y userId): el refine del schema lo rechaza', async () => {
+    const drivers = makeDrivers();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.handler?.(envelope({ ...validPayload, userId: 'user-1' }));
+    expect(drivers.suspendByFleet).not.toHaveBeenCalled();
+    expect(drivers.suspendByFleetForUser).not.toHaveBeenCalled();
   });
 
   it('es idempotente extremo-a-extremo: reentrega del mismo evento (suspendByFleet → false) no rompe', async () => {
@@ -62,7 +112,15 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
     await captured.handler?.(envelope(validPayload));
     await captured.handler?.(envelope(validPayload));
     expect(drivers.suspendByFleet).toHaveBeenCalledTimes(2);
-    expect(drivers.suspendByFleet).toHaveBeenNthCalledWith(2, 'd1', expect.any(Date));
+    expect(drivers.suspendByFleet).toHaveBeenNthCalledWith(2, 'd1', expect.any(Date), 'LICENSE');
+  });
+
+  it('vía DOCUMENTO sin documentType en el payload → causeRef de fallback "UNKNOWN" (honesto, no rompe la idempotencia)', async () => {
+    const drivers = makeDrivers();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    const { documentType: _omit, ...noDocType } = validPayload;
+    await captured.handler?.(envelope(noDocType));
+    expect(drivers.suspendByFleet).toHaveBeenCalledWith('d1', expect.any(Date), 'UNKNOWN');
   });
 
   it('descarta payloads inválidos sin tocar la DB', async () => {
@@ -87,5 +145,111 @@ describe('DriverSuspensionConsumer · fleet.driver.suspended → Driver.suspende
     };
     await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     await expect(captured.handler?.(envelope(validPayload))).rejects.toThrow('db down');
+  });
+});
+
+/** Envelope de un evento de REACTIVACIÓN (eventType guion bajo, el que casa con el handler). */
+function reactivatedEnvelope(payload: unknown): EventEnvelope<unknown> {
+  return {
+    eventId: 'e2',
+    eventType: 'fleet.driver_reactivated',
+    producer: 'fleet-service',
+    occurredAt: new Date().toISOString(),
+    payload,
+  } as EventEnvelope<unknown>;
+}
+
+/** Doble de DriversService con ambas vías de reactivación. */
+function makeReactivators() {
+  return {
+    reactivateByFleet: vi.fn(async () => true),
+    reactivateByFleetForUser: vi.fn(async () => true),
+  };
+}
+
+const reactivatedByDoc = {
+  driverId: 'd1',
+  reason: 'Documento crítico regularizado (SOAT)',
+  documentId: 'doc1',
+  documentType: 'SOAT',
+  reactivatedAt: '2026-06-23T11:00:00.000Z',
+};
+
+const reactivatedByItv = {
+  userId: 'user-1',
+  reason: 'Inspección técnica (ITV) regularizada',
+  vehicleId: 'veh-1',
+  inspectionId: 'insp-2',
+  nextDueAt: '2026-09-23T00:00:00.000Z',
+  reactivatedAt: '2026-06-23T11:00:00.000Z',
+};
+
+describe('DriverSuspensionConsumer · fleet.driver_reactivated → limpia Driver.suspendedAt (solo DOCUMENT_EXPIRED)', () => {
+  beforeEach(() => {
+    captured.byEvent = {};
+  });
+
+  it('vía DOCUMENTO (driverId de perfil): reactiva directo con reactivateByFleet', async () => {
+    const drivers = makeReactivators();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(reactivatedByDoc));
+    expect(drivers.reactivateByFleet).toHaveBeenCalledTimes(1);
+    // Modelo de HOLDS: la vía de documento pasa el `documentType` para quitar SOLO ese hold (no las otras causas).
+    expect(drivers.reactivateByFleet).toHaveBeenCalledWith('d1', 'SOAT');
+    // EL FILO: nunca pasa el driverId de perfil a la vía por userId.
+    expect(drivers.reactivateByFleetForUser).not.toHaveBeenCalled();
+  });
+
+  it('vía ITV (userId): resuelve por userId con reactivateByFleetForUser — NUNCA pasa el userId a reactivateByFleet', async () => {
+    const drivers = makeReactivators();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(reactivatedByItv));
+    expect(drivers.reactivateByFleetForUser).toHaveBeenCalledTimes(1);
+    expect(drivers.reactivateByFleetForUser).toHaveBeenCalledWith('user-1');
+    // EL FILO: el User.id NUNCA cae en reactivateByFleet (que lo trataría como id de perfil → conductor errado).
+    expect(drivers.reactivateByFleet).not.toHaveBeenCalled();
+  });
+
+  it('descarta un payload con AMBAS claves (driverId y userId): el refine del schema lo rechaza', async () => {
+    const drivers = makeReactivators();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(
+      reactivatedEnvelope({ ...reactivatedByDoc, userId: 'user-1' }),
+    );
+    expect(drivers.reactivateByFleet).not.toHaveBeenCalled();
+    expect(drivers.reactivateByFleetForUser).not.toHaveBeenCalled();
+  });
+
+  it('es idempotente extremo-a-extremo: reentrega del mismo evento (reactivateByFleet → false) no rompe', async () => {
+    const drivers = {
+      reactivateByFleet: vi.fn(async () => false),
+      reactivateByFleetForUser: vi.fn(async () => false),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(reactivatedByDoc));
+    await captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(reactivatedByDoc));
+    expect(drivers.reactivateByFleet).toHaveBeenCalledTimes(2);
+  });
+
+  it('descarta payloads inválidos (sin claves) sin tocar la DB', async () => {
+    const drivers = makeReactivators();
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(
+      reactivatedEnvelope({ reason: 'sin sujeto', reactivatedAt: '2026-06-23T11:00:00.000Z' }),
+    );
+    expect(drivers.reactivateByFleet).not.toHaveBeenCalled();
+    expect(drivers.reactivateByFleetForUser).not.toHaveBeenCalled();
+  });
+
+  it('propaga el error para que Kafka reintente (reactivateByFleet es idempotente)', async () => {
+    const drivers = {
+      reactivateByFleet: vi.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(reactivatedByDoc)),
+    ).rejects.toThrow('db down');
   });
 });

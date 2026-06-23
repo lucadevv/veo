@@ -57,7 +57,12 @@ import {
 import { ReadModelService, type Page } from '../read-model/read-model.service';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
-import { tripRecordToSummary, driverRecordToApproval, mapTripStatus } from './mappers';
+import {
+  tripRecordToSummary,
+  driverRecordToApproval,
+  mapTripStatus,
+  type DriverListEnrichment,
+} from './mappers';
 import {
   canSeeIdentity,
   canSeePlate,
@@ -308,28 +313,43 @@ export class OpsService {
       limit,
     );
 
-    // Enriquecimiento de IDENTIDAD (nombre/teléfono) por página, SIN N+1: UNA lectura batch a identity
-    // (GetDriversByIds), y SOLO si el rol puede ver identidad (Compliance+). Sub-Compliance: no se
-    // consulta (cero fetch de PII) → el mapper redacta a null. La identidad no vive en el read-model
-    // (los eventos driver.* no llevan PII · Ley 29733): se resuelve on-read contra identity.
-    let identityById = new Map<string, { fullName: string | null; phone: string | null }>();
-    if (canSeeIdentity(roles) && page.items.length > 0) {
-      const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    // Enriquecimiento por página, SIN N+1: UNA lectura batch a identity (GetDriversByIds). Dos usos del MISMO
+    // reply:
+    //  1) IDENTIDAD (nombre/teléfono · PII · Ley 29733): SOLO se EXPONE a Compliance+ (el mapper redacta a null
+    //     para sub-Compliance). No vive en el read-model (los eventos driver.* no llevan PII) → se resuelve acá.
+    //  2) RECONCILIACIÓN DEL BADGE de suspensión (AUTORIDAD: identity, NO el read-model · modelo de HOLDS): el
+    //     read-model proyecta el status de EVENTOS de dominio, pero NO ve dos cosas — (a) la suspensión por ITV
+    //     llega keyeada por User.id y el consumer NO la proyecta (no tiene el índice inverso userId→driverId),
+    //     y (b) la AUTO-reactivación (el conductor regularizó un documento/ITV por su cuenta) quita el hold en
+    //     identity SIN emitir `driver.reactivated` (ese evento solo lo emite la reactivación del OPERADOR). En
+    //     ambos casos el badge de la LISTA quedaba STALE. `suspendedAt` derivado de identity (≥1 hold ⟺ seteado)
+    //     es la VERDAD: reconciliamos el badge contra él (mismo dato que el DETALLE ya lee por gRPC). `suspendedAt`
+    //     NO es PII (es un hecho de estado que dispatch+ ya ve en el detalle) → se reconcilia para TODOS los roles.
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const identityVisible = canSeeIdentity(roles);
+    let enrichmentById = new Map<string, DriverListEnrichment>();
+    if (page.items.length > 0) {
       const reply = await this.identityGrpc.call<DriversByIdsReply>(
         'GetDriversByIds',
         { ids: page.items.map((r) => r.id) },
         meta,
       );
-      identityById = new Map(
+      enrichmentById = new Map(
         reply.drivers.map((d) => [
           d.id,
-          { fullName: emptyToNull(d.name), phone: emptyToNull(d.phone) },
+          {
+            // PII: solo si el rol la puede ver; si no, null honesto (el reply igual se usa para el badge).
+            fullName: identityVisible ? emptyToNull(d.name) : null,
+            phone: identityVisible ? emptyToNull(d.phone) : null,
+            // Estado AUTORITATIVO de suspensión (derivado de los holds): "" ⇒ libre; ISO ⇒ suspendido.
+            suspendedAt: emptyToNull(d.suspendedAt),
+          },
         ]),
       );
     }
 
     return {
-      items: page.items.map((r) => driverRecordToApproval(r, roles, identityById.get(r.id))),
+      items: page.items.map((r) => driverRecordToApproval(r, roles, enrichmentById.get(r.id))),
       nextCursor: page.nextCursor,
     };
   }
@@ -512,6 +532,11 @@ export class OpsService {
       },
       vehicle,
       documents,
+      // CAUSAS de suspensión (modelo de HOLDS · derivado en identity): el panel las usa para llamar el
+      // endpoint correcto de reactivación (DISCIPLINARY → /reactivate; DOCUMENT_EXPIRED/INSPECTION_EXPIRED →
+      // /reactivate-compliance). [] si no está suspendido. Defensivo: proto3 puede entregar el repeated como
+      // undefined si el productor es viejo → degradamos a [] (el badge `currentStatus`/suspensión no cambia).
+      suspensionCauses: driver.suspensionCauses ?? [],
     };
   }
 
@@ -726,12 +751,41 @@ export class OpsService {
   }
 
   async reactivateDriver(identity: AuthUser, driverId: string): Promise<void> {
-    // Sin body: identity-service limpia suspendedAt + suspensionSource (CAS, solo DISCIPLINARY) y emite
-    // driver.reactivated. FAIL-CLOSED: identity devuelve 403 si la suspensión era por documentos vencidos
-    // y 409 si el conductor no estaba suspendido — el error sube tal cual al panel (no lo enmascaramos).
+    // Sin body: identity-service quita SOLO el hold DISCIPLINARY y recomputa `suspendedAt` derivado (modelo de
+    // HOLDS), luego emite driver.reactivated. FAIL-CLOSED: identity devuelve 403 si la suspensión era por
+    // documentos/ITV vencidos (se levanta por reactivate-compliance, no a mano) y 409 si el conductor no estaba
+    // suspendido — el error sube tal cual al panel (no lo enmascaramos).
     await this.identityRest.post<void>(`/drivers/${driverId}/reactivate`, { identity });
     await this.audit.record(identity, {
       action: 'driver.reactivate',
+      resourceType: 'driver',
+      resourceId: driverId,
+    });
+  }
+
+  /**
+   * OVERRIDE MANUAL del operador para una suspensión por documento/ITV vencido (DOCUMENT_EXPIRED +
+   * INSPECTION_EXPIRED · decisión del dueño · compliance/seguridad). Es el HERMANO de `reactivateDriver` (que
+   * levanta DISCIPLINARY).
+   *
+   * UNA SOLA ESCRITURA AUTORITATIVA (modelo de HOLDS): identity `reactivate-compliance` QUITA los holds
+   * DOCUMENT_EXPIRED + INSPECTION_EXPIRED y recomputa `Driver.suspendedAt`, todo en UNA tx. Ya NO hay un
+   * segundo paso cross-service (antes: limpiar el latch `inspectionSuspendedAt` en fleet) que pudiera fallar
+   * y dejar estado inconsistente — el latch fue ELIMINADO con el refactor a holds. Sin latch que limpiar, el
+   * override es atómico en el source of truth: el conductor reactivado vuelve a ser RE-suspendible porque el
+   * sweeper de ITV re-evalúa cada corrida y re-emite si la ITV sigue vencida (identity dedup-ea por el hold).
+   *
+   * FAIL-CLOSED: si la suspensión no era de compliance (solo DISCIPLINARY) → 403; si no estaba suspendido →
+   * 409. El error sube tal cual al panel (no se enmascara).
+   */
+  async reactivateDriverForCompliance(identity: AuthUser, driverId: string): Promise<void> {
+    // Levanta los holds de compliance (DOCUMENT_EXPIRED + INSPECTION_EXPIRED) en identity, source of truth de
+    // la suspensión. UNA escritura autoritativa: sin segundo paso cross-service que pueda fallar.
+    await this.identityRest.post<void>(`/drivers/${driverId}/reactivate-compliance`, { identity });
+
+    // audit: traza inmutable del override manual (acción distinta de la reactivación disciplinaria).
+    await this.audit.record(identity, {
+      action: 'driver.reactivate-compliance',
       resourceType: 'driver',
       resourceId: driverId,
     });

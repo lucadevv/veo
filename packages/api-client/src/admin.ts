@@ -300,6 +300,13 @@ export const driverDetail = z.object({
   // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
   vehicle: driverVehicle.nullable(),
   documents: z.array(adminDriverDocument),
+  /**
+   * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS, derivado en identity): las `cause` distintas de los
+   * holds vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. El panel
+   * lo usa para saber POR QUÉ está suspendido y llamar el endpoint correcto: DISCIPLINARY → /reactivate;
+   * DOCUMENT_EXPIRED/INSPECTION_EXPIRED → /reactivate-compliance. Si hay VARIAS causas, las muestra todas.
+   */
+  suspensionCauses: z.array(z.string()),
 });
 export type DriverDetail = z.infer<typeof driverDetail>;
 

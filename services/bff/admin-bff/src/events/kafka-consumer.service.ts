@@ -169,6 +169,24 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
     };
     record['fleet.driver_suspended'] = async (e) => {
       const p = e.payload as EventPayload<'fleet.driver_suspended'>;
+      // DOS VÍAS (Lote B): el evento llega keyeado por `driverId` (id de PERFIL → suspensión por DOCUMENTO),
+      // o por `userId` (User.id → suspensión por INSPECCIÓN ITV; fleet no traduce a id de perfil). El
+      // read-model de conductores está keyeado por el id de PERFIL Driver, así que SOLO podemos proyectar el
+      // status cuando el evento trae `driverId`. Para la vía `userId`, resolver User.id → Driver.id exige una
+      // lectura a identity que este consumer NO tiene cableada (el read-model no lleva PII ni índice inverso
+      // userId→id). Residual ACEPTADO y acotado, MISMA clase que el watermark cross-service (ver
+      // read-model.service.ts §upsertDriver): la AUTORIDAD del status es identity, y la vista de DETALLE del
+      // panel YA lee `suspendedAt` de identity por gRPC (GetDriver) — la suspensión por ITV se VE ahí correcta.
+      // Solo el badge de la LISTA no se voltea hasta el próximo evento de status. NO es un hueco de compliance
+      // (el gate de turno vive en identity). Wirear la resolución en el consumer = initiative aparte.
+      if (!p.driverId) {
+        this.log.warn(
+          { vehicleId: p.vehicleId, userId: p.userId },
+          'fleet.driver_suspended por ITV (keyeado por userId): status NO proyectado al read-model (autoridad: identity). Detalle del panel correcto vía gRPC.',
+        );
+        this.counted('fleet.driver_suspended');
+        return;
+      }
       await this.readModel.upsertDriver({
         id: p.driverId,
         status: 'SUSPENDED',

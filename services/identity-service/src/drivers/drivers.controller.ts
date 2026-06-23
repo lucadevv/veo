@@ -301,6 +301,28 @@ export class DriversController {
     await this.drivers.reactivate(id);
   }
 
+  // STEP-UP MFA · DECISIÓN DE BORDE (defensa en profundidad evaluada, NO un olvido): el step-up para este
+  // override lo impone el ADMIN-BFF (`@RequireStepUpMfa()` en su ops.controller), NO este borde. Es el patrón
+  // CONSISTENTE del repo: identity NO aplica step-up en NINGÚN endpoint de conductor — ni siquiera en `purge`
+  // (el hard-delete SUPERADMIN, la acción más destructiva, que SÍ exige step-up en el BFF). La autoridad del
+  // step-up vive donde vive la FRESCURA de la verificación: la sesión/JWT del operador, que el BFF posee y
+  // consume. A identity llega una llamada interna FIRMADA service-to-service (`InternalIdentityGuard` valida la
+  // credencial del BFF) cuyo step-up ya se exigió aguas arriba; replicar el chequeo acá exigiría propagar la
+  // evidencia de frescura del MFA en el call interno (hoy no se propaga) — sería un patrón nuevo, no defensa en
+  // profundidad gratis. El gate de ROL (@Roles Compliance+) SÍ es autoritativo en este borde (curl-proof).
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/reactivate-compliance')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Override manual del operador: reactivar a un conductor suspendido por documentos/ITV vencidos (DOCUMENT_EXPIRED + INSPECTION_EXPIRED)',
+  })
+  async reactivateForCompliance(@Param('id') id: string): Promise<void> {
+    await this.drivers.reactivateForCompliance(id);
+  }
+
   // ── HARD purge (SUPERADMIN) ──
   @Audiences(InternalAudience.ADMIN_RAIL)
   @UseGuards(RolesGuard)

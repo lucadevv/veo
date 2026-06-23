@@ -29,7 +29,7 @@ import {
   DriverStatus,
   KycStatus,
   Prisma,
-  SuspensionSource,
+  SuspensionCause,
 } from '../generated/prisma';
 import { backgroundCheckMachine, isBackgroundCleared } from '../domain/background-check';
 import { hasFaceEmbedding } from '../domain/face-embedding';
@@ -374,30 +374,135 @@ export class DriversService {
   }
 
   /**
-   * Suspensión MANUAL del conductor por un operador admin (acción de SAFETY, espejo de reject). Escribe
-   * `Driver.suspendedAt` —el MISMO campo que el gate de inicio de turno (startShift) y el eligibility gate
-   * de dispatch leen para bloquear (BR-I02)—, así un conductor suspendido NO puede iniciar turno ni aceptar
-   * ofertas (enforcement ya existente, fail-closed). Emite `driver.suspended` por OUTBOX en la MISMA tx para
-   * que audit/admin-bff reaccionen (igual que reject emite driver.rejected).
+   * RECOMPUTA `Driver.suspendedAt` (campo DERIVADO/mantenido) a partir del CONJUNTO de holds vigentes, DENTRO
+   * de la tx que acaba de agregar/quitar un hold. Es el corazón del modelo de HOLDS: la suspensión NO es un
+   * flag, es "tiene ≥1 hold". `suspendedAt` se conserva SOLO para que los lectores externos (startShift, el
+   * eligibility gate de dispatch/booking vía gRPC `toDriverReply.suspendedAt`, el badge admin-bff) no cambien
+   * — ninguno lee los holds, todos leen este campo.
    *
-   * IDEMPOTENTE por CAS (espeja suspendByFleet): `updateMany({ where: { id, suspendedAt: null } })` solo
-   * suspende si NO estaba suspendido; si ya lo estaba, no reescribe el timestamp NI emite un evento duplicado
-   * (no-op silencioso, válido por diseño). El `reason` NO se persiste (el modelo Driver no tiene campo de
-   * motivo de suspensión, igual que suspendByFleet): viaja al evento + al audit del admin-bff.
+   * INVARIANTE que mantiene (atómica con el add/remove, misma tx): `suspendedAt != null` ⟺ ≥1 hold; `null` ⟺ 0.
+   *   - Si quedan holds: `suspendedAt` = createdAt del PRIMER hold (el más viejo). Así regularizar UNA causa de
+   *     varias NO mueve el momento original de la suspensión (no "rejuvenece" el timestamp). Si ya estaba seteado
+   *     al mismo valor, el update es idempotente (no cambia nada).
+   *   - Si NO quedan holds: `suspendedAt` = null → el conductor queda LIBRE (el CAS de startShift vuelve a pasar).
+   *
+   * @returns el `suspendedAt` resultante (Date si quedó suspendido, null si quedó libre).
+   */
+  private async recomputeSuspendedAt(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+  ): Promise<Date | null> {
+    // El PRIMER hold (más viejo) fija el momento original de la suspensión. findFirst orderBy asc → 0..1 fila.
+    const oldest = await tx.driverSuspensionHold.findFirst({
+      where: { driverId },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true },
+    });
+    const suspendedAt = oldest?.createdAt ?? null;
+    // Update directo del campo derivado (dentro de la tx del add/remove): idempotente si ya tenía ese valor.
+    await tx.driver.update({ where: { id: driverId }, data: { suspendedAt } });
+    return suspendedAt;
+  }
+
+  /**
+   * AGREGA un hold (idempotente por el `@@unique([driverId, cause, causeRef])`) y recomputa `suspendedAt`,
+   * todo DENTRO de `tx`. Reúne el patrón de las 3 vías de suspensión (operador, documento, ITV).
+   *
+   * IDEMPOTENCIA (re-suspender la MISMA causa = no-op): `upsert` sobre el natural key. Si el hold YA existía,
+   * el `update` es vacío (no toca `createdAt`: preserva el momento original) → 0→1 no ocurrió, no es "nuevo".
+   * Distingue "se creó un hold nuevo" de "ya existía" leyendo si HABÍA holds antes: si el conductor pasa de
+   * 0→≥1 holds, ES una suspensión nueva (emite evento aguas arriba); si ya tenía holds o ya tenía ESTE, no.
+   *
+   * @returns `{ created, suspendedAt }` — `created=true` SOLO si este hold no existía antes (para que el caller
+   *   decida si emitir el evento de dominio; un re-suspender idempotente NO re-emite).
+   */
+  private addHold(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+    cause: SuspensionCause,
+    causeRef: string,
+    reason: string,
+  ): Promise<{ created: boolean; suspendedAt: Date }> {
+    // El operador suspende AHORA: createdAt = now (default del hold). Las vías de fleet usan addHoldAt con
+    // el momento que fleet reportó (preservan el origen). Mismo idempotency/recompute, distinto createdAt.
+    return this.addHoldAt(tx, driverId, cause, causeRef, reason, new Date());
+  }
+
+  /**
+   * Variante de `addHold` con `createdAt` EXPLÍCITO: las suspensiones de fleet (documento/ITV) llevan el
+   * momento que fleet reportó (`suspendedAt` del evento), no `now`. Así `Driver.suspendedAt` derivado refleja
+   * el momento REAL del vencimiento, no el de la recepción del evento. Mismo natural key e idempotencia.
+   */
+  private async addHoldAt(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+    cause: SuspensionCause,
+    causeRef: string,
+    reason: string,
+    createdAt: Date,
+  ): Promise<{ created: boolean; suspendedAt: Date }> {
+    // ¿Existía YA este hold exacto? (natural key). Si sí, el upsert es no-op y NO es una suspensión nueva.
+    const existing = await tx.driverSuspensionHold.findUnique({
+      where: { driverId_cause_causeRef: { driverId, cause, causeRef } },
+      select: { id: true },
+    });
+    await tx.driverSuspensionHold.upsert({
+      where: { driverId_cause_causeRef: { driverId, cause, causeRef } },
+      // create lleva el reason + createdAt frescos; update vacío → preserva createdAt + reason original (idempotente).
+      create: { driverId, cause, causeRef, reason, createdAt },
+      update: {},
+    });
+    const suspendedAt = await this.recomputeSuspendedAt(tx, driverId);
+    // suspendedAt NUNCA es null acá (acabamos de garantizar ≥1 hold) — el cast es seguro por construcción.
+    return { created: existing === null, suspendedAt: suspendedAt as Date };
+  }
+
+  /**
+   * QUITA los holds que matcheen `where` (idempotente: borrar 0 holds = no-op) y recomputa `suspendedAt`,
+   * todo DENTRO de `tx`. Reúne el patrón de las 4 vías de reactivación. NUNCA toca holds de OTRA causa: el
+   * `where` acota EXACTAMENTE las causas que esta vía puede levantar (la separación de causas se respeta).
+   *
+   * @returns `{ removed, suspendedAt }` — `removed` = cuántos holds se quitaron (0 = no-op); `suspendedAt` = el
+   *   estado DERIVADO tras quitarlos (Date si quedan otros holds → SIGUE suspendido; null → quedó LIBRE).
+   */
+  private async removeHolds(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+    where: Prisma.DriverSuspensionHoldWhereInput,
+  ): Promise<{ removed: number; suspendedAt: Date | null }> {
+    const deleted = await tx.driverSuspensionHold.deleteMany({ where: { driverId, ...where } });
+    const suspendedAt = await this.recomputeSuspendedAt(tx, driverId);
+    return { removed: deleted.count, suspendedAt };
+  }
+
+  /**
+   * Suspensión MANUAL del conductor por un operador admin (acción de SAFETY, espejo de reject). Bajo el modelo
+   * de HOLDS: agrega un hold DISCIPLINARY y recomputa `Driver.suspendedAt` —el MISMO campo que el gate de inicio
+   * de turno (startShift) y el eligibility gate de dispatch leen para bloquear (BR-I02)—, así un conductor con
+   * ≥1 hold NO puede iniciar turno ni aceptar ofertas (enforcement ya existente, fail-closed). Emite
+   * `driver.suspended` por OUTBOX en la MISMA tx para que audit/admin-bff reaccionen (igual que reject).
+   *
+   * IDEMPOTENTE por el `@@unique` del hold (espeja el CAS viejo): re-suspender disciplinariamente a un conductor
+   * que YA tiene un hold DISCIPLINARY es un upsert no-op → NO reescribe el momento NI re-emite el evento. El hold
+   * DISCIPLINARY usa `causeRef = ''` (una sola instancia: el operador no "acumula" disciplinarias). El `reason`
+   * SÍ se persiste ahora (en el hold) además de viajar al evento + al audit del admin-bff.
+   *
+   * NO toca holds de documento/ITV: si el conductor también tenía un DOCUMENT_EXPIRED, ese hold sigue (la
+   * suspensión es el conjunto). Levantar ESTE hold disciplinario va por reactivate() (que NO toca los otros).
    */
   async suspend(driverId: string, reason: string): Promise<void> {
     await this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
       if (!driver) throw new NotFoundError('Conductor no encontrado');
-      const suspendedAt = new Date();
-      // CAS dentro de la tx: si ya estaba suspendido, count=0 → no hay evento (idempotencia extremo-a-extremo).
-      const result = await tx.driver.updateMany({
-        where: { id: driverId, suspendedAt: null },
-        // El SOURCE (DISCIPLINARY) registra que esta suspensión la originó un operador: la reactivación
-        // manual (reactivate) SOLO puede levantar esta fuente (fail-closed contra levantar docs vencidos).
-        data: { suspendedAt, suspensionSource: SuspensionSource.DISCIPLINARY },
-      });
-      if (result.count === 0) return; // ya suspendido: no-op honesto, sin evento duplicado
+      const { created, suspendedAt } = await this.addHold(
+        tx,
+        driverId,
+        SuspensionCause.DISCIPLINARY,
+        '',
+        reason,
+      );
+      // Idempotente: el hold DISCIPLINARY ya existía → no es una suspensión nueva, no se re-emite el evento.
+      if (!created) return;
       const envelope = createEnvelope({
         eventType: 'driver.suspended',
         producer: 'identity-service',
@@ -418,81 +523,145 @@ export class DriversService {
   }
 
   /**
-   * REACTIVACIÓN MANUAL del conductor por un operador admin (la inversa de suspend(), acción de SAFETY).
-   * Limpia `Driver.suspendedAt` + `suspensionSource` —los mismos campos que el gate de inicio de turno
-   * (startShift) y el eligibility gate de dispatch leen para bloquear (BR-I02)—, así un conductor que
-   * estaba suspendido vuelve a poder iniciar turno (sujeto SIEMPRE al gate biométrico, ver punto 4). Emite
-   * `driver.reactivated` por OUTBOX en la MISMA tx (igual que suspend emite driver.suspended) para que
-   * audit/admin-bff reaccionen.
+   * REACTIVACIÓN MANUAL del conductor por un operador admin (la inversa de suspend(), acción de SAFETY). Bajo
+   * el modelo de HOLDS: QUITA SOLO el hold DISCIPLINARY y recomputa `Driver.suspendedAt`. NUNCA toca holds de
+   * documento (DOCUMENT_EXPIRED) ni de ITV (INSPECTION_EXPIRED) — re-habilitar a un conductor con SOAT/licencia/
+   * ITV vencida es un bug de seguridad inaceptable. Si tras quitar el hold disciplinario QUEDAN holds de doc/ITV,
+   * el conductor SIGUE suspendido (`suspendedAt` recomputado sigue seteado). Emite `driver.reactivated` por
+   * OUTBOX en la MISMA tx (igual que suspend) — admin-bff/audit reaccionan.
    *
-   * FAIL-CLOSED (causa raíz del diseño): el operador SOLO puede revertir suspensiones que él originó
-   * (DISCIPLINARY). Una suspensión por documento crítico vencido (DOCUMENT_EXPIRED, vía
-   * fleet.driver_suspended) NO se levanta a mano —re-habilitar a un conductor con SOAT/licencia vencida
-   * es un bug de seguridad inaceptable—: se levanta cuando el conductor regulariza sus documentos. Las
-   * filas LEGACY con suspendedAt seteado pero suspensionSource null se tratan como NO-DISCIPLINARY (también
-   * rechazadas, fail-closed: ante la duda del origen, NO reactivamos).
+   * Esto arregla la CRÍTICA de RAÍZ junto con su par reactivateForCompliance: cada vía levanta SOLO SUS holds;
+   * el conductor se libera de verdad SOLO cuando llega a 0 holds.
    *
    * SEMÁNTICA (en orden):
    *   1. Carga el driver en la tx; 404 si no existe.
-   *   2. Si NO está suspendido (suspendedAt null) → 409 (no hay nada que reactivar).
-   *   3. Si la suspensión NO es DISCIPLINARY (DOCUMENT_EXPIRED o source null legacy) → 403 (fail-closed).
-   *   4. Re-valida eligibility mínima: licencia vencida → 403. (El gate operativo COMPLETO —biometría, KYC—
-   *      lo sigue imponiendo startShift BR-I02; reactivar NO devuelve al conductor a AVAILABLE ni toca
-   *      currentStatus: solo limpia la suspensión.)
-   *   5. CAS clear (where suspendedAt not null + source DISCIPLINARY): si count 0, releemos para un error
-   *      HONESTO (ya reactivado por una carrera, o el source cambió bajo nuestros pies → 409/403).
-   *   6. Emite driver.reactivated por OUTBOX (misma tx).
+   *   2. Si NO tiene hold DISCIPLINARY → error honesto (no estaba suspendido disciplinariamente). 409 si no tiene
+   *      NINGÚN hold (nada que reactivar); 403 si está suspendido pero por OTRA causa (doc/ITV, va por compliance).
+   *   3. Re-valida eligibility mínima: licencia vencida → 403. (El gate operativo COMPLETO —biometría, KYC— lo
+   *      sigue imponiendo startShift BR-I02; reactivar NO devuelve al conductor a AVAILABLE ni toca currentStatus.)
+   *   4. Quita el hold DISCIPLINARY (idempotente) y recomputa suspendedAt. Si removed===0, releemos para error honesto.
+   *   5. Emite driver.reactivated por OUTBOX (misma tx).
    */
   async reactivate(driverId: string): Promise<void> {
     await this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
       if (!driver) throw new NotFoundError('Conductor no encontrado');
-      // 2) Reactivar a un conductor NO suspendido no tiene sentido (no es idempotente como suspend: no hay
-      //    estado al que llevar). 409 honesto en vez de un no-op silencioso que mentiría "reactivado".
-      if (driver.suspendedAt === null) {
-        throw new ConflictError('El conductor no está suspendido');
-      }
-      // 3) FAIL-CLOSED por ORIGEN: el operador solo revierte suspensiones DISCIPLINARY que él originó.
-      //    DOCUMENT_EXPIRED no se levanta a mano. Una fila legacy con source null se trata como
-      //    NO-DISCIPLINARY (ante la duda del origen, NO reactivamos — es la posición segura).
-      if (driver.suspensionSource !== SuspensionSource.DISCIPLINARY) {
+      // 2) FAIL-CLOSED por CAUSA: el operador solo revierte el hold DISCIPLINARY que él originó. Distinguimos
+      //    "no está suspendido" (409, nada que reactivar) de "suspendido pero NO disciplinariamente" (403:
+      //    es doc/ITV, se levanta cuando regulariza / por la vía de compliance). Se lee el hold DISCIPLINARY:
+      //    su ausencia es la condición honesta para el error (no inferimos del flag colapsado, ya no existe).
+      const disciplinary = await tx.driverSuspensionHold.findUnique({
+        where: {
+          driverId_cause_causeRef: { driverId, cause: SuspensionCause.DISCIPLINARY, causeRef: '' },
+        },
+        select: { id: true },
+      });
+      if (!disciplinary) {
+        if (driver.suspendedAt === null) {
+          throw new ConflictError('El conductor no está suspendido');
+        }
         throw new ForbiddenError(
-          'No se puede reactivar: la suspensión es por documentos vencidos; se levanta cuando el conductor regulariza sus documentos',
+          'No se puede reactivar: la suspensión es por documentos/ITV vencidos; se levanta cuando el conductor regulariza',
         );
       }
-      // 4) Re-validación mínima de eligibility: NO reactivamos sobre una licencia vencida. El gate operativo
-      //    completo (biometría, KYC) lo sigue imponiendo startShift (BR-I02); acá solo evitamos el caso
-      //    obvio de levantar la suspensión a un conductor cuya licencia ya venció.
+      // 3) Re-validación mínima de eligibility: NO reactivamos sobre una licencia vencida. El gate operativo
+      //    completo (biometría, KYC) lo sigue imponiendo startShift (BR-I02).
       if (driver.licenseExpiresAt && driver.licenseExpiresAt.getTime() < Date.now()) {
         throw new ForbiddenError('No se puede reactivar: la licencia está vencida');
       }
-      // 5) CAS clear: solo limpia si SIGUE suspendido Y la fuente SIGUE siendo DISCIPLINARY (defensa contra
-      //    una carrera que ya reactivó, o un fleet.driver_suspended que reescribió la fuente bajo nosotros).
-      const result = await tx.driver.updateMany({
-        where: {
-          id: driverId,
-          suspendedAt: { not: null },
-          suspensionSource: SuspensionSource.DISCIPLINARY,
-        },
-        data: { suspendedAt: null, suspensionSource: null },
+      // 4) Quita SOLO el hold DISCIPLINARY (NUNCA doc/ITV) y recomputa suspendedAt. Si removed===0, otra tx
+      //    ya lo quitó (carrera) → releemos para un error HONESTO. Si quedan holds de doc/ITV, suspendedAt
+      //    recomputado SIGUE seteado: el conductor permanece suspendido (la CRÍTICA, resuelta de raíz).
+      const { removed } = await this.removeHolds(tx, driverId, {
+        cause: SuspensionCause.DISCIPLINARY,
+        causeRef: '',
       });
-      if (result.count === 0) {
-        // Releemos para un error HONESTO (espeja startShift): o ya lo reactivó una carrera, o la fuente
-        // cambió a DOCUMENT_EXPIRED (un docto venció entre nuestra lectura y el CAS) → fail-closed.
-        const current = await tx.driver.findUnique({
-          where: { id: driverId },
-          select: { suspendedAt: true, suspensionSource: true },
-        });
-        if (!current) throw new NotFoundError('Conductor no encontrado');
-        if (current.suspendedAt === null) {
-          throw new ConflictError('El conductor ya fue reactivado');
-        }
+      if (removed === 0) {
+        // El hold existía en el pre-read pero ya no: una reactivación concurrente lo quitó. Error honesto.
+        throw new ConflictError('El conductor ya fue reactivado');
+      }
+      // 5) Emite driver.reactivated por OUTBOX en la MISMA tx (igual que suspend): admin-bff proyecta el
+      //    status de SUSPENDED de vuelta a ACTIVE; audit deja la traza inmutable de la decisión. (El evento se
+      //    emite porque se levantó EL hold disciplinario, aunque el conductor siga suspendido por otra causa:
+      //    el hecho de dominio "se revirtió la disciplinaria" ocurrió; admin-bff reconcilia el status real.)
+      const envelope = createEnvelope({
+        eventType: 'driver.reactivated',
+        producer: 'identity-service',
+        payload: {
+          driverId: driver.id,
+          reactivatedAt: new Date().toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driver.id,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
+  /**
+   * OVERRIDE MANUAL del operador para una suspensión por DOCUMENTO/ITV vencido (DOCUMENT_EXPIRED · decisión
+   * del dueño · compliance/seguridad). Es el HERMANO de `reactivate()`: aquella levanta SOLO DISCIPLINARY
+   * (suspensiones que el operador originó); ésta levanta SOLO DOCUMENT_EXPIRED (las automáticas por
+   * documento/ITV vencido). La separación de fuentes se RESPETA: cada vía levanta su propia fuente y NUNCA
+   * la otra (un DISCIPLINARY por esta vía → 403; un DOCUMENT_EXPIRED por `reactivate()` → 403). Así el
+   * operador puede regularizar a mano (override) sin que se mezclen los dos flujos de safety.
+   *
+   * Por qué un método separado y no un flag en reactivate(): el AUDIT del admin-bff distingue la acción
+   * (`driver.reactivate` vs `driver.reactivate-compliance`), el evento de dominio es el mismo
+   * (`driver.reactivated`) y las CAUSAS que levanta son DISTINTAS (esta levanta DOCUMENT_EXPIRED +
+   * INSPECTION_EXPIRED; reactivate() levanta SOLO DISCIPLINARY). El latch de ITV vive en fleet (otro servicio):
+   * lo limpia el ORQUESTADOR (admin-bff) tras este levantamiento, NO identity (regla 2: no cruzar tablas).
+   *
+   * SEMÁNTICA (espeja reactivate(), modelo de HOLDS):
+   *   1. 404 si el conductor no existe.
+   *   2. 409 si NO está suspendido (0 holds, nada que reactivar).
+   *   3. 403 si NO tiene ningún hold de documento/ITV (solo DISCIPLINARY → va por reactivate()).
+   *   4. 403 si la licencia está vencida (no reactivamos sobre una licencia vencida; el gate operativo COMPLETO
+   *      —biometría, KYC— lo sigue imponiendo startShift BR-I02).
+   *   5. Quita los holds DOCUMENT_EXPIRED + INSPECTION_EXPIRED (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si
+   *      tras quitarlos QUEDA un hold DISCIPLINARY, el conductor SIGUE suspendido (la separación de causas).
+   *   6. Emite driver.reactivated por OUTBOX (misma tx).
+   */
+  async reactivateForCompliance(driverId: string): Promise<void> {
+    await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) throw new NotFoundError('Conductor no encontrado');
+      if (driver.suspendedAt === null) {
+        throw new ConflictError('El conductor no está suspendido');
+      }
+      // FAIL-CLOSED por CAUSA (inverso de reactivate()): esta vía levanta SOLO holds de documento/ITV. Si el
+      // conductor NO tiene ningún hold DOCUMENT_EXPIRED/INSPECTION_EXPIRED (está suspendido solo por DISCIPLINARY)
+      // → 403 (se levanta por reactivate()). El conteo se hace ANTES de validar la licencia para dar el error
+      // correcto (no pedir licencia vigente para algo que ni siquiera es una suspensión de compliance).
+      const complianceHolds = await tx.driverSuspensionHold.count({
+        where: {
+          driverId,
+          cause: { in: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.INSPECTION_EXPIRED] },
+        },
+      });
+      if (complianceHolds === 0) {
         throw new ForbiddenError(
-          'No se puede reactivar: la suspensión es por documentos vencidos; se levanta cuando el conductor regulariza sus documentos',
+          'No se puede reactivar por compliance: la suspensión no es por documentos/ITV vencidos',
         );
       }
-      // 6) Emite driver.reactivated por OUTBOX en la MISMA tx (igual que suspend): admin-bff proyecta el
-      //    status de SUSPENDED de vuelta a ACTIVE; audit deja la traza inmutable de la decisión.
+      // Re-validación mínima de eligibility: no reactivamos sobre una licencia vencida (mismo criterio que
+      // reactivate()). El gate operativo completo (biometría, KYC) lo sigue imponiendo startShift (BR-I02).
+      if (driver.licenseExpiresAt && driver.licenseExpiresAt.getTime() < Date.now()) {
+        throw new ForbiddenError('No se puede reactivar: la licencia está vencida');
+      }
+      // Quita los holds de documento/ITV (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si tras quitarlos queda
+      // un hold DISCIPLINARY, suspendedAt recomputado SIGUE seteado → el conductor permanece suspendido.
+      const { removed } = await this.removeHolds(tx, driverId, {
+        cause: { in: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.INSPECTION_EXPIRED] },
+      });
+      if (removed === 0) {
+        // Existían en el pre-count pero ya no: una carrera (otra reactivación/regularización) los quitó.
+        throw new ConflictError('El conductor ya fue reactivado');
+      }
       const envelope = createEnvelope({
         eventType: 'driver.reactivated',
         producer: 'identity-service',
@@ -620,22 +789,120 @@ export class DriversService {
   }
 
   /**
-   * Suspende un conductor por orden de fleet-service (documento crítico vencido → `fleet.driver.suspended`).
-   * Escribe `Driver.suspendedAt`, que es justamente lo que el gate de inicio de turno (startShift) lee
-   * para bloquear (BR-I02). Idempotente: si ya está suspendido no reescribe el timestamp (preserva el
-   * momento original de la suspensión) y reentregas del mismo evento no tienen efecto. Si el conductor
-   * no existe localmente, se ignora silenciosamente (el evento puede llegar antes que el onboarding).
+   * Suspende un conductor por orden de fleet-service (documento crítico vencido → `fleet.driver_suspended`).
+   * Bajo el modelo de HOLDS: agrega un hold DOCUMENT_EXPIRED con `causeRef = documentType` (SOAT/LICENSE_A1/
+   * PROPERTY_CARD) — UN hold POR documento distinto, así regularizar el SOAT NO quita la licencia (la CRÍTICA).
+   * Recomputa `Driver.suspendedAt`, que es lo que el gate de turno (startShift) lee para bloquear (BR-I02).
    *
-   * @returns `true` si esta llamada efectivamente suspendió al conductor; `false` si fue no-op.
+   * IDEMPOTENTE por el `@@unique([driverId, cause, causeRef])`: re-entregas del MISMO evento (mismo documento) →
+   * upsert no-op, NO reescribe el momento. El `suspendedAt` que aporta esta suspensión = createdAt de su hold
+   * (preservado si ya existía). Si el conductor no existe localmente, se ignora silenciosamente (el evento puede
+   * llegar antes que el onboarding): la FK del hold fallaría, así que comprobamos existencia primero.
+   *
+   * @param suspendedAt el momento que fleet reportó — se usa como createdAt del hold (preserva el origen).
+   * @param documentType el tipo de documento vencido (causeRef del hold). Distingue cada doc de los demás.
+   * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
-  async suspendByFleet(driverId: string, suspendedAt: Date): Promise<boolean> {
-    const result = await this.prisma.write.driver.updateMany({
-      where: { id: driverId, suspendedAt: null },
-      // SOURCE DOCUMENT_EXPIRED: suspensión por documento crítico vencido. La reactivación manual del
-      // operador NO puede levantarla (solo se levanta cuando el conductor regulariza sus documentos).
-      data: { suspendedAt, suspensionSource: SuspensionSource.DOCUMENT_EXPIRED },
+  async suspendByFleet(driverId: string, suspendedAt: Date, documentType: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      if (!driver) return false; // evento antes del onboarding: no-op silencioso (coherente con el viejo CAS).
+      const { created } = await this.addHoldAt(
+        tx,
+        driverId,
+        SuspensionCause.DOCUMENT_EXPIRED,
+        documentType,
+        `Documento crítico vencido (${documentType})`,
+        suspendedAt,
+      );
+      return created;
     });
-    return result.count > 0;
+  }
+
+  /**
+   * Suspende un conductor por orden de fleet-service cuando el evento llega keyeado por **User.id** (no por
+   * el id de perfil Driver). Es el caso de la INSPECCIÓN técnica (ITV) vencida: fleet SOLO tiene
+   * `Vehicle.driverId` = User.id y NO traduce a id de perfil — identity es el dueño del mapeo, así que LO
+   * RESUELVE acá (`Driver.userId → Driver.id`) y recién ENTONCES suspende. Esto evita el bug: pasar un User.id
+   * donde se espera un Driver.id suspendería al conductor EQUIVOCADO. El `userId` es @unique → 0..1 fila.
+   *
+   * Bajo el modelo de HOLDS: agrega un hold INSPECTION_EXPIRED (causeRef `''`, una sola ITV). Es UNA CAUSA
+   * DISTINTA de DOCUMENT_EXPIRED → coexiste con los holds de documento: regularizar el SOAT no quita la ITV y
+   * viceversa (la CRÍTICA, resuelta de raíz). Idempotente por el `@@unique`. Sin perfil → no-op silencioso.
+   *
+   * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op.
+   */
+  async suspendByFleetForUser(userId: string, suspendedAt: Date): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      // Resolución User.id → Driver.id (identity es el dueño del mapeo). Sin perfil → no-op (evento prematuro).
+      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+      if (!driver) return false;
+      const { created } = await this.addHoldAt(
+        tx,
+        driver.id,
+        SuspensionCause.INSPECTION_EXPIRED,
+        '',
+        'Inspección técnica (ITV) vencida',
+        suspendedAt,
+      );
+      return created;
+    });
+  }
+
+  /**
+   * Reactiva un conductor por orden de fleet-service cuando REGULARIZÓ un documento crítico vencido
+   * (`fleet.driver_reactivated` keyeado por `driverId` de perfil + `documentType`). Bajo el modelo de HOLDS:
+   * quita SOLO el hold DOCUMENT_EXPIRED de ESE `documentType` (el evento lleva el documentType). Las otras
+   * causas (otro documento, ITV, DISCIPLINARY) NUNCA se tocan → si quedan, el conductor SIGUE suspendido. Es
+   * la INVERSA EXACTA de `suspendByFleet` (mismo natural key). Recomputa `suspendedAt`.
+   *
+   * IDEMPOTENTE: borrar un hold inexistente (ya regularizado, o nunca existió) = 0 filas → no-op. Re-entregas
+   * del mismo evento no rompen. Una DISCIPLINARY NUNCA matchea (causa distinta) — fail-closed por construcción.
+   *
+   * NO toca `currentStatus`: reactivar solo levanta la suspensión; volver a operar lo decide el gate biométrico
+   * de inicio de turno (BR-I02), igual que `reactivate()` manual.
+   *
+   * @returns `true` si esta llamada efectivamente quitó un hold; `false` si fue no-op.
+   */
+  async reactivateByFleet(driverId: string, documentType: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      // GUARD DE EXISTENCIA (espejo de suspendByFleet/suspendByFleetForUser/reactivateByFleetForUser): si el
+      // Driver NO existe (purgado por derecho-al-olvido, o un evento que llegó antes del onboarding), salir
+      // no-op ANTES de tocar holds/recompute. Sin esto, removeHolds→recomputeSuspendedAt hace
+      // `tx.driver.update({ where: { id } })` que lanza P2025 (record-not-found) → el consumer de
+      // `fleet.driver_reactivated` re-lanza → Kafka reintenta ∞ → POISON-PILL que bloquea la partición
+      // (platform-wide). Con el guard, un driver inexistente se trata como YA procesado (return false).
+      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      if (!driver) return false;
+      const { removed } = await this.removeHolds(tx, driverId, {
+        cause: SuspensionCause.DOCUMENT_EXPIRED,
+        causeRef: documentType,
+      });
+      return removed > 0;
+    });
+  }
+
+  /**
+   * Reactiva un conductor por orden de fleet-service cuando el evento llega keyeado por **User.id** (no por
+   * el id de perfil Driver). Es el caso de la INSPECCIÓN técnica (ITV) regularizada: fleet SOLO tiene
+   * `Vehicle.driverId` = User.id — identity resuelve `Driver.userId → Driver.id`. Espejo de
+   * `suspendByFleetForUser`: evita el bug de tratar el User.id como id de perfil.
+   *
+   * Bajo el modelo de HOLDS: quita SOLO el hold INSPECTION_EXPIRED. Las otras causas (documentos, DISCIPLINARY)
+   * NUNCA se tocan → si quedan, el conductor SIGUE suspendido. Idempotente (borrar 0 holds = no-op).
+   *
+   * @returns `true` si esta llamada efectivamente quitó un hold; `false` si fue no-op.
+   */
+  async reactivateByFleetForUser(userId: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+      if (!driver) return false;
+      const { removed } = await this.removeHolds(tx, driver.id, {
+        cause: SuspensionCause.INSPECTION_EXPIRED,
+        causeRef: '',
+      });
+      return removed > 0;
+    });
   }
 
   /**

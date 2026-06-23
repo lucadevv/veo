@@ -15,6 +15,7 @@ import {
   type Page,
 } from '../infra/pagination';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
+import { recordFleetDomainEvent } from '../events/fleet-metrics';
 import {
   assertS3KeysBelongToOwner,
   deriveExpiryStatus,
@@ -384,6 +385,30 @@ export class DocumentsService {
             }),
           );
         }
+      } else if (
+        // AUTO-REACTIVACIÓN POR DOCUMENTO (FIX · simétrico a la suspensión por doc, compliance/seguridad):
+        // un documento crítico DRIVER-scoped que el operador VALIDA (resultado VALID/EXPIRING_SOON, NO
+        // rechazo, NO vencido) es la REGULARIZACIÓN del doc que podía tener al conductor suspendido por
+        // DOCUMENT_EXPIRED. Emitimos `fleet.driver_reactivated` keyeado por `driverId` (= ownerId del doc
+        // DRIVER-scoped, ES el id de perfil) en la MISMA tx (outbox-in-tx). IDEMPOTENTE/SEGURO emitir aunque
+        // el conductor NO estuviera suspendido: el consumer de identity reactiva SOLO suspensiones
+        // DOCUMENT_EXPIRED (una DISCIPLINARY queda intacta) y el CAS es no-op si ya estaba activo.
+        decision === ReviewDecision.VALID &&
+        updated.ownerType === FleetOwnerType.DRIVER &&
+        isCriticalDocument(updated.type)
+      ) {
+        await this.enqueue(
+          tx,
+          updated.ownerId,
+          buildFleetEvent(FleetEventType.DRIVER_REACTIVATED, {
+            driverId: updated.ownerId,
+            reason: `Documento crítico regularizado (${updated.type})`,
+            documentId: updated.id,
+            documentType: updated.type,
+            reactivatedAt: now.toISOString(),
+          }),
+        );
+        recordFleetDomainEvent(FleetEventType.DRIVER_REACTIVATED);
       }
       return updated;
     });

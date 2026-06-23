@@ -82,4 +82,11 @@ message DriverReply {
   double dni_face_match_score = 19;
   // ISO-8601 de cuándo se corrió el face-match; "" si no se corrió.
   string dni_face_matched_at = 20;
+  // CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): el conjunto de `cause` DISTINTAS de los holds vigentes
+  // del conductor (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). Vacío si NO está suspendido. Campo
+  // 21, backward-compatible. Lo consume el admin-bff (GET /ops/drivers/:id) para que el panel sepa POR QUÉ
+  // está suspendido y llame el endpoint correcto de reactivación: DISCIPLINARY → /reactivate;
+  // DOCUMENT_EXPIRED/INSPECTION_EXPIRED → /reactivate-compliance. NO es PII. `suspended_at` (campo 7) sigue
+  // siendo el flag derivado de "está suspendido"; esto añade el PORQUÉ. Un conductor puede tener VARIAS causas.
+  repeated string suspension_causes = 21;
 }

@@ -60,6 +60,12 @@ interface DriverReply {
   dniFaceMatchScore: number;
   /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
   dniFaceMatchedAt: string;
+  /**
+   * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): las `cause` DISTINTAS de los holds vigentes del
+   * conductor (DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
+   * admin-bff para saber POR QUÉ está suspendido y elegir el endpoint de reactivación correcto. NO es PII.
+   */
+  suspensionCauses: string[];
 }
 
 /** Request batch de GetDriversByIds (lectura para listados del admin). */
@@ -93,6 +99,7 @@ const EMPTY_DRIVER: DriverReply = {
   dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
   dniFaceMatchScore: 0,
   dniFaceMatchedAt: '',
+  suspensionCauses: [],
 };
 
 /**
@@ -206,7 +213,13 @@ export class IdentityGrpcController {
     // del usuario (driver→user, ambos en identity: NO es join cross-servicio).
     const d = await this.prisma.read.driver.findUnique({
       where: { id },
-      include: { user: { select: { name: true, kycStatus: true, phone: true } } },
+      include: {
+        user: { select: { name: true, kycStatus: true, phone: true } },
+        // Holds VIGENTES: el admin-bff necesita las CAUSAS distintas para saber POR QUÉ está suspendido y
+        // elegir el endpoint de reactivación (DISCIPLINARY → /reactivate; documento/ITV → /reactivate-compliance).
+        // Solo el `cause` (no PII). El detalle Compliance+ es el único consumidor del DriverReply single.
+        suspensionHolds: { select: { cause: true } },
+      },
     });
     // El descifrado del DNI (único path costoso/peligroso) ocurre ÚNICAMENTE para ADMIN_RAIL, y aun ahí con
     // guarda (`openDniSafely`): un blob corrupto degrada a "" en vez de tumbar la RPC con un 500.
@@ -308,6 +321,9 @@ export class IdentityGrpcController {
     dniFaceMatchScore: number | null;
     dniFaceMatchedAt: Date | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
+    // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
+    // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
+    suspensionHolds?: { cause: string }[];
     },
     includeSensitivePii = false,
   ): DriverReply {
@@ -364,6 +380,11 @@ export class IdentityGrpcController {
       dniFaceMatchScore: includeSensitivePii ? (d.dniFaceMatchScore ?? 0) : 0,
       dniFaceMatchedAt:
         includeSensitivePii && d.dniFaceMatchedAt ? d.dniFaceMatchedAt.toISOString() : '',
+      // CAUSAS de suspensión: las `cause` DISTINTAS de los holds vigentes (modelo de HOLDS). Un conductor con
+      // varias causas (ej. doc vencido + disciplinaria) las muestra TODAS, así el panel ofrece la(s) acción(es)
+      // de reactivación correcta(s). [] cuando el read no trajo holds (batch/by-user) o no hay holds (libre).
+      // NO es PII; el `cause` es un enum de motivo. dedup con Set (ej. 2 holds DOCUMENT_EXPIRED de docs distintos).
+      suspensionCauses: d.suspensionHolds ? [...new Set(d.suspensionHolds.map((h) => h.cause))] : [],
     };
   }
 }

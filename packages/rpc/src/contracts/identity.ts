@@ -75,4 +75,12 @@ export interface DriverReply {
   dniFaceMatchScore: number;
   /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
   dniFaceMatchedAt: string;
+  /**
+   * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS · campo 21 del proto): las `cause` DISTINTAS de los holds
+   * vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
+   * admin-bff (GET /ops/drivers/:id) para saber POR QUÉ está suspendido y llamar el endpoint de reactivación
+   * correcto (DISCIPLINARY → /reactivate; documento/ITV → /reactivate-compliance). NO es PII. Opcional en el
+   * wire: un repeated proto3 puede llegar `undefined` (productor viejo / read sin holds) → degradar a [].
+   */
+  suspensionCauses?: string[];
 }
