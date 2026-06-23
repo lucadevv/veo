@@ -54,6 +54,7 @@ data:
     # prometheus-operator (este Prometheus es un StatefulSet vanilla que lee su config de aquí).
     rule_files:
       - /etc/prometheus/panic-slo.rules.yml
+      - /etc/prometheus/payment-refund.rules.yml
     # Ruteo de alertas: las que disparan las rule_files se ENVÍAN a Alertmanager, que las agrupa y
     # las notifica a un humano (on-call). Sin este bloque la alerta solo se ve en /alerts y muere ahí.
     alerting:
@@ -127,6 +128,30 @@ data:
             annotations:
               summary: "p99 del ack de pánico > 3s (límite duro VEO)"
               description: "p99 del ack de pánico = {{ $value | humanizeDuration }}, supera el límite no-negociable de 3s. Flujo de seguridad degradado."
+  # ── BACKSTOP de REFUNDS system-initiated (INVARIANTE SAGRADO ADR-014 §6) ──────────────────────
+  # VIGILA: un refund AUTOMÁTICO (por booking.cancelled) que NO se pudo devolver solo y cayó al backstop
+  # MANUAL → un pasajero que pagó y NO viajó quedó sin su refund automático. Se ELIMINÓ el cron re-conductor
+  # automático (loopeaba / mataba de hambre): TODO refund REJECTED persistente converge a marca durable (la
+  # fila Refund REJECTED) + métrica + ESTA alerta → refund admin manual. payment-service emite el contador
+  # payment_refund_backstop_total{reason} en los DOS sitios de backstop: `rejected` (el gateway rechazó el
+  # reverso síncrono, quedó un Refund REJECTED persistido) y `unrecoverable` (abortó antes de llamar al riel:
+  # gateway sin reembolsos / cobro sin railRef, ya dejó un Refund REJECTED de marca). POR QUÉ `increase(...[15m]) > 0` y no el valor
+  # absoluto: un counter > 0 dispararía PARA SIEMPRE (es acumulado); `increase` en 15m significa "un
+  # pasajero cayó al backstop RECIÉN" → accionable ahora. severity=warning (no critical): es serio pero
+  # ops-actionable (refund admin a mano), no un page-storm. Se RUTEA a Alertmanager (bloque alerting).
+  payment-refund.rules.yml: |
+    groups:
+      - name: payment-refund-backstop
+        rules:
+          - alert: PaymentRefundBackstop
+            expr: increase(payment_refund_backstop_total[15m]) > 0
+            for: 0m
+            labels:
+              severity: warning
+              domain: payment
+            annotations:
+              summary: "Refund system-initiated cayó al backstop manual"
+              description: "Un refund automático cayó al backstop manual (reason={{ $labels.reason }}): un pasajero que pagó y no viajó no recibió refund automático; requiere refund admin manual (sin reintento automático). Revisar los Refund REJECTED system-initiated (reason=rejected: gateway rechazó el reverso; reason=unrecoverable: failureReason 'unrecoverable:') y devolver la plata a mano vía POST /payments/:tripId/refund."
 ---
 apiVersion: apps/v1
 kind: StatefulSet
