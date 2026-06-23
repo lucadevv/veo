@@ -130,3 +130,23 @@ export function deriveTripChargeDedupKey(tripId: string): string {
 export function deriveRefundIdempotencyKey(refundId: string): string {
   return `refund-${refundId}`;
 }
+
+/**
+ * F3c-payment · PREFIJO TIPADO de la dedupKey de un refund SYSTEM-INITIATED por `booking.cancelled` (cero
+ * strings mágicos: la derivación de la dedupKey deriva de esta constante única). Distingue los refunds
+ * AUTOMÁTICOS (con marcador system-initiated) de los ADMIN discrecionales (dedupKey NULL): el admin correlaciona
+ * un Refund REJECTED system-initiated a su booking por este prefijo para disparar el refund admin manual (backstop).
+ */
+export const BOOKING_CANCEL_REFUND_DEDUP_PREFIX = 'booking-cancel-refund:' as const;
+
+/**
+ * F3c-payment · Clave de idempotencia DETERMINISTA del refund SYSTEM-INITIATED por `booking.cancelled`
+ * (ADR-014 §6 camino infeliz). Persiste en `Refund.dedupKey`. El UNIQUE es PARCIAL (status <> REJECTED, en SQL):
+ * un `booking.cancelled` duplicado/reordenado (Kafka at-least-once) cuyo refund previo sigue ACTIVO choca →
+ * P2002 → no-op graceful (NO doble plata). Si el refund previo quedó REJECTED (proveedor rechazó), la key ya no
+ * bloquea (el marcador durable usa status REJECTED, fuera del índice). En carpooling `tripId = bookingId`
+ * (UUID opaco · §5.5): un Payment ⇄ un bookingId ⇄ un refund de cancelación vivo. Mismo bookingId → misma key.
+ */
+export function deriveBookingCancellationRefundDedupKey(bookingId: string): string {
+  return `${BOOKING_CANCEL_REFUND_DEDUP_PREFIX}${bookingId}`;
+}

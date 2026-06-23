@@ -8,6 +8,7 @@ import { createEnvelope } from '@veo/events';
 import { deletedPlaceholder, enqueueOutbox, isUniqueViolation } from '@veo/database';
 import {
   assertNever,
+  ConcurrencyConflictError,
   ConflictError,
   ForbiddenError,
   InvalidStateError,
@@ -37,10 +38,13 @@ import { Prisma, RefundStatus, type Payment, type Refund } from '../generated/pr
 import {
   assertCanAddTip,
   assertPaymentTransition,
+  BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
   computeChargeAmounts,
+  deriveBookingCancellationRefundDedupKey,
   deriveRefundIdempotencyKey,
   retryDelayMs,
 } from './payment.policy';
+import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { Env } from '../config/env.schema';
 import type { DebtItem, DebtSummary } from './dto/payments.dto';
 
@@ -57,6 +61,15 @@ export const METHOD_UNAVAILABLE_PREFIX = 'method_unavailable';
 function methodUnavailableReason(method: PaymentMethod): string {
   return `${METHOD_UNAVAILABLE_PREFIX}:${method}`;
 }
+
+/**
+ * Prefijo de la razón ESTRUCTURADA del MARCADOR DURABLE de un refund system-initiated IRRECUPERABLE:
+ * el refund automático abortó ANTES de mover plata (gateway sin reembolsos / cobro sin railRef) → NO hay
+ * Refund row. Persistimos un Refund REJECTED de marca (cero strings mágicos: `unrecoverable:<causa>`) para
+ * que el INVARIANTE SAGRADO se cumpla — el pasajero NUNCA queda sin refund Y sin traza durable: el admin lo
+ * ve en la lista de Refunds REJECTED (status=REJECTED + failureReason con este prefijo) y lo resuelve a mano.
+ */
+export const UNRECOVERABLE_REFUND_FAILURE_PREFIX = 'unrecoverable:';
 
 export interface ChargeInput {
   tripId: string;
@@ -83,11 +96,30 @@ export interface ChargeInput {
   };
 }
 
-/** Reserva de reembolso ya VALIDADA en refund(): montos + transición destino del Payment (S5). */
+/**
+ * Marcador TIPADO del actor de un refund SYSTEM-INITIATED (F3c-payment): el refund automático por
+ * `booking.cancelled` NO lo dispara un humano — lo dispara el sistema con autoridad total (no discrecional),
+ * así que NO valida rol L2 ni ventana. Se persiste como `requestedBy`/`approvedBy` del Refund y viaja como
+ * `approvedBy` en `payment.refunded`. Const tipado, NO un string mágico suelto regado por el código.
+ */
+export const SYSTEM_OPERATOR = 'system' as const;
+
+/**
+ * Reserva de reembolso ya VALIDADA por el caller: montos + transición destino del Payment (S5). El actor se
+ * desacopla del `AuthenticatedUser` humano (`requestedBy`/`approvedBy` ya resueltos a string) para que el
+ * MISMO core de refund sirva al refund ADMIN (operador humano) y al SYSTEM-INITIATED (F3c, sin operador).
+ * `dedupKey` (opcional) es la barrera DURA de idempotencia del refund automático (UNIQUE en `Refund.dedupKey`);
+ * NULL en los refunds admin discrecionales.
+ */
 interface RefundClaim {
   amountCents: number;
   reason: string;
-  operator: AuthenticatedUser;
+  /** Quién PIDIÓ el refund (userId del operador humano, o SYSTEM_OPERATOR para el automático). */
+  requestedBy: string;
+  /** Quién lo APROBÓ (igual al requestedBy salvo flujos con aprobador distinto). Va en payment.refunded. */
+  approvedBy: string;
+  /** Idempotencia DURA del refund system-initiated (UNIQUE). NULL en refunds admin discrecionales. */
+  dedupKey: string | null;
   newStatus: 'REFUNDED' | 'PARTIALLY_REFUNDED';
   newRefundedCents: number;
   isFullyRefunded: boolean;
@@ -125,6 +157,11 @@ export class PaymentsService {
     // Trailing + @Optional para no romper los call-sites de test que construyen el service con 5 args;
     // si no está inyectado, el cobro simplemente no aplica crédito (saldo intacto).
     @Optional() private readonly credit?: CreditService,
+    // Métricas Prometheus (CoreModule @Global → SIEMPRE inyectable en runtime). @Optional + trailing por la
+    // MISMA razón que `credit`: los specs construyen el service a mano con menos args. La métrica de backstop de
+    // refunds (`payment_refund_backstop_total`) se emite acá (riel común de rechazo de refund), no solo en el
+    // consumer Kafka — así cubre TAMBIÉN el rechazo ASÍNCRONO por callback del proveedor (applyRefundWebhookResult).
+    @Optional() private readonly metrics?: PaymentMetrics,
   ) {
     this.commissionRate = config.getOrThrow<number>('COMMISSION_RATE');
     this.maxRetries = config.getOrThrow<number>('PAYMENT_MAX_RETRIES');
@@ -1108,13 +1145,109 @@ export class PaymentsService {
     const claim: RefundClaim = {
       amountCents,
       reason,
-      operator,
+      // Admin discrecional: el operador humano firma el pedido y la aprobación; sin dedupKey (su
+      // idempotencia es el CAS optimista del Payment, no una clave determinista).
+      requestedBy: operator.userId,
+      approvedBy: operator.userId,
+      dedupKey: null,
       newStatus,
       newRefundedCents,
       isFullyRefunded,
     };
 
-    // Branch TIPADO por método: el efectivo nunca pasó por el gateway → devolución local explícita.
+    return this.executeRefundClaim(payment, claim);
+  }
+
+  /**
+   * F3c-payment · Refund SYSTEM-INITIATED por `booking.cancelled` (ADR-014 §6 camino infeliz). El consumer lo
+   * llama cuando un booking se canceló POST-captura (razon ASIENTO_LLENO u OFERTA_NO_DISPONIBLE): el cobro SÍ
+   * capturó pero el pasajero NO viajó → hay que devolverle TODO. Diferencias DELIBERADAS con `refund()` admin:
+   *
+   *  - SIN operador → SIN gate L2: lo dispara el SISTEMA, autoridad total, NO es un refund discrecional de
+   *    soporte. El gate >S/30 (RBAC L1/L2) protege la DISCRECIONALIDAD humana; acá no hay discreción que limitar.
+   *  - SIN ventana de 7 días: ese límite es para refunds admin discrecionales (anti-abuso de soporte). El
+   *    asiento-lleno es un refund OBLIGATORIO e INMEDIATO — el pasajero pagó y no viajó, devolverle SIEMPRE,
+   *    sin importar cuándo llegue el `booking.cancelled` (puede llegar reordenado tras un retry de Kafka).
+   *  - Refund SIEMPRE FULL: el monto = saldo reembolsable del Payment (`amountCents − refundedCents`). El
+   *    pasajero no recibió NADA del servicio → se le devuelve TODO lo que quede sin reembolsar.
+   *  - IDEMPOTENCIA DURA: `dedupKey` determinista (`booking-cancel-refund:{bookingId}`, UNIQUE en Refund). Un
+   *    evento duplicado/reordenado → P2002 → no-op graceful. Junto al dedup por eventId del consumer = doble
+   *    barrera contra el doble-refund (plata real, §2 del plan).
+   *
+   * Reusa el MISMO core que el refund admin (`executeRefundClaim`): branch CASH/gateway, intent persistido,
+   * `payment.refunded` en la tx — sin duplicar lógica y sin tocar el camino admin.
+   *
+   * Devuelve `{ skipped: true, motivo }` (no error) en los casos VÁLIDOS bajo at-least-once/reorden:
+   *   · no hay Payment reembolsable (el cobro no capturó, ya está REFUNDED, o el evento llegó antes que la
+   *     captura) → el consumer loguea y avanza el offset (NO relanza: no es una falla).
+   *   · ya existe un refund de ESTA cancelación (dedupKey duplicado) → la plata ya volvió, no-op.
+   */
+  async refundForBookingCancellation(
+    tripId: string,
+    reason: string,
+  ): Promise<
+    { refundId: string; paymentId: string; status: string } | { skipped: true; motivo: string }
+  > {
+    // tripId = bookingId (UUID opaco · §5.5). Mismo lookup que refund(): un cobro CAPTURED o ya parcialmente
+    // reembolsado. Si no hay → el cobro no capturó / ya se reembolsó / el evento se adelantó a la captura.
+    const payment = await this.prisma.read.payment.findFirst({
+      where: { tripId, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
+      orderBy: { capturedAt: 'desc' },
+    });
+    if (!payment) {
+      return {
+        skipped: true,
+        motivo: 'sin cobro reembolsable (no capturó, ya reembolsado, o evento antes de la captura)',
+      };
+    }
+
+    // Refund FULL: el saldo que quede sin reembolsar. El pasajero no viajó → se le devuelve TODO.
+    const remainingCents = payment.amountCents - payment.refundedCents;
+    if (remainingCents <= 0) {
+      // Ya totalmente reembolsado (un `booking.cancelled` previo ya lo cubrió, o un refund admin) → no-op.
+      return { skipped: true, motivo: 'el cobro ya está totalmente reembolsado' };
+    }
+
+    // FULL refund → el Payment queda REFUNDED (no quedará saldo). SIN gate L2, SIN ventana (system-initiated).
+    const newRefundedCents = payment.refundedCents + remainingCents;
+    assertPaymentTransition(payment.status, 'REFUNDED');
+
+    const claim: RefundClaim = {
+      amountCents: remainingCents,
+      reason,
+      requestedBy: SYSTEM_OPERATOR,
+      approvedBy: SYSTEM_OPERATOR,
+      // Barrera DURA: un `booking.cancelled` duplicado choca contra el UNIQUE → P2002 → no-op graceful.
+      dedupKey: deriveBookingCancellationRefundDedupKey(tripId),
+      newStatus: 'REFUNDED',
+      newRefundedCents,
+      isFullyRefunded: true,
+    };
+
+    try {
+      return await this.executeRefundClaim(payment, claim);
+    } catch (err) {
+      // IDEMPOTENCIA: el dedupKey ya existe (otra entrega del MISMO `booking.cancelled` ya creó el Refund) →
+      // P2002 → la plata YA volvió, no-op graceful. Cualquier otro error se relanza (transitorio → reintento).
+      if (isUniqueViolation(err, 'dedupKey')) {
+        this.logger.log(
+          `Refund de cancelación ya existente para el booking ${tripId} (dedupKey); no-op idempotente`,
+        );
+        return { skipped: true, motivo: 'refund de esta cancelación ya registrado (idempotente)' };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * CORE COMPARTIDO del refund (admin y system-initiated): branch TIPADO por método. El efectivo nunca pasó
+   * por el gateway → devolución local explícita; lo digital va por el reverso real del proveedor. NO valida
+   * (la validación —saldo, ventana, rol, monto— ya la hizo el caller y la cristalizó en el `RefundClaim`).
+   */
+  private executeRefundClaim(
+    payment: Payment,
+    claim: RefundClaim,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
     if (payment.method === 'CASH') {
       return this.refundCashLocally(payment, claim);
     }
@@ -1134,8 +1267,9 @@ export class PaymentsService {
           id: uuidv7(),
           paymentId: payment.id,
           amountCents: claim.amountCents,
-          requestedBy: claim.operator.userId,
-          approvedBy: claim.operator.userId,
+          requestedBy: claim.requestedBy,
+          approvedBy: claim.approvedBy,
+          dedupKey: claim.dedupKey,
           status: RefundStatus.COMPLETED,
           reason: claim.reason,
         },
@@ -1152,6 +1286,19 @@ export class PaymentsService {
     // Capacidad del adapter (ISP del puerto): sin `Refundable` NO hay riel por donde devolver la plata.
     // Error tipado explícito — JAMÁS marcar REFUNDED sin que el proveedor mueva el dinero (S5).
     if (!supportsRefund(this.gateway)) {
+      // ANTES de lanzar: dejar una TRAZA DURABLE (Refund REJECTED de marca) para que el pasajero no quede
+      // sin refund Y sin rastro en DB. Best-effort: si falla la marca NO tapa el throw original (el consumer
+      // igual clasifica unrecoverable, alerta y mide). Tres trazas: row REJECTED + métrica + log.
+      await this.persistUnrecoverableRefundMarker(
+        payment,
+        claim,
+        `${UNRECOVERABLE_REFUND_FAILURE_PREFIX}gateway-sin-reembolsos`,
+      ).catch((e) =>
+        this.logger.error(
+          { err: e },
+          'no se pudo persistir el marcador durable del refund unrecoverable (gateway sin reembolsos)',
+        ),
+      );
       throw new InvalidStateError(
         'El gateway de pagos activo no soporta reembolsos digitales; no se puede devolver la plata por el riel',
       );
@@ -1159,6 +1306,16 @@ export class PaymentsService {
     // Referencia del cobro en el riel (uid del proveedor): sin ella el reverso no se puede correlacionar.
     const railRef = payment.externalRef ?? payment.externalUid;
     if (!railRef) {
+      await this.persistUnrecoverableRefundMarker(
+        payment,
+        claim,
+        `${UNRECOVERABLE_REFUND_FAILURE_PREFIX}cobro-sin-railRef`,
+      ).catch((e) =>
+        this.logger.error(
+          { err: e },
+          'no se pudo persistir el marcador durable del refund unrecoverable (cobro sin railRef)',
+        ),
+      );
       throw new InvalidStateError(
         'El cobro no tiene referencia del riel; no se puede reembolsar por el gateway',
       );
@@ -1173,8 +1330,9 @@ export class PaymentsService {
           id: uuidv7(),
           paymentId: payment.id,
           amountCents: claim.amountCents,
-          requestedBy: claim.operator.userId,
-          approvedBy: claim.operator.userId,
+          requestedBy: claim.requestedBy,
+          approvedBy: claim.approvedBy,
+          dedupKey: claim.dedupKey,
           status: RefundStatus.PENDING,
           reason: claim.reason,
         },
@@ -1260,10 +1418,51 @@ export class PaymentsService {
       },
     });
     if (claimed.count === 0) {
-      throw new InvalidStateError(
-        'El cobro cambió de estado o saldo por otra operación concurrente',
+      // CAS miss (optimistic-lock): otro refund concurrente movió el saldo entre el read y este write.
+      // Es TRANSITORIO (un reintento con el estado fresco tendría éxito), NO una violación PERMANENTE de
+      // la máquina de estados → ConcurrencyConflictError, para que el clasificador lo trate como `transient`
+      // (Kafka reintenta) y NO dispare la falsa alerta de backstop irrecuperable de InvalidStateError.
+      throw new ConcurrencyConflictError(
+        'El cobro cambió de saldo por una operación concurrente (CAS); reintentable',
       );
     }
+  }
+
+  /**
+   * MARCADOR DURABLE de un refund system-initiated IRRECUPERABLE (FIX 1 · invariante sagrado). El refund
+   * automático abortó ANTES de mover plata (gateway sin reembolsos / cobro sin railRef) → NO existiría
+   * ningún Refund row → sin esto el pasajero quedaría sin refund Y sin traza en DB (solo un log que nadie
+   * grepea). Persistimos un Refund REJECTED de marca con `failureReason` estructurado (`unrecoverable:<causa>`):
+   *
+   *  - status REJECTED ⇒ NO participa del UNIQUE PARCIAL (índice WHERE status <> REJECTED) → SIEMPRE insertable,
+   *    incluso en un re-delivery/reintento del mismo `booking.cancelled` (jamás choca P2002, no envenena la key).
+   *  - lleva el `dedupKey` system-initiated ⇒ el admin lo CORRELACIONA al booking para disparar el refund admin
+   *    manual sobre el Payment CAPTURED (no hay re-conductor automático: el backstop es humano + alerta).
+   *  - NO reclama/reserva el Payment (no hay movimiento de plata, es un marcador de FALLO) → el Payment queda
+   *    CAPTURED, sigue reembolsable por un admin a mano (que es EXACTAMENTE el backstop). Cero doble-refund.
+   *
+   * El admin lo VE en cualquier listado de Refunds filtrado por status=REJECTED (el `failureReason` con prefijo
+   * `unrecoverable:` lo distingue de un rechazo del proveedor). Best-effort: el caller hace `.catch(log)` y NO
+   * deja que un fallo de la marca tape el throw original.
+   */
+  private async persistUnrecoverableRefundMarker(
+    payment: Pick<Payment, 'id'>,
+    claim: RefundClaim,
+    failureReason: string,
+  ): Promise<void> {
+    await this.prisma.write.refund.create({
+      data: {
+        id: uuidv7(),
+        paymentId: payment.id,
+        amountCents: claim.amountCents,
+        requestedBy: claim.requestedBy,
+        approvedBy: claim.approvedBy,
+        status: RefundStatus.REJECTED,
+        reason: claim.reason,
+        dedupKey: claim.dedupKey,
+        failureReason,
+      },
+    });
   }
 
   /**
@@ -1333,17 +1532,30 @@ export class PaymentsService {
    * base sobre la fila ya lockeada por este UPDATE; el row-lock se sostiene hasta el commit de la tx, así
    * que el valor que devuelve es el saldo REAL post-compensación y el segundo update (status/refundedAt
    * derivados de ese saldo) no puede ser interferido por otra transacción.
+   *
+   * BACKSTOP DEL INVARIANTE SAGRADO (riel COMÚN de rechazo · plata real): este es el ÚNICO punto donde un
+   * Refund pasa a REJECTED, y lo alcanzan AMBOS rieles — el SÍNCRONO (refundViaGateway, rechazo inmediato del
+   * proveedor) y el ASÍNCRONO (applyRefundWebhookResult, DECLINED/EXPIRED por callback días después). Por eso la
+   * métrica scrapeable del backstop (`payment_refund_backstop_total{reason="rejected"}`, sobre la que dispara la
+   * alerta de ops) se emite ACÁ y no en el consumer Kafka: si solo viviera en el consumer, el riel async la
+   * evadiría (el consumer ya commiteó el offset al ver PENDING=éxito) → un refund system-initiated REJECTED por
+   * callback quedaría SIN métrica/alerta/rastro accionable. Se emite SOLO para refunds SYSTEM-INITIATED (los
+   * automáticos por `booking.cancelled`, sin operador humano monitoreando) — distinguidos por el prefijo
+   * `BOOKING_CANCEL_REFUND_DEDUP_PREFIX` del `dedupKey`. Un refund ADMIN rechazado (dedupKey NULL / otro prefijo)
+   * el operador YA lo ve en su UI → no necesita esta señal de backstop. Se emite DESPUÉS del commit y SOLO si el
+   * CAS ganó (esta llamada hizo la transición PENDING→REJECTED) → exactamente una vez por refund REJECTED, sin
+   * doble conteo con el consumer (al que se le quitó la emisión de `'rejected'`).
    */
   private async rejectRefundAndCompensate(
     refundId: string,
     failureReason: string,
   ): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
+    const outcome = await this.prisma.write.$transaction(async (tx) => {
       const claimed = await tx.refund.updateMany({
         where: { id: refundId, status: RefundStatus.PENDING },
         data: { status: RefundStatus.REJECTED, failureReason },
       });
-      if (claimed.count === 0) return false; // ya resuelto → idempotente.
+      if (claimed.count === 0) return { applied: false, systemInitiated: false }; // ya resuelto → idempotente.
       const refund = await tx.refund.findUniqueOrThrow({ where: { id: refundId } });
       // Decremento ATÓMICO en la DB (no read-compute-write): toma el row-lock del Payment y devuelve la
       // fila con el saldo real ya restado, aun si otra reserva commiteó después de nuestro claim.
@@ -1363,8 +1575,20 @@ export class PaymentsService {
       this.logger.warn(
         `Reverso ${refundId} RECHAZADO por el proveedor (${failureReason}); reserva compensada en el pago ${restored.id}`,
       );
-      return true;
+      // SYSTEM-INITIATED ⇔ el dedupKey lleva el prefijo del refund automático por booking.cancelled (cero strings
+      // mágicos). Solo esos caen al backstop manual sin humano monitoreando → solo esos emiten la métrica.
+      const systemInitiated =
+        refund.dedupKey?.startsWith(BOOKING_CANCEL_REFUND_DEDUP_PREFIX) ?? false;
+      return { applied: true, systemInitiated };
     });
+
+    // DESPUÉS del commit (el rechazo + compensación ya son durables) y SOLO si ESTA llamada hizo la transición
+    // (CAS ganado): emitir la métrica del backstop para refunds system-initiated. Cubre el riel SÍNCRONO y el
+    // ASÍNCRONO por un único punto, exactamente una vez, sin doble conteo con el consumer Kafka.
+    if (outcome.applied && outcome.systemInitiated) {
+      this.metrics?.incRefundBackstop('rejected');
+    }
+    return outcome.applied;
   }
 
   /**

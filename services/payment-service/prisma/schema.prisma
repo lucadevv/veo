@@ -237,6 +237,20 @@ model Refund {
   externalRefundId String? @map("external_refund_id")
   /// Motivo del RECHAZO del proveedor (status=REJECTED). Distinto de `reason` (motivo del pedido).
   failureReason String?    @map("failure_reason")
+  /// F3c-payment · Clave de idempotencia DETERMINISTA de un refund SYSTEM-INITIATED (refund automático por
+  /// `booking.cancelled`). Derivada del bookingId (`booking-cancel-refund:{bookingId}`), espeja el patrón de
+  /// `TipAddition.dedupKey` y `Payment.dedupKey` (cobro). NULL en los refunds ADMIN discrecionales (esos llevan
+  /// operador humano y su idempotencia es el CAS optimista del Payment).
+  ///
+  /// ⚠️ UNICIDAD = ÍNDICE PARCIAL en SQL (Prisma NO lo modela): el UNIQUE corre SOLO sobre los refunds ACTIVOS
+  /// (status <> REJECTED). Un refund REJECTED por el proveedor NO participa del UNIQUE → el reintento legítimo
+  /// del MISMO `booking.cancelled` puede crear un Refund NUEVO (la plata se devuelve aunque el 1er reverso
+  /// fallara), mientras un PENDING/COMPLETED SÍ bloquea (no doble-refund). Un `@unique` GLOBAL acá envenenaría
+  /// la key: tras un SOLO rechazo del proveedor el reintento chocaría P2002 → `skipped` → el pasajero NUNCA
+  /// recibiría su plata (refund-starvation, viola ADR-014 §6 "refund OBLIGATORIO"). El índice parcial vive en
+  /// la migración `20260622000000_refund_dedup_key` (`WHERE status <> 'REJECTED' AND dedup_key IS NOT NULL`) —
+  /// NO lo "corrijas" a `@unique` ni dejes que un `prisma migrate` lo regenere como total: rompés el reintento.
+  dedupKey      String?    @map("dedup_key")
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -244,6 +258,10 @@ model Refund {
   @@index([status])
   /// Correlación del callback de reembolso del proveedor (uid → Refund).
   @@index([externalRefundId])
+  /// El UNIQUE de `dedupKey` es PARCIAL (status <> REJECTED) y vive SOLO en SQL (ver comentario del campo); acá
+  /// un índice NO-único para correlacionar el dedupKey al booking en el backstop admin de refunds REJECTED
+  /// (marcador durable + métrica + alerta; el cron re-conductor automático fue ELIMINADO por frágil).
+  @@index([dedupKey])
   @@map("refunds")
   @@schema("payment")
 }

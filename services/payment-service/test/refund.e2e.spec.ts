@@ -20,16 +20,22 @@ import {
 } from '@veo/database/testing';
 import {
   ExternalServiceError,
+  ForbiddenError,
   InvalidStateError,
   NotFoundError,
   UnprocessableEntityError,
   uuidv7,
 } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
+import { BookingCancelledRazon } from '@veo/events';
 import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaClient, type PaymentMethod } from '../src/generated/prisma';
-import { PaymentsService } from '../src/payments/payments.service';
+import {
+  PaymentsService,
+  UNRECOVERABLE_REFUND_FAILURE_PREFIX,
+} from '../src/payments/payments.service';
+import { deriveBookingCancellationRefundDedupKey } from '../src/payments/payment.policy';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type {
   PaymentGateway,
@@ -55,6 +61,11 @@ const noPromos = {
 const L2: AuthenticatedUser = {
   userId: 'op-L2',
   roles: [AdminRole.SUPPORT_L2],
+} as unknown as AuthenticatedUser;
+/** Operador L1 (soporte básico, SIN rol L2): puede refundar ≤S/30, NO los montos altos (gate BR-P06). */
+const L1: AuthenticatedUser = {
+  userId: 'op-L1',
+  roles: [AdminRole.SUPPORT_L1],
 } as unknown as AuthenticatedUser;
 
 function makeConfig(): ConfigService {
@@ -105,27 +116,34 @@ function makeService(
   return { service, calls };
 }
 
-/** Inserta un Payment CAPTURED reembolsable (capturedAt = ahora → dentro de la ventana). */
+/** Inserta un Payment CAPTURED reembolsable (capturedAt = ahora → dentro de la ventana, salvo override). */
 async function seedCaptured(
-  over: { passengerId?: string | null; method?: PaymentMethod; externalRef?: string | null } = {},
+  over: {
+    passengerId?: string | null;
+    method?: PaymentMethod;
+    externalRef?: string | null;
+    capturedAt?: Date;
+    amountCents?: number;
+  } = {},
 ): Promise<{ id: string; tripId: string }> {
   const id = uuidv7();
   const tripId = uuidv7();
+  const amountCents = over.amountCents ?? 2000;
   await prisma.payment.create({
     data: {
       id,
       tripId,
       passengerId: over.passengerId === undefined ? PAX : over.passengerId,
       dedupKey: `trip-completed:${tripId}`,
-      amountCents: 2000,
-      grossCents: 2000,
+      amountCents,
+      grossCents: amountCents,
       commissionCents: 400,
       feeCents: 0,
       refundedCents: 0,
       method: over.method ?? 'YAPE',
       externalRef: over.externalRef === undefined ? RAIL_REF : over.externalRef,
       status: 'CAPTURED',
-      capturedAt: new Date(),
+      capturedAt: over.capturedAt ?? new Date(),
     },
   });
   return { id, tripId };
@@ -359,20 +377,37 @@ describe('PaymentsService.refund · rechazo y fallas del proveedor', () => {
     expect(await refundedEvents()).toHaveLength(0);
   });
 
-  it('gateway SIN capacidad Refundable → error tipado, sin reserva ni filas (digital nunca se marca local)', async () => {
+  it('gateway SIN capacidad Refundable → error tipado + MARCADOR DURABLE REJECTED (sin reserva: digital nunca se marca local)', async () => {
     const { service } = makeService(); // sin refund()
     const { id, tripId } = await seedCaptured();
 
+    // Sigue lanzando el InvalidStateError tipado (no se inventa un éxito).
     await expect(service.refund(tripId, 500, 'x', L2)).rejects.toBeInstanceOf(InvalidStateError);
 
-    expect(await prisma.refund.findMany({})).toHaveLength(0);
-    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('CAPTURED');
+    // FIX 1 (invariante sagrado): aunque no haya riel por donde devolver, queda una TRAZA DURABLE — un
+    // Refund REJECTED de marca con failureReason `unrecoverable:` que el admin VE en su lista de REJECTED.
+    // NO es una reserva (no movió plata) → NO incrementa refundedCents y el Payment queda CAPTURED
+    // (reembolsable a mano = el backstop). Una sola fila marcador, sin reserva.
+    const refunds = await prisma.refund.findMany({});
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({ status: 'REJECTED', amountCents: 500 });
+    expect(refunds[0]?.failureReason).toContain(UNRECOVERABLE_REFUND_FAILURE_PREFIX);
+    expect(refunds[0]?.failureReason).toContain('gateway-sin-reembolsos');
+    const p = await prisma.payment.findUnique({ where: { id } });
+    expect(p?.status).toBe('CAPTURED');
+    expect(p?.refundedCents).toBe(0);
   });
 
-  it('cobro digital SIN referencia del riel → error tipado (no hay cómo correlacionar el reverso)', async () => {
+  it('cobro digital SIN referencia del riel → error tipado + MARCADOR DURABLE REJECTED (no hay cómo correlacionar el reverso)', async () => {
     const { service } = makeService(async () => ({ status: 'ACCEPTED' }));
     const { tripId } = await seedCaptured({ externalRef: null });
     await expect(service.refund(tripId, 500, 'x', L2)).rejects.toBeInstanceOf(InvalidStateError);
+
+    // FIX 1: también deja traza durable (failureReason `unrecoverable:cobro-sin-railRef`).
+    const refunds = await prisma.refund.findMany({});
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({ status: 'REJECTED' });
+    expect(refunds[0]?.failureReason).toContain('cobro-sin-railRef');
   });
 });
 
@@ -432,5 +467,179 @@ describe('PaymentsService.refund · CASH (devolución local, fuera del riel)', (
     expect(calls).toHaveLength(0); // el efectivo nunca pasó por el riel
     expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('REFUNDED');
     expect(await refundedEvents()).toHaveLength(1);
+  });
+});
+
+/**
+ * F3c FIX 1 · ÍNDICE UNIQUE PARCIAL del `Refund.dedupKey` (status <> REJECTED) verificado contra POSTGRES REAL
+ * (testcontainers — el partial index NO se puede probar de verdad con un fake en memoria). LOS DOS invariantes
+ * de la idempotencia financiera A LA VEZ:
+ *   (a) refund REJECTED por el proveedor → el reintento del MISMO booking.cancelled CREA un Refund NUEVO y el
+ *       pasajero RECIBE su plata (la barrera anti-doble-refund NO se volvió barrera anti-refund: refund-starvation
+ *       cerrada). Antes, con `@unique` global, el reintento chocaba P2002 → skipped → plata NUNCA devuelta.
+ *   (b) doble-refund concurrente (dos refunds VIVOS, misma dedupKey, ambos PENDING/COMPLETED) → UNO gana, el otro
+ *       choca el UNIQUE parcial → skip. NO doble salida de plata.
+ */
+describe('PaymentsService · FIX 1 · UNIQUE PARCIAL del dedupKey (Postgres real, ambos invariantes)', () => {
+  const REASON = BookingCancelledRazon.ASIENTO_LLENO;
+
+  it('(a) REJECTED → el reintento del MISMO booking crea un Refund NUEVO y el pasajero RECIBE su plata (CASH)', async () => {
+    // CASH: el camino que NO toca el gateway (devolución local). Para forzar el 1er refund a REJECTED sin
+    // proveedor, lo inyectamos a mano (estado terminal-de-fallo) con la dedupKey system-initiated; luego el
+    // reintento legítimo re-deriva la MISMA key y, con el índice PARCIAL, NO choca → crea un Refund nuevo.
+    const { service } = makeService();
+    const { id, tripId } = await seedCaptured({ method: 'CASH', externalRef: null });
+    const dedupKey = deriveBookingCancellationRefundDedupKey(tripId);
+
+    // 1er intento: el proveedor rechazó → Refund REJECTED con la dedupKey (la plata NO volvió, el Payment sigue
+    // CAPTURED/reembolsable). Simula el resultado de rejectRefundAndCompensate por el path webhook.
+    await prisma.refund.create({
+      data: {
+        id: uuidv7(),
+        paymentId: id,
+        amountCents: 2000,
+        requestedBy: 'system',
+        approvedBy: 'system',
+        dedupKey,
+        status: 'REJECTED',
+        reason: REASON,
+        failureReason: 'reverse_declined',
+      },
+    });
+
+    // Reintento del MISMO booking.cancelled: re-deriva la MISMA dedupKey. Con el UNIQUE PARCIAL el REJECTED no
+    // bloquea → se crea un Refund NUEVO y (CASH local) sale COMPLETED → la plata SÍ vuelve.
+    const res = await service.refundForBookingCancellation(tripId, REASON);
+    expect('skipped' in res).toBe(false);
+    if ('skipped' in res) throw new Error('el reintento NO debía saltarse: el pasajero quedaría sin plata');
+    expect(res.status).toBe('COMPLETED');
+
+    // Quedan 2 Refunds con la MISMA dedupKey: el REJECTED viejo + el COMPLETED nuevo (coexisten porque el UNIQUE
+    // es parcial). El pasajero recibió su plata UNA vez (el nuevo) y el Payment quedó REFUNDED.
+    const refunds = await prisma.refund.findMany({ where: { dedupKey }, orderBy: { status: 'asc' } });
+    expect(refunds.map((r) => r.status).sort()).toEqual(['COMPLETED', 'REJECTED']);
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('REFUNDED');
+    const [payload] = await refundedEvents();
+    expect(payload).toMatchObject({ paymentId: id, amountCents: 2000 });
+  });
+
+  it('(b) doble-refund concurrente (dos VIVOS, misma key) → UNO gana, el otro choca el UNIQUE parcial → no doble plata', async () => {
+    // Inserción DIRECTA y concurrente de dos Refunds con la MISMA dedupKey y status VIVO (PENDING): el índice
+    // parcial DEBE dejar pasar solo a uno. Esto prueba el invariante anti-doble-refund a nivel de la DB real.
+    const { id, tripId } = await seedCaptured();
+    const dedupKey = deriveBookingCancellationRefundDedupKey(tripId);
+    const mkRefund = (status: 'PENDING' | 'COMPLETED') =>
+      prisma.refund.create({
+        data: {
+          id: uuidv7(),
+          paymentId: id,
+          amountCents: 2000,
+          requestedBy: 'system',
+          approvedBy: 'system',
+          dedupKey,
+          status,
+          reason: REASON,
+        },
+      });
+
+    const [first, second] = await Promise.allSettled([mkRefund('PENDING'), mkRefund('PENDING')]);
+    const fulfilled = [first, second].filter((r) => r.status === 'fulfilled');
+    const rejected = [first, second].filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1); // exactamente UN refund vivo con esa key
+    expect(rejected).toHaveLength(1); // el otro chocó el UNIQUE parcial (P2002)
+
+    const vivos = await prisma.refund.count({ where: { dedupKey, status: { not: 'REJECTED' } } });
+    expect(vivos).toBe(1); // INVARIANTE: nunca dos refunds VIVOS con la misma key (no doble plata)
+
+    // Y un COMPLETED tampoco admite un 2do vivo (la barrera vale para todo estado no-REJECTED).
+    await expect(mkRefund('COMPLETED')).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  it('(c) coexisten MÚLTIPLES REJECTED con la misma key (reintentos sucesivos del proveedor) sin chocar', async () => {
+    // Cada reintento fallido deja un Refund REJECTED con la MISMA key; el índice parcial los EXCLUYE a todos,
+    // así que conviven (es lo que el re-conductor cuenta para acotar los reintentos). NINGÚN choque P2002.
+    const { id, tripId } = await seedCaptured({ method: 'CASH', externalRef: null });
+    const dedupKey = deriveBookingCancellationRefundDedupKey(tripId);
+    for (let i = 0; i < 3; i++) {
+      await prisma.refund.create({
+        data: {
+          id: uuidv7(),
+          paymentId: id,
+          amountCents: 2000,
+          requestedBy: 'system',
+          approvedBy: 'system',
+          dedupKey,
+          status: 'REJECTED',
+          reason: REASON,
+          failureReason: 'reverse_declined',
+        },
+      });
+    }
+    expect(await prisma.refund.count({ where: { dedupKey, status: 'REJECTED' } })).toBe(3);
+  });
+});
+
+/**
+ * F3c FIX 3 · BLINDAJE de regresión del REFUND ADMIN (BR-P06). El refactor extrajo `executeRefundClaim` y
+ * reshapeó `RefundClaim` (operator → {requestedBy, approvedBy, dedupKey}); este spec VERIFICA (no asume) que el
+ * camino admin CONSERVA sus gates: gate L2 (>S/30 exige rol L2), ventana de 7 días, RBAC — y que el
+ * system-initiated NO los tiene (diferencia DELIBERADA: refund OBLIGATORIO, sin discrecionalidad que limitar).
+ */
+describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión BR-P06)', () => {
+  it('gate L2: admin SIN rol L2 refundando >S/30 → ForbiddenError, sin tocar el proveedor', async () => {
+    const { service, calls } = makeService(async () => ({ status: 'ACCEPTED' }));
+    const { id, tripId } = await seedCaptured({ amountCents: 5000 }); // S/50, > umbral S/30
+
+    await expect(service.refund(tripId, 4000, 'x', L1)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(calls).toHaveLength(0); // NO se intentó el reverso
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('CAPTURED');
+    expect(await prisma.refund.findMany({})).toHaveLength(0);
+  });
+
+  it('gate L2: admin CON rol L2 refundando >S/30 → procede (el gate solo limita a L1)', async () => {
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { tripId } = await seedCaptured({ amountCents: 5000 });
+    const res = await service.refund(tripId, 4000, 'x', L2);
+    expect(res.status).toBe('COMPLETED');
+  });
+
+  it('gate L2: admin L1 refundando ≤S/30 → procede (el monto bajo NO exige L2)', async () => {
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { tripId } = await seedCaptured({ amountCents: 5000 });
+    const res = await service.refund(tripId, 3000, 'x', L1); // exactamente S/30, no supera el umbral
+    expect(res.status).toBe('COMPLETED');
+  });
+
+  it('ventana 7d: cobro capturado hace 8 días → InvalidStateError, sin proveedor ni filas', async () => {
+    const { service, calls } = makeService(async () => ({ status: 'ACCEPTED' }));
+    const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000);
+    const { id, tripId } = await seedCaptured({ capturedAt: eightDaysAgo });
+
+    await expect(service.refund(tripId, 500, 'x', L2)).rejects.toBeInstanceOf(InvalidStateError);
+    expect(calls).toHaveLength(0);
+    expect(await prisma.refund.findMany({})).toHaveLength(0);
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('CAPTURED');
+  });
+
+  it('ventana 7d: cobro capturado hace 6 días → procede (dentro de la ventana)', async () => {
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const sixDaysAgo = new Date(Date.now() - 6 * 86_400_000);
+    const { tripId } = await seedCaptured({ capturedAt: sixDaysAgo });
+    const res = await service.refund(tripId, 500, 'x', L2);
+    expect(res.status).toBe('COMPLETED');
+  });
+
+  it('DIFERENCIA DELIBERADA: el system-initiated NO tiene gate L2 ni ventana (refund OBLIGATORIO)', async () => {
+    // Monto alto (>S/30) Y fuera de la ventana de 7 días: para el ADMIN serían DOS rechazos. El system-initiated
+    // (refundForBookingCancellation) los IGNORA — el pasajero pagó y no viajó → se le devuelve SIEMPRE.
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev-sys' }));
+    const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000);
+    const { id, tripId } = await seedCaptured({ amountCents: 8000, capturedAt: tenDaysAgo });
+
+    const res = await service.refundForBookingCancellation(tripId, BookingCancelledRazon.ASIENTO_LLENO);
+    expect('skipped' in res).toBe(false);
+    if ('skipped' in res) throw new Error('el refund OBLIGATORIO no debía saltarse');
+    expect(res.status).toBe('COMPLETED');
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('REFUNDED');
   });
 });

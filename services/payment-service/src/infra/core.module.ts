@@ -19,6 +19,7 @@ import { CLOCK, SystemClock } from '@veo/utils';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
+import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { Env } from '../config/env.schema';
 
 const internalSecretProvider: Provider = {
@@ -48,6 +49,7 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
     { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
     { provide: CLOCK, useValue: new SystemClock() },
+    PaymentMetrics,
     InternalIdentityGuard,
     AudienceGuard,
     RolesGuard,
@@ -59,6 +61,7 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
     INTERNAL_IDENTITY_SECRET,
     INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
     CLOCK,
+    PaymentMetrics,
     InternalIdentityGuard,
     AudienceGuard,
     RolesGuard,

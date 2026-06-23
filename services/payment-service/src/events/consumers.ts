@@ -9,26 +9,52 @@
  * = UN consumer con TODOS sus eventos en `handlers()`. El group de erasure es otro consumer
  * (user-deleted.consumer).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   EVENT_SCHEMAS,
   isPermanentDataError,
   isUuid,
+  processEventOnce,
+  type EventDedupOptions,
   type EventEnvelope,
   type EventHandler,
 } from '@veo/events';
+import { BookingCancelledRazon } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
+import type { Redis } from '@veo/redis';
 import { PaymentsService } from '../payments/payments.service';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import { PayoutsService } from '../payouts/payouts.service';
 import { IncentivesService } from '../incentives/incentives.service';
 import { CreditService } from '../credit/credit.service';
+import { REDIS } from '../infra/redis';
+import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { Env } from '../config/env.schema';
+import { classifyRefundError } from './refund-event-classify';
 
 /** clientId kafkajs de este servicio (también su groupId principal de consumo). */
 const KAFKA_CLIENT_ID = 'payment-service';
 const GROUP_ID = 'payment-service';
+
+/**
+ * Namespace Redis de dedup del consumer PRINCIPAL (group `payment-service`). Distinto del de la erasure
+ * (`veo:payment:evt:`, otro groupId) — el prefijo aísla por consumer así un eventId procesado por uno NO
+ * cuenta como procesado por el otro (@veo/events/dedup). Es la barrera BARATA del refund automático (§2):
+ * marca DESPUÉS del éxito (si el handler falla, no se escribe → kafkajs reintenta). La barrera DURA es el
+ * `Refund.dedupKey` UNIQUE de `refundForBookingCancellation`.
+ */
+const PAYMENT_MAIN_EVENT_DEDUP: EventDedupOptions = { keyPrefix: 'veo:payment:main-evt:' };
+
+/**
+ * Razones de `booking.cancelled` que SÍ disparan refund (hubo CAPTURA · ADR-014 §6). Set TIPADO derivado del
+ * enum compartido (cero strings mágicos): el cobro capturó pero el pasajero no viajó → se devuelve. Las otras
+ * razones (COBRO_RECHAZADO/COBRO_FALLIDO: charge-on-approval sin hold, nunca se capturó nada) NO refundan.
+ */
+const REFUNDABLE_CANCELLATION_RAZONES: ReadonlySet<BookingCancelledRazon> = new Set([
+  BookingCancelledRazon.ASIENTO_LLENO,
+  BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
+]);
 
 @Injectable()
 export class PaymentEventConsumers extends KafkaConsumerBootstrap {
@@ -37,6 +63,8 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
     private readonly payouts: PayoutsService,
     private readonly incentives: IncentivesService,
     private readonly credit: CreditService,
+    @Inject(REDIS) private readonly redis: Redis,
+    private readonly metrics: PaymentMetrics,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -46,13 +74,18 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
     });
   }
 
-  /** TODOS los eventos del group, en un solo record (único punto de registro). */
+  /**
+   * TODOS los eventos del group, en un solo record (único punto de registro · regla de oro). `booking.cancelled`
+   * vive en el MISMO group `payment-service`: registrarlo acá hace que el bootstrap suscriba el topic `booking`
+   * (nEvent corta antes del punto) — sin un consumer/group nuevo.
+   */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
       'trip.completed': (env) => this.onTripCompleted(env),
       'trip.cancelled': (env) => this.onTripCancelled(env),
       'driver.flagged': (env) => this.onDriverFlagged(env),
       'referral.rewarded': (env) => this.onReferralRewarded(env),
+      'booking.cancelled': (env) => this.onBookingCancelled(env),
     };
   }
 
@@ -217,6 +250,133 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       }
       this.logger.error({ err }, `Falló acreditar el crédito de referido (eventId=${env.eventId})`);
       throw err; // transitorio → Kafka reintenta; creditFromReferral es idempotente.
+    }
+  }
+
+  /**
+   * `booking.cancelled` → REFUND AUTOMÁTICO system-initiated del carpooling (F3c-payment · ADR-014 §6 camino
+   * infeliz · §9). El ÚLTIMO eslabón: el cobro CAPTURÓ pero el booking se canceló (asiento ya lleno / oferta no
+   * reservable) → el pasajero no viajó → se le devuelve TODO, sin operador, automáticamente.
+   *
+   * Este consumer cubre SOLO la cancelación de un BOOKING individual (forma B del schema: trae `bookingId` +
+   * `razon`). La cancelación de la OFERTA (forma A: `publishedTripId`/`driverId`, fan-out de refunds a las
+   * reservas activas) es OTRA fase y NO se procesa acá — sin `bookingId`/`razon` el handler retorna (no-op).
+   *
+   * FILTRO TIPADO por `razon` (cero strings mágicos): SOLO ASIENTO_LLENO y OFERTA_NO_DISPONIBLE refundan (hubo
+   * captura). COBRO_RECHAZADO/COBRO_FALLIDO (charge-on-approval sin hold → nunca capturó) y cualquier razón
+   * ausente/desconocida → return (no hay nada que devolver).
+   *
+   * IDEMPOTENCIA DOBLE (§2 · plata real, NO doble-refund):
+   *  1. BARATA — `processEventOnce(eventId)`: un re-delivery exacto del MISMO evento ni siquiera entra al refund.
+   *     Marca DESPUÉS del éxito (si falla, no se escribe → kafkajs reintenta sin perder la señal).
+   *  2. DURA — `Refund.dedupKey` UNIQUE (en refundForBookingCancellation): aunque el dedup expirara o un evento
+   *     REORDENADO esquivara la marca, el 2do refund choca contra el UNIQUE → no-op graceful. Una sola plata.
+   *
+   * Payment no encontrado / ya REFUNDED → `{ skipped }` (caso VÁLIDO bajo at-least-once/reorden) → log + return,
+   * NUNCA error (no relanzar: no es una falla).
+   *
+   * CLASIFICACIÓN DEL ERROR (refund-event-classify · cierra el loop de redelivery ∞ · F3c FIX 3): el catch
+   * distingue 4 clases por TIPO/code (cero strings mágicos) para que NINGÚN camino quede en loop ∞ NI sin refund.
+   * Se ELIMINÓ el cron re-conductor automático (loopeaba / mataba de hambre): TODO refund REJECTED persistente
+   * converge a UN solo camino → marcador durable (la fila Refund REJECTED) + métrica + ALERTA → refund admin manual:
+   *  - permanent_data (P2023 UUID inválido…)        → log + return (veneno, no relanzar).
+   *  - rejected_settled (gateway rechazó síncrono;   → log warn + return: el Refund ya quedó REJECTED durable en DB
+   *    UnprocessableEntityError, Refund REJECTED ya     (rastro que el admin VE); sin reintento automático → refund
+   *    persistido)                                      admin manual. La métrica backstop{reason="rejected"} la emite
+   *                                                     `rejectRefundAndCompensate` (riel COMÚN síncrono+async), NO acá.
+   *  - unrecoverable_no_refund (InvalidStateError:   → métrica backstop{reason="unrecoverable"} + ALERTA + return: el
+   *    abortó ANTES de llamar al riel, ya dejó           marcador durable (Refund REJECTED de marca) ya existe; reintentar
+   *    un Refund REJECTED de marca)                      loopearía ∞ → refund admin manual.
+   *  - transient (DB caída/red/timeout/5xx + CAS)    → relanza (Kafka reintenta; refund idempotente por dedupKey).
+   */
+  private async onBookingCancelled(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['booking.cancelled'].safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`booking.cancelled con payload inválido (eventId=${env.eventId}); descartado`);
+      return;
+    }
+    const { bookingId, razon } = parsed.data;
+
+    // Forma A (cancelación de OFERTA): sin bookingId/razon → no es asunto de este refund individual. No-op.
+    if (!bookingId || !razon) return;
+
+    // Filtro TIPADO: solo las cancelaciones POST-captura refundan. El resto (sin captura) → no-op.
+    if (!REFUNDABLE_CANCELLATION_RAZONES.has(razon)) return;
+
+    // POISON: bookingId va al lookup por `trip_id @db.Uuid` (tripId = bookingId · §5.5). Un id malformado →
+    // P2023 → loop infinito si se relanza. Saltamos sin reintento (mismo criterio que trip.completed/cancelled).
+    if (!isUuid(bookingId)) {
+      this.logger.error(
+        `POISON booking.cancelled: bookingId no-UUID "${String(bookingId)}" (eventId=${env.eventId}); descartado sin reintento`,
+      );
+      return;
+    }
+
+    try {
+      // Barrera BARATA: un re-delivery EXACTO del mismo evento no re-procesa. La barrera DURA (dedupKey UNIQUE)
+      // vive dentro de refundForBookingCancellation y cubre el reorden/expiración del dedup.
+      await processEventOnce(this.redis, PAYMENT_MAIN_EVENT_DEDUP, env.eventId, async () => {
+        const res = await this.payments.refundForBookingCancellation(bookingId, razon);
+        if ('skipped' in res) {
+          // Caso VÁLIDO bajo at-least-once/reorden (cobro no capturó, ya refunded, o refund ya existente).
+          this.logger.log(`Refund de cancelación del booking ${bookingId} omitido: ${res.motivo}`);
+          return;
+        }
+        this.logger.log(
+          `Refund automático del booking ${bookingId} (${razon}): refund ${res.refundId} estado ${res.status}`,
+        );
+      });
+    } catch (err) {
+      // Clasificación TIPADA (cero strings mágicos · refund-event-classify): NINGÚN camino queda en loop ∞
+      // NI sin refund. El loop de redelivery se cerraba acá: un rechazo SÍNCRONO del gateway sube como
+      // UnprocessableEntityError (NO permanent-data) → antes se RE-LANZABA → re-entrega ∞ del MISMO evento.
+      const action = classifyRefundError(err);
+      switch (action) {
+        case 'permanent_data':
+          // Veneno de datos (P2023 UUID inválido, etc.): el payload NUNCA procesa → log + return (no relanzar).
+          this.logger.error(
+            { err },
+            `POISON booking.cancelled: error permanente al refundar el booking ${bookingId} (eventId=${env.eventId}); descartado sin reintento`,
+          );
+          return;
+        case 'rejected_settled':
+          // El gateway rechazó el reverso de forma SÍNCRONA y `rejectRefundAndCompensate` ya dejó el Refund
+          // REJECTED PERSISTIDO en DB (el rastro durable que el admin VE en el listado de refunds fallidos).
+          // NO hay reintento automático (se eliminó el cron re-conductor: loopeaba/se moría de hambre). El
+          // backstop converge a UN solo camino: marca durable (la fila REJECTED) + métrica + alerta → refund
+          // admin manual sobre el Payment CAPTURED. El consumer ABSORBE: NO relanzar (sin redelivery Kafka ∞).
+          //
+          // La métrica `payment_refund_backstop_total{reason="rejected"}` la emite `rejectRefundAndCompensate`
+          // (riel COMÚN de transición a REJECTED), NO acá: así cubre TAMBIÉN el rechazo ASÍNCRONO por callback
+          // (applyRefundWebhookResult), que NUNCA pasa por este catch (el consumer ya commiteó el offset al ver
+          // PENDING). Emitirla acá Y allá DOBLE-CONTARÍA el riel síncrono → se quita de acá. (El `'unrecoverable'`
+          // SÍ se emite acá: ese path —persistUnrecoverableRefundMarker— NO pasa por rejectRefundAndCompensate.)
+          this.logger.warn(
+            { err },
+            `BACKSTOP refund del booking ${bookingId}: el gateway RECHAZÓ el reverso (eventId=${env.eventId}); ` +
+              `quedó un Refund REJECTED durable en DB → requiere REFUND ADMIN manual (sin reintento automático)`,
+          );
+          return;
+        case 'unrecoverable_no_refund':
+          // No-transitorio que abortó ANTES de llamar al riel (gateway sin reembolsos / cobro sin railRef).
+          // Reintentar por Kafka loopearía ∞ (la condición es permanente) → ALERTA FUERTE para backstop manual
+          // (refund admin). NO loop, NO refund silenciosamente perdido: se SURFACEA. El marcador DURABLE (un
+          // Refund REJECTED de marca con failureReason 'unrecoverable:') ya lo dejó `persistUnrecoverableRefundMarker`
+          // dentro de refundViaGateway ANTES de lanzar, así que el pasajero NO queda sin rastro. Acá emitimos la
+          // métrica SCRAPEABLE que dispara la alerta de ops (una sola vez por evento). Tres trazas: row + métrica + log.
+          this.metrics.incRefundBackstop('unrecoverable');
+          this.logger.error(
+            { err },
+            `BACKSTOP refund del booking ${bookingId} (eventId=${env.eventId}): el refund automático falló de forma ` +
+              `PERMANENTE (p.ej. el gateway no soporta reembolsos, o el cobro no tiene referencia del riel); quedó un Refund ` +
+              `REJECTED durable de marca → requiere REFUND ADMIN manual (sin reintento automático)`,
+          );
+          return;
+        case 'transient':
+          // DB caída, red, timeout, deadlock, 5xx no-determinista: el medio falló, el evento es válido → relanzar.
+          this.logger.error({ err }, `Falló el refund automático del booking ${bookingId}`);
+          throw err; // transitorio → Kafka reintenta; el refund es idempotente (dedupKey UNIQUE + dedup eventId).
+      }
     }
   }
 }
