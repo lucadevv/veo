@@ -6,7 +6,7 @@
  *  - Identidad/KYC: user.registered, user.email_verified, user.kyc_verified, driver.verified, biometric.failed
  *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
- *  - Pagos:         payment.captured, payment.failed, payout.processed
+ *  - Pagos:         payment.captured, payment.failed, payment.refunded (plata que vuelve al pasajero), payout.processed
  *  - Recompensas:   user.referred (vínculo creado), referral.rewarded, promo.redeemed, incentive.completed (movimientos de crédito · Ley 29733)
  *  - Video/Media:   media.recording_started, media.archived, media.access_granted,
  *                   media.access_viewed (reproducción efectiva · BR-S02), media.access_rejected (denegación · cadena de custodia)
@@ -163,6 +163,16 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       })),
       'payment.failed': this.audited('payment.failed', (p) => ({
         actorId: 'system',
+        resourceType: 'payment',
+        resourceId: p.paymentId,
+      })),
+      // Reembolso EFECTIVO (BR-P06 · Ley 29733 · regla no negociable #1): la plata que VUELVE al pasajero es
+      // un movimiento de dinero y debe quedar en el WORM inmutable igual que captured/failed (cierra el gap de
+      // "movimiento de plata sin audit"). `approvedBy` = quién aprobó la devolución (un operador en el refund
+      // admin, o 'system' en el system-initiated por booking.cancelled) → es el ACTOR del movimiento; recurso =
+      // el Payment reembolsado. amountCents/tripId/passengerId viajan en el payload del evento persistido.
+      'payment.refunded': this.audited('payment.refunded', (p) => ({
+        actorId: p.approvedBy,
         resourceType: 'payment',
         resourceId: p.paymentId,
       })),

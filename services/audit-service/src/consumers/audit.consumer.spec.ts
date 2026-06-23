@@ -484,3 +484,71 @@ describe('AuditConsumer · recompensas/créditos (Ley 29733: traza de movimiento
     expect(mapping).toEqual({ actorId: 'drv-5', resourceType: 'incentive', resourceId: 'inc-3' });
   });
 });
+
+describe('AuditConsumer · pagos (movimiento de dinero al WORM inmutable · Ley 29733)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('registra handlers para los 3 movimientos de pago (captured/failed/refunded)', () => {
+    expect(handlers.has('payment.captured')).toBe(true);
+    expect(handlers.has('payment.failed')).toBe(true);
+    // CAMBIO 3: la plata que VUELVE al pasajero también debe quedar en el audit inmutable (cierra el gap de
+    // "movimiento de plata sin audit"). Sin este handler un refund no dejaría traza WORM como captured/failed.
+    expect(handlers.has('payment.refunded')).toBe(true);
+  });
+
+  it('payment.refunded → actorId=approvedBy (quién aprobó), resourceType=payment, resourceId=paymentId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payment.refunded',
+      producer: 'payment-service',
+      payload: {
+        paymentId: 'pay-9',
+        tripId: 't-9',
+        amountCents: 2500,
+        reason: 'ASIENTO_LLENO',
+        approvedBy: 'op-admin-3',
+        passengerId: 'pax-9',
+      },
+    });
+    await handlers.get('payment.refunded')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('payment.refunded'));
+    expect(mapping).toEqual({ actorId: 'op-admin-3', resourceType: 'payment', resourceId: 'pay-9' });
+  });
+
+  it('payment.refunded system-initiated (approvedBy=system) → actorId=system (refund automático por cancelación)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payment.refunded',
+      producer: 'payment-service',
+      payload: {
+        paymentId: 'pay-sys',
+        tripId: 't-sys',
+        amountCents: 1800,
+        approvedBy: 'system',
+      },
+    });
+    await handlers.get('payment.refunded')!(envelope);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'system', resourceType: 'payment', resourceId: 'pay-sys' });
+  });
+});
