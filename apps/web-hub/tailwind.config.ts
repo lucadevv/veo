@@ -1,10 +1,10 @@
 import type { Config } from 'tailwindcss';
 
 /**
- * El hub usa el tema oscuro "Midnight Motion" (lima/negro) del Pasajero — la cara
- * pública del ecosistema. NO usa el preset OKLCH navy/cian de admin-web/family-web:
- * esos tokens son para las consolas internas, no para esta landing de marca.
- * Los nombres semánticos viven acá, una sola vez; los componentes nunca hardcodean hex.
+ * El hub es la cara pública del ecosistema y va en la MARCA VEO: monomarca azul
+ * (#2D7FF9) sobre lienzo oscuro, texto blanco. Un solo acento (`brand`) — no hay
+ * color por app. Los nombres semánticos viven acá, una sola vez; los componentes
+ * nunca hardcodean hex.
  */
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
@@ -20,9 +20,7 @@ const config: Config = {
         'ink-subtle': 'var(--ink-subtle)',
         border: 'var(--border)',
         'border-strong': 'var(--border-strong)',
-        lime: 'var(--lime)',
-        cyan: 'var(--cyan)',
-        warm: 'var(--warm)',
+        brand: 'var(--brand)',
       },
       fontFamily: {
         display: ['var(--font-display)', 'sans-serif'],

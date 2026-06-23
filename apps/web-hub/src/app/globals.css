@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 /*
- * Tokens del hub (tema "Midnight Motion" lima/negro), única fuente de verdad.
- * Tailwind los referencia vía var() en tailwind.config.ts, y los estilos inline
- * dirigidos por datos (acentos) también — un solo lugar para el color.
+ * Tokens del hub, única fuente de verdad. VEO es MONOMARCA: una sola marca azul
+ * (#2D7FF9 → token `--brand`), texto blanco, lienzo oscuro azulado. Tailwind los
+ * referencia vía var() en tailwind.config.ts, y los estilos inline dirigidos por
+ * datos (el acento de marca) también — un solo lugar para el color.
  */
 :root {
   --bg: #0e1014;
@@ -16,18 +17,16 @@
   --ink-subtle: #6b7280;
   --border: #262b33;
   --border-strong: #353b45;
-  --lime: #c8f230;
-  --cyan: #39bcdf;
-  --warm: #1f9bd4;
+  --brand: #2d7ff9;
   color-scheme: dark;
 }
 
 @layer base {
   body {
-    /* Gradiente de marca fiel al diseño: halo lima arriba-derecha + cian abajo-izquierda. */
+    /* Halo de marca: azul arriba-derecha + un eco azul más tenue abajo-izquierda. */
     background:
-      radial-gradient(80% 50% at 80% -5%, rgba(200, 242, 48, 0.1) 0%, transparent 55%),
-      radial-gradient(70% 50% at 10% 105%, rgba(57, 188, 223, 0.1) 0%, transparent 55%),
+      radial-gradient(80% 50% at 80% -5%, rgba(45, 127, 249, 0.1) 0%, transparent 55%),
+      radial-gradient(70% 50% at 10% 105%, rgba(45, 127, 249, 0.06) 0%, transparent 55%),
       linear-gradient(180deg, #0d1014 0%, #0b0d11 100%);
     background-attachment: fixed;
     min-height: 100vh;

@@ -1,27 +1,24 @@
 import type { AccentName } from '@/domain/ecosystem';
 
 /**
- * Tokens cromáticos de cada acento, definidos UNA sola vez (SSOT).
- * Los componentes resuelven colores con `accentTokens(app.accent)` en lugar de
- * repartir hex por el árbol. Cambiar un acento se hace acá y se propaga solo.
+ * Tokens cromáticos del acento de marca, definidos UNA sola vez (SSOT).
+ * VEO es MONOMARCA: hay un único acento (`brand` = azul #2D7FF9). Los componentes
+ * resuelven colores con `accentTokens(app.accent)` en vez de repartir hex por el
+ * árbol — el color de marca vive acá y se propaga solo. La diferenciación entre
+ * apps NO es cromática: la lleva el ícono, el nombre, la etiqueta y `solid`.
  */
 export interface AccentTokens {
-  /** Color principal del acento (barra superior, relleno del CTA sólido). */
+  /** Azul de marca (barra superior, relleno del CTA sólido, trazo del ícono fantasma). */
   readonly color: string;
-  /** Color de texto/íconos legibles SOBRE el acento (para chips sólidos). */
+  /** Color legible SOBRE el azul de marca (texto/íconos de chips sólidos). */
   readonly onColor: string;
-  /** Trazo del ícono según su contexto (sólido → onColor; fantasma → tono propio). */
-  readonly iconStroke: string;
 }
 
 const TOKENS: Record<AccentName, AccentTokens> = {
-  lime: { color: '#C8F230', onColor: '#0E1014', iconStroke: '#0E1014' },
-  cyan: { color: '#39BCDF', onColor: '#0B111F', iconStroke: '#0B111F' },
-  warm: { color: '#1F9BD4', onColor: '#0E1014', iconStroke: '#39BCDF' },
-  neutral: { color: '#8A93A4', onColor: '#0E1014', iconStroke: '#CFD6E2' },
+  brand: { color: '#2D7FF9', onColor: '#FFFFFF' },
 };
 
-/** Resuelve los tokens de un acento. */
+/** Resuelve los tokens del acento de marca. */
 export function accentTokens(accent: AccentName): AccentTokens {
   return TOKENS[accent];
 }

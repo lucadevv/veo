@@ -30,7 +30,8 @@ export function AppCard({ app }: AppCardProps) {
         style={{
           background: app.solid ? accent.color : 'var(--surface-2)',
           borderColor: app.solid ? accent.color : 'var(--border)',
-          color: accent.iconStroke,
+          // Sólido → ícono blanco sobre el azul; fantasma → ícono azul de marca sobre la superficie.
+          color: app.solid ? accent.onColor : accent.color,
         }}
       >
         <AppIcon name={app.icon} />

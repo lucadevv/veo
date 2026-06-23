@@ -5,7 +5,7 @@ import { StatList } from './stat-list';
 export function Hero() {
   return (
     <section className="hero">
-      <p className="font-semibold uppercase tracking-eyebrow text-[11px] text-lime">
+      <p className="font-semibold uppercase tracking-eyebrow text-[11px] text-brand">
         Yo veo · Tú vas seguro
       </p>
       <h1 className="mt-3.5 max-w-[680px] font-display text-[44px] font-semibold leading-[1.05] tracking-[-0.02em] max-[760px]:text-[34px]">

@@ -5,8 +5,13 @@
  * (ver `data/ecosystem.ts`); los componentes no se tocan (OCP).
  */
 
-/** Acento semántico de cada app. Su color real se resuelve en `theme/accents.ts`. */
-export type AccentName = 'lime' | 'cyan' | 'warm' | 'neutral';
+/**
+ * Acento de marca. VEO es MONOMARCA: una sola marca azul (#2D7FF9) en toda la
+ * landing — no hay un color por app. La diferenciación entre experiencias es
+ * NO cromática (ícono, nombre, etiqueta y el tratamiento `solid`/fantasma).
+ * El color real se resuelve en `theme/accents.ts`.
+ */
+export type AccentName = 'brand';
 
 /** Ícono de marca de cada app. El registro vive en `components/app-icon.tsx`. */
 export type IconName = 'eye' | 'car' | 'family' | 'shield';
