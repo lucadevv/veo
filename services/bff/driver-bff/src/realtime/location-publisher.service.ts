@@ -1,8 +1,9 @@
 /**
  * Publicador del GPS del conductor a Kafka (soberanía: GPS por Socket.IO, NO MQTT).
- * Envuelve el KafkaEventProducer de @veo/events y publica `driver.location_updated` en el topic
- * `driver`. El payload se valida en el productor contra el registro de @veo/events; aquí calculamos
- * la celda H3 (resolución de dispatch) con @veo/utils, igual que el resto de productores del sistema.
+ * Envuelve el KafkaEventProducer de @veo/events y publica `driver.location_updated`. topicForEvent lo aísla
+ * en su PROPIO topic ('driver-location'), separado del topic 'driver' de ciclo de vida — así los consumers de
+ * ciclo de vida (rating, admin-bff) no deserializan este firehose de GPS. El payload se valida en el productor
+ * contra el registro de @veo/events; aquí calculamos la celda H3 (resolución de dispatch) con @veo/utils.
  */
 import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';

@@ -253,3 +253,80 @@ describe('DriverSuspensionConsumer · fleet.driver_reactivated → limpia Driver
     ).rejects.toThrow('db down');
   });
 });
+
+/** Envelope de un `driver.flagged` (lo emite rating-service; topicForEvent → topic 'driver'). */
+function flaggedEnvelope(payload: unknown): EventEnvelope<unknown> {
+  return {
+    eventId: 'e3',
+    eventType: 'driver.flagged',
+    producer: 'rating-service',
+    occurredAt: new Date().toISOString(),
+    payload,
+  } as EventEnvelope<unknown>;
+}
+
+describe('DriverSuspensionConsumer · driver.flagged → AUTO-suspensión por rating bajo (hold RATING_LOW)', () => {
+  beforeEach(() => {
+    captured.byEvent = {};
+  });
+
+  it("reason='suspension' → suspende con suspendByRating (driverId de PERFIL, directo)", async () => {
+    const drivers = { suspendByRating: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.flagged']?.(
+      flaggedEnvelope({ driverId: 'd1', rollingAvg: 3.2, reason: 'suspension' }),
+    );
+    expect(drivers.suspendByRating).toHaveBeenCalledTimes(1);
+    expect(drivers.suspendByRating).toHaveBeenCalledWith('d1', expect.any(String));
+  });
+
+  it("reason='review' → NO suspende (es flag de panel): suspendByRating nunca se llama", async () => {
+    const drivers = { suspendByRating: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.flagged']?.(
+      flaggedEnvelope({ driverId: 'd1', rollingAvg: 4.1, reason: 'review' }),
+    );
+    expect(drivers.suspendByRating).not.toHaveBeenCalled();
+  });
+
+  it('cualquier otra razón desconocida → NO suspende (fail-closed para suspensión)', async () => {
+    const drivers = { suspendByRating: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.flagged']?.(
+      flaggedEnvelope({ driverId: 'd1', rollingAvg: 4.1, reason: 'reverification' }),
+    );
+    expect(drivers.suspendByRating).not.toHaveBeenCalled();
+  });
+
+  it('payload inválido (sin driverId) → descartado sin tocar la DB', async () => {
+    const drivers = { suspendByRating: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.flagged']?.(
+      flaggedEnvelope({ rollingAvg: 3.0, reason: 'suspension' }),
+    );
+    expect(drivers.suspendByRating).not.toHaveBeenCalled();
+  });
+
+  it('es idempotente extremo-a-extremo: reentrega del mismo flag (suspendByRating → false) no rompe', async () => {
+    const drivers = { suspendByRating: vi.fn(async () => false) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    const env = flaggedEnvelope({ driverId: 'd1', rollingAvg: 3.0, reason: 'suspension' });
+    await captured.byEvent['driver.flagged']?.(env);
+    await captured.byEvent['driver.flagged']?.(env);
+    expect(drivers.suspendByRating).toHaveBeenCalledTimes(2);
+  });
+
+  it('propaga el error para que Kafka reintente (suspendByRating es idempotente)', async () => {
+    const drivers = {
+      suspendByRating: vi.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['driver.flagged']?.(
+        flaggedEnvelope({ driverId: 'd1', rollingAvg: 3.0, reason: 'suspension' }),
+      ),
+    ).rejects.toThrow('db down');
+  });
+});

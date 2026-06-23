@@ -1,6 +1,7 @@
 /**
  * Consumidor Kafka que alimenta el seguimiento en vivo del namespace /family.
- * Suscrito a los topics `trip`, `dispatch`, `panic` y `driver` (driver.location_updated).
+ * Suscrito a los topics `trip`, `dispatch`, `panic` y `driver-location` (el firehose `driver.location_updated`,
+ * aislado en su propio topic por topicForEvent — NO el topic 'driver' de ciclo de vida).
  * Valida cada payload con los schemas de @veo/events, mantiene el mapa driver→trip y el último
  * estado/ubicación, y emite a las salas de viajes con tokens vivos.
  *

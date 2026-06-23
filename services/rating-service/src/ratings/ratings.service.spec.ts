@@ -10,6 +10,7 @@ const config = new ConfigService<Env, true>({
   ROLLING_WINDOW_DAYS: 30,
   DRIVER_REVIEW_THRESHOLD: 4.3,
   DRIVER_SUSPENSION_THRESHOLD: 4.0,
+  MIN_REVIEWS_FOR_SUSPENSION: 10,
   PASSENGER_REVERIFY_THRESHOLD: 4.0,
 });
 
@@ -36,6 +37,7 @@ interface CapturedOutbox {
 interface PrevAggregate {
   flagged: boolean;
   flagReason: string | null;
+  suspensionSuppressed?: boolean;
 }
 
 function makePrisma(opts: {
@@ -43,7 +45,11 @@ function makePrisma(opts: {
   windowStars: number[];
   prevAggregate?: PrevAggregate | null;
 }) {
-  const captured = { outbox: [] as CapturedOutbox[], upserts: [] as Record<string, unknown>[] };
+  const captured = {
+    outbox: [] as CapturedOutbox[],
+    upserts: [] as Record<string, unknown>[],
+    updates: [] as Record<string, unknown>[],
+  };
   const tx = {
     rating: {
       create: async ({ data }: { data: Record<string, unknown> }) => ({
@@ -54,8 +60,18 @@ function makePrisma(opts: {
     },
     ratingAggregate: {
       findUnique: async () => opts.prevAggregate ?? null,
-      upsert: async ({ create }: { create: Record<string, unknown> }) => {
+      // upsert: en create-path captura `create`; en update-path (cron sobre agregado existente) captura `update`.
+      // El núcleo escribe los MISMOS campos en ambas ramas (data), así que aseverar sobre `create` sigue válido
+      // para los tests de `create`; los tests de cron aseveran sobre `updates`.
+      upsert: async ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
         captured.upserts.push(create);
+        captured.updates.push(update);
         return create;
       },
     },
@@ -212,11 +228,11 @@ describe('RatingsService.create · gate de validación del viaje (fail-closed)',
 });
 
 describe('RatingsService.create · flags (BR-D01)', () => {
-  it('promedio < 4.0 marca conductor y emite driver.flagged suspension', async () => {
-    // ventana: [3,3,3] → avg 3.0 < 4.0
+  it('promedio < 4.0 CON ≥ mínimo de reseñas marca conductor y emite driver.flagged suspension', async () => {
+    // ventana de 10 reseñas (= MIN_REVIEWS_FOR_SUSPENSION) en 3.0 → avg 3.0 < 4.0 y count ≥ mínimo → suspension.
     const { prisma, captured } = makePrisma({
       existingTrip: false,
-      windowStars: [3, 3, 3],
+      windowStars: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
       prevAggregate: null,
     });
     const svc = new RatingsService(prisma as never, config, okTripClient);
@@ -230,6 +246,23 @@ describe('RatingsService.create · flags (BR-D01)', () => {
     });
     expect(captured.upserts[0]?.flagged).toBe(true);
     expect(captured.upserts[0]?.flagReason).toBe('suspension');
+  });
+
+  it('promedio < 4.0 pero MENOS del mínimo de reseñas → NO suspende, CAPA en review (flag de panel)', async () => {
+    // ventana de 3 reseñas (< MIN_REVIEWS_FOR_SUSPENSION=10) en 3.0 → avg < 4.0 pero count insuficiente.
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [3, 3, 3],
+      prevAggregate: null,
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 3 });
+    const flagged = captured.outbox.find((e) => e.eventType === 'driver.flagged');
+    expect(flagged).toBeDefined();
+    // El payload lleva 'review', NO 'suspension': identity NO auto-suspende con pocas reseñas.
+    expect(flagged?.payload).toMatchObject({ driverId: RATED, reason: 'review' });
+    expect(captured.upserts[0]?.flagged).toBe(true);
+    expect(captured.upserts[0]?.flagReason).toBe('review');
   });
 
   it('promedio en banda review (4.2) emite driver.flagged review', async () => {
@@ -268,6 +301,22 @@ describe('RatingsService.create · flags (BR-D01)', () => {
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 5 });
     expect(captured.upserts[0]?.flagged).toBe(false);
+  });
+
+  it('RE-SUSPENSIÓN tras override: limpiado el sticky (prev limpio), una nueva reseña mala (<4.0, ≥min) RE-emite suspension', async () => {
+    // Estado tras `clearRatingFlag` (override de identity levantó el hold): el agregado quedó LIMPIO. El
+    // rating SIGUE malo (las reseñas no cambiaron). Una nueva reseña mala recomputa 'suspension', y como
+    // prev quedó limpio → isNewFlag vuelve a ser true → SE RE-EMITE (período de gracia, no inmunidad eterna).
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3], // 10 reseñas (≥ min) avg 3.0 < 4.0 → suspension
+      prevAggregate: { flagged: false, flagReason: null }, // ← el sticky YA fue limpiado por el override
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 3 });
+    const flagged = captured.outbox.find((e) => e.eventType === 'driver.flagged');
+    expect(flagged).toBeDefined();
+    expect(flagged?.payload).toMatchObject({ driverId: RATED, reason: 'suspension' });
   });
 });
 
@@ -351,5 +400,160 @@ describe('RatingsService.create · flags (BR-I05 pasajero)', () => {
     const svc = new RatingsService(prisma as never, config, okTripClient);
     await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'PASSENGER', stars: 4 });
     expect(captured.outbox.some((e) => e.eventType === 'passenger.flagged')).toBe(false);
+  });
+});
+
+/**
+ * Mock prisma minimal para clearRatingFlag: solo necesita ratingAggregate.findUnique + update dentro de una
+ * tx. Captura los `update` para aseverar QUÉ se limpió (y que NO se llamó cuando es no-op / guard).
+ */
+function makeAggregatePrisma(prevAggregate: PrevAggregate | null) {
+  const captured = { updates: [] as Record<string, unknown>[] };
+  const tx = {
+    ratingAggregate: {
+      findUnique: async () => prevAggregate,
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        captured.updates.push(data);
+        return data;
+      },
+    },
+  };
+  const prisma = {
+    write: { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) },
+  };
+  return { prisma, captured };
+}
+
+const DRIVER = '00000000-0000-0000-0000-0000000000dd';
+
+describe('RatingsService.clearRatingFlag · limpia el sticky + activa la gracia tras driver.reactivated', () => {
+  it('limpia flagged+flagReason Y ACTIVA suspensionSuppressed cuando estaba flageado como suspension', async () => {
+    const { prisma, captured } = makeAggregatePrisma({ flagged: true, flagReason: 'suspension' });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    const cleared = await svc.clearRatingFlag(DRIVER);
+    expect(cleared).toBe(true);
+    expect(captured.updates).toHaveLength(1);
+    // Limpia el sticky Y prende la supresión: el cron ya no podrá re-escalar a 'suspension' (período de gracia).
+    expect(captured.updates[0]).toMatchObject({
+      flagged: false,
+      flagReason: null,
+      suspensionSuppressed: true,
+    });
+  });
+
+  it('agregado ya limpio PERO sin supresión → ACTIVA la gracia (escribe): re-override re-arma la gracia', async () => {
+    // Caso real: un override sobre un conductor que ya no estaba flageado igual debe prender la gracia, para que
+    // un cron posterior (si el avg sigue malo) no lo re-suspenda hasta la próxima reseña.
+    const { prisma, captured } = makeAggregatePrisma({
+      flagged: false,
+      flagReason: null,
+      suspensionSuppressed: false,
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    const cleared = await svc.clearRatingFlag(DRIVER);
+    expect(cleared).toBe(true);
+    expect(captured.updates[0]).toMatchObject({ suspensionSuppressed: true });
+  });
+
+  it('IDEMPOTENTE: ya limpio Y ya suprimido → no-op, no escribe', async () => {
+    const { prisma, captured } = makeAggregatePrisma({
+      flagged: false,
+      flagReason: null,
+      suspensionSuppressed: true,
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    const cleared = await svc.clearRatingFlag(DRIVER);
+    expect(cleared).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  it('GUARD: sin agregado para ese conductor → no-op, no crashea ni escribe', async () => {
+    const { prisma, captured } = makeAggregatePrisma(null);
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    const cleared = await svc.clearRatingFlag(DRIVER);
+    expect(cleared).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+});
+
+describe('RatingsService · período de gracia post-override (FIX cron re-suspende sin reseña nueva)', () => {
+  const BAD_WINDOW = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3]; // 10 reseñas (≥ min) avg 3.0 < 4.0 → decisión cruda 'suspension'
+  const GOOD_WINDOW = [5, 5, 4, 4]; // avg 4.5 ≥ 4.3 → sin flag
+
+  it('CRON con gracia activa NO re-emite suspension sobre las MISMAS reseñas viejas (override respetado)', async () => {
+    // Estado tras el override: sticky limpio + suspensionSuppressed=true. El cron recomputa el MISMO avg malo.
+    const { prisma, captured } = makePrisma({
+      windowStars: BAD_WINDOW,
+      prevAggregate: { flagged: false, flagReason: null, suspensionSuppressed: true },
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.recomputeAggregate(RATED, 'DRIVER', new Date(), 'cron');
+    // NO se re-emite 'driver.flagged' suspension: la gracia degrada la decisión del cron a 'review'.
+    const suspension = captured.outbox.find(
+      (e) => e.eventType === 'driver.flagged' && e.payload.reason === 'suspension',
+    );
+    expect(suspension).toBeUndefined();
+    // El agregado NO queda en 'suspension' y la supresión PERSISTE (sigue true hasta una reseña nueva).
+    expect(captured.updates[0]?.flagReason).not.toBe('suspension');
+    expect(captured.updates[0]?.suspensionSuppressed).toBe(true);
+  });
+
+  it('CRON SIN gracia (supresión false) SÍ escala a suspension (comportamiento normal del barrido)', async () => {
+    const { prisma, captured } = makePrisma({
+      windowStars: BAD_WINDOW,
+      prevAggregate: { flagged: false, flagReason: null, suspensionSuppressed: false },
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.recomputeAggregate(RATED, 'DRIVER', new Date(), 'cron');
+    const suspension = captured.outbox.find(
+      (e) => e.eventType === 'driver.flagged' && e.payload.reason === 'suspension',
+    );
+    expect(suspension).toBeDefined();
+  });
+
+  it('RESEÑA NUEVA mala (avg<4.0, ≥min) bajo gracia LIMPIA la supresión y RE-emite suspension → re-suspende', async () => {
+    // create() recomputa con source='review': limpia la gracia y re-evalúa. prev limpio → isNewFlag → re-emite.
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: BAD_WINDOW,
+      prevAggregate: { flagged: false, flagReason: null, suspensionSuppressed: true },
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 3 });
+    const suspension = captured.outbox.find(
+      (e) => e.eventType === 'driver.flagged' && e.payload.reason === 'suspension',
+    );
+    expect(suspension).toBeDefined();
+    // La reseña nueva LIMPIA la supresión (suspensionSuppressed=false): la gracia se consumió.
+    expect(captured.upserts[0]?.suspensionSuppressed).toBe(false);
+  });
+
+  it('RESEÑA NUEVA buena (avg≥4.0) bajo gracia deja al conductor ACTIVO (sin flag) y limpia la supresión', async () => {
+    const { prisma, captured } = makePrisma({
+      existingTrip: false,
+      windowStars: GOOD_WINDOW,
+      prevAggregate: { flagged: false, flagReason: null, suspensionSuppressed: true },
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.create(RATER, { tripId: TRIP, ratedId: RATED, ratedRole: 'DRIVER', stars: 5 });
+    // Sin flag (avg ≥ 4.3) y sin emitir suspension: el conductor queda activo.
+    expect(captured.upserts[0]?.flagged).toBe(false);
+    expect(captured.outbox.some((e) => e.eventType === 'driver.flagged')).toBe(false);
+    expect(captured.upserts[0]?.suspensionSuppressed).toBe(false);
+  });
+
+  it('IDEMPOTENTE: dos pasadas de CRON bajo gracia → ninguna re-emite suspension (no escalada repetida)', async () => {
+    const { prisma, captured } = makePrisma({
+      windowStars: BAD_WINDOW,
+      prevAggregate: { flagged: true, flagReason: 'review', suspensionSuppressed: true },
+    });
+    const svc = new RatingsService(prisma as never, config, okTripClient);
+    await svc.recomputeAggregate(RATED, 'DRIVER', new Date(), 'cron');
+    await svc.recomputeAggregate(RATED, 'DRIVER', new Date(), 'cron');
+    expect(
+      captured.outbox.filter(
+        (e) => e.eventType === 'driver.flagged' && e.payload.reason === 'suspension',
+      ),
+    ).toHaveLength(0);
   });
 });

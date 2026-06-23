@@ -48,6 +48,13 @@ model RatingAggregate {
   count30d       Int         @default(0) @map("count_30d")
   flagged        Boolean     @default(false)
   flagReason     String?     @map("flag_reason")
+  /// PERÍODO DE GRACIA post-override (auto-suspensión por rating). Cuando el operador reactiva al conductor
+  /// (`driver.reactivated` → clearRatingFlag), se SETEA en true junto con limpiar el sticky. Mientras esté
+  /// activo, el CRON diario (recomputeAll) NO re-escala a 'suspension' aunque el avg siga < 4.0 con las MISMAS
+  /// reseñas viejas — si no, al próximo tick el override del operador sería inútil. SOLO una RESEÑA NUEVA
+  /// (camino create → recomputeWithinTx source='review') lo LIMPIA y re-habilita la escalada. Así la gracia
+  /// dura "hasta la próxima reseña" (decisión del dueño), no inmunidad eterna ni re-suspensión por cron.
+  suspensionSuppressed Boolean @default(false) @map("suspension_suppressed")
   lastComputedAt DateTime    @default(now()) @map("last_computed_at") @db.Timestamptz
 
   @@index([role, flagged])

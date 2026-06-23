@@ -626,9 +626,11 @@ function holdMatches(h: Hold, where: Record<string, unknown>): boolean {
     if (k === 'driverId') {
       if (h.driverId !== v) return false;
     } else if (k === 'cause') {
-      // cause puede ser un valor escalar o `{ in: [...] }`.
+      // cause puede ser un valor escalar, `{ in: [...] }` o `{ not: ... }` (complemento de una causa).
       if (v && typeof v === 'object' && 'in' in (v as Record<string, unknown>)) {
         if (!(v as { in: string[] }).in.includes(h.cause)) return false;
+      } else if (v && typeof v === 'object' && 'not' in (v as Record<string, unknown>)) {
+        if (h.cause === (v as { not: string }).not) return false;
       } else if (h.cause !== v) return false;
     } else if (k === 'causeRef') {
       if (h.causeRef !== v) return false;
@@ -1075,6 +1077,99 @@ describe('DriversService.reactivateForCompliance · OVERRIDE del operador (quita
     const { prisma } = makeHoldPrisma({ driverExists: false });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
     await expect(svc.reactivateForCompliance('ghost')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('DriversService.suspendByRating · AUTO-suspensión por RATING bajo (hold RATING_LOW, decisión del dueño)', () => {
+  it('agrega un hold RATING_LOW (causeRef vacío) y deriva suspendedAt', async () => {
+    const { prisma, holds } = makeHoldPrisma();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const applied = await svc.suspendByRating('d1', 'Rating bajo sostenido (auto-suspensión BR-D01)');
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ driverId: 'd1', cause: 'RATING_LOW', causeRef: '' });
+  });
+
+  it('es IDEMPOTENTE: re-flag del mismo conductor → no crea otro hold, reporta false', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('RATING_LOW', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const applied = await svc.suspendByRating('d1', 'otra vez');
+    expect(applied).toBe(false);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.createdAt).toEqual(new Date('2026-06-01T00:00:00.000Z')); // preserva el momento original.
+  });
+
+  it('conductor inexistente (flag antes del onboarding / purgado) → no-op silencioso false, sin holds (anti poison-pill)', async () => {
+    const { prisma, holds } = makeHoldPrisma({ driverExists: false });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.suspendByRating('ghost', 'rating bajo')).toBe(false);
+    expect(holds).toHaveLength(0);
+  });
+
+  it('COEXISTE con un DISCIPLINARY: 2 causas distintas → 2 holds (no se colapsan)', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    expect(await svc.suspendByRating('d1', 'rating bajo')).toBe(true);
+    expect(holds).toHaveLength(2);
+  });
+});
+
+describe('DriversService.reactivateForCompliance · GENERALIZADO a TODO hold NO-DISCIPLINARY (incluye RATING_LOW)', () => {
+  it('levanta un hold RATING_LOW (override del operador, reactivación MANUAL) → suspendedAt=null y emite driver.reactivated', async () => {
+    const { prisma, holds, outbox } = makeHoldPrisma({
+      initialHolds: [hold('RATING_LOW', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivateForCompliance('d1');
+    expect(holds).toHaveLength(0);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.eventType).toBe('driver.reactivated');
+  });
+
+  it('levanta RATING_LOW + DOCUMENT_EXPIRED + INSPECTION_EXPIRED juntos (todo lo automático), NUNCA el DISCIPLINARY', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({
+      initialHolds: [
+        hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-02T00:00:00.000Z'),
+        hold('INSPECTION_EXPIRED', '', '2026-06-03T00:00:00.000Z'),
+        hold('RATING_LOW', '', '2026-06-04T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivateForCompliance('d1');
+    // Quedó SOLO la disciplinaria (intacta) → SIGUE suspendido.
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DISCIPLINARY');
+    expect(deriveSuspendedAt()).not.toBeNull();
+  });
+
+  it('suspendido SOLO por RATING_LOW → la vía de compliance lo levanta (no es disciplinaria)', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({
+      initialHolds: [hold('RATING_LOW', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivateForCompliance('d1');
+    expect(holds).toHaveLength(0);
+    expect(deriveSuspendedAt()).toBeNull();
+  });
+
+  it('reactivate() MANUAL/disciplinaria NUNCA toca un RATING_LOW (separación de causas, fail-closed)', async () => {
+    const { prisma, holds, deriveSuspendedAt } = makeHoldPrisma({
+      initialHolds: [
+        hold('DISCIPLINARY', '', '2026-06-01T00:00:00.000Z'),
+        hold('RATING_LOW', '', '2026-06-02T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.reactivate('d1');
+    // Quitó la DISCIPLINARY; el RATING_LOW queda INTACTO → SIGUE suspendido.
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('RATING_LOW');
+    expect(deriveSuspendedAt()).not.toBeNull();
   });
 });
 

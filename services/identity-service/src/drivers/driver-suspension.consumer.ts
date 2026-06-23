@@ -25,6 +25,8 @@ import { ConfigService } from '@nestjs/config';
 import {
   fleetDriverSuspended,
   fleetDriverReactivated,
+  driverFlagged,
+  FLAG_REASON,
   type EventEnvelope,
   type EventHandler,
 } from '@veo/events';
@@ -35,6 +37,21 @@ import type { Env } from '../config/env.schema';
 /** eventType en el wire que emite fleet-service (ver services/fleet-service/src/events/fleet-events.ts). */
 const DRIVER_SUSPENDED = 'fleet.driver_suspended';
 const DRIVER_REACTIVATED = 'fleet.driver_reactivated';
+/**
+ * eventType que emite rating-service cuando un conductor cruza un umbral de flag (BR-D01). topicForEvent lo
+ * mapea al topic 'driver' (no 'rating'): al registrar este handler, el bootstrap suscribe ESTE consumer a UN
+ * topic MÁS ('driver') sobre el MISMO groupId — un consumer / múltiples topics, que es el patrón soportado por
+ * el bootstrap (la REGLA DE ORO prohíbe DOS consumers del mismo groupId en topics distintos, no esto).
+ */
+const DRIVER_FLAGGED = 'driver.flagged';
+
+/**
+ * Razón del flag de rating que identity DISCRIMINA: el VALOR canónico es `FLAG_REASON` del CONTRATO `@veo/events`
+ * (el mismo enum que tipa el payload de `driver.flagged` y rechaza un reason desconocido en el parse) — cero magic
+ * strings en el `===`, una sola lista compartida con rating-service. Solo 'suspension' dispara la AUTO-suspensión
+ * (hold RATING_LOW); 'review' (y cualquier otra) es flag de PANEL → identity la IGNORA para suspensión. El MÍNIMO
+ * de reseñas ya lo aplicó rating-service: si llegó 'suspension', identity confía y materializa el hold (no re-evalúa).
+ */
 
 /** clientId kafkajs de este consumer (también su groupId, propio: no comparte el de referidos). */
 const KAFKA_CLIENT_ID = 'identity-service-driver-suspension';
@@ -53,16 +70,21 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
     });
   }
 
-  /** on() resuelve el topic vía topicForEvent → 'fleet'; el dispatch interno casa por envelope.eventType. */
+  /**
+   * on() resuelve el topic vía topicForEvent: 'fleet.*' → topic 'fleet'; 'driver.flagged' → topic 'driver'. El
+   * dispatch interno casa por envelope.eventType. Este consumer queda suscrito a DOS topics (fleet + driver) en
+   * un solo groupId (un consumer / múltiples topics: el patrón soportado, no la REGLA DE ORO que prohíbe lo inverso).
+   */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
       [DRIVER_SUSPENDED]: (env) => this.onDriverSuspended(env),
       [DRIVER_REACTIVATED]: (env) => this.onDriverReactivated(env),
+      [DRIVER_FLAGGED]: (env) => this.onDriverFlagged(env),
     };
   }
 
   protected override subscriptionLog(): string {
-    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED})`;
+    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED})`;
   }
 
   private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
@@ -133,6 +155,45 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
     } catch (err) {
       this.logger.error({ err }, `Falló la reactivación del conductor ${subject}`);
       throw err; // que Kafka reintente; reactivateByFleet/reactivateByFleetForUser son idempotentes.
+    }
+  }
+
+  /**
+   * AUTO-suspensión por RATING bajo (BR-D01 · decisión del dueño · compliance/seguridad). rating-service ya
+   * decidió: solo emite reason='suspension' cuando avg < 4.0 Y count ≥ MÍNIMO de reseñas; identity NO re-evalúa,
+   * solo MATERIALIZA. El `driver.flagged.driverId` es el id de PERFIL Driver (= `Trip.driverId`, invariante
+   * verificado en trip-service) → se usa DIRECTO, sin resolver por userId.
+   *
+   *  - reason 'suspension' → addHold RATING_LOW (idempotente, con guard de existencia anti poison-pill).
+   *  - reason 'review' (u otra) → NO suspende: es flag de PANEL. Se ignora para suspensión (sin error: el evento
+   *    es legítimo, solo no dispara el hold).
+   *
+   * NO auto-reactiva en recuperación: la decisión del dueño es reactivación MANUAL (el operador levanta el hold
+   * RATING_LOW por la vía de compliance, reactivateForCompliance). Por eso este consumer NUNCA quita el hold.
+   */
+  private async onDriverFlagged(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverFlagged.safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`${DRIVER_FLAGGED} con payload inválido; descartado`);
+      return;
+    }
+    const { driverId, reason } = parsed.data;
+    // Solo 'suspension' suspende. 'review' (y cualquier otra razón futura) es flag de panel → no-op de suspensión.
+    if (reason !== FLAG_REASON.SUSPENSION) {
+      this.logger.debug(`${DRIVER_FLAGGED} reason='${reason}' (no es suspensión); ignorado para suspender`);
+      return;
+    }
+    try {
+      const applied = await this.drivers.suspendByRating(
+        driverId,
+        `Rating bajo sostenido (auto-suspensión BR-D01)`,
+      );
+      if (applied) {
+        this.logger.log(`Conductor ${driverId} auto-suspendido por rating bajo`);
+      }
+    } catch (err) {
+      this.logger.error({ err }, `Falló la auto-suspensión por rating del conductor ${driverId}`);
+      throw err; // que Kafka reintente; suspendByRating es idempotente.
     }
   }
 }

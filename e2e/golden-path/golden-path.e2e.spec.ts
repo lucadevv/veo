@@ -79,8 +79,18 @@ const OTP_CODE = '424242';
 const gate = await checkStack();
 const orchestrator = new Orchestrator();
 
-// El stack mínimo emite/consume estos topics de dominio.
-const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'driver', 'user']);
+// El stack mínimo emite/consume estos topics de dominio. 'driver-location' es el topic propio del
+// firehose de ubicación (driver.location_updated), aislado del 'driver' de ciclo de vida (ver
+// TOPIC_OVERRIDES / topicForEvent en @veo/events).
+const collector = new EventCollector([
+  'trip',
+  'dispatch',
+  'payment',
+  'panic',
+  'driver',
+  'driver-location',
+  'user',
+]);
 
 (gate.ready ? describe : describe.skip)('VEO · golden path E2E (cross-servicio orquestado)', () => {
   const passenger = new BffClient(BASE_URLS.publicBff);

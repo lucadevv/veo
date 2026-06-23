@@ -413,12 +413,16 @@ export type FleetDocumentStatus = (typeof FleetDocumentStatus)[keyof typeof Flee
  *  - DISCIPLINARY: suspensión MANUAL del operador. La levanta SOLO la reactivación manual (→ /reactivate).
  *  - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD).
  *  - INSPECTION_EXPIRED: inspección técnica (ITV) del vehículo operado vencida.
- * DOCUMENT_EXPIRED + INSPECTION_EXPIRED se levantan por la vía de compliance (→ /reactivate-compliance);
- * una DISCIPLINARY NUNCA se toca por esa vía (y viceversa) — la separación de causas es extremo-a-extremo.
+ *  - RATING_LOW: AUTO-suspensión por rating bajo (< 4.0 con ≥ mínimo de reseñas, BR-D01). La decide rating-service
+ *    (`driver.flagged` reason='suspension'); identity la materializa como hold. Reactivación MANUAL del operador.
+ * Las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW) se levantan por la vía de
+ * compliance (→ /reactivate-compliance); una DISCIPLINARY NUNCA se toca por esa vía (y viceversa) — la
+ * separación de causas es extremo-a-extremo.
  */
 export const SuspensionCause = {
   DISCIPLINARY: 'DISCIPLINARY',
   DOCUMENT_EXPIRED: 'DOCUMENT_EXPIRED',
   INSPECTION_EXPIRED: 'INSPECTION_EXPIRED',
+  RATING_LOW: 'RATING_LOW',
 } as const;
 export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

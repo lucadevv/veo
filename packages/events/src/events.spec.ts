@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createEnvelope, envelopeSchema } from './envelope.js';
-import { EVENT_SCHEMAS, topicForEvent, schemaForEvent, type EventPayload } from './schemas.js';
+import {
+  EVENT_SCHEMAS,
+  topicForEvent,
+  schemaForEvent,
+  FLAG_REASON,
+  type EventPayload,
+} from './schemas.js';
 import { isPermanentDataError, isUuid } from './poison.js';
 
 describe('envelope', () => {
@@ -29,6 +35,21 @@ describe('topic routing', () => {
   it('user.kyc_verified enruta al topic user', () => {
     expect(topicForEvent('user.kyc_verified')).toBe('user');
   });
+
+  describe('aislamiento del firehose de GPS (FIX rating-firehose)', () => {
+    it('driver.location_updated (firehose) va a su PROPIO topic driver-location, NO al topic driver', () => {
+      expect(topicForEvent('driver.location_updated')).toBe('driver-location');
+      expect(topicForEvent('driver.location_updated')).not.toBe('driver');
+    });
+
+    it('los eventos de CICLO DE VIDA driver.* siguen en el topic driver (baja frecuencia)', () => {
+      // Estos los oyen rating (driver.reactivated) y admin-bff; deben compartir el topic 'driver' SIN el firehose.
+      expect(topicForEvent('driver.reactivated')).toBe('driver');
+      expect(topicForEvent('driver.suspended')).toBe('driver');
+      expect(topicForEvent('driver.flagged')).toBe('driver');
+      expect(topicForEvent('driver.verified')).toBe('driver');
+    });
+  });
 });
 
 describe('registro de schemas', () => {
@@ -47,6 +68,37 @@ describe('registro de schemas', () => {
   });
   it('rechaza payload inválido', () => {
     expect(EVENT_SCHEMAS['rating.created'].safeParse({ stars: 9 }).success).toBe(false);
+  });
+
+  describe('driver.flagged / passenger.flagged · reason es enum tipado (FLAG_REASON, no z.string crudo)', () => {
+    it('driver.flagged ACEPTA un reason del enum (suspension/review) y RECHAZA uno desconocido', () => {
+      const base = { driverId: 'd1', rollingAvg: 3.9 };
+      expect(
+        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: FLAG_REASON.SUSPENSION })
+          .success,
+      ).toBe(true);
+      expect(
+        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: FLAG_REASON.REVIEW }).success,
+      ).toBe(true);
+      // reason fuera de FLAG_REASON → falla-cerrado (no se acopla por string crudo).
+      expect(
+        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: 'banned' }).success,
+      ).toBe(false);
+      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: '' }).success).toBe(false);
+    });
+
+    it('passenger.flagged ACEPTA reverification y RECHAZA un reason desconocido', () => {
+      const base = { passengerId: 'p1', rollingAvg: 3.5 };
+      expect(
+        EVENT_SCHEMAS['passenger.flagged'].safeParse({
+          ...base,
+          reason: FLAG_REASON.REVERIFICATION,
+        }).success,
+      ).toBe(true);
+      expect(
+        EVENT_SCHEMAS['passenger.flagged'].safeParse({ ...base, reason: 'nope' }).success,
+      ).toBe(false);
+    });
   });
 
   describe('panic.fanout_requested · contrato anti-PII (FOUNDATION §0.7)', () => {

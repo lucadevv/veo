@@ -812,6 +812,26 @@ export const notificationFailed = z.object({
 });
 
 /* ── rating ── (BR-D01 / BR-I05) */
+/**
+ * Razones de flag de rating — CONTRATO CANÓNICO del wire (cero strings mágicos en el `===` de los consumidores).
+ * rating-service es DUEÑO del dominio pero el VALOR viaja por `driver.flagged`/`passenger.flagged`, así que el
+ * enum vive AQUÍ (paquete leaf `@veo/events`, sin ciclo de dependencias) y rating-service IMPORTA estos valores
+ * para su `FLAG_REASON` de dominio — una sola lista, no dos que se desincronizan. identity discrimina por estos
+ * mismos valores tipados:
+ *   - 'review'         conductor < 4.3 (o < 4.0 sin el mínimo de reseñas): flag de PANEL, NO suspende.
+ *   - 'suspension'     conductor < 4.0 con ≥ mínimo de reseñas: dispara la AUTO-suspensión (hold RATING_LOW).
+ *   - 'reverification' pasajero < 4.0 (BR-I05): requiere re-verificación.
+ */
+export const FLAG_REASON = {
+  REVIEW: 'review',
+  SUSPENSION: 'suspension',
+  REVERIFICATION: 'reverification',
+} as const;
+export type FlagReason = (typeof FLAG_REASON)[keyof typeof FLAG_REASON];
+/** z.enum tipado del contrato: el `parse` del evento RECHAZA un reason fuera de FLAG_REASON (falla-cerrado). */
+const flagReasonSchema = z.enum(
+  Object.values(FLAG_REASON) as [FlagReason, ...FlagReason[]],
+);
 export const ratingCreated = z.object({
   ratingId: z.string(),
   tripId: z.string(),
@@ -821,12 +841,12 @@ export const ratingCreated = z.object({
 export const driverFlagged = z.object({
   driverId: z.string(),
   rollingAvg: z.number(),
-  reason: z.string(),
+  reason: flagReasonSchema,
 });
 export const passengerFlagged = z.object({
   passengerId: z.string(),
   rollingAvg: z.number(),
-  reason: z.string(),
+  reason: flagReasonSchema,
 });
 
 /* ── share ── (pilar 4) */
@@ -1228,10 +1248,29 @@ export const EVENT_SCHEMAS = {
 export type EventType = keyof typeof EVENT_SCHEMAS;
 export type EventPayload<T extends EventType> = z.infer<(typeof EVENT_SCHEMAS)[T]>;
 
-/** Topic Kafka para un eventType: el dominio antes del punto. */
+/**
+ * OVERRIDES de topic (eventType → topic) que ROMPEN el default "dominio antes del punto".
+ *
+ * `driver.location_updated` es el FIREHOSE de GPS (un ping por conductor activo cada ~15s, todos los conductores
+ * online). Por el default caería en el topic 'driver' JUNTO a los eventos de CICLO DE VIDA de baja frecuencia
+ * (driver.verified/rejected/suspended/resubmitted/reactivated/flagged). Eso obliga a CUALQUIER consumer del ciclo
+ * de vida (rating-service oye `driver.reactivated`; admin-bff oye varios) a suscribirse al topic 'driver' COMPLETO
+ * y, por la REGLA DE ORO (un groupId/consumer = todos sus topics juntos), a DESERIALIZAR el firehose entero solo
+ * para descartarlo (no tiene handler). Aislar el firehose en su PROPIO topic deja 'driver' limpio (solo ciclo de
+ * vida) para esos consumers, sin que el productor (driver-bff) ni los consumers del firehose (dispatch, public-bff,
+ * admin-bff) cambien una línea: TODOS resuelven su topic por esta misma función. Un único punto de routing.
+ */
+const DRIVER_LOCATION_TOPIC = 'driver-location';
+const TOPIC_OVERRIDES: Readonly<Record<string, string>> = {
+  'driver.location_updated': DRIVER_LOCATION_TOPIC,
+};
+
+/** Topic Kafka para un eventType: override explícito si lo hay; si no, el dominio antes del punto. */
 export function topicForEvent(eventType: string): string {
+  const override = TOPIC_OVERRIDES[eventType];
+  if (override) return override;
   const domain = eventType.split('.')[0];
-  // driver.* eventos los emite tracking/identity pero comparten topic 'driver'
+  // driver.* (excepto el firehose de ubicación, aislado arriba) comparten el topic 'driver': ciclo de vida.
   return domain ?? 'misc';
 }
 

@@ -20,11 +20,16 @@ const CAUSE_LABEL: Record<SuspensionCause, string> = {
   [SuspensionCause.DISCIPLINARY]: 'disciplinaria',
   [SuspensionCause.DOCUMENT_EXPIRED]: 'documentos vencidos',
   [SuspensionCause.INSPECTION_EXPIRED]: 'inspección técnica (ITV) vencida',
+  [SuspensionCause.RATING_LOW]: 'rating bajo',
 };
 
-/** Las causas de COMPLIANCE (documento/ITV) se levantan por el override; la disciplinaria por su propia vía. */
+/**
+ * Toda causa que NO sea DISCIPLINARY se levanta por el override de compliance (documentos, ITV, rating y
+ * futuros causes automáticos) — espeja `reactivateForCompliance` server-side, que quita todo hold
+ * `cause !== DISCIPLINARY`. La disciplinaria va por su propia vía (`/reactivate`).
+ */
 function isComplianceCause(cause: string): boolean {
-  return cause === SuspensionCause.DOCUMENT_EXPIRED || cause === SuspensionCause.INSPECTION_EXPIRED;
+  return cause !== SuspensionCause.DISCIPLINARY;
 }
 
 /**
@@ -97,12 +102,12 @@ export function ActiveDriverActions({ driver }: { driver: DriverApproval }) {
                 {dual ? 'Reactivar (docs/ITV)' : 'Reactivar'}
               </Button>
             }
-            title="Override de compliance (documentos / ITV)"
+            title="Override de compliance (documentos / ITV / rating)"
             description={
-              `Forzás el levantamiento de la suspensión por ${complianceLabel || 'documentos/ITV vencidos'} ` +
-              `del conductor ${driver.id.slice(0, 8)}. Normalmente esto se reactiva SOLO cuando el conductor ` +
-              'regulariza (ITV vigente nueva o documento válido). Usá este override únicamente si verificaste ' +
-              'la regularización por fuera del sistema. Ingresá tu código TOTP; la acción queda auditada.'
+              `Forzás el levantamiento de la suspensión automática por ${complianceLabel || 'documentos/ITV/rating'} ` +
+              `del conductor ${driver.id.slice(0, 8)}. Las suspensiones por documentos o ITV se reactivan solas ` +
+              'al regularizar; la de rating bajo la levantás vos cuando corresponda. Usá este override solo si ' +
+              'verificaste que la condición se resolvió. Ingresá tu código TOTP; la acción queda auditada.'
             }
             onVerified={async () => {
               await reactivateCompliance.mutateAsync({ id: driver.id });

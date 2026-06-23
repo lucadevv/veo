@@ -106,7 +106,16 @@ const PUJA_NOW: ModeSchedule = { defaultMode: 'PUJA', rules: [] };
 
 const gate = await checkStack();
 const orchestrator = new Orchestrator();
-const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'driver', 'user']);
+// 'driver-location' = topic propio del firehose driver.location_updated (TOPIC_OVERRIDES en @veo/events).
+const collector = new EventCollector([
+  'trip',
+  'dispatch',
+  'payment',
+  'panic',
+  'driver',
+  'driver-location',
+  'user',
+]);
 
 /** Un conductor listo para despachar: login + onboard + aprobación + gate biométrico + turno + socket. */
 interface ReadyDriver {

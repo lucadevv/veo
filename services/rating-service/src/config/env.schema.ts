@@ -27,6 +27,11 @@ export const envSchema = z.object({
   // Umbrales de flag del conductor (BR-D01).
   DRIVER_REVIEW_THRESHOLD: z.coerce.number().default(4.3),
   DRIVER_SUSPENSION_THRESHOLD: z.coerce.number().default(4.0),
+  // Mínimo de reseñas para que el flag de conductor ESCALE a 'suspension' (auto-suspensión por rating bajo,
+  // decisión del dueño · compliance/seguridad). Por debajo de este mínimo, un promedio < 4.0 SOLO produce
+  // 'review' (flag de panel, NO suspende): no se castiga a un conductor por 1-2 reseñas malas tempranas.
+  // Entero POSITIVO. Default 10.
+  MIN_REVIEWS_FOR_SUSPENSION: z.coerce.number().int().positive().default(10),
   // Umbral de re-verificación del pasajero (BR-I05).
   PASSENGER_REVERIFY_THRESHOLD: z.coerce.number().default(4.0),
   // Expresión cron del recálculo diario (ventana deslizante). Default 03:10 todos los días.

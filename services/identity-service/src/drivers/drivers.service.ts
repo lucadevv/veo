@@ -603,27 +603,32 @@ export class DriversService {
   }
 
   /**
-   * OVERRIDE MANUAL del operador para una suspensión por DOCUMENTO/ITV vencido (DOCUMENT_EXPIRED · decisión
-   * del dueño · compliance/seguridad). Es el HERMANO de `reactivate()`: aquella levanta SOLO DISCIPLINARY
-   * (suspensiones que el operador originó); ésta levanta SOLO DOCUMENT_EXPIRED (las automáticas por
-   * documento/ITV vencido). La separación de fuentes se RESPETA: cada vía levanta su propia fuente y NUNCA
-   * la otra (un DISCIPLINARY por esta vía → 403; un DOCUMENT_EXPIRED por `reactivate()` → 403). Así el
-   * operador puede regularizar a mano (override) sin que se mezclen los dos flujos de safety.
+   * OVERRIDE MANUAL del operador para una suspensión AUTOMÁTICA (NO-disciplinaria · decisión del dueño ·
+   * compliance/seguridad). Es el HERMANO de `reactivate()`: aquella levanta SOLO DISCIPLINARY (suspensiones que
+   * el operador originó); ésta levanta TODO hold cuya `cause !== DISCIPLINARY` — hoy DOCUMENT_EXPIRED,
+   * INSPECTION_EXPIRED y RATING_LOW (auto-suspensión por rating bajo), y CUALQUIER causa automática futura sin
+   * tocar este método. La separación de fuentes se RESPETA extremo-a-extremo: cada vía levanta su propio conjunto
+   * y NUNCA el del otro (un DISCIPLINARY por esta vía → 403; un hold automático por `reactivate()` → 403). Así el
+   * operador regulariza a mano (override) sin que se mezclen los dos flujos de safety.
    *
    * Por qué un método separado y no un flag en reactivate(): el AUDIT del admin-bff distingue la acción
    * (`driver.reactivate` vs `driver.reactivate-compliance`), el evento de dominio es el mismo
-   * (`driver.reactivated`) y las CAUSAS que levanta son DISTINTAS (esta levanta DOCUMENT_EXPIRED +
-   * INSPECTION_EXPIRED; reactivate() levanta SOLO DISCIPLINARY). El latch de ITV vive en fleet (otro servicio):
-   * lo limpia el ORQUESTADOR (admin-bff) tras este levantamiento, NO identity (regla 2: no cruzar tablas).
+   * (`driver.reactivated`) y las CAUSAS que levanta son DISTINTAS (esta levanta TODO lo NO-disciplinario;
+   * reactivate() levanta SOLO DISCIPLINARY). El latch de ITV vive en fleet (otro servicio): lo limpia el
+   * ORQUESTADOR (admin-bff) tras este levantamiento, NO identity (regla 2: no cruzar tablas).
+   *
+   * GENERALIZACIÓN (decisión del dueño): RATING_LOW es una causa automática nueva cuya reactivación es MANUAL
+   * (no se auto-levanta al recuperar el rating). En vez de enumerar causas (y olvidar agregar las futuras), esta
+   * vía levanta el COMPLEMENTO de DISCIPLINARY → RATING_LOW y cualquier causa automática futura entran solas.
    *
    * SEMÁNTICA (espeja reactivate(), modelo de HOLDS):
    *   1. 404 si el conductor no existe.
    *   2. 409 si NO está suspendido (0 holds, nada que reactivar).
-   *   3. 403 si NO tiene ningún hold de documento/ITV (solo DISCIPLINARY → va por reactivate()).
+   *   3. 403 si NO tiene ningún hold NO-disciplinario (solo DISCIPLINARY → va por reactivate()).
    *   4. 403 si la licencia está vencida (no reactivamos sobre una licencia vencida; el gate operativo COMPLETO
    *      —biometría, KYC— lo sigue imponiendo startShift BR-I02).
-   *   5. Quita los holds DOCUMENT_EXPIRED + INSPECTION_EXPIRED (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si
-   *      tras quitarlos QUEDA un hold DISCIPLINARY, el conductor SIGUE suspendido (la separación de causas).
+   *   5. Quita TODO hold NO-DISCIPLINARY (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si tras quitarlos QUEDA un
+   *      hold DISCIPLINARY, el conductor SIGUE suspendido (la separación de causas).
    *   6. Emite driver.reactivated por OUTBOX (misma tx).
    */
   async reactivateForCompliance(driverId: string): Promise<void> {
@@ -633,19 +638,19 @@ export class DriversService {
       if (driver.suspendedAt === null) {
         throw new ConflictError('El conductor no está suspendido');
       }
-      // FAIL-CLOSED por CAUSA (inverso de reactivate()): esta vía levanta SOLO holds de documento/ITV. Si el
-      // conductor NO tiene ningún hold DOCUMENT_EXPIRED/INSPECTION_EXPIRED (está suspendido solo por DISCIPLINARY)
-      // → 403 (se levanta por reactivate()). El conteo se hace ANTES de validar la licencia para dar el error
-      // correcto (no pedir licencia vigente para algo que ni siquiera es una suspensión de compliance).
+      // FAIL-CLOSED por CAUSA (inverso de reactivate()): esta vía levanta SOLO holds NO-disciplinarios (el
+      // COMPLEMENTO de DISCIPLINARY: documento, ITV, rating, y futuros). Si el conductor NO tiene ninguno (está
+      // suspendido solo por DISCIPLINARY) → 403 (se levanta por reactivate()). El conteo se hace ANTES de validar
+      // la licencia para dar el error correcto (no pedir licencia vigente para algo que no es de compliance).
       const complianceHolds = await tx.driverSuspensionHold.count({
         where: {
           driverId,
-          cause: { in: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.INSPECTION_EXPIRED] },
+          cause: { not: SuspensionCause.DISCIPLINARY },
         },
       });
       if (complianceHolds === 0) {
         throw new ForbiddenError(
-          'No se puede reactivar por compliance: la suspensión no es por documentos/ITV vencidos',
+          'No se puede reactivar por compliance: la suspensión no es de origen automático (documentos/ITV/rating)',
         );
       }
       // Re-validación mínima de eligibility: no reactivamos sobre una licencia vencida (mismo criterio que
@@ -653,10 +658,10 @@ export class DriversService {
       if (driver.licenseExpiresAt && driver.licenseExpiresAt.getTime() < Date.now()) {
         throw new ForbiddenError('No se puede reactivar: la licencia está vencida');
       }
-      // Quita los holds de documento/ITV (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si tras quitarlos queda
+      // Quita TODO hold NO-disciplinario (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si tras quitarlos queda
       // un hold DISCIPLINARY, suspendedAt recomputado SIGUE seteado → el conductor permanece suspendido.
       const { removed } = await this.removeHolds(tx, driverId, {
-        cause: { in: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.INSPECTION_EXPIRED] },
+        cause: { not: SuspensionCause.DISCIPLINARY },
       });
       if (removed === 0) {
         // Existían en el pre-count pero ya no: una carrera (otra reactivación/regularización) los quitó.
@@ -844,6 +849,42 @@ export class DriversService {
         '',
         'Inspección técnica (ITV) vencida',
         suspendedAt,
+      );
+      return created;
+    });
+  }
+
+  /**
+   * AUTO-suspensión del conductor por RATING bajo (decisión del dueño · compliance/seguridad). La DECIDE
+   * rating-service (evento `driver.flagged` reason='suspension', que ya aplicó el MÍNIMO de reseñas: identity
+   * NO re-evalúa el promedio ni el conteo, solo materializa la decisión). El `driverId` del evento es el id de
+   * PERFIL Driver (= `Trip.driverId`, invariante verificado en trip-service) → se usa DIRECTO, sin resolver por
+   * userId (a diferencia de la vía ITV).
+   *
+   * Bajo el modelo de HOLDS: agrega un hold RATING_LOW (`causeRef = ''`, un solo hold de rating; re-flags del
+   * mismo conductor son no-op). Es una causa NO-DISCIPLINARY: la levanta el override de compliance del operador
+   * (reactivateForCompliance) — reactivación MANUAL, NUNCA se auto-levanta al recuperar el rating. Recomputa
+   * `Driver.suspendedAt`, que es lo que el gate de turno (startShift) y el eligibility de dispatch leen (BR-I02).
+   *
+   * GUARD DE EXISTENCIA (anti poison-pill, espejo de suspendByFleet): si el Driver NO existe (purgado por
+   * derecho-al-olvido, o un flag que llegó antes del onboarding), no-op silencioso ANTES de tocar holds/recompute
+   * — sin esto, recomputeSuspendedAt haría un `driver.update` sobre un id inexistente → P2025 → Kafka reintenta ∞.
+   *
+   * IDEMPOTENTE por el `@@unique([driverId, cause, causeRef])`: re-entregas del MISMO flag → upsert no-op, NO
+   * reescribe el momento NI re-suspende.
+   *
+   * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
+   */
+  async suspendByRating(driverId: string, reason: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      if (!driver) return false; // flag antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
+      const { created } = await this.addHold(
+        tx,
+        driverId,
+        SuspensionCause.RATING_LOW,
+        '',
+        reason,
       );
       return created;
     });

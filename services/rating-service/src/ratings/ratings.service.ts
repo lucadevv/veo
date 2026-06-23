@@ -21,9 +21,25 @@ import { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
 import { TRIP_CLIENT, type TripClient } from '../trip/trip-client.port';
 import { averageOfStars, windowCutoff, type RollingAverage } from './domain/rolling-average';
-import { evaluateFlag, type FlagThresholds, type FlagReason } from './domain/flags';
+import {
+  evaluateFlag,
+  FLAG_REASON,
+  type FlagThresholds,
+  type FlagReason,
+  type FlagDecision,
+} from './domain/flags';
 
 const PRODUCER = 'rating-service';
+
+/**
+ * ORIGEN de un recálculo de agregado. Discrimina el período de gracia post-override (FIX auto-suspensión):
+ *  - 'review': lo dispara una RESEÑA NUEVA (POST /ratings). LIMPIA la supresión y evalúa normal — una reseña
+ *    nueva mala SÍ puede re-escalar a 'suspension'. Es la ÚNICA fuente que re-arma la auto-suspensión.
+ *  - 'cron': lo dispara el barrido diario (recomputeAll) sobre reseñas SIN cambios. Mientras el agregado esté
+ *    suprimido NO re-escala a 'suspension' (si no, re-suspendería sobre las MISMAS reseñas viejas y anularía
+ *    el override del operador). Sigue recomputando el avg y puede capar en 'review'.
+ */
+export type RecomputeSource = 'review' | 'cron';
 
 /** Resultado de un recálculo de agregado. */
 export interface RecomputeResult extends RollingAverage {
@@ -46,6 +62,7 @@ export class RatingsService {
     this.thresholds = {
       driverReview: config.getOrThrow<number>('DRIVER_REVIEW_THRESHOLD'),
       driverSuspension: config.getOrThrow<number>('DRIVER_SUSPENSION_THRESHOLD'),
+      driverMinReviewsForSuspension: config.getOrThrow<number>('MIN_REVIEWS_FOR_SUSPENSION'),
       passengerReverify: config.getOrThrow<number>('PASSENGER_REVERIFY_THRESHOLD'),
     };
   }
@@ -97,8 +114,9 @@ export class RatingsService {
           input.ratedId,
         );
 
-        // Recálculo atómico del agregado (incluye la calificación recién creada).
-        await this.recomputeWithinTx(tx, input.ratedId, input.ratedRole, now);
+        // Recálculo atómico del agregado (incluye la calificación recién creada). source='review':
+        // una reseña NUEVA LIMPIA el período de gracia y puede re-escalar a 'suspension' (la única vía).
+        await this.recomputeWithinTx(tx, input.ratedId, input.ratedRole, now, 'review');
         return created;
       });
       return toEntity(rating);
@@ -161,13 +179,65 @@ export class RatingsService {
     return a ? toAggregate(a) : null;
   }
 
-  /** Recalcula el agregado de un sujeto en su propia transacción (usado por el cron). */
+  /**
+   * Limpia el flag STICKY del agregado de un conductor tras una reactivación de identity (`driver.reactivated`).
+   *
+   * RAÍZ del bug de auto-suspensión por rating: el override del operador (`reactivateForCompliance`) levanta el
+   * hold RATING_LOW en identity, pero NO toca el agregado de rating — el `flagReason='suspension'` quedaba STICKY
+   * acá. Como `driver.flagged` se RE-emite solo en la TRANSICIÓN (`isNewFlag`: la razón cambia), una nueva reseña
+   * mala recomputaba el MISMO 'suspension' === prev.flagReason → `isNewFlag=false` → NO re-emitía → identity nunca
+   * re-suspendía. El override era inmunidad permanente de facto.
+   *
+   * Fix: al reactivar, LIMPIAR el sticky (`flagged=false, flagReason=null`) SIN recomputar desde las reseñas (eso
+   * re-suspendería al instante y anularía el override) Y ACTIVAR el período de gracia (`suspensionSuppressed=true`).
+   *
+   * EL PERÍODO DE GRACIA cierra el agujero del CRON: solo limpiar el sticky NO basta, porque el barrido diario
+   * (recomputeAll) recomputa el MISMO avg < 4.0 sobre las reseñas viejas con `prev.flagReason=null` →
+   * `isNewFlag=true` → re-emitiría 'suspension' dentro de 24h → identity re-suspende → el override es INÚTIL.
+   * Con `suspensionSuppressed=true`, el cron NO re-escala a 'suspension' (ver recomputeWithinTx, source='cron').
+   * SOLO una RESEÑA NUEVA (source='review') limpia la supresión y re-habilita la escalada: ahí sí, si el rating
+   * sigue < 4.0 con ≥ mínimo, `isNewFlag` vuelve a ser true → re-emite 'suspension' → identity re-suspende. Da el
+   * PERÍODO DE GRACIA correcto (hasta la próxima reseña), no inmunidad eterna ni re-suspensión automática por cron.
+   *
+   * IDEMPOTENTE: limpiar+suprimir un agregado ya limpio Y ya suprimido = no-op (mismos valores). GUARD: si no
+   * existe agregado para ese conductor (nunca calificado / aún sin agregar) NO hay sticky que limpiar → no-op,
+   * no crashea (la próxima reseña creará el agregado limpio de cero, sin estado heredado que suprimir).
+   *
+   * Acepta CUALQUIER `driver.reactivated` (disciplinaria, doc/ITV, rating): un conductor con rating malo debe poder
+   * re-suspenderse en la próxima reseña sin importar POR QUÉ se lo reactivó. No hace falta discriminar la causa.
+   */
+  async clearRatingFlag(driverId: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const prev = await tx.ratingAggregate.findUnique({
+        where: { subjectId: driverId },
+        select: { flagged: true, flagReason: true, suspensionSuppressed: true },
+      });
+      // GUARD: sin agregado no hay sticky que limpiar (no-op). Idempotente: ya limpio Y ya suprimido → no escribe.
+      if (prev === null) return false;
+      if (!prev.flagged && prev.flagReason === null && prev.suspensionSuppressed) return false;
+      await tx.ratingAggregate.update({
+        where: { subjectId: driverId },
+        data: { flagged: false, flagReason: null, suspensionSuppressed: true },
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Recalcula el agregado de un sujeto en su propia transacción (usado por el CRON). source='cron': mientras el
+   * agregado esté en período de gracia (`suspensionSuppressed`) el barrido NO re-escala a 'suspension' (no
+   * re-suspende sobre reseñas viejas tras un override). El default 'cron' es deliberado: este método es el punto
+   * de entrada del barrido y de cualquier recálculo que NO nace de una reseña nueva.
+   */
   async recomputeAggregate(
     subjectId: string,
     role: SubjectRole,
     now: Date = new Date(),
+    source: RecomputeSource = 'cron',
   ): Promise<RecomputeResult> {
-    return this.prisma.write.$transaction((tx) => this.recomputeWithinTx(tx, subjectId, role, now));
+    return this.prisma.write.$transaction((tx) =>
+      this.recomputeWithinTx(tx, subjectId, role, now, source),
+    );
   }
 
   /**
@@ -190,12 +260,23 @@ export class RatingsService {
     return processed;
   }
 
-  /** Núcleo del recálculo dentro de una transacción dada. */
+  /**
+   * Núcleo del recálculo dentro de una transacción dada.
+   *
+   * PERÍODO DE GRACIA (FIX auto-suspensión por cron): el agregado lleva `suspensionSuppressed`, que `clearRatingFlag`
+   * activa al reactivar (override del operador). Aquí se respeta/limpia según el ORIGEN:
+   *  - source='review' (reseña nueva): la supresión SE LIMPIA. La evaluación corre normal — si sigue 'suspension'
+   *    con prev limpio, isNewFlag=true → re-emite → re-suspende. Es la ÚNICA vía que re-arma la auto-suspensión.
+   *  - source='cron' (barrido diario): mientras la supresión esté activa, una decisión 'suspension' se DEGRADA a
+   *    'review' (NO escala): el cron sigue recomputando el avg y puede flaggear al panel, pero NO re-suspende sobre
+   *    las MISMAS reseñas viejas. La supresión PERSISTE (sigue true) hasta que llegue una reseña nueva.
+   */
   private async recomputeWithinTx(
     tx: Prisma.TransactionClient,
     subjectId: string,
     role: SubjectRole,
     now: Date,
+    source: RecomputeSource,
   ): Promise<RecomputeResult> {
     const cutoff = windowCutoff(this.windowDays, now);
     const rows = await tx.rating.findMany({
@@ -203,9 +284,19 @@ export class RatingsService {
       select: { stars: true },
     });
     const { avg, count } = averageOfStars(rows.map((r) => r.stars));
-    const decision = evaluateFlag(role, avg, count, this.thresholds);
+    const rawDecision = evaluateFlag(role, avg, count, this.thresholds);
 
     const prev = await tx.ratingAggregate.findUnique({ where: { subjectId } });
+
+    // El período de gracia se LIMPIA con una reseña nueva; el cron lo PRESERVA (lo que prev tuviera).
+    const wasSuppressed = prev?.suspensionSuppressed ?? false;
+    const suppressionActive = source === 'cron' && wasSuppressed;
+
+    // GRACIA: el cron NO re-escala a 'suspension' bajo supresión → la degrada a 'review' (flag de panel, no suspende).
+    const decision: FlagDecision =
+      suppressionActive && rawDecision.reason === FLAG_REASON.SUSPENSION
+        ? { flagged: true, reason: FLAG_REASON.REVIEW }
+        : rawDecision;
 
     const data = {
       role,
@@ -213,6 +304,8 @@ export class RatingsService {
       count30d: count,
       flagged: decision.flagged,
       flagReason: decision.reason,
+      // 'review' limpia la gracia; 'cron' la conserva tal cual estaba.
+      suspensionSuppressed: source === 'review' ? false : wasSuppressed,
       lastComputedAt: now,
     };
     await tx.ratingAggregate.upsert({
@@ -221,7 +314,8 @@ export class RatingsService {
       update: data,
     });
 
-    // Emitir evento de flag solo en la transición a un (nuevo) estado/razón de flag.
+    // Emitir evento de flag solo en la transición a un (nuevo) estado/razón de flag. Como bajo supresión la
+    // decisión del cron NUNCA es 'suspension', el cron jamás re-emite 'suspension' durante la gracia.
     const isNewFlag =
       decision.flagged && (prev === null || !prev.flagged || prev.flagReason !== decision.reason);
     if (isNewFlag && decision.reason) {
@@ -246,7 +340,8 @@ export class RatingsService {
         subjectId,
       );
     } else {
-      // NOTA: `passenger.flagged` aún no está en EVENT_SCHEMAS de @veo/events (ver README/docs).
+      // `passenger.flagged` está registrado en EVENT_SCHEMAS de @veo/events (schemas.ts) y se valida en el
+      // productor del outbox contra ese esquema, igual que `driver.flagged`.
       await this.enqueue(
         tx,
         'passenger.flagged',

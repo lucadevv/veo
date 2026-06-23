@@ -97,7 +97,8 @@ const gate = heldStack
       reason:
         'VEO_E2E_HELD_STACK!=1 — corré `pnpm run e2e:waypoint` contra un stack sostenido (e2e:serve)',
     };
-const collector = new EventCollector(['trip', 'dispatch', 'payment', 'driver', 'user']);
+// 'driver-location' = topic propio del firehose driver.location_updated (TOPIC_OVERRIDES en @veo/events).
+const collector = new EventCollector(['trip', 'dispatch', 'payment', 'driver', 'driver-location', 'user']);
 
 (heldStack && gate.ready ? describe : describe.skip)(
   'VEO · parada negociada mid-trip E2E (C1-C4)',

@@ -59,12 +59,17 @@ enum BackgroundCheckStatus {
 ///   - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD). El `causeRef`
 ///     del hold guarda el documentType → un hold POR documento distinto (regularizar el SOAT no quita la licencia).
 ///   - INSPECTION_EXPIRED: inspección técnica (ITV) vencida del vehículo operado. `causeRef` vacío (una sola ITV).
-/// DOCUMENT_EXPIRED + INSPECTION_EXPIRED se levantan por la vía de compliance (reactivateForCompliance / fleet);
-/// una DISCIPLINARY NUNCA se toca por esas vías (y viceversa) — la separación de causas se respeta extremo-a-extremo.
+///   - RATING_LOW: AUTO-suspensión por rating bajo (< 4.0 con ≥ mínimo de reseñas, BR-D01). La decide rating-service
+///     (evento `driver.flagged` reason='suspension'); identity la materializa como hold. `causeRef` vacío (un solo
+///     hold de rating). Reactivación MANUAL del operador (override de compliance) — NO se auto-levanta al recuperar.
+/// Todas las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW) se levantan por la vía de
+/// compliance (reactivateForCompliance / fleet); una DISCIPLINARY NUNCA se toca por esas vías (y viceversa) — la
+/// separación de causas se respeta extremo-a-extremo.
 enum SuspensionCause {
   DISCIPLINARY
   DOCUMENT_EXPIRED
   INSPECTION_EXPIRED
+  RATING_LOW
 
   @@schema("identity")
 }
