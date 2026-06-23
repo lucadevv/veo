@@ -73,6 +73,21 @@ export class InvalidStateError extends DomainError {
 }
 
 /**
+ * Conflicto de CONCURRENCIA (optimistic-lock / CAS miss): la operación abortó porque otra operación
+ * concurrente cambió la fila entre el read y el write (p.ej. un `updateMany` con `WHERE refundedCents=<read>`
+ * devolvió `count===0` porque otro refund ya movió el saldo).
+ *
+ * DISTINTO de `InvalidStateError` (409 también, pero PERMANENTE: violación de la máquina de estados —
+ * reintentar NUNCA resuelve). Este error es TRANSITORIO por naturaleza: un reintento con el estado fresco
+ * SÍ tendría éxito. Tiparlo aparte permite clasificar el reintento correcto (transient) y NO disparar una
+ * falsa alerta de backstop "irrecuperable" sobre lo que es una simple carrera optimista.
+ */
+export class ConcurrencyConflictError extends DomainError {
+  readonly code = 'CONCURRENCY_CONFLICT';
+  readonly httpStatus = 409;
+}
+
+/**
  * Entidad sintácticamente válida pero que no puede procesarse por una precondición de negocio
  * (ej. afiliar Yape sin nombre de perfil cargado). Distinto de 400 (sintaxis) y 409 (conflicto de estado).
  */
