@@ -29,6 +29,7 @@ import {
   DocumentSide,
   FleetDocumentType,
   FleetDocumentStatus,
+  SuspensionCause,
   type AdminRole,
 } from '@veo/shared-types';
 import type {
@@ -131,6 +132,18 @@ function toDniFaceMatchStatus(status: string): DniFaceMatchStatusValue {
   return DNI_FACE_MATCH_STATUS_VALUES.has(status)
     ? (status as DniFaceMatchStatusValue)
     : DniFaceMatchStatus.NOT_RUN;
+}
+
+/** Valores válidos de SuspensionCause (modelo de HOLDS) para narrowear las causas del wire gRPC. */
+const SUSPENSION_CAUSE_VALUES = new Set<string>(Object.values(SuspensionCause));
+
+/**
+ * Narrowea las causas de suspensión del wire gRPC (`string[]`) al enum tipado del dominio, DESCARTANDO los
+ * valores desconocidos (productor más nuevo con una causa que este BFF aún no conoce → se omite, nunca se
+ * inventa una acción de reactivación sobre una causa que no entendemos). `undefined` (proto3 viejo) → [].
+ */
+function toSuspensionCauses(causes: string[] | undefined): SuspensionCause[] {
+  return (causes ?? []).filter((c): c is SuspensionCause => SUSPENSION_CAUSE_VALUES.has(c));
 }
 
 /** Mensaje de causa legible de un error desconocido (para la degradación honesta del purge parcial). */
@@ -343,6 +356,9 @@ export class OpsService {
             phone: identityVisible ? emptyToNull(d.phone) : null,
             // Estado AUTORITATIVO de suspensión (derivado de los holds): "" ⇒ libre; ISO ⇒ suspendido.
             suspendedAt: emptyToNull(d.suspendedAt),
+            // CAUSAS distintas de los holds (cause-aware UI de reactivación · NO PII): el batch ahora las trae
+            // por driver (mismo dato que el detalle). Narrowing defensivo: descarta valores fuera del enum.
+            suspensionCauses: toSuspensionCauses(d.suspensionCauses),
           },
         ]),
       );

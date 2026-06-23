@@ -404,3 +404,21 @@ export const FleetDocumentStatus = {
   REJECTED: 'REJECTED',
 } as const;
 export type FleetDocumentStatus = (typeof FleetDocumentStatus)[keyof typeof FleetDocumentStatus];
+
+/**
+ * CAUSA de un hold de suspensión del conductor (modelo de HOLDS · `DriverSuspensionHold`). Espejo TIPADO
+ * del enum Prisma `SuspensionCause` de identity-service (los valores DEBEN coincidir 1:1 con la columna
+ * `cause`). Discrimina QUÉ vía de reactivación corresponde — fuente de verdad para que backend Y panel
+ * decidan la acción sin magic strings:
+ *  - DISCIPLINARY: suspensión MANUAL del operador. La levanta SOLO la reactivación manual (→ /reactivate).
+ *  - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD).
+ *  - INSPECTION_EXPIRED: inspección técnica (ITV) del vehículo operado vencida.
+ * DOCUMENT_EXPIRED + INSPECTION_EXPIRED se levantan por la vía de compliance (→ /reactivate-compliance);
+ * una DISCIPLINARY NUNCA se toca por esa vía (y viceversa) — la separación de causas es extremo-a-extremo.
+ */
+export const SuspensionCause = {
+  DISCIPLINARY: 'DISCIPLINARY',
+  DOCUMENT_EXPIRED: 'DOCUMENT_EXPIRED',
+  INSPECTION_EXPIRED: 'INSPECTION_EXPIRED',
+} as const;
+export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

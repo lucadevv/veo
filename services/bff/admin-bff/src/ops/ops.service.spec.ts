@@ -1394,6 +1394,81 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
     // Se consultó identity igual (para el badge), aunque el rol no vea PII.
     expect(grpcCall).toHaveBeenCalledWith('GetDriversByIds', expect.anything(), expect.anything());
   });
+
+  it('FIX 2 · el batch trae las CAUSAS y la lista las propaga por fila (UI cause-aware end-to-end)', async () => {
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriversByIds'
+        ? {
+            drivers: [
+              {
+                id: 'd1',
+                name: 'Nora',
+                phone: '+51900000000',
+                suspendedAt: '2026-06-21T00:00:00.000Z',
+                found: true,
+                // El batch (FIX 2) ahora trae las causas distintas por driver, igual que el detalle.
+                suspensionCauses: ['DOCUMENT_EXPIRED', 'DISCIPLINARY'],
+              },
+            ],
+          }
+        : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModelWith([rmDriver('d1', 'SUSPENDED')]),
+      noopAudit,
+      config,
+    );
+
+    const page = await svc.listDrivers(identity, {});
+    // La fila de la LISTA expone las causas → el panel ofrece la acción de reactivación correcta sin abrir el detalle.
+    expect(page.items[0]?.suspensionCauses).toEqual(['DOCUMENT_EXPIRED', 'DISCIPLINARY']);
+  });
+
+  it('FIX 2 · causa desconocida del wire (productor más nuevo) se DESCARTA — nunca se inventa una acción', async () => {
+    const identityGrpc = grpc((m) =>
+      m === 'GetDriversByIds'
+        ? {
+            drivers: [
+              {
+                id: 'd1',
+                name: 'Nora',
+                phone: '+51900000000',
+                suspendedAt: '2026-06-21T00:00:00.000Z',
+                found: true,
+                // 'FUTURE_CAUSE' aún no existe en este BFF → se filtra; la conocida se conserva.
+                suspensionCauses: ['DISCIPLINARY', 'FUTURE_CAUSE'],
+              },
+            ],
+          }
+        : {},
+    );
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      readModelWith([rmDriver('d1', 'SUSPENDED')]),
+      noopAudit,
+      config,
+    );
+
+    const page = await svc.listDrivers(identity, {});
+    expect(page.items[0]?.suspensionCauses).toEqual(['DISCIPLINARY']);
+  });
 });
 
 describe('OpsService.reactivateDriverForCompliance · override manual (compliance holds) — UNA escritura', () => {

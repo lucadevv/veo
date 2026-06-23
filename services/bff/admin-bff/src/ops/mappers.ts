@@ -9,7 +9,7 @@ import {
   type TripStatus,
   type TripSummary,
 } from '@veo/api-client';
-import type { AdminRole } from '@veo/shared-types';
+import type { AdminRole, SuspensionCause } from '@veo/shared-types';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
 
 /**
@@ -49,11 +49,16 @@ const DRIVER_STATUS_ACTIVE = 'ACTIVE';
  *  - `fullName`/`phone`: PII (Compliance+); null para sub-Compliance o sin dato.
  *  - `suspendedAt`: estado AUTORITATIVO de suspensión derivado de los holds ("" → null acá ⇒ libre; ISO ⇒
  *    suspendido). NO es PII: se usa para reconciliar el badge de la lista para TODOS los roles.
+ *  - `suspensionCauses`: las `cause` DISTINTAS de los holds vigentes (DISCIPLINARY/DOCUMENT_EXPIRED/
+ *    INSPECTION_EXPIRED · modelo de HOLDS, derivado en identity). El panel las usa para ofrecer la acción de
+ *    reactivación correcta por fila (cause-aware), igual que el detalle. NO es PII (es un enum de motivo);
+ *    se proyecta para TODOS los roles. [] cuando el conductor no tiene holds.
  */
 export interface DriverListEnrichment {
   fullName: string | null;
   phone: string | null;
   suspendedAt: string | null;
+  suspensionCauses: SuspensionCause[];
 }
 
 /**
@@ -90,6 +95,9 @@ export function driverRecordToApproval(
     submittedAt: r.updatedAt,
     // Motivo del último rechazo (proyectado del evento driver.rejected); null si no está rechazado.
     rejectionReason: r.rejectionReason,
+    // CAUSAS de suspensión (autoridad: identity · modelo de HOLDS) para la UI cause-aware de reactivación.
+    // Sin enriquecimiento (página vacía no debería darse) → [] honesto, nunca se inventa.
+    suspensionCauses: enrichment?.suspensionCauses ?? [],
   };
 }
 

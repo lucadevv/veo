@@ -44,12 +44,16 @@ export function StepUpDialog({
     setError(null);
     setPending(true);
     try {
+      // Verificamos el TOTP y EJECUTAMOS la acción con el diálogo AÚN abierto: si `onVerified` falla
+      // (p. ej. el override de compliance devuelve 403 por causa-mismatch o 409 si ya no está suspendido),
+      // el error queda visible en el Field en vez de perderse tras un diálogo ya cerrado. Cerramos SOLO en
+      // éxito completo (mismo patrón que ConfirmDialog: await primero, setOpen(false) recién al final).
       await stepUp(code);
+      await onVerified();
       setOpen(false);
       setCode('');
-      await onVerified();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Código incorrecto.');
+      setError(e instanceof Error ? e.message : 'No se pudo completar la acción.');
     } finally {
       setPending(false);
     }

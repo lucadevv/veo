@@ -243,6 +243,28 @@ export function useReactivateDriver() {
 }
 
 /**
+ * OVERRIDE DE COMPLIANCE: levanta una suspensión por DOCUMENTOS/ITV vencidos (causas DOCUMENT_EXPIRED /
+ * INSPECTION_EXPIRED del modelo de holds). Esa suspensión normalmente se reactiva SOLA cuando el conductor
+ * regulariza (ITV vigente nueva / documento válido); este endpoint es el override MANUAL del operador para
+ * forzar el levantamiento. Exige step-up MFA fresco: el llamador lo verifica con StepUpDialog ANTES de
+ * invocar, y el admin-bff revalida @Roles + @RequireStepUpMfa server-side (la UI no autoriza). SIN body,
+ * 204 vacío. FAIL-CLOSED: 403 si la suspensión NO era por documentos/ITV (una disciplinaria se levanta con
+ * useReactivateDriver), 409 si no estaba suspendido. Quita SOLO los holds de documento/ITV; si además había
+ * una suspensión disciplinaria, esa queda (el conductor sigue suspendido hasta levantarla por su vía).
+ */
+export function useReactivateDriverForCompliance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/reactivate-compliance`),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: ['drivers'] });
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
+    },
+  });
+}
+
+/**
  * Borrado en CASCADA de un conductor (DELETE /ops/drivers/:id) — IRREVERSIBLE: elimina al conductor, su
  * usuario, documentos y archivos. SOLO SUPERADMIN + step-up MFA fresca (el admin-bff revalida @Roles +
  * @RequireStepUpMfa server-side; la UI solo refleja con `drivers:delete`). Respuesta 204 vacía (no se

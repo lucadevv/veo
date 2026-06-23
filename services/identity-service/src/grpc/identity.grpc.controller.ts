@@ -251,7 +251,15 @@ export class IdentityGrpcController {
     if (!ids || ids.length === 0) return { drivers: [] };
     const drivers = await this.prisma.read.driver.findMany({
       where: { id: { in: ids } },
-      include: { user: { select: { name: true, kycStatus: true, phone: true } } },
+      include: {
+        user: { select: { name: true, kycStatus: true, phone: true } },
+        // Holds VIGENTES (solo el `cause`, NO PII): la LISTA del panel necesita las CAUSAS distintas para
+        // ofrecer la(s) acción(es) de reactivación correcta(s) por fila (cause-aware), igual que el detalle.
+        // SIN N+1: es una SOLA query batch (`findMany WHERE id IN (...)` con `include`) — Prisma trae los
+        // holds de TODOS los ids en la misma ida a la DB, no un query por conductor. `toDriverReply` mapea
+        // `suspensionCauses` (causas distintas, dedup con Set) cuando el row trae `suspensionHolds`.
+        suspensionHolds: { select: { cause: true } },
+      },
     });
     // BATCH/lista: NO se descifra el DNI (`includeDni` ausente → false). El admin-bff `listDrivers` consume
     // SOLO name/phone de este reply (jamás documentId), así que descifrar acá sería over-decryption de PII y

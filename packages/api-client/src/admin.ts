@@ -133,6 +133,12 @@ export const driverApproval = driverSummary.extend({
   submittedAt: z.string().nullable(),
   /** Motivo del último rechazo de antecedentes; `null` si no está rechazado o no se dio motivo. */
   rejectionReason: z.string().nullable(),
+  /**
+   * CAUSAS de suspensión (DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED · modelo de HOLDS) del conductor,
+   * para que la LISTA del panel ofrezca la acción de reactivación correcta por fila (cause-aware), igual que
+   * el detalle (`driverDetail.suspensionCauses`). `[]` si no está suspendido.
+   */
+  suspensionCauses: z.array(z.string()),
 });
 export type DriverApproval = z.infer<typeof driverApproval>;
 

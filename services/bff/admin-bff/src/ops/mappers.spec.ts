@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AdminRole } from '@veo/shared-types';
+import { AdminRole, SuspensionCause } from '@veo/shared-types';
 import {
   tripRecordToSummary,
   driverRecordToSummary,
@@ -44,8 +44,18 @@ describe('mappers OPS', () => {
     };
     // El `enrichment` llega PRE-redactado: ops.service.listDrivers pone fullName/phone a null para sub-Compliance
     // ANTES de pasarlo. El mapper solo proyecta lo que recibe (no decide redacción).
-    const visible = { fullName: 'Luis Conductor', phone: '+51987654321', suspendedAt: null };
-    const redacted = { fullName: null, phone: null, suspendedAt: null };
+    const visible = {
+      fullName: 'Luis Conductor',
+      phone: '+51987654321',
+      suspendedAt: null,
+      suspensionCauses: [],
+    };
+    const redacted = {
+      fullName: null,
+      phone: null,
+      suspendedAt: null,
+      suspensionCauses: [],
+    };
     // SIN enriquecimiento (página vacía / sin reply) → null honesto.
     expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
     // CON enriquecimiento visible: se proyecta tal cual.
@@ -66,7 +76,12 @@ describe('mappers OPS', () => {
       rejectionReason: null,
       updatedAt: '2026-05-29T00:00:00.000Z',
     };
-    const enrich = (suspendedAt: string | null) => ({ fullName: null, phone: null, suspendedAt });
+    const enrich = (suspendedAt: string | null) => ({
+      fullName: null,
+      phone: null,
+      suspendedAt,
+      suspensionCauses: [],
+    });
 
     it('read-model SUSPENDED pero identity LIBRE (auto-reactivación) → badge ACTIVE', () => {
       // El conductor regularizó su documento/ITV: identity quitó el hold (suspendedAt null) SIN emitir
@@ -96,6 +111,35 @@ describe('mappers OPS', () => {
       expect(
         driverRecordToApproval(base, COMPLIANCE, enrich('2026-06-02T08:00:00.000Z')).status,
       ).toBe('SUSPENDED');
+    });
+  });
+
+  describe('driverRecordToApproval · CAUSAS de suspensión en la lista (FIX 2 · UI cause-aware)', () => {
+    const base: DriverRecord = {
+      id: 'd1',
+      userId: 'u1',
+      status: 'SUSPENDED',
+      averageRating: null,
+      backgroundCheckStatus: 'CLEARED',
+      rejectionReason: null,
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    };
+
+    it('proyecta las causas del enriquecimiento (autoridad: identity) a la fila de la lista', () => {
+      const enrichment = {
+        fullName: null,
+        phone: null,
+        suspendedAt: '2026-06-02T08:00:00.000Z',
+        suspensionCauses: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.DISCIPLINARY],
+      };
+      expect(driverRecordToApproval(base, COMPLIANCE, enrichment).suspensionCauses).toEqual([
+        SuspensionCause.DOCUMENT_EXPIRED,
+        SuspensionCause.DISCIPLINARY,
+      ]);
+    });
+
+    it('SIN enriquecimiento (página vacía) → [] honesto (nunca se inventa una causa)', () => {
+      expect(driverRecordToApproval(base, COMPLIANCE).suspensionCauses).toEqual([]);
     });
   });
 

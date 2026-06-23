@@ -465,3 +465,83 @@ describe('IdentityGrpcController · GetDriver expone las CAUSAS de suspensión (
     expect(reply.suspendedAt).toBe('');
   });
 });
+
+/**
+ * FIX 2 (habilitar la UI cause-aware en la LISTA del panel) — el BATCH `GetDriversByIds` (que puebla la lista
+ * del admin vía admin-bff `listDrivers`) ahora EXPONE las CAUSAS de suspensión por conductor, igual que el
+ * detalle. Lo CRÍTICO: SIN N+1 — UNA sola `findMany WHERE id IN (...)` con `include: suspensionHolds` trae los
+ * holds de TODOS los ids en la misma ida a la DB (no un query por driver). El `toDriverReply` ya mapea las
+ * causas distintas (dedup por `cause`) cuando el row trae `suspensionHolds`.
+ */
+describe('IdentityGrpcController · GetDriversByIds (BATCH) expone las CAUSAS de suspensión SIN N+1 (FIX 2)', () => {
+  beforeEach(() => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('el batch incluye los holds en UNA sola query (include suspensionHolds: select cause · sin N+1)', async () => {
+    const ctrl = makeController({
+      findMany: () => [
+        { ...baseDriverRow, id: 'd1', suspensionHolds: [] },
+        { ...baseDriverRow, id: 'd2', suspensionHolds: [] },
+      ],
+    });
+    const prismaFindMany = (
+      ctrl as unknown as {
+        prisma: { read: { driver: { findMany: ReturnType<typeof vi.fn> } } };
+      }
+    ).prisma.read.driver.findMany;
+
+    await ctrl.getDriversByIds({ ids: ['d1', 'd2'] }, signedMeta());
+
+    // UNA sola llamada a la DB para TODA la página (no un query por driver) → no hay N+1.
+    expect(prismaFindMany).toHaveBeenCalledTimes(1);
+    // Y esa única query trae los holds de todos los ids vía include (mismo dato que el detalle).
+    expect(prismaFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['d1', 'd2'] } },
+        include: expect.objectContaining({
+          suspensionHolds: { select: { cause: true } },
+        }),
+      }),
+    );
+  });
+
+  it('cada conductor del batch trae SUS causas distintas (dedup por cause) — la lista las puebla por fila', async () => {
+    const ctrl = makeController({
+      findMany: () => [
+        // d1 suspendido por 2 causas (2 DOCUMENT_EXPIRED de docs distintos + 1 DISCIPLINARY → 2 distintas).
+        {
+          ...baseDriverRow,
+          id: 'd1',
+          suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+          suspensionHolds: [
+            { cause: 'DOCUMENT_EXPIRED' },
+            { cause: 'DOCUMENT_EXPIRED' },
+            { cause: 'DISCIPLINARY' },
+          ],
+        },
+        // d2 suspendido SOLO por ITV.
+        {
+          ...baseDriverRow,
+          id: 'd2',
+          suspendedAt: new Date('2026-06-01T00:00:00.000Z'),
+          suspensionHolds: [{ cause: 'INSPECTION_EXPIRED' }],
+        },
+        // d3 NO suspendido (0 holds) → [].
+        { ...baseDriverRow, id: 'd3', suspensionHolds: [] },
+      ],
+    });
+
+    const reply = await ctrl.getDriversByIds({ ids: ['d1', 'd2', 'd3'] }, signedMeta());
+    const byId = new Map(reply.drivers.map((d) => [d.id, d]));
+
+    expect(byId.get('d1')!.suspensionCauses).toHaveLength(2);
+    expect(byId.get('d1')!.suspensionCauses).toEqual(
+      expect.arrayContaining(['DOCUMENT_EXPIRED', 'DISCIPLINARY']),
+    );
+    expect(byId.get('d2')!.suspensionCauses).toEqual(['INSPECTION_EXPIRED']);
+    expect(byId.get('d3')!.suspensionCauses).toEqual([]);
+    // Minimización 5b intacta: el batch NUNCA descifra el DNI, ni con holds presentes.
+    expect(reply.drivers.every((d) => d.documentId === '')).toBe(true);
+  });
+});
