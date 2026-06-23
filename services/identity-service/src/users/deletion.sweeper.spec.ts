@@ -65,9 +65,16 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     await sweeper.sweep();
 
     expect(calls.driverUpdate).toHaveBeenCalledTimes(1);
+    // Vacía el embedding Y resetea el binding DNI↔selfie (invariante de frescura: mutar el material cotejado
+    // invalida el binding; además no dejamos evidencia biométrica stale de una cuenta borrada).
     expect(calls.driverUpdate.mock.calls[0]![0]).toEqual({
       where: { id: 'd1' },
-      data: { faceEmbedding: [] },
+      data: {
+        faceEmbedding: [],
+        dniFaceMatched: null,
+        dniFaceMatchScore: null,
+        dniFaceMatchedAt: null,
+      },
     });
   });
 

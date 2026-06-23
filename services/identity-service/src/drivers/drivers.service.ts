@@ -57,6 +57,22 @@ function driverStatusSources(to: DriverStatus): DriverStatus[] {
   );
 }
 
+/**
+ * Estados DESDE los que `to` es alcanzable en el eje BackgroundCheckStatus (inversa de la tabla de la máquina).
+ * Gemelo de `driverStatusSources` para el eje de antecedentes: alimenta el CAS atómico de `approve()`
+ * (`updateMany({ where: { backgroundCheckStatus: { in: backgroundCheckSources(CLEARED) } } })`), que mueve el
+ * estado en el MISMO statement que valida que era una transición legal — sin check-then-act, así dos approve()
+ * concurrentes no pueden ambos ganar la carrera (solo UNO matchea → solo UNO emite driver.verified). Deriva de
+ * `backgroundCheckMachine.transitions` (única fuente de verdad del eje): cero strings mágicos. Incluye `to`
+ * mismo si la tabla lo permite (re-aplicación idempotente).
+ */
+function backgroundCheckSources(to: BackgroundCheckStatus): BackgroundCheckStatus[] {
+  const transitions = backgroundCheckMachine.transitions;
+  return (Object.keys(transitions) as BackgroundCheckStatus[]).filter((from) =>
+    backgroundCheckMachine.canTransition(from, to),
+  );
+}
+
 /** Clave Redis del lockout de fallos biométricos del conductor. */
 function bioLockKey(driverId: string): string {
   return `veo:bio:fails:${driverId}`;
@@ -186,16 +202,20 @@ export class DriversService {
    * embedding vive DENTRO de la tx (sobre el dato fresco, no la réplica): sin TOCTOU con un enrollFace
    * concurrente. Error tipado 409 (ConflictError) `biometría no enrolada`.
    *
-   * DECISIÓN sub-lote 3C · el face-match DNI↔selfie NO es gate DURO de aprobación (a propósito): este gate
-   * sigue exigiendo solo el ENROLAMIENTO biométrico (`hasFaceEmbedding`), no que el binding DNI↔selfie haya
-   * dado MATCHED. Razones: (1) gradualidad — exigir el match rompería a los conductores ya en cola que se
-   * enrolaron antes de existir el binding (mismo criterio que el DNI/documentos requeridos, que se sumaron
-   * gradual aguas arriba en el admin-bff); (2) el match puede dar NO_MATCH por una foto de DNI de mala
-   * calidad sin que haya fraude — un falso negativo NO debe bloquear mecánicamente la habilitación; la
-   * decisión es del operador. El requisito de PRODUCTO ("no aprobar a ciegas") se cumple haciendo que el
-   * operador VEA el binding (UI 3C) antes de decidir. Si en el futuro se quiere endurecer, el lugar es ACÁ
-   * (server-truth, curl-proof), leyendo `dniFaceMatched` dentro de esta misma tx — pero como gate gradual y
-   * documentado, NO un cambio silencioso que rompa el flujo actual.
+   * GATE DE EJECUCIÓN DEL BINDING DNI↔selfie (server-truth, fail-closed · diferenciador no negociable VEO):
+   * además del enrolamiento biométrico, este choke point exige que el face-match DNI↔selfie SE HAYA EJECUTADO
+   * antes de aprobar. El predicado tipado es `dniFaceMatchedAt != null` (`matchDniFace()` setea los 3 campos
+   * del binding en UNA escritura atómica → `dniFaceMatchedAt = null` ⇔ el match NUNCA corrió). Curl-proof:
+   * aunque la UI muestre el binding, la API se NIEGA a aprobar a ciegas sin haber corrido el cotejo. La
+   * lectura vive DENTRO de la tx, sobre el MISMO driver que se va a transicionar (sin TOCTOU con un
+   * matchDniFace concurrente). Error tipado 409 (ConflictError) `face-match no ejecutado`.
+   *
+   * DISTINCIÓN CRÍTICA · el gate es "SE EJECUTÓ", NO "MATCHEÓ": un `dniFaceMatched === false` (veredicto
+   * NO_MATCH) DEBE seguir permitiendo la aprobación. Razones: (1) el match puede dar NO_MATCH por una foto de
+   * DNI de mala calidad sin que haya fraude — un falso negativo NO debe bloquear mecánicamente la habilitación;
+   * (2) el veredicto lo decide el OPERADOR que lo VIO (UI 3C), no la máquina. La política es: el binding TIENE
+   * que haberse corrido (gate duro, curl-proof), pero el VEREDICTO es criterio humano. NO se lee
+   * `dniFaceMatched` (el veredicto) para gatear: solo `dniFaceMatchedAt` (la ejecución).
    */
   async approve(driverId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
     return this.prisma.write.$transaction(async (tx) => {
@@ -211,15 +231,71 @@ export class DriversService {
           driverId,
         });
       }
+      // GATE DE EJECUCIÓN DEL BINDING (server-truth, fail-closed): el face-match DNI↔selfie DEBE haberse
+      // ejecutado antes de aprobar. `dniFaceMatchedAt == null` ⇔ matchDniFace() nunca corrió (los 3 campos
+      // del binding se setean juntos en una escritura atómica). Curl-proof: no se aprueba a ciegas. Es gate
+      // de EJECUCIÓN, NO de veredicto: un dniFaceMatched===false (NO_MATCH) SÍ pasa — el operador lo vio y
+      // decide. Se lee del `driver` FRESCO de la tx (mismo que se transiciona): sin TOCTOU. Corta ANTES de
+      // los asserts de máquina y de toda escritura.
+      if (driver.dniFaceMatchedAt == null) {
+        throw new ConflictError(
+          'No se puede aprobar: el face-match DNI↔selfie no se ejecutó. Corré el cotejo antes de aprobar.',
+          { driverId },
+        );
+      }
+      // Asserts de máquina TIPADOS: validan que la transición es LEGAL sobre el dato fresco (un from fuera
+      // del enum / un CLEARED→PENDING ilegal fallan acá, antes del CAS). La GANANCIA de la carrera, en cambio,
+      // la decide el CAS de abajo, no estos asserts (un check-then-act secuencial no protege del concurrente).
       backgroundCheckMachine.assertTransition(
         driver.backgroundCheckStatus,
         BackgroundCheckStatus.CLEARED,
       );
       kycStatusMachine.assertTransition(user.kycStatus, KycStatus.VERIFIED);
-      const updated = await tx.driver.update({
-        where: { id: driverId },
+      // TRANSICIÓN POR CAS ATÓMICO (espeja suspend()/startShift()): el estado fuente válido viaja en el WHERE
+      // del updateMany (`backgroundCheckStatus in sources(CLEARED)` = {PENDING, REJECTED, CLEARED}, derivado de
+      // la máquina, cero strings mágicos). Dos approve() concurrentes leen ambos PENDING y pasan ambos el assert
+      // (READ COMMITTED), pero solo UNO matchea el CAS: el segundo ve count===0 porque la fila ya está en CLEARED
+      // y PENDING ya no está en el WHERE... salvo que CLEARED ∈ sources (re-aplicación idempotente). Para que el
+      // CAS DISCRIMINE al perdedor de la carrera, el WHERE exige el estado fuente que AÚN NO es CLEARED: PENDING
+      // o REJECTED. Así el ganador transiciona PENDING/REJECTED→CLEARED (count 1, emite); el perdedor ya ve
+      // CLEARED y NO matchea (count 0, no-op idempotente SIN re-emitir driver.verified).
+      const claimSources = backgroundCheckSources(BackgroundCheckStatus.CLEARED).filter(
+        (from) => from !== BackgroundCheckStatus.CLEARED,
+      );
+      // GATE DE FACE-MATCH ATÓMICO CON LA TRANSICIÓN (cierra el TOCTOU del pre-read): además del estado fuente,
+      // el WHERE del CAS exige `dniFaceMatchedAt != null`. El pre-read de arriba da el 409 amigable en el caso
+      // común (curl-proof + UX), PERO no es atómico: entre ese read y este write, un resubmit()/enrollFace()
+      // CONCURRENTE puede nulificar el binding (ambos lo resetean en su misma tx). Plegando el predicado en el
+      // CAS, si el binding se nulifica bajo nuestros pies la fila ya NO matchea el WHERE → count 0 → NO se aprueba
+      // ni se emite driver.verified. Es comparación contra constante (`not: null`), soportada por Prisma — no
+      // hace falta comparar dos columnas entre sí. Así el gate de frescura es ATÓMICO con la transición.
+      const claim = await tx.driver.updateMany({
+        where: {
+          id: driverId,
+          backgroundCheckStatus: { in: claimSources },
+          dniFaceMatchedAt: { not: null },
+        },
         data: { backgroundCheckStatus: BackgroundCheckStatus.CLEARED },
       });
+      if (claim.count === 0) {
+        // count 0 tiene DOS causas, ambas resueltas como no-op idempotente SIN re-emitir driver.verified:
+        // (a) IDEMPOTENTE: otra tx concurrente ya aprobó (la fila ya está CLEARED, fuera del `in` del WHERE) — el
+        //     pre-read ya pasó (binding presente), así que NO es una carrera de nulificación: devolvemos el estado
+        //     ya-aprobado, honesto, sin tocar user ni outbox (esto es lo que evita el double-emit).
+        // (b) CARRERA DE NULIFICACIÓN: un resubmit()/enrollFace() concurrente nulificó dniFaceMatchedAt entre el
+        //     pre-read y este CAS. El binding ya NO es fresco → fail-closed: NO aprobamos (no re-emitimos). Tratarlo
+        //     como no-op (en vez de lanzar) es seguro y honesto: la garantía dura ya la dio el WHERE (no se aprobó);
+        //     el conductor quedó PENDING/re-enrolado y deberá re-correr el match — el operador reintentará el approve.
+        // En ambos casos NO re-emitimos driver.verified (cero double-emit) y devolvemos el estado real de la fila.
+        const current = await tx.driver.findUnique({
+          where: { id: driverId },
+          select: { backgroundCheckStatus: true },
+        });
+        return {
+          id: driver.id,
+          backgroundCheckStatus: current?.backgroundCheckStatus ?? driver.backgroundCheckStatus,
+        };
+      }
       await tx.user.update({
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.VERIFIED },
@@ -240,7 +316,7 @@ export class DriversService {
           envelope: envelope as unknown as Prisma.InputJsonValue,
         },
       });
-      return { id: updated.id, backgroundCheckStatus: updated.backgroundCheckStatus };
+      return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.CLEARED };
     });
   }
 
@@ -461,6 +537,17 @@ export class DriversService {
           backgroundCheckStatus: BackgroundCheckStatus.PENDING,
           rejectionReason: null,
           rejectedAt: null,
+          // RESET DEL BINDING DNI↔selfie POR-CICLO (causa raíz, fail-closed): el binding es evidencia de
+          // ESTE ciclo de revisión, NO un hecho histórico. Al reenviar, el conductor corrigió su material
+          // (DNI o selfie); el cotejo viejo apuntaba al material OBSOLETO. Si NO lo limpiáramos, el gate de
+          // ejecución de approve() (`dniFaceMatchedAt != null`) PASARÍA con el timestamp del PRIMER cotejo
+          // (contra el DNI viejo) → un re-approve ligaría material stale. Lo reseteamos a "no corrido" en la
+          // MISMA escritura/tx que lleva el estado a PENDING: una re-aprobación OBLIGA a re-correr
+          // matchDniFace() contra el material corregido (el gate de approve() vuelve a morder). Los 3 campos
+          // del binding se setean juntos en matchDniFace() y se limpian juntos acá → coherencia atómica.
+          dniFaceMatched: null,
+          dniFaceMatchScore: null,
+          dniFaceMatchedAt: null,
         },
       });
       await tx.user.update({
@@ -563,6 +650,18 @@ export class DriversService {
    * 'no_face'): el enrolamiento se RECHAZA y no se guarda nada (fail-closed, degradación HONESTA, sin
    * embedding falso). Si hay rostro, persiste el embedding + `faceEnrolledAt` en UNA escritura — el gate
    * `hasFaceEmbedding` (aprobación del operador + inicio de turno) lo lee como fuente única de "enrolado".
+   *
+   * INVALIDA EL BINDING DNI↔selfie EN LA MISMA ESCRITURA (causa raíz, fail-closed · invariante de FRESCURA):
+   * el binding (`dniFaceMatched`/`dniFaceMatchScore`/`dniFaceMatchedAt`, seteados juntos en matchDniFace())
+   * es evidencia FRESCA contra el `faceEmbedding` con el que se cotejó — y SOLO contra ESE embedding. Re-enrolar
+   * MUTA `faceEmbedding`: el cotejo viejo apunta ahora a un embedding OBSOLETO, así que el binding queda
+   * INVÁLIDO. Si NO lo limpiáramos, un conductor PENDING con match ya corrido podría re-enrolar OTRA cara y el
+   * gate de ejecución de approve() (`dniFaceMatchedAt != null`) PASARÍA con el timestamp del cotejo contra el
+   * embedding VIEJO → aprobación con binding STALE (mismo agujero que ya cerró resubmit()). Por eso, en la MISMA
+   * escritura que muta el embedding, RESETEAMOS los 3 campos del binding a "no corrido": cambiar el material
+   * cotejado OBLIGA a re-correr matchDniFace() contra el embedding nuevo antes de poder aprobar (el gate de
+   * approve() vuelve a morder). NO rompe el flujo normal (enrolar → match → approve): el reset deja
+   * dniFaceMatchedAt=null y matchDniFace() lo vuelve a setear contra el embedding fresco.
    */
   async enrollFace(
     userId: string,
@@ -582,7 +681,16 @@ export class DriversService {
     const enrolledAt = new Date();
     await this.prisma.write.driver.update({
       where: { id: d.id },
-      data: { faceEmbedding: embedding, faceEnrolledAt: enrolledAt },
+      data: {
+        faceEmbedding: embedding,
+        faceEnrolledAt: enrolledAt,
+        // RESET DEL BINDING DNI↔selfie (invariante de frescura, mismo patrón que resubmit()): mutar el
+        // embedding invalida el cotejo viejo (apuntaba al material anterior). Los 3 campos del binding se
+        // limpian JUNTO al embedding nuevo → re-aprobar OBLIGA a re-correr matchDniFace() contra este material.
+        dniFaceMatched: null,
+        dniFaceMatchScore: null,
+        dniFaceMatchedAt: null,
+      },
     });
     return { enrolled: true, enrolledAt: enrolledAt.toISOString() };
   }
@@ -622,7 +730,10 @@ export class DriversService {
     });
 
     // GUARDA el resultado en UNA escritura atómica: el operador siempre lee un binding coherente
-    // (veredicto + score + momento juntos). El score se redondea a entero (escala 0..100, igual que verify).
+    // (veredicto + score + momento juntos). El score se persiste CRUDO (decimal) tal como lo devuelve el motor
+    // — `dniFaceMatchScore` es Float? en el schema, escala 0..100. (A diferencia de verifyBiometric, que SÍ
+    // redondea a entero porque su score viaja en un sessionRef de un solo uso; acá el operador lo VE y el gate
+    // de approve() mira `dniFaceMatchedAt`, no el score, así que no se redondea.)
     await this.prisma.write.driver.update({
       where: { id: driverId },
       data: {

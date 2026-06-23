@@ -23,6 +23,10 @@ const okDriver = {
   backgroundCheckStatus: 'CLEARED',
   licenseExpiresAt: futureLicense,
   faceEmbedding: [0.1, 0.2, 0.3],
+  // Binding DNI↔selfie YA ejecutado (política nueva: approve() exige que el match haya corrido).
+  // dniFaceMatched=true (MATCHED) es el caso feliz; dniFaceMatchedAt!=null es lo que mira el gate.
+  dniFaceMatched: true as boolean | null,
+  dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z') as Date | null,
 };
 
 /** Fuentes válidas del eje DriverStatus hacia AVAILABLE (espeja driverStatusSources del servicio). */
@@ -218,13 +222,19 @@ describe('DriversService.createEnrollChallenge · reto de liveness del enrolamie
 describe('DriversService.enrollFace · enrolamiento KYC selfie-only (Lote 1, sin liveness)', () => {
   /** Prisma que captura el `data` del driver.update para aseverar que se persiste el embedding del motor. */
   function makeEnrollPrisma(driver: unknown) {
-    const updates: { faceEmbedding?: number[]; faceEnrolledAt?: Date }[] = [];
+    const updates: {
+      faceEmbedding?: number[];
+      faceEnrolledAt?: Date;
+      dniFaceMatched?: boolean | null;
+      dniFaceMatchScore?: number | null;
+      dniFaceMatchedAt?: Date | null;
+    }[] = [];
     return {
       updates,
       read: { driver: { findUnique: async () => driver } },
       write: {
         driver: {
-          update: async (args: { data: { faceEmbedding?: number[]; faceEnrolledAt?: Date } }) => {
+          update: async (args: { data: (typeof updates)[number] }) => {
             updates.push(args.data);
             return {};
           },
@@ -264,6 +274,29 @@ describe('DriversService.enrollFace · enrolamiento KYC selfie-only (Lote 1, sin
     await expect(
       svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('FIX 1 · INVALIDA EL BINDING: re-enrolar MUTA faceEmbedding y RESETEA los 3 campos del binding en la MISMA escritura', async () => {
+    // Invariante de frescura: el binding (dniFaceMatched/Score/At) es evidencia contra el embedding cotejado.
+    // Mutar el embedding lo invalida. El enroll debe limpiar los 3 campos JUNTO al embedding nuevo, así un
+    // approve() posterior NO pasa con un binding stale (mismo patrón que resubmit()).
+    const prisma = makeEnrollPrisma({
+      ...okDriver,
+      dniFaceMatched: true,
+      dniFaceMatchScore: 96,
+      dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.enrollFace('u1', { photo: 'selfie-base64' });
+    expect(prisma.updates).toHaveLength(1);
+    const [persisted] = prisma.updates;
+    // Embedding nuevo persistido…
+    expect(persisted?.faceEmbedding).toEqual([0.4, 0.5, 0.6]);
+    expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
+    // …Y el binding reseteado a "no corrido" en la MISMA escritura (los 3 campos juntos).
+    expect(persisted?.dniFaceMatched).toBeNull();
+    expect(persisted?.dniFaceMatchScore).toBeNull();
+    expect(persisted?.dniFaceMatchedAt).toBeNull();
   });
 });
 
@@ -483,6 +516,92 @@ describe('DriversService.resubmit · reenvío a revisión (BR-I01 · M3)', () =>
     // EMITE el evento que cierra el double-source (admin-bff proyecta status=PENDING).
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.resubmitted');
+  });
+
+  it('RESETEA el binding DNI↔selfie a "no corrido" (por-ciclo) en la MISMA tx que lleva a PENDING', async () => {
+    // FIX 1: el binding es evidencia de ESTE ciclo, no histórico. Al reenviar (material corregido), el
+    // cotejo viejo queda OBSOLETO → se limpia (matched/score/at = null) para OBLIGAR a re-correr el match.
+    const driverUpdates: Record<string, unknown>[] = [];
+    const prisma = {
+      write: {
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            driver: {
+              findUnique: async () => ({
+                id: 'd1',
+                userId: 'u1',
+                backgroundCheckStatus: 'REJECTED',
+                // Binding del ciclo ANTERIOR (contra el DNI viejo): debe quedar en null tras el resubmit.
+                dniFaceMatched: true,
+                dniFaceMatchScore: 96,
+                dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+              }),
+              update: async (args: { data: Record<string, unknown> }) => {
+                driverUpdates.push(args.data);
+                return { id: 'd1', backgroundCheckStatus: 'PENDING' };
+              },
+            },
+            user: {
+              findUnique: async () => ({ id: 'u1', kycStatus: 'REJECTED' }),
+              update: async () => ({}),
+            },
+            outboxEvent: { create: async () => ({}) },
+          }),
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+
+    await svc.resubmit('u1');
+
+    // Los 3 campos del binding viajan en la MISMA escritura que el cambio a PENDING (coherencia atómica).
+    expect(driverUpdates[0]).toMatchObject({
+      backgroundCheckStatus: 'PENDING',
+      dniFaceMatched: null,
+      dniFaceMatchScore: null,
+      dniFaceMatchedAt: null,
+    });
+  });
+});
+
+describe('DriversService.resubmit → approve · el binding reseteado VUELVE A MORDER el gate de approve()', () => {
+  it('tras resubmit, un approve() SIN re-correr el match RECHAZA con 409 (binding reseteado a null)', async () => {
+    // FIX 1 (end-to-end): resubmit() dejó dniFaceMatchedAt=null. approve() lee ese driver fresco y el gate de
+    // EJECUCIÓN (dniFaceMatchedAt==null) corta → 409, SIN escribir. Re-aprobar OBLIGA a re-correr matchDniFace().
+    const driverWrites: Record<string, unknown>[] = [];
+    const prisma = {
+      write: {
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            driver: {
+              findUnique: async () => ({
+                ...okDriver,
+                backgroundCheckStatus: 'PENDING',
+                // Estado POST-resubmit: el binding fue reseteado, el match NO se re-ejecutó.
+                dniFaceMatched: null,
+                dniFaceMatchScore: null,
+                dniFaceMatchedAt: null,
+              }),
+              update: async (args: { data: Record<string, unknown> }) => {
+                driverWrites.push(args.data);
+                return { id: 'd1', ...args.data };
+              },
+              updateMany: async (args: { data: Record<string, unknown> }) => {
+                driverWrites.push(args.data);
+                return { count: 1 };
+              },
+            },
+            user: {
+              findUnique: async () => ({ id: 'u1', kycStatus: 'PENDING' }),
+              update: async () => ({}),
+            },
+            outboxEvent: { create: async () => ({}) },
+          }),
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0); // fail-closed: el gate corta ANTES de toda escritura
   });
 });
 
@@ -991,18 +1110,62 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
   function makeApprovalPrisma(
     driver: unknown,
     user: unknown,
-    overrides: { txDriver?: unknown; txUser?: unknown } = {},
+    overrides: {
+      txDriver?: unknown;
+      txUser?: unknown;
+      // Override SOLO de `dniFaceMatchedAt` tal como lo VE el CAS (no el pre-read): modela una nulificación
+      // concurrente que aterriza ESTRICTAMENTE entre el pre-read (que ve el binding fresco) y el CAS.
+      casDniFaceMatchedAt?: Date | null;
+    } = {},
   ) {
     const txDriver = 'txDriver' in overrides ? overrides.txDriver : driver;
     const txUser = 'txUser' in overrides ? overrides.txUser : user;
     const driverWrites: Record<string, unknown>[] = [];
     const userWrites: Record<string, unknown>[] = [];
+    const outbox: { eventType: string }[] = [];
+    // approve() transiciona por CAS atómico: `updateMany({ where: { backgroundCheckStatus in {PENDING,REJECTED} } })`.
+    // El doble espeja ese WHERE sobre el estado FRESCO de la tx: matchea (count 1) solo si el estado fuente AÚN
+    // no es CLEARED (un PENDING/REJECTED legítimo); si ya está CLEARED (otra tx ganó la carrera) → count 0,
+    // no-op idempotente sin re-emitir. reject() sigue por update normal (no CAS): se mantiene intacto.
+    const CLAIM_SOURCES = new Set(['PENDING', 'REJECTED']);
     const tx = {
       driver: {
         findUnique: async () => txDriver,
         update: async ({ data }: { data: Record<string, unknown> }) => {
           driverWrites.push(data);
           return { id: 'd1', ...data };
+        },
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: {
+            backgroundCheckStatus?: { in: string[] };
+            dniFaceMatchedAt?: { not: null };
+          };
+          data: Record<string, unknown>;
+        }) => {
+          const fresh = txDriver as {
+            backgroundCheckStatus?: string;
+            dniFaceMatchedAt?: Date | null;
+          };
+          const current = fresh?.backgroundCheckStatus;
+          // FIX 2: el CAS de approve() matchea solo si (1) el estado fresco está en el `in` del WHERE
+          // (PENDING/REJECTED) Y (2) el binding sigue fresco (`dniFaceMatchedAt != null`). Espeja la cláusula
+          // `dniFaceMatchedAt: { not: null }` plegada en el WHERE: si una tx concurrente nulificó el binding
+          // entre el pre-read y el CAS, la fila fresca tiene dniFaceMatchedAt=null → NO matchea (count 0).
+          // `casDniFaceMatchedAt` permite que el CAS vea un binding DISTINTO al del pre-read (la nulificación
+          // aterriza estrictamente entre ambos); sin override, el CAS ve el mismo binding que la tx.
+          const casMatchedAt =
+            'casDniFaceMatchedAt' in overrides ? overrides.casDniFaceMatchedAt : fresh?.dniFaceMatchedAt;
+          const bindingFresh = where.dniFaceMatchedAt === undefined || casMatchedAt != null;
+          const matches =
+            current != null &&
+            CLAIM_SOURCES.has(current) &&
+            (where.backgroundCheckStatus?.in.includes(current) ?? false) &&
+            bindingFresh;
+          if (matches) driverWrites.push(data);
+          return { count: matches ? 1 : 0 };
         },
       },
       user: {
@@ -1012,11 +1175,17 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
           return { id: 'u1', ...data };
         },
       },
-      outboxEvent: { create: async () => ({}) },
+      outboxEvent: {
+        create: async ({ data }: { data: { eventType: string } }) => {
+          outbox.push({ eventType: data.eventType });
+          return {};
+        },
+      },
     };
     return {
       driverWrites,
       userWrites,
+      outbox,
       prisma: {
         read: {
           driver: { findUnique: async () => driver },
@@ -1062,6 +1231,134 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
     expect(driverWrites).toHaveLength(0);
     expect(userWrites).toHaveLength(0);
+  });
+
+  it('GATE FACE-MATCH (a): rechaza con 409 si el binding DNI↔selfie NUNCA se ejecutó (dniFaceMatchedAt=null)', async () => {
+    // Curl-proof: sin haber corrido matchDniFace() (dniFaceMatchedAt=null) NO se aprueba a ciegas.
+    // El gate corta ANTES de los asserts de máquina y de toda escritura (fail-closed, cero efectos).
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING', dniFaceMatched: null, dniFaceMatchedAt: null },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
+  it('GATE FACE-MATCH (b): PERMITE aprobar con veredicto NO_MATCH (dniFaceMatched=false) si el match SÍ se ejecutó', async () => {
+    // El gate es de EJECUCIÓN, NO de veredicto: un NO_MATCH (dniFaceMatched=false) con dniFaceMatchedAt
+    // seteado lo decide el OPERADOR que lo vio → la aprobación procede normal (CLEARED + VERIFIED).
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        dniFaceMatched: false,
+        dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.approve('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
+    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+  });
+
+  it('GATE FACE-MATCH (c): aprueba normal con veredicto MATCHED (dniFaceMatched=true, dniFaceMatchedAt set)', async () => {
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        dniFaceMatched: true,
+        dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.approve('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
+    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+  });
+
+  it('CAS gana-una-sola-vez: el approve() ganador transiciona PENDING→CLEARED y EMITE driver.verified UNA vez', async () => {
+    // FIX 2: la transición es por CAS atómico. El ganador matchea (count 1) → un solo driver.verified.
+    const { prisma, driverWrites, userWrites, outbox } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.approve('d1');
+    expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
+    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+    expect(outbox).toEqual([{ eventType: 'driver.verified' }]); // EXACTAMENTE un evento
+  });
+
+  it('CAS perdedor de la carrera (otra tx ya dejó CLEARED): no-op idempotente SIN re-emitir driver.verified', async () => {
+    // FIX 2: dos approve() concurrentes leen ambos PENDING (READ COMMITTED) y pasan el assert, pero el CAS lo
+    // gana UNO solo. El perdedor ve la fila ya CLEARED en la tx (fuera del WHERE del CAS) → count 0 → NO toca
+    // user, NO emite outbox (evita el double-emit de driver.verified). El gate de face-match SÍ pasa (binding
+    // ejecutado), para aislar que lo que corta el segundo evento es el CAS, no un gate previo.
+    const { prisma, driverWrites, userWrites, outbox } = makeApprovalPrisma(
+      { ...okDriver, backgroundCheckStatus: 'PENDING' },
+      { id: 'u1', kycStatus: 'PENDING' },
+      // La tx ve el estado FRESCO: otra tx ya transicionó la fila a CLEARED entre la lectura y el CAS.
+      { txDriver: { ...okDriver, backgroundCheckStatus: 'CLEARED' } },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const res = await svc.approve('d1');
+    expect(res.backgroundCheckStatus).toBe('CLEARED'); // honesto: ya está aprobado
+    expect(driverWrites).toHaveLength(0); // el CAS no matcheó (count 0)
+    expect(userWrites).toHaveLength(0); // no re-escribe el KYC del usuario
+    expect(outbox).toHaveLength(0); // y NO re-emite driver.verified (cero double-emit)
+  });
+
+  it('FIX 1+2 · POST-ENROLL SIN RE-MATCH: re-enrolar otra cara nulifica el binding → approve() RECHAZA con 409 (cero writes)', async () => {
+    // El escenario que el gate adversarial confirmó: un PENDING con match ya corrido re-enrola OTRA cara
+    // (enrollFace MUTA faceEmbedding y, con FIX 1, RESETEA dniFaceMatchedAt=null). Si después se intenta
+    // aprobar SIN re-correr matchDniFace(), el gate de ejecución (dniFaceMatchedAt==null) ahora MUERDE → 409.
+    // Antes de FIX 1, el binding quedaba apuntando al embedding viejo y el approve PASABA con material stale.
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        // Estado tras el re-enroll: embedding nuevo presente, binding nulificado por FIX 1.
+        dniFaceMatched: null,
+        dniFaceMatchScore: null,
+        dniFaceMatchedAt: null,
+      },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
+  it('FIX 2 · CAS ATÓMICO (TOCTOU): el binding pasa el pre-read pero una tx concurrente lo nulifica → CAS no matchea (count 0), NO aprueba ni emite', async () => {
+    // El pre-read ve un binding presente (dniFaceMatchedAt set) y pasa el 409 amigable; PERO entre ese read y
+    // el CAS, un resubmit()/enrollFace() concurrente nulificó el binding. La fila FRESCA de la tx tiene
+    // dniFaceMatchedAt=null → el `dniFaceMatchedAt: { not: null }` plegado en el WHERE del CAS NO matchea
+    // (count 0) → fail-closed: no se aprueba, no se toca user, no se emite driver.verified. El gate de frescura
+    // es ATÓMICO con la transición (sin TOCTOU).
+    const { prisma, driverWrites, userWrites, outbox } = makeApprovalPrisma(
+      // El pre-read (dentro de la tx) ve el binding fresco (dniFaceMatchedAt set) → pasa el 409 amigable.
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      { id: 'u1', kycStatus: 'PENDING' },
+      // PERO el CAS (que corre DESPUÉS del pre-read) ve el binding YA nulificado por una carrera que aterrizó
+      // estrictamente entre el pre-read y el CAS → el `dniFaceMatchedAt: { not: null }` del WHERE no matchea.
+      { casDniFaceMatchedAt: null },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const res = await svc.approve('d1');
+    // Fail-closed: el binding stale NO se aprueba. count 0 → no-op honesto (la fila quedó PENDING).
+    expect(res.backgroundCheckStatus).toBe('PENDING');
+    expect(driverWrites).toHaveLength(0); // el CAS no matcheó (binding nulificado en la tx)
+    expect(userWrites).toHaveLength(0); // no toca el KYC del usuario
+    expect(outbox).toHaveLength(0); // NO emite driver.verified
   });
 
   it('re-aprueba un REJECTED (apelación): REJECTED → CLEARED es válida', async () => {
