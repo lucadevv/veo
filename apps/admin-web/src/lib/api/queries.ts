@@ -221,14 +221,14 @@ export function useDriverSuspend() {
 
 /**
  * REACTIVACIÓN MANUAL de un conductor suspendido (la inversa de useDriverSuspend, SAFETY). SIN body: el
- * admin-bff proxya a identity-service, que limpia suspendedAt + suspensionSource (CAS, solo DISCIPLINARY)
- * y emite driver.reactivated. Respuesta 204 vacía (no se parsea). El éxito refetchea la lista (y el detalle
- * del conductor) para reflejar el estado ACTIVE proyectado por el read-model.
+ * admin-bff proxya a identity-service, que quita SOLO el hold DISCIPLINARY y recomputa el `suspendedAt`
+ * derivado (modelo de HOLDS), luego emite driver.reactivated. Respuesta 204 vacía (no se parsea). El éxito
+ * refetchea la lista (y el detalle del conductor) para reflejar el estado ACTIVE.
  *
- * FAIL-CLOSED: el backend devuelve 403 (ForbiddenError) si la suspensión era por documentos vencidos (no
- * se levanta a mano) o si la licencia está vencida, y 409 (ConflictError) si el conductor no estaba
- * suspendido. El ApiError viaja con `status`/`message` (igual que useDeleteDriver) para que el
- * ConfirmDialog/llamador muestre el mensaje del server en vez del crudo.
+ * FAIL-CLOSED: el backend devuelve 403 (ForbiddenError) si la suspensión era por documentos/ITV vencidos (se
+ * levanta por el override de compliance, no a mano) o si la licencia está vencida, y 409 (ConflictError) si el
+ * conductor no estaba suspendido. El ApiError viaja con `status`/`message` (igual que useDeleteDriver) para que
+ * el ConfirmDialog/llamador muestre el mensaje del server en vez del crudo.
  */
 export function useReactivateDriver() {
   const qc = useQueryClient();
