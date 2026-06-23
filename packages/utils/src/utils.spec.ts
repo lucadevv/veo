@@ -3,7 +3,13 @@ import { uuidv7, isUuidV7 } from './ids.js';
 import { money, commission, formatPEN, solesToCents, scaleMoney } from './money.js';
 import { signHmac, verifyHmac, chainHash, numericOtp } from './crypto.js';
 import { toH3, distanceMeters, isWithinLima, neighbors } from './geo.js';
-import { peruPhoneSchema, plateSchema, childCodeSchema, parseOrThrow } from './validation.js';
+import {
+  peruPhoneSchema,
+  plateSchema,
+  childCodeSchema,
+  parseOrThrow,
+  canonicalizePeruPhone,
+} from './validation.js';
 import { ValidationError } from './errors.js';
 import { assertNever } from './assert.js';
 
@@ -94,6 +100,20 @@ describe('validación dominio peruano', () => {
   it('normaliza teléfono peruano', () => {
     expect(parseOrThrow(peruPhoneSchema, '987654321')).toBe('+51987654321');
     expect(parseOrThrow(peruPhoneSchema, '+51 987 654 321')).toBe('+51987654321');
+  });
+  it('canonicalizePeruPhone colapsa las 3 representaciones a +51XXXXXXXXX (coincide con peruPhoneSchema)', () => {
+    const canon = '+51987654321';
+    // Las 3 formas que el DTO acepta para el MISMO número → UNA sola key.
+    expect(canonicalizePeruPhone('987654321')).toBe(canon);
+    expect(canonicalizePeruPhone('51987654321')).toBe(canon);
+    expect(canonicalizePeruPhone('+51987654321')).toBe(canon);
+    // Espacios/guiones se ignoran; coincide con la salida de peruPhoneSchema.
+    expect(canonicalizePeruPhone('+51-987-654-321')).toBe(canon);
+    expect(canonicalizePeruPhone('987654321')).toBe(parseOrThrow(peruPhoneSchema, '987654321'));
+    // No-teléfono → null (el caller decide el fallback, no rompe).
+    expect(canonicalizePeruPhone('not-a-phone')).toBeNull();
+    expect(canonicalizePeruPhone('123')).toBeNull();
+    expect(canonicalizePeruPhone('887654321')).toBeNull(); // no empieza en 9
   });
   it('valida placa y código de niño', () => {
     expect(parseOrThrow(plateSchema, 'abc-123')).toBe('ABC-123');

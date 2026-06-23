@@ -7,6 +7,17 @@ import { z } from 'zod';
 import { secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 
+/**
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
+ * INTERNOS del VPC (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, y unique-local:
+ * 10/8 + 172.16/12 + 192.168/16 + fc00::/7). El ALB y el ingress-nginx tienen IP privada → caen
+ * acá; el CLIENTE real tiene IP PÚBLICA → NUNCA está en esta lista. Con esto Express camina el
+ * `X-Forwarded-For` de derecha a izquierda descartando los hops privados y resuelve `req.ip` = la
+ * primera IP pública = el cliente real (un-spoofeable). NO usamos un NÚMERO de hops: es frágil
+ * (un hop falso del atacante o un cambio de topología lo rompe). Configurable vía TRUSTED_PROXY.
+ */
+export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -80,8 +91,15 @@ export const envSchema = z
     REST_TIMEOUT_MS: z.coerce.number().default(8000),
 
     // ── Rate limiting (Redis). POST /panic JAMÁS se limita (BR / FOUNDATION §14). ──
-    RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
-    RATE_LIMIT_MAX: z.coerce.number().default(120),
+    // .int().positive(): coherente con driver/admin-bff (FIX D). Un 0/negativo/float reventaría el
+    // limiter en runtime → falla al boot en vez de bloquear todo el tráfico silenciosamente.
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+
+    // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
+    // privados del VPC (ALB + ingress-nginx) → `req.ip` resuelve la IP pública real del cliente, no un
+    // header inyectado. Un deploy distinto (p.ej. tras Cloudflare) lo ajusta sin tocar código.
+    TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
     // ── LiveKit self-hosted (video del habitáculo, soberanía §0.7). ──
     // Si falta API_KEY/API_SECRET el video queda DESHABILITADO (la web familiar degrada a "sin video").

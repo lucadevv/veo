@@ -4,10 +4,27 @@
 import { z } from 'zod';
 import { secret } from '@veo/utils';
 
+/**
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Rangos de IP INTERNOS del
+ * VPC (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, unique-local 10/8 + 172.16/12 +
+ * 192.168/16 + fc00::/7). El ALB y el ingress-nginx tienen IP privada → caen acá; el CLIENTE real
+ * tiene IP PÚBLICA → NUNCA está en esta lista. Con esto Express resuelve `req.ip` = la IP pública
+ * real del cliente (un-spoofeable), que es la que se escribe — HASHEADA — en el log inmutable
+ * append-only (Ley 29733). Configurable vía TRUSTED_PROXY. trust-all queda RECHAZADO por
+ * parseTrustedProxy (fail-fast). Contención de red: la NetworkPolicy
+ * `infra/k8s/base/networkpolicies/east-west.yaml` restringe el ingreso al pod (segunda capa).
+ */
+export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3009),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
+  // privados del VPC. Crítico acá: `req.ip` se escribe en el rastro INMUTABLE (Ley 29733) — NO debe
+  // ser forjable. Un header XFF crudo del cliente NUNCA debe convertirse en la IP auditada.
+  TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
   // Base de datos (read/write split). Schema lógico "audit".
   DATABASE_URL: z.string().url(),

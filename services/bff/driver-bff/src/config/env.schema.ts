@@ -6,6 +6,17 @@ import { z } from 'zod';
 import { secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 
+/**
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
+ * INTERNOS del VPC (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, y unique-local:
+ * 10/8 + 172.16/12 + 192.168/16 + fc00::/7). El ALB y el ingress-nginx tienen IP privada → caen
+ * acá; el CLIENTE real tiene IP PÚBLICA → NUNCA está en esta lista. Con esto Express camina el
+ * `X-Forwarded-For` de derecha a izquierda descartando los hops privados y resuelve `req.ip` = la
+ * primera IP pública = el cliente real (un-spoofeable). NO usamos un NÚMERO de hops: es frágil
+ * (un hop falso del atacante o un cambio de topología lo rompe). Configurable vía TRUSTED_PROXY.
+ */
+export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -70,6 +81,11 @@ export const envSchema = z
     // Rate limiting (ventana fija por IP+usuario+ruta).
     RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+
+    // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
+    // privados del VPC (ALB + ingress-nginx) → `req.ip` resuelve la IP pública real del cliente, no un
+    // header inyectado. Un deploy distinto (p.ej. tras Cloudflare) lo ajusta sin tocar código.
+    TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
     // Timeout de las llamadas REST internas (ms).
     DOWNSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),

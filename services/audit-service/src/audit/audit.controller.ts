@@ -125,9 +125,14 @@ function parseSeq(value: string | undefined): bigint | undefined {
   }
 }
 
+/**
+ * IP del actor que se escribe en el log INMUTABLE (Ley 29733). DEBE ser la IP real, no forjable.
+ * Se resuelve SOLO de `req.ip` (Express la puebla vía `trust proxy`, ver main.ts: camina el XFF
+ * descartando los hops privados ALB+ingress-nginx y deja la IP pública real del cliente). NO se lee
+ * `x-forwarded-for` crudo: el atacante lo controla por completo y escribiría una IP falsa —
+ * HASHEADA — en la cadena append-only, envenenando el rastro de compliance. Fallback al peer TCP.
+ */
 function clientIp(req: HttpRequest): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return (fwd.split(',')[0] ?? '').trim();
   return req.ip ?? req.socket.remoteAddress ?? '';
 }
 

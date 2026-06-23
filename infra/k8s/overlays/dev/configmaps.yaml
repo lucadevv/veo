@@ -96,6 +96,13 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # TRUSTED_PROXY (FIX 4): rango ACOTADO del VPC (10.2.0.0/16) — EKS VPC-CNI asigna las IPs de pod
+  # desde el CIDR del VPC, así que ALB + ingress-nginx (los únicos hops) caen acá; el cliente real
+  # (IP pública) NUNCA. Mejor que el preset uniquelocal (TODO RFC1918). Express resuelve req.ip = la
+  # IP pública real, no un XFF inyectado. trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
+  # Contención de red adicional: la NetworkPolicy networkpolicies/east-west.yaml (allow-bff-ingress)
+  # restringe el ingreso al pod SOLO desde ingress-nginx.
+  TRUSTED_PROXY: "loopback, linklocal, 10.2.0.0/16"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -164,6 +171,13 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # TRUSTED_PROXY (FIX 4): rango ACOTADO del VPC (10.2.0.0/16) — EKS VPC-CNI asigna las IPs de pod
+  # desde el CIDR del VPC, así que ALB + ingress-nginx (los únicos hops) caen acá; el cliente real
+  # (IP pública) NUNCA. Mejor que el preset uniquelocal (TODO RFC1918). Express resuelve req.ip = la
+  # IP pública real, no un XFF inyectado. trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
+  # Contención de red adicional: la NetworkPolicy networkpolicies/east-west.yaml (allow-bff-ingress)
+  # restringe el ingreso al pod SOLO desde ingress-nginx.
+  TRUSTED_PROXY: "loopback, linklocal, 10.2.0.0/16"
   VEO_JWT_ISSUER: "veo-identity"
   VEO_JWT_AUDIENCE: "veo-app"
   IDENTITY_GRPC_URL: "identity-service:50051"
@@ -197,6 +211,13 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # TRUSTED_PROXY (FIX 4): rango ACOTADO del VPC (10.2.0.0/16) — EKS VPC-CNI asigna las IPs de pod
+  # desde el CIDR del VPC, así que ALB + ingress-nginx (los únicos hops) caen acá; el cliente real
+  # (IP pública) NUNCA. Mejor que el preset uniquelocal (TODO RFC1918). Express resuelve req.ip = la
+  # IP pública real, no un XFF inyectado. trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
+  # Contención de red adicional: la NetworkPolicy networkpolicies/east-west.yaml (allow-bff-ingress)
+  # restringe el ingreso al pod SOLO desde ingress-nginx.
+  TRUSTED_PROXY: "loopback, linklocal, 10.2.0.0/16"
   VEO_JWT_ISSUER: "veo-identity"
   VEO_JWT_AUDIENCE: "veo-app"
   IDENTITY_GRPC_URL: "identity-service:50051"
@@ -225,6 +246,13 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # TRUSTED_PROXY (FIX 4): rango ACOTADO del VPC (10.2.0.0/16) — EKS VPC-CNI asigna las IPs de pod
+  # desde el CIDR del VPC, así que ALB + ingress-nginx (los únicos hops) caen acá; el cliente real
+  # (IP pública) NUNCA. Mejor que el preset uniquelocal (TODO RFC1918). Express resuelve req.ip = la
+  # IP pública real, no un XFF inyectado. trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
+  # Contención de red adicional: la NetworkPolicy networkpolicies/east-west.yaml (allow-bff-ingress)
+  # restringe el ingreso al pod SOLO desde ingress-nginx.
+  TRUSTED_PROXY: "loopback, linklocal, 10.2.0.0/16"
   VEO_JWT_ISSUER: "veo-identity"
   VEO_JWT_AUDIENCE: "veo-app"
   ADMIN_WEB_ORIGIN: "https://admin.veo.pe"

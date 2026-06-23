@@ -7,17 +7,41 @@ bootstrapOtel({ serviceName: 'public-bff' });
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { LoggingInterceptor, createLogger, initDefaultMetrics } from '@veo/observability';
+import { parseTrustedProxy } from '@veo/utils';
 import { AppModule } from './app.module';
 import { PublicExceptionFilter } from './common/public-exception.filter';
+import type { Env } from './config/env.schema';
+
+/** CORS: lista separada por comas; '*' (o vacío) permite cualquier origen (solo dev). */
+function parseCors(origins: string): boolean | string[] {
+  const list = origins
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  return list.includes('*') || list.length === 0 ? true : list;
+}
 
 async function bootstrap(): Promise<void> {
   const logger = createLogger('public-bff');
   initDefaultMetrics('public-bff');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  // ConfigService validado (Zod): NO leer process.env crudo — saltearse la validación deja entrar
+  // config inválida. Patrón de referencia: driver-bff/main.ts (config.getOrThrow). Conforma public a él.
+  const config = app.get(ConfigService<Env, true>);
+
+  // SEGURIDAD (rate-limit): el deploy es VPC (cliente → ALB → ingress-nginx → pod), todos los proxies
+  // con IP privada. Con `trust proxy` apuntando a los rangos privados, Express resuelve `req.ip` = la
+  // IP pública real del cliente (descarta los hops privados del XFF), un-spoofeable. El guard de
+  // rate-limit lee `req.ip`, así que un atacante NO puede rotar un header de IP para evadir el límite.
+  // TRUSTED_PROXY se valida en env.schema; trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
+  // CONTENCIÓN DE RED: la NetworkPolicy `infra/k8s/base/networkpolicies/east-west.yaml` ya restringe el
+  // ingreso al pod SOLO desde ingress-nginx (allow-bff-ingress) — segunda capa sobre el rango de confianza.
+  app.set('trust proxy', parseTrustedProxy(config.getOrThrow<string>('TRUSTED_PROXY')));
 
   // El body por defecto de Nest/Express tope ~100KB; la verificación KYC envía frames JPEG en base64
   // (varios cientos de KB) → daba 413 PayloadTooLargeError. Subimos el límite JSON a 5MB (suficiente
@@ -25,13 +49,8 @@ async function bootstrap(): Promise<void> {
   app.useBodyParser('json', { limit: '5mb' });
 
   app.use(helmet());
-  // CORS con credenciales: lista de orígenes por env ('*' permite cualquiera).
-  const corsOrigins = (process.env.CORS_ORIGINS ?? '*')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
   app.enableCors({
-    origin: corsOrigins.includes('*') ? true : corsOrigins,
+    origin: parseCors(config.getOrThrow<string>('CORS_ORIGINS')),
     credentials: true,
   });
 
@@ -55,7 +74,7 @@ async function bootstrap(): Promise<void> {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
-  const port = Number(process.env.PORT ?? 4001);
+  const port = config.getOrThrow<number>('PORT');
   await app.listen(port);
   logger.info(`public-bff escuchando en :${port}`);
 }

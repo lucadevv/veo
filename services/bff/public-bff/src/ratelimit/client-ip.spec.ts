@@ -1,10 +1,12 @@
 /**
- * FIX 1 — la IP del cliente debe resolverse de los HEADERS reales del borde, no de `req.ips` (que
- * solo se puebla con Express `trust proxy`, nunca seteado). Detrás de cloudflared/ALB todos los
- * clientes comparten la IP del proxy → sin esto el rate-limit por IP colapsa a un cubo global.
+ * SEGURIDAD (rate-limit) — la IP del cliente se resuelve de `req.ip`, que Express puebla vía
+ * `trust proxy` (ver main.ts): camina el `X-Forwarded-For` descartando los hops de proxy de confianza
+ * (ALB + ingress-nginx, IP privada) y deja la primera IP PÚBLICA = el cliente real.
  *
- * Verificamos que la clave que el guard envía a Redis lleve la IP de `cf-connecting-ip` (precedencia),
- * luego `x-forwarded-for` (primer hop), y por último `req.ip`/socket — consistente con admin/driver-bff.
+ * El contrato CAMBIÓ: antes el guard leía `cf-connecting-ip`/`x-forwarded-for` CRUDOS (spoofeables);
+ * ahora lee `req.ip`. Acá verificamos que un header de IP INYECTADO por el atacante NO entra en la
+ * clave de Redis (no obtiene un cubo de rate-limit fresco rotando el header) y que el rate-limit
+ * sigue funcionando para tráfico legítimo (misma req.ip → misma clave; clientes distintos → distintas).
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { ExecutionContext } from '@nestjs/common';
@@ -13,15 +15,17 @@ import type { ConfigService } from '@nestjs/config';
 import { RateLimitGuard } from './rate-limit.guard';
 import type { RateLimitStore } from './rate-limiter';
 
-/** Store en memoria que captura las claves consultadas (para inspeccionar la IP resuelta). */
+/**
+ * Store en memoria que captura las claves consultadas (para inspeccionar la IP resuelta). El limiter
+ * llama `eval(script, 1, key, windowMs)`: la clave es el 3er argumento posicional (KEYS[1]).
+ */
 function captureStore(): { store: RateLimitStore; keys: string[] } {
   const keys: string[] = [];
   const store: RateLimitStore = {
-    incr: vi.fn(async (key: string) => {
-      keys.push(key);
-      return 1;
+    eval: vi.fn(async (_script: string, _numKeys: number, ...args: Array<string | number>) => {
+      keys.push(String(args[0]));
+      return [1, 60_000];
     }),
-    pexpire: vi.fn(async () => 1),
   };
   return { store, keys };
 }
@@ -31,6 +35,10 @@ const config = {
   getOrThrow: (key: string) => (key === 'RATE_LIMIT_WINDOW_MS' ? 60_000 : 1000),
 } as unknown as ConfigService<never, true>;
 
+/**
+ * Construye el ExecutionContext. `ip` es lo que Express resolvió vía trust proxy (la IP real del
+ * cliente); `headers` es lo que el cliente mandó (potencialmente inyectado por un atacante).
+ */
 function ctxFor(headers: Record<string, string | string[] | undefined>, ip?: string) {
   const req = { method: 'GET', url: '/x', route: { path: '/x' }, headers, ip };
   return {
@@ -47,39 +55,39 @@ function guardWith(store: RateLimitStore): RateLimitGuard {
   return new RateLimitGuard(reflector, store, config);
 }
 
-describe('RateLimitGuard.clientIp', () => {
-  it('usa cf-connecting-ip con PRECEDENCIA sobre x-forwarded-for y req.ip', async () => {
+describe('RateLimitGuard.clientIp · req.ip (trust proxy), headers crudos NO ganan', () => {
+  it('SEGURIDAD: cf-connecting-ip y x-forwarded-for inyectados NO ganan sobre req.ip', async () => {
+    // Simula el chain del ALB: trust proxy ya dejó req.ip = la IP pública real (203.0.113.7).
+    // El atacante inyectó cf-connecting-ip y x-forwarded-for con OTRA IP para forjar un cubo fresco.
     const { store, keys } = captureStore();
     const guard = guardWith(store);
     await guard.canActivate(
-      ctxFor(
-        { 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '10.0.0.1, 127.0.0.1' },
-        '127.0.0.1',
-      ),
+      ctxFor({ 'cf-connecting-ip': '1.2.3.4', 'x-forwarded-for': '1.2.3.4' }, '203.0.113.7'),
     );
-    expect(keys[0]).toContain('203.0.113.7');
-    expect(keys[0]).not.toContain('127.0.0.1');
+    expect(keys[0]).toContain('203.0.113.7'); // la IP REAL
+    expect(keys[0]).not.toContain('1.2.3.4'); // la IP inyectada NO entra en la clave
   });
 
-  it('cae a x-forwarded-for (primer hop) si no hay cf-connecting-ip', async () => {
+  it('SEGURIDAD: rotar x-forwarded-for NO da cubo fresco — misma req.ip → MISMA clave', async () => {
     const { store, keys } = captureStore();
     const guard = guardWith(store);
-    await guard.canActivate(ctxFor({ 'x-forwarded-for': '198.51.100.5, 10.0.0.1' }, '127.0.0.1'));
-    expect(keys[0]).toContain('198.51.100.5');
+    await guard.canActivate(ctxFor({ 'x-forwarded-for': '9.9.9.1' }, '203.0.113.7'));
+    await guard.canActivate(ctxFor({ 'x-forwarded-for': '9.9.9.2' }, '203.0.113.7'));
+    expect(keys[0]).toBe(keys[1]); // el atacante NO evade el límite cambiando el header
   });
 
-  it('cae a req.ip cuando no hay headers de proxy', async () => {
+  it('usa req.ip (la IP real que resolvió Express) cuando no hay headers', async () => {
     const { store, keys } = captureStore();
     const guard = guardWith(store);
     await guard.canActivate(ctxFor({}, '192.0.2.42'));
     expect(keys[0]).toContain('192.0.2.42');
   });
 
-  it('NO colapsa a un cubo global: dos clientes distintos → claves distintas', async () => {
+  it('tráfico legítimo: dos clientes reales distintos (req.ip) → claves distintas', async () => {
     const { store, keys } = captureStore();
     const guard = guardWith(store);
-    await guard.canActivate(ctxFor({ 'cf-connecting-ip': '203.0.113.1' }, '127.0.0.1'));
-    await guard.canActivate(ctxFor({ 'cf-connecting-ip': '203.0.113.2' }, '127.0.0.1'));
+    await guard.canActivate(ctxFor({}, '203.0.113.1'));
+    await guard.canActivate(ctxFor({}, '203.0.113.2'));
     expect(keys[0]).not.toBe(keys[1]);
   });
 });

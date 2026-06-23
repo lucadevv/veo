@@ -1,13 +1,14 @@
 /**
- * Rate limiter de ventana fija backed en Redis. Atómico por clave: INCR + PEXPIRE en el primer hit.
- * Sin estado en proceso (escala horizontalmente). La clave combina IP + usuario + ruta.
+ * Rate limiter de ventana fija backed en Redis. ATÓMICO por clave (INCR + PEXPIRE-en-el-primer-hit
+ * en UN SOLO script Lua, vía `consumeFixedWindow` de @veo/utils — implementación COMPARTIDA por los
+ * 3 BFFs, sin divergir). Sin estado en proceso (escala horizontalmente). La clave combina IP +
+ * usuario + ruta. La atomicidad garantiza que una clave recién creada SIEMPRE tenga TTL (nunca un
+ * bucket permanente que bloquee al cliente legítimo por una caída entre INCR y EXPIRE).
  */
+import { consumeFixedWindow, type RateLimitRedis } from '@veo/utils';
 
-/** Subconjunto de Redis necesario (compatible con ioredis). */
-export interface RateLimitStore {
-  incr(key: string): Promise<number>;
-  pexpire(key: string, milliseconds: number): Promise<number>;
-}
+/** Subconjunto de Redis necesario: `eval` (EVAL). Compatible con ioredis. */
+export type RateLimitStore = RateLimitRedis;
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -35,11 +36,12 @@ export class RateLimiter {
   ): Promise<RateLimitResult> {
     const max = overrides?.max ?? this.max;
     const windowMs = overrides?.windowMs ?? this.windowMs;
-    const key = `rl:${id}`;
-    const count = await this.store.incr(key);
-    // Solo el primer hit fija el TTL de la ventana (evita reiniciarla en cada solicitud).
-    if (count === 1) await this.store.pexpire(key, windowMs);
-    const remaining = Math.max(0, max - count);
-    return { allowed: count <= max, count, limit: max, remaining };
+    const result = await consumeFixedWindow(this.store, `rl:${id}`, max, windowMs);
+    return {
+      allowed: result.allowed,
+      count: result.count,
+      limit: result.limit,
+      remaining: result.remaining,
+    };
   }
 }

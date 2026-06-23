@@ -40,6 +40,22 @@ export const peruPhoneSchema = z
   .refine((d) => /^(51)?9\d{8}$/.test(d), 'Teléfono peruano inválido (formato +51 9XXXXXXXX)')
   .transform((d) => `+51${d.slice(-9)}`);
 
+/**
+ * Forma canónica del teléfono peruano para KEYEAR (rate-limit, dedup): colapsa las 3 representaciones
+ * del MISMO número (`987654321`, `51987654321`, `+51987654321`) a UNA sola key `+51XXXXXXXXX`.
+ * REPLICA la canonicalización de `peruPhoneSchema` (quitar no-dígitos → últimos 9 con prefijo `+51`)
+ * para que los cubos del borde COINCIDAN con cómo identity-service normaliza downstream — si divergen,
+ * el atacante abre cubos distintos por representación y franquea el cap fino N veces.
+ *
+ * Es SEGURA (no lanza): si el valor no es un teléfono peruano válido devuelve `null`, para que el
+ * caller decida el fallback (ej. la key 'none') en vez de romper el guard con un input basura.
+ */
+export function canonicalizePeruPhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (!/^(51)?9\d{8}$/.test(digits)) return null;
+  return `+51${digits.slice(-9)}`;
+}
+
 /** DNI peruano: 8 dígitos. */
 export const dniSchema = z
   .string()

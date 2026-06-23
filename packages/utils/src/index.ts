@@ -17,4 +17,5 @@ export * from './result.js';
 export * from './validation.js';
 export * from './env.js';
 export * from './distributed-lock.js';
+export * from './rate-limit.js';
 export * from './clock.js';

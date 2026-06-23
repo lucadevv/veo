@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { LoggingInterceptor, createLogger, initDefaultMetrics } from '@veo/observability';
+import { parseTrustedProxy } from '@veo/utils';
 import { AppModule } from './app.module';
 import { PublicExceptionFilter } from './common/public-exception.filter';
 import type { Env } from './config/env.schema';
@@ -27,6 +28,13 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const config = app.get(ConfigService<Env, true>);
+
+  // SEGURIDAD (rate-limit): el deploy es VPC (cliente → ALB → ingress-nginx → pod), todos los proxies
+  // con IP privada. Con `trust proxy` apuntando a los rangos privados, Express resuelve `req.ip` = la
+  // IP pública real del cliente (descarta los hops privados del XFF), un-spoofeable. El guard de
+  // rate-limit lee `req.ip`, así que un atacante NO puede rotar un header de IP para evadir el límite.
+  // Configurable vía TRUSTED_PROXY (default = rangos privados del VPC).
+  app.set('trust proxy', parseTrustedProxy(config.getOrThrow<string>('TRUSTED_PROXY')));
 
   // Body JSON hasta 5MB: el enroll biométrico manda la selfie en base64 (alineado con identity-service).
   // Sin esto, el default de Nest/Express (100kb) rechaza la foto con 413 antes de proxearla a identity.
