@@ -278,21 +278,45 @@ const allValidDocs = [
   fleetDoc(FleetDocumentType.VEHICLE_PHOTO, FleetDocumentStatus.VALID),
 ];
 
-describe('OpsService.approveDriver · gate de documentos obligatorios (server-side, autoritativo)', () => {
-  it('aprueba vía REST y audita cuando LICENSE_A1+SOAT+PROPERTY_CARD+VEHICLE_PHOTO están VALID', async () => {
+/** identity GetDriver mínimo (resuelve el userId del driver para el gate de ITV). */
+const driverFound = { id: 'd1', userId: 'u-d1', found: true };
+/** identity grpc que responde GetDriver con el userId; el resto vacío. */
+const identityGrpcWithDriver = grpc((m) => (m === 'GetDriver' ? driverFound : {}));
+/** fleet GetDriverInspectionStatus VIGENTE (gate ITV pasa). */
+const inspectionCurrent = {
+  current: true,
+  hasVehicle: true,
+  vehicleId: 'veh-1',
+  plate: 'ABC-123',
+  nextDueAt: '2099-01-01T00:00:00.000Z',
+  passed: true,
+  invalidReason: '',
+};
+
+/** fleet grpc: GetDriverDocuments con los `docs` dados + GetDriverInspectionStatus con el `inspection` dado. */
+function fleetGrpcFor(
+  docs: unknown[],
+  inspection: Record<string, unknown> = inspectionCurrent,
+): GrpcServiceClient {
+  return grpc((m) => {
+    if (m === 'GetDriverDocuments') return { driverId: 'd1', documents: docs };
+    if (m === 'GetDriverInspectionStatus') return inspection;
+    return {};
+  });
+}
+
+describe('OpsService.approveDriver · gates server-side (documentos + ITV, autoritativos)', () => {
+  it('aprueba vía REST y audita cuando docs VALID Y la ITV del vehículo operado está vigente', async () => {
     const rest = {
       post: vi.fn().mockResolvedValue({ id: 'd1', backgroundCheckStatus: 'CLEARED' }),
     } as unknown as InternalRestClient;
     const audit = {
       record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
     } as unknown as AuditRecorder;
-    const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: allValidDocs } : {},
-    );
     const svc = new OpsService(
       grpc(() => ({})),
-      grpc(() => ({})),
-      fleetGrpc,
+      identityGrpcWithDriver,
+      fleetGrpcFor(allValidDocs),
       rest,
       noopMedia,
       noopTripRest,
@@ -309,27 +333,20 @@ describe('OpsService.approveDriver · gate de documentos obligatorios (server-si
     expect(audit.record).toHaveBeenCalledOnce();
   });
 
-  it('lanza ConflictError y NO llama a identity approve cuando falta el SOAT válido', async () => {
+  it('GATE DOCS: ConflictError y NO llama a identity approve cuando falta el SOAT válido', async () => {
     const post = vi.fn();
     const record = vi.fn();
     const rest = { post } as unknown as InternalRestClient;
     const audit = { record } as unknown as AuditRecorder;
-    // SOAT presente pero EXPIRED (no VALID) → no satisface el gate.
-    const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments'
-        ? {
-            driverId: 'd1',
-            documents: [
-              fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
-              fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.EXPIRED),
-              fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
-            ],
-          }
-        : {},
-    );
+    // SOAT presente pero EXPIRED (no VALID) → no satisface el gate documental (corta ANTES del de ITV).
+    const fleetGrpc = fleetGrpcFor([
+      fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
+      fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.EXPIRED),
+      fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+    ]);
     const svc = new OpsService(
       grpc(() => ({})),
-      grpc(() => ({})),
+      identityGrpcWithDriver,
       fleetGrpc,
       rest,
       noopMedia,
@@ -346,6 +363,139 @@ describe('OpsService.approveDriver · gate de documentos obligatorios (server-si
     expect(err).toBeInstanceOf(ConflictError);
     expect(post).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compliance)', () => {
+  /** Construye el service con la ITV-status dada (docs siempre VALID; el bloqueo es por ITV). */
+  function svcWithInspection(
+    inspectionStatus: Record<string, unknown>,
+    rest: InternalRestClient,
+    audit: AuditRecorder,
+  ): OpsService {
+    return new OpsService(
+      grpc(() => ({})),
+      identityGrpcWithDriver,
+      fleetGrpcFor(allValidDocs, inspectionStatus),
+      rest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+  }
+
+  it('resuelve la ITV por USERID (no driverId): GetDriverInspectionStatus se llama con driver.userId', async () => {
+    const calls: { method: string; req: Record<string, unknown> }[] = [];
+    const fleetGrpc = {
+      call: vi.fn((method: string, req: Record<string, unknown>) => {
+        calls.push({ method, req });
+        if (method === 'GetDriverDocuments') return Promise.resolve({ driverId: 'd1', documents: allValidDocs });
+        if (method === 'GetDriverInspectionStatus') return Promise.resolve(inspectionCurrent);
+        return Promise.resolve({});
+      }),
+    } as unknown as GrpcServiceClient;
+    const rest = {
+      post: vi.fn().mockResolvedValue({ id: 'd1', backgroundCheckStatus: 'CLEARED' }),
+    } as unknown as InternalRestClient;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpcWithDriver,
+      fleetGrpc,
+      rest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+
+    await svc.approveDriver(identity, 'd1');
+    const inspectionCall = calls.find((c) => c.method === 'GetDriverInspectionStatus');
+    // La pieza que más rompe: la ITV se consulta con el USER.id (driver.userId), NO con el driverId de perfil.
+    expect(inspectionCall?.req).toEqual({ id: 'u-d1' });
+  });
+
+  it('BLOQUEA (ConflictError) con ITV VENCIDA y NO llama a identity approve', async () => {
+    const post = vi.fn();
+    const record = vi.fn();
+    const svc = svcWithInspection(
+      { ...inspectionCurrent, current: false, passed: true, invalidReason: 'OVERDUE' },
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+    const err = await svc.approveDriver(identity, 'd1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect((err as ConflictError).message).toContain('vencida');
+    expect(post).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('BLOQUEA con ITV REPROBADA (passed=false → NOT_PASSED)', async () => {
+    const post = vi.fn();
+    const svc = svcWithInspection(
+      { ...inspectionCurrent, current: false, passed: false, invalidReason: 'NOT_PASSED' },
+      { post } as unknown as InternalRestClient,
+      { record: vi.fn() } as unknown as AuditRecorder,
+    );
+    const err = await svc.approveDriver(identity, 'd1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect((err as ConflictError).message).toContain('reprobada');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('BLOQUEA sin vehículo (NO_VEHICLE): no puede operar sin vehículo + ITV', async () => {
+    const post = vi.fn();
+    const svc = svcWithInspection(
+      { current: false, hasVehicle: false, vehicleId: '', plate: '', nextDueAt: '', passed: false, invalidReason: 'NO_VEHICLE' },
+      { post } as unknown as InternalRestClient,
+      { record: vi.fn() } as unknown as AuditRecorder,
+    );
+    const err = await svc.approveDriver(identity, 'd1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect((err as ConflictError).message).toContain('vehículo operable');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('BLOQUEA sin inspección (NONE)', async () => {
+    const post = vi.fn();
+    const svc = svcWithInspection(
+      { ...inspectionCurrent, current: false, passed: false, nextDueAt: '', invalidReason: 'NONE' },
+      { post } as unknown as InternalRestClient,
+      { record: vi.fn() } as unknown as AuditRecorder,
+    );
+    const err = await svc.approveDriver(identity, 'd1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect((err as ConflictError).message).toContain('no tiene inspección');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('NotFoundError si el conductor no existe en identity (no se puede resolver el userId)', async () => {
+    const post = vi.fn();
+    const identityGrpc = grpc((m) => (m === 'GetDriver' ? { found: false } : {}));
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      fleetGrpcFor(allValidDocs),
+      { post } as unknown as InternalRestClient,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    await expect(svc.approveDriver(identity, 'd1')).rejects.toBeInstanceOf(NotFoundError);
+    expect(post).not.toHaveBeenCalled();
   });
 });
 
@@ -390,25 +540,21 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
           ],
         };
       }
-      // F2 · C1: ficha del vehículo (el ACTIVO se prefiere). Keyed por userId (driver.userId).
-      if (m === 'GetDriverVehicles') {
+      // F2 · C1: ficha del vehículo OPERADO. FIX 3 — el display admin usa el MISMO selector autoritativo que
+      // el gate de ITV/dispatch/ping: GetDriverActiveVehicle (pickActiveVehicle), keyed por userId.
+      if (m === 'GetDriverActiveVehicle') {
         return {
-          driverId: 'u-d1',
-          vehicles: [
-            {
-              id: 'veh-1',
-              plate: 'ABC-123',
-              make: 'Toyota',
-              model: 'Yaris',
-              year: 2021,
-              color: 'Plata',
-              docStatus: 'PENDING_REVIEW',
-              active: true,
-              found: true,
-              vehicleType: 'CAR',
-              status: 'PENDING_REVIEW',
-            },
-          ],
+          id: 'veh-1',
+          plate: 'ABC-123',
+          make: 'Toyota',
+          model: 'Yaris',
+          year: 2021,
+          color: 'Plata',
+          docStatus: 'PENDING_REVIEW',
+          active: true,
+          found: true,
+          vehicleType: 'CAR',
+          status: 'PENDING_REVIEW',
         };
       }
       return {};
@@ -496,6 +642,80 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       config,
     );
     await expect(svc.driverDetail(identity, 'missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  // FIX 3 · CONSISTENCIA: el display admin del "vehículo operado" usa el MISMO selector autoritativo que el
+  // gate de ITV / dispatch / ping. Antes resolvía con `GetDriverVehicles` + `find(active) ?? [0]`, un
+  // selector DIVERGENTE de `pickActiveVehicle` → el operador podía ver un auto que NO es el que el gate
+  // evalúa al aprobar. Ahora consume `GetDriverActiveVehicle` (la fuente única), keyed por userId.
+  describe('FIX 3 · vehículo del detalle = el MISMO que evalúa el gate (selector único)', () => {
+    function driverDetailService(fleetImpl: (m: string, req: Record<string, unknown>) => unknown) {
+      const identityGrpc = grpc((m) =>
+        m === 'GetDriver'
+          ? { id: 'd1', userId: 'u-d1', found: true, name: 'X', suspendedAt: '', rejectionReason: '' }
+          : {},
+      );
+      const fleetGrpc = grpc(fleetImpl);
+      const svc = new OpsService(
+        grpc(() => ({})),
+        identityGrpc,
+        fleetGrpc,
+        noopRest,
+        noopMedia,
+        noopTripRest,
+        noopFleetRest,
+        noopPaymentRest,
+        InternalAudience.ADMIN_RAIL,
+        noopReadModel,
+        noopAudit,
+        config,
+      );
+      return { svc, fleetGrpc };
+    }
+
+    it('resuelve el vehículo vía GetDriverActiveVehicle (keyed por userId), NO con el selector divergente', async () => {
+      const { svc, fleetGrpc } = driverDetailService((m) => {
+        if (m === 'GetDriverDocuments') return { driverId: 'd1', documents: [] };
+        if (m === 'GetDriverActiveVehicle')
+          return {
+            id: 'veh-operado',
+            plate: 'XYZ-789',
+            make: 'Kia',
+            model: 'Rio',
+            year: 2022,
+            color: 'Negro',
+            docStatus: 'VALID',
+            active: true,
+            found: true,
+            vehicleType: 'CAR',
+            status: 'ACTIVE',
+          };
+        return {};
+      });
+
+      const view = await svc.driverDetail(identity, 'd1');
+
+      expect(view.vehicle?.id).toBe('veh-operado');
+      const calledMethods = (fleetGrpc.call as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(calledMethods).toContain('GetDriverActiveVehicle');
+      // El display NO debe reusar el selector divergente para la ficha del vehículo.
+      expect(calledMethods).not.toContain('GetDriverVehicles');
+      // Keyed por el User.id (driver.userId), no por el driverId de perfil.
+      const activeCall = (fleetGrpc.call as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'GetDriverActiveVehicle',
+      );
+      expect(activeCall?.[1]).toEqual({ id: 'u-d1' });
+    });
+
+    it('found=false (ningún vehículo operable) → vehicle null (degradación honesta)', async () => {
+      const { svc } = driverDetailService((m) => {
+        if (m === 'GetDriverDocuments') return { driverId: 'd1', documents: [] };
+        if (m === 'GetDriverActiveVehicle') return { found: false };
+        return {};
+      });
+      const view = await svc.driverDetail(identity, 'd1');
+      expect(view.vehicle).toBeNull();
+    });
   });
 });
 

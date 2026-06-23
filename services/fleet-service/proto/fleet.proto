@@ -7,7 +7,15 @@ package veo.fleet.v1;
 service FleetService {
   rpc GetVehicle (GetByIdRequest) returns (VehicleReply);
   rpc GetDriverVehicles (GetByIdRequest) returns (DriverVehiclesReply);
+  // Vehículo OPERADO del conductor (selector AUTORITATIVO único: pickActiveVehicle — selectedAt más
+  // reciente con docs vigentes). `id` = User.id (Vehicle.driver_id). found=false si no tiene ninguno
+  // operable. Dispatch lo usa al adjudicar una oferta para que el vehicleId del viaje sea EL MISMO que
+  // el resto del sistema considera operado (no un .find(active) divergente).
+  rpc GetDriverActiveVehicle (GetByIdRequest) returns (VehicleReply);
   rpc GetDriverDocuments (GetByIdRequest) returns (DriverDocumentsReply);
+  // Vigencia de la inspección técnica (ITV) del vehículo OPERADO del conductor. `id` = User.id (NO el
+  // driverId de perfil): los vehículos se indexan por Vehicle.driver_id = User.id. Gate de aprobación.
+  rpc GetDriverInspectionStatus (GetByIdRequest) returns (DriverInspectionStatusReply);
 }
 
 message GetByIdRequest {
@@ -33,6 +41,13 @@ message DriverVehiclesReply {
   repeated VehicleReply vehicles = 2;
 }
 
+// Imagen de un documento (sub-lote 3A · múltiples imágenes). `side` = FRONT|BACK|SINGLE (string del enum).
+message DocumentImageReply {
+  string s3_key = 1;
+  string side = 2;
+  int32 order = 3;
+}
+
 message FleetDocumentReply {
   string id = 1;
   string owner_type = 2;
@@ -41,12 +56,32 @@ message FleetDocumentReply {
   string document_number = 5;
   string status = 6;
   string expires_at = 7;
-  // Internos (admin review). NO se proyectan al conductor: el driver-bff mapea un subconjunto explícito.
+  // DEPRECADO (sub-lote 3A): primera imagen (backward-compat). Usar `images`. NO se proyecta al conductor.
   string file_s3_key = 8;
   string rejection_reason = 9;
+  // Imágenes del documento (1..N caras). Admin review. El driver-bff mapea un subconjunto explícito.
+  repeated DocumentImageReply images = 10;
 }
 
 message DriverDocumentsReply {
   string driver_id = 1;
   repeated FleetDocumentReply documents = 2;
+}
+
+// Vigencia de la ITV del vehículo OPERADO del conductor (gate de aprobación · compliance).
+message DriverInspectionStatusReply {
+  // ¿El conductor tiene un vehículo operado con inspección VIGENTE (passed && nextDueAt > now)?
+  bool current = 1;
+  // ¿El conductor tiene al menos un vehículo registrado? false ⇒ no puede operar (sin vehículo + ITV).
+  bool has_vehicle = 2;
+  // Vehículo evaluado (el operado). "" si el conductor no tiene vehículo.
+  string vehicle_id = 3;
+  // Placa del vehículo evaluado (para un mensaje de error legible). "" si no hay vehículo.
+  string plate = 4;
+  // Próximo vencimiento de la última inspección (ISO-8601). "" si nunca tuvo inspección.
+  string next_due_at = 5;
+  // ¿La última inspección del vehículo operado pasó? false si reprobó o no hay inspección.
+  bool passed = 6;
+  // Motivo de invalidez cuando current=false: NONE|NOT_PASSED|OVERDUE|NO_VEHICLE. "" si current=true.
+  string invalid_reason = 7;
 }

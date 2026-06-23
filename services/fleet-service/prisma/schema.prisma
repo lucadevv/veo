@@ -289,7 +289,12 @@ model Inspection {
   nextDueAt   DateTime @map("next_due_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  @@index([vehicleId, inspectedAt])
+  // IDEMPOTENCIA (FOUNDATION §0.4): natural key que colapsa un re-POST (doble click / retry de red) a una
+  // sola fila. Una inspección del MISMO vehículo, en el MISMO instante, por el MISMO inspector ES la misma.
+  // Dos inspecciones REALES distintas difieren en `inspectedAt` → no colisionan. El prefijo
+  // [vehicleId, inspectedAt] sirve además el `orderBy inspectedAt desc` del gate de ITV, así que el índice
+  // standalone previo es redundante y se reemplaza por este UNIQUE.
+  @@unique([vehicleId, inspectedAt, inspectorId])
   @@map("inspections")
   @@schema("fleet")
 }

@@ -9,7 +9,12 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
-import { deriveVehicleReviewStatus } from '../vehicles/vehicle-rules';
+import { deriveVehicleReviewStatus, pickActiveVehicle } from '../vehicles/vehicle-rules';
+import {
+  inspectionInvalidReason,
+  isInspectionCurrent,
+  InspectionInvalidReason,
+} from '../inspections/inspection-rules';
 import { FleetOwnerType, type Vehicle } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -64,6 +69,21 @@ interface DriverDocumentsReply {
   driverId: string;
   documents: FleetDocumentReply[];
 }
+
+/// Vigencia de la ITV del vehículo OPERADO del conductor (gate de aprobación · compliance).
+interface DriverInspectionStatusReply {
+  current: boolean;
+  hasVehicle: boolean;
+  vehicleId: string;
+  plate: string;
+  nextDueAt: string;
+  passed: boolean;
+  /// NONE|NOT_PASSED|OVERDUE|NO_VEHICLE; "" cuando current=true.
+  invalidReason: string;
+}
+
+/// Motivo extra (fuera del enum de inspección): el conductor no tiene NINGÚN vehículo operable.
+const NO_VEHICLE_REASON = 'NO_VEHICLE';
 
 const EMPTY_VEHICLE: VehicleReply = {
   id: '',
@@ -142,6 +162,24 @@ export class FleetGrpcController {
     return { driverId: id, vehicles: vehicles.map(toVehicleReply) };
   }
 
+  /**
+   * Vehículo OPERADO del conductor — FUENTE ÚNICA del "vehículo que el conductor maneja". Resuelve con
+   * `pickActiveVehicle` (selector AUTORITATIVO: selectedAt más reciente con docs vigentes), el MISMO que
+   * usan el gate de ITV (getDriverInspectionStatus), el ping del driver-bff (`/drivers/vehicles/active`)
+   * y el alta self-service. `id` = User.id (Vehicle.driverId). `found=false` si no tiene ninguno operable.
+   * Dispatch lo consume al adjudicar para que el vehicleId del viaje NO diverja de lo que opera el conductor.
+   */
+  @GrpcMethod('FleetService', 'GetDriverActiveVehicle')
+  async getDriverActiveVehicle(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<VehicleReply> {
+    this.requireIdentity(metadata);
+    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
+    const active = pickActiveVehicle(vehicles);
+    return active ? toVehicleReply(active) : EMPTY_VEHICLE;
+  }
+
   @GrpcMethod('FleetService', 'GetDriverDocuments')
   async getDriverDocuments(
     { id }: GetByIdRequest,
@@ -170,6 +208,56 @@ export class FleetGrpcController {
         // Sub-lote 3A: las N imágenes (ordenadas). Admin las firma; el conductor recibe un subconjunto.
         images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
       })),
+    };
+  }
+
+  /**
+   * Vigencia de la inspección técnica (ITV) del vehículo OPERADO del conductor — gate de aprobación.
+   * `id` = User.id (Vehicle.driverId, NO el driverId de perfil). Regla: el vehículo OPERADO del conductor
+   * (`pickActiveVehicle`: selector AUTORITATIVO ÚNICO — el MISMO que expone GetDriverActiveVehicle, que
+   * dispatch consume al adjudicar, y que el driver-bff sella en el ping vía `/drivers/vehicles/active`)
+   * debe tener una inspección VIGENTE (última `passed && nextDueAt > now`). Sin vehículo operable → no
+   * vigente (NO_VEHICLE). Devuelve datos útiles (vehicleId, plate, nextDueAt, motivo) para un error claro
+   * en admin-bff. Solo LEE (read replica).
+   */
+  @GrpcMethod('FleetService', 'GetDriverInspectionStatus')
+  async getDriverInspectionStatus(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverInspectionStatusReply> {
+    this.requireIdentity(metadata);
+    const now = new Date();
+    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
+    const active = pickActiveVehicle(vehicles);
+    if (!active) {
+      // Sin vehículo operable (ninguno registrado, o todos con docs vencidos): no puede operar.
+      return {
+        current: false,
+        hasVehicle: false,
+        vehicleId: '',
+        plate: '',
+        nextDueAt: '',
+        passed: false,
+        invalidReason: NO_VEHICLE_REASON,
+      };
+    }
+
+    // Última inspección del vehículo operado (orderBy inspectedAt desc, take 1 = la VIGENTE candidata).
+    const latest = await this.prisma.read.inspection.findFirst({
+      where: { vehicleId: active.id },
+      orderBy: { inspectedAt: 'desc' },
+    });
+    const current = isInspectionCurrent(latest, now);
+    const reason = current ? null : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE);
+
+    return {
+      current,
+      hasVehicle: true,
+      vehicleId: active.id,
+      plate: active.plate,
+      nextDueAt: latest ? latest.nextDueAt.toISOString() : '',
+      passed: latest?.passed ?? false,
+      invalidReason: reason ?? '',
     };
   }
 }

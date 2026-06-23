@@ -56,3 +56,19 @@ export interface DriverDocumentsReply {
   driverId: string;
   documents: FleetDocumentReply[];
 }
+
+/**
+ * fleet.GetDriverInspectionStatus / mensaje DriverInspectionStatusReply.
+ * Vigencia de la ITV del vehículo OPERADO del conductor (gate de aprobación · compliance).
+ * proto3 entrega ""/false por default (nunca null); `invalidReason` "" cuando current=true.
+ */
+export interface DriverInspectionStatusReply {
+  current: boolean;
+  hasVehicle: boolean;
+  vehicleId: string;
+  plate: string;
+  nextDueAt: string;
+  passed: boolean;
+  /** NONE | NOT_PASSED | OVERDUE | NO_VEHICLE | "" (cuando current=true). */
+  invalidReason: string;
+}

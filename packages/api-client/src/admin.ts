@@ -707,12 +707,15 @@ export const createDocumentRequest = z.object({
 });
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequest>;
 
-/** Registro de una inspección técnica (ITV) ya realizada. El fleet-service calcula el próximo vencimiento. */
+/**
+ * Registro de una inspección técnica (ITV) ya realizada. El fleet-service calcula el próximo vencimiento.
+ * SIN `inspectorId`: la identidad del inspector NO es client-supplied — la fija fleet-service desde el JWT
+ * del operador (server-truth · integridad del audit de compliance). Mandarla por el body no tendría efecto.
+ */
 export const createInspectionRequest = z.object({
   vehicleId: z.string().min(1),
   passed: z.boolean(),
   inspectedAt: z.string().optional(),
-  inspectorId: z.string().optional(),
   notes: z.string().optional(),
 });
 export type CreateInspectionRequest = z.infer<typeof createInspectionRequest>;

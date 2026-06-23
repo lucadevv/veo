@@ -139,9 +139,8 @@ export class CreateInspectionDto {
   @IsISO8601()
   inspectedAt?: string;
 
-  @IsOptional()
-  @IsUUID()
-  inspectorId?: string;
+  // SIN `inspectorId`: la identidad del inspector la fija fleet-service desde el JWT del operador (server-
+  // truth). El admin-bff reenviaba el body crudo; aceptar `inspectorId` aquí permitía forjarlo end-to-end.
 
   @IsOptional()
   @IsString()

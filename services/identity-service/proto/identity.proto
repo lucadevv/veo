@@ -4,8 +4,6 @@ package veo.identity.v1;
 
 // Contrato gRPC que identity-service expone a otros servicios (trip, dispatch, panic, etc.).
 // mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
-// NOTA: este .proto es el que CARGA el servidor gRPC en runtime (main.ts protoPath). DEBE mantenerse en
-// sincronía con el canónico packages/rpc/proto/identity.proto (fuente del contrato tipado de los clientes).
 service IdentityService {
   rpc GetUser (GetByIdRequest) returns (UserReply);
   rpc GetDriver (GetByIdRequest) returns (DriverReply);

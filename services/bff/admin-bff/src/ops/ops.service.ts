@@ -12,7 +12,9 @@ import {
   type DriverReply,
   type DriversByIdsReply,
   type DriverVehiclesReply,
+  type VehicleReply,
   type DriverDocumentsReply,
+  type DriverInspectionStatusReply,
 } from '@veo/rpc';
 import { ConflictError, ForbiddenError, NotFoundError, isProdTier } from '@veo/utils';
 import {
@@ -98,6 +100,20 @@ const REQUIRED_DRIVER_DOC_TYPES = [
 function emptyToNull(s: string): string | null {
   return s ? s : null;
 }
+
+/**
+ * Mensaje del operador por cada motivo de invalidez de la ITV (gate de aprobación · compliance). El motivo
+ * lo clasifica fleet (NONE|NOT_PASSED|OVERDUE = inspection-rules; NO_VEHICLE = sin vehículo operable).
+ * Default (motivo desconocido del wire) = mensaje genérico de ausencia, fail-closed honesto.
+ */
+const INSPECTION_BLOCK_MESSAGE: Record<string, string> = {
+  NONE: 'No se puede aprobar: el vehículo del conductor no tiene inspección técnica (ITV) registrada',
+  NOT_PASSED: 'No se puede aprobar: la inspección técnica (ITV) del vehículo está reprobada',
+  OVERDUE: 'No se puede aprobar: la inspección técnica (ITV) del vehículo está vencida',
+  NO_VEHICLE: 'No se puede aprobar: el conductor no tiene un vehículo operable con inspección técnica (ITV)',
+};
+const INSPECTION_BLOCK_DEFAULT =
+  'No se puede aprobar: inspección técnica (ITV) vencida o ausente';
 
 /** Valores válidos de DniFaceMatchStatus (sub-lote 3C) para narrowear el string del wire gRPC. */
 const DNI_FACE_MATCH_STATUS_VALUES = new Set<string>(Object.values(DniFaceMatchStatus));
@@ -400,28 +416,31 @@ export class OpsService {
     ]);
     if (!driver.found) throw new NotFoundError('Conductor no encontrado', { driverId });
 
-    // Ficha del VEHÍCULO (F2 · C1 — admin valida informado): fleet indexa Vehicle.driverId con el
+    // Ficha del VEHÍCULO OPERADO (F2 · C1 — admin valida informado): fleet indexa Vehicle.driverId con el
     // User.id (driver.userId), NO el driverId de perfil → consultamos por userId. Va después de GetDriver
     // porque recién ahí tenemos el userId (un solo round-trip extra, no un loop).
-    const vehiclesReply = await this.fleetGrpc.call<DriverVehiclesReply>(
-      'GetDriverVehicles',
+    //
+    // SELECTOR AUTORITATIVO ÚNICO: usamos `GetDriverActiveVehicle` — el MISMO `pickActiveVehicle` que evalúa
+    // el gate de ITV (GetDriverInspectionStatus), que dispatch consume al adjudicar y que el driver-bff sella
+    // en el ping. El display admin reusaba un `find(active) ?? [0]` DIVERGENTE → el operador podía ver un
+    // vehículo distinto del que el gate evalúa al aprobar. Una sola definición de "vehículo operado" en TODO
+    // el sistema, display incluido. `found=false` (proto3 default) ⇒ ningún vehículo operable → null.
+    const activeVehicle = await this.fleetGrpc.call<VehicleReply>(
+      'GetDriverActiveVehicle',
       { id: driver.userId },
       meta,
     );
-    // proto3 `repeated` entrega [] por default; el `?? []` es degradación honesta ante un reply malformado.
-    const vehicles = vehiclesReply.vehicles ?? [];
-    const v = vehicles.find((x) => x.active) ?? vehicles[0] ?? null;
-    const vehicle: DriverVehicle | null = v
+    const vehicle: DriverVehicle | null = activeVehicle.found
       ? {
-          id: v.id,
-          plate: v.plate,
-          make: v.make,
-          model: v.model,
-          year: v.year,
-          color: v.color,
-          vehicleType: v.vehicleType,
-          docStatus: v.docStatus,
-          active: v.active,
+          id: activeVehicle.id,
+          plate: activeVehicle.plate,
+          make: activeVehicle.make,
+          model: activeVehicle.model,
+          year: activeVehicle.year,
+          color: activeVehicle.color,
+          vehicleType: activeVehicle.vehicleType,
+          docStatus: activeVehicle.docStatus,
+          active: activeVehicle.active,
         }
       : null;
 
@@ -616,9 +635,10 @@ export class OpsService {
     identity: AuthUser,
     driverId: string,
   ): Promise<{ id: string; backgroundCheckStatus: string }> {
-    // GATE autoritativo server-side (NO depende de la UI): un conductor solo se aprueba si TODOS los
-    // documentos obligatorios existen con estado VALID. Ley 29733: la decisión de habilitar un conductor
-    // exige documentación válida verificable. Corta ANTES de delegar la aprobación a identity-service.
+    // GATES autoritativos server-side (NO dependen de la UI), AMBOS deben pasar ANTES de delegar a identity:
+    //   1) DOCUMENTAL: TODOS los documentos obligatorios existen con estado VALID (Ley 29733).
+    //   2) INSPECCIÓN (ITV): el vehículo operado tiene una inspección VIGENTE (passed && no vencida).
+    // Es server-side en el flujo de approve → curl-proof: saltearse la UI no saltea los gates.
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
       'GetDriverDocuments',
@@ -634,6 +654,32 @@ export class OpsService {
         `No se puede aprobar: faltan documentos válidos (${missing.join(', ')})`,
         { driverId, missing },
       );
+    }
+
+    // GATE de INSPECCIÓN TÉCNICA (ITV · compliance/seguridad): un conductor NO se aprueba si su vehículo
+    // OPERADO no tiene una inspección VIGENTE (passed && no vencida). Se SUMA al gate documental (no lo
+    // reemplaza). La verdad de la ITV es el modelo Inspection en fleet, NO un FleetDocument. fleet indexa
+    // los vehículos por Vehicle.driverId = User.id (NO el driverId de perfil), así que primero resolvemos el
+    // userId con GetDriver (mismo patrón que driverDetail) y recién con ese userId consultamos la vigencia.
+    const driver = await this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta);
+    if (!driver.found) {
+      throw new NotFoundError('Conductor no encontrado', { driverId });
+    }
+    const inspection = await this.fleetGrpc.call<DriverInspectionStatusReply>(
+      'GetDriverInspectionStatus',
+      { id: driver.userId },
+      meta,
+    );
+    if (!inspection.current) {
+      const message = INSPECTION_BLOCK_MESSAGE[inspection.invalidReason] ?? INSPECTION_BLOCK_DEFAULT;
+      throw new ConflictError(message, {
+        driverId,
+        userId: driver.userId,
+        vehicleId: emptyToNull(inspection.vehicleId),
+        invalidReason: inspection.invalidReason || null,
+        nextDueAt: emptyToNull(inspection.nextDueAt),
+        hasVehicle: inspection.hasVehicle,
+      });
     }
 
     const res = await this.identityRest.post<{ id: string; backgroundCheckStatus: string }>(
