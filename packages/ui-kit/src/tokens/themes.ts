@@ -26,11 +26,11 @@ export interface ThemeColors {
   border: string;
   /** Borde reforzado (foco de campo, énfasis). */
   borderStrong: string;
-  /** Color de marca (passenger: VEO Cyan · driver: cian). */
+  /** Color de marca VEO = azul #2D7FF9 (mismo en ambos temas; "una sola marca"). */
   brand: string;
   brandHover: string;
   onBrand: string;
-  /** Color de acción/acento (passenger: VEO Cyan · driver: cian). */
+  /** Color de acción/acento VEO = azul #2D7FF9 (mismo en ambos temas). */
   accent: string;
   accentHover: string;
   onAccent: string;
@@ -86,48 +86,56 @@ export interface Theme {
   motion: Motion;
 }
 
-/* ── Passenger · marca oficial VEO · noche, acento VEO Cyan ───────────────────
- * Dirección visual premium para movilidad alineada al VEO Brand Book. Lienzo NEGRO PURO
- * de marca (#000000), tipografía de alto contraste y un único acento cian de uso
- * DISCIPLINADO (acción primaria, ruta, estados activos, punto de ubicación). El cyan nunca
- * rellena áreas grandes; cuando lo hace (botón primario) el texto encima es NEGRO. Escala de
- * superficies tomada del Brand Book (#0e0e11 sheet · #1c1c22 capa elevada · #17171b/#2a2a30
- * bordes). Contraste AA verificado: ink #F4F6F8 sobre bg #000000 (~19:1), onBrand #000000
- * sobre cyan #00E5FF (~13.6:1), inkMuted #CFD3DA sobre bg (~14:1), onDanger #000000 sobre
- * coral #FF3B5C (~6:1). */
+/* ── Passenger · marca oficial VEO · noche, acento AZUL #2D7FF9 ────────────────
+ * "Una sola marca" (VEO_BRIEF_DISENO): el pasajero comparte EXACTAMENTE la paleta de marca
+ * del conductor — azul #2D7FF9 sobre lienzo near-black AZULADO (#0A0B0F). El passenger puede
+ * diferenciarse en USO/componentes, NUNCA en el color de marca. Un único acento azul de uso
+ * DISCIPLINADO (acción primaria, ruta, estados activos, punto de ubicación); cuando rellena
+ * (botón primario) el texto encima es BLANCO. Neutrales tintados hacia azul/frío, nunca
+ * #000/#fff planos.
+ *
+ * Contraste AA verificado (calculado, ratios reales WCAG 2.1 — idénticos al driverTheme):
+ *   · ink #F5F7FA sobre bg #0A0B0F → 18.33:1 (AAA holgado)
+ *   · inkMuted #C4CBD6 sobre bg #0A0B0F → 12.05:1 (pasa AA texto normal ≥4.5)
+ *   · inkSubtle #8A929E sobre bg #0A0B0F → 6.26:1 (terciario/placeholder, igual pasa AA)
+ *   · onAccent/onBrand #FFFFFF sobre brand/accent #2D7FF9 → 3.81:1 (pasa AA-large 3:1; el texto
+ *     de botón es semibold/grande, así que NO hace falta oscurecer el azul)
+ *   · onDanger #1A0306 sobre danger #FF4D6A → 6.15:1
+ *   · onSafe #04160D sobre safe/success #34D399 → 9.70:1
+ *   · onWarn #201301 sobre warn #F2AF48 → 9.52:1 */
 const passengerColors: ThemeColors = {
-  bg: '#000000',
-  surface: '#0E0E11',
-  surfaceElevated: '#1C1C22',
-  ink: '#F4F6F8',
-  inkMuted: '#CFD3DA',
-  inkSubtle: '#8A909C',
-  border: '#17171B',
-  borderStrong: '#2A2A30',
-  brand: '#00E5FF',
-  brandHover: '#00B8CC',
-  onBrand: '#000000',
-  accent: '#00E5FF',
-  accentHover: '#33EAFF',
-  onAccent: '#000000',
+  bg: '#0A0B0F',
+  surface: '#14161C',
+  surfaceElevated: '#1E212A',
+  ink: '#F5F7FA',
+  inkMuted: '#C4CBD6',
+  inkSubtle: '#8A929E',
+  border: '#1C1F27',
+  borderStrong: '#2B2F3A',
+  brand: '#2D7FF9',
+  brandHover: '#1E6AE0',
+  onBrand: '#FFFFFF',
+  accent: '#2D7FF9',
+  accentHover: '#5598FB',
+  onAccent: '#FFFFFF',
   safe: '#34D399',
   onSafe: '#04160D',
   success: '#34D399',
   onSuccess: '#04160D',
   warn: '#F2AF48',
   onWarn: '#201301',
-  danger: '#FF3B5C',
-  dangerHover: '#E62E4D',
-  onDanger: '#000000',
-  focus: '#00E5FF',
-  overlay: 'rgba(0,0,0,0.66)',
-  skeleton: '#1C1C22',
-  skeletonHighlight: '#2A2A30',
+  danger: '#FF4D6A',
+  dangerHover: '#E63A56',
+  onDanger: '#1A0306',
+  focus: '#2D7FF9',
+  overlay: 'rgba(5,7,12,0.7)',
+  skeleton: '#14161C',
+  skeletonHighlight: '#1E212A',
 };
 
 /* ── Driver · AZUL ELÉCTRICO · noche, acento azul de confianza ─────────────────
- * Dirección visual propia del CONDUCTOR: AZUL ELÉCTRICO (#2D7FF9) — confianza + premium para
- * movilidad segura. El pasajero queda en cyan; el conductor se diferencia por su paleta azul.
+ * Marca VEO global: AZUL ELÉCTRICO (#2D7FF9) — confianza + premium para movilidad segura.
+ * Pasajero y conductor comparten ESTA paleta (una sola marca); el driverTheme es la fuente.
  * Lienzo near-black AZULADO (#0A0B0F, NO negro plano — tinta levemente el neutral hacia el azul,
  * ideal OLED para turnos largos) y un único acento azul de uso DISCIPLINADO (acción primaria,
  * estado activo, ruta). El azul nunca rellena áreas grandes; cuando lo hace (botón primario) el
@@ -272,7 +280,7 @@ export type ThemeName = keyof typeof themes;
 /**
  * Tokens para dibujar la ruta y los markers en el lienzo del mapa (MapLibre/react-native-maps).
  * El ui-kit no monta el mapa (lo inyecta la app), pero centraliza el estilo para que la ruta
- * cian de marca VEO sea consistente. La pantalla pasa estos valores a la capa de línea.
+ * azul de marca VEO sea consistente. La pantalla pasa estos valores a la capa de línea.
  */
 export interface MapRouteTokens {
   /** Color de la polyline de ruta activa. */
@@ -292,19 +300,19 @@ export interface MapRouteTokens {
 }
 
 export const passengerMapRoute: MapRouteTokens = {
-  routeColor: '#00E5FF',
+  routeColor: '#2D7FF9',
   routeWidth: 6,
-  routeGlowColor: 'rgba(0,229,255,0.35)',
+  routeGlowColor: 'rgba(45,127,249,0.35)',
   routeGlowWidth: 14,
-  originColor: '#00E5FF',
-  destinationColor: '#00E5FF',
-  userDotColor: '#00E5FF',
+  originColor: '#2D7FF9',
+  destinationColor: '#2D7FF9',
+  userDotColor: '#2D7FF9',
 };
 
 /**
- * Tokens de ruta para el CONDUCTOR (variante AZUL ELÉCTRICO). Mismo lenguaje que el pasajero
- * (halo translúcido + línea nítida) pero con el acento azul #2D7FF9 del `driverTheme`, para que
- * la ruta dibujada en MapLibre sea consistente con el resto de la app del conductor.
+ * Tokens de ruta para el CONDUCTOR. Misma marca azul #2D7FF9 que el pasajero (halo translúcido
+ * + línea nítida); se mantiene como export propio para que la app del conductor lo importe por
+ * nombre, pero los valores son idénticos a `passengerMapRoute` (una sola marca).
  */
 export const driverMapRoute: MapRouteTokens = {
   routeColor: '#2D7FF9',

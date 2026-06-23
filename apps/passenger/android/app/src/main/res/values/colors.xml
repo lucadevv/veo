@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- VEO brand -->
-    <color name="veo_black">#FF000000</color>
-    <color name="veo_cyan">#FF00E5FF</color>
-    <color name="veo_white">#FFF4F6F8</color>
+    <!-- VEO brand · azul #2D7FF9 sobre lienzo near-black azulado #0A0B0F -->
+    <color name="veo_black">#FF0A0B0F</color>
+    <color name="veo_blue">#FF2D7FF9</color>
+    <color name="veo_white">#FFF5F7FA</color>
 
-    <!-- Adaptive launcher icon background (cyan) -->
-    <color name="ic_launcher_background">#FF00E5FF</color>
+    <!-- Adaptive launcher icon background (azul de marca) -->
+    <color name="ic_launcher_background">#FF2D7FF9</color>
 
-    <!-- Splash background (black) -->
-    <color name="veo_splash_background">#FF000000</color>
+    <!-- Splash background (near-black azulado de marca) -->
+    <color name="veo_splash_background">#FF0A0B0F</color>
 </resources>
