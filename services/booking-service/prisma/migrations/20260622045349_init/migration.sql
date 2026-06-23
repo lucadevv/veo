@@ -1,3 +1,8 @@
+-- CreateSchema (DB-per-service · schema lógico propio "booking"). Self-contained: la migración crea su
+-- propio schema (idempotente IF NOT EXISTS), igual que payment-service. Sin esto, `migrate deploy` contra una
+-- DB virgen (p.ej. testcontainers del seat-lock e2e) falla con 3F000 "schema booking does not exist".
+CREATE SCHEMA IF NOT EXISTS "booking";
+
 -- CreateEnum
 CREATE TYPE "booking"."PublishedTripState" AS ENUM ('BORRADOR', 'PUBLICADO', 'PARCIALMENTE_RESERVADO', 'LLENO', 'EN_RUTA', 'COMPLETADO', 'CANCELADO');
 

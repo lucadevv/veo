@@ -91,3 +91,27 @@ export const SEARCHABLE_STATES: readonly PublishedTripState[] = [
   PublishedTripState.PUBLICADO,
   PublishedTripState.PARCIALMENTE_RESERVADO,
 ];
+
+/**
+ * Estados desde los que la OFERTA admite CONFIRMAR una reserva (seat-lock del §6 · F3c): tiene sentido
+ * decrementar un asiento mientras el viaje sigue en su ventana de reserva — PUBLICADO (sin reservas aún),
+ * PARCIALMENTE_RESERVADO (con cupo) y LLENO (un booking COBRO_PENDIENTE vivo cuyo asiento se reservó antes de
+ * llenarse PUEDE confirmar; el §6 ya contempla LLENO→PARCIALMENTE_RESERVADO al liberar). Quedan FUERA:
+ * BORRADOR (no publicada), EN_RUTA/COMPLETADO (el viaje ya arrancó/terminó — F4 clock-driven) y CANCELADO.
+ *
+ * GUARD DEFENSIVO (F3c): hoy EN_RUTA no es alcanzable (su transición clock-driven es F4), así que este set es
+ * inocuo en runtime. Pero cuando F4 introduzca COBRO_PENDIENTE-vivos sobre una oferta que pasó a EN_RUTA, un
+ * `payment.captured` TARDÍO dispararía `assertTransition(EN_RUTA → LLENO)` DENTRO de la txn → throw → rollback
+ * → re-throw → POISON infinito. Este predicado deja al seat-lock cancelar limpio (razon=OFERTA_NO_DISPONIBLE)
+ * en vez de envenenar la partición. Enum TIPADO (cero strings mágicos), derivado de la semántica de la máquina.
+ */
+export const RESERVABLE_STATES: readonly PublishedTripState[] = [
+  PublishedTripState.PUBLICADO,
+  PublishedTripState.PARCIALMENTE_RESERVADO,
+  PublishedTripState.LLENO,
+];
+
+/** ¿La oferta admite confirmar una reserva sobre ella? (predicado tipado del seat-lock · F3c guard). */
+export function isReservableState(estado: PublishedTripState): boolean {
+  return RESERVABLE_STATES.includes(estado);
+}

@@ -43,11 +43,15 @@
  * INSTANT_BOOKING también dispara `triggerCharge` al reservar (mismo método, DRY). El método de pago lo
  * ELIGE el pasajero al reservar (persistido en el Booking, §5.5) y el CHARGE lo usa.
  *
- * DIFERIDO (degradación honesta, ADR-014):
- *  - El handler de `payment.captured` / `payment.failed` (COBRO_PENDIENTE → CONFIRMADO/CANCELADO) + el LOCK
- *    ATÓMICO de asientos (§6, decremento en CONFIRMADO) + BR-P02 + el Refund de asiento-lleno son F3c · PENDIENTE
- *    (aún NO existen). Hoy el cupo se valida de forma NO transaccional al reservar (chequeo barato anti-overbooking
- *    obvio); la garantía dura del cupo llega con ese lock en F3c. NO describir el handler como si ya corriera.
+ * AS-BUILT (F3c · CONSTRUIDO en ESTE servicio):
+ *  - El handler de `payment.captured` / `payment.failed` (`confirmCapture` / `handlePaymentFailed`:
+ *    COBRO_PENDIENTE → CONFIRMADO/CANCELADO) + el LOCK ATÓMICO de asientos (§6, decremento en CONFIRMADO,
+ *    `confirmAndLockSeats`) + BR-P02 (reacción a payment.failed) YA existen acá. La garantía dura del cupo
+ *    vive en ese seat-lock; el chequeo NO transaccional al reservar es solo un anti-overbooking barato previo.
+ *
+ * PENDIENTE (lo que SIGUE, no construido acá):
+ *  - El **Refund** del asiento-lleno es F3c-payment (payment-service consume `booking.cancelled` y reembolsa).
+ *  - La transición a EN_RUTA es F4.
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
@@ -423,6 +427,121 @@ export class BookingsService {
     }
     const take = page.limit ?? DEFAULT_TRIP_BOOKINGS_PAGE_SIZE;
     return this.repo.findByPublishedTripId(publishedTripId, take, page.cursor);
+  }
+
+  /**
+   * F3c · CONSUMIR `payment.captured` → SEAT-LOCK ATÓMICO (ADR-014 §6 · §5.2 paso 3 · §7.1.bis). Es la
+   * reacción al evento que payment-service emite cuando el webhook/poll resuelve la CAPTURA (minutos después
+   * del CHARGE). CORRELACIÓN: el evento trae `tripId = bookingId` (opaco · §5.5) → se ubica el Booking por id.
+   *
+   * El método NO hace el check-cupo acá (sería la grieta de carrera): delega TODO a `confirmAndLockSeats`, que
+   * corre chequear-cupo + decrementar + transición + outbox en UNA txn ACID con `FOR UPDATE` (§6). Acá solo:
+   *  - early-return barato si el booking no existe o ya no está en COBRO_PENDIENTE (idempotencia/reorden) — la
+   *    GARANTÍA dura igual la da el where atómico dentro de la txn, esto solo evita abrir la txn al pedo.
+   *  - traducir el outcome a logs (CONFIRMADO / asiento-lleno → Refund en F3c-payment).
+   *
+   * IDEMPOTENCIA DOBLE (tolera duplicado Y reorden de Kafka): el dedup por eventId (en el consumer) + el where
+   * atómico `estado: COBRO_PENDIENTE` del UPDATE dentro de la txn. Un payment.captured DUPLICADO sobre un
+   * booking YA CONFIRMADO → 0 filas → NOOP → NUNCA doble-decremento (no oversold por reproceso).
+   */
+  async confirmCapture(bookingId: string, paymentId: string): Promise<void> {
+    const booking = await this.repo.findByIdForCaptureHandler(bookingId);
+    if (!booking) {
+      // El tripId del evento de payment NO matchea ningún Booking (opaco · §5.5). No es nuestro: ignorar.
+      this.logger.warn({
+        msg: 'payment.captured sin Booking correlacionado (tripId opaco no es un bookingId de carpooling): ignorado',
+        bookingId,
+        paymentId,
+      });
+      return;
+    }
+    if (booking.estado !== BookingState.COBRO_PENDIENTE) {
+      // Ya confirmado/cancelado (duplicado o reorden de Kafka). El where atómico igual lo blindaría; cortamos antes.
+      this.logger.log({
+        msg: 'payment.captured sobre un booking que ya no está en COBRO_PENDIENTE (duplicado/reorden): no-op idempotente',
+        bookingId,
+        estado: booking.estado,
+      });
+      return;
+    }
+
+    // EL SEAT-LOCK (§6): toda la decisión (cupo + decremento + transición + outbox) en UNA txn con FOR UPDATE.
+    const outcome = await this.repo.confirmAndLockSeats(booking, paymentId);
+    switch (outcome.kind) {
+      case 'CONFIRMED':
+        this.logger.log({
+          msg: 'Booking CONFIRMADO bajo seat-lock atómico (asiento decrementado, booking.confirmed emitido)',
+          bookingId,
+          paymentId,
+          tripQuedoLleno: outcome.tripQuedoLleno,
+        });
+        return;
+      case 'SEAT_FULL':
+        // CAMINO INFELIZ (§6): cobré pero otro se llevó el último asiento. booking.cancelled(ASIENTO_LLENO)
+        // emitido → el Refund lo hará payment-service. F3c-payment · PENDIENTE (el consumer de booking.cancelled
+        // → refund automático SOLO para ASIENTO_LLENO es el lote SIGUIENTE; F3c-booking solo EMITE el evento).
+        this.logger.warn({
+          msg: 'Booking CANCELADO por asiento-lleno bajo seat-lock (cobré pero otro confirmó el último asiento). booking.cancelled(ASIENTO_LLENO) emitido → Refund en F3c-payment · PENDIENTE',
+          bookingId,
+          paymentId,
+        });
+        return;
+      case 'OFFER_UNAVAILABLE':
+        // GUARD DEFENSIVO (§6 · F3c): el cobro capturó pero la oferta ya NO está en un estado reservable
+        // (anómalo / futuro EN_RUTA-COMPLETADO-CANCELADO de F4). Se canceló limpio en vez de envenenar la
+        // partición. booking.cancelled(OFERTA_NO_DISPONIBLE) emitido → Refund en F3c-payment (hubo captura,
+        // igual que ASIENTO_LLENO). El camino EN_RUTA real (clock-driven) es F4.
+        this.logger.warn({
+          msg: 'Booking CANCELADO por oferta no-reservable bajo seat-lock (cobré pero la oferta ya no admite la reserva). booking.cancelled(OFERTA_NO_DISPONIBLE) emitido → Refund en F3c-payment · PENDIENTE',
+          bookingId,
+          paymentId,
+        });
+        return;
+      case 'NOOP':
+        // Carrera con el where atómico: el booking cambió de estado entre el precheck y la txn. Sin efecto.
+        this.logger.log({
+          msg: 'payment.captured: el booking cambió de estado entre el precheck y el seat-lock (carrera/duplicado): no-op idempotente',
+          bookingId,
+        });
+        return;
+    }
+  }
+
+  /**
+   * F3c · CONSUMIR `payment.failed` → CANCELADO (ADR-014 §5.4 / §7.1.bis · BR-P02). IMPORTANTE: los 3
+   * reintentos del riel (BR-P02) los hace payment-service INTERNAMENTE; booking solo REACCIONA al evento:
+   *  - `willRetry === true`  → payment va a reintentar → NO-OP (el booking espera, sigue COBRO_PENDIENTE).
+   *  - `willRetry === false` → DEBT permanente, riel agotado → COBRO_PENDIENTE → CANCELADO + outbox
+   *    `booking.cancelled` (razon=COBRO_FALLIDO). NO hay Refund (no se capturó nada). La deuda se DERIVA de
+   *    payment-service (PaymentStatus.DEBT); booking NO crea un flag DEBT propio (segunda fuente de verdad).
+   *
+   * El asiento NO se decrementó (solo decrementa al CAPTURAR, en confirmCapture), así que la oferta queda
+   * intacta — el viaje no perdió cupo por un cobro fallido. Where atómico por estado (idempotente ante duplicado).
+   */
+  async handlePaymentFailed(bookingId: string, willRetry: boolean): Promise<void> {
+    if (willRetry) {
+      // El riel reintentará (BR-P02 interno de payment). booking ESPERA: no muta nada (sigue COBRO_PENDIENTE).
+      this.logger.log({
+        msg: 'payment.failed con willRetry=true: payment reintentará (BR-P02); el booking sigue COBRO_PENDIENTE (no-op)',
+        bookingId,
+      });
+      return;
+    }
+
+    // FALLA PERMANENTE (riel agotado): COBRO_PENDIENTE → CANCELADO (razon=COBRO_FALLIDO). Sin Refund, sin tocar
+    // el asiento. El where atómico vuelve la operación idempotente (duplicado/reorden → null → no-op).
+    const cancelled = await this.repo.cancelForPaymentFailed(bookingId);
+    if (!cancelled) {
+      this.logger.log({
+        msg: 'payment.failed (permanente) sobre un booking que ya no estaba en COBRO_PENDIENTE (duplicado/reorden): no-op idempotente',
+        bookingId,
+      });
+      return;
+    }
+    this.logger.warn({
+      msg: 'Booking CANCELADO por cobro fallido permanente (riel agotado, BR-P02). booking.cancelled(COBRO_FALLIDO) emitido. SIN Refund (no se capturó). El asiento no se tocó. Deuda derivada de PaymentStatus.DEBT (sin flag propio)',
+      bookingId,
+    });
   }
 
   /**

@@ -3,8 +3,16 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.spec.ts'],
-    // Los tests construyen las clases directamente (sin Nest DI), por lo que no requieren
-    // metadata de decoradores. Resolución de @veo/* vía node_modules (dist ESM).
+    // Unit (src/**/*.spec.ts) + e2e con testcontainers (test/**/*.e2e.spec.ts · F3c seat-lock §6: el lock
+    // pesimista NO se prueba con mocks — Postgres REAL, CLAUDE "pagos/críticos no se mockean"). Mismo include
+    // que payment-service.
+    include: ['src/**/*.spec.ts', 'test/**/*.e2e.spec.ts'],
+    // testcontainers levanta Postgres real (pull + arranque): timeouts holgados.
+    testTimeout: 120_000,
+    hookTimeout: 180_000,
+    // Las suites e2e comparten contenedor/DB por archivo; sin paralelismo entre archivos e2e.
+    fileParallelism: false,
+    // Los tests construyen las clases directamente (sin Nest DI), por lo que no requieren metadata de
+    // decoradores. Resolución de @veo/* vía node_modules (dist ESM).
   },
 });

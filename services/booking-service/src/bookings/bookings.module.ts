@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { BookingsService } from './bookings.service';
 import { BookingsRepository } from './bookings.repository';
 import { BookingsController } from './bookings.controller';
+import { BookingPaymentConsumer } from './payment-event.consumer';
 import { PaymentModule } from '../ports/payment/payment.module';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
@@ -27,7 +28,11 @@ const identityClientProvider: Provider = {
 @Module({
   // PaymentModule provee el token PAYMENT_GATEWAY (gate de deuda al reservar · §5.4; charge al aprobar · F3b).
   imports: [PaymentModule],
-  providers: [BookingsService, BookingsRepository, identityClientProvider],
+  // BookingPaymentConsumer (F3c): el PRIMER consumer Kafka del servicio. Es un provider con lifecycle propio
+  // (onModuleInit arranca el consumer, onModuleDestroy lo desconecta — KafkaConsumerBootstrap), igual que
+  // DispatchConsumer en trip-service / ErasureConsumer en media-service. Depende de BookingsService (orquesta
+  // el seat-lock §6) + REDIS (dedup por eventId, exportado por el CoreModule global) + ConfigService (brokers).
+  providers: [BookingsService, BookingsRepository, identityClientProvider, BookingPaymentConsumer],
   controllers: [BookingsController],
   exports: [BookingsService],
 })
