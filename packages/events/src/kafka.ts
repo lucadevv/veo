@@ -79,9 +79,24 @@ export class KafkaEventConsumer {
       await this.consumer.subscribe({ topic, fromBeginning });
     }
     await this.consumer.run({
-      eachMessage: async ({ message }) => {
+      eachMessage: async ({ topic, partition, message }) => {
         if (!message.value) return;
-        const raw: unknown = JSON.parse(message.value.toString());
+        // POISON-SAFE PARSE (incidente dev 2026-06 · ver poison.ts): un `value` NO-JSON (truncado, binario,
+        // otro producer) lanza SyntaxError en JSON.parse ANTES del safeParse del envelope. Si eso se propagara,
+        // eachMessage rechazaría → kafkajs NO commitea el offset → re-entrega el MISMO mensaje infinitamente
+        // (head-of-line block: la partición se estanca). Un body no-parseable es PERMANENTE (reintentar da el
+        // mismo error): MISMO criterio "log & skip" que ya aplica al safeParse del envelope y al poison handler.
+        // Logueamos topic/partition/offset para diagnóstico SIN volcar el body crudo (puede portar PII/datos).
+        let raw: unknown;
+        try {
+          raw = JSON.parse(message.value.toString());
+        } catch {
+          // eslint-disable-next-line no-console -- sin logger inyectado en esta capa; warn estructurado mínimo.
+          console.warn(
+            `[KafkaEventConsumer] body no-JSON descartado (poison): topic=${topic} partition=${partition} offset=${message.offset}`,
+          );
+          return; // skip → kafkajs commitea el offset y la partición AVANZA (no crash-loop).
+        }
         const parsed = envelopeSchema.safeParse(raw);
         if (!parsed.success) return; // envelope corrupto → ignorar (el caller debe loguear via interceptor)
         const envelope = parsed.data as EventEnvelope<unknown>;

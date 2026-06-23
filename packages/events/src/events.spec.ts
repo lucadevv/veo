@@ -487,6 +487,16 @@ describe('booking.cancelled · contrato aditivo (oferta + booking individual)', 
     expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bookingCancelado).success).toBe(true);
   });
 
+  it('forma BOOKING individual (F3c · guard): bookingId + razon=OFERTA_NO_DISPONIBLE + estadoAnterior=COBRO_PENDIENTE parsea', () => {
+    const bookingCancelado = {
+      bookingId: 'b1',
+      razon: 'OFERTA_NO_DISPONIBLE',
+      estado: 'CANCELADO',
+      estadoAnterior: 'COBRO_PENDIENTE',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bookingCancelado).success).toBe(true);
+  });
+
   it('rechaza una razon fuera del enum tipado (no es un BookingCancelledRazon)', () => {
     const bad = { bookingId: 'b1', razon: 'PORQUE_SI', estado: 'CANCELADO', estadoAnterior: 'APROBADO' };
     expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);

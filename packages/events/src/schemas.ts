@@ -990,13 +990,34 @@ export const bookingUpdated = z.object({
   fechaHoraSalida: z.string().optional(),
   reglas: z.string().nullable().optional(),
 });
-/// Razón TIPADA de un `booking.cancelled` de un BOOKING individual (F3b). FUENTE ÚNICA (espeja
-/// BookingApprovedOrigen): el productor emite `BookingCancelledRazon.X`, NUNCA un literal suelto. Hoy un único
-/// valor (el cobro síncrono rechazó al disparar); el fan-out de Refund por cancelación-de-oferta NO lleva razón.
+/// Razón TIPADA de un `booking.cancelled` de un BOOKING individual (F3b/F3c). FUENTE ÚNICA (espeja
+/// BookingApprovedOrigen): el productor emite `BookingCancelledRazon.X`, NUNCA un literal suelto. F3b dejó un
+/// único valor (el cobro síncrono rechazó al disparar); F3c agrega los DOS caminos del consumer de
+/// payment.captured/failed. El fan-out de Refund por cancelación-de-oferta (forma A) NO lleva razón.
+///
+/// CONSECUENCIA PARA EL REFUND (payment-service · F3c-payment · PENDIENTE): payment refundará los
+/// `booking.cancelled` con razon=ASIENTO_LLENO u OFERTA_NO_DISPONIBLE (hubo CAPTURA: el dinero se movió y hay
+/// que devolverlo). COBRO_RECHAZADO y COBRO_FALLIDO NO se refundan: charge-on-approval sin hold → no se capturó
+/// nada que devolver.
 export const BookingCancelledRazon = {
-  /// El CHARGE rechazó SÍNCRONAMENTE al dispararlo (decline DEBT/FAILED, o error PERMANENTE 4xx de payment ·
-  /// ADR-014 §5.4 "falla permanente → CANCELADO"). El asiento NO se decrementó (charge-on-approval sin hold).
+  /// (F3b · disparo síncrono) El CHARGE rechazó SÍNCRONAMENTE al dispararlo (decline DEBT/FAILED, o error
+  /// PERMANENTE 4xx de payment · ADR-014 §5.4 "falla permanente → CANCELADO"). El asiento NO se decrementó
+  /// (charge-on-approval sin hold). SIN Refund (no se capturó nada).
   COBRO_RECHAZADO: 'COBRO_RECHAZADO',
+  /// (F3c · handler de payment.captured · ADR-014 §6 camino infeliz) El cobro SÍ capturó, pero al correr la txn
+  /// atómica del seat-lock el asiento YA estaba lleno (otro booking confirmó el último asiento primero) →
+  /// COBRO_PENDIENTE → CANCELADO. ÚNICO caso con Refund (payment-service devuelve la captura · F3c-payment).
+  ASIENTO_LLENO: 'ASIENTO_LLENO',
+  /// (F3c · handler de payment.failed · ADR-014 §5.4 / BR-P02) El riel agotó sus reintentos internos
+  /// (willRetry=false → DEBT permanente) → COBRO_PENDIENTE → CANCELADO. SIN Refund (nunca se capturó). La deuda
+  /// se DERIVA de PaymentStatus.DEBT de payment-service; booking NO crea un flag DEBT propio.
+  COBRO_FALLIDO: 'COBRO_FALLIDO',
+  /// (F3c · GUARD DEFENSIVO del seat-lock · ADR-014 §6) El cobro SÍ capturó, pero al correr la txn atómica la
+  /// OFERTA ya NO está en un estado RESERVABLE (anómalo / futuro EN_RUTA-COMPLETADO-CANCELADO de F4) → no se
+  /// puede confirmar la reserva sobre ella → COBRO_PENDIENTE → CANCELADO. CON Refund (hubo captura, igual que
+  /// ASIENTO_LLENO: el dinero se movió y hay que devolverlo · F3c-payment). Defensa contra el poison-pill que
+  /// causaría un payment.captured tardío sobre una oferta ya no reservable; el camino EN_RUTA real es F4.
+  OFERTA_NO_DISPONIBLE: 'OFERTA_NO_DISPONIBLE',
 } as const;
 export type BookingCancelledRazon = (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
 
@@ -1005,10 +1026,14 @@ export type BookingCancelledRazon = (typeof BookingCancelledRazon)[keyof typeof 
 ///   (A) CANCELACIÓN DE LA OFERTA (PublishedTrip · F1a): el conductor/admin cancela su viaje publicado. Lleva
 ///       `publishedTripId` + `driverId` + `estadoAnterior` del PublishedTrip. NO lleva `bookingId` ni `razon`.
 ///       key = publishedTripId. El fan-out de Refund a las reservas activas lo gestiona payment-service.
-///   (B) CANCELACIÓN DE UN BOOKING INDIVIDUAL (F3b · ADR-014 §5.4): el cobro síncrono rechazó al disparar el
-///       CHARGE (decline DEBT/FAILED o error PERMANENTE 4xx) → APROBADO → CANCELADO. Lleva `bookingId` +
-///       `razon` (BookingCancelledRazon) + `estadoAnterior='APROBADO'`. key = bookingId. payment-service NO
-///       hace Refund (no se capturó nada: charge-on-approval sin hold).
+///   (B) CANCELACIÓN DE UN BOOKING INDIVIDUAL (F3b/F3c · ADR-014 §5.4 / §6): lleva `bookingId` + `razon`
+///       (BookingCancelledRazon) + `estadoAnterior`. key = bookingId. TRES sub-formas por `razon`:
+///         · COBRO_RECHAZADO (F3b): el cobro síncrono rechazó al disparar el CHARGE → estadoAnterior='APROBADO'.
+///           SIN Refund (no se capturó nada).
+///         · COBRO_FALLIDO  (F3c): el riel agotó reintentos (payment.failed willRetry=false) →
+///           estadoAnterior='COBRO_PENDIENTE'. SIN Refund (no se capturó nada).
+///         · ASIENTO_LLENO  (F3c): el cobro CAPTURÓ pero el asiento ya se llenó (§6 camino infeliz) →
+///           estadoAnterior='COBRO_PENDIENTE'. ÚNICO caso CON Refund (payment-service devuelve la captura).
 /// DECISIÓN (aditiva, no romper): se mantiene UN solo schema con `publishedTripId`/`driverId` OPCIONALES y se
 /// AÑADEN `bookingId`/`razon` OPCIONALES. Así el caso (A) existente parsea sin cambios (siempre trae
 /// publishedTripId+driverId+estadoAnterior) y el caso (B) nuevo también valida. Un `z.union` discriminado se
@@ -1021,15 +1046,37 @@ export const bookingCancelled = z.object({
   driverId: z.string().optional(),
   /// (B) el booking individual cancelado (F3b · cobro rechazado). Ausente en la cancelación-de-oferta.
   bookingId: z.string().optional(),
-  /// (B) por qué se canceló el booking individual (TIPADO). Ausente en la cancelación-de-oferta.
-  razon: z.enum([BookingCancelledRazon.COBRO_RECHAZADO]).optional(),
+  /// (B) por qué se canceló el booking individual (TIPADO). Ausente en la cancelación-de-oferta. F3c añadió
+  /// ASIENTO_LLENO (Refund) y COBRO_FALLIDO (sin Refund) a COBRO_RECHAZADO (sin Refund, F3b) — aditivo.
+  razon: z
+    .enum([
+      BookingCancelledRazon.COBRO_RECHAZADO,
+      BookingCancelledRazon.ASIENTO_LLENO,
+      BookingCancelledRazon.COBRO_FALLIDO,
+      BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
+    ])
+    .optional(),
   estado: z.literal('CANCELADO'),
   /// Estado del que se canceló (auditoría / decisión de Refund downstream). (A) estado del PublishedTrip;
-  /// (B) 'APROBADO' (el booking se cancela desde APROBADO al fallar el cobro síncrono).
+  /// (B) 'APROBADO' (cobro síncrono rechazado, F3b) o 'COBRO_PENDIENTE' (handler de payment.captured/failed, F3c).
   estadoAnterior: z.string(),
 });
-// Los demás eventos del topic 'booking' (booking.rejected/expired/confirmed/started/completed ·
-// ADR-014 §7.1) se DECLARAN al implementar F1-F4 (su emisión vive en la fase que la gatilla).
+/// `booking.confirmed` — el cobro CAPTURÓ y el seat-lock atómico (ADR-014 §6) decrementó el asiento:
+/// COBRO_PENDIENTE → CONFIRMADO. Lo emite booking-service por OUTBOX en la MISMA tx que el decremento de
+/// `asientosDisponibles` (atomicidad estado↔asiento↔evento, §6/§7). Topic 'booking', key = bookingId.
+/// Consumidores núcleo (ADR-014 §7.1): notification (recibo), rating (futuro), payout (F5). `paymentId` es la
+/// captura que confirmó (correlación con payment-service). Dinero/asientos en Int (céntimos PEN).
+export const bookingConfirmed = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN
+  paymentId: z.string(),
+  estado: z.literal('CONFIRMADO'),
+});
+// Los demás eventos del topic 'booking' (booking.expired/started/completed · ADR-014 §7.1) se DECLARAN al
+// implementar F4 (su emisión vive en la fase que la gatilla).
 
 /** Registro central: eventType → schema del payload. */
 export const EVENT_SCHEMAS = {
@@ -1117,6 +1164,7 @@ export const EVENT_SCHEMAS = {
   'booking.requested': bookingRequested,
   'booking.approved': bookingApproved,
   'booking.updated': bookingUpdated,
+  'booking.confirmed': bookingConfirmed,
   'booking.cancelled': bookingCancelled,
 } as const satisfies Record<string, z.ZodType>;
 
