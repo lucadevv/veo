@@ -355,4 +355,45 @@ export class PrismaOutboxStore implements OutboxStore {
       );
     }
   }
+
+  /**
+   * RETENCIÓN — borra filas YA PUBLICADAS y VIEJAS (FIX: la tabla crecía sin límite; nadie borraba lo publicado).
+   *
+   * QUÉ BORRA (y qué NO):
+   *  - SÍ: `published_at IS NOT NULL AND published_at < now() - retención`. La fila ya se entregó a Kafka hace
+   *    más que la ventana de retención → es puro lastre (el at-least-once ya cumplió; el reproceso/debug ya pasó).
+   *  - NO pendientes: `published_at IS NULL` queda FUERA (aún no entregadas — pendientes o claimed en vuelo).
+   *  - NO poison terminal: un POISON tiene `failed_at` set pero `published_at NULL` (su payload nunca llegó a
+   *    Kafka) → el MISMO filtro `published_at IS NOT NULL` lo EXCLUYE. Ops debe investigar los poison; la
+   *    limpieza automática JAMÁS los toca.
+   *
+   * SIN LOCK LARGO (lote acotado): un solo DELETE toca a lo sumo `batch` filas vía un subselect `LIMIT batch`;
+   * el loop externo (en el relay) repite hasta que un sweep vuelve `< batch` (no quedan más viejas). Nunca se
+   * bloquea la tabla VIVA entera: los INSERT de negocio siguen entrando entre lotes.
+   *
+   * MULTI-RÉPLICA SEGURO (SKIP LOCKED, sin deadlock): el subselect usa `FOR UPDATE SKIP LOCKED` (igual que el
+   * CLAIM). Con N réplicas barriendo a la vez, cada una toma un lote DISJUNTO de filas (las que otra ya bloqueó
+   * se saltan) → no se pelean por las mismas filas, no se bloquean entre sí, no hay deadlock. El orden estable
+   * `ORDER BY published_at ASC, seq ASC` hace el lote determinista (las más viejas primero).
+   *
+   * SEGURIDAD SQL: `schema` validado como identificador Postgres en el ctor → seguro de interpolar. La ventana
+   * de retención va PARAMETRIZADA ($1) y el límite del lote también ($2): jamás interpolados como string.
+   *
+   * @param retentionMs cuánto retener una fila publicada antes de borrarla (ms).
+   * @param batch       máximo de filas a borrar en ESTE DELETE (lote acotado).
+   * @returns           cuántas filas borró este lote (0 o `< batch` ⇒ no quedan más viejas → el loop para).
+   */
+  async sweepPublished(retentionMs: number, batch: number): Promise<number> {
+    const sql = `
+      DELETE FROM "${this.schema}"."outbox_events"
+      WHERE id IN (
+        SELECT id FROM "${this.schema}"."outbox_events"
+        WHERE published_at IS NOT NULL
+          AND published_at < now() - ($1::double precision * interval '1 millisecond')
+        ORDER BY published_at ASC, seq ASC
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+      )`;
+    return this.prisma.$executeRawUnsafe(sql, retentionMs, batch);
+  }
 }

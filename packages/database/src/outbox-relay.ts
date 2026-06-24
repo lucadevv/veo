@@ -10,11 +10,16 @@
  * (Nest invoca los hooks de ciclo de vida en cualquier provider que los tenga, sin decorador).
  * El wiring por servicio es un provider `useFactory` de ~10 líneas con la config que varía.
  *
- * RETENCIÓN (seam documentado, política PENDIENTE — decisión de producto): `drainOutbox` marca
- * `publishedAt` pero NADIE borra filas publicadas → la tabla outbox crece sin límite. Cuando se
- * defina la retención, implementala vía `options.retention`: se invoca al final de cada tick
- * exitoso con la cantidad publicada en ese tick (si lanza, cae al mismo manejo de error del tick).
- * Sin hook configurado el comportamiento es EXACTAMENTE el histórico (no-op).
+ * RETENCIÓN (CABLEADA — la tabla ya NO crece sin límite): `drainOutbox` marca `publishedAt` y un SWEEP
+ * periódico borra las filas YA PUBLICADAS y VIEJAS (`PrismaOutboxStore.sweepPublished`). El sweep corre en su
+ * PROPIO intervalo (`retentionSweepMs`, default 1h) — NO en el tick de 500ms (un DELETE de mantenimiento no va
+ * en el hot loop). Borra en LOTES acotados (`retentionBatch`) con SKIP LOCKED → cero lock largo sobre la tabla
+ * viva + seguro con N réplicas. NUNCA toca pendientes (publishedAt NULL) ni POISON terminal (publishedAt NULL).
+ * Por defecto el sweep está ON con los defaults de env (7 días de retención). Se apaga pasando
+ * `retentionMs <= 0` (comportamiento histórico: la tabla no se barre).
+ *
+ * SEAM LEGADO (`options.retention`): hook opcional que se invoca al final de cada tick exitoso con la cantidad
+ * publicada en ese tick. Se mantiene para tests/extensiones; el sweep de retención de filas NO depende de él.
  */
 import { createKafka, KafkaEventProducer, drainOutbox } from '@veo/events';
 import { outboxPublishPoisonTotal } from '@veo/observability';
@@ -27,13 +32,27 @@ export {
   OUTBOX_CLAIM_STALE_MS,
   OUTBOX_PUBLISH_CONCURRENCY,
   OUTBOX_PUBLISH_TIMEOUT_MS,
+  OUTBOX_RETENTION_MS,
+  OUTBOX_RETENTION_SWEEP_MS,
+  OUTBOX_RETENTION_BATCH,
 } from './outbox-env.js';
 import {
   OUTBOX_BATCH_SIZE,
   OUTBOX_CLAIM_STALE_MS,
   OUTBOX_PUBLISH_CONCURRENCY,
   OUTBOX_PUBLISH_TIMEOUT_MS,
+  OUTBOX_RETENTION_MS,
+  OUTBOX_RETENTION_SWEEP_MS,
+  OUTBOX_RETENTION_BATCH,
 } from './outbox-env.js';
+
+/**
+ * Tope de iteraciones (lotes) por barrido. Cota DURA: aunque haya millones de filas viejas, un solo sweep
+ * borra a lo sumo `OUTBOX_RETENTION_BATCH * este tope` filas y termina — el siguiente barrido (al próximo
+ * `retentionSweepMs`) sigue desde donde quedó. Evita que un primer barrido sobre un backlog enorme monopolice
+ * la conexión indefinidamente. Con batch=1000 → 100k filas por barrido, sobrado para el régimen estacionario.
+ */
+export const OUTBOX_RETENTION_MAX_BATCHES_PER_SWEEP = 100;
 
 /** Intervalo histórico del bucle del relay (idéntico en las 12 copias originales). */
 export const OUTBOX_RELAY_TICK_MS = 500;
@@ -78,8 +97,17 @@ export interface OutboxRelayOptions {
    * clientId+brokers. En AMBOS casos el relay es dueño del ciclo de vida (connect/disconnect).
    */
   producer?: KafkaEventProducer;
-  /** Seam de retención del outbox (ver doc de la clase). Sin hook = comportamiento histórico. */
+  /** Seam LEGADO de retención por-tick (ver doc de la clase). Sin hook = no-op. El sweep de filas NO lo usa. */
   retention?: OutboxRetentionHook;
+  /**
+   * Cuánto retener una fila PUBLICADA antes de borrarla (ms). Default: OUTBOX_RETENTION_MS (7 días). `<= 0`
+   * APAGA el sweep (la tabla no se barre — comportamiento histórico).
+   */
+  retentionMs?: number;
+  /** Cada cuánto corre el sweep de retención (ms), en su PROPIO intervalo (NO el tick). Default: OUTBOX_RETENTION_SWEEP_MS. */
+  retentionSweepMs?: number;
+  /** Filas borradas como MÁXIMO por DELETE del sweep (lote acotado). Default: OUTBOX_RETENTION_BATCH. */
+  retentionBatch?: number;
 }
 
 export class OutboxRelay {
@@ -92,8 +120,13 @@ export class OutboxRelay {
   private readonly publishConcurrency: number;
   private readonly publishTimeoutMs: number;
   private readonly retention?: OutboxRetentionHook;
+  private readonly retentionMs: number;
+  private readonly retentionSweepMs: number;
+  private readonly retentionBatch: number;
   private timer?: NodeJS.Timeout;
+  private sweepTimer?: NodeJS.Timeout;
   private running = false;
+  private sweeping = false;
 
   constructor(options: OutboxRelayOptions) {
     this.logger = options.logger;
@@ -108,6 +141,9 @@ export class OutboxRelay {
     this.publishConcurrency = options.publishConcurrency ?? OUTBOX_PUBLISH_CONCURRENCY;
     this.publishTimeoutMs = options.publishTimeoutMs ?? OUTBOX_PUBLISH_TIMEOUT_MS;
     this.retention = options.retention;
+    this.retentionMs = options.retentionMs ?? OUTBOX_RETENTION_MS;
+    this.retentionSweepMs = options.retentionSweepMs ?? OUTBOX_RETENTION_SWEEP_MS;
+    this.retentionBatch = options.retentionBatch ?? OUTBOX_RETENTION_BATCH;
 
     // INVARIANTE ESTRUCTURAL (fail-fast): el timeout de un publish DEBE ser < el stale-window del claim. Si
     // no, un publish lento podría seguir vivo cuando su claim ya venció → otra réplica lo re-toma → DOBLE
@@ -123,10 +159,15 @@ export class OutboxRelay {
   async onModuleInit(): Promise<void> {
     await this.producer.connect();
     this.timer = setInterval(() => void this.tick(), this.tickMs);
+    // SWEEP de retención en su PROPIO intervalo (no el tick de 500ms). Apagado si retentionMs <= 0.
+    if (this.retentionMs > 0) {
+      this.sweepTimer = setInterval(() => void this.sweep(), this.retentionSweepMs);
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     await this.producer.disconnect();
   }
 
@@ -156,6 +197,34 @@ export class OutboxRelay {
       this.logger.error({ err }, 'outbox relay falló');
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * SWEEP de retención (su propio intervalo, NO el tick). Borra filas YA PUBLICADAS y más viejas que
+   * `retentionMs`, en LOTES acotados de `retentionBatch` (cero lock largo) hasta que un lote vuelve
+   * `< retentionBatch` (no quedan más viejas) o se alcanza el tope de iteraciones por barrido. Seguro
+   * multi-réplica: el DELETE usa SKIP LOCKED (lotes disjuntos, sin deadlock). Un guard `sweeping` evita
+   * solapar dos barridos si uno se pasa de largo. Un fallo se loguea pero NO tira el relay (el tick sigue).
+   */
+  private async sweep(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      let deletedTotal = 0;
+      for (let i = 0; i < OUTBOX_RETENTION_MAX_BATCHES_PER_SWEEP; i++) {
+        const deleted = await this.store.sweepPublished(this.retentionMs, this.retentionBatch);
+        deletedTotal += deleted;
+        // Lote no lleno ⇒ ya no quedan filas publicadas viejas → terminamos este barrido.
+        if (deleted < this.retentionBatch) break;
+      }
+      if (deletedTotal > 0) {
+        this.logger.debug(`outbox: retención borró ${deletedTotal} filas publicadas viejas`);
+      }
+    } catch (err) {
+      this.logger.error({ err }, 'outbox sweep de retención falló');
+    } finally {
+      this.sweeping = false;
     }
   }
 }

@@ -42,6 +42,36 @@ export const OUTBOX_PUBLISH_CONCURRENCY = 8;
  */
 export const OUTBOX_PUBLISH_TIMEOUT_MS = 30_000;
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// RETENCIÓN (FIX: la tabla outbox_events crecía SIN LÍMITE — nadie borraba las filas PUBLICADAS). El relay
+// marca `published_at` pero jamás borraba → disco creciente + degradación progresiva de la claim query. La
+// retención borra SOLO filas YA ENTREGADAS a Kafka y VIEJAS (publishedAt != NULL AND publishedAt < cutoff).
+// NUNCA toca pendientes (publishedAt NULL) ni POISON terminal (failedAt set, publishedAt NULL → excluido por
+// el mismo filtro publishedAt != NULL: Ops debe investigarlos, no se pierden en una limpieza automática).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cuánto se RETIENE una fila ya publicada antes de borrarla (ms). Default 7 DÍAS (604_800_000 ms). El outbox
+ * NO es un log permanente — eso es audit-service (inmutable en S3). 7 días cubre de sobra el reproceso/debug
+ * (re-publicar manualmente, auditar un envelope) y el at-least-once YA entregó el evento a Kafka hace tiempo:
+ * pasada esta ventana la fila es puro lastre. Una fila se borra solo si `published_at < now() - este intervalo`.
+ */
+export const OUTBOX_RETENTION_MS = 604_800_000; // 7 días
+/**
+ * Cada cuánto (ms) corre el SWEEP de retención. Default 1 HORA. NO se corre en cada tick del relay (500ms es
+ * absurdamente frecuente para un DELETE de mantenimiento): el sweep vive en su PROPIO intervalo, mucho más
+ * espaciado. Una fila publicada vive a lo sumo `OUTBOX_RETENTION_MS + OUTBOX_RETENTION_SWEEP_MS` antes de
+ * borrarse (el slack del barrido); irrelevante frente a una ventana de 7 días.
+ */
+export const OUTBOX_RETENTION_SWEEP_MS = 3_600_000; // 1 hora
+/**
+ * Cuántas filas borra COMO MÁXIMO un solo DELETE del sweep (lote acotado). El sweep hace un loop de DELETEs de
+ * este tamaño hasta que un lote vuelve vacío (o se agota el tope de iteraciones por barrido). Acotar el lote
+ * evita un lock largo sobre la tabla VIVA (los INSERT de negocio siguen entrando): cada DELETE toca a lo sumo
+ * `batch` filas y suelta. 1000 es un punto medio (pocos round-trips, lock corto por lote).
+ */
+export const OUTBOX_RETENTION_BATCH = 1000;
+
 /**
  * Fragmento de schema zod con las 4 perillas del relay. Cada servicio lo spreadea en su env.schema:
  *   z.object({ ...otrasVars, ...outboxEnvSchema.shape })
@@ -59,6 +89,12 @@ export const outboxEnvSchema = z.object({
    * stale). El `OutboxRelay` lo valida en el ctor (fail-fast). Default: OUTBOX_PUBLISH_TIMEOUT_MS.
    */
   OUTBOX_PUBLISH_TIMEOUT_MS: z.coerce.number().int().positive().default(OUTBOX_PUBLISH_TIMEOUT_MS),
+  /** Cuánto retener una fila PUBLICADA antes de borrarla (ms). Default OUTBOX_RETENTION_MS (7 días). */
+  OUTBOX_RETENTION_MS: z.coerce.number().int().positive().default(OUTBOX_RETENTION_MS),
+  /** Cada cuánto corre el sweep de retención (ms), en su propio intervalo (NO el tick). Default 1h. */
+  OUTBOX_RETENTION_SWEEP_MS: z.coerce.number().int().positive().default(OUTBOX_RETENTION_SWEEP_MS),
+  /** Filas borradas como MÁXIMO por DELETE del sweep (lote acotado, cero lock largo). Default 1000. */
+  OUTBOX_RETENTION_BATCH: z.coerce.number().int().positive().default(OUTBOX_RETENTION_BATCH),
 });
 
 /** Forma tipada del entorno del relay (lo que `outboxEnvSchema` produce). */
@@ -70,6 +106,9 @@ export interface OutboxRelayEnvConfig {
   claimStaleMs: number;
   publishConcurrency: number;
   publishTimeoutMs: number;
+  retentionMs: number;
+  retentionSweepMs: number;
+  retentionBatch: number;
 }
 
 /** Lo mínimo del ConfigService de Nest que necesitamos (estructural: no acopla a @nestjs/config). */
@@ -88,5 +127,8 @@ export function outboxRelayConfigFromEnv(config: OutboxEnvReader): OutboxRelayEn
     claimStaleMs: config.getOrThrow<number>('OUTBOX_CLAIM_STALE_MS'),
     publishConcurrency: config.getOrThrow<number>('OUTBOX_PUBLISH_CONCURRENCY'),
     publishTimeoutMs: config.getOrThrow<number>('OUTBOX_PUBLISH_TIMEOUT_MS'),
+    retentionMs: config.getOrThrow<number>('OUTBOX_RETENTION_MS'),
+    retentionSweepMs: config.getOrThrow<number>('OUTBOX_RETENTION_SWEEP_MS'),
+    retentionBatch: config.getOrThrow<number>('OUTBOX_RETENTION_BATCH'),
   };
 }
