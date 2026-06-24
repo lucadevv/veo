@@ -127,6 +127,8 @@ export class DriversService {
   private readonly minScore: number;
   /** Clave de cifrado del DNI del conductor en reposo (AES-256-GCM · secret-box). KMS en prod. */
   private readonly dniEncKey: string;
+  /** Cooldown (ms) del hold TEMPORAL EXCESSIVE_CANCELLATIONS (auto-suspensión por exceso de cancelaciones). */
+  private readonly cancellationCooldownMs: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -136,6 +138,8 @@ export class DriversService {
   ) {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
     this.dniEncKey = config.getOrThrow<string>('DRIVER_DNI_ENC_KEY');
+    this.cancellationCooldownMs =
+      config.getOrThrow<number>('EXCESSIVE_CANCELLATION_COOLDOWN_HOURS') * 60 * 60 * 1000;
   }
 
   /**
@@ -422,16 +426,23 @@ export class DriversService {
     cause: SuspensionCause,
     causeRef: string,
     reason: string,
+    expiresAt?: Date,
   ): Promise<{ created: boolean; suspendedAt: Date }> {
     // El operador suspende AHORA: createdAt = now (default del hold). Las vías de fleet usan addHoldAt con
     // el momento que fleet reportó (preservan el origen). Mismo idempotency/recompute, distinto createdAt.
-    return this.addHoldAt(tx, driverId, cause, causeRef, reason, new Date());
+    // `expiresAt` (opcional): hold TEMPORAL (cooldown auto-expirable, hoy EXCESSIVE_CANCELLATIONS); undefined =
+    // hold PERMANENTE (el comportamiento de todas las causas previas, columna NULL).
+    return this.addHoldAt(tx, driverId, cause, causeRef, reason, new Date(), expiresAt);
   }
 
   /**
    * Variante de `addHold` con `createdAt` EXPLÍCITO: las suspensiones de fleet (documento/ITV) llevan el
    * momento que fleet reportó (`suspendedAt` del evento), no `now`. Así `Driver.suspendedAt` derivado refleja
    * el momento REAL del vencimiento, no el de la recepción del evento. Mismo natural key e idempotencia.
+   *
+   * `expiresAt` (opcional): VENCIMIENTO del hold TEMPORAL (primer hold con expiración del sistema). undefined →
+   * columna NULL → hold PERMANENTE (todas las causas previas). Seteado → cooldown auto-expirable que el sweeper
+   * levanta al vencer.
    */
   private async addHoldAt(
     tx: Prisma.TransactionClient,
@@ -440,6 +451,7 @@ export class DriversService {
     causeRef: string,
     reason: string,
     createdAt: Date,
+    expiresAt?: Date,
   ): Promise<{ created: boolean; suspendedAt: Date }> {
     // ¿Existía YA este hold exacto? (natural key). Si sí, el upsert es no-op y NO es una suspensión nueva.
     const existing = await tx.driverSuspensionHold.findUnique({
@@ -448,8 +460,12 @@ export class DriversService {
     });
     await tx.driverSuspensionHold.upsert({
       where: { driverId_cause_causeRef: { driverId, cause, causeRef } },
-      // create lleva el reason + createdAt frescos; update vacío → preserva createdAt + reason original (idempotente).
-      create: { driverId, cause, causeRef, reason, createdAt },
+      // create lleva el reason + createdAt + expiresAt frescos; update VACÍO → preserva createdAt + reason +
+      // expiresAt originales (idempotente). IDEMPOTENCIA DEL COOLDOWN (CRÍTICO): el `update: {}` significa que
+      // una RE-ENTREGA de Kafka (mismo cruce) NO extiende `expiresAt` — el cooldown NO se alarga con redeliveries.
+      // Un cruce REAL nuevo SIEMPRE es un `create` fresco (el sweeper ya removió el hold viejo al vencer), así que
+      // ese sí estampa un expiresAt nuevo. NO-extender-en-conflicto es la regla que protege el cooldown.
+      create: { driverId, cause, causeRef, reason, createdAt, expiresAt },
       update: {},
     });
     const suspendedAt = await this.recomputeSuspendedAt(tx, driverId);
@@ -686,6 +702,82 @@ export class DriversService {
   }
 
   /**
+   * SWEEPER de holds TEMPORALES vencidos (mecanismo nuevo · primer hold con expiración del sistema). Lo invoca el
+   * @Cron de `HoldExpirySweeper`. Levanta los holds cuyo `expiresAt < now` (hoy EXCESSIVE_CANCELLATIONS) y recomputa
+   * `Driver.suspendedAt` derivado por cada conductor afectado. NUNCA toca holds PERMANENTES (`expiresAt = null`:
+   * DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED/RATING_LOW) — el `where` exige `expiresAt != null AND < now`.
+   *
+   * BATCH (no N+1): UNA query lee TODOS los holds vencidos, se agrupan por driver en memoria, y se recomputa por
+   * driver afectado (una tx por driver, igual que cada vía de reactivación). Idempotente: si un hold ya fue removido
+   * (otra réplica / re-corrida), el deleteMany cuenta 0 → no se emite el evento (no hay reactivación nueva).
+   *
+   * Si un driver queda con 0 holds tras quitar los vencidos, emite `driver.reactivated` (MISMO evento/patrón que
+   * reactivateForCompliance, outbox-in-tx) → admin-bff reconcilia el badge, audit deja la traza. Si quedan otros
+   * holds (p.ej. una DISCIPLINARY), NO se emite (el conductor sigue suspendido — separación de causas).
+   *
+   * POR QUÉ sweeper y NO expiración LAZY: `suspendedAt` es la columna derivada ÚNICA que leen startShift/dispatch/
+   * booking/admin; una expiración perezosa la dejaría STALE (el conductor seguiría bloqueado hasta la próxima
+   * escritura). El sweeper mantiene la verdad derivada; el lag de minutos sobre un cooldown de horas es despreciable.
+   *
+   * RESIDUAL CONOCIDO (no resuelto aquí, mismo que el expiry-sweeper de fleet): @Cron SIN lock distribuido → en
+   * multi-réplica corren N sweeps en paralelo. Es IDEMPOTENTE (deleteMany + recompute), así que NO corrompe estado:
+   * a lo sumo dos réplicas intentan el mismo deleteMany (una gana, la otra cuenta 0) → trabajo duplicado, no daño.
+   *
+   * @returns cuántos conductores fueron efectivamente reactivados (quedaron con 0 holds). Público para test/operación.
+   */
+  async sweepExpiredHolds(now = new Date()): Promise<number> {
+    // UNA query: todos los holds temporales vencidos (expiresAt NO null Y < now). Los permanentes (null) quedan fuera.
+    const expired = await this.prisma.read.driverSuspensionHold.findMany({
+      where: { expiresAt: { not: null, lt: now } },
+      select: { driverId: true },
+    });
+    if (expired.length === 0) return 0;
+    // Agrupa por driver en memoria (un set de driverIds afectados) → recompute por driver, no por hold (no N+1).
+    const driverIds = [...new Set(expired.map((h) => h.driverId))];
+    let reactivated = 0;
+    for (const driverId of driverIds) {
+      if (await this.expireHoldsForDriver(driverId, now)) reactivated += 1;
+    }
+    return reactivated;
+  }
+
+  /**
+   * Quita los holds TEMPORALES vencidos de UN conductor en UNA tx, recomputa `suspendedAt` y —si quedó con 0 holds—
+   * emite `driver.reactivated` (outbox-in-tx). Idempotente: si otra réplica ya los quitó, removeHolds cuenta 0 y NO
+   * emite. NUNCA toca permanentes (el `where` exige `expiresAt != null AND < now`). Devuelve `true` si reactivó.
+   */
+  private async expireHoldsForDriver(driverId: string, now: Date): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      // Quita SOLO los holds temporales vencidos de este driver (expiresAt no-null Y < now). recomputa suspendedAt:
+      // si quedan OTROS holds (permanentes u otro temporal aún vigente) → suspendedAt sigue seteado (sigue suspendido).
+      const { removed, suspendedAt } = await this.removeHolds(tx, driverId, {
+        expiresAt: { not: null, lt: now },
+      });
+      // Idempotencia: otra réplica/corrida ya los quitó → nada que reactivar, no se emite evento.
+      if (removed === 0) return false;
+      // Solo emitimos driver.reactivated si el conductor quedó LIBRE (0 holds → suspendedAt null). Si quedan otras
+      // causas (DISCIPLINARY, etc.) SIGUE suspendido: el cooldown venció pero la otra causa lo mantiene (separación).
+      if (suspendedAt !== null) return false;
+      const envelope = createEnvelope({
+        eventType: 'driver.reactivated',
+        producer: 'identity-service',
+        payload: {
+          driverId,
+          reactivatedAt: now.toISOString(),
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: driverId,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return true;
+    });
+  }
+
+  /**
    * Reenvío a revisión del conductor RECHAZADO (resubmit, BR-I01): tras corregir sus datos en la app,
    * el conductor vuelve a la cola de aprobación. Lleva backgroundCheckStatus REJECTED→PENDING y el KYC
    * del usuario REJECTED→PENDING (ambas transiciones se abrieron en las máquinas), y LIMPIA el motivo
@@ -885,6 +977,45 @@ export class DriversService {
         SuspensionCause.RATING_LOW,
         '',
         reason,
+      );
+      return created;
+    });
+  }
+
+  /**
+   * AUTO-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad). dispatch-service ya
+   * decidió (cruzó el umbral en la ventana rolling de 24h, evento `driver.excessive_cancellations`); identity NO
+   * re-evalúa, solo MATERIALIZA. El `driverId` es el id de PERFIL Driver (= `Trip.driverId`, el mismo que resolvió
+   * dispatch vía `driverForTrip`) → se usa DIRECTO, sin resolver por userId (igual que suspendByRating).
+   *
+   * PRIMER HOLD TEMPORAL del sistema: agrega un hold EXCESSIVE_CANCELLATIONS (`causeRef = ''`, un solo hold) con
+   * `expiresAt = now + COOLDOWN` → un sweeper (@Cron) lo auto-levanta al vencer (sin intervención del operador). Es
+   * una causa NO-DISCIPLINARY: el operador también puede levantarla ANTES vía el override de compliance
+   * (reactivateForCompliance, que barre `cause != DISCIPLINARY`). Recomputa `Driver.suspendedAt`, que es lo que el
+   * gate de turno (startShift) y el eligibility de dispatch leen (BR-I02).
+   *
+   * GUARD DE EXISTENCIA (anti poison-pill, espejo de suspendByRating/suspendByFleet): si el Driver NO existe
+   * (purgado / evento que llegó antes del onboarding), no-op silencioso ANTES de tocar holds/recompute — sin esto,
+   * recomputeSuspendedAt haría un `driver.update` sobre un id inexistente → P2025 → Kafka reintenta ∞.
+   *
+   * IDEMPOTENTE por el `@@unique([driverId, cause, causeRef])`: una RE-ENTREGA del MISMO evento → upsert no-op,
+   * NO reescribe el momento, NO re-suspende, y CRÍTICO: NO EXTIENDE el cooldown (el `update: {}` preserva el
+   * `expiresAt` original). Un cruce REAL nuevo (tras vencer y removerse el hold) sí estampa un cooldown fresco.
+   *
+   * @returns `true` si esta llamada creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
+   */
+  async suspendByCancellations(driverId: string, reason: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      if (!driver) return false; // evento antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
+      const expiresAt = new Date(Date.now() + this.cancellationCooldownMs);
+      const { created } = await this.addHold(
+        tx,
+        driverId,
+        SuspensionCause.EXCESSIVE_CANCELLATIONS,
+        '',
+        reason,
+        expiresAt,
       );
       return created;
     });

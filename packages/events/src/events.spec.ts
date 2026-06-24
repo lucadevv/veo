@@ -48,6 +48,24 @@ describe('topic routing', () => {
       expect(topicForEvent('driver.suspended')).toBe('driver');
       expect(topicForEvent('driver.flagged')).toBe('driver');
       expect(topicForEvent('driver.verified')).toBe('driver');
+      // Auto-suspensión por exceso de cancelaciones: ciclo de vida, comparte el topic 'driver' (no el firehose).
+      expect(topicForEvent('driver.excessive_cancellations')).toBe('driver');
+    });
+  });
+
+  describe('driver.excessive_cancellations · schema tipado', () => {
+    it('ACEPTA un payload válido y RECHAZA uno sin driverId', () => {
+      const schema = schemaForEvent('driver.excessive_cancellations');
+      expect(schema).toBeDefined();
+      const ok = schema!.safeParse({
+        driverId: 'd1',
+        count: 5,
+        windowStart: '2026-06-22T00:00:00.000Z',
+        occurredAt: '2026-06-23T00:00:00.000Z',
+      });
+      expect(ok.success).toBe(true);
+      const bad = schema!.safeParse({ count: 5, windowStart: 'x', occurredAt: 'y' });
+      expect(bad.success).toBe(false);
     });
   });
 });

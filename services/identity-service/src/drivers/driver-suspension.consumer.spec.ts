@@ -330,3 +330,56 @@ describe('DriverSuspensionConsumer · driver.flagged → AUTO-suspensión por ra
     ).rejects.toThrow('db down');
   });
 });
+
+function excessiveCancellationsEnvelope(payload: unknown): EventEnvelope<unknown> {
+  return {
+    eventId: 'e4',
+    eventType: 'driver.excessive_cancellations',
+    producer: 'dispatch-service',
+    occurredAt: new Date().toISOString(),
+    payload,
+  } as EventEnvelope<unknown>;
+}
+
+const validCancellations = {
+  driverId: 'd1',
+  count: 5,
+  windowStart: '2026-06-22T00:00:00.000Z',
+  occurredAt: '2026-06-23T00:00:00.000Z',
+};
+
+describe('DriverSuspensionConsumer · driver.excessive_cancellations → AUTO-suspensión TEMPORAL', () => {
+  it('delega en suspendByCancellations con el driverId de PERFIL y el count', async () => {
+    const drivers = { suspendByCancellations: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.excessive_cancellations']?.(
+      excessiveCancellationsEnvelope(validCancellations),
+    );
+    expect(drivers.suspendByCancellations).toHaveBeenCalledTimes(1);
+    // driverId de PERFIL (= Trip.driverId) como primer argumento; el segundo es el reason legible.
+    expect(drivers.suspendByCancellations).toHaveBeenCalledWith('d1', expect.any(String));
+  });
+
+  it('descarta un payload inválido (sin driverId) sin llamar al servicio', async () => {
+    const drivers = { suspendByCancellations: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.excessive_cancellations']?.(
+      excessiveCancellationsEnvelope({ count: 5, windowStart: 'x', occurredAt: 'y' }),
+    );
+    expect(drivers.suspendByCancellations).not.toHaveBeenCalled();
+  });
+
+  it('propaga el error para que Kafka reintente (suspendByCancellations es idempotente)', async () => {
+    const drivers = {
+      suspendByCancellations: vi.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['driver.excessive_cancellations']?.(
+        excessiveCancellationsEnvelope(validCancellations),
+      ),
+    ).rejects.toThrow('db down');
+  });
+});

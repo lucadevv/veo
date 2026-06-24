@@ -21,6 +21,7 @@ const CAUSE_LABEL: Record<SuspensionCause, string> = {
   [SuspensionCause.DOCUMENT_EXPIRED]: 'documentos vencidos',
   [SuspensionCause.INSPECTION_EXPIRED]: 'inspección técnica (ITV) vencida',
   [SuspensionCause.RATING_LOW]: 'rating bajo',
+  [SuspensionCause.EXCESSIVE_CANCELLATIONS]: 'exceso de cancelaciones',
 };
 
 /**

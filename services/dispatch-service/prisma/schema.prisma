@@ -148,6 +148,31 @@ model DriverStats {
   @@schema("dispatch")
 }
 
+/// VENTANA ROLLING de cancelaciones del conductor (auto-suspensión por exceso, decisión del dueño ·
+/// compliance/seguridad). SEPARADA del contador LIFELONG `driver_stats.cancelled_trips` (ese alimenta la
+/// TASA de cancelación del scoring y NUNCA se poda): acá cada cancelación POR conductor es UNA fila con su
+/// `occurredAt`, y la lógica cuenta solo las de las últimas 24h (poda las viejas). Cuando el conteo de la
+/// ventana CRUZA el umbral (4→5) dispatch emite `driver.excessive_cancellations` (UNA vez por cruce).
+///
+/// IDEMPOTENCIA del at-least-once de Kafka: `@@unique([driverId, tripId])` — una RE-ENTREGA del MISMO
+/// `trip.cancelled` (mismo tripId) es un upsert no-op, NO duplica la fila NI re-cuenta. `driverId` y `tripId`
+/// son ids de PERFIL/viaje (el driverId lo resuelve dispatch vía driverForTrip → dispatch_matches, ya de perfil).
+model DriverCancellationEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId   String   @map("driver_id") @db.Uuid
+  /// Viaje cancelado: natural key de idempotencia (una cancelación por viaje y conductor).
+  tripId     String   @map("trip_id") @db.Uuid
+  /// Momento de la cancelación (define si la fila cae dentro de la ventana de 24h o se poda).
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  /// Natural key: UNA cancelación por (conductor, viaje). Re-entregas de Kafka → upsert no-op (idempotencia DB).
+  @@unique([driverId, tripId])
+  /// Hot-path del conteo de ventana: filtra por driverId (igualdad) + occurredAt (rango ≥ cutoff). Y de la poda.
+  @@index([driverId, occurredAt])
+  @@map("driver_cancellation_events")
+  @@schema("dispatch")
+}
+
 /// Config SINGLETON de RADIOS de dispatch (k-rings) editable en runtime por el admin (espejo del
 /// pricing_mode_schedule del trip-service). UNA sola fila (id='GLOBAL', Tier 1): `nearbyKRing` = radio
 /// del feed de mapa de "autos cerca"; `matchKRing` = radio de broadcast de pujas/matching. El `version`

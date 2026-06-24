@@ -415,14 +415,18 @@ export type FleetDocumentStatus = (typeof FleetDocumentStatus)[keyof typeof Flee
  *  - INSPECTION_EXPIRED: inspección técnica (ITV) del vehículo operado vencida.
  *  - RATING_LOW: AUTO-suspensión por rating bajo (< 4.0 con ≥ mínimo de reseñas, BR-D01). La decide rating-service
  *    (`driver.flagged` reason='suspension'); identity la materializa como hold. Reactivación MANUAL del operador.
- * Las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW) se levantan por la vía de
- * compliance (→ /reactivate-compliance); una DISCIPLINARY NUNCA se toca por esa vía (y viceversa) — la
- * separación de causas es extremo-a-extremo.
+ *  - EXCESSIVE_CANCELLATIONS: AUTO-suspensión por exceso de cancelaciones (≥ umbral en ventana rolling de 24h).
+ *    La decide dispatch-service (`driver.excessive_cancellations`); identity la materializa como hold TEMPORAL
+ *    (con `expiresAt`): un sweeper la auto-levanta al vencer el cooldown, o el operador antes vía compliance.
+ * Las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW + EXCESSIVE_CANCELLATIONS) se
+ * levantan por la vía de compliance (→ /reactivate-compliance); una DISCIPLINARY NUNCA se toca por esa vía (y
+ * viceversa) — la separación de causas es extremo-a-extremo.
  */
 export const SuspensionCause = {
   DISCIPLINARY: 'DISCIPLINARY',
   DOCUMENT_EXPIRED: 'DOCUMENT_EXPIRED',
   INSPECTION_EXPIRED: 'INSPECTION_EXPIRED',
   RATING_LOW: 'RATING_LOW',
+  EXCESSIVE_CANCELLATIONS: 'EXCESSIVE_CANCELLATIONS',
 } as const;
 export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

@@ -70,6 +70,7 @@ enum SuspensionCause {
   DOCUMENT_EXPIRED
   INSPECTION_EXPIRED
   RATING_LOW
+  EXCESSIVE_CANCELLATIONS
 
   @@schema("identity")
 }
@@ -277,11 +278,20 @@ model DriverSuspensionHold {
   /// Motivo legible (texto del operador o de fleet). Viaja al audit/evento; no participa del natural key.
   reason    String
   createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  /// VENCIMIENTO del hold (primer hold TEMPORAL del sistema). `null` = PERMANENTE (DISCIPLINARY/DOCUMENT_EXPIRED/
+  /// INSPECTION_EXPIRED/RATING_LOW): solo lo levanta una vía explícita (operador/fleet/compliance). SETEADO =
+  /// COOLDOWN auto-expirable (hoy EXCESSIVE_CANCELLATIONS): un sweeper (@Cron) quita el hold cuando `expiresAt < now`
+  /// y recomputa `Driver.suspendedAt`. NO se hace expiración LAZY porque `suspendedAt` es la columna derivada ÚNICA
+  /// que leen startShift/dispatch/booking/admin: lazy la dejaría STALE; el sweeper mantiene la verdad derivada.
+  expiresAt DateTime?       @map("expires_at") @db.Timestamptz
 
   /// Natural key: UN hold por (conductor, causa, causeRef). El re-suspender la MISMA causa es un upsert no-op
   /// (idempotencia por DB, sin check-then-act). Postgres exige causeRef NOT NULL para que el UNIQUE colapse.
   @@unique([driverId, cause, causeRef])
   @@index([driverId])
+  /// Hot-path del sweeper de holds temporales: filtra `expiresAt < now` (rango sobre NOT NULL). Los permanentes
+  /// (expiresAt null) quedan fuera del índice parcial implícito de Postgres → barrido barato sobre los temporales.
+  @@index([expiresAt])
   @@map("driver_suspension_holds")
   @@schema("identity")
 }

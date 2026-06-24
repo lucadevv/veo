@@ -66,6 +66,15 @@ export const envSchema = z
     // Días de gracia antes del tombstone por derecho al olvido (BR-S06)
     DELETION_GRACE_DAYS: z.coerce.number().default(30),
 
+    // ── Auto-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad) ──
+    /// COOLDOWN (horas) del hold TEMPORAL EXCESSIVE_CANCELLATIONS: al suspender, `expiresAt = now + esto`. El
+    /// sweeper de holds lo auto-levanta al vencer. Default 24h. (Una re-entrega de Kafka NO extiende el cooldown:
+    /// el upsert en conflicto del unique es no-op — no toca expiresAt.)
+    EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: z.coerce.number().int().positive().default(24),
+    /// Intervalo (minutos) del @Cron que barre los holds temporales vencidos (`expiresAt < now`) y recomputa
+    /// `suspendedAt`. Lag de minutos sobre un cooldown de horas = despreciable. Default 10 min.
+    HOLD_SWEEP_INTERVAL_MINUTES: z.coerce.number().int().positive().default(10),
+
     // ── Referidos (Ola 2A) ──
     /// Recompensa al referidor cuando el referido completa su 1er viaje (céntimos PEN). Default S/5.
     REFERRAL_REWARD_CENTS: z.coerce.number().int().min(0).default(500),

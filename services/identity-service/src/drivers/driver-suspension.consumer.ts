@@ -26,6 +26,7 @@ import {
   fleetDriverSuspended,
   fleetDriverReactivated,
   driverFlagged,
+  driverExcessiveCancellations,
   FLAG_REASON,
   type EventEnvelope,
   type EventHandler,
@@ -44,6 +45,12 @@ const DRIVER_REACTIVATED = 'fleet.driver_reactivated';
  * el bootstrap (la REGLA DE ORO prohíbe DOS consumers del mismo groupId en topics distintos, no esto).
  */
 const DRIVER_FLAGGED = 'driver.flagged';
+/**
+ * eventType que emite dispatch-service cuando un conductor cruza el umbral de cancelaciones en la ventana rolling
+ * de 24h (auto-suspensión por exceso). `topicForEvent` lo mapea al topic 'driver' (corta antes del punto), el MISMO
+ * que driver.flagged/suspended/reactivated → este consumer ya está suscrito a 'driver', solo agrega el handler.
+ */
+const DRIVER_EXCESSIVE_CANCELLATIONS = 'driver.excessive_cancellations';
 
 /**
  * Razón del flag de rating que identity DISCRIMINA: el VALOR canónico es `FLAG_REASON` del CONTRATO `@veo/events`
@@ -80,11 +87,12 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
       [DRIVER_SUSPENDED]: (env) => this.onDriverSuspended(env),
       [DRIVER_REACTIVATED]: (env) => this.onDriverReactivated(env),
       [DRIVER_FLAGGED]: (env) => this.onDriverFlagged(env),
+      [DRIVER_EXCESSIVE_CANCELLATIONS]: (env) => this.onDriverExcessiveCancellations(env),
     };
   }
 
   protected override subscriptionLog(): string {
-    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED})`;
+    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED}, ${DRIVER_EXCESSIVE_CANCELLATIONS})`;
   }
 
   private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
@@ -194,6 +202,43 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
     } catch (err) {
       this.logger.error({ err }, `Falló la auto-suspensión por rating del conductor ${driverId}`);
       throw err; // que Kafka reintente; suspendByRating es idempotente.
+    }
+  }
+
+  /**
+   * AUTO-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad). dispatch-service ya
+   * decidió: emite `driver.excessive_cancellations` SOLO al cruzar el umbral en la ventana rolling de 24h; identity
+   * NO re-evalúa, solo MATERIALIZA un hold TEMPORAL EXCESSIVE_CANCELLATIONS con `expiresAt = now + cooldown` (el
+   * sweeper lo auto-levanta al vencer). El `driverId` del evento es el id de PERFIL Driver (= `Trip.driverId`) → se
+   * usa DIRECTO, sin resolver por userId (igual que driver.flagged).
+   *
+   * NO auto-reactiva por código acá: el cooldown lo levanta el SWEEPER (HoldExpirySweeper); el operador puede
+   * levantarlo antes vía compliance (reactivateForCompliance). Por eso este handler NUNCA quita el hold.
+   * Idempotente: una re-entrega es un upsert no-op y NO extiende el cooldown (la garantía vive en addHold).
+   */
+  private async onDriverExcessiveCancellations(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverExcessiveCancellations.safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`${DRIVER_EXCESSIVE_CANCELLATIONS} con payload inválido; descartado`);
+      return;
+    }
+    const { driverId, count } = parsed.data;
+    try {
+      const applied = await this.drivers.suspendByCancellations(
+        driverId,
+        `Exceso de cancelaciones (${count} en ventana rolling; auto-suspensión temporal)`,
+      );
+      if (applied) {
+        this.logger.log(
+          `Conductor ${driverId} auto-suspendido por exceso de cancelaciones (${count})`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        { err },
+        `Falló la auto-suspensión por cancelaciones del conductor ${driverId}`,
+      );
+      throw err; // que Kafka reintente; suspendByCancellations es idempotente.
     }
   }
 }

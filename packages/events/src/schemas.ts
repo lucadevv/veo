@@ -848,6 +848,28 @@ export const passengerFlagged = z.object({
   rollingAvg: z.number(),
   reason: flagReasonSchema,
 });
+/**
+ * AUTO-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad). dispatch-service
+ * mantiene una VENTANA ROLLING de 24h de cancelaciones POR conductor (tabla `driver_cancellation_events`,
+ * SEPARADA del contador LIFELONG `driver_stats.cancelled_trips` que alimenta la tasa de cancelación del
+ * matching) y emite ESTE evento UNA vez cuando el conteo de la ventana CRUZA el umbral (4→5). identity lo
+ * materializa como un hold TEMPORAL EXCESSIVE_CANCELLATIONS con `expiresAt = now + cooldown` (primer hold con
+ * expiración del sistema; un sweeper lo auto-levanta al vencer). Es una causa AUTOMÁTICA (NO-disciplinaria):
+ * la levanta el override de compliance del operador (reactivateForCompliance) ANTES del vencimiento, o el
+ * sweeper al vencer el cooldown.
+ *
+ * `driverId` = id de PERFIL Driver (= `Trip.driverId`, el MISMO que resuelve dispatch vía `driverForTrip` →
+ * `dispatch_matches.driver_id`, que ya es el id de perfil). NUNCA un User.id: la cadena de suspensión exige
+ * el de perfil (como `driver.flagged`). `count` = cancelaciones en la ventana al cruzar (≥ umbral, típico = 5).
+ * `windowStart` ISO-8601 = borde inferior de la ventana de 24h al momento del cruce (trazabilidad). `occurredAt`
+ * ISO-8601 = momento del cruce. El hold downstream es IDEMPOTENTE (re-entregas no extienden el cooldown).
+ */
+export const driverExcessiveCancellations = z.object({
+  driverId: z.string(),
+  count: z.number().int(),
+  windowStart: z.string(),
+  occurredAt: z.string(),
+});
 
 /* ── share ── (pilar 4) */
 export const shareLinkGenerated = z.object({
@@ -1167,6 +1189,7 @@ export const EVENT_SCHEMAS = {
   'driver.suspended': driverSuspended,
   'driver.resubmitted': driverResubmitted,
   'driver.reactivated': driverReactivated,
+  'driver.excessive_cancellations': driverExcessiveCancellations,
   'biometric.failed': biometricFailed,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,

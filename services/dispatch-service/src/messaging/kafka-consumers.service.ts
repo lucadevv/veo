@@ -6,7 +6,9 @@
  *  - rating.created          → proyección de rating del conductor.
  *  - driver.flagged          → proyección de rating (valor impuesto).
  *  - trip.completed          → proyección (último viaje) + reincorpora al conductor al pool.
- *  - trip.cancelled          → proyección de cancelación (solo si la cancela el conductor).
+ *  - trip.cancelled          → proyección de cancelación (solo si la cancela el conductor PRE-accept).
+ *  - trip.reassigning        → re-abre el board + libera al conductor + CUENTA la cancelación POST-accept
+ *                              (la abusiva: aceptó y abandonó) en la MISMA ventana de auto-suspensión.
  *
  * El matching es de larga duración (ofertas secuenciales con timeout): se lanza sin bloquear el
  * commit del consumidor; sus efectos durables (matches, eventos) se persisten igual.
@@ -130,11 +132,26 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    * el payload ENRIQUECIDO (no dependemos de la key vieja de Redis, que pudo expirar por TTL) y LIBERAMOS
    * al conductor que canceló del hot-index (estaba markBusy desde la aceptación; sin esto quedaría excluido
    * del matching para siempre). Mirror de onTripCancelled → releaseDriver. Idempotente.
+   *
+   * AUTO-SUSPENSIÓN (decisión del dueño · contar AMBAS cancelaciones): una cancelación POST-accept es
+   * la MÁS abusiva (el conductor aceptó y abandonó al pasajero) y SIEMPRE es culpa del conductor — el
+   * schema `tripReassigning` tiene `reason` enum de UN solo valor (`driver_cancelled`), sin ruido de
+   * ofertas vencidas. Por eso CUENTA INCONDICIONALMENTE para la misma ventana rolling 24h, reusando el
+   * MISMO `registerCancellationInWindow` que `trip.cancelled by=DRIVER` (un único punto que registra +
+   * poda + cuenta + emite el cruce de umbral; NO se duplica la lógica de ventana). El `driverId` del
+   * payload es de PERFIL (`trip.driverId`, el conductor asignado, mismo espacio que `driverForTrip`),
+   * correcto para la cadena de suspensión. Idempotente por el natural key `(driverId, tripId)`: una
+   * re-entrega Kafka del mismo evento es no-op (no re-cuenta). `occurredAt` = momento REAL del hecho
+   * (del envelope), no el de consumo → la ventana refleja el tiempo de la cancelación.
    */
   private async onReassigning(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['trip.reassigning'].parse(env.payload);
     domainEventsTotal.inc({ event: 'trip.reassigning', result: 'consumed' });
-    // Libera al conductor que canceló (vuelve a ser elegible para el matching).
+    // ORDEN DELIBERADO — SEGURIDAD PRIMERO: reopenBoard (+ releaseDriver) re-abren el OfferBoard para que el
+    // pasajero ABANDONADO consiga otro conductor; es la acción de seguridad y NO debe quedar gateada por un hipo
+    // del contador (analítica). Por eso van ANTES que registerCancellationInWindow. Si el conteo falla transitorio,
+    // el board YA se re-abrió; el retry de Kafka re-corre AMBOS (reopen idempotente; conteo idempotente por
+    // (driverId, tripId), no re-cuenta). Operan sobre Redis (key string, tolera cualquier id).
     if (p.driverId) await this.dispatch.releaseDriver(p.driverId);
     await this.offerBoard.reopenBoard({
       tripId: p.tripId,
@@ -146,6 +163,41 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.
       negotiationSeq: p.negotiationSeq,
     });
+    // Recién AHORA, con el board ya re-abierto, suma esta cancelación POST-accept a la MISMA ventana rolling 24h
+    // de la auto-suspensión. El guard `p.driverId` cubre el borde del emisor (manda '' si no había conductor
+    // asignado — imposible POST-accept, pero defensa en profundidad: sin id de perfil no se puede atribuir).
+    // `tripId` es UUID (toca @db.Uuid en driver_cancellation_events); el schema lo deja como z.string()
+    // compartido, así que guardamos el borde igual que onTripCancelled — un id no-UUID es veneno → log ERROR +
+    // saltar (el board ya quedó re-abierto).
+    if (p.driverId) {
+      if (!isUuid(p.tripId)) {
+        this.logger.error(
+          `POISON trip.reassigning: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); ` +
+            'no se cuenta para la ventana de cancelaciones',
+        );
+        domainEventsTotal.inc({ event: 'trip.reassigning', result: 'poison' });
+        return;
+      }
+      try {
+        await this.projection.registerCancellationInWindow(
+          p.driverId,
+          p.tripId,
+          new Date(env.occurredAt),
+        );
+      } catch (err) {
+        // Error permanente de datos → saltar el conteo (el reopen del board ya ocurrió arriba, el pasajero no
+        // queda abandonado). Lo transitorio se relanza para que Kafka reintente AMBOS (reopen idempotente).
+        if (isPermanentDataError(err)) {
+          this.logger.error(
+            `POISON trip.reassigning: error permanente de datos al contar cancelación de ` +
+              `${p.driverId} (trip ${p.tripId}, eventId=${env.eventId}); descartado: ${String(err)}`,
+          );
+          domainEventsTotal.inc({ event: 'trip.reassigning', result: 'poison' });
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   private async onDriverLocation(env: EventEnvelope<unknown>): Promise<void> {
@@ -271,10 +323,25 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
       return;
     }
+    // driverId del PAYLOAD ENRIQUECIDO (trip.driverId, el conductor asignado — perfil), NO driverForTrip:
+    // `trip.cancelled by=DRIVER` es PRE-accept (el conductor está ASSIGNED, NO ACCEPTED), y driverForTrip busca
+    // el match con outcome=ACCEPTED → devolvería null/incorrecto y la cancelación pre-accept NO se contaría.
+    // trip-service ya enriquece el payload con el driverId (trips.service.ts). Coherente con onReassigning, que
+    // también cuenta con su p.driverId del payload. Guard `if (p.driverId)`: ausente si no había conductor.
+    if (!p.driverId) {
+      domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
+      return;
+    }
     try {
-      const driverId = await this.dispatch.driverForTrip(p.tripId);
-      if (!driverId) return;
-      await this.projection.onTripCancelledByDriver(driverId);
+      // Ventana ROLLING 24h (auto-suspensión por exceso) + contador LIFELONG (tasa de cancelación BR-T06, NUNCA
+      // se poda): AMBOS en registerCancellationInWindow, idempotentes por el natural key (driverId, tripId) → una
+      // re-entrega Kafka no infla ni la ventana ni la tasa. Emite `driver.excessive_cancellations` UNA vez al
+      // cruzar el umbral. `occurredAt` = momento REAL de la cancelación (del envelope), no el de consumo.
+      await this.projection.registerCancellationInWindow(
+        p.driverId,
+        p.tripId,
+        new Date(env.occurredAt),
+      );
       domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
     } catch (err) {
       if (isPermanentDataError(err)) {

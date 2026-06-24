@@ -98,6 +98,15 @@ export const envSchema = z
     // ── Mapa de calor de demanda (Ola 2C) ──
     /// Ventana DESLIZANTE (s) de intensidad por celda H3; cada solicitud refresca el TTL de la celda.
     HEATMAP_WINDOW_SECONDS: z.coerce.number().default(900),
+
+    // ── Auto-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad) ──
+    /// Ventana ROLLING (horas) sobre la que se cuentan las cancelaciones POR conductor. Las cancelaciones
+    /// más viejas que esto se podan y no cuentan. Default 24h. (Tabla `driver_cancellation_events`, SEPARADA
+    /// del contador lifelong del scoring.)
+    CANCELLATION_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
+    /// Nº de cancelaciones en la ventana que DISPARA la auto-suspensión. Al cruzar exactamente este umbral
+    /// (count pasa de THRESHOLD-1 → THRESHOLD) dispatch emite `driver.excessive_cancellations` UNA vez. Default 5.
+    CANCELLATION_THRESHOLD: z.coerce.number().int().positive().default(5),
   })
   .superRefine((env, ctx) => {
     // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.

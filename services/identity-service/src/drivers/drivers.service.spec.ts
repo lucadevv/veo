@@ -13,7 +13,11 @@ import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
 const DRIVER_DNI_ENC_KEY = 'k'.repeat(32);
-const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90, DRIVER_DNI_ENC_KEY });
+const config = new ConfigService<Env, true>({
+  BIOMETRIC_MIN_SCORE: 90,
+  DRIVER_DNI_ENC_KEY,
+  EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
+});
 const futureLicense = new Date(Date.now() + 1_000_000_000);
 const okDriver = {
   id: 'd1',
