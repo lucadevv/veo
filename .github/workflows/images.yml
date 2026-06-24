@@ -57,6 +57,7 @@ jobs:
             {"service":"admin-bff","context":".","dockerfile":"services/bff/admin-bff/Dockerfile","dir":"services/bff/admin-bff/"},
             {"service":"driver-bff","context":".","dockerfile":"services/bff/driver-bff/Dockerfile","dir":"services/bff/driver-bff/"},
             {"service":"public-bff","context":".","dockerfile":"services/bff/public-bff/Dockerfile","dir":"services/bff/public-bff/"},
+            {"service":"booking-service","context":".","dockerfile":"services/booking-service/Dockerfile","dir":"services/booking-service/"},
             {"service":"chat-service","context":".","dockerfile":"services/chat-service/Dockerfile","dir":"services/chat-service/"},
             {"service":"dispatch-service","context":".","dockerfile":"services/dispatch-service/Dockerfile","dir":"services/dispatch-service/"},
             {"service":"fleet-service","context":".","dockerfile":"services/fleet-service/Dockerfile","dir":"services/fleet-service/"},

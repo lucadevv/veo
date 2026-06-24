@@ -192,6 +192,16 @@ services:
     depends_on: [postgres, redis, kafka]
     mem_limit: 256m
 
+  # --- booking-service · HTTP 3016 / gRPC 50054 (carpooling marketplace · ADR-014) ---
+  # OJO: su env/preview.env (en el VPS) DEBE setear VEO_MAPS_MODE=osrm + OSRM_BASE_URL: el
+  # superRefine del schema exige routing soberano en prod (NODE_ENV=production), si no NO arranca.
+  booking-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/booking-service:latest
+    env_file: services/booking-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
   # --- panic-service · HTTP 3006 / gRPC 50056 ---
   panic-service:
     <<: *svc-defaults
