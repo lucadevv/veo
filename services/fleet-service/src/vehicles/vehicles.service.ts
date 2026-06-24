@@ -46,7 +46,9 @@ import { clampLimit, toPage, type Page } from '../infra/pagination';
  *  - `userId` (User.id de identity) → Vehicle.driverId.
  */
 export interface PurgeDriverIds {
-  driverId: string;
+  /** Opcional: ausente en la cascada de erasure (`user.deleted`) de un usuario SIN perfil Driver. Si
+   *  falta, los docs ownerType DRIVER no se tocan; los vehículos igual se purgan por userId. */
+  driverId?: string;
   userId: string;
 }
 
@@ -184,10 +186,14 @@ export class VehiclesService {
             })
           : { count: 0 };
 
-      // Documentos de OPERADOR del conductor (ownerType DRIVER, ownerId = driverId de perfil).
-      const documents = await tx.fleetDocument.deleteMany({
-        where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
-      });
+      // Documentos de OPERADOR del conductor (ownerType DRIVER, ownerId = driverId de perfil). GUARD:
+      // sin driverId NO se filtra — un `ownerId: undefined` en Prisma se ignora y borraría TODOS los
+      // docs DRIVER (footgun). En ese caso (usuario sin perfil Driver) no hay docs de operador que purgar.
+      const documents = driverId
+        ? await tx.fleetDocument.deleteMany({
+            where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
+          })
+        : { count: 0 };
 
       const deletedVehicles = await tx.vehicle.deleteMany({ where: { driverId: userId } });
 
