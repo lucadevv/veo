@@ -4,7 +4,7 @@
  * firmada (HMAC) aguas abajo y habla con los microservicios vía gRPC (lecturas) y REST interno (comandos).
  */
 import { z } from 'zod';
-import { requiredInProd, secret } from '@veo/utils';
+import { isHardenedEnv, requiredInProd, secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 
 /**
@@ -17,6 +17,12 @@ import { MAPS_MODES } from '@veo/maps';
  * (un hop falso del atacante o un cambio de topología lo rompe). Configurable vía TRUSTED_PROXY.
  */
 export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
+
+/**
+ * Default de desarrollo del puerto de señalización LiveKit. Fuente única (sin string mágico esparcido):
+ * lo usa tanto el `.default()` del campo como el fail-fast condicional del `superRefine` de abajo.
+ */
+const DEV_LIVEKIT_URL = 'ws://localhost:7880';
 
 export const envSchema = z
   .object({
@@ -104,7 +110,7 @@ export const envSchema = z
     // ── LiveKit self-hosted (video del habitáculo, soberanía §0.7). ──
     // Si falta API_KEY/API_SECRET el video queda DESHABILITADO (la web familiar degrada a "sin video").
     // El token de viewer (solo suscripción) se firma HS256 con el secreto; nunca se inventan credenciales.
-    LIVEKIT_URL: z.string().default('ws://localhost:7880'),
+    LIVEKIT_URL: z.string().default(DEV_LIVEKIT_URL),
     LIVEKIT_API_KEY: z.string().default(''),
     LIVEKIT_API_SECRET: z.string().default(''),
     LIVEKIT_GRANT_TTL_SEC: z.coerce.number().default(3600),
@@ -121,6 +127,21 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['MAPBOX_ACCESS_TOKEN'],
         message: 'MAPBOX_ACCESS_TOKEN es obligatorio cuando VEO_MAPS_MODE=mapbox',
+      });
+    }
+
+    // LiveKit en prod (fail-fast CONDICIONAL): el video familiar es degradable a propósito — sin
+    // LIVEKIT_API_KEY el viewer se apaga ("sin video") y la URL es irrelevante. PERO si está HABILITADO
+    // (API_KEY presente) en un entorno endurecido, la URL no puede quedar en el localhost de dev: apuntaría
+    // a un server LiveKit inexistente y el viewer familiar se caería en silencio. No se fuerza incondicional
+    // (eso rompería el boot del modo degradado, el mismo error que evitamos con OSRM/NOMINATIM mode-gated).
+    if (isHardenedEnv() && env.LIVEKIT_API_KEY && env.LIVEKIT_URL === DEV_LIVEKIT_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['LIVEKIT_URL'],
+        message:
+          'LIVEKIT_URL no puede ser el default de desarrollo en producción cuando LiveKit está habilitado ' +
+          '(LIVEKIT_API_KEY presente): apunta a un server de señalización inexistente.',
       });
     }
   });

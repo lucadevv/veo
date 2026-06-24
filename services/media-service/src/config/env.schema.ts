@@ -32,7 +32,10 @@ export const envSchema = z.object({
   // === LiveKit self-hosted (WebRTC). Sin SaaS: servidor propio. ===
   VEO_LIVEKIT_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
   /// URL de señalización para clientes (ws://). Se usa como host http(s) para las APIs de servidor.
-  LIVEKIT_URL: z.string().default('ws://localhost:7880'),
+  /// Fail-fast en prod (igual que LIVEKIT_API_SECRET): media-service SIEMPRE usa LiveKit real en prod
+  /// (el secret() de abajo ya lo exige), así que la URL no puede quedar en el localhost de dev → apuntaría
+  /// a un server de señalización inexistente y la cámara en vivo (diferenciador core) se caería en silencio.
+  LIVEKIT_URL: requiredInProd('ws://localhost:7880'),
   LIVEKIT_API_KEY: z.string().default('devkey'),
   // Secreto que FIRMA los tokens WebRTC de la cámara en vivo (seguridad core). Fail-fast en prod: no
   // arrancar con el secreto de dev (forjable → cualquiera mintea acceso a la cámara del habitáculo).
