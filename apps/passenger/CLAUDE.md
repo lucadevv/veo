@@ -1,7 +1,7 @@
 # CLAUDE.md · VEO Passenger App
 
 > 🟢 **Estado global y handoff:** lee `../../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
-> `../../../docs/FOUNDATION.md` (contrato + decisiones). **Regla maestra:** soberanía tecnológica = control del DATO sensible (biometría, video, pánico, audit, PII → propios/self-hosted); los rieles de transporte externos inevitables (push FCM/APNs, pagos, SMS) SÍ se usan, tras puerto propio y sin PII en el payload. Soberanía es seguridad del dato, no “cero proveedores”.
+> `../../../docs/FOUNDATION.md` (contrato + decisiones, §0.7 soberanía). **Regla maestra:** soberanía tecnológica = todo lo self-hosteable se self-hostea, sin SaaS de terceros para el DATO ni el CÓMPUTO sensibles (biometría, video, pánico, audit, PII → propios/self-hosted). SOLO sobreviven los rieles de transporte físicamente imposibles de self-hostear (push FCM/APNs, red de pagos Yape/Plin, SMS de operador), tras un puerto propio intercambiable y sin PII en el payload. Soberanía es seguridad del dato, no “cero proveedores”.
 > Esta app (Ola 4) aún no empieza; el backend `identity-service` ya está listo como referencia.
 
 ## Repo
@@ -63,7 +63,7 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
 - React Navigation 6
 - React Query (server state) + Zustand (client state) + Redux Toolkit (donde aplique para slices grandes)
 - Reanimated 3 (gestures, transitions)
-- react-native-maps (Google Maps)
+- MapLibre + tiles OSM self-hosted (NO Google Maps)
 - react-native-webrtc
 - MMKV (persistencia)
 - i18next + react-i18next (i18n)

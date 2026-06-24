@@ -6,14 +6,15 @@ import { requiredInProd, secret } from '@veo/utils';
 import { outboxEnvSchema } from '@veo/database';
 
 /**
- * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Rangos de IP INTERNOS del
- * VPC (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, unique-local 10/8 + 172.16/12 +
- * 192.168/16 + fc00::/7). El ALB y el ingress-nginx tienen IP privada → caen acá; el CLIENTE real
- * tiene IP PÚBLICA → NUNCA está en esta lista. Con esto Express resuelve `req.ip` = la IP pública
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Rangos de IP INTERNOS de la
+ * red docker (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, unique-local 10/8 + 172.16/12 +
+ * 192.168/16 + fc00::/7). Los proxies de ingreso (cloudflared / la red interna) tienen IP privada →
+ * caen acá; el CLIENTE real → NUNCA está en esta lista. Con esto Express resuelve `req.ip` = la IP
  * real del cliente (un-spoofeable), que es la que se escribe — HASHEADA — en el log inmutable
  * append-only (Ley 29733). Configurable vía TRUSTED_PROXY. trust-all queda RECHAZADO por
- * parseTrustedProxy (fail-fast). Contención de red: la NetworkPolicy
- * `infra/k8s/base/networkpolicies/east-west.yaml` restringe el ingreso al pod (segunda capa).
+ * parseTrustedProxy (fail-fast). En el deploy VPS la contención de red la dan: (a) la red interna de
+ * Docker Compose (los BFFs NO publican puertos al host), (b) el firewall del host (default-deny), y
+ * (c) Cloudflare Tunnel como único ingreso (cloudflared alcanza los BFFs por la red docker).
  */
 export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
 
@@ -23,8 +24,8 @@ export const envSchema = z.object({
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
-  // privados del VPC. Crítico acá: `req.ip` se escribe en el rastro INMUTABLE (Ley 29733) — NO debe
-  // ser forjable. Un header XFF crudo del cliente NUNCA debe convertirse en la IP auditada.
+  // privados de la red docker. Crítico acá: `req.ip` se escribe en el rastro INMUTABLE (Ley 29733) —
+  // NO debe ser forjable. Un header XFF crudo del cliente NUNCA debe convertirse en la IP auditada.
   TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
   // Base de datos (read/write split). Schema lógico "audit".

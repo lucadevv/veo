@@ -34,13 +34,15 @@ async function bootstrap(): Promise<void> {
   // config inválida. Patrón de referencia: driver-bff/main.ts (config.getOrThrow). Conforma public a él.
   const config = app.get(ConfigService<Env, true>);
 
-  // SEGURIDAD (rate-limit): el deploy es VPC (cliente → ALB → ingress-nginx → pod), todos los proxies
-  // con IP privada. Con `trust proxy` apuntando a los rangos privados, Express resuelve `req.ip` = la
-  // IP pública real del cliente (descarta los hops privados del XFF), un-spoofeable. El guard de
+  // SEGURIDAD (rate-limit): con `trust proxy` apuntando a los rangos privados, Express resuelve
+  // `req.ip` = la IP real del cliente (descarta los hops privados del XFF), un-spoofeable. El guard de
   // rate-limit lee `req.ip`, así que un atacante NO puede rotar un header de IP para evadir el límite.
   // TRUSTED_PROXY se valida en env.schema; trust-all queda RECHAZADO por parseTrustedProxy (fail-fast).
-  // CONTENCIÓN DE RED: la NetworkPolicy `infra/k8s/base/networkpolicies/east-west.yaml` ya restringe el
-  // ingreso al pod SOLO desde ingress-nginx (allow-bff-ingress) — segunda capa sobre el rango de confianza.
+  // CONTENCIÓN DE RED: en el deploy VPS la contención la dan (a) la red interna de Docker Compose (los
+  // BFFs NO publican puertos al host), (b) el firewall del host (default-deny), y (c) Cloudflare Tunnel
+  // como único ingreso (cloudflared alcanza los BFFs por la red docker).
+  // TODO(vps): revisar TRUSTED_PROXY para Cloudflare Tunnel — el cliente real llega en CF-Connecting-IP,
+  // el peer es cloudflared en la red docker; ajustar trust-proxy a ese modelo.
   app.set('trust proxy', parseTrustedProxy(config.getOrThrow<string>('TRUSTED_PROXY')));
 
   // El body por defecto de Nest/Express tope ~100KB; la verificación KYC envía frames JPEG en base64

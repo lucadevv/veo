@@ -30,12 +30,15 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService<Env, true>);
 
   // SEGURIDAD (Ley 29733): el POST /audit síncrono registra la IP del actor en el log INMUTABLE
-  // (hash-chain append-only). Esa IP DEBE ser la real, no un header inyectado. El deploy es VPC
-  // (cliente → ALB → ingress-nginx → pod, proxies con IP privada): con `trust proxy` apuntando a los
-  // rangos privados, Express resuelve `req.ip` = la IP pública real del cliente (un-spoofeable), y el
-  // controller lee SOLO `req.ip` (no `x-forwarded-for` crudo). TRUSTED_PROXY se valida en env.schema;
-  // trust-all queda RECHAZADO por parseTrustedProxy (fail-fast). Contención de red adicional: la
-  // NetworkPolicy `infra/k8s/base/networkpolicies/east-west.yaml` restringe el ingreso al pod.
+  // (hash-chain append-only). Esa IP DEBE ser la real, no un header inyectado. Con `trust proxy`
+  // apuntando a los rangos privados, Express resuelve `req.ip` = la IP real del cliente (un-spoofeable),
+  // y el controller lee SOLO `req.ip` (no `x-forwarded-for` crudo). TRUSTED_PROXY se valida en
+  // env.schema; trust-all queda RECHAZADO por parseTrustedProxy (fail-fast). En el deploy VPS la
+  // contención de red la dan: (a) la red interna de Docker Compose (los BFFs NO publican puertos al
+  // host), (b) el firewall del host (default-deny), y (c) Cloudflare Tunnel como único ingreso
+  // (cloudflared alcanza los BFFs por la red docker).
+  // TODO(vps): revisar TRUSTED_PROXY para Cloudflare Tunnel — el cliente real llega en CF-Connecting-IP,
+  // el peer es cloudflared en la red docker; ajustar trust-proxy a ese modelo.
   app.set('trust proxy', parseTrustedProxy(config.getOrThrow<string>('TRUSTED_PROXY')));
 
   app.use(helmet());
@@ -48,7 +51,7 @@ async function bootstrap(): Promise<void> {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('audit-service')
     .setDescription(
-      'Log de auditoría inmutable (append-only, hash chain, S3 Object Lock) · VEO · Ley 29733',
+      'Log de auditoría inmutable (append-only, hash chain, MinIO object-lock self-hosted) · VEO · Ley 29733',
     )
     .setVersion('0.1.0')
     .addBearerAuth()

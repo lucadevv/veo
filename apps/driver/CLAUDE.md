@@ -17,7 +17,7 @@ App conductor React Native Android. Parte de un sistema multi-repo:
 
 - **Tipos y SDK** desde `veo-platform/packages/*` (file: en dev, GitHub Packages en prod).
 - **API** vía `driver-bff` (puerto 4002 dev, `api.veo.pe/driver` prod).
-- **GPS upstream**: MQTT directo a AWS IoT Core (mejor que WS sobre red móvil flaky).
+- **GPS upstream**: Socket.IO namespace `/driver` directo al `driver-bff` (MQTT/IoT Core retirado por soberanía).
 - **WebRTC publisher**: directo a LiveKit con token de `media-service`.
 
 ## Reglas no negociables
@@ -39,7 +39,7 @@ App conductor React Native Android. Parte de un sistema multi-repo:
 
 Igual al passenger-app excepto:
 
-- **react-native-mqtt** (publish GPS a IoT Core)
+- **Socket.IO** (publish GPS por el namespace `/driver` del driver-bff)
 - **ForegroundService nativo** (Android), no equivalente iOS hasta F3
 
 ## Comandos
