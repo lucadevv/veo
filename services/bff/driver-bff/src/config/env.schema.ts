@@ -3,7 +3,7 @@
  * el proceso no arranca. Sin valores hardcodeados: defaults solo para desarrollo local.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 
 /**
@@ -40,7 +40,7 @@ export const envSchema = z
     REDIS_URL: z.string().default('redis://localhost:6379'),
 
     // Kafka (consumidor de eventos para empujar a la app del conductor por Socket.IO).
-    KAFKA_BROKERS: z.string().default('localhost:9094'),
+    KAFKA_BROKERS: requiredInProd('localhost:9094'),
     KAFKA_GROUP_ID: z.string().default('driver-bff'),
 
     // ── Mapas (Ola 2C · navegación turn-by-turn). osrm/local self-hosted; 'mapbox' = Directions API

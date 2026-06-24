@@ -24,6 +24,32 @@ export function secret(devDefault: string) {
 }
 
 /**
+ * Config de infra REQUERIDA con default SOLO en desarrollo/test. Mismo fail-fast que `secret()` pero para
+ * valores NO sensibles (no se redactan, no son credenciales): endpoints/brokers/URLs de dependencias que el
+ * servicio DEBE recibir del entorno en producción. En PRODUCCIÓN (NODE_ENV=production) el default de dev NO
+ * aplica: el valor es REQUERIDO y se RECHAZA el default de desarrollo (típicamente `localhost`) → el servicio
+ * NO arranca apuntando a una dependencia FANTASMA (ej. `KAFKA_BROKERS=localhost:9094` en prod = eventos al
+ * vacío en silencio, sin error). En dev/test usa el default y no rompe el arranque local/CI.
+ *
+ * `secret()` es para CREDENCIALES (HMAC/claves, valor sensible); esto es para INFRA (a dónde me conecto). La
+ * semántica de fail-fast es idéntica; la diferencia es el dato que protege y el mensaje de error.
+ *
+ * Uso en el env schema:
+ *   KAFKA_BROKERS: requiredInProd('localhost:9094'),
+ */
+export function requiredInProd(devDefault: string) {
+  if (isHardenedEnv()) {
+    return z
+      .string()
+      .min(1, 'config de infra requerida en producción (configurar vía entorno/configmap)')
+      .refine((v) => v !== devDefault, {
+        message: `no usar el valor de desarrollo ("${devDefault}") en producción: apunta a una dependencia inexistente`,
+      });
+  }
+  return z.string().default(devDefault);
+}
+
+/**
  * Entorno ENDURECIDO (internet-facing): `NODE_ENV=production` cubre preview Y prod (el tier real lo da el
  * env_file, no este flag). ÚNICO punto del repo que lee `process.env.NODE_ENV` para decidir el tier —
  * centralizado acá (tipado, testeable) para no esparcir el string mágico `'production'` por el código.

@@ -4,7 +4,7 @@
  * firmada (HMAC) aguas abajo y habla con los microservicios vía gRPC (lecturas) y REST interno (comandos).
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 
 /**
@@ -42,7 +42,7 @@ export const envSchema = z
 
     // ── Infraestructura ──
     REDIS_URL: z.string().default('redis://localhost:6379'),
-    KAFKA_BROKERS: z.string().default('localhost:9094'),
+    KAFKA_BROKERS: requiredInProd('localhost:9094'),
 
     // ── Mapas. Modos: `osrm`/`local` (OSM self-hosted, soberanía §0.7) o `mapbox` (APIs HTTP de
     //    Mapbox con token público `pk`, server-side). Todos degradan al motor local ante fallo. ──

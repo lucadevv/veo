@@ -3,7 +3,7 @@
  * notification-service: motor propio de notificaciones (cola, dedup, retry) + canales tras puertos.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
 import { SmsProvider } from '../ports/sms/sms.port';
 import { outboxEnvSchema } from '@veo/database';
@@ -30,7 +30,7 @@ export const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumidores de dominio)
-  KAFKA_BROKERS: z.string().default('localhost:9094'),
+  KAFKA_BROKERS: requiredInProd('localhost:9094'),
 
   // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
   // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida

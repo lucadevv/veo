@@ -3,7 +3,7 @@
  * Defaults orientados a dev; nada hardcodeado en lógica de negocio.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
 
 /**
  * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
@@ -36,7 +36,7 @@ export const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   // Kafka (consumidor de eventos para read-model + tiempo real Socket.IO).
-  KAFKA_BROKERS: z.string().default('localhost:9094'),
+  KAFKA_BROKERS: requiredInProd('localhost:9094'),
   KAFKA_CONSUMER_GROUP: z.string().default('admin-bff'),
 
   // ClickHouse (analítica vía interfaz HTTP — sin dependencias nuevas).
