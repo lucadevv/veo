@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { BID_MAX_CENTS, secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
+import { outboxEnvSchema } from '@veo/database';
 
 export const envSchema = z
   .object({
@@ -20,6 +21,11 @@ export const envSchema = z
 
     // Kafka (outbox relay + consumidor dispatch.match_found)
     KAFKA_BROKERS: z.string().default('localhost:9094'),
+
+    // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+    // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+    // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+    ...outboxEnvSchema.shape,
 
     // Secreto para validar la identidad interna que el BFF propaga a servicios
     INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),

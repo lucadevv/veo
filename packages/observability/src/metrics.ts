@@ -108,3 +108,16 @@ export const errorsTotal = new Counter({
   labelNames: ['code', 'status'] as const,
   registers: [metricsRegistry],
 });
+
+/**
+ * Eventos del OUTBOX que el relay descartó como POISON permanente (payload que viola su schema zod): el
+ * publish falla SIEMPRE igual, así que la fila se marca terminal (`failed_at`) en vez de reintentarse ∞.
+ * Counter dedicado para que Ops alerte sobre un payload malformado que NUNCA se va a publicar (head-of-line
+ * que el relay desbloquea automáticamente, pero el dato sí se perdió y hay que investigar el producer).
+ */
+export const outboxPublishPoisonTotal = new Counter({
+  name: 'outbox_publish_poison_total',
+  help: 'Eventos del outbox descartados como poison permanente (payload inválido, marcados terminal-fallidos)',
+  labelNames: ['event'] as const,
+  registers: [metricsRegistry],
+});

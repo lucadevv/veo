@@ -34,6 +34,8 @@
   "dependencies": {
     "@prisma/client": "^5.20.0",
     "prisma": "^5.20.0",
-    "@veo/events": "workspace:*"
+    "@veo/events": "workspace:*",
+    "@veo/observability": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

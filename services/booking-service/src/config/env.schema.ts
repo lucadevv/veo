@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { secret } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
+import { outboxEnvSchema } from '@veo/database';
 
 // ── SOBERANÍA DE ROUTING (FOUNDATION §0.7, regla maestra) ────────────────────────────────────────
 // El routing respalda el tope LEGAL de cost-sharing (F1b): es DATO sensible (coordenadas reales del
@@ -34,6 +35,10 @@ export const envSchema = z.object({
 
   // Kafka (outbox relay → topic 'booking').
   KAFKA_BROKERS: z.string().default('localhost:9094'),
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
 
   // Secreto de identidad interna que el BFF propaga a servicios (InternalIdentityGuard). DEBE ser
   // IDÉNTICO en todos los services y BFFs; si difiere, el guard interno rechaza la request.

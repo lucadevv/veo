@@ -17,12 +17,28 @@
  * Sin hook configurado el comportamiento es EXACTAMENTE el histórico (no-op).
  */
 import { createKafka, KafkaEventProducer, drainOutbox } from '@veo/events';
+import { outboxPublishPoisonTotal } from '@veo/observability';
 import { PrismaOutboxStore, type OutboxPrismaClient } from './outbox.js';
+// FUENTE ÚNICA de los 4 defaults del relay: viven en `outbox-env.ts` (sin dependencia de Kafka), que es el
+// módulo que los env.schema de los 13 servicios spreadean. Se re-exportan acá para no romper los imports
+// históricos `from '@veo/database'` (el barrel re-exporta ambos módulos).
+export {
+  OUTBOX_BATCH_SIZE,
+  OUTBOX_CLAIM_STALE_MS,
+  OUTBOX_PUBLISH_CONCURRENCY,
+  OUTBOX_PUBLISH_TIMEOUT_MS,
+} from './outbox-env.js';
+import {
+  OUTBOX_BATCH_SIZE,
+  OUTBOX_CLAIM_STALE_MS,
+  OUTBOX_PUBLISH_CONCURRENCY,
+  OUTBOX_PUBLISH_TIMEOUT_MS,
+} from './outbox-env.js';
 
 /** Intervalo histórico del bucle del relay (idéntico en las 12 copias originales). */
 export const OUTBOX_RELAY_TICK_MS = 500;
-/** Tamaño histórico del batch por tick (idéntico en las 12 copias originales). */
-export const OUTBOX_RELAY_BATCH_SIZE = 100;
+/** @deprecated Usar OUTBOX_BATCH_SIZE. Alias del default histórico (mismo valor). */
+export const OUTBOX_RELAY_BATCH_SIZE = OUTBOX_BATCH_SIZE;
 
 /** Puerto mínimo de logging (en Nest lo satisface `new Logger(OutboxRelay.name)`). */
 export interface OutboxRelayLogger {
@@ -46,8 +62,17 @@ export interface OutboxRelayOptions {
   logger: OutboxRelayLogger;
   /** Intervalo del bucle. Default: OUTBOX_RELAY_TICK_MS. */
   tickMs?: number;
-  /** Batch por tick. Default: OUTBOX_RELAY_BATCH_SIZE. */
+  /** Batch por tick (limit del CLAIM). Default: OUTBOX_BATCH_SIZE. */
   batchSize?: number;
+  /** Un claim sin ack más viejo que esto (ms) se re-toma → recovery de crashes. Default: OUTBOX_CLAIM_STALE_MS. */
+  claimStaleMs?: number;
+  /** Grupos de aggregate publicados en paralelo. Default: OUTBOX_PUBLISH_CONCURRENCY. */
+  publishConcurrency?: number;
+  /**
+   * Timeout (ms) de UN publish individual. DEBE ser < `claimStaleMs` (invariante anti-double-publish). El
+   * ctor lo valida (fail-fast). Default: OUTBOX_PUBLISH_TIMEOUT_MS.
+   */
+  publishTimeoutMs?: number;
   /**
    * Productor inyectable (tests / productor compartido). Por defecto el relay crea el suyo con
    * clientId+brokers. En AMBOS casos el relay es dueño del ciclo de vida (connect/disconnect).
@@ -63,6 +88,9 @@ export class OutboxRelay {
   private readonly store: PrismaOutboxStore;
   private readonly tickMs: number;
   private readonly batchSize: number;
+  private readonly claimStaleMs: number;
+  private readonly publishConcurrency: number;
+  private readonly publishTimeoutMs: number;
   private readonly retention?: OutboxRetentionHook;
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -75,8 +103,21 @@ export class OutboxRelay {
     // OutboxStore sobre el write client (la escritura de dominio pobló el outbox en la misma tx).
     this.store = new PrismaOutboxStore(options.prisma, options.schema);
     this.tickMs = options.tickMs ?? OUTBOX_RELAY_TICK_MS;
-    this.batchSize = options.batchSize ?? OUTBOX_RELAY_BATCH_SIZE;
+    this.batchSize = options.batchSize ?? OUTBOX_BATCH_SIZE;
+    this.claimStaleMs = options.claimStaleMs ?? OUTBOX_CLAIM_STALE_MS;
+    this.publishConcurrency = options.publishConcurrency ?? OUTBOX_PUBLISH_CONCURRENCY;
+    this.publishTimeoutMs = options.publishTimeoutMs ?? OUTBOX_PUBLISH_TIMEOUT_MS;
     this.retention = options.retention;
+
+    // INVARIANTE ESTRUCTURAL (fail-fast): el timeout de un publish DEBE ser < el stale-window del claim. Si
+    // no, un publish lento podría seguir vivo cuando su claim ya venció → otra réplica lo re-toma → DOBLE
+    // PUBLISH del mismo id. Lo validamos en el boot: una mala config no arranca (no se descubre en prod).
+    if (this.publishTimeoutMs >= this.claimStaleMs) {
+      throw new Error(
+        `outbox: publishTimeoutMs (${this.publishTimeoutMs}ms) debe ser < claimStaleMs (${this.claimStaleMs}ms) ` +
+          `para cerrar el double-publish por stale: un publish nunca debe seguir vivo tras vencer su claim.`,
+      );
+    }
   }
 
   async onModuleInit(): Promise<void> {
@@ -93,9 +134,24 @@ export class OutboxRelay {
     if (this.running) return;
     this.running = true;
     try {
-      const n = await drainOutbox(this.store, this.producer, this.batchSize);
-      if (n > 0) this.logger.debug(`outbox: publicados ${n} eventos`);
-      if (this.retention) await this.retention(n);
+      const result = await drainOutbox(this.store, this.producer, {
+        batchSize: this.batchSize,
+        staleMs: this.claimStaleMs,
+        concurrency: this.publishConcurrency,
+        publishTimeoutMs: this.publishTimeoutMs,
+      });
+      if (result.published > 0) this.logger.debug(`outbox: publicados ${result.published} eventos`);
+      // POISON terminal: un payload inválido se descartó (marcado failed_at) para NO bloquear el grupo ni
+      // reintentarse ∞. Lo SURFACEAMOS por métrica + log ERROR: el dato se perdió a propósito, Ops debe ver
+      // el producer que emitió el payload malformado. No tira el tick (los eventos sanos siguieron publicando).
+      for (const p of result.poisoned) {
+        outboxPublishPoisonTotal.inc({ event: p.eventType });
+        this.logger.error(
+          { outboxId: p.id, eventType: p.eventType },
+          'outbox: evento POISON descartado (payload inválido, marcado terminal failed_at) — revisar el producer',
+        );
+      }
+      if (this.retention) await this.retention(result.published);
     } catch (err) {
       this.logger.error({ err }, 'outbox relay falló');
     } finally {

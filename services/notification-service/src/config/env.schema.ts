@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { secret } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
 import { SmsProvider } from '../ports/sms/sms.port';
+import { outboxEnvSchema } from '@veo/database';
 
 /**
  * Modos de puerto intercambiable EMAIL (enum tipado, fuente única — sin string mágico esparcido). `live`
@@ -30,6 +31,11 @@ export const envSchema = z.object({
 
   // Kafka (outbox relay + consumidores de dominio)
   KAFKA_BROKERS: z.string().default('localhost:9094'),
+
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
 
   // Secreto para verificar la identidad interna que el BFF propaga (InternalIdentityGuard)
   INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),

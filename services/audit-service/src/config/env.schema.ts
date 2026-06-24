@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { secret } from '@veo/utils';
+import { outboxEnvSchema } from '@veo/database';
 
 /**
  * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Rangos de IP INTERNOS del
@@ -32,6 +33,10 @@ export const envSchema = z.object({
 
   // Kafka — audit-service CONSUME los eventos auditables del resto del dominio.
   KAFKA_BROKERS: z.string().default('localhost:9094'),
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
   KAFKA_GROUP_ID: z.string().default('audit-service'),
   /// Si arranca con la cadena vacía, consumir desde el principio del log de Kafka.
   KAFKA_FROM_BEGINNING: z

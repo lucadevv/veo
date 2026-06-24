@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { secret } from '@veo/utils';
+import { outboxEnvSchema } from '@veo/database';
 
 /**
  * Modos de puerto intercambiable (enum tipado, fuente única — sin string mágico esparcido). `live` usa el
@@ -28,6 +29,10 @@ export const envSchema = z
 
     // Kafka (outbox relay + consumidores)
     KAFKA_BROKERS: z.string().default('localhost:9094'),
+    // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+    // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+    // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+    ...outboxEnvSchema.shape,
     KAFKA_CONSUMER_GROUP: z.string().default('share-service'),
 
     // Secreto para firmar los enlaces de seguimiento (HMAC). KMS/Secrets Manager en prod.

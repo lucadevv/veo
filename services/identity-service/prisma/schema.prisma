@@ -396,13 +396,16 @@ model Consent {
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("identity")
 }

@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type EventEnvelope, type KafkaEventProducer } from '@veo/events';
 import {
   OutboxRelay,
-  OUTBOX_RELAY_BATCH_SIZE,
+  OUTBOX_BATCH_SIZE,
   OUTBOX_RELAY_TICK_MS,
   type OutboxRelayLogger,
 } from './outbox-relay.js';
-import type { OutboxPrismaClient, OutboxTxClient } from './outbox.js';
+import type { OutboxPrismaClient } from './outbox.js';
 
 interface Row {
   id: string;
@@ -20,28 +20,48 @@ interface Row {
   envelope: unknown;
   createdAt: Date;
   publishedAt: Date | null;
+  claimedAt: Date | null;
 }
 
-/** Cliente Prisma fake en memoria que satisface el OutboxPrismaClient estructural. */
+/**
+ * Cliente Prisma fake en memoria que satisface el OutboxPrismaClient estructural (3 fases claim→ack).
+ * Interpreta las dos formas de SQL raw que emite el store: el CLAIM (`UPDATE ... SET claimed_at`, devuelve
+ * filas) y el ACK (`SET published_at` / `SET claimed_at = NULL` sobre un array de ids). No es un parser SQL:
+ * matchea por substring estable del SQL del store, suficiente para cubrir el esqueleto del relay con timers
+ * falsos (el CLAIM real con SKIP LOCKED / stale-reclaim se prueba en el e2e con Postgres).
+ */
 function fakeOutboxClient(rows: Row[]): OutboxPrismaClient {
-  const tx: OutboxTxClient = {
-    $queryRaw: async <T>() => [{ locked: true }] as T,
-    outboxEvent: {
-      create: async () => ({}),
-      findMany: async ({ take }) =>
-        rows
-          .filter((r) => r.publishedAt === null)
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-          .slice(0, take),
-      updateMany: async ({ where, data }) => {
-        for (const r of rows) {
-          if (where.id.in.includes(r.id)) r.publishedAt = data.publishedAt;
-        }
-        return {};
-      },
+  return {
+    outboxEvent: { create: async () => ({}) },
+    $queryRawUnsafe: async <T>(query: string, ...values: unknown[]): Promise<T> => {
+      // CLAIM: reclama hasta `limit` pendientes no-claimed (o claim stale), ordenados por createdAt.
+      const [, limit] = values as [number, number];
+      const now = Date.now();
+      const claimed = rows
+        .filter((r) => r.publishedAt === null && r.claimedAt === null)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .slice(0, limit);
+      for (const r of claimed) r.claimedAt = new Date(now);
+      return claimed.map((r) => ({
+        id: r.id,
+        aggregate_id: r.aggregateId,
+        envelope: r.envelope,
+        created_at: r.createdAt,
+      })) as T;
+    },
+    $executeRawUnsafe: async (query: string, ...values: unknown[]): Promise<number> => {
+      const ids = values[0] as string[];
+      const setPublished = query.includes('published_at = now()');
+      let n = 0;
+      for (const r of rows) {
+        if (!ids.includes(r.id)) continue;
+        if (setPublished) r.publishedAt = new Date();
+        else r.claimedAt = null; // reset de claim para fallos transitorios
+        n++;
+      }
+      return n;
     },
   };
-  return { ...tx, $transaction: async (fn) => fn(tx) };
 }
 
 function row(i: number, eventType = 'trip.requested'): Row {
@@ -52,6 +72,7 @@ function row(i: number, eventType = 'trip.requested'): Row {
     envelope: createEnvelope({ eventType, producer: 'trip-service', payload: { i } }),
     createdAt: new Date(2026, 0, 1, 0, 0, i),
     publishedAt: null,
+    claimedAt: null,
   };
 }
 
@@ -108,6 +129,30 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('OutboxRelay · invariante publishTimeoutMs < claimStaleMs (fail-fast anti double-publish)', () => {
+  it('LANZA en el ctor si publishTimeoutMs >= claimStaleMs (una mala config NO arranca)', () => {
+    const opts = {
+      clientId: 'trip-service',
+      brokers: ['localhost:9092'],
+      schema: 'trip',
+      prisma: fakeOutboxClient([]),
+      logger: fakeLogger(),
+      producer: fakeProducer().asKafkaProducer(),
+    };
+    // timeout == stale → inválido (debe ser ESTRICTAMENTE menor).
+    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 30_000, publishTimeoutMs: 30_000 })).toThrow(
+      /publishTimeoutMs.*debe ser <.*claimStaleMs/,
+    );
+    // timeout > stale → inválido.
+    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 10_000, publishTimeoutMs: 30_000 })).toThrow(
+      /publishTimeoutMs/,
+    );
+    // timeout < stale → OK (no lanza). Defaults: 30_000 < 60_000.
+    expect(() => new OutboxRelay({ ...opts })).not.toThrow();
+    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 60_000, publishTimeoutMs: 30_000 })).not.toThrow();
+  });
+});
+
 describe('OutboxRelay (helper promovido a @veo/database)', () => {
   it('conecta el producer al init y publica el batch pendiente marcando publishedAt', async () => {
     const rows = [row(0), row(1), row(2)];
@@ -131,7 +176,7 @@ describe('OutboxRelay (helper promovido a @veo/database)', () => {
     expect(producer.disconnect).toHaveBeenCalledOnce();
   });
 
-  it('publish que falla → NO marca publishedAt (queda para reintentar) y loguea el error', async () => {
+  it('publish que falla → NO marca publishedAt (claim reseteado, retry el próximo tick) SIN tirar el tick', async () => {
     const rows = [row(0)];
     const producer = fakeProducer();
     producer.publish.mockRejectedValueOnce(new Error('Kafka caído'));
@@ -141,13 +186,12 @@ describe('OutboxRelay (helper promovido a @veo/database)', () => {
     await relay.onModuleInit();
     await vi.advanceTimersByTimeAsync(OUTBOX_RELAY_TICK_MS);
 
+    // Desacople: un publish que falla se AÍSLA (ack resetea claimed_at, la fila queda pendiente). Ya NO tira
+    // el tick entero con rollback (causa raíz del thrashing previo) → no hay error log para un fallo transitorio.
     expect(rows[0]!.publishedAt).toBeNull();
-    expect(logger.error).toHaveBeenCalledWith(
-      { err: new Error('Kafka caído') },
-      'outbox relay falló',
-    );
+    expect(logger.error).not.toHaveBeenCalled();
 
-    // El próximo tick reintenta y ahora sí publica.
+    // El próximo tick re-reclama (claimed_at quedó NULL) y ahora sí publica.
     await vi.advanceTimersByTimeAsync(OUTBOX_RELAY_TICK_MS);
     expect(rows[0]!.publishedAt).toBeInstanceOf(Date);
     expect(producer.published.map((p) => p.key)).toEqual(['agg-0']);
@@ -156,7 +200,7 @@ describe('OutboxRelay (helper promovido a @veo/database)', () => {
   });
 
   it('respeta el batchSize por tick (default histórico: 100)', async () => {
-    expect(OUTBOX_RELAY_BATCH_SIZE).toBe(100);
+    expect(OUTBOX_BATCH_SIZE).toBe(100);
     const rows = [row(0), row(1), row(2), row(3), row(4)];
     const producer = fakeProducer();
     const relay = relayWith(rows, producer, fakeLogger(), { batchSize: 2 });
