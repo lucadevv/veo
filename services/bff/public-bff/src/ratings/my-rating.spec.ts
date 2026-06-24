@@ -30,6 +30,12 @@ function makeService(restGet: ReturnType<typeof vi.fn>) {
   return new RatingsService(grpcStub, rest, SECRET, InternalAudience.PUBLIC_RAIL);
 }
 
+function makeServiceWithGrpc(grpcCall: ReturnType<typeof vi.fn>) {
+  const grpc = { call: grpcCall } as unknown as GrpcServiceClient;
+  const rest = { get: vi.fn(), post: vi.fn() } as unknown as InternalRestClient;
+  return new RatingsService(grpc, rest, SECRET, InternalAudience.PUBLIC_RAIL);
+}
+
 describe('RatingsService.getMyRatingForTrip', () => {
   it('devuelve { stars, comment, createdAt } cuando el pasajero ya calificó', async () => {
     const get = vi.fn().mockResolvedValue(RATING);
@@ -80,5 +86,34 @@ describe('RatingsService.getMyRatingForTrip', () => {
 
     const view = await svc.getMyRatingForTrip(user, 'trip-1');
     expect(view?.comment).toBeNull();
+  });
+});
+
+describe('RatingsService.getAggregate · contrato del pasajero sin moderación (anti-IDOR)', () => {
+  it('NO expone flagged/flagReason aunque el reply gRPC los traiga (fuga de moderación cerrada)', async () => {
+    // El reply gRPC PODRÍA traer flags (el rating-service los zeroea para public-rail, pero el BFF no
+    // depende de eso): el contrato del pasajero NO debe tener los campos de moderación de ningún modo.
+    const call = vi.fn().mockResolvedValue({
+      subjectId: 'drv-1',
+      role: 'DRIVER',
+      rollingAvg30d: 4.7,
+      count30d: 120,
+      flagged: true,
+      flagReason: 'suspension',
+      lastComputedAt: '2026-06-01T00:00:00.000Z',
+    });
+    const svc = makeServiceWithGrpc(call);
+
+    const view = await svc.getAggregate(user, 'drv-1');
+
+    expect(view).toEqual({
+      subjectId: 'drv-1',
+      role: 'DRIVER',
+      rollingAvg30d: 4.7,
+      count30d: 120,
+      lastComputedAt: '2026-06-01T00:00:00.000Z',
+    });
+    expect(view).not.toHaveProperty('flagged');
+    expect(view).not.toHaveProperty('flagReason');
   });
 });

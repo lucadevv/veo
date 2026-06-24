@@ -1535,14 +1535,21 @@ export const myRatingView = z.object({
 });
 export type MyRatingView = z.infer<typeof myRatingView>;
 
-/** GET /ratings/aggregate/:subjectId → agregado rolling 30d. */
+/**
+ * GET /ratings/aggregate/:subjectId → agregado rolling 30d que ve el PASAJERO (public-rail).
+ *
+ * Solo reputación pública (promedio rolling 30d + conteo). NO lleva campos de MODERACIÓN
+ * (`flagged`/`flagReason`): el estado de revisión/suspensión del conductor es interno y exponerlo al
+ * pasajero sería una fuga de moderación (IDOR · enumeración). El public-bff los strippeó del
+ * `AggregateView` server-side — este contrato soberano DEBE espejar esa respuesta (sin flags), o el
+ * `parse()` estricto del HttpClient lanza ZodError. El flag self-view del CONDUCTOR vive en
+ * `driverProfileView.rating` (DRIVER_RAIL, /drivers/me), que NO se toca.
+ */
 export const ratingAggregateView = z.object({
   subjectId: z.string(),
   role: z.string(),
   rollingAvg30d: z.number(),
   count30d: z.number().int(),
-  flagged: z.boolean(),
-  flagReason: z.string().nullable(),
   lastComputedAt: z.string().nullable(),
 });
 export type RatingAggregateView = z.infer<typeof ratingAggregateView>;

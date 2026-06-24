@@ -9,8 +9,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  CurrentRail,
+  CurrentUser,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { RatingsService } from './ratings.service';
+import { scopeAggregateForRail } from './domain/moderation-scope';
 import {
   AggregateResponseDto,
   CreateRatingDto,
@@ -50,10 +57,21 @@ export class RatingsController {
   }
 
   @Get('aggregate/:subjectId')
-  @ApiOperation({ summary: 'Agregado de un sujeto (promedio rolling 30d + flags)' })
-  async getAggregate(@Param('subjectId') subjectId: string): Promise<AggregateResponseDto> {
+  @ApiOperation({
+    summary:
+      'Agregado de un sujeto (promedio rolling 30d). La MODERACIÓN (flagged/flagReason) se acota por RIEL: ' +
+      'solo driver-rail (el propio conductor) y admin-rail la ven; public/service-rail la reciben zeroeada ' +
+      '(anti-IDOR · espejo REST del gRPC GetAggregate, mismo helper scopeAggregateForRail).',
+  })
+  async getAggregate(
+    @Param('subjectId') subjectId: string,
+    @CurrentRail() rail: InternalAudience | undefined,
+  ): Promise<AggregateResponseDto> {
     const aggregate = await this.ratings.getAggregate(subjectId);
     if (!aggregate) throw new NotFoundException('Sin agregado para este sujeto');
-    return aggregate;
+    // SCOPING DE MODERACIÓN POR RIEL (anti-IDOR): MISMO punto de decisión que el gRPC. El riel viaja firmado
+    // en la identidad interna (InternalIdentityGuard lo adjunta a req.user.aud); un caller public-rail recibe
+    // flagged=false/flagReason=null aunque el HMAC sea válido. Cierra el gemelo REST del IDOR de moderación.
+    return scopeAggregateForRail(aggregate, rail);
   }
 }

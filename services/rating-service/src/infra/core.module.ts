@@ -9,7 +9,7 @@ import {
   RolesGuard,
   INTERNAL_IDENTITY_SECRET,
   INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
-  type InternalAudience,
+  InternalAudience,
 } from '@veo/auth';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
@@ -28,7 +28,11 @@ const internalSecretProvider: Provider = {
 //  - driver-rail: el CONDUCTOR lee su agregado (driver-bff, gRPC GetAggregate vía GET /drivers/me).
 //  - admin-rail: el back-office consulta agregados de un sujeto (admin-bff, gRPC rating).
 // La ENTRADA de calificaciones por sistema (trip.completed) es event-driven (Kafka), no gateada por audiencia.
-const ALLOWED_AUDIENCES: readonly InternalAudience[] = ['public-rail', 'driver-rail', 'admin-rail'];
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
+  InternalAudience.PUBLIC_RAIL,
+  InternalAudience.DRIVER_RAIL,
+  InternalAudience.ADMIN_RAIL,
+];
 
 @Global()
 @Module({

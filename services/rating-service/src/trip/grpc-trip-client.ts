@@ -8,7 +8,7 @@
  * CERRADO (la llamada PROPAGA el error, no se califica) — nunca una calificación colándose sobre un
  * viaje que no se pudo verificar.
  */
-import { anonymousIdentity, grpcIdentityMetadata, type InternalAudience } from '@veo/auth';
+import { anonymousIdentity, grpcIdentityMetadata, InternalAudience } from '@veo/auth';
 import { createGrpcClient, type TripReply, type GrpcServiceClient } from '@veo/rpc';
 import type { TripClient, TripView } from './trip-client.port';
 
@@ -16,7 +16,7 @@ import type { TripClient, TripView } from './trip-client.port';
  * Audiencia de RIEL de esta llamada: es de SISTEMA (gate fail-closed de RatingsService.create, sin
  * usuario final ni BFF detrás) → `service-rail`. Const TIPADA (InternalAudience), nunca string mágico.
  */
-const SERVICE_RAIL: InternalAudience = 'service-rail';
+const SERVICE_RAIL: InternalAudience = InternalAudience.SERVICE_RAIL;
 
 export class GrpcTripClient implements TripClient {
   private readonly client: GrpcServiceClient;

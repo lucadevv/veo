@@ -58,13 +58,14 @@ export class RatingsService {
   async getAggregate(user: AuthenticatedUser, subjectId: string): Promise<AggregateView> {
     const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.ratingGrpc.call<AggregateReply>('GetAggregate', { subjectId }, meta);
+    // Contrato del pasajero: SOLO reputación pública (avg/count). NO se mapean `flagged`/`flagReason`
+    // del reply gRPC — el estado de moderación del conductor NO viaja al pasajero (cierre del IDOR a
+    // nivel de contrato; el rating-service además los zeroea para public-rail).
     return {
       subjectId: reply.subjectId,
       role: reply.role,
       rollingAvg30d: reply.rollingAvg30d,
       count30d: reply.count30d,
-      flagged: reply.flagged,
-      flagReason: reply.flagReason || null,
       lastComputedAt: reply.lastComputedAt || null,
     };
   }

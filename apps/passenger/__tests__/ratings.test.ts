@@ -1,8 +1,9 @@
-import type {
-  MyRatingView,
-  RatingAggregateView,
-  RatingSubmitRequest,
-  RatingView,
+import {
+  type MyRatingView,
+  type RatingAggregateView,
+  ratingAggregateView,
+  type RatingSubmitRequest,
+  type RatingView,
 } from '@veo/api-client';
 import type {RatingsRepository} from '../src/features/ratings/domain/ratingsRepository';
 import {
@@ -57,5 +58,52 @@ describe('SubmitRatingUseCase', () => {
       RatingValidationError,
     );
     expect(repo.submit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Contrato soberano del PASAJERO vs respuesta real del public-bff (anti contract-break).
+ *
+ * El public-bff strippeó `flagged`/`flagReason` del `AggregateView` (moderación = fuga IDOR, cerrada
+ * server-side). El `parse()` estricto del HttpClient corre `ratingAggregateView.parse(data)`: si el zod
+ * soberano AÚN exigiera esos campos, la respuesta strippeada lanzaría ZodError y `getAggregate` del
+ * pasajero crashearía en runtime. Estos tests anclan que el zod espeja EXACTO lo que el bff devuelve.
+ */
+describe('ratingAggregateView (contrato soberano del pasajero)', () => {
+  // Lo que el public-bff `AggregateView` devuelve HOY (sin campos de moderación).
+  const bffAggregateResponse = {
+    subjectId: '22222222-2222-2222-2222-222222222222',
+    role: 'DRIVER',
+    rollingAvg30d: 4.7,
+    count30d: 31,
+    lastComputedAt: '2026-05-29T10:00:00.000Z',
+  };
+
+  it('parsea la respuesta del public-bff SIN flags de moderación (no lanza ZodError)', () => {
+    expect(() => ratingAggregateView.parse(bffAggregateResponse)).not.toThrow();
+
+    const parsed = ratingAggregateView.parse(bffAggregateResponse);
+    expect(parsed.rollingAvg30d).toBe(4.7);
+    expect(parsed.count30d).toBe(31);
+  });
+
+  it('tolera lastComputedAt null (agregado aún no computado)', () => {
+    expect(() =>
+      ratingAggregateView.parse({...bffAggregateResponse, lastComputedAt: null}),
+    ).not.toThrow();
+  });
+
+  it('no declara campos de moderación en el contrato del pasajero (cierre IDOR)', () => {
+    const parsed = ratingAggregateView.parse(bffAggregateResponse);
+    expect(parsed).not.toHaveProperty('flagged');
+    expect(parsed).not.toHaveProperty('flagReason');
+    // El strip es a nivel de schema: un payload con flags NO los propaga al objeto parseado.
+    const withFlags = ratingAggregateView.parse({
+      ...bffAggregateResponse,
+      flagged: true,
+      flagReason: 'whatever',
+    });
+    expect(withFlags).not.toHaveProperty('flagged');
+    expect(withFlags).not.toHaveProperty('flagReason');
   });
 });

@@ -57,12 +57,16 @@ export interface MyRatingView {
   createdAt: string;
 }
 
+/**
+ * Vista del agregado de reputación que ve el PASAJERO (public-rail): solo reputación pública
+ * (promedio rolling 30d + conteo). NO lleva campos de MODERACIÓN (`flagged`/`flagReason`): el estado
+ * de revisión/suspensión del conductor es interno y exponerlo al pasajero sería una fuga de moderación
+ * (IDOR · enumeración). El rating-service además los zeroea para public-rail — doble cierre.
+ */
 export interface AggregateView {
   subjectId: string;
   role: string;
   rollingAvg30d: number;
   count30d: number;
-  flagged: boolean;
-  flagReason: string | null;
   lastComputedAt: string | null;
 }
