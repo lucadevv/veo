@@ -165,6 +165,7 @@ function TripsInner() {
               emptyTitle="Sin viajes"
               emptyDescription="No hay viajes que coincidan con el filtro."
               onRowClick={(row) => router.push(`/ops/trips/${row.id}`)}
+              rowLabel={(row) => `Ver detalle del viaje ${row.id.slice(0, 8)}`}
             />
             <LoadMore
               hasNextPage={!!query.hasNextPage}

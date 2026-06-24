@@ -107,6 +107,7 @@ export default function PanicsPage() {
                 emptyTitle="Sin alertas"
                 emptyDescription="No hay alertas en esta vista."
                 onRowClick={(row) => router.push(`/security/panics/${row.id}`)}
+                rowLabel={(row) => `Ver detalle de la alerta del viaje ${row.tripId.slice(0, 8)}`}
               />
             )}
           </TabsContent>

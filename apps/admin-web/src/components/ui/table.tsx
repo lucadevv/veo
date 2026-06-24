@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { type KeyboardEvent, useState } from 'react';
 import {
   type ColumnDef,
   type SortingState,
@@ -21,6 +21,12 @@ interface DataTableProps<TData> {
   emptyTitle?: string;
   emptyDescription?: string;
   onRowClick?: (row: TData) => void;
+  /**
+   * Etiqueta accesible por fila clickeable (a11y por teclado/lector). El DataTable es genérico y no
+   * conoce el dominio, así que el caller describe la fila (ej. `Ver detalle del viaje #${row.id}`).
+   * Solo aplica cuando hay `onRowClick`; sin ella la fila clickeable cae a un label genérico.
+   */
+  rowLabel?: (row: TData) => string;
   /** Etiqueta accesible de la tabla. */
   caption: string;
 }
@@ -33,6 +39,7 @@ export function DataTable<TData>({
   emptyTitle = 'Sin resultados',
   emptyDescription,
   onRowClick,
+  rowLabel,
   caption,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -93,10 +100,29 @@ export function DataTable<TData>({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => (
+          {table.getRowModel().rows.map((row) => {
+            const activate = onRowClick ? () => onRowClick(row.original) : undefined;
+            return (
             <tr
               key={row.id}
-              onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+              onClick={activate}
+              // A11y por teclado: una fila con drill-down imperativo (router.push) no es activable de
+              // forma nativa. La hacemos focusable (tabIndex hereda el ring focus-visible del tema) y
+              // activable con Enter/Space; `role="link"` declara que navega (espeja el destino-ruta del
+              // caller). Solo cuando hay onRowClick: sin él la fila conserva su semántica de fila nativa.
+              {...(activate
+                ? {
+                    role: 'link',
+                    tabIndex: 0,
+                    'aria-label': rowLabel?.(row.original),
+                    onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        activate();
+                      }
+                    },
+                  }
+                : {})}
               className={cn(
                 'border-b border-border/60 transition-colors',
                 onRowClick && 'cursor-pointer hover:bg-surface-2',
@@ -108,7 +134,8 @@ export function DataTable<TData>({
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
