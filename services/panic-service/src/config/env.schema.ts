@@ -15,7 +15,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (readiness + rate-limit de endpoints NO críticos; /panic nunca se throttlea)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay → panic.triggered / panic.acknowledged)
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -35,7 +35,7 @@ export const envSchema = z.object({
   // ── Evidencia S3 (Object Lock / WORM). Self-hosted: MinIO en dev. ──
   // 'live' usa el cliente S3 real contra el endpoint; 'sandbox' no toca red (tests/CI offline).
   VEO_EVIDENCE_MODE: z.enum(['live', 'sandbox']).default('live'),
-  S3_ENDPOINT: z.string().default('http://localhost:9002'),
+  S3_ENDPOINT: requiredInProd('http://localhost:9002'),
   S3_REGION: z.string().default('us-east-1'),
   S3_ACCESS_KEY: z.string().default('veo_dev'),
   // Credencial del storage soberano de EVIDENCIA de pánico (Ley 29733). Fail-fast en prod.

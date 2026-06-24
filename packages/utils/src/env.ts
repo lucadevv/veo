@@ -34,19 +34,23 @@ export function secret(devDefault: string) {
  * `secret()` es para CREDENCIALES (HMAC/claves, valor sensible); esto es para INFRA (a dónde me conecto). La
  * semántica de fail-fast es idéntica; la diferencia es el dato que protege y el mensaje de error.
  *
+ * `opts.url: true` preserva la validación `.url()` para endpoints HTTP (mismo fail-fast, además exige URL
+ * bien formada). Omitir para valores que NO son URL (ej. `host:port` de Kafka, o `host:port` de gRPC).
+ *
  * Uso en el env schema:
  *   KAFKA_BROKERS: requiredInProd('localhost:9094'),
+ *   NOTIFICATION_INTERNAL_URL: requiredInProd('http://localhost:3008/api/v1', { url: true }),
  */
-export function requiredInProd(devDefault: string) {
+export function requiredInProd(devDefault: string, opts?: { url?: boolean }) {
+  const base = opts?.url ? z.string().url() : z.string();
   if (isHardenedEnv()) {
-    return z
-      .string()
+    return base
       .min(1, 'config de infra requerida en producción (configurar vía entorno/configmap)')
       .refine((v) => v !== devDefault, {
         message: `no usar el valor de desarrollo ("${devDefault}") en producción: apunta a una dependencia inexistente`,
       });
   }
-  return z.string().default(devDefault);
+  return base.default(devDefault);
 }
 
 /**

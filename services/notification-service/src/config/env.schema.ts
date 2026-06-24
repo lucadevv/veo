@@ -27,7 +27,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (locks del worker / coordinación ligera)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumidores de dominio)
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -128,7 +128,7 @@ export const envSchema = z.object({
   // ---- gRPC downstream ----
   /// share-service (lectura síncrona): resuelve teléfonos+nombres de contactos para el fan-out de
   /// pánico (panic.fanout_requested). El payload Kafka no transporta PII; se resuelve acá por gRPC.
-  SHARE_GRPC_URL: z.string().default('localhost:50059'),
+  SHARE_GRPC_URL: requiredInProd('localhost:50061'),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 }).superRefine((env, ctx) => {

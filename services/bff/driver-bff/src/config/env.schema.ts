@@ -37,7 +37,7 @@ export const envSchema = z
     VEO_INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
     // Redis (rate limiting por IP+usuario+ruta).
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (consumidor de eventos para empujar a la app del conductor por Socket.IO).
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -52,24 +52,24 @@ export const envSchema = z
     MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
     // gRPC (LECTURAS): host:port de cada microservicio.
-    IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
-    TRIP_GRPC_URL: z.string().default('localhost:50052'),
-    DISPATCH_GRPC_URL: z.string().default('localhost:50053'),
-    PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
-    RATING_GRPC_URL: z.string().default('localhost:50060'),
-    FLEET_GRPC_URL: z.string().default('localhost:50062'),
+    IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
+    TRIP_GRPC_URL: requiredInProd('localhost:50052'),
+    DISPATCH_GRPC_URL: requiredInProd('localhost:50053'),
+    PAYMENT_GRPC_URL: requiredInProd('localhost:50055'),
+    RATING_GRPC_URL: requiredInProd('localhost:50060'),
+    FLEET_GRPC_URL: requiredInProd('localhost:50062'),
 
     // REST interno (COMANDOS): base http de cada microservicio (sin /api/v1, se añade en el cliente).
-    IDENTITY_URL: z.string().url().default('http://localhost:3091'),
-    TRIP_URL: z.string().url().default('http://localhost:3092'),
-    DISPATCH_URL: z.string().url().default('http://localhost:3093'),
-    PAYMENT_URL: z.string().url().default('http://localhost:3005'),
-    PAYOUTS_URL: z.string().url().default('http://localhost:3005'),
-    NOTIFICATION_URL: z.string().url().default('http://localhost:3008'),
-    FLEET_URL: z.string().url().default('http://localhost:3012'),
-    MEDIA_URL: z.string().url().default('http://localhost:3007'),
+    IDENTITY_URL: requiredInProd('http://localhost:3091', { url: true }),
+    TRIP_URL: requiredInProd('http://localhost:3092', { url: true }),
+    DISPATCH_URL: requiredInProd('http://localhost:3093', { url: true }),
+    PAYMENT_URL: requiredInProd('http://localhost:3005', { url: true }),
+    PAYOUTS_URL: requiredInProd('http://localhost:3005', { url: true }),
+    NOTIFICATION_URL: requiredInProd('http://localhost:3008', { url: true }),
+    FLEET_URL: requiredInProd('http://localhost:3012', { url: true }),
+    MEDIA_URL: requiredInProd('http://localhost:3007', { url: true }),
     // chat-service (Ola 2A): historial + persistencia de mensajes del viaje.
-    CHAT_URL: z.string().url().default('http://localhost:3014'),
+    CHAT_URL: requiredInProd('http://localhost:3014', { url: true }),
 
     // Bucket S3/MinIO PRIVADO de documentos de flota (PII). Debe coincidir con media-service
     // (S3_BUCKET_DOCUMENTS). El driver-bff lo pasa explícito al presign-put de media.

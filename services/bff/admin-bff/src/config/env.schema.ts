@@ -33,14 +33,14 @@ export const envSchema = z.object({
   VEO_INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
   // Redis (rate-limit + read-model CQRS de listados).
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (consumidor de eventos para read-model + tiempo real Socket.IO).
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
   KAFKA_CONSUMER_GROUP: z.string().default('admin-bff'),
 
   // ClickHouse (analítica vía interfaz HTTP — sin dependencias nuevas).
-  CLICKHOUSE_URL: z.string().default('http://localhost:8123'),
+  CLICKHOUSE_URL: requiredInProd('http://localhost:8123'),
   CLICKHOUSE_DB: z.string().default('veo_analytics'),
   CLICKHOUSE_USER: z.string().default('veo'),
   CLICKHOUSE_PASSWORD: secret('veo_dev'),
@@ -59,25 +59,25 @@ export const envSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
   // ── gRPC (LECTURAS) ──
-  IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
-  TRIP_GRPC_URL: z.string().default('localhost:50052'),
-  DISPATCH_GRPC_URL: z.string().default('localhost:50053'),
-  PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
-  PANIC_GRPC_URL: z.string().default('localhost:50056'),
-  MEDIA_GRPC_URL: z.string().default('localhost:50057'),
-  AUDIT_GRPC_URL: z.string().default('localhost:50059'),
-  RATING_GRPC_URL: z.string().default('localhost:50060'),
-  FLEET_GRPC_URL: z.string().default('localhost:50062'),
+  IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
+  TRIP_GRPC_URL: requiredInProd('localhost:50052'),
+  DISPATCH_GRPC_URL: requiredInProd('localhost:50053'),
+  PAYMENT_GRPC_URL: requiredInProd('localhost:50055'),
+  PANIC_GRPC_URL: requiredInProd('localhost:50056'),
+  MEDIA_GRPC_URL: requiredInProd('localhost:50057'),
+  AUDIT_GRPC_URL: requiredInProd('localhost:50059'),
+  RATING_GRPC_URL: requiredInProd('localhost:50060'),
+  FLEET_GRPC_URL: requiredInProd('localhost:50062'),
 
   // ── REST interno firmado (COMANDOS) — todos /api/v1 ──
-  IDENTITY_URL: z.string().default('http://localhost:3091/api/v1'),
-  TRIP_URL: z.string().default('http://localhost:3092/api/v1'),
-  DISPATCH_URL: z.string().default('http://localhost:3093/api/v1'),
-  PAYMENT_URL: z.string().default('http://localhost:3005/api/v1'),
-  PANIC_URL: z.string().default('http://localhost:3006/api/v1'),
-  MEDIA_URL: z.string().default('http://localhost:3007/api/v1'),
-  AUDIT_URL: z.string().default('http://localhost:3009/api/v1'),
-  FLEET_URL: z.string().default('http://localhost:3012/api/v1'),
+  IDENTITY_URL: requiredInProd('http://localhost:3091/api/v1'),
+  TRIP_URL: requiredInProd('http://localhost:3092/api/v1'),
+  DISPATCH_URL: requiredInProd('http://localhost:3093/api/v1'),
+  PAYMENT_URL: requiredInProd('http://localhost:3005/api/v1'),
+  PANIC_URL: requiredInProd('http://localhost:3006/api/v1'),
+  MEDIA_URL: requiredInProd('http://localhost:3007/api/v1'),
+  AUDIT_URL: requiredInProd('http://localhost:3009/api/v1'),
+  FLEET_URL: requiredInProd('http://localhost:3012/api/v1'),
 
   // Bucket S3 donde fleet-service guarda los archivos de documentos del conductor. El admin-bff lo pasa
   // a media-service (POST /media/internal/presign-get) para acuñar URLs GET firmadas en la revisión.

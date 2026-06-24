@@ -32,7 +32,7 @@ export const envSchema = z
     DATABASE_URL_REPLICA: z.string().url().optional(),
 
     // Redis (OTP store + refresh sessions + rate limit)
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (outbox relay)
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -124,12 +124,12 @@ export const envSchema = z
     /// Base del notification-service (API interna) al que el adaptador SMS LIVE delega el OTP por REST
     /// FIRMADO (POST /notifications). Solo se usa cuando VEO_SMS_MODE=live; el módulo hace getOrThrow,
     /// así que apuntar al notification real antes de activar live. Default: notification del dev-stack.
-    NOTIFICATION_INTERNAL_URL: z.string().url().default('http://localhost:3008/api/v1'),
+    NOTIFICATION_INTERNAL_URL: requiredInProd('http://localhost:3008/api/v1', { url: true }),
     /// Timeout (ms) de la llamada saliente a notification-service. El OTP debe fallar RÁPIDO Y HONESTO
     /// (502 reintentable) si notification se cuelga, en vez de colgar el login del usuario.
     NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
     VEO_BIOMETRIC_MODE: z.enum(BIOMETRIC_MODES).default('sandbox'),
-    BIOMETRIC_SERVICE_URL: z.string().default('http://localhost:3015'),
+    BIOMETRIC_SERVICE_URL: requiredInProd('http://localhost:3015'),
     /// Score mínimo (0..100) de liveness/match para aprobar verificación de turno (BR-I02). Es el MISMO
     /// umbral que biometric-service VEO_BIO_MATCH_THRESHOLD pero en escala 0..100 (score = coseno*100).
     /// Default 40: alineado a 0.40 (franja oficial InsightFace 0.30–0.45 para buffalo_l). El 90 anterior

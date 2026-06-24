@@ -15,7 +15,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (lock del recálculo del cron, cache de agregados)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumo de trip.completed)
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -49,7 +49,7 @@ export const envSchema = z.object({
   GRPC_URL: z.string().default('0.0.0.0:50060'),
   // gRPC CLIENT a trip-service: valida el viaje en el submit de una calificación (existe + COMPLETED +
   // el rater participó). Gate fail-closed de RatingsService.create. Default = dev-stack.
-  TRIP_GRPC_URL: z.string().default('localhost:50052'),
+  TRIP_GRPC_URL: requiredInProd('localhost:50052'),
 });
 
 export type Env = z.infer<typeof envSchema>;

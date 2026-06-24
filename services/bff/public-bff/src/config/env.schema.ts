@@ -41,7 +41,7 @@ export const envSchema = z
     PANIC_HMAC_SECRET: secret('dev-panic-hmac-secret-change-me'),
 
     // ── Infraestructura ──
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
 
     // ── Mapas. Modos: `osrm`/`local` (OSM self-hosted, soberanía §0.7) o `mapbox` (APIs HTTP de
@@ -62,32 +62,32 @@ export const envSchema = z
       .transform((v) => v === 'true'),
 
     // ── gRPC downstream (lecturas) ──
-    IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
-    TRIP_GRPC_URL: z.string().default('localhost:50052'),
-    DISPATCH_GRPC_URL: z.string().default('localhost:50053'),
-    PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
-    PANIC_GRPC_URL: z.string().default('localhost:50056'),
-    RATING_GRPC_URL: z.string().default('localhost:50060'),
-    SHARE_GRPC_URL: z.string().default('localhost:50061'),
-    FLEET_GRPC_URL: z.string().default('localhost:50062'),
+    IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
+    TRIP_GRPC_URL: requiredInProd('localhost:50052'),
+    DISPATCH_GRPC_URL: requiredInProd('localhost:50053'),
+    PAYMENT_GRPC_URL: requiredInProd('localhost:50055'),
+    PANIC_GRPC_URL: requiredInProd('localhost:50056'),
+    RATING_GRPC_URL: requiredInProd('localhost:50060'),
+    SHARE_GRPC_URL: requiredInProd('localhost:50061'),
+    FLEET_GRPC_URL: requiredInProd('localhost:50062'),
     // places-service (Lote B): lugares guardados del pasajero (CRUD gRPC).
-    PLACES_GRPC_URL: z.string().default('localhost:50063'),
+    PLACES_GRPC_URL: requiredInProd('localhost:50063'),
     GRPC_DEADLINE_MS: z.coerce.number().default(5000),
 
     // ── REST interno downstream (comandos). baseUrl = http://localhost:300X/api/v1 ──
-    IDENTITY_URL: z.string().default('http://localhost:3001/api/v1'),
-    TRIP_URL: z.string().default('http://localhost:3002/api/v1'),
+    IDENTITY_URL: requiredInProd('http://localhost:3001/api/v1'),
+    TRIP_URL: requiredInProd('http://localhost:3002/api/v1'),
     // dispatch-service — comandos REST de la PUJA (listar/aceptar/cancelar ofertas del board).
-    DISPATCH_URL: z.string().default('http://localhost:3003/api/v1'),
-    PAYMENT_URL: z.string().default('http://localhost:3005/api/v1'),
-    PANIC_URL: z.string().default('http://localhost:3006/api/v1'),
-    SHARE_URL: z.string().default('http://localhost:3011/api/v1'),
-    RATING_URL: z.string().default('http://localhost:3010/api/v1'),
-    NOTIFICATION_URL: z.string().default('http://localhost:3008/api/v1'),
+    DISPATCH_URL: requiredInProd('http://localhost:3003/api/v1'),
+    PAYMENT_URL: requiredInProd('http://localhost:3005/api/v1'),
+    PANIC_URL: requiredInProd('http://localhost:3006/api/v1'),
+    SHARE_URL: requiredInProd('http://localhost:3011/api/v1'),
+    RATING_URL: requiredInProd('http://localhost:3010/api/v1'),
+    NOTIFICATION_URL: requiredInProd('http://localhost:3008/api/v1'),
     // chat-service (Ola 2A) — historial + persistencia de mensajes; la entrega RT la hace este BFF.
-    CHAT_URL: z.string().default('http://localhost:3014/api/v1'),
+    CHAT_URL: requiredInProd('http://localhost:3014/api/v1'),
     // media-service — presign de subida del avatar (PUT directo a MinIO/S3).
-    MEDIA_URL: z.string().default('http://localhost:3007/api/v1'),
+    MEDIA_URL: requiredInProd('http://localhost:3007/api/v1'),
     REST_TIMEOUT_MS: z.coerce.number().default(8000),
 
     // ── Rate limiting (Redis). POST /panic JAMÁS se limita (BR / FOUNDATION §14). ──

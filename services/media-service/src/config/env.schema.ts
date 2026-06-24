@@ -16,7 +16,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (idempotencia de consumidores + locks de grabación)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumidores de dominio)
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -42,7 +42,7 @@ export const envSchema = z.object({
 
   // === Almacenamiento de grabaciones: S3/MinIO self-hosted (forcePathStyle). ===
   VEO_STORAGE_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
-  S3_ENDPOINT: z.string().default('http://localhost:9002'),
+  S3_ENDPOINT: requiredInProd('http://localhost:9002'),
   S3_REGION: z.string().default('us-east-1'),
   S3_ACCESS_KEY: z.string().default('veo_dev'),
   // Credencial del storage soberano de VIDEO (Ley 29733). Fail-fast en prod: el video del habitáculo no

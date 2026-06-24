@@ -17,7 +17,7 @@ export const envSchema = z
     DATABASE_URL_REPLICA: z.string().url().optional(),
 
     // Redis (hot index de ubicación + exclusión de pánico + contadores de demanda surge)
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (outbox relay + consumidores)
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -34,10 +34,10 @@ export const envSchema = z
     GRPC_URL: z.string().default('0.0.0.0:50053'),
     // gRPC CLIENT a identity-service: re-valida la elegibilidad del conductor en el submit de la PUJA
     // (ADR 010 §6, cierre estructural del catastrófico #9). Default = dev-stack.
-    IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
+    IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
     // gRPC CLIENT a fleet-service: resuelve el vehículo activo del conductor al ACEPTAR (awarding) para
     // adjuntar vehicleId al match → el viaje queda con su vehículo (trazabilidad). Default = dev-stack.
-    FLEET_GRPC_URL: z.string().default('localhost:50062'),
+    FLEET_GRPC_URL: requiredInProd('localhost:50062'),
 
     // OpenTelemetry
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),

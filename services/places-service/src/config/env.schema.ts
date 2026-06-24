@@ -2,7 +2,7 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -14,7 +14,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (readiness + rate-limit; compartido con el dev-stack)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // ── Reglas de negocio (server-side) ──
   /// Tope de favoritos por usuario (Casa/Trabajo no cuentan). Espeja MAX_FAVORITES de la app.

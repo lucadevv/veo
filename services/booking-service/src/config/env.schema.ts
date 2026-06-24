@@ -31,7 +31,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (reservado para gates/locks de fases futuras; el lock de asientos del §6 es F3).
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay → topic 'booking').
   KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -51,22 +51,22 @@ export const envSchema = z.object({
 
   // ── Puertos gRPC SALIENTES (consumo síncrono) ──
   // identity.GetDriver (gate F1a: status/suspensión/KYC/antecedentes del conductor antes de publicar).
-  IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
+  IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
   // fleet.GetDriverVehicles (gate F1a anti-IDOR: pertenencia + vigencia del vehículo al publicar).
   // Default verificado contra dispatch-service / BFFs (fleet gRPC = localhost:50062).
-  FLEET_GRPC_URL: z.string().default('localhost:50062'),
+  FLEET_GRPC_URL: requiredInProd('localhost:50062'),
   // payment.GetPayment (leer estado/recibo del cobro ya disparado — gRPC, §5.4). El gate de deuda y el
   // charge NO son gRPC (ver PAYMENT_INTERNAL_URL abajo).
   // Default coherente con el puerto gRPC REAL de payment-service (env.schema → GRPC_URL :50055), NO :50052
   // (ese es trip-service): apuntar a 50052 hacía que booking llamara a trip-service creyendo hablar con
   // payment. Mismo patrón de default-coherente que IDENTITY_GRPC_URL/FLEET_GRPC_URL (apuntan al puerto real).
-  PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
+  PAYMENT_GRPC_URL: requiredInProd('localhost:50055'),
   // ── Borde REST de payment (ADR-014 §5.5) ──
   // El CHARGE (POST /charge · firmado service-rail · F3b) y el gate de DEUDA al reservar (GET /debt · F3a)
   // son REST, no gRPC (corrección as-built del contrato real de payment). Apunta a la API interna de
   // payment-service (/api/v1). Mismo patrón que share-service→notification (NOTIFICATION_INTERNAL_URL).
   // payment-service corre en el puerto 3005. Fail-fast: si falta/inválida, booking NO arranca.
-  PAYMENT_INTERNAL_URL: z.string().url().default('http://localhost:3005/api/v1'),
+  PAYMENT_INTERNAL_URL: requiredInProd('http://localhost:3005/api/v1', { url: true }),
 
   // ── BÚSQUEDA GEO H3 (F2 · §6.2) ─────────────────────────────────────────────────────────────────
   // k del anillo H3 de búsqueda (neighbors(celda, k)). k=1 → 7 celdas (≈ la celda + su corona), buen

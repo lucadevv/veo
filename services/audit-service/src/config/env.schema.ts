@@ -56,7 +56,7 @@ export const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  AUDIT_S3_ENDPOINT: z.string().default('http://localhost:9002'),
+  AUDIT_S3_ENDPOINT: requiredInProd('http://localhost:9002'),
   AUDIT_S3_REGION: z.string().default('us-east-1'),
   AUDIT_S3_BUCKET: z.string().default('veo-audit-log'),
   AUDIT_S3_ACCESS_KEY: z.string().default('veo_dev'),

@@ -15,7 +15,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (locks de cron / idempotencia auxiliar)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumidores)
   KAFKA_BROKERS: requiredInProd('localhost:9094'),

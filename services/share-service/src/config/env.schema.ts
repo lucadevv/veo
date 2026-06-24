@@ -25,7 +25,7 @@ export const envSchema = z
     DATABASE_URL_REPLICA: z.string().url().optional(),
 
     // Redis (OTP de contactos + cool-down de la lista + rate-limit)
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (outbox relay + consumidores)
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
@@ -58,7 +58,7 @@ export const envSchema = z
 
     // notification-service (modo SMS live): el adaptador delega la entrega del OTP por REST FIRMADO
     // (POST /notifications). Mismas vars que identity-service. URL apunta a la API interna (/api/v1).
-    NOTIFICATION_INTERNAL_URL: z.string().url().default('http://localhost:3008/api/v1'),
+    NOTIFICATION_INTERNAL_URL: requiredInProd('http://localhost:3008/api/v1', { url: true }),
     NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
 
     // Secreto de identidad interna que el BFF propaga a los servicios
