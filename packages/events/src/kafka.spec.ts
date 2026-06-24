@@ -56,6 +56,10 @@ vi.mock('kafkajs', () => ({
 const incSpy = vi.fn();
 vi.mock('@veo/observability', () => ({
   domainEventsTotal: { inc: incSpy },
+  // Propagación de traza a través del outbox: en este spec (sin OTel) degradan a no-op exacto —
+  // captureTraceparent → undefined (no setea el campo), runWithExtractedTraceparent → ejecuta fn tal cual.
+  captureTraceparent: (): string | undefined => undefined,
+  runWithExtractedTraceparent: <R>(_tp: string | undefined, fn: () => R): R => fn(),
   EventResult: {
     CONSUMED: 'consumed',
     ERROR: 'error',

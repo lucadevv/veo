@@ -4,7 +4,12 @@
  * - KafkaEventConsumer.on(eventType, handler) valida al recibir y descarta lo inválido (a DLQ-log).
  */
 import { Kafka, type Producer, type Consumer, type KafkaConfig, logLevel } from 'kafkajs';
-import { domainEventsTotal, EventResult, UNKNOWN_EVENT } from '@veo/observability';
+import {
+  domainEventsTotal,
+  EventResult,
+  UNKNOWN_EVENT,
+  runWithExtractedTraceparent,
+} from '@veo/observability';
 import { type EventEnvelope, envelopeSchema } from './envelope.js';
 import { schemaForEvent, topicForEvent, type EventType, type EventPayload } from './schemas.js';
 
@@ -50,12 +55,20 @@ export class KafkaEventProducer {
     // Lo dejamos propagar SIN métrica — el scope de la métrica es el send() a Kafka, no la validación.
     if (schema) schema.parse(envelope.payload);
     try {
-      await this.producer.send({
-        topic: topicForEvent(envelope.eventType),
-        messages: [
-          { key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } },
-        ],
-      });
+      // RESTAURA el contexto de traza capturado en el enqueue (request). Envolver el `send` en el
+      // contexto del request hace que la auto-instrumentación de kafkajs cree el span del publish como
+      // HIJO del request original (no del tick del relay) e inyecte el `traceparent` correcto en los
+      // headers Kafka → el consumer continúa la traza ORIGINAL. Sin traceparent (envelope viejo / sin
+      // OTel) ejecuta el `send` tal cual (camino histórico). NO inyectamos el header a mano: lo hace la
+      // auto-instrumentación de kafkajs a partir del contexto activo (no duplicar).
+      await runWithExtractedTraceparent(envelope.traceparent, () =>
+        this.producer.send({
+          topic: topicForEvent(envelope.eventType),
+          messages: [
+            { key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } },
+          ],
+        }),
+      );
     } catch (err) {
       domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.PUBLISH_FAILED });
       throw err; // re-lanzar: el outbox relay / caller decide retry. No tragar.
