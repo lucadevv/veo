@@ -501,3 +501,44 @@ spec:
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: tmp, emptyDir: {} }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: booking-service-migrate
+  labels: { app: booking-service-migrate, tier: backend }
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: { app: booking-service-migrate, tier: backend }
+    spec:
+      restartPolicy: Never
+      serviceAccountName: booking-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: ecr/booking-service:latest
+          command: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: booking-service-secrets, key: DATABASE_URL } }
+            - { name: npm_config_cache, value: /tmp/.npm }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }

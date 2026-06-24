@@ -1,0 +1,108 @@
+## Deployment + Service de booking-service (carpooling marketplace · ADR-014).
+## Espeja el template de payment-service (mismo perfil: gRPC server + clients + Kafka + DB + outbox).
+## Puertos fijos (ADR-014 §12): REST/http 3016, gRPC 50054 (gRPC NO expuesto aún — gap repo-wide, ver configmaps).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-service
+  labels: { app: booking-service, tier: backend }
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: booking-service } }
+  template:
+    metadata:
+      labels: { app: booking-service, tier: backend }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3016"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: booking-service # IRSA bound to least-privilege IAM role
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: booking-service } }
+      containers:
+        - name: app
+          image: ecr/booking-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 3016, protocol: TCP }
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: PORT, value: "3016" }
+          envFrom:
+            - secretRef: { name: booking-service-secrets }
+            - configMapRef: { name: booking-service-config }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app: booking-service } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: booking-service
+  labels: { app: booking-service }
+spec:
+  type: ClusterIP
+  ports:
+    - { name: http, port: 80, targetPort: http, protocol: TCP }
+  selector: { app: booking-service }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: booking-service-pdb
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: booking-service } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: booking-service-hpa
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: booking-service }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+    - type: Resource
+      resource: { name: memory, target: { type: Utilization, averageUtilization: 80 } }

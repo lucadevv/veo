@@ -76,6 +76,25 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: booking-service-config
+  labels: { app: booking-service }
+data:
+  LOG_LEVEL: "info"
+  KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  IDENTITY_GRPC_URL: "identity-service:50051"
+  FLEET_GRPC_URL: "fleet-service:50062"
+  PAYMENT_GRPC_URL: "payment-service:50055"
+  PAYMENT_INTERNAL_URL: "http://payment-service/api/v1"
+  # VEO_MAPS_MODE DEBE ser "osrm" en prod: el superRefine del schema lo EXIGE (NODE_ENV=production);
+  # con el default "local" booking haría CrashLoop. OSRM/NOMINATIM = placeholder PENDIENTE (terraform).
+  VEO_MAPS_MODE: "osrm"
+  OSRM_BASE_URL: "PENDIENTE_OSRM_URL"
+  NOMINATIM_BASE_URL: "PENDIENTE_NOMINATIM_URL"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: panic-service-config
   labels: { app: panic-service }
 data:
