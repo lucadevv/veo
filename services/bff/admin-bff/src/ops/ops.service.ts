@@ -89,9 +89,12 @@ function toDocumentSide(side: string): DocumentSideValue {
 /**
  * Documentos OBLIGATORIOS para aprobar a un conductor (gate server-side autoritativo · Ley 29733).
  * Tipos del enum canónico de flota (NO magic strings): licencia A1 + SOAT + tarjeta de propiedad.
- * DEUDA: el onboarding móvil sube LICENSE_A1 + SOAT + 'VEHICLE_REGISTRATION', pero el enum canónico de
- * fleet para la tarjeta de propiedad del vehículo es PROPERTY_CARD — hay un mismatch de string a
- * reconciliar (mobile 'VEHICLE_REGISTRATION' ↔ fleet PROPERTY_CARD). Acá mandamos el tipo canónico.
+ * NOTA (reconciliación cerrada): `'VEHICLE_REGISTRATION'` es SOLO una etiqueta interna del wizard móvil
+ * ("tarjeta de propiedad" en la UI); NUNCA viaja cruda. El móvil la traduce al `FleetDocumentType` canónico
+ * `PROPERTY_CARD` en el borde del wire vía `registrationDocTypeToBackend` (switch exhaustivo sin `default`
+ * + test de regresión P0), así que el presign del driver-bff (`@IsEnum(FleetDocumentType)`) recibe siempre
+ * el tipo canónico. La cadena queda alineada de punta a punta (móvil→PROPERTY_CARD, fleet almacena
+ * PROPERTY_CARD, este gate exige PROPERTY_CARD): no hay mismatch de string que reconciliar.
  */
 const REQUIRED_DRIVER_DOC_TYPES = [
   FleetDocumentType.LICENSE_A1,
