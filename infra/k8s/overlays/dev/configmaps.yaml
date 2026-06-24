@@ -15,6 +15,9 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
   JWT_ISSUER: "veo-identity"
   JWT_AUDIENCE: "veo-app"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  BIOMETRIC_SERVICE_URL: "http://biometric-service"
+  NOTIFICATION_INTERNAL_URL: "http://notification-service/api/v1"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -56,6 +59,9 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  S3_ENDPOINT: "PENDIENTE_S3_ENDPOINT"
+  LIVEKIT_URL: "PENDIENTE_LIVEKIT_WSS_URL"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -76,6 +82,8 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  S3_ENDPOINT: "PENDIENTE_S3_ENDPOINT"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -103,6 +111,8 @@ data:
   # Contención de red adicional: la NetworkPolicy networkpolicies/east-west.yaml (allow-bff-ingress)
   # restringe el ingreso al pod SOLO desde ingress-nginx.
   TRUSTED_PROXY: "loopback, linklocal, 10.2.0.0/16"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  AUDIT_S3_ENDPOINT: "PENDIENTE_S3_ENDPOINT"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -124,6 +134,8 @@ data:
   LOG_LEVEL: "debug"
   KAFKA_BROKERS: "PENDIENTE_MSK_BOOTSTRAP_BROKERS"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  NOTIFICATION_INTERNAL_URL: "http://notification-service/api/v1"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -273,6 +285,8 @@ data:
   MEDIA_URL: "http://media-service"
   AUDIT_URL: "http://audit-service"
   FLEET_URL: "http://fleet-service"
+  # requiredInProd (fail-fast prod): antes en default localhost del schema; ahora la var es requerida.
+  CLICKHOUSE_URL: "PENDIENTE_CLICKHOUSE_URL"
 # admin-web: Next.js — sin contrato de env de runtime; existe para satisfacer el envFrom del Deployment.
 ---
 apiVersion: v1
