@@ -13,7 +13,7 @@ import { Injectable, Inject, type OnApplicationBootstrap } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config';
 import { type EventHandler, type EventPayload } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { LOGGER, type Logger, domainEventsTotal } from '@veo/observability';
+import { LOGGER, type Logger } from '@veo/observability';
 import type { TripStatus } from '@veo/api-client';
 import type { Env } from '../config/env.schema';
 import { ReadModelService } from '../read-model/read-model.service';
@@ -95,7 +95,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         createdAt: e.occurredAt,
       });
       this.emitTrip(p.tripId, 'REQUESTED', null, e.occurredAt);
-      this.counted('trip.requested');
     };
     for (const type of [
       'trip.assigned',
@@ -112,7 +111,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         const p = e.payload as { tripId: string; driverId?: string; etaSeconds?: number };
         await this.readModel.patchTrip(p.tripId, status, p.driverId);
         this.emitTrip(p.tripId, status, p.etaSeconds ?? null, e.occurredAt);
-        this.counted(type);
       };
     }
 
@@ -128,7 +126,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         rejectionReason: null,
         updatedAt: p.verifiedAt,
       });
-      this.counted('driver.verified');
     };
     record['driver.rejected'] = async (e) => {
       const p = e.payload as EventPayload<'driver.rejected'>;
@@ -141,7 +138,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         rejectionReason: p.reason ? p.reason : null,
         updatedAt: p.rejectedAt,
       });
-      this.counted('driver.rejected');
     };
     // El conductor RECHAZADO corrigió y reenvió a revisión (BR-I01): vuelve a PENDIENTE. Sin esto el
     // read-model quedaba stale en REJECTED mientras identity (detalle) ya decía PENDING (double-source).
@@ -156,7 +152,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         rejectionReason: null,
         updatedAt: p.resubmittedAt,
       });
-      this.counted('driver.resubmitted');
     };
     record['driver.flagged'] = async (e) => {
       const p = e.payload as EventPayload<'driver.flagged'>;
@@ -165,7 +160,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         averageRating: p.rollingAvg,
         updatedAt: new Date().toISOString(),
       });
-      this.counted('driver.flagged');
     };
     record['fleet.driver_suspended'] = async (e) => {
       const p = e.payload as EventPayload<'fleet.driver_suspended'>;
@@ -184,7 +178,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
           { vehicleId: p.vehicleId, userId: p.userId },
           'fleet.driver_suspended por ITV (keyeado por userId): status NO proyectado al read-model (autoridad: identity). Detalle del panel correcto vía gRPC.',
         );
-        this.counted('fleet.driver_suspended');
         return;
       }
       await this.readModel.upsertDriver({
@@ -192,7 +185,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         status: 'SUSPENDED',
         updatedAt: p.suspendedAt,
       });
-      this.counted('fleet.driver_suspended');
     };
     // Suspensión MANUAL por un operador admin (espejo de fleet.driver_suspended, pero originada en el panel):
     // proyecta status=SUSPENDED para que la lista de conductores lo refleje. Idempotente (upsert por id).
@@ -203,7 +195,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         status: 'SUSPENDED',
         updatedAt: p.suspendedAt,
       });
-      this.counted('driver.suspended');
     };
     // Reactivación MANUAL por un operador (la inversa de driver.suspended): saca al conductor de SUSPENDED
     // y lo proyecta de vuelta a ACTIVE (el mismo status post-aprobación que usa driver.verified). El
@@ -216,7 +207,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         status: 'ACTIVE',
         updatedAt: p.reactivatedAt,
       });
-      this.counted('driver.reactivated');
     };
     record['driver.location_updated'] = async (e) => {
       const p = e.payload as EventPayload<'driver.location_updated'>;
@@ -228,7 +218,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         speedKph: null,
         at: p.at,
       });
-      this.counted('driver.location_updated');
     };
 
     // ── Pánico (prioridad) ──
@@ -242,17 +231,14 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
         status: 'TRIGGERED',
         triggeredAt: p.triggeredAt,
       });
-      this.counted('panic.triggered');
     };
     record['panic.acknowledged'] = async (e) => {
       const p = e.payload as EventPayload<'panic.acknowledged'>;
       this.gateway.emitPanicUpdate({ panicId: p.panicId, status: 'ACKNOWLEDGED', at: p.ackAt });
-      this.counted('panic.acknowledged');
     };
     record['panic.resolved'] = async (e) => {
       const p = e.payload as EventPayload<'panic.resolved'>;
       this.gateway.emitPanicUpdate({ panicId: p.panicId, status: p.status, at: p.at });
-      this.counted('panic.resolved');
     };
 
     return record;
@@ -265,9 +251,5 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
     at: string,
   ): void {
     this.gateway.emitTripUpdate({ tripId, status, etaSeconds, driverLocation: null, at });
-  }
-
-  private counted(event: string): void {
-    domainEventsTotal.inc({ event, result: 'consumed' });
   }
 }

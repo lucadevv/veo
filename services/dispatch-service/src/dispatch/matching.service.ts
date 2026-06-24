@@ -32,7 +32,6 @@ import {
   type VehicleClass,
 } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
 import { DriverPool } from './driver-pool';
@@ -396,7 +395,6 @@ export class MatchingService {
         },
       });
     });
-    domainEventsTotal.inc({ event: 'dispatch.no_offers', result: 'published' });
     this.logger.log(
       `matcher FIXED sin candidatos para ${tripId} (intentados ${attemptedDrivers}) → no_offers`,
     );

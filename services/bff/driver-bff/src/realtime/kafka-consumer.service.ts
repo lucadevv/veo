@@ -17,7 +17,12 @@ import {
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { createLogger, domainEventsTotal, type Logger } from '@veo/observability';
+import {
+  createLogger,
+  domainEventsTotal,
+  BusinessEventResult,
+  type Logger,
+} from '@veo/observability';
 import type { ChatMessage, WaypointProposedMsg } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import type { TripReply } from '../common/grpc-replies';
@@ -98,7 +103,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     if (!schema) return;
     const parsed = schema.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'invalid' });
       return;
     }
     const payload = parsed.data as Record<string, unknown>;
@@ -106,7 +110,7 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     try {
       const driverId = await this.resolveDriverId(payload);
       if (!driverId) {
-        domainEventsTotal.inc({ event: envelope.eventType, result: 'no_driver' });
+        domainEventsTotal.inc({ event: envelope.eventType, result: BusinessEventResult.NO_DRIVER });
         return;
       }
       this.gateway.emitToDriver(driverId, socketEvent, {
@@ -114,13 +118,19 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         occurredAt: envelope.occurredAt,
         payload: parsed.data,
       });
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'emitted' });
+      domainEventsTotal.inc({ event: envelope.eventType, result: BusinessEventResult.EMITTED });
     } catch (err) {
       this.log.warn(
         { err, eventType: envelope.eventType },
         'no se pudo enrutar el evento al conductor',
       );
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'error' });
+      // NEGOCIO, no transporte: la entrega realtime es best-effort (el conductor re-sincroniza al
+      // reconectar). El error se TRAGA a propósito (handler retorna normal) → el base emite CONSUMED
+      // encima. La métrica dice "falló la entrega al socket", DISJUNTA del EventResult.ERROR del base.
+      domainEventsTotal.inc({
+        event: envelope.eventType,
+        result: BusinessEventResult.DELIVERY_FAILED,
+      });
     }
   }
 
@@ -131,7 +141,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
   private async handleChatMessage(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = chatMessageSent.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'invalid' });
       return;
     }
     try {
@@ -142,7 +151,7 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         SYSTEM_IDENTITY,
       );
       if (!trip.found || !trip.driverId) {
-        domainEventsTotal.inc({ event: 'chat.message_sent', result: 'no_driver' });
+        domainEventsTotal.inc({ event: 'chat.message_sent', result: BusinessEventResult.NO_DRIVER });
         return;
       }
       const msg: ChatMessage = {
@@ -154,10 +163,14 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         createdAt: parsed.data.createdAt,
       };
       this.gateway.emitToDriver(trip.driverId, 'chat:message', msg);
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'emitted' });
+      domainEventsTotal.inc({ event: 'chat.message_sent', result: BusinessEventResult.EMITTED });
     } catch (err) {
       this.log.warn({ err }, 'no se pudo enrutar el mensaje de chat al conductor');
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'error' });
+      // Best-effort realtime (ver handleEvent): el swallow es INTENCIONAL, el base cuenta CONSUMED.
+      domainEventsTotal.inc({
+        event: 'chat.message_sent',
+        result: BusinessEventResult.DELIVERY_FAILED,
+      });
     }
   }
 
@@ -170,7 +183,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
   private handleWaypointProposed(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = tripWaypointProposed.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'invalid' });
       return Promise.resolve();
     }
     const msg: WaypointProposedMsg = {
@@ -182,7 +194,7 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
       expiresAt: parsed.data.expiresAt,
     };
     this.gateway.emitToDriver(parsed.data.driverId, 'waypoint:proposed', msg);
-    domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'emitted' });
+    domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: BusinessEventResult.EMITTED });
     return Promise.resolve();
   }
 

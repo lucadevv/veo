@@ -12,7 +12,6 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { domainEventsTotal } from '@veo/observability';
 import { type DispatchOffer, type OfferDelivery } from './offer-delivery.port';
 import { EPHEMERAL_EVENT_PUBLISHER, type EphemeralEventPublisher } from './ephemeral-event.port';
 
@@ -48,6 +47,5 @@ export class RealtimeOfferDelivery implements OfferDelivery {
     this.logger.debug(
       `oferta ${offer.matchId} → driver ${offer.driverId} (trip ${offer.tripId}, intento ${offer.attempt}, eta ${offer.etaSeconds}s) publicada (Kafka directo)`,
     );
-    domainEventsTotal.inc({ event: 'dispatch.offered', result: 'published' });
   }
 }

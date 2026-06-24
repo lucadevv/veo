@@ -23,7 +23,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { driverReactivated, type EventEnvelope, type EventHandler } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { domainEventsTotal } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 import { RatingsService } from './ratings.service';
 
@@ -67,7 +66,6 @@ export class TripCompletedConsumer extends KafkaConsumerBootstrap {
 
   private async onTripCompleted(envelope: EventEnvelope<unknown>): Promise<void> {
     const payload = envelope.payload as { tripId?: string };
-    domainEventsTotal.inc({ event: TRIP_COMPLETED, result: 'consumed' });
     this.logger.debug(`viaje completado y elegible para calificación: ${payload.tripId ?? '?'}`);
     return Promise.resolve();
   }
@@ -81,14 +79,12 @@ export class TripCompletedConsumer extends KafkaConsumerBootstrap {
   private async onDriverReactivated(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = driverReactivated.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: DRIVER_REACTIVATED, result: 'invalid' });
       this.logger.warn(`${DRIVER_REACTIVATED} con payload inválido; descartado`);
       return;
     }
     const { driverId } = parsed.data;
     try {
       const cleared = await this.ratings.clearRatingFlag(driverId);
-      domainEventsTotal.inc({ event: DRIVER_REACTIVATED, result: 'consumed' });
       if (cleared) {
         this.logger.log(`Flag de rating limpiado para el conductor ${driverId} tras reactivación`);
       }

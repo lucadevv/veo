@@ -7,7 +7,7 @@
 import { Injectable } from '@nestjs/common';
 import { uuidv7 } from '@veo/utils';
 import type { EventEnvelope } from '@veo/events';
-import { domainEventsTotal } from '@veo/observability';
+import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { AuditRepository, type AppendResult, type RecordedEntry } from './audit.repository';
 import { verifyChain, type ChainVerificationResult } from './chain';
 
@@ -57,7 +57,7 @@ export class AuditService {
       occurredAt: input.occurredAt ?? new Date(),
       payload: input.payload,
     });
-    domainEventsTotal.inc({ event: input.action, result: 'recorded' });
+    domainEventsTotal.inc({ event: input.action, result: BusinessEventResult.RECORDED });
     return result.entry;
   }
 
@@ -80,7 +80,7 @@ export class AuditService {
     });
     domainEventsTotal.inc({
       event: envelope.eventType,
-      result: result.created ? 'recorded' : 'duplicate',
+      result: result.created ? BusinessEventResult.RECORDED : BusinessEventResult.DUPLICATE,
     });
     return result;
   }

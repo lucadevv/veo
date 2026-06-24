@@ -20,7 +20,6 @@ import {
   type DriverSuspendedPayload,
   type VehicleSuspendedPayload,
 } from '../events/fleet-events';
-import { recordFleetDomainEvent } from '../events/fleet-metrics';
 import {
   computeExpiryAlert,
   daysUntilCeil,
@@ -450,10 +449,9 @@ export class ExpirySweeper {
         envelope: envelope as unknown as Prisma.InputJsonValue,
       },
     });
-    // OBSERVABILIDAD (FOUNDATION §5/§6, CLAUDE.md regla 6): el sweeper emite 4+ tipos de evento de dominio
-    // y solo logueaba el resumen. Bumpeamos el counter ESTÁNDAR `domain_events_total{event,result}` en el
-    // punto ÚNICO por donde pasan TODOS los eventos del sweeper (este enqueue) → una sola línea cubre
-    // document_expiring/expired, driver_suspended/reactivated y vehicle_suspended. El eventType viaja tipado.
-    recordFleetDomainEvent(envelope.eventType as FleetEventType);
+    // OBSERVABILIDAD (FOUNDATION §5/§6, CLAUDE.md regla 6): NO bumpeamos el counter acá. La visibilidad
+    // por-tipo de `domain_events_total{event,result=published}` la da la capa BASE (KafkaEventProducer.publish
+    // en @veo/events) cuando el OutboxRelay drena ESTE evento → contar en el enqueue duplicaba la serie del
+    // base (mismo patrón dedupeado en dispatch). El intent enqueue-vs-publish se ve por el lag del outbox.
   }
 }

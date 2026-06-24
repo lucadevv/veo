@@ -38,7 +38,7 @@ import { createEnvelope } from '@veo/events';
 import { isUniqueViolation } from '@veo/database';
 import { DispatchOutcome, type SpecialRequest, type VehicleClass } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { domainEventsTotal } from '@veo/observability';
+import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
@@ -623,8 +623,6 @@ export class OfferBoardService {
     // markBusy se mantiene acá (Lote separado): el claim atómico ya garantiza que solo este camino
     // llega hasta acá, así que no hay carrera de doble-markBusy para este board.
     await this.hotIndex.markBusy(driverId);
-    domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'published' });
-    domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     this.logger.log(`board trip=${tripId} CLOSED_MATCHED → driver=${driverId}`);
     return { ...chosen, status: OfferStatus.ACCEPTED };
   }
@@ -908,7 +906,7 @@ export class OfferBoardService {
           `N5 reconciliador: SKIP trip=${board.tripId} driver=${driverId} — sin DispatchMatch ACCEPTED ` +
             `con agreedPriceCents persistido (no se fabrica precio; se reintenta luego)`,
         );
-        domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'skipped' });
+        domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: BusinessEventResult.SKIPPED });
         continue;
       }
       try {
@@ -962,8 +960,8 @@ export class OfferBoardService {
         );
       }
       await this.store.markMatchEmitted(board.tripId);
-      domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'reconciled' });
-      domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'reconciled' });
+      domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: BusinessEventResult.RECONCILED });
+      domainEventsTotal.inc({ event: 'dispatch.match_found', result: BusinessEventResult.RECONCILED });
       this.logger.warn(
         `N5 reconciliador: re-emitido match_found trip=${board.tripId} driver=${driverId} (residual hard-crash)`,
       );
@@ -1032,6 +1030,5 @@ export class OfferBoardService {
       );
       return;
     }
-    domainEventsTotal.inc({ event: eventType, result: 'published' });
   }
 }

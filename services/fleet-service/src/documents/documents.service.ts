@@ -15,7 +15,6 @@ import {
   type Page,
 } from '../infra/pagination';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
-import { recordFleetDomainEvent } from '../events/fleet-metrics';
 import {
   assertS3KeysBelongToOwner,
   deriveExpiryStatus,
@@ -408,7 +407,6 @@ export class DocumentsService {
             reactivatedAt: now.toISOString(),
           }),
         );
-        recordFleetDomainEvent(FleetEventType.DRIVER_REACTIVATED);
       }
       return updated;
     });

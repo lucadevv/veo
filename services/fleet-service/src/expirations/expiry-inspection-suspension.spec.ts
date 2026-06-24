@@ -14,7 +14,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { domainEventsTotal } from '@veo/observability';
 import { ExpirySweeper } from './expiry.sweeper';
 import { FleetEventType } from '../events/fleet-events';
 import { VehicleDocStatus } from '../generated/prisma';
@@ -246,26 +245,6 @@ describe('ExpirySweeper · auto-suspensión por ITV vencida (Lote B)', () => {
       )
       .filter(Boolean);
     expect(userIds).toEqual(expect.arrayContaining(['user-A', 'user-B']));
-  });
-
-  it('FIX observabilidad: cada suspensión por ITV bumpea domain_events_total{event=fleet.driver_suspended}', async () => {
-    const labels = { event: FleetEventType.DRIVER_SUSPENDED, result: 'emitted' };
-    const before = (await domainEventsTotal.get()).values.find(
-      (v) => v.labels.event === labels.event && v.labels.result === labels.result,
-    )?.value ?? 0;
-
-    const veh = vehicle();
-    const { sweeper } = makeSweeper({
-      vehiclesForSweep: [veh],
-      vehiclesForDriver: [veh],
-      latestInspection: inspection({ nextDueAt: new Date('2026-05-01T00:00:00.000Z') }),
-    });
-    await sweeper.sweep(NOW);
-
-    const after = (await domainEventsTotal.get()).values.find(
-      (v) => v.labels.event === labels.event && v.labels.result === labels.result,
-    )?.value ?? 0;
-    expect(after).toBe(before + 1);
   });
 
   it('sin vehículo OPERABLE (todos con docs vencidos) → NO suspende por ITV (lo cubre el gate de alta)', async () => {

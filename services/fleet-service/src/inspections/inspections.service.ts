@@ -13,7 +13,6 @@ import {
   isInspectionCurrent,
 } from './inspection-rules';
 import { buildFleetEvent, FleetEventType, type DriverReactivatedPayload } from '../events/fleet-events';
-import { recordFleetDomainEvent } from '../events/fleet-metrics';
 import type { CreateInspectionDto } from './dto/inspection.dto';
 import { Prisma, type Inspection } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -98,7 +97,6 @@ export class InspectionsService {
               envelope: envelope as unknown as Prisma.InputJsonValue,
             },
           });
-          recordFleetDomainEvent(FleetEventType.DRIVER_REACTIVATED);
         }
         return inspection;
       });

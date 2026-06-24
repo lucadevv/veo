@@ -27,7 +27,7 @@ import {
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { domainEventsTotal } from '@veo/observability';
+import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { VehicleClass } from '@veo/shared-types';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { MatchingService } from '../dispatch/matching.service';
@@ -83,7 +83,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
 
   private async onTripRequested(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['trip.requested'].parse(env.payload);
-    domainEventsTotal.inc({ event: 'trip.requested', result: 'consumed' });
     await this.surge.recordDemand(p.origin);
     // Ola 2C: alimenta el mapa de calor de demanda por celda H3 (ventana deslizante en Redis).
     await this.heatmap.recordDemand(p.origin);
@@ -112,7 +111,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    */
   private async onBidPosted(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['trip.bid_posted'].parse(env.payload);
-    domainEventsTotal.inc({ event: 'trip.bid_posted', result: 'consumed' });
     await this.offerBoard.openBoard({
       tripId: p.tripId,
       passengerId: p.passengerId,
@@ -146,7 +144,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    */
   private async onReassigning(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['trip.reassigning'].parse(env.payload);
-    domainEventsTotal.inc({ event: 'trip.reassigning', result: 'consumed' });
     // ORDEN DELIBERADO — SEGURIDAD PRIMERO: reopenBoard (+ releaseDriver) re-abren el OfferBoard para que el
     // pasajero ABANDONADO consiga otro conductor; es la acción de seguridad y NO debe quedar gateada por un hipo
     // del contador (analítica). Por eso van ANTES que registerCancellationInWindow. Si el conteo falla transitorio,
@@ -175,7 +172,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
           `POISON trip.reassigning: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); ` +
             'no se cuenta para la ventana de cancelaciones',
         );
-        domainEventsTotal.inc({ event: 'trip.reassigning', result: 'poison' });
+        domainEventsTotal.inc({ event: 'trip.reassigning', result: BusinessEventResult.REJECTED });
         return;
       }
       try {
@@ -192,7 +189,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
             `POISON trip.reassigning: error permanente de datos al contar cancelación de ` +
               `${p.driverId} (trip ${p.tripId}, eventId=${env.eventId}); descartado: ${String(err)}`,
           );
-          domainEventsTotal.inc({ event: 'trip.reassigning', result: 'poison' });
+          domainEventsTotal.inc({ event: 'trip.reassigning', result: BusinessEventResult.REJECTED });
         } else {
           throw err;
         }
@@ -214,7 +211,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // B5-3.2 · certs vigentes del conductor para gatear las verticales (fail-closed en el pool).
       certifications: p.certifications,
     });
-    domainEventsTotal.inc({ event: 'driver.location_updated', result: 'consumed' });
   }
 
   private async onPanic(env: EventEnvelope<unknown>): Promise<void> {
@@ -227,20 +223,19 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       this.logger.error(
         `POISON panic.triggered: tripId no-UUID "${String(p.tripId)}" (panicId=${p.panicId}, eventId=${env.eventId}); descartado sin reintento`,
       );
-      domainEventsTotal.inc({ event: 'panic.triggered', result: 'poison' });
+      domainEventsTotal.inc({ event: 'panic.triggered', result: BusinessEventResult.REJECTED });
       return;
     }
     try {
       const driverId = await this.dispatch.excludeDriverForPanic(p.tripId);
       if (driverId)
         this.logger.warn(`pánico en trip ${p.tripId}: conductor ${driverId} excluido del pool`);
-      domainEventsTotal.inc({ event: 'panic.triggered', result: 'consumed' });
     } catch (err) {
       if (isPermanentDataError(err)) {
         this.logger.error(
           `POISON panic.triggered: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
         );
-        domainEventsTotal.inc({ event: 'panic.triggered', result: 'poison' });
+        domainEventsTotal.inc({ event: 'panic.triggered', result: BusinessEventResult.REJECTED });
         return;
       }
       throw err;
@@ -250,13 +245,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
   private async onRating(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['rating.created'].parse(env.payload);
     await this.projection.onRatingCreated(p.driverId, p.stars);
-    domainEventsTotal.inc({ event: 'rating.created', result: 'consumed' });
   }
 
   private async onDriverFlagged(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.flagged'].parse(env.payload);
     await this.projection.onDriverFlagged(p.driverId, p.rollingAvg);
-    domainEventsTotal.inc({ event: 'driver.flagged', result: 'consumed' });
   }
 
   private async onTripCompleted(env: EventEnvelope<unknown>): Promise<void> {
@@ -270,7 +263,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       this.logger.error(
         `POISON trip.completed: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
-      domainEventsTotal.inc({ event: 'trip.completed', result: 'poison' });
+      domainEventsTotal.inc({ event: 'trip.completed', result: BusinessEventResult.REJECTED });
       return;
     }
     try {
@@ -278,7 +271,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       if (!driverId) return;
       await this.projection.onTripCompleted(driverId, new Date());
       await this.dispatch.releaseDriver(driverId);
-      domainEventsTotal.inc({ event: 'trip.completed', result: 'consumed' });
     } catch (err) {
       // Red de seguridad: cualquier OTRO error permanente de datos (P2009/P2000…) → saltar. Lo
       // transitorio (DB caída, deadlock, timeout) se RELANZA para que Kafka reintente.
@@ -286,7 +278,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
         this.logger.error(
           `POISON trip.completed: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
         );
-        domainEventsTotal.inc({ event: 'trip.completed', result: 'poison' });
+        domainEventsTotal.inc({ event: 'trip.completed', result: BusinessEventResult.REJECTED });
         return;
       }
       throw err;
@@ -306,7 +298,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       this.logger.error(
         `POISON trip.cancelled: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
       );
-      domainEventsTotal.inc({ event: 'trip.cancelled', result: 'poison' });
+      domainEventsTotal.inc({ event: 'trip.cancelled', result: BusinessEventResult.REJECTED });
       return;
     }
     // CAPA 2 (anti-IDOR): cancelBoard ancla el ownership del board al pasajero SOLICITANTE en el camino
@@ -320,7 +312,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // reconciler no sigan ofertando a un viaje cancelado. Idempotente (CAS); no-op si no había sesión (PUJA).
     await this.matching.cancelSession(p.tripId);
     if (p.by !== 'DRIVER') {
-      domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
       return;
     }
     // driverId del PAYLOAD ENRIQUECIDO (trip.driverId, el conductor asignado — perfil), NO driverForTrip:
@@ -329,7 +320,6 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // trip-service ya enriquece el payload con el driverId (trips.service.ts). Coherente con onReassigning, que
     // también cuenta con su p.driverId del payload. Guard `if (p.driverId)`: ausente si no había conductor.
     if (!p.driverId) {
-      domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
       return;
     }
     try {
@@ -342,13 +332,12 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
         p.tripId,
         new Date(env.occurredAt),
       );
-      domainEventsTotal.inc({ event: 'trip.cancelled', result: 'consumed' });
     } catch (err) {
       if (isPermanentDataError(err)) {
         this.logger.error(
           `POISON trip.cancelled: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
         );
-        domainEventsTotal.inc({ event: 'trip.cancelled', result: 'poison' });
+        domainEventsTotal.inc({ event: 'trip.cancelled', result: BusinessEventResult.REJECTED });
         return;
       }
       throw err;

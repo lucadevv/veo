@@ -4,6 +4,7 @@
  * - KafkaEventConsumer.on(eventType, handler) valida al recibir y descarta lo inválido (a DLQ-log).
  */
 import { Kafka, type Producer, type Consumer, type KafkaConfig, logLevel } from 'kafkajs';
+import { domainEventsTotal, EventResult, UNKNOWN_EVENT } from '@veo/observability';
 import { type EventEnvelope, envelopeSchema } from './envelope.js';
 import { schemaForEvent, topicForEvent, type EventType, type EventPayload } from './schemas.js';
 
@@ -45,13 +46,21 @@ export class KafkaEventProducer {
     key: string,
   ): Promise<void> {
     const schema = schemaForEvent(envelope.eventType);
+    // NOTA: si schema.parse lanza es un BUG del caller (payload mal armado), no un publish fallido.
+    // Lo dejamos propagar SIN métrica — el scope de la métrica es el send() a Kafka, no la validación.
     if (schema) schema.parse(envelope.payload);
-    await this.producer.send({
-      topic: topicForEvent(envelope.eventType),
-      messages: [
-        { key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } },
-      ],
-    });
+    try {
+      await this.producer.send({
+        topic: topicForEvent(envelope.eventType),
+        messages: [
+          { key, value: JSON.stringify(envelope), headers: { eventType: envelope.eventType } },
+        ],
+      });
+    } catch (err) {
+      domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.PUBLISH_FAILED });
+      throw err; // re-lanzar: el outbox relay / caller decide retry. No tragar.
+    }
+    domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.PUBLISHED });
   }
 }
 
@@ -95,16 +104,36 @@ export class KafkaEventConsumer {
           console.warn(
             `[KafkaEventConsumer] body no-JSON descartado (poison): topic=${topic} partition=${partition} offset=${message.offset}`,
           );
+          // POISON: body no-JSON, sin eventType confiable → label `event` = UNKNOWN_EVENT.
+          domainEventsTotal.inc({ event: UNKNOWN_EVENT, result: EventResult.POISON });
           return; // skip → kafkajs commitea el offset y la partición AVANZA (no crash-loop).
         }
         const parsed = envelopeSchema.safeParse(raw);
-        if (!parsed.success) return; // envelope corrupto → ignorar (el caller debe loguear via interceptor)
+        if (!parsed.success) {
+          // INVALID: envelope corrupto, eventType no confiable → label `event` = UNKNOWN_EVENT.
+          domainEventsTotal.inc({ event: UNKNOWN_EVENT, result: EventResult.INVALID });
+          return; // ignorar (el caller debe loguear via interceptor)
+        }
         const envelope = parsed.data as EventEnvelope<unknown>;
         const handler = this.handlers.get(envelope.eventType);
+        // SIN handler → SIN métrica: en topics compartidos cada consumer recibe TODOS los eventos
+        // del topic; contar los no-manejados inflaría la métrica con eventos ajenos a este consumer.
         if (!handler) return;
         const payloadSchema = schemaForEvent(envelope.eventType);
-        if (payloadSchema && !payloadSchema.safeParse(envelope.payload).success) return;
-        await handler(envelope);
+        if (payloadSchema && !payloadSchema.safeParse(envelope.payload).success) {
+          // INVALID para un evento CON handler: payload no matchea su schema → eventType SÍ confiable.
+          domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.INVALID });
+          return;
+        }
+        try {
+          await handler(envelope);
+        } catch (err) {
+          // ERROR de transporte: el handler falló (DB caída, timeout...). Contamos y RE-LANZAMOS
+          // para preservar el invariante: eachMessage rechaza → kafkajs NO commitea → reintenta.
+          domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.ERROR });
+          throw err;
+        }
+        domainEventsTotal.inc({ event: envelope.eventType, result: EventResult.CONSUMED });
       },
     });
   }

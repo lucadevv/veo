@@ -11,7 +11,6 @@ import { createEnvelope } from '@veo/events';
 import { isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, type LatLon } from '@veo/utils';
 import { DispatchOutcome, type VehicleClass } from '@veo/shared-types';
-import { domainEventsTotal } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
 import {
@@ -144,7 +143,6 @@ export class DispatchService {
     // BROADCAST EMERGENCY (B5-vert): retira las ofertas HERMANAS vivas (las otras N-1 del broadcast) y avisa
     // a los perdedores. En el flujo STANDARD no hay hermanas (1 OFFERED/viaje) ⇒ no-op. Idempotente.
     await this.retractSiblingOffers(view.tripId, view.id);
-    domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     return view;
   }
 

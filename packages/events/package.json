@@ -41,6 +41,7 @@
     "@nestjs/common": "^10.4.4",
     "zod": "^3.23.8",
     "kafkajs": "^2.2.4",
+    "@veo/observability": "workspace:*",
     "@veo/shared-types": "workspace:*",
     "@veo/utils": "workspace:*"
   }

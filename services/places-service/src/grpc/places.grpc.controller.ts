@@ -12,7 +12,7 @@ import { Controller, Inject } from '@nestjs/common';
 import { GrpcMethod, Payload, Ctx, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
-import { createLogger, domainEventsTotal } from '@veo/observability';
+import { createLogger, domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { PlaceKind, type SavedPlace } from '../generated/prisma';
 import { PlacesService, type SavePlaceInput } from '../places/places.service';
 import {
@@ -92,7 +92,7 @@ export class PlacesGrpcController {
   async save(@Payload() payload: SavePayload, @Ctx() meta: Metadata): Promise<{ place: PlaceMsg }> {
     const user = this.identity(meta);
     const place = await this.run(() => this.places.save(user.userId, toInput(payload)));
-    domainEventsTotal.inc({ event: 'place.saved', result: 'ok' });
+    domainEventsTotal.inc({ event: 'place.saved', result: BusinessEventResult.OK });
     this.logger.info({ userId: user.userId, kind: place.kind, id: place.id }, 'place saved');
     return { place: toMsg(place) };
   }
@@ -106,7 +106,7 @@ export class PlacesGrpcController {
     const place = await this.run(() =>
       this.places.update(user.userId, payload.id, toInput(payload)),
     );
-    domainEventsTotal.inc({ event: 'place.updated', result: 'ok' });
+    domainEventsTotal.inc({ event: 'place.updated', result: BusinessEventResult.OK });
     this.logger.info({ userId: user.userId, id: place.id }, 'place updated');
     return { place: toMsg(place) };
   }
@@ -118,7 +118,7 @@ export class PlacesGrpcController {
   ): Promise<{ removed: boolean }> {
     const user = this.identity(meta);
     await this.run(() => this.places.remove(user.userId, payload.id));
-    domainEventsTotal.inc({ event: 'place.removed', result: 'ok' });
+    domainEventsTotal.inc({ event: 'place.removed', result: BusinessEventResult.OK });
     this.logger.info({ userId: user.userId, id: payload.id }, 'place removed');
     return { removed: true };
   }
