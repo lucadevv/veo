@@ -68,6 +68,28 @@ class EmbedResponse(BaseModel):
     dimensions: int
 
 
+class EnrollPassiveResponse(BaseModel):
+    """Respuesta de POST /v1/enroll-passive: enrolamiento del REGISTRO con liveness PASIVO (PAD single-frame).
+
+    A diferencia de /v1/embed (1 foto sin liveness, para DNI/pasajero/server-to-server), acá se corre el PAD
+    anti-spoofing sobre la MISMA foto ANTES de calcular el embedding:
+      - `live=false` (spoof detectado) → `embedding=null`, `reason='spoof'` (NO se enrola un ataque de
+        presentación; foto impresa/pantalla).
+      - `live=true` → `embedding` presente (persona real).
+    `livenessChecked=false` = el PAD no estaba cargado (modelo ausente) → degradación honesta: se enrola SIN
+    liveness (comportamiento previo), `live=true` por defecto. El caller (identity) decide la política.
+    """
+
+    embedding: Optional[List[float]] = None
+    dimensions: int = 0
+    live: bool
+    liveness_checked: bool = Field(..., alias="livenessChecked")
+    spoof_score: float = Field(..., alias="spoofScore")
+    reason: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
+
+
 # --- Enroll con liveness (challenge-response) ---
 class EnrollRequest(BaseModel):
     """Cuerpo de POST /v1/enroll: enrolamiento del rostro CON prueba de vida.

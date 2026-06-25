@@ -32,6 +32,7 @@ from app.face.matcher import to_vector
 if TYPE_CHECKING:
     from app.face.detector import FaceDetection, ScrfdDetector
     from app.face.embedder import ArcFaceEmbedder
+    from app.face.spoof import AntiSpoofClassifier, SpoofVerdict
 
 NDArrayF = npt.NDArray[np.float32]
 NDArrayU8 = npt.NDArray[np.uint8]
@@ -78,6 +79,9 @@ class BiometricPipeline:
         self._settings = settings
         self._detector: Optional["ScrfdDetector"] = None
         self._embedder: Optional["ArcFaceEmbedder"] = None
+        # PAD pasivo (anti-spoofing single-frame). OPCIONAL: si falta el modelo, el enroll degrada a "solo
+        # detección de rostro" sin liveness. NO entra en `ready` (det+embed), que gobierna /verify.
+        self._anti_spoof: Optional["AntiSpoofClassifier"] = None
         self._load_error: Optional[str] = None
         self._thresholds = thresholds_from_settings(settings)
         # Serializa la carga de modelos: FastAPI sirve los endpoints sync en un threadpool, así que
@@ -90,6 +94,9 @@ class BiometricPipeline:
 
     def _embedder_path(self) -> str:
         return os.path.join(self._settings.model_dir, self._settings.embedder_model)
+
+    def _spoof_path(self) -> str:
+        return os.path.join(self._settings.model_dir, self._settings.spoof_model)
 
     def models_present(self) -> bool:
         return os.path.isfile(self._detector_path()) and os.path.isfile(self._embedder_path())
@@ -117,6 +124,16 @@ class BiometricPipeline:
             self._detector = load_detector(self._settings, self._detector_path())
             self._embedder = load_embedder(self._settings, self._embedder_path())
             self._load_error = None
+            # PAD pasivo (OPCIONAL, best-effort): si está habilitado y el modelo está presente, lo cargamos.
+            # Si falta o falla, queda en None → `classify_liveness` degrada honesto (sin liveness pasivo), sin
+            # tumbar el servicio ni afectar `ready`.
+            if self._settings.passive_liveness_enabled and os.path.isfile(self._spoof_path()):
+                try:
+                    from app.face.spoof import load_anti_spoof
+
+                    self._anti_spoof = load_anti_spoof(self._settings, self._spoof_path())
+                except Exception:  # noqa: BLE001 — degradación honesta: el PAD es opcional
+                    self._anti_spoof = None
 
     @property
     def ready(self) -> bool:
@@ -163,6 +180,20 @@ class BiometricPipeline:
     def embed(self, frame_bgr: NDArrayU8, detection: "FaceDetection") -> NDArrayF:
         _, embedder = self._require_models()
         return embedder.embed_face(frame_bgr, detection)
+
+    @property
+    def passive_liveness_loaded(self) -> bool:
+        """¿El PAD pasivo está cargado? (para observabilidad / health: si False, el enroll no exige liveness)."""
+        return self._anti_spoof is not None
+
+    def classify_liveness(
+        self, image_bgr: NDArrayU8, detection: "FaceDetection"
+    ) -> Optional["SpoofVerdict"]:
+        """Veredicto de vida PASIVO (PAD) sobre el rostro detectado. `None` si el PAD no está cargado/
+        habilitado → degradación honesta (el caller decide exigir liveness o aceptar el enroll sin él)."""
+        if self._anti_spoof is None:
+            return None
+        return self._anti_spoof.classify(image_bgr, detection)
 
     def verify(
         self,

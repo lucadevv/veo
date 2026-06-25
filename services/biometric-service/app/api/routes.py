@@ -17,6 +17,7 @@ from app.api.schemas import (
     ChallengeResponse,
     EmbedRequest,
     EmbedResponse,
+    EnrollPassiveResponse,
     EnrollRequest,
     EnrollResponse,
     FaceMatchRequest,
@@ -200,6 +201,59 @@ def embed_reference(
         raise HTTPException(status_code=422, detail=f"Foto inválida: {exc}") from exc
     embedding = _embed_single_face(pipeline, image)
     return EmbedResponse(embedding=embedding, dimensions=len(embedding))
+
+
+# --- Enroll del REGISTRO con liveness PASIVO (PAD single-frame, anti-spoofing) ---
+@router.post(
+    "/v1/enroll-passive",
+    response_model=EnrollPassiveResponse,
+    tags=["enroll"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def enroll_passive(
+    payload: EmbedRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
+) -> EnrollPassiveResponse:
+    """Enrolamiento del REGISTRO del conductor: liveness PASIVO sobre 1 foto + embedding (SIN frames extra).
+
+    Corre el PAD anti-spoofing ANTES del embedding: si la foto es un ataque de presentación (impresa/pantalla)
+    → NO se enrola (embedding null, reason 'spoof'). Si es persona real → embedding. Si el PAD no está cargado
+    → degrada honesto a enrolar SIN liveness (`livenessChecked=false`). El `/v1/embed` genérico (DNI/pasajero)
+    NO pasa por acá: el PAD solo aplica a la selfie del registro. Sync (`def`): corre en el threadpool.
+    """
+    _require_models_ready(pipeline)
+    _check_b64_image_size(payload.photo, settings)
+    try:
+        image = decode_base64_image(payload.photo)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Foto inválida: {exc}") from exc
+    count, detection = pipeline.best_detection(image)
+    if count != 1 or detection is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="La imagen debe contener exactamente un rostro claro",
+        )
+    verdict = pipeline.classify_liveness(image, detection)
+    if verdict is not None and not verdict.live:
+        # Spoof detectado: NO se enrola (no se gasta embedding sobre un ataque de presentación).
+        return EnrollPassiveResponse(
+            embedding=None,
+            dimensions=0,
+            live=False,
+            liveness_checked=True,
+            spoof_score=verdict.score,
+            reason="spoof",
+        )
+    embedding = pipeline.embed(image, detection).tolist()
+    return EnrollPassiveResponse(
+        embedding=embedding,
+        dimensions=len(embedding),
+        live=True,
+        liveness_checked=verdict is not None,
+        spoof_score=0.0 if verdict is None else verdict.score,
+        reason=None,
+    )
 
 
 @router.post(

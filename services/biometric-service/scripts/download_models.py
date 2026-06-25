@@ -29,6 +29,14 @@ BUFFALO_L_URL = (
 DETECTOR_FILE = "det_10g.onnx"
 EMBEDDER_FILE = "w600k_r50.onnx"
 
+# PAD pasivo (anti-spoofing single-frame) — MiniFASNetV2 (Silent-Face, Apache-2.0). OPCIONAL: si no se baja,
+# el servicio arranca igual y el enroll degrada a "sin liveness pasivo". El fichero (= VEO_BIO_SPOOF_MODEL)
+# DEBE matchear el preprocessing del config: variante 2.7_80x80 (crop 2.7, 80×80, BGR/255), salida softmax
+# 3-clases con live en `VEO_BIO_SPOOF_LIVE_INDEX` (0 para el export ONNX de HuggingFace). La URL va por env
+# (VEO_BIO_SPOOF_MODEL_URL) → espejala en tu storage privado (soberanía), igual que buffalo_l.
+SPOOF_FILE = os.environ.get("VEO_BIO_SPOOF_MODEL", "minifasnet_v2.onnx")
+SPOOF_URL = os.environ.get("VEO_BIO_SPOOF_MODEL_URL", "")
+
 
 def _model_dir() -> Path:
     return Path(os.environ.get("VEO_BIO_MODEL_DIR", "models")).resolve()
@@ -92,6 +100,26 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    # PAD pasivo (OPCIONAL, best-effort): se baja solo si hay URL configurada y no está presente. Un fallo NO
+    # rompe el script ni el arranque — el servicio degrada honesto a "registro sin liveness pasivo".
+    spoof = model_dir / SPOOF_FILE
+    if not spoof.is_file():
+        if SPOOF_URL:
+            try:
+                _download(SPOOF_URL, spoof)
+                print(f"  PAD descargado: {SPOOF_FILE}")
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"AVISO: no se pudo bajar el PAD ({exc}). El registro irá SIN liveness pasivo.",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                "AVISO: VEO_BIO_SPOOF_MODEL_URL no seteada → sin modelo PAD. El registro irá SIN liveness "
+                "pasivo (degradado). Seteá la URL (mirror del MiniFASNet 2.7_80x80) para activarlo.",
+                file=sys.stderr,
+            )
+
     print(f"Listo. Modelos en {model_dir}")
     return 0
 

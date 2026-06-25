@@ -80,6 +80,25 @@ class Settings(BaseSettings):
     # Tope de frames embebidos para match/consistencia (acota el costo de inferencia: p99 < 3s del SLA).
     max_match_frames: int = Field(default=8, ge=1)
 
+    # --- Liveness PASIVO (PAD anti-spoofing single-frame · registro) ---
+    # Modelo MiniFASNetV2 (Silent-Face, Apache-2.0). PAD sobre 1 sola foto (sin frames extra → sin lag), usado
+    # en el ENROLL del REGISTRO (NO en el doc-match DNI ni en el gate de turno). Si está OFF o el modelo no
+    # está presente, el enroll degrada al comportamiento actual (solo detección de rostro), sin liveness.
+    passive_liveness_enabled: bool = True
+    spoof_model: str = "minifasnet_v2.onnx"
+    # Preprocessing EXACTO del MiniFASNet (sourced del repo de referencia, no inventado): crop a `spoof_scale`
+    # centrado + resize a `spoof_input_size`, BGR, /255, NCHW.
+    spoof_scale: float = Field(default=2.7, gt=0.0)
+    spoof_input_size: int = Field(default=80, ge=16)
+    # Índice de la clase REAL/viva en la salida softmax. ⚠️ DIVERGE entre exports: el export ONNX de
+    # HuggingFace (el que baja `download_models.py`) usa 0; el `.pth` canónico usa 1. Un índice mal puesto
+    # INVIERTE el veredicto → CALIBRAR con muestra real/spoof antes de prod. VEO_BIO_SPOOF_LIVE_INDEX.
+    spoof_live_index: int = Field(default=0, ge=0)
+    # Umbral de la prob de la clase viva. Default conservador 0.60 (MiniFASNet ~98% acc); calibrar a la
+    # población real (igual que match_threshold). Configurable por VEO_BIO_SPOOF_THRESHOLD.
+    spoof_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    # DEUDA: spoof_live_index (0 por export HF) + spoof_threshold (0.60 heuristico) · techo: veredicto invertido o mal calibrado deja pasar spoof o rechaza reales · gatillo: calibrar con set real/impreso/pantalla etiquetado antes de prod
+
     # --- Liveness activo (por reto) ---
     challenge_ttl_seconds: int = 60
     # Store de retos: vacío ⇒ in-memory (una réplica, dev). Con URL Redis ⇒ store distribuido
