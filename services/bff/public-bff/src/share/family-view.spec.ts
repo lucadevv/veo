@@ -28,6 +28,16 @@ const driver: DriverReply = {
   phone: '',
   documentId: '12345678',
   birthDate: '1990-01-15',
+  // Binding DNI↔selfie + licencia↔selfie + liveness PASIVO: defaults proto3 ('NOT_RUN'/0/"") = no corrido.
+  dniFaceMatchStatus: 'NOT_RUN',
+  dniFaceMatchScore: 0,
+  dniFaceMatchedAt: '',
+  licenseFaceMatchStatus: 'NOT_RUN',
+  licenseFaceMatchScore: 0,
+  licenseFaceMatchedAt: '',
+  faceSelfieKey: '',
+  livenessStatus: 'NOT_RUN',
+  livenessScore: 0,
 };
 const aggregate: AggregateReply = {
   subjectId: 'drv-1',

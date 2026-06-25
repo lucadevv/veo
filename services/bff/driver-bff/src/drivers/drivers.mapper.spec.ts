@@ -41,6 +41,10 @@ const driver: DriverReply = {
   licenseFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
   licenseFaceMatchScore: 0,
   licenseFaceMatchedAt: '',
+  // Selfie del enrol + liveness PASIVO (ADMIN-ONLY; defaults proto3 ""/'NOT_RUN'/0 = no corrido/no-admin).
+  faceSelfieKey: '',
+  livenessStatus: 'NOT_RUN',
+  livenessScore: 0,
 };
 
 const user: UserReply = {
