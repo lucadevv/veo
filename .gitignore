@@ -135,3 +135,8 @@ infra/cloudflare/env/*.env
 # apps: tier files con valores (incl. Mapbox pk) gitignored; example.env es el contrato
 apps/**/env/*.env
 !apps/**/env/example.env
+
+# Media binaria de assets (login hero, etc.): NO va en git → se provisiona aparte (MinIO/deploy).
+# El README de cada carpeta documenta qué archivo poner.
+apps/admin-web/public/*.mp4
+apps/admin-web/public/*.webm

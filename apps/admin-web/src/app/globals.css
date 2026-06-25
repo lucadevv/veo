@@ -57,6 +57,11 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
   }
+  /* Entrada editorial: sube + aparece. Para revelados escalonados (login, encabezados). */
+  @keyframes veo-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
   .animate-fade-in {
     animation: veo-fade-in 180ms var(--ease-out) both;
   }
@@ -66,8 +71,32 @@
   .animate-slide-in {
     animation: veo-slide-in-right 220ms var(--ease-out) both;
   }
+  .animate-rise {
+    animation: veo-rise 560ms var(--ease-out) both;
+  }
   .animate-pulse-danger {
     animation: veo-pulse-danger 1.4s ease-in-out infinite;
+  }
+  /* Legibilidad de texto sobre imagen/video: halo oscuro que rodea cada glifo, así el texto
+     se lee incluso sobre zonas claras del video (cielo, edificios) SIN necesitar una banda
+     oscura de fondo. El anillo tight (0 0 3px) hace el grueso del trabajo; el glow (10px) suaviza. */
+  .text-on-media {
+    text-shadow:
+      0 0 3px oklch(0 0 0 / 0.85),
+      0 1px 2px oklch(0 0 0 / 0.85),
+      0 0 10px oklch(0 0 0 / 0.5);
+  }
+  /* Accesibilidad: sin movimiento, las entradas resuelven al estado final al instante. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-scale-in,
+    .animate-slide-in,
+    .animate-rise {
+      animation: none;
+    }
+    .animate-pulse-danger {
+      animation: none;
+    }
   }
 }
 
