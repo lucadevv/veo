@@ -419,7 +419,7 @@ function EnrolSelfiePreview({ url }: { url: string | null }) {
             ? 'Compará a ojo contra el DNI y la licencia.'
             : url === null
               ? 'Sin selfie guardada.'
-              : 'No se pudo cargar (el enlace pudo vencer).'}
+              : 'No se pudo mostrar (enlace vencido o archivo dañado).'}
         </p>
       </div>
     </div>

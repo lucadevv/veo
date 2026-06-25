@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ImageOff, RefreshCw, X } from 'lucide-react';
+import { BadgeCheck, Car, Check, ImageOff, type LucideIcon, RefreshCw, User, X } from 'lucide-react';
 import type {
   AdminDocumentImage,
   AdminDriverDocument,
@@ -13,6 +13,7 @@ import { useDocumentReview } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { StatusPill } from '@/components/ui/status-pill';
@@ -59,6 +60,70 @@ const DOCUMENT_SIDE_LABEL: Record<DocumentSideValue, string> = {
   BACK: 'Reverso',
   SINGLE: 'Documento',
 };
+
+/**
+ * CATEGORÍA del documento (quién es su DUEÑO). El contrato `adminDriverDocument` NO trae `ownerType`, así que
+ * la DERIVAMOS del `type` con un Record EXHAUSTIVO: sumar un tipo de doc al contrato sin categorizarlo acá es
+ * error de compilación. Cero magic strings. Esto es lo que mata el "todo en una lista plana" — el operador ve
+ * los docs PERSONALES separados de los DEL VEHÍCULO.
+ */
+const DocumentCategory = {
+  PERSONAL: 'PERSONAL',
+  VEHICLE: 'VEHICLE',
+  CERTIFICATION: 'CERTIFICATION',
+} as const;
+type DocumentCategory = (typeof DocumentCategory)[keyof typeof DocumentCategory];
+
+const DOCUMENT_CATEGORY: Record<FleetDocumentTypeValue, DocumentCategory> = {
+  DNI: DocumentCategory.PERSONAL,
+  LICENSE_A1: DocumentCategory.PERSONAL,
+  BACKGROUND_CHECK: DocumentCategory.PERSONAL,
+  SOAT: DocumentCategory.VEHICLE,
+  PROPERTY_CARD: DocumentCategory.VEHICLE,
+  VEHICLE_PHOTO: DocumentCategory.VEHICLE,
+  ITV: DocumentCategory.VEHICLE,
+  AMBULANCE_OPERATOR: DocumentCategory.CERTIFICATION,
+  TOW_OPERATOR: DocumentCategory.CERTIFICATION,
+  MECHANIC_CERT: DocumentCategory.CERTIFICATION,
+};
+
+/** Meta de cada categoría en ORDEN de despliegue (personal → vehículo → certificaciones). */
+const CATEGORY_META: { key: DocumentCategory; label: string; hint: string; Icon: LucideIcon }[] = [
+  { key: DocumentCategory.PERSONAL, label: 'Documentos personales', hint: 'Identidad del conductor', Icon: User },
+  { key: DocumentCategory.VEHICLE, label: 'Documentos del vehículo', hint: 'Habilitación del auto', Icon: Car },
+  {
+    key: DocumentCategory.CERTIFICATION,
+    label: 'Certificaciones de operador',
+    hint: 'Verticales especiales',
+    Icon: BadgeCheck,
+  },
+];
+
+/** Orden estable DENTRO de cada categoría (Record exhaustivo: DNI antes que licencia, SOAT antes que tarjeta…). */
+const DOCUMENT_TYPE_ORDER: Record<FleetDocumentTypeValue, number> = {
+  DNI: 0,
+  LICENSE_A1: 1,
+  BACKGROUND_CHECK: 2,
+  SOAT: 3,
+  PROPERTY_CARD: 4,
+  VEHICLE_PHOTO: 5,
+  ITV: 6,
+  AMBULANCE_OPERATOR: 7,
+  TOW_OPERATOR: 8,
+  MECHANIC_CERT: 9,
+};
+
+/**
+ * Estados del doc (= `fleetDocumentStatus` del contrato). Const local tipado para comparar SIN magic strings
+ * (`=== DocStatus.PENDING_REVIEW` en vez de `=== 'PENDING_REVIEW'`), sin importar shared-types en el cliente.
+ */
+const DocStatus = {
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  VALID: 'VALID',
+  EXPIRING_SOON: 'EXPIRING_SOON',
+  EXPIRED: 'EXPIRED',
+  REJECTED: 'REJECTED',
+} as const;
 
 interface DocumentViewerProps {
   documents: AdminDriverDocument[];
@@ -107,19 +172,111 @@ export function DocumentViewer({
     );
   }
 
+  // Estado 4: AGRUPADO por categoría (personal / vehículo / certificación), ordenado dentro de cada una. Esto
+  // reemplaza la lista plana que mezclaba DNI/licencia con SOAT/tarjeta/foto — el operador escanea por dueño.
+  const byCategory = new Map<DocumentCategory, AdminDriverDocument[]>();
+  for (const doc of documents) {
+    const cat = DOCUMENT_CATEGORY[doc.type];
+    const list = byCategory.get(cat);
+    if (list) list.push(doc);
+    else byCategory.set(cat, [doc]);
+  }
+  for (const list of byCategory.values()) {
+    list.sort((a, b) => DOCUMENT_TYPE_ORDER[a.type] - DOCUMENT_TYPE_ORDER[b.type]);
+  }
+
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {documents.map((doc) => (
-        <DocumentCard
-          key={doc.id}
-          doc={doc}
-          driverId={driverId}
-          onReload={onReload}
-          isReloading={isReloading}
-        />
-      ))}
+    <div className="space-y-8">
+      {CATEGORY_META.map(({ key, label, hint, Icon }) => {
+        const docs = byCategory.get(key);
+        if (!docs || docs.length === 0) return null;
+        return (
+          <DocumentSection
+            key={key}
+            label={label}
+            hint={hint}
+            Icon={Icon}
+            docs={docs}
+            driverId={driverId}
+            onReload={onReload}
+            isReloading={isReloading}
+          />
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * Una SECCIÓN de categoría: encabezado (icono + label + conteo) con un resumen at-a-glance del estado del
+ * grupo a la derecha, y la grilla de tarjetas. Solo se renderiza si la categoría tiene documentos.
+ */
+function DocumentSection({
+  label,
+  hint,
+  Icon,
+  docs,
+  driverId,
+  onReload,
+  isReloading,
+}: {
+  label: string;
+  hint: string;
+  Icon: LucideIcon;
+  docs: AdminDriverDocument[];
+  driverId: string;
+  onReload: () => void;
+  isReloading: boolean;
+}) {
+  return (
+    <section>
+      <header className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-ink-muted">
+            <Icon className="size-4" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-ink">{label}</h3>
+            <p className="text-xs text-ink-subtle">
+              {hint} · {docs.length} {docs.length === 1 ? 'documento' : 'documentos'}
+            </p>
+          </div>
+        </div>
+        <SectionSummary docs={docs} />
+      </header>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {docs.map((doc) => (
+          <DocumentCard
+            key={doc.id}
+            doc={doc}
+            driverId={driverId}
+            onReload={onReload}
+            isReloading={isReloading}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Resumen at-a-glance del estado de una sección, por PRIORIDAD de acción: si hay docs por revisar (acción
+ * pendiente del operador) gana el ámbar; si no, lo que tiene PROBLEMA (vencido/rechazado) gana el rojo; si
+ * todo está vigente, verde "En regla". Así el operador sabe DÓNDE mirar sin abrir cada tarjeta.
+ */
+function SectionSummary({ docs }: { docs: AdminDriverDocument[] }) {
+  const pending = docs.filter((d) => d.status === DocStatus.PENDING_REVIEW).length;
+  const problem = docs.filter(
+    (d) => d.status === DocStatus.EXPIRED || d.status === DocStatus.REJECTED,
+  ).length;
+
+  if (pending > 0) {
+    return <Badge tone="warn">{pending} por revisar</Badge>;
+  }
+  if (problem > 0) {
+    return <Badge tone="danger">{problem} con problema</Badge>;
+  }
+  return <Badge tone="success">En regla</Badge>;
 }
 
 function DocumentCard({
@@ -248,7 +405,9 @@ function DocumentImageTile({
           <div className="grid size-12 place-items-center rounded-lg bg-surface text-ink-muted">
             <ImageOff className="size-6" aria-hidden />
           </div>
-          <p className="text-sm text-ink-muted">No se pudo cargar la imagen (el enlace pudo vencer).</p>
+          <p className="text-sm text-ink-muted">
+            No se pudo mostrar la imagen (enlace vencido o archivo dañado).
+          </p>
           <Button variant="secondary" size="sm" loading={isReloading} onClick={onReload}>
             <RefreshCw className="size-4" aria-hidden />
             Recargar
@@ -279,9 +438,9 @@ function DocumentReviewActions({ doc, driverId }: { doc: AdminDriverDocument; dr
   const { toast } = useToast();
   const review = useDocumentReview();
 
-  // `doc.status` es el enum tipado (fleetDocumentStatus): comparar contra un literal fuera del set es
-  // error de compilación, no un magic string mudo.
-  if (!can(user, 'fleet:review') || doc.status !== 'PENDING_REVIEW') {
+  // `doc.status` es el enum tipado (fleetDocumentStatus): comparado contra el const tipado `DocStatus` (no un
+  // literal mudo). Solo se revisa lo que está PENDING_REVIEW.
+  if (!can(user, 'fleet:review') || doc.status !== DocStatus.PENDING_REVIEW) {
     return null;
   }
 
