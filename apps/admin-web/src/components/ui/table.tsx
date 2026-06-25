@@ -73,7 +73,7 @@ export function DataTable<TData>({
                     aria-sort={
                       sortDir === 'asc' ? 'ascending' : sortDir === 'desc' ? 'descending' : 'none'
                     }
-                    className="px-4 py-2.5 text-left font-medium text-ink-muted"
+                    className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle"
                   >
                     {header.isPlaceholder ? null : canSort ? (
                       <button
@@ -124,12 +124,12 @@ export function DataTable<TData>({
                   }
                 : {})}
               className={cn(
-                'border-b border-border/60 transition-colors',
-                onRowClick && 'cursor-pointer hover:bg-surface-2',
+                'border-b border-border/40 transition-colors',
+                onRowClick && 'cursor-pointer hover:bg-surface-2/60',
               )}
             >
               {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-4 py-2.5 text-ink">
+                <td key={cell.id} className="px-4 py-3.5 text-ink">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}
