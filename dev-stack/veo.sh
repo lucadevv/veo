@@ -33,6 +33,9 @@
 #   restart <svc>      down de ESE servicio (pidfile/puerto) + build + boot.
 #   logs <svc> [-f]    tail (o tail -f con -f) de dev-stack/logs/<svc>.log.
 #   migrate            Solo el paso de migraciones (prisma migrate deploy) — seguro/idempotente.
+#   otp [-f]           Escáner de OTP de dev: muestra el código de cualquier OTP (driver/pasajero,
+#                      SMS sandbox + email) leyéndolo de notification.notifications. -f = en vivo.
+#                      El admin usa TOTP (Google Authenticator), no pasa por acá.
 #
 # REGLA DE PUERTOS (del dueño): si un puerto está ocupado por algo ajeno, se
 # REPORTA — JAMÁS se salta a otro puerto en silencio.
@@ -49,6 +52,7 @@ LOGS_DIR="$SCRIPT_DIR/logs"
 PIDS_DIR="$SCRIPT_DIR/.pids"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 BIO_VENV="$ROOT_DIR/services/biometric-service/.venv"
+PG_CONT="veo-postgres"   # contenedor de infra postgres (fijo en dev) — lo consume `veo.sh otp`.
 
 mkdir -p "$LOGS_DIR" "$PIDS_DIR"
 
@@ -1024,6 +1028,49 @@ cmd_dev() {
   printf '\n%s%s✓ WATCH activo:%s editá el SRC de cualquier servicio → recompila y reinicia solo.\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
   yel " Cambiaste una LIB @veo/* o tracking (Go) → 'veo.sh restart <svc>' (o 'veo.sh dev' de nuevo)."
   yel " Web (admin-web) y apps RN: las compilás vos aparte — veo.sh no las toca."
+  blue " 📲 OTP en vivo (driver/pasajero · SMS sandbox + email): corré  'veo.sh otp -f'  en otra terminal."
+}
+
+# ── SUBCOMANDO: otp (escáner de OTP de dev) ───────────────────────────────────
+# En dev el SMS va por SANDBOX (no se manda nada real) — el código de CUALQUIER OTP (driver/pasajero,
+# SMS o email) queda en notification.notifications.payload->>'code'. Este comando lo muestra con su
+# destino. El admin usa TOTP (Google Authenticator), NO pasa por esta tabla, así que queda afuera solo.
+#   veo.sh otp        → últimos OTP (tabla)
+#   veo.sh otp -f     → EN VIVO: imprime cada OTP nuevo al aparecer (ideal para probar flows rápido)
+otp_rows() {  # imprime newest-first:  epoch \t HH:MM:SS \t canal \t destino \t código \t estado
+  docker exec "$PG_CONT" psql -U veo -d veo -t -A -F $'\t' -c \
+    "SELECT extract(epoch from created_at)::bigint, to_char(created_at,'HH24:MI:SS'), channel,
+            COALESCE(payload->>'to', payload->>'email', payload->>'recipient', '?'), payload->>'code', status
+     FROM notification.notifications WHERE payload ? 'code'
+     ORDER BY created_at DESC LIMIT ${1:-12};" 2>/dev/null
+}
+cmd_otp() {
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | rg -q "^${PG_CONT}\$"; then
+    red "  postgres ($PG_CONT) no está arriba — levantá la infra (veo.sh up / dev)"; return 1
+  fi
+  local follow=0
+  [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]] && follow=1
+  if (( ! follow )); then
+    printf '%s%-9s %-6s %-22s %-8s %s%s\n' "$C_BOLD" "HORA" "CANAL" "DESTINO" "CÓDIGO" "ESTADO" "$C_RESET"
+    otp_rows 12 | while IFS=$'\t' read -r ep t ch to code st; do
+      [[ -z "$code" ]] && continue
+      printf '%-9s %-6s %-22s %s%-8s%s %s\n' "$t" "$ch" "$to" "$C_BOLD$C_GREEN" "$code" "$C_RESET" "$st"
+    done
+    return 0
+  fi
+  blue "  📲 escáner OTP EN VIVO (Ctrl-C corta) · SMS sandbox + email · admin=TOTP aparte"
+  local hw=0
+  while true; do
+    while IFS=$'\t' read -r ep t ch to code st; do
+      [[ -z "$ep" || -z "$code" ]] && continue
+      if (( ep > hw )); then
+        hw=$ep
+        printf '%s[OTP]%s %s  %-5s  %-22s  → %s%s%s  (%s)\n' \
+          "$C_BOLD$C_GREEN" "$C_RESET" "$t" "$ch" "$to" "$C_BOLD$C_GREEN" "$code" "$C_RESET" "$st"
+      fi
+    done < <(otp_rows 8 | tail -r)
+    sleep 1.5
+  done
 }
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -1036,6 +1083,7 @@ case "${1:-}" in
   restart) shift; cmd_restart "${1:-}" ;;
   logs)    shift; cmd_logs "${1:-}" "${2:-}" ;;
   migrate) cmd_migrate ;;
+  otp)     shift; cmd_otp "${1:-}" ;;
   *)
     cat <<EOF
 ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
@@ -1048,6 +1096,7 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}restart${C_RESET} <svc>      down + build + boot de ESE servicio
   ${C_BOLD}logs${C_RESET} <svc> [-f]    tail (o tail -f) de dev-stack/logs/<svc>.log
   ${C_BOLD}migrate${C_RESET}            prisma migrate deploy de todos los servicios (idempotente)
+  ${C_BOLD}otp${C_RESET} [-f]           Escáner de OTP de dev (driver/pasajero · SMS sandbox + email). -f = en vivo. Admin=TOTP aparte
 
   servicios: $(printf '%s ' "${SERVICES[@]%%|*}")
 EOF
