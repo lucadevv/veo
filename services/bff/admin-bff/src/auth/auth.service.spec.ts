@@ -3,9 +3,14 @@ import { AuthService } from './auth.service';
 import type { IdentityAuthClient } from './identity-auth.client';
 import type { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
+import type { AuditRecorder } from '../audit/audit-recorder.service';
 
 function makeService(): AuthService {
-  return new AuthService({} as unknown as IdentityAuthClient, {} as unknown as InternalRestClient);
+  return new AuthService(
+    {} as unknown as IdentityAuthClient,
+    {} as unknown as AuditRecorder,
+    {} as unknown as InternalRestClient,
+  );
 }
 
 const baseUser: AuthenticatedUser = {
