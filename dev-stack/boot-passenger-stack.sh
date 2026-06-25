@@ -206,12 +206,18 @@ start_service() {
     c_blue "[$name] puerto $http_port YA ocupado (pid $(pid_on_port "$http_port")) — no arranco de nuevo (idempotente)"
     return 0
   fi
-  if [[ ! -f "$dir/dist/main.js" ]]; then
+  # En WATCH (VEO_WATCH=1) NO exigimos dist/main.js: `nest start --watch` compila al vuelo desde src.
+  # En modo normal SÍ — sin dist no hay binario que bootear.
+  if [[ "${VEO_WATCH:-0}" != "1" && ! -f "$dir/dist/main.js" ]]; then
     c_red "[$name] FALTA $dir/dist/main.js — construí el servicio antes de bootear"
     return 1
   fi
 
-  c_blue "[$name] arrancando (HTTP :$http_port) → log: $logf"
+  if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+    c_blue "[$name] arrancando en WATCH (nest start --watch, HTTP :$http_port) → log: $logf"
+  else
+    c_blue "[$name] arrancando (HTTP :$http_port) → log: $logf"
+  fi
   (
     cd "$dir"
     load_env "$dir"
@@ -223,7 +229,13 @@ start_service() {
     if [[ -d prisma/migrations ]]; then
       npx prisma migrate deploy || { c_red "[$name] migrate deploy FALLÓ — NO arranco (revisá $logf)"; exit 1; }
     fi
-    exec node dist/main.js
+    # WATCH: el script `dev` del paquete (= nest start --watch) recompila y reinicia ante cada cambio
+    # de SRC. Normal: el binario ya compilado. El `down` de veo.sh reapea los watchers (pkill 'nest start').
+    if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+      exec pnpm run dev
+    else
+      exec node dist/main.js
+    fi
   ) >"$logf" 2>&1 &
   echo $! > "$pidf"
   log "pid $(cat "$pidf")"

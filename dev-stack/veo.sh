@@ -20,6 +20,10 @@
 #   up                 Ignición completa: infra(wait healthy) → secrets →
 #                      build(packages PRIMERO) → migrate deploy → boot uniforme
 #                      → tablero. Idempotente: lo ya arriba no se duplica.
+#   dev                Como `up` pero los servicios arrancan en WATCH (nest start
+#                      --watch / uvicorn --reload): editás el SRC de un servicio y
+#                      recompila + reinicia SOLO. Infra en docker; web/apps las
+#                      compilás vos aparte. Libs @veo/* y tracking(Go) → restart manual.
 #   down [--infra]     Apagado LIMPIO y robusto en capas (pidfiles → puertos →
 #                      pkill por patrón). Con --infra además baja los contenedores.
 #   status             El TABLERO: una fila por servicio (puerto, health, pid,
@@ -362,13 +366,22 @@ boot_biometric() {
   if [[ -f "$svc_dir/env/${APP_ENV}.env" ]]; then envf="$svc_dir/env/${APP_ENV}.env"
   elif [[ -f "$svc_dir/env/preview.env" ]]; then envf="$svc_dir/env/preview.env"; fi
 
-  blue "  ▶ biometric (uvicorn :$port) → log: $logf"
+  if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+    blue "  ▶ biometric (uvicorn --reload :$port) → log: $logf"
+  else
+    blue "  ▶ biometric (uvicorn :$port) → log: $logf"
+  fi
   (
     cd "$svc_dir" || exit 1
     set -a
     [[ -n "$envf" ]] && . "$envf" 2>/dev/null
     set +a
-    exec "$BIO_VENV/bin/uvicorn" app.main:app --host 0.0.0.0 --port "$port"
+    # WATCH: uvicorn --reload reinicia ante cada cambio de los .py del servicio.
+    if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+      exec "$BIO_VENV/bin/uvicorn" app.main:app --host 0.0.0.0 --port "$port" --reload
+    else
+      exec "$BIO_VENV/bin/uvicorn" app.main:app --host 0.0.0.0 --port "$port"
+    fi
   ) >"$logf" 2>&1 &
   echo $! > "$pidf"
   log "pid $(cat "$pidf")"
@@ -976,9 +989,47 @@ cmd_restart() {
 # ── SUBCOMANDO: migrate ───────────────────────────────────────────────────────
 cmd_migrate() { migrate_all; }
 
+# ── BUILD (solo libs) ─────────────────────────────────────────────────────────
+# En `dev` (watch) los SERVICIOS no se pre-buildean: `nest start --watch` los compila al vuelo.
+# Pero las libs @veo/* SÍ se buildean primero — los servicios las importan desde su DIST (no src),
+# así que sin su dist fresco el watch arranca contra tipos viejos.
+build_libs() {
+  hdr "BUILD LIBS (@veo/*)"
+  blue "  packages (@veo/*) — los servicios importan su DIST; en watch NO se recompilan solas"
+  if pnpm -r --filter "./packages/*" build; then
+    green "  packages OK"
+  else
+    red "  ALGÚN package falló su build — los servicios dependen de @veo/*; REVISÁ esto antes de seguir."
+  fi
+}
+
+# ── SUBCOMANDO: dev (WATCH — todo en vivo) ────────────────────────────────────
+# Igual que `up`, pero los servicios arrancan en WATCH (nest start --watch / uvicorn --reload):
+# editás el SRC de un servicio → recompila y reinicia SOLO, sin tocar nada. La INFRA sigue en docker.
+# La WEB (admin-web) y las APPS RN las compilás vos aparte — veo.sh no las toca.
+# LÍMITE HONESTO (libs): los servicios importan @veo/* desde su DIST → un cambio en una lib NO se
+# propaga solo (nest observa el src del servicio, no node_modules). tracking (Go) tampoco tiene watch.
+# ⇒ tocaste una lib o tracking → `veo.sh restart <svc>` (o `veo.sh dev` de nuevo, que rebuildea libs).
+cmd_dev() {
+  printf '%s%s🔧 VEO · WATCH (dev en vivo)%s\n' "$C_BOLD" "$C_BLUE" "$C_RESET"
+  infra_up_and_wait || { red "Infra no quedó healthy — ABORTO (los servicios la necesitan)."; exit 1; }
+  gen_secrets
+  build_libs            # servicios NO pre-buildeados: nest los compila al vuelo. Libs SÍ (se importan de dist).
+  migrate_all
+  export VEO_WATCH=1    # ← el flag que boot-passenger/boot-extra/biometric leen para arrancar en watch.
+  boot_all
+  reconcile_pids
+  wait_native_health    # estabiliza los lentos (biometric/tracking) ANTES del tablero.
+  cmd_status
+  printf '\n%s%s✓ WATCH activo:%s editá el SRC de cualquier servicio → recompila y reinicia solo.\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
+  yel " Cambiaste una LIB @veo/* o tracking (Go) → 'veo.sh restart <svc>' (o 'veo.sh dev' de nuevo)."
+  yel " Web (admin-web) y apps RN: las compilás vos aparte — veo.sh no las toca."
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
+  dev)     cmd_dev ;;
   down)    shift; cmd_down "${1:-}" ;;
   status)  cmd_status ;;
   monitor) cmd_monitor ;;
@@ -990,6 +1041,7 @@ case "${1:-}" in
 ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
 
   ${C_BOLD}up${C_RESET}                 Ignición completa (infra → secrets → build → migrate → boot → tablero)
+  ${C_BOLD}dev${C_RESET}                Como 'up' pero servicios en WATCH (nest --watch/uvicorn --reload): editás src → reinicia solo
   ${C_BOLD}down${C_RESET} [--infra]     Apagado limpio en capas (pidfiles → puertos → patrón). --infra baja docker
   ${C_BOLD}status${C_RESET}             El tablero (health/pid/dist/último error por servicio + infra)
   ${C_BOLD}monitor${C_RESET}            El escáner EN VIVO: sigue todos los logs y muestra solo errores al pasar

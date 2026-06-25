@@ -24,11 +24,17 @@ start_node() { # <name> <dir> <port>
     if [ -d prisma/migrations ]; then
       npx prisma migrate deploy > "$LOGS/$name.log" 2>&1 || exit 1
     fi
-    nohup node dist/main.js >> "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid"
+    # WATCH (VEO_WATCH=1): el script `dev` (= nest start --watch) recompila y reinicia ante cada cambio
+    # de SRC. Normal: el binario ya compilado. El `down` de veo.sh reapea los watchers (pkill 'nest start').
+    if [ "${VEO_WATCH:-0}" = "1" ]; then
+      nohup pnpm run dev >> "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid"
+    else
+      nohup node dist/main.js >> "$LOGS/$name.log" 2>&1 & echo $! > "$PIDS/$name.pid"
+    fi
   ); then
     echo "  ✗ $name migrate deploy FALLÓ — NO arrancó (ver $LOGS/$name.log)"; return
   fi
-  echo "  ▶ $name lanzado (puerto $port, log $LOGS/$name.log)"
+  echo "  ▶ $name lanzado (puerto $port, log $LOGS/$name.log)$([ "${VEO_WATCH:-0}" = "1" ] && printf ' · WATCH')"
 }
 
 start_node audit      services/audit-service       3009
