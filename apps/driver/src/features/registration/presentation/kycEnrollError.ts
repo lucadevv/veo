@@ -8,10 +8,13 @@ import { ApiError } from '@veo/api-client';
  *  - `missing-capture`: no hay una captura facial válida que enrolar (el proveedor no entregó la foto
  *    real). NO es un fallo de backend: es un gate del cliente que IMPIDE cerrar el alta sin biometría.
  *    El conductor debe (re)completar la verificación facial.
- *  - `liveness`: la PRUEBA DE VIDA no se superó (422 con `details.reason`): el gesto no se ejecutó bien
- *    o el motor sospechó spoofing (foto/video). Es ACCIONABLE: el conductor pide un reto NUEVO y repite el
- *    gesto. Se distingue del `face` (rostro no procesable) por el `details.reason` que trae el 422.
- *  - `face`: el backend no pudo usar la imagen (0 o 2+ rostros). El conductor reintenta con buena luz.
+ *  - `spoof`: el ANTI-SPOOFING PASIVO (PAD single-frame) sospechó un ataque de presentación — la cámara
+ *    apuntó a una FOTO o una PANTALLA, no a una persona real (422 con `details.reason === 'spoof'`). Es
+ *    ACCIONABLE y distinto de `face`: el rostro se detectó, pero NO era una persona viva. El conductor
+ *    repite la selfie apuntando a su cara real (sin fotos ni pantallas de por medio).
+ *  - `face`: el motor no pudo usar la imagen como rostro procesable — 0/2+ rostros, o el PAD no detectó
+ *    a nadie (422 con `details.reason === 'no_face'`, o un 422 sin reason). El conductor reintenta con
+ *    buena luz y mirando al frente.
  *  - `network`: fallo de red (sin respuesta del servidor). Reintentar suele resolver.
  *  - `incomplete`: error de DOMINIO del cierre (`RegistrationCloseError`): el backend reporta que el alta
  *    todavía NO está completa al cerrar el KYC. Es ACCIONABLE (faltan datos/pasos), NO un fallo opaco: se
@@ -20,11 +23,24 @@ import { ApiError } from '@veo/api-client';
  */
 export type KycEnrollErrorKind =
   | 'missing-capture'
-  | 'liveness'
+  | 'spoof'
   | 'face'
   | 'network'
   | 'incomplete'
   | 'generic';
+
+/**
+ * Vocabulario de DOMINIO del backend para el motivo del rechazo del enroll (`details.reason` del 422 que
+ * tira `enrollFace` en identity-service). Tipado y centralizado: la app NUNCA compara el reason como string
+ * suelto (`reason === 'spoof'`) — se chequea contra estas constantes. Un typo es ERROR DE COMPILACIÓN.
+ *  - `SPOOF`:   el PAD pasivo marcó la captura como ataque de presentación (foto/pantalla).
+ *  - `NO_FACE`: no se detectó un rostro usable (motor sin embedding).
+ */
+export const EnrollFailReason = {
+  SPOOF: 'spoof',
+  NO_FACE: 'no_face',
+} as const;
+export type EnrollFailReason = (typeof EnrollFailReason)[keyof typeof EnrollFailReason];
 
 /**
  * Error SENTINEL del cliente: se intentó confirmar el KYC sin una captura facial válida que enrolar.
@@ -74,42 +90,28 @@ function hasEmbeddedUnprocessableStatus(details: unknown): boolean {
 }
 
 /**
- * Motivo de fallo de liveness embebido por el backend en `details.reason` del 422 "Prueba de vida no
- * superada". Lo devolvemos para que la pantalla pueda APENDARLO al mensaje i18n (de forma humana, nunca
- * como único texto crudo). Devuelve `null` si no hay un reason string utilizable.
- *
- * DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2). La pantalla ya no
- * consume este helper (no hay reto de liveness en el alta). Se conserva junto al kind `'liveness'` del
- * clasificador por si el backend sigue emitiendo ese 422. Gatillo: borrar `livenessFailReason` + el kind
- * `'liveness'` cuando se confirme que el enroll del alta nunca devuelve "prueba de vida no superada".
+ * Lee el `details.reason` del 422 del enroll (el motivo de DOMINIO que tira `enrollFace`). Devuelve el
+ * string crudo (lo compara el clasificador contra `EnrollFailReason`) o `null` si no hay un reason usable.
  */
-export function livenessFailReason(error: unknown): string | null {
-  if (!(error instanceof ApiError) || !error.details || typeof error.details !== 'object') {
+function readEnrollReason(details: unknown): string | null {
+  if (!details || typeof details !== 'object') {
     return null;
   }
-  const reason = (error.details as { reason?: unknown }).reason;
+  const reason = (details as { reason?: unknown }).reason;
   return typeof reason === 'string' && reason.trim().length > 0 ? reason : null;
 }
 
-/** true si el `details` del error trae un `reason` string (firma del 422 de "prueba de vida no superada"). */
-function hasLivenessFailReason(details: unknown): boolean {
-  if (!details || typeof details !== 'object') {
-    return false;
-  }
-  const reason = (details as { reason?: unknown }).reason;
-  return typeof reason === 'string' && reason.trim().length > 0;
-}
-
 /**
- * Clasifica el error del enroll para mapearlo a un mensaje específico. Es CONSERVADOR: solo marca
- * `face` cuando hay señal clara de "rostro no procesable" (422 directo o embebido); un 5xx genérico NO
- * se hace pasar por "rostro" (sería deshonesto y confundiría al conductor). Lo no-`ApiError` y lo
- * desconocido cae en `generic`.
+ * Clasifica el error del enroll para mapearlo a un mensaje específico. Es CONSERVADOR: solo marca `spoof`
+ * ante la señal EXACTA del PAD (`details.reason === 'spoof'`); todo otro 422 sobre la selfie (sin rostro,
+ * 0/2+ rostros, reason desconocido) cae en `face` — un 422 unprocessable de la selfie SIEMPRE es "la foto
+ * no sirvió, retomala", lo más accionable. Un 5xx genérico NO se hace pasar por rostro ni spoof (sería
+ * deshonesto). Lo no-`ApiError` y lo desconocido cae en `generic`.
  *
- * NOTA DE CONTRATO (backend): hoy el biometric-service responde 422 ("la imagen debe contener
- * exactamente un rostro claro") pero identity-service lo reescribe a `502 EXTERNAL` con
- * `details: { status: 422 }`. Por eso el puente vía `details.status`. Si el backend pasa a propagar el
- * 422 limpio, la rama `status === 422` lo cubre sin cambios en la app.
+ * NOTA DE CONTRATO (backend): `enrollFace` (identity-service) tira el 422 PROPIO con `details.reason ∈
+ * {spoof, no_face}`; el bff-exception-filter propaga LIMPIO los <500 (status+code+details intactos), así
+ * que el `reason` llega a la app sin reescribir. El caso "0/2+ rostros" del biometric-service se reescribe
+ * a 502 con `details.status === 422` — de ahí el puente `hasEmbeddedUnprocessableStatus`.
  */
 export function classifyKycEnrollError(error: unknown): KycEnrollErrorKind {
   if (error instanceof MissingFaceCaptureError) {
@@ -124,13 +126,18 @@ export function classifyKycEnrollError(error: unknown): KycEnrollErrorKind {
     if (error.status === 0) {
       return 'network';
     }
-    // Prueba de vida no superada: 422 DIRECTO con `details.reason` (el gesto/anti-spoofing falló). Se
-    // chequea ANTES que `face` porque ese 422 también es `status === 422`; el `reason` lo desambigua.
-    if (error.status === FACE_UNPROCESSABLE_STATUS && hasLivenessFailReason(error.details)) {
-      return 'liveness';
+    if (error.status === FACE_UNPROCESSABLE_STATUS) {
+      // Ataque de presentación (PAD pasivo): rostro detectado pero NO era una persona viva. Se chequea
+      // contra la constante tipada, ANTES del fallback a `face`.
+      if (readEnrollReason(error.details) === EnrollFailReason.SPOOF) {
+        return 'spoof';
+      }
+      // Cualquier otro 422 sobre la selfie (no_face, sin reason, reason desconocido): la foto no se pudo
+      // usar como rostro → retomar con buena luz.
+      return 'face';
     }
-    // Rostro no procesable (0 o 2+ rostros): 422 directo SIN reason, o el 422 embebido por identity-service.
-    if (error.status === FACE_UNPROCESSABLE_STATUS || hasEmbeddedUnprocessableStatus(error.details)) {
+    // 422 embebido por identity-service (502 EXTERNAL con `details.status === 422`): "0 o 2+ rostros".
+    if (hasEmbeddedUnprocessableStatus(error.details)) {
       return 'face';
     }
     return 'generic';

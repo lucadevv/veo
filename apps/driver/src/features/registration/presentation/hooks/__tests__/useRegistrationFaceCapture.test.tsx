@@ -188,6 +188,52 @@ describe('useRegistrationFaceCapture · KYC de una selfie del alta', () => {
     expect(hook.current().enrollErrorKind).toBe('face');
   });
 
+  it('enroll rechaza 422 con reason "spoof" (PAD pasivo) ⇒ failed clasificado spoof; NO cierra', async () => {
+    mockEnrollMutateAsync
+      .mockReset()
+      .mockRejectedValueOnce(
+        new ApiError(422, 'UNPROCESSABLE_ENTITY', 'No detectamos a una persona real', {
+          reason: 'spoof',
+        }),
+      );
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+
+    expect(mockSubmitMutateAsync).not.toHaveBeenCalled();
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+    expect(hook.current().errorSource).toBe('enroll');
+    expect(hook.current().enrollErrorKind).toBe('spoof');
+  });
+
+  it('enroll rechaza 422 con reason "no_face" ⇒ failed clasificado face (no spoof); NO cierra', async () => {
+    mockEnrollMutateAsync
+      .mockReset()
+      .mockRejectedValueOnce(
+        new ApiError(422, 'UNPROCESSABLE_ENTITY', 'No detectamos tu rostro', {
+          reason: 'no_face',
+        }),
+      );
+    const hook = await mountHook();
+    await act(async () => {
+      await hook.current().capture();
+    });
+    await tick();
+    await act(async () => {
+      await hook.current().confirm();
+    });
+    await tick();
+
+    expect(hook.current().phase).toBe(SelfiePhase.FAILED);
+    expect(hook.current().enrollErrorKind).toBe('face');
+  });
+
   it('enroll falla por red (status 0) ⇒ failed clasificado network; NO cierra', async () => {
     mockEnrollMutateAsync
       .mockReset()
