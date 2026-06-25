@@ -26,6 +26,7 @@ import {
 } from '../ports/biometric/biometric.port';
 import {
   BackgroundCheckStatus,
+  type Driver,
   DriverStatus,
   KycStatus,
   Prisma,
@@ -143,17 +144,60 @@ export class DriversService {
   }
 
   /**
+   * Materializa el cascarón del agregado Driver de forma idempotente y ORDEN-INDEPENDIENTE, emitiendo
+   * `driver.registered` por OUTBOX EXACTAMENTE UNA VEZ (solo quien GANA la creación de la fila). El alta es un
+   * wizard de dos pasos (datos personales / licencia) que pueden llegar en CUALQUIER orden, y ambos pasan por
+   * acá. Primitiva atómica: `createMany({ skipDuplicates })` = `INSERT ... ON CONFLICT DO NOTHING`, que devuelve
+   * `count`:
+   *   - count === 1 ⇒ ESTA llamada creó la fila ⇒ emite el evento en la MISMA tx (outbox-in-tx · FOUNDATION §6);
+   *   - count === 0 ⇒ la fila ya existía (el OTRO paso del wizard ya la creó y ya emitió) ⇒ solo actualiza su slice.
+   * Sin check-then-act (la unicidad de `userId` la garantiza Postgres) y sin abortar la tx (ON CONFLICT DO NOTHING
+   * NO lanza, a diferencia de un create + catch P2002 que deja la tx en estado fallido): exactly-once aún con
+   * doble-tap CONCURRENTE del mismo conductor. Mismo idioma de "el count discrimina al ganador" que usa `approve()`
+   * con su `updateMany`. Downstream: admin-bff proyecta status=PENDING en el read-model → el conductor aparece en la
+   * vista de FLOTA ("Todos") desde el alta, no recién cuando hay una decisión.
+   */
+  private materializeDriverShell(
+    userId: string,
+    createData: Prisma.DriverCreateManyInput,
+    updateData: Prisma.DriverUpdateInput,
+  ): Promise<Driver> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const inserted = await tx.driver.createMany({ data: createData, skipDuplicates: true });
+      const created = inserted.count === 1;
+      if (!created) {
+        await tx.driver.update({ where: { userId }, data: updateData });
+      }
+      const driver = await tx.driver.findUniqueOrThrow({ where: { userId } });
+      if (created) {
+        const envelope = createEnvelope({
+          eventType: 'driver.registered',
+          producer: 'identity-service',
+          payload: { driverId: driver.id, userId, registeredAt: new Date().toISOString() },
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: driver.id,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+      return driver;
+    });
+  }
+
+  /**
    * Onboarding del conductor (User type DRIVER): registra su licencia y queda PENDING de aprobación.
    *
    * IDEMPOTENTE Y ORDEN-INDEPENDIENTE (fix P0): el alta del conductor es un wizard multi-paso (datos
    * personales, licencia, biometría) que NO tiene un único "paso creador". Cualquier paso que corra
-   * primero debe materializar el agregado Driver; los demás actualizan su slice. Por eso `onboard` hace
-   * UPSERT por el unique `userId` (atómico a nivel DB, sin check-then-act ni carrera entre pasos):
-   * crea la fila-cascarón con los defaults del agregado + la licencia si aún no existe, o solo actualiza
-   * la licencia si ya existía (porque corrió antes `updatePersonalInfo`). Reentrante por diseño: reenviar
-   * la licencia NO lanza ConflictError. NO emite evento de dominio (igual que antes): el hecho de negocio
-   * "listo para revisión" se representa con backgroundCheckStatus PENDING, que `listPendingApproval`
-   * (cola del operador) consulta por estado — no hay consumidor de un "driver.onboarded".
+   * primero materializa el agregado Driver; los demás actualizan su slice. La materialización + el
+   * `driver.registered` exactly-once viven en `materializeDriverShell` (ver su doc): crea la fila-cascarón
+   * con los defaults del agregado + la licencia si aún no existe, o solo actualiza la licencia si ya existía
+   * (porque corrió antes `updatePersonalInfo`). Reentrante por diseño: reenviar la licencia NO lanza
+   * ConflictError. El hecho "listo para revisión" sigue representándose con backgroundCheckStatus PENDING
+   * (lo que consulta `listPendingApproval`), pero AHORA además se proyecta a la flota vía `driver.registered`.
    */
   async onboard(
     userId: string,
@@ -164,20 +208,20 @@ export class DriversService {
     if (user.type !== 'DRIVER') throw new ForbiddenError('El usuario no es conductor');
 
     const licenseExpiresAt = new Date(input.licenseExpiresAt);
-    const driver = await this.prisma.write.driver.upsert({
-      where: { userId },
-      create: {
+    const driver = await this.materializeDriverShell(
+      userId,
+      {
         userId,
         licenseNumber: input.licenseNumber,
         licenseExpiresAt,
         currentStatus: DriverStatus.OFFLINE,
         backgroundCheckStatus: BackgroundCheckStatus.PENDING,
       },
-      update: {
+      {
         licenseNumber: input.licenseNumber,
         licenseExpiresAt,
       },
-    });
+    );
     return { driverId: driver.id, backgroundCheckStatus: driver.backgroundCheckStatus };
   }
 
@@ -1491,10 +1535,11 @@ export class DriversService {
    * `dni` (DNI peruano, 8 dígitos) se valida en el borde; aquí se persiste y se devuelve la vista.
    *
    * IDEMPOTENTE Y ORDEN-INDEPENDIENTE (fix P0): este suele ser el PRIMER paso del wizard de alta, antes
-   * de que exista fila Driver (la licencia llega en `onboard`, paso posterior). UPSERT por el unique
-   * `userId` materializa el cascarón con los defaults del agregado + los datos personales si no existe, o
-   * solo actualiza el slice personal si ya existe — sin el viejo 404 que bloqueaba el paso 1. Atómico a
-   * nivel DB sobre el unique, sin carrera con un `onboard` concurrente.
+   * de que exista fila Driver (la licencia llega en `onboard`, paso posterior). La materialización del
+   * cascarón + el `driver.registered` exactly-once viven en `materializeDriverShell` (ver su doc): crea con
+   * los defaults del agregado + los datos personales si no existe, o solo actualiza el slice personal si ya
+   * existe — sin el viejo 404 que bloqueaba el paso 1. Atómico a nivel DB sobre el unique, sin carrera con
+   * un `onboard` concurrente.
    */
   async updatePersonalInfo(
     userId: string,
@@ -1505,9 +1550,9 @@ export class DriversService {
     // cifrado REVERSIBLE (no hash) porque compliance debe MOSTRARLO al operador para verificación manual:
     // identity descifra en el borde gRPC (toDriverReply) antes de mandarlo al admin-bff (gateado Compliance+).
     const documentIdEnc = seal(input.dni, this.dniEncKey);
-    await this.prisma.write.driver.upsert({
-      where: { userId },
-      create: {
+    await this.materializeDriverShell(
+      userId,
+      {
         userId,
         currentStatus: DriverStatus.OFFLINE,
         backgroundCheckStatus: BackgroundCheckStatus.PENDING,
@@ -1515,12 +1560,12 @@ export class DriversService {
         documentIdEnc,
         birthDate,
       },
-      update: {
+      {
         legalName: input.legalName,
         documentIdEnc,
         birthDate,
       },
-    });
+    );
     // La vista vuelve al PROPIO conductor (que ya tipeó el DNI): se devuelve ENMASCARADO (últimos 4 dígitos),
     // nunca el crudo ni el ciphertext. Se arma desde el input plano (no se re-descifra de la fila escrita).
     return {

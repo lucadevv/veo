@@ -15,7 +15,14 @@ import { REDIS } from '../infra/tokens';
 
 const TRIPS = 'bff:rm:trips';
 const DRIVERS = 'bff:rm:drivers';
-const TTL_SECONDS = 60 * 60 * 24 * 14; // retención de 14 días en el read-model
+const TTL_SECONDS = 60 * 60 * 24 * 14; // retención de 14 días para VIAJES (alta cardinalidad / efímeros)
+/**
+ * Conductores SIN expiración (sentinel ttl<=0 → PERSIST en el Lua). Son una entidad ADMIN de BAJA
+ * cardinalidad (cientos/miles, no millones como los viajes) y la flota debe mostrarlos de forma estable, no
+ * "hasta que caduquen". Su limpieza es explícita (removeDriver en el purge/derecho al olvido), no por TTL —
+ * que era justamente lo que hacía DESAPARECER conductores ya decididos de la vista de "Todos".
+ */
+const DRIVER_TTL_SECONDS = 0;
 
 /**
  * Watermark de monotonía SOLO del eje status (campo interno del hash, NO dato de dominio del panel).
@@ -150,7 +157,14 @@ if updatedToUse ~= nil and updatedToUse ~= false then
 end
 -- id e identidad mínima siempre presentes.
 redis.call('HSET', hashKey, 'id', id)
-redis.call('EXPIRE', hashKey, ttl)
+-- TTL: ttl > 0 → expira (viajes, alta cardinalidad/efímeros); ttl <= 0 → PERSIST (conductores: baja
+-- cardinalidad y entidad ADMIN durable; su limpieza es el purge/removeDriver, no la expiración). PERSIST
+-- además REMUEVE activamente un TTL legacy que la fila pudiera arrastrar de la política anterior.
+if ttl > 0 then
+  redis.call('EXPIRE', hashKey, ttl)
+else
+  redis.call('PERSIST', hashKey)
+end
 
 -- 7) zadd global de recencia con el score NO-regresado.
 redis.call('ZADD', zGlobal, scoreToUse, id)
@@ -329,7 +343,7 @@ export class ReadModelService {
       touchesStatus ? '1' : '0',
       Number.isFinite(incomingStatusTs) ? String(incomingStatusTs) : '',
       String(incomingScore),
-      String(TTL_SECONDS),
+      String(DRIVER_TTL_SECONDS),
       STATUS_WATERMARK_FIELD,
       ABSENT,
     );

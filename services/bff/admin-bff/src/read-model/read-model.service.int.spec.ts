@@ -216,4 +216,18 @@ describe('ReadModelService.upsertDriver · CAS atómico (Redis real)', () => {
     expect(await field('d10', 'status')).toBe('ACTIVE');
     expect(await field('d10', 'averageRating')).toBe('4.2');
   });
+
+  it('(j) los conductores PERSISTEN (sin TTL) y un TTL legacy se REMUEVE en el próximo upsert', async () => {
+    // Un upsert de conductor deja el hash SIN expiración (ttl=-1): la flota es una entidad admin durable,
+    // no se vence como los viajes. Antes el hash llevaba EXPIRE 14d → los conductores ya decididos
+    // DESAPARECÍAN de "Todos"; ese era el corazón de la deuda del read-model de flota.
+    await svc.upsertDriver({ id: 'd11', status: 'PENDING', backgroundCheckStatus: 'PENDING', updatedAt: T1 });
+    expect(await redis.ttl(hashKey('d11'))).toBe(-1);
+
+    // Defensa de migración: una fila con TTL legacy (política vieja) se PERSISTE en el siguiente upsert.
+    await redis.expire(hashKey('d11'), 1000);
+    expect(await redis.ttl(hashKey('d11'))).toBeGreaterThan(0);
+    await svc.upsertDriver({ id: 'd11', status: 'ACTIVE', backgroundCheckStatus: 'VERIFIED', updatedAt: T2 });
+    expect(await redis.ttl(hashKey('d11'))).toBe(-1);
+  });
 });

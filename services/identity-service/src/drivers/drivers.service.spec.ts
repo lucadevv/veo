@@ -1280,32 +1280,57 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
   function makePersonalPrisma(existing: Record<string, unknown> | null) {
     const upsertCalls: {
       create: Record<string, unknown>;
-      update: Record<string, unknown>;
+      update?: Record<string, unknown>;
     }[] = [];
+    const outboxEvents: { aggregateId: string; eventType: string }[] = [];
     return {
       upsertCalls,
+      outboxEvents,
       prisma: {
         read: { driver: { findUnique: async () => existing } },
+        // Materialización por `materializeDriverShell`: createMany({skipDuplicates}) → si la fila ya existía
+        // (existing) el count es 0 (no crea, no emite) y se actualiza el slice; si no existía, count 1 (crea +
+        // emite driver.registered). El doble captura ambos brazos en `upsertCalls` (create del createMany,
+        // update del driver.update) + los eventos de outbox para fijar el invariante exactly-once.
         write: {
-          driver: {
-            upsert: async ({
-              create,
-              update,
-            }: {
-              create: Record<string, unknown>;
-              update: Record<string, unknown>;
-            }) => {
-              upsertCalls.push({ create, update });
-              // Sin fila previa → la rama create define el estado final; con fila previa → merge update.
-              // El DNI se persiste CIFRADO (`document_id_enc`); la vista NO se arma de esta fila sino del input
-              // plano (enmascarado), así que el shape de la fila solo se usa para inspeccionar el upsert.
-              const data = existing ? { ...existing, ...update } : create;
-              return {
-                legalName: (data.legalName as string | null) ?? null,
-                documentIdEnc: (data.documentIdEnc as string | null) ?? null,
-                birthDate: (data.birthDate as Date | null) ?? null,
-              };
-            },
+          $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+            const call: { create: Record<string, unknown>; update?: Record<string, unknown> } = {
+              create: {},
+            };
+            const tx = {
+              driver: {
+                createMany: async ({ data }: { data: Record<string, unknown> }) => {
+                  call.create = data;
+                  return { count: existing ? 0 : 1 };
+                },
+                update: async ({ data }: { data: Record<string, unknown> }) => {
+                  call.update = data;
+                  return {};
+                },
+                findUniqueOrThrow: async () => {
+                  const data = existing ? { ...existing, ...(call.update ?? {}) } : call.create;
+                  return {
+                    id: (data.id as string) ?? 'd-new',
+                    backgroundCheckStatus: (data.backgroundCheckStatus as string) ?? 'PENDING',
+                    legalName: (data.legalName as string | null) ?? null,
+                    documentIdEnc: (data.documentIdEnc as string | null) ?? null,
+                    birthDate: (data.birthDate as Date | null) ?? null,
+                  };
+                },
+              },
+              outboxEvent: {
+                create: async ({
+                  data,
+                }: {
+                  data: { aggregateId: string; eventType: string };
+                }) => {
+                  outboxEvents.push({ aggregateId: data.aggregateId, eventType: data.eventType });
+                },
+              },
+            };
+            const result = await fn(tx);
+            upsertCalls.push(call);
+            return result;
           },
         },
       },
@@ -1371,6 +1396,23 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     // Dos upsert al MISMO unique userId: idempotente, sin error de conflicto.
     expect(upsertCalls).toHaveLength(2);
   });
+
+  it('exactly-once: SIN fila previa emite driver.registered (una vez); con fila previa NO re-emite', async () => {
+    // personal-first crea el cascarón → emite el evento de registro EN la misma tx (outbox-in-tx).
+    const first = makePersonalPrisma(null);
+    const svcA = new DriversService(first.prisma as never, makeRedis() as never, bio, config);
+    await svcA.updatePersonalInfo('u1', { legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    expect(first.outboxEvents.map((e) => e.eventType)).toEqual(['driver.registered']);
+    // La fila ya existía (el OTRO paso del wizard la creó y ya emitió) → este no re-emite (count 0).
+    const second = makePersonalPrisma({ ...okDriver, legalName: 'Ana' });
+    const svcB = new DriversService(second.prisma as never, makeRedis() as never, bio, config);
+    await svcB.updatePersonalInfo('u1', {
+      legalName: 'Ana María',
+      dni: '87654321',
+      birthDate: '1992-01-10',
+    });
+    expect(second.outboxEvents).toHaveLength(0);
+  });
 });
 
 describe('DriversService.onboard · alta de licencia idempotente y orden-independiente (fix P0)', () => {
@@ -1385,31 +1427,55 @@ describe('DriversService.onboard · alta de licencia idempotente y orden-indepen
   ) {
     const upsertCalls: {
       create: Record<string, unknown>;
-      update: Record<string, unknown>;
+      update?: Record<string, unknown>;
     }[] = [];
+    const outboxEvents: { aggregateId: string; eventType: string }[] = [];
     return {
       upsertCalls,
+      outboxEvents,
       prisma: {
         read: {
           user: { findUnique: async () => user },
           driver: { findUnique: async () => existing },
         },
+        // Mismo doble de materialización que `makePersonalPrisma`: el count del createMany discrimina
+        // crear+emitir (sin fila previa) de solo-actualizar (cascarón ya creado por el otro paso del wizard).
         write: {
-          driver: {
-            upsert: async ({
-              create,
-              update,
-            }: {
-              create: Record<string, unknown>;
-              update: Record<string, unknown>;
-            }) => {
-              upsertCalls.push({ create, update });
-              const data = existing ? { ...existing, ...update } : create;
-              return {
-                id: (data.id as string) ?? 'd-new',
-                backgroundCheckStatus: (data.backgroundCheckStatus as string) ?? 'PENDING',
-              };
-            },
+          $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+            const call: { create: Record<string, unknown>; update?: Record<string, unknown> } = {
+              create: {},
+            };
+            const tx = {
+              driver: {
+                createMany: async ({ data }: { data: Record<string, unknown> }) => {
+                  call.create = data;
+                  return { count: existing ? 0 : 1 };
+                },
+                update: async ({ data }: { data: Record<string, unknown> }) => {
+                  call.update = data;
+                  return {};
+                },
+                findUniqueOrThrow: async () => {
+                  const data = existing ? { ...existing, ...(call.update ?? {}) } : call.create;
+                  return {
+                    id: (data.id as string) ?? 'd-new',
+                    backgroundCheckStatus: (data.backgroundCheckStatus as string) ?? 'PENDING',
+                  };
+                },
+              },
+              outboxEvent: {
+                create: async ({
+                  data,
+                }: {
+                  data: { aggregateId: string; eventType: string };
+                }) => {
+                  outboxEvents.push({ aggregateId: data.aggregateId, eventType: data.eventType });
+                },
+              },
+            };
+            const result = await fn(tx);
+            upsertCalls.push(call);
+            return result;
           },
         },
       },
@@ -1450,6 +1516,20 @@ describe('DriversService.onboard · alta de licencia idempotente y orden-indepen
     await svc.onboard('u1', license);
     await svc.onboard('u1', license);
     expect(upsertCalls).toHaveLength(2);
+  });
+
+  it('exactly-once: onboard-first emite driver.registered; onboard-after-personal NO re-emite', async () => {
+    // onboard-first crea el cascarón → emite el evento de registro (aggregateId = id del Driver).
+    const first = makeOnboardPrisma(null);
+    const svcA = new DriversService(first.prisma as never, makeRedis() as never, bio, config);
+    await svcA.onboard('u1', license);
+    expect(first.outboxEvents.map((e) => e.eventType)).toEqual(['driver.registered']);
+    expect(first.outboxEvents[0]?.aggregateId).toBe('d-new');
+    // Cascarón ya creado por updatePersonalInfo (existing) → solo fija la licencia, sin re-emitir.
+    const second = makeOnboardPrisma({ id: 'd1', backgroundCheckStatus: 'PENDING' });
+    const svcB = new DriversService(second.prisma as never, makeRedis() as never, bio, config);
+    await svcB.onboard('u1', license);
+    expect(second.outboxEvents).toHaveLength(0);
   });
 
   it('rechaza si el usuario no existe o está borrado (404)', async () => {

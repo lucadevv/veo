@@ -115,6 +115,23 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
     }
 
     // ── Conductores ──
+    // El conductor MATERIALIZÓ su alta (primer paso del wizard de registro): lo sembramos en el read-model como
+    // PENDIENTE para que aparezca en la vista de FLOTA ("Todos") DESDE el alta, no recién cuando hay una decisión
+    // (verified/rejected). Cierra el hueco de que el read-model solo se sembraba con eventos de CAMBIO DE ESTADO:
+    // la cola "Pendientes" ya veía a estos conductores (lee identity directo), pero la flota no. Espejo de
+    // `driver.resubmitted` (también proyecta PENDING), pero originado en el registro. identity lo emite
+    // exactly-once (solo quien gana la creación de la fila Driver); acá es idempotente igual (upsert por id, y el
+    // watermark de status descarta una redelivery o un evento de estado posterior que llegara reordenado).
+    record['driver.registered'] = async (e) => {
+      const p = e.payload as EventPayload<'driver.registered'>;
+      await this.readModel.upsertDriver({
+        id: p.driverId,
+        userId: p.userId,
+        status: 'PENDING',
+        backgroundCheckStatus: 'PENDING',
+        updatedAt: p.registeredAt,
+      });
+    };
     record['driver.verified'] = async (e) => {
       const p = e.payload as EventPayload<'driver.verified'>;
       await this.readModel.upsertDriver({

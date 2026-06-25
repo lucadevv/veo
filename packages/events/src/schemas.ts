@@ -76,6 +76,20 @@ export const driverResubmitted = z.object({
   userId: z.string(),
   resubmittedAt: z.string(),
 });
+/// El conductor MATERIALIZÓ su alta (primer dato del wizard que crea el agregado Driver, quedando PENDING de
+/// revisión). identity-service lo emite por OUTBOX en la MISMA tx que CREA la fila Driver, EXACTAMENTE UNA VEZ:
+/// el alta son dos upserts independientes del orden (datos personales / licencia) y solo el que GANA la creación
+/// (INSERT ... ON CONFLICT DO NOTHING → count=1) emite; el otro ve la fila ya creada y no re-emite. Downstream:
+/// admin-bff lo proyecta como status=PENDING en el read-model de conductores → el conductor aparece en la vista
+/// de FLOTA ("Todos") desde el alta, no recién cuando hay una decisión (verified/rejected). Cierra el hueco de que
+/// el read-model solo se sembraba con eventos de cambio de estado (la cola "Pendientes" ya lo veía vía identity
+/// directo, pero la flota no). SIN PII en el payload (igual que el resto de driver.*): el nombre lo resuelve el
+/// admin-bff por gRPC al listar. `registeredAt` ISO-8601 del momento de materialización.
+export const driverRegistered = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  registeredAt: z.string(),
+});
 /// El OPERADOR levantó una suspensión del conductor desde el panel (la inversa de driver.suspended).
 /// identity-service lo emite por OUTBOX en la MISMA tx que QUITA el/los hold(s) y RECOMPUTA `Driver.suspendedAt`
 /// derivado (modelo de HOLDS; así nunca hay reactivación sin evento ni evento sin reactivación). Lo emiten DOS
@@ -1184,6 +1198,7 @@ export const EVENT_SCHEMAS = {
   'user.deletion_requested': userDeletionRequested,
   'user.deleted': userDeleted,
   'admin.role_changed': adminRoleChanged,
+  'driver.registered': driverRegistered,
   'driver.verified': driverVerified,
   'driver.rejected': driverRejected,
   'driver.suspended': driverSuspended,
