@@ -10,6 +10,7 @@ import {
   useDriverDecision,
   useDeleteDriver,
   useDniFaceMatch,
+  useLicenseFaceMatch,
 } from '@/lib/api/queries';
 import { date, dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
@@ -135,7 +136,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
                     value={dateTime(driver.biometric.lastVerifiedAt)}
                   />
                 </div>
-                <DniFaceMatchPanel driver={driver} />
+                <FaceMatchBindings driver={driver} />
               </CardContent>
             </Card>
           </div>
@@ -203,12 +204,6 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
 }
 
 /**
- * Sub-lote 3C · BINDING DNI↔selfie. Muestra el resultado GUARDADO del face-match (Coincide ✓ verde / No
- * coincide ✗ rojo + score%) junto a la biometría, y un botón "Verificar rostro vs DNI" que dispara la
- * acción del admin-bff (baja la foto FRONT del DNI de S3 → cotea con la biometría enrolada → guarda). El
- * operador VE el binding antes de aprobar (no aprueba a ciegas). El gate REAL es server-side; esto refleja.
- */
-/**
  * El `dniFaceMatchScore` GUARDADO está en escala 0..100 (= similitud coseno ArcFace × 100). Mostrarlo como
  * "{score}%" ENGAÑA: un 0.40 de coseno legítimo (DNI viejo/baja-res, misma persona) se LEE como "40% de
  * confianza" → el operador cree que hay 60% de que NO sea la persona, cuando en realidad 0.40 es un coseno
@@ -224,27 +219,100 @@ function formatFaceMatchScore(score0to100: number): { cosine: string; band: stri
   return { cosine: cosine.toFixed(2), band };
 }
 
-function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
+/**
+ * Estados tipados del binding documento↔selfie (= enum `DniFaceMatchStatus` del contrato). Const local para
+ * conmutar el panel SIN strings mágicos (`status === FaceMatchStatus.MATCHED` en vez de `=== 'MATCHED'`).
+ */
+const FaceMatchStatus = {
+  NOT_RUN: 'NOT_RUN',
+  MATCHED: 'MATCHED',
+  NO_MATCH: 'NO_MATCH',
+} as const;
+
+/**
+ * Descriptor de un binding documento↔selfie para el panel CANÓNICO. Centraliza las labels/copys y el SELECTOR
+ * tipado de los 3 campos del binding (sin indexar por string) → un panel, dos documentos (DNI y licencia ·
+ * Lote C · binding MÁS FUERTE). Acá muere el copy-paste entre el panel del DNI y el del brevete.
+ */
+interface FaceMatchDoc {
+  /** Etiqueta corta del binding ("Rostro vs DNI" / "Rostro vs licencia"). */
+  label: string;
+  /** Verbo del CTA cuando aún no se corrió. */
+  verifyLabel: string;
+  /** Hint cuando no se corrió. */
+  emptyHint: string;
+  /** Títulos del toast al coincidir / no coincidir. */
+  matchTitle: string;
+  noMatchTitle: string;
+  /** Qué revisar si el match falla (toast de error). */
+  errorHint: string;
+  /** Extrae los 3 campos del binding del bloque biométrico (tipado, sin strings de keys). */
+  select: (bio: DriverDetail['biometric']) => {
+    status: DriverDetail['biometric']['dniFaceMatchStatus'];
+    score: number | null;
+    at: string | null;
+  };
+}
+
+const FACE_MATCH_DNI: FaceMatchDoc = {
+  label: 'Rostro vs DNI',
+  verifyLabel: 'Verificar rostro vs DNI',
+  emptyHint: 'Aún no se verificó el rostro del DNI contra la biometría enrolada.',
+  matchTitle: 'Rostro coincide con el DNI',
+  noMatchTitle: 'El rostro NO coincide con el DNI',
+  errorHint: 'Revisá que el conductor tenga biometría enrolada y la foto FRONT del DNI cargada.',
+  select: (b) => ({
+    status: b.dniFaceMatchStatus,
+    score: b.dniFaceMatchScore,
+    at: b.dniFaceMatchedAt,
+  }),
+};
+
+const FACE_MATCH_LICENSE: FaceMatchDoc = {
+  label: 'Rostro vs licencia',
+  verifyLabel: 'Verificar rostro vs licencia',
+  emptyHint: 'Aún no se verificó el rostro del brevete contra la biometría enrolada.',
+  matchTitle: 'Rostro coincide con la licencia',
+  noMatchTitle: 'El rostro NO coincide con la licencia',
+  errorHint: 'Revisá que el conductor tenga biometría enrolada y la foto del brevete cargada.',
+  select: (b) => ({
+    status: b.licenseFaceMatchStatus,
+    score: b.licenseFaceMatchScore,
+    at: b.licenseFaceMatchedAt,
+  }),
+};
+
+/**
+ * Panel CANÓNICO del binding documento↔selfie (DNI o licencia). Muestra el resultado GUARDADO (Coincide ✓ /
+ * No coincide ✗ + similitud coseno honesta) y un CTA que dispara el match en el admin-bff. Parametrizado por
+ * `doc` (descriptor) + la `mutation` del documento — un solo componente, cero copy-paste. El operador VE el
+ * binding antes de aprobar; el gate REAL (ambos bindings ejecutados) es server-side, esto solo refleja.
+ */
+function FaceMatchPanel({
+  driver,
+  doc,
+  mutation,
+}: {
+  driver: DriverDetail;
+  doc: FaceMatchDoc;
+  mutation: ReturnType<typeof useDniFaceMatch>;
+}) {
   const { toast } = useToast();
-  const match = useDniFaceMatch();
-  const { dniFaceMatchStatus, dniFaceMatchScore, dniFaceMatchedAt } = driver.biometric;
+  const { status, score, at } = doc.select(driver.biometric);
 
   const runMatch = async () => {
     try {
-      const res = await match.mutateAsync({ id: driver.id });
+      const res = await mutation.mutateAsync({ id: driver.id });
       toast({
         tone: res.matched ? 'success' : 'danger',
-        title: res.matched ? 'Rostro coincide con el DNI' : 'El rostro NO coincide con el DNI',
+        title: res.matched ? doc.matchTitle : doc.noMatchTitle,
         description: res.reason ?? undefined,
       });
     } catch (error) {
       toast({
         tone: 'danger',
         title: 'No se pudo verificar el rostro',
-        description:
-          error instanceof ApiError
-            ? error.message
-            : 'Revisá que el conductor tenga biometría enrolada y la foto FRONT del DNI cargada.',
+        description: error instanceof ApiError ? error.message : doc.errorHint,
       });
     }
   };
@@ -252,39 +320,57 @@ function DniFaceMatchPanel({ driver }: { driver: DriverDetail }) {
   return (
     <div className="border-t border-border pt-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <dt className="text-xs text-ink-muted">Rostro vs DNI</dt>
-        <Button size="sm" variant="secondary" onClick={() => void runMatch()} disabled={match.isPending}>
+        <dt className="text-xs text-ink-muted">{doc.label}</dt>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void runMatch()}
+          disabled={mutation.isPending}
+        >
           <ScanFace className="size-4" aria-hidden />
-          {dniFaceMatchStatus === 'NOT_RUN' ? 'Verificar rostro vs DNI' : 'Volver a verificar'}
+          {status === FaceMatchStatus.NOT_RUN ? doc.verifyLabel : 'Volver a verificar'}
         </Button>
       </div>
-      {dniFaceMatchStatus === 'NOT_RUN' ? (
-        <p className="text-xs text-ink-muted">
-          Aún no se verificó el rostro del DNI contra la biometría enrolada.
-        </p>
-      ) : dniFaceMatchStatus === 'MATCHED' ? (
+      {status === FaceMatchStatus.NOT_RUN ? (
+        <p className="text-xs text-ink-muted">{doc.emptyHint}</p>
+      ) : status === FaceMatchStatus.MATCHED ? (
         <div className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-success">
           <Check className="size-4" aria-hidden />
           <span className="font-medium">Coincide</span>
-          {dniFaceMatchScore !== null ? (
+          {score !== null ? (
             <span className="tabular text-xs text-success/80">
-              {`similitud ${formatFaceMatchScore(dniFaceMatchScore).cosine} · ${formatFaceMatchScore(dniFaceMatchScore).band}`}
+              {`similitud ${formatFaceMatchScore(score).cosine} · ${formatFaceMatchScore(score).band}`}
             </span>
           ) : null}
-          <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
+          <span className="ml-auto text-xs text-ink-muted">{dateTime(at)}</span>
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-md bg-danger/10 px-3 py-2 text-danger">
           <X className="size-4" aria-hidden />
           <span className="font-medium">No coincide</span>
-          {dniFaceMatchScore !== null ? (
+          {score !== null ? (
             <span className="tabular text-xs text-danger/80">
-              {`similitud ${formatFaceMatchScore(dniFaceMatchScore).cosine} · ${formatFaceMatchScore(dniFaceMatchScore).band}`}
+              {`similitud ${formatFaceMatchScore(score).cosine} · ${formatFaceMatchScore(score).band}`}
             </span>
           ) : null}
-          <span className="ml-auto text-xs text-ink-muted">{dateTime(dniFaceMatchedAt)}</span>
+          <span className="ml-auto text-xs text-ink-muted">{dateTime(at)}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Los DOS bindings documento↔selfie (DNI + licencia · Lote C · binding MÁS FUERTE) que el operador VE antes de
+ * aprobar. Llama ambas mutations acá (reglas de hooks) y renderiza un panel canónico por documento.
+ */
+function FaceMatchBindings({ driver }: { driver: DriverDetail }) {
+  const dniMatch = useDniFaceMatch();
+  const licenseMatch = useLicenseFaceMatch();
+  return (
+    <div className="space-y-3">
+      <FaceMatchPanel driver={driver} doc={FACE_MATCH_DNI} mutation={dniMatch} />
+      <FaceMatchPanel driver={driver} doc={FACE_MATCH_LICENSE} mutation={licenseMatch} />
     </div>
   );
 }

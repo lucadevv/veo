@@ -872,6 +872,93 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
   });
 });
 
+describe('OpsService.runLicenseFaceMatch · orquesta el BINDING licencia↔selfie (Lote C)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Brevete (LICENSE_A1) con imagen FRONT — la cara del titular que el face-match usa. */
+  const licenseWithFront = {
+    id: 'doc-license',
+    ownerType: 'DRIVER',
+    ownerId: 'd1',
+    type: FleetDocumentType.LICENSE_A1,
+    documentNumber: 'Q12345678',
+    status: FleetDocumentStatus.PENDING_REVIEW,
+    expiresAt: '',
+    fileS3Key: '',
+    rejectionReason: '',
+    images: [{ s3Key: 'drivers/d1/license-front.jpg', side: 'FRONT', order: 0 }],
+  };
+
+  it('baja la foto del brevete de S3, la pasa a identity y devuelve + audita el resultado', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([5, 6, 7, 8]), { status: 200 }),
+    );
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [licenseWithFront] } : {},
+    );
+    const presignPost = vi.fn().mockResolvedValue({ url: 'https://signed/license-front' });
+    const media = { post: presignPost } as unknown as InternalRestClient;
+    const identityPost = vi.fn().mockResolvedValue({ matched: true, score: 88, reason: null });
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      identityRest,
+      media,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+
+    const out = await svc.runLicenseFaceMatch(identity, 'd1');
+
+    expect(out).toEqual({ matched: true, score: 88, reason: null });
+    expect(presignPost.mock.calls[0]?.[1]?.body?.key).toBe('drivers/d1/license-front.jpg');
+    expect(identityPost).toHaveBeenCalledWith(
+      '/drivers/d1/license-face-match',
+      expect.objectContaining({ body: { image: Buffer.from([5, 6, 7, 8]).toString('base64') } }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'driver.license-face-match' }),
+    );
+  });
+
+  it('sin foto del brevete → 409 (ConflictError) sin llamar a identity', async () => {
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [] } : {},
+    );
+    const identityPost = vi.fn();
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      identityRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    await expect(svc.runLicenseFaceMatch(identity, 'd1')).rejects.toBeInstanceOf(ConflictError);
+    expect(identityPost).not.toHaveBeenCalled();
+  });
+});
+
 describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
   it('ADMIN → [SUPERADMIN]: ForbiddenError 403 que CORTA antes de identityRest.post', async () => {
     const post = vi.fn();

@@ -89,4 +89,13 @@ message DriverReply {
   // DOCUMENT_EXPIRED/INSPECTION_EXPIRED → /reactivate-compliance. NO es PII. `suspended_at` (campo 7) sigue
   // siendo el flag derivado de "está suspendido"; esto añade el PORQUÉ. Un conductor puede tener VARIAS causas.
   repeated string suspension_causes = 21;
+  // ── Lote C · BINDING licencia↔selfie (gemelo del DNI, binding MÁS FUERTE). Resultado GUARDADO del face-match
+  // entre la foto del brevete (LICENSE_A1) y la biometría de referencia. El operador lo VE antes de aprobar;
+  // approve() exige AMBOS bindings ejecutados. Campos 22-24, backward-compatible (proto3 defaults). ──
+  string license_face_match_status = 22;
+  // Score del face-match del brevete en 0..100; 0 si no se corrió. El brevete es low-res → score típicamente
+  // más bajo que el DNI; el veredicto lo decide el operador. Solo significativo si status != NOT_RUN.
+  double license_face_match_score = 23;
+  // ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió.
+  string license_face_matched_at = 24;
 }

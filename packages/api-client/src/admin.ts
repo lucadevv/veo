@@ -302,6 +302,15 @@ export const driverDetail = z.object({
     dniFaceMatchStatus: dniFaceMatchStatus,
     dniFaceMatchScore: z.number().nullable(),
     dniFaceMatchedAt: z.string().nullable(),
+    /**
+     * Lote C · BINDING licencia↔selfie (gemelo del DNI · binding MÁS FUERTE). Reusa el mismo enum de estado
+     * (NOT_RUN/MATCHED/NO_MATCH). El operador VE ambos bindings antes de aprobar; approve() exige los dos
+     * ejecutados. `licenseFaceMatchScore` 0..100 (null si no se corrió · el brevete es low-res → suele ser más
+     * bajo); `licenseFaceMatchedAt` ISO-8601 (null si no se corrió).
+     */
+    licenseFaceMatchStatus: dniFaceMatchStatus,
+    licenseFaceMatchScore: z.number().nullable(),
+    licenseFaceMatchedAt: z.string().nullable(),
   }),
   // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
   vehicle: driverVehicle.nullable(),

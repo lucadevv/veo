@@ -76,6 +76,15 @@ export interface DriverReply {
   /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
   dniFaceMatchedAt: string;
   /**
+   * Lote C · BINDING licencia↔selfie (gemelo del DNI · campos 22-24 del proto). Estado tipado
+   * NOT_RUN/MATCHED/NO_MATCH (proto3 default → 'NOT_RUN', materializado en el grpc controller).
+   */
+  licenseFaceMatchStatus: string;
+  /** Score del face-match del brevete en 0..100; 0 si no se corrió. El brevete es low-res → suele ser más bajo. */
+  licenseFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió. */
+  licenseFaceMatchedAt: string;
+  /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS · campo 21 del proto): las `cause` DISTINTAS de los holds
    * vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
    * admin-bff (GET /ops/drivers/:id) para saber POR QUÉ está suspendido y llamar el endpoint de reactivación

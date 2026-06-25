@@ -109,6 +109,20 @@ export class OpsController {
     return this.ops.runDniFaceMatch(user, id);
   }
 
+  @Post('drivers/:id/license-face-match')
+  @HttpCode(200)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({
+    summary:
+      'Verificar rostro licencia↔selfie: baja la foto del brevete de S3 y la cotea con la biometría enrolada (BINDING · Lote C)',
+  })
+  licenseFaceMatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<DniFaceMatchResult> {
+    return this.ops.runLicenseFaceMatch(user, id);
+  }
+
   @Post('drivers/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)

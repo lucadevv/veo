@@ -185,6 +185,25 @@ export function useDniFaceMatch() {
   });
 }
 
+/**
+ * Lote C · dispara el FACE-MATCH licencia↔selfie (POST /ops/drivers/:id/license-face-match). Gemelo del DNI:
+ * el admin-bff baja la foto del brevete (LICENSE_A1) de S3 y la cotea con la biometría enrolada (server-truth).
+ * El éxito invalida el detalle para reflejar el binding del brevete. Mismos 409 honestos (sin biometría / sin
+ * foto del brevete). El resultado comparte forma con el DNI (`dniFaceMatchResult`: matched/score/reason).
+ */
+export function useLicenseFaceMatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/license-face-match`, {
+        schema: dniFaceMatchResult,
+      }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
+    },
+  });
+}
+
 export function useDriverDecision() {
   const qc = useQueryClient();
   return useMutation({

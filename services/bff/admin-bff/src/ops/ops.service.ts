@@ -548,6 +548,11 @@ export class OpsService {
         dniFaceMatchStatus: toDniFaceMatchStatus(driver.dniFaceMatchStatus),
         dniFaceMatchScore: driver.dniFaceMatchedAt ? driver.dniFaceMatchScore : null,
         dniFaceMatchedAt: emptyToNull(driver.dniFaceMatchedAt),
+        // Lote C · BINDING licencia↔selfie GUARDADO (gemelo del DNI · binding MÁS FUERTE). Mismo narrowing y
+        // gateo de score por "se corrió" (licenseFaceMatchedAt) que el DNI. El operador VE ambos bindings.
+        licenseFaceMatchStatus: toDniFaceMatchStatus(driver.licenseFaceMatchStatus),
+        licenseFaceMatchScore: driver.licenseFaceMatchedAt ? driver.licenseFaceMatchScore : null,
+        licenseFaceMatchedAt: emptyToNull(driver.licenseFaceMatchedAt),
       },
       vehicle,
       documents,
@@ -611,6 +616,59 @@ export class OpsService {
     );
     await this.audit.record(identity, {
       action: 'driver.dni-face-match',
+      resourceType: 'driver',
+      resourceId: driverId,
+      payload: { matched: result.matched, score: result.score },
+    });
+    return result;
+  }
+
+  /**
+   * Lote C · ORQUESTA el face-match licencia↔selfie (POST /ops/drivers/:id/license-face-match). Gemelo de
+   * `runDniFaceMatch`: ubica el brevete (LICENSE_A1) → su imagen FRONT (donde va la foto del titular) → baja
+   * los bytes de S3 → los pasa a identity `POST /drivers/:id/license-face-match { image }`. identity coteja
+   * contra el `faceEmbedding` GUARDADO (server-truth), lo persiste y lo devuelve. Audita (Ley 29733).
+   *
+   * MISMA GARANTÍA que el DNI: la imagen sale del brevete REAL (S3, no arbitraria) y el embedding de
+   * referencia es el GUARDADO del conductor (lo resuelve identity). El admin-bff solo transporta los bytes.
+   */
+  async runLicenseFaceMatch(
+    identity: AuthUser,
+    driverId: string,
+  ): Promise<DniFaceMatchResult> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
+      'GetDriverDocuments',
+      { id: driverId },
+      meta,
+    );
+    // Ubica el brevete (LICENSE_A1) y su imagen FRONT (la cara con la foto del titular). Sin licencia / sin
+    // FRONT → 409 honesto: no hay foto que cotear.
+    const license = docs.documents.find((d) => d.type === FleetDocumentType.LICENSE_A1);
+    const frontKey =
+      license?.images?.find((img) => img.side === DocumentSide.FRONT)?.s3Key ??
+      // Backward-compat: un brevete legacy con una sola imagen (fileS3Key) se trata como el FRONT.
+      (license?.fileS3Key || null);
+    if (!frontKey) {
+      throw new ConflictError(
+        'No se puede verificar el rostro: el conductor no tiene la foto del brevete (licencia) cargada',
+        { driverId },
+      );
+    }
+
+    const image = await this.fetchDocumentImageBase64(identity, frontKey);
+    if (!image) {
+      throw new ConflictError('No se pudo descargar la imagen del brevete para la verificación', {
+        driverId,
+      });
+    }
+
+    const result = await this.identityRest.post<DniFaceMatchResult>(
+      `/drivers/${driverId}/license-face-match`,
+      { identity, body: { image } },
+    );
+    await this.audit.record(identity, {
+      action: 'driver.license-face-match',
       resourceType: 'driver',
       resourceId: driverId,
       payload: { matched: result.matched, score: result.score },
