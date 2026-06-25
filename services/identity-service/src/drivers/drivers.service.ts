@@ -326,6 +326,20 @@ export class DriversService {
           { driverId },
         );
       }
+      // GATE DE EJECUCIÓN DEL LIVENESS PASIVO (anti-spoofing PAD · fail-closed · diferenciador no negociable VEO):
+      // no se aprueba un conductor cuya selfie de enrol NO pasó por el PAD. `livenessChecked !== true` ⇔ el PAD no
+      // corrió (modelo ausente → enrol DEGRADADO) o el conductor enroló antes de que existiera el campo (null). Es
+      // gate de EJECUCIÓN (que el anti-spoofing CORRIÓ), NO de score: un spoof real ya fue RECHAZADO en el enrol
+      // (422, nunca se persiste), así que acá no hay veredicto que juzgar — solo exigimos que el PAD se haya
+      // ejecutado. Curl-proof: aunque la UI muestre el chip, la API se NIEGA a aprobar un enrol sin anti-spoofing.
+      // En prod nunca debería disparar (fail-closed por /health/ready del biometric-service); un DEGRADED en prod
+      // es una alarma, no un caso normal. Para destrabar: re-enrolar la biometría con el PAD activo.
+      if (driver.livenessChecked !== true) {
+        throw new ConflictError(
+          'No se puede aprobar: el liveness pasivo (anti-spoofing) no se ejecutó en el enrol. Re-enrolá la biometría con el PAD activo.',
+          { driverId },
+        );
+      }
       // Asserts de máquina TIPADOS: validan que la transición es LEGAL sobre el dato fresco (un from fuera
       // del enum / un CLEARED→PENDING ilegal fallan acá, antes del CAS). La GANANCIA de la carrera, en cambio,
       // la decide el CAS de abajo, no estos asserts (un check-then-act secuencial no protege del concurrente).
@@ -1293,6 +1307,11 @@ export class DriversService {
           faceEnrolledAt: enrolledAt,
           // F5 · selfie del enrol (ayuda visual del operador). Validada por prefijo arriba; null si no aplica.
           faceSelfieKey: selfieKey,
+          // VEREDICTO del liveness PASIVO de ESTE enrol (lo VE el operador + lo exige `approve()`): `livenessChecked`
+          // = ¿corrió el PAD? (false ⇒ degradado, modelo ausente); `score` = clase viva 0..1. Un spoof no llega acá
+          // (se rechazó arriba con 422). Se ESCRIBE en cada enrol (describe la captura actual, no se resetea).
+          livenessChecked: enroll.livenessChecked,
+          livenessScore: enroll.score,
           // RESET DEL BINDING DNI↔selfie (invariante de frescura, mismo patrón que resubmit()): mutar el
           // embedding invalida el cotejo viejo (apuntaba al material anterior). Los 3 campos del binding se
           // limpian JUNTO al embedding nuevo → re-aprobar OBLIGA a re-correr matchDniFace() contra este material.

@@ -138,6 +138,13 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
                     value={dateTime(driver.biometric.faceEnrolledAt)}
                   />
                   <Detail
+                    label="Anti-spoofing (liveness)"
+                    value={livenessLabel(
+                      driver.biometric.livenessStatus,
+                      driver.biometric.livenessScore,
+                    )}
+                  />
+                  <Detail
                     label="Última verificación"
                     value={dateTime(driver.biometric.lastVerifiedAt)}
                   />
@@ -233,6 +240,17 @@ const FaceMatchStatus = {
   NOT_RUN: 'NOT_RUN',
   MATCHED: 'MATCHED',
   NO_MATCH: 'NO_MATCH',
+} as const;
+
+/**
+ * Estados tipados del liveness PASIVO (= enum `passiveLivenessStatus` del contrato). Const local para conmutar
+ * el chip + el gate SIN strings mágicos. PASSED = el PAD corrió y dio viva; DEGRADED = enroló sin anti-spoofing
+ * (modelo ausente); NOT_RUN = aún no enroló. Un spoof NUNCA llega acá (se rechaza en el enrol).
+ */
+const PassiveLivenessStatus = {
+  NOT_RUN: 'NOT_RUN',
+  PASSED: 'PASSED',
+  DEGRADED: 'DEGRADED',
 } as const;
 
 /**
@@ -471,6 +489,30 @@ function faceReadiness(status: DriverDetail['biometric']['dniFaceMatchStatus']):
       : 'pending';
 }
 
+/**
+ * Readiness del liveness PASIVO: PASSED → ok (el anti-spoofing corrió y dio viva); DEGRADED → warn (enroló SIN
+ * anti-spoofing — el operador debe saberlo); NOT_RUN → pending (aún no enroló biometría).
+ */
+function livenessReadiness(status: DriverDetail['biometric']['livenessStatus']): ReadyState {
+  return status === PassiveLivenessStatus.PASSED
+    ? 'ok'
+    : status === PassiveLivenessStatus.DEGRADED
+      ? 'warn'
+      : 'pending';
+}
+
+/** Texto legible del liveness para la ficha (status + score 0..1 de la clase viva). */
+function livenessLabel(
+  status: DriverDetail['biometric']['livenessStatus'],
+  score: number | null,
+): string {
+  if (status === PassiveLivenessStatus.PASSED) {
+    return score != null ? `Vivo · ${score.toFixed(2)}` : 'Vivo';
+  }
+  if (status === PassiveLivenessStatus.DEGRADED) return 'Degradado · sin anti-spoofing';
+  return 'No enrolado';
+}
+
 /** Chip de readiness para la barra de aprobación: verde ok / ámbar-danger warn / neutro pendiente. */
 function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
   const cfg = {
@@ -500,16 +542,26 @@ function ApprovalBar({ driver }: { driver: DriverDetail }) {
   const { toast } = useToast();
   const decision = useDriverDecision();
   const bio = driver.biometric;
-  const canApprove = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
+  // Gate DUAL server-side de `approve()` REFLEJADO (la UI no autoriza): ambos face-match ejecutados + el
+  // liveness pasivo PASSED (el PAD corrió). El bff revalida igual @Roles + el gate + los documentos.
+  const livenessPassed = bio.livenessStatus === PassiveLivenessStatus.PASSED;
+  const facesRun = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
+  const canApprove = facesRun && livenessPassed;
+  // Motivo HONESTO del bloqueo (cronológico): el anti-spoofing degradado NO se arregla corriendo el match —
+  // exige re-enrolar; los face-match sí los dispara el operador desde esta pantalla.
+  const blockReason = !livenessPassed
+    ? 'El anti-spoofing del enrol no corrió (enrol degradado); el conductor debe re-enrolar su biometría.'
+    : 'Corré ambos face-match para habilitar.';
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between lg:px-5">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-ink">Revisión de alta</p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          <ReadyChip label="Biometría enrolada" state={bio.faceEnrolledAt ? 'ok' : 'pending'} />
+          <ReadyChip label="Anti-spoofing" state={livenessReadiness(bio.livenessStatus)} />
           <ReadyChip label="Rostro vs DNI" state={faceReadiness(bio.dniFaceMatchStatus)} />
           <ReadyChip label="Rostro vs licencia" state={faceReadiness(bio.licenseFaceMatchStatus)} />
-          <ReadyChip label="Biometría enrolada" state={bio.faceEnrolledAt ? 'ok' : 'pending'} />
         </div>
       </div>
 
@@ -530,9 +582,7 @@ function ApprovalBar({ driver }: { driver: DriverDetail }) {
               toast({ tone: 'success', title: 'Conductor aprobado' });
             }}
           />
-          {!canApprove ? (
-            <span className="text-xs text-ink-muted">Corré ambos face-match para habilitar.</span>
-          ) : null}
+          {!canApprove ? <span className="text-xs text-ink-muted">{blockReason}</span> : null}
         </div>
       ) : null}
     </div>

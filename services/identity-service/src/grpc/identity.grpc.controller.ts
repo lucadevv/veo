@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, InternalAudience, type InternalIdentity } from '@veo/auth';
-import { DniFaceMatchStatus } from '@veo/shared-types';
+import { DniFaceMatchStatus, PassiveLivenessStatus } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
@@ -68,6 +68,10 @@ interface DriverReply {
   licenseFaceMatchedAt: string;
   /** F5 · key S3/MinIO de la selfie del enrol (ADMIN-ONLY). "" si no hay/no-admin. */
   faceSelfieKey: string;
+  /** Estado del liveness PASIVO del enrol (NOT_RUN/PASSED/DEGRADED · ADMIN-ONLY). NOT_RUN en no-admin. */
+  livenessStatus: string;
+  /** Score de la clase viva del PAD en 0..1; 0 si no se corrió o no-admin. */
+  livenessScore: number;
   /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): las `cause` DISTINTAS de los holds vigentes del
    * conductor (DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
@@ -111,6 +115,8 @@ const EMPTY_DRIVER: DriverReply = {
   licenseFaceMatchScore: 0,
   licenseFaceMatchedAt: '',
   faceSelfieKey: '',
+  livenessStatus: PassiveLivenessStatus.NOT_RUN,
+  livenessScore: 0,
   suspensionCauses: [],
 };
 
@@ -344,6 +350,8 @@ export class IdentityGrpcController {
     licenseFaceMatchScore: number | null;
     licenseFaceMatchedAt: Date | null;
     faceSelfieKey: string | null;
+    livenessChecked: boolean | null;
+    livenessScore: number | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
     // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
     // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
@@ -418,6 +426,16 @@ export class IdentityGrpcController {
       // F5 · key de la selfie del enrol. ADMIN-ONLY (igual que el DNI/binding): "" en rieles no-admin (el
       // pasajero/dispatch no ven la biometría del conductor) o si no hay selfie guardada.
       faceSelfieKey: includeSensitivePii ? (d.faceSelfieKey ?? '') : '',
+      // LIVENESS PASIVO del enrol. ADMIN-ONLY (señal del proceso KYC). El status se DERIVA del `livenessChecked`
+      // persistido (null = aún no enroló → NOT_RUN; true → PASSED, el PAD corrió y dio viva; false → DEGRADED,
+      // enroló sin PAD): estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0.
+      livenessStatus:
+        !includeSensitivePii || d.livenessChecked === null || d.livenessChecked === undefined
+          ? PassiveLivenessStatus.NOT_RUN
+          : d.livenessChecked
+            ? PassiveLivenessStatus.PASSED
+            : PassiveLivenessStatus.DEGRADED,
+      livenessScore: includeSensitivePii ? (d.livenessScore ?? 0) : 0,
       // CAUSAS de suspensión: las `cause` DISTINTAS de los holds vigentes (modelo de HOLDS). Un conductor con
       // varias causas (ej. doc vencido + disciplinaria) las muestra TODAS, así el panel ofrece la(s) acción(es)
       // de reactivación correcta(s). [] cuando el read no trajo holds (batch/by-user) o no hay holds (libre).

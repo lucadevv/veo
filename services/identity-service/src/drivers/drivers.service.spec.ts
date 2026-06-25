@@ -34,6 +34,9 @@ const okDriver = {
   // Binding licencia↔selfie YA ejecutado (Lote C · approve() exige AMBOS bindings corridos).
   licenseFaceMatched: true as boolean | null,
   licenseFaceMatchedAt: new Date('2026-01-01T00:00:00Z') as Date | null,
+  // Liveness PASIVO YA ejecutado (PAD corrió → PASSED): approve() exige `livenessChecked === true`. El caso feliz.
+  livenessChecked: true as boolean | null,
+  livenessScore: 0.95 as number | null,
 };
 
 /** Fuentes válidas del eje DriverStatus hacia AVAILABLE (espeja driverStatusSources del servicio). */
@@ -269,6 +272,8 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
       faceEmbedding?: number[];
       faceEnrolledAt?: Date;
       faceSelfieKey?: string | null;
+      livenessChecked?: boolean | null;
+      livenessScore?: number | null;
       dniFaceMatched?: boolean | null;
       dniFaceMatchScore?: number | null;
       dniFaceMatchedAt?: Date | null;
@@ -309,6 +314,10 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
     // Persiste EXACTAMENTE el embedding que devolvió embed (no uno inventado).
     expect(persisted?.faceEmbedding).toEqual([0.4, 0.5, 0.6]);
     expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
+    // Persiste el veredicto del liveness PASIVO de ESTE enrol (lo VE el operador + lo exige approve()): el PAD
+    // corrió (livenessChecked=true) con score 0.95 de la clase viva, tal como los devolvió enrollPassive.
+    expect(persisted?.livenessChecked).toBe(true);
+    expect(persisted?.livenessScore).toBe(0.95);
     // AUDITORÍA F1 (Ley 29733): el enrol exitoso emite `biometric.enrolled` ATÓMICO con la persistencia.
     expect(prisma.outbox.map((e) => e.eventType)).toEqual(['biometric.enrolled']);
     // F5: sin selfieKey en el input → faceSelfieKey null (la subida del BFF es best-effort, pudo no venir).
@@ -1796,6 +1805,22 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
     expect(driverWrites).toHaveLength(0);
     expect(userWrites).toHaveLength(0);
+  });
+
+  it('GATE LIVENESS PASIVO: rechaza con 409 si el PAD NO se ejecutó — null (NOT_RUN) y false (DEGRADED)', async () => {
+    // Gate de EJECUCIÓN del anti-spoofing: con los face-match corridos PERO el PAD sin correr (livenessChecked
+    // null = enrol previo al campo, o false = modelo ausente → degradado), NO se aprueba. Un spoof no llega acá
+    // (se rechaza en el enrol). Curl-proof, fail-closed, cero escrituras. Ambos no-PASSED bloquean.
+    for (const livenessChecked of [null, false] as const) {
+      const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+        { ...okDriver, backgroundCheckStatus: 'PENDING', livenessChecked },
+        { id: 'u1', kycStatus: 'PENDING' },
+      );
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+      await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+      expect(driverWrites).toHaveLength(0);
+      expect(userWrites).toHaveLength(0);
+    }
   });
 
   it('GATE FACE-MATCH (b): PERMITE aprobar con veredicto NO_MATCH (dniFaceMatched=false) si el match SÍ se ejecutó', async () => {

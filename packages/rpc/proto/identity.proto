@@ -101,4 +101,9 @@ message DriverReply {
   // F5 · key S3/MinIO de la SELFIE del enrol (ayuda visual del operador en casos dudosos). ADMIN-ONLY (PII ·
   // Ley 29733): solo viaja por el riel admin; "" en rieles no-admin o si no hay selfie. Campo 25, backward-compat.
   string face_selfie_key = 25;
+  // LIVENESS PASIVO (anti-spoofing PAD del enrol). Status DERIVADO (NOT_RUN/PASSED/DEGRADED): NOT_RUN = sin
+  // enrol; PASSED = PAD corrió y dio viva; DEGRADED = enroló sin PAD (modelo ausente). ADMIN-ONLY; "" / 0 en
+  // rieles no-admin. Score de clase viva en 0..1 (NO 0..100). Campos 26-27, backward-compatible.
+  string liveness_status = 26;
+  double liveness_score = 27;
 }

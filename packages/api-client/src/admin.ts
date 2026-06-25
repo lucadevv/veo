@@ -192,6 +192,16 @@ export const dniFaceMatchStatus = z.enum(['NOT_RUN', 'MATCHED', 'NO_MATCH']);
 export type DniFaceMatchStatusValue = z.infer<typeof dniFaceMatchStatus>;
 
 /**
+ * Estado del LIVENESS PASIVO (anti-spoofing PAD del enrol) que el operador VE antes de aprobar:
+ *  - NOT_RUN: el conductor aún no enroló biometría (o enroló antes de que existiera el campo).
+ *  - PASSED: el PAD corrió sobre la selfie y la dio por viva (no es impresa/pantalla).
+ *  - DEGRADED: enroló PERO el PAD no corrió (modelo ausente → sin anti-spoofing). Un spoof NUNCA llega acá
+ *    (se rechaza en el enrol). `approve()` exige PASSED (el PAD se ejecutó) — server-side, curl-proof.
+ */
+export const passiveLivenessStatus = z.enum(['NOT_RUN', 'PASSED', 'DEGRADED']);
+export type PassiveLivenessStatusValue = z.infer<typeof passiveLivenessStatus>;
+
+/**
  * Resultado de POST /ops/drivers/:id/dni-face-match: lo que devuelve el admin-bff (proxy de identity) al
  * disparar el match. `matched` = veredicto; `score` 0..100; `reason` = motivo legible si NO coincide (null
  * si coincide). El resultado además queda GUARDADO en identity (lo refleja `driverDetail.biometric`).
@@ -317,6 +327,13 @@ export const driverDetail = z.object({
      * la verificación (esa la hace el match contra DNI/licencia) — es evidencia visual para dirimir un NO_MATCH.
      */
     faceSelfieUrl: z.string().nullable(),
+    /**
+     * LIVENESS PASIVO (anti-spoofing PAD del enrol). El operador VE si la selfie pasó el anti-spoofing antes de
+     * aprobar. `livenessStatus` tipado (NOT_RUN/PASSED/DEGRADED); `livenessScore` 0..1 de la clase viva (null si
+     * no se corrió). Un spoof NO llega acá (se rechaza en el enrol, 422). `approve()` exige PASSED server-side.
+     */
+    livenessStatus: passiveLivenessStatus,
+    livenessScore: z.number().nullable(),
   }),
   // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
   vehicle: driverVehicle.nullable(),

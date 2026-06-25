@@ -396,6 +396,24 @@ export const DniFaceMatchStatus = {
 } as const;
 export type DniFaceMatchStatus = (typeof DniFaceMatchStatus)[keyof typeof DniFaceMatchStatus];
 
+/**
+ * Estado del LIVENESS PASIVO (anti-spoofing PAD single-frame) evaluado en el enrol del registro. El operador
+ * lo VE en la ficha del conductor antes de aprobar. Estado tipado explícito (cero magic string) que distingue
+ * "el PAD corrió y la selfie es real" de "el PAD no corrió" — un ataque de presentación (spoof) NUNCA llega a
+ * este estado: se RECHAZA en el enrol (422), nunca se persiste un conductor spoof.
+ *  - NOT_RUN: el conductor aún no enroló biometría (o enroló antes de que existiera el campo).
+ *  - PASSED: el PAD corrió sobre la selfie y la dio por viva (no es impresa/pantalla).
+ *  - DEGRADED: enroló PERO el PAD no corrió (modelo ausente → sin anti-spoofing · degradación honesta). En prod
+ *    no debería ocurrir (fail-closed por /health/ready del biometric-service); es señal de degradación si pasa.
+ */
+export const PassiveLivenessStatus = {
+  NOT_RUN: 'NOT_RUN',
+  PASSED: 'PASSED',
+  DEGRADED: 'DEGRADED',
+} as const;
+export type PassiveLivenessStatus =
+  (typeof PassiveLivenessStatus)[keyof typeof PassiveLivenessStatus];
+
 export const FleetDocumentStatus = {
   PENDING_REVIEW: 'PENDING_REVIEW',
   VALID: 'VALID',

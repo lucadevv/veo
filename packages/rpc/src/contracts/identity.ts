@@ -86,6 +86,10 @@ export interface DriverReply {
   licenseFaceMatchedAt: string;
   /** F5 · key S3/MinIO de la selfie del enrol (ayuda visual del operador · ADMIN-ONLY). "" si no hay/no-admin. */
   faceSelfieKey: string;
+  /** Estado del liveness PASIVO del enrol (NOT_RUN/PASSED/DEGRADED · ADMIN-ONLY). NOT_RUN en no-admin. */
+  livenessStatus: string;
+  /** Score de la clase viva del PAD en 0..1; 0 si no se corrió o no-admin. */
+  livenessScore: number;
   /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS · campo 21 del proto): las `cause` DISTINTAS de los holds
    * vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el

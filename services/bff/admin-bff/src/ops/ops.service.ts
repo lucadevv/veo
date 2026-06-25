@@ -29,6 +29,7 @@ import {
   DocumentSide,
   FleetDocumentType,
   FleetDocumentStatus,
+  PassiveLivenessStatus,
   SuspensionCause,
   type AdminRole,
 } from '@veo/shared-types';
@@ -42,6 +43,7 @@ import type {
   AdminDriverDocument,
   DocumentSideValue,
   DniFaceMatchStatusValue,
+  PassiveLivenessStatusValue,
   DniFaceMatchResult,
   GeoPoint,
 } from '@veo/api-client';
@@ -135,6 +137,19 @@ function toDniFaceMatchStatus(status: string): DniFaceMatchStatusValue {
   return DNI_FACE_MATCH_STATUS_VALUES.has(status)
     ? (status as DniFaceMatchStatusValue)
     : DniFaceMatchStatus.NOT_RUN;
+}
+
+/** Valores válidos de PassiveLivenessStatus para narrowear el string del wire gRPC. */
+const PASSIVE_LIVENESS_STATUS_VALUES = new Set<string>(Object.values(PassiveLivenessStatus));
+
+/**
+ * Narrowea el estado del liveness PASIVO del wire gRPC al enum tipado del contrato. Un valor desconocido
+ * (o "" del proto3 default) degrada a NOT_RUN (degradación honesta: ante la duda, "no se corrió").
+ */
+function toPassiveLivenessStatus(status: string): PassiveLivenessStatusValue {
+  return PASSIVE_LIVENESS_STATUS_VALUES.has(status)
+    ? (status as PassiveLivenessStatusValue)
+    : PassiveLivenessStatus.NOT_RUN;
 }
 
 /** Valores válidos de SuspensionCause (modelo de HOLDS) para narrowear las causas del wire gRPC. */
@@ -559,6 +574,15 @@ export class OpsService {
         faceSelfieUrl: driver.faceSelfieKey
           ? await this.presignDocument(identity, driver.faceSelfieKey)
           : null,
+        // LIVENESS PASIVO del enrol (anti-spoofing PAD). identity lo persiste + lo deriva; acá se EXPONE para que
+        // el operador VEA si la selfie pasó el anti-spoofing antes de aprobar. Status tipado (narrowing defensivo
+        // a NOT_RUN ante un valor desconocido del wire). El score (0..1) se gatea por "se corrió" (status !=
+        // NOT_RUN), igual que el score de los face-match se gatea por su `*MatchedAt`.
+        livenessStatus: toPassiveLivenessStatus(driver.livenessStatus),
+        livenessScore:
+          toPassiveLivenessStatus(driver.livenessStatus) === PassiveLivenessStatus.NOT_RUN
+            ? null
+            : driver.livenessScore,
       },
       vehicle,
       documents,

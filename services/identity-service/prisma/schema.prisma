@@ -230,6 +230,13 @@ model Driver {
   /// Best-effort: si la subida falla, el enrol igual cierra con el embedding y esto queda null. Se purga por
   /// derecho al olvido (prefijo `drivers/{id}/` en user.deleted). Solo Compliance+ la VE vía presigned GET.
   faceSelfieKey         String?               @map("face_selfie_key")
+  /// VEREDICTO del LIVENESS PASIVO (anti-spoofing PAD single-frame) del enrol. El operador lo VE antes de
+  /// aprobar y `approve()` exige que el PAD HAYA CORRIDO (gate de ejecución). `livenessChecked` = ¿corrió el
+  /// PAD? (true = anti-spoofing real; false = modelo ausente → enrolado DEGRADADO sin liveness; null = aún no
+  /// enrolado). `livenessScore` = score de la clase viva 0..1 del PAD. Un spoof NUNCA llega acá: se rechaza en
+  /// el enrol (422), no se persiste. El status tipado (NOT_RUN/PASSED/DEGRADED) se DERIVA en el borde gRPC.
+  livenessChecked       Boolean?              @map("liveness_checked")
+  livenessScore         Float?                @map("liveness_score")
   /// Sub-lote 3C · BINDING DNI↔selfie. Resultado del face-match entre la foto FRONT del DNI (de S3, que el
   /// admin-bff baja) y el `faceEmbedding` de referencia GUARDADO del conductor. El operador lo VE antes de
   /// aprobar (no aprueba a ciegas). Nullable = aún no se corrió el match. `dniFaceMatched` = veredicto
