@@ -225,6 +225,11 @@ model Driver {
   faceEmbedding         Float[]               @map("face_embedding")
   /// Momento del enrolamiento facial. Null = no enrolado.
   faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
+  /// F5 · key S3/MinIO de la SELFIE del enrol (cifrada en reposo · Ley 29733). ADICIONAL al embedding: ayuda
+  /// VISUAL para el operador en casos dudosos (NO es la verificación — esa la hace el match contra DNI/licencia).
+  /// Best-effort: si la subida falla, el enrol igual cierra con el embedding y esto queda null. Se purga por
+  /// derecho al olvido (prefijo `drivers/{id}/` en user.deleted). Solo Compliance+ la VE vía presigned GET.
+  faceSelfieKey         String?               @map("face_selfie_key")
   /// Sub-lote 3C · BINDING DNI↔selfie. Resultado del face-match entre la foto FRONT del DNI (de S3, que el
   /// admin-bff baja) y el `faceEmbedding` de referencia GUARDADO del conductor. El operador lo VE antes de
   /// aprobar (no aprueba a ciegas). Nullable = aún no se corrió el match. `dniFaceMatched` = veredicto

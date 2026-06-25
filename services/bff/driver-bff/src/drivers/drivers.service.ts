@@ -41,6 +41,7 @@ import {
   buildDriverVehicleFromRest,
   buildDriverVehicleModels,
   buildDriverVehicles,
+  type DriverDocumentDetailWithKeys,
   type FleetDriverVehicleReply,
   type FleetVehicleModelPageReply,
   type FleetVehicleModelRequestReply,
@@ -74,6 +75,13 @@ import type {
  * (no silencioso) y el conductor puede acotar con `q`. Si se vuelve recurrente, paginar en la UI.
  */
 const VEHICLE_MODELS_PAGE_LIMIT = 100;
+
+/**
+ * TTL (segundos) de la presigned GET con la que el conductor RE-RENDERIZA sus propias caras de documento
+ * en el resume del onboarding. Corto a propósito (mismo valor que el admin review): la URL vive lo justo
+ * para pintar el preview, no para cachearse. La firma es server-to-server y FAIL-SOFT.
+ */
+const DOCUMENT_READ_TTL_SECONDS = 120;
 
 /** Respuesta de media-service POST /media/internal/presign-put. */
 interface MediaPresignPutReply {
@@ -229,15 +237,76 @@ export class DriversService {
     );
   }
 
-  /** Enrolamiento facial de referencia con UNA selfie, sin liveness (Lote 1) → identity-service. */
-  enrollFace(
+  /**
+   * Enrolamiento facial de referencia con UNA selfie (liveness PASIVO en identity/biometric) → identity-service.
+   * F5: ANTES de enrolar, sube la selfie a MinIO (best-effort) para la AYUDA VISUAL del operador en casos
+   * dudosos. Es ADICIONAL — si la subida falla, el enrol sigue igual (el embedding + el match son la
+   * verificación real). identity solo REFERENCIA la key (`faceSelfieKey`) si el enrol resulta VIVO; un spoof
+   * deja el blob huérfano en MinIO (se sobreescribe al próximo enrol contra la MISMA key, o se purga por
+   * derecho al olvido — `drivers/{driverId}/` se barre en `user.deleted`).
+   */
+  async enrollFace(
     identity: AuthenticatedUser,
     dto: EnrollFaceDto,
   ): Promise<DriverBiometricEnrollResult> {
+    const selfieKey = await this.tryStoreEnrollSelfie(identity, dto.photo);
     return this.identity().post<DriverBiometricEnrollResult>('/drivers/biometric/enroll', {
       identity,
-      body: dto,
+      body: selfieKey ? { photo: dto.photo, selfieKey } : { photo: dto.photo },
     });
+  }
+
+  /**
+   * Sube la selfie del enrol a MinIO (server-to-server, key DRIVER-SCOPED `drivers/{driverId}/kyc-selfie.jpg`,
+   * misma frontera/bucket que los documentos). BEST-EFFORT: cualquier fallo (driver no resuelto, presign,
+   * PUT) devuelve `null` y el enrol procede SIN selfie — nunca traba el alta por una ayuda visual. Devuelve la
+   * key (que identity validará por prefijo y guardará solo en el enrol vivo) o `null`.
+   */
+  private async tryStoreEnrollSelfie(
+    identity: AuthenticatedUser,
+    photoBase64: string,
+  ): Promise<string | null> {
+    try {
+      const driver = await this.grpc.call<DriverReply>(
+        'identity',
+        'GetDriverByUser',
+        { id: identity.userId },
+        identity,
+      );
+      if (!driver.found) return null;
+      const key = `drivers/${driver.id}/kyc-selfie.jpg`;
+      const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
+        '/media/internal/presign-put',
+        {
+          identity,
+          body: {
+            bucket: this.documentsBucket,
+            key,
+            contentType: 'image/jpeg',
+            ttlSeconds: this.documentUploadTtl,
+          },
+        },
+      );
+      const res = await fetch(ticket.url, {
+        method: 'PUT',
+        headers: ticket.requiredHeaders,
+        body: Buffer.from(photoBase64, 'base64'),
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          { driverId: driver.id, status: res.status },
+          'F5: subida best-effort de la selfie del enrol FALLÓ; el alta sigue sin selfie',
+        );
+        return null;
+      }
+      return key;
+    } catch (err) {
+      this.logger.warn(
+        { err: String(err) },
+        'F5: no se pudo subir la selfie del enrol (best-effort); el alta sigue sin selfie',
+      );
+      return null;
+    }
   }
 
   /** Emite el reto de liveness para iniciar turno (BR-I02) → identity-service. */
@@ -341,7 +410,67 @@ export class DriversService {
       { id: driver.id },
       identity,
     );
-    return buildDriverDocuments(docs.documents ?? []);
+    // Cada s3Key viene de fleet para ESTE driver (claves bajo `drivers/{driver.id}/...`, resuelto
+    // server-side): firmar el read no expone docs de otro conductor. La firma es FAIL-SOFT (url null
+    // por cara que falle) → la lista de docs siempre responde, el preview degrada por cara.
+    return Promise.all(
+      buildDriverDocuments(docs.documents ?? []).map((doc) =>
+        this.attachDocumentImageUrls(identity, doc),
+      ),
+    );
+  }
+
+  /**
+   * Cierra el paso INTERMEDIO del mapper: firma una presigned GET por cara (su key S3 interna) y proyecta
+   * la vista FINAL del cliente (`DriverDocumentImageView`: side + order + url, SIN s3Key). FAIL-SOFT por
+   * cara — una key inválida deja `url: null` en esa cara, no tumba el documento ni la lista.
+   */
+  private async attachDocumentImageUrls(
+    identity: AuthenticatedUser,
+    doc: DriverDocumentDetailWithKeys,
+  ): Promise<DriverDocumentDetail> {
+    const images = await Promise.all(
+      doc.images.map(async ({ side, order, s3Key }) => ({
+        side,
+        order,
+        url: await this.presignDocumentRead(identity, s3Key),
+      })),
+    );
+    // Reemplaza las imágenes con-key por las firmadas; el resto del documento queda igual.
+    const { images: _withKeys, ...rest } = doc;
+    return { ...rest, images };
+  }
+
+  /**
+   * Acuña una presigned GET URL para una imagen de documento (media-service, server-to-server). Espejo del
+   * `presignDocument` del admin-bff: POST /media/internal/presign-get con ttl corto (120s). s3Key '' (sin
+   * archivo) → null. FAIL-SOFT: si la firma falla devolvemos null y seguimos — no poder mostrar el preview
+   * NO debe tumbar la lista de documentos (el resume del onboarding degrada esa cara, no falla).
+   */
+  private async presignDocumentRead(
+    identity: AuthenticatedUser,
+    s3Key: string,
+  ): Promise<string | null> {
+    if (!s3Key) return null;
+    try {
+      const { url } = await this.rest.client('media').post<{ url: string }>(
+        '/media/internal/presign-get',
+        {
+          identity,
+          // audience 'device': el preview lo consume la APP en el TELÉFONO → la URL debe firmarse contra el
+          // host LAN (S3_PUBLIC_BASE_URL), no localhost (que en el device es el device mismo y no alcanza MinIO).
+          body: {
+            bucket: this.documentsBucket,
+            key: s3Key,
+            ttlSeconds: DOCUMENT_READ_TTL_SECONDS,
+            audience: 'device',
+          },
+        },
+      );
+      return url;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -408,7 +537,7 @@ export class DriversService {
         ocrAt: input.ocrAt,
       },
     });
-    return buildDriverDocument(created);
+    return this.attachDocumentImageUrls(signedIdentity, buildDriverDocument(created));
   }
 
   /**

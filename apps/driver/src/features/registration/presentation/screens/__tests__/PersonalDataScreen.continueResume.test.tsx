@@ -99,6 +99,25 @@ function fakeNavigation() {
   return { navigate: jest.fn() } as never;
 }
 
+/**
+ * Captura LOCAL del DNI (anverso, sin reverso) — la fuente HONESTA de "DNI listo para avanzar" del nuevo
+ * gating `dniDocReady` (`pendingDni != null || serverHasDni`). Antes el gating se conformaba con
+ * `personal.dni` persistido (número), que sobrevive al reload sin su imagen → DNI fantasma; ahora se exige
+ * la imagen (captura viva) o el server. Estos tests representan ESA precondición real.
+ */
+const DNI_CAPTURE = {
+  front: {
+    uri: 'data:image/jpeg;base64,/9j/dnifront',
+    mimeType: 'image/jpeg',
+    fileName: 'dni-front.jpg',
+    width: null,
+    height: null,
+    fileSize: null,
+  },
+  back: null,
+  extractedData: null,
+};
+
 function withProviders(node: ReactElement, client: QueryClient): React.JSX.Element {
   return (
     <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
@@ -141,11 +160,26 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
 
   it('(a) RESUME (driverExists): Continuar llama al submit con driverExists=true → navega (sin re-PATCH)', async () => {
     mockDriverExistence = DriverExistence.Exists;
-    // Estado de RESUME: el server tiene al conductor; el avance local marca el DNI y la licencia UPLOADED
-    // (lo hace la hidratación) para que el gating habilite el botón sin captura local en esta sesión.
+    // Estado de RESUME con docs CAPTURADOS (fuente HONESTA del gating: imagen del DNI + licencia presentes).
+    // Lo que se testea es que `driverExists=true` (de useDriverExists) hace que el continue SALTE el PATCH —
+    // independiente de la captura. (Antes el botón se habilitaba con flags locales sin captura: ese era el bug.)
     act(() => {
       useRegistrationStore.getState().setPersonal({ dni: '70123456' });
-      useRegistrationStore.getState().setDocumentStatus('LICENSE', DocumentUploadStatus.UPLOADED);
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
+      useRegistrationStore.getState().setPendingLicense({
+        file: {
+          uri: 'data:image/jpeg;base64,/9j/license',
+          mimeType: 'image/jpeg',
+          fileName: 'lic.jpg',
+          width: null,
+          height: null,
+          fileSize: null,
+        },
+        back: null,
+        documentNumber: 'Q12345678',
+        expiresAt: '2030-12-31',
+        extractedData: null,
+      });
     });
 
     let renderer!: TestRenderer.ReactTestRenderer;
@@ -181,6 +215,7 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
         dni: '70123456',
         birthdate: '1990-03-15',
       });
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
       useRegistrationStore.getState().setPendingLicense({
         file: {
           uri: 'data:image/jpeg;base64,/9j/license',
@@ -190,6 +225,7 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
           height: null,
           fileSize: null,
         },
+        back: null,
         documentNumber: 'Q12345678',
         expiresAt: '2030-12-31',
         extractedData: null,
@@ -210,10 +246,12 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
       pressContinue(renderer);
     });
 
-    expect(mockSubmit).toHaveBeenCalledTimes(1);
-    const params = mockSubmit.mock.calls[0]?.[0];
-    // Alta fresca → `driverExists=false`: el continue ejecuta el PATCH que crea el driver.
-    expect(params?.driverExists).toBe(false);
+    // LOTE B (subida inmediata): además del Continuar explícito, el efecto EAGER dispara `submit` al montar
+    // (sube DNI/licencia apenas hay datos completos + captura). En alta fresca AMBAS llamadas derivan
+    // `driverExists=false` (PATCH idempotente crea el driver); verificamos ese invariante en TODAS las
+    // llamadas en vez del conteo exacto (que ahora incluye la eager). Reusan el MISMO submit testeado.
+    expect(mockSubmit).toHaveBeenCalled();
+    expect(mockSubmit.mock.calls.every((c) => c[0]?.driverExists === false)).toBe(true);
 
     act(() => {
       renderer.unmount();
@@ -230,6 +268,7 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
         birthdate: '1990-03-15',
       });
       useRegistrationStore.getState().setDocumentStatus('LICENSE', DocumentUploadStatus.UPLOADED);
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
       useRegistrationStore.getState().setPendingLicense({
         file: {
           uri: 'data:image/jpeg;base64,/9j/license',
@@ -239,6 +278,7 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
           height: null,
           fileSize: null,
         },
+        back: null,
         documentNumber: 'Q12345678',
         expiresAt: '2030-12-31',
         extractedData: null,

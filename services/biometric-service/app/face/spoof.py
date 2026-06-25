@@ -115,8 +115,11 @@ class AntiSpoofClassifier:
         x1, y1, x2, y2 = _expanded_box(src_w, src_h, bbox_ltwh, self._settings.spoof_scale)
         crop = image_bgr[y1 : y2 + 1, x1 : x2 + 1]
         resized = cv2.resize(crop, (self._w, self._h))  # BGR, sin conversión de color
-        # `/255` → [0,1] (SIN mean/std). HWC → NCHW.
-        blob = resized.astype(np.float32) / 255.0
+        # RANGO CRUDO 0-255 (NO /255): el export ONNX de garciafido HORNEA la normalización adentro del grafo —
+        # dividir /255 acá la aplicaría DOS veces → valores ~0.004 → el modelo satura a una clase constante
+        # (verificado: con /255 toda cara real Y un print daban [0,0.01,0.99]; con 0-255 una cara real → idx1≈1).
+        # Solo HWC → NCHW; el modelo hace su propia escala interna. (DEUDA cerrada: era doble-normalización.)
+        blob = resized.astype(np.float32)
         blob = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
         return blob.astype(np.float32)
 

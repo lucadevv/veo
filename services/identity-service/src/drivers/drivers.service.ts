@@ -2,7 +2,7 @@
  * DriversService — onboarding autoservicio + aprobación del operador, y el gate biométrico de turno.
  * BR-I01/I02: sin KYC aprobado no hay turno; liveness+match score >= mínimo; 3 fallos → bloqueo 1h.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { createEnvelope } from '@veo/events';
@@ -40,6 +40,23 @@ import type { Env } from '../config/env.schema';
 
 const MAX_BIO_FAILS = 3;
 const BIO_LOCK_TTL_SECONDS = 3600; // 1h (BR-I02)
+/**
+ * Motivos TIPADOS del rechazo del enrol KYC del alta (contrato con la app: viajan en `details.reason` del 422
+ * y `kycEnrollError` los lee para elegir el banner). Constantes, NO strings sueltos (ARQUITECTURA §4-ter): un
+ * typo es error de compilación. `spoof` además se AUDITA (`biometric.enroll_rejected`, traza forense Ley
+ * 29733); `no_face` es ruido operativo (no se detectó persona → reintentar), no se audita.
+ */
+const ENROLL_REJECT_SPOOF = 'spoof';
+const ENROLL_REJECT_NO_FACE = 'no_face';
+/**
+ * Techo de abuso del ENROL del alta (anti-hammering del PAD): tras N rechazos por SPOOF seguidos, cooldown
+ * temporal. A PROPÓSITO más laxo y CORTO que el lockout del turno (5 spoofs / 15 min, no 3 / 1h): el enrol es
+ * onboarding y el PAD tiene falsos positivos (luz/cámara) — un cooldown corto corta el scripting/fraude SIN
+ * atrapar 1h a un conductor legítimo. Solo `spoof` suma (no `no_face`, que es ruido operativo). Se limpia al
+ * enrolar OK; la central puede destrabar antes (unlock admin). El intento queda auditado (biometric.enroll_rejected).
+ */
+const MAX_ENROLL_SPOOFS = 5;
+const ENROLL_SPOOF_LOCK_TTL_SECONDS = 900; // 15 min
 /** TTL del sessionRef de un solo uso minteado por la verificación biométrica (BR-I02). */
 const BIO_SESSION_TTL_SECONDS = 120;
 
@@ -74,9 +91,14 @@ function backgroundCheckSources(to: BackgroundCheckStatus): BackgroundCheckStatu
   );
 }
 
-/** Clave Redis del lockout de fallos biométricos del conductor. */
+/** Clave Redis del lockout de fallos biométricos del conductor (gate de TURNO). */
 function bioLockKey(driverId: string): string {
   return `veo:bio:fails:${driverId}`;
+}
+
+/** Clave Redis del cooldown de abuso por SPOOF del ENROL del alta (anti-hammering del PAD). */
+function enrollSpoofLockKey(driverId: string): string {
+  return `veo:bio:enroll-spoof:${driverId}`;
 }
 
 /** Clave Redis del sessionRef de un solo uso (minteado por verify, consumido por startShift). */
@@ -125,6 +147,9 @@ export interface DriverPurgeResult {
 
 @Injectable()
 export class DriversService {
+  /** Observabilidad (F4): logs estructurados del flujo biométrico (enrol/turno/lockout/destrabe) — SRE/central
+   *  veían un agujero ciego. Los WARN de lockout/spoof/degradado son alertables (rate por log). */
+  private readonly logger = new Logger(DriversService.name);
   private readonly minScore: number;
   /** Clave de cifrado del DNI del conductor en reposo (AES-256-GCM · secret-box). KMS en prod. */
   private readonly dniEncKey: string;
@@ -1140,17 +1165,22 @@ export class DriversService {
   }
 
   /**
-   * Enrolamiento KYC con UNA selfie, SIN prueba de vida (decisión Lote 1): el conductor manda una sola foto
-   * y biometric-service `POST /v1/embed` deriva el embedding de referencia ArcFace (exige 1 rostro claro,
-   * sin reto girar/asentir/sonreír). La defensa anti-suplantación ya NO vive acá (liveness), sino en el
-   * face-match DNI↔selfie del binding (matchDniFace), que el operador VE antes de aprobar. Flujo:
+   * Enrolamiento KYC con UNA selfie + liveness PASIVO (PAD single-frame, sin frames extra → sin lag): el
+   * conductor manda una sola foto y biometric-service `POST /v1/enroll-passive` corre el anti-spoofing sobre
+   * ESA misma selfie ANTES de derivar el embedding de referencia ArcFace. Defensa en profundidad: el PAD acá
+   * (registro) + el face-match DNI/licencia↔selfie del binding (matchDniFace/matchLicenseFace, que el operador
+   * VE antes de aprobar) + el liveness ACTIVO por reto del gate de turno (verifyBiometric). Flujo:
    *   1. La app captura UNA selfie.
    *   2. POST /drivers/biometric/enroll con { photo } (base64 sin prefijo data:).
    *
-   * Si el motor NO detecta un rostro (embedding vacío) → 422 tipado (UnprocessableEntityError, reason
-   * 'no_face'): el enrolamiento se RECHAZA y no se guarda nada (fail-closed, degradación HONESTA, sin
-   * embedding falso). Si hay rostro, persiste el embedding + `faceEnrolledAt` en UNA escritura — el gate
-   * `hasFaceEmbedding` (aprobación del operador + inicio de turno) lo lee como fuente única de "enrolado".
+   * Dos rechazos fail-closed (422 tipado, degradación HONESTA, sin embedding falso): un ATAQUE DE PRESENTACIÓN
+   * que el PAD detecta (reason 'spoof') o un rostro NO procesable (embedding vacío → reason 'no_face'). Si pasa,
+   * persiste el embedding + `faceEnrolledAt` en UNA tx — el gate `hasFaceEmbedding` (aprobación del operador +
+   * inicio de turno) lo lee como fuente única de "enrolado".
+   *
+   * AUDITORÍA (Ley 29733 · traza inmutable): emite `biometric.enrolled` (éxito, ATÓMICO con la persistencia del
+   * embedding) y `biometric.enroll_rejected` (spoof, escritura propia FORENSE que persiste aunque el request
+   * termine en 422) por outbox → audit-service. Ningún enrol ni intento de suplantación queda sin rastro.
    *
    * INVALIDA EL BINDING DNI↔selfie EN LA MISMA ESCRITURA (causa raíz, fail-closed · invariante de FRESCURA):
    * el binding (`dniFaceMatched`/`dniFaceMatchScore`/`dniFaceMatchedAt`, seteados juntos en matchDniFace())
@@ -1166,10 +1196,24 @@ export class DriversService {
    */
   async enrollFace(
     userId: string,
-    input: { photo: string },
+    input: { photo: string; selfieKey?: string },
   ): Promise<{ enrolled: true; enrolledAt: string }> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
+
+    // TECHO DE ABUSO DEL ENROL (anti-hammering del PAD, fail-fast ANTES de gastar inferencia): tras
+    // MAX_ENROLL_SPOOFS rechazos por spoof seguidos, cooldown temporal CORTO (no atrapa 1h a un conductor
+    // legítimo). Se limpia al enrolar OK; la central destraba antes con el unlock admin.
+    const spoofLockKey = enrollSpoofLockKey(d.id);
+    const spoofs = Number((await this.redis.get(spoofLockKey)) ?? 0);
+    if (spoofs >= MAX_ENROLL_SPOOFS) {
+      this.logger.warn(
+        `Enrol KYC bloqueado por abuso: ${spoofs} spoofs en la ventana (driverId=${d.id})`,
+      );
+      throw new ForbiddenError(
+        'Demasiados intentos con foto o pantalla. Esperá unos minutos e intentá de nuevo con tu rostro real.',
+      );
+    }
 
     // Liveness PASIVO (PAD single-frame, sin frames extra → sin lag): el motor corre el anti-spoofing sobre
     // la MISMA selfie ANTES del embedding. Si el modelo PAD no está cargado, degrada honesto a sin-liveness
@@ -1179,38 +1223,124 @@ export class DriversService {
     // GATE ANTI-SPOOFING (fail-closed): el PAD corrió y el veredicto NO es persona viva → ataque de
     // presentación (foto impresa / pantalla / replay). NO se enrola. Decisión por BOOLEANOS, no por `reason`.
     if (enroll.livenessChecked && !enroll.live) {
+      // FORENSE (Ley 29733): el intento de suplantación deja TRAZA INMUTABLE antes de rechazar. Escritura
+      // propia e independiente (mismo espíritu que biometric.failed del turno): el camino de rechazo ni toca
+      // al Driver, así que la evidencia se persiste con su evento aunque el request termine en 422.
+      const rejected = createEnvelope({
+        eventType: 'biometric.enroll_rejected',
+        producer: 'identity-service',
+        payload: {
+          driverId: d.id,
+          userId,
+          reason: ENROLL_REJECT_SPOOF,
+          score: enroll.score,
+          at: new Date().toISOString(),
+        },
+      });
+      await this.prisma.write.outboxEvent.create({
+        data: {
+          aggregateId: d.id,
+          eventType: rejected.eventType,
+          envelope: rejected as unknown as Prisma.InputJsonValue,
+        },
+      });
+      // Suma al techo de abuso (anti-hammering): N spoofs seguidos → cooldown. `expire` en el primero fija la
+      // ventana; cada spoof posterior solo incrementa (no resetea el TTL → la ventana no se extiende sola).
+      const spoofCount = await this.redis.incr(spoofLockKey);
+      if (spoofCount === 1) await this.redis.expire(spoofLockKey, ENROLL_SPOOF_LOCK_TTL_SECONDS);
+      this.logger.warn(
+        `Enrol KYC rechazado por anti-spoofing pasivo (driverId=${d.id}, score=${enroll.score}, intento=${spoofCount})`,
+      );
       throw new UnprocessableEntityError(
         'No detectamos a una persona real frente a la cámara. Evitá fotos o pantallas e intentá de nuevo.',
-        { reason: 'spoof' },
+        { reason: ENROLL_REJECT_SPOOF },
       );
     }
 
     const embedding = enroll.embedding ?? [];
     // GATE DE ROSTRO (fail-closed): si el motor no detecta una cara, el embedding viene vacío → 422 tipado.
     // La app degrada HONESTO ("No detectamos tu rostro") y pide reintentar la selfie. Nunca un PASS inventado.
+    // (no_face NO se audita: es ruido operativo —no se detectó persona—, no un evento de identidad/seguridad.)
     if (!embedding.length) {
-      throw new UnprocessableEntityError('No detectamos tu rostro', { reason: 'no_face' });
+      throw new UnprocessableEntityError('No detectamos tu rostro', { reason: ENROLL_REJECT_NO_FACE });
     }
 
     const enrolledAt = new Date();
-    await this.prisma.write.driver.update({
-      where: { id: d.id },
-      data: {
-        faceEmbedding: embedding,
-        faceEnrolledAt: enrolledAt,
-        // RESET DEL BINDING DNI↔selfie (invariante de frescura, mismo patrón que resubmit()): mutar el
-        // embedding invalida el cotejo viejo (apuntaba al material anterior). Los 3 campos del binding se
-        // limpian JUNTO al embedding nuevo → re-aprobar OBLIGA a re-correr matchDniFace() contra este material.
-        dniFaceMatched: null,
-        dniFaceMatchScore: null,
-        dniFaceMatchedAt: null,
-        // Idéntico para el binding licencia↔selfie (Lote C): el embedding nuevo invalida el cotejo del brevete.
-        licenseFaceMatched: null,
-        licenseFaceMatchScore: null,
-        licenseFaceMatchedAt: null,
+    // F5 · key de la selfie (ADICIONAL, ayuda visual del operador). DEFENSE-IN-DEPTH: solo se acepta si tiene
+    // el prefijo del PROPIO conductor (`drivers/{driverId}/`) — NO se confía en una key arbitraria del caller,
+    // aunque sea interno y firmado. Se persiste SOLO en este path VIVO (un spoof nunca llega acá). Si no vino
+    // (subida best-effort del BFF falló) o el prefijo no calza → null (degradación honesta, sin selfie).
+    const selfieKey =
+      input.selfieKey && input.selfieKey.startsWith(`drivers/${d.id}/`) ? input.selfieKey : null;
+    // AUDITORÍA ATÓMICA (Ley 29733): el embedding de referencia y la traza inmutable del enrol se persisten
+    // JUNTOS en una sola tx (o ambos, o ninguno) — nunca un enrol sin su evidencia ni un evento sin enrol.
+    const enrolled = createEnvelope({
+      eventType: 'biometric.enrolled',
+      producer: 'identity-service',
+      payload: {
+        driverId: d.id,
+        userId,
+        livenessChecked: enroll.livenessChecked,
+        score: enroll.score,
+        at: enrolledAt.toISOString(),
       },
     });
+    await this.prisma.write.$transaction(async (tx) => {
+      await tx.driver.update({
+        where: { id: d.id },
+        data: {
+          faceEmbedding: embedding,
+          faceEnrolledAt: enrolledAt,
+          // F5 · selfie del enrol (ayuda visual del operador). Validada por prefijo arriba; null si no aplica.
+          faceSelfieKey: selfieKey,
+          // RESET DEL BINDING DNI↔selfie (invariante de frescura, mismo patrón que resubmit()): mutar el
+          // embedding invalida el cotejo viejo (apuntaba al material anterior). Los 3 campos del binding se
+          // limpian JUNTO al embedding nuevo → re-aprobar OBLIGA a re-correr matchDniFace() contra este material.
+          dniFaceMatched: null,
+          dniFaceMatchScore: null,
+          dniFaceMatchedAt: null,
+          // Idéntico para el binding licencia↔selfie (Lote C): el embedding nuevo invalida el cotejo del brevete.
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: d.id,
+          eventType: enrolled.eventType,
+          envelope: enrolled as unknown as Prisma.InputJsonValue,
+        },
+      });
+    });
+    // Enrol OK: el conductor demostró ser una persona real → limpia el contador de abuso (no arrastra spoofs
+    // viejos a la próxima captura). Idempotente si no había contador.
+    await this.redis.del(spoofLockKey);
+    // DEGRADADO (observabilidad · F4): si el PAD no corrió (modelo ausente) el enrol quedó SIN anti-spoofing.
+    // En prod no debería pasar (fail-closed por /health/ready); un WARN acá es la alarma si igual ocurre.
+    if (!enroll.livenessChecked) {
+      this.logger.warn(
+        `Enrol KYC SIN liveness pasivo: el PAD no corrió (modelo ausente) — driverId=${d.id}`,
+      );
+    }
     return { enrolled: true, enrolledAt: enrolledAt.toISOString() };
+  }
+
+  /**
+   * Destrabe biométrico por la CENTRAL (acción admin · regla #1 driver: "Sin override de UI — solo central
+   * puede destrabar"). Limpia AMBOS bloqueos del conductor: el lockout del gate de TURNO (3 fallos → 1h) y el
+   * cooldown de abuso del ENROL (spoofs). Da a la central la palanca que la regla le asigna (antes el único
+   * destrabe era el auto-TTL). Idempotente: si no había bloqueo, no rompe. El comando lo audita el admin-bff.
+   */
+  async clearBiometricLockout(driverId: string): Promise<void> {
+    const driver = await this.prisma.read.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
+    await this.redis.del(bioLockKey(driverId));
+    await this.redis.del(enrollSpoofLockKey(driverId));
+    this.logger.log(`Verificación biométrica destrabada por la central (driverId=${driverId})`);
   }
 
   /**
@@ -1411,6 +1541,9 @@ export class DriversService {
     const lockKey = bioLockKey(d.id);
     const fails = Number((await this.redis.get(lockKey)) ?? 0);
     if (fails >= MAX_BIO_FAILS) {
+      this.logger.warn(
+        `Gate de turno bloqueado: ${fails} fallos biométricos en 1h (driverId=${d.id})`,
+      );
       throw new ForbiddenError('Verificación bloqueada por 1 hora tras 3 intentos fallidos');
     }
 

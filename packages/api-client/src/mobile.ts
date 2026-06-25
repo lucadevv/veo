@@ -1853,11 +1853,15 @@ export type DriverDocumentSimpleStatus = z.infer<typeof driverDocumentSimpleStat
  */
 /**
  * Cara del documento proyectada al conductor (sub-lote 3A · SIN la key S3 interna). La app la usa para
- * saber qué caras ya subió (p.ej. DNI: FRONT y/o BACK). El binario solo lo firma el admin-bff.
+ * saber qué caras ya subió (p.ej. DNI: FRONT y/o BACK) y, en el resume del onboarding, para RE-RENDERIZAR
+ * la cara desde el servidor sin cachear PII en local: `url` es una presigned GET de vida corta para la
+ * imagen. `url` es nullable porque la firma es FAIL-SOFT — si media falla, la lista de docs igual responde
+ * (url: null) y la app degrada (no muestra el preview de esa cara). El binario solo lo firma el backend.
  */
 export const driverDocumentImage = z.object({
   side: documentSide,
   order: z.number().int(),
+  url: z.string().nullable(),
 });
 export type DriverDocumentImage = z.infer<typeof driverDocumentImage>;
 

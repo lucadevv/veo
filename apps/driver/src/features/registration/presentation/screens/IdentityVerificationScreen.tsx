@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,11 @@ import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { FACE_PHOTO_GRABBER_UNAVAILABLE, RegistrationStep } from '../../domain';
 import { useRegistrationFaceCapture, SelfiePhase } from '../hooks/useRegistrationFaceCapture';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import {
+  useRegistrationWizardPageOptional,
+  type WizardPageFooter,
+} from './RegistrationWizardContext';
 import {
   BiometricCameraPreview,
   type BiometricCameraErrorCode,
@@ -19,7 +24,8 @@ import {
   hexAlpha,
 } from '../components';
 
-type Props = NativeStackScreenProps<RegistrationStackParamList, 'IdentityVerification'>;
+// `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route`. Standalone: normales.
+type Props = Partial<NativeStackScreenProps<RegistrationStackParamList, 'IdentityVerification'>>;
 
 /**
  * Estado de la cámara frontal nativa (`BiometricCameraPreview`), gobernado por sus eventos
@@ -93,7 +99,7 @@ function LiveFacePreview({
 /** Paso 3 del alta: verificación de identidad con UNA SELFIE simple (cámara → foto → preview → enroll). */
 // El back ya no usa el prop `navigation` (lo maneja `useRegistrationStepBack`); el tipo `Props` se
 // mantiene para documentar que es la pantalla del paso `IdentityVerification`.
-export const IdentityVerificationScreen = (_props: Props): React.JSX.Element => {
+export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const {
@@ -112,6 +118,13 @@ export const IdentityVerificationScreen = (_props: Props): React.JSX.Element => 
     retake,
     retry,
   } = useRegistrationFaceCapture();
+
+  // Modo dual + FOCO de cámara: embebido en el pager (publica su footer al host y la cámara se activa SOLO
+  // cuando esta página está visible, para LIBERAR el sensor frontal en los pasos 1-2) o standalone (chrome
+  // propio). `isActive` = la página del KYC es la que el pager muestra.
+  const wizard = useRegistrationWizardPageOptional();
+  const pageIndex = ORDERED_STEPS.indexOf(RegistrationStep.IDENTITY_VERIFICATION);
+  const isActive = wizard ? wizard.index === pageIndex : true;
 
   // Estado de la cámara (HONESTO: iniciando / lista / permiso denegado / error de dispositivo).
   const [cameraState, setCameraState] = useState<CameraState>('starting');
@@ -142,12 +155,13 @@ export const IdentityVerificationScreen = (_props: Props): React.JSX.Element => 
     void Linking.openSettings();
   }, []);
 
-  // Back robusto del paso: reconstruye la pila al reanudar y nunca dispara un GO_BACK muerto.
-  const back = useRegistrationStepBack();
+  // Back robusto del paso (solo standalone): embebido lo maneja el host del wizard.
+  const back = useRegistrationStepBack(!wizard);
 
-  // La preview en vivo se muestra mientras se encuadra (idle) o se dispara la captura (capturing). En
-  // preview/envío/éxito se muestra otra cosa (foto / spinner / check).
-  const showLivePreview = isIdle || isCapturing;
+  // La preview en vivo se muestra mientras se encuadra (idle) o se dispara la captura (capturing) Y la página
+  // está VISIBLE (`isActive`): en los pasos 1-2 del pager el KYC sigue montado pero la cámara NO arranca, así
+  // el sensor frontal queda libre hasta que el conductor llega a este paso.
+  const showLivePreview = (isIdle || isCapturing) && isActive;
   const cameraReady = cameraState === 'ready';
   // El botón "Tomar foto" solo se habilita con la cámara lista y sin trabajo en curso.
   const canTake = isIdle && cameraReady;
@@ -159,117 +173,168 @@ export const IdentityVerificationScreen = (_props: Props): React.JSX.Element => 
   // Subtítulo: en preview, "¿Se ve bien?"; encuadrando, el genérico.
   const subtitle = isPreview ? t('registration.kyc.previewSubtitle') : t('registration.kyc.subtitle');
 
+  // EMBEBIDO: publica el footer del KYC al host, ADAPTADO a la fase (el KYC no tiene un "Continuar" plano):
+  //  · idle    → "Tomar foto" (+ hint si la cámara arranca).
+  //  · preview → "Confirmar" (primary) + "Volver a tomar" (secundaria, reemplaza al Atrás).
+  //  · failed  → sin primary; queda el "Atrás" del host (el reintento vive en el banner de estado).
+  //  · capturing/submitting/success → SIN footer (el cuerpo muestra el estado).
+  // Refs estables a las acciones para no re-registrar en cada render (el footer solo cambia con la fase).
+  const captureRef = useRef(capture);
+  captureRef.current = capture;
+  const confirmRef = useRef(confirm);
+  confirmRef.current = confirm;
+  const retakeRef = useRef(retake);
+  retakeRef.current = retake;
+  useEffect(() => {
+    if (!wizard) {
+      return;
+    }
+    let footer: WizardPageFooter | null;
+    if (isIdle) {
+      footer = {
+        primaryLabel: t('registration.kyc.takePhoto'),
+        onPrimary: () => void captureRef.current(),
+        primaryDisabled: !canTake,
+        hint: cameraReady ? undefined : t('registration.kyc.startingCamera'),
+      };
+    } else if (isPreview) {
+      footer = {
+        primaryLabel: t('registration.actions.usePhoto'),
+        onPrimary: () => void confirmRef.current(),
+        secondaryLabel: t('registration.actions.retake'),
+        onSecondary: () => retakeRef.current(),
+      };
+    } else if (isFailed) {
+      footer = { primaryLabel: '', onPrimary: () => undefined, primaryHidden: true };
+    } else {
+      footer = null; // capturing / submitting / success
+    }
+    wizard.registerFooter(pageIndex, footer);
+    return () => wizard.registerFooter(pageIndex, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wizard, pageIndex, isIdle, isPreview, isFailed, canTake, cameraReady]);
+
+  // CUERPO del paso (compartido por ambos modos). En embebido el chrome (header/progress/footer/exit) y el
+  // CTA unificado los pone el host; acá NO se pintan el progress ni los botones de acción (van al footer).
+  const stepBody = (
+    <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
+      {wizard ? null : (
+        <Reveal>
+          <RegistrationProgress current={RegistrationStep.IDENTITY_VERIFICATION} />
+        </Reveal>
+      )}
+
+      {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. El
+          círculo de la cámara va centrado aparte (es el foco visual), pero el encabezado manda desde la
+          izquierda como en Onboarding/Login. */}
+      <Reveal delay={40} style={styles.intro}>
+        <Text variant="display">{t('registration.kyc.title')}</Text>
+        <Text variant="callout" color="inkMuted">
+          {subtitle}
+        </Text>
+      </Reveal>
+
+      {/* Zona del círculo: cambia por fase, sin perder el centro. */}
+      {isSuccess ? (
+        <Reveal spring style={styles.ringArea}>
+          <SuccessCheck />
+        </Reveal>
+      ) : isSubmitting ? (
+        <Reveal spring style={styles.ringArea}>
+          <View style={styles.previewWrap}>
+            <ActivityIndicator size="large" color={theme.colors.accent} />
+          </View>
+        </Reveal>
+      ) : isPreview ? (
+        // Preview: la selfie quedó tomada. Anillo de éxito limpio (el subtítulo "¿Se ve bien?" ya da el
+        // contexto, sin el rótulo "Capturado ✓" redundante). El conductor confirma o vuelve a tomar (footer).
+        <Reveal spring style={styles.ringArea}>
+          <View style={styles.previewWrap}>
+            <View style={[styles.disc, { borderColor: theme.colors.success }]}>
+              <IconCheck size={64} color={theme.colors.success} strokeWidth={2.4} />
+            </View>
+          </View>
+        </Reveal>
+      ) : (
+        <Reveal delay={120} spring style={styles.ringArea}>
+          {showLivePreview ? (
+            <LiveFacePreview onReady={handleCameraReady} onError={handleCameraError} />
+          ) : (
+            <View style={styles.previewWrap}>
+              <ActivityIndicator size="large" color={theme.colors.accent} />
+            </View>
+          )}
+        </Reveal>
+      )}
+
+      {renderStatus({
+        t,
+        theme,
+        unavailable,
+        cameraState,
+        phase,
+        enrollErrorKind: errorSource === 'enroll' ? enrollErrorKind : null,
+        isFailed,
+        onOpenSettings: openSettings,
+        onRetryCamera: retryCamera,
+        onRetry: retry,
+      })}
+
+      <View style={styles.spacer} />
+
+      {/* "Capturando…" es un ESTADO (no un botón): se muestra en ambos modos. Los BOTONES de acción
+          (Tomar foto / Volver a tomar / Confirmar) SOLO en standalone; embebido los pinta el footer del host. */}
+      {isCapturing ? (
+        <Reveal style={styles.ctaWrap}>
+          <Text variant="bodyStrong" color="accent" align="center">
+            {t('registration.kyc.capturing')}
+          </Text>
+        </Reveal>
+      ) : null}
+
+      {!wizard && isIdle ? (
+        <Reveal delay={200} style={styles.ctaWrap}>
+          <Button
+            label={t('registration.kyc.takePhoto')}
+            onPress={() => void capture()}
+            disabled={!canTake}
+            fullWidth
+          />
+          {!cameraReady ? (
+            <Text variant="footnote" color="inkMuted" align="center" style={styles.hint}>
+              {t('registration.kyc.startingCamera')}
+            </Text>
+          ) : null}
+        </Reveal>
+      ) : null}
+
+      {!wizard && isPreview ? (
+        <Reveal delay={120} style={[styles.ctaWrap, styles.previewActions]}>
+          <Button
+            label={t('registration.actions.retake')}
+            variant="ghost"
+            onPress={retake}
+            style={styles.previewBtn}
+          />
+          <Button
+            label={t('registration.actions.usePhoto')}
+            onPress={() => void confirm()}
+            style={styles.previewBtn}
+          />
+        </Reveal>
+      ) : null}
+    </View>
+  );
+
+  // Modo EMBEBIDO (wizard): solo el cuerpo (flex), con su padding horizontal (el host es `padded={false}`).
+  if (wizard) {
+    return <View style={styles.embeddedBody}>{stepBody}</View>;
+  }
+
+  // Modo STANDALONE (fuera del wizard, p. ej. tests): chrome propio + exit sheet.
   return (
     <>
-      <SafeScreen header={<RegistrationHeader showLogo onBack={back.onBack} peruRight />}>
-        <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
-          {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
-              (`registration.stepOf`) se ELIMINÓ — redundante con la barra. El título display manda. */}
-          <Reveal>
-            <RegistrationProgress current={RegistrationStep.IDENTITY_VERIFICATION} />
-          </Reveal>
-
-          {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted.
-              El círculo de la cámara va centrado aparte (es el foco visual), pero el encabezado manda
-              desde la izquierda como en Onboarding/Login. */}
-          <Reveal delay={40} style={styles.intro}>
-            <Text variant="display">{t('registration.kyc.title')}</Text>
-            <Text variant="callout" color="inkMuted">
-              {subtitle}
-            </Text>
-          </Reveal>
-
-          {/* Zona del círculo: cambia por fase, sin perder el centro. */}
-          {isSuccess ? (
-            <Reveal spring style={styles.ringArea}>
-              <SuccessCheck />
-            </Reveal>
-          ) : isSubmitting ? (
-            <Reveal spring style={styles.ringArea}>
-              <View style={styles.previewWrap}>
-                <ActivityIndicator size="large" color={theme.colors.accent} />
-              </View>
-            </Reveal>
-          ) : isPreview ? (
-            <Reveal spring style={styles.ringArea}>
-              <View style={styles.previewWrap}>
-                <View style={[styles.disc, { borderColor: theme.colors.success }]}>
-                  <IconCheck size={56} color={theme.colors.success} strokeWidth={2.2} />
-                  <Text variant="footnote" color="inkMuted" align="center" style={styles.capturedLabel}>
-                    {t('registration.kyc.captured')}
-                  </Text>
-                </View>
-              </View>
-            </Reveal>
-          ) : (
-            <Reveal delay={120} spring style={styles.ringArea}>
-              {showLivePreview ? (
-                <LiveFacePreview onReady={handleCameraReady} onError={handleCameraError} />
-              ) : (
-                <View style={styles.previewWrap}>
-                  <ActivityIndicator size="large" color={theme.colors.accent} />
-                </View>
-              )}
-            </Reveal>
-          )}
-
-          {renderStatus({
-            t,
-            theme,
-            unavailable,
-            cameraState,
-            phase,
-            enrollErrorKind: errorSource === 'enroll' ? enrollErrorKind : null,
-            isFailed,
-            onOpenSettings: openSettings,
-            onRetryCamera: retryCamera,
-            onRetry: retry,
-          })}
-
-          <View style={styles.spacer} />
-
-          {/* Acciones por fase. Encuadrando: "Tomar foto"; en preview: "Volver a tomar" / "Confirmar". */}
-          {isIdle ? (
-            <Reveal delay={200} style={styles.ctaWrap}>
-              <Button
-                label={t('registration.kyc.takePhoto')}
-                onPress={() => void capture()}
-                disabled={!canTake}
-                fullWidth
-              />
-              {!cameraReady ? (
-                <Text variant="footnote" color="inkMuted" align="center" style={styles.hint}>
-                  {t('registration.kyc.startingCamera')}
-                </Text>
-              ) : null}
-            </Reveal>
-          ) : null}
-
-          {isCapturing ? (
-            <Reveal style={styles.ctaWrap}>
-              <Text variant="bodyStrong" color="accent" align="center">
-                {t('registration.kyc.capturing')}
-              </Text>
-            </Reveal>
-          ) : null}
-
-          {isPreview ? (
-            <Reveal delay={120} style={[styles.ctaWrap, styles.previewActions]}>
-              <Button
-                label={t('registration.actions.retake')}
-                variant="ghost"
-                onPress={retake}
-                style={styles.previewBtn}
-              />
-              <Button
-                label={t('registration.actions.usePhoto')}
-                onPress={() => void confirm()}
-                style={styles.previewBtn}
-              />
-            </Reveal>
-          ) : null}
-        </View>
-      </SafeScreen>
+      <SafeScreen header={<RegistrationHeader showLogo onBack={back.onBack} peruRight />}>{stepBody}</SafeScreen>
       <RegistrationExitSheet exit={back.exit} />
     </>
   );
@@ -351,6 +416,20 @@ function renderStatus({
             tone="warn"
             title={t('registration.kyc.enrollMissingCaptureTitle')}
             description={t('registration.kyc.enrollMissingCaptureBody')}
+            action={{ label: t('registration.kyc.tryAgain'), onPress: onRetry }}
+          />
+        </Reveal>
+      );
+    }
+    if (enrollErrorKind === 'spoof') {
+      // Anti-spoofing pasivo: la cámara apuntó a una foto/pantalla, no a una persona real. Tono `danger`
+      // (es un rechazo de seguridad, no un "mejorá la luz") con instrucción específica.
+      return (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('registration.kyc.enrollSpoofTitle')}
+            description={t('registration.kyc.enrollSpoofBody')}
             action={{ label: t('registration.kyc.tryAgain'), onPress: onRetry }}
           />
         </Reveal>
@@ -456,6 +535,8 @@ function renderStatus({
 }
 
 const styles = StyleSheet.create({
+  // Embebido: el host del wizard es `padded={false}`; la página aporta su padding horizontal y llena el alto.
+  embeddedBody: { flex: 1, paddingHorizontal: 20 },
   body: { flex: 1, paddingTop: 20 },
   // Aire Tesla bajo la barra: el bloque héroe respira; título+subtítulo juntos por su gap.
   intro: { gap: 10, marginTop: 12 },

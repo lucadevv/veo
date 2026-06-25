@@ -59,10 +59,6 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
   // el escaneo falló sin caras. NUNCA sube aquí (eso pasa en el continue del paso 1).
   const canConfirm = isCaptured && dni.front != null && hasReadDniNumber;
   const onPrimary = (): void => {
-    if (isReady) {
-      onClose();
-      return;
-    }
     if (canConfirm) {
       // Hay caras Y el número crítico se leyó: el primario las CONFIRMA (guarda en el store).
       dni.submit();
@@ -73,13 +69,11 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
     void runScan();
   };
 
-  const primaryLabel = isReady
-    ? t('common.close')
-    : canConfirm
-      ? t('registration.actions.useDni')
-      : dni.front
-        ? t('registration.actions.rescan')
-        : t('registration.personal.scanDni.cta');
+  const primaryLabel = canConfirm
+    ? t('registration.actions.useDni')
+    : dni.front
+      ? t('registration.actions.rescan')
+      : t('registration.personal.scanDni.cta');
 
   return (
     <BottomSheet
@@ -87,21 +81,28 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
       onClose={onClose}
       title={t('registration.personal.scanDni.title')}
       footer={
-        <View style={styles.footer}>
-          <Button
-            label={isReady ? t('common.close') : t('common.cancel')}
-            variant="secondary"
-            onPress={onClose}
-            disabled={busy}
-          />
-          <Button
-            label={primaryLabel}
-            variant="primary"
-            loading={busy}
-            disabled={busy}
-            onPress={onPrimary}
-          />
-        </View>
+        isReady ? (
+          // Estado `ready`: el DNI quedó listo para subir; la ÚNICA acción posible es cerrar. Antes el footer
+          // mostraba DOS botones idénticos "Cerrar" (primario + secundario, ambos → onClose): el "doble cerrar".
+          // Ahora, en `ready`, es UN solo botón.
+          <Button label={t('common.close')} variant="primary" fullWidth onPress={onClose} />
+        ) : (
+          <View style={styles.footer}>
+            <Button
+              label={t('common.cancel')}
+              variant="secondary"
+              onPress={onClose}
+              disabled={busy}
+            />
+            <Button
+              label={primaryLabel}
+              variant="primary"
+              loading={busy}
+              disabled={busy}
+              onPress={onPrimary}
+            />
+          </View>
+        )
       }
     >
       <View style={[styles.body, { gap: theme.spacing.lg }]}>

@@ -47,6 +47,16 @@ FACE_MATCH_LATENCY = Histogram(
     "veo_biometric_face_match_seconds",
     "Latencia del endpoint /face-match en segundos",
 )
+ENROLL_PASSIVE_TOTAL = Counter(
+    "veo_biometric_enroll_passive_total",
+    "Enrolamientos pasivos del registro (PAD anti-spoofing) por resultado",
+    labelnames=("result",),  # enrolled | spoof | no_face | degraded (PAD ausente → enrolado sin liveness)
+)
+SPOOF_SCORE = Histogram(
+    "veo_biometric_spoof_score",
+    "Distribución del score de vida del PAD anti-spoofing en el enrol pasivo (1.0 = vivo)",
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
 
 
 def metrics_payload() -> tuple[bytes, str]:

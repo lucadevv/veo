@@ -6,6 +6,7 @@ export {
   UnderReviewScreen,
   RejectedScreen,
   RegistrationGateRetryScreen,
+  RegistrationWizardScreen,
 } from './screens';
 export { BIOMETRIC_CAMERA_PREVIEW_NAME } from './components';
 export { useRegistrationStore, REGISTRATION_TOTAL_STEPS } from './state/registrationStore';

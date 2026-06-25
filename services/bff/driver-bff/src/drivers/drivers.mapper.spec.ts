@@ -38,6 +38,9 @@ const driver: DriverReply = {
   dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
   dniFaceMatchScore: 0,
   dniFaceMatchedAt: '',
+  licenseFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  licenseFaceMatchScore: 0,
+  licenseFaceMatchedAt: '',
 };
 
 const user: UserReply = {

@@ -66,6 +66,8 @@ interface DriverReply {
   licenseFaceMatchScore: number;
   /** ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió. */
   licenseFaceMatchedAt: string;
+  /** F5 · key S3/MinIO de la selfie del enrol (ADMIN-ONLY). "" si no hay/no-admin. */
+  faceSelfieKey: string;
   /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): las `cause` DISTINTAS de los holds vigentes del
    * conductor (DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
@@ -108,6 +110,7 @@ const EMPTY_DRIVER: DriverReply = {
   licenseFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
   licenseFaceMatchScore: 0,
   licenseFaceMatchedAt: '',
+  faceSelfieKey: '',
   suspensionCauses: [],
 };
 
@@ -340,6 +343,7 @@ export class IdentityGrpcController {
     licenseFaceMatched: boolean | null;
     licenseFaceMatchScore: number | null;
     licenseFaceMatchedAt: Date | null;
+    faceSelfieKey: string | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
     // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
     // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
@@ -411,6 +415,9 @@ export class IdentityGrpcController {
       licenseFaceMatchScore: includeSensitivePii ? (d.licenseFaceMatchScore ?? 0) : 0,
       licenseFaceMatchedAt:
         includeSensitivePii && d.licenseFaceMatchedAt ? d.licenseFaceMatchedAt.toISOString() : '',
+      // F5 · key de la selfie del enrol. ADMIN-ONLY (igual que el DNI/binding): "" en rieles no-admin (el
+      // pasajero/dispatch no ven la biometría del conductor) o si no hay selfie guardada.
+      faceSelfieKey: includeSensitivePii ? (d.faceSelfieKey ?? '') : '',
       // CAUSAS de suspensión: las `cause` DISTINTAS de los holds vigentes (modelo de HOLDS). Un conductor con
       // varias causas (ej. doc vencido + disciplinaria) las muestra TODAS, así el panel ofrece la(s) acción(es)
       // de reactivación correcta(s). [] cuando el read no trajo holds (batch/by-user) o no hay holds (libre).

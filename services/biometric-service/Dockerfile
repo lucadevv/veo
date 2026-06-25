@@ -37,8 +37,10 @@ RUN python scripts/download_models.py \
 
 EXPOSE 3015
 
+# /health/ready (no /health): refleja modelos + PAD anti-spoofing. Con REQUIRE_PASSIVE_LIVENESS=true (prod) un
+# pod sin PAD da 503 → el orquestador NO lo enruta (fail-closed: nunca enrola sin liveness). En dev queda 200.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-    CMD curl -fsS http://localhost:3015/health || exit 1
+    CMD curl -fsS http://localhost:3015/health/ready || exit 1
 
 # A partir de aquí el contenedor corre sin privilegios de root.
 USER veo

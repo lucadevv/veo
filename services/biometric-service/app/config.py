@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Si es False, /verify devuelve 503 (degradado) pero el servicio arranca igual.
     require_models: bool = False
 
+    # Si es True, /health/ready falla (503) cuando el PAD anti-spoofing NO está cargado: en PROD un pod sin
+    # liveness pasivo NO se reporta listo → no entra al balanceador → el registro NUNCA enrola sin anti-spoofing
+    # (fail-closed, sin degradación SILENCIOSA). En dev/local va False: el servicio degrada honesto (enrola con
+    # livenessChecked=false) sin trabar el arranque, pero /health/ready expone `passiveLivenessLoaded=false`
+    # para que el estado degradado sea VISIBLE (ya no entra al balanceador como "sano" engañando).
+    require_passive_liveness: bool = False
+
     # --- Límites de entrada (anti-DoS: el caller manda N frames + foto de referencia) ---
     # Cantidad máxima de frames por /verify (suficiente para liveness; corta amplificación de cómputo).
     max_frames: int = Field(default=30, ge=1)
@@ -86,18 +93,19 @@ class Settings(BaseSettings):
     # está presente, el enroll degrada al comportamiento actual (solo detección de rostro), sin liveness.
     passive_liveness_enabled: bool = True
     spoof_model: str = "minifasnet_v2.onnx"
-    # Preprocessing EXACTO del MiniFASNet (sourced del repo de referencia, no inventado): crop a `spoof_scale`
-    # centrado + resize a `spoof_input_size`, BGR, /255, NCHW.
+    # Preprocessing del MiniFASNet (export ONNX garciafido): crop a `spoof_scale` centrado + resize a
+    # `spoof_input_size`, BGR, RANGO CRUDO 0-255 (el ONNX hornea la normalización; ver spoof.py), NCHW.
     spoof_scale: float = Field(default=2.7, gt=0.0)
     spoof_input_size: int = Field(default=80, ge=16)
-    # Índice de la clase REAL/viva en la salida softmax. ⚠️ DIVERGE entre exports: el export ONNX de
-    # HuggingFace (el que baja `download_models.py`) usa 0; el `.pth` canónico usa 1. Un índice mal puesto
-    # INVIERTE el veredicto → CALIBRAR con muestra real/spoof antes de prod. VEO_BIO_SPOOF_LIVE_INDEX.
-    spoof_live_index: int = Field(default=0, ge=0)
+    # Índice de la clase REAL/viva en la salida softmax 3-clases. VERIFICADO determinísticamente contra el
+    # export ONNX de garciafido con caras reales de cámara (Obama/Biden → idx1≈1.00) + el `.pth` canónico
+    # (`label==1 = real`): el vivo es el ÍNDICE 1 (el "0 por HF model card" era incorrecto). VEO_BIO_SPOOF_LIVE_INDEX.
+    spoof_live_index: int = Field(default=1, ge=0)
     # Umbral de la prob de la clase viva. Default conservador 0.60 (MiniFASNet ~98% acc); calibrar a la
     # población real (igual que match_threshold). Configurable por VEO_BIO_SPOOF_THRESHOLD.
     spoof_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
-    # DEUDA: spoof_live_index (0 por export HF) + spoof_threshold (0.60 heuristico) · techo: veredicto invertido o mal calibrado deja pasar spoof o rechaza reales · gatillo: calibrar con set real/impreso/pantalla etiquetado antes de prod
+    # DEUDA (acotada): el índice (1) y el preprocessing (0-255) quedaron VERIFICADOS contra el modelo real; resta
+    # afinar `spoof_threshold` (0.60 heurístico) con un set etiquetado real/impreso/pantalla de la población real.
 
     # --- Liveness activo (por reto) ---
     challenge_ttl_seconds: int = 60

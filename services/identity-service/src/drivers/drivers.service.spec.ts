@@ -259,25 +259,42 @@ describe('DriversService.createEnrollChallenge · reto de liveness del enrolamie
 });
 
 describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD anti-spoofing)', () => {
-  /** Prisma que captura el `data` del driver.update para aseverar que se persiste el embedding del motor. */
+  /**
+   * Prisma que captura el `data` del driver.update (embedding) Y los eventos de outbox (auditoría F1). El
+   * enrol exitoso persiste el embedding + emite `biometric.enrolled` ATÓMICAMENTE (una tx); el rechazo por
+   * spoof emite `biometric.enroll_rejected` en escritura propia. El mock modela ambos caminos.
+   */
   function makeEnrollPrisma(driver: unknown) {
     const updates: {
       faceEmbedding?: number[];
       faceEnrolledAt?: Date;
+      faceSelfieKey?: string | null;
       dniFaceMatched?: boolean | null;
       dniFaceMatchScore?: number | null;
       dniFaceMatchedAt?: Date | null;
     }[] = [];
+    const outbox: { eventType: string }[] = [];
+    const driverWrite = {
+      update: async (args: { data: (typeof updates)[number] }) => {
+        updates.push(args.data);
+        return {};
+      },
+    };
+    const outboxEvent = {
+      create: async (args: { data: { eventType: string } }) => {
+        outbox.push(args.data);
+        return {};
+      },
+    };
     return {
       updates,
+      outbox,
       read: { driver: { findUnique: async () => driver } },
       write: {
-        driver: {
-          update: async (args: { data: (typeof updates)[number] }) => {
-            updates.push(args.data);
-            return {};
-          },
-        },
+        driver: driverWrite,
+        outboxEvent,
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({ driver: driverWrite, outboxEvent }),
       },
     };
   }
@@ -292,25 +309,48 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
     // Persiste EXACTAMENTE el embedding que devolvió embed (no uno inventado).
     expect(persisted?.faceEmbedding).toEqual([0.4, 0.5, 0.6]);
     expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
+    // AUDITORÍA F1 (Ley 29733): el enrol exitoso emite `biometric.enrolled` ATÓMICO con la persistencia.
+    expect(prisma.outbox.map((e) => e.eventType)).toEqual(['biometric.enrolled']);
+    // F5: sin selfieKey en el input → faceSelfieKey null (la subida del BFF es best-effort, pudo no venir).
+    expect(persisted?.faceSelfieKey).toBeNull();
   });
 
-  it('sin rostro (enrollPassive sin embedding) → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
+  it('F5 · selfieKey con prefijo del PROPIO conductor → se guarda faceSelfieKey', async () => {
+    const prisma = makeEnrollPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.enrollFace('u1', { photo: 'selfie-base64', selfieKey: 'drivers/d1/kyc-selfie.jpg' });
+    expect(prisma.updates[0]?.faceSelfieKey).toBe('drivers/d1/kyc-selfie.jpg');
+  });
+
+  it('F5 · selfieKey con prefijo AJENO → se IGNORA (null, defense-in-depth, no confía en key arbitraria)', async () => {
+    const prisma = makeEnrollPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    // okDriver.id = 'd1'; una key de OTRO conductor NO debe persistirse (aunque el caller sea interno/firmado).
+    await svc.enrollFace('u1', { photo: 'selfie-base64', selfieKey: 'drivers/OTRO-DRIVER/kyc-selfie.jpg' });
+    expect(prisma.updates[0]?.faceSelfieKey).toBeNull();
+  });
+
+  it('sin rostro (enrollPassive sin embedding) → 422 (UnprocessableEntityError) y NO escribe ni audita', async () => {
     const prisma = makeEnrollPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bioNoFace, config);
     await expect(
       svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(UnprocessableEntityError);
     expect(prisma.updates).toHaveLength(0);
+    // no_face es ruido operativo (no se detectó persona) → NO se audita (ningún evento de outbox).
+    expect(prisma.outbox).toHaveLength(0);
   });
 
-  it('SPOOF (PAD: livenessChecked && !live) → 422 y NO escribe el embedding (fail-closed anti-spoofing)', async () => {
+  it('SPOOF (PAD: livenessChecked && !live) → 422, NO enrola, pero SÍ deja traza forense', async () => {
     const prisma = makeEnrollPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bioSpoof, config);
     await expect(
       svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(UnprocessableEntityError);
-    // Un ataque de presentación (foto impresa / pantalla) NO se enrola.
+    // Un ataque de presentación (foto impresa / pantalla) NO se enrola…
     expect(prisma.updates).toHaveLength(0);
+    // …PERO deja TRAZA INMUTABLE del intento de suplantación (Ley 29733 · F1), aunque el request termine en 422.
+    expect(prisma.outbox.map((e) => e.eventType)).toEqual(['biometric.enroll_rejected']);
   });
 
   it('404 si el conductor no existe', async () => {
@@ -2102,5 +2142,109 @@ describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)'
     expect(out.matched).toBe(false);
     expect(prisma.updates[0]?.licenseFaceMatched).toBe(false);
     expect(prisma.updates[0]?.licenseFaceMatchScore).toBe(28);
+  });
+});
+
+describe('DriversService · techo de abuso del enrol + destrabe de central (F3)', () => {
+  /** Redis stateful POR-CLAVE (el makeRedis global es shift-specific): modela el cooldown de spoof del enrol. */
+  function makeKeyedRedis(seed: Record<string, number> = {}) {
+    const counts = new Map<string, number>(Object.entries(seed));
+    return {
+      counts,
+      async get(key: string): Promise<string | null> {
+        const v = counts.get(key);
+        return v === undefined ? null : String(v);
+      },
+      async incr(key: string): Promise<number> {
+        const v = (counts.get(key) ?? 0) + 1;
+        counts.set(key, v);
+        return v;
+      },
+      async expire(): Promise<number> {
+        return 1;
+      },
+      async del(key: string): Promise<number> {
+        return counts.delete(key) ? 1 : 0;
+      },
+    };
+  }
+
+  /** Prisma mínimo para enrollFace (findUnique por userId) que captura el outbox; reusa el patrón del bloque enrol. */
+  function makeEnrollPrismaLocal(driver: unknown) {
+    const driverWrite = { update: async () => ({}) };
+    const outboxEvent = { create: async () => ({}) };
+    return {
+      read: { driver: { findUnique: async () => driver } },
+      write: {
+        driver: driverWrite,
+        outboxEvent,
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({ driver: driverWrite, outboxEvent }),
+      },
+    };
+  }
+
+  const ENROLL_KEY = 'veo:bio:enroll-spoof:d1';
+  const SHIFT_KEY = 'veo:bio:fails:d1';
+
+  it('GATE DE ABUSO: con el cooldown lleno (5 spoofs) → 403 ANTES de gastar el PAD', async () => {
+    const redis = makeKeyedRedis({ [ENROLL_KEY]: 5 });
+    // Si el gate NO cortara, bioSpoof tiraría Unprocessable (422). Que tire Forbidden (403) PRUEBA el short-circuit.
+    const svc = new DriversService(
+      makeEnrollPrismaLocal(okDriver) as never,
+      redis as never,
+      bioSpoof,
+      config,
+    );
+    await expect(svc.enrollFace('u1', { photo: 'selfie' })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('un SPOOF incrementa el contador de abuso del enrol', async () => {
+    const redis = makeKeyedRedis();
+    const svc = new DriversService(
+      makeEnrollPrismaLocal(okDriver) as never,
+      redis as never,
+      bioSpoof,
+      config,
+    );
+    await expect(svc.enrollFace('u1', { photo: 'selfie' })).rejects.toBeInstanceOf(
+      UnprocessableEntityError,
+    );
+    expect(redis.counts.get(ENROLL_KEY)).toBe(1);
+  });
+
+  it('un enrol OK LIMPIA el contador de abuso (no arrastra spoofs viejos)', async () => {
+    const redis = makeKeyedRedis({ [ENROLL_KEY]: 3 });
+    const svc = new DriversService(
+      makeEnrollPrismaLocal(okDriver) as never,
+      redis as never,
+      bio,
+      config,
+    );
+    await svc.enrollFace('u1', { photo: 'selfie' });
+    expect(redis.counts.has(ENROLL_KEY)).toBe(false);
+  });
+
+  it('clearBiometricLockout (central) borra AMBOS bloqueos: turno + enrol', async () => {
+    const redis = makeKeyedRedis({ [SHIFT_KEY]: 3, [ENROLL_KEY]: 4 });
+    const svc = new DriversService(
+      makeEnrollPrismaLocal({ id: 'd1' }) as never,
+      redis as never,
+      bio,
+      config,
+    );
+    await svc.clearBiometricLockout('d1');
+    expect(redis.counts.has(SHIFT_KEY)).toBe(false);
+    expect(redis.counts.has(ENROLL_KEY)).toBe(false);
+  });
+
+  it('clearBiometricLockout → 404 si el conductor no existe', async () => {
+    const svc = new DriversService(
+      makeEnrollPrismaLocal(null) as never,
+      makeKeyedRedis() as never,
+      bio,
+      config,
+    );
+    await expect(svc.clearBiometricLockout('d1')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

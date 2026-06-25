@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { PRESIGN_AUDIENCES, type PresignAudience } from '../../ports/storage/storage.port';
 
 /**
  * TTL por defecto (segundos) de la URL prefirmada de descarga interna. Corto a propósito: la usa
@@ -60,6 +61,16 @@ export class PresignGetDto {
   @Min(1)
   @Max(MAX_PRESIGN_GET_TTL_SECONDS)
   ttlSeconds?: number;
+
+  @ApiProperty({
+    required: false,
+    enum: PRESIGN_AUDIENCES,
+    description:
+      "Quién consumirá la URL: 'device' (app/teléfono → se firma contra el host LAN) o 'admin' (browser del operador → localhost). Default 'admin' (compat con el visor del operador).",
+  })
+  @IsOptional()
+  @IsIn(PRESIGN_AUDIENCES)
+  audience?: PresignAudience;
 }
 
 /** Respuesta: la URL prefirmada de descarga (GET). */

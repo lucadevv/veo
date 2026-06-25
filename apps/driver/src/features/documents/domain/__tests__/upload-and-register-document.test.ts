@@ -26,7 +26,7 @@ function registeredDoc(): DriverDocument {
     ok: true,
     rejectionReason: null,
     // Sub-lote 3A/3B: caras del documento ya subidas (1 imagen SINGLE para la licencia de este fixture).
-    images: [{ side: 'SINGLE', order: 0 }],
+    images: [{ side: 'SINGLE', order: 0, url: null }],
   };
 }
 

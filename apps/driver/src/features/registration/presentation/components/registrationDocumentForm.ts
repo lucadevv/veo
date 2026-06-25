@@ -48,6 +48,14 @@ export interface RegistrationDocumentFormConfig {
   readonly numberPlaceholderKey?: string;
   /** `true` si el documento vence: el `DateField` de vencimiento se muestra y se exige. */
   readonly hasExpiry: boolean;
+  /**
+   * `true` si el documento se captura en DOS caras (anverso + reverso), p. ej. la licencia de conducir. El
+   * sheet pide la 2ª página al escáner, previsualiza ambas y entrega el reverso (`backFile`); el OCR corre
+   * SOLO sobre el ANVERSO. Reverso SOFT: si no salió la 2ª página, degrada honesto a UNA sola cara `SINGLE`
+   * (no bloquea, y respeta la regla del backend que exige el par exacto {FRONT,BACK} si se manda alguna cara).
+   * Ausente/`false` = documento de una sola cara (SOAT/tarjeta/foto).
+   */
+  readonly twoSided?: boolean;
 }
 
 /**
@@ -67,6 +75,9 @@ export const REGISTRATION_DOCUMENT_FORM_CONFIG: Record<
     numberPlaceholderKey: 'registration.documents.number.LICENSE_A1.placeholder',
     // La licencia de conducir vence.
     hasExpiry: true,
+    // La licencia se captura por sus DOS caras: el anverso lleva número/categoría/vencimiento (lo que el OCR
+    // lee) y el reverso suma restricciones + QR para la verificación del operador. El reverso es SOFT.
+    twoSided: true,
   },
   [FleetDocumentType.SOAT]: {
     captureMode: 'document',

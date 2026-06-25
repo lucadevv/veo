@@ -359,6 +359,7 @@ describe('usePersonalDataContinue · subida DIFERIDA de la licencia (BUG #2)', (
   function pendingLicense() {
     return {
       file: face('data:image/jpeg;base64,/9j/license'),
+      back: null,
       documentNumber: 'Q12345678',
       expiresAt: '2030-12-31',
       extractedData: null,
@@ -576,6 +577,7 @@ describe('usePersonalDataContinue · RESUME (driverExists) — NO re-PATCHea', (
       });
       useRegistrationStore.getState().setPendingLicense({
         file: face('data:image/jpeg;base64,/9j/license'),
+        back: null,
         documentNumber: 'Q12345678',
         expiresAt: '2030-12-31',
         extractedData: null,

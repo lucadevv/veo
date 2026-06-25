@@ -192,6 +192,10 @@ class HealthResponse(BaseModel):
 class ReadyResponse(BaseModel):
     ready: bool
     models_loaded: bool = Field(..., alias="modelsLoaded")
+    # ¿El PAD anti-spoofing (liveness pasivo) está cargado? Expuesto aparte de `models_loaded` (detector+embedder)
+    # para que ops/dashboards VEAN el modo degradado en vez de un pod "ready" engañoso. Con
+    # `require_passive_liveness=True` (prod), `ready` es False si esto es False (fail-closed).
+    passive_liveness_loaded: bool = Field(..., alias="passiveLivenessLoaded")
     detail: Optional[str] = None
 
     model_config = {"populate_by_name": True}

@@ -1,4 +1,5 @@
 export { RegistrationProgress } from './RegistrationProgress';
+export { WizardPager } from './WizardPager';
 export { RegistrationHeader } from './RegistrationHeader';
 export { RegistrationExitSheet } from './RegistrationExitSheet';
 export { RegistrationField, type RegistrationFieldProps } from './RegistrationField';
@@ -11,6 +12,7 @@ export {
   type DocumentCardTone,
 } from './DocumentUploadCard';
 export { RegistrationDocumentSheet } from './RegistrationDocumentSheet';
+export { DocumentPreviewCard, type DocumentPreviewCardProps } from './DocumentPreviewCard';
 export { firstMissingRequirement, type StepRequirement } from './missingRequirement';
 export { ScanDniSheet, type ScanDniSheetProps } from './ScanDniSheet';
 export {

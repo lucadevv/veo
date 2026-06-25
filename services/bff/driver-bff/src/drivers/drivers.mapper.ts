@@ -112,8 +112,32 @@ function toDocumentSide(side: string): DocumentSide | null {
   return DOCUMENT_SIDE_VALUES.has(side) ? (side as DocumentSide) : null;
 }
 
-/** Vista detallada de un documento del conductor. */
-export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail {
+/**
+ * Cara del documento CON su key S3 interna — paso INTERMEDIO server-side. El mapper es puro (sin I/O) y
+ * NO puede firmar la URL: deja pasar `s3Key` para que el service (que tiene el cliente de media) acuñe la
+ * presigned GET y construya la `DriverDocumentImageView` final (que ya NO lleva `s3Key`, solo `url`).
+ */
+export interface DriverDocumentImageWithKey {
+  side: DocumentSide;
+  order: number;
+  s3Key: string;
+}
+
+/**
+ * Vista detallada de un documento del conductor en su paso INTERMEDIO: idéntica a `DriverDocumentDetail`
+ * salvo que sus imágenes aún llevan la key S3 (`DriverDocumentImageWithKey`) en vez de la `url` firmada.
+ * El service la transforma en `DriverDocumentDetail` tras firmar cada cara (`presignDriverDocumentImages`).
+ */
+export type DriverDocumentDetailWithKeys = Omit<DriverDocumentDetail, 'images'> & {
+  images: DriverDocumentImageWithKey[];
+};
+
+/**
+ * Vista detallada de un documento del conductor (paso INTERMEDIO, CON keys S3). Antes este mapper DROPEABA
+ * la key (proyectaba solo side+order); ahora la deja pasar para que el service firme la presigned GET por
+ * cara (resume del onboarding: re-render server-side sin cachear PII). La key NUNCA llega al cliente.
+ */
+export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetailWithKeys {
   return {
     type: d.type,
     documentNumber: emptyToNull(d.documentNumber) ?? '',
@@ -123,18 +147,18 @@ export function buildDriverDocument(d: FleetDocumentReply): DriverDocumentDetail
     ok: isDocApproved(d.status),
     // M5: el motivo del rechazo viaja al conductor ("" del proto3 → null honesto).
     rejectionReason: emptyToNull(d.rejectionReason),
-    // Sub-lote 3A: las caras (side + order), SIN la key S3 interna. proto3 entrega [] si no hay imágenes.
+    // Sub-lote 3A: las caras (side + order + s3Key INTERNA). proto3 entrega [] si no hay imágenes.
     images: (d.images ?? [])
       .map((img) => {
         const side = toDocumentSide(img.side);
-        return side ? { side, order: img.order } : null;
+        return side ? { side, order: img.order, s3Key: img.s3Key } : null;
       })
-      .filter((img): img is { side: DocumentSide; order: number } => img !== null),
+      .filter((img): img is DriverDocumentImageWithKey => img !== null),
   };
 }
 
-/** Vista detallada de los documentos del conductor (GET /drivers/me/documents). */
-export function buildDriverDocuments(docs: FleetDocumentReply[]): DriverDocumentDetail[] {
+/** Vista detallada de los documentos del conductor (paso INTERMEDIO, CON keys S3). */
+export function buildDriverDocuments(docs: FleetDocumentReply[]): DriverDocumentDetailWithKeys[] {
   return docs.map(buildDriverDocument);
 }
 

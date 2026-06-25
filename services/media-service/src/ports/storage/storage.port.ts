@@ -15,7 +15,8 @@ export const STORAGE_PORT = Symbol('STORAGE_PORT');
  *  - `'admin'`: el operador en el browser DEL MAC (admin-web vía admin-bff). Alcanza MinIO por
  *    `localhost` (estable, no driftea con DHCP) → se firma contra `S3_ADMIN_BASE_URL`.
  */
-export type PresignAudience = 'device' | 'admin';
+export const PRESIGN_AUDIENCES = ['device', 'admin'] as const;
+export type PresignAudience = (typeof PRESIGN_AUDIENCES)[number];
 
 export interface PresignDownloadInput {
   key: string;

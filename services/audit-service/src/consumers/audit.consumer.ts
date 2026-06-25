@@ -114,6 +114,21 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'driver',
         resourceId: p.driverId,
       })),
+      // Enrol biométrico del alta (KYC selfie + liveness PASIVO): traza inmutable de que SE ejecutó una
+      // verificación biométrica de registro (Ley 29733). El veredicto de vida (livenessChecked/score) viaja
+      // en el envelope. actor=recurso=driverId (sujeto del enrol proyectado por el evento de dominio).
+      'biometric.enrolled': this.audited('biometric.enrolled', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
+      // Intento de SUPLANTACIÓN en el enrol (el PAD rechazó la captura: foto/pantalla/replay): traza forense
+      // inmutable del ataque de presentación. El motivo + score viajan en el envelope.
+      'biometric.enroll_rejected': this.audited('biometric.enroll_rejected', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
 
       // Derecho al olvido (BR-S06 · Ley 29733): traza inmutable de cada etapa del borrado.
       // user.deletion_requested = solicitud (inicia la gracia); user.deleted = borrado efectivo (sweep).

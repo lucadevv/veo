@@ -6,7 +6,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ValidationError } from '@veo/utils';
-import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
+import { STORAGE_PORT, type StoragePort, type PresignAudience } from '../ports/storage/storage.port';
 import {
   DEFAULT_PRESIGN_GET_TTL_SECONDS,
   DEFAULT_PRESIGN_PUT_TTL_SECONDS,
@@ -29,14 +29,16 @@ export class InternalStorageService {
     bucket: string;
     key: string;
     ttlSeconds?: number;
+    audience?: PresignAudience;
   }): Promise<PresignGetView> {
     const url = await this.storage.presignDownloadUrl({
       bucket: input.bucket,
       key: input.key,
       expiresSeconds: input.ttlSeconds ?? DEFAULT_PRESIGN_GET_TTL_SECONDS,
-      // Audiencia ADMIN: lo consume el operador en el browser DEL MAC (admin-web vía admin-bff). Se
-      // firma contra S3_ADMIN_BASE_URL (localhost), no contra el host LAN del device.
-      audience: 'admin',
+      // Audiencia: por defecto 'admin' (el visor del operador corre en el browser DEL MAC → se firma contra
+      // S3_ADMIN_BASE_URL/localhost). El driver-bff (preview del onboarding en el TELÉFONO) pasa 'device' →
+      // se firma contra S3_PUBLIC_BASE_URL (host LAN); si no, la URL apunta a localhost y el device no la alcanza.
+      audience: input.audience ?? 'admin',
     });
     return { url };
   }

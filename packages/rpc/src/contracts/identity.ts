@@ -84,6 +84,8 @@ export interface DriverReply {
   licenseFaceMatchScore: number;
   /** ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió. */
   licenseFaceMatchedAt: string;
+  /** F5 · key S3/MinIO de la selfie del enrol (ayuda visual del operador · ADMIN-ONLY). "" si no hay/no-admin. */
+  faceSelfieKey: string;
   /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS · campo 21 del proto): las `cause` DISTINTAS de los holds
    * vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el

@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { IconCheck, IconDocument } from '../../../../shared/presentation/icons';
+import { IconDocument } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { hexAlpha } from '../components';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
 import {
@@ -26,7 +25,10 @@ import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
 import { useRegistrationDocuments } from '../hooks/useRegistrationDocuments';
 import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
+  DocumentPreviewCard,
   DocumentUploadCard,
   firstMissingRequirement,
   RegistrationDocumentSheet,
@@ -42,7 +44,9 @@ import type {
   RegistrationDocumentInput,
 } from '../components/RegistrationDocumentSheet';
 
-type Props = NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>;
+// `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route` (no es una ruta). En
+// modo STANDALONE (tests, o si volviera a rutearse) llegan normales. La navegación solo se usa standalone.
+type Props = Partial<NativeStackScreenProps<RegistrationStackParamList, 'PersonalData'>>;
 
 /** Etiqueta del wizard de la LICENCIA de conducir (documento del CONDUCTOR; mapea a LICENSE_A1). */
 const LICENSE_DOC_TYPE: RegistrationDocumentType = 'LICENSE';
@@ -87,9 +91,13 @@ function serverStatusTone(status: RegistrationDocumentServerStatus): DocumentCar
  * porque para un conductor nuevo el presign de la licencia da 404 si se sube en el escaneo). El gating del
  * "Continuar" exige DNI leído + licencia capturada (pendiente de subir, subida local, o ya en el servidor).
  */
-export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => {
+export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+  // Modo dual: si hay contexto del wizard, la pantalla está EMBEBIDA en el pager (publica su footer y avanza
+  // con `goNext`); si es `null`, corre STANDALONE (chrome propio). El índice de su página sale del orden tipado.
+  const wizard = useRegistrationWizardPageOptional();
+  const pageIndex = ORDERED_STEPS.indexOf(RegistrationStep.PERSONAL_DATA);
   const personal = useRegistrationStore((s) => s.personal);
   // Las caras del DNI escaneado (anverso = miniatura de la tarjeta "DNI capturado ✓"). Es la fuente de
   // verdad de "se capturó un DNI" INDEPENDIENTE del OCR: la imagen viaja aunque el texto no se lea.
@@ -101,7 +109,8 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
 
   // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación).
   const exit = useRegistrationExit();
-  useRegistrationExitGuard(exit.handleHardwareBack);
+  // Embebido en el wizard: el guard de hardware-back lo monta el HOST. Solo standalone registra el suyo.
+  useRegistrationExitGuard(exit.handleHardwareBack, !wizard);
 
   // LICENCIA (doc del conductor · LOTE B). La subida + onboarding se DIFIEREN al "Continuar" (espejo del
   // DNI): para un conductor NUEVO el driver no existe hasta el PATCH /personal, así que subir en el escaneo
@@ -144,6 +153,11 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   // documento viaja aunque el OCR no extraiga texto (p. ej. binario nativo sin la capa OCR). Así NUNCA se
   // muestra una tarjeta "vacía" que parece OK ni se oculta el fallback honesto cuando el OCR no leyó nada.
   const hasCapture = pendingDni != null;
+  // Honestidad de estado (espejo de la licencia): el DOCUMENTO del DNI está "listo" SOLO si hay una captura
+  // LOCAL viva (`pendingDni`, la imagen que se va a subir) O el servidor YA lo tiene (`serverHasDni`).
+  // `hasReadDni` (número leído, puede venir de `personal.dni` persistido) NO alcanza: tras un reload el número
+  // sobrevive pero la IMAGEN no → diría "listo" sin nada que subir (DNI fantasma). El número se exige aparte.
+  const dniDocReady = pendingDni != null || serverHasDni;
 
   const dniBackendType = registrationDocTypeToBackend('DNI');
   // Estado de SERVIDOR del DNI para el chip "ya enviado" (mismo patrón que la licencia): al reanudar SIN
@@ -159,6 +173,11 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
     };
   })();
 
+  // Opción A · RESUME: URL prefirmada del ANVERSO del DNI ya subido, para previsualizarlo SIN captura local
+  // (el backend ordena FRONT=0 → la 1ª imagen es el anverso). `null` si no hay imagen o el presign falló.
+  const dniServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === dniBackendType)?.images[0]?.url ?? null;
+
   const licenseBackendType = registrationDocTypeToBackend(LICENSE_DOC_TYPE);
 
   /** ¿El servidor YA tiene la licencia en un estado aceptable? (conductor que vuelve/reinstala). */
@@ -167,10 +186,12 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
   // La licencia cuenta como "lista para avanzar" si: hay una captura DIFERIDA pendiente de subir en el
   // continue (`pendingLicense`), O el avance local la marca `uploaded` (resume/hidratación), O el servidor
   // ya la tiene válida. El `pendingLicense` es la señal del flujo nuevo (escaneo → guarda → sube en Continuar).
-  const licenseUploaded =
-    pendingLicense != null ||
-    documents.find((d) => d.type === LICENSE_DOC_TYPE)?.status === DocumentUploadStatus.UPLOADED ||
-    serverHasLicense;
+  // Honestidad de estado (mata la "licencia fantasma"): "lista para avanzar" SOLO si hay una captura LOCAL
+  // viva pendiente de subir (`pendingLicense`), O el servidor YA la tiene (`serverHasLicense`). Se DESCARTA el
+  // flag local `documents.UPLOADED`: se seteaba OPTIMISTA en el escaneo y SOBREVIVÍA al reload sin su captura
+  // (el array `documents` se persiste, la captura no) → mentía "subida" sin que el server la tuviera. Un fallo
+  // de subida conserva `pendingLicense` (sigue "lista para enviar/reintentar") y el banner de fallo lo dice.
+  const licenseUploaded = pendingLicense != null || serverHasLicense;
 
   // Estado de SERVIDOR de la licencia para el chip (si existe en `GET /drivers/me/documents`).
   const licenseServerState = (() => {
@@ -184,13 +205,19 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
     };
   })();
 
-  // Gating del paso CONDUCTOR (LOTE B): se exige DNI leído + LICENCIA subida para avanzar al Vehículo.
-  const canContinue = hasReadDni && licenseUploaded;
+  // Opción A · RESUME: URL prefirmada de la licencia ya subida (para previsualizarla SIN captura local).
+  const licenseServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === licenseBackendType)?.images[0]?.url ?? null;
+
+  // Gating del paso CONDUCTOR (LOTE B): avanza SOLO con el número del DNI leído (para el PATCH) + la IMAGEN del
+  // DNI disponible (captura viva o ya en el server) + la licencia lista. Exigir `dniDocReady` (no solo
+  // `hasReadDni`) cierra el DNI fantasma: número persistido sin imagen tras un reload ya no deja avanzar.
+  const canContinue = hasReadDni && dniDocReady && licenseUploaded;
 
   // U3 · CTA que dice QUÉ falta: derivado del MISMO gating (no se duplica la lógica). El orden refleja la
   // SECUENCIA de pasos (1 · DNI, 2 · Licencia): se muestra el PRIMER requisito incumplido, pegado al CTA.
   const personalRequirements: readonly StepRequirement[] = [
-    { satisfied: hasReadDni, missingKey: 'registration.personal.missing.dni' },
+    { satisfied: hasReadDni && dniDocReady, missingKey: 'registration.personal.missing.dni' },
     { satisfied: licenseUploaded, missingKey: 'registration.personal.missing.license' },
   ];
   const missingKey = firstMissingRequirement(personalRequirements);
@@ -213,6 +240,9 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
     }
     setPendingLicense({
       file: input.file,
+      // Reverso SOFT (documento de 2 caras): si el escáner trajo la 2ª página, la guardamos; si no, `null`
+      // y la subida degrada honesto a una sola cara SINGLE (el reverso no bloquea el avance).
+      back: input.backFile ?? null,
       documentNumber: input.documentNumber,
       expiresAt: input.expiresAtIso,
       extractedData: input.extractedData ?? null,
@@ -252,8 +282,13 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
     });
     switch (result.status) {
       case 'ok':
-        setCurrentStep(RegistrationStep.VEHICLE);
-        navigation.navigate('Vehicle');
+        // Embebido: avanza el pager (el host fija el `currentStep`). Standalone: navega a la ruta del paso 2.
+        if (wizard) {
+          wizard.goNext();
+        } else {
+          setCurrentStep(RegistrationStep.VEHICLE);
+          navigation?.navigate('Vehicle');
+        }
         return;
       case 'field-errors':
         // Sin formulario editable no debería ocurrir (el OCR alimenta los campos), pero si el backend
@@ -279,41 +314,80 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
     }
   };
 
-  return (
-    <>
-      <SafeScreen
-        scroll
-        header={<RegistrationHeader showLogo peru onExit={exit.requestExit} />}
-        footer={
-          <View style={styles.footer}>
-            {/* U3 · feedback PEGADO al CTA: cuando "Continuar" está disabled, decimos QUÉ falta (el primer
-                requisito incumplido del gating), no un banner lejano. Tipado (clave i18n derivada), sin
-                string mágico. Desaparece cuando todo está listo (el botón se habilita). */}
-            {missingKey ? (
-              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
-                {t('registration.personal.missing.label', { detail: t(missingKey) })}
-              </Text>
-            ) : null}
-            <Button
-              label={t('common.continue')}
-              variant="accent"
-              fullWidth
-              loading={personalContinue.isPending}
-              disabled={!canContinue}
-              onPress={() => {
-                void onContinue();
-              }}
-            />
-          </View>
-        }
-      >
-        <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
+  // LOTE B · subida INMEDIATA (igual que el vehículo): apenas el escaneo dejó los datos personales COMPLETOS
+  // (lo que el PATCH exige) y hay una captura para subir (DNI o licencia), corre el MISMO `submit()` del
+  // Continuar (PATCH idempotente crea el driver → sube DNI → sube licencia + onboard, todo 409-como-éxito).
+  // Así el conductor + sus documentos quedan en el SERVER al escanear, no diferidos al Continuar: el resume
+  // sabe siempre qué se subió (los chips ya reflejan el `serverState`). Reusa 100% la lógica testeada; es una
+  // optimización SILENCIOSA — NO navega ni pinta error (eso lo gobierna el Continuar explícito): si algo
+  // falla, la captura se conserva y degrada al flujo de siempre (subir/reintentar en el Continuar).
+  const eagerSyncKey = useRef<string | null>(null);
+
+  /** Corre el `submit()` eager. `submit()` nunca lanza (mapea todo a un resultado discriminado que acá se ignora a propósito). */
+  const runEagerSync = async (): Promise<void> => {
+    await personalContinue.submit({
+      personal,
+      driverExists: driverExistence === DriverExistence.Exists,
+    });
+  };
+
+  useEffect(() => {
+    // Espera a que los sheets de captura estén CERRADOS (el usuario confirmó): un re-escaneo DENTRO del sheet
+    // no debe disparar una subida prematura que un 409 no podría reemplazar después.
+    if (scanOpen || licenseSheetOpen) {
+      return;
+    }
+    // El PATCH exige nombre + DNI + nacimiento. Sin eso (OCR incompleto) esperamos el tipeo manual.
+    const personalComplete =
+      personal.fullName.trim().length > 0 &&
+      personal.dni.trim().length > 0 &&
+      personal.birthdate.trim().length > 0;
+    if (!personalComplete || (!pendingDni && !pendingLicense) || personalContinue.isPending) {
+      return;
+    }
+    // Una sola vez por combinación de capturas (evita re-disparos en cada render). Un re-escaneo (uri distinta)
+    // rearma. Si la subida falla, la captura se conserva y el reintento es el Continuar explícito.
+    const key = `${pendingDni?.front.uri ?? '-'}|${pendingLicense?.file.uri ?? '-'}`;
+    if (eagerSyncKey.current === key) {
+      return;
+    }
+    eagerSyncKey.current = key;
+    void runEagerSync();
+    // `runEagerSync` toma el estado actual en cada corrida; las deps de abajo regobiernan el disparo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanOpen, licenseSheetOpen, personal, pendingDni, pendingLicense, personalContinue.isPending]);
+
+  // EMBEBIDO (wizard): publica el footer del paso al host — "Continuar" + el hint "Te falta: …". `onContinueRef`
+  // evita re-registrar en cada render (el footer solo cambia cuando cambia el gating). Standalone: no hace nada
+  // (el CTA lo pinta el footer propio de la pantalla).
+  const onContinueRef = useRef(onContinue);
+  onContinueRef.current = onContinue;
+  useEffect(() => {
+    if (!wizard) {
+      return;
+    }
+    wizard.registerFooter(pageIndex, {
+      primaryLabel: t('common.continue'),
+      onPrimary: () => void onContinueRef.current(),
+      primaryDisabled: !canContinue,
+      primaryLoading: personalContinue.isPending,
+      hint: missingKey ? t('registration.personal.missing.label', { detail: t(missingKey) }) : undefined,
+    });
+    return () => wizard.registerFooter(pageIndex, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wizard, pageIndex, canContinue, personalContinue.isPending, missingKey]);
+
+  // El CUERPO del paso (compartido por ambos modos). El chrome cambia según el modo (embebido vs standalone).
+  const stepBody = (
+    <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
           {/* La BARRA de progreso (animada) se mantiene como única señal visual del avance: el caption
               textual "Paso N de M" (`registration.stepOf`) se ELIMINÓ — era redundante con la barra y
               empujaba el contenido, invirtiendo la jerarquía. Ahora el TÍTULO display manda. */}
-          <Reveal>
-            <RegistrationProgress current={1} />
-          </Reveal>
+          {wizard ? null : (
+            <Reveal>
+              <RegistrationProgress current={1} />
+            </Reveal>
+          )}
 
           {/* Bloque héroe alineado a la IZQUIERDA con aire generoso (estándar Tesla: Onboarding/Login):
               título `display` que domina + subtítulo `callout` muted. Sin "Paso N de M" encima. */}
@@ -336,7 +410,7 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
               icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
               stepNumber={1}
               label={t('registration.documents.dni')}
-              status={hasReadDni ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+              status={dniDocReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
               serverState={dniServerState}
@@ -385,31 +459,21 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
               leyó: una captura que parece OK SOLO cuando de verdad lo está. */}
           {hasCapture && hasReadDni && pendingDni ? (
             <Reveal delay={120} from="scale">
-              <View
-                style={[
-                  styles.capturedCard,
-                  {
-                    backgroundColor: hexAlpha(theme.colors.success, 0.1),
-                    borderColor: hexAlpha(theme.colors.success, 0.4),
-                    borderRadius: theme.radii.lg,
-                    padding: theme.spacing.md,
-                    gap: theme.spacing.md,
-                  },
-                ]}
-              >
-                <Image
-                  source={{ uri: pendingDni.front.uri }}
-                  style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
-                  resizeMode="cover"
-                  accessibilityIgnoresInvertColors
-                />
-                <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
-                  <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
-                  <Text variant="headline" color="success">
-                    {t('registration.personal.scanDni.capturedTitle')}
-                  </Text>
-                </View>
-              </View>
+              <DocumentPreviewCard
+                imageUri={pendingDni.front.uri}
+                title={t('registration.documents.dni')}
+                caption={t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : dniServerImageUri ? (
+            // RESUME (Opción A): sin captura local pero el DNI YA está en el servidor → preview desde la URL
+            // prefirmada (cero PII en el device, imagen on-demand). El caption refleja el estado REAL del server.
+            <Reveal delay={120} from="scale">
+              <DocumentPreviewCard
+                imageUri={dniServerImageUri}
+                title={t('registration.documents.dni')}
+                caption={dniServerState?.label ?? t('registration.documents.state.ready')}
+              />
             </Reveal>
           ) : null}
 
@@ -460,33 +524,108 @@ export const PersonalDataScreen = ({ navigation }: Props): React.JSX.Element => 
               }}
             />
           </Reveal>
-        </View>
 
-        {licenseSheetOpen ? (
-          <RegistrationDocumentSheet
-            visible
-            onClose={() => {
-              if (licenseUploadState !== 'uploading') {
-                setLicenseSheetOpen(false);
-              }
-            }}
-            documentLabel={t('registration.documents.license')}
-            documentType={licenseBackendType}
-            uploadState={licenseUploadState}
-            errorMessage={licenseError ? toErrorMessage(licenseError, t) : undefined}
-            onPick={(source) => imagePicker.pick(source)}
-            onScan={() => documentScanner.scan()}
-            onSubmit={onSubmitLicense}
-          />
-        ) : null}
+          {/* PREVIEW de la LICENCIA capturada (espejo del DNI · MISMO componente canónico). Solo cuando hay
+              imagen LOCAL en `pendingLicense`; en resume server-side sin captura local NO se inventa preview
+              (degradación honesta: el chip ya refleja el estado real del servidor). */}
+          {pendingLicense?.file?.uri ? (
+            <Reveal delay={180} from="scale">
+              <DocumentPreviewCard
+                imageUri={pendingLicense.file.uri}
+                title={t('registration.documents.license')}
+                caption={t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : licenseServerImageUri ? (
+            // RESUME (Opción A): la licencia ya está en el servidor → preview desde la URL prefirmada.
+            <Reveal delay={180} from="scale">
+              <DocumentPreviewCard
+                imageUri={licenseServerImageUri}
+                title={t('registration.documents.license')}
+                caption={licenseServerState?.label ?? t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : null}
+        </View>
+  );
+
+  const licenseSheet = licenseSheetOpen ? (
+    <RegistrationDocumentSheet
+      visible
+      onClose={() => {
+        if (licenseUploadState !== 'uploading') {
+          setLicenseSheetOpen(false);
+        }
+      }}
+      documentLabel={t('registration.documents.license')}
+      documentType={licenseBackendType}
+      uploadState={licenseUploadState}
+      errorMessage={licenseError ? toErrorMessage(licenseError, t) : undefined}
+      onPick={(source) => imagePicker.pick(source)}
+      // Licencia = documento de 2 caras: pedimos 2 páginas (anverso + reverso) en una sesión del escáner.
+      onScan={() => documentScanner.scan({ maxPages: 2 })}
+      onSubmit={onSubmitLicense}
+    />
+  ) : null;
+  const scanSheet = <ScanDniSheet visible={scanOpen} onClose={() => setScanOpen(false)} />;
+
+  // Modo EMBEBIDO (wizard): solo el cuerpo en un scroll propio + los sheets. El host pone el chrome
+  // (header/footer/progress/exit) y pinta el CTA unificado (publicado vía `registerFooter`).
+  if (wizard) {
+    return (
+      <>
+        <ScrollView
+          contentContainerStyle={styles.embeddedScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {stepBody}
+        </ScrollView>
+        {licenseSheet}
+        {scanSheet}
+      </>
+    );
+  }
+
+  // Modo STANDALONE (fuera del wizard, p. ej. tests): chrome propio + el CTA "Continuar" en el footer.
+  return (
+    <>
+      <SafeScreen
+        scroll
+        header={<RegistrationHeader showLogo peru onExit={exit.requestExit} />}
+        footer={
+          <View style={styles.footer}>
+            {/* U3 · feedback PEGADO al CTA: cuando "Continuar" está disabled, decimos QUÉ falta (el primer
+                requisito incumplido del gating), no un banner lejano. */}
+            {missingKey ? (
+              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
+                {t('registration.personal.missing.label', { detail: t(missingKey) })}
+              </Text>
+            ) : null}
+            <Button
+              label={t('common.continue')}
+              variant="accent"
+              fullWidth
+              loading={personalContinue.isPending}
+              disabled={!canContinue}
+              onPress={() => {
+                void onContinue();
+              }}
+            />
+          </View>
+        }
+      >
+        {stepBody}
+        {licenseSheet}
       </SafeScreen>
       <RegistrationExitSheet exit={exit} />
-      <ScanDniSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
+      {scanSheet}
     </>
   );
 };
 
 const styles = StyleSheet.create({
+  // Embebido: el host del wizard es `padded={false}`, así que el scroll de la página pone su propio padding.
+  embeddedScroll: { paddingHorizontal: 20, paddingBottom: 32 },
   body: { paddingTop: 20 },
   // Aire Tesla bajo la barra de progreso: el bloque héroe respira (marginTop generoso) y el
   // título+subtítulo quedan juntos por su propio gap.
@@ -494,7 +633,4 @@ const styles = StyleSheet.create({
   footer: { gap: 10 },
   missingHint: {},
   scanHint: { marginTop: 6 },
-  capturedCard: { borderWidth: 1, alignItems: 'center' },
-  capturedThumb: { width: '100%', height: 160 },
-  capturedHeader: { flexDirection: 'row', alignItems: 'center' },
 });

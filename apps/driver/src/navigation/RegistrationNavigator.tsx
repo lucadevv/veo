@@ -1,51 +1,23 @@
 import React from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { driverTheme } from '@veo/ui-kit';
-import type { RegistrationStackParamList } from './types';
-import { resolveInitialRoute } from './registrationStackRoutes';
 import {
-  IdentityVerificationScreen,
-  PersonalDataScreen,
   RealFaceCaptureProvider,
-  useRegistrationStore,
-  VehicleScreen,
+  RegistrationWizardScreen,
 } from '../features/registration/presentation';
 
-const Stack = createNativeStackNavigator<RegistrationStackParamList>();
-
 /**
- * Wizard de registro: 3 pasos presentados con slide horizontal (`slide_from_right`). El estado del
- * alta vive en el store del feature; la captura de la SELFIE del KYC (cámara frontal nativa, una foto)
- * se inyecta vía `RealFaceCaptureProvider` (puerto propio del registro, independiente de la captura del
- * turno). Lote 2: el liveness DIY (reto/frames) se retiró; el enroll usa una sola foto.
+ * Wizard de registro (LOTE C · "sensación de onboarding"): UNA sola pantalla con un PAGER horizontal de los
+ * 3 pasos (Datos · Vehículo · Identidad), en vez de 3 rutas de navegación separadas. El progress lineal, el
+ * footer unificado (Atrás | Primary) y las transiciones animadas viven en `RegistrationWizardScreen`; el
+ * estado del alta sigue en el store del feature. El "atrás" del header (único control) SALE del onboarding
+ * (cerrar sesión); el `Atrás` del footer camina los pasos por índice respetando el gating.
  *
- * `initialRouteName` se deriva del `currentStep` del store (`resolveInitialRoute`) y fija el paso N
- * como pantalla SUPERIOR: el primer paint ya es la pantalla correcta al reanudar. En native-stack
- * `initialRouteName` monta UNA sola pantalla (NO apila los pasos previos); por eso, al REANUDAR en un
- * paso > 1 (MMKV persistido, o `RejectedScreen.onFix`→`setCurrentStep`), cada pantalla de paso 2/3/4
- * reconstruye su propia pila `[PersonalData … pasoN]` (pasos 2/3) vía `useRegistrationStepBack`
- * (`CommonActions.reset`, una sola vez, sin flash porque el top no cambia). Así el back gesture/botón
- * retrocede por los pasos completados hasta el paso 1, donde toma el exit-guard de raíz (Lote 1). Sin
- * esa reconstrucción la pila quedaría `[pasoN]` y un `goBack` moriría con "GO_BACK was not handled".
- * LOTE B: el wizard quedó en 3 pasos (Conductor · Vehículo · KYC); el paso Documents desapareció.
+ * La captura de la SELFIE del KYC (cámara frontal nativa, una foto) se inyecta vía `RealFaceCaptureProvider`
+ * (puerto propio del registro, independiente de la captura del turno).
  */
 export const RegistrationNavigator = (): React.JSX.Element => {
-  // `getState()` (no selector reactivo): `initialRouteName` solo se lee al montar el navigator.
-  const initialRouteName = resolveInitialRoute(useRegistrationStore.getState().currentStep);
   return (
     <RealFaceCaptureProvider>
-      <Stack.Navigator
-        initialRouteName={initialRouteName}
-        screenOptions={{
-          headerShown: false,
-          animation: 'slide_from_right',
-          contentStyle: { backgroundColor: driverTheme.colors.bg },
-        }}
-      >
-        <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
-        <Stack.Screen name="Vehicle" component={VehicleScreen} />
-        <Stack.Screen name="IdentityVerification" component={IdentityVerificationScreen} />
-      </Stack.Navigator>
+      <RegistrationWizardScreen />
     </RealFaceCaptureProvider>
   );
 };

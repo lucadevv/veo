@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,7 +24,11 @@ import {
   useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
 import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
+import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
+  DocumentPreviewCard,
   DocumentUploadCard,
   firstMissingRequirement,
   hexAlpha,
@@ -51,7 +55,9 @@ import {
   type RegistrationDocumentServerStatus,
 } from '../../domain';
 
-type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
+// `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route`. Standalone (tests):
+// llegan normales. La navegación solo se usa standalone (embebido avanza por el pager con `goNext`).
+type Props = Partial<NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>>;
 
 /** Tono del chip del SOAT según el `simpleStatus` real del documento (espeja el dominio de documentos). */
 function soatStatusTone(status: RegistrationDocumentServerStatus): DocumentCardTone {
@@ -88,7 +94,7 @@ function soatStatusTone(status: RegistrationDocumentServerStatus): DocumentCardT
  * documento DRIVER-scoped (igual que la foto): se sube/registra al capturarlo (mismo pipeline que la foto).
  * El gating de "Registrar vehículo"/"Continuar" exige tarjeta (datos del vehículo) + foto + SOAT.
  */
-export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
+export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
@@ -99,8 +105,13 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   // La tarjeta escaneada (imagen) es la fuente de verdad de "se capturó una tarjeta" INDEPENDIENTE del OCR.
   const pendingPropertyCard = useRegistrationStore((s) => s.pendingPropertyCard);
 
-  // Back robusto del paso: reconstruye la pila al reanudar y nunca dispara un GO_BACK muerto.
-  const back = useRegistrationStepBack();
+  // Modo dual: embebido en el pager (publica footer + avanza con `goNext`) o standalone (chrome propio).
+  const wizard = useRegistrationWizardPageOptional();
+  const pageIndex = ORDERED_STEPS.indexOf(RegistrationStep.VEHICLE);
+
+  // Back robusto del paso (solo standalone): reconstruye la pila al reanudar y nunca dispara un GO_BACK muerto.
+  // Embebido: deshabilitado — el back/exit/hardware-back los maneja el host del wizard.
+  const back = useRegistrationStepBack(!wizard);
 
   // Rehidrata el vehículo ya registrado (si existe) para mostrar su estado y bloquear el re-alta.
   const vehiclesQuery = useDriverVehicles();
@@ -112,8 +123,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const [errors, setErrors] = useState<VehicleErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
-  // El vehículo se creó pero la subida DIFERIDA de la tarjeta falló (no 409). NO perdemos la imagen
-  // (sigue en `pendingPropertyCard`): aviso + reintento al volver a tocar Registrar (alta idempotente).
+  // LOTE A: la subida INMEDIATA de la tarjeta (efecto `uploadPropertyCardNow`) falló por red/5xx. NO
+  // perdemos la imagen (sigue en `pendingPropertyCard`): banner + botón de reintento. Bloquea el alta
+  // hasta que la tarjeta aterrice en el server (vía `cardImageReady`).
   const [cardUploadFailed, setCardUploadFailed] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   // El conductor pidió cargar a mano (fallback accesible): muestra el formulario completo (placa/año/
@@ -129,6 +141,8 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const imagePicker = useImagePicker();
   const documentScanner = useDocumentScanner();
   const photoBackendType = registrationDocTypeToBackend('VEHICLE_PHOTO');
+  // Tipo backend de la tarjeta de propiedad (la etiqueta del wizard 'VEHICLE_REGISTRATION' mapea a PROPERTY_CARD).
+  const propertyCardBackendType = registrationDocTypeToBackend('VEHICLE_REGISTRATION');
 
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [photoUploadState, setPhotoUploadState] = useState<DocumentUploadState>('idle');
@@ -167,6 +181,56 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     };
   })();
 
+  /** Estado de SERVIDOR de la FOTO del vehículo para el chip (MISMO patrón server-aware que el SOAT). */
+  const photoServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === photoBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
+  /**
+   * Estado de SERVIDOR de la TARJETA DE PROPIEDAD para el chip del Paso 1 (MISMO patrón server-aware que la
+   * foto/SOAT). LOTE A: la tarjeta ahora SUBE al escanear, así que su chip debe reflejar el estado REAL del
+   * server ("En revisión", etc.) — NO el label estático "Listo para enviar" heredado del modelo diferido,
+   * que MENTÍA (decía "listo para enviar" cuando la tarjeta YA estaba enviada y en revisión).
+   */
+  const cardServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === propertyCardBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
+  // Opción A · preview desde el SERVER de los docs ya subidos: la foto + el SOAT se suben al capturarlos
+  // (DRIVER-scoped), así que su preview viene de la URL prefirmada del server (1ª imagen), no de captura local.
+  const photoServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === photoBackendType)?.images[0]?.url ?? null;
+  const soatServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === soatBackendType)?.images[0]?.url ?? null;
+  // LOTE A: la TARJETA ahora también se sube al escanear → su preview viene del server al reanudar (cuando
+  // `pendingPropertyCard` ya no está, porque vive SOLO en memoria por Ley 29733). Sin esto, tras recargar la
+  // tarjeta enviada quedaba SIN preview y el flujo re-ofrecía "cargar a mano" (la captura local desaparecida).
+  const cardServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === propertyCardBackendType)?.images[0]?.url ?? null;
+
+  // LOTE A · honestidad de estado: la IMAGEN de la tarjeta está "lista" solo si REALMENTE se subió — flag
+  // local UPLOADED (lo setea `uploadPropertyCardNow` SOLO tras una subida exitosa, NO la captura local) o
+  // el server ya la tiene (conductor que vuelve). MISMO patrón server-aware que la foto/SOAT. Ya NO basta
+  // `pendingPropertyCard` (captura local sin subir): el gate ESPERA a que la tarjeta aterrice en el server
+  // antes de habilitar el alta, así nunca se crea un vehículo con la tarjeta a medio subir.
+  const cardImageReady =
+    documents.find((d) => d.type === 'VEHICLE_REGISTRATION')?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasAcceptableDoc(serverDocs.data, 'VEHICLE_REGISTRATION');
+
   // ¿Se capturó una tarjeta? (señal = imagen, NO los campos OCR). ¿El OCR leyó la PLACA (campo crítico)?
   const hasCapture = pendingPropertyCard != null;
   const hasReadPlate = vehicle.plate.trim().length > 0;
@@ -190,6 +254,70 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
   };
+
+  // LOTE A · subida INMEDIATA de la tarjeta de propiedad (unifica el flujo con la foto/SOAT). Marca QUÉ
+  // captura (por su uri) ya se intentó subir, para no re-disparar el efecto en cada render ni duplicar la
+  // subida. Una captura NUEVA (re-escaneo → uri distinta) rearma el intento.
+  const uploadedCardUri = useRef<string | null>(null);
+
+  /**
+   * Sube+registra la IMAGEN de la tarjeta de propiedad AL SERVER (DRIVER-scoped, igual que la foto/SOAT).
+   * El backend EXIGE `documentNumber` para todo doc ≠ foto: la PLACA es el identificador natural de la
+   * tarjeta (no tiene número propio), normalizada IGUAL que en `validateVehicle` (mayúsculas, sin espacios)
+   * para coincidir con el alta. La data OCR + su trazabilidad viajan solo si el escaneo extrajo algo. 409
+   * (tarjeta ya registrada) es ÉXITO, no error (mismo patrón que la foto/SOAT/DNI). Si falla por red/5xx, NO
+   * se pierde la imagen (sigue en `pendingPropertyCard`) → aviso + reintento manual.
+   */
+  const uploadPropertyCardNow = async (): Promise<void> => {
+    if (!pendingPropertyCard) {
+      return;
+    }
+    setCardUploadFailed(false);
+    const plate = vehicle.plate.trim().toUpperCase().replace(/\s+/g, '');
+    const markUploaded = (): void => {
+      setDocumentStatus('VEHICLE_REGISTRATION', DocumentUploadStatus.UPLOADED);
+      void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+    };
+    try {
+      await uploadDocument.mutateAsync({
+        type: propertyCardBackendType,
+        file: pendingPropertyCard.front,
+        documentNumber: plate,
+        ...(pendingPropertyCard.extractedData
+          ? {
+              extractedData: pendingPropertyCard.extractedData,
+              ocrEngine: ocrEngineForPlatform(),
+              ocrAt: ocrTimestampNow(),
+            }
+          : {}),
+      });
+      markUploaded();
+    } catch (e) {
+      // 409 = la tarjeta YA está registrada → ÉXITO (mismo patrón que la foto/SOAT/DNI).
+      if (isConflictError(e)) {
+        markUploaded();
+        return;
+      }
+      setCardUploadFailed(true);
+    }
+  };
+
+  // Dispara la subida apenas la tarjeta tiene TODO lo que el backend exige: imagen (`pendingPropertyCard`)
+  // + placa (`hasReadPlate`, venga del OCR o del tipeo manual). Si la placa aún no se leyó, el efecto
+  // re-corre cuando aparezca. Si la tarjeta ya está lista (`cardImageReady`), no hace nada.
+  useEffect(() => {
+    if (cardImageReady || !pendingPropertyCard || !hasReadPlate) {
+      return;
+    }
+    const uri = pendingPropertyCard.front.uri;
+    if (uploadedCardUri.current === uri) {
+      return;
+    }
+    uploadedCardUri.current = uri;
+    void uploadPropertyCardNow();
+    // `uploadPropertyCardNow` captura el estado actual en cada corrida del efecto (deps abajo lo regobiernan).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardImageReady, pendingPropertyCard, hasReadPlate]);
 
   /** Sube+registra la foto del vehículo (reusa el pipeline de documentos; sin número ni vencimiento). */
   const onSubmitPhoto = async (input: RegistrationDocumentInput) => {
@@ -268,8 +396,13 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   }
 
   const goNext = () => {
+    // Embebido: avanza el pager (el host fija el `currentStep`). Standalone: navega a la ruta del paso 3.
+    if (wizard) {
+      wizard.goNext();
+      return;
+    }
     setCurrentStep(RegistrationStep.IDENTITY_VERIFICATION);
-    navigation.navigate('IdentityVerification');
+    navigation?.navigate('IdentityVerification');
   };
 
   /**
@@ -310,10 +443,9 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     }
     setErrors({});
     setServerError(null);
-    setCardUploadFailed(false);
 
-    // El hook orquesta el alta del vehículo → subida DIFERIDA de la tarjeta escaneada (con OCR). El
-    // resultado discriminado dice exactamente qué pintar (sin strings mágicos) y si se puede avanzar.
+    // LOTE A: el hook solo CREA el vehículo (la imagen de la tarjeta YA se subió al escanear, gateada por
+    // `cardImageReady`). El resultado discriminado dice exactamente qué pintar (sin strings mágicos).
     const result = await vehicleContinue.submit(vehicle);
     switch (result.status) {
       case 'ok':
@@ -329,9 +461,6 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
         return;
       case 'server-error':
         setServerError(result.error);
-        return;
-      case 'card-upload-failed':
-        setCardUploadFailed(true);
         return;
     }
   };
@@ -350,7 +479,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   // mano (cumple la promesa del comentario que prometía ocultarlo tras un scan exitoso). Tampoco se muestra
   // si ya estás en modo manual (el form está abierto).
   const scanCaptureComplete = hasCapture && hasReadPlate && hasReadYear && hasType;
-  const showManualToggle = !manualMode && !scanCaptureComplete;
+  // LOTE A: también se oculta si la tarjeta YA está en el server (`cardImageReady`). Al REANUDAR, la captura
+  // local (`pendingPropertyCard`) se fue (memoria, Ley 29733) → `scanCaptureComplete` quedaba false y el toggle
+  // re-ofrecía "cargar a mano" una tarjeta YA ENVIADA. La fuente de verdad es la subida real, no la captura local.
+  const showManualToggle = !manualMode && !scanCaptureComplete && !cardImageReady;
 
   // U3 · CTA que dice QUÉ falta: derivado del MISMO gating del footer (datos del vehículo vía tarjeta/manual +
   // foto + SOAT). El orden refleja la SECUENCIA de pasos (1 · Tarjeta, 2 · Foto, 3 · SOAT): se muestra el
@@ -363,42 +495,37 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   ];
   const missingKey = existingVehicle ? null : firstMissingRequirement(vehicleRequirements);
 
-  return (
-    <>
-      <SafeScreen
-        scroll
-        header={<RegistrationHeader showLogo={false} onBack={back.onBack} />}
-        footer={
-          <View style={styles.footer}>
-            {/* U3 · feedback PEGADO al CTA: cuando "Registrar/Continuar" está disabled, decimos QUÉ falta (el
-                primer requisito incumplido del gating: tarjeta → foto → SOAT), no un banner lejano. Tipado
-                (clave i18n derivada), sin string mágico. Desaparece cuando todo está listo. */}
-            {missingKey ? (
-              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
-                {t('registration.vehicle.missing.label', { detail: t(missingKey) })}
-              </Text>
-            ) : null}
-            <Button
-              label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
-              variant="accent"
-              fullWidth
-              loading={vehicleContinue.isPending}
-              // LOTE B: la foto Y el SOAT del vehículo son REQUERIDOS para avanzar (alta nueva Y vehículo ya
-              // registrado). Espejan el gating de la documentación del vehículo agrupada en este paso.
-              disabled={(!existingVehicle && !hasVehicleData) || !photoUploaded || !soatUploaded}
-              onPress={() => {
-                void onContinue();
-              }}
-            />
-          </View>
-        }
-      >
-        <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
+  // EMBEBIDO (wizard): publica el footer del paso al host — "Registrar vehículo"/"Continuar" + el hint
+  // "Te falta: …". `onContinueRef` evita re-registrar en cada render (solo cambia con el gating).
+  const onContinueRef = useRef(onContinue);
+  onContinueRef.current = onContinue;
+  const vehiclePrimaryDisabled =
+    (!existingVehicle && !hasVehicleData) || !cardImageReady || !photoUploaded || !soatUploaded;
+  useEffect(() => {
+    if (!wizard) {
+      return;
+    }
+    wizard.registerFooter(pageIndex, {
+      primaryLabel: existingVehicle ? t('common.continue') : t('registration.vehicle.register'),
+      onPrimary: () => void onContinueRef.current(),
+      primaryDisabled: vehiclePrimaryDisabled,
+      primaryLoading: vehicleContinue.isPending,
+      hint: missingKey ? t('registration.vehicle.missing.label', { detail: t(missingKey) }) : undefined,
+    });
+    return () => wizard.registerFooter(pageIndex, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wizard, pageIndex, existingVehicle, vehiclePrimaryDisabled, vehicleContinue.isPending, missingKey]);
+
+  // El CUERPO del paso (compartido por ambos modos). El chrome cambia según el modo (embebido vs standalone).
+  const stepBody = (
+    <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
           {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
               (`registration.stepOf`) se ELIMINÓ — redundante con la barra. El título display manda. */}
-          <Reveal>
-            <RegistrationProgress current={2} />
-          </Reveal>
+          {wizard ? null : (
+            <Reveal>
+              <RegistrationProgress current={2} />
+            </Reveal>
+          )}
 
           {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
           <Reveal delay={40} style={styles.intro}>
@@ -426,6 +553,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                 tone="danger"
                 title={t('registration.vehicle.scanCard.uploadFailed')}
                 description={t('registration.vehicle.scanCard.uploadRetryHint')}
+                action={{ label: t('common.retry'), onPress: () => void uploadPropertyCardNow() }}
               />
             </Reveal>
           ) : null}
@@ -447,11 +575,10 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                   icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
                   stepNumber={1}
                   label={t('registration.vehicle.scanCard.preview')}
-                  status={
-                    derivedFromScan ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING
-                  }
+                  status={cardImageReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
                   uploadedLabel={t('registration.documents.state.ready')}
                   pendingLabel={t('registration.documents.pending')}
+                  serverState={cardServerState}
                   accessibilityLabel={
                     hasCapture
                       ? t('registration.actions.rescan')
@@ -469,11 +596,14 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                     style={[
                       styles.capturedCard,
                       {
-                        backgroundColor: hexAlpha(theme.colors.success, 0.1),
-                        borderColor: hexAlpha(theme.colors.success, 0.4),
+                        // Estética Tesla (negro premium): superficie oscura + borde sutil + elevación, NO la
+                        // "caja verde de AI". El éxito es un ACENTO mínimo (check chico), no el fondo.
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.border,
                         borderRadius: theme.radii.lg,
                         padding: theme.spacing.md,
                         gap: theme.spacing.md,
+                        ...theme.elevation.level2,
                       },
                     ]}
                   >
@@ -485,8 +615,8 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                     />
                     <View style={[styles.capturedBody, { gap: theme.spacing.sm }]}>
                       <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
-                        <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
-                        <Text variant="headline" color="success">
+                        <IconCheck size={16} color={theme.colors.success} strokeWidth={2.6} />
+                        <Text variant="headline" color="ink">
                           {t('registration.vehicle.scanCard.capturedTitle')}
                         </Text>
                       </View>
@@ -511,6 +641,19 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                       ) : null}
                     </View>
                   </View>
+                </Reveal>
+              ) : null}
+
+              {/* Preview de la TARJETA ya subida, desde el SERVER (Opción A · URL prefirmada). Al REANUDAR
+                  no hay captura local viva (`pendingPropertyCard` es efímero), así que el preview viene del
+                  server — mismo patrón que la foto/SOAT. Solo cuando NO se está mostrando la captura local. */}
+              {!derivedFromScan && cardServerImageUri ? (
+                <Reveal delay={150} from="scale">
+                  <DocumentPreviewCard
+                    imageUri={cardServerImageUri}
+                    title={t('registration.vehicle.scanCard.preview')}
+                    caption={cardServerState?.label ?? t('registration.documents.state.ready')}
+                  />
                 </Reveal>
               ) : null}
 
@@ -681,6 +824,7 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
               status={photoUploaded ? 'uploaded' : 'pending'}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
+              serverState={photoServerState}
               busy={uploadDocument.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.vehicle.photoLabel'),
@@ -692,6 +836,17 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
               }}
             />
           </Reveal>
+
+          {/* Preview de la FOTO ya subida, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+          {photoServerImageUri ? (
+            <Reveal delay={255} from="scale">
+              <DocumentPreviewCard
+                imageUri={photoServerImageUri}
+                title={t('registration.vehicle.photoLabel')}
+                caption={photoServerState?.label ?? t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : null}
 
           {/* SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos). Reusa el componente
               CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Documento numerado que vence;
@@ -716,53 +871,113 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
               }}
             />
           </Reveal>
+
+          {/* Preview del SOAT ya subido, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+          {soatServerImageUri ? (
+            <Reveal delay={295} from="scale">
+              <DocumentPreviewCard
+                imageUri={soatServerImageUri}
+                title={t('registration.documents.soat')}
+                caption={soatServerState?.label ?? t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : null}
         </View>
+  );
 
-        {photoSheetOpen ? (
-          <RegistrationDocumentSheet
-            visible
-            onClose={() => {
-              if (photoUploadState !== 'uploading') {
-                setPhotoSheetOpen(false);
-              }
-            }}
-            documentLabel={t('registration.vehicle.photoLabel')}
-            documentType={photoBackendType}
-            uploadState={photoUploadState}
-            errorMessage={photoError ? toErrorMessage(photoError, t) : undefined}
-            // La foto del vehículo es una FOTO LIBRE: el sheet entra en modo `'photo'` y su acción
-            // principal es la cámara normal vía `onPick`, SIN escáner de bordes ni OCR. Por eso no se
-            // inyecta `onScan`. El pipeline de subida (presign + PUT + registro) es el mismo.
-            onPick={(source) => imagePicker.pick(source)}
-            onSubmit={onSubmitPhoto}
-          />
-        ) : null}
+  const photoSheet = photoSheetOpen ? (
+    <RegistrationDocumentSheet
+      visible
+      onClose={() => {
+        if (photoUploadState !== 'uploading') {
+          setPhotoSheetOpen(false);
+        }
+      }}
+      documentLabel={t('registration.vehicle.photoLabel')}
+      documentType={photoBackendType}
+      uploadState={photoUploadState}
+      errorMessage={photoError ? toErrorMessage(photoError, t) : undefined}
+      // La foto del vehículo es una FOTO LIBRE: el sheet entra en modo `'photo'` y su acción principal es
+      // la cámara normal vía `onPick`, SIN escáner de bordes ni OCR. El pipeline de subida es el mismo.
+      onPick={(source) => imagePicker.pick(source)}
+      onSubmit={onSubmitPhoto}
+    />
+  ) : null;
 
-        {soatSheetOpen ? (
-          <RegistrationDocumentSheet
-            visible
-            onClose={() => {
-              if (soatUploadState !== 'uploading') {
-                setSoatSheetOpen(false);
-              }
-            }}
-            documentLabel={t('registration.documents.soat')}
-            // El tipo CANÓNICO selecciona la config contextual del formulario (etiqueta del número + que
-            // vence) y el parser de OCR (`parseSoat`). El mapeo es el mismo que viaja al backend.
-            documentType={soatBackendType}
-            uploadState={soatUploadState}
-            errorMessage={soatError ? toErrorMessage(soatError, t) : undefined}
-            onPick={(source) => imagePicker.pick(source)}
-            onScan={() => documentScanner.scan()}
-            onSubmit={onSubmitSoat}
-          />
-        ) : null}
+  const soatSheet = soatSheetOpen ? (
+    <RegistrationDocumentSheet
+      visible
+      onClose={() => {
+        if (soatUploadState !== 'uploading') {
+          setSoatSheetOpen(false);
+        }
+      }}
+      documentLabel={t('registration.documents.soat')}
+      // El tipo CANÓNICO selecciona la config contextual del formulario (número + que vence) y el parser
+      // de OCR (`parseSoat`). El mapeo es el mismo que viaja al backend.
+      documentType={soatBackendType}
+      uploadState={soatUploadState}
+      errorMessage={soatError ? toErrorMessage(soatError, t) : undefined}
+      onPick={(source) => imagePicker.pick(source)}
+      onScan={() => documentScanner.scan()}
+      onSubmit={onSubmitSoat}
+    />
+  ) : null;
+
+  const scanCardSheet = (
+    <ScanPropertyCardSheet visible={scanOpen} onClose={() => setScanOpen(false)} onCaptured={onCaptured} />
+  );
+
+  // Modo EMBEBIDO (wizard): solo el cuerpo en un scroll propio + los sheets. El host pone el chrome
+  // (header/footer/progress/exit) y pinta el CTA unificado (publicado vía `registerFooter`).
+  if (wizard) {
+    return (
+      <>
+        <ScrollView
+          contentContainerStyle={styles.embeddedScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {stepBody}
+        </ScrollView>
+        {photoSheet}
+        {soatSheet}
+        {scanCardSheet}
+      </>
+    );
+  }
+
+  // Modo STANDALONE (fuera del wizard, p. ej. tests): chrome propio + el CTA "Registrar" en el footer.
+  return (
+    <>
+      <SafeScreen
+        scroll
+        header={<RegistrationHeader showLogo={false} onBack={back.onBack} />}
+        footer={
+          <View style={styles.footer}>
+            {/* U3 · feedback PEGADO al CTA: el primer requisito incumplido (tarjeta → foto → SOAT). */}
+            {missingKey ? (
+              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
+                {t('registration.vehicle.missing.label', { detail: t(missingKey) })}
+              </Text>
+            ) : null}
+            <Button
+              label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
+              variant="accent"
+              fullWidth
+              loading={vehicleContinue.isPending}
+              disabled={vehiclePrimaryDisabled}
+              onPress={() => {
+                void onContinue();
+              }}
+            />
+          </View>
+        }
+      >
+        {stepBody}
+        {photoSheet}
+        {soatSheet}
       </SafeScreen>
-      <ScanPropertyCardSheet
-        visible={scanOpen}
-        onClose={() => setScanOpen(false)}
-        onCaptured={onCaptured}
-      />
+      {scanCardSheet}
       <RegistrationExitSheet exit={back.exit} />
     </>
   );
@@ -786,6 +1001,8 @@ function ReadRow({ label, value }: { label: string; value: string }): React.JSX.
 }
 
 const styles = StyleSheet.create({
+  // Embebido: el host del wizard es `padded={false}`, así que el scroll de la página pone su propio padding.
+  embeddedScroll: { paddingHorizontal: 20, paddingBottom: 32 },
   body: { paddingTop: 20 },
   // Aire Tesla bajo la barra: el bloque héroe respira; título+subtítulo juntos por su gap.
   intro: { gap: 10, marginTop: 12 },

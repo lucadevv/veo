@@ -85,6 +85,16 @@ export class EnrollFaceDto {
   @MinLength(FRAME_BASE64_MIN)
   @MaxLength(FRAME_BASE64_MAX)
   photo!: string;
+
+  /**
+   * F5 · key S3/MinIO de la selfie que el driver-bff YA subió (best-effort) para la ayuda visual del operador.
+   * Lo manda el BFF (NO la app), server-to-server. identity la valida (prefijo `drivers/{driverId}/`) y SOLO la
+   * guarda si el enrol resulta VIVO. Opcional: si la subida del BFF falló, no viene y `faceSelfieKey` queda null.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  selfieKey?: string;
 }
 
 class VerifyBiometricDto {
@@ -292,6 +302,19 @@ export class DriversController {
   })
   licenseFaceMatch(@Param('id') id: string, @Body() dto: LicenseFaceMatchDto) {
     return this.drivers.matchLicenseFace(id, { image: dto.image });
+  }
+
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/biometric/unlock')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Destrabar la verificación biométrica del conductor (central · regla #1: solo la central destraba). Limpia el lockout de turno + el cooldown de enrol',
+  })
+  async unlockBiometric(@Param('id') id: string): Promise<void> {
+    await this.drivers.clearBiometricLockout(id);
   }
 
   @Audiences(InternalAudience.ADMIN_RAIL)

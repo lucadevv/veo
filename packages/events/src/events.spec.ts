@@ -68,6 +68,40 @@ describe('topic routing', () => {
       expect(bad.success).toBe(false);
     });
   });
+
+  describe('audit.recorded · contrato productor↔schema (guard del POISON)', () => {
+    it('ACEPTA el payload que audit-service emite (entryId + at + tamper-evident)', () => {
+      const schema = schemaForEvent('audit.recorded');
+      expect(schema).toBeDefined();
+      // Forma EXACTA que emite audit.repository.ts tras el fix.
+      const ok = schema!.safeParse({
+        entryId: 'a1',
+        seq: '42',
+        eventId: 'e1',
+        actorId: 'u1',
+        action: 'biometric.enrolled',
+        resourceType: 'driver',
+        resourceId: 'd1',
+        at: '2026-06-25T12:37:38.329Z',
+        hash: 'deadbeef',
+      });
+      expect(ok.success).toBe(true);
+    });
+
+    it('RECHAZA la forma vieja rota (auditId en vez de entryId, sin at) — el bug del POISON', () => {
+      const schema = schemaForEvent('audit.recorded');
+      const bad = schema!.safeParse({
+        auditId: 'a1',
+        seq: '42',
+        eventId: 'e1',
+        action: 'x',
+        resourceType: 'driver',
+        resourceId: 'd1',
+        hash: 'deadbeef',
+      });
+      expect(bad.success).toBe(false);
+    });
+  });
 });
 
 describe('registro de schemas', () => {

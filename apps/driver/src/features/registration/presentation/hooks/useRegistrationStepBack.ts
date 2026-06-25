@@ -4,6 +4,7 @@ import { CommonActions, useFocusEffect, useNavigation } from '@react-navigation/
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   buildResumeRoutes,
+  ORDERED_STEPS,
   type RegistrationResumeStack,
 } from '../../../../navigation/registrationStackRoutes';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
@@ -45,13 +46,15 @@ export interface RegistrationStepBack {
  *    pila superficial, NUNCA cierra la app por sorpresa. Ningún back —software ni hardware, en ningún
  *    paso— puede morir ni cerrar la app inesperadamente.
  */
-export function useRegistrationStepBack(): RegistrationStepBack {
+export function useRegistrationStepBack(enabled = true): RegistrationStepBack {
   const navigation = useNavigation<RegistrationStepNavigation>();
   const exit = useRegistrationExit();
   const seeded = useRef(false);
 
   useLayoutEffect(() => {
-    if (seeded.current) {
+    // EMBEBIDO en el wizard de un solo screen (`enabled=false`): la pila/back/exit los maneja el HOST. No
+    // reconstruimos la pila ni registramos el back de hardware acá (sería un doble handler con el del host).
+    if (!enabled || seeded.current) {
       return;
     }
     seeded.current = true;
@@ -66,14 +69,31 @@ export function useRegistrationStepBack(): RegistrationStepBack {
     if (resume) {
       navigation.dispatch(CommonActions.reset(resume));
     }
-  }, [navigation]);
+  }, [navigation, enabled]);
 
   const onBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
       return;
     }
-    // No hay a dónde volver: en vez de un GO_BACK muerto, ofrecemos la salida del onboarding (Lote 1).
+    // Pila SUPERFICIAL (re-mount del navigator por un cambio de `registrationStatus` en el root / la
+    // reconstrucción de mount no llegó a aplicarse): en vez de claudicar al exit-confirm —que SOLO
+    // corresponde al paso 1, donde NO hay paso anterior—, reconstruimos `[PersonalData … pasoN]` y
+    // retrocedemos al paso ANTERIOR. La FUENTE DE VERDAD es `currentStep` del store, no la pila frágil:
+    // así el "atrás" SIEMPRE camina los pasos ya completados (lo que el conductor espera), y el exit queda
+    // solo cuando de verdad no hay anterior. `setCurrentStep` mantiene el wizard y la pila en sync.
+    const store = useRegistrationStore.getState();
+    const resume = buildResumeRoutes(store.currentStep);
+    if (resume && resume.index > 0) {
+      const routes = resume.routes.slice(0, resume.index); // dropea el paso actual → `[PersonalData … pasoN-1]`
+      const prevStep = ORDERED_STEPS[routes.length - 1]; // paso anterior (existe: `index > 0` ⇒ length ≥ 1)
+      if (prevStep !== undefined) {
+        store.setCurrentStep(prevStep);
+        navigation.dispatch(CommonActions.reset({ index: routes.length - 1, routes }));
+        return;
+      }
+    }
+    // Paso 1 (sin paso anterior): ofrecemos la salida del onboarding (Lote 1).
     exit.requestExit();
   }, [navigation, exit]);
 
@@ -82,6 +102,10 @@ export function useRegistrationStepBack(): RegistrationStepBack {
   // evento (`true`) para que Android nunca cierre la app por sorpresa. Montado solo en foco.
   useFocusEffect(
     useCallback(() => {
+      // Embebido (`enabled=false`): el back de hardware lo maneja el host del wizard, no la página.
+      if (!enabled) {
+        return undefined;
+      }
       const subscription: NativeEventSubscription = BackHandler.addEventListener(
         'hardwareBackPress',
         () => {
@@ -94,7 +118,7 @@ export function useRegistrationStepBack(): RegistrationStepBack {
         },
       );
       return () => subscription.remove();
-    }, [exit, onBack]),
+    }, [exit, onBack, enabled]),
   );
 
   return { onBack, exit };

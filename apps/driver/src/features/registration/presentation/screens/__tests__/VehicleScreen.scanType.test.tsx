@@ -208,6 +208,9 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     act(() => {
       useRegistrationStore.getState().setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
       useRegistrationStore.getState().setDocumentStatus('SOAT', 'uploaded');
+      // LOTE A: la tarjeta sube AL ESCANEAR (efecto), no diferida. Para aislar el gating del TIPO la
+      // pre-marcamos subida igual que foto/SOAT → el efecto la ve lista y no dispara subida en el test.
+      useRegistrationStore.getState().setDocumentStatus('VEHICLE_REGISTRATION', 'uploaded');
     });
 
     emitScan(renderer, VehicleType.MOTO, false);
@@ -236,6 +239,9 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     act(() => {
       useRegistrationStore.getState().setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
       useRegistrationStore.getState().setDocumentStatus('SOAT', 'uploaded');
+      // LOTE A: la tarjeta sube AL ESCANEAR (efecto), no diferida. Para aislar el gating del TIPO la
+      // pre-marcamos subida igual que foto/SOAT → el efecto la ve lista y no dispara subida en el test.
+      useRegistrationStore.getState().setDocumentStatus('VEHICLE_REGISTRATION', 'uploaded');
     });
 
     // Scan capturado pero sin tipo derivado (categoría no leída): el store queda en `type: null`.

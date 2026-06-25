@@ -98,4 +98,7 @@ message DriverReply {
   double license_face_match_score = 23;
   // ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió.
   string license_face_matched_at = 24;
+  // F5 · key S3/MinIO de la SELFIE del enrol (ayuda visual del operador en casos dudosos). ADMIN-ONLY (PII ·
+  // Ley 29733): solo viaja por el riel admin; "" en rieles no-admin o si no hay selfie. Campo 25, backward-compat.
+  string face_selfie_key = 25;
 }

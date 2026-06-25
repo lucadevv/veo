@@ -553,6 +553,12 @@ export class OpsService {
         licenseFaceMatchStatus: toDniFaceMatchStatus(driver.licenseFaceMatchStatus),
         licenseFaceMatchScore: driver.licenseFaceMatchedAt ? driver.licenseFaceMatchScore : null,
         licenseFaceMatchedAt: emptyToNull(driver.licenseFaceMatchedAt),
+        // F5 · presigned GET de la SELFIE del enrol (ayuda visual del operador en casos dudosos). TTL corto,
+        // Compliance+ (la gateaba ya el roster de la ruta). `null` si no hay selfie (best-effort no la guardó)
+        // o si la firma falla (fail-soft). El operador la VE junto al score; el match sigue siendo la verificación.
+        faceSelfieUrl: driver.faceSelfieKey
+          ? await this.presignDocument(identity, driver.faceSelfieKey)
+          : null,
       },
       vehicle,
       documents,
@@ -809,6 +815,20 @@ export class OpsService {
       resourceId: driverId,
       // El motivo queda en la traza inmutable junto a la decisión (sin motivo ⇒ se omite la clave).
       ...(reason ? { payload: { reason } } : {}),
+    });
+  }
+
+  /**
+   * Destrabe biométrico por la CENTRAL (regla #1 driver: "solo central puede destrabar"). Llama a identity
+   * (limpia el lockout de turno + el cooldown de enrol en Redis) y AUDITA el comando del operador (traza
+   * inmutable Ley 29733 de quién destrabó a quién). Sin body: la acción es idempotente sobre el driverId.
+   */
+  async unlockBiometric(identity: AuthUser, driverId: string): Promise<void> {
+    await this.identityRest.post<void>(`/drivers/${driverId}/biometric/unlock`, { identity });
+    await this.audit.record(identity, {
+      action: 'driver.biometric-unlock',
+      resourceType: 'driver',
+      resourceId: driverId,
     });
   }
 

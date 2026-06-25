@@ -128,22 +128,54 @@ describe('useRegistrationStepBack · reconstrucción + back seguro (fix del GO_B
     expect(mockExitStub.requestExit).not.toHaveBeenCalled();
   });
 
-  it('onBack sin paso previo (caso límite) abre el exit-confirm en vez de morir', () => {
+  it('onBack con pila SUPERFICIAL en KYC reconstruye al paso ANTERIOR (Vehículo), NO claudica al exit', () => {
+    // Bug que cazó el dueño: la pila quedó superficial (re-mount del navigator por un cambio de
+    // `registrationStatus` en el root) y `canGoBack()` es false PERSISTENTE — la reconstrucción de mount no
+    // la rescató. El back NO debe ofrecer "salir" en un paso > 1: debe caminar al paso anterior (fuente de
+    // verdad = `currentStep`, no la pila frágil).
     useRegistrationStore.setState({ currentStep: RegistrationStep.IDENTITY_VERIFICATION });
-    // Pila superficial persistente (la reconstrucción no aplicó): el back NO puede morir.
     mockNav.canGoBack.mockReturnValue(false);
 
     let back!: ReturnType<typeof useRegistrationStepBack>;
     act(() => {
       TestRenderer.create(<HookHost onReady={(b) => (back = b)} />);
     });
+    // La reconstrucción de mount ya disparó un reset; aislamos el dispatch del onBack.
+    mockNav.dispatch.mockClear();
 
     act(() => {
       back.onBack();
     });
 
-    // En vez de un GO_BACK muerto, ofrece la salida del onboarding (Lote 1).
-    expect(mockNav.goBack).not.toHaveBeenCalled();
+    // Reconstruye `[PersonalData, Vehicle]` posicionando en Vehículo (paso anterior) — NO el exit-confirm.
+    expect(mockExitStub.requestExit).not.toHaveBeenCalled();
+    expect(mockNav.dispatch).toHaveBeenCalledTimes(1);
+    expect(mockNav.dispatch).toHaveBeenCalledWith(
+      CommonActions.reset({
+        index: 1,
+        routes: [{ name: 'PersonalData' }, { name: 'Vehicle' }],
+      }),
+    );
+    // El wizard sigue a la pila: `currentStep` retrocede a Vehículo (resume coherente con lo visible).
+    expect(useRegistrationStore.getState().currentStep).toBe(RegistrationStep.VEHICLE);
+  });
+
+  it('onBack SIN paso anterior (paso 1) abre el exit-confirm (no hay a dónde retroceder)', () => {
+    useRegistrationStore.setState({ currentStep: RegistrationStep.PERSONAL_DATA });
+    mockNav.canGoBack.mockReturnValue(false);
+
+    let back!: ReturnType<typeof useRegistrationStepBack>;
+    act(() => {
+      TestRenderer.create(<HookHost onReady={(b) => (back = b)} />);
+    });
+    mockNav.dispatch.mockClear();
+
+    act(() => {
+      back.onBack();
+    });
+
+    // Paso 1: sin paso anterior → exit-confirm, sin reconstruir.
+    expect(mockNav.dispatch).not.toHaveBeenCalled();
     expect(mockExitStub.requestExit).toHaveBeenCalledTimes(1);
   });
 });

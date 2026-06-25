@@ -1623,3 +1623,35 @@ describe('OpsService.reactivateDriverForCompliance · override manual (complianc
     expect(record).not.toHaveBeenCalled(); // el levantamiento falló → no se audita.
   });
 });
+
+describe('OpsService.unlockBiometric · destrabe biométrico por la central (F3)', () => {
+  it('llama a identity (POST /biometric/unlock) y AUDITA el comando del operador', async () => {
+    const identityPost = vi.fn().mockResolvedValue(undefined);
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const audit = { record } as unknown as AuditRecorder;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      grpc(() => ({})),
+      identityRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      audit,
+      config,
+    );
+    await svc.unlockBiometric(identity, 'd1');
+    expect(identityPost).toHaveBeenCalledWith(
+      '/drivers/d1/biometric/unlock',
+      expect.objectContaining({ identity }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'driver.biometric-unlock', resourceId: 'd1' }),
+    );
+  });
+});

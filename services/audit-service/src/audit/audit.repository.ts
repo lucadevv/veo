@@ -111,13 +111,17 @@ export class AuditRepository {
         producer: 'audit-service',
         occurredAt: new Date(content.occurredAt).toISOString(),
         payload: {
-          auditId: created.id,
+          // Alineado al schema `auditRecorded` de @veo/events: `entryId` (no `auditId`) + `at` OBLIGATORIO.
+          // Antes faltaban ambos → el relay marcaba el evento POISON en cada auditoría (payload inválido).
+          entryId: created.id,
           seq: String(created.seq),
           eventId: created.eventId,
-          actorId: created.actorId,
+          // actorId es opcional en el schema (z.string().optional()); la fila puede tenerlo null → undefined.
+          actorId: created.actorId ?? undefined,
           action: created.action,
           resourceType: created.resourceType,
           resourceId: created.resourceId,
+          at: created.createdAt.toISOString(),
           hash: created.hash,
         },
       });

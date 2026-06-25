@@ -1,5 +1,5 @@
 import { DocumentSide, FleetDocumentType } from '@veo/shared-types';
-import type { DocumentSideFile, PickedImage } from '../../../documents/domain';
+import type { DocumentSideFile } from '../../../documents/domain';
 import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
 import { PersonalDataValidationError, type PersonalData, type PersonalDataErrors } from '../../domain';
 import { isConflictError } from '../../../../shared/presentation/errors';
@@ -84,33 +84,47 @@ export function usePersonalDataContinue(): PersonalDataContinue {
   const onboardLicense = useOnboardLicense();
 
   /**
-   * Sube el DNI escaneado pendiente (si lo hay) AHORA que el driver existe. FRONT siempre; BACK solo si se
-   * capturó (una cara es válida; el reverso se completa luego). Caras tipadas del enum, sin strings mágicos.
-   * Devuelve `true` si subió o si no había nada que subir; `false` si la subida falló (conserva `pendingDni`).
+   * Sube el DNI escaneado pendiente (si lo hay) AHORA que el driver existe. CON reverso → par FRONT+BACK;
+   * SIN reverso → una sola cara SINGLE (el backend exige el par EXACTO si se manda alguna cara FRONT/BACK,
+   * así que un FRONT solo se rechazaría). Caras tipadas del enum, sin strings mágicos. Devuelve `true` si subió
+   * o si no había nada que subir; `false` si la subida falló (conserva `pendingDni`).
    */
   const uploadPendingDni = async (documentNumber: string): Promise<boolean> => {
     if (!pendingDni) {
       return true;
     }
-    const sides: DocumentSideFile[] = [{ side: DocumentSide.FRONT, file: pendingDni.front }];
-    if (pendingDni.back) {
-      sides.push({ side: DocumentSide.BACK, file: pendingDni.back });
-    }
+    // Número (si lo hay) + data OCR/trazabilidad (solo si el escaneo extrajo algo: el DNI tipeado a mano se
+    // sube sin OCR) — comunes a ambas formas de subida.
+    const extraFields = {
+      ...(documentNumber.length > 0 ? { documentNumber } : {}),
+      ...(pendingDni.extractedData
+        ? {
+            extractedData: pendingDni.extractedData,
+            ocrEngine: ocrEngineForPlatform(),
+            ocrAt: ocrTimestampNow(),
+          }
+        : {}),
+    };
     try {
-      await uploadDni.mutateAsync({
-        type: FleetDocumentType.DNI,
-        sides,
-        ...(documentNumber.length > 0 ? { documentNumber } : {}),
-        // Lote 1: la data OCR del DNI (mapeada en el scan) + su trazabilidad viajan al registrar. Solo si
-        // el escaneo extrajo algo (`extractedData` no nulo): el DNI tipeado a mano se sube sin OCR.
-        ...(pendingDni.extractedData
+      // MISMA regla de caras que la licencia (fleet `normalizeDocumentImages`): un FRONT solo se RECHAZA
+      // ("Caras incoherentes"). CON reverso → par FRONT+BACK; SIN reverso → una sola cara SINGLE (`{file}`).
+      // FIX del bug latente: antes mandaba `sides:[FRONT]` sin reverso → el backend lo habría rechazado.
+      await uploadDni.mutateAsync(
+        pendingDni.back
           ? {
-              extractedData: pendingDni.extractedData,
-              ocrEngine: ocrEngineForPlatform(),
-              ocrAt: ocrTimestampNow(),
+              type: FleetDocumentType.DNI,
+              sides: [
+                { side: DocumentSide.FRONT, file: pendingDni.front },
+                { side: DocumentSide.BACK, file: pendingDni.back },
+              ] satisfies DocumentSideFile[],
+              ...extraFields,
             }
-          : {}),
-      });
+          : {
+              type: FleetDocumentType.DNI,
+              file: pendingDni.front,
+              ...extraFields,
+            },
+      );
       clearPendingDni();
       return true;
     } catch (e) {
@@ -140,21 +154,38 @@ export function usePersonalDataContinue(): PersonalDataContinue {
     if (!pendingLicense) {
       return true;
     }
-    const file: PickedImage = pendingLicense.file;
+    // Data OCR + trazabilidad (solo si el escaneo las produjo) — comunes a ambas formas de subida.
+    const ocrFields = pendingLicense.extractedData
+      ? {
+          extractedData: pendingLicense.extractedData,
+          ocrEngine: ocrEngineForPlatform(),
+          ocrAt: ocrTimestampNow(),
+        }
+      : {};
     try {
-      await uploadLicense.mutateAsync({
-        type: FleetDocumentType.LICENSE_A1,
-        file,
-        documentNumber: pendingLicense.documentNumber,
-        expiresAt: pendingLicense.expiresAt,
-        ...(pendingLicense.extractedData
+      // El backend exige el PAR EXACTO {FRONT, BACK} si se manda ALGUNA cara (fleet `normalizeDocumentImages`):
+      // un FRONT solo se rechaza ("Caras incoherentes"). Reverso SOFT: CON reverso → par FRONT+BACK; SIN reverso
+      // → una sola imagen SINGLE (shape `{file}`, como hoy). Así el soft no viola la regla de caras del backend.
+      await uploadLicense.mutateAsync(
+        pendingLicense.back
           ? {
-              extractedData: pendingLicense.extractedData,
-              ocrEngine: ocrEngineForPlatform(),
-              ocrAt: ocrTimestampNow(),
+              type: FleetDocumentType.LICENSE_A1,
+              sides: [
+                { side: DocumentSide.FRONT, file: pendingLicense.file },
+                { side: DocumentSide.BACK, file: pendingLicense.back },
+              ] satisfies DocumentSideFile[],
+              documentNumber: pendingLicense.documentNumber,
+              expiresAt: pendingLicense.expiresAt,
+              ...ocrFields,
             }
-          : {}),
-      });
+          : {
+              type: FleetDocumentType.LICENSE_A1,
+              file: pendingLicense.file,
+              documentNumber: pendingLicense.documentNumber,
+              expiresAt: pendingLicense.expiresAt,
+              ...ocrFields,
+            },
+      );
       // La licencia alimenta el onboarding del conductor (driverOnboardRequest). Número + vencimiento son
       // críticos (el sheet solo captura cuando el OCR los leyó), así que acá están garantizados.
       await onboardLicense.mutateAsync({

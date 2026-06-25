@@ -204,6 +204,22 @@ export function useLicenseFaceMatch() {
   });
 }
 
+/**
+ * F3 · destrabe biométrico por la CENTRAL (POST /ops/drivers/:id/biometric/unlock). Limpia el lockout del gate
+ * de turno (3 fallos/1h) + el cooldown de abuso del enrol. Idempotente (204 sin body): el operador lo dispara
+ * cuando un conductor reporta estar bloqueado. El éxito invalida el detalle del conductor.
+ */
+export function useUnlockBiometric() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/drivers/${input.id}/biometric/unlock`),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
+    },
+  });
+}
+
 export function useDriverDecision() {
   const qc = useQueryClient();
   return useMutation({

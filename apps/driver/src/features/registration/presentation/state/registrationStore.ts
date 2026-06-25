@@ -74,8 +74,13 @@ export interface PendingPropertyCardCapture {
  * propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
  */
 export interface PendingLicenseCapture {
-  /** Imagen de la licencia lista para subir (siempre presente cuando hay captura). */
+  /** Anverso de la licencia listo para subir (siempre presente cuando hay captura; lleva el OCR crítico). */
   file: PickedImage;
+  /**
+   * Reverso de la licencia si el escáner capturó la 2ª página; `null` si solo vino el anverso. Reverso SOFT:
+   * con reverso se sube el par FRONT+BACK; sin reverso se sube una sola cara SINGLE (degradación honesta).
+   */
+  back: PickedImage | null;
   /** Número de licencia leído por OCR (crítico: el sheet solo captura cuando lo leyó). Alimenta el onboarding. */
   documentNumber: string;
   /** Vencimiento de la licencia en ISO-8601 (crítico: idem). Alimenta el onboarding (`licenseExpiresAt`). */

@@ -18,10 +18,16 @@ import { useFocusEffect } from '@react-navigation/native';
  *
  * @param onBack Acción a ejecutar cuando el usuario presiona el back de hardware (típicamente
  *   `handleHardwareBack`: toggle del confirm de salida).
+ * @param enabled Si `false`, el guard NO registra el handler (no consume el back). Sirve para las pantallas
+ *   de paso EMBEBIDAS en el wizard de un solo screen: ahí el guard lo monta el HOST, y montarlo también en la
+ *   página produciría un doble handler de hardware-back. Por defecto `true` (los callers raíz no cambian).
  */
-export function useRegistrationExitGuard(onBack: () => void): void {
+export function useRegistrationExitGuard(onBack: () => void, enabled = true): void {
   useFocusEffect(
     useCallback(() => {
+      if (!enabled) {
+        return undefined;
+      }
       const subscription: NativeEventSubscription = BackHandler.addEventListener(
         'hardwareBackPress',
         () => {
@@ -31,6 +37,6 @@ export function useRegistrationExitGuard(onBack: () => void): void {
         },
       );
       return () => subscription.remove();
-    }, [onBack]),
+    }, [onBack, enabled]),
   );
 }

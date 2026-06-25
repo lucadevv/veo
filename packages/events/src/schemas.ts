@@ -126,6 +126,29 @@ export const biometricFailed = z.object({
   attempt: z.number(),
   at: z.string(),
 });
+/// El conductor ENROLÓ su biometría facial en el alta (KYC: selfie + liveness PASIVO). identity-service lo
+/// emite por OUTBOX en la MISMA tx que persiste faceEmbedding + faceEnrolledAt → audit (traza inmutable
+/// Ley 29733 de que SE ejecutó una verificación biométrica de alta y su veredicto de vida). `livenessChecked`
+/// = si el PAD corrió (false = modelo ausente → enrolado SIN liveness, degradación honesta); `score` = score
+/// de vida del PAD 0..1. SIN datos biométricos en el payload: solo el veredicto + metadatos. `at` ISO-8601.
+export const biometricEnrolled = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  livenessChecked: z.boolean(),
+  score: z.number(),
+  at: z.string(),
+});
+/// El enrol biométrico del alta fue RECHAZADO por el anti-spoofing PASIVO (PAD): la captura es un ataque de
+/// presentación (foto/pantalla/replay). identity-service lo emite por OUTBOX en una tx PROPIA y forense
+/// (persiste aunque el request termine en 422) → audit (traza inmutable del intento de suplantación, Ley
+/// 29733). `reason` = motivo tipado del rechazo ('spoof'); `score` = score de vida 0..1. SIN biometría. `at`.
+export const biometricEnrollRejected = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  reason: z.string(),
+  score: z.number(),
+  at: z.string(),
+});
 export const userDeletionRequested = z.object({
   userId: z.string(),
   requestedAt: z.string(),
@@ -909,13 +932,20 @@ export const chatMessageSent = z.object({
 });
 
 /* ── audit ── (BR-S03 trazabilidad inmutable) */
+/// audit-service grabó un eslabón TAMPER-EVIDENT en el audit log hash-encadenado (Ley 29733). Emitido por
+/// OUTBOX en la MISMA tx que escribe la fila → un consumidor (dashboard de seguridad / verificador de cadena)
+/// puede reaccionar con la prueba criptográfica. `entryId` = id de la fila; `seq` = posición en la cadena;
+/// `hash` = hash del eslabón; `eventId` = evento de dominio que originó la auditoría (correlación); `at` ISO-8601.
 export const auditRecorded = z.object({
   entryId: z.string(),
+  seq: z.string(),
+  eventId: z.string(),
   action: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),
   actorId: z.string().optional(),
   at: z.string(),
+  hash: z.string(),
 });
 
 /* ── fleet ── (gestión de flota / documentos) */
@@ -1206,6 +1236,8 @@ export const EVENT_SCHEMAS = {
   'driver.reactivated': driverReactivated,
   'driver.excessive_cancellations': driverExcessiveCancellations,
   'biometric.failed': biometricFailed,
+  'biometric.enrolled': biometricEnrolled,
+  'biometric.enroll_rejected': biometricEnrollRejected,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,
   'trip.requested': tripRequested,

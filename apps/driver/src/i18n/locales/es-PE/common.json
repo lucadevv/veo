@@ -80,6 +80,9 @@
     "country": "Perú",
     "stepOf": "Paso {{current}} de {{total}}",
     "progressLabel": "Progreso del registro: paso {{current}} de {{total}}",
+    "wizard": {
+      "stubBody": "Contenido de este paso en camino — estamos puliendo la nueva experiencia de registro."
+    },
     "back": "Volver al paso anterior",
     "exit": "Cerrar sesión",
     "exitConfirmTitle": "¿Salir del registro?",
@@ -179,7 +182,7 @@
         "unsupportedBody": "Tu tarjeta indica un tipo que aún no manejamos automáticamente. Elige el tipo a mano para continuar.",
         "manualFallback": "El escáner no está disponible en este dispositivo. Carga los datos de tu vehículo a mano.",
         "uploadFailed": "No se pudo subir tu tarjeta de propiedad. Inténtalo de nuevo.",
-        "uploadRetryHint": "Tu vehículo se registró y la foto de la tarjeta no se perdió. Toca Registrar para reintentar la subida.",
+        "uploadRetryHint": "La foto de tu tarjeta no se perdió. Toca Reintentar para volver a subirla.",
         "yearMissingTitle": "Revisa el año de tu vehículo",
         "yearMissingBody": "No pudimos leer un año válido en tu tarjeta. Ingresa el año de fabricación para continuar.",
         "typePrompt": "Tipo de vehículo",
@@ -327,6 +330,8 @@
       "cameraErrorBody": "Revisa que ninguna otra app la esté usando e inténtalo de nuevo.",
       "enrollMissingCaptureTitle": "Falta tu verificación facial",
       "enrollMissingCaptureBody": "Necesitás completar la verificación facial para continuar.",
+      "enrollSpoofTitle": "Necesitamos verte en persona",
+      "enrollSpoofBody": "Parece una foto o una pantalla. Apuntá la cámara a tu rostro real e intentá de nuevo.",
       "enrollFaceTitle": "No detectamos bien tu rostro",
       "enrollFaceBody": "Probá con buena luz y mirando al frente.",
       "enrollNetworkTitle": "Sin conexión",

@@ -146,7 +146,7 @@ export class StubRegistrationRepository implements RegistrationRepository {
       rejectionReason: null,
       // Sub-lote 3A/3B: caras subidas. El stub refleja lo que envió el body (cada `images[].side` → una
       // cara con su `order`); si vino por el camino viejo (`fileS3Key`) o sin imágenes, queda vacío.
-      images: (input.images ?? []).map((image, order) => ({ side: image.side, order })),
+      images: (input.images ?? []).map((image, order) => ({ side: image.side, order, url: null })),
     };
   }
 

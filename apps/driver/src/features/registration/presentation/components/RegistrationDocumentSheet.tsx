@@ -66,8 +66,10 @@ export interface RegistrationDocumentInput {
   documentNumber?: string;
   /** Vencimiento en ISO-8601 si el OCR lo leyó (licencia/SOAT). Ausente si el documento no vence o no se leyó. */
   expiresAtIso?: string;
-  /** Archivo local capturado/elegido. El binario se sube ANTES de registrar. */
+  /** Archivo local capturado/elegido (ANVERSO si el documento es de dos caras). Se sube ANTES de registrar. */
   file: PickedImage;
+  /** Reverso capturado (solo documentos de DOS caras, p. ej. licencia). Ausente si one-sided o si no salió. */
+  backFile?: PickedImage;
   /** Data OCR mapeada a la variante del contrato (`ExtractedDocumentData`). Solo si el OCR la produjo. */
   extractedData?: ExtractedDocumentData;
   /** Motor de OCR que la produjo (enum cerrado). Solo si hay `extractedData`. */
@@ -140,8 +142,12 @@ export function RegistrationDocumentSheet({
   const isPhoto = formConfig.captureMode === 'photo';
   const hasNumber = formConfig.hasNumber;
   const hasExpiry = formConfig.hasExpiry;
+  // Documento de DOS caras (licencia): el sheet captura anverso + reverso y entrega ambos. El OCR corre solo
+  // sobre el anverso; el reverso es SOFT (su ausencia no bloquea). Los demás tipos quedan one-sided igual que hoy.
+  const twoSided = formConfig.twoSided ?? false;
 
   const [file, setFile] = useState<PickedImage | null>(null);
+  const [back, setBack] = useState<PickedImage | null>(null);
   const [readout, setReadout] = useState<CapturedReadout | null>(null);
   const [localState, setLocalState] = useState<DocumentCaptureLocalState>('idle');
   const [pickError, setPickError] = useState<string | null>(null);
@@ -153,6 +159,7 @@ export function RegistrationDocumentSheet({
   useEffect(() => {
     if (visible) {
       setFile(null);
+      setBack(null);
       setReadout(null);
       setLocalState('idle');
       setPickError(null);
@@ -179,13 +186,20 @@ export function RegistrationDocumentSheet({
    * crítico está presente (gating previo). Adjunta `extractedData`/`ocrEngine`/`ocrAt` SOLO si el OCR
    * produjo data (degradación honesta: un documento sin data se sube sin esos campos).
    */
-  const submitCaptured = (picked: PickedImage, data: CapturedReadout): void => {
+  const submitCaptured = (
+    picked: PickedImage,
+    data: CapturedReadout,
+    backPicked?: PickedImage | null,
+  ): void => {
     onSubmit({
       // Solo se manda `documentNumber` si el tipo es numerado Y el OCR lo leyó (coherencia con el contrato:
       // el campo es opcional por tipo; mandar '' es frágil aunque hoy aguante por truthiness downstream).
       ...(hasNumber && data.number ? { documentNumber: data.number } : {}),
       ...(hasExpiry && data.expiry ? { expiresAtIso: data.expiry } : {}),
       file: picked,
+      // Reverso (documentos de 2 caras): se entrega solo si se capturó (SOFT). El uploader lo sube como par
+      // FRONT+BACK; sin reverso, una sola cara SINGLE.
+      ...(backPicked ? { backFile: backPicked } : {}),
       ...(data.extractedData
         ? {
             extractedData: data.extractedData,
@@ -201,7 +215,12 @@ export function RegistrationDocumentSheet({
    * crítico. Si el tipo es numerado (licencia/SOAT/tarjeta) y el OCR NO leyó el número → fallback honesto
    * (reescaneo, sin formulario). Si el campo crítico está → tarjeta "Capturado ✓" + auto-submit.
    */
-  const processScan = (picked: PickedImage, lines: readonly string[]): void => {
+  const processScan = (
+    picked: PickedImage,
+    lines: readonly string[],
+    backPicked?: PickedImage | null,
+  ): void => {
+    setBack(backPicked ?? null);
     if (!isParsableDocumentType(documentType) || lines.length === 0) {
       // Sin parser/sin texto: no podemos leer el campo crítico → reescaneo honesto.
       setFile(picked);
@@ -219,14 +238,15 @@ export function RegistrationDocumentSheet({
     setMissingCritical(critical);
     setLocalState('captured');
     if (!critical) {
-      // "Escaneá y listo": auto-envío sin paso de formulario.
-      submitCaptured(picked, data);
+      // "Escaneá y listo": auto-envío sin paso de formulario (con el reverso si es un documento de 2 caras).
+      submitCaptured(picked, data, backPicked ?? null);
     }
   };
 
   /** Reintenta el escaneo (desde el fallback de campo crítico o desde la tarjeta). Limpia el estado leído. */
   const resetCapture = (): void => {
     setFile(null);
+    setBack(null);
     setReadout(null);
     setMissingCritical(false);
     setLocalState('idle');
@@ -254,7 +274,11 @@ export function RegistrationDocumentSheet({
         setPickError(t('registration.documents.scanFailed'));
         return;
       }
-      processScan(scannedImageToPickedImage(first), textLines[0] ?? []);
+      // Documento de DOS caras (licencia): la 2ª página es el REVERSO (imagen, sin OCR). Reverso SOFT: si el
+      // escáner no la trajo, `back` queda null y la subida degrada honesto a una sola cara SINGLE.
+      const backImage = twoSided ? images[1] : undefined;
+      const backPicked = backImage ? scannedImageToPickedImage(backImage) : null;
+      processScan(scannedImageToPickedImage(first), textLines[0] ?? [], backPicked);
     } catch (e) {
       setLocalState('idle');
       if (isDocumentScannerError(e, 'E_CANCELLED')) {
@@ -377,6 +401,32 @@ export function RegistrationDocumentSheet({
           ) : null}
         </View>
 
+        {/* REVERSO (documentos de 2 caras · licencia): miniatura del reverso capturado, o un placeholder con
+            su etiqueta "Reverso". SOFT — su ausencia NO bloquea (la subida degrada a una sola cara SINGLE). */}
+        {twoSided && !isPhoto ? (
+          <View style={[styles.backRow, { gap: theme.spacing.md }]}>
+            <View
+              style={[
+                styles.backThumb,
+                {
+                  backgroundColor: theme.colors.surfaceElevated,
+                  borderColor: back ? hexAlpha(theme.colors.accent, 0.5) : theme.colors.border,
+                  borderRadius: theme.radii.md,
+                },
+              ]}
+            >
+              {back ? (
+                <Image source={{ uri: back.uri }} style={styles.previewImage} resizeMode="cover" />
+              ) : (
+                <IconScan size={22} color={theme.colors.inkSubtle} strokeWidth={1.8} />
+              )}
+            </View>
+            <Text variant="footnote" color={back ? 'success' : 'inkSubtle'}>
+              {t('registration.personal.scanDni.back')}
+            </Text>
+          </View>
+        ) : null}
+
         {/* TARJETA "Capturado ✓" READ-ONLY: los datos leídos por OCR como TEXTO (no inputs). Solo cuando
             hay captura válida con campo crítico presente (modo documento) y no estamos en error de subida. */}
         {isCaptured && !missingCritical && !isPhoto ? (
@@ -398,7 +448,8 @@ export function RegistrationDocumentSheet({
         ) : null}
 
         {/* Acción de captura según el modo. En estado "capturado" válido el envío es automático: el botón
-            pasa a ser "volver a escanear". El botón de galería es el camino secundario del modo documento. */}
+            pasa a ser "volver a escanear". El botón de galería ("cargar de galería") es el camino SECUNDARIO
+            en AMBOS modos (cámara/escáner primario): elección del usuario. */}
         {!isSuccess ? (
           <View style={[styles.captureCol, { gap: theme.spacing.sm }]}>
             {isPhoto ? (
@@ -434,15 +485,16 @@ export function RegistrationDocumentSheet({
                 busy={isScanning}
               />
             )}
-            {!isPhoto ? (
-              <CaptureButton
-                label={t('registration.documents.fromGallery')}
-                icon={<IconImage size={18} color={theme.colors.ink} strokeWidth={1.8} />}
-                onPress={pickFrom('library')}
-                disabled={captureDisabled}
-                busy={isPicking}
-              />
-            ) : null}
+            {/* Galería disponible en AMBOS modos (documento Y foto del vehículo): tomar foto O cargar de
+                galería, elección del usuario. La selfie de KYC NO pasa por este sheet (captura nativa en
+                vivo, sin galería — subir una cara de galería sería fraude de identidad). */}
+            <CaptureButton
+              label={t('registration.documents.fromGallery')}
+              icon={<IconImage size={18} color={theme.colors.ink} strokeWidth={1.8} />}
+              onPress={pickFrom('library')}
+              disabled={captureDisabled}
+              busy={isPicking}
+            />
           </View>
         ) : null}
 
@@ -634,6 +686,15 @@ const styles = StyleSheet.create({
   body: { paddingBottom: 8 },
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   preview: { height: 180, borderWidth: 1, overflow: 'hidden', justifyContent: 'center' },
+  backRow: { flexDirection: 'row', alignItems: 'center' },
+  backThumb: {
+    width: 120,
+    height: 76,
+    borderWidth: 1,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   previewImage: { width: '100%', height: '100%' },
   previewEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   previewOverlay: {

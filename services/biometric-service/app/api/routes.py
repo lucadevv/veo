@@ -35,10 +35,12 @@ from app.face.pipeline import BiometricPipeline
 from app.security.internal_identity import require_internal_identity
 from app.telemetry import (
     CHALLENGE_ISSUED_TOTAL,
+    ENROLL_PASSIVE_TOTAL,
     FACE_MATCH_LATENCY,
     FACE_MATCH_TOTAL,
     LIVENESS_TOTAL,
     MATCH_SCORE,
+    SPOOF_SCORE,
     VERIFY_LATENCY,
     VERIFY_TOTAL,
     metrics_payload,
@@ -66,13 +68,21 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
 def ready(
     response: Response,
     pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
 ) -> ReadyResponse:
     pipeline.load()
-    if not pipeline.ready:
+    pad_loaded = pipeline.passive_liveness_loaded
+    # Readiness HONESTO: refleja detector+embedder (`pipeline.ready`) Y el PAD anti-spoofing. Fail-closed en
+    # prod (`require_passive_liveness`): un pod sin PAD NO se reporta listo → no entra al balanceador → el
+    # registro nunca enrola sin anti-spoofing. En dev (require=False) queda listo igual, pero el flag
+    # `passiveLivenessLoaded` deja el modo degradado VISIBLE (no más "ready" engañoso).
+    ready_ok = pipeline.ready and (pad_loaded or not settings.require_passive_liveness)
+    if not ready_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadyResponse(
-        ready=pipeline.ready,
+        ready=ready_ok,
         modelsLoaded=pipeline.ready,
+        passiveLivenessLoaded=pad_loaded,
         detail=pipeline.load_error,
     )
 
@@ -230,6 +240,7 @@ def enroll_passive(
         raise HTTPException(status_code=422, detail=f"Foto inválida: {exc}") from exc
     count, detection = pipeline.best_detection(image)
     if count != 1 or detection is None:
+        ENROLL_PASSIVE_TOTAL.labels(result="no_face").inc()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="La imagen debe contener exactamente un rostro claro",
@@ -237,6 +248,8 @@ def enroll_passive(
     verdict = pipeline.classify_liveness(image, detection)
     if verdict is not None and not verdict.live:
         # Spoof detectado: NO se enrola (no se gasta embedding sobre un ataque de presentación).
+        ENROLL_PASSIVE_TOTAL.labels(result="spoof").inc()
+        SPOOF_SCORE.observe(verdict.score)
         return EnrollPassiveResponse(
             embedding=None,
             dimensions=0,
@@ -246,6 +259,11 @@ def enroll_passive(
             reason="spoof",
         )
     embedding = pipeline.embed(image, detection).tolist()
+    # `degraded` = el PAD no corrió (modelo ausente) → enrolado SIN liveness. Etiqueta DISTINTA de `enrolled`
+    # para que el dashboard distinga el modo degradado (gap "PAD off en prod") de un enrol con anti-spoofing real.
+    ENROLL_PASSIVE_TOTAL.labels(result="enrolled" if verdict is not None else "degraded").inc()
+    if verdict is not None:
+        SPOOF_SCORE.observe(verdict.score)
     return EnrollPassiveResponse(
         embedding=embedding,
         dimensions=len(embedding),

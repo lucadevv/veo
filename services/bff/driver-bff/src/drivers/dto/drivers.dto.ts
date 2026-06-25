@@ -285,6 +285,12 @@ export type DriverDocumentSimpleStatus =
 export interface DriverDocumentImageView {
   side: DocumentSide;
   order: number;
+  /**
+   * Presigned GET de vida corta (120s) para RE-RENDERIZAR esta cara desde el servidor en el resume del
+   * onboarding (sin cachear PII en local). null si la firma falló (FAIL-SOFT) — la lista de docs igual
+   * responde y la app degrada (no muestra el preview de esa cara). La key S3 NUNCA se proyecta al cliente.
+   */
+  url: string | null;
 }
 
 /** Vista detallada de un documento del conductor (GET /drivers/me/documents). */

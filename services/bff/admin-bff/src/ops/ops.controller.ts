@@ -135,6 +135,20 @@ export class OpsController {
     return this.ops.rejectDriver(user, id, dto.reason);
   }
 
+  @Post('drivers/:id/biometric/unlock')
+  @HttpCode(204)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @ApiOperation({
+    summary:
+      'Destraba la verificación biométrica del conductor (central · regla #1: solo la central destraba)',
+  })
+  unlockBiometric(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.ops.unlockBiometric(user, id);
+  }
+
   @Post('drivers/:id/suspend')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)

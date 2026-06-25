@@ -32,6 +32,7 @@ export class InternalStorageController {
       bucket: dto.bucket,
       key: dto.key,
       ttlSeconds: dto.ttlSeconds,
+      audience: dto.audience,
     });
   }
 

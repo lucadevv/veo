@@ -79,9 +79,9 @@ SERVICES=(
   "panic|3006|services/panic-service|node|/health"
   "media|3007|services/media-service|node|/health"
   "notification|3008|services/notification-service|node|/health"
-  "audit|3009|services/audit-service|node|/health"
+  "audit|3009|services/audit-service|node|/api/v1/health"
   "rating|3010|services/rating-service|node|/health"
-  "share|3011|services/share-service|node|/health"
+  "share|3011|services/share-service|node|/api/v1/health"
   "fleet|3012|services/fleet-service|node|/health"
   "places|3013|services/places-service|node|/health"
   "chat|3014|services/chat-service|node|/health"
@@ -135,8 +135,12 @@ health_code() {
 # Imprime "<http_code>".
 HEALTH_PATHS=(/health /api/v1/health /health/live /health/ready)
 health_probe() {
-  local base="$1" p code last="000"
-  for p in "${HEALTH_PATHS[@]}"; do
+  local base="$1" primary="${2:-}" p code last="000"
+  # Probá PRIMERO el path DECLARADO del servicio ($health del mapa), si lo hay: los servicios con prefijo
+  # global (audit/share → /api/v1/health) dan su 200 sin pegarle antes a /health, que logueaba un 404 espurio
+  # en cada probe. Después, fallback al multi-path por robustez (si el declarado cambió o quedó vacío).
+  for p in "$primary" "${HEALTH_PATHS[@]}"; do
+    [[ -z "$p" ]] && continue
     code="$(health_code "${base}${p}")"
     case "$code" in
       2*|401|403) printf '%s' "$code"; return 0 ;;  # vivo (o auth-gated) → cortamos.
@@ -409,7 +413,7 @@ wait_native_health() {
     printf '  [%s] esperando health en :%s ' "$svc" "$port"
     i=0
     while (( i < timeout )); do
-      code="$(health_probe "http://localhost:$port")"
+      code="$(health_probe "http://localhost:$port" "$health")"
       case "$code" in
         2*|401|403) green "OK ($code)"; break ;;
       esac
@@ -644,11 +648,11 @@ cmd_status() {
     elif [[ -f "$pidf" ]]; then pid="$(cat "$pidf" 2>/dev/null)"; fi
 
     # HEALTH: icono (columna propia) + label plano (columna propia).
-    # Probe multi-path (/health → /api/v1/health → /health/live → /health/ready):
-    # cubre los servicios con prefijo global (audit/share dan 200 en /api/v1/health)
-    # sin marcarlos ❌ falso. El $health del mapa queda como doc, ya no se usa acá.
+    # Probe: prueba el path DECLARADO del servicio ($health del mapa) PRIMERO y cae al multi-path
+    # (/health → /api/v1/health → /health/live → /health/ready) como fallback. Así audit/share
+    # (prefijo global → /api/v1/health) dan 200 sin loguear un 404 espurio en /health.
     if port_in_use "$port"; then
-      hcode="$(health_probe "http://localhost:$port")"
+      hcode="$(health_probe "http://localhost:$port" "$health")"
       case "$hcode" in
         200|204) hicon="✅"; hcolor="$C_GREEN"; hlabel="200 OK"; ((up++)) ;;
         401|403) hicon="⚠️"; hcolor="$C_YEL";   hlabel="$hcode auth-gated"; ((up++)) ;;  # admin-bff: vivo, no down.

@@ -311,6 +311,12 @@ export const driverDetail = z.object({
     licenseFaceMatchStatus: dniFaceMatchStatus,
     licenseFaceMatchScore: z.number().nullable(),
     licenseFaceMatchedAt: z.string().nullable(),
+    /**
+     * F5 · presigned GET URL de la SELFIE del enrol (ayuda visual del operador en casos dudosos). `null` si no
+     * hay selfie guardada (best-effort) o si la firma falló. El operador la VE junto al score del match; NO es
+     * la verificación (esa la hace el match contra DNI/licencia) — es evidencia visual para dirimir un NO_MATCH.
+     */
+    faceSelfieUrl: z.string().nullable(),
   }),
   // Ficha del vehículo que opera (F2 · C1); null si aún no registró ninguno.
   vehicle: driverVehicle.nullable(),
