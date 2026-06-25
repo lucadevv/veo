@@ -60,6 +60,12 @@ interface DriverReply {
   dniFaceMatchScore: number;
   /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
   dniFaceMatchedAt: string;
+  /** Lote C · estado del binding licencia↔selfie (NOT_RUN/MATCHED/NO_MATCH). */
+  licenseFaceMatchStatus: string;
+  /** Score del face-match del brevete en 0..100; 0 si no se corrió. */
+  licenseFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió. */
+  licenseFaceMatchedAt: string;
   /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): las `cause` DISTINTAS de los holds vigentes del
    * conductor (DISCIPLINARY/DOCUMENT_EXPIRED/INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
@@ -99,6 +105,9 @@ const EMPTY_DRIVER: DriverReply = {
   dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
   dniFaceMatchScore: 0,
   dniFaceMatchedAt: '',
+  licenseFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  licenseFaceMatchScore: 0,
+  licenseFaceMatchedAt: '',
   suspensionCauses: [],
 };
 
@@ -328,6 +337,9 @@ export class IdentityGrpcController {
     dniFaceMatched: boolean | null;
     dniFaceMatchScore: number | null;
     dniFaceMatchedAt: Date | null;
+    licenseFaceMatched: boolean | null;
+    licenseFaceMatchScore: number | null;
+    licenseFaceMatchedAt: Date | null;
     user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
     // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
     // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
@@ -388,6 +400,17 @@ export class IdentityGrpcController {
       dniFaceMatchScore: includeSensitivePii ? (d.dniFaceMatchScore ?? 0) : 0,
       dniFaceMatchedAt:
         includeSensitivePii && d.dniFaceMatchedAt ? d.dniFaceMatchedAt.toISOString() : '',
+      // Lote C · binding licencia↔selfie GUARDADO. Mismo gateo ADMIN-ONLY + derivación que el DNI (null →
+      // NOT_RUN; true → MATCHED; false → NO_MATCH). Para rieles no-admin → NOT_RUN/0/"" (proto3 default honesto).
+      licenseFaceMatchStatus:
+        !includeSensitivePii || d.licenseFaceMatched === null || d.licenseFaceMatched === undefined
+          ? DniFaceMatchStatus.NOT_RUN
+          : d.licenseFaceMatched
+            ? DniFaceMatchStatus.MATCHED
+            : DniFaceMatchStatus.NO_MATCH,
+      licenseFaceMatchScore: includeSensitivePii ? (d.licenseFaceMatchScore ?? 0) : 0,
+      licenseFaceMatchedAt:
+        includeSensitivePii && d.licenseFaceMatchedAt ? d.licenseFaceMatchedAt.toISOString() : '',
       // CAUSAS de suspensión: las `cause` DISTINTAS de los holds vigentes (modelo de HOLDS). Un conductor con
       // varias causas (ej. doc vencido + disciplinaria) las muestra TODAS, así el panel ofrece la(s) acción(es)
       // de reactivación correcta(s). [] cuando el read no trajo holds (batch/by-user) o no hay holds (libre).

@@ -63,6 +63,15 @@ const bioPass = {
   async matchDniFace() {
     return { matched: true, score: 96, reason: null };
   },
+  async enrollPassive() {
+    return {
+      embedding: [0.4, 0.5, 0.6] as number[] | null,
+      live: true,
+      livenessChecked: true,
+      score: 0.95,
+      reason: null as string | null,
+    };
+  },
 };
 
 const bioLivenessFail = {

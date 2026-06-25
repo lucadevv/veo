@@ -232,6 +232,15 @@ model Driver {
   dniFaceMatched        Boolean?              @map("dni_face_matched")
   dniFaceMatchScore     Float?                @map("dni_face_match_score")
   dniFaceMatchedAt      DateTime?             @map("dni_face_matched_at") @db.Timestamptz
+  /// Lote C · BINDING licencia↔selfie (gemelo del DNI, binding MÁS FUERTE). Face-match entre la foto del
+  /// brevete (LICENSE_A1, de S3) y el `faceEmbedding` de referencia GUARDADO. Mismo contrato que el DNI:
+  /// el operador lo VE antes de aprobar; nullable = aún no se corrió. `approve()` exige que AMBOS bindings
+  /// (DNI y licencia) se HAYAN EJECUTADO (`*FaceMatchedAt != null`) — gate de ejecución, NO de veredicto.
+  /// OJO: el brevete trae una foto de menor resolución que el DNI → el score puede ser más bajo legítimamente;
+  /// el VEREDICTO lo decide el operador (no la máquina). Se resetea junto al DNI al re-enrolar/resubmit.
+  licenseFaceMatched    Boolean?              @map("license_face_matched")
+  licenseFaceMatchScore Float?                @map("license_face_match_score")
+  licenseFaceMatchedAt  DateTime?             @map("license_face_matched_at") @db.Timestamptz
   /// Suspensión DERIVADA del conjunto de holds (modelo de HOLDS). INVARIANTE: `suspendedAt != null` ⟺ el
   /// conductor tiene ≥1 `DriverSuspensionHold` activo; `null` ⟺ 0 holds. Es un campo MANTENIDO, no la fuente:
   /// se recomputa TRANSACCIONALMENTE junto a cada add/remove de hold (helper `recomputeSuspendedAt`). Se

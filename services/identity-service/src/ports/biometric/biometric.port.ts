@@ -93,19 +93,47 @@ export interface BiometricDniMatchResult {
   reason: string | null;
 }
 
+/**
+ * Resultado del enrolamiento del REGISTRO con liveness PASIVO (PAD single-frame). La decisión del caller se
+ * hace por BOOLEANOS (no por el string de `reason`): `livenessChecked && !live` ⇒ spoof; `embedding == null`
+ * sin liveness ⇒ sin rostro; `embedding` presente ⇒ enrolado (vivo, o degradado si el PAD no estaba).
+ */
+export interface BiometricPassiveEnrollResult {
+  /** Embedding de referencia (512-d) si la foto es de una persona real; `null` si spoof o sin rostro. */
+  embedding: number[] | null;
+  /** Veredicto de vida. `true` si pasó (o si el PAD no estaba cargado → degradado a sin-liveness). */
+  live: boolean;
+  /** ¿Corrió el PAD? `false` = modelo ausente → enrolado SIN liveness (degradación honesta). */
+  livenessChecked: boolean;
+  /** Score de la clase viva (0..1). */
+  score: number;
+  /** Motivo legible cuando NO se enroló ('spoof' | 'no_face'); `null` si enroló. */
+  reason: string | null;
+}
+
 export interface BiometricProvider {
   /** Emite un reto de liveness activo. */
   createChallenge(): Promise<BiometricChallenge>;
   /**
-   * Enrolamiento CON liveness (BR-I02): verifica los frames del reto (prueba de vida) y, si pasa,
-   * deriva y devuelve el embedding de referencia. Este es el camino del REGISTRO del conductor.
+   * Enrolamiento CON liveness ACTIVO por reto (frames girá/sonreí → prueba de vida → embedding). Hoy NO lo
+   * usa el REGISTRO del conductor: el alta migró a 1 selfie (`embed`, ver `enrollFace` en drivers.service).
+   * El liveness activo por reto vive en el GATE DE TURNO (`verify`). PLAN (en construcción): al registro se
+   * le agrega liveness PASIVO (PAD single-frame, sin frames extra → sin lag) DENTRO del path de `embed`/
+   * `enrollFace`, NO por acá. Este método queda para el camino activo (turno/legacy).
    */
   enrollWithLiveness(input: BiometricEnrollInput): Promise<BiometricEnrollResult>;
   /**
-   * Calcula el embedding de referencia de UNA foto, SIN liveness. Se conserva para compat/sandbox y
-   * usos server-to-server que no pasan por el reto; el enrolamiento del registro usa `enrollWithLiveness`.
+   * Calcula el embedding de referencia de UNA foto, SIN liveness. Para el DNI (face-match), el pasajero, y
+   * usos server-to-server que NO deben correr el PAD (la foto del DNI ES una foto → el PAD la marcaría spoof).
    */
   embed(photo: string): Promise<number[]>;
+  /**
+   * Enrolamiento del REGISTRO del conductor con liveness PASIVO (PAD single-frame sobre 1 foto, SIN frames
+   * extra → SIN lag). Corre el anti-spoofing ANTES del embedding: si la foto es un ataque de presentación
+   * (impresa/pantalla) NO devuelve embedding (`live=false`, `livenessChecked=true`). Reemplaza el `embed`
+   * directo del registro (que no tenía liveness). El liveness ACTIVO por reto sigue en el turno (`verify`).
+   */
+  enrollPassive(photo: string): Promise<BiometricPassiveEnrollResult>;
   /** Verifica los frames del reto contra el embedding de referencia (gate de turno). */
   verify(input: BiometricVerifyInput): Promise<BiometricVerifyResult>;
   /**

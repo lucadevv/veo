@@ -16,6 +16,7 @@ import {
   type BiometricDniMatchInput,
   type BiometricDniMatchResult,
   type BiometricEnrollInput,
+  type BiometricPassiveEnrollResult,
   type BiometricEnrollResult,
   type BiometricProvider,
   type BiometricVerifyInput,
@@ -114,6 +115,21 @@ class BiometricSandboxProvider implements BiometricProvider {
     return deterministicEmbedding(photo);
   }
 
+  async enrollPassive(photo: string): Promise<BiometricPassiveEnrollResult> {
+    // Sandbox determinista: simula un SPOOF si el seed contiene 'spoof' (para testear el rechazo del
+    // registro); si no, persona viva con embedding determinista. Mismo idioma que `verify` (seed 'fail').
+    if (photo.includes('spoof')) {
+      return { embedding: null, live: false, livenessChecked: true, score: 0.1, reason: 'spoof' };
+    }
+    return {
+      embedding: deterministicEmbedding(photo),
+      live: true,
+      livenessChecked: true,
+      score: 0.95,
+      reason: null,
+    };
+  }
+
   async verify(input: BiometricVerifyInput): Promise<BiometricVerifyResult> {
     const fail = input.challengeId.includes('fail');
     const score = fail ? 40 : 96;
@@ -161,6 +177,16 @@ interface EnrollServiceResponse {
   embedding: number[] | null;
   reason: string | null;
   takenAt: string;
+}
+
+/** Respuesta cruda de biometric-service POST /v1/enroll-passive (enrolamiento con liveness PASIVO/PAD). */
+interface PassiveEnrollServiceResponse {
+  embedding: number[] | null;
+  dimensions: number;
+  live: boolean;
+  livenessChecked: boolean;
+  spoofScore: number;
+  reason: string | null;
 }
 
 /** Respuesta cruda de biometric-service POST /v1/face-match (score en 0..1). */
@@ -245,10 +271,10 @@ export class BiometricServiceClient implements BiometricProvider {
    * no del servicio: lo devolvemos como `NO_FACE` para que el caller lo traduzca a embedding vacío. El
    * timeout/red sigue cayendo en el `catch` de `request`-style (ExternalServiceError 502).
    */
-  private async requestEmbed(
+  private async requestWithNoFace<T>(
     path: string,
     body: unknown,
-  ): Promise<{ embedding: number[] } | typeof NO_FACE> {
+  ): Promise<T | typeof NO_FACE> {
     const { header, signature } = signInternalIdentity(
       anonymousIdentity('driver'),
       this.internalSecret,
@@ -283,7 +309,7 @@ export class BiometricServiceClient implements BiometricProvider {
     if (!res.ok) {
       throw new ExternalServiceError('biometric-service devolvió error', { status: res.status });
     }
-    return (await res.json()) as { embedding: number[] };
+    return (await res.json()) as T;
   }
 
   async createChallenge(): Promise<BiometricChallenge> {
@@ -316,8 +342,28 @@ export class BiometricServiceClient implements BiometricProvider {
    *    enmascara como "sin rostro".
    */
   async embed(photo: string): Promise<number[]> {
-    const out = await this.requestEmbed('/v1/embed', { photo });
+    const out = await this.requestWithNoFace<{ embedding: number[] }>('/v1/embed', { photo });
     return out === NO_FACE ? [] : out.embedding;
+  }
+
+  /**
+   * Enrolamiento del REGISTRO con liveness PASIVO (`POST /v1/enroll-passive`). El motor corre el PAD sobre
+   * la foto ANTES del embedding: 200 con `embedding=null`+`live=false` = SPOOF (foto/pantalla); 200 con
+   * `embedding` = persona viva; 422 (mismo contrato que /v1/embed) = sin rostro → `no_face`. La decisión la
+   * toma el caller por booleanos (`livenessChecked`/`live`), no por el string `reason`.
+   */
+  async enrollPassive(photo: string): Promise<BiometricPassiveEnrollResult> {
+    const out = await this.requestWithNoFace<PassiveEnrollServiceResponse>('/v1/enroll-passive', { photo });
+    if (out === NO_FACE) {
+      return { embedding: null, live: false, livenessChecked: false, score: 0, reason: 'no_face' };
+    }
+    return {
+      embedding: out.embedding ?? null,
+      live: out.live,
+      livenessChecked: out.livenessChecked,
+      score: out.spoofScore,
+      reason: out.reason ?? null,
+    };
   }
 
   async verify(input: BiometricVerifyInput): Promise<BiometricVerifyResult> {

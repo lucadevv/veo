@@ -31,6 +31,9 @@ const okDriver = {
   // dniFaceMatched=true (MATCHED) es el caso feliz; dniFaceMatchedAt!=null es lo que mira el gate.
   dniFaceMatched: true as boolean | null,
   dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z') as Date | null,
+  // Binding licencia↔selfie YA ejecutado (Lote C · approve() exige AMBOS bindings corridos).
+  licenseFaceMatched: true as boolean | null,
+  licenseFaceMatchedAt: new Date('2026-01-01T00:00:00Z') as Date | null,
 };
 
 /** Fuentes válidas del eje DriverStatus hacia AVAILABLE (espeja driverStatusSources del servicio). */
@@ -137,6 +140,16 @@ const bio = {
   async matchDniFace() {
     return { matched: true, score: 96, reason: null };
   },
+  async enrollPassive() {
+    // Registro con liveness pasivo OK (persona viva): embedding + live=true.
+    return {
+      embedding: [0.4, 0.5, 0.6] as number[] | null,
+      live: true,
+      livenessChecked: true,
+      score: 0.95,
+      reason: null as string | null,
+    };
+  },
 };
 const bioFail = {
   ...bio,
@@ -144,11 +157,33 @@ const bioFail = {
     return { score: 40, livenessPassed: false, matchPassed: false };
   },
 };
-/** Motor que NO detecta rostro en la selfie (embed devuelve []) → el enroll debe lanzar 422 (no_face). */
+/** Motor que NO detecta rostro en la selfie (enrollPassive sin embedding) → el enroll lanza 422 (no_face). */
 const bioNoFace = {
   ...bio,
   async embed() {
     return [] as number[];
+  },
+  async enrollPassive() {
+    return {
+      embedding: null as number[] | null,
+      live: true,
+      livenessChecked: false,
+      score: 0,
+      reason: null as string | null,
+    };
+  },
+};
+/** Motor que detecta SPOOF (foto/pantalla): livenessChecked && !live → el enroll lanza 422 (spoof). */
+const bioSpoof = {
+  ...bio,
+  async enrollPassive() {
+    return {
+      embedding: null as number[] | null,
+      live: false,
+      livenessChecked: true,
+      score: 0.1,
+      reason: 'spoof' as string | null,
+    };
   },
 };
 
@@ -223,7 +258,7 @@ describe('DriversService.createEnrollChallenge · reto de liveness del enrolamie
   });
 });
 
-describe('DriversService.enrollFace · enrolamiento KYC selfie-only (Lote 1, sin liveness)', () => {
+describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD anti-spoofing)', () => {
   /** Prisma que captura el `data` del driver.update para aseverar que se persiste el embedding del motor. */
   function makeEnrollPrisma(driver: unknown) {
     const updates: {
@@ -259,12 +294,22 @@ describe('DriversService.enrollFace · enrolamiento KYC selfie-only (Lote 1, sin
     expect(persisted?.faceEnrolledAt).toBeInstanceOf(Date);
   });
 
-  it('sin rostro (embed → []) → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
+  it('sin rostro (enrollPassive sin embedding) → 422 (UnprocessableEntityError) y NO escribe el embedding', async () => {
     const prisma = makeEnrollPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bioNoFace, config);
     await expect(
       svc.enrollFace('u1', { photo: 'selfie-base64' }),
     ).rejects.toBeInstanceOf(UnprocessableEntityError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('SPOOF (PAD: livenessChecked && !live) → 422 y NO escribe el embedding (fail-closed anti-spoofing)', async () => {
+    const prisma = makeEnrollPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioSpoof, config);
+    await expect(
+      svc.enrollFace('u1', { photo: 'selfie-base64' }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityError);
+    // Un ataque de presentación (foto impresa / pantalla) NO se enrola.
     expect(prisma.updates).toHaveLength(0);
   });
 
@@ -1614,6 +1659,25 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     expect(userWrites).toHaveLength(0);
   });
 
+  it('GATE FACE-MATCH licencia (Lote C): rechaza con 409 si el DNI se ejecutó pero la LICENCIA no (licenseFaceMatchedAt=null)', async () => {
+    // El gate de licencia muerde INDEPENDIENTE del DNI: aunque el binding del DNI esté corrido, sin el cotejo
+    // del brevete (licenseFaceMatchedAt=null) NO se aprueba. Curl-proof, fail-closed, cero escrituras.
+    const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+        licenseFaceMatched: null,
+        licenseFaceMatchedAt: null,
+      },
+      { id: 'u1', kycStatus: 'PENDING' },
+    );
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(svc.approve('d1')).rejects.toBeInstanceOf(ConflictError);
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+  });
+
   it('GATE FACE-MATCH (b): PERMITE aprobar con veredicto NO_MATCH (dniFaceMatched=false) si el match SÍ se ejecutó', async () => {
     // El gate es de EJECUCIÓN, NO de veredicto: un NO_MATCH (dniFaceMatched=false) con dniFaceMatchedAt
     // seteado lo decide el OPERADOR que lo vio → la aprobación procede normal (CLEARED + VERIFIED).
@@ -1889,5 +1953,74 @@ describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', ()
     expect(out.matched).toBe(false);
     expect(prisma.updates[0]?.dniFaceMatched).toBe(false);
     expect(prisma.updates[0]?.dniFaceMatchScore).toBe(33);
+  });
+});
+
+describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)', () => {
+  /** Prisma que captura el `data` del driver.update para aseverar que el binding de LICENCIA se GUARDA. */
+  function makeMatchPrisma(driver: unknown) {
+    const updates: {
+      licenseFaceMatched?: boolean;
+      licenseFaceMatchScore?: number;
+      licenseFaceMatchedAt?: Date;
+    }[] = [];
+    return {
+      updates,
+      read: { driver: { findUnique: async () => driver } },
+      write: {
+        driver: {
+          update: async (args: { data: (typeof updates)[number] }) => {
+            updates.push(args.data);
+            return {};
+          },
+        },
+      },
+    };
+  }
+
+  it('corre el match del brevete contra el embedding GUARDADO y PERSISTE los campos licenseFace*', async () => {
+    const prisma = makeMatchPrisma(okDriver);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    const out = await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
+    expect(out).toEqual({ matched: true, score: 96, reason: null });
+    // GUARDA en los campos de LICENCIA (no en los del DNI): veredicto + score + momento, una sola escritura.
+    expect(prisma.updates).toHaveLength(1);
+    const [persisted] = prisma.updates;
+    expect(persisted?.licenseFaceMatched).toBe(true);
+    expect(persisted?.licenseFaceMatchScore).toBe(96);
+    expect(persisted?.licenseFaceMatchedAt).toBeInstanceOf(Date);
+  });
+
+  it('sin biometría enrolada → 409 (ConflictError) y NO escribe nada', async () => {
+    const prisma = makeMatchPrisma({ ...okDriver, faceEmbedding: [] });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(
+      svc.matchLicenseFace('d1', { image: 'base64-license-front' }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('404 si el conductor no existe', async () => {
+    const prisma = makeMatchPrisma(null);
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await expect(
+      svc.matchLicenseFace('d1', { image: 'base64-license-front' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('NO coincide (brevete low-res) → persiste licenseFaceMatched=false con score y motivo', async () => {
+    const prisma = makeMatchPrisma(okDriver);
+    const bioNoMatch = {
+      ...bio,
+      async matchDniFace() {
+        return { matched: false, score: 28, reason: 'no coincide' };
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, config);
+    const out = await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
+    expect(out.matched).toBe(false);
+    expect(prisma.updates[0]?.licenseFaceMatched).toBe(false);
+    expect(prisma.updates[0]?.licenseFaceMatchScore).toBe(28);
   });
 });

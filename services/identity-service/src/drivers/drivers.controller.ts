@@ -112,6 +112,20 @@ class DniFaceMatchDto {
   image!: string;
 }
 
+/**
+ * POST /drivers/:id/license-face-match → body (Lote C · BINDING licencia↔selfie). Gemelo del DNI: el admin-bff
+ * baja la foto del brevete (LICENSE_A1) de S3 y la pasa como base64 (`image`); el embedding de referencia NO
+ * viaja (server-truth). Mismo endurecimiento de payload que el DNI.
+ */
+class LicenseFaceMatchDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsBase64()
+  @MinLength(FRAME_BASE64_MIN)
+  @MaxLength(FRAME_BASE64_MAX)
+  image!: string;
+}
+
 class RejectDriverDto {
   // Motivo del rechazo (opcional). Texto del operador que el conductor verá en la app. Sin motivo → "".
   @IsOptional()
@@ -265,6 +279,19 @@ export class DriversController {
   })
   dniFaceMatch(@Param('id') id: string, @Body() dto: DniFaceMatchDto) {
     return this.drivers.matchDniFace(id, { image: dto.image });
+  }
+
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/license-face-match')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Face-match licencia↔selfie: cotejar la foto del brevete vs la biometría enrolada del conductor (BINDING · Lote C)',
+  })
+  licenseFaceMatch(@Param('id') id: string, @Body() dto: LicenseFaceMatchDto) {
+    return this.drivers.matchLicenseFace(id, { image: dto.image });
   }
 
   @Audiences(InternalAudience.ADMIN_RAIL)

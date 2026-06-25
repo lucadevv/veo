@@ -247,6 +247,16 @@ export class DriversService {
           { driverId },
         );
       }
+      // GATE DE EJECUCIÓN DEL BINDING LICENCIA↔selfie (Lote C · binding MÁS FUERTE, fail-closed): gemelo del
+      // gate del DNI. `licenseFaceMatchedAt == null` ⇔ matchLicenseFace() nunca corrió. Es gate de EJECUCIÓN,
+      // NO de veredicto: un licenseFaceMatched===false (NO_MATCH, frecuente por la baja resolución del brevete)
+      // SÍ pasa — el operador lo vio y decide. Curl-proof: no se aprueba sin haber corrido AMBOS cotejos.
+      if (driver.licenseFaceMatchedAt == null) {
+        throw new ConflictError(
+          'No se puede aprobar: el face-match licencia↔selfie no se ejecutó. Corré el cotejo antes de aprobar.',
+          { driverId },
+        );
+      }
       // Asserts de máquina TIPADOS: validan que la transición es LEGAL sobre el dato fresco (un from fuera
       // del enum / un CLEARED→PENDING ilegal fallan acá, antes del CAS). La GANANCIA de la carrera, en cambio,
       // la decide el CAS de abajo, no estos asserts (un check-then-act secuencial no protege del concurrente).
@@ -278,6 +288,9 @@ export class DriversService {
           id: driverId,
           backgroundCheckStatus: { in: claimSources },
           dniFaceMatchedAt: { not: null },
+          // Mismo gate ATÓMICO para la licencia (Lote C): si un resubmit()/enrollFace() concurrente nulifica
+          // el binding del brevete entre el pre-read y este CAS, la fila ya NO matchea → count 0 → no se aprueba.
+          licenseFaceMatchedAt: { not: null },
         },
         data: { backgroundCheckStatus: BackgroundCheckStatus.CLEARED },
       });
@@ -814,6 +827,11 @@ export class DriversService {
           dniFaceMatched: null,
           dniFaceMatchScore: null,
           dniFaceMatchedAt: null,
+          // Mismo razonamiento para el binding licencia↔selfie (Lote C): el brevete viejo apuntaba al material
+          // obsoleto. Se limpia junto al DNI → un re-approve OBLIGA a re-correr AMBOS cotejos contra lo corregido.
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
         },
       });
       await tx.user.update({
@@ -1109,8 +1127,21 @@ export class DriversService {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
 
-    const embedding = await this.biometric.embed(input.photo);
+    // Liveness PASIVO (PAD single-frame, sin frames extra → sin lag): el motor corre el anti-spoofing sobre
+    // la MISMA selfie ANTES del embedding. Si el modelo PAD no está cargado, degrada honesto a sin-liveness
+    // (livenessChecked=false) — el comportamiento previo. El liveness ACTIVO por reto sigue en el turno.
+    const enroll = await this.biometric.enrollPassive(input.photo);
 
+    // GATE ANTI-SPOOFING (fail-closed): el PAD corrió y el veredicto NO es persona viva → ataque de
+    // presentación (foto impresa / pantalla / replay). NO se enrola. Decisión por BOOLEANOS, no por `reason`.
+    if (enroll.livenessChecked && !enroll.live) {
+      throw new UnprocessableEntityError(
+        'No detectamos a una persona real frente a la cámara. Evitá fotos o pantallas e intentá de nuevo.',
+        { reason: 'spoof' },
+      );
+    }
+
+    const embedding = enroll.embedding ?? [];
     // GATE DE ROSTRO (fail-closed): si el motor no detecta una cara, el embedding viene vacío → 422 tipado.
     // La app degrada HONESTO ("No detectamos tu rostro") y pide reintentar la selfie. Nunca un PASS inventado.
     if (!embedding.length) {
@@ -1129,6 +1160,10 @@ export class DriversService {
         dniFaceMatched: null,
         dniFaceMatchScore: null,
         dniFaceMatchedAt: null,
+        // Idéntico para el binding licencia↔selfie (Lote C): el embedding nuevo invalida el cotejo del brevete.
+        licenseFaceMatched: null,
+        licenseFaceMatchScore: null,
+        licenseFaceMatchedAt: null,
       },
     });
     return { enrolled: true, enrolledAt: enrolledAt.toISOString() };
@@ -1179,6 +1214,52 @@ export class DriversService {
         dniFaceMatched: result.matched,
         dniFaceMatchScore: result.score,
         dniFaceMatchedAt: new Date(),
+      },
+    });
+
+    return result;
+  }
+
+  /**
+   * Lote C · BINDING licencia↔selfie (gemelo de matchDniFace, binding MÁS FUERTE). Cotea la foto del brevete
+   * (LICENSE_A1, que el admin-bff baja de S3) contra el `faceEmbedding` de referencia GUARDADO del conductor
+   * (server-truth, NO uno del caller) y PERSISTE el resultado en los 3 campos `licenseFace*` en UNA escritura
+   * atómica. El operador lo VE antes de aprobar; el gate de `approve()` exige que el cotejo se HAYA EJECUTADO
+   * (`licenseFaceMatchedAt != null`), NO un veredicto positivo.
+   *
+   * Reusa el puerto `biometric.matchDniFace` — la operación del motor es GENÉRICA (match de una foto-de-rostro
+   * contra un embedding; `/v1/face-match` no sabe de qué documento viene). El nombre del puerto es histórico;
+   * acá la semántica de DOMINIO (qué documento, qué columnas) la pone este método.
+   *
+   * NOTA DE CALIBRACIÓN: el brevete trae una foto de MENOR resolución que el DNI → el score tiende a ser más
+   * bajo y un NO_MATCH legítimo es más probable. Por eso el gate es de EJECUCIÓN y el veredicto lo decide el
+   * operador. El umbral de display puede requerir calibración aparte del DNI (DEUDA).
+   *
+   * Sin biometría enrolada → 409 tipado (mismo predicado `hasFaceEmbedding` que matchDniFace/approve/turno).
+   */
+  async matchLicenseFace(
+    driverId: string,
+    input: { image: string },
+  ): Promise<BiometricDniMatchResult> {
+    const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
+    if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
+    if (!hasFaceEmbedding(driver)) {
+      throw new ConflictError('El conductor no tiene biometría facial enrolada', { driverId });
+    }
+
+    // Match de la foto del BREVETE (S3) contra el embedding GUARDADO. Mismo puerto genérico que el DNI.
+    const result = await this.biometric.matchDniFace({
+      image: input.image,
+      referenceEmbedding: driver.faceEmbedding,
+    });
+
+    // GUARDA el binding de licencia en UNA escritura atómica (veredicto + score crudo 0..100 + momento juntos).
+    await this.prisma.write.driver.update({
+      where: { id: driverId },
+      data: {
+        licenseFaceMatched: result.matched,
+        licenseFaceMatchScore: result.score,
+        licenseFaceMatchedAt: new Date(),
       },
     });
 
