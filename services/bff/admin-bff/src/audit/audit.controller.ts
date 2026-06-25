@@ -1,5 +1,7 @@
 /**
- * AuditController — lectura de la bitácora inmutable (RBAC: compliance/admin).
+ * AuditController — lectura de la bitácora inmutable.
+ * RBAC: COMPLIANCE_SUPERVISOR + SUPERADMIN únicamente (separación de funciones · decisión del
+ * dueño): un ADMIN genérico NO lee el audit — quien opera no audita. Espeja el audit-service.
  */
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -11,7 +13,7 @@ import { AuditQueryDto, AuditVerifyDto } from './dto/audit-query.dto';
 
 @ApiTags('audit')
 @Controller('audit')
-@Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+@Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
 export class AuditController {
   constructor(private readonly audit: AuditService) {}
 

@@ -13,6 +13,7 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '@veo/auth';
+import { AdminRole } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import { AuditService } from './audit.service';
 import type { RecordedEntry } from './audit.repository';
@@ -62,7 +63,7 @@ export class AuditController {
 
   @Get()
   @UseGuards(InternalIdentityGuard, RolesGuard)
-  @Roles('COMPLIANCE_SUPERVISOR', 'SUPERADMIN')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
   @ApiOperation({ summary: 'Consultar el audit log (filtros + paginación por cursor).' })
   async list(@Query() dto: QueryAuditDto): Promise<AuditEntryResponse[]> {
     const entries = await this.audit.query({
@@ -78,7 +79,7 @@ export class AuditController {
 
   @Get('verify')
   @UseGuards(InternalIdentityGuard, RolesGuard)
-  @Roles('COMPLIANCE_SUPERVISOR', 'SUPERADMIN')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
   @ApiOperation({ summary: 'Verificar la integridad de la cadena (detección de tampering).' })
   async verify(@Query() dto: VerifyAuditDto): Promise<VerifyResponse> {
     const result = await this.audit.verifyRange({

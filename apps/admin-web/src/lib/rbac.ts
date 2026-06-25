@@ -101,8 +101,9 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   // dispatch-config.controller PUT radius-config: reemplazar los k-rings (mutación global). Mismos roles.
   'dispatch:manage': [DISPATCHER, ADMIN, SUPERADMIN],
   // audit.controller (clase): listado y verificación de la hash-chain.
-  'audit:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'audit:verify': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // Separación de funciones (decisión del dueño): COMPLIANCE_SUPERVISOR + SUPERADMIN, NO ADMIN.
+  'audit:view': [COMPLIANCE_SUPERVISOR, SUPERADMIN],
+  'audit:verify': [COMPLIANCE_SUPERVISOR, SUPERADMIN],
 };
 
 export function can(user: SessionUser | null | undefined, permission: Permission): boolean {
