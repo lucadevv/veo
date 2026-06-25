@@ -76,10 +76,23 @@ export class AuthService {
     return this.identityAuth.post('/auth/refresh', dto);
   }
 
-  logout(dto: LogoutDto): Promise<{ ok: true }> {
-    // TODO(audit): logout requiere que identity devuelva el operador. Hoy el LogoutDto solo lleva el
-    // refresh token (no el userId del operador), así que no podemos armar un actor para el WORM.
-    return this.identityAuth.post('/auth/logout', dto);
+  async logout(dto: LogoutDto): Promise<{ ok: true }> {
+    // identity devuelve `userId` (el `sub` del refresh) SOLO si el token era válido. Si viene, auditamos
+    // el cierre de sesión del operador en el WORM. El refresh NO porta roles (`roles: []`): la firma gRPC
+    // del WRITE de audit solo exige el header internal-identity + audiencia (InternalIdentityGuard NO valida
+    // roles — eso se chequea en la LECTURA), así que el actor mínimo escribe bien. fail-OPEN (recordSession).
+    const res = await this.identityAuth.post<{ ok: true; userId?: string }>('/auth/logout', dto);
+    if (res.userId) {
+      const actor: AuthenticatedUser = {
+        userId: res.userId,
+        type: 'admin',
+        roles: [],
+        sessionId: '',
+        email: '',
+      };
+      await this.recordSession(actor, 'auth.logout', res.userId);
+    }
+    return { ok: true };
   }
 
   /** Step-up TOTP: requiere Bearer válido; identity re-emite un access con mfaAt fresco. */

@@ -162,14 +162,22 @@ export class AuthService {
     return { accessToken, typ: 'admin' };
   }
 
-  async logout(refreshToken: string): Promise<{ ok: true }> {
+  /**
+   * Revoca la sesión del refresh token. Endpoint COMPARTIDO (passenger/driver/admin).
+   * Devuelve `userId` (el `sub` del refresh) SOLO cuando el token era válido, para que el caller que lo
+   * necesite (admin-bff: auditoría WORM del logout del operador) pueda armar el actor. El campo es OPCIONAL
+   * y ADITIVO: passenger/driver-bff lo ignoran. En el catch (token inválido / logout idempotente) NO hay
+   * sesión que auditar → se omite `userId`.
+   */
+  async logout(refreshToken: string): Promise<{ ok: true; userId?: string }> {
     try {
       const claims = await this.jwt.verifyRefresh(refreshToken);
       await this.sessions.revoke(claims.sid);
+      return { ok: true, userId: claims.sub };
     } catch {
-      // logout idempotente: token inválido = ya no hay sesión que revocar
+      // logout idempotente: token inválido = ya no hay sesión que revocar (ni que auditar)
+      return { ok: true };
     }
-    return { ok: true };
   }
 
   private subjectType(type: UserType): SubjectType {
