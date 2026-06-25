@@ -24,6 +24,17 @@ import {
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { NAV } from './nav';
 
+/** Formatea el rol principal del operador para el topbar (SUPERADMIN → "Superadmin", SUPPORT_L1 → "Support L1").
+ *  Stopgap honesto mientras el email no viaja en la sesión — mostrar el UUID es un wart de UX. */
+function primaryRoleLabel(roles: readonly string[]): string {
+  const first = roles[0];
+  if (!first) return 'Operador';
+  return first
+    .split('_')
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export function Topbar() {
   const router = useRouter();
   const { theme, toggle } = useTheme();
@@ -88,8 +99,10 @@ export function Topbar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="secondary" size="sm" className="gap-2">
-              <UserRound className="size-4" aria-hidden />
-              <span className="hidden max-w-32 truncate sm:inline">{user.userId}</span>
+              <span className="grid size-5 place-items-center rounded-full bg-accent/15 text-accent">
+                <UserRound className="size-3.5" aria-hidden />
+              </span>
+              <span className="hidden max-w-40 truncate sm:inline">{primaryRoleLabel(user.roles)}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

@@ -1,8 +1,8 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Car, Check, Lock, ScanFace, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Car, Check, Circle, Lock, ScanFace, Trash2, Unlock, X } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { DriverDetail } from '@veo/api-client';
 import {
@@ -11,6 +11,7 @@ import {
   useDeleteDriver,
   useDniFaceMatch,
   useLicenseFaceMatch,
+  useUnlockBiometric,
 } from '@/lib/api/queries';
 import { date, dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
@@ -88,6 +89,10 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
         <ErrorState onRetry={() => void query.refetch()} className="m-6" />
       ) : driver ? (
         <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 lg:p-6">
+          {/* Barra de aprobación: la acción PRIMARIA de la pantalla, al frente y gateada (refleja el
+              gate server-side: ambos face-match ejecutados). El operador ve el readiness de un vistazo. */}
+          <ApprovalBar driver={driver} />
+
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader>
@@ -126,6 +131,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
                 <CardTitle>Verificación biométrica</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
+                <EnrolSelfiePreview url={driver.biometric.faceSelfieUrl} />
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   <Detail
                     label="Rostro enrolado"
@@ -137,6 +143,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
                   />
                 </div>
                 <FaceMatchBindings driver={driver} />
+                <BiometricUnlockAction driverId={driver.id} />
               </CardContent>
             </Card>
           </div>
@@ -175,7 +182,6 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
           <Card>
             <CardHeader>
               <CardTitle>Documentos</CardTitle>
-              <ApproveDriverAction driverId={driver.id} />
             </CardHeader>
             <CardContent>
               <DocumentViewer
@@ -364,6 +370,44 @@ function FaceMatchPanel({
  * Los DOS bindings documento↔selfie (DNI + licencia · Lote C · binding MÁS FUERTE) que el operador VE antes de
  * aprobar. Llama ambas mutations acá (reglas de hooks) y renderiza un panel canónico por documento.
  */
+/**
+ * F5 · selfie del enrol del conductor, como AYUDA VISUAL para el operador (casos dudosos: dirimir un NO_MATCH
+ * del brevete low-res a ojo). NO es la verificación — esa la hace el match contra DNI/licencia. Thumbnail
+ * clickeable (abre full); fail-soft (URL vencida/firma fallida → placeholder); `null` → "sin selfie" honesto.
+ */
+function EnrolSelfiePreview({ url }: { url: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const showImage = url !== null && !broken;
+  return (
+    <div className="flex items-center gap-3 border-b border-border pb-4">
+      {showImage ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+          <img
+            src={url}
+            alt="Selfie del registro del conductor"
+            className="size-24 rounded-xl border border-border object-cover ring-1 ring-inset ring-white/5"
+            onError={() => setBroken(true)}
+          />
+        </a>
+      ) : (
+        <div className="grid size-24 shrink-0 place-items-center rounded-xl border border-border bg-surface text-ink-muted">
+          <ScanFace className="size-8" aria-hidden />
+        </div>
+      )}
+      <div>
+        <dt className="text-xs font-medium text-ink-muted">Selfie del registro</dt>
+        <p className="mt-0.5 text-xs text-ink-muted">
+          {showImage
+            ? 'Compará a ojo contra el DNI y la licencia.'
+            : url === null
+              ? 'Sin selfie guardada.'
+              : 'No se pudo cargar (el enlace pudo vencer).'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function FaceMatchBindings({ driver }: { driver: DriverDetail }) {
   const dniMatch = useDniFaceMatch();
   const licenseMatch = useLicenseFaceMatch();
@@ -376,36 +420,122 @@ function FaceMatchBindings({ driver }: { driver: DriverDetail }) {
 }
 
 /**
- * Aprobar al CONDUCTOR (POST /ops/drivers/:id/approve vía useDriverDecision). Gateado por
- * `drivers:approve` (la UI refleja; el bff revalida @Roles). El backend tiene un GATE autoritativo: si
- * los 3 documentos obligatorios no están VALID responde 409 (ConflictError) con un mensaje en español;
- * el ConfirmDialog captura el throw del mutateAsync y lo muestra como error amigable en el propio diálogo.
+ * F3 · destrabe biométrico por la CENTRAL (regla #1 driver: "solo central destraba"). Botón de remediación
+ * idempotente: limpia el lockout del gate de turno (3 fallos/1h) y el cooldown de abuso del enrol. NO es
+ * destructivo (habilita, no borra) → sin confirm pesado, toast de éxito. El gate REAL es server-side.
  */
-function ApproveDriverAction({ driverId }: { driverId: string }) {
+function BiometricUnlockAction({ driverId }: { driverId: string }) {
+  const { toast } = useToast();
+  const unlock = useUnlockBiometric();
+  const run = async () => {
+    try {
+      await unlock.mutateAsync({ id: driverId });
+      toast({ tone: 'success', title: 'Verificación biométrica destrabada' });
+    } catch (error) {
+      toast({
+        tone: 'danger',
+        title: 'No se pudo destrabar la verificación',
+        description: error instanceof ApiError ? error.message : undefined,
+      });
+    }
+  };
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+      <div>
+        <dt className="text-xs text-ink-muted">Bloqueo por intentos fallidos</dt>
+        <p className="mt-0.5 text-xs text-ink-muted">
+          Destrabá si el conductor reporta su verificación bloqueada (turno o registro).
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => void run()}
+        disabled={unlock.isPending}
+      >
+        <Unlock className="size-4" aria-hidden />
+        Destrabar
+      </Button>
+    </div>
+  );
+}
+
+type ReadyState = 'ok' | 'pending' | 'warn';
+
+/** Mapea el FaceMatchStatus tipado a un estado de readiness (sin strings mágicos: usa el enum local). */
+function faceReadiness(status: DriverDetail['biometric']['dniFaceMatchStatus']): ReadyState {
+  return status === FaceMatchStatus.MATCHED
+    ? 'ok'
+    : status === FaceMatchStatus.NO_MATCH
+      ? 'warn'
+      : 'pending';
+}
+
+/** Chip de readiness para la barra de aprobación: verde ok / ámbar-danger warn / neutro pendiente. */
+function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
+  const cfg = {
+    ok: { Icon: Check, cls: 'bg-success/10 text-success' },
+    warn: { Icon: AlertTriangle, cls: 'bg-danger/10 text-danger' },
+    pending: { Icon: Circle, cls: 'bg-surface-2 text-ink-subtle' },
+  } as const;
+  const { Icon, cls } = cfg[state];
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}
+    >
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Barra de aprobación: la acción PRIMARIA de la pantalla, al frente. Muestra el READINESS de los gates
+ * que el operador necesita (ambos face-match ejecutados = el gate dual server-side de `approve()`) y la
+ * CTA "Aprobar conductor" GATEADA: deshabilitada con el motivo hasta correr ambos bindings. La UI REFLEJA
+ * el gate (no autoriza); el bff revalida @Roles + el gate dual + los documentos obligatorios.
+ */
+function ApprovalBar({ driver }: { driver: DriverDetail }) {
   const user = useSession();
   const { toast } = useToast();
   const decision = useDriverDecision();
-
-  if (!can(user, 'drivers:approve')) {
-    return null;
-  }
+  const bio = driver.biometric;
+  const canApprove = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
 
   return (
-    <ConfirmDialog
-      trigger={
-        <Button size="sm" variant="primary">
-          <Check className="size-4" aria-hidden />
-          Aprobar conductor
-        </Button>
-      }
-      title="Aprobar conductor"
-      description="Habilitas al conductor para operar. Requiere que los documentos obligatorios estén válidos; si falta alguno, el servidor lo rechazará y verás el detalle aquí."
-      confirmLabel="Aprobar"
-      onConfirm={async () => {
-        await decision.mutateAsync({ id: driverId, decision: 'approve' });
-        toast({ tone: 'success', title: 'Conductor aprobado' });
-      }}
-    />
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between lg:px-5">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-ink">Revisión de alta</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <ReadyChip label="Rostro vs DNI" state={faceReadiness(bio.dniFaceMatchStatus)} />
+          <ReadyChip label="Rostro vs licencia" state={faceReadiness(bio.licenseFaceMatchStatus)} />
+          <ReadyChip label="Biometría enrolada" state={bio.faceEnrolledAt ? 'ok' : 'pending'} />
+        </div>
+      </div>
+
+      {can(user, 'drivers:approve') ? (
+        <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+          <ConfirmDialog
+            trigger={
+              <Button variant="primary" disabled={!canApprove}>
+                <Check className="size-4" aria-hidden />
+                Aprobar conductor
+              </Button>
+            }
+            title="Aprobar conductor"
+            description="Habilitás al conductor para operar. El servidor revalida los documentos obligatorios; si falta alguno, verás el detalle aquí."
+            confirmLabel="Aprobar"
+            onConfirm={async () => {
+              await decision.mutateAsync({ id: driver.id, decision: 'approve' });
+              toast({ tone: 'success', title: 'Conductor aprobado' });
+            }}
+          />
+          {!canApprove ? (
+            <span className="text-xs text-ink-muted">Corré ambos face-match para habilitar.</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -464,9 +594,13 @@ function DeleteDriverAction({
   return (
     <StepUpDialog
       trigger={
-        <Button size="sm" variant="danger">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-9 px-0 text-ink-subtle hover:bg-danger/10 hover:text-danger"
+          aria-label="Eliminar conductor"
+        >
           <Trash2 className="size-4" aria-hidden />
-          Eliminar conductor
         </Button>
       }
       title="Eliminar conductor"

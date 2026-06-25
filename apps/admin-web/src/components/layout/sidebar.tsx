@@ -19,23 +19,25 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
-      <div className="flex h-16 items-center gap-2.5 border-b border-border px-5">
-        <div className="grid size-8 place-items-center rounded-md bg-accent text-accent-on">
+      <div className="flex h-16 items-center gap-3 border-b border-border px-5">
+        <div className="grid size-9 place-items-center rounded-lg bg-accent/12 text-accent ring-1 ring-inset ring-accent/25">
           <ShieldCheck className="size-5" aria-hidden />
         </div>
         <div className="leading-tight">
-          <p className="font-mono text-sm font-semibold tracking-tight text-ink">VEO</p>
-          <p className="text-[11px] text-ink-muted">Control de operación</p>
+          <p className="font-mono text-[15px] font-bold tracking-tight text-ink">VEO</p>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-ink-subtle">
+            Control de operación
+          </p>
         </div>
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto p-4" aria-label="Navegación principal">
+      <nav className="flex-1 space-y-7 overflow-y-auto px-3 py-5" aria-label="Navegación principal">
         {NAV.map((group) => {
           const items = group.items.filter((item) => can(user, item.permission));
           if (items.length === 0) return null;
           return (
             <div key={group.title}>
-              <p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-subtle">
                 {group.title}
               </p>
               <ul className="space-y-0.5">
@@ -48,13 +50,19 @@ export function Sidebar() {
                         href={item.href}
                         aria-current={active ? 'page' : undefined}
                         className={cn(
-                          'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150',
+                          'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150',
                           active
-                            ? 'bg-accent/10 text-accent'
-                            : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
+                            ? 'bg-surface-2 font-semibold text-ink ring-1 ring-inset ring-white/[0.06]'
+                            : 'font-medium text-ink-muted hover:bg-surface-2/60 hover:text-ink',
                         )}
                       >
-                        <Icon className="size-4 shrink-0" aria-hidden />
+                        <Icon
+                          className={cn(
+                            'size-4 shrink-0 transition-colors',
+                            active ? 'text-accent' : 'text-ink-subtle group-hover:text-ink-muted',
+                          )}
+                          aria-hidden
+                        />
                         {item.label}
                       </Link>
                     </li>
