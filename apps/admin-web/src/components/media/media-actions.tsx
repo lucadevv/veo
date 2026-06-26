@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, PlayCircle, X } from 'lucide-react';
 import { useDecideMedia, useSignedMedia } from '@/lib/api/queries';
 import type { MediaAccessRequestView, SignedMedia } from '@/lib/api/schemas';
@@ -18,22 +18,70 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
   const { toast } = useToast();
   const decide = useDecideMedia();
   const signed = useSignedMedia();
-  const [media, setMedia] = useState<Extract<SignedMedia, { status: 'READY' }> | null>(null);
+  const [media, setMedia] = useState<SignedMedia | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
+  const [playError, setPlayError] = useState(false);
 
+  /**
+   * Reproducir: el watermark se quema async (burn-in). El primer fetch suele venir PROCESSING; en vez de
+   * pedirle al operador que reintente a mano (y rehaga el MFA), abrimos el modal en "preparando" y poll-eamos.
+   * El step-up MFA es por VENTANA (fresco 5 min), y el render peor-caso (~140s) entra holgado en esa ventana,
+   * así que el poll resuelve sin re-promptear. La identidad firmada ya viaja en cada request del cliente.
+   */
   async function play() {
-    const result = await signed.mutateAsync({ id: request.id });
-    // El render del watermark es asíncrono (burn-in): si la copia aún se está quemando, avisar y reintentar.
-    if (result.status === 'PROCESSING') {
-      toast({
-        tone: 'info',
-        title: 'Preparando el video',
-        description: 'Se está aplicando la marca de agua. Reintentá en unos segundos.',
-      });
-      return;
+    setPlayError(false);
+    try {
+      const result = await signed.mutateAsync({ id: request.id });
+      setMedia(result);
+      setPlayerOpen(true);
+    } catch {
+      setMedia(null);
+      setPlayError(true);
+      setPlayerOpen(true);
     }
-    setMedia(result);
-    setPlayerOpen(true);
+  }
+
+  // Poll mientras la copia se está quemando. Para al quedar READY, al fallar, al agotar la espera, o al cerrar.
+  const POLL_MS = 3500;
+  const MAX_POLLS = 50; // ~3 min de techo (cubre el render + holgura; antes de que venza la ventana MFA).
+  const pollsRef = useRef(0);
+  useEffect(() => {
+    if (!playerOpen || media?.status !== 'PROCESSING') return;
+    pollsRef.current = 0;
+    let active = true;
+    const timer = setInterval(() => {
+      pollsRef.current += 1;
+      void signed
+        .mutateAsync({ id: request.id })
+        .then((result) => {
+          if (!active) return;
+          if (result.status === 'READY') {
+            setMedia(result);
+          } else if (pollsRef.current >= MAX_POLLS) {
+            setMedia(null);
+            setPlayError(true);
+          }
+        })
+        .catch(() => {
+          if (!active) return;
+          setMedia(null);
+          setPlayError(true);
+        });
+    }, POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+    // `signed.mutateAsync` es estable (react-query); el ciclo depende del estado de la copia y del request.
+  }, [playerOpen, media?.status, request.id]);
+
+  // Al cerrar el modal, limpiamos el estado para que un próximo "Reproducir" arranque fresco.
+  function onPlayerOpenChange(next: boolean) {
+    setPlayerOpen(next);
+    if (!next) {
+      setMedia(null);
+      setPlayError(false);
+    }
   }
 
   return (
@@ -88,7 +136,12 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
         />
       ) : null}
 
-      <MediaPlayer media={media} open={playerOpen} onOpenChange={setPlayerOpen} />
+      <MediaPlayer
+        media={media}
+        error={playError}
+        open={playerOpen}
+        onOpenChange={onPlayerOpenChange}
+      />
     </div>
   );
 }
