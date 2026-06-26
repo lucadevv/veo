@@ -2,7 +2,8 @@ import type { GeoPoint } from '@veo/api-client';
 import { Camera, CircleLayer, LineLayer, MapView, MarkerView, ShapeSource } from '@rnmapbox/maps';
 import { driverMapRoute, RoutePin } from '@veo/ui-kit';
 import React, { useMemo } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { env } from '../../../core/config/env';
 import { boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat } from '../../utils/geo';
 import { veoDarkMapboxStyleJSON } from './mapbox/veoDarkStyle';
 import { NavPuck } from './NavPuck';
@@ -160,6 +161,15 @@ function AppMapComponent({
     return LIMA_CENTER_LNGLAT;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lon, driver?.lat, driver?.lon]);
+
+  // FAIL-SAFE de token (fail-closed contra el crash NATIVO): `@rnmapbox/maps` v10 CRASHEA el proceso al
+  // montar un `MapView` si nunca se llamó a `setAccessToken` (token ausente → `initMapbox` lo saltea). Sin
+  // `MAPBOX_ACCESS_TOKEN` degradamos a un lienzo oscuro (el `bg` del estilo veo-dark) en vez de montar el
+  // mapa: los overlays del `MapShell` siguen funcionando y la app NO se cierra (degradación honesta). Va
+  // DESPUÉS de los hooks (rules-of-hooks). Con token configurado, el mapa real se monta normal.
+  if (!env.MAPBOX_ACCESS_TOKEN) {
+    return <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0B0F14' }]} />;
+  }
 
   return (
     <MapView

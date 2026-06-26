@@ -8,8 +8,10 @@ import { env } from '../config/env';
  * teselas/glyphs/sprites en runtime. Debe ejecutarse UNA sola vez, a nivel de módulo y ANTES de
  * montar cualquier `MapView` (por eso se llama desde `index.js`, fuera de React).
  *
- * Si el token no está configurado (tests, builds sin `.env`), no llamamos a `setAccessToken`: el
- * mapa simplemente no cargará teselas, pero la app arranca sin romper. No se loguea el token.
+ * Si el token no está configurado (tests, builds sin `.env`), no llamamos a `setAccessToken`. OJO: en
+ * `@rnmapbox/maps` v10 montar un `MapView` SIN token registrado CRASHEA el proceso nativo — por eso el
+ * fail-safe vive en `AppMap` (degrada a un lienzo oscuro cuando `MAPBOX_ACCESS_TOKEN` está vacío) y la
+ * app NO se cierra. Acá solo evitamos setear un token vacío. No se loguea el token.
  */
 export function initMapbox(): void {
   const token = env.MAPBOX_ACCESS_TOKEN;
