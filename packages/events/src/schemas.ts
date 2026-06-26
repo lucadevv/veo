@@ -731,6 +731,37 @@ export const payoutProcessed = z.object({
   period: z.string(),
 });
 
+/**
+ * payout.processing (ADR-015 §4.1 · NUEVO): el OPERADOR disparó el desembolso (PENDING/HELD → PROCESSING)
+ * e invocó `PayoutGateway.disburse`. Traza el acto humano. audit lo consume.
+ *
+ * SOBERANÍA (FOUNDATION §0.7 · ADR-015 D2/D7): CERO PII en el payload — solo IDs + monto + período. La
+ * billetera destino NUNCA viaja por Kafka (la resuelve el adapter server-side). `.strict()` RECHAZA cualquier
+ * campo extra (un teléfono/nombre filtrado) → el contrato falla-CERRADO contra fugas de PII, verificado por test.
+ */
+export const payoutProcessing = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
+
+/**
+ * payout.failed (ADR-015 §4.1 · NUEVO): el riel rechazó/expiró el desembolso (PROCESSING → FAILED). La plata
+ * NO salió; el operador puede reintentar (idempotente por `dedupKey`). audit + notification (avisa al operador)
+ * lo consumen. Mismo contrato SIN PII + `.strict()` fail-closed que payout.processing.
+ */
+export const payoutFailed = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
+
 /* ── afiliación de wallet / Yape On File (payment) ── (Ola pagos PE)
  * Notificaciones futuras (push "tu Yape quedó afiliado"). SIN PII: solo ids + phone enmascarado. */
 export const paymentAffiliationActivated = z.object({
@@ -1283,7 +1314,9 @@ export const EVENT_SCHEMAS = {
   'payment.cancellation_penalty_collected': cancellationPenaltyCollected,
   'payment.affiliation_activated': paymentAffiliationActivated,
   'payment.affiliation_expired': paymentAffiliationExpired,
+  'payout.processing': payoutProcessing,
   'payout.processed': payoutProcessed,
+  'payout.failed': payoutFailed,
   'promo.redeemed': promoRedeemed,
   'incentive.completed': incentiveCompleted,
   'panic.triggered': panicTriggered,

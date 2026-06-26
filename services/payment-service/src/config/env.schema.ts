@@ -79,6 +79,24 @@ export const envSchema = z.object({
   /// Secret HMAC para firmar/verificar webhooks SIMULADOS del adapter sandbox (e2e/smoke).
   SANDBOX_WEBHOOK_SECRET: z.string().default('dev-sandbox-webhook-secret'),
 
+  // ── Riel de DESEMBOLSO tras el puerto PayoutGateway (money-OUT · ADR-015 D2) ──
+  /// Selección de adapter money-OUT: `sandbox` (determinista, AHORA) | `live` (Yape/Plin, DIFERIDO PSP).
+  /// Default sandbox: en dev el desembolso e2e corre sin PSP real; en prod sin convenio el live falla-rápido.
+  PAYOUT_GATEWAY_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+  /// Endpoint + credenciales del riel de desembolso real (solo modo live · DIFERIDO).
+  PAYOUT_GATEWAY_URL: z.string().optional(),
+  PAYOUT_GATEWAY_API_KEY: z.string().optional(),
+  PAYOUT_GATEWAY_MERCHANT_ID: z.string().optional(),
+  /// Semilla del rechazo determinista del sandbox de desembolso: un amountCents múltiplo de esto se rechaza
+  /// permanente (prueba el camino PROCESSING→FAILED sin cuentas reales). 0 ⇒ nunca rechaza por monto.
+  SANDBOX_PAYOUT_REJECT_SEED: z.coerce.number().int().min(0).default(13),
+  /// Si `true`, el sandbox de desembolso confirma SÍNCRONO (CONFIRMED) en vez de async (SUBMITTED). Default
+  /// false (camino normal: el desembolso queda SUBMITTED y confirma por webhook/poll).
+  SANDBOX_PAYOUT_CONFIRM_SYNC: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true' || v === '1')
+    .default(false),
+
   // ── ProntoPaga (VEO_PAYMENT_MODE=prontopaga) · agregador de pagos Perú ──
   /// Base de la API (tracked). Default sandbox público de ProntoPaga.
   PRONTOPAGA_BASE_URL: z.string().default('https://sandbox.prontopaga.com'),

@@ -209,6 +209,14 @@ model Payout {
   processedAt     DateTime?    @map("processed_at") @db.Timestamptz
   /// Motivo de retención si el conductor está en review (BR-P05, evento driver.flagged).
   heldReason      String?      @map("held_reason")
+  /// ADR-015 §7 · Idempotencia financiera del DESEMBOLSO money-OUT: `dedupKey = payout-disburse:{payoutId}`,
+  /// derivada del payoutId, distinta del `booking-charge:{bookingId}` del CHARGE para no colisionar. Reintentos
+  /// del mismo payout (FAILED→PROCESSING) → la misma key → el riel NO duplica la transferencia. Nullable y additive:
+  /// los payouts existentes (pre-desembolso-real) quedan con dedupKey = NULL hasta que el operador los dispare.
+  dedupKey        String?      @unique @map("dedup_key")
+  /// ADR-015 §2 · Ref de la transferencia en el riel de desembolso (uid externo del PayoutGateway). Correlaciona
+  /// el webhook/poll de confirmación (PROCESSING→PROCESSED|FAILED). Null hasta que el desembolso se dispara.
+  externalRef     String?      @map("external_ref")
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 

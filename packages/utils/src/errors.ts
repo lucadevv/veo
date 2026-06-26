@@ -124,6 +124,19 @@ export class GatewayCapabilityUnavailableError extends DomainError {
   readonly httpStatus = 422;
 }
 
+/**
+ * El riel de DESEMBOLSO (money-OUT · ADR-015) rechazó la transferencia de forma PERMANENTE (4xx
+ * no-reintentable: billetera inválida, cuenta cerrada, KYC del destino fallido). Espejo money-OUT del
+ * rechazo permanente del CHARGE: a diferencia de `ExternalServiceError` (502, transitorio → el operador
+ * reintenta), reintentar el MISMO payout NUNCA va a funcionar — el dominio lo lleva a `FAILED` terminal
+ * (sin re-disparo automático) y el `paidAt` del incentivo NO se marca (la plata no salió). httpStatus 422:
+ * es un rechazo de NEGOCIO del riel, no una caída de infraestructura (distinto del 502 reintentable).
+ */
+export class PayoutPermanentlyRejectedError extends DomainError {
+  readonly code = 'PAYOUT_PERMANENTLY_REJECTED';
+  readonly httpStatus = 422;
+}
+
 export function isDomainError(err: unknown): err is DomainError {
   return err instanceof DomainError;
 }
