@@ -87,6 +87,24 @@ export const envSchema = z.object({
   /// Validez de la URL firmada para visualizar video (BR-S02): 5 minutos.
   SIGNED_URL_TTL_SECONDS: z.coerce.number().default(300),
 
+  // === Quemado (burn-in) de watermark en video (BR-S02 · ports&adapters). SIN secretos: ffmpeg no
+  // maneja credenciales. El binario/SDK vive SOLO en `FfmpegWatermarkAdapter`. ===
+  /// `sandbox` (default): passthrough determinista sin ffmpeg (tests). `live`: invoca el binario ffmpeg.
+  VEO_WATERMARK_MODE: z.enum(['live', 'sandbox']).default('sandbox'),
+  /// Ruta del binario ffmpeg (en el image va en el PATH del runtime alpine; en host puede ser absoluto).
+  WATERMARK_FFMPEG_PATH: z.string().default('ffmpeg'),
+  /// Ruta del TTF para drawtext. Default = la fuente del paquete alpine `ttf-dejavu`, que instala en
+  /// `/usr/share/fonts/dejavu/` (NO en `/usr/share/fonts/ttf-dejavu/`). Verificado contra el paquete.
+  WATERMARK_FONT_PATH: z.string().default('/usr/share/fonts/dejavu/DejaVuSans.ttf'),
+  /// Altura máxima del derivado en px (downscale, nunca upscale): acota costo de re-encode y peso.
+  WATERMARK_MAX_HEIGHT: z.coerce.number().int().positive().default(720),
+  /// CRF de libx264 (calidad/compresión): 28 = balance razonable para evidencia.
+  WATERMARK_CRF: z.coerce.number().int().default(28),
+  /// Preset de libx264 (velocidad vs tamaño): `veryfast` prioriza throughput del render server-side.
+  WATERMARK_PRESET: z.string().default('veryfast'),
+  /// Timeout duro del render en ms: al excederlo se mata ffmpeg (SIGKILL) y se devuelve error tipado.
+  WATERMARK_RENDER_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
+
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
   // gRPC (lectura síncrona desde otros servicios — veo.media.v1)

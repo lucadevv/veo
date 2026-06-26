@@ -17,8 +17,11 @@ RUN pnpm --filter @veo/media-service deploy --prod /prod/app
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-# openssl: deteccion de plataforma de prisma CLI (Job de migracion) y @prisma/client en runtime
-RUN apk add --no-cache openssl
+# openssl: deteccion de plataforma de prisma CLI (Job de migracion) y @prisma/client en runtime.
+# ffmpeg + ttf-dejavu: quemado (burn-in) de watermark en video server-side (FfmpegWatermarkAdapter).
+# El ffmpeg de alpine ya trae libfreetype -> drawtext funciona. ttf-dejavu instala la fuente en
+# /usr/share/fonts/dejavu/DejaVuSans.ttf (= default de WATERMARK_FONT_PATH). Solo en RUNTIME, no en build.
+RUN apk add --no-cache openssl ffmpeg ttf-dejavu
 ENV NODE_ENV=production
 COPY --from=builder /prod/app/dist ./dist
 # El contrato gRPC se resuelve en runtime como ../proto/media.proto (relativo a dist/).
