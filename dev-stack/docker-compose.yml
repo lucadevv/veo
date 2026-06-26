@@ -100,6 +100,11 @@ services:
     environment:
       MINIO_ROOT_USER: veo_dev
       MINIO_ROOT_PASSWORD: veo_dev_secret
+      # Cifrado at-rest SOBERANO (Ley 29733 · FOUNDATION §0.7c): clave maestra propia self-hosted para
+      # SSE-S3 (envelope: MinIO cifra cada objeto con una data-key envuelta por esta maestra). NO es un KMS
+      # managed — es el KMS interno de MinIO con NUESTRA clave (en prod la inyecta SOPS+age). Formato
+      # `nombre:base64(32 bytes)`. Valor DEV (tier público, se reemplaza en prod por el del host).
+      MINIO_KMS_SECRET_KEY: "veo-media-key-dev:98t0vkG+lmzJIm4P4btvrmM6EY6ZmUYMrklXyDc6usA="
     ports:
       - "9002:9000" # S3 API (host 9002 → MinIO 9000; evita choque con ClickHouse Native 9000)
       - "9001:9001" # Console
@@ -127,7 +132,11 @@ services:
       mc alias set local http://minio:9000 veo_dev veo_dev_secret &&
       mc mb --ignore-existing local/veo-avatars-dev &&
       mc anonymous set download local/veo-avatars-dev/avatars &&
-      echo 'minio-provision: veo-avatars-dev listo (download anónimo en avatars/)'
+      mc mb --ignore-existing local/veo-video-dev &&
+      mc mb --ignore-existing local/veo-documents-dev &&
+      mc encrypt set sse-s3 local/veo-video-dev &&
+      mc encrypt set sse-s3 local/veo-documents-dev &&
+      echo 'minio-provision: buckets listos · SSE-S3 at-rest en video+documents (PII) · avatars publico sin cifrar'
       "
     restart: "no"
 

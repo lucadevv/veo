@@ -26,9 +26,12 @@ ENV_FILE="${VEO_DIR}/.env"
 # de avatar sin firma); el resto quedan privados. Ajustá los nombres para que matcheen S3_BUCKET_* de los
 # preview.env de tus servicios (media/fleet/panic/audit).
 VEO_AVATARS_BUCKET="${VEO_AVATARS_BUCKET:-veo-avatars}"
-VEO_PRIVATE_BUCKETS="${VEO_PRIVATE_BUCKETS:-veo-documents veo-panic-evidence veo-audit}"
+# Buckets PRIVADOS con PII/video sensible → se cifran at-rest con SSE-S3 (Ley 29733 · §0.7c). Incluye
+# veo-video (grabación de cabina, el dato más sensible) que antes no se aprovisionaba acá.
+VEO_PRIVATE_BUCKETS="${VEO_PRIVATE_BUCKETS:-veo-video veo-documents veo-panic-evidence veo-audit}"
 # Secretos de infra que el compose exige (${VAR:?}). Deben existir y NO estar vacíos en /opt/veo/.env.
-REQUIRED_VARS=(CLICKHOUSE_PASSWORD MINIO_ROOT_PASSWORD LIVEKIT_API_SECRET CLOUDFLARE_TUNNEL_TOKEN)
+# MINIO_KMS_SECRET_KEY = clave maestra del cifrado at-rest soberano (SOPS+age), formato nombre:base64(32B).
+REQUIRED_VARS=(CLICKHOUSE_PASSWORD MINIO_ROOT_PASSWORD MINIO_KMS_SECRET_KEY LIVEKIT_API_SECRET CLOUDFLARE_TUNNEL_TOKEN)
 
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
@@ -81,6 +84,11 @@ ${MC} mb --ignore-existing "local/${VEO_AVATARS_BUCKET}" >/dev/null && green "�
 ${MC} anonymous set download "local/${VEO_AVATARS_BUCKET}/avatars" >/dev/null && green "✓ descarga anónima en ${VEO_AVATARS_BUCKET}/avatars"
 for b in ${VEO_PRIVATE_BUCKETS}; do
   ${MC} mb --ignore-existing "local/${b}" >/dev/null && green "✓ bucket ${b} (privado)"
+  # Cifrado at-rest SOBERANO (Ley 29733 · §0.7c): auto-encryption SSE-S3 con la clave maestra propia
+  # (MINIO_KMS_SECRET_KEY). Envelope real: cada objeto con su data-key envuelta por la maestra. Transparente
+  # (LiveKit egress y las URLs prefirmadas no cambian). Idempotente. El object-lock del WORM (veo-audit)
+  # coexiste con SSE-S3.
+  ${MC} encrypt set sse-s3 "local/${b}" >/dev/null && green "  ↳ SSE-S3 at-rest activado en ${b}"
 done
 
 green "== bootstrap completo. Próximo paso: activar el deploy en GitHub (ver docs/runbooks/deploy-vps.md) =="

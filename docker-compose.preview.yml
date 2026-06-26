@@ -117,6 +117,10 @@ services:
     environment:
       MINIO_ROOT_USER: veo_dev
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defini MINIO_ROOT_PASSWORD en /opt/veo/.env}
+      # Cifrado at-rest SOBERANO (Ley 29733 · FOUNDATION §0.7c): clave maestra propia self-hosted para
+      # SSE-S3 (envelope). NO es KMS managed — es el KMS interno de MinIO con NUESTRA clave, provista por
+      # SOPS+age en el host. Fail-fast: prod NO arranca sin ella. Formato `nombre:base64(32 bytes)`.
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?defini MINIO_KMS_SECRET_KEY en /opt/veo/.env (SOPS+age) — formato nombre:base64-de-32-bytes}
     volumes:
       - minio-data:/data
     healthcheck:

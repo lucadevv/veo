@@ -78,8 +78,10 @@ export const envSchema = z.object({
     .union([z.boolean(), z.string()])
     .default(true)
     .transform((v) => (typeof v === 'string' ? v === 'true' : v)),
-  /// Referencia a la clave KMS con la que se cifra el video en reposo (SSE-KMS en prod).
-  KMS_KEY_ID_VIDEO: z.string().default('alias/veo-video'),
+  /// Nombre de la clave maestra MinIO SSE-S3 bajo la que el video se cifra at-rest (envelope, §0.7c · Ley
+  /// 29733). NO es AWS KMS: es el KMS interno de MinIO con nuestra clave (MINIO_KMS_SECRET_KEY, SOPS+age).
+  /// El cifrado es SERVER-SIDE transparente; este nombre se persiste como metadato para auditar rotación.
+  VIDEO_SSE_KEY_NAME: z.string().default('veo-media-key'),
 
   // === Retención (BR-S03) ===
   RETENTION_DEFAULT_DAYS: z.coerce.number().default(30),

@@ -23,7 +23,7 @@ function makeSpyLivekit(): { livekit: LiveKitPort; captured: { input?: IssueToke
 
 const config = new ConfigService<Env, true>({
   LIVEKIT_TOKEN_TTL_SECONDS: 3600,
-  KMS_KEY_ID_VIDEO: 'alias/veo-video',
+  VIDEO_SSE_KEY_NAME: 'veo-media-key',
   RETENTION_DEFAULT_DAYS: 30,
   RETENTION_INCIDENT_DAYS: 180,
   LIVEKIT_URL: 'ws://localhost:7880',

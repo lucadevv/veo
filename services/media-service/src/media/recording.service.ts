@@ -41,7 +41,8 @@ export interface IssueTokenParams {
 export class RecordingService {
   private readonly logger = new Logger(RecordingService.name);
   private readonly tokenTtl: number;
-  private readonly kmsKeyId: string;
+  /** Nombre de la clave maestra MinIO SSE-S3 bajo la que el video se cifra at-rest (metadato de auditoría). */
+  private readonly sseKeyName: string;
   private readonly defaultDays: number;
   private readonly incidentDays: number;
   private readonly livekitUrl: string;
@@ -54,7 +55,7 @@ export class RecordingService {
     config: ConfigService<Env, true>,
   ) {
     this.tokenTtl = config.getOrThrow<number>('LIVEKIT_TOKEN_TTL_SECONDS');
-    this.kmsKeyId = config.getOrThrow<string>('KMS_KEY_ID_VIDEO');
+    this.sseKeyName = config.getOrThrow<string>('VIDEO_SSE_KEY_NAME');
     this.defaultDays = config.getOrThrow<number>('RETENTION_DEFAULT_DAYS');
     this.incidentDays = config.getOrThrow<number>('RETENTION_INCIDENT_DAYS');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
@@ -132,7 +133,7 @@ export class RecordingService {
           startedAt,
           s3Key,
           codec: 'h264',
-          encryptionKeyId: this.kmsKeyId,
+          encryptionKeyId: this.sseKeyName,
           hasPanic: opts.panic ?? false,
           // Pánico ⇒ retención INDEFINIDA (null). Explícito y robusto aunque
           // computeRetentionUntil ya devuelva null con hasPanic:true.
