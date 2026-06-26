@@ -14,7 +14,11 @@ import { StatusPill } from '@/components/ui/status-pill';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ReleaseHeldPayoutButton, RunPayoutsButton } from '@/components/finance/payout-actions';
+import {
+  ReleaseHeldPayoutButton,
+  RetryPayoutButton,
+  RunPayoutsButton,
+} from '@/components/finance/payout-actions';
 import { RefundDialog } from '@/components/finance/refund-dialog';
 
 const columns: ColumnDef<PayoutView, unknown>[] = [
@@ -84,16 +88,26 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
   {
     id: 'actions',
     header: '',
-    // Acción que REFLEJA el estado: solo una fila HELD ofrece liberar la retención del conductor
-    // (camino de vuelta de driver.flagged). El botón se auto-oculta sin permiso finance:payout.
-    // `status` es el enum tipado del contrato (payoutStatus): nada de literales sueltos.
-    cell: ({ row }) =>
-      row.original.status === payoutStatus.enum.HELD ? (
-        <ReleaseHeldPayoutButton
-          driverId={row.original.driverId}
-          amountCents={row.original.amountCents}
-        />
-      ) : null,
+    // Acción que REFLEJA el estado: una fila HELD ofrece liberar la retención del conductor (camino de vuelta
+    // de driver.flagged); una fila FAILED ofrece reintentar el desembolso (ADR-015 §5). Ambos botones se
+    // auto-ocultan sin permiso finance:payout. `status` es el enum tipado del contrato (payoutStatus): nada
+    // de literales sueltos.
+    cell: ({ row }) => {
+      if (row.original.status === payoutStatus.enum.HELD) {
+        return (
+          <ReleaseHeldPayoutButton
+            driverId={row.original.driverId}
+            amountCents={row.original.amountCents}
+          />
+        );
+      }
+      if (row.original.status === payoutStatus.enum.FAILED) {
+        return (
+          <RetryPayoutButton payoutId={row.original.id} amountCents={row.original.amountCents} />
+        );
+      }
+      return null;
+    },
   },
 ];
 
@@ -134,6 +148,7 @@ export default function FinancePage() {
           <TabsList>
             <TabsTrigger value="PENDING">Pendientes</TabsTrigger>
             <TabsTrigger value="HELD">Retenidas</TabsTrigger>
+            <TabsTrigger value={payoutStatus.enum.FAILED}>Fallidas</TabsTrigger>
             <TabsTrigger value="PROCESSED">Procesadas</TabsTrigger>
             <TabsTrigger value="ALL">Todas</TabsTrigger>
           </TabsList>

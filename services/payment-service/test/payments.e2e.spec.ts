@@ -23,6 +23,7 @@ import { PayoutsService } from '../src/payouts/payouts.service';
 import { PromotionsService } from '../src/promotions/promotions.service';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
+import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { AffiliationsService } from '../src/affiliations/affiliations.service';
 import type { Env } from '../src/config/env.schema';
@@ -70,7 +71,9 @@ beforeAll(async () => {
     set: async () => 'OK',
     del: async () => 1,
   } as unknown as Redis;
-  payouts = new PayoutsService(prismaService, fakeRedis, config);
+  // Sandbox de payout: el cron (runPayouts) solo AGREGA (PENDING) y no lo toca; igual lo inyectamos.
+  const payoutGateway = new SandboxPayoutGateway({ rejectSeed: 0, confirmSync: false });
+  payouts = new PayoutsService(prismaService, fakeRedis, payoutGateway, config);
 }, 180_000);
 
 afterAll(async () => {
@@ -623,7 +626,8 @@ describe('Compensación de penalidad al conductor en el payout (F2.3b: collectEa
     expect(payout?.amountCents).toBe(4000);
     expect(payout?.grossCents).toBe(0);
     expect(payout?.commissionCents).toBe(0);
-    expect(payout?.status).toBe('PROCESSED');
+    // ADR-015 §3: el cron ya NO nace PROCESSED — el Payout queda PENDING hasta el disparo del operador.
+    expect(payout?.status).toBe('PENDING');
   });
 
   it('una penalidad SIN conductor (driverCompensation 0) no crea payout para nadie', async () => {

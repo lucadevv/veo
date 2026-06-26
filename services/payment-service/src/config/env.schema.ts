@@ -96,6 +96,20 @@ export const envSchema = z.object({
     .union([z.boolean(), z.string()])
     .transform((v) => v === true || v === 'true' || v === '1')
     .default(false),
+  /// Poll fallback del DESEMBOLSO (ADR-015 §4.2 · espejo del poll del money-IN): consulta el estado de los
+  /// payouts PROCESSING al riel (PayoutStatusQuery) cuando el webhook no llega (dev sin túnel) y aplica la
+  /// confirmación por el camino idempotente (applyPayoutDisbursementResult). Activable; cierra el ciclo async
+  /// money-OUT en dev/e2e. Solo corre si el adapter soporta la consulta (sandbox la implementa; live, al PSP).
+  PAYOUT_POLL_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true' || v === '1')
+    .default(true),
+  /// Cada cuántos ms corre el barrido del poll de desembolso (default 25s).
+  PAYOUT_POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(25_000),
+  /// Solo se consultan payouts PROCESSING actualizados dentro de esta ventana (minutos).
+  PAYOUT_POLL_MAX_AGE_MIN: z.coerce.number().int().min(1).default(60),
+  /// Máximo de payouts consultados por tick (cota de carga al riel).
+  PAYOUT_POLL_BATCH: z.coerce.number().int().min(1).max(200).default(25),
 
   // ── ProntoPaga (VEO_PAYMENT_MODE=prontopaga) · agregador de pagos Perú ──
   /// Base de la API (tracked). Default sandbox público de ProntoPaga.

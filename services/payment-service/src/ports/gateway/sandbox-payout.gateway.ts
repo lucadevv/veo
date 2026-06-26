@@ -19,9 +19,19 @@ import { Logger } from '@nestjs/common';
 import { PayoutPermanentlyRejectedError } from '@veo/utils';
 import type {
   PayoutGateway,
+  PayoutStatusQuery,
+  PayoutDisbursementQuery,
+  PayoutDisbursementStatusDetail,
   DisburseRequest,
   DisburseResult,
 } from './payout-gateway.port';
+
+/**
+ * Prefijo de la dedupKey financiera del desembolso (ADR-015 §7: `payout-disburse:{payoutId}`). El sandbox lo
+ * usa para RECONSTRUIR el payoutId desde la dedupKey cuando reconcilia un PROCESSING huérfano (sin externalRef)
+ * — su ref es determinista por payoutId, así que dedupKey y externalRef apuntan a la MISMA transferencia.
+ */
+const PAYOUT_DEDUP_PREFIX = 'payout-disburse:';
 
 export interface SandboxPayoutGatewayOptions {
   /**
@@ -36,19 +46,43 @@ export interface SandboxPayoutGatewayOptions {
   confirmSync?: boolean;
 }
 
-export class SandboxPayoutGateway implements PayoutGateway {
+export class SandboxPayoutGateway implements PayoutGateway, PayoutStatusQuery {
   private readonly logger = new Logger('SandboxPayoutGateway');
   private readonly rejectSeed: number;
   private readonly confirmSync: boolean;
+  /**
+   * Libro mayor de desembolsos SUBMITTED (externalRef → monto), en proceso. El poll fallback consulta acá: un
+   * desembolso async pasa a CONFIRMED en la consulta (espeja el ledger del sandbox money-IN que el `/show`/
+   * poll resuelve). Determinista 1:1 sin red ni azar.
+   */
+  private readonly submitted = new Map<string, { amountCents: number }>();
+  /**
+   * Índice paralelo payoutId → externalRef de los SUBMITTED. Permite reconciliar un PROCESSING HUÉRFANO (sin
+   * externalRef por un crash post-claim) a partir de SOLO su `dedupKey` (`payout-disburse:{payoutId}`): de la
+   * dedupKey extraemos el payoutId y de acá su externalRef. Cierra el hueco de orfandad del §4.2.
+   */
+  private readonly submittedByPayoutId = new Map<string, string>();
 
   constructor(opts: SandboxPayoutGatewayOptions = {}) {
     this.rejectSeed = opts.rejectSeed ?? 13;
     this.confirmSync = opts.confirmSync ?? false;
   }
 
+  /** Ref determinista por payout (idempotencia: re-disparar el mismo payout no duplica el riel). */
+  private refFor(method: string, payoutId: string): string {
+    return `sbx_payout_${method.toLowerCase()}_${payoutId}`;
+  }
+
+  /**
+   * Disponibilidad del riel (ADR-015 §8): el sandbox SIEMPRE puede desembolsar (red determinista en
+   * proceso, sin convenio externo). El dominio lo consulta pre-claim; en dev/test nada cambia.
+   */
+  isAvailable(): boolean {
+    return true;
+  }
+
   async disburse(req: DisburseRequest): Promise<DisburseResult> {
-    // Referencia determinista por payout (idempotencia: re-disparar el mismo payout no duplica el riel).
-    const externalRef = `sbx_payout_${req.method.toLowerCase()}_${req.payoutId}`;
+    const externalRef = this.refFor(req.method, req.payoutId);
 
     // 1. Rechazo PERMANENTE determinista por monto (espeja el declineSuffix del money-IN).
     if (this.rejectSeed > 0 && req.amountCents % this.rejectSeed === 0) {
@@ -69,10 +103,51 @@ export class SandboxPayoutGateway implements PayoutGateway {
       return { externalRef, status: 'CONFIRMED' };
     }
 
-    // 3. SUBMITTED (default): async, la confirmación llega por webhook/poll.
+    // 3. SUBMITTED (default): async, la confirmación llega por webhook/poll. Lo anotamos en el libro para
+    //    que el poll fallback lo resuelva a CONFIRMED (re-disparar el mismo payout reusa el MISMO ref → no
+    //    duplica la anotación: idempotencia del riel).
+    if (!this.submitted.has(externalRef)) {
+      this.submitted.set(externalRef, { amountCents: req.amountCents });
+      this.submittedByPayoutId.set(req.payoutId, externalRef);
+    }
     this.logger.log(
       `[SANDBOX-PAYOUT ${req.method}] desembolso SUBMITTED (async) ref=${externalRef} monto=${req.amountCents} (espera webhook/poll)`,
     );
     return { externalRef, status: 'SUBMITTED' };
+  }
+
+  /**
+   * POLL FALLBACK (capacidad `PayoutStatusQuery`): un desembolso SUBMITTED se resuelve a CONFIRMED al
+   * consultarlo (la plata "salió" en la red simulada). Determinista, reproducible: cierra el ciclo async
+   * money-OUT en dev/e2e sin PSP real, espejo de cómo el poll del money-IN cierra el PENDING_EXTERNAL.
+   *
+   * Reconcilia por DOS llaves (cierra la orfandad del §4.2): resuelve por `externalRef` si lo tiene; si NO
+   * (PROCESSING huérfano por un crash post-claim), por `dedupKey` → extrae el payoutId y recupera el ref
+   * anotado. Ambas correlacionan la MISMA transferencia. Un handle no anotado ⇒ `found:false` (reintento luego).
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getDisbursementStatus(
+    query: PayoutDisbursementQuery,
+  ): Promise<PayoutDisbursementStatusDetail> {
+    // 1. Por externalRef si está presente y anotado.
+    if (query.externalRef && this.submitted.has(query.externalRef)) {
+      this.logger.log(
+        `[SANDBOX-PAYOUT] consulta ref=${query.externalRef} → CONFIRMED (plata salió, simulado)`,
+      );
+      return { found: true, status: 'CONFIRMED' };
+    }
+    // 2. Fallback por dedupKey: el PROCESSING huérfano (sin externalRef) se reconcilia por su dedupKey
+    //    determinista. Extraemos el payoutId y buscamos el ref que el disburse anotó para ese payout.
+    const payoutId = query.dedupKey.startsWith(PAYOUT_DEDUP_PREFIX)
+      ? query.dedupKey.slice(PAYOUT_DEDUP_PREFIX.length)
+      : null;
+    const refByDedup = payoutId ? this.submittedByPayoutId.get(payoutId) : undefined;
+    if (refByDedup && this.submitted.has(refByDedup)) {
+      this.logger.log(
+        `[SANDBOX-PAYOUT] consulta por dedupKey=${query.dedupKey} (sin externalRef) → CONFIRMED (reconciliado)`,
+      );
+      return { found: true, status: 'CONFIRMED' };
+    }
+    return { found: false, status: 'PENDING' };
   }
 }

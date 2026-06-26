@@ -138,10 +138,28 @@ describe('discrepancyPct (BR-P07)', () => {
   });
 });
 
-describe('máquina de estados del payout (S4)', () => {
-  it('HELD → PROCESSED es válida (liberación de la retención, review resuelto)', () => {
-    expect(canTransitionPayout('HELD', 'PROCESSED')).toBe(true);
-    expect(() => assertPayoutTransition('HELD', 'PROCESSED')).not.toThrow();
+describe('máquina de estados del payout (S4 · ADR-015 §3)', () => {
+  it('HELD → PROCESSING es válida (liberar = entrar al desembolso, NO saltar a PROCESSED)', () => {
+    expect(canTransitionPayout('HELD', 'PROCESSING')).toBe(true);
+    expect(() => assertPayoutTransition('HELD', 'PROCESSING')).not.toThrow();
+  });
+
+  it('HELD → PROCESSED ya NO es válida directa (la plata sale por el riel, no por un flag)', () => {
+    expect(canTransitionPayout('HELD', 'PROCESSED')).toBe(false);
+    expect(() => assertPayoutTransition('HELD', 'PROCESSED')).toThrow(
+      'Transición de payout inválida',
+    );
+  });
+
+  it('PENDING → PROCESSING (operador dispara) y PROCESSING → PROCESSED|FAILED (riel confirma)', () => {
+    expect(canTransitionPayout('PENDING', 'PROCESSING')).toBe(true);
+    expect(canTransitionPayout('PROCESSING', 'PROCESSED')).toBe(true);
+    expect(canTransitionPayout('PROCESSING', 'FAILED')).toBe(true);
+  });
+
+  it('FAILED → PROCESSING (operador reintenta, idempotente por dedupKey)', () => {
+    expect(canTransitionPayout('FAILED', 'PROCESSING')).toBe(true);
+    expect(() => assertPayoutTransition('FAILED', 'PROCESSING')).not.toThrow();
   });
 
   it('PROCESSED es terminal: no vuelve a HELD ni a PENDING', () => {
@@ -152,7 +170,7 @@ describe('máquina de estados del payout (S4)', () => {
     );
   });
 
-  it('HELD no puede caer a FAILED en silencio (liberar = pagar, no fallar)', () => {
+  it('HELD no puede caer a FAILED en silencio (liberar = desembolsar, no fallar)', () => {
     expect(canTransitionPayout('HELD', 'FAILED')).toBe(false);
   });
 

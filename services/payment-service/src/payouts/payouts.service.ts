@@ -3,7 +3,7 @@
  * Cron lunes: agrega los cobros capturados de la semana previa, aplica mínimo liquidable y
  * retención (HELD) si el conductor está en review (señal driver.flagged). Publica payout.processed.
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
@@ -11,11 +11,15 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import {
   ConflictError,
+  ExternalServiceError,
   ForbiddenError,
+  NotFoundError,
+  PayoutPermanentlyRejectedError,
   uuidv7,
   withDistributedLock,
   type DistributedLockOutcome,
 } from '@veo/utils';
+import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
@@ -25,6 +29,11 @@ import {
   periodLabel,
   type DriverEarningRow,
 } from './payout.policy';
+import {
+  PAYOUT_GATEWAY,
+  type PayoutGateway,
+  type PayoutMethod,
+} from '../ports/gateway/payout-gateway.port';
 import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -32,11 +41,43 @@ const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
 const CRON_LOCK_KEY = 'veo:payment:lock:weekly-payouts';
 const CRON_LOCK_TTL_SECONDS = 600;
 const STEPUP_MAX_AGE_SECONDS = 300;
+/** Riel money-OUT por defecto del desembolso (ADR-015 D2: YAPE/PLIN a la billetera del conductor). */
+const DEFAULT_PAYOUT_METHOD: PayoutMethod = 'YAPE';
+
+/** `dedupKey` financiera del DESEMBOLSO (ADR-015 §7): derivada del payoutId, distinta del charge. */
+function payoutDedupKey(payoutId: string): string {
+  return `payout-disburse:${payoutId}`;
+}
+
+/** Resumen de un disparo de desembolso (operador): cuántos pasaron a PROCESSING vs fallaron en línea. */
+export interface PayoutDisburseSummary {
+  /** Payouts que entraron a PROCESSING Y el riel ACEPTÓ en línea (SUBMITTED async o CONFIRMED síncrono). */
+  dispatched: number;
+  /**
+   * Payouts que NO salieron en línea: rechazo PERMANENTE del riel → FAILED, O transitorio (ExternalServiceError)
+   * → quedan PROCESSING para el poll/retry. En ambos el operador ve "no salió en línea"; el poll/retry lo cierra.
+   */
+  failed: number;
+  /**
+   * Payouts RECLAMADOS fuera de su estado origen (PENDING/HELD/FAILED → PROCESSING): `dispatched + failed`. Es
+   * lo que de verdad se MOVIÓ del estado origen (lo usa el release para des-flaguear: el flag se quita cuando el
+   * HELD se liberó al carril, independiente de si el riel falló transitorio — el payout ya está PROCESSING).
+   */
+  released: number;
+  totalAmountCents: number;
+}
+
+/** Resultado de aplicar la confirmación del riel a un payout (PROCESSING → PROCESSED | FAILED). */
+export interface ApplyDisbursementResult {
+  applied: boolean;
+  status: string;
+}
 
 export interface PayoutRunSummary {
   periodStart: string;
   periodEnd: string;
-  processed: number;
+  /** Payouts creados en PENDING (a la espera del disparo del operador). El cron ya NO desembolsa. */
+  pending: number;
   held: number;
   totalAmountCents: number;
 }
@@ -44,7 +85,7 @@ export interface PayoutRunSummary {
 /** Resultado de liberar la retención de un conductor (camino de vuelta de driver.flagged). */
 export interface ReleaseHeldPayoutsResult {
   driverId: string;
-  /** Payouts HELD→PROCESSED liberados por esta llamada (0 si ya estaban liberados: idempotente). */
+  /** Payouts HELD→PROCESSING despachados al riel por esta llamada (0 si ya estaban liberados: idempotente). */
   released: number;
   totalAmountCents: number;
 }
@@ -70,7 +111,12 @@ export class PayoutsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(PAYOUT_GATEWAY) private readonly payoutGateway: PayoutGateway,
     config: ConfigService<Env, true>,
+    // Métricas Prometheus del carril money-OUT (CLAUDE §6). @Optional + trailing por la MISMA razón que en
+    // PaymentsService: los specs construyen el service a mano con menos args (sin Nest DI). PaymentMetrics es
+    // @Global (CoreModule) → SIEMPRE inyectable en runtime; sin él (en tests viejos) el carril no emite métrica.
+    @Optional() private readonly metrics?: PaymentMetrics,
   ) {
     this.minCents = config.getOrThrow<number>('PAYOUT_MIN_CENTS');
     this.stepUpCents = config.getOrThrow<number>('PAYOUT_STEPUP_CENTS');
@@ -86,7 +132,9 @@ export class PayoutsService {
       const outcome = await this.runPayoutsExclusive(start, end);
       if (!outcome.acquired) return;
       const summary = outcome.result;
-      this.logger.log(`Payouts semanales: ${summary.processed} pagados, ${summary.held} retenidos`);
+      this.logger.log(
+        `Payouts semanales agregados: ${summary.pending} PENDING (esperan disparo del operador), ${summary.held} retenidos`,
+      );
     } catch (err) {
       this.logger.error({ err }, 'Cron de payouts falló');
     }
@@ -143,8 +191,7 @@ export class PayoutsService {
       );
     }
 
-    const label = periodLabel(start, end);
-    let processed = 0;
+    let pending = 0;
     let held = 0;
     let totalAmountCents = 0;
 
@@ -169,10 +216,11 @@ export class PayoutsService {
       if (alreadyPaidDriverIds.has(agg.driverId)) continue; // idempotencia: ya liquidado este período.
 
       const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
-      // Bonos pendientes que ESTE driver aporta a este Payout. Solo llegamos acá si agg superó el mínimo
-      // liquidable y no había Payout previo del período → el bono se marca pagado SOLO si la plata sale
-      // (incluido el camino HELD: el bono ya está dentro de agg.amountCents, que es lo que se libera al
-      // resolver el review). Un driver bajo mínimo nunca entra a `aggregated` → su bono sigue paidAt:null.
+      // Bonos pendientes que ESTE driver aporta a este Payout. ADR-015 §3/§D5: el cron solo AGREGA — el
+      // Payout nace PENDING (o HELD), la plata NO se ha movido. El bono se LIGA al Payout (paidInPayoutId)
+      // para saber qué incentivos marcar cuando el riel confirme, pero `paidAt` queda NULL hasta el
+      // PROCESSED confirmado (cierra el hueco 5 "bono marcado pagado sin pagar"). El CAS `paidAt:null` en el
+      // handler de confirmación garantiza no-doble-marca.
       const pendingIncentiveIds = pendingIncentiveIdsByDriver.get(agg.driverId) ?? [];
       await this.prisma.write.$transaction(async (tx) => {
         const payout = await tx.payout.create({
@@ -184,39 +232,27 @@ export class PayoutsService {
             grossCents: agg.grossCents,
             commissionCents: agg.commissionCents,
             amountCents: agg.amountCents,
-            status: flagged ? 'HELD' : 'PROCESSED',
+            // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
+            // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
+            status: flagged ? 'HELD' : 'PENDING',
             heldReason: flagged ? 'driver_in_review' : null,
-            processedAt: flagged ? null : new Date(),
+            processedAt: null,
           },
         });
-        // Marcado idempotente del bono DENTRO de la tx que crea el Payout: el CAS `paidAt:null` garantiza
-        // que un re-run (o una carrera) NO lo doble-marque ni lo doble-pague. Si la tx aborta, el bono
-        // queda pendiente y el próximo run lo barre (no hay marcado-pagado-pero-no-pagado).
+        // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
+        // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
         if (pendingIncentiveIds.length > 0) {
           await tx.incentiveProgress.updateMany({
             where: { id: { in: pendingIncentiveIds }, paidAt: null },
-            data: { paidAt: new Date(), paidInPayoutId: payout.id },
+            data: { paidInPayoutId: payout.id },
           });
-        }
-        if (!flagged) {
-          const envelope = createEnvelope({
-            eventType: 'payout.processed',
-            producer: 'payment-service',
-            payload: {
-              payoutId: payout.id,
-              driverId: payout.driverId,
-              amountCents: payout.amountCents,
-              period: label,
-            },
-          });
-          await enqueueOutbox(tx, envelope, payout.id);
         }
       });
 
       if (flagged) {
         held += 1;
       } else {
-        processed += 1;
+        pending += 1;
         totalAmountCents += agg.amountCents;
       }
     }
@@ -224,10 +260,297 @@ export class PayoutsService {
     return {
       periodStart: start.toISOString(),
       periodEnd: end.toISOString(),
-      processed,
+      pending,
       held,
       totalAmountCents,
     };
+  }
+
+  /* ─────────────────────── Carril de DESEMBOLSO (ADR-015 §3/§D5 · sub-lote 2b) ─────────────────────── */
+
+  /**
+   * Disparo del operador (ADR-015 D3/§5 `POST /payouts/run`): desembolsa los Payout PENDING del período.
+   * El cron solo AGREGÓ (creó PENDING); acá el OPERADOR mueve la plata. Step-up MFA sobre el umbral
+   * (BR-S07), espejo de runPayouts. Cada payout entra al carril `disburseOne` (PENDING → PROCESSING +
+   * disburse). El resultado del riel decide: SUBMITTED/CONFIRMED → PROCESSING (espera confirmación async);
+   * rechazo permanente → FAILED terminal (sin esperar). Idempotente: un 2º disparo no re-procesa los que ya
+   * salieron de PENDING (assertTransition los rechaza → se cuentan como ya despachados, no error).
+   */
+  async disbursePendingForPeriod(
+    start: Date,
+    end: Date,
+    operator?: AuthenticatedUser,
+  ): Promise<PayoutDisburseSummary> {
+    const pendingPayouts = await this.prisma.read.payout.findMany({
+      where: { periodStart: start, periodEnd: end, status: PayoutStatus.PENDING },
+      orderBy: { id: 'asc' },
+    });
+    const projectedTotal = pendingPayouts.reduce((sum, p) => sum + p.amountCents, 0);
+    if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
+      throw new ForbiddenError(
+        `Desembolsar ${projectedTotal} céntimos supera S/5000: requiere verificación MFA fresca (step-up)`,
+      );
+    }
+    return this.disburseEach(pendingPayouts);
+  }
+
+  /**
+   * Reintento del operador de un payout FALLIDO (ADR-015 §5 `POST /payouts/:id/retry` · §8 "el operador
+   * reintenta"). FAILED → PROCESSING por el MISMO carril (disburseOne), idempotente por la MISMA `dedupKey`
+   * (`payout-disburse:{payoutId}`): el riel NO duplica la transferencia (ADR-015 §7). Step-up MFA sobre el umbral.
+   *
+   * GUARD DURO DE INVARIANTE PROPIO (fix CRÍTICO doble-transferencia): SOLO un payout FAILED se reintenta. NO
+   * nos apoyamos en `assertPayoutTransition` para esto: `canTransitionPayout` cortocircuita `if (from===to)
+   * return true`, así que un payout YA en PROCESSING pasaría `assertTransition(PROCESSING, PROCESSING)` y el CAS
+   * `where status=PROCESSING` matchearía → re-invocaría el riel (segunda transferencia mientras la primera sigue
+   * en curso). El reintento es una acción del operador con su PROPIA precondición (el payout DEBE estar fallido);
+   * la validamos explícita acá con un error de dominio tipado (409). PENDING/HELD tienen su propio disparo
+   * (run/release), no se "reintentan"; PROCESSING ya está en curso; PROCESSED ya cobró: ninguno se reintenta.
+   */
+  async retryPayout(payoutId: string, operator?: AuthenticatedUser): Promise<PayoutDisburseSummary> {
+    const payout = await this.prisma.read.payout.findUnique({ where: { id: payoutId } });
+    if (!payout) throw new NotFoundError(`Payout ${payoutId} no encontrado`);
+    if (payout.status !== PayoutStatus.FAILED) {
+      throw new ConflictError(
+        `Solo un payout FALLIDO puede reintentarse (estado actual: ${payout.status}); ` +
+          `PENDING/HELD se disparan con run/release, PROCESSING ya está en curso, PROCESSED ya se pagó`,
+      );
+    }
+    if (operator && payout.amountCents > this.stepUpCents && !this.hasFreshMfa(operator)) {
+      throw new ForbiddenError(
+        `Reintentar ${payout.amountCents} céntimos supera S/5000: requiere verificación MFA fresca (step-up)`,
+      );
+    }
+    this.metrics?.incPayoutDisbursement('retried');
+    return this.disburseEach([payout]);
+  }
+
+  /**
+   * Corre el carril de desembolso para una lista de payouts y agrega el resultado.
+   *
+   * RESILIENCIA POR ITEM (fix CRÍTICO batch-abortado): un fallo TRANSITORIO de UN payout (ExternalServiceError
+   * del riel, que `disburseOne` PROPAGA) NO debe tumbar el lote entero — antes el `throw` se propagaba y los
+   * payouts AÚN no procesados quedaban sin disparar, mientras los ya-reclamados quedaban PROCESSING sin que el
+   * operador supiera cuántos salieron. Acá envolvemos CADA item en try/catch: un transitorio se REGISTRA (log +
+   * el payout YA quedó PROCESSING con su dedupKey, así que el poll fallback / el reintento del operador lo
+   * cierran) y el batch CONTINÚA con los demás. El resumen `{ dispatched, failed }` le dice al operador cuántos
+   * entraron al riel y cuántos no — un transitorio cuenta como `failed` (no entró a PROCESSING limpio en línea),
+   * igual que el rechazo permanente, pero por una causa distinta (uno es terminal, el otro reintentable).
+   */
+  private async disburseEach(payouts: Payout[]): Promise<PayoutDisburseSummary> {
+    // GATE PRE-CLAIM DE DISPONIBILIDAD DEL RIEL (causa raíz · ADR-015 §8 "el adapter live no está"):
+    // si el riel money-OUT NO puede desembolsar HOY (adapter live diferido, convenio PSP pendiente),
+    // RECHAZAMOS el disparo ANTES de tocar el estado de cualquier payout. Es el punto común de los TRES
+    // carriles (run → disbursePendingForPeriod, release → releaseHeldPayouts, retry → retryPayout), todos
+    // pasan por acá. Antes el claim PENDING/HELD/FAILED → PROCESSING se commiteaba PRIMERO y recién después
+    // `disburse()` lanzaba (live stub) → el payout quedaba PROCESSING COLGADO (el PollService no lo cierra:
+    // el stub no tiene status real). Ahora: ningún payout cambia de estado, todos quedan en su origen y el
+    // operador recibe un 502 honesto. Fail-fast, NO silencio, NO atasco. En sandbox isAvailable()=true → el
+    // flujo corre idéntico (cero cambios de comportamiento en dev/test).
+    if (payouts.length > 0 && !this.payoutGateway.isAvailable()) {
+      throw new ExternalServiceError(
+        'desembolso no disponible: riel money-OUT pendiente de convenio PSP (ADR-015 §8). ' +
+          'Ningún payout cambió de estado; reintentá cuando el riel esté disponible',
+      );
+    }
+    let dispatched = 0;
+    let failed = 0;
+    let totalAmountCents = 0;
+    for (const payout of payouts) {
+      let outcome: 'DISPATCHED' | 'FAILED';
+      try {
+        outcome = await this.disburseOne(payout);
+      } catch (err) {
+        // Transitorio (ExternalServiceError) u otro error en línea: el payout ya quedó PROCESSING (el claim se
+        // commiteó antes de invocar el riel) → el poll/retry lo cierra. NO abortamos el lote: seguimos con los
+        // demás y lo contamos como failed para que el operador vea cuántos no salieron en línea.
+        const msg = err instanceof Error ? err.message : 'error';
+        this.logger.warn(
+          `Desembolso del payout ${payout.id} falló transitorio (queda PROCESSING para el poll/retry): ${msg}`,
+        );
+        failed += 1;
+        continue;
+      }
+      if (outcome === 'DISPATCHED') {
+        dispatched += 1;
+        totalAmountCents += payout.amountCents;
+        this.metrics?.incPayoutDisbursement('dispatched');
+      } else {
+        // FAILED (rechazo permanente en línea): la métrica `failed` la emite UNA sola vez la transición a FAILED
+        // dentro de `applyPayoutDisbursementResult` (punto único de paso a FAILED, sea en línea o por poll/webhook)
+        // — NO la dupliquemos acá. Solo agregamos al resumen del operador.
+        failed += 1;
+      }
+    }
+    // `released` = todo lo que se reclamó fuera de su estado origen (entró a PROCESSING), salga o no en línea.
+    return { dispatched, failed, released: dispatched + failed, totalAmountCents };
+  }
+
+  /**
+   * Carril de desembolso de UN payout: estado-origen → PROCESSING (atómico con `payout.processing` al
+   * outbox), invoca `PayoutGateway.disburse` con la dedupKey financiera, y resuelve el resultado del riel:
+   *  - `SUBMITTED` (async) / `CONFIRMED` (síncrono): queda PROCESSING esperando la confirmación
+   *    (`applyPayoutDisbursementResult`, espejo de applyWebhookResult). [DISPATCHED]
+   *  - `PayoutPermanentlyRejectedError` (4xx no-reintentable): PROCESSING → FAILED terminal (emite
+   *    payout.failed). El paidAt del incentivo NO se marca. [FAILED]
+   *  - `ExternalServiceError` (502 transitorio): se PROPAGA (no se traga) → el operador reintenta; el payout
+   *    QUEDA en PROCESSING (la disburse se invocó). La idempotencia por dedupKey vuelve seguro el reintento.
+   *
+   * ATOMICIDAD estado↔evento (CLAUDE §3): la transición a PROCESSING y el `payout.processing` van en la
+   * MISMA tx, con CAS por status (where status=from) para que un doble-click (2º disparo concurrente) NO
+   * re-emita ni re-invoque el riel: el 2º ve count=0 y sale (NO-OP). assertTransition valida la regla.
+   */
+  private async disburseOne(payout: Payout): Promise<'DISPATCHED' | 'FAILED'> {
+    assertPayoutTransition(payout.status, PayoutStatus.PROCESSING);
+    const dedupKey = payoutDedupKey(payout.id);
+    const label = periodLabel(payout.periodStart, payout.periodEnd);
+
+    // 1. Reclamo transaccional PENDING/HELD/FAILED → PROCESSING + dedupKey + payout.processing (misma tx).
+    //    CAS por status: gana UNA sola corrida; el doble-click pierde (count=0) y NO invoca el riel.
+    const claimed = await this.prisma.write.$transaction(async (tx) => {
+      const { count } = await tx.payout.updateMany({
+        where: { id: payout.id, status: payout.status },
+        data: { status: PayoutStatus.PROCESSING, dedupKey },
+      });
+      if (count === 0) return false; // otra corrida ya lo reclamó (doble-click): NO-OP.
+      const envelope = createEnvelope({
+        eventType: 'payout.processing',
+        producer: 'payment-service',
+        payload: {
+          payoutId: payout.id,
+          driverId: payout.driverId,
+          amountCents: payout.amountCents,
+          period: label,
+        },
+      });
+      await enqueueOutbox(tx, envelope, payout.id);
+      return true;
+    });
+    if (!claimed) return 'DISPATCHED'; // ya estaba en curso por otra corrida: idempotente, no error.
+
+    // 2. Invoca el riel (FUERA de la tx: el desembolso es I/O externo, no debe colgar la transacción).
+    try {
+      const result = await this.payoutGateway.disburse({
+        payoutId: payout.id,
+        driverId: payout.driverId,
+        amountCents: payout.amountCents,
+        method: DEFAULT_PAYOUT_METHOD,
+        currency: 'PEN',
+      });
+      // Persistimos el ref externo (correlaciona el webhook/poll de confirmación). El estado queda
+      // PROCESSING: SUBMITTED espera la confirmación async; CONFIRMED síncrono lo cerramos por el MISMO
+      // camino idempotente que el webhook (applyPayoutDisbursementResult) — una sola fuente de verdad.
+      await this.prisma.write.payout.update({
+        where: { id: payout.id },
+        data: { externalRef: result.externalRef },
+      });
+      if (result.status === 'CONFIRMED') {
+        await this.applyPayoutDisbursementResult({ payoutId: payout.id, resolution: 'CONFIRMED' });
+      }
+      return 'DISPATCHED';
+    } catch (err) {
+      if (err instanceof PayoutPermanentlyRejectedError) {
+        // Rechazo PERMANENTE en línea: PROCESSING → FAILED terminal por el camino idempotente. La plata NO
+        // salió; el paidAt del incentivo NO se marca. El operador puede reintentar (FAILED → PROCESSING).
+        await this.applyPayoutDisbursementResult({ payoutId: payout.id, resolution: 'REJECTED' });
+        this.logger.warn(`Payout ${payout.id} RECHAZADO permanente por el riel → FAILED`);
+        return 'FAILED';
+      }
+      // Transitorio (ExternalServiceError) u otro: se PROPAGA. El payout queda PROCESSING (disburse se
+      // invocó); el operador reintenta — la dedupKey vuelve seguro el reintento (el riel no duplica).
+      throw err;
+    }
+  }
+
+  /**
+   * Handler de CONFIRMACIÓN del riel (ADR-015 §4.2 · espejo de PaymentsService.applyWebhookResult). El
+   * desembolso es ASÍNCRONO: la confirmación llega por webhook/poll y este handler corre la transición
+   * PROCESSING → PROCESSED | FAILED. IDEMPOTENTE:
+   *  - CONFIRMED: PROCESSING → PROCESSED (emite payout.processed + marca paidAt del incentivo, todo en UNA
+   *    tx atómica). Una redelivery con el payout YA PROCESSED → status-guard no-op (no re-emite, no re-marca).
+   *  - REJECTED:  PROCESSING → FAILED (emite payout.failed). El paidAt NO se marca (la plata no salió).
+   *  - PENDING:   no-op (el desembolso sigue en curso).
+   * El status-guard (la lectura del estado actual + el CAS `where status=PROCESSING`) hace la operación
+   * segura ante webhook duplicado y poll+webhook concurrentes — exactamente como applyWebhookResult.
+   */
+  async applyPayoutDisbursementResult(input: {
+    payoutId: string;
+    resolution: 'CONFIRMED' | 'REJECTED' | 'PENDING';
+  }): Promise<ApplyDisbursementResult> {
+    const payout = await this.prisma.read.payout.findUnique({ where: { id: input.payoutId } });
+    if (!payout) {
+      this.logger.warn(`Confirmación de desembolso sin match (payoutId=${input.payoutId}); no-op`);
+      return { applied: false, status: 'NO_MATCH' };
+    }
+
+    if (input.resolution === 'PENDING') return { applied: false, status: payout.status }; // sigue en curso
+
+    if (input.resolution === 'CONFIRMED') {
+      // Idempotencia: si ya está PROCESSED, una 2ª confirmación (webhook duplicado) no re-emite ni re-marca.
+      if (payout.status === PayoutStatus.PROCESSED) return { applied: false, status: 'PROCESSED' };
+      assertPayoutTransition(payout.status, PayoutStatus.PROCESSED);
+      const label = periodLabel(payout.periodStart, payout.periodEnd);
+      const ok = await this.prisma.write.$transaction(async (tx) => {
+        // CAS por status: gana UNA corrida; una confirmación concurrente ve count=0 y sale (no re-emite).
+        const { count } = await tx.payout.updateMany({
+          where: { id: payout.id, status: PayoutStatus.PROCESSING },
+          data: { status: PayoutStatus.PROCESSED, processedAt: new Date() },
+        });
+        if (count === 0) return false;
+        // El paidAt del incentivo se marca AQUÍ (ADR-015 §3/§D5): recién con el desembolso confirmado. CAS
+        // `paidAt:null` para no re-marcar un bono ya pagado (webhook duplicado / poll+webhook).
+        await tx.incentiveProgress.updateMany({
+          where: { paidInPayoutId: payout.id, paidAt: null },
+          data: { paidAt: new Date() },
+        });
+        const envelope = createEnvelope({
+          eventType: 'payout.processed',
+          producer: 'payment-service',
+          payload: {
+            payoutId: payout.id,
+            driverId: payout.driverId,
+            amountCents: payout.amountCents,
+            period: label,
+          },
+        });
+        await enqueueOutbox(tx, envelope, payout.id);
+        return true;
+      });
+      if (ok) {
+        this.metrics?.incPayoutDisbursement('processed'); // la plata SALIÓ (señal money-OUT scrapeable)
+        return { applied: true, status: 'PROCESSED' };
+      }
+      return { applied: false, status: 'PROCESSED' }; // carrera: otra confirmación ya lo cerró.
+    }
+
+    // REJECTED: PROCESSING → FAILED (la plata NO salió; el paidAt NO se marca).
+    if (payout.status === PayoutStatus.FAILED) return { applied: false, status: 'FAILED' }; // idempotente
+    assertPayoutTransition(payout.status, PayoutStatus.FAILED);
+    const label = periodLabel(payout.periodStart, payout.periodEnd);
+    const ok = await this.prisma.write.$transaction(async (tx) => {
+      const { count } = await tx.payout.updateMany({
+        where: { id: payout.id, status: PayoutStatus.PROCESSING },
+        data: { status: PayoutStatus.FAILED },
+      });
+      if (count === 0) return false;
+      const envelope = createEnvelope({
+        eventType: 'payout.failed',
+        producer: 'payment-service',
+        payload: {
+          payoutId: payout.id,
+          driverId: payout.driverId,
+          amountCents: payout.amountCents,
+          period: label,
+        },
+      });
+      await enqueueOutbox(tx, envelope, payout.id);
+      return true;
+    });
+    if (ok) {
+      this.metrics?.incPayoutDisbursement('failed'); // confirmación REJECTED del riel: la plata NO salió
+      return { applied: true, status: 'FAILED' };
+    }
+    return { applied: false, status: 'FAILED' };
   }
 
   listByDriver(driverId: string): Promise<unknown[]> {
@@ -269,19 +592,29 @@ export class PayoutsService {
 
   /**
    * Camino de VUELTA de driver.flagged (review resuelto, acción admin): libera los payouts HELD del
-   * conductor (transición tipada HELD→PROCESSED) y levanta su retención (srem del set de flaggeados,
-   * para que las próximas liquidaciones no nazcan HELD).
+   * conductor metiéndolos al CARRIL DE DESEMBOLSO (ADR-015 §3/§D5: HELD → PROCESSING, NO salta a PROCESSED)
+   * y levanta su retención (srem del set de flaggeados, para que las próximas liquidaciones no nazcan HELD).
    *
-   *  - Los payouts se liberan en UNA transacción; cada liberación emite `payout.processed` por OUTBOX
-   *    en la MISMA tx (idéntico dominó que el cron para un payout no retenido: la plata sale y
-   *    notification-service avisa). El CAS `updateMany where status=HELD` hace la operación idempotente
-   *    y concurrencia-segura: una liberación re-entrante libera 0 y NO re-emite.
-   *  - El srem va DESPUÉS de la tx: si liberar falla, el conductor sigue retenido (estado consistente)
-   *    y el operador reintenta; el reintento es seguro.
+   *  - Cada HELD entra a `disburseOne` (HELD → PROCESSING + payout.processing en la MISMA tx + invoca el
+   *    riel). La plata sale por el MISMO riel que un PENDING disparado; PROCESSED se alcanza recién cuando el
+   *    riel confirma (applyPayoutDisbursementResult). El CAS `where status=HELD` hace la liberación
+   *    idempotente y concurrencia-segura: una liberación re-entrante reclama 0 y NO re-emite.
+   *
+   *  INVARIANTE DEL DES-FLAG (fix CRÍTICO conductor-flaggeado-para-siempre): el flag se quita cuando el HELD
+   *  se LIBERÓ AL CARRIL (entró a PROCESSING, su plata YA está en el riel/poll), NO cuando el riel confirma.
+   *  Antes el `srem` corría DESPUÉS de un `disburseEach` que PODÍA LANZAR ante un transitorio del riel: el
+   *  throw saltaba el srem y dejaba al conductor RETENIDO PARA SIEMPRE (su payout ya en PROCESSING, pero el
+   *  flag intacto → las próximas liquidaciones seguían naciendo HELD y nadie lo liberaba). Dos correcciones:
+   *   1. `disburseEach` ya NO propaga el transitorio (fix per-item): el payout queda PROCESSING y el batch sigue
+   *      → el srem SIEMPRE se alcanza. Un transitorio NO deja la liberación a medias.
+   *   2. El srem va en su PROPIO try/catch: un hiccup de Redis no revierte una liberación ya hecha (los payouts
+   *      ya están PROCESSING); se loguea y el operador puede re-liberar (idempotente, reclama 0, solo re-srem).
+   *  Así: ni conductor flaggeado-para-siempre por un transitorio del riel, ni release a medias.
+   *
    *  - Plata grande exige step-up MFA fresco, espejo de runPayouts (BR-S07).
-   *  - `heldReason` se conserva (historia de POR QUÉ estuvo retenido); el estado vigente es PROCESSED.
-   *  - El audit trail del operador lo registra admin-bff (AuditRecorder, action payout.release_held),
-   *    como hace con payout.run; acá queda el rastro de dominio (outbox + log estructurado).
+   *  - `heldReason` se conserva (historia de POR QUÉ estuvo retenido); el estado vigente pasa a PROCESSING.
+   *  - El audit trail del operador lo registra admin-bff (AuditRecorder, action payout.release_held); acá
+   *    queda el rastro de dominio (outbox payout.processing + log estructurado).
    */
   async releaseHeldPayouts(
     driverId: string,
@@ -299,38 +632,28 @@ export class PayoutsService {
       );
     }
 
-    let released = 0;
-    let totalAmountCents = 0;
-    await this.prisma.write.$transaction(async (tx) => {
-      for (const payout of held) {
-        assertPayoutTransition(payout.status, PayoutStatus.PROCESSED);
-        const { count } = await tx.payout.updateMany({
-          where: { id: payout.id, status: PayoutStatus.HELD },
-          data: { status: PayoutStatus.PROCESSED, processedAt: new Date() },
-        });
-        if (count === 0) continue; // otra liberación concurrente ya lo procesó: no re-emitir.
-        const envelope = createEnvelope({
-          eventType: 'payout.processed',
-          producer: 'payment-service',
-          payload: {
-            payoutId: payout.id,
-            driverId: payout.driverId,
-            amountCents: payout.amountCents,
-            period: periodLabel(payout.periodStart, payout.periodEnd),
-          },
-        });
-        await enqueueOutbox(tx, envelope, payout.id);
-        released += 1;
-        totalAmountCents += payout.amountCents;
-      }
-    });
+    // HELD → PROCESSING por el carril de desembolso (un payout a la vez). `disburseEach` es resiliente por
+    // item: ni el rechazo permanente ni el transitorio de uno abortan la liberación de los demás. `released`
+    // = los que se movieron de HELD a PROCESSING (salgan o no en línea: su plata YA está en el riel/poll).
+    const { dispatched, failed, released, totalAmountCents } = await this.disburseEach(held);
 
-    // Des-flag al final: las próximas liquidaciones del conductor ya no nacen HELD. Idempotente.
-    await this.redis.srem(FLAGGED_DRIVERS_KEY, driverId);
+    // Des-flag: se quita PORQUE los HELD se liberaron al carril (ya PROCESSING), independiente de si el riel
+    // falló transitorio. En su PROPIO try/catch: un fallo de Redis NO revierte la liberación ya hecha (los
+    // payouts ya están PROCESSING); se loguea y el operador re-libera (idempotente). Idempotente per-se.
+    try {
+      await this.redis.srem(FLAGGED_DRIVERS_KEY, driverId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'error';
+      this.logger.error(
+        `Conductor ${driverId}: payouts liberados (${released} HELD→PROCESSING) pero el des-flag (srem) falló: ` +
+          `${msg}. Re-liberar es seguro (idempotente). El conductor podría seguir naciendo HELD hasta el srem.`,
+      );
+    }
 
     this.logger.log(
-      `Retención liberada para el conductor ${driverId}: ${released} payout(s) HELD→PROCESSED ` +
-        `por ${totalAmountCents} céntimos${operator ? ` (operador ${operator.userId})` : ''}`,
+      `Retención liberada para el conductor ${driverId}: ${released} payout(s) HELD→PROCESSING ` +
+        `(${dispatched} en camino por el riel, ${failed} a cerrar por poll/retry) por ${totalAmountCents} ` +
+        `céntimos${operator ? ` (operador ${operator.userId})` : ''}`,
     );
     return { driverId, released, totalAmountCents };
   }

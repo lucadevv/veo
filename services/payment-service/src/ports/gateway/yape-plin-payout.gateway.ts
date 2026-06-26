@@ -26,6 +26,16 @@ export class YapePlinPayoutGateway implements PayoutGateway {
 
   constructor(private readonly opts: YapePlinPayoutGatewayOptions = {}) {}
 
+  /**
+   * Disponibilidad del riel (ADR-015 §8): el adapter live está DIFERIDO hasta el convenio PSP → NO
+   * disponible. El dominio lo consulta PRE-CLAIM y, al ver `false`, rechaza el disparo ANTES de mover
+   * un solo payout a PROCESSING (fail-fast honesto: ningún payout queda colgado). Esto reemplaza la
+   * vieja causa raíz, donde `disburse` lanzaba DESPUÉS del claim y dejaba el payout PROCESSING colgado.
+   */
+  isAvailable(): boolean {
+    return false;
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async disburse(req: DisburseRequest): Promise<DisburseResult> {
     // Fail-fast honesto: el riel live de desembolso no está disponible hasta cerrar el convenio PSP.

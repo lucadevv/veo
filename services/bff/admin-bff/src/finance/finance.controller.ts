@@ -8,6 +8,7 @@ import { AdminRole } from '@veo/shared-types';
 import type { PayoutView } from '@veo/api-client';
 import {
   FinanceService,
+  type PayoutDisburseResult,
   type ReleaseHeldPayoutsResult,
   type RunPayoutsResult,
 } from './finance.service';
@@ -54,6 +55,20 @@ export class FinanceController {
     @Param('driverId', ParseUUIDPipe) driverId: string,
   ): Promise<ReleaseHeldPayoutsResult> {
     return this.finance.releaseDriverPayouts(user, driverId);
+  }
+
+  // Reintento de un payout FALLIDO (ADR-015 §5): FAILED→PROCESSING re-invocando el riel, idempotente por
+  // dedupKey. Mutación de PLATA → mismo rol restrictivo que payouts/run (solo FINANCE) + step-up MFA.
+  @Post('payouts/:id/retry')
+  @HttpCode(200)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Reintenta un payout FALLIDO (FAILED→PROCESSING, solo FINANCE)' })
+  retryPayout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PayoutDisburseResult> {
+    return this.finance.retryPayout(user, id);
   }
 
   @Post('refunds/:tripId')

@@ -33,18 +33,28 @@ interface Page<T> {
   nextCursor: string | null;
 }
 
+/** Resultado del disparo de la liquidación (ADR-015 §5): agrega los PENDING + DESEMBOLSA el período.
+ *  `dispatched` = payouts que entraron a PROCESSING (disburse aceptado); `failed` = rechazados en línea. */
 export interface RunPayoutsResult {
   periodStart: string;
   periodEnd: string;
-  processed: number;
-  held: number;
+  dispatched: number;
+  failed: number;
   totalAmountCents: number;
 }
 
-/** Resultado de liberar la retención de un conductor (payouts HELD → PROCESSED). */
+/** Resultado de liberar la retención de un conductor (payouts HELD → PROCESSING, entran al desembolso). */
 export interface ReleaseHeldPayoutsResult {
   driverId: string;
   released: number;
+  totalAmountCents: number;
+}
+
+/** Resultado del desembolso de un payout puntual (reintento de un FALLIDO · ADR-015 §5). payment-service
+ *  sirve PayoutDisburseSummary SIN periodStart/periodEnd (es por-payout, no por-período). */
+export interface PayoutDisburseResult {
+  dispatched: number;
+  failed: number;
   totalAmountCents: number;
 }
 
@@ -76,15 +86,20 @@ export class FinanceService {
       action: 'payout.run',
       resourceType: 'payout_batch',
       resourceId: `${res.periodStart}..${res.periodEnd}`,
-      payload: { processed: res.processed, held: res.held, totalAmountCents: res.totalAmountCents },
+      payload: {
+        dispatched: res.dispatched,
+        failed: res.failed,
+        totalAmountCents: res.totalAmountCents,
+      },
     });
     return res;
   }
 
   /**
    * Libera los payouts HELD de un conductor y levanta su retención (camino de vuelta de driver.flagged).
-   * payment-service hace la transición tipada HELD→PROCESSED + emite payout.processed; acá se audita la
-   * acción del operador (mismo patrón que payout.run). Idempotente (re-liberar libera 0).
+   * payment-service hace la transición tipada HELD→PROCESSING + emite payout.processing e invoca el riel de
+   * desembolso (ADR-015 §3/§D5: liberar = desembolsar de verdad, no un flag); acá se audita la acción del
+   * operador (mismo patrón que payout.run). Idempotente (re-liberar libera 0).
    */
   async releaseDriverPayouts(
     identity: AuthenticatedUser,
@@ -99,6 +114,31 @@ export class FinanceService {
       resourceType: 'driver',
       resourceId: driverId,
       payload: { released: res.released, totalAmountCents: res.totalAmountCents },
+    });
+    return res;
+  }
+
+  /**
+   * Reintenta un payout FALLIDO (ADR-015 §5): payment-service hace la transición tipada FAILED→PROCESSING y
+   * RE-INVOCA el riel de desembolso. Idempotente por dedupKey (el riel NO doble-paga). Acá se audita la
+   * acción del operador (mismo patrón que payout.release_held). El backend exige step-up MFA por monto.
+   */
+  async retryPayout(
+    identity: AuthenticatedUser,
+    payoutId: string,
+  ): Promise<PayoutDisburseResult> {
+    const res = await this.rest.post<PayoutDisburseResult>(`/payouts/${payoutId}/retry`, {
+      identity,
+    });
+    await this.audit.record(identity, {
+      action: 'payout.retry',
+      resourceType: 'payout',
+      resourceId: payoutId,
+      payload: {
+        dispatched: res.dispatched,
+        failed: res.failed,
+        totalAmountCents: res.totalAmountCents,
+      },
     });
     return res;
   }

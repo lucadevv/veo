@@ -57,4 +57,27 @@ export class PaymentMetrics {
   incRefundBackstop(reason: 'rejected' | 'unrecoverable'): void {
     this.refundBackstop.inc({ reason });
   }
+
+  /**
+   * Contador del carril money-OUT del DESEMBOLSO (ADR-015 · CLAUDE §6 "observabilidad antes de features").
+   * El carril de la plata SALIENDO no emitía NINGUNA métrica: un PROCESSING que se atasca, un FAILED que el
+   * operador no ve, un reintento que se dispara — todo era invisible salvo en un log que nadie grepea. Esta
+   * métrica convierte cada evento money-OUT en una SEÑAL scrapeable (Prometheus) sobre la que alertar.
+   * Espejo EXACTO del `payment_refund_backstop_total` del money-IN (misma instancia prom-client, mismo registry).
+   * Por `event`:
+   *  - `dispatched`: un payout entró a PROCESSING (disburse aceptado: SUBMITTED async o CONFIRMED síncrono).
+   *  - `processed`:  un payout se confirmó (PROCESSING→PROCESSED): la plata SALIÓ de verdad.
+   *  - `failed`:     el riel rechazó (PROCESSING→FAILED): la plata NO salió.
+   *  - `retried`:    el operador reintentó un payout FALLIDO (FAILED→PROCESSING).
+   */
+  private readonly payoutDisbursement: CounterLike = getOrCreateCounter(
+    'payout_disbursement_total',
+    'Eventos del carril money-OUT del desembolso (ADR-015), por tipo de evento',
+    ['event'] as const,
+  );
+
+  /** Incrementa el contador del carril money-OUT, etiquetado por el evento del desembolso. */
+  incPayoutDisbursement(event: 'dispatched' | 'processed' | 'failed' | 'retried'): void {
+    this.payoutDisbursement.inc({ event });
+  }
 }

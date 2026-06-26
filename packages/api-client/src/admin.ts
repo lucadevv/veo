@@ -628,15 +628,29 @@ export const replaceRadiusConfigRequest = z.object({
 });
 export type ReplaceRadiusConfigRequest = z.infer<typeof replaceRadiusConfigRequest>;
 
-/* ── Finanzas: resultado del batch de liquidaciones (POST /finance/payouts/run) ── */
+/* ── Finanzas: resultado del disparo de la liquidación (POST /finance/payouts/run · ADR-015 §5) ──
+ * El operador AGREGA + DESEMBOLSA el período. El desembolso es ASÍNCRONO: `dispatched` = payouts que
+ * entraron a PROCESSING (el riel aceptó el desembolso, la plata está EN CAMINO — confirma luego por
+ * webhook/poll); `failed` = rechazados en línea por el riel. NO es "pagadas": PROCESSED se alcanza recién
+ * cuando el riel confirma la salida del dinero. */
 export const runPayoutsResult = z.object({
   periodStart: z.string(),
   periodEnd: z.string(),
-  processed: z.number().int(),
-  held: z.number().int(),
+  dispatched: z.number().int(),
+  failed: z.number().int(),
   totalAmountCents: z.number().int(),
 });
 export type RunPayoutsResult = z.infer<typeof runPayoutsResult>;
+
+/* ── Finanzas: resultado del REINTENTO de un payout FALLIDO (POST /finance/payouts/:id/retry · ADR-015 §5) ──
+ * Es por-payout (no por-período), así que la respuesta NO trae periodStart/periodEnd — solo el desembolso:
+ * `dispatched` = entró a PROCESSING (el riel aceptó, plata EN CAMINO); `failed` = rechazado en línea. */
+export const payoutDisburseResult = z.object({
+  dispatched: z.number().int(),
+  failed: z.number().int(),
+  totalAmountCents: z.number().int(),
+});
+export type PayoutDisburseResult = z.infer<typeof payoutDisburseResult>;
 
 /* ── Flota: vehículos, inspecciones, vencimientos ── */
 export const vehicleView = z.object({

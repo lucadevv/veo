@@ -27,6 +27,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PayoutsService } from '../src/payouts/payouts.service';
+import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
@@ -71,7 +72,10 @@ function makeRedis(): { redis: unknown; flagged: Set<string> } {
 
 function makeService(redis: unknown): PayoutsService {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  return new PayoutsService(prismaService, redis as never, makeConfig() as never);
+  // El cron solo AGREGA (PENDING) — no toca el gateway. Igual lo inyectamos (real sandbox) para los tests
+  // de desembolso de este suite. confirmSync:false ⇒ el disburse queda SUBMITTED (async), como en prod.
+  const gateway = new SandboxPayoutGateway({ rejectSeed: 0, confirmSync: false });
+  return new PayoutsService(prismaService, redis as never, gateway, makeConfig() as never);
 }
 
 /** Inserta un Incentive META_VIAJES con su bono. Una fila por test (active, sin caducidad). */
@@ -135,7 +139,7 @@ beforeEach(async () => {
 });
 
 describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix payout-link)', () => {
-  it('bono completado en ventana → Payout.amountCents lo incluye y el progress queda pagado', async () => {
+  it('bono completado en ventana → Payout PENDING lo incluye, ligado al progress, paidAt AÚN null (cron solo agrega)', async () => {
     const driverId = uuidv7();
     const incentiveId = await seedIncentive(6000);
     const progressId = await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW);
@@ -143,23 +147,26 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
 
     const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
 
-    expect(summary.processed).toBe(1);
+    // ADR-015 §3: el cron ya NO nace PROCESSED — crea PENDING (la plata no se movió aún).
+    expect(summary.pending).toBe(1);
     expect(summary.totalAmountCents).toBe(6000);
 
     const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
     expect(payout.amountCents).toBe(6000); // bono NETO
     expect(payout.grossCents).toBe(0); // no infla el bruto
     expect(payout.commissionCents).toBe(0); // ni la comisión
-    expect(payout.status).toBe('PROCESSED');
+    expect(payout.status).toBe('PENDING');
+    expect(payout.processedAt).toBeNull();
 
     const progress = await prisma.incentiveProgress.findUniqueOrThrow({
       where: { id: progressId },
     });
-    expect(progress.paidAt).not.toBeNull();
+    // Hueco 5 cerrado: el bono se LIGA al payout pero NO se marca pagado hasta el desembolso confirmado.
+    expect(progress.paidAt).toBeNull();
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
 
-  it('re-correr runPayouts NO duplica el Payout ni re-paga el bono (idempotencia, CAS paidAt:null)', async () => {
+  it('re-correr runPayouts NO duplica el Payout ni re-liga el bono (idempotencia del cron)', async () => {
     const driverId = uuidv7();
     const incentiveId = await seedIncentive(6000);
     const progressId = await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW);
@@ -167,12 +174,8 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const svc = makeService(redis);
 
     await svc.runPayouts(PERIOD_START, PERIOD_END);
-    const firstPaidAt = (
-      await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } })
-    ).paidAt;
-
     const second = await svc.runPayouts(PERIOD_START, PERIOD_END);
-    expect(second.processed).toBe(0); // ya existía el Payout del período
+    expect(second.pending).toBe(0); // ya existía el Payout del período
 
     const payouts = await prisma.payout.findMany({ where: { driverId } });
     expect(payouts).toHaveLength(1); // UNIQUE(driverId, periodStart, periodEnd) sin duplicar
@@ -180,7 +183,7 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const progress = await prisma.incentiveProgress.findUniqueOrThrow({
       where: { id: progressId },
     });
-    expect(progress.paidAt).toEqual(firstPaidAt); // no se re-marcó (mismo timestamp)
+    expect(progress.paidAt).toBeNull(); // el cron no marca pagado; el bono sigue ligado al payout PENDING
     expect(progress.paidInPayoutId).toBe(payouts[0]!.id);
   });
 
@@ -191,7 +194,7 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const { redis } = makeRedis();
 
     const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
-    expect(summary.processed).toBe(0);
+    expect(summary.pending).toBe(0);
 
     expect(await prisma.payout.findMany({ where: { driverId } })).toHaveLength(0);
     const progress = await prisma.incentiveProgress.findUniqueOrThrow({
@@ -244,15 +247,17 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     const { redis } = makeRedis();
 
     const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
-    expect(summary.processed).toBe(1);
+    expect(summary.pending).toBe(1);
     expect(summary.totalAmountCents).toBe(7000);
 
     const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
     expect(payout.amountCents).toBe(7000);
+    expect(payout.status).toBe('PENDING');
     const progress = await prisma.incentiveProgress.findUniqueOrThrow({
       where: { id: progressId },
     });
-    expect(progress.paidAt).not.toBeNull();
+    // El bono histórico SÍ entra (back-pay por arrastre), ligado al payout PENDING; paidAt se marca al confirmar.
+    expect(progress.paidAt).toBeNull();
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
 
@@ -265,7 +270,7 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
 
     const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
     expect(summary.held).toBe(1);
-    expect(summary.processed).toBe(0);
+    expect(summary.pending).toBe(0);
 
     const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
     expect(payout.status).toBe('HELD');

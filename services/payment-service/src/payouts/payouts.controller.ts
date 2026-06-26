@@ -29,6 +29,7 @@ import {
   PayoutsService,
   previousWeek,
   type PayoutPage,
+  type PayoutDisburseSummary,
   type ReleaseHeldPayoutsResult,
 } from './payouts.service';
 import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
@@ -85,13 +86,42 @@ export class PayoutsController {
   @Post('run')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Correr la liquidación de payouts (EXCLUSIVO FINANCE). Step-up MFA; >S/5000 re-valida en el servicio',
+    summary:
+      'Disparar la liquidación del período (EXCLUSIVO FINANCE): agrega los PENDING faltantes y DESEMBOLSA (PENDING→PROCESSING+disburse). Step-up MFA; >S/5000 re-valida en el servicio',
   })
-  run(@Body() dto: RunPayoutsDto, @CurrentUser() user: AuthenticatedUser) {
+  async run(
+    @Body() dto: RunPayoutsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ periodStart: string; periodEnd: string } & PayoutDisburseSummary> {
     const fallback = previousWeek(new Date());
     const start = dto.periodStart ? new Date(dto.periodStart) : fallback.start;
     const end = dto.periodEnd ? new Date(dto.periodEnd) : fallback.end;
-    return this.payouts.runPayouts(start, end, user);
+    // ADR-015 §5 `POST /payouts/run`: el operador dispara la liquidación = AGREGAR (idempotente, crea los
+    // PENDING que el cron aún no creó) + DESEMBOLSAR (PENDING→PROCESSING+disburse). El cron solo agrega; el
+    // acto de mover plata es siempre humano + auditado + con step-up MFA. El MFA por-monto se valida en el
+    // servicio sobre el total a desembolsar (BR-S07), no sobre el total agregado.
+    await this.payouts.runPayouts(start, end, user);
+    const summary = await this.payouts.disbursePendingForPeriod(start, end, user);
+    return { periodStart: start.toISOString(), periodEnd: end.toISOString(), ...summary };
+  }
+
+  // ── Reintento de un payout FALLIDO (ADR-015 §5 `POST /payouts/:id/retry`): FAILED→PROCESSING, idempotente
+  // por la MISMA dedupKey (el riel no duplica). Mutación de PLATA: EXCLUSIVO FINANCE + step-up MFA (borde +
+  // re-validación por-monto en el servicio). ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
+  @Post(':id/retry')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Reintentar un payout FALLIDO (FAILED→PROCESSING) — EXCLUSIVO FINANCE. Idempotente por dedupKey (el riel no duplica)',
+  })
+  retry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PayoutDisburseSummary> {
+    return this.payouts.retryPayout(id, user);
   }
 
   // ── Camino de VUELTA de driver.flagged (S4): el review del conductor se resolvió → liberar sus

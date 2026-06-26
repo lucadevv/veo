@@ -44,6 +44,7 @@ import {
   panicSummary,
   payoutView,
   runPayoutsResult,
+  payoutDisburseResult,
   signedMedia,
   tripDetail,
   tripSummary,
@@ -677,6 +678,25 @@ export function useReleaseDriverPayouts() {
   return useMutation({
     mutationFn: (input: { driverId: string }) =>
       apiClient().post(`/finance/payouts/drivers/${input.driverId}/release`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['payouts'] });
+    },
+  });
+}
+
+/**
+ * Reintenta un payout FALLIDO (ADR-015 §5): FAILED→PROCESSING re-invocando el riel de desembolso.
+ * Idempotente por dedupKey (el riel NO doble-paga); Idempotency-Key de extremo a extremo. >S/5000 exige
+ * step-up MFA (lo valida payment-service). Solo FINANCE (el bff revalida con @Roles; espejo `finance:payout`).
+ */
+export function useRetryPayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { payoutId: string; idempotencyKey: string }) =>
+      apiClient().post(`/finance/payouts/${input.payoutId}/retry`, {
+        schema: payoutDisburseResult,
+        idempotencyKey: input.idempotencyKey,
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['payouts'] });
     },
