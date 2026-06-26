@@ -33,6 +33,8 @@ export const TEMPLATE_KEYS = {
   PAYMENT_PENALTY_RECORDED: 'payment.penalty_recorded',
   PAYMENT_PENALTY_COLLECTED: 'payment.penalty_collected',
   PAYMENT_PENALTY_DRIVER_COMP: 'payment.penalty_driver_comp',
+  PAYOUT_PROCESSED: 'payout.processed',
+  PAYOUT_FAILED_CENTRAL_ALERT: 'payout.failed_central_alert',
   PAYMENT_CENTRAL_ALERT: 'payment.central_alert',
   CHAT_MESSAGE: 'chat.message',
   CONTACT_OTP: 'contact.otp',
@@ -63,7 +65,7 @@ export type InboxCategory = 'trip' | 'safety' | 'payment' | 'promo' | 'general';
 export function categoryForTemplate(key: string): InboxCategory {
   if (key.startsWith('trip.') || key.startsWith('chat.')) return 'trip';
   if (key.startsWith('panic.') || key.startsWith('contact.')) return 'safety';
-  if (key.startsWith('payment.')) return 'payment';
+  if (key.startsWith('payment.') || key.startsWith('payout.')) return 'payment';
   if (key.startsWith('promo.')) return 'promo';
   return 'general';
 }
@@ -281,6 +283,26 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Nuevo mensaje de tu conductor',
     body: 'Tu conductor te escribio: {{preview}}',
+  },
+  {
+    // Push al CONDUCTOR cuando su liquidación se DESEMBOLSÓ de verdad (ADR-015 D7: PROCESSED confirmado =
+    // la plata salió). Monto NETO en soles desde amountCents. Sin PII en el payload del evento (§0.7); el
+    // copy lo compone notification-service. La app abre su billetera (deep-link Wallet).
+    key: TEMPLATE_KEYS.PAYOUT_PROCESSED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tu liquidacion se proceso',
+    body: 'Tu liquidacion se proceso · S/{{amount}} en camino a tu billetera.',
+  },
+  {
+    // Aviso al OPERADOR/central (ADR-015 D7 opcional) cuando el desembolso FALLA (PROCESSING → FAILED): la
+    // plata NO salió, el operador puede reintentar. Reusa el riel webhook a la central (CENTRAL_ALERT_WEBHOOK_URL),
+    // mismo carril que PAYMENT_CENTRAL_ALERT — NO es un canal nuevo. Sin PII: solo IDs + monto + período.
+    key: TEMPLATE_KEYS.PAYOUT_FAILED_CENTRAL_ALERT,
+    channel: NotificationChannel.WEBHOOK,
+    locale: LOCALE,
+    subject: null,
+    body: 'PAYOUT_FALLIDO payout={{payoutId}} conductor={{driverId}} periodo={{period}}',
   },
   {
     key: TEMPLATE_KEYS.PAYMENT_CENTRAL_ALERT,

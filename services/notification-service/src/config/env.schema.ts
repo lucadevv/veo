@@ -130,6 +130,12 @@ export const envSchema = z.object({
   /// pánico (panic.fanout_requested). El payload Kafka no transporta PII; se resuelve acá por gRPC.
   SHARE_GRPC_URL: requiredInProd('localhost:50061'),
 
+  /// identity-service (lectura síncrona): resuelve `driverId → userId` para los pushes que targetean al
+  /// conductor por su `Driver.id` (ADR-015 D7 · payout.processed). El device-token store se consulta por
+  /// `userId`; sin esta resolución el push al conductor se omitía siempre (Driver.id ≠ userId). Mismo
+  /// default-coherente que booking-service (apunta al puerto gRPC real de identity).
+  IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
+
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 }).superRefine((env, ctx) => {
   // FAIL-FAST DE SEGURIDAD (regla ENTORNOS · diferenciador VEO): en un entorno PRODUCTIVO (internet-facing)
