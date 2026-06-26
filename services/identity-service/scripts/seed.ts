@@ -39,10 +39,11 @@ async function main(): Promise<void> {
 
   const admin = await prisma.adminUser.upsert({
     where: { email },
-    // El update NO re-pisa el TOTP de un admin ya existente: hacerlo en cada corrida del seed rompía el
-    // enrolamiento real del operador (su Authenticator quedaba desincronizado del secreto en DB). El TOTP
-    // solo se pre-enrola en create (DB fresca, para el visor de dev). Re-forzar el fijo = acción explícita.
-    update: { status: 'ACTIVE', roles: ['SUPERADMIN'] },
+    // El update preserva el TOTP de un admin ENDURECIDO (re-pisarlo desincronizaba el Authenticator real
+    // del operador). Pero en DEV (no endurecido) NO hay Authenticator real: es el secreto FIJO del visor →
+    // lo refrescamos también en el update para que el código del visor (:5190) SIEMPRE valide tras un
+    // re-seed (mata el blocker "Código TOTP incorrecto" por secreto en formato/key viejos). Solo dev.
+    update: { status: 'ACTIVE', roles: ['SUPERADMIN'], ...(isHardened ? {} : totpFields) },
     create: { email, passwordHash, roles: ['SUPERADMIN'], status: 'ACTIVE', ...totpFields },
   });
 
