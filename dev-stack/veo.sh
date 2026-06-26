@@ -36,6 +36,8 @@
 #   otp [-f]           Escáner de OTP de dev: muestra el código de cualquier OTP (driver/pasajero,
 #                      SMS sandbox + email) leyéndolo de notification.notifications. -f = en vivo.
 #                      El admin usa TOTP (Google Authenticator), no pasa por acá.
+#   trazar <paquete>   Gate determinista (00 §8) SCOPEADO a UN paquete (~2s). El root del monorepo
+#                      compila ~32 sub-proyectos y cuelga >2min → siempre scopeá al paquete tocado.
 #
 # REGLA DE PUERTOS (del dueño): si un puerto está ocupado por algo ajeno, se
 # REPORTA — JAMÁS se salta a otro puerto en silencio.
@@ -1073,6 +1075,48 @@ cmd_otp() {
   done
 }
 
+# ── SUBCOMANDO: trazar (gate determinista SCOPEADO) ───────────────────────────
+# `trazar index .` en el ROOT compila los ~32 sub-proyectos del monorepo → cuelga >2min (no es un bug:
+# trazar usa el compilador TS y el monorepo es grande). El gate por LOTE (00 §8) es SCOPEADO: indexá
+# SOLO el paquete tocado (~2s) y corré veredicto + findings sobre ESO. Esto lo hace ergonómico.
+#   veo.sh trazar <paquete>   → path (services/bff/admin-bff) o nombre suelto (admin-bff). Sin arg: lista.
+cmd_trazar() {
+  if ! command -v trazar >/dev/null 2>&1; then
+    red "  'trazar' no está en el PATH — instalá/linkeá el CLI de trazabilidad"; return 1
+  fi
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    yel "  uso: veo.sh trazar <paquete>   (ej. 'services/bff/admin-bff' ó 'admin-bff')"
+    blue "  el root entero cuelga (~32 paquetes); scopeá al que tocaste. Candidatos:"
+    fd -t f -g 'tsconfig.json' "$ROOT_DIR/services" "$ROOT_DIR/apps" "$ROOT_DIR/packages" \
+      -E node_modules -E dist 2>/dev/null | sed "s#$ROOT_DIR/##;s#/tsconfig.json##" | sort | sed 's/^/    /'
+    return 1
+  fi
+  # Resolver el paquete: path directo con tsconfig, o búsqueda fuzzy por nombre de dir.
+  local dir=""
+  if [[ -f "$ROOT_DIR/$target/tsconfig.json" ]]; then
+    dir="$ROOT_DIR/$target"
+  elif [[ -f "$target/tsconfig.json" ]]; then
+    dir="$target"
+  else
+    dir="$(fd -t d "$target" "$ROOT_DIR/services" "$ROOT_DIR/apps" "$ROOT_DIR/packages" \
+      -E node_modules 2>/dev/null | while read -r d; do [[ -f "$d/tsconfig.json" ]] && { echo "$d"; break; }; done)"
+  fi
+  if [[ -z "$dir" || ! -f "$dir/tsconfig.json" ]]; then
+    red "  no encontré un paquete con tsconfig.json para '$target' — corré 'veo.sh trazar' sin args para ver los candidatos"
+    return 1
+  fi
+  hdr "TRAZAR (scopeado) · ${dir#"$ROOT_DIR"/}"
+  blue "  index (solo este paquete — rápido) …"
+  if ! trazar index "$dir"; then red "  index falló (revisá que el paquete compile)"; return 1; fi
+  printf '\n'; trazar verdict "$dir" --fail-on-deadend; local v=$?
+  printf '\n'; trazar findings "$dir"
+  printf '\n'
+  (( v == 0 )) && green "  ✓ gate OK (sin dead-ends)" || yel "  ⚠ el veredicto marcó algo (ver arriba) — revisá antes de entregar el lote"
+  blue "  gate por LOTE: importan string-magico / n-plus-one / missing-transaction / promesa-flotante (within-package)."
+  yel  "  'orphan-receiver'/'dead-end' acá son RUIDO del scoping de un lado (el otro extremo no está en el grafo)."
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
@@ -1084,6 +1128,7 @@ case "${1:-}" in
   logs)    shift; cmd_logs "${1:-}" "${2:-}" ;;
   migrate) cmd_migrate ;;
   otp)     shift; cmd_otp "${1:-}" ;;
+  trazar)  shift; cmd_trazar "${1:-}" ;;
   *)
     cat <<EOF
 ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
@@ -1097,6 +1142,7 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}logs${C_RESET} <svc> [-f]    tail (o tail -f) de dev-stack/logs/<svc>.log
   ${C_BOLD}migrate${C_RESET}            prisma migrate deploy de todos los servicios (idempotente)
   ${C_BOLD}otp${C_RESET} [-f]           Escáner de OTP de dev (driver/pasajero · SMS sandbox + email). -f = en vivo. Admin=TOTP aparte
+  ${C_BOLD}trazar${C_RESET} <paquete>   Gate determinista SCOPEADO (index + veredicto + findings de UN paquete · ~2s). El root cuelga (~32 pkgs)
 
   servicios: $(printf '%s ' "${SERVICES[@]%%|*}")
 EOF
