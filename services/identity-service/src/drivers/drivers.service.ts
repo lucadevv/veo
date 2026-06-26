@@ -1401,13 +1401,17 @@ export class DriversService {
     // — `dniFaceMatchScore` es Float? en el schema, escala 0..100. (A diferencia de verifyBiometric, que SÍ
     // redondea a entero porque su score viaja en un sessionRef de un solo uso; acá el operador lo VE y el gate
     // de approve() mira `dniFaceMatchedAt`, no el score, así que no se redondea.)
-    await this.prisma.write.driver.update({
-      where: { id: driverId },
-      data: {
-        dniFaceMatched: result.matched,
-        dniFaceMatchScore: result.score,
-        dniFaceMatchedAt: new Date(),
-      },
+    // Persiste el binding + (si COMPLETA la identidad biométrica positiva) auto-verifica el KYC, en la MISMA tx.
+    await this.prisma.write.$transaction(async (tx) => {
+      await tx.driver.update({
+        where: { id: driverId },
+        data: {
+          dniFaceMatched: result.matched,
+          dniFaceMatchScore: result.score,
+          dniFaceMatchedAt: new Date(),
+        },
+      });
+      await this.autoVerifyKycIfComplete(tx, driverId);
     });
 
     return result;
@@ -1446,17 +1450,80 @@ export class DriversService {
       referenceEmbedding: driver.faceEmbedding,
     });
 
-    // GUARDA el binding de licencia en UNA escritura atómica (veredicto + score crudo 0..100 + momento juntos).
-    await this.prisma.write.driver.update({
-      where: { id: driverId },
-      data: {
-        licenseFaceMatched: result.matched,
-        licenseFaceMatchScore: result.score,
-        licenseFaceMatchedAt: new Date(),
-      },
+    // GUARDA el binding de licencia + (si COMPLETA la identidad biométrica positiva) auto-verifica el KYC, MISMA tx.
+    await this.prisma.write.$transaction(async (tx) => {
+      await tx.driver.update({
+        where: { id: driverId },
+        data: {
+          licenseFaceMatched: result.matched,
+          licenseFaceMatchScore: result.score,
+          licenseFaceMatchedAt: new Date(),
+        },
+      });
+      await this.autoVerifyKycIfComplete(tx, driverId);
     });
 
     return result;
+  }
+
+  /**
+   * AUTO-VERIFICACIÓN del KYC del conductor (DESACOPLADA de la aprobación). El `kycStatus` es la
+   * verificación de IDENTIDAD (biométrica); la aprobación del operador es el eje SEPARADO
+   * `backgroundCheckStatus`. Cuando la identidad biométrica está COMPLETA y POSITIVA — liveness PASÓ
+   * (PAD ok) + rostro↔DNI COINCIDE + rostro↔licencia COINCIDE — el KYC pasa SOLO a VERIFIED, sin esperar
+   * la aprobación. Decisión del dueño: "cuando todo el check biométrico coincide, el KYC ya está validado;
+   * la aprobación es el acto final cuando TODO está verde".
+   *
+   * SEGURO: la ELEGIBILIDAD operativa (booking-service driver-eligibility) exige `kycStatus===VERIFIED ∧
+   * backgroundCheckStatus===CLEARED` — desacoplar el KYC NO vuelve operativo al conductor: sigue faltando
+   * el CLEARED, que solo da approve(). NO_MATCH (similitud baja) NO auto-verifica: el KYC queda PENDING y lo
+   * decide el operador al aprobar (override). Idempotente: si ya está VERIFIED, no-op (no re-emite el evento).
+   * Espeja el patrón del KYC del pasajero (kyc.service): transición tipada + outbox `user.kyc_verified` en la
+   * MISMA tx. Se llama tras CADA match (el que complete el set positivo dispara el flip).
+   */
+  private async autoVerifyKycIfComplete(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+  ): Promise<void> {
+    const driver = await tx.driver.findUnique({
+      where: { id: driverId },
+      select: { userId: true, livenessChecked: true, dniFaceMatched: true, licenseFaceMatched: true },
+    });
+    if (!driver) return;
+    // Identidad biométrica COMPLETA y POSITIVA: las 3 condiciones tipadas (booleanos del dominio, no strings).
+    const biometricIdentityVerified =
+      driver.livenessChecked === true &&
+      driver.dniFaceMatched === true &&
+      driver.licenseFaceMatched === true;
+    if (!biometricIdentityVerified) return;
+    const user = await tx.user.findUnique({
+      where: { id: driver.userId },
+      select: { kycStatus: true },
+    });
+    // Ya VERIFIED → no-op idempotente (no re-transiciona ni re-emite). PENDING/REJECTED → VERIFIED.
+    if (!user || user.kycStatus === KycStatus.VERIFIED) return;
+    kycStatusMachine.assertTransition(user.kycStatus, KycStatus.VERIFIED);
+    const verifiedAt = new Date();
+    await tx.user.update({
+      where: { id: driver.userId },
+      data: { kycStatus: KycStatus.VERIFIED, kycVerifiedAt: verifiedAt },
+    });
+    const envelope = createEnvelope({
+      eventType: 'user.kyc_verified',
+      producer: 'identity-service',
+      payload: {
+        userId: driver.userId,
+        kycStatus: KycStatus.VERIFIED,
+        verifiedAt: verifiedAt.toISOString(),
+      },
+    });
+    await tx.outboxEvent.create({
+      data: {
+        aggregateId: driver.userId,
+        eventType: envelope.eventType,
+        envelope: envelope as unknown as Prisma.InputJsonValue,
+      },
+    });
   }
 
   /**

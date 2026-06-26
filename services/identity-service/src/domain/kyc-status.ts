@@ -1,6 +1,10 @@
 /**
- * Eje User.kycStatus — verificación de identidad del usuario (pasajero: liveness OK → VERIFIED;
- * conductor: la aprobación de antecedentes lo arrastra a VERIFIED, ver drivers.service).
+ * Eje User.kycStatus — verificación de IDENTIDAD del usuario, DESACOPLADA de la aprobación operativa:
+ *  - pasajero: liveness OK → VERIFIED (kyc.service).
+ *  - conductor: identidad biométrica COMPLETA y POSITIVA → VERIFIED SOLO (autoVerifyKycIfComplete en
+ *    drivers.service): liveness PASÓ + rostro↔DNI COINCIDE + rostro↔licencia COINCIDE. La APROBACIÓN del
+ *    operador es el eje SEPARADO `backgroundCheckStatus` (CLEARED en approve()); la elegibilidad operativa
+ *    exige AMBOS. NO_MATCH no auto-verifica → el operador decide al aprobar (approve setea VERIFIED idempotente).
  *
  *  - PENDING → VERIFIED | REJECTED: resultado de la verificación (biométrica u operador).
  *  - VERIFIED → EXPIRED | REJECTED: la verificación caduca o se revoca.

@@ -2031,23 +2031,44 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
 });
 
 describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', () => {
-  /** Prisma que captura el `data` del driver.update para aseverar que el resultado del match se GUARDA. */
-  function makeMatchPrisma(driver: unknown) {
+  /** Prisma que captura el `data` del driver.update (en la tx del match) + sirve el autoVerify del KYC. */
+  function makeMatchPrisma(driver: unknown, kycStatus: string = 'PENDING') {
     const updates: {
       dniFaceMatched?: boolean;
       dniFaceMatchScore?: number;
       dniFaceMatchedAt?: Date;
     }[] = [];
+    const userUpdates: Record<string, unknown>[] = [];
+    const events: string[] = [];
     return {
       updates,
+      userUpdates,
+      events,
       read: { driver: { findUnique: async () => driver } },
       write: {
-        driver: {
-          update: async (args: { data: (typeof updates)[number] }) => {
-            updates.push(args.data);
-            return {};
-          },
-        },
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            driver: {
+              update: async (args: { data: (typeof updates)[number] }) => {
+                updates.push(args.data);
+                return {};
+              },
+              findUnique: async () => driver,
+            },
+            user: {
+              findUnique: async () => ({ kycStatus }),
+              update: async (args: { data: Record<string, unknown> }) => {
+                userUpdates.push(args.data);
+                return {};
+              },
+            },
+            outboxEvent: {
+              create: async (args: { data: { eventType: string } }) => {
+                events.push(args.data.eventType);
+                return {};
+              },
+            },
+          }),
       },
     };
   }
@@ -2102,23 +2123,44 @@ describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', ()
 });
 
 describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)', () => {
-  /** Prisma que captura el `data` del driver.update para aseverar que el binding de LICENCIA se GUARDA. */
-  function makeMatchPrisma(driver: unknown) {
+  /** Prisma que captura el `data` del driver.update (en la tx del match) + sirve el autoVerify del KYC. */
+  function makeMatchPrisma(driver: unknown, kycStatus: string = 'PENDING') {
     const updates: {
       licenseFaceMatched?: boolean;
       licenseFaceMatchScore?: number;
       licenseFaceMatchedAt?: Date;
     }[] = [];
+    const userUpdates: Record<string, unknown>[] = [];
+    const events: string[] = [];
     return {
       updates,
+      userUpdates,
+      events,
       read: { driver: { findUnique: async () => driver } },
       write: {
-        driver: {
-          update: async (args: { data: (typeof updates)[number] }) => {
-            updates.push(args.data);
-            return {};
-          },
-        },
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            driver: {
+              update: async (args: { data: (typeof updates)[number] }) => {
+                updates.push(args.data);
+                return {};
+              },
+              findUnique: async () => driver,
+            },
+            user: {
+              findUnique: async () => ({ kycStatus }),
+              update: async (args: { data: Record<string, unknown> }) => {
+                userUpdates.push(args.data);
+                return {};
+              },
+            },
+            outboxEvent: {
+              create: async (args: { data: { eventType: string } }) => {
+                events.push(args.data.eventType);
+                return {};
+              },
+            },
+          }),
       },
     };
   }
@@ -2167,6 +2209,41 @@ describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)'
     expect(out.matched).toBe(false);
     expect(prisma.updates[0]?.licenseFaceMatched).toBe(false);
     expect(prisma.updates[0]?.licenseFaceMatchScore).toBe(28);
+  });
+
+  // ── AUTO-VERIFICACIÓN del KYC (desacople de la aprobación) ──
+  it('AUTO-VERIFICA el KYC (PENDING → VERIFIED + outbox user.kyc_verified) cuando liveness PASÓ + ambos matches COINCIDEN', async () => {
+    // okDriver tiene livenessChecked=true + dniFaceMatched=true; este match de licencia COINCIDE → set completo.
+    const prisma = makeMatchPrisma(okDriver, 'PENDING');
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
+    expect(prisma.userUpdates).toHaveLength(1);
+    expect(prisma.userUpdates[0]?.kycStatus).toBe('VERIFIED');
+    expect(prisma.userUpdates[0]?.kycVerifiedAt).toBeInstanceOf(Date);
+    expect(prisma.events).toContain('user.kyc_verified');
+  });
+
+  it('NO auto-verifica el KYC si el match del brevete NO coincide (identidad dudosa → queda PENDING, lo decide el operador)', async () => {
+    // Estado post-match con la licencia en NO_MATCH (el findUnique del autoVerify lo refleja).
+    const prisma = makeMatchPrisma({ ...okDriver, licenseFaceMatched: false }, 'PENDING');
+    const bioNoMatch = {
+      ...bio,
+      async matchDniFace() {
+        return { matched: false, score: 28, reason: 'no coincide' };
+      },
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, config);
+    await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
+    expect(prisma.userUpdates).toHaveLength(0);
+    expect(prisma.events).toHaveLength(0);
+  });
+
+  it('IDEMPOTENTE: si el KYC ya está VERIFIED no re-transiciona ni re-emite', async () => {
+    const prisma = makeMatchPrisma(okDriver, 'VERIFIED');
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, config);
+    await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
+    expect(prisma.userUpdates).toHaveLength(0);
+    expect(prisma.events).toHaveLength(0);
   });
 });
 
