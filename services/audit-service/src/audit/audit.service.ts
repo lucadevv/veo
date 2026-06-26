@@ -10,6 +10,7 @@ import type { EventEnvelope } from '@veo/events';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { AuditRepository, type AppendResult, type RecordedEntry } from './audit.repository';
 import { verifyChain, type ChainVerificationResult } from './chain';
+import { projectAuditPayload } from './payload-projection';
 
 /** Datos de un registro síncrono (POST /audit o gRPC Record). */
 export interface RecordSyncInput {
@@ -44,7 +45,17 @@ export interface VerifyRangeResult extends ChainVerificationResult {
 export class AuditService {
   constructor(private readonly repo: AuditRepository) {}
 
-  /** Registro síncrono iniciado por otro servicio (acción directa, no evento). */
+  /**
+   * Registro síncrono iniciado por otro servicio (acción directa, no evento · POST /audit + gRPC Record).
+   *
+   * SOBERANÍA (FOUNDATION §0.7 · Ley 29733): el payload se PROYECTA con `projectAuditPayload` ANTES de
+   * persistir, IGUAL que `recordFromEvent` — este es el mismo choke point para el carril síncrono. Sin esto,
+   * los callers (admin-bff: `operator.create` con {email}, `payment.refund`/`media.access_request` con
+   * {reason} free-text) fijaban PII en el WORM inmutable. La `action` (operator.create, payment.refund,
+   * media.access_*…) es la KEY de proyección: sin allowlist → `{}` vacío (safe-by-default, dropea email/reason;
+   * la fila conserva who/what/which/when). NOTA DEUDA PRE-EXISTENTE (fuera de este lote): recordSync NO es
+   * idempotente (eventId autogenerado por request) — a diferencia de recordFromEvent (idempotente por eventId).
+   */
   async recordSync(input: RecordSyncInput): Promise<RecordedEntry> {
     const result = await this.repo.appendEntry({
       eventId: uuidv7(),
@@ -55,13 +66,20 @@ export class AuditService {
       ip: input.ip,
       userAgent: input.userAgent,
       occurredAt: input.occurredAt ?? new Date(),
-      payload: input.payload,
+      payload: projectAuditPayload(input.action, input.payload),
     });
     domainEventsTotal.inc({ event: input.action, result: BusinessEventResult.RECORDED });
     return result.entry;
   }
 
-  /** Registro a partir de un evento de dominio consumido de Kafka. Idempotente por eventId. */
+  /**
+   * Registro a partir de un evento de dominio consumido de Kafka. Idempotente por eventId.
+   *
+   * SOBERANÍA (FOUNDATION §0.7 · Ley 29733): el payload del evento se PROYECTA con `projectAuditPayload`
+   * (allowlist tipada por eventType) ANTES de persistir. El WORM es inmutable (object-lock) → NUNCA debe
+   * fijar PII. La proyección es safe-by-default (un evento sin allowlist → `{}`) y tiene una denylist PII
+   * defensiva. La esencia forense (quién/qué/cuál/cuándo) vive en las columnas actor/action/resource/occurredAt.
+   */
   async recordFromEvent(
     envelope: EventEnvelope<unknown>,
     topic: string,
@@ -76,7 +94,7 @@ export class AuditService {
       ip: '',
       userAgent: `kafka:${topic}`,
       occurredAt: new Date(envelope.occurredAt),
-      payload: (envelope.payload ?? {}) as Record<string, unknown>,
+      payload: projectAuditPayload(envelope.eventType, envelope.payload),
     });
     domainEventsTotal.inc({
       event: envelope.eventType,

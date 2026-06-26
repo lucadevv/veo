@@ -135,10 +135,10 @@ describe('AuditConsumer · ciclo de vida del viaje (trazabilidad forense Ley 297
     }
   });
 
-  it('NO audita trip.requested/bid_posted/reassigning (llevan geo → no van al WORM inmutable)', () => {
-    expect(handlers.has('trip.requested')).toBe(false);
-    expect(handlers.has('trip.bid_posted')).toBe(false);
-    expect(handlers.has('trip.reassigning')).toBe(false);
+  it('SÍ audita trip.requested/bid_posted/reassigning (la geo del payload la descarta la proyección, no se excluyen)', () => {
+    expect(handlers.has('trip.requested')).toBe(true);
+    expect(handlers.has('trip.bid_posted')).toBe(true);
+    expect(handlers.has('trip.reassigning')).toBe(true);
   });
 
   it('trip.started → actorId=driverId, resourceType=trip, resourceId=tripId', async () => {
@@ -619,5 +619,245 @@ describe('AuditConsumer · desembolsos (ciclo de payout al WORM inmutable · ADR
     const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
     expect(topic).toBe(topicForEvent('payout.processed'));
     expect(mapping).toEqual({ actorId: 'drv-5', resourceType: 'payout', resourceId: 'po-3' });
+  });
+});
+
+describe('AuditConsumer · trazabilidad total (representativos por categoría · "todo todo")', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  const mappingOf = () => (recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping])[2];
+
+  // ── A · money ──
+  it('A/money · payment.cancellation_penalty_recorded → actor=passengerId, recurso=penalty/penaltyId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payment.cancellation_penalty_recorded',
+      producer: 'payment-service',
+      payload: {
+        penaltyId: 'pen-1',
+        tripId: 't-1',
+        passengerId: 'pax-1',
+        driverId: 'drv-1',
+        penaltyCents: 500,
+        driverCompensationCents: 300,
+        platformCents: 200,
+      },
+    });
+    await handlers.get('payment.cancellation_penalty_recorded')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'pax-1', resourceType: 'penalty', resourceId: 'pen-1' });
+  });
+
+  // ── B · acceso (admin.role_changed) ──
+  it('B/acceso · admin.role_changed → actor=changedBy, recurso=admin/adminUserId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'admin.role_changed',
+      producer: 'identity-service',
+      payload: {
+        adminUserId: 'adm-9',
+        roles: ['PANIC_OPERATOR'],
+        changedBy: 'super-1',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('admin.role_changed')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'super-1', resourceType: 'admin', resourceId: 'adm-9' });
+  });
+
+  it('B/acceso · driver.flagged (regla automática) → actor=system, recurso=driver', async () => {
+    const envelope = createEnvelope({
+      eventType: 'driver.flagged',
+      producer: 'rating-service',
+      payload: { driverId: 'drv-9', rollingAvg: 3.9, reason: 'suspension' },
+    });
+    await handlers.get('driver.flagged')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'system', resourceType: 'driver', resourceId: 'drv-9' });
+  });
+
+  it('B/acceso · fleet.driver_suspended por ITV (vía userId) → recurso=userId cuando no hay driverId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'fleet.driver_suspended',
+      producer: 'fleet-service',
+      payload: {
+        userId: 'usr-7',
+        reason: 'INSPECTION_EXPIRED',
+        vehicleId: 'veh-1',
+        suspendedAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('fleet.driver_suspended')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'system', resourceType: 'driver', resourceId: 'usr-7' });
+  });
+
+  // ── C · ciclo (booking.published) ──
+  it('C/ciclo · booking.published → actor=driverId, recurso=published_trip/publishedTripId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'booking.published',
+      producer: 'booking-service',
+      payload: {
+        publishedTripId: 'pt-1',
+        driverId: 'drv-1',
+        vehicleId: 'veh-1',
+        asientosTotales: 3,
+        precioBase: 1500,
+        modoReserva: 'INSTANT_BOOKING',
+        fechaHoraSalida: new Date().toISOString(),
+        pais: 'PE',
+        moneda: 'PEN',
+      },
+    });
+    await handlers.get('booking.published')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'drv-1',
+      resourceType: 'published_trip',
+      resourceId: 'pt-1',
+    });
+  });
+
+  it('C/ciclo · booking.approved discrimina por origen (INSTANT→system, APROBACION_CONDUCTOR→driverId)', async () => {
+    const mk = (origen: 'INSTANT_BOOKING' | 'APROBACION_CONDUCTOR') =>
+      createEnvelope({
+        eventType: 'booking.approved',
+        producer: 'booking-service',
+        payload: {
+          bookingId: 'bk-1',
+          publishedTripId: 'pt-1',
+          passengerId: 'pax-1',
+          driverId: 'drv-1',
+          asientos: 1,
+          precioAcordado: 1500,
+          modoReserva: origen === 'INSTANT_BOOKING' ? 'INSTANT_BOOKING' : 'REVISION_CADA_SOLICITUD',
+          estado: 'APROBADO',
+          origen,
+        },
+      });
+    await handlers.get('booking.approved')!(mk('INSTANT_BOOKING'));
+    await handlers.get('booking.approved')!(mk('APROBACION_CONDUCTOR'));
+    const actors = recordFromEvent.mock.calls.map((c) => (c[2] as EventAuditMapping).actorId);
+    expect(actors).toEqual(['system', 'drv-1']);
+  });
+
+  it('C/ciclo · booking.cancelled forma A (oferta, sin bookingId) → actor=driverId, recurso=published_trip', async () => {
+    const envelope = createEnvelope({
+      eventType: 'booking.cancelled',
+      producer: 'booking-service',
+      payload: {
+        publishedTripId: 'pt-9',
+        driverId: 'drv-9',
+        estado: 'CANCELADO',
+        estadoAnterior: 'PUBLICADO',
+      },
+    });
+    await handlers.get('booking.cancelled')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'drv-9',
+      resourceType: 'published_trip',
+      resourceId: 'pt-9',
+    });
+  });
+
+  it('C/ciclo · booking.cancelled forma B (booking individual, con bookingId) → actor=system, recurso=booking', async () => {
+    const envelope = createEnvelope({
+      eventType: 'booking.cancelled',
+      producer: 'booking-service',
+      payload: {
+        bookingId: 'bk-7',
+        razon: 'ASIENTO_LLENO',
+        estado: 'CANCELADO',
+        estadoAnterior: 'COBRO_PENDIENTE',
+      },
+    });
+    await handlers.get('booking.cancelled')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'system', resourceType: 'booking', resourceId: 'bk-7' });
+  });
+
+  it('C/ciclo · pricing.mode_schedule_updated → actor=system, recurso=pricing/mode_schedule (config snapshot)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'pricing.mode_schedule_updated',
+      producer: 'admin-bff',
+      payload: {
+        defaultMode: 'PUJA',
+        rules: [{ dayMask: 127, startMinute: 0, endMinute: 1439, mode: 'FIXED' }],
+        version: 3,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('pricing.mode_schedule_updated')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'system',
+      resourceType: 'pricing',
+      resourceId: 'mode_schedule',
+    });
+  });
+
+  it('C/ciclo · dispatch.match_found → actor=driverId, recurso=dispatch/tripId (sin geo en el payload)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'dispatch.match_found',
+      producer: 'dispatch-service',
+      payload: { tripId: 't-5', driverId: 'drv-5', vehicleId: 'veh-5', scoreMs: 12 },
+    });
+    await handlers.get('dispatch.match_found')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'drv-5', resourceType: 'dispatch', resourceId: 't-5' });
+  });
+
+  // ── D · metadato (chat SÍ se audita; el body lo descarta la proyección antes del WORM) ──
+  it('D/metadato · chat.message_sent → actor=senderId, recurso=chat/tripId (el body lo dropea la proyección)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'chat.message_sent',
+      producer: 'chat-service',
+      payload: {
+        messageId: 'msg-1',
+        tripId: 't-1',
+        senderId: 'pax-1',
+        senderRole: 'PASSENGER',
+        body: 'texto privado',
+        createdAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('chat.message_sent')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'pax-1', resourceType: 'chat', resourceId: 't-1' });
+  });
+
+  it('D/metadato · notification.sent → actor=system, recurso=notification/notificationId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'notification.sent',
+      producer: 'notification-service',
+      payload: { notificationId: 'ntf-1', channel: 'PUSH', to: 'tok-abc' },
+    });
+    await handlers.get('notification.sent')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'system',
+      resourceType: 'notification',
+      resourceId: 'ntf-1',
+    });
+  });
+
+  it('share.link_generated → actor=system, recurso=share/shareId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'share.link_generated',
+      producer: 'share-service',
+      payload: { shareId: 'sh-1', tripId: 't-1', expiresAt: new Date().toISOString() },
+    });
+    await handlers.get('share.link_generated')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'system', resourceType: 'share', resourceId: 'sh-1' });
   });
 });
