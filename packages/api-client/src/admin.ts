@@ -339,6 +339,27 @@ export const driverDetail = z.object({
   vehicle: driverVehicle.nullable(),
   documents: z.array(adminDriverDocument),
   /**
+   * READINESS de aprobación NO-biométrico (documental + ITV) REFLEJADO del gate server-side de `approve()`.
+   * Lo calcula el admin-bff con la MISMA lógica que IMPONE al aprobar (single source of truth) → el panel
+   * muestra exactamente qué falta y NO habilita "Aprobar" a ciegas. La UI refleja, el servidor decide.
+   *  - documentsValid: TODOS los docs obligatorios están VALID. missingDocuments: los que faltan/no-válidos.
+   *  - inspection.current: la ITV del vehículo operado está vigente (passed && no vencida). invalidReason
+   *    (NONE/NOT_PASSED/OVERDUE/NO_VEHICLE · null si vigente) explica POR QUÉ no, para el hint del operador.
+   */
+  approvalReadiness: z.object({
+    documentsValid: z.boolean(),
+    missingDocuments: z.array(z.string()),
+    inspection: z.object({
+      current: z.boolean(),
+      invalidReason: z.string().nullable(),
+      nextDueAt: z.string().nullable(),
+      hasVehicle: z.boolean(),
+      // Vehículo OPERADO contra el que se evalúa la ITV (mismo selector que el gate). El panel lo usa para
+      // precargar el alta de inspección inline. null si el conductor no tiene vehículo operable.
+      vehicleId: z.string().nullable(),
+    }),
+  }),
+  /**
    * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS, derivado en identity): las `cause` distintas de los
    * holds vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. El panel
    * lo usa para saber POR QUÉ está suspendido y llamar el endpoint correcto: DISCIPLINARY → /reactivate;

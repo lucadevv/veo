@@ -502,6 +502,9 @@ export class OpsService {
     // IMAGEN (DNI anverso+reverso, N fotos de vehículo). Backward-compat: si el doc NO trae imágenes pero
     // sí el legacy fileS3Key, lo tratamos como una sola imagen SINGLE (no se pierde el render de 1 imagen).
     // `url` (deprecado) = la URL de la primera imagen, para el render legacy. Todas las firmas en paralelo.
+    // READINESS de aprobación (docs + ITV) REFLEJADO del gate server-side, en paralelo con el presigning de
+    // imágenes (1 gRPC extra, sin latencia añadida): el panel muestra qué falta y NO habilita aprobar a ciegas.
+    const approvalReadinessPromise = this.computeApprovalGates(identity, driver.userId, docs);
     const documents: AdminDriverDocument[] = await Promise.all(
       docs.documents.map(async (doc) => {
         // Fuente de imágenes: las N reales o, si no hay, la degradación al legacy fileS3Key (1 SINGLE).
@@ -532,6 +535,8 @@ export class OpsService {
         };
       }),
     );
+
+    const approvalReadiness = await approvalReadinessPromise;
 
     await this.audit.record(identity, {
       action: 'driver.documents.view',
@@ -591,6 +596,44 @@ export class OpsService {
       // /reactivate-compliance). [] si no está suspendido. Defensivo: proto3 puede entregar el repeated como
       // undefined si el productor es viejo → degradamos a [] (el badge `currentStatus`/suspensión no cambia).
       suspensionCauses: driver.suspensionCauses ?? [],
+      approvalReadiness,
+    };
+  }
+
+  /**
+   * Gates de aprobación NO-biométricos (documental + ITV) calculados UNA vez — FUENTE ÚNICA consumida por:
+   *  - `approveDriver` → los IMPONE (fail-closed; curl-proof: saltear la UI no saltea el gate).
+   *  - `driverDetail`  → los EXPONE como `approvalReadiness` para que el panel muestre QUÉ falta y NO habilite
+   *    "Aprobar" a ciegas (la UI refleja, NO autoriza).
+   * Recibe los `docs` YA traídos (evita un GetDriverDocuments duplicado) y suma la inspección del vehículo
+   * OPERADO. fleet indexa los vehículos por Vehicle.driverId = User.id → la ITV se consulta por `userId`, NO
+   * el driverId de perfil (mismo patrón que driverDetail/approveDriver).
+   */
+  private async computeApprovalGates(
+    identity: AuthUser,
+    userId: string,
+    docs: DriverDocumentsReply,
+  ): Promise<DriverDetail['approvalReadiness']> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const inspection = await this.fleetGrpc.call<DriverInspectionStatusReply>(
+      'GetDriverInspectionStatus',
+      { id: userId },
+      meta,
+    );
+    const missingDocuments = REQUIRED_DRIVER_DOC_TYPES.filter(
+      (req) =>
+        !docs.documents.some((d) => d.type === req && d.status === FleetDocumentStatus.VALID),
+    );
+    return {
+      documentsValid: missingDocuments.length === 0,
+      missingDocuments: [...missingDocuments],
+      inspection: {
+        current: inspection.current,
+        invalidReason: emptyToNull(inspection.invalidReason),
+        nextDueAt: emptyToNull(inspection.nextDueAt),
+        hasVehicle: inspection.hasVehicle,
+        vehicleId: emptyToNull(inspection.vehicleId),
+      },
     };
   }
 
@@ -777,40 +820,30 @@ export class OpsService {
       { id: driverId },
       meta,
     );
-    const missing = REQUIRED_DRIVER_DOC_TYPES.filter(
-      (req) =>
-        !docs.documents.some((d) => d.type === req && d.status === FleetDocumentStatus.VALID),
-    );
-    if (missing.length > 0) {
-      throw new ConflictError(
-        `No se puede aprobar: faltan documentos válidos (${missing.join(', ')})`,
-        { driverId, missing },
-      );
-    }
-
-    // GATE de INSPECCIÓN TÉCNICA (ITV · compliance/seguridad): un conductor NO se aprueba si su vehículo
-    // OPERADO no tiene una inspección VIGENTE (passed && no vencida). Se SUMA al gate documental (no lo
-    // reemplaza). La verdad de la ITV es el modelo Inspection en fleet, NO un FleetDocument. fleet indexa
-    // los vehículos por Vehicle.driverId = User.id (NO el driverId de perfil), así que primero resolvemos el
-    // userId con GetDriver (mismo patrón que driverDetail) y recién con ese userId consultamos la vigencia.
+    // fleet indexa los vehículos por Vehicle.driverId = User.id (NO el driverId de perfil) → resolvemos el
+    // userId con GetDriver para el gate de ITV. La verdad de docs+ITV la calcula computeApprovalGates (la
+    // MISMA que driverDetail EXPONE como approvalReadiness): single source of truth — acá la IMPONEMOS.
     const driver = await this.identityGrpc.call<DriverReply>('GetDriver', { id: driverId }, meta);
     if (!driver.found) {
       throw new NotFoundError('Conductor no encontrado', { driverId });
     }
-    const inspection = await this.fleetGrpc.call<DriverInspectionStatusReply>(
-      'GetDriverInspectionStatus',
-      { id: driver.userId },
-      meta,
-    );
-    if (!inspection.current) {
-      const message = INSPECTION_BLOCK_MESSAGE[inspection.invalidReason] ?? INSPECTION_BLOCK_DEFAULT;
+    const gates = await this.computeApprovalGates(identity, driver.userId, docs);
+    if (!gates.documentsValid) {
+      throw new ConflictError(
+        `No se puede aprobar: faltan documentos válidos (${gates.missingDocuments.join(', ')})`,
+        { driverId, missing: gates.missingDocuments },
+      );
+    }
+    if (!gates.inspection.current) {
+      const message =
+        INSPECTION_BLOCK_MESSAGE[gates.inspection.invalidReason ?? ''] ?? INSPECTION_BLOCK_DEFAULT;
       throw new ConflictError(message, {
         driverId,
         userId: driver.userId,
-        vehicleId: emptyToNull(inspection.vehicleId),
-        invalidReason: inspection.invalidReason || null,
-        nextDueAt: emptyToNull(inspection.nextDueAt),
-        hasVehicle: inspection.hasVehicle,
+        vehicleId: gates.inspection.vehicleId,
+        invalidReason: gates.inspection.invalidReason,
+        nextDueAt: gates.inspection.nextDueAt,
+        hasVehicle: gates.inspection.hasVehicle,
       });
     }
 

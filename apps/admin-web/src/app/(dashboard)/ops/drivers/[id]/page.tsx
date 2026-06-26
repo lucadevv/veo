@@ -26,6 +26,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { useToast } from '@/components/ui/toast';
 import { DocumentViewer } from '@/components/drivers/document-viewer';
+import { CreateInspectionDialog } from '@/components/fleet/fleet-forms';
 
 /**
  * Detalle de revisión de un conductor (GET /ops/drivers/:id): datos core + biométrico + VISOR de
@@ -89,9 +90,10 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
         <ErrorState onRetry={() => void query.refetch()} className="m-6" />
       ) : driver ? (
         <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 lg:p-6">
-          {/* Barra de aprobación: la acción PRIMARIA de la pantalla, al frente y gateada (refleja el
-              gate server-side: ambos face-match ejecutados). El operador ve el readiness de un vistazo. */}
-          <ApprovalBar driver={driver} />
+          {/* Barra de aprobación: la acción PRIMARIA de la pantalla, al frente y gateada (refleja TODOS los
+              gates server-side: face-match + liveness + documentos + ITV). El operador ve el readiness de un
+              vistazo y registra la ITV inline si es lo que falta. */}
+          <ApprovalBar driver={driver} onItvRegistered={() => void query.refetch()} />
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
@@ -513,6 +515,17 @@ function livenessLabel(
   return 'No enrolado';
 }
 
+/**
+ * Hint corto del gate de ITV por motivo de invalidez (presentación, NO lógica: el gate usa el booleano
+ * `inspection.current`). Espeja los motivos que clasifica fleet (NONE/NOT_PASSED/OVERDUE/NO_VEHICLE).
+ */
+const ITV_HINT: Record<string, string> = {
+  NONE: 'El vehículo no tiene ITV registrada.',
+  NOT_PASSED: 'La ITV del vehículo está reprobada.',
+  OVERDUE: 'La ITV del vehículo está vencida.',
+  NO_VEHICLE: 'El conductor no tiene un vehículo operable.',
+};
+
 /** Chip de readiness para la barra de aprobación: verde ok / ámbar-danger warn / neutro pendiente. */
 function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
   const cfg = {
@@ -537,21 +550,36 @@ function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
  * CTA "Aprobar conductor" GATEADA: deshabilitada con el motivo hasta correr ambos bindings. La UI REFLEJA
  * el gate (no autoriza); el bff revalida @Roles + el gate dual + los documentos obligatorios.
  */
-function ApprovalBar({ driver }: { driver: DriverDetail }) {
+function ApprovalBar({
+  driver,
+  onItvRegistered,
+}: {
+  driver: DriverDetail;
+  onItvRegistered: () => void;
+}) {
   const user = useSession();
   const { toast } = useToast();
   const decision = useDriverDecision();
   const bio = driver.biometric;
-  // Gate DUAL server-side de `approve()` REFLEJADO (la UI no autoriza): ambos face-match ejecutados + el
-  // liveness pasivo PASSED (el PAD corrió). El bff revalida igual @Roles + el gate + los documentos.
+  const readiness = driver.approvalReadiness;
+  const itv = readiness.inspection;
+  // TODOS los gates server-side de `approve()` REFLEJADOS (la UI no autoriza, refleja): face-match dual +
+  // liveness PASSED + documentos obligatorios VALID + ITV vigente. canApprove exige los cuatro → el botón
+  // ya NO se habilita a ciegas. El bff revalida igual @Roles + los mismos gates (computeApprovalGates).
   const livenessPassed = bio.livenessStatus === PassiveLivenessStatus.PASSED;
   const facesRun = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
-  const canApprove = facesRun && livenessPassed;
-  // Motivo HONESTO del bloqueo (cronológico): el anti-spoofing degradado NO se arregla corriendo el match —
-  // exige re-enrolar; los face-match sí los dispara el operador desde esta pantalla.
+  const canApprove = facesRun && livenessPassed && readiness.documentsValid && itv.current;
+  // Motivo HONESTO del bloqueo, en el ORDEN en que el operador lo resuelve: anti-spoofing (re-enrol) →
+  // face-match (cotejo, en esta pantalla) → documentos (validar en la ficha) → ITV (registrar acá mismo).
   const blockReason = !livenessPassed
     ? 'El anti-spoofing del enrol no corrió (enrol degradado); el conductor debe re-enrolar su biometría.'
-    : 'Corré ambos face-match para habilitar.';
+    : !facesRun
+      ? 'Corré ambos face-match para habilitar.'
+      : !readiness.documentsValid
+        ? `Faltan documentos válidos: ${readiness.missingDocuments.join(', ')}. Validalos abajo en Documentos.`
+        : !itv.current
+          ? (ITV_HINT[itv.invalidReason ?? ''] ?? 'Falta la inspección técnica (ITV) del vehículo.')
+          : '';
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between lg:px-5">
@@ -562,11 +590,29 @@ function ApprovalBar({ driver }: { driver: DriverDetail }) {
           <ReadyChip label="Anti-spoofing" state={livenessReadiness(bio.livenessStatus)} />
           <ReadyChip label="Rostro vs DNI" state={faceReadiness(bio.dniFaceMatchStatus)} />
           <ReadyChip label="Rostro vs licencia" state={faceReadiness(bio.licenseFaceMatchStatus)} />
+          <ReadyChip label="Documentos" state={readiness.documentsValid ? 'ok' : 'warn'} />
+          <ReadyChip label="ITV" state={itv.current ? 'ok' : 'warn'} />
         </div>
       </div>
 
       {can(user, 'drivers:approve') ? (
         <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+          {/* Puente a la ITV: si es lo que bloquea y hay vehículo operable, el operador la registra ACÁ MISMO
+              (vehículo precargado, sin pegar uuids ni salir de la pantalla). Al registrarla, refresca el detalle
+              → el chip ITV pasa a verde y "Aprobar" se habilita. Sin vehículo no se ofrece (no hay qué inspeccionar). */}
+          {!itv.current && (itv.vehicleId || driver.vehicle) ? (
+            <CreateInspectionDialog
+              vehicleId={itv.vehicleId ?? driver.vehicle?.id}
+              vehicleLabel={driver.vehicle?.plate ?? undefined}
+              onCreated={onItvRegistered}
+              trigger={
+                <Button variant="secondary">
+                  <Car className="size-4" aria-hidden />
+                  Registrar ITV
+                </Button>
+              }
+            />
+          ) : null}
           <ConfirmDialog
             trigger={
               <Button variant="primary" disabled={!canApprove}>

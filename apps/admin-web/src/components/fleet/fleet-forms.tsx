@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import { FleetDocumentType } from '@veo/shared-types';
 import {
@@ -329,15 +329,34 @@ export function CreateDocumentDialog() {
   );
 }
 
-/* ── Alta de inspección ── */
-export function CreateInspectionDialog() {
+/* ── Alta de inspección ──
+ * Reusable: sin props es el alta genérica de Flota (el operador tipea el uuid). Con `vehicleId` precargado
+ * (p.ej. desde la barra de aprobación del conductor) el vehículo viene FIJO y se muestra su placa — el
+ * operador no pega uuids ni se equivoca de vehículo. `onCreated` deja refrescar el contexto llamador. */
+export function CreateInspectionDialog({
+  vehicleId: presetVehicleId,
+  vehicleLabel,
+  trigger,
+  onCreated,
+}: {
+  vehicleId?: string;
+  vehicleLabel?: string;
+  trigger?: ReactNode;
+  onCreated?: () => void;
+} = {}) {
   const create = useCreateInspection();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ vehicleId: '', passed: 'true', inspectedAt: '', notes: '' });
+  const [form, setForm] = useState({
+    vehicleId: presetVehicleId ?? '',
+    passed: 'true',
+    inspectedAt: '',
+    notes: '',
+  });
 
+  const locked = Boolean(presetVehicleId);
   const valid = form.vehicleId.trim().length > 0;
 
   async function submit() {
@@ -352,7 +371,8 @@ export function CreateInspectionDialog() {
       });
       toast({ tone: 'success', title: 'Inspección registrada' });
       setOpen(false);
-      setForm({ vehicleId: '', passed: 'true', inspectedAt: '', notes: '' });
+      setForm({ vehicleId: presetVehicleId ?? '', passed: 'true', inspectedAt: '', notes: '' });
+      onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo registrar la inspección.');
     } finally {
@@ -363,9 +383,7 @@ export function CreateInspectionDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <span>
-          <CreateTrigger label="Registrar inspección" />
-        </span>
+        <span>{trigger ?? <CreateTrigger label="Registrar inspección" />}</span>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -375,12 +393,18 @@ export function CreateInspectionDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-1">
-          <Field label="ID del vehículo">
-            <Input
-              value={form.vehicleId}
-              onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
-              placeholder="uuid del vehículo"
-            />
+          <Field label="Vehículo">
+            {locked ? (
+              <div className="flex h-11 items-center rounded-md border border-border bg-surface-2 px-3 text-sm text-ink">
+                {vehicleLabel ?? form.vehicleId}
+              </div>
+            ) : (
+              <Input
+                value={form.vehicleId}
+                onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                placeholder="uuid del vehículo"
+              />
+            )}
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Resultado">
