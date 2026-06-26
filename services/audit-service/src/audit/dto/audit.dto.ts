@@ -1,4 +1,4 @@
-import { IsInt, IsObject, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsInt, IsObject, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -26,6 +26,16 @@ export class RecordAuditDto {
   @IsOptional()
   @IsObject()
   payload?: Record<string, unknown>;
+
+  // IDEMPOTENCIA del registro síncrono (espejo del carril Kafka): id ESTABLE del evento (UUIDv7)
+  // generado por el caller UNA vez por acción. Un retry de TRANSPORTE reusa el mismo id → el append-only
+  // dedupea por eventId y no duplica la fila WORM. Omitir = caller legacy: el servicio genera uno (no
+  // idempotente). El retry a nivel OPERACIÓN-BFF (doble-submit del operador) es otro tema (idempotency
+  // keys en las mutaciones admin) — fuera de scope de este campo.
+  @ApiPropertyOptional({ description: 'Id estable del evento (UUIDv7) para idempotencia del registro.' })
+  @IsOptional()
+  @IsUUID()
+  eventId?: string;
 }
 
 export class QueryAuditDto {

@@ -24,6 +24,9 @@ interface RecordRequest {
   resourceType: string;
   resourceId: string;
   payloadJson: string;
+  // Id estable del evento (UUIDv7) para idempotencia. proto3 + defaults:true → "" cuando el caller no lo manda;
+  // opcional acá porque un caller legacy puede no setearlo (`req.eventId || undefined` lo normaliza a ausente).
+  eventId?: string;
 }
 interface RecordReply {
   id: string;
@@ -114,6 +117,8 @@ export class AuditGrpcController {
       payload: parsePayload(req.payloadJson),
       ip: '',
       userAgent: 'grpc',
+      // proto3 entrega "" cuando el caller no lo manda → tratá vacío como ausente (caller legacy).
+      eventId: req.eventId || undefined,
     });
     return { id: entry.id, seq: String(entry.seq), hash: entry.hash };
   }

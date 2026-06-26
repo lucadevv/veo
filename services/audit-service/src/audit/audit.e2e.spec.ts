@@ -12,6 +12,7 @@ import {
   type TestDatabase,
 } from '@veo/database/testing';
 import { createEnvelope } from '@veo/events';
+import { isUuidV7, uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../generated/prisma';
 import { type PrismaService } from '../infra/prisma.service';
 import { AuditRepository } from './audit.repository';
@@ -98,6 +99,84 @@ describe('append-only hash chain (Postgres real)', () => {
     expect(await repo.count()).toBe(before + 1);
     // El registro idempotente devuelve la MISMA entrada (mismo hash).
     expect(second.entry.hash).toBe(first.entry.hash);
+  });
+});
+
+describe('idempotencia del registro SÍNCRONO por eventId (espejo del carril Kafka)', () => {
+  it('recordSync 2× con el MISMO eventId → UNA sola fila (el 2º es no-op idempotente)', async () => {
+    const before = await repo.count();
+    const eventId = uuidv7();
+    const first = await service.recordSync({
+      actorId: 'op-1',
+      action: 'operator.create',
+      resourceType: 'operator',
+      resourceId: 'op-new-1',
+      payload: { email: 'x@y.z' },
+      ip: '10.0.0.9',
+      userAgent: 'grpc',
+      eventId,
+    });
+    // Retry de TRANSPORTE: mismo record() → mismo eventId.
+    const second = await service.recordSync({
+      actorId: 'op-1',
+      action: 'operator.create',
+      resourceType: 'operator',
+      resourceId: 'op-new-1',
+      payload: { email: 'x@y.z' },
+      ip: '10.0.0.9',
+      userAgent: 'grpc',
+      eventId,
+    });
+
+    // ASSERT CLAVE: el WORM no creció en la 2ª llamada (el seq NO avanzó) y devuelve la fila EXISTENTE.
+    expect(await repo.count()).toBe(before + 1);
+    expect(second.eventId).toBe(first.eventId);
+    expect(second.seq).toBe(first.seq);
+    expect(second.hash).toBe(first.hash);
+    expect(second.id).toBe(first.id);
+  });
+
+  it('recordSync con eventos DISTINTOS → 2 filas (no sobre-dedupea)', async () => {
+    const before = await repo.count();
+    const a = await service.recordSync({
+      actorId: 'op-2',
+      action: 'operator.create',
+      resourceType: 'operator',
+      resourceId: 'op-new-2',
+      payload: {},
+      ip: '',
+      userAgent: 'grpc',
+      eventId: uuidv7(),
+    });
+    const b = await service.recordSync({
+      actorId: 'op-2',
+      action: 'operator.create',
+      resourceType: 'operator',
+      resourceId: 'op-new-2',
+      payload: {},
+      ip: '',
+      userAgent: 'grpc',
+      eventId: uuidv7(),
+    });
+    expect(await repo.count()).toBe(before + 2);
+    expect(a.eventId).not.toBe(b.eventId);
+    expect(b.seq).toBe(a.seq + 1n);
+  });
+
+  it('backward-compat: sin eventId (caller legacy) → genera uno y NO crashea', async () => {
+    const before = await repo.count();
+    const entry = await service.recordSync({
+      actorId: 'op-3',
+      action: 'operator.create',
+      resourceType: 'operator',
+      resourceId: 'op-new-3',
+      payload: {},
+      ip: '',
+      userAgent: 'grpc',
+    });
+    expect(await repo.count()).toBe(before + 1);
+    // El servicio generó un eventId (UUIDv7) por su cuenta.
+    expect(isUuidV7(entry.eventId)).toBe(true);
   });
 });
 

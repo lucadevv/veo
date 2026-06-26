@@ -58,6 +58,8 @@ export class AuditController {
       payload: dto.payload ?? {},
       ip: clientIp(req),
       userAgent: header(req, 'user-agent'),
+      // Id estable provisto por el caller (opcional) → idempotencia del registro síncrono.
+      eventId: dto.eventId,
     });
     return toResponse(entry);
   }

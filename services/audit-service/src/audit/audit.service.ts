@@ -5,7 +5,7 @@
  * La réplica WORM a S3 la realiza el relay (S3ReplicationRelay), desacoplado y resiliente.
  */
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { uuidv7 } from '@veo/utils';
+import { uuidv7, isUuid, ValidationError } from '@veo/utils';
 import type { EventEnvelope } from '@veo/events';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { AuditRepository, type AppendResult, type RecordedEntry } from './audit.repository';
@@ -22,6 +22,12 @@ export interface RecordSyncInput {
   ip: string;
   userAgent: string;
   occurredAt?: Date;
+  /**
+   * Id ESTABLE del evento (UUIDv7) provisto por el caller para IDEMPOTENCIA (espejo de recordFromEvent).
+   * Si viene → se usa tal cual y un retry de transporte dedupea por eventId (no duplica fila WORM).
+   * Si NO viene → el servicio genera uno (caller legacy, NO idempotente). Ver `eventId` del DTO/proto.
+   */
+  eventId?: string;
 }
 
 /** Mapeo de un evento de dominio consumido a una entrada de auditoría. */
@@ -76,12 +82,23 @@ export class AuditService {
    * los callers (admin-bff: `operator.create` con {email}, `payment.refund`/`media.access_request` con
    * {reason} free-text) fijaban PII en el WORM inmutable. La `action` (operator.create, payment.refund,
    * media.access_*…) es la KEY de proyección: sin allowlist → `{}` vacío (safe-by-default, dropea email/reason;
-   * la fila conserva who/what/which/when). NOTA DEUDA PRE-EXISTENTE (fuera de este lote): recordSync NO es
-   * idempotente (eventId autogenerado por request) — a diferencia de recordFromEvent (idempotente por eventId).
+   * la fila conserva who/what/which/when).
+   *
+   * IDEMPOTENCIA (espejo de recordFromEvent): el `eventId` provisto por el caller es la CLAVE de dedupe. Un
+   * retry de TRANSPORTE del MISMO record() reusa el id → `appendEntry` no inserta (created=false) y devolvemos
+   * la fila EXISTENTE (no error). Backward-compat HONESTA: sin eventId (caller legacy) generamos uno (uuidv7)
+   * → ese caller NO es idempotente. El retry a nivel OPERACIÓN-BFF (doble-submit del operador) es OTRO problema
+   * (idempotency keys en las mutaciones admin), NO se resuelve acá.
    */
   async recordSync(input: RecordSyncInput): Promise<RecordedEntry> {
+    // Defensa en profundidad: el eventId provisto es la CLAVE de dedupe del WORM inmutable. Validamos su
+    // formato (UUID) en ESTE choke point → cubre AMBOS carriles (gRPC + REST) de forma consistente; el REST
+    // ya lo valida en el DTO (@IsUUID), pero el gRPC RecordRequest es una interface sin class-validator.
+    if (input.eventId !== undefined && !isUuid(input.eventId)) {
+      throw new ValidationError('eventId debe ser un UUID válido');
+    }
     const result = await this.repo.appendEntry({
-      eventId: uuidv7(),
+      eventId: input.eventId ?? uuidv7(),
       actorId: input.actorId,
       action: input.action,
       resourceType: input.resourceType,
@@ -91,7 +108,11 @@ export class AuditService {
       occurredAt: input.occurredAt ?? new Date(),
       payload: projectAuditPayload(input.action, input.payload),
     });
-    domainEventsTotal.inc({ event: input.action, result: BusinessEventResult.RECORDED });
+    // created=false → el retry idempotente reusó la fila existente: contabilizá DUPLICATE, igual que el carril Kafka.
+    domainEventsTotal.inc({
+      event: input.action,
+      result: result.created ? BusinessEventResult.RECORDED : BusinessEventResult.DUPLICATE,
+    });
     return result.entry;
   }
 

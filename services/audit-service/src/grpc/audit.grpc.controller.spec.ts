@@ -111,6 +111,30 @@ describe('AuditGrpcController · integridad del actorId del WORM (anti-spoof)', 
     expect(reply.seq).toBe('42');
   });
 
+  it('Record · reenvía el eventId del request a recordSync (idempotencia) y "" → undefined (legacy)', async () => {
+    const { ctrl, recordSync } = makeController();
+    const eventId = '0190b8d2-0000-7000-8000-000000000000';
+    await ctrl.record(
+      {
+        actorId: 'x',
+        action: 'operator.create',
+        resourceType: 'operator',
+        resourceId: 'op-new',
+        payloadJson: '{}',
+        eventId,
+      },
+      signedMetaAs(InternalAudience.ADMIN_RAIL),
+    );
+    expect((recordSync.mock.calls[0]![0] as { eventId?: string }).eventId).toBe(eventId);
+
+    // proto3 + defaults:true entrega "" cuando el caller no lo manda → debe llegar undefined, no "".
+    await ctrl.record(
+      { actorId: 'x', action: 'a', resourceType: 'r', resourceId: 'i', payloadJson: '{}', eventId: '' },
+      signedMetaAs(InternalAudience.ADMIN_RAIL),
+    );
+    expect((recordSync.mock.calls[1]![0] as { eventId?: string }).eventId).toBeUndefined();
+  });
+
   it('Record · firma ausente → UNAUTHENTICATED (no escribe al WORM)', async () => {
     const { ctrl, recordSync } = makeController();
     let caught: unknown;
