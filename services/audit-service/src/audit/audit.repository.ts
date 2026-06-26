@@ -154,11 +154,44 @@ export class AuditRepository {
     return rows.map(toRecorded);
   }
 
-  /** Rango de la cadena por seq (ascendente) para verificación de integridad. */
+  /**
+   * Rango de la cadena por seq (ascendente) para verificación de integridad.
+   *
+   * ⚠️ CARGA TODO el rango en memoria. Con ambos límites `undefined` materializa la tabla append-only ENTERA
+   * (millones de eslabones) → OOM. NO usar en el hot-path de verificación: `verifyRange` recorre la cadena por
+   * `getChainBatch` (streaming keyset, memoria acotada). Se conserva para lecturas ACOTADAS y puntuales
+   * (p.ej. tests que leen unas pocas filas concretas), donde el rango es chico por construcción.
+   */
   async getRange(fromSeq?: bigint, toSeq?: bigint): Promise<ChainRow[]> {
     const rows = await this.prisma.read.auditLog.findMany({
       where: { seq: { gte: fromSeq, lte: toSeq } },
       orderBy: { seq: 'asc' },
+    });
+    return rows.map(toChainRow);
+  }
+
+  /**
+   * Un LOTE de la cadena por paginación KEYSET sobre `seq` (no offset, que es O(n) en Postgres) — pieza del
+   * recorrido por streaming de `verifyRange` (anti-OOM). Espeja el patrón cursor de `PayoutsService.listAll`
+   * (`where`/`orderBy asc`/`take`), adaptado a un cursor numérico monotónico (`seq` es @unique autoincrement).
+   *
+   *  - `afterSeq` es el cursor EXCLUSIVO (`gt`): el último `seq` ya devuelto. `undefined` = desde el principio.
+   *    El llamador respeta un `fromSeq` INCLUSIVO arrancando el cursor en `fromSeq - 1n` (gt(x-1) ≡ gte(x) en
+   *    enteros) → una sola ruta de query, sin caso especial del primer lote.
+   *  - `toSeq` es la cota superior INCLUSIVA (`lte`) del rango; `undefined` = hasta el final de la cadena.
+   *  - `limit` (`take`) acota la memoria: nunca trae más de `limit` filas.
+   *
+   * La query usa el índice único de `seq` (range-scan O(log n) + límite) → NO hace full-scan de la tabla WORM.
+   */
+  async getChainBatch(
+    afterSeq: bigint | undefined,
+    toSeq: bigint | undefined,
+    limit: number,
+  ): Promise<ChainRow[]> {
+    const rows = await this.prisma.read.auditLog.findMany({
+      where: { seq: { gt: afterSeq, lte: toSeq } },
+      orderBy: { seq: 'asc' },
+      take: limit,
     });
     return rows.map(toChainRow);
   }

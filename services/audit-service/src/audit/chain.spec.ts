@@ -9,6 +9,7 @@ import {
   verifyChain,
   type AuditEntryContent,
   type ChainRow,
+  type ChainVerificationResult,
 } from './chain';
 
 function content(i: number, overrides: Partial<AuditEntryContent> = {}): AuditEntryContent {
@@ -120,5 +121,97 @@ describe('verifyChain — detección de tampering', () => {
     expect(result.valid).toBe(false);
     expect(result.reason).toBe('BROKEN_LINK');
     expect(result.brokenAtSeq).toBe('5');
+  });
+});
+
+describe('verifyChain — streaming por lotes (hash arrastrado)', () => {
+  /** Recorre `rows` en lotes de `size` arrastrando el último hash, como hace AuditService.verifyRange. */
+  function verifyStreamed(
+    rows: ChainRow[],
+    size: number,
+    expectGenesis: boolean,
+  ): ChainVerificationResult {
+    let cursor = 0;
+    let carriedPrevHash: string | null = null;
+    let first = true;
+    let checked = 0;
+    while (cursor < rows.length) {
+      const batch = rows.slice(cursor, cursor + size);
+      const r = verifyChain(batch, {
+        expectGenesis: first ? expectGenesis : false,
+        startingPrevHash: first ? undefined : carriedPrevHash,
+      });
+      if (!r.valid) return { ...r, checked: checked + r.checked };
+      checked += r.checked;
+      carriedPrevHash = batch[batch.length - 1]!.hash;
+      cursor += batch.length;
+      first = false;
+    }
+    return { valid: true, checked };
+  }
+
+  it('verifica una cadena íntegra atravesando múltiples lotes (resultado == no-paginado)', () => {
+    const rows = buildChain(20);
+    const streamed = verifyStreamed(rows, 3, true);
+    const whole = verifyChain(rows, { expectGenesis: true });
+    expect(streamed.valid).toBe(true);
+    expect(streamed.checked).toBe(20);
+    expect(streamed).toEqual({ valid: whole.valid, checked: whole.checked });
+  });
+
+  it('detecta tampering en el MEDIO de un lote (mismo resultado que el no-paginado)', () => {
+    const rows = buildChain(20);
+    const tampered = rows.map((r) =>
+      r.seq === 11 ? { ...r, payload: { ...r.payload, note: 'ALTERADO' } } : r,
+    );
+    const streamed = verifyStreamed(tampered, 3, true);
+    const whole = verifyChain(tampered, { expectGenesis: true });
+    expect(streamed).toEqual(whole);
+    expect(streamed.reason).toBe('CONTENT_TAMPERED');
+    expect(streamed.brokenAtSeq).toBe('11');
+  });
+
+  it('caza tampering en el BORDE de lote — la última fila de un lote con su hash REFIJADO', () => {
+    // size=3 ⇒ lotes [1,2,3][4,5,6]... La fila 3 es el BORDE: un atacante altera su contenido y RECALCULA
+    // su hash para pasar la validación INTERNA del lote 1. El hash arrastrado (nuevo) ya no coincide con el
+    // prevHash (original) de la fila 4 ⇒ BROKEN_LINK en el seam. Un streaming naïf (sin hash arrastrado)
+    // verificaría el lote 2 con expectGenesis:false, confiaría el borde y lo DEJARÍA PASAR.
+    const rows = buildChain(9);
+    const borderIdx = 2; // seq=3, última del primer lote.
+    const altered = { ...rows[borderIdx]!, payload: { hacked: true } };
+    altered.hash = computeEntryHash(altered.prevHash, altered);
+    const tampered = rows.map((r, i) => (i === borderIdx ? altered : r));
+
+    const streamed = verifyStreamed(tampered, 3, true);
+    const whole = verifyChain(tampered, { expectGenesis: true });
+    expect(streamed.valid).toBe(false);
+    expect(streamed.reason).toBe('BROKEN_LINK');
+    expect(streamed.brokenAtSeq).toBe('4'); // la rotura aflora en la primera fila del lote siguiente.
+    expect(streamed).toEqual(whole); // idéntico al no-paginado.
+
+    // Prueba de que un streaming NAÏF (cada lote en aislamiento) NO lo detectaría: el lote 2 solo es válido.
+    const naiveBatch2 = verifyChain(tampered.slice(3, 6), { expectGenesis: false });
+    expect(naiveBatch2.valid).toBe(true);
+  });
+
+  it('caza tampering en el BORDE — la PRIMERA fila del lote siguiente (prevHash roto)', () => {
+    const rows = buildChain(9);
+    const firstOfBatch2 = 3; // seq=4, primera del segundo lote.
+    const tampered = rows.map((r, i) =>
+      i === firstOfBatch2 ? { ...r, prevHash: 'deadbeef' } : r,
+    );
+    const streamed = verifyStreamed(tampered, 3, true);
+    const whole = verifyChain(tampered, { expectGenesis: true });
+    expect(streamed.valid).toBe(false);
+    expect(streamed.reason).toBe('BROKEN_LINK');
+    expect(streamed.brokenAtSeq).toBe('4');
+    expect(streamed).toEqual(whole);
+  });
+
+  it('sub-rango con startingPrevHash undefined preserva el borde-confiado (no exige génesis)', () => {
+    const rows = buildChain(10).slice(4); // seqs 5..10, primer lote de un sub-rango.
+    const r = verifyChain(rows, { expectGenesis: false });
+    expect(r.valid).toBe(true);
+    expect(r.checked).toBe(6);
   });
 });

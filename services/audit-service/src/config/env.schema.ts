@@ -51,6 +51,15 @@ export const envSchema = z.object({
   // gRPC (registro/verificación síncrona desde otros servicios).
   GRPC_URL: z.string().default('0.0.0.0:50059'),
 
+  // Tamaño del LOTE (keyset) con el que `verifyRange` recorre la cadena WORM por streaming (anti-OOM).
+  // La verificación NO materializa la tabla append-only entera (millones de eslabones) en memoria: la
+  // recorre en páginas keyset por `seq` de este tamaño, arrastrando el hash entre lotes (cadena completa,
+  // memoria acotada). Default 2000: cada fila lleva un payload ya PROYECTADO (PII-stripped, a menudo `{}`),
+  // así que ~2k filas son unos pocos MB —muy por debajo del heap— y a la vez mantienen pocas idas a la DB
+  // (1M de eslabones = ~500 queries, cada una sobre el índice único de `seq`, range-scan O(log n), sin
+  // full-scan). Subirlo cambia el trade-off memoria↔round-trips; no afecta el RESULTADO de la verificación.
+  AUDIT_VERIFY_BATCH_SIZE: z.coerce.number().int().positive().default(2000),
+
   // === Réplica inmutable WORM a S3/MinIO (Object Lock, modo COMPLIANCE) ===
   /// Activa la réplica a S3. En dev apunta a MinIO. Desactivar solo en tests aislados.
   AUDIT_S3_ENABLED: z

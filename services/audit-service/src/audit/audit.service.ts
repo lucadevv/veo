@@ -4,7 +4,7 @@
  * - verifyRange recorre la cadena y detecta tampering (ver chain.ts).
  * La réplica WORM a S3 la realiza el relay (S3ReplicationRelay), desacoplado y resiliente.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { uuidv7 } from '@veo/utils';
 import type { EventEnvelope } from '@veo/events';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
@@ -41,9 +41,32 @@ export interface VerifyRangeResult extends ChainVerificationResult {
   toSeq: string | null;
 }
 
+/** Token DI del tamaño de lote de `verifyRange` (lo provee AuditModule desde `AUDIT_VERIFY_BATCH_SIZE`). */
+export const VERIFY_BATCH_SIZE = Symbol('audit.verifyBatchSize');
+
+/** Default si no se inyecta config (ver `AUDIT_VERIFY_BATCH_SIZE` en env.schema para el porqué del 2000). */
+export const DEFAULT_VERIFY_BATCH_SIZE = 2000;
+/** Tope duro: aun con un env disparatado, el lote no rompe la cota de memoria que justifica el streaming. */
+const MAX_VERIFY_BATCH_SIZE = 10_000;
+
+function clampVerifyBatchSize(size?: number): number {
+  if (size === undefined || !Number.isFinite(size) || size < 1) return DEFAULT_VERIFY_BATCH_SIZE;
+  return Math.min(Math.trunc(size), MAX_VERIFY_BATCH_SIZE);
+}
+
 @Injectable()
 export class AuditService {
-  constructor(private readonly repo: AuditRepository) {}
+  /** Filas por lote del recorrido keyset de `verifyRange` (memoria acotada). */
+  private readonly verifyBatchSize: number;
+
+  constructor(
+    private readonly repo: AuditRepository,
+    // @Optional: los specs construyen el service a mano (sin DI). Sin inyección → DEFAULT_VERIFY_BATCH_SIZE.
+    // En tests pasamos un lote CHICO (p.ej. 3) para forzar multi-lote y ejercitar el hash arrastrado del borde.
+    @Optional() @Inject(VERIFY_BATCH_SIZE) batchSize?: number,
+  ) {
+    this.verifyBatchSize = clampVerifyBatchSize(batchSize);
+  }
 
   /**
    * Registro síncrono iniciado por otro servicio (acción directa, no evento · POST /audit + gRPC Record).
@@ -114,17 +137,69 @@ export class AuditService {
     return this.repo.query(filters);
   }
 
-  /** Verifica la integridad de la cadena en un rango [fromSeq, toSeq]. */
+  /**
+   * Verifica la integridad de la cadena en un rango [fromSeq, toSeq] por STREAMING (anti-OOM).
+   *
+   * NO materializa la tabla append-only entera (millones de eslabones) en memoria —eso era el OOM
+   * auto-infligido del hot-path de compliance—: la recorre en LOTES keyset por `seq` (`getChainBatch`),
+   * arrastrando el último hash de cada lote al siguiente. La memoria queda acotada a `verifyBatchSize`
+   * filas, y el resultado (valid / dónde rompe) es IDÉNTICO al de verificar la cadena entera de una vez:
+   *
+   *  - Cada lote verifica su cadena INTERNA con `verifyChain`.
+   *  - El enlace CRUZADO (primera fila del lote N contra el último hash del lote N-1) se valida pasando
+   *    `startingPrevHash` → un tampering en el BORDE de lote se caza igual que uno en el medio.
+   *  - El `fromSeq` INCLUSIVO se respeta con un cursor inicial `fromSeq - 1n` (gt(x-1) ≡ gte(x) en enteros).
+   *  - `expectGenesis` (prevHash null en seq=1) solo aplica al PRIMER lote, igual que antes.
+   */
   async verifyRange(input: VerifyRangeInput): Promise<VerifyRangeResult> {
-    const rows = await this.repo.getRange(input.fromSeq, input.toSeq);
     const expectGenesis = input.fromSeq === undefined || input.fromSeq <= 1n;
-    const result = verifyChain(rows, { expectGenesis });
-    const first = rows[0];
-    const last = rows[rows.length - 1];
+    // Cursor keyset EXCLUSIVO (gt). fromSeq-1n para honrar el límite inferior INCLUSIVO del contrato.
+    let cursor: bigint | undefined = input.fromSeq === undefined ? undefined : input.fromSeq - 1n;
+    let carriedPrevHash: string | null = null;
+    let isFirstBatch = true;
+    let checked = 0;
+    let firstSeq: bigint | null = null;
+    let lastSeq: bigint | null = null;
+
+    for (;;) {
+      const batch = await this.repo.getChainBatch(cursor, input.toSeq, this.verifyBatchSize);
+      if (batch.length === 0) break;
+      if (firstSeq === null) firstSeq = BigInt(batch[0]!.seq);
+
+      const result = verifyChain(batch, {
+        expectGenesis: isFirstBatch ? expectGenesis : false,
+        // Lote ≥2: el enlace cruzado se valida contra el hash arrastrado (NO se confía el borde).
+        startingPrevHash: isFirstBatch ? undefined : carriedPrevHash,
+      });
+      if (!result.valid) {
+        // `checked` global = filas ya verificadas en lotes previos + el índice de la rotura en éste.
+        // brokenAtSeq/reason son del seq real → idénticos a la verificación no-paginada.
+        return {
+          valid: false,
+          checked: checked + result.checked,
+          brokenAtSeq: result.brokenAtSeq,
+          reason: result.reason,
+          fromSeq: firstSeq !== null ? String(firstSeq) : null,
+          toSeq: lastSeq !== null ? String(lastSeq) : null,
+        };
+      }
+
+      checked += result.checked;
+      const last = batch[batch.length - 1]!;
+      carriedPrevHash = last.hash;
+      lastSeq = BigInt(last.seq);
+      cursor = lastSeq;
+      isFirstBatch = false;
+
+      // Lote incompleto ⇒ última página: corta una query extra que devolvería 0 filas.
+      if (batch.length < this.verifyBatchSize) break;
+    }
+
     return {
-      ...result,
-      fromSeq: first ? String(first.seq) : null,
-      toSeq: last ? String(last.seq) : null,
+      valid: true,
+      checked,
+      fromSeq: firstSeq !== null ? String(firstSeq) : null,
+      toSeq: lastSeq !== null ? String(lastSeq) : null,
     };
   }
 }
