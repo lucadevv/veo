@@ -4,7 +4,12 @@
  *
  * - `live`: S3Client real (forcePathStyle) contra MinIO/S3 + URLs prefirmadas.
  * - `sandbox`: adapter determinista para tests (URLs estables, sin red).
+ *
+ * La interfaz habla en tipos del CORE de Node (`Readable`/`Buffer`), nunca en tipos de `@aws-sdk`
+ * (regla D de SOLID): el SDK de S3 vive SOLO dentro del adapter `live`.
  */
+import type { Readable } from 'node:stream';
+
 export const STORAGE_PORT = Symbol('STORAGE_PORT');
 
 /**
@@ -53,6 +58,32 @@ export interface PresignUploadInput {
   audience?: PresignAudience;
 }
 
+/**
+ * Subida server-to-server (money-side: la inicia ESTE servicio, no el cliente). La usa el quemado de
+ * watermark para guardar la copia derivada del video. Tipos del core de Node: el dominio no ve `@aws-sdk`.
+ */
+export interface UploadObjectInput {
+  /** Clave (path) del objeto destino dentro del bucket. */
+  key: string;
+  /**
+   * Cuerpo a subir. `Buffer` cuando el largo se conoce de antemano; `Readable` para alimentar la
+   * subida por pipe (p. ej. la salida de ffmpeg) sin materializar todo el video en memoria.
+   */
+  body: Readable | Buffer;
+  /** Content-Type exacto del objeto derivado (p. ej. `video/mp4`). */
+  contentType: string;
+  /**
+   * Bucket destino. Opcional: por defecto el bucket primario del adapter (video). Se pasa explícito
+   * para no acoplar el dominio a un bucket concreto (mismo contrato que el resto del puerto).
+   */
+  bucket?: string;
+  /**
+   * Largo en bytes del `body`, si se conoce. Con un `Readable` de largo DESCONOCIDO se omite y el
+   * adapter `live` cae a subida multipart (lib-storage), que no exige `Content-Length` por adelantado.
+   */
+  contentLength?: number;
+}
+
 export interface StoragePort {
   /** Genera una URL prefirmada de descarga (GET) válida `expiresSeconds` (BR-S02: 5 min). */
   presignDownloadUrl(input: PresignDownloadInput): Promise<string>;
@@ -77,4 +108,15 @@ export interface StoragePort {
    * @returns cuántos objetos se borraron.
    */
   deletePrefix(bucket: string, prefix: string): Promise<number>;
+  /**
+   * Descarga server-to-server: devuelve el stream de LECTURA del objeto crudo (GetObject del cliente
+   * INTERNO, sin presign) para alimentar ffmpeg por pipe sin materializar el video en memoria. Lanza
+   * `NotFoundError` si el objeto no existe. `bucket` opcional: por defecto el bucket primario del adapter.
+   */
+  getObjectStream(key: string, bucket?: string): Promise<Readable>;
+  /**
+   * Subida server-to-server: guarda un objeto desde el SERVIDOR (PutObject del cliente INTERNO, sin
+   * presign) — p. ej. la copia con watermark quemado. Ver `UploadObjectInput`.
+   */
+  uploadObject(input: UploadObjectInput): Promise<void>;
 }

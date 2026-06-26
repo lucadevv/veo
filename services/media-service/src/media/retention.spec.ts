@@ -195,6 +195,8 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
       presignUploadUrl: (input) => sandbox.presignUploadUrl(input),
       getObjectSize: () => sandbox.getObjectSize(),
       deletePrefix: (bucket, prefix) => sandbox.deletePrefix(bucket, prefix),
+      getObjectStream: (key, bucket) => sandbox.getObjectStream(key, bucket),
+      uploadObject: (input) => sandbox.uploadObject(input),
       deleteObject: async (key: string): Promise<void> => {
         if (key === 'recordings/t/boom.mp4') {
           throw new Error('S3 caído para este objeto');

@@ -16,6 +16,8 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
       deletePrefix: vi.fn(),
+      getObjectStream: vi.fn(),
+      uploadObject: vi.fn(),
     };
     const svc = new InternalStorageService(storage);
 
@@ -42,6 +44,8 @@ describe('InternalStorageService.presignGet · presigned GET interno de una key 
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
       deletePrefix: vi.fn(),
+      getObjectStream: vi.fn(),
+      uploadObject: vi.fn(),
     };
     const svc = new InternalStorageService(storage);
 
@@ -78,6 +82,8 @@ describe('InternalStorageService.presignPut · presigned PUT interno de un docum
       deleteObject: vi.fn(),
       getObjectSize: vi.fn(),
       deletePrefix: vi.fn(),
+      getObjectStream: vi.fn(),
+      uploadObject: vi.fn(),
     };
   }
 
