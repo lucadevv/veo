@@ -98,12 +98,14 @@ message DriverReply {
   double license_face_match_score = 23;
   // ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió.
   string license_face_matched_at = 24;
-  // F5 · key S3/MinIO de la SELFIE del enrol (ayuda visual del operador en casos dudosos). ADMIN-ONLY (PII ·
-  // Ley 29733): solo viaja por el riel admin; "" en rieles no-admin o si no hay selfie. Campo 25, backward-compat.
+  // F5 · key S3/MinIO de la SELFIE del enrol (ayuda visual del operador). ADMIN-ONLY (PII · Ley 29733): solo
+  // viaja por el riel admin; "" en rieles no-admin o si no hay selfie. Campo 25, backward-compatible.
   string face_selfie_key = 25;
-  // LIVENESS PASIVO (anti-spoofing PAD del enrol). Status DERIVADO (NOT_RUN/PASSED/DEGRADED): NOT_RUN = sin
-  // enrol; PASSED = PAD corrió y dio viva; DEGRADED = enroló sin PAD (modelo ausente). ADMIN-ONLY; "" / 0 en
-  // rieles no-admin. Score de clase viva en 0..1 (NO 0..100). Campos 26-27, backward-compatible.
+  // ── LIVENESS PASIVO (anti-spoofing PAD del enrol). El operador lo VE antes de aprobar; approve() exige que el
+  // PAD haya CORRIDO. Status DERIVADO (NOT_RUN/PASSED/DEGRADED): NOT_RUN = sin enrol; PASSED = PAD corrió y dio
+  // viva; DEGRADED = enroló sin PAD (modelo ausente). ADMIN-ONLY; "" / 0 en rieles no-admin. Campos 26-27. ──
   string liveness_status = 26;
+  // Score de la clase viva del PAD en 0..1 (NO 0..100 como los face-match); 0 si no se corrió. Solo
+  // significativo si status == PASSED o DEGRADED.
   double liveness_score = 27;
 }
