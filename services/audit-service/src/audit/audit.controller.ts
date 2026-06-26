@@ -43,12 +43,13 @@ export class AuditController {
   @ApiOperation({ summary: 'Registrar una acción auditable (append-only, hash chain).' })
   async record(
     @Body() dto: RecordAuditDto,
-    @CurrentUser() user: AuthenticatedUser | undefined,
+    @CurrentUser() user: AuthenticatedUser,
     @Req() req: HttpRequest,
   ): Promise<AuditEntryResponse> {
-    const actorId = dto.actorId ?? user?.userId;
-    if (!actorId)
-      throw new ValidationError('actorId requerido (sin identidad interna ni en el body)');
+    // INTEGRIDAD del WORM (Ley 29733): el actor que se persiste es SIEMPRE la identidad VERIFICADA por el
+    // InternalIdentityGuard (firma HMAC del caller), NUNCA un `actorId` del body (forjable). El guard exige
+    // identidad válida → `user` no puede faltar acá. `actorId` ya NO existe en RecordAuditDto.
+    const actorId = user.userId;
     const entry = await this.audit.recordSync({
       actorId,
       action: dto.action,

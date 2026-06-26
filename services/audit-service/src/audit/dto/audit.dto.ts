@@ -3,12 +3,9 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RecordAuditDto {
-  @ApiPropertyOptional({
-    description: 'Actor que ejecutó la acción. Por defecto, la identidad interna.',
-  })
-  @IsOptional()
-  @IsString()
-  actorId?: string;
+  // INTEGRIDAD del WORM (Ley 29733): el actor NO se acepta del body — se DERIVA de la identidad interna
+  // VERIFICADA por el InternalIdentityGuard (firma HMAC). Un caller no puede forjar quién hizo la acción.
+  // (Con `whitelist: true` en el ValidationPipe, un `actorId` enviado por error se descarta en silencio.)
 
   @ApiProperty({ example: 'media.access', description: 'Acción auditada.' })
   @IsString()
