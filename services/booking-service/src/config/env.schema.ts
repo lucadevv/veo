@@ -5,7 +5,7 @@
  * Puertos fijos del servicio (ADR-014 §12): REST 3016, gRPC 50054.
  */
 import { z } from 'zod';
-import { requiredInProd, secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
 import { outboxEnvSchema } from '@veo/database';
 
@@ -22,6 +22,9 @@ const SOVEREIGN_MAPS_MODES = MAPS_MODES.filter(
 ) as [SovereignMapsMode, ...SovereignMapsMode[]];
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3016),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),

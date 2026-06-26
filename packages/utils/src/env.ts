@@ -55,6 +55,33 @@ export function requiredInProd(devDefault: string, opts?: { url?: boolean }) {
 }
 
 /**
+ * Fragmento de schema zod con el contrato del transporte TLS de gRPC interno (ADR-016). Las 3 rutas son
+ * OPCIONALES: ausentes (las 3) = insecure (dev/test); presentes (las 3) = mTLS; mezcla = fail-fast en el
+ * helper `buildGrpc*Credentials` (@veo/rpc). Cada servicio/BFF que hace gRPC (servidor y/o cliente) lo
+ * spreadea en su env.schema (FUENTE ÚNICA del contrato, DRY):
+ *   z.object({ ...otrasVars, ...grpcTlsEnvSchema.shape })
+ * El VALOR efectivo lo lee `grpcTlsPathsFromEnv()` de `process.env` (mismo patrón que GRPC_URL); este
+ * fragmento DOCUMENTA y valida el contrato (3 strings opcionales) sin acoplar el helper al ConfigService.
+ */
+export const grpcTlsEnvSchema = z.object({
+  /** PEM de la CA interna (raíz de confianza mutua del mTLS). Ausente = insecure. */
+  GRPC_TLS_CA_PATH: z.string().optional(),
+  /** PEM del certificado de ESTE servicio/cliente. Ausente = insecure. */
+  GRPC_TLS_CERT_PATH: z.string().optional(),
+  /** PEM de la clave privada de ESTE servicio/cliente. Ausente = insecure. */
+  GRPC_TLS_KEY_PATH: z.string().optional(),
+  /**
+   * Lever de ENFORCEMENT de mTLS. `true` + certs ausentes → el servicio NO arranca (fail-fast en
+   * `buildGrpc*Credentials`): prohíbe el texto plano en prod una vez provisionada la PKI. Default `false`
+   * (soft): permite deployar prod ANTES de tener certs y no rompe dev/preview. Ley 29733 (TLS interno).
+   */
+  GRPC_TLS_REQUIRED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+});
+
+/**
  * Entorno ENDURECIDO (internet-facing): `NODE_ENV=production` cubre preview Y prod (el tier real lo da el
  * env_file, no este flag). ÚNICO punto del repo que lee `process.env.NODE_ENV` para decidir el tier —
  * centralizado acá (tipado, testeable) para no esparcir el string mágico `'production'` por el código.

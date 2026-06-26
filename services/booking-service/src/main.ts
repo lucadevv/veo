@@ -52,7 +52,9 @@ async function bootstrap(): Promise<void> {
   // Los métodos booking.GetPublishedTrip/GetBooking y su .proto son F2+: por ahora NO se conecta el
   // microservicio gRPC para no referenciar un proto inexistente. Cuando se agregue proto/booking.proto,
   // wirear con app.connectMicroservice({ transport: Transport.GRPC, options: { package: 'veo.booking.v1',
-  // protoPath: join(__dirname, '../proto/booking.proto'), url: grpcUrl } }) + startAllMicroservices.
+  // protoPath: join(__dirname, '../proto/booking.proto'), url: grpcUrl,
+  // credentials: buildGrpcServerCredentials() } }) + startAllMicroservices — TLS-capable por env (ADR-016),
+  // el MISMO helper de @veo/rpc que usan los otros 11 servidores (DRY).
   await app.listen(port);
   logger.info(
     `booking-service escuchando en :${port} (gRPC :${grpcUrl} reservado para F2)`,

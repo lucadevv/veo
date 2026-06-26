@@ -5,6 +5,7 @@ import { bootstrapOtel } from '@veo/observability';
 bootstrapOtel({ serviceName: 'payment-service' });
 
 import { NestFactory } from '@nestjs/core';
+import { buildGrpcServerCredentials } from '@veo/rpc';
 import { ValidationPipe } from '@nestjs/common';
 import { type MicroserviceOptions, Transport } from '@nestjs/microservices';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -63,6 +64,8 @@ async function bootstrap(): Promise<void> {
       package: 'veo.payment.v1',
       protoPath: join(__dirname, '../proto/payment.proto'),
       url: process.env.GRPC_URL ?? '0.0.0.0:50055',
+      // TLS-capable por env (ADR-016): con GRPC_TLS_* → mTLS; sin ellos → insecure (dev). UN helper compartido.
+      credentials: buildGrpcServerCredentials(),
     },
   });
   await app.startAllMicroservices();

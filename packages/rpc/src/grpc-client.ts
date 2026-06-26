@@ -2,7 +2,12 @@
  * Factoría de clientes gRPC para lecturas BFF→servicio. Promisifica los métodos unarios
  * y añade deadline por defecto. Sin estado global: un cliente por servicio, reutilizable.
  */
-import { credentials, loadPackageDefinition, Metadata, type Client } from '@grpc/grpc-js';
+import {
+  loadPackageDefinition,
+  Metadata,
+  type ChannelCredentials,
+  type Client,
+} from '@grpc/grpc-js';
 import { loadSync } from '@grpc/proto-loader';
 import {
   protoPathFor,
@@ -10,12 +15,18 @@ import {
   SERVICE_RPC_NAME,
   type ServiceName,
 } from './proto-paths.js';
+import { buildGrpcClientCredentials, type GrpcTlsPaths } from './grpc-tls.js';
 
 export interface GrpcClientOptions {
   /** host:port del servidor gRPC, ej. localhost:50052 */
   url: string;
   /** Deadline por llamada en ms (default 5000). */
   deadlineMs?: number;
+  /**
+   * Rutas de cert para el transporte TLS (mTLS). Default: las del entorno (`GRPC_TLS_*`). Ausentes →
+   * insecure (dev/test). Inyectable para tests. Ver `grpc-tls.ts` / ADR-016.
+   */
+  tls?: GrpcTlsPaths;
 }
 
 type UnaryFn = (
@@ -43,11 +54,9 @@ export class GrpcServiceClient {
     if (typeof ctor !== 'function') {
       throw new Error(`gRPC service ctor no encontrado para ${service}`);
     }
-    const ClientCtor = ctor as new (
-      url: string,
-      creds: ReturnType<typeof credentials.createInsecure>,
-    ) => Client;
-    this.raw = new ClientCtor(opts.url, credentials.createInsecure()) as Client &
+    const ClientCtor = ctor as new (url: string, creds: ChannelCredentials) => Client;
+    // TLS-capable por env: con GRPC_TLS_* → mTLS; sin ellos → insecure (dev/test). UN helper compartido.
+    this.raw = new ClientCtor(opts.url, buildGrpcClientCredentials(opts.tls)) as Client &
       Record<string, UnaryFn>;
     this.deadlineMs = opts.deadlineMs ?? 5000;
   }

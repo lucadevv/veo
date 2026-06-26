@@ -5,6 +5,7 @@ import { bootstrapOtel } from '@veo/observability';
 bootstrapOtel({ serviceName: 'audit-service' });
 
 import { NestFactory } from '@nestjs/core';
+import { buildGrpcServerCredentials } from '@veo/rpc';
 import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
@@ -65,6 +66,8 @@ async function bootstrap(): Promise<void> {
       package: 'veo.audit.v1',
       protoPath: join(__dirname, '../proto/audit.proto'),
       url: process.env.GRPC_URL ?? '0.0.0.0:50059',
+      // TLS-capable por env (ADR-016): con GRPC_TLS_* → mTLS; sin ellos → insecure (dev). UN helper compartido.
+      credentials: buildGrpcServerCredentials(),
     },
   });
   await app.startAllMicroservices();

@@ -3,7 +3,7 @@
  * notification-service: motor propio de notificaciones (cola, dedup, retry) + canales tras puertos.
  */
 import { z } from 'zod';
-import { requiredInProd, secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 import { PushMode, PushTransportKey } from '../ports/push/push.port';
 import { SmsProvider } from '../ports/sms/sms.port';
 import { outboxEnvSchema } from '@veo/database';
@@ -18,6 +18,9 @@ export const PORT_MODES = ['live', 'sandbox'] as const;
 export const LIVE_MODE = 'live' satisfies (typeof PORT_MODES)[number];
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3008),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),

@@ -4,6 +4,13 @@
  */
 export { GrpcServiceClient, createGrpcClient } from './grpc-client.js';
 export type { GrpcClientOptions } from './grpc-client.js';
+export {
+  buildGrpcServerCredentials,
+  buildGrpcClientCredentials,
+  grpcTlsPathsFromEnv,
+  grpcTlsRequiredFromEnv,
+} from './grpc-tls.js';
+export type { GrpcTlsPaths, GrpcTlsMode, GrpcTlsLogger } from './grpc-tls.js';
 export { InternalRestClient } from './internal-rest.js';
 export type { InternalRestOptions, InternalRequest } from './internal-rest.js';
 export { DownstreamError, normalizeError } from './error.js';

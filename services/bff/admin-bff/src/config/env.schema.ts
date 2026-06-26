@@ -3,7 +3,7 @@
  * Defaults orientados a dev; nada hardcodeado en lógica de negocio.
  */
 import { z } from 'zod';
-import { requiredInProd, secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 
 /**
  * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
@@ -17,6 +17,9 @@ import { requiredInProd, secret } from '@veo/utils';
 export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4003),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
