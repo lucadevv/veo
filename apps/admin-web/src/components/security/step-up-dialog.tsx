@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { cloneElement, isValidElement, useState, type MouseEventHandler } from 'react';
 import { KeyRound } from 'lucide-react';
 import { stepUp } from '@/lib/api/auth';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,17 @@ export function StepUpDialog({
   const [code, setCode] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // DEV: espejo EXACTO del `StepUpMfaGuard` del backend (`if (!isHardenedEnv()) return true`): en
+  // local/dev el server NO exige la doble-auth fresca, así que la UI tampoco debe pedir TOTP (el
+  // superadmin opera sin re-tipear el código en cada acción sensible). El gate de ROL sigue server-side.
+  // Solo NODE_ENV=production (preview Y prod) mantiene el step-up. Saltamos el diálogo y corremos la
+  // acción directo cableando el onClick del trigger.
+  if (process.env.NODE_ENV !== 'production' && isValidElement(trigger)) {
+    return cloneElement(trigger as React.ReactElement<{ onClick?: MouseEventHandler }>, {
+      onClick: () => void onVerified(),
+    });
+  }
 
   async function verify() {
     setError(null);

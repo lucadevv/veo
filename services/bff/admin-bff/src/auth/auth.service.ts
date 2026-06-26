@@ -5,6 +5,7 @@
  */
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
+import { isHardenedEnv } from '@veo/utils';
 import { isMfaFresh, type AuthenticatedUser } from '@veo/auth';
 import type { AdminRole } from '@veo/shared-types';
 import type { SessionUser } from '@veo/api-client';
@@ -157,7 +158,10 @@ export class AuthService {
       userId: user.userId,
       type: user.type,
       roles: user.roles,
-      mfaFresh: isMfaFresh(user.mfaVerifiedAt, MFA_FRESH_MAX_AGE_SEC),
+      // DEV: el StepUpMfaGuard bypassea la doble-auth en local/dev (!isHardenedEnv) → el indicador del
+      // header debe reflejar ESO (siempre "MFA fresco"), si no muestra "inactivo" mintiendo sobre un gate
+      // que el server NO aplica. Prod (endurecido) usa la frescura real de 5min.
+      mfaFresh: !isHardenedEnv() || isMfaFresh(user.mfaVerifiedAt, MFA_FRESH_MAX_AGE_SEC),
     };
   }
 }
