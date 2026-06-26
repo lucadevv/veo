@@ -6,7 +6,8 @@
  *  - Identidad/KYC: user.registered, user.email_verified, user.kyc_verified, driver.verified, biometric.failed
  *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
- *  - Pagos:         payment.captured, payment.failed, payment.refunded (plata que vuelve al pasajero), payout.processed
+ *  - Pagos:         payment.captured, payment.failed, payment.refunded (plata que vuelve al pasajero),
+ *                   payout.processing/processed/failed (ciclo de desembolso al conductor · ADR-015 §4.1/§6)
  *  - Recompensas:   user.referred (vínculo creado), referral.rewarded, promo.redeemed, incentive.completed (movimientos de crédito · Ley 29733)
  *  - Video/Media:   media.recording_started, media.archived, media.access_granted,
  *                   media.access_viewed (reproducción efectiva · BR-S02), media.access_rejected (denegación · cadena de custodia)
@@ -191,7 +192,22 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'payment',
         resourceId: p.paymentId,
       })),
+      // Desembolso al conductor (ADR-015 §4.1/§6 · movimiento de plata al WORM inmutable · Ley 29733): el ciclo
+      // PROCESSING → PROCESSED/FAILED queda trazado entero. `processing` = el OPERADOR disparó el desembolso (acto
+      // humano); `failed` = el riel lo rechazó/expiró (la plata NO salió). Mismo mapeo que `processed` —
+      // actorId=driverId (el beneficiario del movimiento), recurso=payout/payoutId. El payload solo trae IDs +
+      // monto + período (CERO PII, `.strict()` fail-closed en el contrato), igual que processed.
+      'payout.processing': this.audited('payout.processing', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'payout',
+        resourceId: p.payoutId,
+      })),
       'payout.processed': this.audited('payout.processed', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'payout',
+        resourceId: p.payoutId,
+      })),
+      'payout.failed': this.audited('payout.failed', (p) => ({
         actorId: p.driverId,
         resourceType: 'payout',
         resourceId: p.payoutId,

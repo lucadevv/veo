@@ -552,3 +552,72 @@ describe('AuditConsumer · pagos (movimiento de dinero al WORM inmutable · Ley 
     expect(mapping).toEqual({ actorId: 'system', resourceType: 'payment', resourceId: 'pay-sys' });
   });
 });
+
+describe('AuditConsumer · desembolsos (ciclo de payout al WORM inmutable · ADR-015 §4.1/§6 · Ley 29733)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('registra handlers para el ciclo completo de desembolso (processing/processed/failed)', () => {
+    // Regla de oro del consumer: TODOS los eventos suscritos están en handlers(); el bootstrap deriva la
+    // suscripción al topic `payout` de estas keys. Sin estos handlers, processing/failed NO dejarían traza WORM.
+    expect(handlers.has('payout.processing')).toBe(true);
+    expect(handlers.has('payout.processed')).toBe(true);
+    expect(handlers.has('payout.failed')).toBe(true);
+  });
+
+  it('payout.processing → actorId=driverId, resourceType=payout, resourceId=payoutId (disparo humano del operador)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payout.processing',
+      producer: 'payment-service',
+      payload: { payoutId: 'po-1', driverId: 'drv-9', amountCents: 45000, period: '2026-06' },
+    });
+    await handlers.get('payout.processing')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('payout.processing'));
+    expect(mapping).toEqual({ actorId: 'drv-9', resourceType: 'payout', resourceId: 'po-1' });
+  });
+
+  it('payout.failed → actorId=driverId, resourceType=payout, resourceId=payoutId (rechazo del riel)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payout.failed',
+      producer: 'payment-service',
+      payload: { payoutId: 'po-2', driverId: 'drv-7', amountCents: 32000, period: '2026-06' },
+    });
+    await handlers.get('payout.failed')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('payout.failed'));
+    expect(mapping).toEqual({ actorId: 'drv-7', resourceType: 'payout', resourceId: 'po-2' });
+  });
+
+  it('payout.processed → actorId=driverId, resourceType=payout, resourceId=payoutId (desembolso efectivo)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'payout.processed',
+      producer: 'payment-service',
+      payload: { payoutId: 'po-3', driverId: 'drv-5', amountCents: 50000, period: '2026-06' },
+    });
+    await handlers.get('payout.processed')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('payout.processed'));
+    expect(mapping).toEqual({ actorId: 'drv-5', resourceType: 'payout', resourceId: 'po-3' });
+  });
+});

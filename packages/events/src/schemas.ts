@@ -724,12 +724,20 @@ export const cancellationPenaltyCollected = z.object({
   settlementPaymentId: z.string(),
 });
 
-export const payoutProcessed = z.object({
-  payoutId: z.string(),
-  driverId: z.string(),
-  amountCents: z.number().int(),
-  period: z.string(),
-});
+/**
+ * payout.processed (ADR-015 §4.1 · semántica corregida en 2b): el riel CONFIRMÓ la salida del dinero
+ * (PROCESSING → PROCESSED) — la plata SALIÓ de verdad. audit + notification (push al conductor, D7) lo consumen.
+ * Mismo contrato SIN PII + `.strict()` fail-closed que payout.processing/failed: solo IDs + monto + período;
+ * la billetera destino jamás viaja por Kafka. `.strict()` RECHAZA campos extra → falla-CERRADO contra fugas de PII.
+ */
+export const payoutProcessed = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
 
 /**
  * payout.processing (ADR-015 §4.1 · NUEVO): el OPERADOR disparó el desembolso (PENDING/HELD → PROCESSING)
