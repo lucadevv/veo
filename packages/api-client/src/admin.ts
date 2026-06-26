@@ -824,11 +824,24 @@ export const mediaAccessRequestView = z.object({
 });
 export type MediaAccessRequestView = z.infer<typeof mediaAccessRequestView>;
 
-export const signedMedia = z.object({
-  url: z.string(),
-  expiresAt: z.string(),
-  watermark: z.string(),
-});
+/**
+ * Resultado de pedir el stream de un video aprobado (BR-S02 · burn-in Lote 3). DISCRIMINADO por `status`:
+ *  - PROCESSING: la copia con watermark QUEMADO se está rindiendo server-side (asíncrono). NO hay URL aún;
+ *    el cliente reintenta (poll). El operador NUNCA recibe la URL del video crudo.
+ *  - READY: copia lista → `url` firmada (5 min) de la COPIA DERIVADA + `watermark` ya quemado + vencimiento.
+ * Tiparlo como unión discriminada (no un objeto con campos opcionales) hace que el cliente DEBA estrechar
+ * por `status` antes de tocar `url` — no se puede reproducir por accidente un PROCESSING sin URL.
+ */
+export const signedMedia = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('PROCESSING') }),
+  z.object({
+    status: z.literal('READY'),
+    url: z.string(),
+    expiresAt: z.string(),
+    watermark: z.string(),
+    segmentId: z.string(),
+  }),
+]);
 export type SignedMedia = z.infer<typeof signedMedia>;
 
 /* ── Media EN VIVO: muro de cámaras (token solo-suscripción · doble-auth rol+MFA · auditado) ── */

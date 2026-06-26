@@ -18,11 +18,20 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
   const { toast } = useToast();
   const decide = useDecideMedia();
   const signed = useSignedMedia();
-  const [media, setMedia] = useState<SignedMedia | null>(null);
+  const [media, setMedia] = useState<Extract<SignedMedia, { status: 'READY' }> | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
 
   async function play() {
     const result = await signed.mutateAsync({ id: request.id });
+    // El render del watermark es asíncrono (burn-in): si la copia aún se está quemando, avisar y reintentar.
+    if (result.status === 'PROCESSING') {
+      toast({
+        tone: 'info',
+        title: 'Preparando el video',
+        description: 'Se está aplicando la marca de agua. Reintentá en unos segundos.',
+      });
+      return;
+    }
     setMedia(result);
     setPlayerOpen(true);
   }

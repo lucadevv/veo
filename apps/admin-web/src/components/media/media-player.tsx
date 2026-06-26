@@ -4,8 +4,11 @@ import type { SignedMedia } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
+/** Solo la variante READY tiene URL/watermark reproducibles (la unión discriminada se estrecha aguas arriba). */
+type ReadyMedia = Extract<SignedMedia, { status: 'READY' }>;
+
 interface MediaPlayerProps {
-  media: SignedMedia | null;
+  media: ReadyMedia | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }

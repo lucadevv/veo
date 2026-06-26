@@ -214,6 +214,11 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'media.access_granted': ['requestId', 'tripId', 'segmentId', 'operatorId', 'approvedBy', 'expiresAt', 'at'],
   'media.access_rejected': ['requestId', 'tripId', 'segmentId', 'operatorId', 'rejectedBy', 'at'],
   'media.access_viewed': ['requestId', 'tripId', 'segmentId', 'operatorId', 'viewedBy', 'expiresAt', 'at'],
+  // render (burn-in Lote 3): IDs técnicos + timestamp. `reason` de failed es una CATEGORÍA técnica (enum
+  // SOURCE_NOT_FOUND/STORAGE_OR_RENDER_FAILED/INVALID_INPUT/UNKNOWN de categorizeRenderError), NO texto libre
+  // ni PII → seguro. completed no porta reason (terminó OK).
+  'media.render_completed': ['requestId', 'tripId', 'segmentId', 'at'],
+  'media.render_failed': ['requestId', 'tripId', 'reason', 'at'],
   // ── pagos / payouts ── (`method` es z.enum → SEGURO; `reason` de failed/refunded es z.string LIBRE → FUERA;
   // `period` de payout es z.string LIBRE → FUERA)
   'payment.captured': ['paymentId', 'tripId', 'method', 'grossCents', 'commissionCents', 'passengerId'],

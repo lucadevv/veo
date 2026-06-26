@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { RecordingService, roomNameForTrip } from './recording.service';
 import { LiveKitSandboxAdapter } from '../ports/livekit/livekit.module';
+import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import type { IssueTokenInput, LiveKitPort } from '../ports/livekit/livekit.port';
 import type { StoragePort } from '../ports/storage/storage.port';
 import type { Env } from '../config/env.schema';
@@ -26,6 +27,7 @@ const config = new ConfigService<Env, true>({
   RETENTION_DEFAULT_DAYS: 30,
   RETENTION_INCIDENT_DAYS: 180,
   LIVEKIT_URL: 'ws://localhost:7880',
+  WATERMARK_RENDERED_PREFIX: 'watermarked/',
 });
 
 interface Seg {
@@ -43,7 +45,7 @@ interface Seg {
 
 function makePrisma() {
   const segments: Seg[] = [];
-  const accessRequests: { tripId: string }[] = [];
+  const accessRequests: { id: string; tripId: string; renderedS3Key?: string | null }[] = [];
   const outbox: { eventType: string }[] = [];
   const tx = {
     mediaSegment: {
@@ -110,6 +112,12 @@ function makePrisma() {
           segments
             .filter((s) => s.tripId === where.tripId)
             .map((s) => ({ id: s.id, s3Key: s.s3Key })),
+      },
+      videoAccessRequest: {
+        // Derecho al olvido trip-scoped: TODAS las solicitudes del viaje (sin filtrar por renderedS3Key).
+        // La clave de la copia derivada se COMPUTA del id → cae también la copia huérfana (renderedS3Key null).
+        findMany: async ({ where }: { where: { tripId: string } }) =>
+          accessRequests.filter((r) => r.tripId === where.tripId).map((r) => ({ id: r.id })),
       },
     },
     write: {
@@ -332,5 +340,47 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
 
     expect(res.purgedSegments).toBe(0);
     expect(deletes).toHaveLength(0);
+  });
+
+  it('purga también las COPIAS con watermark quemado del viaje (PII, Lote 3)', async () => {
+    const { prisma, accessRequests } = makePrisma();
+    const { storage, deletes } = makeSpyStorage();
+    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
+    // Una solicitud del viaje con copia derivada READY (video de cabina con PII).
+    accessRequests.push({ id: 'req-1', tripId: 'trip-1', renderedS3Key: 'watermarked/req-1.mp4' });
+    // Otra de OTRO viaje: no debe tocarse.
+    accessRequests.push({ id: 'req-9', tripId: 'trip-9', renderedS3Key: 'watermarked/req-9.mp4' });
+
+    await svc.eraseTrip('trip-1');
+
+    // La clave se COMPUTA del id (renderedKeyFor) — no se lee renderedS3Key.
+    expect(deletes).toContain('watermarked/req-1.mp4'); // copia derivada del viaje purgada
+    expect(deletes).not.toContain('watermarked/req-9.mp4'); // la de otro viaje, intacta
+  });
+
+  it('borra la copia HUÉRFANA (renderedS3Key=null por render fallido tras subir bytes) por clave COMPUTADA', async () => {
+    const { prisma, accessRequests } = makePrisma();
+    // Storage REAL (sandbox con store en memoria): el round-trip de borrado es honesto.
+    const storage = new StorageSandboxAdapter();
+    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
+
+    // Render que SUBIÓ los bytes de la copia con PII pero cuya tx de READY falló → renderedS3Key quedó null.
+    // La fila NO referencia la copia, pero el objeto EXISTE en el storage bajo la clave determinista.
+    accessRequests.push({ id: 'req-orphan', tripId: 'trip-1', renderedS3Key: null });
+    const orphanKey = 'watermarked/req-orphan.mp4';
+    await storage.uploadObject({
+      key: orphanKey,
+      body: Buffer.from('copia-derivada-con-PII-huerfana'),
+      contentType: 'video/mp4',
+    });
+    // Pre-condición: la copia huérfana EXISTE en el storage.
+    await expect(storage.getObjectStream(orphanKey)).resolves.toBeDefined();
+
+    await svc.eraseTrip('trip-1');
+
+    // La copia huérfana YA NO está: se borró por clave COMPUTADA, NO por el campo DB (que era null).
+    await expect(storage.getObjectStream(orphanKey)).rejects.toThrow();
   });
 });

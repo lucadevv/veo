@@ -22,11 +22,18 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError, uuidv7 } from '@veo/utils';
+import {
+  ConflictError,
+  ExternalServiceError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  uuidv7,
+} from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import { buildWatermark } from './watermark';
-import { VideoAccessStatus } from '../generated/prisma';
+import { VideoAccessStatus, VideoRenderStatus, type VideoAccessRequest } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const PRODUCER = 'media-service';
@@ -35,25 +42,49 @@ const MIN_REASON_LENGTH = 20;
 export interface CreateAccessRequestInput {
   tripId: string;
   segmentId?: string;
-  /** Operador que solicita (su id de usuario). */
+  /** Operador que solicita (su id de usuario, de la identidad firmada). */
   requestedBy: string;
-  /** Email del operador (se incrusta en el watermark). */
+  /**
+   * Etiqueta de identidad del operador que se QUEMA en el watermark del video (BR-S02). DEBE derivar de la
+   * identidad FIRMADA (claim `email` del token admin, fallback `userId`) — NUNCA de un campo del body: el
+   * artefacto forense no puede portar un valor controlado por el solicitante (no-repudiación).
+   */
   requestedByEmail: string;
   reason: string;
 }
 
-/** Resultado de una visualización: lo que el cliente necesita para reproducir (NUNCA se persiste el url). */
-export interface StreamResult {
-  signedUrl: string;
-  watermark: string;
-  expiresAt: Date;
-  segmentId: string;
-}
+/**
+ * Discriminador TIPADO del resultado de `streamAccess` (sin strings mágicos: se compara contra estas
+ * constantes, jamás contra literales sueltos). El eje de RENDER (quema de watermark) es asíncrono, así que
+ * una visualización puede no estar lista todavía → el cliente reintenta (PROCESSING) o reproduce (READY).
+ */
+export const StreamStatus = {
+  PROCESSING: 'PROCESSING',
+  READY: 'READY',
+} as const;
+export type StreamStatus = (typeof StreamStatus)[keyof typeof StreamStatus];
+
+/**
+ * Resultado de una visualización (DISCRIMINADO por `status`):
+ *  - PROCESSING: la copia con watermark quemado aún no está lista (el worker la está rindiendo). NO hay URL.
+ *  - READY: copia lista → URL firmada de la COPIA DERIVADA (NUNCA del crudo) + watermark ya quemado.
+ * El `signedUrl` jamás se persiste (efímero, 5 min).
+ */
+export type StreamResult =
+  | { status: typeof StreamStatus.PROCESSING }
+  | {
+      status: typeof StreamStatus.READY;
+      signedUrl: string;
+      watermark: string;
+      expiresAt: Date;
+      segmentId: string;
+    };
 
 @Injectable()
 export class AccessService {
   private readonly logger = new Logger(AccessService.name);
   private readonly signedUrlTtl: number;
+  private readonly maxRenderAttempts: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -61,6 +92,7 @@ export class AccessService {
     config: ConfigService<Env, true>,
   ) {
     this.signedUrlTtl = config.getOrThrow<number>('SIGNED_URL_TTL_SECONDS');
+    this.maxRenderAttempts = config.getOrThrow<number>('WATERMARK_RENDER_MAX_ATTEMPTS');
   }
 
   /** Paso 1: crea la solicitud de acceso (status PENDING). Valida el motivo (>20 chars — BR-S02). */
@@ -177,9 +209,18 @@ export class AccessService {
   }
 
   /**
-   * Paso 3: VISUALIZACIÓN. SOLO si la solicitud está APPROVED. Genera URL firmada (5 min) + watermark
-   * FRESCO con el email del solicitante + timestamp now + id, incrementa accessedCount y AUDITA cada
-   * reproducción por outbox (cadena de custodia BR-S02 — cada vista deja rastro). Guard: APPROVED.
+   * Paso 3: VISUALIZACIÓN (BR-S02 · burn-in Lote 3). SOLO si la solicitud está APPROVED. El operador NUNCA
+   * recibe la URL del video CRUDO (`segment.s3Key`): solo la COPIA DERIVADA con watermark quemado
+   * (`renderedS3Key`). El quemado es ASÍNCRONO (worker server-side), así que el resultado es DISCRIMINADO:
+   *
+   *  - renderStatus READY (+ renderedS3Key): firma la COPIA, audita la vista (cadena de custodia), suma
+   *    accessedCount → { status: READY, ... }. INVARIANTE: se presigna `renderedS3Key`, jamás el crudo.
+   *  - renderStatus null / FAILED(<cap) / READY-sin-key (defensivo): dispara el render (→ PENDING) sin firmar
+   *    nada → { status: PROCESSING }. NO incrementa attempts (eso lo hace el worker al TOMAR la solicitud).
+   *  - renderStatus PENDING / PROCESSING: idempotente, no re-dispara → { status: PROCESSING }.
+   *  - renderStatus FAILED con attempts ≥ cap: error TIPADO (no dejar al operador en loop infinito).
+   *
+   * Guard de DECISIÓN: el status del request DEBE seguir siendo APPROVED (si no, ForbiddenError como antes).
    */
   async streamAccess(requestId: string, viewerId: string, now = new Date()): Promise<StreamResult> {
     const req = await this.prisma.read.videoAccessRequest.findUnique({ where: { id: requestId } });
@@ -188,6 +229,71 @@ export class AccessService {
       throw new ForbiddenError('La solicitud no está aprobada');
     }
 
+    // READY con copia derivada lista → servila (presigna SOLO la copia, audita la vista). Se pasa la fila YA
+    // cargada (no se re-lee): es la misma del guard de DECISIÓN de arriba.
+    if (req.renderStatus === VideoRenderStatus.READY && req.renderedS3Key) {
+      return this.serveReady(req, req.renderedS3Key, viewerId, now);
+    }
+
+    // Render en curso (o recién pedido): idempotente, no re-dispara.
+    if (
+      req.renderStatus === VideoRenderStatus.PENDING ||
+      req.renderStatus === VideoRenderStatus.PROCESSING
+    ) {
+      return { status: StreamStatus.PROCESSING };
+    }
+
+    // Falló de forma PERSISTENTE (agotó los intentos): error tipado, no loop infinito de PROCESSING.
+    if (
+      req.renderStatus === VideoRenderStatus.FAILED &&
+      req.renderAttempts >= this.maxRenderAttempts
+    ) {
+      throw new ExternalServiceError('El render del video falló de forma persistente', {
+        requestId: req.id,
+        attempts: req.renderAttempts,
+      });
+    }
+
+    // Resto (null = nunca rendido · FAILED con intentos disponibles): (re)dispara el render lazy con un
+    // UPDATE CONDICIONAL guardado (updateMany filtrado por estado), NO un update incondicional por id.
+    //
+    // PORQUÉ condicional (lost-update race): entre el read de arriba y este punto, el worker pudo dejar la
+    // solicitud READY (o tomarla a PROCESSING). Un update incondicional `{ where: { id } }` PISARÍA ese
+    // READY → PENDING y forzaría un re-render espurio de una copia ya lista. El guard `WHERE renderStatus
+    // null OR (FAILED & attempts<cap)` EXCLUYE READY/PENDING/PROCESSING: solo dispara desde los estados que
+    // legítimamente requieren render. Si `count===0`, otro ya la movió (en curso o lista) → no tocamos nada,
+    // el próximo poll la resuelve. Un solo statement → sin $transaction (era over-engineering).
+    const claimed = await this.prisma.write.videoAccessRequest.updateMany({
+      where: {
+        id: req.id,
+        OR: [
+          { renderStatus: null },
+          { renderStatus: VideoRenderStatus.FAILED, renderAttempts: { lt: this.maxRenderAttempts } },
+        ],
+      },
+      data: { renderStatus: VideoRenderStatus.PENDING, renderRequestedAt: now, renderError: null },
+    });
+    if (claimed.count === 0) {
+      // Otro carril ya lo dejó READY o lo tomó (PENDING/PROCESSING): no re-disparamos ni clobereamos.
+      this.logger.log(`Render ya en curso/listo request=${req.id} (no re-disparado) por=${viewerId}`);
+    } else {
+      this.logger.log(`Render de video solicitado (lazy) request=${req.id} por=${viewerId}`);
+    }
+    return { status: StreamStatus.PROCESSING };
+  }
+
+  /**
+   * Sirve una solicitud cuya copia con watermark quemado ya está READY: presigna la COPIA DERIVADA
+   * (`renderedS3Key`, NUNCA el crudo), audita la visualización por outbox (cadena de custodia BR-S02) y
+   * suma accessedCount. El `watermark` devuelto es el texto YA quemado (informativo para el cliente).
+   */
+  private async serveReady(
+    req: VideoAccessRequest,
+    renderedS3Key: string,
+    viewerId: string,
+    now: Date,
+  ): Promise<Extract<StreamResult, { status: typeof StreamStatus.READY }>> {
+    // `req` es la fila YA cargada por streamAccess (FIX: se elimina el segundo findUnique de la misma fila).
     const segment = req.segmentId
       ? await this.prisma.read.mediaSegment.findUnique({ where: { id: req.segmentId } })
       : await this.prisma.read.mediaSegment.findFirst({
@@ -197,20 +303,19 @@ export class AccessService {
     if (!segment) throw new NotFoundError('Segmento de video no encontrado');
 
     const expiresAt = new Date(now.getTime() + this.signedUrlTtl * 1000);
-    const watermark = buildWatermark({
-      operatorEmail: req.requestedByEmail,
-      requestId: req.id,
-      at: now,
-    });
+    // El watermark ya está QUEMADO en la copia: devolvemos el texto persistido (fallback defensivo al recompute).
+    const watermark =
+      req.watermark ?? buildWatermark({ operatorEmail: req.requestedByEmail, requestId: req.id, at: now });
+    // INVARIANTE DE SEGURIDAD: se presigna la COPIA DERIVADA con watermark quemado, JAMÁS `segment.s3Key`.
     const signedUrl = await this.storage.presignDownloadUrl({
-      key: segment.s3Key,
+      key: renderedS3Key,
       expiresSeconds: this.signedUrlTtl,
     });
 
     await this.prisma.write.$transaction(async (tx) => {
       await tx.videoAccessRequest.update({
         where: { id: req.id },
-        data: { signedUrlExpiresAt: expiresAt, watermark },
+        data: { signedUrlExpiresAt: expiresAt },
       });
       await tx.mediaSegment.update({
         where: { id: segment.id },
@@ -238,7 +343,7 @@ export class AccessService {
     this.logger.log(
       `Visualización de video request=${req.id} segment=${segment.id} por=${viewerId}`,
     );
-    return { signedUrl, watermark, expiresAt, segmentId: segment.id };
+    return { status: StreamStatus.READY, signedUrl, watermark, expiresAt, segmentId: segment.id };
   }
 
   /** Lista las solicitudes de acceso, opcionalmente filtradas por estado. Orden createdAt desc. */

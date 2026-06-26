@@ -276,6 +276,22 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'media',
         resourceId: p.segmentId ?? p.tripId,
       })),
+      // Render (burn-in Lote 3) de un acceso YA APROBADO: el quemado server-side del watermark de la copia
+      // derivada TERMINÓ (completed) o FALLÓ de forma reintentable/terminal (failed). Sin estos handlers, una
+      // falla PERMANENTE de render de un video aprobado NO dejaría rastro inmutable (BR-S02 incompleto). Es
+      // trabajo del SISTEMA (worker), sin operador humano → actor='system' (mismo patrón que recording_started/
+      // archived). resource=media: el segmento concreto rendido (completed lo trae) o el viaje (failed no porta
+      // segmentId). El payload es CERO PII (IDs/categoría técnica de error/timestamp); la proyección lo allowlista.
+      'media.render_completed': this.audited('media.render_completed', (p) => ({
+        actorId: 'system',
+        resourceType: 'media',
+        resourceId: p.segmentId,
+      })),
+      'media.render_failed': this.audited('media.render_failed', (p) => ({
+        actorId: 'system',
+        resourceType: 'media',
+        resourceId: p.tripId,
+      })),
 
       // Viaje (ciclo de vida · trazabilidad forense, movilidad segura / Ley 29733): la cadena de custodia
       // debe poder reconstruir QUÉ pasó en un viaje (quién lo aceptó/inició/completó/canceló y cuándo), no

@@ -18,6 +18,7 @@ import { PrismaService } from '../infra/prisma.service';
 import { LIVEKIT_PORT, type LiveKitPort } from '../ports/livekit/livekit.port';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import { computeRetentionUntil } from './retention';
+import { renderedKeyFor } from './watermark';
 import type { Env } from '../config/env.schema';
 
 const PRODUCER = 'media-service';
@@ -44,6 +45,7 @@ export class RecordingService {
   private readonly defaultDays: number;
   private readonly incidentDays: number;
   private readonly livekitUrl: string;
+  private readonly renderedPrefix: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -56,6 +58,7 @@ export class RecordingService {
     this.defaultDays = config.getOrThrow<number>('RETENTION_DEFAULT_DAYS');
     this.incidentDays = config.getOrThrow<number>('RETENTION_INCIDENT_DAYS');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
+    this.renderedPrefix = config.getOrThrow<string>('WATERMARK_RENDERED_PREFIX');
   }
 
   /** Emite un token LiveKit de cámara para un participante del viaje (BR-S01). */
@@ -234,11 +237,18 @@ export class RecordingService {
       where: { tripId },
       select: { id: true, s3Key: true },
     });
-    if (segments.length === 0) return { purgedSegments: 0 };
+    // Copias DERIVADAS con watermark quemado (Lote 3): video de cabina con PII → NO pueden quedar (Ley
+    // 29733). Las solicitudes del viaje pueden tener una copia READY; se purgan junto al crudo. Se resuelve
+    // por separado del crudo: una solicitud de acceso puede existir aunque el segmento ya haya sido barrido.
+    const renderedKeys = await this.renderedKeysForTrip(tripId);
+    if (segments.length === 0 && renderedKeys.length === 0) return { purgedSegments: 0 };
 
     // Borra los objetos de almacenamiento primero (idempotente). Si la transacción de DB falla luego,
     // el reproceso vuelve a intentar el borrado de objetos (no-op) y el de filas: sin huérfanos.
-    await Promise.all(segments.map((s) => this.storage.deleteObject(s.s3Key)));
+    await Promise.all([
+      ...segments.map((s) => this.storage.deleteObject(s.s3Key)),
+      ...renderedKeys.map((k) => this.storage.deleteObject(k)),
+    ]);
 
     const segmentIds = segments.map((s) => s.id);
     await this.prisma.write.$transaction(async (tx) => {
@@ -251,6 +261,24 @@ export class RecordingService {
       `Derecho al olvido: purgado el video del viaje ${tripId} (${segments.length} segmento(s) + objetos S3)`,
     );
     return { purgedSegments: segments.length };
+  }
+
+  /**
+   * Claves S3 de las copias DERIVADAS (watermark quemado) de las solicitudes de un viaje (Lote 3).
+   *
+   * COMPUTA la clave determinista (`renderedKeyFor`) de TODAS las solicitudes del viaje, SIN filtrar por
+   * `renderedS3Key`. El derecho al olvido es trip-scoped y legalmente DEBE ser completo: si filtráramos por
+   * `renderedS3Key != null` dejaríamos viva la copia HUÉRFANA de un render que subió los bytes pero cuya
+   * transacción de READY falló (`renderedS3Key` quedó null) → PII sobreviviendo un borrado = violación Ley
+   * 29733. Como la clave es determinista y `deleteObject` es idempotente, borrar una clave que quizá no
+   * existe es seguro.
+   */
+  private async renderedKeysForTrip(tripId: string): Promise<string[]> {
+    const rows = await this.prisma.read.videoAccessRequest.findMany({
+      where: { tripId },
+      select: { id: true },
+    });
+    return rows.map((r) => renderedKeyFor(this.renderedPrefix, r.id));
   }
 
   private async findOpenSegment(tripId: string): Promise<{

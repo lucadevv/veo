@@ -45,13 +45,14 @@ interface VideoAccessRequest {
   createdAt: string;
 }
 
-/** Stream firmado que devuelve media-service (GET .../stream). */
-interface StreamReply {
-  signedUrl: string;
-  watermark: string;
-  expiresAt: string;
-  segmentId: string;
-}
+/**
+ * Stream que devuelve media-service (GET .../stream) — DISCRIMINADO por `status` (burn-in Lote 3):
+ *  - PROCESSING: la copia con watermark quemado aún se rinde (asíncrono). NO hay URL.
+ *  - READY: URL firmada de la COPIA DERIVADA (nunca el crudo) + watermark quemado + vencimiento.
+ */
+type StreamReply =
+  | { status: 'PROCESSING' }
+  | { status: 'READY'; signedUrl: string; watermark: string; expiresAt: string; segmentId: string };
 
 /** Vista de solicitud de acceso que consume admin-web (schema Zod `mediaAccessRequestView`). */
 export interface MediaAccessRequestView {
@@ -65,12 +66,14 @@ export interface MediaAccessRequestView {
   decidedBy: string | null;
 }
 
-/** URL firmada del video que consume admin-web (schema Zod `signedMedia`). */
-export interface SignedMedia {
-  url: string;
-  expiresAt: string;
-  watermark: string;
-}
+/**
+ * Resultado del stream que consume admin-web (schema Zod `signedMedia`, DISCRIMINADO por `status`):
+ *  - PROCESSING: la copia con watermark quemado se está rindiendo (asíncrono); el cliente reintenta.
+ *  - READY: URL firmada de la COPIA DERIVADA (nunca el crudo) + watermark quemado + vencimiento.
+ */
+export type SignedMedia =
+  | { status: 'PROCESSING' }
+  | { status: 'READY'; url: string; expiresAt: string; watermark: string; segmentId: string };
 
 /** Token de cámara EN VIVO (solo-suscripción) emitido por media-service para el muro del admin. */
 export interface LiveViewerToken {
@@ -123,24 +126,6 @@ export class MediaService {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
-  /**
-   * Email del operador para incrustar como watermark en el video (media-service lo exige con @IsEmail).
-   * El JWT admin transporta el `email` del operador (claim solo-admin, staff interno), así que el
-   * watermark muestra la identidad legible REAL del operador (BR-S02), no un sintético opaco. El camino
-   * de REFRESH de identity ahora distingue sujeto admin (`typ:'admin'` en el refresh token) y REPUEBLA
-   * `email` (y roles) desde AdminUser, así que el token re-emitido por refresh TAMBIÉN porta el email.
-   *
-   * Fallback residual: solo se activa para identidades sin email (passenger/driver, que nunca acceden a
-   * este BFF) o un refresh token PREVIO al fix que aún no portaba `typ` y se re-emitió sin email; en ese
-   * caso caemos al email determinista derivado del `userId` —que ES la clave canónica de rendición de
-   * cuentas (mismo valor que media-service persiste como `requestedBy`/`approvedBy`)— para que la
-   * validación @IsEmail downstream no rompa. Tras el primer refresh, el token queda curado con `typ` y
-   * el email real vuelve a estar presente.
-   */
-  private operatorEmail(identity: AuthenticatedUser): string {
-    return identity.email ?? `${identity.userId}@operator.veo.internal`;
-  }
-
   /** Lista las solicitudes de acceso (opcionalmente filtradas por estado). Lectura — solo rol, sin step-up. */
   async listRequests(
     identity: AuthenticatedUser,
@@ -154,9 +139,11 @@ export class MediaService {
   }
 
   /**
-   * Crea una solicitud de acceso (queda PENDING). El `operatorEmail` se deriva de la sesión, NO del cliente.
-   * media-service devuelve solo {id,status}; construimos la vista con los datos conocidos (el cliente igual
-   * invalida y refetchea la lista real, así que la vista provisional alcanza para el optimistic update).
+   * Crea una solicitud de acceso (queda PENDING). La identidad del operador que se QUEMA en el watermark NO
+   * se envía en el body: media-service la deriva del header de identidad interna FIRMADO (claim `email` del
+   * token admin, fallback `userId`), que el `InternalRestClient` propaga desde `identity`. Así el artefacto
+   * forense no puede portar un valor controlado por el cliente (BR-S02 · no-repudiación). media-service devuelve
+   * solo {id,status}; construimos la vista provisional con los datos conocidos (el cliente refetchea la lista real).
    */
   async requestAccess(
     identity: AuthenticatedUser,
@@ -164,7 +151,7 @@ export class MediaService {
   ): Promise<MediaAccessRequestView> {
     const created = await this.rest.post<AccessRequestCreated>('/media/access', {
       identity,
-      body: { tripId: dto.tripId, reason: dto.reason, operatorEmail: this.operatorEmail(identity) },
+      body: { tripId: dto.tripId, reason: dto.reason },
     });
     await this.audit.record(identity, {
       action: 'media.access_request',
@@ -219,18 +206,30 @@ export class MediaService {
   }
 
   /**
-   * Obtiene la URL firmada del video de una solicitud aprobada (requiere MFA fresca; el controller lo impone).
-   * El acceso efectivo al material sensible se audita ANTES de devolver la URL (fail-closed, Ley 29733).
+   * Obtiene el stream del video de una solicitud aprobada (requiere MFA fresca; el controller lo impone).
+   * El render del watermark es ASÍNCRONO (burn-in Lote 3): si aún no está listo devuelve PROCESSING (el
+   * cliente reintenta) y NO se audita (no hubo acceso a material). Cuando está READY, el acceso efectivo a
+   * material sensible se audita ANTES de devolver la URL de la COPIA DERIVADA (fail-closed, Ley 29733).
    */
   async streamRequest(identity: AuthenticatedUser, requestId: string): Promise<SignedMedia> {
     const res = await this.rest.get<StreamReply>(`/media/access/${requestId}/stream`, { identity });
+    if (res.status === 'PROCESSING') {
+      // No hubo acceso a material (la copia se está rindiendo) → nada que auditar todavía.
+      return { status: 'PROCESSING' };
+    }
     await this.audit.record(identity, {
       action: 'media.access_stream',
       resourceType: 'media_access',
       resourceId: requestId,
       payload: { segmentId: res.segmentId, expiresAt: res.expiresAt },
     });
-    return { url: res.signedUrl, expiresAt: res.expiresAt, watermark: res.watermark };
+    return {
+      status: 'READY',
+      url: res.signedUrl,
+      expiresAt: res.expiresAt,
+      watermark: res.watermark,
+      segmentId: res.segmentId,
+    };
   }
 
   /**

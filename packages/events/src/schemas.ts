@@ -643,6 +643,22 @@ export const mediaAccessViewed = z.object({
   expiresAt: z.string(),
   at: z.string(),
 });
+/// BR-S02 (Lote 3 · burn-in): el quemado server-side del watermark de la copia derivada TERMINÓ OK. SIN PII:
+/// el operador (quién pidió) ya está en `media.access_granted`; acá solo IDs técnicos de la copia lista.
+export const mediaRenderCompleted = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  segmentId: z.string(),
+  at: z.string(),
+});
+/// BR-S02 (Lote 3 · burn-in): el quemado del watermark FALLÓ. SIN PII: `reason` es una CATEGORÍA técnica
+/// (clase de error), nunca texto libre ni datos del operador/video.
+export const mediaRenderFailed = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  reason: z.string(),
+  at: z.string(),
+});
 
 /* ── payment ── (BR-P01) */
 export const paymentCaptured = z.object({
@@ -1313,6 +1329,8 @@ export const EVENT_SCHEMAS = {
   'media.access_granted': mediaAccessGranted,
   'media.access_rejected': mediaAccessRejected,
   'media.access_viewed': mediaAccessViewed,
+  'media.render_completed': mediaRenderCompleted,
+  'media.render_failed': mediaRenderFailed,
   'payment.captured': paymentCaptured,
   'payment.failed': paymentFailed,
   'payment.tip_added': paymentTipAdded,

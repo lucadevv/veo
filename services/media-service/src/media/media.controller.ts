@@ -89,7 +89,11 @@ export class MediaController {
       tripId: dto.tripId,
       segmentId: dto.segmentId,
       requestedBy: user.userId,
-      requestedByEmail: dto.operatorEmail,
+      // CADENA DE CUSTODIA (BR-S02): el identificador del operador que se QUEMA en el video deriva SIEMPRE
+      // de la identidad FIRMADA (claim `email` del token admin, propagado por el header de identidad interna
+      // HMAC), JAMÁS de un campo del body forjable por el solicitante. Fallback robusto al `userId` FIRMADO
+      // cuando el token no porta email (admin re-emitido por refresh). Nunca un valor controlado por el cliente.
+      requestedByEmail: user.email ?? user.userId,
       reason: dto.reason,
     });
   }

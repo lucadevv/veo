@@ -105,6 +105,21 @@ export const envSchema = z.object({
   /// Timeout duro del render en ms: al excederlo se mata ffmpeg (SIGKILL) y se devuelve error tipado.
   WATERMARK_RENDER_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
 
+  // === Worker de render (Lote 3 · quema lazy + reaper). Perillas tuneables sin redeploy. SIN secretos. ===
+  /// Cada cuántos segundos corre el worker que quema watermark de las solicitudes PENDING (lazy + reaper).
+  WATERMARK_RENDER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(20),
+  /// Cuántas solicitudes rinde como máximo por tick (SECUENCIAL, para no fundir el CPU del VPS).
+  WATERMARK_RENDER_BATCH: z.coerce.number().int().positive().default(3),
+  /// Cap de intentos de render por solicitud: al alcanzarlo, streamAccess deja de reintentar y tira error.
+  WATERMARK_RENDER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  /// Prefijo S3/MinIO de las copias derivadas (watermark quemado). Dedicado → barrido por prefijo seguro.
+  WATERMARK_RENDERED_PREFIX: z.string().default('watermarked/'),
+  /// TTL del lock distribuido del worker (s). DEBE superar el peor caso del batch (batch × render timeout).
+  WATERMARK_RENDER_LOCK_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /// Antigüedad (s) tras la cual un PROCESSING se considera COLGADO (worker murió a mitad) y se re-toma.
+  /// DEBE superar el render timeout (un render en curso legítimo no debe verse como colgado).
+  WATERMARK_RENDER_STALE_SECONDS: z.coerce.number().int().positive().default(600),
+
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
   // gRPC (lectura síncrona desde otros servicios — veo.media.v1)

@@ -166,6 +166,43 @@ describe('payload-projection · PII-guard (cero PII al WORM, para TODO evento de
     expect('body' in safe).toBe(false);
   });
 
+  it('render · media.render_completed mantiene IDs/timestamp del burn-in (sin PII)', () => {
+    const safe = projectAuditPayload('media.render_completed', {
+      requestId: 'req-1',
+      tripId: 't-1',
+      segmentId: 'seg-9',
+      at: '2026-06-26T00:00:00Z',
+      // contaminación que NO debe sobrevivir si llegara:
+      operatorEmail: 'op@veo.pe',
+      watermark: 'VEO · op@veo.pe · req-1',
+    });
+    expect(safe).toEqual({
+      requestId: 'req-1',
+      tripId: 't-1',
+      segmentId: 'seg-9',
+      at: '2026-06-26T00:00:00Z',
+    });
+  });
+
+  it('render · media.render_failed PRESERVA el `reason` CATEGÓRICO (enum técnico, no texto libre ni PII)', () => {
+    const safe = projectAuditPayload('media.render_failed', {
+      requestId: 'req-2',
+      tripId: 't-42',
+      reason: 'STORAGE_OR_RENDER_FAILED',
+      at: '2026-06-26T00:00:00Z',
+      operatorEmail: 'op@veo.pe',
+    });
+    expect(safe).toEqual({
+      requestId: 'req-2',
+      tripId: 't-42',
+      reason: 'STORAGE_OR_RENDER_FAILED',
+      at: '2026-06-26T00:00:00Z',
+    });
+    // el reason categórico SOBREVIVE (valor forense), el email NO.
+    expect(safe.reason).toBe('STORAGE_OR_RENDER_FAILED');
+    expect('operatorEmail' in safe).toBe(false);
+  });
+
   it('notification · notification.sent DESCARTA el `to` (token/teléfono/email crudo), deja id+canal', () => {
     const safe = projectAuditPayload('notification.sent', {
       notificationId: 'ntf-1',

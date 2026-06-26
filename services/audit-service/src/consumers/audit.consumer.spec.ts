@@ -861,3 +861,62 @@ describe('AuditConsumer · trazabilidad total (representativos por categoría ·
     expect(mappingOf()).toEqual({ actorId: 'system', resourceType: 'share', resourceId: 'sh-1' });
   });
 });
+
+describe('AuditConsumer · render del burn-in (cadena de custodia · Lote 3 · BR-S02)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('registra handlers para media.render_completed y media.render_failed (sin estos, una falla permanente de render no deja rastro WORM)', () => {
+    expect(handlers.has('media.render_completed')).toBe(true);
+    expect(handlers.has('media.render_failed')).toBe(true);
+  });
+
+  it('media.render_completed → actor=system (worker), resourceType=media, resourceId=segmentId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.render_completed',
+      producer: 'media-service',
+      payload: { requestId: 'req-1', tripId: 't-1', segmentId: 'seg-9', at: new Date().toISOString() },
+    });
+    await handlers.get('media.render_completed')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('media.render_completed'));
+    expect(mapping).toEqual({ actorId: 'system', resourceType: 'media', resourceId: 'seg-9' });
+  });
+
+  it('media.render_failed → actor=system, resourceType=media, resourceId=tripId (no porta segmentId)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'media.render_failed',
+      producer: 'media-service',
+      payload: {
+        requestId: 'req-2',
+        tripId: 't-42',
+        reason: 'STORAGE_OR_RENDER_FAILED',
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('media.render_failed')!(envelope);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('media.render_failed'));
+    expect(mapping).toEqual({ actorId: 'system', resourceType: 'media', resourceId: 't-42' });
+  });
+});

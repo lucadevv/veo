@@ -62,6 +62,19 @@ enum VideoAccessStatus {
   @@schema("media")
 }
 
+/// Estado del RENDER (quemado de watermark server-side) de la copia derivada — EJE SEPARADO de la
+/// DECISIÓN de acceso (VideoAccessStatus). NULL en la solicitud = render nunca solicitado. State machine
+/// del render: (null) → PENDING → PROCESSING → READY | FAILED. El operador NUNCA recibe la URL del video
+/// CRUDO: streamAccess solo presigna la copia READY (`renderedS3Key`), jamás `MediaSegment.s3Key` (BR-S02).
+enum VideoRenderStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+
+  @@schema("media")
+}
+
 model VideoAccessRequest {
   id                 String    @id @db.Uuid
   /// Segmento concreto al que se solicita acceso (opcional: se puede pedir por viaje completo).
@@ -83,14 +96,30 @@ model VideoAccessRequest {
   rejectedBy         String?   @map("rejected_by") @db.Uuid
   rejectedAt         DateTime? @map("rejected_at") @db.Timestamptz
   signedUrlExpiresAt DateTime? @map("signed_url_expires_at") @db.Timestamptz
-  /// Watermark de la última visualización (email del operador + timestamp + id de solicitud).
+  /// Watermark de la última visualización (email del operador + timestamp + id de solicitud). Tras el
+  /// burn-in (Lote 3) guarda el texto QUEMADO en la copia derivada (informativo para el cliente).
   watermark          String?
+  /// EJE DE RENDER (separado del de decisión). Estado del quemado de watermark de la copia derivada.
+  /// NULL = render nunca solicitado (una aprobación recién hecha no tiene render hasta el primer stream).
+  renderStatus       VideoRenderStatus? @map("render_status")
+  /// Clave S3/MinIO de la COPIA con watermark quemado (la ÚNICA que se presigna al operador). Set al READY.
+  renderedS3Key      String?   @map("rendered_s3_key")
+  /// Cuándo se SOLICITÓ el render (transición a PENDING) — orden del worker + detección de PROCESSING colgado.
+  renderRequestedAt  DateTime? @map("render_requested_at") @db.Timestamptz
+  /// Cuándo el render llegó a READY (copia derivada lista).
+  renderedAt         DateTime? @map("rendered_at") @db.Timestamptz
+  /// Motivo de la ÚLTIMA falla de render — SIN PII (solo categoría/mensaje técnico, truncado).
+  renderError        String?   @map("render_error")
+  /// Intentos de render consumidos (el worker lo incrementa al TOMAR la solicitud). Cap = MAX_ATTEMPTS.
+  renderAttempts     Int       @default(0) @map("render_attempts")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([tripId])
   @@index([segmentId])
   @@index([requestedBy])
   @@index([status, createdAt])
+  /// Índice del worker de render: barre PENDING / PROCESSING-colgado ordenado por renderRequestedAt.
+  @@index([renderStatus, renderRequestedAt])
   @@map("video_access_requests")
   @@schema("media")
 }
