@@ -9,6 +9,8 @@ import type Redis from 'ioredis';
 import argon2 from 'argon2';
 import { JwtService, RedisRefreshTokenStore, enrollTotp, verifyTotp } from '@veo/auth';
 import { AdminRole as AdminRoles, canGrantRoles, maxRoleRank, type AdminRole } from '@veo/shared-types';
+import { enqueueOutbox } from '@veo/database';
+import { createEnvelope } from '@veo/events';
 import {
   ConflictError,
   ForbiddenError,
@@ -90,6 +92,7 @@ export class AdminService {
    */
   async createOperator(
     actorRoles: AdminRole[],
+    actorId: string,
     email: string,
     roles: AdminRole[],
   ): Promise<{ id: string; inviteToken: string; inviteUrl: string; expiresAt: Date }> {
@@ -109,15 +112,21 @@ export class AdminService {
     if (existing) throw new ConflictError('Ya existe un operador con ese email');
 
     const { token, tokenHash, expiresAt } = generateInviteToken();
-    const admin = await this.prisma.write.adminUser.create({
-      data: {
-        email,
-        roles,
-        status: AdminStatus.INVITED,
-        passwordHash: null,
-        inviteTokenHash: tokenHash,
-        inviteExpiresAt: expiresAt,
-      },
+    // El grant inicial de roles ES una mutación de privilegio auditable (Ley 29733, libro WORM).
+    // El write y el evento `admin.role_changed` van en la MISMA transacción: estado↔auditoría atómicos.
+    const admin = await this.prisma.write.$transaction(async (tx) => {
+      const created = await tx.adminUser.create({
+        data: {
+          email,
+          roles,
+          status: AdminStatus.INVITED,
+          passwordHash: null,
+          inviteTokenHash: tokenHash,
+          inviteExpiresAt: expiresAt,
+        },
+      });
+      await enqueueOutbox(tx, this.roleChangedEnvelope(created.id, roles, actorId), created.id);
+      return created;
     });
 
     const inviteUrl = this.buildInviteUrl(token);
@@ -161,32 +170,62 @@ export class AdminService {
   /** Re-emite la invitación de un operador que aún no la aceptó (regenera token+expiración). */
   async reinvite(
     actorRoles: AdminRole[],
+    actorId: string,
     id: string,
   ): Promise<{ inviteUrl: string; expiresAt: Date }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id } });
-    if (!admin) throw new NotFoundError('Operador no encontrado');
-    if (admin.status !== AdminStatus.INVITED) {
-      throw new ConflictError('El operador ya aceptó o no está invitado');
-    }
-    // Anti-escalada: re-invitar es re-otorgar los mismos roles; el actor debe poder otorgarlos.
-    if (!canGrantRoles(actorRoles, admin.roles as AdminRole[])) {
-      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
-        actorRoles,
-        requested: admin.roles,
-      });
-    }
+    const existing = await this.prisma.read.adminUser.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError('Operador no encontrado');
     const { token, tokenHash, expiresAt } = generateInviteToken();
-    await this.prisma.write.adminUser.update({
-      where: { id },
-      data: { inviteTokenHash: tokenHash, inviteExpiresAt: expiresAt },
+    // TOCTOU-safe (espejo de reject()): la lectura del status + el check anti-escalada se RE-validan
+    // DENTRO de la tx con el write client. Sin esto, un reject() concurrente entre el read y la tx
+    // dejaría re-emitir el token Y un `admin.role_changed` para una cuenta ya REVOCADA → ruido
+    // forense en el WORM + token inútil. El update + el evento van en la MISMA tx.
+    const email = await this.prisma.write.$transaction(async (tx) => {
+      const admin = await tx.adminUser.findUnique({ where: { id } });
+      if (!admin) throw new NotFoundError('Operador no encontrado');
+      if (admin.status !== AdminStatus.INVITED) {
+        throw new ConflictError('El operador ya aceptó o no está invitado');
+      }
+      const roles = admin.roles as AdminRole[];
+      // Anti-escalada: re-invitar es re-otorgar los mismos roles; el actor debe poder otorgarlos.
+      if (!canGrantRoles(actorRoles, roles)) {
+        throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+          actorRoles,
+          requested: roles,
+        });
+      }
+      await tx.adminUser.update({
+        where: { id },
+        data: { inviteTokenHash: tokenHash, inviteExpiresAt: expiresAt },
+      });
+      await enqueueOutbox(tx, this.roleChangedEnvelope(id, roles, actorId), id);
+      return admin.email;
     });
     const inviteUrl = this.buildInviteUrl(token);
-    await this.sendInviteEmail(admin.email, inviteUrl, expiresAt);
+    await this.sendInviteEmail(email, inviteUrl, expiresAt);
     return { inviteUrl, expiresAt };
   }
 
   private buildInviteUrl(token: string): string {
     return `${this.adminWebUrl}/accept-invite?token=${token}`;
+  }
+
+  /**
+   * Envelope del evento de auditoría de privilegio `admin.role_changed` (consumido por audit-service →
+   * libro WORM). Sin PII: solo IDs + roles tipados + timestamp. `changedBy` = actor que muta los roles.
+   * El eventId (uuidv7) lo genera createEnvelope → el audit dedupea por eventId.
+   */
+  private roleChangedEnvelope(adminUserId: string, roles: AdminRole[], changedBy: string) {
+    return createEnvelope({
+      eventType: 'admin.role_changed',
+      producer: 'identity-service',
+      payload: {
+        adminUserId,
+        roles,
+        changedBy,
+        at: new Date(this.clock.now()).toISOString(),
+      },
+    });
   }
 
   /**

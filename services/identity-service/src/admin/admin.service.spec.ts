@@ -13,6 +13,7 @@ import {
   type Clock,
 } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
+import { adminRoleChanged } from '@veo/events';
 import { AdminService } from './admin.service';
 import { InvalidStatusTransition } from '../domain/state-machine';
 import { hashInviteToken } from '../domain/invite-token';
@@ -183,21 +184,28 @@ describe('AdminService.reject · anti-escalada + máquina dentro de la tx', () =
 });
 
 /**
- * Prisma doble para createOperator: read.findUnique (chequeo de email) + write.create.
- * Los spies permiten afirmar que la escalada CORTA antes de tocar la DB.
+ * Prisma doble para createOperator: read.findUnique (chequeo de email) + write.$transaction(create +
+ * outboxEvent.create). El create y el evento `admin.role_changed` van en la MISMA tx (atomicidad
+ * estado↔auditoría). Los spies permiten afirmar que la escalada CORTA antes de tocar la DB y que el
+ * outbox recibe el envelope.
  */
-function makeCreatePrisma(existing: unknown = null) {
+function makeCreatePrisma(existing: unknown = null, opts: { createThrows?: boolean } = {}) {
   const findUnique = vi.fn(async () => existing);
-  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
-    id: 'a1',
-    ...data,
-  }));
+  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    if (opts.createThrows) throw new Error('DB caída en el create');
+    return { id: 'a1', ...data };
+  });
+  const outboxCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
+  const $transaction = vi.fn(async (fn: (t: unknown) => Promise<unknown>) =>
+    fn({ adminUser: { create }, outboxEvent: { create: outboxCreate } }),
+  );
   return {
     findUnique,
     create,
+    outboxCreate,
     prisma: {
       read: { adminUser: { findUnique } },
-      write: { adminUser: { create } },
+      write: { $transaction },
     },
   };
 }
@@ -206,7 +214,7 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
   it('ADMIN → [SUPERADMIN]: ForbiddenError 403 SIN tocar la DB', async () => {
     const { prisma, findUnique, create } = makeCreatePrisma();
     const err = await makeService(prisma)
-      .createOperator([AdminRole.ADMIN], 'op@veo.pe', [AdminRole.SUPERADMIN])
+      .createOperator([AdminRole.ADMIN], 'actor-1', 'op@veo.pe', [AdminRole.SUPERADMIN])
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ForbiddenError);
     expect((err as ForbiddenError).httpStatus).toBe(403);
@@ -219,6 +227,7 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
     await expect(
       makeService(prisma).createOperator(
         [AdminRole.SUPERADMIN],
+        'actor-1',
         'op@veo.pe',
         ['NO_EXISTE' as AdminRole],
       ),
@@ -230,9 +239,12 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
   it('ADMIN → [SUPPORT_L2]: crea INVITED con token y devuelve el inviteUrl', async () => {
     const { prisma, create } = makeCreatePrisma();
     const email = makeEmail();
-    const res = await makeService(prisma, email).createOperator([AdminRole.ADMIN], 'op@veo.pe', [
-      AdminRole.SUPPORT_L2,
-    ]);
+    const res = await makeService(prisma, email).createOperator(
+      [AdminRole.ADMIN],
+      'actor-1',
+      'op@veo.pe',
+      [AdminRole.SUPPORT_L2],
+    );
     expect(create).toHaveBeenCalledOnce();
     const data = create.mock.calls[0]![0].data as Record<string, unknown>;
     expect(data.status).toBe('INVITED');
@@ -248,7 +260,9 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
   it('email ya tomado → ConflictError', async () => {
     const { prisma } = makeCreatePrisma({ id: 'x', email: 'op@veo.pe' });
     await expect(
-      makeService(prisma).createOperator([AdminRole.ADMIN], 'op@veo.pe', [AdminRole.SUPPORT_L2]),
+      makeService(prisma).createOperator([AdminRole.ADMIN], 'actor-1', 'op@veo.pe', [
+        AdminRole.SUPPORT_L2,
+      ]),
     ).rejects.toMatchObject({ httpStatus: 409 });
   });
 
@@ -257,11 +271,96 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
     const email = makeEmail(async () => {
       throw new Error('SMTP caído');
     });
-    const res = await makeService(prisma, email).createOperator([AdminRole.ADMIN], 'op@veo.pe', [
-      AdminRole.SUPPORT_L2,
-    ]);
+    const res = await makeService(prisma, email).createOperator(
+      [AdminRole.ADMIN],
+      'actor-1',
+      'op@veo.pe',
+      [AdminRole.SUPPORT_L2],
+    );
     expect(res.inviteToken).toEqual(expect.any(String));
     expect(res.inviteUrl).toContain('/accept-invite?token=');
+  });
+});
+
+/**
+ * Emisión del evento de auditoría de privilegio `admin.role_changed` (compliance Ley 29733 → libro
+ * WORM del audit-service). El write del rol y el evento van en la MISMA transacción: un cambio de rol
+ * SIN su evento de auditoría es justo el gap que cerramos.
+ */
+describe('AdminService · emite admin.role_changed por outbox (auditoría de privilegio)', () => {
+  const FIXED = new FixedClock(Date.parse('2026-06-26T12:00:00.000Z'));
+
+  it('createOperator encola admin.role_changed con payload correcto en la MISMA tx', async () => {
+    const { prisma, create, outboxCreate } = makeCreatePrisma();
+    await makeService(prisma, makeEmail(), fakeRedis(), {}, {}, FIXED).createOperator(
+      [AdminRole.ADMIN],
+      'actor-99',
+      'op@veo.pe',
+      [AdminRole.SUPPORT_L2],
+    );
+    // El write del rol corrió.
+    expect(create).toHaveBeenCalledOnce();
+    // El outbox recibió el envelope DENTRO de la tx (mismo tx-client que el create).
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    const row = outboxCreate.mock.calls[0]![0].data as {
+      aggregateId: string;
+      eventType: string;
+      envelope: { eventType: string; producer: string; payload: unknown };
+    };
+    expect(row.eventType).toBe('admin.role_changed');
+    expect(row.aggregateId).toBe('a1'); // adminUserId del operador creado
+    expect(row.envelope.producer).toBe('identity-service');
+    // Assert clave: el payload tiene EXACTAMENTE los 4 campos y pasa el schema (sin PII, sin extras).
+    expect(row.envelope.payload).toEqual({
+      adminUserId: 'a1',
+      roles: [AdminRole.SUPPORT_L2],
+      changedBy: 'actor-99',
+      at: '2026-06-26T12:00:00.000Z',
+    });
+    expect(() => adminRoleChanged.parse(row.envelope.payload)).not.toThrow();
+  });
+
+  it('ATOMICIDAD: si el write del rol falla, el evento NO se encola (rollback de la tx)', async () => {
+    const { prisma, outboxCreate } = makeCreatePrisma(null, { createThrows: true });
+    await expect(
+      makeService(prisma, makeEmail(), fakeRedis(), {}, {}, FIXED).createOperator(
+        [AdminRole.ADMIN],
+        'actor-99',
+        'op@veo.pe',
+        [AdminRole.SUPPORT_L2],
+      ),
+    ).rejects.toThrow('DB caída en el create');
+    // El create lanzó ANTES del enqueue → el outbox nunca recibió el evento.
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('reinvite (re-grant) encola admin.role_changed con los roles vigentes del operador', async () => {
+    const { prisma, outboxCreate } = makeReinvitePrisma({
+      id: 'op-7',
+      email: 'op@veo.pe',
+      status: 'INVITED',
+      roles: [AdminRole.SUPPORT_L2],
+    });
+    await makeService(prisma, makeEmail(), fakeRedis(), {}, {}, FIXED).reinvite(
+      [AdminRole.ADMIN],
+      'actor-99',
+      'op-7',
+    );
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    const row = outboxCreate.mock.calls[0]![0].data as {
+      aggregateId: string;
+      eventType: string;
+      envelope: { payload: unknown };
+    };
+    expect(row.eventType).toBe('admin.role_changed');
+    expect(row.aggregateId).toBe('op-7');
+    expect(row.envelope.payload).toEqual({
+      adminUserId: 'op-7',
+      roles: [AdminRole.SUPPORT_L2],
+      changedBy: 'actor-99',
+      at: '2026-06-26T12:00:00.000Z',
+    });
+    expect(() => adminRoleChanged.parse(row.envelope.payload)).not.toThrow();
   });
 });
 
@@ -357,15 +456,28 @@ describe('AdminService.acceptInvite · fija contraseña → ACTIVE (un solo uso)
 });
 
 /**
- * Prisma doble para reinvite: read.findUnique + write.update.
+ * Prisma doble para reinvite: read.findUnique (existencia) + write.$transaction(findUnique RE-validado
+ * + update + outboxEvent.create). El status se re-lee DENTRO de la tx (TOCTOU-safe, espejo de reject):
+ * `txAdmin` simula lo que ve la tx (puede diferir de la réplica si un reject concurrente lo cambió).
  */
-function makeReinvitePrisma(admin: Record<string, unknown> | null) {
+function makeReinvitePrisma(
+  replicaAdmin: Record<string, unknown> | null,
+  txAdmin: Record<string, unknown> | null = replicaAdmin,
+) {
   const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'a1', ...data }));
+  const outboxCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
+  const $transaction = vi.fn(async (fn: (t: unknown) => Promise<unknown>) =>
+    fn({
+      adminUser: { findUnique: async () => txAdmin, update },
+      outboxEvent: { create: outboxCreate },
+    }),
+  );
   return {
     update,
+    outboxCreate,
     prisma: {
-      read: { adminUser: { findUnique: async () => admin } },
-      write: { adminUser: { update } },
+      read: { adminUser: { findUnique: async () => replicaAdmin } },
+      write: { $transaction },
     },
   };
 }
@@ -378,7 +490,7 @@ describe('AdminService.reinvite · re-emite invitación solo si sigue INVITED', 
       status: 'INVITED',
       roles: [AdminRole.SUPPORT_L2],
     });
-    const res = await makeService(prisma).reinvite([AdminRole.ADMIN], 'a1');
+    const res = await makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1');
     expect(update).toHaveBeenCalledOnce();
     expect(res.inviteUrl).toContain('/accept-invite?token=');
   });
@@ -390,16 +502,30 @@ describe('AdminService.reinvite · re-emite invitación solo si sigue INVITED', 
       status: 'ACTIVE',
       roles: [AdminRole.SUPPORT_L2],
     });
-    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'a1')).rejects.toMatchObject({
+    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1')).rejects.toMatchObject({
       httpStatus: 409,
     });
   });
 
   it('404 si el operador no existe', async () => {
     const { prisma } = makeReinvitePrisma(null);
-    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'a1')).rejects.toBeInstanceOf(
+    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1')).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+
+  it('TOCTOU: la réplica decía INVITED pero un reject() concurrente lo dejó REJECTED → 409, SIN update NI evento', async () => {
+    // La réplica (read) ve INVITED, pero la tx (write) ve REJECTED (reject corrió entre el read y la tx).
+    const { prisma, update, outboxCreate } = makeReinvitePrisma(
+      { id: 'a1', email: 'op@veo.pe', status: 'INVITED', roles: [AdminRole.SUPPORT_L2] },
+      { id: 'a1', email: 'op@veo.pe', status: 'REJECTED', roles: [AdminRole.SUPPORT_L2] },
+    );
+    await expect(
+      makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1'),
+    ).rejects.toMatchObject({ httpStatus: 409 });
+    // Assert clave: NO re-emite el token NI un admin.role_changed para una cuenta ya revocada.
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 });
 

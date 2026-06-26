@@ -86,7 +86,7 @@ export class AdminController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateOperatorDto,
   ): Promise<{ id: string; inviteToken: string; inviteUrl: string; expiresAt: Date }> {
-    return this.admin.createOperator(user.roles, dto.email, dto.roles);
+    return this.admin.createOperator(user.roles, user.userId, dto.email, dto.roles);
   }
 
   @ApiBearerAuth()
@@ -99,7 +99,7 @@ export class AdminController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
   ): Promise<{ inviteUrl: string; expiresAt: Date }> {
-    return this.admin.reinvite(user.roles, id);
+    return this.admin.reinvite(user.roles, user.userId, id);
   }
 
   @ApiBearerAuth()
