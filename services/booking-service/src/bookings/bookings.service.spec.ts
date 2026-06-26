@@ -426,6 +426,10 @@ describe('BookingsService · INSTANT dispara el CHARGE al reservar (§4.2/§5.2)
     expect(gateway.chargeCalls[0]).toMatchObject({
       method: PaymentMethod.PLIN,
       passengerId: PASSENGER_ID,
+      // ADR-015 D4 / hueco 1: el CHARGE del INSTANT porta el driverId del dueño del PublishedTrip
+      // (`trip.driverId`) → el Payment nace CON conductor → el cobro ENTRA a la liquidación (sin él, el cron
+      // de payout `driverId: { not: null }` lo excluiría y el conductor nunca cobraría su neto).
+      driverId: DRIVER_ID,
     });
     // grossCents = precioBase(4500) + sin specialRequest. bookingId viaja como tripId opaco (el port lo nombra bookingId).
     expect(gateway.chargeCalls[0]!.grossCents).toBe(4500);
@@ -572,6 +576,9 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     expect(approvedSchema!.safeParse(intent.payload).success).toBe(true);
     // charge disparado FUERA de tx + tx2 COBRO_PENDIENTE.
     expect(gateway.chargeCalls).toHaveLength(1);
+    // ADR-015 D4 / hueco 1: el CHARGE de approve porta el driverId del dueño del PublishedTrip (el `driverId`
+    // server-truth del caller, ya validado en el gate) → el cobro del carpooling ENTRA a la liquidación.
+    expect(gateway.chargeCalls[0]).toMatchObject({ driverId: DRIVER_ID });
     expect(markChargePending).toHaveBeenCalledOnce();
     expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
   });
@@ -659,8 +666,54 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     // NO se re-emite booking.approved (la tx1 se saltea): solo se re-dispara el charge (idempotente por dedupKey).
     expect(transitionWithEvent).not.toHaveBeenCalled();
     expect(gateway.chargeCalls).toHaveLength(1);
+    // ADR-015 D4 / hueco 1: incluso en el re-disparo (booking YA APROBADO), el CHARGE porta el driverId del
+    // caller (= dueño del PublishedTrip) → el cobro sigue entrando a la liquidación.
+    expect(gateway.chargeCalls[0]).toMatchObject({ driverId: DRIVER_ID });
     expect(markChargePending).toHaveBeenCalledOnce();
     expect(result.estado).toBe(BookingState.COBRO_PENDIENTE);
+  });
+});
+
+/**
+ * ADR-015 D4 / HUECO 1 (money-critical) — el CHARGE del carpooling DEBE portar el driverId del dueño del
+ * PublishedTrip en AMBOS caminos. Sin él, el Payment nace driverId=null y el cron de payout
+ * (`driverId: { not: null }`) lo EXCLUYE → el conductor cobra al pasajero pero NUNCA recibe su liquidación.
+ * Estos tests blindan el wiring para que un futuro refactor no lo vuelva a romper en silencio.
+ */
+describe('BookingsService · ADR-015 D4: el CHARGE porta el driverId del PublishedTrip (hueco 1)', () => {
+  // driverId del dueño del PublishedTrip, DISTINTO de los demás ids fake: si el wiring tomara por error el
+  // passengerId u otro campo, la aserción fallaría (no es un valor que colisione por casualidad).
+  const TRIP_DRIVER_ID = '00000000-0000-0000-0000-0000000000d7';
+
+  it('INSTANT reserve: el charge lleva trip.driverId (no null, no el passengerId)', async () => {
+    const { repo } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: TRIP_DRIVER_ID, modoReserva: ModoReserva.INSTANT_BOOKING }),
+    );
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    await service.reserve(PASSENGER_ID, makeDto());
+
+    expect(gateway.chargeCalls).toHaveLength(1);
+    // El driverId del Payment = el dueño del PublishedTrip (trip.driverId), NO null ni el passengerId.
+    expect(gateway.chargeCalls[0]!.driverId).toBe(TRIP_DRIVER_ID);
+    expect(gateway.chargeCalls[0]!.driverId).not.toBe(PASSENGER_ID);
+  });
+
+  it('approve: el charge lleva el driverId del conductor dueño (= el del gate de ownership)', async () => {
+    const { repo, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: TRIP_DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(repo, gateway, makeIdentity());
+
+    // approve(bookingId, driverId): el driverId del caller es el dueño server-truth (ya validado en el gate).
+    await service.approve(BOOKING_ID, TRIP_DRIVER_ID);
+
+    expect(gateway.chargeCalls).toHaveLength(1);
+    expect(gateway.chargeCalls[0]!.driverId).toBe(TRIP_DRIVER_ID);
+    expect(gateway.chargeCalls[0]!.driverId).not.toBe(PASSENGER_ID);
   });
 });
 

@@ -281,7 +281,11 @@ export class BookingsService {
     // (P2002 → existente) puede devolver un booking que ya pasó de APROBADO: `triggerCharge` es tolerante a
     // un estado ya avanzado (no re-dispara si no está APROBADO) — un reintento del mismo submit no doble-cobra.
     if (booking.estado === BookingState.APROBADO) {
-      return this.triggerCharge(booking);
+      // ADR-015 D4 / hueco 1: el CHARGE del carpooling DEBE portar el driverId del dueño del PublishedTrip
+      // (`trip.driverId`, server-truth, ya validado al publicar) — si no, el Payment nace driverId=null y el
+      // cron de payout (filtro `driverId: { not: null }`) lo EXCLUYE → el conductor cobra al pasajero pero
+      // NUNCA recibe su liquidación. El driverId NO vive en el Booking; el dueño es el del PublishedTrip.
+      return this.triggerCharge(booking, trip.driverId);
     }
     return booking;
   }
@@ -332,7 +336,10 @@ export class BookingsService {
     // re-emite booking.approved — se va directo a re-disparar el charge (idempotente por dedupKey). Esto vuelve
     // approve seguro de reintentar tras un charge fallido sin romper la máquina ni doble-cobrar.
     if (booking.estado === BookingState.APROBADO) {
-      return this.triggerCharge(booking);
+      // ADR-015 D4 / hueco 1: el re-disparo del CHARGE también porta el driverId (el `driverId` server-truth
+      // del caller approve, = dueño del PublishedTrip ya validado en el gate). Sin él, el carpooling queda
+      // fuera de la liquidación. Idempotente por dedupKey (derivada del bookingId): no doble-cobra.
+      return this.triggerCharge(booking, driverId);
     }
 
     // LA REGLA, NO EL IF: validar contra el estado REAL del agregado (FIX 6: `booking.estado`, NO el literal
@@ -372,7 +379,10 @@ export class BookingsService {
     );
 
     // tx1 commiteó (booking.approved emitido). AHORA el CHARGE REST, fuera de toda tx → tx2 COBRO_PENDIENTE.
-    return this.triggerCharge(approved);
+    // ADR-015 D4 / hueco 1: el CHARGE porta el driverId (= dueño del PublishedTrip, server-truth ya validado
+    // en el gate de approve) → el Payment nace con driverId → el cobro ENTRA a la liquidación por el mismo
+    // carril que el on-demand (sin él, el cron de payout lo excluiría y el conductor no cobraría su neto).
+    return this.triggerCharge(approved, driverId);
   }
 
   /**
@@ -551,8 +561,15 @@ export class BookingsService {
    *
    * Precondición: `booking` está en APROBADO. (approve/reserve garantizan esto antes de llamar.)
    *
-   * Idempotencia financiera: el adapter deriva `dedupKey = booking-charge:{bookingId}` (determinista) → un
-   * reintento (mismo booking) NO duplica el cobro. Por eso re-ejecutar approve tras un charge fallido es seguro.
+   * `driverId` (ADR-015 D4 / hueco 1): el dueño del PublishedTrip (server-truth — `trip.driverId`, NO un campo
+   * del Booking). Viaja AL CHARGE para que el Payment nazca CON conductor; sin él, el Payment quedaría
+   * driverId=null y el cron de payout (`driverId: { not: null }`) excluiría el cobro → el conductor de
+   * carpooling cobraría al pasajero pero NUNCA recibiría su liquidación. Ambos callers lo tienen en el scope
+   * (approve: su parámetro; reserve-INSTANT: `trip.driverId`) → cero lookups extra.
+   *
+   * Idempotencia financiera: el adapter deriva `dedupKey = booking-charge:{bookingId}` (determinista, del
+   * bookingId — el driverId NO entra en la dedupKey) → un reintento (mismo booking) NO duplica el cobro. Por
+   * eso re-ejecutar approve tras un charge fallido es seguro.
    *
    * RESULTADO del charge (FIX 2/3 · ADR-014 §5.4 "falla permanente → CANCELADO") — el disparo NO siempre lanza
    * ni devuelve PENDING; se INSPECCIONA `charge.status` (PaymentStatus tipado, cero strings mágicos):
@@ -571,7 +588,7 @@ export class BookingsService {
    * NINGÚN camino deja el booking colgado: o COBRO_PENDIENTE (async sigue), o CANCELADO (terminal), o APROBADO
    * re-ejecutable (transitorio, con salida). El doble-cobro lo corta la dedupKey determinista (§5.3).
    */
-  private async triggerCharge(booking: Booking): Promise<Booking> {
+  private async triggerCharge(booking: Booking, driverId: string): Promise<Booking> {
     // El método de pago lo eligió el pasajero al reservar y vive en el Booking (server-truth). El tipo Prisma
     // PaymentMethod es la cara LOCAL del contrato compartido y es ESTRUCTURALMENTE el mismo set que el
     // PaymentMethod de @veo/shared-types que espera el puerto (mismos miembros) → asignable directo, sin cast.
@@ -583,6 +600,9 @@ export class BookingsService {
         grossCents: booking.precioAcordado,
         method,
         passengerId: booking.passengerId,
+        // ADR-015 D4 / hueco 1: el dueño del PublishedTrip va al Payment → el cobro del carpooling ENTRA a la
+        // liquidación (el cron de payout filtra `driverId: { not: null }`). El puerto ya acepta driverId (opt).
+        driverId,
       });
     } catch (err) {
       // RECHAZO PERMANENTE (4xx no-reintentable): el booking NO puede prosperar — reintentar daría el mismo
