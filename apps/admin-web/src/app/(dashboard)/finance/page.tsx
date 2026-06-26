@@ -5,7 +5,7 @@ import { Lock } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { usePayouts } from '@/lib/api/queries';
 import { payoutStatus, type PayoutView } from '@/lib/api/schemas';
-import { money } from '@/lib/formatters';
+import { money, dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -35,9 +35,26 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
     header: 'Periodo',
     cell: ({ row }) => <span className="text-ink-muted">{row.original.period}</span>,
   },
+  // Desglose del payout (ADR-015 D6): Bruto / Comisión / Neto. Mismo formateador de plata (money, céntimos→S/)
+  // y mismo patrón monetario que la columna anterior; bruto/comisión en text-ink-muted (contexto auditable),
+  // el NETO en text-ink (el dato protagonista: lo que el conductor cobra). Alineadas a la derecha (tabular).
+  {
+    accessorKey: 'grossCents',
+    header: 'Bruto',
+    cell: ({ row }) => (
+      <span className="tabular text-ink-muted">{money(row.original.grossCents)}</span>
+    ),
+  },
+  {
+    accessorKey: 'commissionCents',
+    header: 'Comisión',
+    cell: ({ row }) => (
+      <span className="tabular text-ink-muted">{money(row.original.commissionCents)}</span>
+    ),
+  },
   {
     accessorKey: 'amountCents',
-    header: 'Monto',
+    header: 'Neto',
     cell: ({ row }) => (
       <span className="tabular font-medium text-ink">{money(row.original.amountCents)}</span>
     ),
@@ -45,7 +62,24 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
   {
     accessorKey: 'status',
     header: 'Estado',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
+    // El estado, y SOLO en HELD, el motivo de retención como subtítulo discreto (sin recargar): heldReason
+    // solo está poblado en HELD (contrato). Texto pequeño y atenuado bajo el pill, no un badge extra.
+    cell: ({ row }) => (
+      <div className="flex flex-col gap-0.5">
+        <StatusPill status={row.original.status} />
+        {row.original.status === payoutStatus.enum.HELD && row.original.heldReason ? (
+          <span className="text-xs text-ink-muted">{row.original.heldReason}</span>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    accessorKey: 'processedAt',
+    header: 'Procesado',
+    // Cuándo el riel confirmó la salida (PROCESSED). dateTime() ya devuelve "—" si es null (no procesado aún).
+    cell: ({ row }) => (
+      <span className="tabular text-ink-muted">{dateTime(row.original.processedAt)}</span>
+    ),
   },
   {
     id: 'actions',

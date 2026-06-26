@@ -202,12 +202,26 @@ export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 export const payoutStatus = z.enum(['PENDING', 'PROCESSING', 'PROCESSED', 'HELD', 'FAILED']);
 export type PayoutStatus = z.infer<typeof payoutStatus>;
 
+/**
+ * Desglose de la liquidación (ADR-015 D6). El conductor ya ve gross/commission/neto en su app; el panel
+ * FINANCE debe tener PARIDAD para auditar. Dinero SIEMPRE Int céntimos (formatear a S/ SOLO en la UI).
+ *  - `grossCents`: ticket bruto del período (base de la comisión).
+ *  - `commissionCents`: retención de la plataforma (commission(gross, rate)).
+ *  - `amountCents`: NETO desembolsado al conductor (= gross − commission + propinas/bonos netos).
+ *  - `processedAt`: instante en que el riel confirmó la salida (PROCESSED); null mientras no se procesó.
+ *  - `heldReason`: motivo de retención (solo poblado en HELD); null en el resto de estados.
+ * Ampliación ADDITIVE sobre el contrato previo (amountCents queda = NETO): no rompe consumidores.
+ */
 export const payoutView = z.object({
   id: z.string(),
   driverId: z.string(),
+  grossCents: z.number().int(),
+  commissionCents: z.number().int(),
   amountCents: z.number().int(),
   status: payoutStatus,
   period: z.string(),
+  processedAt: z.string().nullable(),
+  heldReason: z.string().nullable(),
 });
 export type PayoutView = z.infer<typeof payoutView>;
 

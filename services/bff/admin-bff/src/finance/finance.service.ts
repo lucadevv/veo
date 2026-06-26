@@ -11,14 +11,21 @@ import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { RunPayoutsDto, RefundDto } from './dto/finance.dto';
 
 /** Shape interno que sirve payment-service (GET /payouts/all). `status` ES el enum Prisma `PayoutStatus`
- *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1. */
+ *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1.
+ *  payment-service hace `findMany` SIN `select` → la fila Payout llega COMPLETA (gross/commission/neto/
+ *  processedAt/heldReason ya persistidos en el modelo Prisma); el desglose es server-truth, no se recalcula.
+ *  `processedAt` viaja como ISO string (Prisma `DateTime` serializado a JSON sobre el REST interno). */
 interface Payout {
   id: string;
   driverId: string;
+  grossCents: number;
+  commissionCents: number;
   amountCents: number;
   status: PayoutView['status'];
   periodStart: string;
   periodEnd: string;
+  processedAt: string | null;
+  heldReason: string | null;
 }
 
 interface Page<T> {
@@ -115,12 +122,18 @@ export class FinanceService {
   }
 }
 
+// Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
+// heldReason que payment-service ya sirve. `amountCents` queda = NETO (paridad con la app del conductor).
 function toPayoutView(p: Payout): PayoutView {
   return {
     id: p.id,
     driverId: p.driverId,
+    grossCents: p.grossCents,
+    commissionCents: p.commissionCents,
     amountCents: p.amountCents,
     status: p.status,
     period: `${p.periodStart}..${p.periodEnd}`,
+    processedAt: p.processedAt,
+    heldReason: p.heldReason,
   };
 }
