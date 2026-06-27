@@ -1,5 +1,5 @@
 /** DTOs de finanzas (payouts y reembolsos). */
-import { IsInt, IsISO8601, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Listado admin de payouts: filtro por estado + paginación cursor (el estado lo valida payment-service). */
@@ -41,14 +41,39 @@ export class RefundDto {
 }
 
 /**
- * Reemplaza la tasa de comisión ON-DEMAND (F2.7). La tasa va en BASIS POINTS Int (0..10000; 2000 = 20%) —
- * jamás float. El carpooling NO se configura acá (0 fijo legal · ADR-015 §11.2). `expectedVersion` = CAS.
+ * Reemplaza AMBAS tasas de comisión (F2.7 · full-replace): la comisión ON-DEMAND (descontada al conductor) y el
+ * service fee CARPOOLING (sumado al pasajero). En BASIS POINTS Int (0..10000; 2000 = 20%) — jamás float.
+ * `expectedVersion` = CAS.
  */
 export class ReplaceCommissionDto {
   @IsInt()
   @Min(0)
   @Max(10_000)
   onDemandRateBps!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10_000)
+  carpoolingFeeBps!: number;
+
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}
+
+/**
+ * Reemplaza el costo de OPERACIÓN por km de UN país (F2.5 · escudo legal anti-lucro del carpooling). El costo
+ * va en CÉNTIMOS PEN Int (combustible + desgaste; PE real = 150 = S/1.50/km) — jamás float. `expectedVersion`
+ * = CAS per-país. booking-service re-valida RBAC + step-up y aplica el CAS (defensa en profundidad).
+ */
+export class ReplaceCostPerKmDto {
+  @IsIn(['PE', 'EC'])
+  pais!: 'PE' | 'EC';
+
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  costPerKmCents!: number;
 
   @IsInt()
   @Min(0)

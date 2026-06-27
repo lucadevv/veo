@@ -11,18 +11,13 @@
  * PARALELIZADAS con Promise.all (son pocas: ArrayMaxSize(40) en el DTO; publish NO es hot-path). No hay N+1
  * silencioso — el fan-out es acotado y explícito.
  */
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ExternalServiceError, ValidationError, type LatLon } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { assertStopoverOrdersValid, destinoOrden } from '../domain/trip-segments';
-import {
-  assertFullRouteCap,
-  assertTramoCap,
-  costPerKmCentsFor,
-  type CostPerKmConfig,
-} from '../domain/cost-cap';
-import { CostPerKmService } from './cost-per-km.service';
+import { assertFullRouteCap, assertTramoCap } from '../domain/cost-cap';
+import { CostPerKmConfigService } from '../cost-per-km/cost-per-km-config.service';
 
 /** Hito de la ruta con su orden y coordenadas (origen=0, stopovers=1..n, destino=destinoOrden). */
 interface PuntoHito {
@@ -50,6 +45,8 @@ export interface PriceCapInput {
   pais: string;
   asientosTotales: number;
   precioBaseCentimos: number;
+  /** Peaje del viaje declarado por el conductor (céntimos PEN). Sube SOLO el tope full-route (no los tramos). */
+  tollsCents: number;
   origenLat: number;
   origenLon: number;
   destinoLat: number;
@@ -62,27 +59,21 @@ export interface PriceCapInput {
 export class CostCapService {
   constructor(
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
-    @Inject('COST_PER_KM_CONFIG') private readonly costPerKm: CostPerKmConfig,
-    // F2.5 · resolutor del costo/km VIVO (derivado del EnergyCatalog de trip-service). @Optional + trailing:
-    // sin él (tests legacy con 2 args, o un boot sin el cliente REST) el gate cae al env `costPerKm` directo
-    // — el comportamiento histórico, intacto. El propio CostPerKmService YA degrada a este mismo env si
-    // trip-service no responde, así que la fuente del costo/km cambia sin tocar la FÓRMULA del tope.
-    @Optional() private readonly costPerKmService?: CostPerKmService,
+    // F2.5 · el costo/km lo fija el ADMIN por país (CostPerKmConfig en DB), NO se deriva de energía. El
+    // servicio degrada al env COST_PER_KM_CENTS_* si la config no está disponible (degradación honesta) —
+    // el gate F1b nunca se queda sin costo/km. La FÓRMULA del tope vive en el dominio puro (cost-cap.ts).
+    private readonly costPerKm: CostPerKmConfigService,
   ) {}
 
   /**
-   * GATE F1b. Calcula la distancia real (vía el puerto de mapas) y exige que `precioBase` (full-route) y
-   * CADA `precioPorTramo` no excedan su tope. Cualquier exceso → ValidationError (de las funciones puras).
-   * FAIL-CLOSED: si el motor de rutas falla (red/timeout/sin ruta), lanza ExternalServiceError y NO se
-   * publica/edita — el tope legal no se puede saltar por un error de infraestructura.
+   * GATE F1b. Calcula la distancia real (vía el puerto de mapas) y exige que `precioBase` (full-route, con el
+   * peaje sumado) y CADA `precioPorTramo` (distancia pura) no excedan su tope. Cualquier exceso →
+   * ValidationError (de las funciones puras). FAIL-CLOSED: si el motor de rutas falla (red/timeout/sin ruta),
+   * lanza ExternalServiceError y NO se publica/edita — el tope legal no se puede saltar por infraestructura.
    */
   async assertPriceCap(input: PriceCapInput): Promise<void> {
-    // F2.5 · el costo/km sale del resolutor VIVO (precio de energía de trip-service ÷ rendimiento de
-    // referencia) cuando está inyectado; si no, del env directo (legacy/tests). El resolutor ya degrada al
-    // MISMO env ante fallos, así que el gate F1b nunca se queda sin costo/km. La FÓRMULA del tope NO cambia.
-    const costPerKmCents = this.costPerKmService
-      ? await this.costPerKmService.getCostPerKmCents(input.pais)
-      : costPerKmCentsFor(input.pais, this.costPerKm);
+    // F2.5 · el costo/km sale DIRECTO de la config del admin (per-país), con degradación honesta al env.
+    const costPerKmCents = await this.costPerKm.getCostPerKmCents(input.pais);
 
     // Mapa orden→punto: origen=0, stopovers por su `orden`, destino=destinoOrden (fuente única, F1a).
     const puntosPorOrden = this.buildPuntosPorOrden(input);
@@ -95,12 +86,18 @@ export class CostCapService {
       .map<LatLon>((s) => ({ lat: s.lat, lon: s.lon }));
 
     const fullRoute = await this.routeOrFailClosed(origen, destino, waypointsFull);
+    // El peaje declarado SUBE el tope full-route (costo del viaje entero ÷ asientos).
     assertFullRouteCap({
       precioBaseCentimos: input.precioBaseCentimos,
       distanceMeters: fullRoute,
       costPerKmCents,
       asientosTotales: input.asientosTotales,
+      tollsCents: input.tollsCents,
     });
+
+    // Orden del destino (origen=0, destino=max(stopovers.orden)+1). Sirve para decidir si un tramo ABARCA el
+    // viaje completo (origen→destino) y por ende carga el peaje, o es un sub-segmento estricto (sin peaje).
+    const ordenDestino = destinoOrden(input.stopovers);
 
     // POR TRAMO — paralelizadas (Promise.all). Cada tramo: ruta entre sus hitos extremos, con los stopovers
     // intermedios que caen ESTRICTAMENTE dentro del rango como waypoints (la distancia del segmento real).
@@ -118,6 +115,10 @@ export class CostCapService {
           { lat: hasta.lat, lon: hasta.lon },
           intermedios,
         );
+        // El peaje entra SOLO si el tramo abarca la ruta completa (origen → destino): ese tramo ES el viaje
+        // entero (el tramo full-route implícito == precioBase), así que carga el peaje igual que el full-route.
+        // Un sub-segmento estricto NO lo carga (sumarle el peaje de todo el viaje inflaría su tope → lucro).
+        const esRutaCompleta = tramo.desdeOrden === 0 && tramo.hastaOrden === ordenDestino;
         assertTramoCap({
           desdeOrden: tramo.desdeOrden,
           hastaOrden: tramo.hastaOrden,
@@ -125,6 +126,7 @@ export class CostCapService {
           distanceMeters: distTramo,
           costPerKmCents,
           asientosTotales: input.asientosTotales,
+          tollsCents: esRutaCompleta ? input.tollsCents : 0,
         });
       }),
     );

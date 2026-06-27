@@ -17,6 +17,8 @@ import {
   INTERNAL_AUDIENCES,
   InternalIdentityGuard,
   AudienceGuard,
+  RolesGuard,
+  StepUpMfaGuard,
   type InternalAudience,
 } from '@veo/auth';
 import { PrismaService } from './prisma.service';
@@ -52,6 +54,11 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
     { provide: CLOCK, useValue: new SystemClock() },
     InternalIdentityGuard,
     AudienceGuard,
+    // RBAC + step-up MFA del endpoint interno de config financiera (cost/km · F2.5). RolesGuard depende solo
+    // del Reflector; StepUpMfaGuard del Reflector + CLOCK (provisto acá). Defensa en profundidad: booking
+    // re-autoriza aunque el admin-bff ya gatee en su borde.
+    RolesGuard,
+    StepUpMfaGuard,
   ],
   exports: [
     PrismaService,
@@ -62,6 +69,8 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
     CLOCK,
     InternalIdentityGuard,
     AudienceGuard,
+    RolesGuard,
+    StepUpMfaGuard,
   ],
 })
 export class CoreModule {}

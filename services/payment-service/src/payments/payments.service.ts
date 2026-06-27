@@ -83,10 +83,11 @@ export interface ChargeInput {
   driverId?: string;
   dedupKey: string;
   /**
-   * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2): determina la TASA de comisión. ON_DEMAND → tasa
-   * configurable; CARPOOLING → 0 FIJO (legal-gated). Lo SETEA el caller en el PUNTO DE ENTRADA del cobro (el
-   * consumer trip.completed → ON_DEMAND; el controller charge service-rail → CARPOOLING). Opcional por compat:
-   * ausente ⇒ ON_DEMAND (el comportamiento histórico de env), NUNCA CARPOOLING por defecto.
+   * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2): determina la TASA y el MODELO de comisión. ON_DEMAND →
+   * comisión DESCONTADA al conductor (tasa configurable, `grossCents` = la tarifa); CARPOOLING → service fee
+   * SUMADO al pasajero (fee configurable, `grossCents` = la CONTRIBUCIÓN del conductor → el bruto cobrado = contribución
+   * + fee). Lo SETEA el caller en el PUNTO DE ENTRADA del cobro (el consumer trip.completed → ON_DEMAND; el
+   * controller charge service-rail → CARPOOLING). Opcional por compat: ausente ⇒ ON_DEMAND, NUNCA CARPOOLING por defecto.
    */
   mode?: ChargeMode;
   /** Código de promoción opcional (Ola 2A). Se canjea y descuenta del total del pasajero. */
@@ -205,14 +206,17 @@ export class PaymentsService {
 
   /**
    * F2.7 · Resuelve la TASA de comisión (fracción 0..1 que consume `commission()`) para un MODO de cobro.
-   * CARPOOLING → 0 SIEMPRE (guard legal de dominio, ADR-015 §11.2). ON_DEMAND → la tasa configurable de
-   * CommissionConfig (bps Int → fracción al aplicar). DEGRADACIÓN HONESTA: sin CommissionService inyectado (DI
-   * ausente en tests) cae a `this.commissionRate` del env — NUNCA rompe el cobro por falta de la config. La tasa
-   * SIEMPRE nace como bps Int; el float solo aparece acá, al APLICARLA (redondeo a céntimo Int en `commission()`).
+   * ON_DEMAND → `onDemandRateBps` (comisión descontada al conductor); CARPOOLING → `carpoolingFeeBps` (service
+   * fee sumado al pasajero) — ambas de CommissionConfig (bps Int → fracción al aplicar). DEGRADACIÓN HONESTA: sin
+   * CommissionService inyectado (DI ausente en tests) el on-demand cae a `this.commissionRate` del env y el
+   * carpooling cae a 0 (sin fee) — NUNCA rompe el cobro por falta de la config. La tasa SIEMPRE nace como bps Int;
+   * el float solo aparece acá, al APLICARLA (redondeo a céntimo Int en `commission()`).
    */
   private async resolveChargeRate(mode: ChargeMode): Promise<number> {
-    if (mode === ChargeMode.CARPOOLING) return bpsToRate(0); // 0 fijo legal — no consulta config alguna.
-    if (!this.commission) return this.commissionRate; // DI ausente (tests) → fallback al env.
+    if (!this.commission) {
+      // DI ausente (tests/degradación): on-demand → la tasa del env; carpooling → 0 (sin service fee).
+      return mode === ChargeMode.CARPOOLING ? bpsToRate(0) : this.commissionRate;
+    }
     return bpsToRate(await this.commission.resolveRateBps(mode));
   }
 
@@ -279,12 +283,15 @@ export class PaymentsService {
       });
     }
 
-    // F2.7 · la TASA de comisión se resuelve por MODO (NO la global): CARPOOLING → 0 FIJO (legal-gated,
-    // ADR-015 §11.2); ON_DEMAND → la tasa configurable (CommissionConfig, con degradación honesta al env).
+    // F2.7 · la TASA y el MODELO de comisión se resuelven por MODO (NO global): ON_DEMAND → comisión
+    // DESCONTADA al conductor (tasa configurable); CARPOOLING → service fee SUMADO al pasajero (fee configurable).
+    // Para carpooling, `input.grossCents` es la CONTRIBUCIÓN del conductor; `computeChargeAmounts` deriva el bruto
+    // COBRADO al pasajero (= contribución + fee) y lo persiste en `amounts.grossCents`. Ver `computeChargeAmounts`.
     const mode = input.mode ?? ChargeMode.ON_DEMAND;
     const rate = await this.resolveChargeRate(mode);
 
     const amounts = computeChargeAmounts(
+      mode,
       input.grossCents,
       input.tipCents ?? 0,
       rate,

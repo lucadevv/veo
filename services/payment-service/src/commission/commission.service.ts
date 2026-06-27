@@ -6,10 +6,10 @@
  *    del ENV (`COMMISSION_RATE`, que queda de fallback), NUNCA rompe el cobro ni cae a 0 (eso sería regalar
  *    la comisión on-demand). El cache cubre el camino feliz; el catch cubre el infeliz.
  *  - `getConfig()`: GET vigente (el panel admin) — la tasa bps + version + updatedAt.
- *  - `resolveRateBps(mode)`: el GUARD LEGAL — CARPOOLING → 0 SIEMPRE (constante de dominio), ON_DEMAND → la
- *    tasa configurada. Único punto de resolución por modo.
- *  - `replace(onDemandRateBps, expectedVersion)`: PUT — REEMPLAZA la tasa ON-DEMAND, bumpea `version` (CAS) y
- *    persiste + EMITE payment.commission_updated por outbox en la MISMA tx. NO toca el carpooling (0 fijo legal).
+ *  - `resolveRateBps(mode)`: CARPOOLING → `carpoolingFeeBps` (service fee al pasajero), ON_DEMAND → `onDemandRateBps`
+ *    (comisión al conductor). Único punto de resolución por modo.
+ *  - `replace(onDemandRateBps, carpoolingFeeBps, expectedVersion)`: PUT — REEMPLAZA AMBAS tasas, bumpea `version`
+ *    (CAS) y persiste + EMITE payment.commission_updated por outbox en la MISMA tx.
  *  - `invalidateCache()`: lo llama el PUT local y el CommissionCacheConsumer (evento cross-réplica).
  *
  * La tasa SIEMPRE en bps Int (0..10000), JAMÁS float persistido. La división /10000 ocurre al APLICAR
@@ -19,12 +19,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { ConflictError } from '@veo/utils';
-import {
-  BPS_DENOMINATOR,
-  CARPOOLING_COMMISSION_BPS,
-  ChargeMode,
-  resolveCommissionBps,
-} from '../payments/payment.policy';
+import { BPS_DENOMINATOR, ChargeMode, resolveCommissionBps } from '../payments/payment.policy';
 import type { Env } from '../config/env.schema';
 import {
   COMMISSION_REPO,
@@ -98,33 +93,34 @@ export class CommissionService {
   }
 
   /**
-   * GUARD LEGAL · resuelve la tasa de comisión (bps Int) para un MODO. CARPOOLING → 0 SIEMPRE (constante de
-   * dominio, NO admin-editable, ADR-015 §11.2); ON_DEMAND → la tasa configurada. Único punto de resolución por
-   * modo del lado del service (la regla pura vive en `resolveCommissionBps`).
+   * Resuelve la tasa de comisión (bps Int) para un MODO. ON_DEMAND → `onDemandRateBps` (descontada al conductor);
+   * CARPOOLING → `carpoolingFeeBps` (service fee al pasajero). Ambas de la config vigente (con degradación honesta:
+   * on-demand al env, carpooling a 0). Único punto de resolución por modo del lado del service (la regla pura vive
+   * en `resolveCommissionBps`).
    */
   async resolveRateBps(mode: ChargeMode): Promise<number> {
-    if (mode === ChargeMode.CARPOOLING) return CARPOOLING_COMMISSION_BPS;
-    return resolveCommissionBps(mode, await this.getOnDemandRateBps());
+    return resolveCommissionBps(mode, await this.getConfig());
   }
 
   /**
-   * PUT: REEMPLAZA la tasa ON-DEMAND, bumpea `version` y persiste + EMITE payment.commission_updated por outbox
-   * en la MISMA tx. CAS optimista: el UPDATE solo pega si la versión vigente sigue siendo `expectedVersion` (si
-   * no, ConflictError 409 → sin lost update). NO admite tocar el carpooling: es 0 fijo legal, no entra acá.
+   * PUT: REEMPLAZA AMBAS tasas (on-demand + carpooling fee), bumpea `version` y persiste + EMITE
+   * payment.commission_updated por outbox en la MISMA tx. Full-replace con CAS optimista: el UPDATE solo pega si
+   * la versión vigente sigue siendo `expectedVersion` (si no, ConflictError 409 → sin lost update).
    */
-  async replace(onDemandRateBps: number, expectedVersion: number): Promise<PersistedCommission> {
-    // Guard de dominio (defensa en profundidad sobre el DTO): bps Int en rango. Cero floats.
-    if (!Number.isInteger(onDemandRateBps) || onDemandRateBps < 0 || onDemandRateBps > BPS_DENOMINATOR) {
-      throw new ConflictError(
-        `la tasa de comisión debe ser un entero en basis points 0..${BPS_DENOMINATOR}`,
-      );
-    }
+  async replace(
+    onDemandRateBps: number,
+    carpoolingFeeBps: number,
+    expectedVersion: number,
+  ): Promise<PersistedCommission> {
+    // Guard de dominio (defensa en profundidad sobre el DTO): ambas tasas bps Int en rango. Cero floats.
+    assertBps(onDemandRateBps, 'la comisión on-demand');
+    assertBps(carpoolingFeeBps, 'el service fee de carpooling');
     const nextVersion = expectedVersion + 1;
 
     const result = await this.repo.runInTx(async (tx) => {
       const updated = await tx.commissionConfig.updateMany({
         where: { id: COMMISSION_SINGLETON_ID, version: expectedVersion },
-        data: { onDemandRateBps, version: nextVersion },
+        data: { onDemandRateBps, carpoolingFeeBps, version: nextVersion },
       });
 
       let row: { version: number; updatedAt: Date };
@@ -145,7 +141,7 @@ export class CommissionService {
           );
         }
         row = await tx.commissionConfig.create({
-          data: { id: COMMISSION_SINGLETON_ID, onDemandRateBps, version: nextVersion },
+          data: { id: COMMISSION_SINGLETON_ID, onDemandRateBps, carpoolingFeeBps, version: nextVersion },
         });
       } else {
         throw new ConflictError(
@@ -161,6 +157,7 @@ export class CommissionService {
             producer: PRODUCER,
             payload: {
               onDemandRateBps,
+              carpoolingFeeBps,
               version: row.version,
               updatedAt: row.updatedAt.toISOString(),
             },
@@ -172,11 +169,12 @@ export class CommissionService {
 
     this.invalidateCache(); // el PUT y el getConfig viven en el mismo proceso → el cambio se ve ya
     this.logger.log(
-      `comisión ON-DEMAND REEMPLAZADA → version ${result.version} (${onDemandRateBps} bps = ` +
-        `${(onDemandRateBps / BPS_DENOMINATOR) * 100}%); payment.commission_updated emitido; cache invalidado`,
+      `comisión REEMPLAZADA → version ${result.version} (on-demand ${onDemandRateBps} bps, ` +
+        `carpooling-fee ${carpoolingFeeBps} bps); payment.commission_updated emitido; cache invalidado`,
     );
     return {
       onDemandRateBps,
+      carpoolingFeeBps,
       version: result.version,
       updatedAt: result.updatedAt.toISOString(),
     };
@@ -191,12 +189,20 @@ export class CommissionService {
     this.cache = null;
   }
 
-  /** Snapshot de degradación honesta: la tasa del env, version 0 (no hay config persistida). */
+  /** Snapshot de degradación honesta: on-demand a la tasa del env, carpooling-fee a 0 (sin fee), version 0. */
   private envFallback(): PersistedCommission {
     return {
       onDemandRateBps: this.envFallbackBps,
+      carpoolingFeeBps: 0,
       version: 0,
       updatedAt: new Date(0).toISOString(),
     };
+  }
+}
+
+/** Guard de dominio compartido: una tasa de comisión es un entero en basis points 0..10000. Cero floats. */
+function assertBps(bps: number, label: string): void {
+  if (!Number.isInteger(bps) || bps < 0 || bps > BPS_DENOMINATOR) {
+    throw new ConflictError(`${label} debe ser un entero en basis points 0..${BPS_DENOMINATOR}`);
   }
 }

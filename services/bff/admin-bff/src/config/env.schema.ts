@@ -81,6 +81,8 @@ export const envSchema = z.object({
   MEDIA_URL: requiredInProd('http://localhost:3007/api/v1'),
   AUDIT_URL: requiredInProd('http://localhost:3009/api/v1'),
   FLEET_URL: requiredInProd('http://localhost:3012/api/v1'),
+  // booking-service (carpooling): el endpoint interno del costo/km del cost-cap (F2.5 · escudo legal). :3016.
+  BOOKING_URL: requiredInProd('http://localhost:3016/api/v1'),
 
   // Bucket S3 donde fleet-service guarda los archivos de documentos del conductor. El admin-bff lo pasa
   // a media-service (POST /media/internal/presign-get) para acuñar URLs GET firmadas en la revisión.

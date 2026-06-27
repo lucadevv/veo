@@ -93,27 +93,17 @@ export const envSchema = z.object({
   // este tiempo, no se publica (mejor bloquear que publicar sin validar el tope legal).
   MAPS_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 
-  // ── Costo de referencia por km, por país (F1b · ESCUDO LEGAL anti-lucro, ADR-014 §8) ──────────
-  // ⚠️ VALORES PROVISIONALES — NO son definitivos. El tope de cost-sharing existe para que la oferta sea
-  // COMPARTIR COSTOS, no lucro (carpooling, no taxi informal): precio del asiento ≤ (distancia_km ×
-  // costo/km) / asientosTotales. Estos defaults (PE: S/1.00/km = 100 céntimos; EC: 50 céntimos) son una
-  // ESTIMACIÓN INICIAL razonable; el DUEÑO debe VALIDARLOS con legal/finanzas ANTES de lanzar a producción
-  // (combustible + desgaste + peajes reales por país). Hasta entonces, tratar como placeholder configurable.
-  COST_PER_KM_CENTS_PE: z.coerce.number().int().positive().default(100),
+  // ── Costo de operación por km, por país — FALLBACK (F2.5 · ESCUDO LEGAL anti-lucro, ADR-014 §8) ──────
+  // La FUENTE AUTORITATIVA del costo/km es la config editable por el admin (CostPerKmConfig en DB, per-país,
+  // sembrada PE=150/EC=50). Estos env son SOLO el FALLBACK de degradación honesta: si la config no está
+  // disponible (DB sin migrar / país sin sembrar / error transitorio), el tope de cost-sharing cae acá en vez
+  // de romper el publish. PE=150 (S/1.50/km, costo real = combustible + desgaste, alineado con la semilla);
+  // EC=50 (placeholder, F8). El peaje viaja aparte (lo declara el conductor por viaje, lo suma el cost-cap).
+  COST_PER_KM_CENTS_PE: z.coerce.number().int().positive().default(150),
   COST_PER_KM_CENTS_EC: z.coerce.number().int().positive().default(50),
 
-  // ── F2.5 (ADR-017 §1.4) · costo/km UNIFICADO con el on-demand ─────────────────────────────────────
-  // El costo/km del tope legal PE deja de ser FLAT de env: se DERIVA del precio de energía VIVO de
-  // trip-service (GET /internal/pricing/energy-catalog ÷ rendimiento del económico), la MISMA fórmula que
-  // usa el on-demand. booking lo lee por el endpoint INTERNO firmado (HMAC service-rail), NUNCA por DB
-  // compartida. DEGRADACIÓN HONESTA: si trip-service no responde, el gate cae a COST_PER_KM_CENTS_PE
-  // (arriba). API interna de trip-service (/api/v1), REST = :3002. Fail-fast en prod si falta/inválida.
-  TRIP_INTERNAL_URL: requiredInProd('http://localhost:3002/api/v1', { url: true }),
-  // Timeout corto de esa lectura (ms): el costo/km vivo es un refinamiento cacheado; si trip-service tarda,
-  // el gate degrada al env sin colgar el publish (NO es fail-closed como el motor de rutas: ese sí bloquea).
-  TRIP_INTERNAL_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
-  // TTL del cache in-proc del costo/km vivo (ms). Slot corto; el evento energy.catalog_updated lo invalida
-  // antes de que venza (el TTL es el fallback ante un evento perdido). Espeja el cache del EnergyCatalog.
+  // TTL del cache in-proc del costo/km (ms). Slot corto por país; el PUT del admin invalida la réplica que lo
+  // atiende de inmediato (autoaplica) y las demás convergen al vencer el TTL (sin acoplar a Kafka).
   COST_PER_KM_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
 })
   .superRefine((env, ctx) => {

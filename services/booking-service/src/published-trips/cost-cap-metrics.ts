@@ -1,9 +1,9 @@
 /**
- * Métrica de observabilidad del cost-cap del carpooling (F2.5 · ADR-017 §1.4). El tope legal anti-lucro (F1b)
- * deriva del precio de energía VIVO de trip-service; si esa fuente cae o está mal configurada, el cost-cap
- * DEGRADA al env `COST_PER_KM_CENTS_PE` (placeholder, NO validado por legal/finanzas). Esa degradación NO
- * debe ser silenciosa: este counter la hace VISIBLE y alertable — un valor SOSTENIDO distingue un misconfig
- * PERMANENTE del escudo legal (URL/HMAC/404) de un corte transitorio de trip-service.
+ * Métrica de observabilidad del cost-cap del carpooling (F2.5). El tope legal anti-lucro (F1b) usa el costo/km
+ * que el ADMIN fija por país (CostPerKmConfig en DB); si esa config no está disponible (DB sin migrar / país
+ * sin sembrar / error transitorio), el cost-cap DEGRADA al env `COST_PER_KM_CENTS_*` (placeholder, NO el valor
+ * curado por el admin). Esa degradación NO debe ser silenciosa: este counter la hace VISIBLE y alertable — un
+ * valor SOSTENIDO significa que el tope aplicado DIVERGE del que el admin configuró (config rota), no un blip.
  *
  * Mismo patrón que trip-service/trip-metrics.ts: tomamos la clase Counter de la instancia de prom-client que
  * ya usa @veo/observability (sin dep nueva), registrada en el registry que expone GET /metrics. Módulo-level
@@ -27,8 +27,8 @@ const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor
 
 export const COST_PER_KM_DEGRADED_METRIC = 'carpooling_cost_per_km_degraded_total';
 
-/** Por qué el cost/km vivo no se pudo usar y el tope cayó al env placeholder. */
-export type CostPerKmDegradedReason = 'trip_unreachable' | 'no_price' | 'degenerate';
+/** Por qué la config del costo/km no se pudo usar y el tope cayó al env placeholder. */
+export type CostPerKmDegradedReason = 'config_unavailable';
 
 function getOrCreateCounter(
   name: string,
@@ -43,8 +43,8 @@ function getOrCreateCounter(
 /** Counter de la degradación del cost/km del cost-cap. Exportado para que los specs lean su valor. */
 export const costPerKmDegradedTotal: CounterLike = getOrCreateCounter(
   COST_PER_KM_DEGRADED_METRIC,
-  'Veces que el cost-cap del carpooling degradó al env placeholder por no poder usar el precio de energía ' +
-    'vivo (F2.5). Valor SOSTENIDO = misconfig permanente del escudo legal anti-lucro, no un corte transitorio.',
+  'Veces que el cost-cap del carpooling degradó al env placeholder por no poder leer la config del costo/km ' +
+    'del admin (F2.5). Valor SOSTENIDO = config rota: el tope aplicado diverge del que el admin configuró.',
   ['reason'],
 );
 

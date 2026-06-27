@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCostPerKmCents, CARPOOLING_COST_REFERENCE } from './cost-per-km.js';
-import { OFFERINGS, OfferingId } from './offerings.js';
-import { EnergySource } from '../enums/index.js';
+import { deriveCostPerKmCents } from './cost-per-km.js';
 
 describe('deriveCostPerKmCents · FUENTE ÚNICA de la fórmula (F2.5)', () => {
   it('precio ÷ rendimiento, redondeado a céntimo entero', () => {
@@ -34,18 +32,5 @@ describe('deriveCostPerKmCents · FUENTE ÚNICA de la fórmula (F2.5)', () => {
 
   it('precio 0 → 0 (energía gratis = costo/km 0, no degeneración)', () => {
     expect(deriveCostPerKmCents(0, 12)).toBe(0);
-  });
-});
-
-describe('CARPOOLING_COST_REFERENCE · derivada del catálogo (no diverge)', () => {
-  it('= VEO_ECONÓMICO (GASOLINE_90, 12 km/L) tomado de OFFERINGS', () => {
-    expect(CARPOOLING_COST_REFERENCE.energySource).toBe(EnergySource.GASOLINE_90);
-    expect(CARPOOLING_COST_REFERENCE.efficiencyKmPerUnit).toBe(12);
-  });
-
-  it('sigue al catálogo: es exactamente el referenceEnergySourceId/Efficiency del económico', () => {
-    const economico = OFFERINGS[OfferingId.VEO_ECONOMICO];
-    expect(CARPOOLING_COST_REFERENCE.energySource).toBe(economico.referenceEnergySourceId);
-    expect(CARPOOLING_COST_REFERENCE.efficiencyKmPerUnit).toBe(economico.referenceEfficiency);
   });
 });

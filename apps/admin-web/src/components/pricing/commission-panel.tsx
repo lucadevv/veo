@@ -30,11 +30,13 @@ function bpsToPercentLabel(bps: number): string {
 }
 
 /**
- * Comisión por modo (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). El admin edita la tasa de comisión ON-DEMAND (la
- * que la plataforma retiene de cada cobro on-demand). La comisión del CARPOOLING es 0% FIJO y SOLO-LECTURA:
- * cobrar comisión sobre un viaje compartido (cost-sharing) sería lucro de la plataforma → ilegal hasta el
- * visto bueno legal; subirla requiere un ADR + flag, no un cambio del admin. La UI solo refleja `finance:manage`;
- * el admin-bff + payment-service re-autorizan y auditan. La tasa se persiste en basis points Int (nunca float).
+ * Comisión por modo (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). El admin edita DOS tasas, con modelos distintos:
+ *  - On-demand: la comisión que se DESCUENTA al conductor (el pasajero paga la tarifa; el conductor recibe
+ *    tarifa − comisión).
+ *  - Carpooling: un service fee que se SUMA al pasajero (cost-sharing) — el conductor cobra el 100% de su
+ *    contribución. No tiene nudo legal: es un cargo al pasajero, no lucro sobre el conductor.
+ * Full-replace con CAS: se mandan ambas tasas con la `version` cargada (409 si otro admin la movió). La UI solo
+ * refleja `finance:manage`; el admin-bff + payment-service re-autorizan y auditan. Tasas en basis points Int.
  */
 export function CommissionPanel({ config }: { config: CommissionView }) {
   const user = useSession();
@@ -42,17 +44,34 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
   const { toast } = useToast();
   const replace = useReplaceCommission();
 
-  const [pct, setPct] = useState<string>(bpsToPercentLabel(config.onDemandRateBps));
+  const [onDemandPct, setOnDemandPct] = useState<string>(bpsToPercentLabel(config.onDemandRateBps));
+  const [carpoolingPct, setCarpoolingPct] = useState<string>(
+    bpsToPercentLabel(config.carpoolingFeeBps),
+  );
 
-  const bps = percentToBps(pct);
-  const invalid = !Number.isFinite(bps) || bps < 0 || bps > MAX_RATE_PCT * BPS_PER_PERCENT;
-  const dirty = bps !== config.onDemandRateBps;
+  const onDemandBps = percentToBps(onDemandPct);
+  const carpoolingBps = percentToBps(carpoolingPct);
+  const rangeBps = (bps: number) =>
+    !Number.isFinite(bps) || bps < 0 || bps > MAX_RATE_PCT * BPS_PER_PERCENT;
+  const onDemandInvalid = rangeBps(onDemandBps);
+  const carpoolingInvalid = rangeBps(carpoolingBps);
+  const invalid = onDemandInvalid || carpoolingInvalid;
+  const dirty =
+    onDemandBps !== config.onDemandRateBps || carpoolingBps !== config.carpoolingFeeBps;
 
   async function save() {
     try {
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409.
-      await replace.mutateAsync({ onDemandRateBps: bps, expectedVersion: config.version });
-      toast({ tone: 'success', title: `Comisión on-demand: ${bpsToPercentLabel(bps)}%` });
+      // Full-replace: se mandan AMBAS tasas. expectedVersion = la que cargamos (optimistic locking): si otro
+      // admin la movió, el server responde 409.
+      await replace.mutateAsync({
+        onDemandRateBps: onDemandBps,
+        carpoolingFeeBps: carpoolingBps,
+        expectedVersion: config.version,
+      });
+      toast({
+        tone: 'success',
+        title: `Comisión actualizada · on-demand ${bpsToPercentLabel(onDemandBps)}% · carpooling ${bpsToPercentLabel(carpoolingBps)}%`,
+      });
     } catch (err) {
       // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
       // muestra los valores vigentes; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
@@ -72,16 +91,18 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
         <Percent className="size-4" aria-hidden /> Comisión por modo
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        La tasa que la plataforma retiene de cada cobro. La comisión <strong>on-demand</strong> es
-        configurable; la del <strong>carpooling</strong> es 0% fijo (cost-sharing: por validación legal). El
-        cambio es global, inmediato y queda auditado.
+        Dos modelos distintos. La comisión <strong>on-demand</strong> se <strong>descuenta al
+        conductor</strong> (el pasajero paga la tarifa, el conductor recibe la tarifa menos la comisión). El{' '}
+        <strong>service fee de carpooling</strong> se <strong>suma al pasajero</strong> (cost-sharing): el
+        conductor cobra el 100% de su contribución y el fee es del pasajero, aparte. El cambio es global,
+        inmediato y queda auditado.
       </p>
 
       <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
         <Field
-          label="On-demand (%)"
+          label="On-demand · comisión al conductor (%)"
           hint={`Actual: ${bpsToPercentLabel(config.onDemandRateBps)}%`}
-          error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+          error={onDemandInvalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
         >
           <Input
             type="number"
@@ -89,14 +110,27 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
             step="0.5"
             min="0"
             max={MAX_RATE_PCT}
-            value={pct}
-            onChange={(e) => setPct(e.target.value)}
+            value={onDemandPct}
+            onChange={(e) => setOnDemandPct(e.target.value)}
             disabled={!canManage}
           />
         </Field>
 
-        <Field label="Carpooling (%)" hint="0% — gated por validación legal (ADR-015 §11.2)">
-          <Input type="number" value={(config.carpoolingRateBps / BPS_PER_PERCENT).toFixed(2)} disabled readOnly />
+        <Field
+          label="Carpooling · service fee al pasajero (%)"
+          hint={`Actual: ${bpsToPercentLabel(config.carpoolingFeeBps)}%`}
+          error={carpoolingInvalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+        >
+          <Input
+            type="number"
+            inputMode="decimal"
+            step="0.5"
+            min="0"
+            max={MAX_RATE_PCT}
+            value={carpoolingPct}
+            onChange={(e) => setCarpoolingPct(e.target.value)}
+            disabled={!canManage}
+          />
         </Field>
 
         {canManage ? (
@@ -107,7 +141,7 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
           ) : (
             <StepUpDialog
               title="Confirmar cambio de comisión"
-              description="Esta acción cambia la comisión on-demand global y queda auditada."
+              description="Esta acción cambia las comisiones globales (on-demand y carpooling) y queda auditada."
               trigger={
                 <Button variant="primary" size="md">
                   Guardar
@@ -118,11 +152,6 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
           )
         ) : null}
       </div>
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        El carpooling es 0% hasta el visto bueno legal (ADR-015 §11.2): cobrar comisión sobre un viaje
-        compartido sería lucro de la plataforma. Subirla requiere un ADR + flag, no un cambio acá.
-      </p>
 
       {!canManage ? (
         <p className="mt-3 text-xs text-ink-subtle">

@@ -3,9 +3,10 @@
  * PrismaBaseFareRepository de trip-service: el CommissionService depende de la INTERFAZ (COMMISSION_REPO), no
  * de Prisma — se testea con un repo en memoria; la persistencia vive en el adaptador.
  *
- * La config es UN escalar GLOBAL: la tasa ON-DEMAND en BASIS POINTS Int (0..10000), Tier 1 GLOBAL. La tasa del
- * CARPOOLING NO vive acá (es 0 FIJO de dominio · CARPOOLING_COMMISSION_BPS · legal-gated). La fila SIEMPRE existe
- * en prod (la siembra la migración con 2000 bps = 20%); `find` devuelve `null` solo en una DB sin migrar (tests).
+ * La config es UN singleton GLOBAL con DOS tasas en BASIS POINTS Int (0..10000), Tier 1 GLOBAL: la comisión
+ * ON-DEMAND (descontada al conductor) y el service fee CARPOOLING (sumado al pasajero). Ambas admin-editables. La
+ * fila SIEMPRE existe en prod (la siembra la migración: on-demand 2000 bps = 20%, carpooling 0); `find` devuelve
+ * `null` solo en una DB sin migrar (tests).
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
@@ -16,10 +17,12 @@ export const COMMISSION_REPO = Symbol('COMMISSION_REPO');
 /** Id fijo del singleton (Tier 1 GLOBAL). */
 export const COMMISSION_SINGLETON_ID = 'GLOBAL';
 
-/** Config persistida de la comisión ON-DEMAND + metadatos de versión (lo que el GET expone y el PUT bumpea). */
+/** Config persistida de la comisión por modo + metadatos de versión (lo que el GET expone y el PUT bumpea). */
 export interface PersistedCommission {
-  /** Tasa de comisión ON-DEMAND en basis points Int (0..10000; 2000 = 20%). Jamás float. */
+  /** Tasa de comisión ON-DEMAND en basis points Int (0..10000; 2000 = 20%) — descontada al conductor. Jamás float. */
   onDemandRateBps: number;
+  /** Service fee CARPOOLING en basis points Int (0..10000) — sumado al pasajero (cost-sharing). Jamás float. */
+  carpoolingFeeBps: number;
   version: number;
   updatedAt: string;
 }
@@ -67,6 +70,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
     if (!row) return null;
     return {
       onDemandRateBps: row.onDemandRateBps,
+      carpoolingFeeBps: row.carpoolingFeeBps,
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

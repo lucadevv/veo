@@ -214,17 +214,20 @@ model Payment {
 }
 
 /// Comisión de plataforma por MODO, editable en caliente (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). SINGLETON
-/// (espejo de base_fare_config de trip-service): un solo registro GLOBAL. SOLO la tasa ON-DEMAND es
-/// configurable; la del CARPOOLING es 0 FIJO de dominio (CARPOOLING_COMMISSION_BPS) y NO vive acá — subirla
-/// requiere ADR + flag legal, jamás un PUT del admin. La tasa va en BASIS POINTS Int (0..10000; 2000 = 20%) —
-/// NUNCA float persistido para dinero/tasa. `version` = optimistic locking (CAS) en el reemplazo.
+/// (espejo de base_fare_config de trip-service): un solo registro GLOBAL con DOS tasas, ambas configurables:
+/// la comisión ON-DEMAND (descontada al conductor) y el service fee CARPOOLING (sumado al pasajero en
+/// cost-sharing — el conductor cobra el 100% de su contribución). Las tasas van en BASIS POINTS Int
+/// (0..10000; 2000 = 20%) — NUNCA float persistido. `version` = optimistic locking (CAS) en el reemplazo.
 model CommissionConfig {
-  id              String   @id
+  id               String   @id
   /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Se divide /10000 al APLICAR
   /// (redondeo a céntimo Int en la fórmula commission()); jamás se persiste ni se opera como float.
-  onDemandRateBps Int      @default(2000) @map("on_demand_rate_bps")
-  version         Int      @default(0)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  onDemandRateBps  Int      @default(2000) @map("on_demand_rate_bps")
+  /// Service fee CARPOOLING en basis points (0..10000). Arranca en 0; el admin lo sube. Se SUMA al pasajero
+  /// (no se descuenta al conductor). Mismo tratamiento Int/redondeo que la comisión on-demand.
+  carpoolingFeeBps Int      @default(0) @map("carpooling_fee_bps")
+  version          Int      @default(0)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("commission_config")
   @@schema("payment")

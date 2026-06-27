@@ -29,10 +29,13 @@ import {
   fuelSurchargeView,
   baseFareView,
   commissionView,
+  costPerKmConfigView,
+  costPerKmListView,
   energyCatalogView,
   bidFloorView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
+  type ReplaceCostPerKmRequest,
   type ReplaceBidFloorRequest,
   operator,
   type CreateOperatorRequest,
@@ -80,6 +83,7 @@ export const qk = {
   fuelSurcharge: ['fuel-surcharge'] as const,
   baseFare: ['base-fare'] as const,
   commission: ['commission'] as const,
+  costPerKm: ['cost-per-km'] as const,
   energyCatalog: ['energy-catalog'] as const,
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
@@ -815,6 +819,28 @@ export function useReplaceCommission() {
     // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.commission });
+    },
+  });
+}
+
+/* ── Costo/km del carpooling (F2.5 · costo de operación DIRECTO del admin, per-país · FINANCE/ADMIN/SUPERADMIN) ── */
+export function useCostPerKm() {
+  return useQuery({
+    queryKey: qk.costPerKm,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/cost-per-km', { schema: costPerKmListView, signal }),
+  });
+}
+
+export function useReplaceCostPerKm() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(FINANCE, ADMIN, SUPERADMIN)` + step-up MFA, y booking-service re-autoriza: la UI solo refleja.
+    mutationFn: (input: ReplaceCostPerKmRequest) =>
+      apiClient().put('/finance/cost-per-km', { body: input, schema: costPerKmConfigView }),
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.costPerKm });
     },
   });
 }

@@ -6,8 +6,9 @@
  *  - RolesGuard + @Roles(FINANCE/ADMIN/SUPERADMIN) → RBAC server-side (es config financiera).
  *  - @RequireStepUpMfa + StepUpMfaGuard en el PUT → mutación de config sensible.
  *
- * SOLO se configura la tasa ON-DEMAND. El carpooling es 0 FIJO de dominio (CARPOOLING_COMMISSION_BPS): NO hay
- * endpoint para subirlo — requiere un ADR + flag legal, jamás un PUT del admin (ADR-015 §11.2).
+ * Se configuran AMBAS tasas (full-replace): la comisión ON-DEMAND (descontada al conductor) y el service fee
+ * CARPOOLING (sumado al pasajero). Ambas admin-editables — el carpooling fee NO tiene nudo legal (es un cargo al
+ * pasajero en cost-sharing, NO lucro sobre el conductor).
  */
 import { Body, Controller, Get, HttpCode, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -24,14 +25,10 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { CommissionService } from './commission.service';
 import { ReplaceCommissionDto } from './dto/commission.dto';
-import { CARPOOLING_COMMISSION_BPS } from '../payments/payment.policy';
 import type { PersistedCommission } from './commission.repository';
 
-/** Vista del endpoint: la tasa ON-DEMAND configurable + el carpooling 0 (solo-lectura, legal-gated) + version. */
-interface CommissionView extends PersistedCommission {
-  /** Comisión del carpooling en bps: 0 FIJO (ADR-015 §11.2). Expuesta solo-lectura para que el panel la pinte. */
-  carpoolingRateBps: number;
-}
+/** Vista del endpoint: ambas tasas configurables (on-demand + carpooling fee) en bps + version. */
+type CommissionView = PersistedCommission;
 
 @ApiTags('commission')
 @ApiBearerAuth()
@@ -45,11 +42,10 @@ export class CommissionController {
   @Get('commission')
   @ApiOperation({
     summary:
-      'Comisión por modo vigente: tasa ON-DEMAND configurable (bps) + carpooling 0 (legal-gated). finance:view. F2.7',
+      'Comisión por modo vigente: tasa ON-DEMAND + service fee CARPOOLING, ambas configurables (bps). finance:view. F2.7',
   })
   async getCommission(): Promise<CommissionView> {
-    const config = await this.commission.getConfig();
-    return { ...config, carpoolingRateBps: CARPOOLING_COMMISSION_BPS };
+    return this.commission.getConfig();
   }
 
   @Put('commission')
@@ -58,10 +54,9 @@ export class CommissionController {
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
-      'REEMPLAZA la tasa de comisión ON-DEMAND (bps). El carpooling 0 NO se toca (legal-gated). finance:manage + step-up MFA. F2.7',
+      'REEMPLAZA AMBAS tasas: comisión ON-DEMAND + service fee CARPOOLING (bps). finance:manage + step-up MFA. F2.7',
   })
   async replaceCommission(@Body() dto: ReplaceCommissionDto): Promise<CommissionView> {
-    const config = await this.commission.replace(dto.onDemandRateBps, dto.expectedVersion);
-    return { ...config, carpoolingRateBps: CARPOOLING_COMMISSION_BPS };
+    return this.commission.replace(dto.onDemandRateBps, dto.carpoolingFeeBps, dto.expectedVersion);
   }
 }

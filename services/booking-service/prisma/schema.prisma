@@ -106,6 +106,11 @@ model PublishedTrip {
   precioBase          Int                @map("precio_base") // céntimos PEN, asiento full-route
   precioPorTramo      Json               @default("[]") @map("precio_por_tramo") // { desdeOrden, hastaOrden, precioCentimos }[]
 
+  // Peaje del viaje declarado por el conductor (céntimos PEN, F2.5 · escudo legal). Se SUMA al costo del
+  // trayecto y RECIÉN se divide entre asientos en el tope de cost-sharing (modelo BlaBlaCar; NO va en el
+  // per-km). Default 0 (sin peaje); topado en el borde por MAX_TOLLS_CENTS (techo de cordura anti-inflado).
+  tollsCents          Int                @default(0) @map("tolls_cents")
+
   modoReserva         ModoReserva        @map("modo_reserva")
   reglas              String?            @db.Text // equipaje, mascotas, etc.
   pais                String             @default("PE") // EC → F8
@@ -207,5 +212,24 @@ model OutboxEvent {
 
   @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
+  @@schema("booking")
+}
+
+/// F2.5 · Costo de OPERACIÓN por km, editable EN CALIENTE por el admin, POR PAÍS (escudo legal anti-lucro).
+/// Es el costo real de operar el vehículo (combustible + desgaste/depreciación, estilo "IRS mileage rate"),
+/// NO derivado del precio de energía: lo FIJA el admin (finance) y alimenta DIRECTO el tope de cost-sharing
+/// (CostCapService). Una fila POR PAÍS (PK = `pais`): cada país versiona su tarifa por separado (CAS). Se
+/// SIEMBRA PE=150 (S/1.50/km, el valor real del dueño = combustible+desgaste) y EC=50 (placeholder, F8).
+/// DEGRADACIÓN HONESTA: si la fila no existe (DB sin migrar) el resolutor cae al env COST_PER_KM_CENTS_*.
+model CostPerKmConfig {
+  /// País del marketplace (PE/EC). PK: una tarifa por país (no singleton global — cada país su versión CAS).
+  pais          String   @id
+  /// Costo de operación por kilómetro en céntimos PEN (Int, jamás float). Seed PE=150, EC=50.
+  costPerKmCents Int     @map("cost_per_km_cents")
+  /// Versión MONOTÓNICA per-país (se bumpea en cada PUT · optimistic locking CAS).
+  version       Int      @default(0)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("cost_per_km_config")
   @@schema("booking")
 }

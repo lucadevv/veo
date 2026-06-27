@@ -23,6 +23,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ModoReserva } from '../../generated/prisma';
+import { MAX_TOLLS_CENTS } from '../../domain/cost-cap';
 
 /**
  * Una parada intermedia de la ruta (ADR-014 §2.1 `stopovers`). El `orden` arranca en 1: el 0 está RESERVADO
@@ -109,6 +110,15 @@ export class CreatePublishedTripDto {
   @ValidateNested({ each: true })
   @Type(() => TramoPrecioDto)
   precioPorTramo?: TramoPrecioDto[];
+
+  // Peaje del viaje en CÉNTIMOS PEN (Int, nunca float). El conductor lo declara; se SUMA al costo del trayecto
+  // y RECIÉN se divide entre asientos en el tope de cost-sharing (NO va en el per-km). Default 0 (sin peaje).
+  // Topado por MAX_TOLLS_CENTS (techo de cordura anti-inflado); el tope total limita igual el precio final.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_TOLLS_CENTS)
+  tollsCents?: number;
 
   // Modo de reserva — enum TIPADO (INSTANT_BOOKING | REVISION_CADA_SOLICITUD). Sin string mágico.
   @IsEnum(ModoReserva)

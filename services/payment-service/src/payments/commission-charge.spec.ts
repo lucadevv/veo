@@ -1,10 +1,11 @@
 /**
  * charge() · comisión por MODO (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · camino de DINERO). Verifica END-TO-END
  * en el service que:
- *  - el cobro CARPOOLING persiste comisión 0 y `mode=CARPOOLING` AUNQUE haya una tasa on-demand configurada
- *    alta (el GUARD LEGAL no se puede saltar desde el cobro);
- *  - el cobro ON_DEMAND persiste la tasa CONFIGURADA (CommissionService) y `mode=ON_DEMAND`;
- *  - sin CommissionService inyectado, el ON_DEMAND DEGRADA a la tasa del env — NUNCA rompe el cobro.
+ *  - el cobro CARPOOLING SUMA el service fee al pasajero (grossCents cobrado = contribución + fee), el corte de
+ *    la plataforma es el fee y el conductor cobra el 100% de su contribución;
+ *  - el cobro ON_DEMAND DESCUENTA la comisión al conductor con la tasa CONFIGURADA y persiste `mode=ON_DEMAND`;
+ *  - sin CommissionService inyectado, el ON_DEMAND DEGRADA a la tasa del env y el CARPOOLING cae a fee 0 — NUNCA
+ *    rompe el cobro.
  * Se usa el método CASH (no toca gateway: charge() devuelve el Payment recién creado tras persistir).
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -42,22 +43,41 @@ function buildService(opts: { commission?: Partial<CommissionService>; envRate?:
 }
 
 describe('charge() · comisión por modo (camino de dinero + legal)', () => {
-  it('CARPOOLING → comisión 0 y mode=CARPOOLING, AUNQUE la config on-demand sea 20% (guard legal)', async () => {
-    // El stub devolvería 20% para on-demand; el carpooling igual debe terminar en 0 (resolveChargeRate corta antes).
-    const commission = { resolveRateBps: vi.fn(async () => 2000) };
+  it('CARPOOLING → el service fee se SUMA al pasajero; el conductor cobra FULL (contribución 2000, fee 15%)', async () => {
+    const commission = {
+      resolveRateBps: vi.fn(async (mode: ChargeMode) => (mode === ChargeMode.CARPOOLING ? 1500 : 2000)),
+    };
     const { service, created } = buildService({ commission });
     const payment = await service.charge({
       tripId: 'b-1',
-      grossCents: 3000,
+      grossCents: 2000, // la CONTRIBUCIÓN del conductor (cost-sharing)
       method: 'CASH',
       dedupKey: 'booking-charge:b-1',
       mode: ChargeMode.CARPOOLING,
     });
-    expect(payment.commissionCents).toBe(0);
-    expect(commission.resolveRateBps).not.toHaveBeenCalled(); // resolveChargeRate corta antes de consultar config
+    expect(commission.resolveRateBps).toHaveBeenCalledWith(ChargeMode.CARPOOLING);
+    expect(payment.commissionCents).toBe(300); // fee = 15% de 2000 (corte de la plataforma)
     expect(created[0]!.mode).toBe('CARPOOLING');
+    expect(created[0]!.grossCents).toBe(2300); // COBRADO al pasajero = contribución + fee
+    expect(created[0]!.amountCents).toBe(2300); // lo que se cobra al método de pago del pasajero
+    expect(created[0]!.commissionCents).toBe(300);
+    expect(created[0]!.feeCents).toBe(300);
+    // driverNet derivable: gross − commission = 2300 − 300 = 2000 (contribución FULL al conductor).
+    expect((created[0]!.grossCents as number) - (created[0]!.commissionCents as number)).toBe(2000);
+  });
+
+  it('CARPOOLING sin CommissionService → fee 0: el pasajero paga exactamente la contribución, conductor FULL', async () => {
+    const { service, created } = buildService(); // sin commission inyectado → carpooling fee 0
+    await service.charge({
+      tripId: 'b-2',
+      grossCents: 3000,
+      method: 'CASH',
+      dedupKey: 'booking-charge:b-2',
+      mode: ChargeMode.CARPOOLING,
+    });
     expect(created[0]!.commissionCents).toBe(0);
-    expect(created[0]!.feeCents).toBe(0);
+    expect(created[0]!.grossCents).toBe(3000); // contribución + 0
+    expect(created[0]!.amountCents).toBe(3000);
   });
 
   it('ON_DEMAND → usa la tasa CONFIGURADA (15%) y persiste mode=ON_DEMAND', async () => {

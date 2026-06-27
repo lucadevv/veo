@@ -7,7 +7,6 @@ import {
   BPS_DENOMINATOR,
   canAddTip,
   canTransitionPayment,
-  CARPOOLING_COMMISSION_BPS,
   ChargeMode,
   computeChargeAmounts,
   deriveTripChargeDedupKey,
@@ -15,55 +14,88 @@ import {
   retryDelayMs,
 } from './payment.policy';
 
-describe('computeChargeAmounts · comisión (BR-P04)', () => {
-  it('aplica el 20% sobre el bruto y excluye la propina', () => {
-    // Bruto S/20.00 = 2000 céntimos, propina S/3.00 = 300, rate 0.2.
-    const r = computeChargeAmounts(2000, 300, 0.2);
-    expect(r.commissionCents).toBe(400); // 20% de 2000
+describe('computeChargeAmounts · ON_DEMAND — comisión DESCONTADA al conductor (BR-P04)', () => {
+  it('aplica el 20% sobre la tarifa (bruto) y excluye la propina', () => {
+    // Tarifa S/20.00 = 2000 céntimos, propina S/3.00 = 300, rate 0.2.
+    const r = computeChargeAmounts(ChargeMode.ON_DEMAND, 2000, 300, 0.2);
+    expect(r.grossCents).toBe(2000); // bruto cobrado = la tarifa (input)
+    expect(r.commissionCents).toBe(400); // 20% de 2000, descontado al conductor
     expect(r.feeCents).toBe(400); // fee visible = comisión
-    expect(r.amountCents).toBe(2300); // bruto + propina cobrados al pasajero
+    expect(r.amountCents).toBe(2300); // tarifa + propina cobradas al pasajero
     expect(r.driverNetCents).toBe(1900); // (2000 - 400) + 300
   });
 
   it('redondea la comisión a céntimos enteros', () => {
-    // 20% de 1505 = 301 (301.0). Probamos un caso con redondeo: 20% de 1503 = 300.6 → 301.
-    const r = computeChargeAmounts(1503, 0, 0.2);
+    // 20% de 1503 = 300.6 → 301.
+    const r = computeChargeAmounts(ChargeMode.ON_DEMAND, 1503, 0, 0.2);
     expect(r.commissionCents).toBe(301);
     expect(r.amountCents).toBe(1503);
     expect(r.driverNetCents).toBe(1202);
   });
 
   it('una tarifa con surge (mayor bruto) paga más comisión, propina intacta', () => {
-    const r = computeChargeAmounts(5000, 1000, 0.2);
+    const r = computeChargeAmounts(ChargeMode.ON_DEMAND, 5000, 1000, 0.2);
     expect(r.commissionCents).toBe(1000);
     expect(r.driverNetCents).toBe(5000); // (5000-1000)+1000
   });
 
   it('rechaza montos no enteros o negativos', () => {
-    expect(() => computeChargeAmounts(-1, 0, 0.2)).toThrow(InvalidStateError);
-    expect(() => computeChargeAmounts(100.5, 0, 0.2)).toThrow(InvalidStateError);
-    expect(() => computeChargeAmounts(100, -5, 0.2)).toThrow(InvalidStateError);
+    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, -1, 0, 0.2)).toThrow(InvalidStateError);
+    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100.5, 0, 0.2)).toThrow(InvalidStateError);
+    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100, -5, 0.2)).toThrow(InvalidStateError);
   });
 });
 
-describe('comisión por MODO (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal)', () => {
-  it('CARPOOLING es 0 FIJO de dominio — el guard legal', () => {
-    expect(CARPOOLING_COMMISSION_BPS).toBe(0);
+describe('computeChargeAmounts · CARPOOLING — service fee SUMADO al pasajero (F2.7 · cost-sharing)', () => {
+  it('el fee se SUMA arriba: contribución 2000, fee 15% → cobrado 2300, fee 300, conductor 2000 FULL', () => {
+    const r = computeChargeAmounts(ChargeMode.CARPOOLING, 2000, 0, 0.15);
+    expect(r.commissionCents).toBe(300); // 15% de 2000 = serviceFee (corte de la plataforma)
+    expect(r.feeCents).toBe(300); // fee visible al pasajero
+    expect(r.grossCents).toBe(2300); // BRUTO cobrado = contribución + fee
+    expect(r.amountCents).toBe(2300); // lo que se cobra al método de pago (sin propina/descuento)
+    expect(r.driverNetCents).toBe(2000); // el conductor cobra el 100% de su contribución
   });
 
-  it('resolveCommissionBps(CARPOOLING, …) devuelve 0 SIEMPRE, ignorando la tasa configurada', () => {
-    // Aunque alguien pase una tasa on-demand alta, el carpooling NUNCA cobra comisión.
-    expect(resolveCommissionBps(ChargeMode.CARPOOLING, 9999)).toBe(0);
-    expect(resolveCommissionBps(ChargeMode.CARPOOLING, 2000)).toBe(0);
+  it('INVARIANTE: el conductor de carpooling cobra SIEMPRE el 100% de su contribución (sin propina)', () => {
+    for (const [contribution, rate] of [
+      [1000, 0.1],
+      [3333, 0.2],
+      [4999, 0.07],
+    ] as const) {
+      const r = computeChargeAmounts(ChargeMode.CARPOOLING, contribution, 0, rate);
+      expect(r.driverNetCents).toBe(contribution); // driverNet === contribución, NUNCA menos
+      expect(r.grossCents).toBe(contribution + r.commissionCents); // bruto = contribución + fee
+    }
   });
 
-  it('resolveCommissionBps(ON_DEMAND, bps) devuelve la tasa configurada tal cual', () => {
-    expect(resolveCommissionBps(ChargeMode.ON_DEMAND, 2000)).toBe(2000);
-    expect(resolveCommissionBps(ChargeMode.ON_DEMAND, 1500)).toBe(1500);
+  it('la propina es 100% del conductor, sumada arriba de su contribución', () => {
+    const r = computeChargeAmounts(ChargeMode.CARPOOLING, 2000, 500, 0.15);
+    expect(r.driverNetCents).toBe(2500); // contribución 2000 + propina 500
+    expect(r.amountCents).toBe(2800); // bruto 2300 + propina 500
+  });
+
+  it('fee 0 (sin service fee) → el pasajero paga exactamente la contribución, conductor FULL', () => {
+    const r = computeChargeAmounts(ChargeMode.CARPOOLING, 3000, 0, 0);
+    expect(r.commissionCents).toBe(0);
+    expect(r.grossCents).toBe(3000); // contribución + 0
+    expect(r.driverNetCents).toBe(3000);
+  });
+
+  it('el neto del conductor es derivable como bruto − comisión + propina (vale para ambos modos)', () => {
+    const r = computeChargeAmounts(ChargeMode.CARPOOLING, 2000, 0, 0.15);
+    expect(r.grossCents - r.commissionCents + r.tipCents).toBe(r.driverNetCents); // 2300 - 300 + 0 = 2000
+  });
+});
+
+describe('comisión por MODO (F2.7 · ADR-017 §1.6 / ADR-015 §11.2)', () => {
+  it('resolveCommissionBps(CARPOOLING, rates) devuelve carpoolingFeeBps; ON_DEMAND devuelve onDemandRateBps', () => {
+    const rates = { onDemandRateBps: 2000, carpoolingFeeBps: 1500 };
+    expect(resolveCommissionBps(ChargeMode.CARPOOLING, rates)).toBe(1500);
+    expect(resolveCommissionBps(ChargeMode.ON_DEMAND, rates)).toBe(2000);
   });
 
   it('bpsToRate pliega bps Int a la fracción 0..1 que consume commission()', () => {
-    expect(bpsToRate(0)).toBe(0); // carpooling
+    expect(bpsToRate(0)).toBe(0);
     expect(bpsToRate(2000)).toBe(0.2); // 20%
     expect(bpsToRate(BPS_DENOMINATOR)).toBe(1); // 100%
   });
@@ -72,12 +104,6 @@ describe('comisión por MODO (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo leg
     expect(() => bpsToRate(-1)).toThrow(InvalidStateError);
     expect(() => bpsToRate(10_001)).toThrow(InvalidStateError);
     expect(() => bpsToRate(20.5)).toThrow(InvalidStateError);
-  });
-
-  it('una tarifa de carpooling (rate 0) NO paga comisión: todo el bruto es del conductor', () => {
-    const r = computeChargeAmounts(3000, 0, bpsToRate(CARPOOLING_COMMISSION_BPS));
-    expect(r.commissionCents).toBe(0);
-    expect(r.driverNetCents).toBe(3000); // bruto íntegro al conductor
   });
 });
 

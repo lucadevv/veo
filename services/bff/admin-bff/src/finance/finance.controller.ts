@@ -19,6 +19,8 @@ import type { PayoutView } from '@veo/api-client';
 import {
   FinanceService,
   type CommissionView,
+  type CostPerKmConfigView,
+  type CostPerKmListView,
   type PayoutDisburseResult,
   type ReleaseHeldPayoutsResult,
   type RunPayoutsResult,
@@ -28,6 +30,7 @@ import {
   RunPayoutsDto,
   RefundDto,
   ReplaceCommissionDto,
+  ReplaceCostPerKmDto,
 } from './dto/finance.dto';
 
 @ApiTags('finance')
@@ -109,6 +112,30 @@ export class FinanceController {
     @Body() dto: ReplaceCommissionDto,
   ): Promise<CommissionView> {
     return this.finance.replaceCommission(user, dto);
+  }
+
+  // ── Costo/km del carpooling (F2.5 · escudo legal anti-lucro). GET = finance:view (rol de clase). PUT =
+  // finance:manage + step-up MFA: cambia el costo/km de un país que alimenta DIRECTO el tope de cost-sharing.
+  // booking-service RE-valida RBAC + step-up (defensa en profundidad) y aplica el CAS. ──
+  @Get('cost-per-km')
+  @ApiOperation({
+    summary: 'Costo de operación por km vigente por país (PE/EC). Alimenta el tope de cost-sharing. finance:view. F2.5',
+  })
+  getCostPerKm(@CurrentUser() user: AuthenticatedUser): Promise<CostPerKmListView> {
+    return this.finance.getCostPerKm(user);
+  }
+
+  @Put('cost-per-km')
+  @HttpCode(200)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary: 'REEMPLAZA el costo/km de un país (céntimos PEN Int). finance:manage + step-up. F2.5',
+  })
+  replaceCostPerKm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReplaceCostPerKmDto,
+  ): Promise<CostPerKmConfigView> {
+    return this.finance.replaceCostPerKm(user, dto);
   }
 
   @Post('refunds/:tripId')

@@ -3,8 +3,13 @@
  *
  * PORQUÉ EXISTE: VEO es CARPOOLING (compartir costos), NO taxi informal. La oferta del conductor debe
  * COMPARTIR el costo del viaje, no LUCRAR. El tope acota el precio del asiento a una fracción del costo
- * real del trayecto: `precio_asiento ≤ (distancia_km × costo/km) / asientosTotales`. Server-side, NO
- * negociable por el cliente — un precio por encima del tope se RECHAZA al publicar/editar.
+ * real del trayecto, modelo BlaBlaCar: `precio_asiento ≤ (distancia_km × costo/km + peaje) / asientosTotales`.
+ * Server-side, NO negociable por el cliente — un precio por encima del tope se RECHAZA al publicar/editar.
+ *
+ * EL COSTO/KM es el costo de OPERACIÓN real (combustible + desgaste/depreciación, estilo "IRS mileage rate"):
+ * lo fija el ADMIN por país (CostPerKmConfig), NO se deriva del precio de energía. El PEAJE (`tollsCents`) lo
+ * declara el CONDUCTOR por viaje; se SUMA al costo del trayecto y RECIÉN se divide entre asientos (es un costo
+ * del viaje entero, NO un costo por km).
  *
  * Este módulo es DOMINIO PURO: la MATEMÁTICA del tope, sin I/O. Las distancias (metros) entran como dato
  * (las calcula el `CostCapService` vía el puerto `MapsClient`). Así el cálculo es determinista y testeable
@@ -17,6 +22,15 @@
  * costo real, así que se trunca: `precio ≤ floor(costoReal)`.
  */
 import { ValidationError } from '@veo/utils';
+
+/**
+ * Techo de CORDURA del peaje declarado por el conductor (céntimos PEN). NO es un valor de negocio fino: es un
+ * guard anti-absurdo (fat-finger / overflow / inflado grosero). S/500 cubre con holgura el peaje real de la
+ * ruta interurbana más larga del Perú (varias casetas). El tope de cost-sharing limita igual el precio final;
+ * este techo solo acota cuánto puede MOVER el conductor el tope al declarar peaje. El DTO lo enforça en el
+ * borde; el dominio lo re-valida (defensa en profundidad).
+ */
+export const MAX_TOLLS_CENTS = 50_000;
 
 /**
  * País del marketplace. NO existe enum tipado en @veo/shared-types (verificado: no hay Pais/Country/
@@ -34,15 +48,20 @@ export function isPais(value: string): value is Pais {
   return value === PAIS.PE || value === PAIS.EC;
 }
 
-/** Costo/km por país (céntimos Int), provisto desde env (PROVISIONAL, validado por legal/finanzas). */
+/**
+ * Costo/km por país (céntimos Int) de FALLBACK desde env. La FUENTE AUTORITATIVA del costo/km es la config
+ * editable por el admin (CostPerKmConfig en DB, per-país); este objeto solo alimenta la DEGRADACIÓN HONESTA
+ * (config no disponible → env) — NUNCA es el valor de primera mano del tope legal.
+ */
 export interface CostPerKmConfig {
   readonly [PAIS.PE]: number;
   readonly [PAIS.EC]: number;
 }
 
 /**
- * Resuelve el costo/km (céntimos) para un país. País no soportado → ValidationError tipado (no un default
- * silencioso: publicar para un país sin tarifa configurada es un estado inválido, no un fallback).
+ * Resuelve el costo/km (céntimos) de FALLBACK para un país desde el objeto de env. País no soportado →
+ * ValidationError tipado (no un default silencioso: publicar para un país sin tarifa configurada es un estado
+ * inválido, no un fallback). Lo usa el resolutor de config como red de degradación, no el cálculo directo.
  */
 export function costPerKmCentsFor(pais: string, config: CostPerKmConfig): number {
   if (!isPais(pais)) {
@@ -52,18 +71,21 @@ export function costPerKmCentsFor(pais: string, config: CostPerKmConfig): number
 }
 
 /**
- * Tope (céntimos Int) de un trayecto dado su distancia. FÓRMULA ÚNICA (full-route y por tramo la comparten):
+ * Tope (céntimos Int) de un trayecto dado su distancia + peaje. FÓRMULA ÚNICA (BlaBlaCar):
  *
- *   topeCentimos = Math.floor((distanceMeters / 1000) * costPerKmCents / asientosTotales)
+ *   topeCentimos = Math.floor((distanceMeters / 1000) * costPerKmCents + tollsCents) / asientosTotales)
  *
- * Un único Math.floor sobre el resultado final → entero, sin float persistido/comparado, y SIEMPRE ≤ costo
- * real (un tope nunca debe exceder el costo-compartido). `asientosTotales` reparte el costo del trayecto
- * entre los asientos (cada pasajero paga su fracción, no el viaje entero).
+ * El PEAJE (`tollsCents`) se SUMA al costo del trayecto (distancia × costo/km) y RECIÉN se divide entre los
+ * asientos — es un costo del viaje ENTERO, no un costo por km (NO va en el per-km). Un único Math.floor sobre
+ * el resultado final → entero, sin float persistido/comparado, y SIEMPRE ≤ costo real (un tope nunca debe
+ * exceder el costo-compartido). `asientosTotales` reparte el costo del trayecto entre los asientos (cada
+ * pasajero paga su fracción, no el viaje entero).
  */
 export function capCentsForDistance(
   distanceMeters: number,
   costPerKmCents: number,
   asientosTotales: number,
+  tollsCents: number,
 ): number {
   if (asientosTotales <= 0) {
     // Defensa en profundidad: el publish ya exige asientosTotales > 0; acá evita división por cero.
@@ -71,23 +93,35 @@ export function capCentsForDistance(
       asientosTotales,
     });
   }
+  if (!Number.isInteger(tollsCents) || tollsCents < 0) {
+    // Defensa en profundidad: el DTO ya exige Int ≥ 0; un peaje negativo/no-entero es un estado inválido
+    // (no se silencia a 0: publicar/editar con un peaje corrupto debe fallar, no validar un tope torcido).
+    throw new ValidationError('El peaje (tollsCents) debe ser un entero ≥ 0', { tollsCents });
+  }
   const distanceKm = distanceMeters / 1000;
   // floor (NO round): el tope es un MÁXIMO legal; truncar garantiza tope ≤ costo real (anti micro-lucro .5).
-  return Math.floor((distanceKm * costPerKmCents) / asientosTotales);
+  return Math.floor((distanceKm * costPerKmCents + tollsCents) / asientosTotales);
 }
 
 /**
  * Verifica el tope FULL-ROUTE: el `precioBase` (asiento de la ruta completa) no puede exceder el tope
- * derivado de la distancia origen→destino (con stopovers como waypoints). Excede → ValidationError con la
- * causa concreta (precio, tope, distancia) para un 400 legible.
+ * derivado de la distancia origen→destino (con stopovers como waypoints) MÁS el peaje declarado del viaje.
+ * El peaje entra SOLO acá (es un costo del viaje entero); los tramos no lo cargan (ver `assertTramoCap`).
+ * Excede → ValidationError con la causa concreta (precio, tope, distancia, peaje) para un 400 legible.
  */
 export function assertFullRouteCap(args: {
   precioBaseCentimos: number;
   distanceMeters: number;
   costPerKmCents: number;
   asientosTotales: number;
+  tollsCents: number;
 }): void {
-  const tope = capCentsForDistance(args.distanceMeters, args.costPerKmCents, args.asientosTotales);
+  const tope = capCentsForDistance(
+    args.distanceMeters,
+    args.costPerKmCents,
+    args.asientosTotales,
+    args.tollsCents,
+  );
   if (args.precioBaseCentimos > tope) {
     throw new ValidationError(
       'El precio base excede el tope de cost-sharing por distancia (carpooling no puede lucrar)',
@@ -97,6 +131,7 @@ export function assertFullRouteCap(args: {
         distanceMeters: args.distanceMeters,
         costPerKmCents: args.costPerKmCents,
         asientosTotales: args.asientosTotales,
+        tollsCents: args.tollsCents,
       },
     );
   }
@@ -104,8 +139,14 @@ export function assertFullRouteCap(args: {
 
 /**
  * Verifica el tope de UN tramo: el precio del tramo [desdeOrden→hastaOrden] no puede exceder el tope
- * derivado de la distancia de ESE segmento. Excede → ValidationError con la causa (incluye los órdenes del
- * tramo para que el conductor sepa CUÁL tramo está fuera de rango).
+ * derivado de la distancia de ESE segmento (+ peaje SOLO si el tramo es la ruta COMPLETA). Excede →
+ * ValidationError con la causa (incluye los órdenes del tramo para que el conductor sepa CUÁL está fuera de rango).
+ *
+ * EL PEAJE solo entra cuando el tramo ABARCA todo el viaje (origen→destino): ese tramo ES la ruta completa,
+ * así que carga el peaje igual que el full-route (de hecho, el tramo full-route implícito == precioBase). Un
+ * sub-segmento estricto NO carga el peaje (`tollsCents = 0`): sumarle el peaje de TODO el viaje inflaría su
+ * tope (un tramo corto con el peaje entero) → vector de lucro. Quién es "full-route" lo decide el orquestador
+ * (CostCapService) y lo pasa acá; el dominio solo aplica la fórmula con el peaje que recibe.
  */
 export function assertTramoCap(args: {
   desdeOrden: number;
@@ -114,8 +155,14 @@ export function assertTramoCap(args: {
   distanceMeters: number;
   costPerKmCents: number;
   asientosTotales: number;
+  tollsCents: number;
 }): void {
-  const tope = capCentsForDistance(args.distanceMeters, args.costPerKmCents, args.asientosTotales);
+  const tope = capCentsForDistance(
+    args.distanceMeters,
+    args.costPerKmCents,
+    args.asientosTotales,
+    args.tollsCents,
+  );
   if (args.precioCentimos > tope) {
     throw new ValidationError(
       'El precio de un tramo excede el tope de cost-sharing por distancia',
@@ -127,6 +174,7 @@ export function assertTramoCap(args: {
         distanceMeters: args.distanceMeters,
         costPerKmCents: args.costPerKmCents,
         asientosTotales: args.asientosTotales,
+        tollsCents: args.tollsCents,
       },
     );
   }

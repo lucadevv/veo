@@ -216,6 +216,8 @@ export class PublishedTripsService {
       pais: PUBLISH_COUNTRY,
       asientosTotales: dto.asientosTotales,
       precioBaseCentimos: dto.precioBase,
+      // Peaje declarado por el conductor (default 0): sube SOLO el tope full-route (costo del viaje entero).
+      tollsCents: dto.tollsCents ?? 0,
       origenLat: dto.origenLat,
       origenLon: dto.origenLon,
       destinoLat: dto.destinoLat,
@@ -257,6 +259,8 @@ export class PublishedTripsService {
       pricingMode: PricingMode.FIJO,
       precioBase: dto.precioBase,
       precioPorTramo,
+      // Peaje del viaje (céntimos PEN, default 0). Persistido con la oferta; el cost-cap lo suma al tope.
+      tollsCents: dto.tollsCents ?? 0,
       modoReserva: dto.modoReserva,
       reglas: dto.reglas ?? null,
       pais: PUBLISH_COUNTRY, // EC → F8
@@ -589,6 +593,7 @@ export class PublishedTripsService {
     if (dto.precioPorTramo !== undefined) {
       data.precioPorTramo = dto.precioPorTramo as unknown as object;
     }
+    if (dto.tollsCents !== undefined) data.tollsCents = dto.tollsCents;
     if (dto.modoReserva !== undefined) data.modoReserva = dto.modoReserva;
     if (dto.reglas !== undefined) data.reglas = dto.reglas;
 
@@ -810,6 +815,8 @@ export class PublishedTripsService {
     return (
       dto.precioBase !== undefined ||
       dto.precioPorTramo !== undefined ||
+      // El peaje SUBE el tope full-route: editarlo cambia el tope → DEBE re-validar (anti inflado de peaje).
+      dto.tollsCents !== undefined ||
       dto.origenLat !== undefined ||
       dto.origenLon !== undefined ||
       dto.destinoLat !== undefined ||
@@ -840,6 +847,8 @@ export class PublishedTripsService {
     const destinoLon = dto.destinoLon ?? trip.destinoLon;
     const asientosTotales = dto.asientosTotales ?? trip.asientosTotales;
     const precioBase = dto.precioBase ?? trip.precioBase;
+    // Peaje FINAL: el del DTO si llega, o el persistido (mismo merge DTO ∪ persistido que el resto del input).
+    const tollsCents = dto.tollsCents ?? trip.tollsCents;
 
     const stopovers: StopoverPunto[] = dto.stopovers ?? readStopoverPuntos(trip.stopovers);
 
@@ -854,6 +863,7 @@ export class PublishedTripsService {
       pais: trip.pais,
       asientosTotales,
       precioBaseCentimos: precioBase,
+      tollsCents,
       origenLat,
       origenLon,
       destinoLat,

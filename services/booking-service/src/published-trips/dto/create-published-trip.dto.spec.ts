@@ -76,3 +76,27 @@ describe('CreatePublishedTripDto · stopovers orden (FIX 1: borde anti-lucro)', 
     expect(stopoversError?.constraints).toHaveProperty('arrayUnique');
   });
 });
+
+describe('CreatePublishedTripDto · tollsCents (peaje declarado, F2.5)', () => {
+  it('acepta un peaje entero ≥ 0', () => {
+    expect(validate({ ...VALID_BASE, tollsCents: 800 })).toHaveLength(0);
+    expect(validate({ ...VALID_BASE, tollsCents: 0 })).toHaveLength(0);
+  });
+
+  it('acepta el payload SIN peaje (opcional, default 0 en el service)', () => {
+    expect(validate({ ...VALID_BASE })).toHaveLength(0);
+  });
+
+  it('rechaza un peaje negativo (@Min(0) — el dinero no es negativo)', () => {
+    expect(validate({ ...VALID_BASE, tollsCents: -1 }).length).toBeGreaterThan(0);
+  });
+
+  it('rechaza un peaje no entero (céntimos Int, jamás float)', () => {
+    expect(validate({ ...VALID_BASE, tollsCents: 12.5 }).length).toBeGreaterThan(0);
+  });
+
+  it('TOPA el peaje en MAX_TOLLS_CENTS (techo de cordura anti-inflado): 50_001 → rechaza', () => {
+    expect(validate({ ...VALID_BASE, tollsCents: 50_001 }).length).toBeGreaterThan(0);
+    expect(validate({ ...VALID_BASE, tollsCents: 50_000 })).toHaveLength(0);
+  });
+});

@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { ValidationError, ExternalServiceError, type LatLon } from '@veo/utils';
 import type { MapsClient, RouteResult } from '@veo/maps';
 import { CostCapService, type PriceCapInput } from './cost-cap.service';
-import type { CostPerKmService } from './cost-per-km.service';
-import { PAIS, type CostPerKmConfig } from '../domain/cost-cap';
+import type { CostPerKmConfigService } from '../cost-per-km/cost-per-km-config.service';
+import { PAIS } from '../domain/cost-cap';
 
-const CONFIG: CostPerKmConfig = { [PAIS.PE]: 100, [PAIS.EC]: 50 };
+/** Costo/km de prueba: PE=150 (seed real), EC=50 — lo que la config del admin resuelve (degradación incluida). */
+const COST_PER_KM: Record<string, number> = { [PAIS.PE]: 150, [PAIS.EC]: 50 };
 
 /** RouteResult mínimo con la distancia que el test quiere (lo único que el gate F1b consume). */
 function routeOf(distanceMeters: number): RouteResult {
@@ -38,50 +39,76 @@ function makeMaps(routeFn: () => Promise<RouteResult>): { maps: MapsClient; rout
   return { maps, route };
 }
 
-function makeService(maps: MapsClient, config: CostPerKmConfig = CONFIG): CostCapService {
-  return new CostCapService(maps, config);
+/** Fake del CostPerKmConfigService: resuelve el costo/km del admin (degradación incluida en el servicio real). */
+function makeCostPerKm(
+  getCostPerKmCents: (pais: string) => Promise<number> = async (pais) => COST_PER_KM[pais] ?? 0,
+): { svc: CostPerKmConfigService; getCostPerKmCents: ReturnType<typeof vi.fn> } {
+  const spy = vi.fn(getCostPerKmCents);
+  return { svc: { getCostPerKmCents: spy } as unknown as CostPerKmConfigService, getCostPerKmCents: spy };
 }
 
-/** Input full-route simple (sin stopovers, 1 tramo full-route con precioBase). */
+function makeService(
+  maps: MapsClient,
+  costPerKm: CostPerKmConfigService = makeCostPerKm().svc,
+): CostCapService {
+  return new CostCapService(maps, costPerKm);
+}
+
+/** Input full-route simple (sin stopovers, 1 tramo full-route con precioBase, sin peaje). */
 function makeInput(over: Partial<PriceCapInput> = {}): PriceCapInput {
   return {
     pais: PAIS.PE,
     asientosTotales: 4,
-    precioBaseCentimos: 250,
+    precioBaseCentimos: 375,
+    tollsCents: 0,
     origenLat: -12.05,
     origenLon: -77.04,
     destinoLat: -12.1,
     destinoLon: -77.0,
     stopovers: [],
-    tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 250 }],
+    tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }],
     ...over,
   };
 }
 
-describe('CostCapService · gate F1b full-route', () => {
+describe('CostCapService · gate F1b full-route (costo/km DIRECTO del admin)', () => {
   it('precioBase <= tope → publica OK (no lanza)', async () => {
-    // 10km · PE(100c) · 4 asientos → tope 250; precioBase 250 == tope.
+    // 10km · PE(150c) · 4 asientos → tope 375; precioBase 375 == tope.
     const { maps, route } = makeMaps(async () => routeOf(10_000));
     const service = makeService(maps);
 
-    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 250 }))).resolves.toBeUndefined();
+    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 375 }))).resolves.toBeUndefined();
     expect(route).toHaveBeenCalled();
   });
 
-  it('precioBase > tope → ValidationError con el tope esperado (250)', async () => {
-    const { maps } = makeMaps(async () => routeOf(10_000)); // tope 250
+  it('precioBase > tope → ValidationError con el tope esperado (375)', async () => {
+    const { maps } = makeMaps(async () => routeOf(10_000)); // tope 375
     const service = makeService(maps);
 
     await expect(
-      service.assertPriceCap(makeInput({ precioBaseCentimos: 251 })),
-    ).rejects.toMatchObject({ details: { topeCentimos: 250, precioBaseCentimos: 251 } });
-    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 251 }))).rejects.toBeInstanceOf(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 376 })),
+    ).rejects.toMatchObject({ details: { topeCentimos: 375, precioBaseCentimos: 376 } });
+    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 376 }))).rejects.toBeInstanceOf(
       ValidationError,
     );
   });
 
-  it('EC usa COST_PER_KM_CENTS_EC (50): 10km · 4 asientos → tope 125', async () => {
-    // (10 * 50) / 4 = 125. precioBase 130 > 125 → rechaza; 125 → OK.
+  it('lee el costo/km de la config del admin (per-país), no de un valor fijo', async () => {
+    // El servicio resuelve 200 c/km → 10km/4 asientos → tope (10*200)/4 = 500 (NO 375 del seed PE=150).
+    const { maps } = makeMaps(async () => routeOf(10_000));
+    const { svc, getCostPerKmCents } = makeCostPerKm(async () => 200);
+    const service = makeService(maps, svc);
+
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 500 })),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 501 })),
+    ).rejects.toMatchObject({ details: { topeCentimos: 500 } });
+    expect(getCostPerKmCents).toHaveBeenCalledWith(PAIS.PE);
+  });
+
+  it('EC usa el costo/km de EC (50): 10km · 4 asientos → tope 125', async () => {
     const { maps } = makeMaps(async () => routeOf(10_000));
     const service = makeService(maps);
 
@@ -106,38 +133,87 @@ describe('CostCapService · gate F1b full-route', () => {
   });
 });
 
-describe('CostCapService · gate F1b por tramo', () => {
-  it('un tramo con precio > topeTramo → ValidationError', async () => {
-    // Dos tramos sobre 1 stopover (orden 1), destino orden 2. Cada route → 5km → tope (5*100)/2=250.
+describe('CostCapService · PEAJE (entra al full-route, NO a los tramos)', () => {
+  it('el peaje declarado SUBE el tope full-route: 10km · PE(150) · 4 asientos · peaje 800 → (1500+800)/4 = 575', async () => {
+    const { maps } = makeMaps(async () => routeOf(10_000));
+    const service = makeService(maps);
+
+    // precioBase 575 == tope CON peaje → OK; sin peaje el tope sería 375 y 575 reventaría.
+    await expect(
+      service.assertPriceCap(
+        makeInput({
+          tollsCents: 800,
+          precioBaseCentimos: 575,
+          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 575 }],
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    // 576 excede el tope incluso con peaje.
+    await expect(
+      service.assertPriceCap(
+        makeInput({
+          tollsCents: 800,
+          precioBaseCentimos: 576,
+          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 575 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ details: { topeCentimos: 575, tollsCents: 800 } });
+  });
+
+  it('el peaje NO infla el tope de un TRAMO: un tramo se topa por su distancia pura, sin el peaje del viaje', async () => {
+    // Dos tramos sobre 1 stopover (orden 1), destino 2. Cada route → 5km → topeTramo (5*150)/2 = 375 (SIN peaje).
     const { maps } = makeMaps(async () => routeOf(5_000));
     const service = makeService(maps);
 
     const input = makeInput({
       asientosTotales: 2,
-      precioBaseCentimos: 250, // full-route lo mockea a 5km igual → tope 250, pasa
+      precioBaseCentimos: 575, // full-route 5km → (5*150 + 800)/2 = (750+800)/2 = 775 → 575 pasa
+      tollsCents: 800,
       stopovers: [{ lat: -12.07, lon: -77.02, orden: 1 }],
       tramos: [
-        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 250 }, // OK
-        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 300 }, // > 250 → rechaza
+        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }, // == topeTramo (sin peaje) → OK
+        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 376 }, // > topeTramo 375 (el peaje NO lo sube) → rechaza
       ],
     });
 
     await expect(service.assertPriceCap(input)).rejects.toMatchObject({
-      details: { desdeOrden: 1, hastaOrden: 2, topeCentimos: 250 },
+      details: { desdeOrden: 1, hastaOrden: 2, topeCentimos: 375 },
     });
   });
+});
 
-  it('paraleliza las llamadas de tramo (Promise.all): full-route + N tramos', async () => {
-    const { maps, route } = makeMaps(async () => routeOf(4_000)); // (4*100)/2 = 200
+describe('CostCapService · gate F1b por tramo', () => {
+  it('un tramo con precio > topeTramo → ValidationError', async () => {
+    // Dos tramos sobre 1 stopover (orden 1), destino orden 2. Cada route → 5km → tope (5*150)/2=375.
+    const { maps } = makeMaps(async () => routeOf(5_000));
     const service = makeService(maps);
 
     const input = makeInput({
       asientosTotales: 2,
-      precioBaseCentimos: 200,
+      precioBaseCentimos: 375, // full-route lo mockea a 5km igual → tope 375, pasa
       stopovers: [{ lat: -12.07, lon: -77.02, orden: 1 }],
       tramos: [
-        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 200 },
-        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 200 },
+        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }, // OK
+        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 400 }, // > 375 → rechaza
+      ],
+    });
+
+    await expect(service.assertPriceCap(input)).rejects.toMatchObject({
+      details: { desdeOrden: 1, hastaOrden: 2, topeCentimos: 375 },
+    });
+  });
+
+  it('paraleliza las llamadas de tramo (Promise.all): full-route + N tramos', async () => {
+    const { maps, route } = makeMaps(async () => routeOf(4_000)); // (4*150)/2 = 300
+    const service = makeService(maps);
+
+    const input = makeInput({
+      asientosTotales: 2,
+      precioBaseCentimos: 300,
+      stopovers: [{ lat: -12.07, lon: -77.02, orden: 1 }],
+      tramos: [
+        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 300 },
+        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 300 },
       ],
     });
 
@@ -147,7 +223,7 @@ describe('CostCapService · gate F1b por tramo', () => {
   });
 });
 
-describe('CostCapService · FIX 1 — invariante de hitos (orden colisionante burla el tope por tramo)', () => {
+describe('CostCapService · invariante de hitos (orden colisionante burla el tope por tramo)', () => {
   it('stopover orden=0 → ValidationError (pisaría el origen, NO last-write-wins)', async () => {
     const { maps } = makeMaps(async () => routeOf(5_000));
     const service = makeService(maps);
@@ -155,7 +231,7 @@ describe('CostCapService · FIX 1 — invariante de hitos (orden colisionante bu
       service.assertPriceCap(
         makeInput({
           stopovers: [{ lat: -12.07, lon: -77.02, orden: 0 }],
-          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 250 }],
+          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }],
         }),
       ),
     ).rejects.toBeInstanceOf(ValidationError);
@@ -171,68 +247,45 @@ describe('CostCapService · FIX 1 — invariante de hitos (orden colisionante bu
             { lat: -12.07, lon: -77.02, orden: 1 },
             { lat: -12.08, lon: -77.03, orden: 1 },
           ],
-          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 250 }],
+          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }],
         }),
       ),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('stopover en orden = destino (n+1) → ValidationError (pisaría el destino)', async () => {
-    // 1 stopover → n=1 → destino=2. Un stopover en orden 2 colisiona con el destino.
     const { maps } = makeMaps(async () => routeOf(5_000));
     const service = makeService(maps);
     await expect(
       service.assertPriceCap(
         makeInput({
           stopovers: [{ lat: -12.07, lon: -77.02, orden: 2 }],
-          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 250 }],
+          tramos: [{ desdeOrden: 0, hastaOrden: 1, precioCentimos: 375 }],
         }),
       ),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('tramo {0→1} con stopover legítimo en orden 1 calcula la distancia desde el ORIGEN real', async () => {
-    // Con stopover en orden 1, destino = 2. El tramo 0→1 debe rutear desde el ORIGEN (input.origen*) hasta el
-    // stopover, NO desde un stopover inyectado en 0. Verificamos que alguna llamada tiene origin = el origen real.
-    const { maps, route } = makeMaps(async () => routeOf(4_000)); // (4*100)/2 = 200
+    const { maps, route } = makeMaps(async () => routeOf(4_000)); // (4*150)/2 = 300
     const service = makeService(maps);
 
     const input = makeInput({
       asientosTotales: 2,
-      precioBaseCentimos: 200,
+      precioBaseCentimos: 300,
       origenLat: -12.05,
       origenLon: -77.04,
       stopovers: [{ lat: -12.07, lon: -77.02, orden: 1 }],
       tramos: [
-        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 200 },
-        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 200 },
+        { desdeOrden: 0, hastaOrden: 1, precioCentimos: 300 },
+        { desdeOrden: 1, hastaOrden: 2, precioCentimos: 300 },
       ],
     });
 
     await expect(service.assertPriceCap(input)).resolves.toBeUndefined();
-    // El tramo 0→1 ruteó con origin = el ORIGEN real (no un stopover inyectado en orden 0).
     const origins = route.mock.calls.map((call) => call[0] as LatLon);
     const ruteoDesdeOrigen = origins.some((o) => o.lat === -12.05 && o.lon === -77.04);
     expect(ruteoDesdeOrigen).toBe(true);
-  });
-});
-
-describe('CostCapService · F2.5 — usa el costo/km DERIVADO (CostPerKmService) en vez del env', () => {
-  it('el tope se calcula con el costo/km del resolutor vivo, no con el env', async () => {
-    // 10km · 4 asientos. Con el resolutor devolviendo 200 c/km → tope (10*200)/4 = 500 (NO 250 del env PE=100).
-    const { maps } = makeMaps(async () => routeOf(10_000));
-    const getCostPerKmCents = vi.fn(async () => 200);
-    const costPerKm = { getCostPerKmCents } as unknown as CostPerKmService;
-    const service = new CostCapService(maps, CONFIG, costPerKm);
-
-    // precioBase 500 == tope derivado → OK; 501 > tope → rechaza con topeCentimos 500.
-    await expect(
-      service.assertPriceCap(makeInput({ precioBaseCentimos: 500 })),
-    ).resolves.toBeUndefined();
-    await expect(
-      service.assertPriceCap(makeInput({ precioBaseCentimos: 501 })),
-    ).rejects.toMatchObject({ details: { topeCentimos: 500 } });
-    expect(getCostPerKmCents).toHaveBeenCalledWith(PAIS.PE);
   });
 });
 

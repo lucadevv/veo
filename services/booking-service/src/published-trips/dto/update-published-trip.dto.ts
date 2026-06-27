@@ -29,6 +29,7 @@ import {
 import { Type } from 'class-transformer';
 import { ModoReserva } from '../../generated/prisma';
 import { StopoverDto, TramoPrecioDto, stopoverOrdenSelector } from './create-published-trip.dto';
+import { MAX_TOLLS_CENTS } from '../../domain/cost-cap';
 
 export class UpdatePublishedTripDto {
   @IsOptional()
@@ -79,6 +80,14 @@ export class UpdatePublishedTripDto {
   @ValidateNested({ each: true })
   @Type(() => TramoPrecioDto)
   precioPorTramo?: TramoPrecioDto[];
+
+  // Peaje del viaje en CÉNTIMOS PEN (Int, nunca float). Editable; se SUMA al costo y RECIÉN se divide entre
+  // asientos en el tope. Topado por MAX_TOLLS_CENTS (techo de cordura). Tocarlo re-valida el gate F1b.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_TOLLS_CENTS)
+  tollsCents?: number;
 
   @IsOptional()
   @IsEnum(ModoReserva)

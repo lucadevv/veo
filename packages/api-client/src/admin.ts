@@ -521,28 +521,58 @@ export const replaceBaseFareRequest = z.object({
 export type ReplaceBaseFareRequest = z.infer<typeof replaceBaseFareRequest>;
 
 /**
- * Comisión por modo vigente (GET /finance/commission · F2.7 · ADR-017 §1.6 / ADR-015 §11.2). La tasa va en
- * BASIS POINTS Int (0..10000; 2000 = 20%) — NUNCA float. SOLO la tasa ON-DEMAND es configurable; la del
- * CARPOOLING es 0 FIJO (legal-gated: cobrar comisión sobre cost-sharing sería ilegal), expuesta solo-lectura.
+ * Comisión por modo vigente (GET /finance/commission · F2.7 · ADR-017 §1.6 / ADR-015 §11.2). Las tasas van en
+ * BASIS POINTS Int (0..10000; 2000 = 20%) — NUNCA float. AMBAS configurables: la comisión ON-DEMAND (descontada
+ * al conductor) y el service fee CARPOOLING (sumado al pasajero en cost-sharing).
  */
 export const commissionView = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
-  carpoolingRateBps: z.number().int().min(0).max(10_000),
+  carpoolingFeeBps: z.number().int().min(0).max(10_000),
   version: z.number().int(),
   updatedAt: z.string(),
 });
 export type CommissionView = z.infer<typeof commissionView>;
 
 /**
- * Body del PUT /finance/commission (F2.7): la tasa ON-DEMAND en basis points Int. `expectedVersion` = CAS
- * (la versión que el panel cargó; 409 si otro admin la movió → recargar). El carpooling NO se manda: es 0
- * fijo legal, no editable por el admin (subirlo requiere un ADR + flag, ADR-015 §11.2).
+ * Body del PUT /finance/commission (F2.7): AMBAS tasas en basis points Int (full-replace). `expectedVersion` =
+ * CAS (la versión que el panel cargó; 409 si otro admin la movió → recargar).
  */
 export const replaceCommissionRequest = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
+  carpoolingFeeBps: z.number().int().min(0).max(10_000),
   expectedVersion: z.number().int().nonnegative(),
 });
 export type ReplaceCommissionRequest = z.infer<typeof replaceCommissionRequest>;
+
+/**
+ * Costo de OPERACIÓN por km del carpooling, por país (GET /finance/cost-per-km · F2.5 · escudo legal). Es el
+ * costo real de operar el vehículo (combustible + desgaste, estilo "IRS mileage rate") en CÉNTIMOS PEN Int —
+ * NUNCA float, NO derivado del precio de energía. Lo fija el admin y alimenta DIRECTO el tope de cost-sharing.
+ */
+export const costPerKmConfigView = z.object({
+  pais: z.enum(['PE', 'EC']),
+  costPerKmCents: z.number().int().positive(),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type CostPerKmConfigView = z.infer<typeof costPerKmConfigView>;
+
+/** GET /finance/cost-per-km: una fila por país (PE/EC). */
+export const costPerKmListView = z.object({
+  configs: z.array(costPerKmConfigView),
+});
+export type CostPerKmListView = z.infer<typeof costPerKmListView>;
+
+/**
+ * Body del PUT /finance/cost-per-km (F2.5): el costo/km de UN país en céntimos PEN Int. `expectedVersion` =
+ * CAS per-país (409 si otro admin lo movió → recargar). El peaje NO va acá: lo declara el conductor por viaje.
+ */
+export const replaceCostPerKmRequest = z.object({
+  pais: z.enum(['PE', 'EC']),
+  costPerKmCents: z.number().int().positive().max(10_000),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceCostPerKmRequest = z.infer<typeof replaceCostPerKmRequest>;
 
 /**
  * Catálogo de precios de energía por fuente (B5). El admin edita el precio por unidad (céntimos/litro o

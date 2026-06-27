@@ -36,6 +36,7 @@ import {
   REST_AUDIT,
   REST_FLEET,
   REST_DISPATCH,
+  REST_BOOKING,
 } from './tokens';
 
 /** Cierra los clientes gRPC y Redis al apagar el proceso. */
@@ -134,6 +135,8 @@ const providers: Provider[] = [
   restProvider(REST_AUDIT, 'AUDIT_URL'),
   restProvider(REST_FLEET, 'FLEET_URL'),
   restProvider(REST_DISPATCH, 'DISPATCH_URL'),
+  // F2.5 · costo/km del carpooling (config financiera del escudo legal) vive en booking-service.
+  restProvider(REST_BOOKING, 'BOOKING_URL'),
   InfraLifecycle,
 ];
 

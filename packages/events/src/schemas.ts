@@ -593,6 +593,8 @@ export const pricingBaseFareUpdated = z.object({
 export const paymentCommissionUpdated = z.object({
   /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Int, jamás float.
   onDemandRateBps: z.number().int().min(0).max(10_000),
+  /// Service fee CARPOOLING en basis points (0..10000). Int, jamás float. Se SUMA al pasajero (cost-sharing).
+  carpoolingFeeBps: z.number().int().min(0).max(10_000),
   /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
   version: z.number().int().nonnegative(),
   /// Marca ISO de cuándo el admin guardó el snapshot.

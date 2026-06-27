@@ -60,9 +60,11 @@ function makeService(rows: PayoutRow[]) {
     get: vi.fn().mockResolvedValue({ items: rows, nextCursor: null }),
     post: vi.fn(),
   };
+  // REST_BOOKING (F2.5 · costo/km): cliente separado hacia booking-service. Stub vacío salvo en sus tests.
+  const bookingRest = { get: vi.fn(), put: vi.fn() };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FinanceService(rest as never, audit as never);
-  return { svc, rest, audit };
+  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  return { svc, rest, bookingRest, audit };
 }
 
 describe('FinanceService.listPayouts · ADR-015 D6 (desglose)', () => {

@@ -6,21 +6,40 @@ import { Injectable, Inject } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { PayoutView } from '@veo/api-client';
-import { REST_PAYMENT } from '../infra/tokens';
+import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { RunPayoutsDto, RefundDto, ReplaceCommissionDto } from './dto/finance.dto';
+import type {
+  RunPayoutsDto,
+  RefundDto,
+  ReplaceCommissionDto,
+  ReplaceCostPerKmDto,
+} from './dto/finance.dto';
 
 /** Vista de la comisión por modo (F2.7): tasa ON-DEMAND configurable (bps) + carpooling 0 (legal-gated) + version. */
 export interface CommissionView {
-  /** Tasa ON-DEMAND en basis points Int (0..10000; 2000 = 20%). */
+  /** Comisión ON-DEMAND en basis points Int (0..10000; 2000 = 20%) — descontada al conductor. */
   onDemandRateBps: number;
-  /** Comisión del carpooling en bps: 0 FIJO (ADR-015 §11.2), solo-lectura. */
-  carpoolingRateBps: number;
+  /** Service fee CARPOOLING en basis points Int (0..10000) — sumado al pasajero (cost-sharing). */
+  carpoolingFeeBps: number;
   version: number;
   updatedAt: string;
 }
 
+/** Costo/km de un país (F2.5): el costo de operación que alimenta el tope de cost-sharing + version (CAS). */
+export interface CostPerKmConfigView {
+  pais: string;
+  costPerKmCents: number;
+  version: number;
+  updatedAt: string;
+}
+
+/** GET del costo/km: una fila por país (PE/EC). */
+export interface CostPerKmListView {
+  configs: CostPerKmConfigView[];
+}
+
 const COMMISSION_BASE = '/internal/finance/commission';
+const COST_PER_KM_BASE = '/internal/finance/cost-per-km';
 
 /** Shape interno que sirve payment-service (GET /payouts/all). `status` ES el enum Prisma `PayoutStatus`
  *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1.
@@ -74,6 +93,8 @@ export interface PayoutDisburseResult {
 export class FinanceService {
   constructor(
     @Inject(REST_PAYMENT) private readonly rest: InternalRestClient,
+    // F2.5 · el costo/km del carpooling vive en booking-service (no en payment): cliente REST propio.
+    @Inject(REST_BOOKING) private readonly bookingRest: InternalRestClient,
     private readonly audit: AuditRecorder,
   ) {}
 
@@ -155,14 +176,14 @@ export class FinanceService {
     return res;
   }
 
-  /** finance:view — lee la comisión por modo vigente (tasa ON-DEMAND configurable + carpooling 0). F2.7 */
+  /** finance:view — lee la comisión por modo vigente (comisión ON-DEMAND + service fee CARPOOLING). F2.7 */
   getCommission(identity: AuthenticatedUser): Promise<CommissionView> {
     return this.rest.get<CommissionView>(COMMISSION_BASE, { identity });
   }
 
   /**
-   * finance:manage — reemplaza la tasa de comisión ON-DEMAND. payment-service bump-ea version (CAS) y emite el
-   * evento. El carpooling NO se toca (0 fijo legal · ADR-015 §11.2). Mutación de config financiera → auditada.
+   * finance:manage — reemplaza AMBAS tasas (comisión ON-DEMAND + service fee CARPOOLING). payment-service bump-ea
+   * version (CAS) y emite el evento. Mutación de config financiera → auditada.
    */
   async replaceCommission(
     identity: AuthenticatedUser,
@@ -170,13 +191,47 @@ export class FinanceService {
   ): Promise<CommissionView> {
     const res = await this.rest.put<CommissionView>(COMMISSION_BASE, {
       identity,
-      body: { onDemandRateBps: dto.onDemandRateBps, expectedVersion: dto.expectedVersion },
+      body: {
+        onDemandRateBps: dto.onDemandRateBps,
+        carpoolingFeeBps: dto.carpoolingFeeBps,
+        expectedVersion: dto.expectedVersion,
+      },
     });
     await this.audit.record(identity, {
       action: 'finance.commission_replace',
       resourceType: 'commission_config',
       resourceId: String(res.version),
-      payload: { onDemandRateBps: dto.onDemandRateBps, version: res.version },
+      payload: {
+        onDemandRateBps: dto.onDemandRateBps,
+        carpoolingFeeBps: dto.carpoolingFeeBps,
+        version: res.version,
+      },
+    });
+    return res;
+  }
+
+  /** finance:view — lee el costo/km vigente por país (PE/EC) desde booking-service. F2.5 */
+  getCostPerKm(identity: AuthenticatedUser): Promise<CostPerKmListView> {
+    return this.bookingRest.get<CostPerKmListView>(COST_PER_KM_BASE, { identity });
+  }
+
+  /**
+   * finance:manage — reemplaza el costo/km de UN país. booking-service bump-ea version (CAS) y autoaplica
+   * (cache). Mutación de config del escudo legal anti-lucro → auditada (Ley 29733).
+   */
+  async replaceCostPerKm(
+    identity: AuthenticatedUser,
+    dto: ReplaceCostPerKmDto,
+  ): Promise<CostPerKmConfigView> {
+    const res = await this.bookingRest.put<CostPerKmConfigView>(COST_PER_KM_BASE, {
+      identity,
+      body: { pais: dto.pais, costPerKmCents: dto.costPerKmCents, expectedVersion: dto.expectedVersion },
+    });
+    await this.audit.record(identity, {
+      action: 'finance.cost_per_km_replace',
+      resourceType: 'cost_per_km_config',
+      resourceId: res.pais,
+      payload: { pais: res.pais, costPerKmCents: res.costPerKmCents, version: res.version },
     });
     return res;
   }

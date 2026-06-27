@@ -6,6 +6,7 @@ import {
   useFuelSurcharge,
   useBaseFare,
   useCommission,
+  useCostPerKm,
   useEnergyCatalog,
   useBidFloor,
 } from '@/lib/api/queries';
@@ -18,6 +19,7 @@ import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { CommissionPanel } from '@/components/pricing/commission-panel';
+import { CostPerKmPanel } from '@/components/pricing/cost-per-km-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
 import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
@@ -31,6 +33,7 @@ export default function PricingPage() {
   const fuelQuery = useFuelSurcharge();
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
+  const costPerKmQuery = useCostPerKm();
   const energyQuery = useEnergyCatalog();
   const bidFloorQuery = useBidFloor();
 
@@ -95,6 +98,15 @@ export default function PricingPage() {
           <Skeleton className="mt-6 h-28" />
         ) : (
           <CommissionPanel config={commissionQuery.data} />
+        )}
+
+        {/* F2.5 · costo/km del carpooling (costo de operación DIRECTO del admin, per-país; escudo legal). */}
+        {costPerKmQuery.isError ? (
+          <ErrorState onRetry={() => void costPerKmQuery.refetch()} />
+        ) : costPerKmQuery.isLoading || !costPerKmQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <CostPerKmPanel config={costPerKmQuery.data} />
         )}
 
         {/* B5 · precios de energía multi-fuente (mismo gate pricing:view; carga independiente). */}
