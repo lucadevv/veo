@@ -183,7 +183,7 @@ model VehicleModelSpec {
   /// VehicleSegment (@veo/shared-types): ECONOMY|MID|PREMIUM. NULL en una solicitud PENDING (el operador
   /// lo completa al aprobar). Invariante (B5-2.c): status=APPROVED ⇒ no-null (forzado en la transición).
   segment      String?
-  /// EnergySource (@veo/shared-types): GASOLINE_90|DIESEL|ELECTRIC|GNV. NULL en PENDING.
+  /// EnergySource (@veo/shared-types): GASOLINE_90|DIESEL|ELECTRIC. NULL en PENDING.
   energySource String?            @map("energy_source")
   /// Rendimiento en km por unidad de energía (km/L o km/kWh). Lo pone el operador al aprobar. NULL en PENDING.
   efficiency   Int?

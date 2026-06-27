@@ -21,22 +21,22 @@ const MAX_PER_UNIT = 100;
 const UNIT_LABEL: Record<string, string> = { LITER: 'S/ por litro', KWH: 'S/ por kWh' };
 
 /**
- * Los 4 TIPOS de energía de ADR-017 §1.1 (UN precio por tipo, sin octanaje). Lista canónica que espeja el
+ * Los 3 TIPOS de energía de ADR-017 (UN precio por tipo, sin octanaje). Lista canónica que espeja el
  * enum `EnergySource` del contrato — la fuente de verdad de qué se puede configurar (no lo que ya está
  * sembrado). La gasolina es UNA (referencia 90, la común); el octanaje real del conductor no importa.
+ * GNV/GLP NO son tipos de plataforma (combustible privado del conductor, no se trackea).
  * `note` marca las verticales cuyas ofertas aún están OCULTAS: configurables hacia adelante, sin efecto hoy.
  */
 const ENERGY_TYPES = [
   { id: 'GASOLINE_90', label: 'Gasolina 90', unit: 'LITER', note: undefined },
   { id: 'DIESEL', label: 'Diésel', unit: 'LITER', note: 'Se aplica cuando la vertical de diésel esté activa.' },
-  { id: 'GNV', label: 'GNV', unit: 'LITER', note: 'Se aplica cuando la vertical de GNV esté activa.' },
   { id: 'ELECTRIC', label: 'Eléctrico', unit: 'KWH', note: 'Se aplica cuando la vertical eléctrica esté activa.' },
 ] as const;
 
 /**
  * Catálogo de precios de energía (B5 · ADR-017 §1.1). El admin ingresa UN precio por TIPO (lo que ve en el
  * grifo / la tarifa de kWh); el sistema deriva el costo por km = precio ÷ rendimiento de cada oferta. Hoy la
- * gasolina-90 es la única con efecto (las otras 3 son verticales cuyas ofertas están ocultas → forward-config).
+ * gasolina-90 es la única con efecto (las otras 2 son verticales cuyas ofertas están ocultas → forward-config).
  * La UI solo refleja `pricing:manage`; admin-bff + trip-service re-autorizan. El cambio es global y auditado.
  */
 export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
@@ -69,7 +69,7 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   async function save() {
     try {
       await replace.mutateAsync({
-        // Persistimos los 4 tipos (sourceId + precio); el server revalida el enum y el techo.
+        // Persistimos los 3 tipos (sourceId + precio); el server revalida el enum y el techo.
         sources: ENERGY_TYPES.map((t) => ({ sourceId: t.id, pricePerUnitCents: centsOf(t.id) })),
         expectedVersion: config.version,
       });

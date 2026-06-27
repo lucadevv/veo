@@ -799,9 +799,11 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
       expect(parsePropertyCard(['Combustible: PETROLEO']).energySource).toBe('DIESEL');
     });
 
-    it('Combustible: GNV / GAS NATURAL → GNV', () => {
-      expect(parsePropertyCard(['Combustible: GNV']).energySource).toBe('GNV');
-      expect(parsePropertyCard(['Combustible: GAS NATURAL']).energySource).toBe('GNV');
+    it('Combustible: GNV / GAS NATURAL → energySource AUSENTE (no es tipo de plataforma, ADR-017)', () => {
+      // GNV es combustible REAL común en Lima (conversión a gas) pero NO es tipo de plataforma: el combustible
+      // real es el margen privado del dueño del auto, la plataforma no lo trackea. Se omite, IGUAL que el GLP.
+      expect(parsePropertyCard(['Combustible: GNV']).energySource).toBeUndefined();
+      expect(parsePropertyCard(['Combustible: GAS NATURAL']).energySource).toBeUndefined();
     });
 
     it('Combustible: ELECTRICO / ELÉCTRICO / ELECTRICA → ELECTRIC', () => {
@@ -819,7 +821,7 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
 
     it('combustible DISPERSO: etiqueta "Combustible" sola + valor en la línea siguiente', () => {
       expect(parsePropertyCard(['Combustible', 'GASOLINA']).energySource).toBe('GASOLINE_90');
-      expect(parsePropertyCard(['Combustible', 'GNV']).energySource).toBe('GNV');
+      expect(parsePropertyCard(['Combustible', 'DIESEL']).energySource).toBe('DIESEL');
     });
 
     it('TIVe SIN combustible → energySource ausente (no inventa)', () => {

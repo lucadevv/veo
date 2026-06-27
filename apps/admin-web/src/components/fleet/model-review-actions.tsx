@@ -33,11 +33,11 @@ const SEGMENT_OPTIONS = [
   { value: 'MID', label: 'Intermedio' },
   { value: 'PREMIUM', label: 'Premium' },
 ] as const;
-// ADR-017 §1.1: una sola gasolina (sin octanaje; el 90 es la referencia común). Espejan el enum del contrato.
+// ADR-017: 3 tipos de plataforma (una sola gasolina, el 90 es la referencia común; GNV/GLP no se trackean).
+// Espejan el enum `EnergySource` del contrato.
 const ENERGY_OPTIONS = [
   { value: 'GASOLINE_90', label: 'Gasolina 90' },
   { value: 'DIESEL', label: 'Diésel' },
-  { value: 'GNV', label: 'GNV' },
   { value: 'ELECTRIC', label: 'Eléctrico' },
 ] as const;
 

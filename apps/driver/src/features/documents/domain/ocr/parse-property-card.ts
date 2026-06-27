@@ -302,14 +302,16 @@ function extractColor(lines: readonly string[]): string | undefined {
 }
 
 /**
- * Mapea el valor CRUDO del combustible impreso en la TIVe (`GASOLINA`, `DIESEL`, `GNV`, `ELECTRICO`…) a la
- * fuente de energía tipada `EnergySource` (ADR-017 §1.8). Función PURA. Normaliza el crudo (mayúsculas, sin
- * tildes) y reconoce por `includes` tolerante al ruido del OCR. Degradación honesta: lo que NO calza uno de
- * los 4 tipos de ADR-017 → `undefined` (el operador lo setea a mano en el VehicleModelSpec).
+ * Mapea el valor CRUDO del combustible impreso en la TIVe (`GASOLINA`, `DIESEL`, `ELECTRICO`…) a la fuente
+ * de energía tipada `EnergySource` (ADR-017 §1.8). Función PURA. Normaliza el crudo (mayúsculas, sin tildes)
+ * y reconoce por `includes` tolerante al ruido del OCR. Degradación honesta: lo que NO calza uno de los 3
+ * tipos de plataforma de ADR-017 → `undefined` (el operador lo setea a mano en el VehicleModelSpec).
  *
- * OJO con GLP (Gas Licuado de Petróleo): es COMÚN en taxis de Lima pero NO está en el enum hoy (ADR-017 §1.1
- * fija 4 fuentes: GASOLINE_90/DIESEL/GNV/ELECTRIC). Se descarta EXPLÍCITO y ANTES del check de PETROLEO/DIESEL,
- * porque su nombre largo ("GAS LICUADO DE PETROLEO") contiene "PETROLEO" y si no caería como DIESEL por error.
+ * OJO con GNV y GLP: son combustibles REALES comunes en Lima (conversión a gas para ahorrar) pero NO son
+ * tipos de plataforma (ADR-017 fija 3: GASOLINE_90/DIESEL/ELECTRIC) — el combustible real es el margen
+ * PRIVADO del dueño del auto, la plataforma no lo trackea. Ambos se OMITEN (caen al `undefined` final). El
+ * GLP se descarta EXPLÍCITO y ANTES del check de PETROLEO/DIESEL, porque su nombre largo ("GAS LICUADO DE
+ * PETROLEO") contiene "PETROLEO" y si no caería como DIESEL por error.
  */
 function mapRawToEnergySource(raw: string): EnergySource | undefined {
   const norm = stripDiacritics(raw).toUpperCase();
@@ -324,13 +326,11 @@ function mapRawToEnergySource(raw: string): EnergySource | undefined {
   if (norm.includes('DIESEL') || norm.includes('PETROLEO')) {
     return EnergySource.DIESEL;
   }
-  if (norm.includes('GNV') || norm.includes('GAS NATURAL')) {
-    return EnergySource.GNV;
-  }
   if (norm.includes('ELECTRIC')) {
     return EnergySource.ELECTRIC;
   }
-  return undefined; // cualquier otro combustible no soportado → manual.
+  // GNV / GAS NATURAL y cualquier otro combustible NO son tipos de plataforma → omitido (cae a manual).
+  return undefined;
 }
 
 /**

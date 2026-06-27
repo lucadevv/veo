@@ -86,19 +86,21 @@ export type ServiceType = (typeof ServiceType)[keyof typeof ServiceType];
  * rendimiento (km por unidad): líquido (S/litro ÷ km/L) y eléctrico (S/kWh ÷ km/kWh) usan la MISMA
  * fórmula, solo cambia la `EnergyUnit`. Los precios viven en EnergyCatalog (hot-config, admin-editable).
  *
- * GASOLINE_90 (ADR-017 §1.1): hay UNA sola gasolina para el pricing — la referencia 90, la octanaje
- * común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje real del vehículo del conductor
- * NO importa para el precio del pasajero (eso es su economía privada, §1.1). DIESEL/GNV/ELECTRIC siguen.
+ * 3 TIPOS de plataforma (ADR-017): GASOLINE_90, DIESEL, ELECTRIC. Hay UNA sola gasolina para el pricing
+ * — la referencia 90, la octanaje común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje
+ * real del vehículo del conductor NO importa para el precio del pasajero (eso es su economía privada, §1.1).
+ *
+ * GNV/GLP NO son tipos de energía de la plataforma: el combustible REAL del vehículo (si el dueño convirtió
+ * a GNV o usa GLP para ahorrar) es su margen PRIVADO — la plataforma no lo trackea como tipo de energía.
  */
 export const EnergySource = {
   GASOLINE_90: 'GASOLINE_90',
   DIESEL: 'DIESEL',
-  GNV: 'GNV',
   ELECTRIC: 'ELECTRIC',
 } as const;
 export type EnergySource = (typeof EnergySource)[keyof typeof EnergySource];
 
-/** Unidad de la fuente de energía: litro (combustibles líquidos/GNV) o kWh (eléctrico). B5. */
+/** Unidad de la fuente de energía: litro (combustibles líquidos) o kWh (eléctrico). B5. */
 export const EnergyUnit = {
   LITER: 'LITER',
   KWH: 'KWH',
@@ -128,7 +130,6 @@ export const VEHICLE_SEGMENT_RANK: Record<VehicleSegment, number> = {
 export const ENERGY_SOURCE_UNIT: Record<EnergySource, EnergyUnit> = {
   [EnergySource.GASOLINE_90]: EnergyUnit.LITER,
   [EnergySource.DIESEL]: EnergyUnit.LITER,
-  [EnergySource.GNV]: EnergyUnit.LITER,
   [EnergySource.ELECTRIC]: EnergyUnit.KWH,
 };
 

@@ -1932,7 +1932,7 @@ export const extractedPropertyCardData = z.object({
    * economía/referencia del operador, NO para el precio. El `z.enum` es el BORDE legítimo del contrato:
    * debe coincidir 1:1 con `EnergySource` de @veo/shared-types y con el `@IsEnum(EnergySource)` del backend.
    */
-  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'GNV', 'ELECTRIC']).optional(),
+  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'ELECTRIC']).optional(),
 });
 export type ExtractedPropertyCardData = z.infer<typeof extractedPropertyCardData>;
 

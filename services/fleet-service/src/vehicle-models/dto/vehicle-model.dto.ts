@@ -124,7 +124,7 @@ export class ApproveVehicleModelDto {
 
   @ApiProperty({
     enum: EnergySource,
-    description: 'GASOLINE_90 | DIESEL | GNV | ELECTRIC.',
+    description: 'GASOLINE_90 | DIESEL | ELECTRIC.',
   })
   @IsEnum(EnergySource)
   energySource!: EnergySource;

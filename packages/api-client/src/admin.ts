@@ -710,7 +710,7 @@ export type VehicleModelReviewView = z.infer<typeof vehicleModelReviewView>;
  */
 export const approveVehicleModelRequest = z.object({
   segment: z.enum(['ECONOMY', 'MID', 'PREMIUM']),
-  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'GNV', 'ELECTRIC']),
+  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'ELECTRIC']),
   efficiency: z.number().int().min(1).max(1000),
   seats: z.number().int().min(1).max(20).optional(),
 });
