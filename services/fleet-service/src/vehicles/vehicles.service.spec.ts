@@ -28,7 +28,7 @@ function specRow(over: Record<string, unknown> = {}) {
     vehicleType: VehicleType.CAR,
     seats: 5,
     segment: 'ECONOMY',
-    energySource: 'GASOLINE_95',
+    energySource: 'GASOLINE_90',
     efficiency: 17,
     status: VehicleModelStatus.APPROVED,
     source: VehicleModelSource.SEED,

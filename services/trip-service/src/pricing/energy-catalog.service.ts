@@ -7,7 +7,7 @@
  *  - `replace(sources, expectedVersion)`: PUT interno — REEMPLAZA wholesale, CAS sobre `version`, persiste
  *    + EMITE energy.catalog_updated por outbox en la MISMA tx.
  *
- * B5-0: el catálogo se construye y se siembra (GASOLINE_95 = precio global actual), pero NO se cablea aún
+ * B5-0: el catálogo se construye y se siembra (GASOLINE_90 = precio global actual), pero NO se cablea aún
  * a la fórmula de tarifa — eso es B5-1 (con shadow-compare). Acá solo vive el motor + la lectura.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';

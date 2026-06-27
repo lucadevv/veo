@@ -17,23 +17,27 @@ import { StepUpDialog } from '@/components/security/step-up-dialog';
 /** Techo de cordura (espejo del DTO server-side): S/100 por unidad. */
 const MAX_PER_UNIT = 100;
 
-/** Etiqueta legible de la unidad de energía (display, no comparación de dominio). */
+/** Etiqueta legible de la unidad (display). */
 const UNIT_LABEL: Record<string, string> = { LITER: 'S/ por litro', KWH: 'S/ por kWh' };
 
-/** Nombre legible de la fuente (display; el server valida el enum). */
-const SOURCE_LABEL: Record<string, string> = {
-  GASOLINE_95: 'Gasolina 95',
-  GASOLINE_84: 'Gasolina 84',
-  DIESEL: 'Diésel',
-  GNV: 'GNV',
-  ELECTRIC: 'Eléctrico',
-};
+/**
+ * Los 4 TIPOS de energía de ADR-017 §1.1 (UN precio por tipo, sin octanaje). Lista canónica que espeja el
+ * enum `EnergySource` del contrato — la fuente de verdad de qué se puede configurar (no lo que ya está
+ * sembrado). La gasolina es UNA (referencia 90, la común); el octanaje real del conductor no importa.
+ * `note` marca las verticales cuyas ofertas aún están OCULTAS: configurables hacia adelante, sin efecto hoy.
+ */
+const ENERGY_TYPES = [
+  { id: 'GASOLINE_90', label: 'Gasolina 90', unit: 'LITER', note: undefined },
+  { id: 'DIESEL', label: 'Diésel', unit: 'LITER', note: 'Se aplica cuando la vertical de diésel esté activa.' },
+  { id: 'GNV', label: 'GNV', unit: 'LITER', note: 'Se aplica cuando la vertical de GNV esté activa.' },
+  { id: 'ELECTRIC', label: 'Eléctrico', unit: 'KWH', note: 'Se aplica cuando la vertical eléctrica esté activa.' },
+] as const;
 
 /**
- * Catálogo de precios de energía (B5). El admin ingresa el PRECIO por unidad de cada fuente (lo que ve en
- * el grifo / la tarifa de kWh); el sistema deriva el costo por km = precio ÷ rendimiento de cada oferta y
- * lo aplica a la tarifa (server-driven). Hoy MVP: solo Gasolina 95 (el resto de fuentes se desbloquean con
- * las verticales eléctricas/diésel). La UI solo refleja `pricing:manage`; admin-bff + trip-service re-autorizan.
+ * Catálogo de precios de energía (B5 · ADR-017 §1.1). El admin ingresa UN precio por TIPO (lo que ve en el
+ * grifo / la tarifa de kWh); el sistema deriva el costo por km = precio ÷ rendimiento de cada oferta. Hoy la
+ * gasolina-90 es la única con efecto (las otras 3 son verticales cuyas ofertas están ocultas → forward-config).
+ * La UI solo refleja `pricing:manage`; admin-bff + trip-service re-autorizan. El cambio es global y auditado.
  */
 export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   const user = useSession();
@@ -41,32 +45,32 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   const { toast } = useToast();
   const replace = useReplaceEnergyCatalog();
 
-  // Estado editable: precio en SOLES por fuente (se persiste en céntimos). Clave = sourceId.
+  /** Precio vigente (céntimos) de un tipo, leído del catálogo persistido (0 si aún no se configuró). */
+  const persistedCents = (id: string): number =>
+    config.sources.find((s) => s.sourceId === id)?.pricePerUnitCents ?? 0;
+
+  // Estado editable: precio en SOLES por tipo. Arranca de lo persistido (0 = sin configurar todavía).
   const [prices, setPrices] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      config.sources.map((s) => [s.sourceId, (s.pricePerUnitCents / 100).toFixed(2)]),
-    ),
+    Object.fromEntries(ENERGY_TYPES.map((t) => [t.id, (persistedCents(t.id) / 100).toFixed(2)])),
   );
 
-  const centsOf = (sourceId: string): number => {
-    const raw = prices[sourceId]?.trim();
+  const centsOf = (id: string): number => {
+    const raw = prices[id]?.trim();
     return raw === '' || raw === undefined ? 0 : Math.round(Number(raw) * 100);
   };
-  const invalidOf = (sourceId: string): boolean => {
-    const c = centsOf(sourceId);
+  const invalidOf = (id: string): boolean => {
+    const c = centsOf(id);
     return !Number.isFinite(c) || c < 0 || c > MAX_PER_UNIT * 100;
   };
 
-  const anyInvalid = config.sources.some((s) => invalidOf(s.sourceId));
-  const dirty = config.sources.some((s) => centsOf(s.sourceId) !== s.pricePerUnitCents);
+  const anyInvalid = ENERGY_TYPES.some((t) => invalidOf(t.id));
+  const dirty = ENERGY_TYPES.some((t) => centsOf(t.id) !== persistedCents(t.id));
 
   async function save() {
     try {
       await replace.mutateAsync({
-        sources: config.sources.map((s) => ({
-          sourceId: s.sourceId,
-          pricePerUnitCents: centsOf(s.sourceId),
-        })),
+        // Persistimos los 4 tipos (sourceId + precio); el server revalida el enum y el techo.
+        sources: ENERGY_TYPES.map((t) => ({ sourceId: t.id, pricePerUnitCents: centsOf(t.id) })),
         expectedVersion: config.version,
       });
       toast({ tone: 'success', title: 'Precios de energía actualizados' });
@@ -87,55 +91,50 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
         <Zap className="size-4" aria-hidden /> Precios de energía
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        Ingresá el precio de cada fuente de energía (lo que ves en el grifo o la tarifa de kWh). El
-        sistema deriva el recargo por km de cada servicio según su rendimiento. El cambio es global
-        y queda auditado.
+        Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). El sistema deriva el
+        recargo por km de cada servicio según su rendimiento. El cambio es global y queda auditado.
       </p>
 
-      {config.sources.length === 0 ? (
-        <p className="mt-3 text-sm text-ink-subtle">Sin fuentes de energía configuradas todavía.</p>
-      ) : (
-        <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">
-          {config.sources.map((s) => (
-            <Field
-              key={s.sourceId}
-              label={`${SOURCE_LABEL[s.sourceId] ?? s.sourceId} (${UNIT_LABEL[s.unit] ?? s.unit})`}
-              hint={`Actual: S/${(s.pricePerUnitCents / 100).toFixed(2)}`}
-              error={invalidOf(s.sourceId) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
-            >
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.10"
-                min="0"
-                max={MAX_PER_UNIT}
-                value={prices[s.sourceId] ?? ''}
-                onChange={(e) => setPrices((p) => ({ ...p, [s.sourceId]: e.target.value }))}
-                disabled={!canManage}
-              />
-            </Field>
-          ))}
+      <div className="mt-4 flex max-w-2xl flex-wrap items-start gap-3">
+        {ENERGY_TYPES.map((t) => (
+          <Field
+            key={t.id}
+            label={`${t.label} (${UNIT_LABEL[t.unit] ?? t.unit})`}
+            hint={t.note ?? `Actual: S/${(persistedCents(t.id) / 100).toFixed(2)}`}
+            error={invalidOf(t.id) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
+          >
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.10"
+              min="0"
+              max={MAX_PER_UNIT}
+              value={prices[t.id] ?? ''}
+              onChange={(e) => setPrices((p) => ({ ...p, [t.id]: e.target.value }))}
+              disabled={!canManage}
+            />
+          </Field>
+        ))}
 
-          {canManage ? (
-            !dirty || anyInvalid || replace.isPending ? (
-              <Button variant="primary" size="md" disabled>
-                Guardar
-              </Button>
-            ) : (
-              <StepUpDialog
-                title="Confirmar cambio de precios de energía"
-                description="Esta acción cambia el pricing global y queda auditada."
-                trigger={
-                  <Button variant="primary" size="md">
-                    Guardar
-                  </Button>
-                }
-                onVerified={save}
-              />
-            )
-          ) : null}
-        </div>
-      )}
+        {canManage ? (
+          !dirty || anyInvalid || replace.isPending ? (
+            <Button variant="primary" size="md" disabled>
+              Guardar
+            </Button>
+          ) : (
+            <StepUpDialog
+              title="Confirmar cambio de precios de energía"
+              description="Esta acción cambia el pricing global y queda auditada."
+              trigger={
+                <Button variant="primary" size="md">
+                  Guardar
+                </Button>
+              }
+              onVerified={save}
+            />
+          )
+        ) : null}
+      </div>
 
       {!canManage ? (
         <p className="mt-2 text-xs text-ink-subtle">

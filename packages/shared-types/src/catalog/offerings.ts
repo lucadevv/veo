@@ -152,7 +152,7 @@ export const OFFERINGS = {
     icon: OfferingIcon.MOTO,
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
     referenceEfficiency: 40, // km/L (mototaxi)
     pricing: { multiplier: 0.55, minFareCents: 300 },
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
@@ -170,7 +170,7 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
     referenceEfficiency: 12, // km/L (auto económico)
     pricing: { multiplier: 1.0, minFareCents: 500 },
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
@@ -184,7 +184,7 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
     referenceEfficiency: 11, // km/L (auto confort, motor mayor)
     pricing: { multiplier: 1.25, minFareCents: 500 },
     // Confort = auto de gama media o mejor, no muy viejo (BR-D04 ya exige >=2017; esto es más estricto).
@@ -200,7 +200,7 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
     referenceEfficiency: 8, // km/L (XL/van, mayor consumo)
     pricing: { multiplier: 1.6, minFareCents: 500 },
     // XL = capacidad: 6 asientos o más (familias/grupos). El segmento no importa, sí el tamaño.
@@ -269,7 +269,7 @@ export const OFFERINGS = {
     // Mecánico móvil: llega en moto al vehículo varado (no traslada pasajeros).
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.MECHANIC,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
     referenceEfficiency: 35, // km/L (moto del mecánico)
     pricing: { multiplier: 1.0, minFareCents: 2000 },
     allowedModes: [PricingMode.FIXED],

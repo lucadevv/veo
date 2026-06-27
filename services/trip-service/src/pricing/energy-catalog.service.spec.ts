@@ -62,7 +62,7 @@ class FakeRepo implements EnergyCatalogRepository {
 }
 
 const GAS: EnergySourcePrice = {
-  sourceId: EnergySource.GASOLINE_95,
+  sourceId: EnergySource.GASOLINE_90,
   unit: EnergyUnit.LITER,
   pricePerUnitCents: 1640,
 };
@@ -76,13 +76,13 @@ describe('EnergyCatalogService (B5)', () => {
   it('sin fila (DB vacía) → getCatalog vacío y getPriceFor null (degradación honesta)', async () => {
     const service = new EnergyCatalogService(new FakeRepo(null), 0);
     expect(await service.getCatalog()).toMatchObject({ sources: [], version: 0 });
-    expect(await service.getPriceFor(EnergySource.GASOLINE_95)).toBeNull();
+    expect(await service.getPriceFor(EnergySource.GASOLINE_90)).toBeNull();
   });
 
   it('con fila → getPriceFor devuelve el precio/unidad de la fuente (y null si no está)', async () => {
     const repo = new FakeRepo({ sources: [GAS], version: 3, updatedAt: new Date(0).toISOString() });
     const service = new EnergyCatalogService(repo, 0);
-    expect(await service.getPriceFor(EnergySource.GASOLINE_95)).toBe(1640);
+    expect(await service.getPriceFor(EnergySource.GASOLINE_90)).toBe(1640);
     expect(await service.getPriceFor(EnergySource.DIESEL)).toBeNull();
   });
 

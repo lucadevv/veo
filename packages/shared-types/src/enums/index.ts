@@ -85,10 +85,13 @@ export type ServiceType = (typeof ServiceType)[keyof typeof ServiceType];
  * Fuente de energía del vehículo (B5). El costo de energía por km se UNIFICA como precio_por_unidad ÷
  * rendimiento (km por unidad): líquido (S/litro ÷ km/L) y eléctrico (S/kWh ÷ km/kWh) usan la MISMA
  * fórmula, solo cambia la `EnergyUnit`. Los precios viven en EnergyCatalog (hot-config, admin-editable).
+ *
+ * GASOLINE_90 (ADR-017 §1.1): hay UNA sola gasolina para el pricing — la referencia 90, la octanaje
+ * común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje real del vehículo del conductor
+ * NO importa para el precio del pasajero (eso es su economía privada, §1.1). DIESEL/GNV/ELECTRIC siguen.
  */
 export const EnergySource = {
-  GASOLINE_95: 'GASOLINE_95',
-  GASOLINE_84: 'GASOLINE_84',
+  GASOLINE_90: 'GASOLINE_90',
   DIESEL: 'DIESEL',
   GNV: 'GNV',
   ELECTRIC: 'ELECTRIC',
@@ -123,8 +126,7 @@ export const VEHICLE_SEGMENT_RANK: Record<VehicleSegment, number> = {
 
 /** Unidad canónica de cada fuente de energía (evita que el admin la elija mal). B5. */
 export const ENERGY_SOURCE_UNIT: Record<EnergySource, EnergyUnit> = {
-  [EnergySource.GASOLINE_95]: EnergyUnit.LITER,
-  [EnergySource.GASOLINE_84]: EnergyUnit.LITER,
+  [EnergySource.GASOLINE_90]: EnergyUnit.LITER,
   [EnergySource.DIESEL]: EnergyUnit.LITER,
   [EnergySource.GNV]: EnergyUnit.LITER,
   [EnergySource.ELECTRIC]: EnergyUnit.KWH,

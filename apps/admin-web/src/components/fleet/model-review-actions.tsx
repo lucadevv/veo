@@ -33,9 +33,9 @@ const SEGMENT_OPTIONS = [
   { value: 'MID', label: 'Intermedio' },
   { value: 'PREMIUM', label: 'Premium' },
 ] as const;
+// ADR-017 §1.1: una sola gasolina (sin octanaje; el 90 es la referencia común). Espejan el enum del contrato.
 const ENERGY_OPTIONS = [
-  { value: 'GASOLINE_95', label: 'Gasolina 95' },
-  { value: 'GASOLINE_84', label: 'Gasolina 84' },
+  { value: 'GASOLINE_90', label: 'Gasolina 90' },
   { value: 'DIESEL', label: 'Diésel' },
   { value: 'GNV', label: 'GNV' },
   { value: 'ELECTRIC', label: 'Eléctrico' },

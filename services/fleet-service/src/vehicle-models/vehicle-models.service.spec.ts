@@ -28,7 +28,7 @@ function row(over: Partial<VehicleModelSpec> = {}): VehicleModelSpec {
     vehicleType: VehicleType.CAR,
     seats: 5,
     segment: 'ECONOMY',
-    energySource: 'GASOLINE_95',
+    energySource: 'GASOLINE_90',
     efficiency: 17,
     status: VehicleModelStatus.APPROVED,
     source: VehicleModelSource.SEED,
@@ -100,7 +100,7 @@ describe('VehicleModelsService.listApproved', () => {
       vehicleType: VehicleType.CAR,
       seats: 5,
       segment: 'ECONOMY',
-      energySource: 'GASOLINE_95',
+      energySource: 'GASOLINE_90',
       efficiency: 17,
     });
   });

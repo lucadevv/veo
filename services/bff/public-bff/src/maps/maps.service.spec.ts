@@ -64,9 +64,9 @@ class FakeTripRest {
   ) {}
   async get<T>(path: string, req: { query?: Record<string, unknown> }): Promise<T> {
     if (path.includes('/internal/pricing/energy-catalog')) {
-      // B5 · catálogo de energía: GASOLINE_95 al precio que espeja el fuel global (shadow-compare del quote).
+      // B5 · catálogo de energía: GASOLINE_90 al precio que espeja el fuel global (shadow-compare del quote).
       return {
-        sources: [{ sourceId: 'GASOLINE_95', unit: 'LITER', pricePerUnitCents: 0 }],
+        sources: [{ sourceId: 'GASOLINE_90', unit: 'LITER', pricePerUnitCents: 0 }],
         version: 1,
         updatedAt: new Date(0).toISOString(),
       } as T;

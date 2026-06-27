@@ -312,7 +312,7 @@ model FuelSurchargeConfig {
 /// B5 · Catálogo de precios de energía por fuente, editable en caliente (singleton + version + CAS +
 /// outbox + cache, espejo de offering_catalog). `sources` = array JSON { sourceId, unit, pricePerUnitCents }.
 /// El costo de energía por km se deriva = precio_por_unidad ÷ rendimiento (km por unidad), unificando
-/// líquido (S/litro) y eléctrico (S/kWh). B5-0: se siembra (GASOLINE_95 = precio global actual) pero aún
+/// líquido (S/litro) y eléctrico (S/kWh). B5-0: se siembra (GASOLINE_90 = precio global actual) pero aún
 /// NO se cablea a la tarifa (eso es B5-1 con shadow-compare).
 model EnergyCatalog {
   /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.

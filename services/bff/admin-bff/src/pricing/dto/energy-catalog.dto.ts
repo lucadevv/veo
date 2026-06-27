@@ -25,7 +25,7 @@ export const ENERGY_PRICE_MAX_CENTS = 10_000;
 export class EnergySourcePriceDto {
   @ApiProperty({
     enum: ENERGY_SOURCES,
-    description: 'Fuente de energía (GASOLINE_95, DIESEL, ELECTRIC, …)',
+    description: 'Fuente de energía (GASOLINE_90, DIESEL, ELECTRIC, …)',
   })
   @IsIn(ENERGY_SOURCES)
   sourceId!: EnergySource;
