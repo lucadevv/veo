@@ -10,7 +10,7 @@ import { DriverStatus, KycStatus, FleetDocumentStatus } from '@veo/shared-types'
 import { toH3, neighbors, DISPATCH_H3_RESOLUTION } from '@veo/utils';
 import { PublishedTripState, PricingMode, ModoReserva } from '../generated/prisma';
 import { PublishedTripsService } from './published-trips.service';
-import type { CostCapService, PriceCapInput } from './cost-cap.service';
+import type { CostCapService, PriceCapInput } from '../cost-cap/cost-cap.service';
 import type {
   PublishedTripsRepository,
   CreatePublishedTripData,

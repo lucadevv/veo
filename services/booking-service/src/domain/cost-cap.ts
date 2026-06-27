@@ -138,6 +138,43 @@ export function assertFullRouteCap(args: {
 }
 
 /**
+ * Verifica el tope FULL-ROUTE aplicado al PRECIO ACORDADO de un booking (precioBase + specialRequest) — el
+ * ESCUDO anti-lucro F1b llevado al momento de RESERVAR, no solo al publicar. `precioAcordadoCentimos` es el
+ * monto POR ASIENTO que el conductor recibe (en F0 el precio es full-route; el pricing por tramo es F1): no
+ * puede exceder el tope full-route, ni siquiera por el `specialRequest` que el pasajero suma al reservar. El
+ * peaje del viaje entra acá (es full-route, costo del viaje entero ÷ asientos), igual que en `assertFullRouteCap`.
+ * Excede → ValidationError tipado con la causa concreta (para un 400 legible y auditable). Hermano de
+ * `assertFullRouteCap`, con su PROPIO mensaje: la causa es el specialRequest del booking, no el precioBase.
+ */
+export function assertAgreedPriceCap(args: {
+  precioAcordadoCentimos: number;
+  distanceMeters: number;
+  costPerKmCents: number;
+  asientosTotales: number;
+  tollsCents: number;
+}): void {
+  const tope = capCentsForDistance(
+    args.distanceMeters,
+    args.costPerKmCents,
+    args.asientosTotales,
+    args.tollsCents,
+  );
+  if (args.precioAcordadoCentimos > tope) {
+    throw new ValidationError(
+      'El precio acordado (base + specialRequest) excede el tope de cost-sharing por distancia (carpooling no puede lucrar ni vía specialRequest)',
+      {
+        precioAcordadoCentimos: args.precioAcordadoCentimos,
+        topeCentimos: tope,
+        distanceMeters: args.distanceMeters,
+        costPerKmCents: args.costPerKmCents,
+        asientosTotales: args.asientosTotales,
+        tollsCents: args.tollsCents,
+      },
+    );
+  }
+}
+
+/**
  * Verifica el tope de UN tramo: el precio del tramo [desdeOrden→hastaOrden] no puede exceder el tope
  * derivado de la distancia de ESE segmento (+ peaje SOLO si el tramo es la ruta COMPLETA). Excede →
  * ValidationError con la causa (incluye los órdenes del tramo para que el conductor sepa CUÁL está fuera de rango).

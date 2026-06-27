@@ -16,7 +16,7 @@ import { ExternalServiceError, ValidationError, type LatLon } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { assertStopoverOrdersValid, destinoOrden } from '../domain/trip-segments';
-import { assertFullRouteCap, assertTramoCap } from '../domain/cost-cap';
+import { assertAgreedPriceCap, assertFullRouteCap, assertTramoCap } from '../domain/cost-cap';
 import { CostPerKmConfigService } from '../cost-per-km/cost-per-km-config.service';
 
 /** Hito de la ruta con su orden y coordenadas (origen=0, stopovers=1..n, destino=destinoOrden). */
@@ -55,6 +55,27 @@ export interface PriceCapInput {
   tramos: readonly TramoPrecio[];
 }
 
+/**
+ * Input del re-tope F1b al RESERVAR (booking-service · escudo anti-lucro aplicado al `precioAcordado`). El
+ * `stopovers` llega como el JSON PERSISTIDO de la oferta (no narrowado): se narrowea internamente a
+ * {lat,lon,orden}[] para los waypoints del full-route (el caller — BookingsService — pasa `trip.stopovers` tal
+ * cual). `precioAcordadoCentimos` es el monto POR ASIENTO (precioBase + specialRequest); el cobro total
+ * (×asientos) lo arma el caller, NO este gate (el tope es por-asiento).
+ */
+export interface AgreedPriceCapInput {
+  pais: string;
+  asientosTotales: number;
+  precioAcordadoCentimos: number;
+  /** Peaje del viaje (céntimos PEN) declarado por el conductor al publicar; sube el tope full-route. */
+  tollsCents: number;
+  origenLat: number;
+  origenLon: number;
+  destinoLat: number;
+  destinoLon: number;
+  /** Stopovers PERSISTIDOS (Prisma.JsonValue de la oferta). Se narrowan internamente al shape {lat,lon,orden}[]. */
+  stopovers: unknown;
+}
+
 @Injectable()
 export class CostCapService {
   constructor(
@@ -79,13 +100,7 @@ export class CostCapService {
     const puntosPorOrden = this.buildPuntosPorOrden(input);
 
     // FULL-ROUTE — 1 sola llamada: origen → destino con los stopovers (en orden) como waypoints.
-    const origen: LatLon = { lat: input.origenLat, lon: input.origenLon };
-    const destino: LatLon = { lat: input.destinoLat, lon: input.destinoLon };
-    const waypointsFull = [...input.stopovers]
-      .sort((a, b) => a.orden - b.orden)
-      .map<LatLon>((s) => ({ lat: s.lat, lon: s.lon }));
-
-    const fullRoute = await this.routeOrFailClosed(origen, destino, waypointsFull);
+    const fullRoute = await this.fullRouteDistanceMeters(input);
     // El peaje declarado SUBE el tope full-route (costo del viaje entero ÷ asientos).
     assertFullRouteCap({
       precioBaseCentimos: input.precioBaseCentimos,
@@ -130,6 +145,60 @@ export class CostCapService {
         });
       }),
     );
+  }
+
+  /**
+   * RE-TOPE F1b AL RESERVAR (booking-service · escudo anti-lucro aplicado al `precioAcordado`). Recomputa el
+   * tope FULL-ROUTE de una oferta YA PUBLICADA (mismo costo/km del admin + peaje + asientos que el publish) y
+   * exige que `precioAcordadoCentimos` (= precioBase + specialRequest, POR ASIENTO) no lo exceda. El conductor
+   * NO puede recibir, por asiento, más que el costo compartido topado — ni siquiera vía el `specialRequest` que
+   * el pasajero suma al reservar (que al publicar NO se topa, porque no existe aún). FAIL-CLOSED igual que el
+   * publish: si el motor de rutas no responde, NO se reserva (el tope legal no se salta por infraestructura).
+   *
+   * SOLO el caller que tiene un specialRequest > 0 necesita llamar acá: si specialRequest es 0, precioAcordado
+   * == precioBase, que YA fue topado al publicar (invariante) → no hace falta re-pegarle a mapas (el caller
+   * decide, espejo de `editTouchesPriceCap`). El cobro total (precioAcordado × asientos) lo arma el caller.
+   */
+  async assertAgreedPriceWithinCap(input: AgreedPriceCapInput): Promise<void> {
+    // El costo/km sale DIRECTO de la config del admin (per-país), con degradación honesta al env (idéntico al publish).
+    const costPerKmCents = await this.costPerKm.getCostPerKmCents(input.pais);
+    const distanceMeters = await this.fullRouteDistanceMeters({
+      origenLat: input.origenLat,
+      origenLon: input.origenLon,
+      destinoLat: input.destinoLat,
+      destinoLon: input.destinoLon,
+      // Stopovers persistidos (JSON) → shape {lat,lon,orden}[] para los waypoints del full-route.
+      stopovers: readStopoverPuntos(input.stopovers),
+    });
+    // El peaje del viaje SUBE el tope full-route (costo del viaje entero ÷ asientos), igual que en el publish.
+    assertAgreedPriceCap({
+      precioAcordadoCentimos: input.precioAcordadoCentimos,
+      distanceMeters,
+      costPerKmCents,
+      asientosTotales: input.asientosTotales,
+      tollsCents: input.tollsCents,
+    });
+  }
+
+  /**
+   * Distancia FULL-ROUTE (metros) de una ruta origen → destino con los stopovers (en orden) como waypoints —
+   * UNA sola llamada al puerto de mapas. FUENTE ÚNICA de la distancia full-route: la comparten el gate de
+   * publish/edit (`assertPriceCap`) y el re-tope al reservar (`assertAgreedPriceWithinCap`) → cero drift. El
+   * fail-closed lo hereda de `routeOrFailClosed` (motor caído → ExternalServiceError, nunca un default).
+   */
+  private async fullRouteDistanceMeters(input: {
+    origenLat: number;
+    origenLon: number;
+    destinoLat: number;
+    destinoLon: number;
+    stopovers: readonly StopoverPunto[];
+  }): Promise<number> {
+    const origen: LatLon = { lat: input.origenLat, lon: input.origenLon };
+    const destino: LatLon = { lat: input.destinoLat, lon: input.destinoLon };
+    const waypointsFull = [...input.stopovers]
+      .sort((a, b) => a.orden - b.orden)
+      .map<LatLon>((s) => ({ lat: s.lat, lon: s.lon }));
+    return this.routeOrFailClosed(origen, destino, waypointsFull);
   }
 
   /**
@@ -211,4 +280,27 @@ export class CostCapService {
       );
     }
   }
+}
+
+/**
+ * Narrowing TIPADO del `stopovers` JSON persistido (Prisma.JsonValue) al shape COMPLETO `{lat,lon,orden}[]` que
+ * el cálculo del full-route necesita (coordenadas + orden, para los waypoints). Tolerante a filas legacy /
+ * datos sucios: descarta entradas que no traen los tres números (no rompe el gate con basura; el invariante se
+ * evalúa sobre lo bien formado). Espeja `readStopoverPuntos` de published-trips.service (mismo criterio).
+ */
+function readStopoverPuntos(value: unknown): StopoverPunto[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isRecord(entry) &&
+    typeof entry.lat === 'number' &&
+    typeof entry.lon === 'number' &&
+    typeof entry.orden === 'number'
+      ? [{ lat: entry.lat, lon: entry.lon, orden: entry.orden }]
+      : [],
+  );
+}
+
+/** Type-guard mínimo: ¿`value` es un objeto plano indexable? (evita `any`, narrowing seguro del JSON). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

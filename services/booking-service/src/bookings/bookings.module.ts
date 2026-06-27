@@ -5,6 +5,7 @@ import { BookingsRepository } from './bookings.repository';
 import { BookingsController } from './bookings.controller';
 import { BookingPaymentConsumer } from './payment-event.consumer';
 import { PaymentModule } from '../ports/payment/payment.module';
+import { CostCapModule } from '../cost-cap/cost-cap.module';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
 import type { Env } from '../config/env.schema';
@@ -27,7 +28,9 @@ const identityClientProvider: Provider = {
 
 @Module({
   // PaymentModule provee el token PAYMENT_GATEWAY (gate de deuda al reservar · §5.4; charge al aprobar · F3b).
-  imports: [PaymentModule],
+  // CostCapModule provee CostCapService (re-tope F1b del precioAcordado al reservar · escudo anti-lucro, evita
+  // que el specialRequest del pasajero empuje el precio del asiento por encima del costo compartido topado).
+  imports: [PaymentModule, CostCapModule],
   // BookingPaymentConsumer (F3c): el PRIMER consumer Kafka del servicio. Es un provider con lifecycle propio
   // (onModuleInit arranca el consumer, onModuleDestroy lo desconecta — KafkaConsumerBootstrap), igual que
   // DispatchConsumer en trip-service / ErasureConsumer en media-service. Depende de BookingsService (orquesta

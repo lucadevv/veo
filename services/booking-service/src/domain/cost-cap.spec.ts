@@ -6,6 +6,7 @@ import {
   costPerKmCentsFor,
   capCentsForDistance,
   assertFullRouteCap,
+  assertAgreedPriceCap,
   assertTramoCap,
   MAX_TOLLS_CENTS,
   type CostPerKmConfig,
@@ -110,6 +111,40 @@ describe('cost-cap · assertFullRouteCap (el peaje SUBE el tope full-route)', ()
     // 576 sigue excediendo el tope CON peaje.
     expect(() =>
       assertFullRouteCap({ ...base, tollsCents: 800, precioBaseCentimos: 576 }),
+    ).toThrow(ValidationError);
+  });
+});
+
+describe('cost-cap · assertAgreedPriceCap (escudo anti-lucro del precioAcordado al reservar)', () => {
+  // 10km · 150c/km · 4 asientos · sin peaje → tope 375 (por asiento).
+  const base = { distanceMeters: 10_000, costPerKmCents: 150, asientosTotales: 4, tollsCents: 0 };
+
+  it('precioAcordado == tope → OK (límite inclusivo)', () => {
+    expect(() => assertAgreedPriceCap({ ...base, precioAcordadoCentimos: 375 })).not.toThrow();
+  });
+  it('precioAcordado < tope → OK', () => {
+    expect(() => assertAgreedPriceCap({ ...base, precioAcordadoCentimos: 300 })).not.toThrow();
+  });
+  it('precioAcordado > tope → ValidationError con su propio mensaje + tope en details', () => {
+    try {
+      assertAgreedPriceCap({ ...base, precioAcordadoCentimos: 376 });
+      throw new Error('debía lanzar');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      // El mensaje culpa al specialRequest (no al precioBase) — la causa real del exceso al reservar.
+      expect((err as ValidationError).message).toContain('specialRequest');
+      expect((err as ValidationError).details).toMatchObject({
+        precioAcordadoCentimos: 376,
+        topeCentimos: 375,
+      });
+    }
+  });
+  it('el peaje SUBE el tope también acá (full-route): 575 pasa con peaje 800 (tope (1500+800)/4)', () => {
+    expect(() =>
+      assertAgreedPriceCap({ ...base, tollsCents: 800, precioAcordadoCentimos: 575 }),
+    ).not.toThrow();
+    expect(() =>
+      assertAgreedPriceCap({ ...base, tollsCents: 800, precioAcordadoCentimos: 576 }),
     ).toThrow(ValidationError);
   });
 });

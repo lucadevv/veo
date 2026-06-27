@@ -62,7 +62,7 @@ import {
   type PriceCapInput,
   type StopoverPunto,
   type TramoPrecio,
-} from './cost-cap.service';
+} from '../cost-cap/cost-cap.service';
 import { IDENTITY_CLIENT, type IdentityClient, type IdentityDriver } from '../identity/identity-client.port';
 import {
   IDENTITY_BATCH_CLIENT,

@@ -80,6 +80,7 @@ import {
 import { isDriverActive } from '../domain/driver-eligibility';
 import { BookingEventType } from '../events/booking-events';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/payment/payment-gateway.port';
+import { CostCapService } from '../cost-cap/cost-cap.service';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { BookingsRepository, type CreateBookingData } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
@@ -103,6 +104,7 @@ export class BookingsService {
     private readonly repo: BookingsRepository,
     @Inject(PAYMENT_GATEWAY) private readonly payment: PaymentGateway,
     @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
+    private readonly costCap: CostCapService,
   ) {}
 
   /**
@@ -189,12 +191,35 @@ export class BookingsService {
     // payment por una oferta inexistente. Fail-OPEN con observabilidad si payment no responde (ver assertNoDebt).
     await this.assertNoDebt(passengerId);
 
-    // Precio acordado = base + specialRequest (céntimos PEN, Int). F0 usa el precio full-route; el pricing
-    // por TRAMO (precioPorTramo según pickup/dropoff) es F1.
+    // Precio acordado = base + specialRequest (céntimos PEN, Int) — el monto POR ASIENTO que el conductor
+    // recibe. F0 usa el precio full-route; el pricing por TRAMO (precioPorTramo según pickup/dropoff) es F1.
     const specialRequest = dto.specialRequest ?? 0;
     const precioAcordado = trip.precioBase + specialRequest;
     if (precioAcordado < 0) {
       throw new ValidationError('precioAcordado no puede ser negativo', { precioAcordado });
+    }
+
+    // ESCUDO ANTI-LUCRO F1b AL RESERVAR (ADR-014 §8 · Ley de carpooling): el `specialRequest` que el pasajero
+    // suma a la base NO existe al PUBLICAR, así que el tope de cost-sharing (validado allí sobre `precioBase`)
+    // NO lo cubre. Sin re-topar acá, el conductor recibiría por asiento MÁS que el costo compartido topado vía
+    // specialRequest = LUCRO (escudo legal roto). Se re-valida que `precioAcordado` (= base + specialRequest,
+    // POR ASIENTO) ≤ el tope full-route VIGENTE del viaje (mismo costo/km del admin + peaje + asientosTotales
+    // que el publish). SOLO si specialRequest > 0: si es 0, precioAcordado == precioBase, que YA fue topado al
+    // publicar (invariante) → no re-pegamos a mapas (espejo de editTouchesPriceCap). Excede → ValidationError
+    // tipado (400). FAIL-CLOSED (motor de rutas caído → ExternalServiceError) igual que el publish: el tope
+    // legal no se salta por infraestructura. El cobro TOTAL (precioAcordado × asientos) se arma en triggerCharge.
+    if (specialRequest > 0) {
+      await this.costCap.assertAgreedPriceWithinCap({
+        pais: trip.pais,
+        asientosTotales: trip.asientosTotales,
+        precioAcordadoCentimos: precioAcordado,
+        tollsCents: trip.tollsCents,
+        origenLat: trip.origenLat,
+        origenLon: trip.origenLon,
+        destinoLat: trip.destinoLat,
+        destinoLon: trip.destinoLon,
+        stopovers: trip.stopovers,
+      });
     }
 
     // ESTADO INICIAL POR LA MÁQUINA (cero strings mágicos): SOLICITADO → (REVISION) PENDIENTE_APROBACION
@@ -593,11 +618,20 @@ export class BookingsService {
     // PaymentMethod es la cara LOCAL del contrato compartido y es ESTRUCTURALMENTE el mismo set que el
     // PaymentMethod de @veo/shared-types que espera el puerto (mismos miembros) → asignable directo, sin cast.
     const method: PaymentMethod = booking.paymentMethod;
+    // CONTRIBUCIÓN TOTAL del pasajero = precioAcordado (POR ASIENTO) × asientos reservados. `precioAcordado`
+    // es el precio de UN asiento (= precioBase full-route + specialRequest, ambos por-asiento), y un Booking
+    // puede tomar 1..N asientos (validado contra asientosDisponibles). Cobrar `precioAcordado` a secas
+    // SUB-COBRARÍA una reserva multi-asiento (3 asientos pagarían 1). El tope de cost-sharing es POR ASIENTO,
+    // así que × asientos sigue siendo legal (≤ tope × asientos). Esto es la CONTRIBUCIÓN que va a payment; el
+    // service fee al pasajero lo SUMA payment-service ENCIMA de esta contribución (F2.7) — NO se calcula acá.
+    // Sin overflow: precioAcordado ≤ tope de cost-sharing (céntimos realistas) y asientos ≤ 8 (@Max DTO) →
+    // el producto entra holgado en el Int32 de Postgres (céntimos PEN), muy por debajo de 2^31.
+    const grossCents = booking.precioAcordado * booking.asientos;
     let charge;
     try {
       charge = await this.payment.charge({
         bookingId: booking.id, // = tripId opaco para payment (§5.5); el adapter deriva la dedupKey financiera.
-        grossCents: booking.precioAcordado,
+        grossCents,
         method,
         passengerId: booking.passengerId,
         // ADR-015 D4 / hueco 1: el dueño del PublishedTrip va al Payment → el cobro del carpooling ENTRA a la

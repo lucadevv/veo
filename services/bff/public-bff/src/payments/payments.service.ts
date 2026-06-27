@@ -53,25 +53,43 @@ export class PaymentsService {
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
-  charge(user: AuthenticatedUser, dto: ChargeDto): Promise<PaymentView> {
-    // MONEY PATH — idempotencia por VIAJE.
-    // El cobro de un viaje es canónico: existe UN solo Payment por viaje. El cobro nace
-    // normalmente del evento `trip.completed` (payment-service consumer) con la dedupKey
-    // determinista `trip-completed:${tripId}`. Si el pasajero dispara además este cobro manual,
-    // DEBE caer en EXACTAMENTE la misma dedupKey para chocar contra el UNIQUE de Payment.dedupKey
-    // y devolver el pago existente en vez de crear un segundo (doble cobro).
+  async charge(user: AuthenticatedUser, dto: ChargeDto): Promise<PaymentView> {
+    // MONEY PATH — tarifa SERVER-AUTHORITATIVE + anti-IDOR + idempotencia por VIAJE.
     //
-    // Por eso NO usamos la dedupKey arbitraria del cliente ni un uuidv7() aleatorio: ambos abrirían
-    // namespaces distintos y romperían la colisión. Derivamos SIEMPRE del tripId, replicando el
-    // formato de payment-service `deriveTripChargeDedupKey` (payment.policy.ts). No se importa esa
-    // función: cruzaría la frontera de microservicios (regla #2). El formato es el contrato compartido.
+    // 1) ANTI-IDOR + TARIFA AUTORITATIVA (mismo gate que getPaymentByTrip/tip/videoGrant): traemos el
+    //    viaje por gRPC GetTrip con el `passengerId` del JWT. La tarifa a cobrar NO viene del cliente
+    //    (`dto.grossCents` se IGNORA): un pasajero podía postear `grossCents: 1` y pagar S/0.01 por su
+    //    viaje. El monto FIRME es `trip.fareCents` — el único monto canónico del viaje (la PUJA acordada
+    //    también se resuelve server-side a `fareCents`, no hay un campo aparte). Viaje ajeno/inexistente
+    //    → 404 (no 403: anti-enumeración, idéntico a getPaymentByTrip). Si trip-service no responde, el
+    //    gRPC LANZA y NO se cobra: degradación honesta, jamás un monto inventado.
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
+    const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: dto.tripId }, meta);
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
+    if (trip.passengerId !== user.userId) {
+      throw new NotFoundError('Viaje no encontrado'); // anti-enumeración (no filtra que exista para otro)
+    }
+
+    // 2) IDEMPOTENCIA POR VIAJE (intacta). El cobro de un viaje es canónico: existe UN solo Payment por
+    //    viaje. El cobro nace normalmente del evento `trip.completed` (payment-service consumer) con la
+    //    dedupKey determinista `trip-completed:${tripId}`. Si el pasajero dispara además este cobro
+    //    manual, DEBE caer en EXACTAMENTE la misma dedupKey para chocar contra el UNIQUE de
+    //    Payment.dedupKey y devolver el pago existente en vez de crear un segundo (doble cobro). Con
+    //    `grossCents` ahora server-derivado, ambos carriles coinciden además en el MONTO.
+    //
+    //    Por eso NO usamos la dedupKey arbitraria del cliente ni un uuidv7() aleatorio: ambos abrirían
+    //    namespaces distintos y romperían la colisión. Derivamos SIEMPRE del tripId, replicando el
+    //    formato de payment-service `deriveTripChargeDedupKey` (payment.policy.ts). No se importa esa
+    //    función: cruzaría la frontera de microservicios (regla #2). El formato es el contrato compartido.
     const dedupKey = deriveTripChargeDedupKey(dto.tripId);
     return this.paymentRest.post<PaymentView>('/payments/charge', {
       identity: user,
       idempotencyKey: dedupKey,
       body: {
         tripId: dto.tripId,
-        grossCents: dto.grossCents,
+        // Tarifa AUTORITATIVA del viaje (server-derived). NUNCA `dto.grossCents` (amount tampering).
+        grossCents: trip.fareCents,
+        // La propina SÍ es del pasajero (voluntaria), validada en el DTO (@IsInt @Min(0) @Max techo).
         tipCents: dto.tipCents,
         method: dto.method,
         payerRef: dto.payerRef,

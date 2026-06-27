@@ -1,7 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
 import { DomainError } from '@veo/utils';
+
+/**
+ * Techo de cordura de la propina (céntimos PEN · S/500). La propina es voluntaria y chica; este límite
+ * solo ataja un valor absurdo por bug del cliente o abuso. NO es la tarifa (esa se deriva server-side).
+ */
+export const TIP_MAX_CENTS = 50_000;
 
 /**
  * El pasajero tiene una deuda pendiente (un cobro en DEBT, BR-P02). DECISIÓN DE PRODUCTO: la deuda
@@ -27,15 +33,27 @@ export class ChargeDto {
   @IsUUID()
   tripId!: string;
 
-  @ApiProperty({ description: 'Ticket bruto en céntimos PEN (incluye surge, excluye propina)' })
-  @IsInt()
-  @Min(0)
-  grossCents!: number;
-
-  @ApiPropertyOptional({ description: 'Propina en céntimos PEN (100% al conductor)' })
+  /**
+   * @deprecated IGNORADO. La tarifa NO viene del cliente: el BFF la deriva SIEMPRE de la tarifa
+   * AUTORITATIVA del viaje (`trip.fareCents` vía GetTrip). Aceptar el monto del cliente permitía amount
+   * tampering: postear `grossCents: 1` y pagar S/0.01 por el viaje. Se mantiene el campo OPCIONAL para no
+   * romper el payload actual de la app (lo sigue mandando), pero el servidor lo IGNORA por completo.
+   */
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'IGNORADO: la tarifa se deriva server-side del viaje (trip.fareCents). Anti-tampering — no es el monto a cobrar.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
+  grossCents?: number;
+
+  @ApiPropertyOptional({ description: 'Propina en céntimos PEN (100% al conductor), tope S/500' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(TIP_MAX_CENTS)
   tipCents?: number;
 
   @ApiProperty({ enum: PaymentMethod })

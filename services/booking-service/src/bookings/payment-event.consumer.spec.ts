@@ -17,6 +17,7 @@ import type { BookingsRepository, ConfirmSeatOutcome } from './bookings.reposito
 import { BookingPaymentConsumer } from './payment-event.consumer';
 import type { IdentityClient } from '../identity/identity-client.port';
 import type { PaymentGateway } from '../ports/payment/payment-gateway.port';
+import type { CostCapService } from '../cost-cap/cost-cap.service';
 
 const BOOKING_ID = '0192f8a0-0000-7000-8000-0000000000b1';
 const PAYMENT_ID = '0192f8a0-0000-7000-8000-0000000000f1';
@@ -64,10 +65,11 @@ function makeRepo(
 }
 
 function makeService(repo: BookingsRepository): BookingsService {
-  // El path F3c NO usa el gateway ni identity (reacciona a eventos, no llama afuera): stubs vacíos.
+  // El path F3c NO usa el gateway, identity ni el cost-cap (reacciona a eventos, no llama afuera): stubs vacíos.
   const payment = {} as unknown as PaymentGateway;
   const identity = {} as unknown as IdentityClient;
-  return new BookingsService(repo, payment, identity);
+  const costCap = {} as unknown as CostCapService;
+  return new BookingsService(repo, payment, identity, costCap);
 }
 
 describe('BookingsService.confirmCapture · seat-lock orquestación (§6)', () => {

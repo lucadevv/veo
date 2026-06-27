@@ -14,9 +14,7 @@ import {
 } from './published-trips.service';
 import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
-import { CostCapService } from './cost-cap.service';
-import { CostPerKmConfigModule } from '../cost-per-km/cost-per-km.module';
-import { MapsModule } from '../ports/maps/maps.module';
+import { CostCapModule } from '../cost-cap/cost-cap.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
@@ -76,12 +74,12 @@ const searchH3ConfigProvider: Provider = {
 
 @Module({
   // BookingsModule exporta BookingsService (lo consume el handler GET /:id/bookings del controller, F3b).
-  // CostPerKmConfigModule exporta CostPerKmConfigService (el costo/km DIRECTO del admin que alimenta el tope).
-  imports: [MapsModule, BookingsModule, CostPerKmConfigModule],
+  // CostCapModule exporta CostCapService (el gate F1b del tope de cost-sharing; ahora módulo propio para que
+  // BookingsModule también lo consuma sin cerrar un ciclo published-trips ↔ bookings).
+  imports: [CostCapModule, BookingsModule],
   providers: [
     PublishedTripsService,
     PublishedTripsRepository,
-    CostCapService,
     identityClientProvider,
     identityBatchClientProvider,
     fleetClientProvider,
