@@ -23,7 +23,7 @@ const user: AuthenticatedUser = { userId: 'usr-1', type: 'passenger', roles: [],
 type PostOpts = { identity: unknown; idempotencyKey: string; body: Record<string, unknown> };
 
 function makeService(
-  trip: { found: boolean; passengerId?: string; fareCents?: number },
+  trip: { found: boolean; passengerId?: string; fareCents?: number; status?: string },
   opts?: { tripThrows?: boolean },
 ) {
   const tripGrpc = {
@@ -94,6 +94,17 @@ describe('PaymentsService.charge · tarifa server-authoritative', () => {
   it('404 si el viaje no existe (no cobra)', async () => {
     const { svc, post } = makeService({ found: false });
     await expect(svc.charge(user, dto())).rejects.toMatchObject({ httpStatus: 404 });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('409 si el viaje aún NO está completado: el cobro fija la tarifa firme, no una en-curso (anti sub-cobro)', async () => {
+    const { svc, post } = makeService({
+      found: true,
+      passengerId: 'usr-1',
+      fareCents: 2000,
+      status: 'IN_PROGRESS',
+    });
+    await expect(svc.charge(user, dto())).rejects.toMatchObject({ httpStatus: 409 });
     expect(post).not.toHaveBeenCalled();
   });
 

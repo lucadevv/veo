@@ -13,7 +13,8 @@ import {
   type AuthenticatedUser,
   type InternalAudience,
 } from '@veo/auth';
-import { NotFoundError } from '@veo/utils';
+import { NotFoundError, ConflictError } from '@veo/utils';
+import { TripStatus } from '@veo/shared-types';
 import { GRPC_PAYMENT, GRPC_TRIP, REST_PAYMENT } from '../infra/downstream.tokens';
 import { REDIS } from '../infra/redis';
 import type { PaymentReply, TripReply, UserCreditReply } from '../infra/grpc-types';
@@ -68,6 +69,17 @@ export class PaymentsService {
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
       throw new NotFoundError('Viaje no encontrado'); // anti-enumeración (no filtra que exista para otro)
+    }
+    // 1.b) GATE DE ESTADO (anti sub-cobro): el cobro manual SOLO sobre un viaje COMPLETADO — ahí su
+    //    `fareCents` es FINAL. En un viaje EN CURSO la tarifa todavía puede SUBIR (waypoints/espera, que
+    //    waypoint-proposal recalcula). Sin este gate, un cobro temprano congelaría una tarifa baja en el
+    //    Payment canónico y, vía la dedupKey compartida, el cobro del evento `trip.completed` (tarifa final)
+    //    chocaría el UNIQUE → devolvería el Payment bajo → el delta NUNCA se cobra. El cobro normal nace del
+    //    evento al completarse; este manual es el pasajero confirmando método/propina POST-viaje.
+    if (trip.status !== TripStatus.COMPLETED) {
+      throw new ConflictError('El viaje aún no está completado; el cobro se realiza al finalizar', {
+        status: trip.status,
+      });
     }
 
     // 2) IDEMPOTENCIA POR VIAJE (intacta). El cobro de un viaje es canónico: existe UN solo Payment por

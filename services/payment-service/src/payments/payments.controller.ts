@@ -68,11 +68,11 @@ export class PaymentsController {
       grossCents: dto.grossCents,
       tipCents: dto.tipCents,
       method: dto.method,
-      // F2.7 · el MODO se determina en el PUNTO DE ENTRADA del cobro, por el RIEL (NO se enriquece el contrato
-      // REST cross-service): SERVICE_RAIL = SOLO booking-service disparando el cobro del carpooling (ADR-014
-      // §5.5) → CARPOOLING (comisión 0 legal-gated). Los rieles de cliente (public/driver/admin = los BFFs que
-      // cobran on-demand) → ON_DEMAND (tasa configurable). Conservador: un service-rail siempre cae a 0, jamás
-      // cobra comisión de carpooling de más.
+      // F2.7-v2 · el MODO se determina en el PUNTO DE ENTRADA del cobro, por el RIEL (NO se enriquece el
+      // contrato REST cross-service): SERVICE_RAIL = SOLO booking-service disparando el cobro del carpooling
+      // (ADR-014 §5.5) → CARPOOLING (service fee SUMADO al pasajero, modelo BlaBlaCar — el conductor cobra el
+      // 100%, ver payment.policy.ts). Los rieles de cliente (public/driver/admin = los BFFs que cobran
+      // on-demand) → ON_DEMAND (comisión descontada al conductor). La tasa de cada modo es admin-editable.
       mode: rail === InternalAudience.SERVICE_RAIL ? ChargeMode.CARPOOLING : ChargeMode.ON_DEMAND,
       payerRef: dto.payerRef,
       driverId: dto.driverId,
