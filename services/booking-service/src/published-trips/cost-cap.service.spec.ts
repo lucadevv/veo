@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ValidationError, ExternalServiceError, type LatLon } from '@veo/utils';
 import type { MapsClient, RouteResult } from '@veo/maps';
 import { CostCapService, type PriceCapInput } from './cost-cap.service';
+import type { CostPerKmService } from './cost-per-km.service';
 import { PAIS, type CostPerKmConfig } from '../domain/cost-cap';
 
 const CONFIG: CostPerKmConfig = { [PAIS.PE]: 100, [PAIS.EC]: 50 };
@@ -213,6 +214,25 @@ describe('CostCapService · FIX 1 — invariante de hitos (orden colisionante bu
     const origins = route.mock.calls.map((call) => call[0] as LatLon);
     const ruteoDesdeOrigen = origins.some((o) => o.lat === -12.05 && o.lon === -77.04);
     expect(ruteoDesdeOrigen).toBe(true);
+  });
+});
+
+describe('CostCapService · F2.5 — usa el costo/km DERIVADO (CostPerKmService) en vez del env', () => {
+  it('el tope se calcula con el costo/km del resolutor vivo, no con el env', async () => {
+    // 10km · 4 asientos. Con el resolutor devolviendo 200 c/km → tope (10*200)/4 = 500 (NO 250 del env PE=100).
+    const { maps } = makeMaps(async () => routeOf(10_000));
+    const getCostPerKmCents = vi.fn(async () => 200);
+    const costPerKm = { getCostPerKmCents } as unknown as CostPerKmService;
+    const service = new CostCapService(maps, CONFIG, costPerKm);
+
+    // precioBase 500 == tope derivado → OK; 501 > tope → rechaza con topeCentimos 500.
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 500 })),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 501 })),
+    ).rejects.toMatchObject({ details: { topeCentimos: 500 } });
+    expect(getCostPerKmCents).toHaveBeenCalledWith(PAIS.PE);
   });
 });
 

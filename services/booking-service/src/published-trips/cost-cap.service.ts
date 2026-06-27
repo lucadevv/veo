@@ -11,7 +11,7 @@
  * PARALELIZADAS con Promise.all (son pocas: ArrayMaxSize(40) en el DTO; publish NO es hot-path). No hay N+1
  * silencioso — el fan-out es acotado y explícito.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ExternalServiceError, ValidationError, type LatLon } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -22,6 +22,7 @@ import {
   costPerKmCentsFor,
   type CostPerKmConfig,
 } from '../domain/cost-cap';
+import { CostPerKmService } from './cost-per-km.service';
 
 /** Hito de la ruta con su orden y coordenadas (origen=0, stopovers=1..n, destino=destinoOrden). */
 interface PuntoHito {
@@ -62,6 +63,11 @@ export class CostCapService {
   constructor(
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Inject('COST_PER_KM_CONFIG') private readonly costPerKm: CostPerKmConfig,
+    // F2.5 · resolutor del costo/km VIVO (derivado del EnergyCatalog de trip-service). @Optional + trailing:
+    // sin él (tests legacy con 2 args, o un boot sin el cliente REST) el gate cae al env `costPerKm` directo
+    // — el comportamiento histórico, intacto. El propio CostPerKmService YA degrada a este mismo env si
+    // trip-service no responde, así que la fuente del costo/km cambia sin tocar la FÓRMULA del tope.
+    @Optional() private readonly costPerKmService?: CostPerKmService,
   ) {}
 
   /**
@@ -71,7 +77,12 @@ export class CostCapService {
    * publica/edita — el tope legal no se puede saltar por un error de infraestructura.
    */
   async assertPriceCap(input: PriceCapInput): Promise<void> {
-    const costPerKmCents = costPerKmCentsFor(input.pais, this.costPerKm);
+    // F2.5 · el costo/km sale del resolutor VIVO (precio de energía de trip-service ÷ rendimiento de
+    // referencia) cuando está inyectado; si no, del env directo (legacy/tests). El resolutor ya degrada al
+    // MISMO env ante fallos, así que el gate F1b nunca se queda sin costo/km. La FÓRMULA del tope NO cambia.
+    const costPerKmCents = this.costPerKmService
+      ? await this.costPerKmService.getCostPerKmCents(input.pais)
+      : costPerKmCentsFor(input.pais, this.costPerKm);
 
     // Mapa orden→punto: origen=0, stopovers por su `orden`, destino=destinoOrden (fuente única, F1a).
     const puntosPorOrden = this.buildPuntosPorOrden(input);

@@ -12,6 +12,7 @@
 import { money, scaleMoney, addMoney, type Money, ValidationError, InvalidStateError } from '@veo/utils';
 import {
   CHILD_MODE_FEE_CENTS,
+  deriveCostPerKmCents,
   type OfferingPricingPolicy,
   type OfferingSpec,
 } from '@veo/shared-types';
@@ -42,11 +43,13 @@ export const MAX_SURGE = 2.0;
  * ≤ 0 o no-finito → 0 (sin recargo, NO división por cero). El per-km derivado luego se pliega al per-km de
  * la tarifa y escala con el multiplier de la oferta (una moto consume menos que un XL).
  * DEUDA: rendimiento GLOBAL (vehículo de referencia) · per-clase (moto ~40 / auto ~12 / XL ~8 km/L) sería más exacto · gatillo: si el multiplier deja de aproximar bien el consumo por clase (Tier 3)
+ *
+ * F2.5 (ADR-017 §1.4) · DELEGA en `deriveCostPerKmCents` de @veo/shared-types — la FUENTE ÚNICA de la
+ * fórmula que ahora comparten on-demand (acá) y carpooling (booking cost-cap). Firma/comportamiento
+ * INTACTOS (round(precio÷rendimiento), mismos guards): refactor invisible, cero cambio de precio.
  */
 export function deriveFuelPerKmCents(pricePerLiterCents: number, kmPerLiter: number): number {
-  if (!Number.isFinite(pricePerLiterCents) || pricePerLiterCents < 0) return 0;
-  if (!Number.isFinite(kmPerLiter) || kmPerLiter <= 0) return 0;
-  return Math.round(pricePerLiterCents / kmPerLiter);
+  return deriveCostPerKmCents(pricePerLiterCents, kmPerLiter);
 }
 
 /**

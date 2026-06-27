@@ -7,6 +7,8 @@
  */
 import { Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InternalRestClient } from '@veo/rpc';
+import { type InternalAudience } from '@veo/auth';
 import {
   PublishedTripsService,
   SEARCH_H3_CONFIG,
@@ -15,6 +17,12 @@ import {
 import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
 import { CostCapService } from './cost-cap.service';
+import {
+  CostPerKmService,
+  TRIP_REST_CLIENT,
+  COST_PER_KM_CACHE_TTL_MS,
+} from './cost-per-km.service';
+import { PricingCacheConsumer } from './pricing-cache.consumer';
 import { MapsModule } from '../ports/maps/maps.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { PAIS, type CostPerKmConfig } from '../domain/cost-cap';
@@ -88,6 +96,33 @@ const costPerKmConfigProvider: Provider = {
   }),
 };
 
+/**
+ * F2.5 · cliente REST interno firmado hacia trip-service (lee GET /internal/pricing/energy-catalog para el
+ * costo/km VIVO). Riel `service-rail` (llamada de SISTEMA, sin usuario final), HMAC `INTERNAL_IDENTITY_SECRET`
+ * compartido — mismo patrón que los clientes REST internos de los BFFs. URL del env `TRIP_INTERNAL_URL`.
+ * Timeout corto: el costo/km es un refinamiento cacheado; si trip-service tarda, el gate degrada al env sin
+ * colgar el publish.
+ */
+const tripRestClientProvider: Provider = {
+  provide: TRIP_REST_CLIENT,
+  inject: [ConfigService],
+  useFactory: (config: ConfigService<Env, true>) =>
+    new InternalRestClient({
+      baseUrl: config.getOrThrow<string>('TRIP_INTERNAL_URL'),
+      secret: config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
+      audience: 'service-rail' satisfies InternalAudience,
+      timeoutMs: config.getOrThrow<number>('TRIP_INTERNAL_TIMEOUT_MS'),
+    }),
+};
+
+/** F2.5 · TTL del cache del costo/km vivo (céntimos). Espeja el slot corto del EnergyCatalog de trip-service. */
+const costPerKmCacheTtlProvider: Provider = {
+  provide: COST_PER_KM_CACHE_TTL_MS,
+  inject: [ConfigService],
+  useFactory: (config: ConfigService<Env, true>): number =>
+    config.getOrThrow<number>('COST_PER_KM_CACHE_TTL_MS'),
+};
+
 @Module({
   // BookingsModule exporta BookingsService (lo consume el handler GET /:id/bookings del controller, F3b).
   imports: [MapsModule, BookingsModule],
@@ -95,7 +130,11 @@ const costPerKmConfigProvider: Provider = {
     PublishedTripsService,
     PublishedTripsRepository,
     CostCapService,
+    CostPerKmService,
+    PricingCacheConsumer,
     costPerKmConfigProvider,
+    tripRestClientProvider,
+    costPerKmCacheTtlProvider,
     identityClientProvider,
     identityBatchClientProvider,
     fleetClientProvider,

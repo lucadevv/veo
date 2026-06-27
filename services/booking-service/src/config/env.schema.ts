@@ -101,6 +101,20 @@ export const envSchema = z.object({
   // (combustible + desgaste + peajes reales por país). Hasta entonces, tratar como placeholder configurable.
   COST_PER_KM_CENTS_PE: z.coerce.number().int().positive().default(100),
   COST_PER_KM_CENTS_EC: z.coerce.number().int().positive().default(50),
+
+  // ── F2.5 (ADR-017 §1.4) · costo/km UNIFICADO con el on-demand ─────────────────────────────────────
+  // El costo/km del tope legal PE deja de ser FLAT de env: se DERIVA del precio de energía VIVO de
+  // trip-service (GET /internal/pricing/energy-catalog ÷ rendimiento del económico), la MISMA fórmula que
+  // usa el on-demand. booking lo lee por el endpoint INTERNO firmado (HMAC service-rail), NUNCA por DB
+  // compartida. DEGRADACIÓN HONESTA: si trip-service no responde, el gate cae a COST_PER_KM_CENTS_PE
+  // (arriba). API interna de trip-service (/api/v1), REST = :3002. Fail-fast en prod si falta/inválida.
+  TRIP_INTERNAL_URL: requiredInProd('http://localhost:3002/api/v1', { url: true }),
+  // Timeout corto de esa lectura (ms): el costo/km vivo es un refinamiento cacheado; si trip-service tarda,
+  // el gate degrada al env sin colgar el publish (NO es fail-closed como el motor de rutas: ese sí bloquea).
+  TRIP_INTERNAL_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
+  // TTL del cache in-proc del costo/km vivo (ms). Slot corto; el evento energy.catalog_updated lo invalida
+  // antes de que venza (el TTL es el fallback ante un evento perdido). Espeja el cache del EnergyCatalog.
+  COST_PER_KM_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
 })
   .superRefine((env, ctx) => {
     // Routing SOBERANO fail-fast (§0.7): en prod el gate legal F1b NO puede correr sobre el motor 'local'
