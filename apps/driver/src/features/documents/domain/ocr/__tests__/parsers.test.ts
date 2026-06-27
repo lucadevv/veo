@@ -787,6 +787,67 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
       });
     });
   });
+
+  describe('combustible → energySource (ADR-017 §1.8: combustible REAL de la TIVe → fuente tipada)', () => {
+    it('Combustible: GASOLINA → GASOLINE_90 (UNA sola gasolina, sin octanaje · ADR-017 §1.1)', () => {
+      expect(parsePropertyCard(['Combustible: GASOLINA']).energySource).toBe('GASOLINE_90');
+    });
+
+    it('Combustible: DIESEL / DIÉSEL / PETROLEO → DIESEL', () => {
+      expect(parsePropertyCard(['Combustible: DIESEL']).energySource).toBe('DIESEL');
+      expect(parsePropertyCard(['Combustible: DIÉSEL']).energySource).toBe('DIESEL');
+      expect(parsePropertyCard(['Combustible: PETROLEO']).energySource).toBe('DIESEL');
+    });
+
+    it('Combustible: GNV / GAS NATURAL → GNV', () => {
+      expect(parsePropertyCard(['Combustible: GNV']).energySource).toBe('GNV');
+      expect(parsePropertyCard(['Combustible: GAS NATURAL']).energySource).toBe('GNV');
+    });
+
+    it('Combustible: ELECTRICO / ELÉCTRICO / ELECTRICA → ELECTRIC', () => {
+      expect(parsePropertyCard(['Combustible: ELECTRICO']).energySource).toBe('ELECTRIC');
+      expect(parsePropertyCard(['Combustible: ELÉCTRICO']).energySource).toBe('ELECTRIC');
+      expect(parsePropertyCard(['Combustible: ELECTRICA']).energySource).toBe('ELECTRIC');
+    });
+
+    it('Combustible: GLP / GAS LICUADO DE PETROLEO → energySource AUSENTE (fuera del enum, no DIESEL)', () => {
+      // GLP es común en taxis de Lima pero NO está en los 4 tipos de ADR-017 §1.1: degradación honesta. OJO:
+      // "GAS LICUADO DE PETROLEO" contiene "PETROLEO" → NO debe caer como DIESEL (cortocircuito explícito).
+      expect(parsePropertyCard(['Combustible: GLP']).energySource).toBeUndefined();
+      expect(parsePropertyCard(['Combustible: GAS LICUADO DE PETROLEO']).energySource).toBeUndefined();
+    });
+
+    it('combustible DISPERSO: etiqueta "Combustible" sola + valor en la línea siguiente', () => {
+      expect(parsePropertyCard(['Combustible', 'GASOLINA']).energySource).toBe('GASOLINE_90');
+      expect(parsePropertyCard(['Combustible', 'GNV']).energySource).toBe('GNV');
+    });
+
+    it('TIVe SIN combustible → energySource ausente (no inventa)', () => {
+      expect(parsePropertyCard(['Placa: ABC-123', 'Marca: TOYOTA']).energySource).toBeUndefined();
+    });
+
+    it('TIVe completa con Combustible: el campo fluye junto al resto (no rompe los demás)', () => {
+      const lines = [
+        'SUNARP - TARJETA DE IDENTIFICACIÓN VEHICULAR',
+        'Placa N°: ABC123',
+        'Categoría: M1',
+        'Marca: TOYOTA',
+        'Modelo: YARIS',
+        'Año de Fab.: 2019',
+        'Color: PLATA',
+        'Combustible: GASOLINA',
+      ];
+      expect(parsePropertyCard(lines)).toEqual({
+        plate: 'ABC-123',
+        make: 'TOYOTA',
+        model: 'YARIS',
+        year: 2019,
+        mtcCategory: 'M1',
+        color: 'PLATA',
+        energySource: 'GASOLINE_90',
+      });
+    });
+  });
 });
 
 describe('mapMtcCategoryToVehicleType · MTC → VehicleType tipado (degradación honesta)', () => {

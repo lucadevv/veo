@@ -79,5 +79,6 @@ export function parsedPropertyCardToExtracted(p: ParsedPropertyCard): ExtractedP
     ...(p.model ? { model: p.model } : {}),
     ...(p.year !== undefined ? { year: p.year } : {}),
     ...(p.mtcCategory ? { mtcCategory: p.mtcCategory } : {}),
+    ...(p.energySource ? { energySource: p.energySource } : {}),
   };
 }

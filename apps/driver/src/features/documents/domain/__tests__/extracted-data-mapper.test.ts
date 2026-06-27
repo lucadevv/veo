@@ -2,9 +2,15 @@ import { FleetDocumentType } from '@veo/shared-types';
 import {
   parsedDniToExtracted,
   parsedLicenseToExtracted,
+  parsedPropertyCardToExtracted,
   parsedSoatToExtracted,
 } from '../ocr/extracted-data-mapper';
-import type { ParsedDni, ParsedLicense, ParsedSoat } from '../ocr/parsed-document';
+import type {
+  ParsedDni,
+  ParsedLicense,
+  ParsedPropertyCard,
+  ParsedSoat,
+} from '../ocr/parsed-document';
 
 /**
  * Pruebas del MAPPER `ParsedX → ExtractedDocumentData` (Lote 1 · onboarding sin-formularios). El mapper
@@ -80,6 +86,42 @@ describe('extracted-data-mapper · ParsedX → ExtractedDocumentData (degradaci�
 
     it('OMITE lo no leído (parse vacío → solo discriminante)', () => {
       expect(parsedLicenseToExtracted({})).toEqual({ type: FleetDocumentType.LICENSE_A1 });
+    });
+  });
+
+  describe('Tarjeta de propiedad · parsedPropertyCardToExtracted', () => {
+    it('mapea todos los campos incl. energySource (combustible de la TIVe · ADR-017 §1.8)', () => {
+      const parsed: ParsedPropertyCard = {
+        plate: 'ABC-123',
+        make: 'TOYOTA',
+        model: 'YARIS',
+        year: 2019,
+        mtcCategory: 'M1',
+        energySource: 'GASOLINE_90',
+      };
+      expect(parsedPropertyCardToExtracted(parsed)).toEqual({
+        type: FleetDocumentType.PROPERTY_CARD,
+        plate: 'ABC-123',
+        make: 'TOYOTA',
+        model: 'YARIS',
+        year: 2019,
+        mtcCategory: 'M1',
+        energySource: 'GASOLINE_90',
+      });
+    });
+
+    it('OMITE energySource cuando el OCR no lo leyó (degradación honesta)', () => {
+      const result = parsedPropertyCardToExtracted({ plate: 'XYZ-789', mtcCategory: 'N1' });
+      expect(result).toEqual({
+        type: FleetDocumentType.PROPERTY_CARD,
+        plate: 'XYZ-789',
+        mtcCategory: 'N1',
+      });
+      expect(result).not.toHaveProperty('energySource');
+    });
+
+    it('parse vacío → solo el discriminante', () => {
+      expect(parsedPropertyCardToExtracted({})).toEqual({ type: FleetDocumentType.PROPERTY_CARD });
     });
   });
 });

@@ -1927,6 +1927,12 @@ export const extractedPropertyCardData = z.object({
   model: ocrText.optional(),
   year: z.number().int().optional(),
   mtcCategory: ocrId.optional(),
+  /**
+   * Combustible REAL de la TIVe (`Combustible:`) mapeado a la fuente de energía (ADR-017 §1.8). Para la
+   * economía/referencia del operador, NO para el precio. El `z.enum` es el BORDE legítimo del contrato:
+   * debe coincidir 1:1 con `EnergySource` de @veo/shared-types y con el `@IsEnum(EnergySource)` del backend.
+   */
+  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'GNV', 'ELECTRIC']).optional(),
 });
 export type ExtractedPropertyCardData = z.infer<typeof extractedPropertyCardData>;
 

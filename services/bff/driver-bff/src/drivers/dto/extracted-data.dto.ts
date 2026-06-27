@@ -18,6 +18,7 @@
 import type { TypeOptions } from 'class-transformer';
 import {
   Equals,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -26,7 +27,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { FleetDocumentType } from '@veo/shared-types';
+import { EnergySource, FleetDocumentType } from '@veo/shared-types';
 
 /** Tope de longitud de los strings de OCR (acota tamaño del JSONB; un nombre/placa/póliza no excede esto). */
 const OCR_TEXT_MAX = 120;
@@ -107,6 +108,13 @@ export class ExtractedPropertyCardDataDto {
   @IsString()
   @Length(1, OCR_ID_MAX)
   mtcCategory?: string;
+
+  /** Combustible REAL de la TIVe (`Combustible:`) → fuente de energía tipada (ADR-017 §1.8). Para la
+   *  economía/referencia del operador, NO para el precio (va por-clase-referencia, §1.1). `@IsEnum` acota al
+   *  enum cerrado (con `forbidNonWhitelisted`); se omite si el OCR no lo leyó o cayó fuera del enum (p. ej. GLP). */
+  @IsOptional()
+  @IsEnum(EnergySource)
+  energySource?: EnergySource;
 }
 
 /** LICENSE_A1: data extraída de la licencia de conducir. */

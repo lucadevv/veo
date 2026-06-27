@@ -14,6 +14,7 @@
  *  - El QR es una URL de verificación SUNARP (no data) → NO se depende del QR.
  */
 
+import { EnergySource } from '@veo/shared-types';
 import { canonicalize, collapseWhitespace, lineMatchesAnyKeyword, stripDiacritics } from './ocr-text';
 import type { ParsedPropertyCard } from './parsed-document';
 
@@ -30,6 +31,8 @@ const COLOR_KEYWORDS = ['color'] as const;
  */
 const YEAR_KEYWORDS = ['ano de fab', 'ano fab', 'ano de fabricacion'] as const;
 const YEAR_FALLBACK_KEYWORDS = ['ano modelo'] as const;
+/** Etiqueta del combustible impreso en la TIVe (`Combustible: GASOLINA`), canónica (sin tilde, minúscula). */
+const COMBUSTIBLE_KEYWORDS = ['combustible'] as const;
 
 /**
  * Patrones de placa peruana, en orden de preferencia, anclados a límites de palabra. Cada patrón captura
@@ -131,6 +134,7 @@ const ALL_KNOWN_LABELS: readonly string[] = [
   ...YEAR_KEYWORDS,
   ...YEAR_FALLBACK_KEYWORDS,
   ...COLOR_KEYWORDS,
+  ...COMBUSTIBLE_KEYWORDS,
 ];
 
 /** ¿El `labelKeyOf` de la línea calza EXACTO alguna etiqueta conocida (es una etiqueta vecina)? */
@@ -298,6 +302,48 @@ function extractColor(lines: readonly string[]): string | undefined {
 }
 
 /**
+ * Mapea el valor CRUDO del combustible impreso en la TIVe (`GASOLINA`, `DIESEL`, `GNV`, `ELECTRICO`…) a la
+ * fuente de energía tipada `EnergySource` (ADR-017 §1.8). Función PURA. Normaliza el crudo (mayúsculas, sin
+ * tildes) y reconoce por `includes` tolerante al ruido del OCR. Degradación honesta: lo que NO calza uno de
+ * los 4 tipos de ADR-017 → `undefined` (el operador lo setea a mano en el VehicleModelSpec).
+ *
+ * OJO con GLP (Gas Licuado de Petróleo): es COMÚN en taxis de Lima pero NO está en el enum hoy (ADR-017 §1.1
+ * fija 4 fuentes: GASOLINE_90/DIESEL/GNV/ELECTRIC). Se descarta EXPLÍCITO y ANTES del check de PETROLEO/DIESEL,
+ * porque su nombre largo ("GAS LICUADO DE PETROLEO") contiene "PETROLEO" y si no caería como DIESEL por error.
+ */
+function mapRawToEnergySource(raw: string): EnergySource | undefined {
+  const norm = stripDiacritics(raw).toUpperCase();
+  // GLP / Gas Licuado de Petróleo → fuera del enum (degradación honesta). Cortocircuito antes de PETROLEO.
+  if (norm.includes('GLP') || norm.includes('LICUADO')) {
+    return undefined;
+  }
+  // UNA sola gasolina para el pricing — la 90, sin granularidad de octanaje (ADR-017 §1.1).
+  if (norm.includes('GASOLINA')) {
+    return EnergySource.GASOLINE_90;
+  }
+  if (norm.includes('DIESEL') || norm.includes('PETROLEO')) {
+    return EnergySource.DIESEL;
+  }
+  if (norm.includes('GNV') || norm.includes('GAS NATURAL')) {
+    return EnergySource.GNV;
+  }
+  if (norm.includes('ELECTRIC')) {
+    return EnergySource.ELECTRIC;
+  }
+  return undefined; // cualquier otro combustible no soportado → manual.
+}
+
+/**
+ * Extrae la fuente de energía del combustible impreso en la TIVe (`Combustible: GASOLINA`). Ancla a la
+ * etiqueta "Combustible" (inline o dispersa, igual que los otros campos vía `inlineValueForLabel`) y MAPEA
+ * el crudo a `EnergySource` tipado. `undefined` si no hay etiqueta o el valor no calza el enum (honesto).
+ */
+function extractEnergySource(lines: readonly string[]): EnergySource | undefined {
+  const raw = inlineValueForLabel(lines, COMBUSTIBLE_KEYWORDS);
+  return raw === undefined ? undefined : mapRawToEnergySource(raw);
+}
+
+/**
  * Parsea las líneas OCR de una tarjeta de propiedad / TIVe peruana. Devuelve solo lo que extrajo con
  * confianza; texto basura → `{}` (no inventa).
  */
@@ -327,6 +373,10 @@ export function parsePropertyCard(lines: readonly string[]): ParsedPropertyCard 
   const color = extractColor(lines);
   if (color) {
     result.color = color;
+  }
+  const energySource = extractEnergySource(lines);
+  if (energySource) {
+    result.energySource = energySource;
   }
   return result;
 }

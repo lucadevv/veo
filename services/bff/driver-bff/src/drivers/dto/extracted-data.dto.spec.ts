@@ -75,6 +75,27 @@ describe('extractedData — validación FUERTE en el borde público (Lote 0)', (
     expect(errorOn(errors, 'extractedData')).toBeUndefined();
   });
 
+  it('(b) ACEPTA energySource del enum cerrado en PROPERTY_CARD (combustible de la TIVe · ADR-017 §1.8)', async () => {
+    const errors = await errorsFor({
+      ...base,
+      type: FleetDocumentType.PROPERTY_CARD,
+      extractedData: { type: FleetDocumentType.PROPERTY_CARD, plate: 'ABC-123', energySource: 'DIESEL' },
+    });
+    expect(errorOn(errors, 'extractedData')).toBeUndefined();
+  });
+
+  it('(a) RECHAZA un energySource fuera del enum (GLP no está en los 4 tipos de ADR-017)', async () => {
+    const errors = await errorsFor({
+      ...base,
+      type: FleetDocumentType.PROPERTY_CARD,
+      extractedData: { type: FleetDocumentType.PROPERTY_CARD, energySource: 'GLP' },
+    });
+    const ed = errorOn(errors, 'extractedData');
+    expect(ed).toBeDefined();
+    const child = (ed?.children ?? []).find((c) => c.property === 'energySource');
+    expect(child?.constraints).toHaveProperty('isEnum');
+  });
+
   it('(c) RECHAZA un ocrEngine fuera del enum cerrado', async () => {
     const errors = await errorsFor({ ...base, ocrEngine: 'mlkit-android-spoof' });
     expect(errorOn(errors, 'ocrEngine')).toBeDefined();

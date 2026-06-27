@@ -8,6 +8,7 @@
  * unión tipada `LicenseCategory` (sin strings sueltos).
  */
 
+import type { EnergySource } from '@veo/shared-types';
 import type { LicenseCategory } from './license-category';
 
 /** Campos extraíbles del DNI peruano. */
@@ -56,6 +57,12 @@ export interface ParsedPropertyCard {
   mtcCategory?: string;
   /** Color de carrocería (`Color:`), normalizado a mayúsculas sin tildes (`NEGRO`, `AZUL MARINO`). */
   color?: string;
+  /**
+   * Combustible REAL impreso en la TIVe (`Combustible:`), mapeado a la fuente de energía tipada. Para la
+   * economía del conductor / referencia del operador, NO para el precio (el precio va por-clase-referencia,
+   * ADR-017 §1.1). Ausente si la TIVe no lo trae o el valor cae fuera del enum (p. ej. GLP · degradación honesta).
+   */
+  energySource?: EnergySource;
 }
 
 /**
