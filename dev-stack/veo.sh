@@ -95,6 +95,7 @@ SERVICES=(
   "fleet|3012|services/fleet-service|node|/health"
   "places|3013|services/places-service|node|/health"
   "chat|3014|services/chat-service|node|/health"
+  "booking|3016|services/booking-service|node|/health"
   "biometric|3015|services/biometric-service|python|/health"
   "tracking|3004|services/tracking-service|go|/health"
   "bff|4001|services/bff/public-bff|node|/health/live"
@@ -299,7 +300,7 @@ boot_all() {
   blue "  → boot-passenger-stack.sh (identity/trip/dispatch/fleet/payment/rating/places/notification + bff)"
   bash "$SCRIPT_DIR/boot-passenger-stack.sh" start || yel "  boot-passenger devolvió error parcial (revisá arriba)"
 
-  blue "  → boot-extra-services.sh (audit/media/panic/share/chat + driver-bff + admin-bff)"
+  blue "  → boot-extra-services.sh (audit/media/panic/share/chat/booking + driver-bff + admin-bff)"
   bash "$SCRIPT_DIR/boot-extra-services.sh" || yel "  boot-extra devolvió error parcial (revisá arriba)"
 
   boot_biometric
@@ -981,7 +982,7 @@ cmd_restart() {
       case "$svc" in
         identity|trip|dispatch|payment|rating|fleet|places|notification|bff)
           bash "$SCRIPT_DIR/boot-passenger-stack.sh" start ;;
-        audit|media|panic|share|chat|driver-bff|admin-bff)
+        audit|media|panic|share|chat|booking|driver-bff|admin-bff)
           bash "$SCRIPT_DIR/boot-extra-services.sh" ;;
       esac ;;
     python) boot_biometric ;;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # boot-extra-services.sh · Arranca los servicios NestJS que el boot-passenger NO toca.
-# (audit, media, panic, share, chat) + driver-bff + admin-bff. Idempotente por puerto.
+# (audit, media, panic, share, chat, booking) + driver-bff + admin-bff. Idempotente por puerto.
 set -uo pipefail
 
 DEV_STACK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,16 +42,17 @@ start_node media      services/media-service       3007
 start_node panic      services/panic-service       3006
 start_node share      services/share-service       3011
 start_node chat       services/chat-service         3014
+start_node booking    services/booking-service      3016
 start_node driver-bff services/bff/driver-bff       4002
 start_node admin-bff  services/bff/admin-bff        4003
 
 echo "Esperando health (hasta 40s)…"
 for i in $(seq 1 40); do
   ok=1
-  for hp in audit:3009 media:3007 panic:3006 share:3011 chat:3014 driver-bff:4002 admin-bff:4003; do
+  for hp in audit:3009 media:3007 panic:3006 share:3011 chat:3014 booking:3016 driver-bff:4002 admin-bff:4003; do
     p="${hp#*:}"
     curl -sf "http://localhost:$p/health" >/dev/null 2>&1 || ok=0
   done
-  [ "$ok" = 1 ] && { echo "✅ los 7 responden /health"; break; }
+  [ "$ok" = 1 ] && { echo "✅ los 8 responden /health"; break; }
   sleep 1
 done
