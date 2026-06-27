@@ -1,18 +1,34 @@
 /**
  * FINANZAS — payouts y reembolsos (RBAC FINANCE/admin). payouts/run exige rol FINANCE.
  */
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { PayoutView } from '@veo/api-client';
 import {
   FinanceService,
+  type CommissionView,
   type PayoutDisburseResult,
   type ReleaseHeldPayoutsResult,
   type RunPayoutsResult,
 } from './finance.service';
-import { PayoutsQueryDto, RunPayoutsDto, RefundDto } from './dto/finance.dto';
+import {
+  PayoutsQueryDto,
+  RunPayoutsDto,
+  RefundDto,
+  ReplaceCommissionDto,
+} from './dto/finance.dto';
 
 @ApiTags('finance')
 @Controller('finance')
@@ -69,6 +85,30 @@ export class FinanceController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PayoutDisburseResult> {
     return this.finance.retryPayout(user, id);
+  }
+
+  // ── Comisión por modo (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). GET = finance:view (rol de clase). PUT =
+  // finance:manage (FINANCE/ADMIN/SUPERADMIN) + step-up MFA: cambia la tasa ON-DEMAND. El carpooling 0 NO se
+  // toca (legal-gated). payment-service RE-valida RBAC + step-up (defensa en profundidad) y audita el cambio. ──
+  @Get('commission')
+  @ApiOperation({
+    summary: 'Comisión por modo vigente (tasa ON-DEMAND configurable + carpooling 0 legal-gated). finance:view',
+  })
+  getCommission(@CurrentUser() user: AuthenticatedUser): Promise<CommissionView> {
+    return this.finance.getCommission(user);
+  }
+
+  @Put('commission')
+  @HttpCode(200)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary: 'REEMPLAZA la tasa de comisión ON-DEMAND (bps). El carpooling 0 no se toca. finance:manage + step-up',
+  })
+  replaceCommission(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReplaceCommissionDto,
+  ): Promise<CommissionView> {
+    return this.finance.replaceCommission(user, dto);
   }
 
   @Post('refunds/:tripId')

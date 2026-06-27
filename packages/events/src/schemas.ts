@@ -585,6 +585,20 @@ export const pricingBaseFareUpdated = z.object({
   updatedAt: z.string(),
 });
 
+/// Comisión de plataforma por MODO reemplazada por el admin (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). Emitida
+/// por outbox en la MISMA tx del PUT; la consume CommissionCacheConsumer (payment-service) para invalidar el
+/// cache de la tasa cross-réplica (NO load-bearing: payment-service lee la tabla local). SOLO la tasa ON-DEMAND
+/// es configurable; la del CARPOOLING es 0 FIJO (gated por validación legal, NO viaja en este evento). La tasa
+/// va en BASIS POINTS Int (0..10000) — NUNCA float (dinero/tasa). `version` MONOTÓNICA (invalidación idempotente).
+export const paymentCommissionUpdated = z.object({
+  /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Int, jamás float.
+  onDemandRateBps: z.number().int().min(0).max(10_000),
+  /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
+  version: z.number().int().nonnegative(),
+  /// Marca ISO de cuándo el admin guardó el snapshot.
+  updatedAt: z.string(),
+});
+
 /* ── tracking ── */
 export const driverLocationUpdated = z.object({
   driverId: z.string(),
@@ -1358,6 +1372,7 @@ export const EVENT_SCHEMAS = {
   'payment.cancellation_penalty_collected': cancellationPenaltyCollected,
   'payment.affiliation_activated': paymentAffiliationActivated,
   'payment.affiliation_expired': paymentAffiliationExpired,
+  'payment.commission_updated': paymentCommissionUpdated,
   'payout.processing': payoutProcessing,
   'payout.processed': payoutProcessed,
   'payout.failed': payoutFailed,

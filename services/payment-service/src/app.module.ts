@@ -13,6 +13,7 @@ import { CoreModule } from './infra/core.module';
 import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { PaymentsModule } from './payments/payments.module';
+import { CommissionModule } from './commission/commission.module';
 import { AffiliationsModule } from './affiliations/affiliations.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -48,6 +49,7 @@ const readinessProvider: Provider = {
     ScheduleModule.forRoot(),
     CoreModule,
     PaymentsModule,
+    CommissionModule,
     AffiliationsModule,
     WebhooksModule,
     PromotionsModule,

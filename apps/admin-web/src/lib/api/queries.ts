@@ -28,9 +28,11 @@ import {
   modeScheduleView,
   fuelSurchargeView,
   baseFareView,
+  commissionView,
   energyCatalogView,
   bidFloorView,
   type ReplaceBaseFareRequest,
+  type ReplaceCommissionRequest,
   type ReplaceBidFloorRequest,
   operator,
   type CreateOperatorRequest,
@@ -77,6 +79,7 @@ export const qk = {
   modeSchedule: ['mode-schedule'] as const,
   fuelSurcharge: ['fuel-surcharge'] as const,
   baseFare: ['base-fare'] as const,
+  commission: ['commission'] as const,
   energyCatalog: ['energy-catalog'] as const,
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
@@ -790,6 +793,28 @@ export function useReplaceBaseFare() {
     // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.baseFare });
+    },
+  });
+}
+
+/* ── Comisión por modo (F2.7 · ON-DEMAND configurable · CARPOOLING 0 legal-gated · FINANCE/ADMIN/SUPERADMIN) ── */
+export function useCommission() {
+  return useQuery({
+    queryKey: qk.commission,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/commission', { schema: commissionView, signal }),
+  });
+}
+
+export function useReplaceCommission() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(FINANCE, ADMIN, SUPERADMIN)` + step-up MFA, y payment-service re-autoriza: la UI solo refleja.
+    mutationFn: (input: ReplaceCommissionRequest) =>
+      apiClient().put('/finance/commission', { body: input, schema: commissionView }),
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.commission });
     },
   });
 }

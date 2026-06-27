@@ -5,6 +5,7 @@ import {
   useModeSchedule,
   useFuelSurcharge,
   useBaseFare,
+  useCommission,
   useEnergyCatalog,
   useBidFloor,
 } from '@/lib/api/queries';
@@ -16,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
+import { CommissionPanel } from '@/components/pricing/commission-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
 import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
@@ -28,6 +30,7 @@ export default function PricingPage() {
   const query = useModeSchedule();
   const fuelQuery = useFuelSurcharge();
   const baseFareQuery = useBaseFare();
+  const commissionQuery = useCommission();
   const energyQuery = useEnergyCatalog();
   const bidFloorQuery = useBidFloor();
 
@@ -83,6 +86,15 @@ export default function PricingPage() {
           <Skeleton className="mt-6 h-28" />
         ) : (
           <BaseFarePanel config={baseFareQuery.data} />
+        )}
+
+        {/* F2.7 · comisión por modo (on-demand configurable + carpooling 0 legal-gated; carga independiente). */}
+        {commissionQuery.isError ? (
+          <ErrorState onRetry={() => void commissionQuery.refetch()} />
+        ) : commissionQuery.isLoading || !commissionQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <CommissionPanel config={commissionQuery.data} />
         )}
 
         {/* B5 · precios de energía multi-fuente (mismo gate pricing:view; carga independiente). */}

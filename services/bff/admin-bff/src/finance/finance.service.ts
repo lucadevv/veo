@@ -8,7 +8,19 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { PayoutView } from '@veo/api-client';
 import { REST_PAYMENT } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { RunPayoutsDto, RefundDto } from './dto/finance.dto';
+import type { RunPayoutsDto, RefundDto, ReplaceCommissionDto } from './dto/finance.dto';
+
+/** Vista de la comisión por modo (F2.7): tasa ON-DEMAND configurable (bps) + carpooling 0 (legal-gated) + version. */
+export interface CommissionView {
+  /** Tasa ON-DEMAND en basis points Int (0..10000; 2000 = 20%). */
+  onDemandRateBps: number;
+  /** Comisión del carpooling en bps: 0 FIJO (ADR-015 §11.2), solo-lectura. */
+  carpoolingRateBps: number;
+  version: number;
+  updatedAt: string;
+}
+
+const COMMISSION_BASE = '/internal/finance/commission';
 
 /** Shape interno que sirve payment-service (GET /payouts/all). `status` ES el enum Prisma `PayoutStatus`
  *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1.
@@ -139,6 +151,32 @@ export class FinanceService {
         failed: res.failed,
         totalAmountCents: res.totalAmountCents,
       },
+    });
+    return res;
+  }
+
+  /** finance:view — lee la comisión por modo vigente (tasa ON-DEMAND configurable + carpooling 0). F2.7 */
+  getCommission(identity: AuthenticatedUser): Promise<CommissionView> {
+    return this.rest.get<CommissionView>(COMMISSION_BASE, { identity });
+  }
+
+  /**
+   * finance:manage — reemplaza la tasa de comisión ON-DEMAND. payment-service bump-ea version (CAS) y emite el
+   * evento. El carpooling NO se toca (0 fijo legal · ADR-015 §11.2). Mutación de config financiera → auditada.
+   */
+  async replaceCommission(
+    identity: AuthenticatedUser,
+    dto: ReplaceCommissionDto,
+  ): Promise<CommissionView> {
+    const res = await this.rest.put<CommissionView>(COMMISSION_BASE, {
+      identity,
+      body: { onDemandRateBps: dto.onDemandRateBps, expectedVersion: dto.expectedVersion },
+    });
+    await this.audit.record(identity, {
+      action: 'finance.commission_replace',
+      resourceType: 'commission_config',
+      resourceId: String(res.version),
+      payload: { onDemandRateBps: dto.onDemandRateBps, version: res.version },
     });
     return res;
   }

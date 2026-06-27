@@ -28,6 +28,7 @@ export type Permission =
   | 'finance:view'
   | 'finance:payout'
   | 'finance:refund'
+  | 'finance:manage'
   | 'media:view'
   | 'media:request'
   | 'media:approve'
@@ -80,6 +81,9 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'finance:refund': [FINANCE, ADMIN, SUPERADMIN],
   // finance.controller payouts/run: SOLO FINANCE (ni ADMIN ni SUPERADMIN; el servidor los negaría).
   'finance:payout': [FINANCE],
+  // finance.controller PUT commission (F2.7): cambiar la tasa de comisión ON-DEMAND. Decisión financiera +
+  // step-up MFA. Mismos roles que el resto de config financiera (espejo de pricing:manage).
+  'finance:manage': [FINANCE, ADMIN, SUPERADMIN],
   // media.controller (clase): solicitar/ver/aprobar acceso a video (approve además exige step-up MFA).
   'media:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'media:request': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],

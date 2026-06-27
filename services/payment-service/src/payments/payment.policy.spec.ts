@@ -3,10 +3,15 @@ import { InvalidStateError } from '@veo/utils';
 import {
   assertCanAddTip,
   assertPaymentTransition,
+  bpsToRate,
+  BPS_DENOMINATOR,
   canAddTip,
   canTransitionPayment,
+  CARPOOLING_COMMISSION_BPS,
+  ChargeMode,
   computeChargeAmounts,
   deriveTripChargeDedupKey,
+  resolveCommissionBps,
   retryDelayMs,
 } from './payment.policy';
 
@@ -38,6 +43,41 @@ describe('computeChargeAmounts · comisión (BR-P04)', () => {
     expect(() => computeChargeAmounts(-1, 0, 0.2)).toThrow(InvalidStateError);
     expect(() => computeChargeAmounts(100.5, 0, 0.2)).toThrow(InvalidStateError);
     expect(() => computeChargeAmounts(100, -5, 0.2)).toThrow(InvalidStateError);
+  });
+});
+
+describe('comisión por MODO (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal)', () => {
+  it('CARPOOLING es 0 FIJO de dominio — el guard legal', () => {
+    expect(CARPOOLING_COMMISSION_BPS).toBe(0);
+  });
+
+  it('resolveCommissionBps(CARPOOLING, …) devuelve 0 SIEMPRE, ignorando la tasa configurada', () => {
+    // Aunque alguien pase una tasa on-demand alta, el carpooling NUNCA cobra comisión.
+    expect(resolveCommissionBps(ChargeMode.CARPOOLING, 9999)).toBe(0);
+    expect(resolveCommissionBps(ChargeMode.CARPOOLING, 2000)).toBe(0);
+  });
+
+  it('resolveCommissionBps(ON_DEMAND, bps) devuelve la tasa configurada tal cual', () => {
+    expect(resolveCommissionBps(ChargeMode.ON_DEMAND, 2000)).toBe(2000);
+    expect(resolveCommissionBps(ChargeMode.ON_DEMAND, 1500)).toBe(1500);
+  });
+
+  it('bpsToRate pliega bps Int a la fracción 0..1 que consume commission()', () => {
+    expect(bpsToRate(0)).toBe(0); // carpooling
+    expect(bpsToRate(2000)).toBe(0.2); // 20%
+    expect(bpsToRate(BPS_DENOMINATOR)).toBe(1); // 100%
+  });
+
+  it('bpsToRate rechaza bps no enteros o fuera de [0,10000] (cero float persistido)', () => {
+    expect(() => bpsToRate(-1)).toThrow(InvalidStateError);
+    expect(() => bpsToRate(10_001)).toThrow(InvalidStateError);
+    expect(() => bpsToRate(20.5)).toThrow(InvalidStateError);
+  });
+
+  it('una tarifa de carpooling (rate 0) NO paga comisión: todo el bruto es del conductor', () => {
+    const r = computeChargeAmounts(3000, 0, bpsToRate(CARPOOLING_COMMISSION_BPS));
+    expect(r.commissionCents).toBe(0);
+    expect(r.driverNetCents).toBe(3000); // bruto íntegro al conductor
   });
 });
 

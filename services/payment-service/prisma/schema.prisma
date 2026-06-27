@@ -50,6 +50,20 @@ enum PaymentStatus {
   @@schema("payment")
 }
 
+/// MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal). Determina la TASA de comisión:
+///  ON_DEMAND  → tasa CONFIGURABLE por el admin (CommissionConfig.onDemandRateBps).
+///  CARPOOLING → comisión 0 FIJA (cost-sharing: cobrar comisión sobre un viaje compartido sería lucro de
+///               la plataforma → ILEGAL hasta visto bueno legal). NO es admin-editable; subirla requiere ADR.
+/// La columna Payment.mode es NULLABLE: las filas legacy (pre-F2.7) se LEEN como ON_DEMAND (su comportamiento
+/// histórico: comisión global de env). El modo se determina en el PUNTO DE ENTRADA del cobro, NO en los
+/// contratos de eventos cross-service.
+enum PaymentMode {
+  ON_DEMAND
+  CARPOOLING
+
+  @@schema("payment")
+}
+
 enum PayoutStatus {
   PENDING
   PROCESSING
@@ -149,6 +163,10 @@ model Payment {
   /// Referencia externa del riel de pago (id de transacción Yape/Plin). Null hasta confirmar.
   externalRef     String?       @map("external_ref")
   status          PaymentStatus @default(PENDING)
+  /// MODO del cobro (F2.7): determina la TASA de comisión aplicada (ON_DEMAND configurable · CARPOOLING 0
+  /// legal-gated). NULLABLE para compat con filas legacy (pre-F2.7), que se LEEN como ON_DEMAND. Se setea en
+  /// el punto de entrada del cobro (consumer trip.completed → ON_DEMAND; charge service-rail → CARPOOLING).
+  mode            PaymentMode?  @default(ON_DEMAND)
   /// Intentos consumidos contra el gateway (BR-P02: máx 3 antes de DEBT).
   retries         Int           @default(0)
   /// Última razón de fallo (para soporte/observabilidad).
@@ -192,6 +210,23 @@ model Payment {
   /// Sirve a GET /payments/debt (bloqueo de nuevos viajes) por [passengerId, status].
   @@index([passengerId, status])
   @@map("payments")
+  @@schema("payment")
+}
+
+/// Comisión de plataforma por MODO, editable en caliente (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). SINGLETON
+/// (espejo de base_fare_config de trip-service): un solo registro GLOBAL. SOLO la tasa ON-DEMAND es
+/// configurable; la del CARPOOLING es 0 FIJO de dominio (CARPOOLING_COMMISSION_BPS) y NO vive acá — subirla
+/// requiere ADR + flag legal, jamás un PUT del admin. La tasa va en BASIS POINTS Int (0..10000; 2000 = 20%) —
+/// NUNCA float persistido para dinero/tasa. `version` = optimistic locking (CAS) en el reemplazo.
+model CommissionConfig {
+  id              String   @id
+  /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Se divide /10000 al APLICAR
+  /// (redondeo a céntimo Int en la fórmula commission()); jamás se persiste ni se opera como float.
+  onDemandRateBps Int      @default(2000) @map("on_demand_rate_bps")
+  version         Int      @default(0)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("commission_config")
   @@schema("payment")
 }
 

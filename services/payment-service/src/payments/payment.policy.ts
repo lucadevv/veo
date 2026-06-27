@@ -6,6 +6,51 @@
 import { addMoney, commission, money, subtractMoney, InvalidStateError } from '@veo/utils';
 import type { PaymentStatus } from '@veo/shared-types';
 
+/**
+ * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal). Union TIPADA — jamás un string suelto.
+ * Determina la TASA de comisión: `ON_DEMAND` usa la tasa configurable; `CARPOOLING` es 0 FIJO (ver
+ * CARPOOLING_COMMISSION_BPS). El modo se determina en el PUNTO DE ENTRADA del cobro en payment-service (NO se
+ * enriquecen los contratos de eventos cross-service): trip.completed → ON_DEMAND; charge service-rail → CARPOOLING.
+ */
+export const ChargeMode = {
+  ON_DEMAND: 'ON_DEMAND',
+  CARPOOLING: 'CARPOOLING',
+} as const;
+export type ChargeMode = (typeof ChargeMode)[keyof typeof ChargeMode];
+
+/**
+ * Tope de basis points de una tasa (100% = 10000 bps). La tasa de comisión se persiste y se transporta como
+ * Int en bps (0..BPS_DENOMINATOR), NUNCA como float — y se divide por esto SOLO al aplicar (redondeo a céntimo
+ * Int en `commission()`). Un único punto define el denominador (cero literales 10000 regados por el código).
+ */
+export const BPS_DENOMINATOR = 10_000;
+
+/**
+ * NUDO LEGAL (ADR-015 §11.2): la comisión del CARPOOLING es 0 FIJO. Es cost-sharing — cobrar comisión sobre un
+ * viaje COMPARTIDO sería lucro de la plataforma, ILEGAL hasta el visto bueno legal. NO es admin-editable: la
+ * resolución por modo devuelve SIEMPRE 0 para CARPOOLING; no hay fila en commission_config para él. Subirla
+ * requiere un ADR + un flag legal explícito, JAMÁS un PUT del admin. Constante de dominio, cero strings mágicos.
+ */
+export const CARPOOLING_COMMISSION_BPS = 0;
+
+/** Convierte una tasa en basis points Int (0..10000) a la fracción 0..1 que consume `commission()`. Solo se
+ * aplica al COBRAR; el valor de dominio/persistido es SIEMPRE el Int en bps. */
+export function bpsToRate(bps: number): number {
+  if (!Number.isInteger(bps) || bps < 0 || bps > BPS_DENOMINATOR) {
+    throw new InvalidStateError(`tasa en bps inválida: ${bps} (esperado un entero 0..${BPS_DENOMINATOR})`);
+  }
+  return bps / BPS_DENOMINATOR;
+}
+
+/**
+ * Resuelve la tasa de comisión (en bps Int) para un MODO de cobro (F2.7). CARPOOLING → 0 SIEMPRE (legal-gated,
+ * constante de dominio). ON_DEMAND → la tasa configurada que provee el caller (la `CommissionConfig`, con su
+ * propia degradación honesta al env). Pura y testeable: el guard legal del carpooling vive ACÁ, un único punto.
+ */
+export function resolveCommissionBps(mode: ChargeMode, onDemandRateBps: number): number {
+  return mode === ChargeMode.CARPOOLING ? CARPOOLING_COMMISSION_BPS : onDemandRateBps;
+}
+
 export interface ChargeAmounts {
   /** Ticket bruto: incluye surge, EXCLUYE propinas. Base de la comisión. */
   grossCents: number;

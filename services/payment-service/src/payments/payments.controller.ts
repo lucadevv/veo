@@ -26,6 +26,7 @@ const PASSENGER_RAILS = [
   InternalAudience.ADMIN_RAIL,
 ] as const;
 import { PaymentsService } from './payments.service';
+import { ChargeMode } from './payment.policy';
 import {
   AddTipDto,
   ChangeMethodDto,
@@ -61,12 +62,18 @@ export class PaymentsController {
     summary:
       'Cobro idempotente de un viaje (BR-P01/P04). Reintento con misma dedupKey es idempotente',
   })
-  charge(@Body() dto: ChargeDto) {
+  charge(@Body() dto: ChargeDto, @CurrentRail() rail: InternalAudience | undefined) {
     return this.payments.charge({
       tripId: dto.tripId,
       grossCents: dto.grossCents,
       tipCents: dto.tipCents,
       method: dto.method,
+      // F2.7 · el MODO se determina en el PUNTO DE ENTRADA del cobro, por el RIEL (NO se enriquece el contrato
+      // REST cross-service): SERVICE_RAIL = SOLO booking-service disparando el cobro del carpooling (ADR-014
+      // §5.5) → CARPOOLING (comisión 0 legal-gated). Los rieles de cliente (public/driver/admin = los BFFs que
+      // cobran on-demand) → ON_DEMAND (tasa configurable). Conservador: un service-rail siempre cae a 0, jamás
+      // cobra comisión de carpooling de más.
+      mode: rail === InternalAudience.SERVICE_RAIL ? ChargeMode.CARPOOLING : ChargeMode.ON_DEMAND,
       payerRef: dto.payerRef,
       driverId: dto.driverId,
       dedupKey: dto.dedupKey,

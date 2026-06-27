@@ -39,11 +39,14 @@ import {
   assertCanAddTip,
   assertPaymentTransition,
   BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
+  bpsToRate,
+  ChargeMode,
   computeChargeAmounts,
   deriveBookingCancellationRefundDedupKey,
   deriveRefundIdempotencyKey,
   retryDelayMs,
 } from './payment.policy';
+import { CommissionService } from '../commission/commission.service';
 import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { Env } from '../config/env.schema';
 import type { DebtItem, DebtSummary } from './dto/payments.dto';
@@ -79,6 +82,13 @@ export interface ChargeInput {
   payerRef?: string;
   driverId?: string;
   dedupKey: string;
+  /**
+   * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2): determina la TASA de comisión. ON_DEMAND → tasa
+   * configurable; CARPOOLING → 0 FIJO (legal-gated). Lo SETEA el caller en el PUNTO DE ENTRADA del cobro (el
+   * consumer trip.completed → ON_DEMAND; el controller charge service-rail → CARPOOLING). Opcional por compat:
+   * ausente ⇒ ON_DEMAND (el comportamiento histórico de env), NUNCA CARPOOLING por defecto.
+   */
+  mode?: ChargeMode;
   /** Código de promoción opcional (Ola 2A). Se canjea y descuenta del total del pasajero. */
   promoCode?: string;
   /** Id del pasajero que paga (necesario para canjear la promo y resolver afiliación on-file). */
@@ -162,6 +172,11 @@ export class PaymentsService {
     // refunds (`payment_refund_backstop_total`) se emite acá (riel común de rechazo de refund), no solo en el
     // consumer Kafka — así cubre TAMBIÉN el rechazo ASÍNCRONO por callback del proveedor (applyRefundWebhookResult).
     @Optional() private readonly metrics?: PaymentMetrics,
+    // F2.7 · resuelve la tasa de comisión por MODO (ON_DEMAND configurable · CARPOOLING 0 legal-gated). @Optional
+    // + trailing por la MISMA razón que credit/metrics: los specs construyen el service a mano con menos args. Si
+    // NO está inyectado, el cobro cae a `this.commissionRate` del env (degradación honesta) y trata todo como
+    // ON_DEMAND — JAMÁS rompe el cobro por falta de la config.
+    @Optional() private readonly commission?: CommissionService,
   ) {
     this.commissionRate = config.getOrThrow<number>('COMMISSION_RATE');
     this.maxRetries = config.getOrThrow<number>('PAYMENT_MAX_RETRIES');
@@ -186,6 +201,19 @@ export class PaymentsService {
         `El cobro con ${method} no está habilitado en el gateway de pagos activo; elegí otro método`,
       );
     }
+  }
+
+  /**
+   * F2.7 · Resuelve la TASA de comisión (fracción 0..1 que consume `commission()`) para un MODO de cobro.
+   * CARPOOLING → 0 SIEMPRE (guard legal de dominio, ADR-015 §11.2). ON_DEMAND → la tasa configurable de
+   * CommissionConfig (bps Int → fracción al aplicar). DEGRADACIÓN HONESTA: sin CommissionService inyectado (DI
+   * ausente en tests) cae a `this.commissionRate` del env — NUNCA rompe el cobro por falta de la config. La tasa
+   * SIEMPRE nace como bps Int; el float solo aparece acá, al APLICARLA (redondeo a céntimo Int en `commission()`).
+   */
+  private async resolveChargeRate(mode: ChargeMode): Promise<number> {
+    if (mode === ChargeMode.CARPOOLING) return bpsToRate(0); // 0 fijo legal — no consulta config alguna.
+    if (!this.commission) return this.commissionRate; // DI ausente (tests) → fallback al env.
+    return bpsToRate(await this.commission.resolveRateBps(mode));
   }
 
   /**
@@ -251,10 +279,15 @@ export class PaymentsService {
       });
     }
 
+    // F2.7 · la TASA de comisión se resuelve por MODO (NO la global): CARPOOLING → 0 FIJO (legal-gated,
+    // ADR-015 §11.2); ON_DEMAND → la tasa configurable (CommissionConfig, con degradación honesta al env).
+    const mode = input.mode ?? ChargeMode.ON_DEMAND;
+    const rate = await this.resolveChargeRate(mode);
+
     const amounts = computeChargeAmounts(
       input.grossCents,
       input.tipCents ?? 0,
-      this.commissionRate,
+      rate,
       discountCents + creditCents,
     );
 
@@ -280,6 +313,7 @@ export class PaymentsService {
           commissionCents: amounts.commissionCents,
           feeCents: amounts.feeCents,
           method: input.method,
+          mode,
           payerRef: input.payerRef ?? null,
           status: 'PENDING',
         },
@@ -1831,6 +1865,9 @@ export class PaymentsService {
       grossCents: input.grossCents,
       tipCents: 0,
       method,
+      // El cobro on-demand entra por el evento trip.completed → modo ON_DEMAND (tasa configurable). El
+      // carpooling NUNCA pasa por acá: entra por POST /charge service-rail (controller), tageado CARPOOLING.
+      mode: ChargeMode.ON_DEMAND,
       driverId: input.driverId,
       dedupKey: input.dedupKey,
       promoCode: input.promoCode,

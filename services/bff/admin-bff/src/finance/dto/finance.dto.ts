@@ -39,3 +39,18 @@ export class RefundDto {
   @MinLength(3)
   reason!: string;
 }
+
+/**
+ * Reemplaza la tasa de comisión ON-DEMAND (F2.7). La tasa va en BASIS POINTS Int (0..10000; 2000 = 20%) —
+ * jamás float. El carpooling NO se configura acá (0 fijo legal · ADR-015 §11.2). `expectedVersion` = CAS.
+ */
+export class ReplaceCommissionDto {
+  @IsInt()
+  @Min(0)
+  @Max(10_000)
+  onDemandRateBps!: number;
+
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}

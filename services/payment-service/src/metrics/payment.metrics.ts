@@ -81,3 +81,22 @@ export class PaymentMetrics {
     this.payoutDisbursement.inc({ event });
   }
 }
+
+/**
+ * F2.7 · degradación de la comisión ON_DEMAND a la tasa del env (`COMMISSION_RATE`). Cuando `commission_config`
+ * está caído/sin migrar, el cobro on-demand se liquida con la tasa del ENV, que puede DIVERGIR de la que el
+ * admin configuró → impacto DIRECTO en plata (sub/sobre-comisión silenciosa). Un valor SOSTENIDO distingue una
+ * config ROTA (mal deploy/migración) de un blip transitorio de DB → señal scrapeable para alertar. Módulo-level
+ * (sin DI): CommissionService lo llama directo, igual que el patrón de trip-metrics, sin tocar su constructor.
+ */
+const commissionDegradedTotal: CounterLike = getOrCreateCounter(
+  'payment_commission_degraded_total',
+  'Veces que el cobro on-demand cayó a la tasa de comisión del env (commission_config no disponible). ' +
+    'Valor SOSTENIDO = config rota, no un blip transitorio.',
+  [] as const,
+);
+
+/** Bumpea el contador de degradación de la comisión on-demand (+ el caller logea = observabilidad completa). */
+export function bumpCommissionDegraded(): void {
+  commissionDegradedTotal.inc({});
+}
