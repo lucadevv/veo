@@ -11,10 +11,13 @@
  * a la fórmula de tarifa — eso es B5-1 (con shadow-compare). Acá solo vive el motor + la lectura.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { ConflictError } from '@veo/utils';
+import { ConflictError, ValidationError } from '@veo/utils';
 import type { EnergySource, EnergySourcePrice } from '@veo/shared-types';
 import { bumpPricingConfigChanged } from '../trips/trip-metrics';
+import { missingRequiredSources } from './energy-requirements';
+import type { Env } from '../config/env.schema';
 import {
   ENERGY_CATALOG_REPO,
   ENERGY_CATALOG_SINGLETON_ID,
@@ -50,6 +53,9 @@ export class EnergyCatalogService {
     @Optional()
     @Inject(ENERGY_CATALOG_CACHE_TTL_MS)
     private readonly cacheTtlMs = 10_000,
+    // F2.1b · para gatear la guarda de completitud del replace() según el flip. @Optional: tests legacy
+    // construyen sin config (flip OFF → sin restricción, como en producción pre-flip).
+    @Optional() private readonly config?: ConfigService<Env, true>,
   ) {}
 
   /** Carga el catálogo del repo (cacheado un slot). Miss/vencido → lee; cachea solo lecturas exitosas. */
@@ -95,6 +101,19 @@ export class EnergyCatalogService {
    * re-parsea defensivo (normaliza unit, descarta corruptos).
    */
   async replace(sources: EnergySourcePrice[], expectedVersion: number): Promise<EnergyCatalogView> {
+    // F2.1b · con el flip ON, un PUT no puede dejar el catálogo incompleto: el create autoritativo lanzaría
+    // InvalidStateError para las ofertas cuya fuente quedó sin precio → caída de creación de viajes. Guardamos
+    // la MUTACIÓN (misma regla que el boot-guard), rechazando ANTES de persistir. Flip OFF → sin restricción.
+    if (this.config?.get('PRICING_ENERGY_MODEL_ENABLED')) {
+      const missing = missingRequiredSources(new Set<EnergySource>(sources.map((s) => s.sourceId)));
+      if (missing.length > 0) {
+        throw new ValidationError(
+          'El modelo de energía está activo: el catálogo debe incluir un precio para todas las fuentes de ' +
+            'las ofertas visibles. Faltan fuentes — agregalas antes de guardar.',
+          { missingSources: missing },
+        );
+      }
+    }
     const nextVersion = expectedVersion + 1;
     const sourcesJson = sources.map((s) => ({
       sourceId: s.sourceId,

@@ -56,7 +56,14 @@ import {
 } from './domain/trip-state-machine';
 import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
-import { calculateFare, shadowCompareFare, deriveFuelPerKmCents } from './domain/fare';
+import {
+  calculateFare,
+  calculateOfferingFare,
+  applyOfferingPricing,
+  shadowCompareFare,
+  deriveFuelPerKmCents,
+} from './domain/fare';
+import { resolveAuthoritativeEnergy } from '../pricing/energy-requirements';
 import { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
@@ -510,9 +517,12 @@ export class TripsService {
     const fuelPerKmCents = await this.resolveFuelPerKmCents();
     // B5-1.d · con el FLIP activo, la energía por oferta (precio fuente ÷ rendimiento) es el insumo
     // autoritativo; con el flag OFF queda en 0 y manda el fuel viejo. Solo se resuelve si hace falta.
-    const energyPerKmCents = this.energyModelEnabled
-      ? await this.resolveEnergyPerKmCents(offering)
-      : 0;
+    // Solo FIXED usa la energía en la fórmula; PUJA la ignora (el bid ES la tarifa). Resolverla en PUJA
+    // acoplaría la puja al catálogo y la haría reventar sin razón si el catálogo cae → gate por modo.
+    const energyPerKmCents =
+      this.energyModelEnabled && mode === PricingMode.FIXED
+        ? await resolveAuthoritativeEnergy(this.energyCatalog, offering)
+        : 0;
     // Piso AUTORITATIVO de la puja para ESTA oferta (ADR 010 §9.3): config del admin per-(zona, oferta).
     const bidFloorCents = await this.resolveBidFloorCents(origin, offering.id);
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
@@ -1612,16 +1622,41 @@ export class TripsService {
     const waypoints = readWaypoints(trip);
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = Number(trip.surgeMultiplier.toString());
-    const fare = calculateFare({
+    // Re-cotiza con la MISMA política de la oferta del viaje (multiplier + mínima) y, bajo el flip + FIXED,
+    // la energía autoritativa — espejo del create (F2.1b). Sin esto, `calculateFare` base reseteaba la tarifa
+    // sin multiplier ni energía: un FIXED Premium/XL podía cambiar de destino (aun al mismo punto) y cobrar
+    // de menos. SIN piso contra `trip.fareCents`: un destino MÁS CERCA sí debe abaratar (a diferencia de la
+    // parada, que solo agrega ruta). El piso de la mínima de la oferta ya está dentro de las fórmulas.
+    const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
+    // El recargo de combustible (B3) se pliega en la rama flip-OFF — espejo COMPLETO del create FIXED, que
+    // resuelve y aplica el fuel (fixed-dispatch.strategy). En la rama flip-ON la energía pass-through lo
+    // reemplaza (calculateOfferingFare IGNORA fuelPerKmCents). Sin esto, cambiar de destino con fuel admin>0
+    // abarataba la tarifa por el componente de combustible (cobro-de-menos en el camino legacy, el ACTIVO hoy).
+    const fuelPerKmCents = await this.resolveFuelPerKmCents();
+    const fareInput = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       surgeMultiplier: surge,
       childMode: trip.childMode,
-    });
+      fuelPerKmCents,
+    };
+    const fare =
+      this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
+        ? calculateOfferingFare(
+            fareInput,
+            offering.pricing,
+            await resolveAuthoritativeEnergy(this.energyCatalog, offering),
+          )
+        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
+      // CAS: el gate de estado (DESTINATION_EDITABLE) se RE-VALIDA dentro de la tx (viaja en el WHERE). El
+      // chequeo de arriba se hizo sobre una lectura previa al `maps.route` (cientos de ms); una carrera que
+      // sacó el viaje de un estado editable (start/complete/cancel) en esa ventana → count 0 → ConflictError.
+      // Sin esto, el update por-id pisaría destino+fareCents en un viaje ya no editable (mutación financiera
+      // post-completion). Patrón espejo del CAS de accept()/waypoint.
+      const claim = await tx.trip.updateMany({
+        where: { id, status: { in: [...DESTINATION_EDITABLE] } },
         data: {
           destLat: destination.lat,
           destLon: destination.lon,
@@ -1631,6 +1666,10 @@ export class TripsService {
           fareCents: fare.cents,
         },
       });
+      if (claim.count === 0) {
+        throw new ConflictError('No se puede cambiar el destino en el estado actual', { id });
+      }
+      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
       await recordTripEvent(tx, id, 'trip.destination_changed', {
         destination,
         previousFareCents: trip.fareCents,

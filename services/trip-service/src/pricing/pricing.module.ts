@@ -11,6 +11,7 @@ import { FuelSurchargeService, FUEL_SURCHARGE_CACHE_TTL_MS } from './fuel-surcha
 import { EnergyCatalogService, ENERGY_CATALOG_CACHE_TTL_MS } from './energy-catalog.service';
 import { BidFloorService, BID_FLOOR_CACHE_TTL_MS } from './bid-floor.service';
 import { PricingCacheConsumer } from './pricing-cache.consumer';
+import { EnergyModelBootGuard } from './energy-model-boot.guard';
 import { AdminIdentityGuard } from './admin-identity.guard';
 import { CatalogModule } from '../catalog/catalog.module';
 import {
@@ -67,6 +68,8 @@ const bidFloorCacheTtlProvider: Provider = {
     // Invalidación instantánea cross-réplica del cache de los 5 servicios de config (arranca en
     // onModuleInit del bootstrap Kafka; PricingModule está en el grafo vía TripsModule → AppModule).
     PricingCacheConsumer,
+    // F2.1b · fail-fast al arranque: flip ON + catálogo de energía sin poblar → no levanta (anti cobro-de-menos).
+    EnergyModelBootGuard,
     AdminIdentityGuard,
     scheduleCacheTtlProvider,
     fuelCacheTtlProvider,

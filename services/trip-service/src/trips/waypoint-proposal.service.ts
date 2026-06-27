@@ -26,14 +26,17 @@ import {
   geoPointSchema,
   type LatLon,
 } from '@veo/utils';
-import { TripStatus } from '@veo/shared-types';
+import { PricingMode, TripStatus } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { PrismaService } from '../infra/prisma.service';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
-import { applyOfferingPricing, calculateFare } from './domain/fare';
+import { applyOfferingPricing, calculateFare, calculateOfferingFare } from './domain/fare';
 import { resolveTripOffering } from './domain/offering';
+import { EnergyCatalogService } from '../pricing/energy-catalog.service';
+import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
+import { resolveAuthoritativeEnergy } from '../pricing/energy-requirements';
 import { WaypointProposalStatus, computeFareDelta, isExpired } from './domain/waypoint-proposal';
 import { readWaypoints } from './trip-view.mapper';
 import { MAX_WAYPOINTS } from './dto/trip.dto';
@@ -76,13 +79,30 @@ export interface RespondWaypointResult {
 export class WaypointProposalService {
   private readonly logger = new Logger(WaypointProposalService.name);
   private readonly ttlSeconds: number;
+  private readonly energyModelEnabled: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
+    // F2.1b · catálogo de energía para el re-quote autoritativo bajo el flip. @Optional: tests legacy
+    // construyen sin él (flip OFF → política vieja, como en producción pre-flip).
+    @Optional() private readonly energyCatalog?: EnergyCatalogService,
+    // F2.1b · recargo de combustible (B3) para plegarlo en el re-quote flip-OFF — espejo del create.
+    @Optional() private readonly fuel?: FuelSurchargeService,
   ) {
     this.ttlSeconds = config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
+    this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
+  }
+
+  /** B3 · recargo de combustible por km vigente. Sin servicio (tests) o lectura caída → 0 (degradación honesta). */
+  private async resolveFuelPerKmCents(): Promise<number> {
+    if (!this.fuel) return 0;
+    try {
+      return await this.fuel.getPerKmCents();
+    } catch {
+      return 0;
+    }
   }
 
   // ───────────────────────────── propose ─────────────────────────────
@@ -152,13 +172,26 @@ export class WaypointProposalService {
     // "reemplazar" vs "delta marginal aditivo sobre lo negociado" requiere su propio ADR).
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
     const surge = Number(trip.surgeMultiplier.toString());
-    const base = calculateFare({
+    // El combustible (B3) se pliega en la rama flip-OFF (espejo del create); en flip-ON la energía
+    // pass-through lo reemplaza (calculateOfferingFare ignora fuelPerKmCents).
+    const fareInput = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       surgeMultiplier: surge,
       childMode: trip.childMode,
-    });
-    const policyFare = applyOfferingPricing(base, offering.pricing);
+      fuelPerKmCents: await this.resolveFuelPerKmCents(),
+    };
+    // F2.1b · bajo el flip + FIXED la ruta extendida se cotiza con la energía AUTORITATIVA (espejo del
+    // create): sin esto el tramo nuevo se cobraba sin energía → cobro-de-menos. PUJA/flip-OFF: política
+    // vieja (multiplier + mínima). El piso monótono de abajo (Math.max) sigue cubriendo ambos.
+    const policyFare =
+      this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
+        ? calculateOfferingFare(
+            fareInput,
+            offering.pricing,
+            await resolveAuthoritativeEnergy(this.energyCatalog, offering),
+          )
+        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
     // Invariante de dominio: agregar una parada NUNCA abarata el viaje (delta ≥ 0). Piso en la tarifa
     // VIGENTE: cubre la puja con bid generoso (no se regala plata reseteando la negociación hacia
     // abajo) y rutas raras del motor. En FIXED es no-op (la fórmula es monótona con la ruta).
@@ -303,10 +336,15 @@ export class WaypointProposalService {
         where: { id: proposalId, status: WaypointProposalStatus.PROPOSED },
         data: { status: WaypointProposalStatus.ACCEPTED, respondedAt: new Date() },
       });
-      if (moved.count === 0) return false; // otro actor ganó la carrera
+      if (moved.count === 0) return false; // otro actor ganó la carrera (doble-accept/expire/reject)
 
-      await tx.trip.update({
-        where: { id: tripId },
+      // CAS de ESTADO DEL VIAJE: solo pisa la tarifa si el viaje SIGUE en curso. El gate de estado (319) se
+      // chequeó sobre una lectura previa al `maps.route` (cientos de ms); una carrera que terminó el viaje
+      // (cancel del pasajero, watchdog, redelivery/multi-device) en esa ventana → count 0 → throw DENTRO de la
+      // tx, que REVIERTE el CAS de la propuesta (atómico). Evita la mutación financiera post-completion (mismo
+      // invariante que el CAS de changeDestination).
+      const tripMoved = await tx.trip.updateMany({
+        where: { id: tripId, status: { in: [...WAYPOINT_PROPOSABLE] } },
         data: {
           waypoints: waypointsJson,
           fareCents: proposal.newFareCents,
@@ -315,6 +353,11 @@ export class WaypointProposalService {
           routePolyline: route.polyline || null,
         },
       });
+      if (tripMoved.count === 0) {
+        throw new ConflictError('El viaje ya no está en curso; no se puede aplicar la parada', {
+          tripId,
+        });
+      }
       await emitWaypointAccepted(tx, eventData);
       return true;
     });

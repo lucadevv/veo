@@ -3,7 +3,9 @@
  * el servicio depende del puerto), captura el outbox de la tx. CAS idéntico a fuel/catalog.
  */
 import { describe, expect, it } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
 import { EnergySource, EnergyUnit, type EnergySourcePrice } from '@veo/shared-types';
+import { ValidationError } from '@veo/utils';
 import { EnergyCatalogService } from './energy-catalog.service';
 import type {
   EnergyCatalogRepository,
@@ -71,6 +73,11 @@ const ELEC: EnergySourcePrice = {
   unit: EnergyUnit.KWH,
   pricePerUnitCents: 65,
 };
+const DIESEL: EnergySourcePrice = {
+  sourceId: EnergySource.DIESEL,
+  unit: EnergyUnit.LITER,
+  pricePerUnitCents: 500,
+};
 
 describe('EnergyCatalogService (B5)', () => {
   it('sin fila (DB vacía) → getCatalog vacío y getPriceFor null (degradación honesta)', async () => {
@@ -110,5 +117,34 @@ describe('EnergyCatalogService (B5)', () => {
     await expect(service.replace([ELEC], 6)).rejects.toThrow(/cambió/);
     expect(repo.outboxEvents).toEqual([]);
     expect((await service.getCatalog()).version).toBe(7); // intacto
+  });
+});
+
+/** ConfigService mínimo con el flip ON (lo único que el guard de completitud del replace lee). */
+const flipOnConfig = {
+  get: (k: string) => (k === 'PRICING_ENERGY_MODEL_ENABLED' ? true : undefined),
+} as unknown as ConfigService<Record<string, unknown>, true>;
+
+describe('EnergyCatalogService · F2.1b · guarda de completitud del replace bajo el flip', () => {
+  it('flip ON + PUT que OMITE fuentes requeridas (solo ELEC) → ValidationError, NO persiste', async () => {
+    const repo = new FakeRepo({ sources: [GAS], version: 4, updatedAt: new Date(0).toISOString() });
+    const service = new EnergyCatalogService(repo, 0, flipOnConfig);
+    // Guardar solo eléctrico dejaría gasolina-90 (RIDE) y diésel (ambulancia/grúa) sin precio → caída.
+    await expect(service.replace([ELEC], 4)).rejects.toBeInstanceOf(ValidationError);
+    expect(repo.outboxEvents).toEqual([]); // rechazó ANTES de persistir
+    expect((await service.getCatalog()).version).toBe(4); // intacto
+  });
+
+  it('flip ON + PUT que omite DIESEL (vertical oculta encendible por overlay) → ValidationError', async () => {
+    const repo = new FakeRepo({ sources: [GAS], version: 4, updatedAt: new Date(0).toISOString() });
+    const service = new EnergyCatalogService(repo, 0, flipOnConfig);
+    // Solo gasolina deja la ambulancia/grúa (DIESEL) sin precio → si el admin la enciende, outage.
+    await expect(service.replace([GAS], 4)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('flip ON + PUT COMPLETO (gasolina-90 + diésel) → procede normal', async () => {
+    const repo = new FakeRepo({ sources: [GAS], version: 4, updatedAt: new Date(0).toISOString() });
+    const service = new EnergyCatalogService(repo, 0, flipOnConfig);
+    expect((await service.replace([GAS, DIESEL], 4)).version).toBe(5);
   });
 });

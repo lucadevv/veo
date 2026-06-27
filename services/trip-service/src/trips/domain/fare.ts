@@ -9,8 +9,12 @@
  * porque el combustible es un costo POR DISTANCIA; así escala con surge y con el multiplier de la oferta
  * (una moto ×0.55 consume menos que un XL ×1.6 — el multiplier ya aproxima el consumo por clase).
  */
-import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
-import { CHILD_MODE_FEE_CENTS, type OfferingPricingPolicy } from '@veo/shared-types';
+import { money, scaleMoney, addMoney, type Money, ValidationError, InvalidStateError } from '@veo/utils';
+import {
+  CHILD_MODE_FEE_CENTS,
+  type OfferingPricingPolicy,
+  type OfferingSpec,
+} from '@veo/shared-types';
 
 /** Banderazo base: S/ 6.00. */
 export const BASE_FARE_CENTS = 600;
@@ -43,6 +47,26 @@ export function deriveFuelPerKmCents(pricePerLiterCents: number, kmPerLiter: num
   if (!Number.isFinite(pricePerLiterCents) || pricePerLiterCents < 0) return 0;
   if (!Number.isFinite(kmPerLiter) || kmPerLiter <= 0) return 0;
   return Math.round(pricePerLiterCents / kmPerLiter);
+}
+
+/**
+ * F2.1b · costo de energía por km AUTORITATIVO (flip ON) para una oferta, dado el precio de su fuente.
+ * A diferencia del shadow, `priceOrNull === null` (fuente sin cargar) NO cae a 0: el create cobraría de
+ * menos (~13% en rutas largas). Es config inválida del operador → InvalidStateError (fail-LOUD, nunca
+ * silencioso). UNA definición del invariante, compartida por createTrip, changeDestination y el re-quote
+ * de parada (mid-trip) — los tres caminos que cotizan una tarifa firme.
+ */
+export function authoritativeEnergyPerKmCents(
+  offering: OfferingSpec,
+  priceOrNull: number | null,
+): number {
+  if (priceOrNull === null) {
+    throw new InvalidStateError(
+      'Modelo de energía activo pero sin precio para la fuente de la oferta — poblá el catálogo',
+      { offering: offering.id, energySource: offering.referenceEnergySourceId },
+    );
+  }
+  return deriveFuelPerKmCents(priceOrNull, offering.referenceEfficiency);
 }
 
 export interface FareInput {

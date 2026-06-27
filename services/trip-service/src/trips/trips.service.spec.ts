@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
-import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '@veo/utils';
+import {
+  ConflictError,
+  InvalidStateError,
+  NotFoundError,
+  RateLimitError,
+  ValidationError,
+} from '@veo/utils';
 import { EVENT_SCHEMAS } from '@veo/events';
 import {
   TripStatus,
@@ -1092,6 +1098,84 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     await expect(
       svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  // F2.1b · el re-quote del destino aplica la política de la oferta + (flip ON) la energía autoritativa.
+  const longRoute10k = {
+    route: async () => ({
+      distanceMeters: 10000,
+      durationSeconds: 1200,
+      polyline: 'new',
+      geometry: { type: 'LineString' as const, coordinates: [] },
+    }),
+  };
+  const flipOnConfig = {
+    get: (k: string) => (k === 'PRICING_ENERGY_MODEL_ENABLED' ? true : undefined),
+  } as never;
+  const energyCatalogOf = (price: number | null) =>
+    ({ getPriceFor: () => Promise.resolve(price) }) as never;
+
+  it('F2.1b · FIXED + flip ON: re-cotiza con multiplier + energía (no resetea a fórmula base)', async () => {
+    // Confort (×1.25, rendimiento 11), ruta 10 km/20 min. Servicio 2400 × 1.25 = 3000; energía gasolina
+    // 1100¢/L → 100¢/km → +100×10 = 1000 ⇒ 4000. SIN el fix, calculateFare base daba 2400 (sub-cobro).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', category: 'veo_confort', fareCents: 3000 }),
+    );
+    const svc = new TripsService(
+      prisma as never,
+      longRoute10k as never,
+      flipOnConfig,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      energyCatalogOf(1100),
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(4000);
+  });
+
+  it('F2.1b · FIXED + flip OFF: pliega el recargo de combustible B3 (no lo descarta como antes)', async () => {
+    // Económico (×1.0), ruta 10 km/20 min, fuel admin 40¢/km. Con fuel: 600 + (120+40)·10 + 30·20 = 2800.
+    // SIN el fix, calculateFare lo defaulteaba a 0 → 2400 (cobro-de-menos del componente combustible, flip OFF
+    // = el camino ACTIVO por default).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const fuel = { getPerKmCents: async () => 40 } as never;
+    const svc = new TripsService(
+      prisma as never,
+      longRoute10k as never,
+      undefined, // config (flip OFF)
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      fuel, // FuelSurchargeService (posición 7)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2800);
+  });
+
+  it('F2.1b · FIXED + flip ON + catálogo VACÍO → InvalidStateError (nunca cobra de menos)', async () => {
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', category: 'veo_confort', fareCents: 3000 }),
+    );
+    const svc = new TripsService(
+      prisma as never,
+      longRoute10k as never,
+      flipOnConfig,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      energyCatalogOf(null),
+    );
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toBeInstanceOf(InvalidStateError);
   });
 });
 
