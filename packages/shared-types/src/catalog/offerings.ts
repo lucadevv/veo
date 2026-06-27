@@ -32,9 +32,10 @@ export const OfferingId = {
   VEO_ECONOMICO: 'veo_economico',
   VEO_CONFORT: 'veo_confort',
   VEO_XL: 'veo_xl',
-  // B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
+  // F2.3 (ADR-017 §1.2) · tier PREMIUM: alta gama + unidad reciente. Oferta VISIBLE (defaultEnabled:true).
+  VEO_PREMIUM: 'veo_premium',
+  // B5-4 · verticales especiales: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
   // desbloquea por overlay (feature paga). ids = contrato INMUTABLE, igual que los de arriba.
-  VEO_ECONOMICO_EV: 'veo_economico_ev',
   VEO_AMBULANCE: 'veo_ambulance',
   VEO_TOW: 'veo_tow',
   VEO_MECHANIC: 'veo_mechanic',
@@ -143,7 +144,7 @@ export interface OfferingSpec {
  * El catálogo — la FUENTE de multiplicadores y mínimas (Lote C consumado): el preview del
  * public-bff (`maps/fare.ts`) y trip-service (FixedDispatchStrategy + re-quote de paradas) los
  * consumen de acá. Cambiar un número acá cambia el PRECIO en todos lados:
- * moto ×0.55/S\/3.00 · económico ×1.0/S\/5.00 · confort ×1.25/S\/5.00 · xl ×1.6/S\/5.00.
+ * moto ×0.55/S\/3.00 · económico ×1.0/S\/5.00 · normal ×1.25/S\/5.00 · premium ×1.8/S\/8.00 · xl ×1.6/S\/5.00.
  */
 export const OFFERINGS = {
   [OfferingId.VEO_MOTO]: {
@@ -208,27 +209,30 @@ export const OFFERINGS = {
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,
     defaultEnabled: true,
+    sortOrder: 4,
+  },
+  [OfferingId.VEO_PREMIUM]: {
+    id: OfferingId.VEO_PREMIUM,
+    labelKey: 'offering.veo_premium.name',
+    icon: OfferingIcon.CAR, // no hay token premium; CAR es seguro. (Glyph premium dedicado = follow-up de UX.)
+    vehicleClass: VehicleClass.CAR,
+    serviceType: ServiceType.RIDE,
+    referenceEnergySourceId: EnergySource.GASOLINE_90,
+    referenceEfficiency: 9, // km/L (premium, motor mayor)
+    pricing: { multiplier: 1.8, minFareCents: 800 },
+    // Premium = alta gama (segmento PREMIUM) + unidad nueva (<=5 años). La FOTO del vehículo (REQUERIDA
+    // para aprobar, ya capturada en onboarding) es la evidencia del operador para asignar segmento PREMIUM.
+    // ADR-017 §1.2.
+    requires: { minSegment: VehicleSegment.PREMIUM, maxAgeYears: 5 },
+    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    flow: OfferingFlow.STANDARD,
+    defaultEnabled: true,
     sortOrder: 3,
   },
 
-  // ── B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
+  // ── B5-4 · verticales especiales: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
   // habilita por overlay cuando se venda la feature. Los pricings/eficiencias son referencias iniciales
   // que el operador afina; lo importante acá es que la LÓGICA exista y el matching las soporte. ──
-  [OfferingId.VEO_ECONOMICO_EV]: {
-    id: OfferingId.VEO_ECONOMICO_EV,
-    labelKey: 'offering.veo_economico_ev.name',
-    icon: OfferingIcon.EV,
-    vehicleClass: VehicleClass.CAR,
-    serviceType: ServiceType.RIDE,
-    // EV = categoría de primera clase con su PROPIA fuente de energía (kWh). cost/km = precio_kWh ÷ efic.
-    referenceEnergySourceId: EnergySource.ELECTRIC,
-    referenceEfficiency: 6, // km/kWh (auto eléctrico típico)
-    pricing: { multiplier: 1.0, minFareCents: 500 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
-    flow: OfferingFlow.STANDARD,
-    defaultEnabled: false,
-    sortOrder: 4,
-  },
   [OfferingId.VEO_AMBULANCE]: {
     id: OfferingId.VEO_AMBULANCE,
     labelKey: 'offering.veo_ambulance.name',

@@ -271,8 +271,8 @@ const ROUTE: RouteResult = {
 const ORIGIN = { lat: -12.0464, lng: -77.0428 };
 const DESTINATION = { lat: -12.1211, lng: -77.0297 };
 
-// B5-4: las ofertas VISIBLES por default (las 3 RIDE + moto). Las verticales (ambulancia/grúa/mecánico/EV)
-// nacen ocultas (defaultEnabled:false) → no aparecen en el quote salvo que el admin las habilite.
+// B5-4/F2.3: las ofertas VISIBLES por default (económico/normal/premium/xl; moto diferida). Las verticales
+// (ambulancia/grúa/mecánico) nacen ocultas (defaultEnabled:false) → no aparecen en el quote salvo que el admin las habilite.
 const VISIBLE_IDS = OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => o.id);
 
 describe('MapsService.quote', () => {

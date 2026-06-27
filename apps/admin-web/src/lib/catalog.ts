@@ -15,9 +15,10 @@ import type { CatalogOverride } from '@/lib/api/schemas';
 const OFFERING_NAMES = {
   [OfferingId.VEO_MOTO]: 'VEO Moto',
   [OfferingId.VEO_ECONOMICO]: 'VEO Económico',
-  [OfferingId.VEO_CONFORT]: 'VEO Confort',
+  // F2.3 (ADR-017 §1.2) · Confort renombrado a "Normal" (solo el nombre; el id veo_confort es contrato).
+  [OfferingId.VEO_CONFORT]: 'VEO Normal',
   [OfferingId.VEO_XL]: 'VEO XL',
-  [OfferingId.VEO_ECONOMICO_EV]: 'VEO Económico Eléctrico',
+  [OfferingId.VEO_PREMIUM]: 'VEO Premium',
   [OfferingId.VEO_AMBULANCE]: 'VEO Ambulancia',
   [OfferingId.VEO_TOW]: 'VEO Grúa',
   [OfferingId.VEO_MECHANIC]: 'VEO Mecánico',

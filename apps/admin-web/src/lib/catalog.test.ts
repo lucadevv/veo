@@ -20,7 +20,11 @@ describe('offeringLabel · nombres del catálogo en el panel admin', () => {
     expect(offeringLabel(OfferingId.VEO_AMBULANCE)).toBe('VEO Ambulancia');
     expect(offeringLabel(OfferingId.VEO_TOW)).toBe('VEO Grúa');
     expect(offeringLabel(OfferingId.VEO_MECHANIC)).toBe('VEO Mecánico');
-    expect(offeringLabel(OfferingId.VEO_ECONOMICO_EV)).toBe('VEO Económico Eléctrico');
+  });
+
+  it('F2.3 · premium tiene nombre legible y Confort se renombró a "VEO Normal"', () => {
+    expect(offeringLabel(OfferingId.VEO_PREMIUM)).toBe('VEO Premium');
+    expect(offeringLabel(OfferingId.VEO_CONFORT)).toBe('VEO Normal');
   });
 
   it('degradación honesta: un id desconocido (server más nuevo que el admin) cae al id crudo', () => {

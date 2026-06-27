@@ -45,15 +45,15 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
   });
 
   // ADR 013 (Lote C): el catálogo ya NO se define en fare.ts — es OFFERING_LIST de @veo/shared-types.
-  it('el catálogo (OFFERING_LIST) incluye el tier MOTO y las ofertas de auto (moto→económico→premium)', () => {
-    // B5-4: OFFERING_LIST es el catálogo COMPLETO (4 RIDE visibles + 4 verticales ocultas por
-    // defaultEnabled:false). El quote filtra las ocultas; acá verificamos el catálogo base entero.
+  it('el catálogo (OFFERING_LIST) incluye el tier MOTO y las ofertas de auto (moto→económico→normal→premium→xl)', () => {
+    // B5-4/F2.3: OFFERING_LIST es el catálogo COMPLETO (5 RIDE visibles +premium, 3 verticales ocultas
+    // por defaultEnabled:false). El quote filtra las ocultas; acá verificamos el catálogo base entero.
     expect(OFFERING_LIST.map((o) => o.id)).toEqual([
       'veo_moto',
       'veo_economico',
       'veo_confort',
+      'veo_premium',
       'veo_xl',
-      'veo_economico_ev',
       'veo_ambulance',
       'veo_tow',
       'veo_mechanic',

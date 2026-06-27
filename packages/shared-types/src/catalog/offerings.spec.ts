@@ -26,7 +26,8 @@ describe('catálogo efectivo (overlay editable en caliente · B1)', () => {
     expect(resolved.find((o) => o.id === OfferingId.VEO_AMBULANCE)?.enabled).toBe(false);
     expect(resolved.find((o) => o.id === OfferingId.VEO_TOW)?.enabled).toBe(false);
     expect(resolved.find((o) => o.id === OfferingId.VEO_MECHANIC)?.enabled).toBe(false);
-    expect(resolved.find((o) => o.id === OfferingId.VEO_ECONOMICO_EV)?.enabled).toBe(false);
+    // F2.3 · premium es una RIDE VISIBLE (defaultEnabled:true).
+    expect(resolved.find((o) => o.id === OfferingId.VEO_PREMIUM)?.enabled).toBe(true);
     // Conserva el orden por sortOrder de la base.
     expect(resolved.map((o) => o.id)).toEqual(OFFERING_LIST.map((o) => o.id));
   });
@@ -298,21 +299,22 @@ describe('isEligibleForOffering (B5-3.2 · vehículo ∧ conductor)', () => {
   });
 });
 
-describe('verticales especiales + EV (B5-4 · codeadas pero OCULTAS)', () => {
+describe('verticales especiales (B5-4 · codeadas pero OCULTAS)', () => {
   const HIDDEN = [
     OfferingId.VEO_AMBULANCE,
     OfferingId.VEO_TOW,
     OfferingId.VEO_MECHANIC,
-    OfferingId.VEO_ECONOMICO_EV,
   ];
 
-  it('sin overlay, el quote (activeOfferings) muestra SOLO las 3 RIDE de AUTO, NO moto ni verticales', () => {
+  it('sin overlay, el quote (activeOfferings) muestra SOLO las 4 RIDE de AUTO, NO moto ni verticales', () => {
     // Ola 1 "solo autos": la moto (Ola 2B) está DIFERIDA (defaultEnabled:false) → fuera del quote por
     // defecto, igual que las verticales. El admin la reactiva por overlay cuando se lance el tier moto.
+    // F2.3: premium (sortOrder 3) entra entre confort y xl.
     const active = activeOfferings(null).map((o) => o.id);
     expect(active).toEqual([
       OfferingId.VEO_ECONOMICO,
       OfferingId.VEO_CONFORT,
+      OfferingId.VEO_PREMIUM,
       OfferingId.VEO_XL,
     ]);
     expect(active).not.toContain(OfferingId.VEO_MOTO);
@@ -336,7 +338,13 @@ describe('verticales especiales + EV (B5-4 · codeadas pero OCULTAS)', () => {
     expect(amb.flow).toBe('EMERGENCY');
   });
 
-  it('EV es una oferta con su propia fuente de energía ELECTRIC (km/kWh)', () => {
-    expect(OFFERINGS[OfferingId.VEO_ECONOMICO_EV].referenceEnergySourceId).toBe('ELECTRIC');
+  it('F2.3 · premium es una RIDE VISIBLE que exige segmento PREMIUM + unidad reciente (<=5 años)', () => {
+    const premium = OFFERINGS[OfferingId.VEO_PREMIUM];
+    expect(premium.defaultEnabled).toBe(true);
+    expect(premium.requires).toEqual({
+      minSegment: VehicleSegment.PREMIUM,
+      maxAgeYears: 5,
+    });
+    expect(premium.pricing).toEqual({ multiplier: 1.8, minFareCents: 800 });
   });
 });

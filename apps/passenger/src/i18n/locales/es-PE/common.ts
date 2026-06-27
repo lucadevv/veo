@@ -498,12 +498,13 @@ export const common = {
   offering: {
     veo_moto: {name: 'VEO Moto'},
     veo_economico: {name: 'VEO Económico'},
-    veo_confort: {name: 'VEO Confort'},
+    // F2.3 (ADR-017 §1.2) · Confort renombrado a "Normal" (solo el nombre visible; el id veo_confort es contrato).
+    veo_confort: {name: 'VEO Normal'},
     veo_xl: {name: 'VEO XL'},
-    // B5-vert · verticales especiales + EV: codeadas pero OCULTAS (defaultEnabled:false). El i18n nativo
+    veo_premium: {name: 'VEO Premium'},
+    // B5-vert · verticales especiales: codeadas pero OCULTAS (defaultEnabled:false). El i18n nativo
     // existe para cuando el admin las habilite (la feature pagable); mientras estén ocultas el quote no las
     // cotiza, así que estas claves no se renderizan. Mismos textos que OFFERING_DISPLAY_NAMES del public-bff.
-    veo_economico_ev: {name: 'VEO Económico Eléctrico'},
     veo_ambulance: {name: 'VEO Ambulancia'},
     veo_tow: {name: 'VEO Grúa'},
     veo_mechanic: {name: 'VEO Mecánico'},

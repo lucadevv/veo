@@ -39,7 +39,7 @@ export default function CatalogPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Catálogo de ofertas"
-        description="Activá o desactivá cada servicio (VEO Moto, Económico, Confort, XL). El pasajero ve solo lo habilitado."
+        description="Activá o desactivá cada servicio (VEO Moto, Económico, Normal, Premium, XL). El pasajero ve solo lo habilitado."
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Catálogo' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

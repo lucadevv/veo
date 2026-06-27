@@ -22,15 +22,15 @@ describe('sync api-client ↔ catálogo de offerings (@veo/shared-types)', () =>
    * `createTripRequest.category` (`veo_moto | veo_economico | veo_confort | veo_xl`).
    */
   it('los ids de OFFERINGS son exactamente el universo CODEADO del catálogo (RIDE + verticales ocultas)', () => {
-    // B5-4: el catálogo codea las 4 RIDE (visibles) + 4 verticales OCULTAS (defaultEnabled:false). El
-    // contrato cubre TODOS los ids codeados (no solo los visibles del quote); la visibilidad la decide
-    // `defaultEnabled`/overlay, no la membresía del enum.
+    // B5-4/F2.3: el catálogo codea las 5 RIDE (visibles, +premium) + 3 verticales OCULTAS
+    // (defaultEnabled:false). El contrato cubre TODOS los ids codeados (no solo los visibles del quote);
+    // la visibilidad la decide `defaultEnabled`/overlay, no la membresía del enum.
     const documentedIds = [
       'veo_moto',
       'veo_economico',
       'veo_confort',
       'veo_xl',
-      'veo_economico_ev',
+      'veo_premium',
       'veo_ambulance',
       'veo_tow',
       'veo_mechanic',

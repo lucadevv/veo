@@ -19,15 +19,16 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
    * apps en la calle y con los datos ya guardados. Si este test rompe, NO "ajustes el assert":
    * estás rompiendo el contrato. Agregar una oferta nueva = AGREGAR un id acá.
    */
-  it('los ids del catálogo son el contrato (4 RIDE visibles + 4 verticales ocultas · B5-4)', () => {
-    // Las 4 RIDE son INMUTABLES (contrato con apps en la calle + Trip.category persistido). Las 4
-    // verticales (EV/ambulancia/grúa/mecánico) se AGREGARON codeadas pero ocultas (defaultEnabled:false).
+  it('los ids del catálogo son el contrato (5 RIDE visibles + 3 verticales ocultas · B5-4/F2.3)', () => {
+    // Las RIDE son INMUTABLES (contrato con apps en la calle + Trip.category persistido). F2.3: se
+    // AGREGÓ veo_premium (visible) y se DEPRECÓ veo_economico_ev (el eléctrico es un tipo de energía,
+    // no una oferta). Las 3 verticales (ambulancia/grúa/mecánico) siguen codeadas pero ocultas.
     const expected = [
       'veo_moto',
       'veo_economico',
       'veo_confort',
       'veo_xl',
-      'veo_economico_ev',
+      'veo_premium',
       'veo_ambulance',
       'veo_tow',
       'veo_mechanic',
@@ -86,9 +87,10 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
       OfferingId.VEO_MOTO,
       OfferingId.VEO_ECONOMICO,
       OfferingId.VEO_CONFORT,
+      // F2.3 · premium (sortOrder 3) entra ANTES de xl (sortOrder 4): económico → normal → premium → xl.
+      OfferingId.VEO_PREMIUM,
       OfferingId.VEO_XL,
       // B5-4 · verticales por sortOrder (ocultas: defaultEnabled:false, no aparecen en el quote).
-      OfferingId.VEO_ECONOMICO_EV,
       OfferingId.VEO_AMBULANCE,
       OfferingId.VEO_TOW,
       OfferingId.VEO_MECHANIC,
