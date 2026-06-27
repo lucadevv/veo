@@ -36,6 +36,7 @@ import { applyOfferingPricing, calculateFare, calculateOfferingFare } from './do
 import { resolveTripOffering } from './domain/offering';
 import { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
+import { BaseFareService } from '../pricing/base-fare.service';
 import { resolveAuthoritativeEnergy } from '../pricing/energy-requirements';
 import { WaypointProposalStatus, computeFareDelta, isExpired } from './domain/waypoint-proposal';
 import { readWaypoints } from './trip-view.mapper';
@@ -90,6 +91,8 @@ export class WaypointProposalService {
     @Optional() private readonly energyCatalog?: EnergyCatalogService,
     // F2.1b · recargo de combustible (B3) para plegarlo en el re-quote flip-OFF — espejo del create.
     @Optional() private readonly fuel?: FuelSurchargeService,
+    // F2.4 · tarifa base configurable (banderazo/km/min). @Optional: sin él → constantes de código.
+    @Optional() private readonly baseFare?: BaseFareService,
   ) {
     this.ttlSeconds = config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
     this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
@@ -102,6 +105,21 @@ export class WaypointProposalService {
       return await this.fuel.getPerKmCents();
     } catch {
       return 0;
+    }
+  }
+
+  /** F2.4 · banderazo/km/min vigentes (config admin). Sin servicio o lectura caída → `{}` (constantes de código). */
+  private async resolveBaseFare(): Promise<{
+    baseFareCents?: number;
+    perKmCents?: number;
+    perMinCents?: number;
+  }> {
+    if (!this.baseFare) return {};
+    try {
+      const c = await this.baseFare.getConfig();
+      return { baseFareCents: c.baseFareCents, perKmCents: c.perKmCents, perMinCents: c.perMinCents };
+    } catch {
+      return {};
     }
   }
 
@@ -180,6 +198,8 @@ export class WaypointProposalService {
       surgeMultiplier: surge,
       childMode: trip.childMode,
       fuelPerKmCents: await this.resolveFuelPerKmCents(),
+      // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
+      ...(await this.resolveBaseFare()),
     };
     // F2.1b · bajo el flip + FIXED la ruta extendida se cotiza con la energía AUTORITATIVA (espejo del
     // create): sin esto el tramo nuevo se cobraba sin energía → cobro-de-menos. PUJA/flip-OFF: política

@@ -75,6 +75,7 @@ import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
+import { BaseFareService } from '../pricing/base-fare.service';
 import { BidFloorService } from '../pricing/bid-floor.service';
 import type { Env } from '../config/env.schema';
 import type {
@@ -211,6 +212,8 @@ export class TripsService {
   private readonly bidFloor: BidFloorService | null;
   /** B5-1 · catálogo de energía multi-fuente. `@Optional()`: si no está, el shadow-compare se saltea (no rompe). */
   private readonly energyCatalog: EnergyCatalogService | null;
+  /** F2.4 · tarifa base configurable (banderazo/km/min). `@Optional()`: sin él → constantes de código. */
+  private readonly baseFare: BaseFareService | null;
   /** B5-1.d · FLIP del modelo de energía (default false). ON = fórmula nueva autoritativa (energía pass-through). */
   private readonly energyModelEnabled: boolean;
 
@@ -225,6 +228,7 @@ export class TripsService {
     @Optional() fuel?: FuelSurchargeService,
     @Optional() energyCatalog?: EnergyCatalogService,
     @Optional() bidFloor?: BidFloorService,
+    @Optional() baseFare?: BaseFareService,
   ) {
     this.bidFloorCents = config?.get('BID_FLOOR_CENTS') ?? DEFAULT_BID_FLOOR_CENTS;
     this.bidMaxCents = config?.get('BID_MAX_CENTS') ?? DEFAULT_BID_MAX_CENTS;
@@ -237,6 +241,7 @@ export class TripsService {
     this.fuel = fuel ?? null;
     this.energyCatalog = energyCatalog ?? null;
     this.bidFloor = bidFloor ?? null;
+    this.baseFare = baseFare ?? null;
     this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
   }
 
@@ -288,6 +293,32 @@ export class TripsService {
           `uso 0 (degradación honesta · B3)`,
       );
       return 0;
+    }
+  }
+
+  /**
+   * F2.4 · banderazo/km/min vigentes (config del admin, `BaseFareConfig`). Devuelve el triple o `{}` si el
+   * servicio no está (tests) o la lectura cae → la fórmula usa las constantes de código (degradación honesta;
+   * el seed sembró los valores actuales, así que en prod la fila existe y NO hay cambio de precio).
+   */
+  private async resolveBaseFare(): Promise<{
+    baseFareCents?: number;
+    perKmCents?: number;
+    perMinCents?: number;
+  }> {
+    if (!this.baseFare) return {};
+    try {
+      const c = await this.baseFare.getConfig();
+      return {
+        baseFareCents: c.baseFareCents,
+        perKmCents: c.perKmCents,
+        perMinCents: c.perMinCents,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `tarifa base no disponible (${(err as Error).message}); uso las constantes de código (F2.4)`,
+      );
+      return {};
     }
   }
 
@@ -512,19 +543,21 @@ export class TripsService {
     //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
     //    política de la oferta — max(round(calculateFare × multiplier), minFareCents); seq=0.
     // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
-    // B3 · recargo de combustible por km (admin, hot-editable). Solo FIXED lo aplica (plegado al per-km);
-    // PUJA lo ignora (el bid ES la tarifa). Degradación honesta: catálogo de fuel ausente/caído → 0.
-    const fuelPerKmCents = await this.resolveFuelPerKmCents();
-    // B5-1.d · con el FLIP activo, la energía por oferta (precio fuente ÷ rendimiento) es el insumo
-    // autoritativo; con el flag OFF queda en 0 y manda el fuel viejo. Solo se resuelve si hace falta.
-    // Solo FIXED usa la energía en la fórmula; PUJA la ignora (el bid ES la tarifa). Resolverla en PUJA
-    // acoplaría la puja al catálogo y la haría reventar sin razón si el catálogo cae → gate por modo.
-    const energyPerKmCents =
+    // Las 4 lecturas de config de pricing son INDEPENDIENTES entre sí → en paralelo (no encadenar awaits en
+    // el hot-path del create). Notas por insumo:
+    //  - B3 fuel: recargo de combustible por km (admin). Solo FIXED lo aplica; degradación honesta a 0.
+    //  - B5-1.d energía: con el FLIP+FIXED, precio fuente ÷ rendimiento (autoritativo, lanza si falta precio);
+    //    fuera de ese gate → 0 (PUJA/flip-OFF la ignoran; resolverla acoplaría la puja al catálogo).
+    //  - bid-floor: piso AUTORITATIVO de la puja per-(zona, oferta) (ADR 010 §9.3).
+    //  - F2.4 base: banderazo/km/min vigentes (admin); solo FIXED; degrada a las constantes de código.
+    const [fuelPerKmCents, energyPerKmCents, bidFloorCents, baseFare] = await Promise.all([
+      this.resolveFuelPerKmCents(),
       this.energyModelEnabled && mode === PricingMode.FIXED
-        ? await resolveAuthoritativeEnergy(this.energyCatalog, offering)
-        : 0;
-    // Piso AUTORITATIVO de la puja para ESTA oferta (ADR 010 §9.3): config del admin per-(zona, oferta).
-    const bidFloorCents = await this.resolveBidFloorCents(origin, offering.id);
+        ? resolveAuthoritativeEnergy(this.energyCatalog, offering)
+        : Promise.resolve(0),
+      this.resolveBidFloorCents(origin, offering.id),
+      this.resolveBaseFare(),
+    ]);
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
       bidCents: dto.bidCents,
       floorCents: bidFloorCents,
@@ -533,6 +566,7 @@ export class TripsService {
       childMode: dto.childMode ?? false,
       fuelPerKmCents,
       energyPerKmCents,
+      ...baseFare,
       energyModelEnabled: this.energyModelEnabled,
       pricing: effectivePricing,
     });
@@ -1639,6 +1673,8 @@ export class TripsService {
       surgeMultiplier: surge,
       childMode: trip.childMode,
       fuelPerKmCents,
+      // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
+      ...(await this.resolveBaseFare()),
     };
     const fare =
       this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED

@@ -27,8 +27,10 @@ import {
   catalogView,
   modeScheduleView,
   fuelSurchargeView,
+  baseFareView,
   energyCatalogView,
   bidFloorView,
+  type ReplaceBaseFareRequest,
   type ReplaceBidFloorRequest,
   operator,
   type CreateOperatorRequest,
@@ -74,6 +76,7 @@ export const qk = {
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
   fuelSurcharge: ['fuel-surcharge'] as const,
+  baseFare: ['base-fare'] as const,
   energyCatalog: ['energy-catalog'] as const,
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
@@ -765,6 +768,28 @@ export function useReplaceFuelSurcharge() {
     // muestra la versión/valores vigentes aunque otro admin haya cambiado el config mientras editabas.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.fuelSurcharge });
+    },
+  });
+}
+
+/* ── Pricing: tarifa base global (banderazo + per-km + per-min · F2.4 · ADMIN/SUPERADMIN/FINANCE) ── */
+export function useBaseFare() {
+  return useQuery({
+    queryKey: qk.baseFare,
+    queryFn: ({ signal }) =>
+      apiClient().get('/pricing/base-fare', { schema: baseFareView, signal }),
+  });
+}
+
+export function useReplaceBaseFare() {
+  const qc = useQueryClient();
+  return useMutation({
+    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` + step-up MFA, y trip-service re-firma: la UI solo refleja.
+    mutationFn: (input: ReplaceBaseFareRequest) =>
+      apiClient().put('/pricing/base-fare', { body: input, schema: baseFareView }),
+    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.baseFare });
     },
   });
 }

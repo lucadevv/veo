@@ -36,6 +36,13 @@ export interface DispatchCreationInput {
    */
   energyPerKmCents?: number;
   /**
+   * F2.4 · tarifa base configurable por el admin (`BaseFareConfig`, céntimos PEN). Solo FIXED la usa; default
+   * = las constantes de código (retro-compat). El triple se resuelve en `createTrip` y viaja a la fórmula.
+   */
+  baseFareCents?: number;
+  perKmCents?: number;
+  perMinCents?: number;
+  /**
    * B5-1.d · FLIP: si true, FIXED usa la fórmula NUEVA (calculateOfferingFare: energía pass-through,
    * multiplier solo posición); si false (default), la vieja (fuel plegado al per-km ×multiplier).
    */

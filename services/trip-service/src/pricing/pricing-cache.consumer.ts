@@ -30,6 +30,7 @@ import { EnergyCatalogService } from './energy-catalog.service';
 import { FuelSurchargeService } from './fuel-surcharge.service';
 import { PricingScheduleService } from './pricing-schedule.service';
 import { BidFloorService } from './bid-floor.service';
+import { BaseFareService } from './base-fare.service';
 
 /** clientId kafkajs de este servicio. */
 const KAFKA_CLIENT_ID = 'trip-service';
@@ -46,6 +47,7 @@ const PRICING_CACHE_GROUP_ID = 'trip-service.pricing-cache';
 const PRICING_CACHE_EVENTS = {
   'pricing.mode_schedule_updated': 'schedule',
   'pricing.bid_floor_updated': 'bid_floor',
+  'pricing.base_fare_updated': 'base_fare',
   'fuel.surcharge_updated': 'fuel',
   'energy.catalog_updated': 'energy',
   'catalog.updated': 'catalog',
@@ -61,6 +63,7 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
     private readonly energy: EnergyCatalogService,
     private readonly catalog: CatalogService,
     private readonly bidFloor: BidFloorService,
+    private readonly baseFare: BaseFareService,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -77,6 +80,8 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
         this.onConfigUpdated('pricing.mode_schedule_updated', envelope),
       'pricing.bid_floor_updated': (envelope) =>
         this.onConfigUpdated('pricing.bid_floor_updated', envelope),
+      'pricing.base_fare_updated': (envelope) =>
+        this.onConfigUpdated('pricing.base_fare_updated', envelope),
       'fuel.surcharge_updated': (envelope) =>
         this.onConfigUpdated('fuel.surcharge_updated', envelope),
       'energy.catalog_updated': (envelope) =>
@@ -105,6 +110,9 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
         break;
       case 'pricing.bid_floor_updated':
         this.bidFloor.invalidateCache();
+        break;
+      case 'pricing.base_fare_updated':
+        this.baseFare.invalidateCache();
         break;
       case 'fuel.surcharge_updated':
         this.fuel.invalidateCache();

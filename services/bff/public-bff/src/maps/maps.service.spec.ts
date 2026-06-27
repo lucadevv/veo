@@ -61,6 +61,15 @@ class FakeTripRest {
     } = { defaultFloorCents: 700, overrides: [] },
     // Simula el endpoint del piso CAÍDO (degradación honesta: el quote cae a DEFAULT_BID_FLOOR_CONFIG).
     private readonly bidFloorError?: Error,
+    // F2.4: tarifa base (banderazo/km/min) que devuelve /internal/pricing/base-fare. Default = las
+    // constantes de código (= el seed) → el quote computa igual que antes de F2.4.
+    private readonly baseFare: { baseFareCents: number; perKmCents: number; perMinCents: number } = {
+      baseFareCents: 600,
+      perKmCents: 120,
+      perMinCents: 30,
+    },
+    // Simula el endpoint de tarifa base CAÍDO (degradación honesta: el quote cae a las constantes).
+    private readonly baseFareError?: Error,
   ) {}
   async get<T>(path: string, req: { query?: Record<string, unknown> }): Promise<T> {
     if (path.includes('/internal/pricing/energy-catalog')) {
@@ -78,6 +87,10 @@ class FakeTripRest {
     if (path.includes('/internal/pricing/fuel-surcharge')) {
       if (this.fuelError) throw this.fuelError; // simula el recargo CAÍDO (degradación)
       return { perKmCents: this.fuelPerKmCents } as T; // B4 · el derivado precio÷rendimiento
+    }
+    if (path.includes('/internal/pricing/base-fare')) {
+      if (this.baseFareError) throw this.baseFareError; // F2.4 · simula tarifa base CAÍDA (degradación)
+      return { ...this.baseFare, version: 1, updatedAt: new Date(0).toISOString() } as T;
     }
     if (path.includes('/internal/catalog')) {
       if (this.catalogError) throw this.catalogError; // simula el catálogo CAÍDO (degradación)
@@ -274,8 +287,34 @@ const DESTINATION = { lat: -12.1211, lng: -77.0297 };
 // B5-4/F2.3: las ofertas VISIBLES por default (económico/normal/premium/xl; moto diferida). Las verticales
 // (ambulancia/grúa/mecánico) nacen ocultas (defaultEnabled:false) → no aparecen en el quote salvo que el admin las habilite.
 const VISIBLE_IDS = OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => o.id);
+/** F2.4 · tarifa base de prueba (≠ las constantes) para verificar que la config mueve el quote. */
+const BASE_700 = { baseFareCents: 700, perKmCents: 140, perMinCents: 40 };
 
 describe('MapsService.quote', () => {
+  it('F2.4 · la tarifa base configurada por el admin mueve el priceCents del quote', async () => {
+    // Base 700/140/40 (vs 600/120/30) → económico 5km/10min = 700 + 140·5 + 40·10 = 1800 (era 1500).
+    const fake = new FakeMapsClient({ route: ROUTE });
+    const tripRest = new FakeTripRest(
+      { mode: 'FIXED' },
+      [],
+      undefined,
+      {},
+      0,
+      undefined,
+      { defaultFloorCents: 700, overrides: [] },
+      undefined,
+      { baseFareCents: 700, perKmCents: 140, perMinCents: 40 },
+    );
+    const service = buildService(fake, tripRest);
+
+    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+
+    const economico = out.options.find((o) => o.id === 'veo_economico');
+    expect(economico?.priceCents).toBe(1800);
+    // Espeja lo que el create FIXED cobraría con la misma base → sin divergencia preview-vs-cobro.
+    expect(economico?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, undefined, 0, BASE_700));
+  });
+
   it('modo FIXED: ruta + opciones con priceCents firme; SIN bidFloor/suggested', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
     const tripRest = new FakeTripRest({ mode: 'FIXED' });

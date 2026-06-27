@@ -17,8 +17,9 @@ import { PricingScheduleService } from './pricing-schedule.service';
 import { FuelSurchargeService } from './fuel-surcharge.service';
 import { EnergyCatalogService } from './energy-catalog.service';
 import { BidFloorService } from './bid-floor.service';
+import { BaseFareService } from './base-fare.service';
 import { AdminIdentityGuard } from './admin-identity.guard';
-import { ReplaceScheduleDto, ReplaceFuelSurchargeDto } from './dto/pricing.dto';
+import { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 import { ReplaceBidFloorDto } from './dto/bid-floor.dto';
 import { ResolveQueryDto } from './dto/resolve-query.dto';
@@ -34,6 +35,7 @@ export class PricingController {
     private readonly fuel: FuelSurchargeService,
     private readonly energy: EnergyCatalogService,
     private readonly bidFloor: BidFloorService,
+    private readonly baseFare: BaseFareService,
   ) {}
 
   @Get('mode-schedule')
@@ -76,6 +78,32 @@ export class PricingController {
   })
   replaceFuelSurcharge(@Body() dto: ReplaceFuelSurchargeDto) {
     return this.fuel.replace(dto.fuelPricePerLiterCents, dto.kmPerLiter, dto.expectedVersion);
+  }
+
+  @Get('base-fare')
+  @ApiOperation({
+    summary:
+      'Tarifa base vigente (banderazo + per-km + per-min en céntimos, o los defaults del código). F2.4',
+  })
+  getBaseFare() {
+    return this.baseFare.getConfig();
+  }
+
+  @Put('base-fare')
+  @HttpCode(200)
+  @UseGuards(AdminIdentityGuard)
+  @ApiOperation({
+    summary:
+      'REEMPLAZA la tarifa base (banderazo + per-km + per-min, bump version) y emite ' +
+      'pricing.base_fare_updated. Solo identidad admin (F2.4).',
+  })
+  replaceBaseFare(@Body() dto: ReplaceBaseFareDto) {
+    return this.baseFare.replace(
+      dto.baseFareCents,
+      dto.perKmCents,
+      dto.perMinCents,
+      dto.expectedVersion,
+    );
   }
 
   @Get('energy-catalog')

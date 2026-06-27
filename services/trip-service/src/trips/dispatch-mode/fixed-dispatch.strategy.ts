@@ -44,6 +44,10 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
           durationSeconds: input.route.durationSeconds,
           surgeMultiplier: input.surge,
           childMode: input.childMode,
+          // F2.4 · tarifa base configurable (banderazo/km/min editables por el admin).
+          baseFareCents: input.baseFareCents,
+          perKmCents: input.perKmCents,
+          perMinCents: input.perMinCents,
         },
         input.pricing,
         input.energyPerKmCents ?? 0,
@@ -57,6 +61,10 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
       surgeMultiplier: input.surge,
       childMode: input.childMode,
       fuelPerKmCents: input.fuelPerKmCents, // B3 · recargo de combustible (admin), plegado al per-km
+      // F2.4 · tarifa base configurable (banderazo/km/min editables por el admin).
+      baseFareCents: input.baseFareCents,
+      perKmCents: input.perKmCents,
+      perMinCents: input.perMinCents,
     });
     return { fareCents: applyOfferingPricing(base, input.pricing).cents, negotiationSeq: 0 };
   }

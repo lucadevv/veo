@@ -15,6 +15,7 @@ import type {
   ReplaceScheduleDto,
   ReplaceFuelSurchargeDto,
   ReplaceBidFloorDto,
+  ReplaceBaseFareDto,
 } from './dto/pricing.dto';
 import type { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 
@@ -46,6 +47,15 @@ export interface EnergyCatalogView {
   updatedAt: string;
 }
 
+/** Vista de la tarifa base devuelta por trip-service (F2.4): banderazo + per-km + per-min + version. */
+export interface BaseFareView {
+  baseFareCents: number;
+  perKmCents: number;
+  perMinCents: number;
+  version: number;
+  updatedAt: string;
+}
+
 /** Vista del piso de la PUJA devuelta por trip-service (ADR 010 §9.3): default + overrides por (zona, oferta). */
 export interface BidFloorView {
   defaultFloorCents: number;
@@ -58,6 +68,7 @@ const BASE = '/internal/pricing/mode-schedule';
 const FUEL_BASE = '/internal/pricing/fuel-surcharge';
 const ENERGY_BASE = '/internal/pricing/energy-catalog';
 const BID_FLOOR_BASE = '/internal/pricing/bid-floor';
+const BASE_FARE_BASE = '/internal/pricing/base-fare';
 
 @Injectable()
 export class PricingService {
@@ -118,6 +129,39 @@ export class PricingService {
       payload: {
         fuelPricePerLiterCents: dto.fuelPricePerLiterCents,
         kmPerLiter: dto.kmPerLiter,
+        version: res.version,
+      },
+    });
+    return res;
+  }
+
+  /** pricing:view — lee la tarifa base vigente (banderazo + per-km + per-min, o los defaults del código). F2.4 */
+  getBaseFare(identity: AuthenticatedUser): Promise<BaseFareView> {
+    return this.rest.get<BaseFareView>(BASE_FARE_BASE, { identity });
+  }
+
+  /** pricing:manage — reemplaza la tarifa base. trip-service bump-ea version y emite el evento. F2.4 */
+  async replaceBaseFare(
+    identity: AuthenticatedUser,
+    dto: ReplaceBaseFareDto,
+  ): Promise<BaseFareView> {
+    const res = await this.rest.put<BaseFareView>(BASE_FARE_BASE, {
+      identity,
+      body: {
+        baseFareCents: dto.baseFareCents,
+        perKmCents: dto.perKmCents,
+        perMinCents: dto.perMinCents,
+        expectedVersion: dto.expectedVersion,
+      },
+    });
+    await this.audit.record(identity, {
+      action: 'pricing.base_fare_replace',
+      resourceType: 'base_fare_config',
+      resourceId: String(res.version),
+      payload: {
+        baseFareCents: dto.baseFareCents,
+        perKmCents: dto.perKmCents,
+        perMinCents: dto.perMinCents,
         version: res.version,
       },
     });

@@ -59,6 +59,22 @@ export function minFareForCategory(vehicleClass: VehicleClass): number {
 }
 
 /**
+ * F2.4 · banderazo/km/min configurables por el admin (`BaseFareConfig`, céntimos PEN). El QUOTE los lee de
+ * trip-service y los pasa a la fórmula para que el preview muestre lo que el create FIXED va a cobrar (anti
+ * divergencia preview-vs-cobro). Default = las constantes de código (= el seed) → degradación honesta.
+ */
+export interface FareBase {
+  baseFareCents: number;
+  perKmCents: number;
+  perMinCents: number;
+}
+export const DEFAULT_FARE_BASE: FareBase = {
+  baseFareCents: BASE_FARE_CENTS,
+  perKmCents: PER_KM_CENTS,
+  perMinCents: PER_MIN_CENTS,
+};
+
+/**
  * Calcula el precio (céntimos PEN) de una oferta a partir de la distancia y duración reales.
  * Aplica el multiplicador, redondea a S/ 0.10 y respeta la tarifa mínima. Los insumos de política
  * (`multiplier`, `minFareCents`) vienen de `offering.pricing` del catálogo (ADR 013).
@@ -73,6 +89,8 @@ export function categoryFareCents(
   /** B3 · recargo de combustible por km (céntimos PEN, admin). Default 0. Se pliega al per-km (espejo
    *  de trip-service domain/fare.ts) para que el preview muestre lo que el create FIXED va a cobrar. */
   fuelPerKmCents = 0,
+  /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
+  fareBase: FareBase = DEFAULT_FARE_BASE,
 ): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -90,7 +108,8 @@ export function categoryFareCents(
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
   // B3 · el recargo de combustible se pliega al per-km (es costo por distancia), igual que en trip-service.
-  const subtotal = BASE_FARE_CENTS + (PER_KM_CENTS + fuelPerKmCents) * km + PER_MIN_CENTS * min;
+  const subtotal =
+    fareBase.baseFareCents + (fareBase.perKmCents + fuelPerKmCents) * km + fareBase.perMinCents * min;
   const scaled = subtotal * multiplier;
   const rounded = Math.round(scaled / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
   return Math.max(minFareCents, rounded);
@@ -112,6 +131,8 @@ export function categoryFareCentsV2(
   multiplier: number,
   minFareCents: number = MIN_FARE_CENTS,
   energyPerKmCents = 0,
+  /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
+  fareBase: FareBase = DEFAULT_FARE_BASE,
 ): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -128,7 +149,8 @@ export function categoryFareCentsV2(
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
-  const service = (BASE_FARE_CENTS + PER_KM_CENTS * km + PER_MIN_CENTS * min) * multiplier; // posicionamiento
+  const service =
+    (fareBase.baseFareCents + fareBase.perKmCents * km + fareBase.perMinCents * min) * multiplier; // posicionamiento
   const total = service + energyPerKmCents * km; // energía pass-through (no ×multiplier)
   const rounded = Math.round(total / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
   return Math.max(minFareCents, rounded);
@@ -166,6 +188,8 @@ export function shadowCompareCategoryFare(
   minFareCents: number,
   oldFuelPerKmCents: number,
   newEnergyPerKmCents: number,
+  /** F2.4 · banderazo/km/min vigentes — el MISMO para ambas fórmulas (el delta aísla energía, no la base). */
+  fareBase: FareBase = DEFAULT_FARE_BASE,
 ): QuoteShadowDelta {
   const oldCents = categoryFareCents(
     distanceMeters,
@@ -173,6 +197,7 @@ export function shadowCompareCategoryFare(
     multiplier,
     minFareCents,
     oldFuelPerKmCents,
+    fareBase,
   );
   const newCents = categoryFareCentsV2(
     distanceMeters,
@@ -180,6 +205,7 @@ export function shadowCompareCategoryFare(
     multiplier,
     minFareCents,
     newEnergyPerKmCents,
+    fareBase,
   );
   return { oldCents, newCents, deltaCents: newCents - oldCents };
 }

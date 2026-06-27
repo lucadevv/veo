@@ -77,6 +77,26 @@ export interface FareInput {
   childMode?: boolean;
   /** B3 · recargo de combustible por km (céntimos PEN ≥ 0), admin-editable. Default 0 (sin recargo). */
   fuelPerKmCents?: number;
+  /**
+   * F2.4 · tarifa base configurable por el admin (`BaseFareConfig`, céntimos PEN). Default = las constantes
+   * de código (banderazo/km/min), para retro-compat: un caller que NO resuelve la config cobra lo de siempre.
+   * El caller que SÍ lee `BaseFareService` inyecta el triple → la tarifa real refleja lo que el admin editó.
+   */
+  baseFareCents?: number;
+  perKmCents?: number;
+  perMinCents?: number;
+}
+
+/** F2.4 · valida el triple de la tarifa base (banderazo/km/min): finitos y ≥ 0. */
+function isValidFareBase(baseFareCents: number, perKmCents: number, perMinCents: number): boolean {
+  return (
+    Number.isFinite(baseFareCents) &&
+    baseFareCents >= 0 &&
+    Number.isFinite(perKmCents) &&
+    perKmCents >= 0 &&
+    Number.isFinite(perMinCents) &&
+    perMinCents >= 0
+  );
 }
 
 /**
@@ -88,6 +108,10 @@ export function calculateFare(input: FareInput): Money {
   const surge = input.surgeMultiplier ?? 1.0;
   const childMode = input.childMode ?? false;
   const fuelPerKmCents = input.fuelPerKmCents ?? 0;
+  // F2.4 · tarifa base configurable (default = constantes de código → retro-compat).
+  const baseFareCents = input.baseFareCents ?? BASE_FARE_CENTS;
+  const perKmCents = input.perKmCents ?? PER_KM_CENTS;
+  const perMinCents = input.perMinCents ?? PER_MIN_CENTS;
 
   if (distanceMeters < 0 || !Number.isFinite(distanceMeters)) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -101,13 +125,22 @@ export function calculateFare(input: FareInput): Money {
   if (fuelPerKmCents < 0 || !Number.isFinite(fuelPerKmCents)) {
     throw new ValidationError('fuelPerKmCents inválido (≥ 0)', { fuelPerKmCents });
   }
+  // F2.4 · defensa en profundidad: el DTO ya valida @Min(0) al ESCRIBIR la config, pero la fórmula no confía
+  // en su insumo (puede venir de un reply interno malformado) → un triple inválido falla FUERTE, no produce NaN.
+  if (!isValidFareBase(baseFareCents, perKmCents, perMinCents)) {
+    throw new ValidationError('tarifa base inválida (banderazo/km/min ≥ 0, finitos)', {
+      baseFareCents,
+      perKmCents,
+      perMinCents,
+    });
+  }
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
 
   // B3 · el recargo de combustible se pliega al costo POR KM (ver cabecera): es costo por distancia.
   const subtotalCents = Math.round(
-    BASE_FARE_CENTS + (PER_KM_CENTS + fuelPerKmCents) * km + PER_MIN_CENTS * min,
+    baseFareCents + (perKmCents + fuelPerKmCents) * km + perMinCents * min,
   );
   const surged = scaleMoney(money(subtotalCents), surge);
   return childMode ? addMoney(surged, money(CHILD_MODE_FEE_CENTS)) : surged;
@@ -165,10 +198,22 @@ export function calculateOfferingFare(
     throw new ValidationError('energyPerKmCents inválido (≥ 0)', { energyPerKmCents });
   }
 
+  // F2.4 · tarifa base configurable (default = constantes de código → retro-compat).
+  const baseFareCents = input.baseFareCents ?? BASE_FARE_CENTS;
+  const perKmCents = input.perKmCents ?? PER_KM_CENTS;
+  const perMinCents = input.perMinCents ?? PER_MIN_CENTS;
+  if (!isValidFareBase(baseFareCents, perKmCents, perMinCents)) {
+    throw new ValidationError('tarifa base inválida (banderazo/km/min ≥ 0, finitos)', {
+      baseFareCents,
+      perKmCents,
+      perMinCents,
+    });
+  }
+
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
 
-  const service = BASE_FARE_CENTS + PER_KM_CENTS * km + PER_MIN_CENTS * min;
+  const service = baseFareCents + perKmCents * km + perMinCents * min;
   const positioned = service * pricing.multiplier; // posicionamiento (NO toca la energía)
   const withEnergy = positioned + energyPerKmCents * km; // energía pass-through
   const surged = Math.round(withEnergy * surge);

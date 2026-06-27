@@ -10,6 +10,7 @@ import type { PricingScheduleService } from './pricing-schedule.service';
 import type { FuelSurchargeService } from './fuel-surcharge.service';
 import type { EnergyCatalogService } from './energy-catalog.service';
 import type { BidFloorService } from './bid-floor.service';
+import type { BaseFareService } from './base-fare.service';
 
 /** Doble mínimo del EnergyCatalogService (B5): el controller solo lo expone vía GET/PUT energy-catalog. */
 function fakeEnergy(): EnergyCatalogService {
@@ -83,12 +84,53 @@ function fakeBidFloor() {
   return { svc, replaced };
 }
 
+/** Doble del BaseFareService (F2.4): captura los componentes reemplazados, devuelve config fija. */
+function fakeBaseFare() {
+  const replaced: {
+    baseFareCents: number;
+    perKmCents: number;
+    perMinCents: number;
+    expectedVersion: number;
+  }[] = [];
+  const svc = {
+    getConfig: async () => ({
+      baseFareCents: 600,
+      perKmCents: 120,
+      perMinCents: 30,
+      version: 1,
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    }),
+    replace: async (
+      baseFareCents: number,
+      perKmCents: number,
+      perMinCents: number,
+      expectedVersion: number,
+    ) => {
+      replaced.push({ baseFareCents, perKmCents, perMinCents, expectedVersion });
+      return {
+        baseFareCents,
+        perKmCents,
+        perMinCents,
+        version: 2,
+        updatedAt: '2026-06-27T00:00:00.000Z',
+      };
+    },
+  } as unknown as BaseFareService;
+  return { svc, replaced };
+}
+
 const LIMA = { lat: -12.0464, lon: -77.0428 };
 
 describe('PricingController.resolve · S2 · `at` opcional', () => {
   it('con `at` → resuelve para ESE instante (hora de recojo)', async () => {
     const { svc, calls } = fakePricing(PricingMode.FIXED);
-    const controller = new PricingController(svc, fakeFuel().svc, fakeEnergy(), fakeBidFloor().svc);
+    const controller = new PricingController(
+      svc,
+      fakeFuel().svc,
+      fakeEnergy(),
+      fakeBidFloor().svc,
+      fakeBaseFare().svc,
+    );
     const at = '2026-06-01T22:00:00.000Z';
 
     const out = await controller.resolve({ ...LIMA, at });
@@ -100,7 +142,13 @@ describe('PricingController.resolve · S2 · `at` opcional', () => {
 
   it('sin `at` → resuelve para now (default)', async () => {
     const { svc, calls } = fakePricing(PricingMode.PUJA);
-    const controller = new PricingController(svc, fakeFuel().svc, fakeEnergy(), fakeBidFloor().svc);
+    const controller = new PricingController(
+      svc,
+      fakeFuel().svc,
+      fakeEnergy(),
+      fakeBidFloor().svc,
+      fakeBaseFare().svc,
+    );
     const before = Date.now();
 
     const out = await controller.resolve({ ...LIMA });
@@ -119,6 +167,7 @@ describe('PricingController · fuel surcharge (B4 · precio÷rendimiento)', () =
       fuel.svc,
       fakeEnergy(),
       fakeBidFloor().svc,
+      fakeBaseFare().svc,
     );
     expect(await controller.getFuelSurcharge()).toEqual({
       fuelPricePerLiterCents: 420,
@@ -135,6 +184,7 @@ describe('PricingController · fuel surcharge (B4 · precio÷rendimiento)', () =
       fuel.svc,
       fakeEnergy(),
       fakeBidFloor().svc,
+      fakeBaseFare().svc,
     );
     const out = await controller.replaceFuelSurcharge({
       fuelPricePerLiterCents: 480,
@@ -154,6 +204,7 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
       fakeFuel().svc,
       fakeEnergy(),
       fakeBidFloor().svc,
+      fakeBaseFare().svc,
     );
     expect(await controller.getBidFloor()).toEqual({
       defaultFloorCents: 700,
@@ -170,6 +221,7 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
       fakeFuel().svc,
       fakeEnergy(),
       bid.svc,
+      fakeBaseFare().svc,
     );
     const dto = {
       defaultFloorCents: 700,

@@ -4,6 +4,7 @@ import { Lock } from 'lucide-react';
 import {
   useModeSchedule,
   useFuelSurcharge,
+  useBaseFare,
   useEnergyCatalog,
   useBidFloor,
 } from '@/lib/api/queries';
@@ -14,6 +15,7 @@ import { EmptyState, ErrorState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
+import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
 import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
@@ -25,6 +27,7 @@ export default function PricingPage() {
   const user = useSession();
   const query = useModeSchedule();
   const fuelQuery = useFuelSurcharge();
+  const baseFareQuery = useBaseFare();
   const energyQuery = useEnergyCatalog();
   const bidFloorQuery = useBidFloor();
 
@@ -71,6 +74,15 @@ export default function PricingPage() {
           <Skeleton className="mt-6 h-28" />
         ) : (
           <FuelSurchargePanel config={fuelQuery.data} />
+        )}
+
+        {/* F2.4 · tarifa base (banderazo + per-km + per-min; mismo gate pricing:view; carga independiente). */}
+        {baseFareQuery.isError ? (
+          <ErrorState onRetry={() => void baseFareQuery.refetch()} />
+        ) : baseFareQuery.isLoading || !baseFareQuery.data ? (
+          <Skeleton className="mt-6 h-28" />
+        ) : (
+          <BaseFarePanel config={baseFareQuery.data} />
         )}
 
         {/* B5 · precios de energía multi-fuente (mismo gate pricing:view; carga independiente). */}

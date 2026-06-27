@@ -47,6 +47,22 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(fare.cents).toBe(1500);
   });
 
+  it('F2.4 · banderazo/km/min configurables del admin mueven la tarifa (700/140/40 → 1800)', () => {
+    const fare = calculateFare({
+      distanceMeters: 5000,
+      durationSeconds: 600,
+      baseFareCents: 700,
+      perKmCents: 140,
+      perMinCents: 40,
+    });
+    // 700 + 140*5 + 40*10 = 700 + 700 + 400 = 1800 (vs 1500 con las constantes)
+    expect(fare.cents).toBe(1800);
+  });
+
+  it('F2.4 · sin el triple usa las constantes de código (retro-compat)', () => {
+    expect(calculateFare({ distanceMeters: 5000, durationSeconds: 600 }).cents).toBe(1500);
+  });
+
   it('B3 · el recargo de combustible se pliega al per-km (5 km, +40 céntimos/km = +200)', () => {
     const fare = calculateFare({ distanceMeters: 5000, durationSeconds: 600, fuelPerKmCents: 40 });
     // 600 + (120+40)*5 + 30*10 = 600 + 800 + 300 = 1700
@@ -184,6 +200,16 @@ describe('B5-1 · calculateOfferingFare (energía pass-through · multiplier sol
 
   it('económico (mult 1.0) sin energía → 1500 (servicio puro)', () => {
     expect(calculateOfferingFare(ride, eco, 0).cents).toBe(1500);
+  });
+
+  it('F2.4 · la tarifa base configurable mueve el servicio (700/140/40 ×1.6 XL → 2880)', () => {
+    // servicio (700 + 140·5 + 40·10) = 1800; ×1.6 = 2880 (vs 2400 con las constantes)
+    const fare = calculateOfferingFare(
+      { ...ride, baseFareCents: 700, perKmCents: 140, perMinCents: 40 },
+      xl,
+      0,
+    );
+    expect(fare.cents).toBe(2880);
   });
 
   it('energía es PASS-THROUGH: el multiplier NO la escala (económico +40/km = +200)', () => {

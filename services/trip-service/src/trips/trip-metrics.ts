@@ -102,7 +102,8 @@ export type PricingConfigKind =
   | 'offering_catalog'
   | 'mode_schedule'
   | 'energy_catalog'
-  | 'bid_floor';
+  | 'bid_floor'
+  | 'base_fare';
 
 export const pricingConfigChangedTotal: CounterLike = getOrCreateCounter(
   PRICING_CONFIG_CHANGED_METRIC,

@@ -495,6 +495,32 @@ export const replaceFuelSurchargeRequest = z.object({
 });
 
 /**
+ * Tarifa base vigente (GET /pricing/base-fare · F2.4): banderazo + per-km + per-min en céntimos PEN.
+ * Reemplaza los escalares hardcodeados de la fórmula de tarifa; el admin los edita en caliente.
+ */
+export const baseFareView = z.object({
+  baseFareCents: z.number().int().nonnegative(),
+  perKmCents: z.number().int().nonnegative(),
+  perMinCents: z.number().int().nonnegative(),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type BaseFareView = z.infer<typeof baseFareView>;
+
+/**
+ * Body del PUT /pricing/base-fare (F2.4): los tres componentes base en céntimos PEN. `expectedVersion` =
+ * optimistic locking (CAS): la versión que el panel cargó; el server reemplaza solo si sigue vigente, si
+ * otro admin la movió responde 409 (el panel recarga y reintenta). 0 = primer write.
+ */
+export const replaceBaseFareRequest = z.object({
+  baseFareCents: z.number().int().nonnegative(),
+  perKmCents: z.number().int().nonnegative(),
+  perMinCents: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceBaseFareRequest = z.infer<typeof replaceBaseFareRequest>;
+
+/**
  * Catálogo de precios de energía por fuente (B5). El admin edita el precio por unidad (céntimos/litro o
  * /kWh según la fuente); la `unit` la deriva el server. `expectedVersion` = optimistic locking (CAS).
  */

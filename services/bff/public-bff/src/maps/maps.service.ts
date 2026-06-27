@@ -41,6 +41,8 @@ import {
   categoryFareCentsV2,
   shadowCompareCategoryFare,
   deriveEnergyPerKmCents,
+  DEFAULT_FARE_BASE,
+  type FareBase,
 } from './fare';
 import { OFFERING_DISPLAY_NAMES } from './offering-names';
 import { bumpCatalogDegraded } from './maps-metrics';
@@ -182,6 +184,7 @@ export class MapsService {
       fuelPerKmCents,
       energyPrices,
       bidFloorConfig,
+      fareBase,
     ] = await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
@@ -201,6 +204,9 @@ export class MapsService {
       // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
       // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
       this.fetchBidFloorConfig(identity),
+      // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
+      // código (= el seed) → el preview no diverge del cobro en el caso común.
+      this.fetchBaseFare(identity),
     ]);
 
     // ADR 013 §1.3 · el `mode` top-level = el modo de la oferta ANCLA (VEO Económico). B2: respeta su pin
@@ -232,6 +238,7 @@ export class MapsService {
           route,
           fuelPerKmCents,
           energyPrices,
+          fareBase,
         );
         // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
         const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
@@ -266,7 +273,7 @@ export class MapsService {
       });
 
     // B5-1.b · shadow-compare del quote (log-only): mide el delta viejo↔nuevo sin cambiar lo que se muestra.
-    this.logQuoteFareShadow(energyPrices, route, effective, fuelPerKmCents);
+    this.logQuoteFareShadow(energyPrices, route, effective, fuelPerKmCents, fareBase);
 
     const base: QuoteResult = {
       distanceMeters: route.distanceMeters,
@@ -286,6 +293,7 @@ export class MapsService {
         route,
         fuelPerKmCents,
         energyPrices,
+        fareBase,
       );
       // El piso top-level (compat apps viejas) = el de la oferta ANCLA (VEO Económico), mismo resolver.
       const bidFloorCents = resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, ANCHOR_OFFERING.id);
@@ -356,6 +364,37 @@ export class MapsService {
   }
 
   /**
+   * F2.4 · banderazo/km/min vigentes (céntimos PEN) desde trip-service. DEGRADACIÓN HONESTA: si la llamada
+   * falla → las constantes de código (= el seed) — el preview cobra lo de siempre, NUNCA un precio inventado
+   * ni 0 (0 = viajes gratis). El quote es informativo; el autoritativo es el create.
+   */
+  private async fetchBaseFare(identity: AuthenticatedUser): Promise<FareBase> {
+    try {
+      const reply = await this.tripRest.get<FareBase>('/internal/pricing/base-fare', { identity });
+      // No confiamos en el shape del reply interno: un 200 malformado (campo faltante/no-numérico)
+      // propagaría NaN al precio. Degradamos a las constantes (= el seed) — nunca un precio inventado.
+      if (
+        !Number.isFinite(reply.baseFareCents) ||
+        !Number.isFinite(reply.perKmCents) ||
+        !Number.isFinite(reply.perMinCents)
+      ) {
+        this.logger.warn('tarifa base con shape inválido; preview con tarifa base de código (F2.4)');
+        return DEFAULT_FARE_BASE;
+      }
+      return {
+        baseFareCents: reply.baseFareCents,
+        perKmCents: reply.perKmCents,
+        perMinCents: reply.perMinCents,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `tarifa base no disponible (${(err as Error).message}); preview con tarifa base de código (F2.4 · degradación honesta)`,
+      );
+      return DEFAULT_FARE_BASE;
+    }
+  }
+
+  /**
    * B5-1 · precios de energía por fuente (céntimos/unidad) del EnergyCatalog del admin, para el
    * shadow-compare del quote (y, post-flip, la tarifa autoritativa). `null` = no disponible → el shadow
    * se saltea (degradación honesta, no rompe el quote). Map<sourceId, pricePerUnitCents>.
@@ -415,6 +454,7 @@ export class MapsService {
     route: { distanceMeters: number; durationSeconds: number },
     effective: Map<string, EffectiveOffering> | null,
     oldFuelPerKmCents: number,
+    fareBase: FareBase,
   ): void {
     if (!energyPrices) return;
     const deltas = this.quotedOfferings()
@@ -433,6 +473,7 @@ export class MapsService {
           pricing.minFareCents,
           oldFuelPerKmCents,
           energyPerKm,
+          fareBase,
         );
         return `${offering.id}:${d.oldCents}→${d.newCents}(${d.deltaCents >= 0 ? '+' : ''}${d.deltaCents})`;
       });
@@ -452,6 +493,7 @@ export class MapsService {
     route: { distanceMeters: number; durationSeconds: number },
     fuelPerKmCents: number,
     energyPrices: Map<string, number> | null,
+    fareBase: FareBase,
   ): number {
     if (this.energyModelEnabled) {
       const energyPerKm = deriveEnergyPerKmCents(
@@ -464,6 +506,7 @@ export class MapsService {
         pricing.multiplier,
         pricing.minFareCents,
         energyPerKm,
+        fareBase,
       );
     }
     return categoryFareCents(
@@ -472,6 +515,7 @@ export class MapsService {
       pricing.multiplier,
       pricing.minFareCents,
       fuelPerKmCents,
+      fareBase,
     );
   }
 

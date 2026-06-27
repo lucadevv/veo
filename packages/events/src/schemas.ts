@@ -568,6 +568,23 @@ export const pricingBidFloorUpdated = z.object({
   updatedAt: z.string(),
 });
 
+/// Tarifa base (banderazo + per-km + per-min) reemplazada por el admin (F2.4). Emitida por outbox en la
+/// MISMA tx del PUT; la consume PricingCacheConsumer para invalidar el cache de la tarifa base cross-réplica
+/// (NO load-bearing: trip-service lee la tabla local). Los tres componentes en céntimos PEN. `version`
+/// MONOTÓNICA (la invalidación de cache es idempotente y tolera el reordenamiento at-least-once de Kafka).
+export const pricingBaseFareUpdated = z.object({
+  /// Banderazo (tarifa fija de arranque) en céntimos PEN.
+  baseFareCents: z.number().int().nonnegative(),
+  /// Costo por kilómetro en céntimos PEN.
+  perKmCents: z.number().int().nonnegative(),
+  /// Costo por minuto en céntimos PEN.
+  perMinCents: z.number().int().nonnegative(),
+  /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
+  version: z.number().int().nonnegative(),
+  /// Marca ISO de cuándo el admin guardó el snapshot.
+  updatedAt: z.string(),
+});
+
 /* ── tracking ── */
 export const driverLocationUpdated = z.object({
   driverId: z.string(),
@@ -1322,6 +1339,7 @@ export const EVENT_SCHEMAS = {
   'dispatch.offer_withdrawn': dispatchOfferWithdrawn,
   'pricing.mode_schedule_updated': pricingModeScheduleUpdated,
   'pricing.bid_floor_updated': pricingBidFloorUpdated,
+  'pricing.base_fare_updated': pricingBaseFareUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,

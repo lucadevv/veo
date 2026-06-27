@@ -17,8 +17,14 @@ import {
   type FuelSurchargeView,
   type EnergyCatalogView,
   type BidFloorView,
+  type BaseFareView,
 } from './pricing.service';
-import { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBidFloorDto } from './dto/pricing.dto';
+import {
+  ReplaceScheduleDto,
+  ReplaceFuelSurchargeDto,
+  ReplaceBidFloorDto,
+  ReplaceBaseFareDto,
+} from './dto/pricing.dto';
 import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 
 @ApiTags('pricing')
@@ -68,6 +74,29 @@ export class PricingController {
     @Body() dto: ReplaceFuelSurchargeDto,
   ): Promise<FuelSurchargeView> {
     return this.pricing.replaceFuelSurcharge(user, dto);
+  }
+
+  @Get('base-fare')
+  @ApiOperation({
+    summary: 'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
+  })
+  getBaseFare(@CurrentUser() user: AuthenticatedUser): Promise<BaseFareView> {
+    return this.pricing.getBaseFare(user);
+  }
+
+  @Put('base-fare')
+  @HttpCode(200)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'REEMPLAZA la tarifa base (banderazo + per-km + per-min). pricing:manage (ADMIN/SUPERADMIN/FINANCE). F2.4',
+  })
+  replaceBaseFare(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReplaceBaseFareDto,
+  ): Promise<BaseFareView> {
+    return this.pricing.replaceBaseFare(user, dto);
   }
 
   @Get('energy-catalog')

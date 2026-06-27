@@ -309,6 +309,29 @@ model FuelSurchargeConfig {
   @@schema("trip")
 }
 
+/// F2.4 · Tarifa base GLOBAL (banderazo + per-km + per-min). SINGLETON editable EN CALIENTE por el admin:
+/// los tres componentes base de la fórmula de tarifa dejan de estar hardcodeados (domain/fare.ts:
+/// BASE_FARE_CENTS/PER_KM_CENTS/PER_MIN_CENTS) y pasan a ser config. El motor de tarifa los recibe como
+/// parámetros y los pliega al cálculo (el threading lo hace el orquestador aparte). Reemplazo wholesale en
+/// el PUT del admin (bump `version`, emite pricing.base_fare_updated por outbox). Se SIEMBRA con los valores
+/// vigentes (600/120/30) → CERO cambio de precio al desplegar. Tier 1 GLOBAL (un solo valor; per-país = F8).
+model BaseFareConfig {
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  id            String   @id
+  /// Banderazo (tarifa fija de arranque) en céntimos PEN. Default = valor hardcodeado vigente (600 = S/6).
+  baseFareCents Int      @default(600) @map("base_fare_cents")
+  /// Costo por kilómetro en céntimos PEN. Default = valor hardcodeado vigente (120 = S/1.20).
+  perKmCents    Int      @default(120) @map("per_km_cents")
+  /// Costo por minuto en céntimos PEN. Default = valor hardcodeado vigente (30 = S/0.30).
+  perMinCents   Int      @default(30) @map("per_min_cents")
+  /// Versión MONOTÓNICA (se bumpea en cada PUT; viaja en pricing.base_fare_updated por outbox).
+  version       Int      @default(0)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("base_fare_config")
+  @@schema("trip")
+}
+
 /// B5 · Catálogo de precios de energía por fuente, editable en caliente (singleton + version + CAS +
 /// outbox + cache, espejo de offering_catalog). `sources` = array JSON { sourceId, unit, pricePerUnitCents }.
 /// El costo de energía por km se deriva = precio_por_unidad ÷ rendimiento (km por unidad), unificando
