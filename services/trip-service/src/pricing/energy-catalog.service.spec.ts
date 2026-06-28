@@ -147,4 +147,12 @@ describe('EnergyCatalogService · F2.1b · guarda de completitud del replace baj
     const service = new EnergyCatalogService(repo, 0, flipOnConfig);
     expect((await service.replace([GAS, DIESEL], 4)).version).toBe(5);
   });
+
+  it('active refleja el flag: sin config / OFF → vista previa (false); ON → vivo (true)', async () => {
+    const repo = new FakeRepo({ sources: [GAS], version: 4, updatedAt: new Date(0).toISOString() });
+    // Sin config inyectada → flag OFF → B5 NO afecta la tarifa (vista previa).
+    expect((await new EnergyCatalogService(repo, 0).getCatalog()).active).toBe(false);
+    // Flag ON → B5 es el modelo vivo.
+    expect((await new EnergyCatalogService(repo, 0, flipOnConfig).getCatalog()).active).toBe(true);
+  });
 });

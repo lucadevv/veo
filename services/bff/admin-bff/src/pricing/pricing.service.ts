@@ -34,6 +34,8 @@ export interface FuelSurchargeView {
   perKmCents: number;
   version: number;
   updatedAt: string;
+  /** ¿B4 vivo hoy? (flag de energía OFF). Passthrough de trip-service; el panel pinta el badge. */
+  active: boolean;
 }
 
 /**
@@ -45,6 +47,8 @@ export interface EnergyCatalogView {
   sources: EnergySourcePrice[];
   version: number;
   updatedAt: string;
+  /** ¿B5 vivo hoy? (flag de energía ON). Passthrough de trip-service; el panel pinta el badge. */
+  active: boolean;
 }
 
 /** Vista de la tarifa base devuelta por trip-service (F2.4): banderazo + per-km + per-min + version. */

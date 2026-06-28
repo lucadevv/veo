@@ -34,6 +34,12 @@ export interface EnergyCatalogView {
   sources: EnergySourcePrice[];
   version: number;
   updatedAt: string;
+  /**
+   * ¿Es este catálogo (B5) el modelo de energía VIVO hoy? = flag PRICING_ENERGY_MODEL_ENABLED ON.
+   * El admin necesita saberlo: con el flag OFF, editar el catálogo NO mueve la tarifa (la fija el
+   * recargo de combustible B4) — el panel lo refleja como "Vista previa". Inverso de FuelSurcharge.active.
+   */
+  active: boolean;
 }
 
 @Injectable()
@@ -79,10 +85,19 @@ export class EnergyCatalogService {
     return value;
   }
 
-  /** GET interno: catálogo vigente (fuentes + precios + version). */
+  /**
+   * ¿Es este catálogo (B5) el modelo de energía VIVO hoy? = flag PRICING_ENERGY_MODEL_ENABLED ON.
+   * Único punto que lee el flag para señalar `active` (GET + PUT). El flag ya está inyectado (@Optional)
+   * para la guarda de completitud del replace(); lo reusamos. Sin config (tests legacy) → false (OFF).
+   */
+  private isLiveModel(): boolean {
+    return this.config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
+  }
+
+  /** GET interno: catálogo vigente (fuentes + precios + version) + si este modelo está vivo (flag ON). */
   async getCatalog(): Promise<EnergyCatalogView> {
     const { sources, version, updatedAt } = await this.load();
-    return { sources, version, updatedAt };
+    return { sources, version, updatedAt, active: this.isLiveModel() };
   }
 
   /**
@@ -182,6 +197,7 @@ export class EnergyCatalogService {
       sources,
       version: result.version,
       updatedAt: result.updatedAt.toISOString(),
+      active: this.isLiveModel(),
     };
   }
 

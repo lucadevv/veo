@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /** Techo de cordura (espejo del DTO server-side): S/100 por unidad. */
@@ -89,10 +90,16 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
     <section className="pt-6">
       <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Zap className="size-4" aria-hidden /> Precios de energía
+        {config.active ? (
+          <Badge tone="success">Activo</Badge>
+        ) : (
+          <Badge tone="neutral">Vista previa</Badge>
+        )}
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). El sistema deriva el
-        recargo por km de cada servicio según su rendimiento. El cambio es global y queda auditado.
+        {config.active
+          ? 'Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). El sistema deriva el recargo por km de cada servicio según su rendimiento y lo aplica a la tarifa. El cambio es global y queda auditado.'
+          : 'Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). Este modelo todavía no afecta la tarifa: el recargo activo es el de combustible. Lo que edites acá queda guardado para cuando se active el modelo de energía.'}
       </p>
 
       <div className="mt-4 flex max-w-2xl flex-wrap items-start gap-3">

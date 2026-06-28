@@ -12,9 +12,11 @@
  * ajusta el precio del grifo sin deploy). El motor de tarifa (domain/fare.ts) recibe el perKmCents y lo pliega al per-km.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { ConflictError } from '@veo/utils';
 import { deriveFuelPerKmCents } from '../trips/domain/fare';
+import type { Env } from '../config/env.schema';
 import { bumpPricingConfigChanged } from '../trips/trip-metrics';
 import {
   FUEL_SURCHARGE_REPO,
@@ -31,6 +33,12 @@ export const FUEL_SURCHARGE_CACHE_TTL_MS = Symbol('FUEL_SURCHARGE_CACHE_TTL_MS')
 /** Config + el per-km DERIVADO (lo que exponen GET/PUT): el admin ve precio/rendimiento, el quote usa perKmCents. */
 export interface FuelSurchargeView extends PersistedFuelSurcharge {
   perKmCents: number;
+  /**
+   * ¿Es este recargo (B4) el modelo de energía VIVO hoy? = flag PRICING_ENERGY_MODEL_ENABLED OFF.
+   * Inverso exacto de EnergyCatalogView.active (un solo modelo manda). Con el flag ON el recargo queda
+   * reemplazado por el catálogo de energía (B5) → el panel lo refleja como "Reemplazado", no edita en vano.
+   */
+  active: boolean;
 }
 
 @Injectable()
@@ -45,6 +53,9 @@ export class FuelSurchargeService {
     @Optional()
     @Inject(FUEL_SURCHARGE_CACHE_TTL_MS)
     private readonly cacheTtlMs = 10_000,
+    // El flag del modelo de energía: B4 está VIVO mientras esté OFF. @Optional → tests legacy sin config
+    // tratan el flag como OFF (B4 activo), que es el default de producción pre-flip.
+    @Optional() private readonly config?: ConfigService<Env, true>,
   ) {}
 
   /**
@@ -53,6 +64,15 @@ export class FuelSurchargeService {
    * por cero). Cacheado un slot; el PUT invalida. Los consumidores (quote/create) NO cambian: siguen
    * pidiendo este per-km; solo cambió de dónde sale (de precio+rendimiento en vez de un per-km a mano).
    */
+  /**
+   * ¿Es este recargo (B4) el modelo de energía VIVO hoy? = flag PRICING_ENERGY_MODEL_ENABLED OFF.
+   * Único punto que lee el flag para señalar `active` (GET + PUT). Sin config (tests legacy) → true
+   * (B4 activo, el default de producción pre-flip). Inverso exacto de EnergyCatalogService.isLiveModel.
+   */
+  private isLiveModel(): boolean {
+    return !(this.config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false);
+  }
+
   async getPerKmCents(): Promise<number> {
     const now = Date.now();
     if (this.cache && this.cache.expiresAt > now) return this.cache.value;
@@ -80,7 +100,11 @@ export class FuelSurchargeService {
       version: 0,
       updatedAt: new Date(0).toISOString(),
     };
-    return { ...cfg, perKmCents: deriveFuelPerKmCents(cfg.fuelPricePerLiterCents, cfg.kmPerLiter) };
+    return {
+      ...cfg,
+      perKmCents: deriveFuelPerKmCents(cfg.fuelPricePerLiterCents, cfg.kmPerLiter),
+      active: this.isLiveModel(),
+    };
   }
 
   /**
@@ -164,6 +188,7 @@ export class FuelSurchargeService {
       perKmCents,
       version: result.version,
       updatedAt: result.updatedAt.toISOString(),
+      active: this.isLiveModel(),
     };
   }
 

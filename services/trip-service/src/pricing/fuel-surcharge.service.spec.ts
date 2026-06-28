@@ -3,6 +3,7 @@
  * Repo fake en memoria (clean arch: el servicio depende del puerto), captura el outbox de la tx.
  */
 import { describe, expect, it } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
 import { FuelSurchargeService } from './fuel-surcharge.service';
 import { pricingConfigChangedTotal } from '../trips/trip-metrics';
 import type {
@@ -80,7 +81,30 @@ describe('FuelSurchargeService (B4 · derivado de precio÷rendimiento)', () => {
       perKmCents: 0,
       version: 0,
       updatedAt: new Date(0).toISOString(),
+      // Sin config (flag OFF, default prod) → B4 es el modelo de energía VIVO.
+      active: true,
     });
+  });
+
+  it('active refleja el flag de energía: sin config / OFF → B4 vivo (true); ON → reemplazado (false)', async () => {
+    const repo = new FakeRepo({
+      fuelPricePerLiterCents: 1700,
+      kmPerLiter: 12,
+      version: 1,
+      updatedAt: new Date(0).toISOString(),
+    });
+    // Sin config inyectada → trata el flag como OFF → B4 activo.
+    expect((await new FuelSurchargeService(repo, 0).getConfig()).active).toBe(true);
+    // Flag OFF explícito → B4 activo.
+    const off = {
+      get: (k: string) => (k === 'PRICING_ENERGY_MODEL_ENABLED' ? false : undefined),
+    } as unknown as ConfigService<Record<string, unknown>, true>;
+    expect((await new FuelSurchargeService(repo, 0, off).getConfig()).active).toBe(true);
+    // Flag ON → B4 reemplazado por el catálogo de energía (B5) → inactivo.
+    const on = {
+      get: (k: string) => (k === 'PRICING_ENERGY_MODEL_ENABLED' ? true : undefined),
+    } as unknown as ConfigService<Record<string, unknown>, true>;
+    expect((await new FuelSurchargeService(repo, 0, on).getConfig()).active).toBe(false);
   });
 
   it('con fila → getPerKmCents DERIVA = round(precio ÷ rendimiento)', async () => {

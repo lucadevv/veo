@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /** Techos de cordura (espejo del DTO server-side, defensa en profundidad UI). */
@@ -76,11 +77,16 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
     <section className="pt-6">
       <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Fuel className="size-4" aria-hidden /> Recargo de combustible
+        {config.active ? (
+          <Badge tone="success">Activo</Badge>
+        ) : (
+          <Badge tone="neutral">Reemplazado</Badge>
+        )}
       </h2>
       <p className="mt-1 text-sm text-ink-subtle">
-        Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de
-        referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la
-        tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.
+        {config.active
+          ? 'Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.'
+          : 'Ingresá el precio del combustible y el rendimiento del vehículo de referencia. Hoy este recargo está reemplazado por el modelo de precios de energía: lo que edites acá no afecta la tarifa mientras el modelo de energía esté activo.'}
       </p>
 
       <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">

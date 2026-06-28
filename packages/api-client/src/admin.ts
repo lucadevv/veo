@@ -480,6 +480,11 @@ export const fuelSurchargeView = z.object({
   perKmCents: z.number().int().nonnegative(),
   version: z.number().int(),
   updatedAt: z.string(),
+  // `active` = este recargo (B4) es el que HOY afecta la tarifa. Es el inverso exacto de
+  // `energyCatalogView.active`: el flag de servidor PRICING_ENERGY_MODEL_ENABLED elige UN solo
+  // modelo de energía vivo (OFF → combustible B4; ON → catálogo de energía B5). El panel lo refleja
+  // (badge Activo / Vista previa) — la UI nunca decide cuál manda, lo lee del server.
+  active: z.boolean(),
 });
 export type FuelSurchargeView = z.infer<typeof fuelSurchargeView>;
 
@@ -589,6 +594,10 @@ export const energyCatalogView = z.object({
   sources: z.array(energySourcePrice),
   version: z.number().int(),
   updatedAt: z.string(),
+  // `active` = este catálogo (B5) es el que HOY afecta la tarifa (flag PRICING_ENERGY_MODEL_ENABLED
+  // ON). Inverso de `fuelSurchargeView.active`. Mientras esté en false, editar acá NO mueve la tarifa
+  // (queda guardado para el día del flip) — el panel lo dice explícito (badge Vista previa).
+  active: z.boolean(),
 });
 export type EnergyCatalogView = z.infer<typeof energyCatalogView>;
 
