@@ -45,6 +45,14 @@ interface Vehicle {
   docStatus: string;
   active: boolean;
   driverId: string | null;
+  // Ficha técnica del MATCH (fleet-service la enriquece desde el modelSpec; ver VehicleListItem). Opcional/nullable
+  // por compat: un fleet-service viejo no la envía → el panel degrada a "—" (nunca rompe).
+  vehicleType?: string | null;
+  mtcCategory?: string | null;
+  segment?: string | null;
+  energySource?: string | null;
+  efficiency?: number | null;
+  seats?: number | null;
 }
 /** Shape interno que sirve fleet-service (REST /documents). `status` ES el enum Prisma
  *  `FleetDocumentStatus` serializado tal cual (sin transformación intermedia); el contrato
@@ -291,6 +299,13 @@ function toVehicleView(v: Vehicle): VehicleView {
     color: v.color,
     status: v.docStatus,
     driverId: v.driverId ?? null,
+    // Ficha técnica del match (degradación honesta: un fleet-service que aún no la envía → null → "—" en el panel).
+    vehicleType: v.vehicleType ?? null,
+    mtcCategory: v.mtcCategory ?? null,
+    segment: v.segment ?? null,
+    energySource: v.energySource ?? null,
+    efficiency: v.efficiency ?? null,
+    seats: v.seats ?? null,
   };
 }
 

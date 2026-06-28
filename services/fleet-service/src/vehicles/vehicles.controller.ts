@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger'
 import { InternalIdentityGuard, RolesGuard, Roles } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
-import { VehiclesService } from './vehicles.service';
+import { VehiclesService, type VehicleListItem } from './vehicles.service';
 import { CreateVehicleDto } from './dto/vehicle.dto';
 import { VehicleDocStatus, type Vehicle } from '../generated/prisma';
 import type { Page } from '../infra/pagination';
@@ -34,7 +34,7 @@ export class VehiclesController {
     @Query('active') active?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
-  ): Promise<Page<Vehicle>> {
+  ): Promise<Page<VehicleListItem>> {
     return this.vehicles.list({
       docStatus,
       active: active === undefined ? undefined : active === 'true',

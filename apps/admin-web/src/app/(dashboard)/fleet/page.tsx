@@ -72,6 +72,20 @@ const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
   },
 ];
 
+// Labels de la ficha técnica — ESPEJO EXACTO del formulario de aprobación de modelos
+// (components/fleet/model-review-actions.tsx) para que el admin vea la MISMA terminología que eligió al
+// aprobar. Son labels de presentación: el valor de dominio (el enum) viaja crudo y se mapea acá para mostrar.
+const SEGMENT_LABELS: Record<string, string> = {
+  ECONOMY: 'Económico',
+  MID: 'Intermedio',
+  PREMIUM: 'Premium',
+};
+const ENERGY_LABELS: Record<string, string> = {
+  GASOLINE_90: 'Gasolina 90',
+  DIESEL: 'Diésel',
+  ELECTRIC: 'Eléctrico',
+};
+
 const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
   {
     accessorKey: 'plate',
@@ -87,6 +101,37 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
         {row.original.year ? ` (${row.original.year})` : ''}
       </span>
     ),
+  },
+  {
+    // F1 · LA FICHA DEL MATCH: segmento/energía/asientos deciden a qué oferta (Confort/XL/Premium) es elegible
+    // el vehículo y su pricing de energía. Si falta (vehículo sin modelSpec) el dispatch lo deja pasar igual
+    // (fail-open) → lo marcamos "Sin ficha" para que el admin VEA el eslabón que no cierra.
+    id: 'spec',
+    header: 'Ficha técnica',
+    cell: ({ row }) => {
+      const { segment, energySource, seats, mtcCategory } = row.original;
+      if (!segment && !energySource) {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs text-warn">
+            <AlertTriangle className="size-3.5" aria-hidden />
+            Sin ficha
+          </span>
+        );
+      }
+      const top = [
+        segment ? (SEGMENT_LABELS[segment] ?? segment) : null,
+        energySource ? (ENERGY_LABELS[energySource] ?? energySource) : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const bottom = [mtcCategory, seats ? `${seats} plazas` : null].filter(Boolean).join(' · ');
+      return (
+        <div className="flex flex-col gap-0.5 text-xs">
+          <span className="text-ink">{top || '—'}</span>
+          <span className="text-ink-muted">{bottom || '—'}</span>
+        </div>
+      );
+    },
   },
   {
     accessorKey: 'color',

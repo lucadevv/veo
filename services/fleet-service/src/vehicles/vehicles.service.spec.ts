@@ -620,3 +620,90 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
     expect(await service.getActiveVehicle('driver-1')).toBeNull();
   });
 });
+
+/**
+ * F1 · `list()` enriquece cada vehículo con la ficha del MATCH (segment/energySource/efficiency/seats) que
+ * vive en el modelSpec, para que el panel de Flota deje de ser ciego al eslabón vehículo↔config. Lo crítico:
+ * el join es BATCHED (una sola query de specs por página, no N+1) y degrada a null sin romper (legacy/spec
+ * borrado), porque ese null ES la señal del eslabón que el dispatch fail-opea.
+ */
+describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () => {
+  function listService(
+    vehicles: Array<Record<string, unknown>>,
+    specs: Array<Record<string, unknown>>,
+  ) {
+    const specFindMany = vi.fn().mockResolvedValue(specs);
+    const prisma = {
+      read: {
+        vehicle: { findMany: vi.fn().mockResolvedValue(vehicles) },
+        vehicleModelSpec: { findMany: specFindMany },
+      },
+    };
+    const config = { getOrThrow: () => 2017 };
+    const { double } = makeVehicleModelsDouble();
+    const service = new VehiclesService(prisma as never, double, config as never);
+    return { service, specFindMany };
+  }
+
+  const veh = (over: Record<string, unknown> = {}) => ({
+    id: 'veh-1',
+    plate: 'AAA-111',
+    make: 'Toyota',
+    model: 'Yaris',
+    year: 2022,
+    color: 'Rojo',
+    vehicleType: VehicleType.CAR,
+    mtcCategory: 'M1',
+    driverId: 'drv-1',
+    modelSpecId: 'spec-1',
+    docStatus: VehicleDocStatus.VALID,
+    active: true,
+    fleetId: null,
+    insuranceExpiresAt: null,
+    selectedAt: null,
+    createdAt: new Date('2026-06-16T00:00:00Z'),
+    updatedAt: new Date('2026-06-16T00:00:00Z'),
+    ...over,
+  });
+
+  it('enriquece cada vehículo con la ficha de su modelSpec en UNA query batched (no N+1)', async () => {
+    const { service, specFindMany } = listService(
+      [veh({ id: 'veh-1', modelSpecId: 'spec-1' }), veh({ id: 'veh-2', modelSpecId: 'spec-1' })],
+      [specRow({ id: 'spec-1', segment: 'PREMIUM', energySource: 'DIESEL', efficiency: 12, seats: 7 })],
+    );
+    const page = await service.list({});
+    // UNA sola query de specs para toda la página, con los ids deduplicados.
+    expect(specFindMany).toHaveBeenCalledTimes(1);
+    expect(specFindMany).toHaveBeenCalledWith({ where: { id: { in: ['spec-1'] } } });
+    expect(page.items[0]).toMatchObject({
+      segment: 'PREMIUM',
+      energySource: 'DIESEL',
+      efficiency: 12,
+      seats: 7,
+    });
+    expect(page.items[1]).toMatchObject({ segment: 'PREMIUM', energySource: 'DIESEL', seats: 7 });
+  });
+
+  it('vehículo legacy sin modelSpecId → ficha en null y NI SE CONSULTA specs (degradación honesta)', async () => {
+    const { service, specFindMany } = listService([veh({ id: 'veh-3', modelSpecId: null })], []);
+    const page = await service.list({});
+    expect(specFindMany).not.toHaveBeenCalled();
+    expect(page.items[0]).toMatchObject({
+      segment: null,
+      energySource: null,
+      efficiency: null,
+      seats: null,
+    });
+  });
+
+  it('modelSpecId cuyo spec ya no existe → ficha en null (no asume datos de un spec borrado)', async () => {
+    const { service } = listService([veh({ id: 'veh-4', modelSpecId: 'spec-gone' })], []);
+    const page = await service.list({});
+    expect(page.items[0]).toMatchObject({
+      segment: null,
+      energySource: null,
+      efficiency: null,
+      seats: null,
+    });
+  });
+});

@@ -79,6 +79,20 @@ interface ModelSnapshot {
   pendingOcrModel: PendingOcrModel | null;
 }
 
+/**
+ * Vehículo de la lista admin ENRIQUECIDO con la ficha técnica del modelSpec elegido
+ * (segment/energySource/efficiency/seats). Esos campos deciden la eligibilidad de oferta (dispatch) y el
+ * pricing de energía, pero viven en `VehicleModelSpec` (referencia BLANDA, sin FK), no en `Vehicle` — sin
+ * proyectarlos el panel de Flota es CIEGO al eslabón vehículo↔config (F1). `mtcCategory`/`vehicleType` ya
+ * viven en `Vehicle`. Vehículo legacy sin `modelSpecId` (o spec borrado) → nulls (degradación honesta).
+ */
+export type VehicleListItem = Vehicle & {
+  segment: string | null;
+  energySource: string | null;
+  efficiency: number | null;
+  seats: number | null;
+};
+
 @Injectable()
 export class VehiclesService {
   private readonly logger = new Logger(VehiclesService.name);
@@ -220,7 +234,7 @@ export class VehiclesService {
     active?: boolean;
     cursor?: string;
     limit?: number;
-  }): Promise<Page<Vehicle>> {
+  }): Promise<Page<VehicleListItem>> {
     const limit = clampLimit(opts.limit);
     const where: Prisma.VehicleWhereInput = {};
     if (opts.docStatus) where.docStatus = opts.docStatus;
@@ -231,7 +245,27 @@ export class VehiclesService {
       orderBy: { id: 'desc' },
       take: limit + 1,
     });
-    return toPage(rows, limit);
+    // Enriquecimiento BATCHED (anti-N+1): traemos los modelSpec de TODA la página en UNA query y los
+    // mapeamos a cada vehículo. La ficha técnica (segment/energySource/efficiency/seats) vive en el
+    // modelSpec, no en Vehicle; sin esto el panel de Flota no puede VERIFICAR el match vehículo↔config (F1).
+    const specIds = [
+      ...new Set(rows.map((r) => r.modelSpecId).filter((id): id is string => id !== null)),
+    ];
+    const specs = specIds.length
+      ? await this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
+      : [];
+    const specById = new Map(specs.map((s) => [s.id, s] as const));
+    const enriched: VehicleListItem[] = rows.map((v) => {
+      const spec = v.modelSpecId ? specById.get(v.modelSpecId) : undefined;
+      return {
+        ...v,
+        segment: spec?.segment ?? null,
+        energySource: spec?.energySource ?? null,
+        efficiency: spec?.efficiency ?? null,
+        seats: spec?.seats ?? null,
+      };
+    });
+    return toPage(enriched, limit);
   }
 
   /**
