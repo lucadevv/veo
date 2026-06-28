@@ -22,6 +22,10 @@ const AUTO = '';
 /** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
 const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio fijo' };
 
+// Espejo del MULTIPLIER_MAX autoritativo (trip-service catalog.dto). El contrato/UI no importan shared-types;
+// el valor vive acá como literal documentado. trip-service y el admin-bff RE-validan server-side.
+const MULTIPLIER_MAX_UI = 10;
+
 /**
  * Panel del catálogo de ofertas (ADR 013 · Fase B). El admin prende/apaga cada oferta y, por oferta,
  * pinea el MODO (PUJA/FIXED, restringido a lo que la oferta permite — la UI refleja el invariante) y
@@ -147,7 +151,11 @@ function OfferingRow({
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
   const minFareCents =
     minFareSoles.trim() === '' ? undefined : Math.round(Number(minFareSoles) * 100);
-  const multInvalid = multNum !== undefined && (!Number.isFinite(multNum) || multNum <= 0);
+  // Tope de cordura del multiplicador: corta el dedazo ×100 ANTES de mandar (el BFF y trip-service re-validan
+  // server-side con MULTIPLIER_MAX=10 autoritativo). 0 < x ≤ 10.
+  const multInvalid =
+    multNum !== undefined &&
+    (!Number.isFinite(multNum) || multNum <= 0 || multNum > MULTIPLIER_MAX_UI);
   const minFareInvalid =
     minFareCents !== undefined && (!Number.isFinite(minFareCents) || minFareCents < 0);
 
@@ -241,6 +249,7 @@ function OfferingRow({
               inputMode="decimal"
               step="0.05"
               min="0"
+              max={MULTIPLIER_MAX_UI}
               placeholder={offering.pricing.multiplier.toString()}
               value={multiplier}
               onChange={(e) => setMultiplier(e.target.value)}

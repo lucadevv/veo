@@ -669,7 +669,9 @@ export const catalogOverride = z.object({
   id: z.string(),
   enabled: z.boolean(),
   mode: pricingMode.optional(),
-  multiplier: z.number().positive().optional(),
+  // Tope de cordura: espeja MULTIPLIER_MAX (=10) del DTO autoritativo de trip-service (el contrato se mantiene
+  // desacoplado de shared-types, por eso el literal). Corta el dedazo ×100; trip-service RE-valida con @Max.
+  multiplier: z.number().positive().max(10).optional(),
   minFareCents: z.number().int().nonnegative().optional(),
 });
 export type CatalogOverride = z.infer<typeof catalogOverride>;

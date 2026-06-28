@@ -26,6 +26,13 @@ const PRICING_MODES = Object.values(PricingMode);
 /** Techo de cordura de la tarifa mínima por oferta: S/1000 (evita un minFare absurdo por dedazo del admin). */
 export const MIN_FARE_MAX_CENTS = 100_000;
 
+/**
+ * Techo de cordura del MULTIPLICADOR de tarifa: 10× (el más alto del catálogo base es 2.5, ambulancia). Da
+ * margen para surge/premium legítimo y CORTA el dedazo del admin (un `100` en vez de `1.0` multiplicaría ×100
+ * el cobro FIXED directo al pasajero). Espeja MIN_FARE_MAX_CENTS; el admin-bff lo duplica (defensa en profundidad).
+ */
+export const MULTIPLIER_MAX = 10;
+
 /** Override de UNA oferta: habilitarla o no (B1) + pin de modo y precio (B2). */
 export class OfferingOverrideDto {
   @ApiProperty({ enum: OFFERING_IDS, description: 'Id de la oferta del catálogo' })
@@ -46,10 +53,11 @@ export class OfferingOverrideDto {
   mode?: PricingMode;
 
   @ApiPropertyOptional({
-    description: 'B2: override del multiplicador (> 0). Ausente → el de código.',
+    description: 'B2: override del multiplicador (0 < x ≤ 10). Ausente → el de código.',
   })
   @IsOptional()
   @IsPositive()
+  @Max(MULTIPLIER_MAX)
   multiplier?: number;
 
   @ApiPropertyOptional({

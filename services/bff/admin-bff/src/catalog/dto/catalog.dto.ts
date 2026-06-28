@@ -23,6 +23,9 @@ import { OfferingId, PricingMode } from '@veo/shared-types';
 /** Techo de cordura de la tarifa mínima por oferta: S/1000 (espejo de trip-service). */
 export const MIN_FARE_MAX_CENTS = 100_000;
 
+/** Techo de cordura del multiplicador de tarifa: 10× (espejo de trip-service, que RE-valida). Corta el dedazo ×100. */
+export const MULTIPLIER_MAX = 10;
+
 const OFFERING_IDS = Object.values(OfferingId);
 const PRICING_MODES = Object.values(PricingMode);
 
@@ -45,10 +48,11 @@ export class OfferingOverrideDto {
   mode?: PricingMode;
 
   @ApiPropertyOptional({
-    description: 'B2: override del multiplicador (> 0). Ausente → el de código.',
+    description: 'B2: override del multiplicador (0 < x ≤ 10). Ausente → el de código.',
   })
   @IsOptional()
   @IsPositive()
+  @Max(MULTIPLIER_MAX)
   multiplier?: number;
 
   @ApiPropertyOptional({
