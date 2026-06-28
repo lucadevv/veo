@@ -1,5 +1,15 @@
 /** DTOs de finanzas (payouts y reembolsos). */
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Listado admin de payouts: filtro por estado + paginación cursor (el estado lo valida payment-service). */
@@ -38,6 +48,11 @@ export class RefundDto {
   @IsString()
   @MinLength(3)
   reason!: string;
+
+  /** "Es un reembolso NUEVO, no un reintento": salta el backstop de ventana en payment-service (2do parcial igual). */
+  @IsOptional()
+  @IsBoolean()
+  forceNew?: boolean;
 }
 
 /**

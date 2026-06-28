@@ -77,6 +77,9 @@ export function RefundDialog() {
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Gesto EXPLÍCITO "es un reembolso NUEVO, no un reintento": habilita un 2do parcial idéntico legítimo. El server
+  // no puede distinguir un reintento de un parcial-igual sin esta señal, así que la decide el operador (humano).
+  const [forceNew, setForceNew] = useState(false);
   // Idempotency-Key ligado a la IDENTIDAD DE DINERO de la operación: SOLO (tripId, céntimos). El motivo (texto
   // libre) NO entra — el dinero lo define el viaje y el monto; editar el motivo no es una operación distinta, y
   // meterlo en el key haría que un retype cosmético del motivo derrote el dedup y doble-pague. Cacheado por firma:
@@ -128,6 +131,13 @@ export function RefundDialog() {
   async function submit() {
     setError(null);
     const amountCents = solesToCents(amount);
+    // "Reembolso nuevo" deliberado: descartar el nonce persistido ANTES de acuñar el key, para que salga uno
+    // FRESCO. Si no, el `dedupKey` server-side devolvería el refund anterior y derrotaría el `forceNew` (el
+    // backstop de ventana lo salta el flag, pero la barrera dura del key seguiría dedupeando con el mismo key).
+    if (forceNew) {
+      clearNonce(attemptSlot(tripId, amountCents));
+      attemptRef.current = null;
+    }
     // El try cubre SOLO la mutación money-OUT: si falla, es el ÚNICO caso en que mostramos "no se pudo emitir".
     try {
       await refund.mutateAsync({
@@ -135,6 +145,7 @@ export function RefundDialog() {
         amountCents,
         reason: reason.trim(),
         idempotencyKey: operationKey(amountCents),
+        forceNew,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo emitir el reembolso.');
@@ -150,6 +161,7 @@ export function RefundDialog() {
     setTripId('');
     setSoles('');
     setReason('');
+    setForceNew(false);
   }
 
   return (
@@ -186,6 +198,22 @@ export function RefundDialog() {
           <Field label="Motivo" error={error ?? undefined}>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
+          <label htmlFor="refund-force-new" className="flex items-start gap-2.5 text-sm">
+            <input
+              id="refund-force-new"
+              type="checkbox"
+              checked={forceNew}
+              onChange={(e) => setForceNew(e.target.checked)}
+              className="mt-0.5 size-4 shrink-0 rounded border-border accent-accent"
+            />
+            <span>
+              Es un reembolso nuevo, no un reintento
+              <span className="mt-0.5 block text-ink-muted">
+                Marcá esto solo si querés emitir un segundo reembolso idéntico (mismo viaje y monto) a propósito.
+                Por defecto, un reenvío del mismo monto se trata como reintento y no duplica el pago.
+              </span>
+            </span>
+          </label>
         </div>
         <DialogFooter>
           <DialogClose asChild>

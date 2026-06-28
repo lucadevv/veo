@@ -41,6 +41,7 @@ import {
   BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
   bpsToRate,
   ChargeMode,
+  ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS,
   computeChargeAmounts,
   deriveAdminRefundDedupKey,
   deriveBookingCancellationRefundDedupKey,
@@ -135,6 +136,25 @@ interface RefundClaim {
   newStatus: 'REFUNDED' | 'PARTIALLY_REFUNDED';
   newRefundedCents: number;
   isFullyRefunded: boolean;
+  /**
+   * Aplica el backstop server-side de idempotencia por VENTANA TEMPORAL sobre (paymentId, céntimos) ANTES de
+   * crear el refund (solo el camino ADMIN discrecional). El system-initiated NO lo lleva (tiene su `dedupKey`
+   * determinista por bookingId). `false`/undefined = sin backstop de ventana (el operador pidió `forceNew`, o es
+   * system-initiated).
+   */
+  enforceWindowDedup?: boolean;
+}
+
+/**
+ * Señal de control INTERNA (nunca cruza el borde del servicio): el backstop de ventana encontró un reembolso
+ * reciente del MISMO dinero (paymentId, céntimos) → `refund()` la atrapa y devuelve el existente idempotentemente,
+ * sin doble-pagar. Lleva el refund ya creado para el retorno.
+ */
+class DuplicateRefundInWindowError extends Error {
+  constructor(readonly existing: { refundId: string; paymentId: string; status: string }) {
+    super('Ya existe un reembolso reciente para este pago y monto (ventana de idempotencia)');
+    this.name = 'DuplicateRefundInWindowError';
+  }
 }
 
 /** Desglose real de ganancias de un conductor en una ventana temporal (BR-P05). Céntimos PEN. */
@@ -1146,6 +1166,9 @@ export class PaymentsService {
     reason: string,
     operator: AuthenticatedUser,
     idempotencyKey?: string,
+    // Gesto EXPLÍCITO del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana para
+    // permitir un 2do parcial idéntico legítimo (el server no puede distinguirlo de un reintento sin esta señal).
+    forceNew = false,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.prisma.read.payment.findFirst({
@@ -1200,11 +1223,25 @@ export class PaymentsService {
       newStatus,
       newRefundedCents,
       isFullyRefunded,
+      // Backstop server-side de ventana temporal sobre (paymentId, céntimos): SIEMPRE para el refund admin, salvo
+      // que el operador haya marcado `forceNew` (2do parcial idéntico deliberado). Cierra el residual del nonce de
+      // cliente (storage bloqueado, cross-tab, cross-device) que el `dedupKey` solo no puede.
+      enforceWindowDedup: !forceNew,
     };
 
     try {
       return await this.executeRefundClaim(payment, claim);
     } catch (err) {
+      // BACKSTOP DE VENTANA: ya hay un refund reciente del MISMO dinero (paymentId, céntimos) creado dentro de la
+      // ventana → la operación es la MISMA (un reintento que llegó con otro key, o sin key) → devolvemos el
+      // existente, NO doble-pagamos. Esto cierra el hueco que el `dedupKey` deja cuando el key del cliente diverge.
+      if (err instanceof DuplicateRefundInWindowError) {
+        this.logger.log(
+          `Refund admin idempotente por VENTANA (mismo pago y monto, key divergente/ausente) trip=${tripId}; ` +
+            `devuelvo el refund existente ${err.existing.refundId}`,
+        );
+        return err.existing;
+      }
       // IDEMPOTENCIA: el MISMO `Idempotency-Key` ya creó un refund ACTIVO (UNIQUE parcial) → P2002. Sin key →
       // dedupKey null → este path no aplica (relanza). Leemos del PRIMARIO (`write`), no de la réplica: el
       // refund se acaba de commitear ahí y bajo lag la réplica devolvería null (read-after-write).
@@ -1483,6 +1520,12 @@ export class PaymentsService {
     payment: Payment,
     claim: RefundClaim,
   ): Promise<void> {
+    // Backstop de idempotencia por VENTANA (solo refund admin discrecional): bajo un advisory lock por paymentId,
+    // si ya hay un refund reciente del MISMO (paymentId, céntimos) → lanza DuplicateRefundInWindowError (refund()
+    // la atrapa y devuelve el existente). El system-initiated NO lo lleva (claim.enforceWindowDedup undefined).
+    if (claim.enforceWindowDedup) {
+      await this.assertNoDuplicateAdminRefundInWindowTx(tx, payment.id, claim.amountCents);
+    }
     const claimed = await tx.payment.updateMany({
       where: {
         id: payment.id,
@@ -1503,6 +1546,42 @@ export class PaymentsService {
       throw new ConcurrencyConflictError(
         'El cobro cambió de saldo por una operación concurrente (CAS); reintentable',
       );
+    }
+  }
+
+  /**
+   * Backstop server-side de idempotencia por VENTANA TEMPORAL (refund admin). Corre DENTRO de la tx del claim,
+   * tras tomar un advisory lock TRANSACCIONAL por paymentId (`pg_advisory_xact_lock`) que SERIALIZA los refunds
+   * concurrentes del mismo pago — sin él, dos submits simultáneos con keys divergentes pasarían ambos el chequeo
+   * (TOCTOU) y doble-pagarían. Con el lock tomado, busca un refund NO-RECHAZADO del MISMO (paymentId, céntimos)
+   * creado dentro de la ventana; si existe, lanza `DuplicateRefundInWindowError` (la atrapa `refund()` → devuelve
+   * el existente). REJECTED NO cuenta (no movió plata; un reintento tras un rechazo debe poder volver a intentar).
+   */
+  private async assertNoDuplicateAdminRefundInWindowTx(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    amountCents: number,
+  ): Promise<void> {
+    // Advisory lock transaccional (se libera SOLO al cerrar la tx): hashtext(paymentId) → clave bigint estable.
+    // `$executeRaw` (no `$queryRaw`): pg_advisory_xact_lock devuelve `void` y $queryRaw fallaría al deserializar
+    // esa columna; $executeRaw ejecuta la sentencia sin deserializar el resultado.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${paymentId})::bigint)`;
+    const since = new Date(Date.now() - ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS);
+    const recent = await tx.refund.findFirst({
+      where: {
+        paymentId,
+        amountCents,
+        status: { not: RefundStatus.REJECTED },
+        createdAt: { gte: since },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recent) {
+      throw new DuplicateRefundInWindowError({
+        refundId: recent.id,
+        paymentId: recent.paymentId,
+        status: recent.status,
+      });
     }
   }
 

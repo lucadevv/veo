@@ -255,7 +255,11 @@ export class PaymentsController {
   @Audiences(...PASSENGER_RAILS)
   @Post(':tripId/refund')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Reembolso de un viaje (BR-P06). Ventana 7 días; >S/30 requiere L2' })
+  @ApiOperation({
+    summary:
+      'Reembolso de un viaje (BR-P06 · finance:refund). Ventana 7 días; >S/30 requiere autoridad de finanzas. ' +
+      'Idempotente: backstop server-side por ventana sobre (pago, monto); forceNew habilita un 2do parcial idéntico',
+  })
   refund(
     @Param('tripId') tripId: string,
     @Body() dto: RefundDto,
@@ -263,6 +267,13 @@ export class PaymentsController {
     // Idempotency-Key del operador (panel admin) → barrera dura contra el doble-reembolso parcial.
     @Headers('Idempotency-Key') idempotencyKey?: string,
   ) {
-    return this.payments.refund(tripId, dto.amountCents, dto.reason, user, idempotencyKey);
+    return this.payments.refund(
+      tripId,
+      dto.amountCents,
+      dto.reason,
+      user,
+      idempotencyKey,
+      dto.forceNew ?? false,
+    );
   }
 }

@@ -246,13 +246,17 @@ export class FinanceService {
       `/payments/${tripId}/refund`,
       // El Idempotency-Key del operador se PROPAGA al servicio dueño del dato (no muere acá): un reintento /
       // doble-submit con el mismo key NO doble-reembolsa (UNIQUE parcial en Refund).
-      { identity, body: { amountCents: dto.amountCents, reason: dto.reason }, idempotencyKey },
+      {
+        identity,
+        body: { amountCents: dto.amountCents, reason: dto.reason, forceNew: dto.forceNew ?? false },
+        idempotencyKey,
+      },
     );
     await this.audit.record(identity, {
       action: 'payment.refund',
       resourceType: 'payment',
       resourceId: res.paymentId,
-      payload: { tripId, amountCents: dto.amountCents, reason: dto.reason },
+      payload: { tripId, amountCents: dto.amountCents, reason: dto.reason, forceNew: dto.forceNew ?? false },
     });
     return res;
   }

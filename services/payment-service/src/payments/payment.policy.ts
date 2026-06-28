@@ -284,3 +284,16 @@ export const ADMIN_REFUND_DEDUP_PREFIX = 'admin-refund:' as const;
 export function deriveAdminRefundDedupKey(idempotencyKey: string): string {
   return `${ADMIN_REFUND_DEDUP_PREFIX}${idempotencyKey}`;
 }
+
+/**
+ * VENTANA DE IDEMPOTENCIA del refund ADMIN (backstop server-side · decisión de producto). El `Idempotency-Key`
+ * del cliente es best-effort: un nonce generado en el browser SIEMPRE puede divergir (sessionStorage bloqueado +
+ * remonte, otra pestaña, otro dispositivo) → el server recibe dos keys distintos para el MISMO dinero y, sin este
+ * backstop, doble-paga (acotado por el saldo, pero el monto intencionado se paga dos veces). Por eso, además del
+ * `dedupKey`, el server trata dos reembolsos del MISMO (paymentId, céntimos) creados dentro de esta ventana como
+ * la MISMA operación (devuelve el existente), INDEPENDIENTE del key. El operador habilita un 2do parcial idéntico
+ * LEGÍTIMO con el gesto explícito `forceNew` (no se puede distinguir un reintento de un parcial-igual sin él, así
+ * que la decisión es del humano). La ventana cubre el reintento realista (timeout → refresh/cambio de pestaña o
+ * dispositivo) sin bloquear un parcial deliberado posterior.
+ */
+export const ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS = 15 * 60_000; // 15 minutos

@@ -726,10 +726,12 @@ export function useRefund() {
       amountCents: number;
       reason: string;
       idempotencyKey: string;
+      // "Es un reembolso NUEVO, no un reintento": salta el backstop de ventana server-side (2do parcial idéntico).
+      forceNew?: boolean;
     }) =>
-      // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason}.
+      // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason, forceNew}.
       apiClient().post(`/finance/refunds/${input.tripId}`, {
-        body: { amountCents: input.amountCents, reason: input.reason },
+        body: { amountCents: input.amountCents, reason: input.reason, forceNew: input.forceNew ?? false },
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {

@@ -105,8 +105,26 @@ function makePrisma(payment: FakePayment | null) {
         refunds.push(data);
         return data;
       }),
+      // Backstop de VENTANA (assertNoDuplicateAdminRefundInWindowTx): refund reciente NO-RECHAZADO del MISMO
+      // (paymentId, amountCents). El doble trata TODOS los refunds como "dentro de la ventana" (ignora createdAt)
+      // → modela el peor caso (idempotencia más agresiva), suficiente para verificar el dedup por identidad-dinero.
+      findFirst: vi.fn(
+        async ({
+          where,
+        }: {
+          where: { paymentId: string; amountCents: number; status?: { not: string } };
+        }) =>
+          refunds.find(
+            (r) =>
+              r.paymentId === where.paymentId &&
+              r.amountCents === where.amountCents &&
+              r.status !== 'REJECTED',
+          ) ?? null,
+      ),
     },
     outboxEvent: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
+    // Advisory lock transaccional del backstop de ventana (pg_advisory_xact_lock): no-op en el doble.
+    $executeRaw: vi.fn(async () => 0),
   };
 
   const prisma = {
@@ -257,12 +275,27 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     expect(res.refundId).toBe('refund-motivo-A');
   });
 
-  it('keys DISTINTOS → refunds DISTINTOS (dos parciales legítimos no se colapsan)', async () => {
+  it('keys distintos, mismo dinero, SIN forceNew → BACKSTOP DE VENTANA dedupea (NO doble-paga aunque el key diverja)', async () => {
+    // El cierre DURO del residual del nonce de cliente: aunque el 2do intento traiga un Idempotency-Key DISTINTO
+    // (storage bloqueado / otra pestaña / otro dispositivo re-acuñaron uno nuevo), el server lo trata como la
+    // MISMA operación de dinero (mismo paymentId+monto, dentro de la ventana) → devuelve el existente, NO crea otro.
+    const { prisma, refunds } = makePrisma(capturedPayment({ amountCents: 4500 }));
+    const svc = buildService(prisma);
+
+    const first = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
+    const second = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-B'); // key DIVERGENTE, sin forceNew
+
+    expect(refunds).toHaveLength(1); // un solo money-OUT
+    expect(second.refundId).toBe(first.refundId); // el 2do devolvió el existente
+  });
+
+  it('keys distintos, mismo dinero, CON forceNew → DOS refunds (el operador habilita el 2do parcial idéntico)', async () => {
+    // El gesto explícito del operador salta el backstop de ventana: dos parciales LEGÍTIMOS idénticos no colapsan.
     const { prisma, refunds } = makePrisma(capturedPayment({ amountCents: 4500 }));
     const svc = buildService(prisma);
 
     await svc.refund('trip-1', 1000, 'ajuste 1', operator, 'KEY-A');
-    await svc.refund('trip-1', 1000, 'ajuste 2', operator, 'KEY-B');
+    await svc.refund('trip-1', 1000, 'ajuste 2', operator, 'KEY-B', true); // forceNew=true
 
     expect(refunds).toHaveLength(2);
     expect(refunds[0]!.dedupKey).toBe(deriveAdminRefundDedupKey('KEY-A'));

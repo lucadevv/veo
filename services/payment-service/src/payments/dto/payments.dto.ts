@@ -176,6 +176,16 @@ export class RefundDto {
   @IsString()
   @MinLength(3)
   reason!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Gesto explícito del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana ' +
+      'temporal para permitir un 2do parcial idéntico legítimo (mismo viaje y monto dentro de la ventana).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  forceNew?: boolean;
 }
 
 /**

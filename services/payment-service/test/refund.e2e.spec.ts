@@ -646,3 +646,49 @@ describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión 
     expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('REFUNDED');
   });
 });
+
+/**
+ * BACKSTOP SERVER-SIDE de idempotencia por VENTANA TEMPORAL (decisión del dueño · cierre DURO del residual del
+ * nonce de cliente). El `Idempotency-Key` del browser es best-effort: puede DIVERGIR (storage bloqueado, otra
+ * pestaña, otro dispositivo). El server cierra el hueco tratando dos reembolsos del MISMO (paymentId, céntimos)
+ * dentro de la ventana como la MISMA operación —INDEPENDIENTE del key— salvo el gesto explícito `forceNew`.
+ * Verifica contra Postgres real (advisory lock + createdAt + saldo), no contra un doble.
+ */
+describe('PaymentsService.refund · backstop de VENTANA de idempotencia (cross-key)', () => {
+  it('keys DISTINTOS, mismo (pago, monto), SIN forceNew → el 2do devuelve el existente (NO doble-paga)', async () => {
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { id, tripId } = await seedCaptured({ amountCents: 5000, method: 'CASH' });
+
+    const a = await service.refund(tripId, 1500, 'x', L2, 'KEY-A');
+    // 2do intento con un key DIVERGENTE (el nonce de cliente se re-acuñó: storage caído / otra pestaña / device):
+    const b = await service.refund(tripId, 1500, 'x', L2, 'KEY-B');
+
+    expect(b.refundId).toBe(a.refundId); // el backstop devolvió el existente
+    expect(await prisma.refund.findMany({ where: { paymentId: id } })).toHaveLength(1); // un solo money-OUT
+    expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(1500);
+  });
+
+  it('keys DISTINTOS, mismo (pago, monto), CON forceNew → DOS refunds (parcial idéntico deliberado)', async () => {
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { id, tripId } = await seedCaptured({ amountCents: 5000, method: 'CASH' });
+
+    await service.refund(tripId, 1500, 'x', L2, 'KEY-A');
+    await service.refund(tripId, 1500, 'x', L2, 'KEY-B', true); // gesto explícito: es un reembolso NUEVO
+
+    expect(await prisma.refund.findMany({ where: { paymentId: id } })).toHaveLength(2);
+    expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(3000);
+  });
+
+  it('SIN key en ambos (idempotencia opt-in apagada) → la VENTANA igual dedupea por identidad de dinero', async () => {
+    // El backstop NO depende del key: aun sin Idempotency-Key, dos reembolsos del mismo (pago, monto) en la
+    // ventana colapsan (cierra el viejo hueco "sin key ⇒ solo CAS, que no es idempotente").
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { id, tripId } = await seedCaptured({ amountCents: 5000, method: 'CASH' });
+
+    const a = await service.refund(tripId, 1200, 'x', L2);
+    const b = await service.refund(tripId, 1200, 'x', L2);
+
+    expect(b.refundId).toBe(a.refundId);
+    expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(1200);
+  });
+});
