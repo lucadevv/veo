@@ -342,6 +342,7 @@ export class OfferBoardService {
       board.vehicleType,
       false,
       board.category,
+      true, // measureTier: submit ES una decisión de tier por-board → mide absent/unknown (no el poll)
     );
 
     if (input.kind === OfferKind.ACCEPT_PRICE && input.priceCents !== board.bidCents) {
@@ -494,7 +495,14 @@ export class OfferBoardService {
       // A4 — BYPASS del cache (`fresh=true`): el accept es la decisión de plata. Un conductor recién
       // suspendido NO puede colarse por un snapshot stale de hasta `ELIGIBILITY_CACHE_TTL_MS` al match.
       // B5-3 — re-valida también el TIER (board.category): un tier inferior no se cuela al match.
-      await this.eligibility.assertEligibleToOffer(driverId, board.vehicleType, true, board.category);
+      // accept: decisión de tier por-board (fresh=true bypasea cache) → measureTier=true mide absent/unknown.
+      await this.eligibility.assertEligibleToOffer(
+        driverId,
+        board.vehicleType,
+        true,
+        board.category,
+        true,
+      );
     } catch {
       await this.store.setOfferStatus(tripId, driverId, OfferStatus.STALE);
       // BE-3 — la oferta dejó de ser válida con el board OPEN: avisamos al pasajero para que la QUITE al

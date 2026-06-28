@@ -4,13 +4,14 @@ import { VehicleType, VehicleSegment, OfferingId } from '@veo/shared-types';
 import { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex } from '../hot-index/in-memory-hot-index';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
-import { bumpEligibilityFailOpen } from './dispatch.metrics';
+import { bumpEligibilityFailOpen, bumpEligibilityTierUnknown } from './dispatch.metrics';
 
-// Espiamos SOLO el bump del fail-open (source=gate) para asertar que el gate autoritativo de PUJA instrumenta
-// su fail-open; `classifyMissingAttr` se mantiene REAL (importActual) para etiquetar correctamente el attr.
+// Espiamos los bumps de observabilidad (fail-open source=gate + tier-irresoluble) para asertar la
+// instrumentación; `classifyMissingAttr`/`findOffering` se mantienen REALES (importActual).
 vi.mock('./dispatch.metrics', async (importActual) => ({
   ...(await importActual<typeof import('./dispatch.metrics')>()),
   bumpEligibilityFailOpen: vi.fn(),
+  bumpEligibilityTierUnknown: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -225,6 +226,29 @@ describe('EligibilityGate · B5-3 — elegibilidad por TIER en PUJA (paridad con
     await expect(
       gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, 'no_existe'),
     ).resolves.toBeUndefined();
+  });
+
+  it('tier-irresoluble: el POLL (measureTier=false) NO mide; submit/accept (true) SÍ → des-contamina absent', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    const bump = vi.mocked(bumpEligibilityTierUnknown);
+
+    // Path del POLL (listOpenBidsNear): sin category, measureTier por DEFAULT false → NO mide 'absent'
+    // (si midiera, el volumen del poll dominaría la serie y nunca tendería a 0 → engañaría el flip).
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR);
+    expect(bump).not.toHaveBeenCalled();
+
+    // Path de SUBMIT con board N-2 sin category (measureTier=true) → SÍ mide 'absent' (señal de rollout real).
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, undefined, true);
+    expect(bump).toHaveBeenCalledWith('absent');
+
+    // Path de SUBMIT con category fuera del catálogo (measureTier=true) → mide 'unknown' (gap de catálogo).
+    bump.mockClear();
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, 'no_existe', true);
+    expect(bump).toHaveBeenCalledWith('unknown');
   });
 
   it('vertical con cert (ambulancia) FAIL-CLOSED: sin certs → 403 aunque los attrs basten', async () => {

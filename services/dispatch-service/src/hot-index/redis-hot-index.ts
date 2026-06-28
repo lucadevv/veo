@@ -71,6 +71,16 @@ export class RedisHotIndex implements HotIndex {
     // la flota esté desplegada con attrs. Por eso, cuando el ping omite un attr de tier, lo PRESERVAMOS
     // del ping previo — pero SOLO si es el MISMO vehicleType (un cambio de clase trae otro vehículo con
     // attrs distintos: no se arrastran). Un ping que SÍ trae el attr lo pisa (cambio de vehículo real).
+    //
+    // ⚠ PREREQUISITO DEL FLIP A FAIL-CLOSED (Lote 3) — el guard es por vehicleType (VehicleClass), que NO
+    // distingue dos vehículos de la MISMA clase (un van XL 7-asientos y un económico 5-asientos son ambos
+    // VehicleClass.CAR; DriverVehicleAttrs no porta vehicleId). HOY es inocuo: el gate corre fail-OPEN (los
+    // attrs ausentes NO restringen) y el resolver server-authoritative pisa el carry en ≤20s. PERO bajo
+    // fail-closed un swap intra-clase + un ping degradado sin attrs haría que el económico HEREDE los attrs
+    // STALE del XL y PASE el gate estricto (en vez de ser denegado por ausencia), invisible a la prevalencia.
+    // ANTES de flipear: keyear el carry por IDENTIDAD de vehículo (vehicleId/modelSpecId en el ping firehose)
+    // o NO arrastrar attrs bajo semántica fail-closed. Gate adversarial wkrozhaf6 (ALTA, refutada a "inerte
+    // hoy / landmine del flip"). Espejado en in-memory-hot-index.ts (paridad de contrato).
     const carry = prev?.vehicleType === vehicleType ? prev : undefined;
     const seats = attrs?.seats ?? carry?.seats;
     const segment = attrs?.segment ?? carry?.segment;

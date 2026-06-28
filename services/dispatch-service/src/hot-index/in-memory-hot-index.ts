@@ -22,15 +22,25 @@ export class InMemoryHotIndex implements HotIndex {
     vehicleType: VehicleClass,
     attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
+    // Paridad de contrato con RedisHotIndex.upsertLocation: el anti-clobber de attrs de tier. Un ping que
+    // OMITE los attrs preserva los del ping previo SOLO si es el mismo vehicleType (las certs NO se
+    // preservan: fail-closed). Antes el fake clobbeaba (replace total) mientras Redis preservaba → el doble
+    // mentía sobre el "mismo contrato" y los tests unitarios ejercían el comportamiento VIEJO. Ver el
+    // comentario canónico en redis-hot-index.ts para el razonamiento completo.
+    const prev = this.locations.get(driverId);
+    const carry = prev?.vehicleType === vehicleType ? prev : undefined;
+    const seats = attrs?.seats ?? carry?.seats;
+    const segment = attrs?.segment ?? carry?.segment;
+    const vehicleYear = attrs?.vehicleYear ?? carry?.vehicleYear;
     const loc: DriverLocation = {
       driverId,
       lat: point.lat,
       lon: point.lon,
       h3: toH3(point, DISPATCH_H3_RESOLUTION),
       vehicleType,
-      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
-      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
-      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      ...(seats !== undefined ? { seats } : {}),
+      ...(segment !== undefined ? { segment } : {}),
+      ...(vehicleYear !== undefined ? { vehicleYear } : {}),
       ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
       updatedAt: Date.now(),
     };

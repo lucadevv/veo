@@ -96,6 +96,7 @@ export class EligibilityGate {
     vehicleType: VehicleClass,
     fresh = false,
     category?: string,
+    measureTier = false,
   ): Promise<void> {
     // Capa 3: estado autoritativo en identity (NO el hot-index). Falla-cerrado ante error de red.
     const snapshot = await this.identitySnapshot(driverId, fresh);
@@ -143,12 +144,18 @@ export class EligibilityGate {
     //  - category ausente  → compat N-2 (el board aún no la lleva): reason=absent.
     //  - category presente pero fuera del catálogo → drift/gap de catálogo: reason=unknown.
     //  - oferta resuelta SIN `requires` → no tier-gatea (ride básico): ni se mide ni se restringe.
+    // La MEDICIÓN de tier-irresoluble (absent/unknown) solo corre con `measureTier` — los call-sites que SON
+    // una decisión de tier por-board (submit/accept de un board específico). El POLL de /bids/open
+    // (listOpenBidsNear) llama SIN category por diseño (lista N boards, no uno) y NO debe contaminar 'absent':
+    // si bumpeara, 'absent' quedaría dominado por el volumen del poll y NUNCA tendería a 0 aunque el rollout de
+    // category al board esté 100% completo → engañaría la decisión del flip. El ENFORCEMENT (certs/attrs) sí
+    // corre siempre que la category resuelva, independiente de `measureTier`.
     if (!category) {
-      bumpEligibilityTierUnknown('absent');
+      if (measureTier) bumpEligibilityTierUnknown('absent');
     } else {
       const offering = findOffering(category);
       if (!offering) {
-        bumpEligibilityTierUnknown('unknown');
+        if (measureTier) bumpEligibilityTierUnknown('unknown');
       } else if (offering.requires) {
         const requires = offering.requires;
         // Certs del conductor → FAIL-CLOSED: una vertical (ambulancia/grúa/mecánico) exige credencial VÁLIDA;
