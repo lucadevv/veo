@@ -1211,15 +1211,11 @@ export class PaymentsService {
           where: { dedupKey: deriveAdminRefundDedupKey(idempotencyKey) },
           orderBy: { createdAt: 'desc' },
         });
-        // El key debe identificar UNA operación: solo devolvemos el existente si es de ESTE pago, monto Y motivo
-        // (la identidad de valor que el cliente liga al key). Un key reusado para OTRA operación NO debe devolver
-        // un refund ajeno como éxito falso (la otra operación nunca se reembolsaría) → conflicto explícito.
-        if (
-          existing &&
-          existing.paymentId === payment.id &&
-          existing.amountCents === amountCents &&
-          existing.reason === reason
-        ) {
+        // El key identifica la IDENTIDAD DE DINERO de la operación: (pago, monto). Solo devolvemos el existente
+        // si coincide en AMBOS — el motivo (texto libre) NO entra: un reintento con el motivo editado sigue
+        // siendo la MISMA operación de dinero y debe dedupear, no fallar. Un key reusado para OTRO dinero
+        // (distinto pago o monto) NO debe devolver un refund ajeno como éxito falso → conflicto explícito.
+        if (existing && existing.paymentId === payment.id && existing.amountCents === amountCents) {
           this.logger.log(
             `Refund admin idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo el refund existente`,
           );
@@ -1230,7 +1226,7 @@ export class PaymentsService {
           };
         }
         throw new ConflictError(
-          'El Idempotency-Key ya se usó para otra operación de reembolso (distinto pago o monto)',
+          'El Idempotency-Key ya se usó para otro reembolso (distinto pago o monto)',
           { tripId, paymentId: payment.id, amountCents },
         );
       }

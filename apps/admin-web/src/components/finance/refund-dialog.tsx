@@ -32,21 +32,24 @@ export function RefundDialog() {
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // Idempotency-Key ligado a la IDENTIDAD DE VALOR de la operación (tripId + céntimos + motivo), cacheado por
-  // firma. NO se deriva del valor (dos reembolsos parciales LEGÍTIMOS idénticos NO deben colapsar — BR-P06) ni
-  // se re-acuña por evento de edición (retipear '500'→'500' o '500'→'500.00' = misma operación → debe dedupear).
-  // Reglas: misma firma → MISMO key (un reintento tras error de red dedupea server-side, no doble-paga). Firma
-  // distinta → key NUEVO (otra operación). Se RESETEA en éxito y al abrir → dos operaciones idénticas en
-  // sesiones distintas SÍ obtienen keys distintos (ambas se cobran, intencional).
+  // Idempotency-Key ligado a la IDENTIDAD DE DINERO de la operación: SOLO (tripId, céntimos). El motivo (texto
+  // libre) NO entra — el dinero lo define el viaje y el monto; editar el motivo no es una operación distinta, y
+  // meterlo en el key haría que un retype cosmético del motivo derrote el dedup y doble-pague. Cacheado por firma:
+  //  - misma firma → MISMO key → un reintento (retipear igual, editar el motivo, cerrar+reabrir+reenviar) dedupea
+  //    server-side y NO doble-paga.
+  //  - firma distinta (otro viaje o monto) → key NUEVO → otra operación.
+  // Se resetea SOLO en ÉXITO (no al abrir): así dos reembolsos parciales LEGÍTIMOS idénticos NO colapsan (el 1ro
+  // hace SUCCESS → reset → el 2do arranca con key fresco), pero un reintento de una op aún NO confirmada conserva
+  // el key (la única forma de doble-pagar el MISMO valor sería tras un éxito confirmado, que es intencional).
   const attemptRef = useRef<{ sig: string; key: string } | null>(null);
 
   const amount = Number(soles);
   const valid =
     tripId.trim().length > 0 && amount > 0 && reason.trim().length >= REASON_MIN_LENGTH;
 
-  /** Key idempotente de ESTE intento: estable mientras la firma de valor no cambie; fresco si cambió. */
+  /** Key idempotente de ESTE intento: estable mientras (tripId, céntimos) no cambie; fresco si cambian. */
   function operationKey(amountCents: number): string {
-    const sig = `${tripId.trim()}|${amountCents}|${reason.trim()}`;
+    const sig = `${tripId.trim()}|${amountCents}`;
     if (!attemptRef.current || attemptRef.current.sig !== sig) {
       attemptRef.current = { sig, key: crypto.randomUUID() };
     }
@@ -54,10 +57,7 @@ export function RefundDialog() {
   }
 
   function handleOpenChange(next: boolean) {
-    if (next) {
-      setError(null);
-      attemptRef.current = null; // diálogo nuevo = operación nueva (aunque repita valores)
-    }
+    if (next) setError(null);
     setOpen(next);
   }
 

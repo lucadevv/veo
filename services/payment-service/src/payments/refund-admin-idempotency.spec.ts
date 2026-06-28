@@ -231,11 +231,13 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     // El operador edita el monto a 500 y reenvía con el MISMO key: NO debe devolver el refund de 1000 como
     // éxito (sería un sub-reembolso enmascarado) → conflicto explícito.
     await expect(svc.refund('trip-1', 500, 'ajuste', operator, 'KEY-A')).rejects.toThrow(
-      /otra operación/,
+      /distinto pago o monto/,
     );
   });
 
-  it('mismo key, mismo monto, OTRO motivo → CONFLICTO (identidad de valor completa: pago+monto+motivo)', async () => {
+  it('mismo key, mismo dinero (pago+monto), OTRO motivo → DEDUP (el motivo NO es identidad de dinero)', async () => {
+    // Un reintento donde el operador editó el motivo libre sigue siendo la MISMA operación de dinero: debe
+    // devolver el existente (no doble-pagar, no conflicto). El motivo no entra en la identidad del key.
     const { prisma, txRefundCreate } = makePrisma(capturedPayment({ amountCents: 4500 }));
     await txRefundCreate({
       data: {
@@ -251,9 +253,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     } as never);
     const svc = buildService(prisma);
 
-    await expect(svc.refund('trip-1', 1000, 'motivo B', operator, 'KEY-A')).rejects.toThrow(
-      /otra operación/,
-    );
+    const res = await svc.refund('trip-1', 1000, 'motivo B', operator, 'KEY-A');
+    expect(res.refundId).toBe('refund-motivo-A');
   });
 
   it('keys DISTINTOS → refunds DISTINTOS (dos parciales legítimos no se colapsan)', async () => {
