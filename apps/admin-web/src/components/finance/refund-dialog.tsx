@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 import {
   Dialog,
   DialogClose,
@@ -106,17 +107,24 @@ export function RefundDialog() {
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
           </DialogClose>
-          <Button
-            variant="primary"
-            loading={refund.isPending}
-            // `!valid || isPending`: `disabled` es un booleano DEFINIDO, así que el `disabled ?? loading` del
-            // Button no caería a `loading` solo — hay que OR-ear el pending acá para que el botón NO siga
-            // clickeable durante el request en vuelo (si no, un doble-click dispara dos submits).
-            disabled={!valid || refund.isPending}
-            onClick={() => void submit()}
-          >
-            Emitir reembolso
-          </Button>
+          <StepUpDialog
+            title="Emitir reembolso"
+            description="Reintegro al pasajero sobre un viaje. Es una acción money-OUT: confirmá con tu código TOTP (step-up MFA). El admin-bff lo exige server-side."
+            trigger={
+              <Button
+                variant="primary"
+                loading={refund.isPending}
+                // `!valid || isPending`: `disabled` es un booleano DEFINIDO, así que el `disabled ?? loading`
+                // del Button no caería a `loading` solo — hay que OR-ear el pending acá para que el botón NO
+                // siga clickeable durante el request (si no, un doble-click dispara dos submits). Y deshabilitado
+                // bloquea también la apertura del step-up (DialogTrigger respeta disabled).
+                disabled={!valid || refund.isPending}
+              >
+                Emitir reembolso
+              </Button>
+            }
+            onVerified={submit}
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

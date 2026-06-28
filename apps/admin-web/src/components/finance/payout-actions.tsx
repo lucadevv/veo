@@ -7,7 +7,7 @@ import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /**
  * Ejecuta el BATCH de liquidaciones del periodo (semana previa). NO es por-payout: el backend agrega los
@@ -19,7 +19,7 @@ export function RunPayoutsButton() {
   const run = useRunPayout();
 
   return (
-    <ConfirmDialog
+    <StepUpDialog
       trigger={
         <Button size="sm" variant="primary">
           <PlayCircle className="size-4" aria-hidden />
@@ -27,9 +27,8 @@ export function RunPayoutsButton() {
         </Button>
       }
       title="Ejecutar liquidaciones del periodo"
-      description="Se liquida la semana previa: se agregan los cobros capturados de cada conductor y se DESEMBOLSAN al riel (la plata queda en camino; se confirma cuando el riel responde). Los conductores en revisión quedan retenidos (HELD). La acción es idempotente."
-      confirmLabel="Ejecutar batch"
-      onConfirm={async () => {
+      description="Se liquida la semana previa: se agregan los cobros capturados de cada conductor y se DESEMBOLSAN al riel (la plata queda en camino; se confirma cuando el riel responde). Los conductores en revisión quedan retenidos (HELD). La acción es idempotente. Confirmá con tu código TOTP (step-up MFA)."
+      onVerified={async () => {
         const res = await run.mutateAsync({ idempotencyKey: crypto.randomUUID() });
         toast({
           tone: 'success',
@@ -65,7 +64,7 @@ export function ReleaseHeldPayoutButton({
   if (!can(user, 'finance:payout')) return null;
 
   return (
-    <ConfirmDialog
+    <StepUpDialog
       trigger={
         <Button size="sm" variant="secondary">
           <LockOpen className="size-4" aria-hidden />
@@ -73,9 +72,8 @@ export function ReleaseHeldPayoutButton({
         </Button>
       }
       title="Liberar la retención del conductor"
-      description={`Se levantará la retención (review resuelto): TODOS los payouts HELD del conductor entran al desembolso y su plata sale por el riel (esta liquidación: ${money(amountCents)}; se confirma cuando el riel responde). Las próximas liquidaciones ya no nacerán retenidas. La acción es idempotente.`}
-      confirmLabel="Liberar y desembolsar"
-      onConfirm={async () => {
+      description={`Se levantará la retención (review resuelto): TODOS los payouts HELD del conductor entran al desembolso y su plata sale por el riel (esta liquidación: ${money(amountCents)}; se confirma cuando el riel responde). Las próximas liquidaciones ya no nacerán retenidas. La acción es idempotente. Confirmá con tu código TOTP (step-up MFA).`}
+      onVerified={async () => {
         await release.mutateAsync({ driverId });
         toast({
           tone: 'success',
@@ -108,7 +106,7 @@ export function RetryPayoutButton({
   if (!can(user, 'finance:payout')) return null;
 
   return (
-    <ConfirmDialog
+    <StepUpDialog
       trigger={
         <Button size="sm" variant="secondary">
           <RotateCcw className="size-4" aria-hidden />
@@ -116,9 +114,8 @@ export function RetryPayoutButton({
         </Button>
       }
       title="Reintentar liquidación"
-      description={`El payout FALLIDO vuelve al desembolso (FAILED→PROCESSING) y su plata sale de nuevo por el riel (${money(amountCents)}; se confirma cuando el riel responde). La acción es idempotente por dedupKey: el riel NO doble-paga si la salida anterior sí se despachó.`}
-      confirmLabel="Reintentar desembolso"
-      onConfirm={async () => {
+      description={`El payout FALLIDO vuelve al desembolso (FAILED→PROCESSING) y su plata sale de nuevo por el riel (${money(amountCents)}; se confirma cuando el riel responde). La acción es idempotente por dedupKey: el riel NO doble-paga si la salida anterior sí se despachó. Confirmá con tu código TOTP (step-up MFA).`}
+      onVerified={async () => {
         const res = await retry.mutateAsync({ payoutId, idempotencyKey: crypto.randomUUID() });
         toast({
           tone: 'success',
