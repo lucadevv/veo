@@ -62,6 +62,13 @@ export class RedisHotIndex implements HotIndex {
     attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
+    // RMW best-effort: leemos `prev` FUERA del LUA y mergeamos los attrs en Node (abajo). Es seguro porque
+    // los pings de UN conductor se SERIALIZAN aguas arriba: el firehose se particiona por driverId
+    // (location-publisher emite con key=driverId) y el consumer corre con partitionsConsumedConcurrently=1
+    // → no hay dos upsert del mismo driver concurrentes. Si ese invariante NO-local cambiara (otro productor
+    // sin esa key, o concurrencia >1, o un caller no-Kafka), la lectura podría quedar stale y un ping pisaría
+    // un attr recién llegado — transitorio (fail-open + self-heal al próximo ping), pero ahí habría que mover
+    // el merge DENTRO del LUA (leer la loc viva en el script y mergear los attrs ausentes). Gate `wkege7nth` (BAJA).
     const prev = await this.getLocation(driverId);
     const oldCell = prev?.h3 ?? h3;
     // ANTI-CLOBBER del gate de tier (B5-3). Los attrs del modelSpec viajan en el ping, pero un ping
