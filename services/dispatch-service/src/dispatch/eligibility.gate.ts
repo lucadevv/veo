@@ -25,6 +25,7 @@ import {
 } from '@veo/shared-types';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
+import { bumpEligibilityFailOpen, classifyMissingAttr } from './dispatch.metrics';
 
 /** Estado de identity que habilita ofertar: el conductor está online y disponible (turno activo). */
 const ELIGIBLE_STATUS = 'AVAILABLE';
@@ -158,6 +159,19 @@ export class EligibilityGate {
             { driverId, category },
           );
         }
+      } else {
+        // OBSERVABILIDAD (source=gate, CERO cambio de comportamiento): faltó algún attr → el gate AUTORITATIVO
+        // de la PUJA deja pasar SIN verificar el tier por asientos/segmento/año. Lo MEDIMOS (no lo cerramos:
+        // el flip a fail-closed sigue pendiente del gate adversarial) etiquetado `gate` para dimensionar el
+        // blast-radius por superficie del submit/accept, separado de la prevalencia de flota que mide el pool.
+        bumpEligibilityFailOpen(
+          'gate',
+          classifyMissingAttr({
+            seats: loc.seats !== undefined,
+            segment: loc.segment !== undefined,
+            year: loc.vehicleYear !== undefined,
+          }),
+        );
       }
     }
   }

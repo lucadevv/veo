@@ -10,8 +10,10 @@ import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-mem
 import { DriverPool } from './driver-pool';
 import { bumpEligibilityFailOpen } from './dispatch.metrics';
 
-// La observabilidad (C1) es un side-effect: la mockeamos para asertar que dispara sin tocar el registry real.
-vi.mock('./dispatch.metrics', () => ({
+// La observabilidad es un side-effect: espiamos SOLO el bump para asertar que dispara sin tocar el registry
+// real. `classifyMissingAttr` se mantiene REAL (importActual) — el pool lo usa para etiquetar qué attr faltó.
+vi.mock('./dispatch.metrics', async (importActual) => ({
+  ...(await importActual<typeof import('./dispatch.metrics')>()),
   bumpEligibilityFailOpen: vi.fn(),
 }));
 
@@ -110,11 +112,12 @@ describe('DriverPool.eligible · B5-3 eligibilidad por oferta', () => {
     expect(ids(out)).toEqual(['legacy']);
   });
 
-  it('OBSERVABILIDAD (C1): el fail-open BUMPEA la métrica sin cambiar el resultado (legacy igual pasa)', async () => {
+  it('OBSERVABILIDAD (source=pool): el fail-open BUMPEA la métrica sin cambiar el resultado (legacy igual pasa)', async () => {
     await hotIndex.seed('legacy', -12, -77, CELL, VehicleType.CAR); // sin attrs → faltan los 3 → 'multiple'
     const out = await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
     expect(ids(out)).toEqual(['legacy']); // comportamiento INTACTO (cero cambio)
-    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('multiple');
+    // El pool es el barrido amplio de candidatos → source='pool' (prevalencia de flota).
+    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('pool', 'multiple');
   });
 
   it('OBSERVABILIDAD (C1): NO bumpea cuando los attrs SÍ están (no hay fail-open)', async () => {

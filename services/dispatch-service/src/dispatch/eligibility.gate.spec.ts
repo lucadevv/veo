@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isDomainError } from '@veo/utils';
 import { VehicleType, VehicleSegment, OfferingId } from '@veo/shared-types';
 import { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex } from '../hot-index/in-memory-hot-index';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
+import { bumpEligibilityFailOpen } from './dispatch.metrics';
+
+// Espiamos SOLO el bump del fail-open (source=gate) para asertar que el gate autoritativo de PUJA instrumenta
+// su fail-open; `classifyMissingAttr` se mantiene REAL (importActual) para etiquetar correctamente el attr.
+vi.mock('./dispatch.metrics', async (importActual) => ({
+  ...(await importActual<typeof import('./dispatch.metrics')>()),
+  bumpEligibilityFailOpen: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const H3_CELL = 'cell-1';
 const DRIVER = 'driver-1';
@@ -174,11 +186,21 @@ describe('EligibilityGate · B5-3 — elegibilidad por TIER en PUJA (paridad con
     ).resolves.toBeUndefined();
   });
 
-  it('(c) conductor LEGACY sin attrs (seats/segment/year undefined) NO se excluye (fail-open preservado)', async () => {
-    const gate = await gateWithAttrs(); // sin attrs
+  it('(c) conductor LEGACY sin attrs (seats/segment/year undefined) NO se excluye (fail-open preservado) e INSTRUMENTA source=gate', async () => {
+    const gate = await gateWithAttrs(); // sin attrs → faltan los 3 → 'multiple'
     await expect(
       gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
     ).resolves.toBeUndefined();
+    // El gate autoritativo de PUJA mide su PROPIO fail-open (blast-radius del submit/accept), distinto del pool.
+    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('gate', 'multiple');
+  });
+
+  it('(c-bis) con attrs PRESENTES y válidos NO instrumenta el fail-open (no hay bypass)', async () => {
+    const gate = await gateWithAttrs({ seats: 7, segment: VehicleSegment.ECONOMY, vehicleYear: 2022 });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+    expect(bumpEligibilityFailOpen).not.toHaveBeenCalled();
   });
 
   it('(d) board SIN category (compat N-2) → sin requires → comportamiento previo (solo vehicleType)', async () => {
