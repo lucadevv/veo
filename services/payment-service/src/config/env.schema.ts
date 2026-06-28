@@ -54,7 +54,8 @@ export const envSchema = z.object({
   /// Ventana del BACKSTOP de idempotencia del refund admin (minutos): dos reembolsos del MISMO (paymentId,
   /// céntimos) dentro de esta ventana se tratan como la MISMA operación (devuelve el existente), independiente
   /// del Idempotency-Key del cliente. Cierra el residual del nonce de browser divergente (storage bloqueado,
-  /// cross-tab, cross-device). Default 15 min. Ver payment.policy.ts DEFAULT_REFUND_IDEMPOTENCY_WINDOW_MINUTES.
+  /// cross-tab, cross-device). El operador habilita un 2do parcial idéntico legítimo con el gesto `forceNew`.
+  /// Default 15 min; tuneable por entorno como sus hermanas REFUND_WINDOW_DAYS / REFUND_L2_THRESHOLD_CENTS.
   REFUND_IDEMPOTENCY_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
   /// Fracción de la penalidad de cancelación que va al CONDUCTOR como compensación (F2 · BR-T03). El
   /// resto lo retiene la plataforma. Default 0.5 (50/50).
