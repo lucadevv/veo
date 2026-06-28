@@ -43,6 +43,7 @@ import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { DriverPool } from './driver-pool';
+import { bumpPujaRequiresSkipped } from './dispatch.metrics';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
 import {
@@ -251,6 +252,10 @@ export class OfferBoardService {
     const cells = neighbors(center, matchKRing);
     // Candidatos elegibles (disponibles + del tipo del board + no excluidos por pánico). Filtrado
     // centralizado en DriverPool (misma fuente que el matcher secuencial FIXED).
+    // OBSERVABILIDAD (C2, CERO cambio de comportamiento): el carril PUJA llama eligible() SIN los `requires`
+    // de la oferta (el board no lleva category), así que segment/asientos NO se evalúan acá, a diferencia del
+    // carril FIXED. Medimos la exposición antes de cablear los requires al board (cambio pendiente del gate).
+    bumpPujaRequiresSkipped(board.vehicleType);
     const candidates = await this.driverPool.eligible(cells, board.vehicleType);
 
     const expiresAtIso = new Date(board.expiresAt).toISOString();

@@ -4,10 +4,17 @@
  * (confort=segment≥MID, xl=6 asientos), y DEGRADA SEGURO: un conductor sin attrs en el ping (legacy) NO
  * se excluye (no romper el matching durante el rollout, hasta que el productor mande los attrs).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { VehicleType, VehicleSegment, FleetDocumentType } from '@veo/shared-types';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
 import { DriverPool } from './driver-pool';
+import { bumpEligibilityFailOpen } from './dispatch.metrics';
+
+// La observabilidad (C1) es un side-effect: la mockeamos para asertar que dispara sin tocar el registry real.
+vi.mock('./dispatch.metrics', () => ({
+  bumpEligibilityFailOpen: vi.fn(),
+  bumpPujaRequiresSkipped: vi.fn(),
+}));
 
 const CELL = 'cell-1';
 const cells = [CELL];
@@ -16,6 +23,7 @@ let hotIndex: InMemoryHotIndex;
 let pool: DriverPool;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   hotIndex = new InMemoryHotIndex();
   pool = new DriverPool(hotIndex, new InMemoryExclusionRegistry());
 });
@@ -101,6 +109,23 @@ describe('DriverPool.eligible · B5-3 eligibilidad por oferta', () => {
     const out = await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
     // legacy pasa (degradación); el que SÍ trae attrs y no cumple, se excluye.
     expect(ids(out)).toEqual(['legacy']);
+  });
+
+  it('OBSERVABILIDAD (C1): el fail-open BUMPEA la métrica sin cambiar el resultado (legacy igual pasa)', async () => {
+    await hotIndex.seed('legacy', -12, -77, CELL, VehicleType.CAR); // sin attrs → faltan los 3 → 'multiple'
+    const out = await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
+    expect(ids(out)).toEqual(['legacy']); // comportamiento INTACTO (cero cambio)
+    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('multiple');
+  });
+
+  it('OBSERVABILIDAD (C1): NO bumpea cuando los attrs SÍ están (no hay fail-open)', async () => {
+    await hotIndex.seed('full', -12, -77, CELL, VehicleType.CAR, {
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
+    expect(bumpEligibilityFailOpen).not.toHaveBeenCalled();
   });
 
   it('respeta el vehicleType además del requires (una MOTO no entra a un pool CAR)', async () => {

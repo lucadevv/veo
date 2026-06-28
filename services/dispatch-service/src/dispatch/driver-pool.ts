@@ -20,6 +20,7 @@ import {
   type ExclusionRegistry,
   type DriverLocation,
 } from '../hot-index/hot-index.port';
+import { bumpEligibilityFailOpen } from './dispatch.metrics';
 
 @Injectable()
 export class DriverPool {
@@ -73,6 +74,22 @@ export class DriverPool {
     if (!hasRequiredCertifications(requires, loc.certifications)) return false;
     // Attrs del vehículo: FAIL-OPEN — sin el dato no se restringe.
     if (loc.seats === undefined || loc.segment === undefined || loc.vehicleYear === undefined) {
+      // OBSERVABILIDAD (C1, CERO cambio de comportamiento): el fail-open dispara — un vehículo con attrs
+      // ausentes pasa para una oferta con requisitos. Medimos cuánto pasa en tráfico real antes de flipear a
+      // fail-closed (el cambio de matching en vivo necesita el gate adversarial). Etiquetamos QUÉ atributo faltó.
+      const missingCount =
+        (loc.seats === undefined ? 1 : 0) +
+        (loc.segment === undefined ? 1 : 0) +
+        (loc.vehicleYear === undefined ? 1 : 0);
+      bumpEligibilityFailOpen(
+        missingCount > 1
+          ? 'multiple'
+          : loc.seats === undefined
+            ? 'seats'
+            : loc.segment === undefined
+              ? 'segment'
+              : 'year',
+      );
       return true;
     }
     return isVehicleEligibleForOffering(
