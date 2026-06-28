@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   Roles,
@@ -247,7 +257,9 @@ export class PaymentsController {
     @Param('tripId') tripId: string,
     @Body() dto: RefundDto,
     @CurrentUser() user: AuthenticatedUser,
+    // Idempotency-Key del operador (panel admin) → barrera dura contra el doble-reembolso parcial.
+    @Headers('Idempotency-Key') idempotencyKey?: string,
   ) {
-    return this.payments.refund(tripId, dto.amountCents, dto.reason, user);
+    return this.payments.refund(tripId, dto.amountCents, dto.reason, user, idempotencyKey);
   }
 }

@@ -5,6 +5,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -146,7 +147,9 @@ export class FinanceController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('tripId') tripId: string,
     @Body() dto: RefundDto,
+    // Idempotency-Key del panel → se PROPAGA a payment-service (no muere en el bff): barrera de idempotencia.
+    @Headers('Idempotency-Key') idempotencyKey?: string,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
-    return this.finance.refund(user, tripId, dto);
+    return this.finance.refund(user, tripId, dto, idempotencyKey);
   }
 }

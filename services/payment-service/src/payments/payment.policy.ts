@@ -266,3 +266,21 @@ export const BOOKING_CANCEL_REFUND_DEDUP_PREFIX = 'booking-cancel-refund:' as co
 export function deriveBookingCancellationRefundDedupKey(bookingId: string): string {
   return `${BOOKING_CANCEL_REFUND_DEDUP_PREFIX}${bookingId}`;
 }
+
+/**
+ * PREFIJO TIPADO de la dedupKey de un refund ADMIN discrecional cuando el operador trae un `Idempotency-Key`
+ * (cero strings mágicos). Distingue el namespace del refund admin del system-initiated (`booking-cancel-refund:`)
+ * para que NUNCA colisionen en `Refund.dedupKey` aunque el UUID del cliente coincidiera con un bookingId.
+ */
+export const ADMIN_REFUND_DEDUP_PREFIX = 'admin-refund:' as const;
+
+/**
+ * Clave de idempotencia de un refund ADMIN discrecional, derivada del `Idempotency-Key` que el operador envía
+ * desde el panel. Persiste en `Refund.dedupKey` (UNIQUE PARCIAL en SQL, status <> REJECTED): un doble-submit o
+ * un reintento de red con el MISMO key choca → P2002 → el caller devuelve el refund existente (NO doble plata).
+ * El refund PARCIAL no lo blinda la máquina de estados (el CAS solo impide exceder el saldo, no hace idempotente
+ * la operación lógica), así que esta key es la barrera real. Sin `Idempotency-Key` ⇒ dedupKey NULL (como antes).
+ */
+export function deriveAdminRefundDedupKey(idempotencyKey: string): string {
+  return `${ADMIN_REFUND_DEDUP_PREFIX}${idempotencyKey}`;
+}

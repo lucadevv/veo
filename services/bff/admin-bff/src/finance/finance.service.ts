@@ -240,10 +240,13 @@ export class FinanceService {
     identity: AuthenticatedUser,
     tripId: string,
     dto: RefundDto,
+    idempotencyKey?: string,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     const res = await this.rest.post<{ refundId: string; paymentId: string; status: string }>(
       `/payments/${tripId}/refund`,
-      { identity, body: { amountCents: dto.amountCents, reason: dto.reason } },
+      // El Idempotency-Key del operador se PROPAGA al servicio dueño del dato (no muere acá): un reintento /
+      // doble-submit con el mismo key NO doble-reembolsa (UNIQUE parcial en Refund).
+      { identity, body: { amountCents: dto.amountCents, reason: dto.reason }, idempotencyKey },
     );
     await this.audit.record(identity, {
       action: 'payment.refund',

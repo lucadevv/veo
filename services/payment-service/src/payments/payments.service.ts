@@ -42,6 +42,7 @@ import {
   bpsToRate,
   ChargeMode,
   computeChargeAmounts,
+  deriveAdminRefundDedupKey,
   deriveBookingCancellationRefundDedupKey,
   deriveRefundIdempotencyKey,
   retryDelayMs,
@@ -1144,6 +1145,7 @@ export class PaymentsService {
     amountCents: number,
     reason: string,
     operator: AuthenticatedUser,
+    idempotencyKey?: string,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.prisma.read.payment.findFirst({
@@ -1186,17 +1188,41 @@ export class PaymentsService {
     const claim: RefundClaim = {
       amountCents,
       reason,
-      // Admin discrecional: el operador humano firma el pedido y la aprobación; sin dedupKey (su
-      // idempotencia es el CAS optimista del Payment, no una clave determinista).
+      // Admin discrecional: el operador humano firma el pedido y la aprobación. Si el panel trae un
+      // `Idempotency-Key`, lo usamos como barrera DURA de idempotencia (UNIQUE PARCIAL en Refund) para que un
+      // doble-submit / reintento de red NO doble-reembolse — el refund PARCIAL no lo blinda la state machine
+      // (el CAS solo impide exceder el saldo). Sin key (compat) ⇒ null: idempotencia = CAS optimista, como antes.
       requestedBy: operator.userId,
       approvedBy: operator.userId,
-      dedupKey: null,
+      dedupKey: idempotencyKey ? deriveAdminRefundDedupKey(idempotencyKey) : null,
       newStatus,
       newRefundedCents,
       isFullyRefunded,
     };
 
-    return this.executeRefundClaim(payment, claim);
+    try {
+      return await this.executeRefundClaim(payment, claim);
+    } catch (err) {
+      // IDEMPOTENCIA: el MISMO `Idempotency-Key` ya creó un refund ACTIVO (UNIQUE parcial) → P2002. Devolvemos
+      // ESE refund (no creamos un segundo money-OUT). Sin key → dedupKey null → este path no aplica (relanza).
+      if (idempotencyKey && isUniqueViolation(err, 'dedupKey')) {
+        const existing = await this.prisma.read.refund.findFirst({
+          where: { dedupKey: deriveAdminRefundDedupKey(idempotencyKey) },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (existing) {
+          this.logger.log(
+            `Refund admin idempotente (Idempotency-Key ya usado) trip=${tripId}; devuelvo el refund existente`,
+          );
+          return {
+            refundId: existing.id,
+            paymentId: existing.paymentId,
+            status: existing.status,
+          };
+        }
+      }
+      throw err;
+    }
   }
 
   /**

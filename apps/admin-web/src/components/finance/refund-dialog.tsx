@@ -19,6 +19,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 
+/** Motivo mínimo: el DTO del admin-bff exige MinLength(3). Validar acá evita un 400 en el round-trip. */
+const REASON_MIN_LENGTH = 3;
+
 /** Emite un reembolso sobre un viaje (monto en soles → céntimos). Idempotente. */
 export function RefundDialog() {
   const { toast } = useToast();
@@ -28,9 +31,22 @@ export function RefundDialog() {
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Idempotency-Key ESTABLE por sesión de diálogo (no per-click): si el operador reintenta tras un error de red
+  // ambiguo (el server pudo haber commiteado), el MISMO key dedupea server-side → NUNCA doble-reembolso. Se
+  // re-acuña al abrir el diálogo (cada apertura = una intención de reembolso nueva).
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   const amount = Number(soles);
-  const valid = tripId.trim().length > 0 && amount > 0 && reason.trim().length > 0;
+  const valid =
+    tripId.trim().length > 0 && amount > 0 && reason.trim().length >= REASON_MIN_LENGTH;
+
+  function handleOpenChange(next: boolean) {
+    if (next) {
+      setIdempotencyKey(crypto.randomUUID()); // key fresco por apertura
+      setError(null);
+    }
+    setOpen(next);
+  }
 
   async function submit() {
     setError(null);
@@ -39,7 +55,7 @@ export function RefundDialog() {
         tripId: tripId.trim(),
         amountCents: solesToCents(amount),
         reason: reason.trim(),
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey,
       });
       toast({ tone: 'success', title: 'Reembolso emitido' });
       setOpen(false);
@@ -52,7 +68,7 @@ export function RefundDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="secondary" size="sm">
           <Undo2 className="size-4" aria-hidden />
@@ -93,7 +109,10 @@ export function RefundDialog() {
           <Button
             variant="primary"
             loading={refund.isPending}
-            disabled={!valid}
+            // `!valid || isPending`: `disabled` es un booleano DEFINIDO, así que el `disabled ?? loading` del
+            // Button no caería a `loading` solo — hay que OR-ear el pending acá para que el botón NO siga
+            // clickeable durante el request en vuelo (si no, un doble-click dispara dos submits).
+            disabled={!valid || refund.isPending}
             onClick={() => void submit()}
           >
             Emitir reembolso
