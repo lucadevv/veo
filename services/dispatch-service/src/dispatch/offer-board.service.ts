@@ -36,14 +36,21 @@ import { createEnvelope } from '@veo/events';
 // (que, además, es FRÁGIL: cada servicio genera su propio cliente Prisma → clases distintas; el helper
 // compartido detecta de forma ESTRUCTURAL por name+code, válido cross-cliente).
 import { isUniqueViolation } from '@veo/database';
-import { DispatchOutcome, type SpecialRequest, type VehicleClass } from '@veo/shared-types';
+import {
+  DispatchOutcome,
+  findOffering,
+  hasRequiredCertifications,
+  isVehicleEligibleForOffering,
+  type OfferingRequirements,
+  type SpecialRequest,
+  type VehicleClass,
+} from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { HOT_INDEX, type HotIndex, type DriverLocation } from '../hot-index/hot-index.port';
 import { DriverPool } from './driver-pool';
-import { bumpPujaRequiresSkipped } from './dispatch.metrics';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
 import {
@@ -67,6 +74,9 @@ export interface BidPosted {
   passengerId: string;
   bidCents: number;
   vehicleType: VehicleClass;
+  /// B5-3 — oferta/tier del viaje (offeringId): el board la guarda para derivar `requires` y enforcar la
+  /// eligibilidad por TIER en PUJA igual que FIXED. Opcional por compat N-2 (bid_posted previos sin él).
+  category?: string;
   origin: LatLon;
   windowSec: number;
   /// H13 — ciclo de negociación del viaje (lo guardamos en el board y lo estampamos en offer_accepted).
@@ -82,6 +92,9 @@ export interface Reassigning {
   driverId: string;
   passengerId: string;
   vehicleType: VehicleClass;
+  /// B5-3 — oferta/tier del viaje: el board re-abierto la re-persiste para enforcar el TIER en el re-match.
+  /// Opcional por compat N-2 (reassigning previos sin él).
+  category?: string;
   origin: LatLon;
   bidCents: number;
   /// H13 — ciclo de negociación del NUEVO re-match (seq incrementado por trip al pasar a REASSIGNING).
@@ -169,6 +182,9 @@ export class OfferBoardService {
       passengerId: bid.passengerId,
       bidCents: bid.bidCents,
       vehicleType: bid.vehicleType,
+      // B5-3 — el tier del viaje viaja al board: el gate deriva `requires` de acá para enforcar la
+      // elegibilidad en PUJA (un tier inferior no puede ganar un bid de tier superior).
+      category: bid.category,
       origin: bid.origin,
       // A3 — celda H3 del origen calculada UNA vez acá: alimenta el índice inverso `board:cell:<cell>`
       // que `listOpenBidsNear` consulta por k-ring (en vez de cargar TODOS los boards y filtrar en Node).
@@ -212,6 +228,10 @@ export class OfferBoardService {
       tripId: reassign.tripId,
       passengerId: existing?.passengerId ?? reassign.passengerId,
       vehicleType: existing?.vehicleType ?? reassign.vehicleType,
+      // B5-3 — preserva el tier del board previo si sobrevivió (TTL no expiró); si se rearma SOLO desde el
+      // evento (board ya expirado), lo toma del payload ENRIQUECIDO de trip.reassigning. Así el board
+      // re-abierto NUNCA pierde sus `requires` y el re-match enforça el TIER igual que la puja original.
+      category: existing?.category ?? reassign.category,
       origin,
       // A3 — re-deriva la celda del origen resuelto (reusa la del board previo si existía, o la del evento).
       originCell: existing?.originCell ?? toH3(origin, DISPATCH_H3_RESOLUTION),
@@ -250,13 +270,14 @@ export class OfferBoardService {
     // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado); sin config → DEFAULT.
     const { matchKRing } = await this.radiusConfig.getKRings();
     const cells = neighbors(center, matchKRing);
-    // Candidatos elegibles (disponibles + del tipo del board + no excluidos por pánico). Filtrado
-    // centralizado en DriverPool (misma fuente que el matcher secuencial FIXED).
-    // OBSERVABILIDAD (C2, CERO cambio de comportamiento): el carril PUJA llama eligible() SIN los `requires`
-    // de la oferta (el board no lleva category), así que segment/asientos NO se evalúan acá, a diferencia del
-    // carril FIXED. Medimos la exposición antes de cablear los requires al board (cambio pendiente del gate).
-    bumpPujaRequiresSkipped(board.vehicleType);
-    const candidates = await this.driverPool.eligible(cells, board.vehicleType);
+    // Candidatos elegibles (disponibles + del tipo del board + que SATISFACEN los `requires` de la oferta +
+    // no excluidos por pánico). Filtrado centralizado en DriverPool (misma fuente que el matcher secuencial
+    // FIXED). B5-3 — el board YA lleva `category`: derivamos sus `requires` y se los pasamos a `eligible()`
+    // para que el broadcast no llegue a conductores de un tier que no cumplen (paridad con FIXED). El gate
+    // de submit/accept re-valida igual (defensa en profundidad); esto solo evita el ruido del broadcast.
+    const candidates = await this.driverPool.eligible(cells, board.vehicleType, {
+      requires: findOffering(board.category ?? '')?.requires,
+    });
 
     const expiresAtIso = new Date(board.expiresAt).toISOString();
     // A1 — UNA sola llamada de ETA en LOTE (OSRM `/table` / motor local mapeado) en vez de N×`eta`
@@ -314,8 +335,14 @@ export class OfferBoardService {
       throw new ConflictError('La puja ya no está abierta', { status: board.status });
     }
 
-    // Capa 3 (service): re-valida elegibilidad contra identity + vehículo. NO basta presencia GPS.
-    await this.eligibility.assertEligibleToOffer(input.driverId, board.vehicleType);
+    // Capa 3 (service): re-valida elegibilidad contra identity + vehículo + TIER (board.category). NO basta
+    // presencia GPS. B5-3 — un conductor de tier inferior NO puede ofertar a un bid de tier superior.
+    await this.eligibility.assertEligibleToOffer(
+      input.driverId,
+      board.vehicleType,
+      false,
+      board.category,
+    );
 
     if (input.kind === OfferKind.ACCEPT_PRICE && input.priceCents !== board.bidCents) {
       throw new ValidationError('ACCEPT_PRICE debe igualar el bid', {
@@ -466,7 +493,8 @@ export class OfferBoardService {
     try {
       // A4 — BYPASS del cache (`fresh=true`): el accept es la decisión de plata. Un conductor recién
       // suspendido NO puede colarse por un snapshot stale de hasta `ELIGIBILITY_CACHE_TTL_MS` al match.
-      await this.eligibility.assertEligibleToOffer(driverId, board.vehicleType, true);
+      // B5-3 — re-valida también el TIER (board.category): un tier inferior no se cuela al match.
+      await this.eligibility.assertEligibleToOffer(driverId, board.vehicleType, true, board.category);
     } catch {
       await this.store.setOfferStatus(tripId, driverId, OfferStatus.STALE);
       // BE-3 — la oferta dejó de ser válida con el board OPEN: avisamos al pasajero para que la QUITE al
@@ -700,10 +728,46 @@ export class OfferBoardService {
     // pre-excluye los vencidos por score y poda los muertos por TTL; el filtro en Node es belt-and-suspenders
     // sobre ese conjunto ACOTADO: OPEN + ventana viva + vehículo.
     const now = Date.now();
+    const currentYear = new Date().getUTCFullYear();
     const candidates = await this.store.boardsInCells(cells);
     return candidates.filter(
       (b) =>
-        b.status === BoardStatus.OPEN && b.expiresAt > now && b.vehicleType === loc.vehicleType,
+        b.status === BoardStatus.OPEN &&
+        b.expiresAt > now &&
+        b.vehicleType === loc.vehicleType &&
+        // B5-3 — además del vehicleType, el board debe cumplir los `requires` de SU oferta para que el
+        // conductor lo vea/poll-ee: un tier inferior NO debe encontrar boards de tier superior. Misma
+        // semántica del pool/gate (certs fail-closed, attrs fail-open).
+        this.boardMeetsRequires(b.category, loc, currentYear),
+    );
+  }
+
+  /**
+   * B5-3 — ¿el conductor (`loc` del hot-index) satisface los `requires` de la oferta del board? Espeja
+   * `DriverPool.passesEligibility` y la rama de tier del `EligibilityGate`: certs FAIL-CLOSED (una vertical
+   * exige credencial válida), attrs del vehículo (seats/segment/año) FAIL-OPEN (un ping legacy sin attrs NO
+   * se excluye, para no romper el rollout). Category ausente/desconocida ⇒ sin requires ⇒ true (solo filtra
+   * por vehicleType, como antes). Es un filtro de VISIBILIDAD/ruido; el gate de submit/accept re-valida igual.
+   */
+  private boardMeetsRequires(
+    category: string | undefined,
+    loc: DriverLocation,
+    currentYear: number,
+  ): boolean {
+    const requires: OfferingRequirements | undefined = category
+      ? findOffering(category)?.requires
+      : undefined;
+    if (!requires) return true;
+    // Certs: FAIL-CLOSED — se evalúa SIEMPRE (independiente de los attrs del vehículo).
+    if (!hasRequiredCertifications(requires, loc.certifications)) return false;
+    // Attrs del vehículo: FAIL-OPEN — sin el dato (legacy) no se restringe.
+    if (loc.seats === undefined || loc.segment === undefined || loc.vehicleYear === undefined) {
+      return true;
+    }
+    return isVehicleEligibleForOffering(
+      requires,
+      { seats: loc.seats, segment: loc.segment, year: loc.vehicleYear },
+      currentYear,
     );
   }
 

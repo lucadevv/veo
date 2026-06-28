@@ -412,6 +412,11 @@ export const tripBidPosted = z.object({
   passengerId: z.string(),
   bidCents: z.number().int().positive(),
   vehicleType: vehicleClassSchema,
+  /// B5-3 · oferta del viaje (offeringId del catálogo, ej. veo_xl). dispatch la persiste en el board y
+  /// deriva sus REQUISITOS (segment/seats/antigüedad/certs) para enforcar la eligibilidad por TIER en la
+  /// PUJA igual que en FIXED. Opcional/compat N-2: ausente o desconocido ⇒ sin requisitos extra (el gate
+  /// solo filtra por vehicleType, como antes).
+  category: z.string().optional(),
   origin: geo,
   windowSec: z.number().int().positive(),
   /// H13 — secuencia MONOTÓNICA de negociación del viaje (NUNCA se resetea, a diferencia de
@@ -506,6 +511,10 @@ export const tripReassigning = z.object({
   passengerId: z.string(),
   /// Tipo de vehículo del viaje: dispatch difunde la re-puja solo a conductores de ese tipo.
   vehicleType: vehicleClassSchema,
+  /// B5-3 · oferta del viaje (offeringId): dispatch la re-persiste en el board re-abierto para enforcar la
+  /// eligibilidad por TIER en el re-match igual que en la puja original. Opcional/compat N-2: ausente o
+  /// desconocido ⇒ sin requisitos extra.
+  category: z.string().optional(),
   /// Origen del viaje (geo): centro del broadcast a conductores elegibles cercanos.
   origin: geo,
   bidCents: z.number().int().positive(),

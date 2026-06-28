@@ -1,13 +1,15 @@
 /**
  * Métricas Prometheus propias del dispatch-service (FOUNDATION §5 · observabilidad antes de features).
  *
- * Estas dos métricas MIDEN —sin cambiar comportamiento— la exposición del eslabón vehículo↔oferta en el
- * matching, ANTES de flipear las degradaciones a fail-closed (el cambio de matching en vivo necesita pasar
- * el gate adversarial; mientras tanto, medimos cuánto pasa en tráfico real para decidir con datos):
+ * Esta métrica MIDE —sin cambiar comportamiento— la exposición del eslabón vehículo↔oferta en el matching,
+ * ANTES de flipear la degradación a fail-closed (el cambio de matching en vivo necesita pasar el gate
+ * adversarial; mientras tanto, medimos cuánto pasa en tráfico real para decidir con datos):
  *  - C1: el FAIL-OPEN de atributos en la elegibilidad (driver-pool) — un vehículo sin seats/segment/año en el
  *    ping pasa para una oferta con requisitos sin verificar el tier.
- *  - C2: el carril PUJA (offer-board) corre la elegibilidad SIN los `requires` de la oferta (el board no lleva
- *    category), así que segment/asientos NO se evalúan, a diferencia del carril FIXED.
+ *
+ * (C2 — el carril PUJA corría la elegibilidad SIN los `requires` de la oferta porque el board no llevaba
+ * `category` — quedó CERRADO: el board ahora transporta `category` y el gate enforça el TIER en PUJA igual
+ * que en FIXED, así que la métrica de exposición ya no tiene sentido y se eliminó.)
  *
  * Patrón (igual que payment-service/panic-service): dispatch no declara `prom-client` como dependencia
  * directa. Reutilizamos la MISMA instancia del módulo que ya usa @veo/observability, tomando la clase Counter
@@ -51,22 +53,4 @@ const eligibilityFailOpenTotal: CounterLike = getOrCreateCounter(
 /** Bumpea el contador del fail-open de atributos (C1), etiquetado por el atributo que faltó. */
 export function bumpEligibilityFailOpen(missing: 'seats' | 'segment' | 'year' | 'multiple'): void {
   eligibilityFailOpenTotal.inc({ missing });
-}
-
-/**
- * C2 · Broadcasts del carril PUJA cuya elegibilidad corrió SIN los `requires` de la oferta. Hoy el board no
- * lleva `category`, así que `eligible()` se llama solo con `vehicleType` → segment/asientos NO se evalúan (a
- * diferencia del carril FIXED, que sí deriva requires). Mide la exposición del tier en PUJA antes de cablear
- * los requires al board. Por `vehicleType`.
- */
-const pujaRequiresSkippedTotal: CounterLike = getOrCreateCounter(
-  'dispatch_puja_requires_skipped_total',
-  'Broadcasts del carril PUJA cuya elegibilidad corrió SIN los requisitos de la oferta (el board no lleva ' +
-    'category → segment/asientos no se evalúan, a diferencia de FIXED). Mide la exposición del tier en PUJA.',
-  ['vehicleType'] as const,
-);
-
-/** Bumpea el contador de PUJA-sin-requires (C2), etiquetado por la clase de vehículo del board. */
-export function bumpPujaRequiresSkipped(vehicleType: string): void {
-  pujaRequiresSkippedTotal.inc({ vehicleType });
 }

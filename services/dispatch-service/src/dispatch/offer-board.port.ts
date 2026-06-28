@@ -79,6 +79,12 @@ export interface OfferBoard {
   /** Piso de la negociación (céntimos PEN). ACCEPT_PRICE == bidCents; COUNTER > bidCents. */
   bidCents: number;
   vehicleType: VehicleClass;
+  /**
+   * B5-3 — oferta/tier del viaje (offeringId del catálogo). Se persiste con el board para derivar sus
+   * `requires` (segment/seats/antigüedad/certs) y enforcar la elegibilidad por TIER en la PUJA igual que
+   * en FIXED. Opcional por compat N-2 (boards en reposo escritos por una versión previa sin el campo).
+   */
+  category?: string;
   origin: LatLon;
   /**
    * A3 — celda H3 (a `DISPATCH_H3_RESOLUTION`) del ORIGEN del board, calculada UNA vez al abrirlo. Es la

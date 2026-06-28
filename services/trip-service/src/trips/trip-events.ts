@@ -123,6 +123,10 @@ export async function emitBidPosted(
         passengerId: trip.passengerId,
         bidCents: trip.fareCents,
         vehicleType: trip.vehicleType,
+        // B5-3: oferta del viaje (offeringId). dispatch la guarda en el board y deriva sus requisitos
+        // de eligibilidad (segment/seats/antigüedad/certs) para enforcar el TIER en la PUJA igual que en
+        // FIXED. Sin esto el board queda mudo y un tier inferior puede ganar un bid de tier superior.
+        category: trip.category ?? undefined,
         origin,
         windowSec: bidWindowSec,
         // H13 — dispatch persiste este seq en el board y lo estampa en dispatch.offer_accepted.

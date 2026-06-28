@@ -116,6 +116,9 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       passengerId: p.passengerId,
       bidCents: p.bidCents,
       vehicleType: p.vehicleType,
+      // B5-3 — propaga el tier del viaje al board: el gate deriva `requires` para enforcar la elegibilidad
+      // por TIER en PUJA igual que en FIXED. Opcional/compat N-2 (bid_posted previos sin category).
+      category: p.category,
       origin: p.origin,
       windowSec: p.windowSec,
       // H13 — propaga el ciclo de negociación al board (se estampa en offer_accepted).
@@ -155,6 +158,8 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       driverId: p.driverId,
       passengerId: p.passengerId,
       vehicleType: p.vehicleType,
+      // B5-3 — re-persiste el tier en el board re-abierto para enforcar el TIER en el re-match.
+      category: p.category,
       origin: p.origin,
       bidCents: p.bidCents,
       // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.

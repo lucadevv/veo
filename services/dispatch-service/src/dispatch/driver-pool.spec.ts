@@ -13,7 +13,6 @@ import { bumpEligibilityFailOpen } from './dispatch.metrics';
 // La observabilidad (C1) es un side-effect: la mockeamos para asertar que dispara sin tocar el registry real.
 vi.mock('./dispatch.metrics', () => ({
   bumpEligibilityFailOpen: vi.fn(),
-  bumpPujaRequiresSkipped: vi.fn(),
 }));
 
 const CELL = 'cell-1';

@@ -17,7 +17,12 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ForbiddenError } from '@veo/utils';
-import { VehicleClass } from '@veo/shared-types';
+import {
+  VehicleClass,
+  findOffering,
+  hasRequiredCertifications,
+  isVehicleEligibleForOffering,
+} from '@veo/shared-types';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 
@@ -71,11 +76,19 @@ export class EligibilityGate {
    * A4 — `fresh`: si es true, BYPASEA el cache de identity y lee fresco (path de ACCEPT, la decisión de
    * plata: un conductor recién suspendido no puede colarse por un snapshot stale de hasta `cacheTtlMs`).
    * El path de SUBMIT/LIST usa el cache (read-heavy, estado que cambia en minutos). Default = con cache.
+   *
+   * B5-3 — `category`: el tier/oferta del board (offeringId). Si viene, derivamos sus `requires`
+   * (segment/seats/antigüedad/certs) y enforzamos la elegibilidad por TIER en la PUJA con la MISMA
+   * semántica del pool de FIXED (`driver-pool.passesEligibility`): certs FAIL-CLOSED (una vertical exige
+   * credencial válida), attrs del vehículo FAIL-OPEN (un ping legacy sin seats/segment/año NO se excluye,
+   * para no romper el rollout). Sin `category` (compat N-2) o category desconocida ⇒ sin requisitos extra
+   * ⇒ comportamiento previo (solo online/!suspendido/vehículo).
    */
   async assertEligibleToOffer(
     driverId: string,
     vehicleType: VehicleClass,
     fresh = false,
+    category?: string,
   ): Promise<void> {
     // Capa 3: estado autoritativo en identity (NO el hot-index). Falla-cerrado ante error de red.
     const snapshot = await this.identitySnapshot(driverId, fresh);
@@ -111,6 +124,41 @@ export class EligibilityGate {
         expected: vehicleType,
         actual: loc.vehicleType,
       });
+    }
+
+    // B5-3 — ELEGIBILIDAD POR TIER (cierre del hueco PUJA): si el board lleva su oferta/tier, derivamos sus
+    // `requires` y los enforzamos con la MISMA semántica del pool de FIXED (driver-pool.passesEligibility),
+    // para que un conductor de tier inferior (ej. CAR económico de 4 asientos) NO pueda ofertar/ganar un bid
+    // de tier superior (VEO_XL minSeats:6, VEO_PREMIUM minSegment:PREMIUM). Category ausente/desconocida ⇒
+    // sin requires ⇒ comportamiento previo (solo vehicleType).
+    const requires = category ? findOffering(category)?.requires : undefined;
+    if (requires) {
+      // Certs del conductor → FAIL-CLOSED: una vertical (ambulancia/grúa/mecánico) exige credencial VÁLIDA;
+      // su AUSENCIA NO habilita (espeja el pool). Una oferta sin certs requeridas no se ve afectada.
+      if (!hasRequiredCertifications(requires, loc.certifications)) {
+        throw new ForbiddenError(
+          'Conductor no elegible: faltan certificaciones requeridas por la oferta',
+          { driverId, category },
+        );
+      }
+      // Attrs del vehículo (seats/segment/año) → FAIL-OPEN: si el hot-index no los trae (legacy/productor
+      // sin desplegar) NO se excluye — igual que el pool, para no romper el matching en el rollout. Solo se
+      // enforça cuando los TRES attrs están presentes.
+      if (loc.seats !== undefined && loc.segment !== undefined && loc.vehicleYear !== undefined) {
+        const currentYear = new Date().getUTCFullYear();
+        if (
+          !isVehicleEligibleForOffering(
+            requires,
+            { seats: loc.seats, segment: loc.segment, year: loc.vehicleYear },
+            currentYear,
+          )
+        ) {
+          throw new ForbiddenError(
+            'Conductor no elegible: el vehículo no cumple los requisitos de la oferta',
+            { driverId, category },
+          );
+        }
+      }
     }
   }
 

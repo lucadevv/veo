@@ -110,6 +110,9 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
           driverId: cancelledDriverId ?? '',
           passengerId: trip.passengerId,
           vehicleType: trip.vehicleType,
+          // B5-3: oferta del viaje — dispatch la re-persiste en el board re-abierto para enforcar el TIER
+          // en el re-match igual que en la puja original (sin esto el board re-abierto perdería los requires).
+          category: trip.category ?? undefined,
           origin: { lat: trip.originLat, lon: trip.originLon },
           bidCents,
           reason: 'driver_cancelled',

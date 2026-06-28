@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { isDomainError, toH3, neighbors, DISPATCH_H3_RESOLUTION } from '@veo/utils';
-import { VehicleType, SpecialRequest } from '@veo/shared-types';
+import { VehicleType, VehicleSegment, SpecialRequest, OfferingId } from '@veo/shared-types';
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
 import type { DispatchRadiusConfigService } from './dispatch-radius-config.service';
@@ -1442,6 +1442,70 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
 
     const bids = await c.svc.listOpenBidsNear('d1');
     expect(bids.map((b) => b.tripId)).toEqual(['trip-1']);
+  });
+
+  it('B5-3: listOpenBidsNear FILTRA por TIER — un conductor que no cumple los requires del board NO lo ve', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    // Conductor CAR económico de 4 asientos (attrs presentes) → no cumple VEO_XL (minSeats:6).
+    await c.hotIndex.seed('d-small', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR, {
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    // Board XL cercano (mismo vehicleType CAR pero tier superior).
+    await c.svc.openBoard({
+      tripId: 'trip-xl',
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      category: OfferingId.VEO_XL,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+    // Board sin category (RIDE genérico): debe verlo igual.
+    await c.svc.openBoard({
+      tripId: 'trip-any',
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+
+    // El conductor chico NO ve el board XL, pero SÍ el genérico.
+    expect((await c.svc.listOpenBidsNear('d-small')).map((b) => b.tripId)).toEqual(['trip-any']);
+
+    // Un conductor con van de 7 asientos SÍ ve el board XL.
+    await c.hotIndex.seed('d-van', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR, {
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    expect((await c.svc.listOpenBidsNear('d-van')).map((b) => b.tripId).sort()).toEqual([
+      'trip-any',
+      'trip-xl',
+    ]);
+  });
+
+  it('B5-3: listOpenBidsNear fail-OPEN — un conductor LEGACY sin attrs SÍ ve un board de tier (no se excluye)', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    // Conductor sin attrs (ping legacy) → fail-open: NO se lo excluye del board XL.
+    await c.hotIndex.seed('d-legacy', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
+    await c.svc.openBoard({
+      tripId: 'trip-xl',
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      category: OfferingId.VEO_XL,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+    expect((await c.svc.listOpenBidsNear('d-legacy')).map((b) => b.tripId)).toEqual(['trip-xl']);
   });
 
   // ── A3: índice inverso celda→board (listOpenBidsNear por k-ring, no all-scan) ──────────────────

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isDomainError } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleType, VehicleSegment, OfferingId } from '@veo/shared-types';
 import { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex } from '../hot-index/in-memory-hot-index';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
@@ -135,6 +135,104 @@ describe('EligibilityGate (cierre #9)', () => {
   it('online+no suspendido pero sin ubicación activa (vehículo desconocido) → 403', async () => {
     const gate = await gateWith({ identity: identityFake({}), seedVehicle: null });
     await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR));
+  });
+});
+
+describe('EligibilityGate · B5-3 — elegibilidad por TIER en PUJA (paridad con FIXED)', () => {
+  /** Construye el gate con un conductor elegible (AVAILABLE, no suspendido) y los attrs de vehículo dados. */
+  async function gateWithAttrs(attrs?: {
+    seats?: number;
+    segment?: VehicleSegment;
+    vehicleYear?: number;
+    certifications?: import('@veo/shared-types').FleetDocumentType[];
+  }): Promise<EligibilityGate> {
+    const hotIndex = new InMemoryHotIndex();
+    await hotIndex.seed(DRIVER, -12, -77, H3_CELL, VehicleType.CAR, attrs);
+    return new EligibilityGate(identityFake({}), hotIndex, 0);
+  }
+
+  // VEO_XL requires { minSeats: 6 } (catálogo). Un CAR económico de 4 asientos NO lo cumple.
+  const XL = OfferingId.VEO_XL;
+
+  it('(a) tier INFERIOR (CAR 4 asientos, attrs presentes) RECHAZADO en un board XL (minSeats:6) → 403', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL));
+  });
+
+  it('(b) conductor que SÍ cumple (van 7 asientos) es ACEPTADO en un board XL', async () => {
+    const gate = await gateWithAttrs({
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+  });
+
+  it('(c) conductor LEGACY sin attrs (seats/segment/year undefined) NO se excluye (fail-open preservado)', async () => {
+    const gate = await gateWithAttrs(); // sin attrs
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+  });
+
+  it('(d) board SIN category (compat N-2) → sin requires → comportamiento previo (solo vehicleType)', async () => {
+    // Un CAR de 4 asientos que XL rechazaría: sin category NO hay requires que enforcar → pasa.
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR)).resolves.toBeUndefined();
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, undefined),
+    ).resolves.toBeUndefined();
+  });
+
+  it('category DESCONOCIDA (no está en el catálogo) → sin requires → no excluye', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, 'no_existe'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('vertical con cert (ambulancia) FAIL-CLOSED: sin certs → 403 aunque los attrs basten', async () => {
+    const gate = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.MID,
+      vehicleYear: 2022,
+    }); // sin certs
+    await expectForbidden(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_AMBULANCE),
+    );
+  });
+
+  it('confort (minSegment MID): un ECONOMY es RECHAZADO, un PREMIUM es aceptado', async () => {
+    const eco = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expectForbidden(
+      eco.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_CONFORT),
+    );
+    const prem = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2022,
+    });
+    await expect(
+      prem.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_CONFORT),
+    ).resolves.toBeUndefined();
   });
 });
 
