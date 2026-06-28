@@ -34,6 +34,40 @@ function attemptSlot(tripId: string, amountCents: number): string {
   return `${ATTEMPT_SLOT_PREFIX}${tripId.trim()}|${amountCents}`;
 }
 
+/**
+ * Lectura tolerante del nonce persistido. Si el storage NO está disponible (SSR, modo administrado/privado que
+ * LANZA al acceder) devuelve null sin reventar — el reembolso NUNCA se bloquea por un storage caído (mismo patrón
+ * que theme.tsx). Devolver null hace que el caller acuñe/use el ref efímero.
+ */
+function readNonce(slot: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(slot);
+  } catch {
+    return null;
+  }
+}
+
+/** Escritura tolerante del nonce: si el storage lanza, no pasa nada (el caller ya tiene el key en mano/ref). */
+function writeNonce(slot: string, key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(slot, key);
+  } catch {
+    /* storage bloqueado: el nonce no sobrevive el remonte, pero el flujo de dinero sigue */
+  }
+}
+
+/** Borrado tolerante del nonce (tras éxito confirmado): un storage caído jamás disfraza un money-OUT exitoso. */
+function clearNonce(slot: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(slot);
+  } catch {
+    /* storage bloqueado: un nonce huérfano no afecta la integridad de dinero */
+  }
+}
+
 /** Emite un reembolso sobre un viaje (monto en soles → céntimos). Idempotente. */
 export function RefundDialog() {
   const { toast } = useToast();
@@ -66,22 +100,23 @@ export function RefundDialog() {
   const valid =
     tripId.trim().length > 0 && amount > 0 && reason.trim().length >= REASON_MIN_LENGTH;
 
-  /** Key idempotente de ESTE intento: estable mientras (tripId, céntimos) no cambie; sobrevive remonte/refresh. */
+  /**
+   * Key idempotente de ESTE intento: estable mientras (tripId, céntimos) no cambie; sobrevive remonte/refresh vía
+   * sessionStorage. Es TOTAL — NUNCA lanza: si el storage está caído (administrado/privado) degrada al ref efímero
+   * (el nonce no persiste el remonte, pero el reembolso JAMÁS queda bloqueado por un storage inaccesible).
+   */
   function operationKey(amountCents: number): string {
     const sig = `${tripId.trim()}|${amountCents}`;
+    const slot = attemptSlot(tripId, amountCents);
     // Camino real (cliente): el nonce persiste en sessionStorage atado a la firma → un remonte/refresh lo reusa.
-    if (typeof window !== 'undefined') {
-      const slot = attemptSlot(tripId, amountCents);
-      const existing = window.sessionStorage.getItem(slot);
-      if (existing) return existing;
-      const key = crypto.randomUUID();
-      window.sessionStorage.setItem(slot, key);
-      return key;
-    }
-    // SSR / sin storage: degradación honesta al ref efímero (no crashea; la persistencia recién aplica en cliente).
+    const persisted = readNonce(slot);
+    if (persisted) return persisted;
+    // No hay nonce persistido aún. Acuñamos uno, lo intentamos persistir (tolerante) y lo espejamos en el ref por
+    // si el storage no lo guardó: así el MISMO render reusa el mismo key aunque sessionStorage esté bloqueado.
     if (!attemptRef.current || attemptRef.current.sig !== sig) {
       attemptRef.current = { sig, key: crypto.randomUUID() };
     }
+    writeNonce(slot, attemptRef.current.key);
     return attemptRef.current.key;
   }
 
@@ -93,6 +128,7 @@ export function RefundDialog() {
   async function submit() {
     setError(null);
     const amountCents = solesToCents(amount);
+    // El try cubre SOLO la mutación money-OUT: si falla, es el ÚNICO caso en que mostramos "no se pudo emitir".
     try {
       await refund.mutateAsync({
         tripId: tripId.trim(),
@@ -100,20 +136,20 @@ export function RefundDialog() {
         reason: reason.trim(),
         idempotencyKey: operationKey(amountCents),
       });
-      // éxito: limpiar el nonce (sessionStorage + ref) → la próxima operación, aunque repita valores, arranca
-      // con key fresco; así dos parciales legítimos idénticos NO se colapsan.
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.removeItem(attemptSlot(tripId, amountCents));
-      }
-      attemptRef.current = null;
-      toast({ tone: 'success', title: 'Reembolso emitido' });
-      setOpen(false);
-      setTripId('');
-      setSoles('');
-      setReason('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo emitir el reembolso.');
+      return;
     }
+    // money-OUT CONFIRMADO: nada de acá abajo puede "fallar el reembolso" (el dinero YA se movió), por eso vive
+    // FUERA del try. Limpiar el nonce → la próxima operación, aunque repita valores, arranca con key fresco (dos
+    // parciales legítimos idénticos NO colapsan). clearNonce es tolerante a storage caído.
+    clearNonce(attemptSlot(tripId, amountCents));
+    attemptRef.current = null;
+    toast({ tone: 'success', title: 'Reembolso emitido' });
+    setOpen(false);
+    setTripId('');
+    setSoles('');
+    setReason('');
   }
 
   return (
