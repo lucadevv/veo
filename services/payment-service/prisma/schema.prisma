@@ -50,10 +50,11 @@ enum PaymentStatus {
   @@schema("payment")
 }
 
-/// MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal). Determina la TASA de comisión:
-///  ON_DEMAND  → tasa CONFIGURABLE por el admin (CommissionConfig.onDemandRateBps).
-///  CARPOOLING → comisión 0 FIJA (cost-sharing: cobrar comisión sobre un viaje compartido sería lucro de
-///               la plataforma → ILEGAL hasta visto bueno legal). NO es admin-editable; subirla requiere ADR.
+/// MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal). Determina el MODELO de dinero:
+///  ON_DEMAND  → comisión DESCONTADA al conductor; tasa CONFIGURABLE por el admin (CommissionConfig.onDemandRateBps).
+///  CARPOOLING → service fee SUMADO al pasajero (CommissionConfig.carpoolingFeeBps); el conductor cobra el 100%
+///               del cost-sharing. Admin-editable, ARRANCA EN 0 (sin lucro hasta visto bueno legal) y el admin
+///               lo sube. NO se descuenta al conductor (a diferencia de ON_DEMAND). Ver ADR-017 §1.6.
 /// La columna Payment.mode es NULLABLE: las filas legacy (pre-F2.7) se LEEN como ON_DEMAND (su comportamiento
 /// histórico: comisión global de env). El modo se determina en el PUNTO DE ENTRADA del cobro, NO en los
 /// contratos de eventos cross-service.
@@ -163,9 +164,10 @@ model Payment {
   /// Referencia externa del riel de pago (id de transacción Yape/Plin). Null hasta confirmar.
   externalRef     String?       @map("external_ref")
   status          PaymentStatus @default(PENDING)
-  /// MODO del cobro (F2.7): determina la TASA de comisión aplicada (ON_DEMAND configurable · CARPOOLING 0
-  /// legal-gated). NULLABLE para compat con filas legacy (pre-F2.7), que se LEEN como ON_DEMAND. Se setea en
-  /// el punto de entrada del cobro (consumer trip.completed → ON_DEMAND; charge service-rail → CARPOOLING).
+  /// MODO del cobro (F2.7): determina el MODELO de dinero (ON_DEMAND = comisión al conductor, configurable ·
+  /// CARPOOLING = service fee al pasajero, editable, arranca en 0). NULLABLE para compat con filas legacy
+  /// (pre-F2.7), que se LEEN como ON_DEMAND. Se setea en el punto de entrada del cobro (consumer trip.completed
+  /// → ON_DEMAND; charge service-rail → CARPOOLING).
   mode            PaymentMode?  @default(ON_DEMAND)
   /// Intentos consumidos contra el gateway (BR-P02: máx 3 antes de DEBT).
   retries         Int           @default(0)
