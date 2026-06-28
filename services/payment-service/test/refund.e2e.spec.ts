@@ -80,6 +80,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -690,5 +691,23 @@ describe('PaymentsService.refund · backstop de VENTANA de idempotencia (cross-k
 
     expect(b.refundId).toBe(a.refundId);
     expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(1200);
+  });
+
+  it('CONCURRENTE (TOCTOU): dos refunds SIMULTÁNEOS, keys distintos, mismo (pago, monto) → el advisory lock serializa → UN solo money-OUT', async () => {
+    // La razón de existir del pg_advisory_xact_lock: SIN él, dos submits simultáneos con keys DIVERGENTES pasan
+    // ambos el findFirst (ninguno commiteó aún) → DOS refunds = doble-pago. CON el lock, el 2do espera al 1ro, ve
+    // el refund recién creado dentro de la ventana y dedupea. Este test ejercita esa carrera (Promise.all), no
+    // un await secuencial (donde el 1ro ya commiteó).
+    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
+    const { id, tripId } = await seedCaptured({ amountCents: 5000, method: 'CASH' });
+
+    const [a, b] = await Promise.all([
+      service.refund(tripId, 1500, 'x', L2, 'KEY-A'),
+      service.refund(tripId, 1500, 'x', L2, 'KEY-B'), // key DIVERGENTE, concurrente
+    ]);
+
+    expect(a.refundId).toBe(b.refundId); // ambos resuelven al MISMO refund (uno creó, el otro dedupeó)
+    expect(await prisma.refund.findMany({ where: { paymentId: id } })).toHaveLength(1); // un solo money-OUT
+    expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(1500);
   });
 });

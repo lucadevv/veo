@@ -41,7 +41,6 @@ import {
   BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
   bpsToRate,
   ChargeMode,
-  ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS,
   computeChargeAmounts,
   deriveAdminRefundDedupKey,
   deriveBookingCancellationRefundDedupKey,
@@ -177,6 +176,7 @@ export class PaymentsService {
   private readonly defaultMethod: PaymentMethod;
   private readonly refundWindowDays: number;
   private readonly refundL2ThresholdCents: number;
+  private readonly refundIdempotencyWindowMs: number;
   private readonly cancellationDriverShare: number;
 
   constructor(
@@ -206,6 +206,8 @@ export class PaymentsService {
     this.defaultMethod = config.getOrThrow<PaymentMethod>('DEFAULT_PAYMENT_METHOD');
     this.refundWindowDays = config.getOrThrow<number>('REFUND_WINDOW_DAYS');
     this.refundL2ThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
+    this.refundIdempotencyWindowMs =
+      config.getOrThrow<number>('REFUND_IDEMPOTENCY_WINDOW_MINUTES') * 60_000;
     this.cancellationDriverShare = config.getOrThrow<number>('CANCELLATION_DRIVER_SHARE');
   }
 
@@ -1566,7 +1568,7 @@ export class PaymentsService {
     // `$executeRaw` (no `$queryRaw`): pg_advisory_xact_lock devuelve `void` y $queryRaw fallaría al deserializar
     // esa columna; $executeRaw ejecuta la sentencia sin deserializar el resultado.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${paymentId})::bigint)`;
-    const since = new Date(Date.now() - ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS);
+    const since = new Date(Date.now() - this.refundIdempotencyWindowMs);
     const recent = await tx.refund.findFirst({
       where: {
         paymentId,

@@ -295,5 +295,8 @@ export function deriveAdminRefundDedupKey(idempotencyKey: string): string {
  * LEGÍTIMO con el gesto explícito `forceNew` (no se puede distinguir un reintento de un parcial-igual sin él, así
  * que la decisión es del humano). La ventana cubre el reintento realista (timeout → refresh/cambio de pestaña o
  * dispositivo) sin bloquear un parcial deliberado posterior.
+ *
+ * Este es el DEFAULT (minutos): el valor vivo se lee de `REFUND_IDEMPOTENCY_WINDOW_MINUTES` (env.schema), igual
+ * que sus dos hermanas money-OUT (REFUND_WINDOW_DAYS, REFUND_L2_THRESHOLD_CENTS) → tuneable por entorno.
  */
-export const ADMIN_REFUND_IDEMPOTENCY_WINDOW_MS = 15 * 60_000; // 15 minutos
+export const DEFAULT_REFUND_IDEMPOTENCY_WINDOW_MINUTES = 15;
