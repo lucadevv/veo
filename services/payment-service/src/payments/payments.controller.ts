@@ -245,10 +245,13 @@ export class PaymentsController {
     });
   }
 
-  // ── Reembolso (BR-P06): operadores de soporte. >S/30 requiere L2 (validado en el servicio). NO se abre a
-  // service-rail (mínimo privilegio · ADR-014 §5.5): el riel admin + el RBAC de operador lo gatean. ──
+  // ── Reembolso (BR-P06 · `finance:refund`): acción de FINANZAS, no de soporte (decisión del dueño — money-OUT
+  // restringido al mínimo de roles que mueven dinero). Alinea payment-service con el admin-bff (`@Roles(FINANCE,
+  // ADMIN, SUPERADMIN)`) y con el spec: antes payment-service exigía SUPPORT_L1/L2 y OMITÍA FINANCE, así que un
+  // operador FINANCE pasaba el BFF pero el servicio lo rechazaba. NO se abre a service-rail (mínimo privilegio ·
+  // ADR-014 §5.5): el riel admin + el RBAC de operador lo gatean. ──
   @UseGuards(RolesGuard)
-  @Roles(AdminRole.SUPPORT_L1, AdminRole.SUPPORT_L2, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Audiences(...PASSENGER_RAILS)
   @Post(':tripId/refund')
   @HttpCode(200)

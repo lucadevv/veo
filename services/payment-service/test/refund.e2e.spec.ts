@@ -58,11 +58,14 @@ const noAffiliation = {
 const noPromos = {
   redeemPromo: async () => ({ discountCents: 0 }),
 } as unknown as PromotionsService;
+/** Operador de FINANZAS (autoridad money-OUT · decisión del dueño: refund = acción de finanzas): puede
+ *  refundar cualquier monto, incl. >S/30. El nombre `L2` es legacy del gate de monto alto. */
 const L2: AuthenticatedUser = {
   userId: 'op-L2',
-  roles: [AdminRole.SUPPORT_L2],
+  roles: [AdminRole.FINANCE],
 } as unknown as AuthenticatedUser;
-/** Operador L1 (soporte básico, SIN rol L2): puede refundar ≤S/30, NO los montos altos (gate BR-P06). */
+/** Operador SIN autoridad de finanzas (SUPPORT_L1): a nivel servicio el gate de monto alto lo deja refundar
+ *  ≤S/30 pero NO los montos altos (>S/30, gate BR-P06). En prod el @Roles del controller ni lo deja entrar. */
 const L1: AuthenticatedUser = {
   userId: 'op-L1',
   roles: [AdminRole.SUPPORT_L1],
@@ -582,11 +585,11 @@ describe('PaymentsService · FIX 1 · UNIQUE PARCIAL del dedupKey (Postgres real
 /**
  * F3c FIX 3 · BLINDAJE de regresión del REFUND ADMIN (BR-P06). El refactor extrajo `executeRefundClaim` y
  * reshapeó `RefundClaim` (operator → {requestedBy, approvedBy, dedupKey}); este spec VERIFICA (no asume) que el
- * camino admin CONSERVA sus gates: gate L2 (>S/30 exige rol L2), ventana de 7 días, RBAC — y que el
+ * camino admin CONSERVA sus gates: gate de monto alto (>S/30 exige autoridad de finanzas), ventana de 7 días, RBAC — y que el
  * system-initiated NO los tiene (diferencia DELIBERADA: refund OBLIGATORIO, sin discrecionalidad que limitar).
  */
 describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión BR-P06)', () => {
-  it('gate L2: admin SIN rol L2 refundando >S/30 → ForbiddenError, sin tocar el proveedor', async () => {
+  it('gate monto alto: operador SIN autoridad de finanzas refundando >S/30 → ForbiddenError, sin tocar el proveedor', async () => {
     const { service, calls } = makeService(async () => ({ status: 'ACCEPTED' }));
     const { id, tripId } = await seedCaptured({ amountCents: 5000 }); // S/50, > umbral S/30
 
@@ -596,14 +599,14 @@ describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión 
     expect(await prisma.refund.findMany({})).toHaveLength(0);
   });
 
-  it('gate L2: admin CON rol L2 refundando >S/30 → procede (el gate solo limita a L1)', async () => {
+  it('gate monto alto: operador CON autoridad de finanzas (FINANCE) refundando >S/30 → procede', async () => {
     const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
     const { tripId } = await seedCaptured({ amountCents: 5000 });
     const res = await service.refund(tripId, 4000, 'x', L2);
     expect(res.status).toBe('COMPLETED');
   });
 
-  it('gate L2: admin L1 refundando ≤S/30 → procede (el monto bajo NO exige L2)', async () => {
+  it('gate monto alto: operador sin autoridad de finanzas refundando ≤S/30 → procede (el monto bajo NO exige finanzas)', async () => {
     const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
     const { tripId } = await seedCaptured({ amountCents: 5000 });
     const res = await service.refund(tripId, 3000, 'x', L1); // exactamente S/30, no supera el umbral

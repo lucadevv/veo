@@ -1170,14 +1170,16 @@ export class PaymentsService {
       );
     }
 
+    // Gate de monto alto (BR-P06): >S/30 requiere un rol con autoridad de finanzas. FINANCE es el rol money-OUT
+    // canónico (decisión del dueño: refund = acción de finanzas) y satisface el gate; ADMIN/SUPERADMIN también.
     const needsL2 = amountCents > this.refundL2ThresholdCents;
     const roles = operator.roles ?? [];
     const hasL2 =
-      roles.includes(AdminRole.SUPPORT_L2) ||
+      roles.includes(AdminRole.FINANCE) ||
       roles.includes(AdminRole.ADMIN) ||
       roles.includes(AdminRole.SUPERADMIN);
     if (needsL2 && !hasL2) {
-      throw new ForbiddenError('Un reembolso mayor a S/30 requiere aprobación de un operador L2');
+      throw new ForbiddenError('Un reembolso mayor a S/30 requiere un operador con autoridad de finanzas');
     }
 
     const newRefundedCents = payment.refundedCents + amountCents;
