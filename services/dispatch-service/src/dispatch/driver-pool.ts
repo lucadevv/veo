@@ -20,7 +20,12 @@ import {
   type ExclusionRegistry,
   type DriverLocation,
 } from '../hot-index/hot-index.port';
-import { bumpEligibilityFailOpen, classifyMissingAttr } from './dispatch.metrics';
+import {
+  bumpEligibilityFailOpen,
+  bumpEligibilityTierEvaluation,
+  classifyMissingAttr,
+  offeringRestrictsByVehicleAttrs,
+} from './dispatch.metrics';
 
 @Injectable()
 export class DriverPool {
@@ -70,14 +75,20 @@ export class DriverPool {
     currentYear: number,
   ): boolean {
     if (!requires) return true;
-    // Certs: FAIL-CLOSED — se evalúa SIEMPRE (independiente de los attrs del vehículo).
+    // Certs: FAIL-CLOSED — se evalúa SIEMPRE (eje ortogonal a los attrs del vehículo).
     if (!hasRequiredCertifications(requires, loc.certifications)) return false;
+    // ¿La oferta restringe por ATRIBUTOS del vehículo? Si NO (ej. vertical certs-only: ambulancia/grúa, que
+    // gatea por credencial y no por asientos/segmento/año), un attr ausente es IRRELEVANTE para esta oferta:
+    // no se mide ni cae a fail-open (no inflar el numerador con fugas inexistentes; no falso-excluir en un flip).
+    if (!offeringRestrictsByVehicleAttrs(requires)) return true;
+    // DENOMINADOR de la prevalencia: esta evaluación SÍ podría caer a fail-open (la oferta tier-gatea por attrs).
+    bumpEligibilityTierEvaluation('pool');
     // Attrs del vehículo: FAIL-OPEN — sin el dato no se restringe.
     if (loc.seats === undefined || loc.segment === undefined || loc.vehicleYear === undefined) {
       // OBSERVABILIDAD (CERO cambio de comportamiento): el fail-open dispara — un vehículo con attrs
-      // ausentes pasa para una oferta con requisitos. Medimos cuánto pasa en tráfico real antes de flipear a
-      // fail-closed (el cambio de matching en vivo necesita el gate adversarial). `source=pool`: este es el
-      // barrido AMPLIO de candidatos (FIXED + broadcast de PUJA), la muestra de prevalencia de flota.
+      // ausentes pasa para una oferta con requisitos. La prevalencia (numerador/denominador) mide cuánto pasa
+      // en tráfico real antes de flipear a fail-closed (el cambio de matching en vivo necesita el gate
+      // adversarial). `source=pool`: barrido AMPLIO de candidatos (FIXED + broadcast de PUJA), muestra de flota.
       bumpEligibilityFailOpen(
         'pool',
         classifyMissingAttr({

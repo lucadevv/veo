@@ -25,7 +25,13 @@ import {
 } from '@veo/shared-types';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
-import { bumpEligibilityFailOpen, classifyMissingAttr } from './dispatch.metrics';
+import {
+  bumpEligibilityFailOpen,
+  bumpEligibilityTierEvaluation,
+  bumpEligibilityTierUnknown,
+  classifyMissingAttr,
+  offeringRestrictsByVehicleAttrs,
+} from './dispatch.metrics';
 
 /** Estado de identity que habilita ofertar: el conductor está online y disponible (turno activo). */
 const ELIGIBLE_STATUS = 'AVAILABLE';
@@ -132,46 +138,63 @@ export class EligibilityGate {
     // para que un conductor de tier inferior (ej. CAR económico de 4 asientos) NO pueda ofertar/ganar un bid
     // de tier superior (VEO_XL minSeats:6, VEO_PREMIUM minSegment:PREMIUM). Category ausente/desconocida ⇒
     // sin requires ⇒ comportamiento previo (solo vehicleType).
-    const requires = category ? findOffering(category)?.requires : undefined;
-    if (requires) {
-      // Certs del conductor → FAIL-CLOSED: una vertical (ambulancia/grúa/mecánico) exige credencial VÁLIDA;
-      // su AUSENCIA NO habilita (espeja el pool). Una oferta sin certs requeridas no se ve afectada.
-      if (!hasRequiredCertifications(requires, loc.certifications)) {
-        throw new ForbiddenError(
-          'Conductor no elegible: faltan certificaciones requeridas por la oferta',
-          { driverId, category },
-        );
-      }
-      // Attrs del vehículo (seats/segment/año) → FAIL-OPEN: si el hot-index no los trae (legacy/productor
-      // sin desplegar) NO se excluye — igual que el pool, para no romper el matching en el rollout. Solo se
-      // enforça cuando los TRES attrs están presentes.
-      if (loc.seats !== undefined && loc.segment !== undefined && loc.vehicleYear !== undefined) {
-        const currentYear = new Date().getUTCFullYear();
-        if (
-          !isVehicleEligibleForOffering(
-            requires,
-            { seats: loc.seats, segment: loc.segment, year: loc.vehicleYear },
-            currentYear,
-          )
-        ) {
+    // Resolución del TIER de la oferta. Si NO se puede resolver, no hay forma de gatear por attrs (fail-open
+    // más amplio): lo MEDIMOS (era el blind-spot que el audit marcó a mirar a mano), sin romper el flujo.
+    //  - category ausente  → compat N-2 (el board aún no la lleva): reason=absent.
+    //  - category presente pero fuera del catálogo → drift/gap de catálogo: reason=unknown.
+    //  - oferta resuelta SIN `requires` → no tier-gatea (ride básico): ni se mide ni se restringe.
+    if (!category) {
+      bumpEligibilityTierUnknown('absent');
+    } else {
+      const offering = findOffering(category);
+      if (!offering) {
+        bumpEligibilityTierUnknown('unknown');
+      } else if (offering.requires) {
+        const requires = offering.requires;
+        // Certs del conductor → FAIL-CLOSED: una vertical (ambulancia/grúa/mecánico) exige credencial VÁLIDA;
+        // su AUSENCIA NO habilita (espeja el pool). Una oferta sin certs requeridas no se ve afectada.
+        if (!hasRequiredCertifications(requires, loc.certifications)) {
           throw new ForbiddenError(
-            'Conductor no elegible: el vehículo no cumple los requisitos de la oferta',
+            'Conductor no elegible: faltan certificaciones requeridas por la oferta',
             { driverId, category },
           );
         }
-      } else {
-        // OBSERVABILIDAD (source=gate, CERO cambio de comportamiento): faltó algún attr → el gate AUTORITATIVO
-        // de la PUJA deja pasar SIN verificar el tier por asientos/segmento/año. Lo MEDIMOS (no lo cerramos:
-        // el flip a fail-closed sigue pendiente del gate adversarial) etiquetado `gate` para dimensionar el
-        // blast-radius por superficie del submit/accept, separado de la prevalencia de flota que mide el pool.
-        bumpEligibilityFailOpen(
-          'gate',
-          classifyMissingAttr({
-            seats: loc.seats !== undefined,
-            segment: loc.segment !== undefined,
-            year: loc.vehicleYear !== undefined,
-          }),
-        );
+        // Attrs del vehículo (seats/segment/año) → FAIL-OPEN, y SOLO si la oferta restringe por attrs (una
+        // vertical certs-only no tier-gatea por asientos/segmento/año: medir su attr ausente inflaría el
+        // numerador con fugas inexistentes y un flip naïve la falso-excluiría).
+        if (offeringRestrictsByVehicleAttrs(requires)) {
+          // DENOMINADOR de la prevalencia (source=gate): esta evaluación SÍ podría caer a fail-open.
+          bumpEligibilityTierEvaluation('gate');
+          // Solo se enforça cuando los TRES attrs están presentes; si falta alguno, fail-open medido.
+          if (loc.seats !== undefined && loc.segment !== undefined && loc.vehicleYear !== undefined) {
+            const currentYear = new Date().getUTCFullYear();
+            if (
+              !isVehicleEligibleForOffering(
+                requires,
+                { seats: loc.seats, segment: loc.segment, year: loc.vehicleYear },
+                currentYear,
+              )
+            ) {
+              throw new ForbiddenError(
+                'Conductor no elegible: el vehículo no cumple los requisitos de la oferta',
+                { driverId, category },
+              );
+            }
+          } else {
+            // OBSERVABILIDAD (source=gate, CERO cambio de comportamiento): faltó algún attr → el gate
+            // AUTORITATIVO de la PUJA deja pasar SIN verificar el tier por asientos/segmento/año. Lo MEDIMOS
+            // (no lo cerramos: el flip a fail-closed sigue pendiente del gate adversarial) etiquetado `gate`
+            // para dimensionar el blast-radius por superficie del submit/accept, separado del pool.
+            bumpEligibilityFailOpen(
+              'gate',
+              classifyMissingAttr({
+                seats: loc.seats !== undefined,
+                segment: loc.segment !== undefined,
+                year: loc.vehicleYear !== undefined,
+              }),
+            );
+          }
+        }
       }
     }
   }

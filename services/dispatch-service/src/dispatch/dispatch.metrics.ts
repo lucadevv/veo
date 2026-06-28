@@ -23,6 +23,7 @@
  * correcto sin acoplar una dependencia nueva. Module-level (sin DI): los callers lo invocan directo.
  */
 import { metricsRegistry, domainEventsTotal } from '@veo/observability';
+import type { OfferingRequirements } from '@veo/shared-types';
 
 interface CounterLike {
   inc(labels: Record<string, string>): void;
@@ -84,4 +85,75 @@ export function classifyMissingAttr(present: {
 /** Bumpea el contador del fail-open de atributos, etiquetado por superficie y por el atributo que faltó. */
 export function bumpEligibilityFailOpen(source: FailOpenSource, missing: MissingAttr): void {
   eligibilityFailOpenTotal.inc({ source, missing });
+}
+
+/**
+ * DENOMINADOR de la prevalencia (cierra el hueco MEDIA del gate adversarial: antes solo existía el
+ * NUMERADOR `dispatch_eligibility_fail_open_total` → un conteo absoluto NO normalizable: 1000 fail-opens
+ * podían ser el 1% o el 50%). Cuenta CADA evaluación de elegibilidad sobre una oferta que SÍ restringe por
+ * atributos del vehículo (la población que PODRÍA caer a fail-open). Así:
+ *
+ *   prevalencia(source) = dispatch_eligibility_fail_open_total{source} / dispatch_eligibility_tier_evaluations_total{source}
+ *
+ * Clave del diseño: el denominador se cuenta con la MISMA granularidad que el numerador (una vez por
+ * candidato-por-evaluación). Eso hace el RATIO invariante a la densidad por zona (cierra el sesgo BAJA del
+ * conteo per-evaluación): una celda caliente con muchos legacy infla numerador Y denominador por igual, el
+ * cociente no se mueve. El conteo ABSOLUTO sigue sesgado por zona, pero la PREVALENCIA —que es lo que decide
+ * el flip— no. Etiquetado por `source` (pool=flota / gate=blast-radius de PUJA), igual que el numerador.
+ */
+const eligibilityTierEvaluationsTotal: CounterLike = getOrCreateCounter(
+  'dispatch_eligibility_tier_evaluations_total',
+  'Evaluaciones de elegibilidad sobre ofertas que restringen por atributos del vehículo (denominador de la ' +
+    'prevalencia del fail-open). prevalencia = fail_open_total / tier_evaluations_total, invariante a la ' +
+    'densidad por zona. source=pool (flota) | gate (blast-radius de PUJA).',
+  ['source'] as const,
+);
+
+/**
+ * El gate AUTORITATIVO de PUJA recibe la oferta como `category` (string) y resuelve sus `requires` por
+ * catálogo. Si NO puede resolver el tier, NO hay forma de gatear por atributos: es el fail-open MÁS AMPLIO
+ * (cero verificación de tier), y antes quedaba INVISIBLE (el `auditar-core` lo marcó como residual a mirar a
+ * mano). Lo medimos para que el blind-spot deje de serlo, separado por `reason`:
+ *   - `absent`  → el board no llevó `category` (compat N-2; debería tender a 0 a medida que el rollout limpia).
+ *   - `unknown` → `category` llegó pero el catálogo no la conoce (gap de catálogo / drift) → señal de alarma.
+ * NO entra en el denominador de prevalencia (ahí el tier es CONOCIDO): es una población distinta (tier
+ * irresoluble), su propia señal de cobertura del board/catálogo.
+ */
+const eligibilityTierUnknownTotal: CounterLike = getOrCreateCounter(
+  'dispatch_eligibility_tier_unknown_total',
+  'Evaluaciones del gate de PUJA donde el tier de la oferta NO se pudo resolver (fail-open más amplio: cero ' +
+    'verificación de tier). reason=absent (board sin category, compat N-2) | unknown (category fuera del catálogo).',
+  ['reason'] as const,
+);
+
+/** Por qué no se pudo resolver el tier de la oferta en el gate de PUJA. */
+export type TierUnknownReason = 'absent' | 'unknown';
+
+/**
+ * ¿La oferta restringe por ATRIBUTOS del vehículo (asientos/segmento/antigüedad)? Solo entonces un attr
+ * ausente es un fail-open REAL y debe contar (numerador + denominador). Una oferta SIN requisitos de attrs
+ * —ej. las verticales certs-only (ambulancia/grúa/mecánico), que gatean por certificación y NO por
+ * asientos/segmento/año— NO tier-gatea por attrs: medir su "attr ausente" inflaría el numerador con fugas
+ * inexistentes Y un flip naïve a fail-closed las falso-excluiría por un atributo que nunca pidieron. Las
+ * certs son un eje ORTOGONAL (fail-closed, evaluado aparte). Espejo local de la forma de `OfferingRequirements`
+ * (minSeats/minSegment/maxAgeYears = los ejes de attrs del vehículo). DEUDA: promover a `@veo/shared-types`
+ * (catálogo) como fuente única cuando toque un build; hoy local para no rebuildear el paquete compartido.
+ */
+export function offeringRestrictsByVehicleAttrs(requires: OfferingRequirements | undefined): boolean {
+  if (!requires) return false;
+  return (
+    requires.minSeats !== undefined ||
+    requires.minSegment !== undefined ||
+    requires.maxAgeYears !== undefined
+  );
+}
+
+/** Bumpea el DENOMINADOR de la prevalencia: una evaluación sobre una oferta que tier-gatea por attrs. */
+export function bumpEligibilityTierEvaluation(source: FailOpenSource): void {
+  eligibilityTierEvaluationsTotal.inc({ source });
+}
+
+/** Bumpea el contador del tier irresoluble en el gate de PUJA (fail-open más amplio), por razón. */
+export function bumpEligibilityTierUnknown(reason: TierUnknownReason): void {
+  eligibilityTierUnknownTotal.inc({ reason });
 }
