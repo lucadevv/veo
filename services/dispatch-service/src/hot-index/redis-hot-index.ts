@@ -64,17 +64,32 @@ export class RedisHotIndex implements HotIndex {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
     const prev = await this.getLocation(driverId);
     const oldCell = prev?.h3 ?? h3;
+    // ANTI-CLOBBER del gate de tier (B5-3). Los attrs del modelSpec viajan en el ping, pero un ping
+    // puede llegar SIN ellos (fleet 204 / outage / modelo legacy sin attrs en catálogo). Si solo
+    // escribiéramos lo que trae el ping, ese ping sin attrs SOBREESCRIBIRÍA (SET total del LUA) los
+    // seats/segment/año BUENOS que ya estaban en el hot-index → el gate de tier se auto-desarma aunque
+    // la flota esté desplegada con attrs. Por eso, cuando el ping omite un attr de tier, lo PRESERVAMOS
+    // del ping previo — pero SOLO si es el MISMO vehicleType (un cambio de clase trae otro vehículo con
+    // attrs distintos: no se arrastran). Un ping que SÍ trae el attr lo pisa (cambio de vehículo real).
+    const carry = prev?.vehicleType === vehicleType ? prev : undefined;
+    const seats = attrs?.seats ?? carry?.seats;
+    const segment = attrs?.segment ?? carry?.segment;
+    const vehicleYear = attrs?.vehicleYear ?? carry?.vehicleYear;
     const loc: DriverLocation = {
       driverId,
       lat: point.lat,
       lon: point.lon,
       h3,
       vehicleType,
-      // B5-3 · attrs de eligibilidad (opcionales): solo se incluyen las claves presentes (un ping sin
-      // ellos no escribe undefined que ensucie el JSON). Si faltan, el pool degrada a "elegible".
-      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
-      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
-      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      // Solo se incluyen las claves PRESENTES (preservadas o del ping) — un attr ausente no escribe
+      // undefined que ensucie el JSON; si nunca hubo valor, el pool degrada a "elegible" (fail-open).
+      ...(seats !== undefined ? { seats } : {}),
+      ...(segment !== undefined ? { segment } : {}),
+      ...(vehicleYear !== undefined ? { vehicleYear } : {}),
+      // CERTS: NO se preservan. Gatean verticales FAIL-CLOSED (ausente = denegado, dirección segura) y su
+      // ciclo de vida es del CONDUCTOR (revocables), no del modelSpec → arrastrar una cert posiblemente
+      // vencida abriría un gate fail-closed. Se toman estrictas del ping; ausente ⇒ inelegible (self-heal
+      // al próximo ping que las traiga). El clobber de certs es la dirección segura, no se corrige.
       ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
       updatedAt: Date.now(),
     };

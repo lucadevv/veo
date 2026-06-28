@@ -156,4 +156,67 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     const ride = await pool.eligible([cellD], VehicleClass.CAR);
     expect(ride.map((l) => l.driverId).sort()).toEqual(['d-amb', 'd-none', 'd-tow']);
   });
+
+  // ── ANTI-CLOBBER · un ping sin attrs NO debe borrar los attrs buenos del hot-index ──
+  const E = { lat: -12.3, lon: -77.2 }; // celda AISLADA para los tests de clobber
+
+  it('anti-clobber · un ping SIN attrs (fleet 204/outage) PRESERVA los seats/segment/año previos (mismo vehicleType)', async () => {
+    // Ping bueno: el conductor opera un XL premium 2023.
+    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR, {
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Ping degradado: fleet no resolvió (sin attrs), pero la clase sigue siendo la misma.
+    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR);
+    const loc = await hotIndex.getLocation('clb-keep');
+    // Los attrs de tier SOBREVIVEN: el gate de tier no se auto-desarma por un ping sin attrs.
+    expect(loc?.seats).toBe(7);
+    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleYear).toBe(2023);
+  });
+
+  it('anti-clobber · un ping CON attrs nuevos SÍ pisa los previos (cambio de vehículo real, no se arrastra)', async () => {
+    await hotIndex.upsertLocation('clb-overwrite', E, VehicleClass.CAR, {
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // El conductor cambió a un económico de 5 asientos: el ping trae los attrs nuevos COMPLETOS.
+    await hotIndex.upsertLocation('clb-overwrite', E, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2020,
+    });
+    const loc = await hotIndex.getLocation('clb-overwrite');
+    expect(loc?.seats).toBe(5);
+    expect(loc?.segment).toBe(VehicleSegment.ECONOMY);
+    expect(loc?.vehicleYear).toBe(2020);
+  });
+
+  it('anti-clobber · un cambio de CLASE NO arrastra los attrs de la clase anterior (vehicleType distinto)', async () => {
+    // Operaba un CAR con attrs; cambia a MOTO y el ping de moto no trae attrs de auto.
+    await hotIndex.upsertLocation('clb-class', E, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.MID,
+      vehicleYear: 2022,
+    });
+    await hotIndex.upsertLocation('clb-class', E, VehicleClass.MOTO);
+    const loc = await hotIndex.getLocation('clb-class');
+    // Otro vehículo (otra clase): los attrs viejos NO se preservan (serían basura para una moto).
+    expect(loc?.vehicleType).toBe(VehicleClass.MOTO);
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('anti-clobber · las CERTS NO se preservan: un ping sin certs las quita (gate fail-closed, dirección segura)', async () => {
+    await hotIndex.upsertLocation('clb-cert', E, VehicleClass.CAR, {
+      certifications: [FleetDocumentType.AMBULANCE_OPERATOR],
+    });
+    // Ping sin certs: a diferencia de los attrs de tier, las certs NO se arrastran (revocables).
+    await hotIndex.upsertLocation('clb-cert', E, VehicleClass.CAR);
+    const loc = await hotIndex.getLocation('clb-cert');
+    expect(loc?.certifications).toBeUndefined();
+  });
 });
