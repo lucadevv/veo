@@ -1203,16 +1203,20 @@ export class PaymentsService {
     try {
       return await this.executeRefundClaim(payment, claim);
     } catch (err) {
-      // IDEMPOTENCIA: el MISMO `Idempotency-Key` ya creó un refund ACTIVO (UNIQUE parcial) → P2002. Devolvemos
-      // ESE refund (no creamos un segundo money-OUT). Sin key → dedupKey null → este path no aplica (relanza).
+      // IDEMPOTENCIA: el MISMO `Idempotency-Key` ya creó un refund ACTIVO (UNIQUE parcial) → P2002. Sin key →
+      // dedupKey null → este path no aplica (relanza). Leemos del PRIMARIO (`write`), no de la réplica: el
+      // refund se acaba de commitear ahí y bajo lag la réplica devolvería null (read-after-write).
       if (idempotencyKey && isUniqueViolation(err, 'dedupKey')) {
-        const existing = await this.prisma.read.refund.findFirst({
+        const existing = await this.prisma.write.refund.findFirst({
           where: { dedupKey: deriveAdminRefundDedupKey(idempotencyKey) },
           orderBy: { createdAt: 'desc' },
         });
-        if (existing) {
+        // El key debe identificar UNA operación: solo devolvemos el existente si es de ESTE pago y monto. Un key
+        // reusado para OTRA operación (el operador editó tripId/monto tras un timeout y reenvió con el mismo key)
+        // NO debe devolver un refund ajeno como éxito falso (el nuevo viaje nunca se reembolsaría) → conflicto.
+        if (existing && existing.paymentId === payment.id && existing.amountCents === amountCents) {
           this.logger.log(
-            `Refund admin idempotente (Idempotency-Key ya usado) trip=${tripId}; devuelvo el refund existente`,
+            `Refund admin idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo el refund existente`,
           );
           return {
             refundId: existing.id,
@@ -1220,6 +1224,10 @@ export class PaymentsService {
             status: existing.status,
           };
         }
+        throw new ConflictError(
+          'El Idempotency-Key ya se usó para otra operación de reembolso (distinto pago o monto)',
+          { tripId, paymentId: payment.id, amountCents },
+        );
       }
       throw err;
     }

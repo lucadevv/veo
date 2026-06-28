@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
 
 export class ChargeDto {
@@ -163,8 +172,9 @@ export class RefundDto {
   @Min(1)
   amountCents!: number;
 
-  @ApiProperty({ description: 'Motivo del reembolso' })
+  @ApiProperty({ description: 'Motivo del reembolso (mín. 3 caracteres)' })
   @IsString()
+  @MinLength(3)
   reason!: string;
 }
 

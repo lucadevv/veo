@@ -44,7 +44,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type ?? 'button'}
       className={cn(buttonVariants({ variant, size }), className)}
-      disabled={disabled ?? loading}
+      // `disabled || loading` (no `??`): un botón en `loading` NUNCA debe quedar clickeable, AUNQUE el
+      // consumidor pase un `disabled` definido. Con `??`, un `disabled={false}` cortocircuitaba el auto-disable
+      // por loading → ventana de doble-submit (mordió en refund-dialog y en el botón Verificar del step-up).
+      disabled={disabled || loading}
       aria-busy={loading}
       {...props}
     >

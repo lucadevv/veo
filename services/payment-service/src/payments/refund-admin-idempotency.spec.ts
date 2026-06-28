@@ -125,6 +125,12 @@ function makePrisma(payment: FakePayment | null) {
       },
     },
     write: {
+      // El handler de idempotencia relee del PRIMARIO (read-after-write): el doble lo expone igual que `read`.
+      refund: {
+        findFirst: vi.fn(async ({ where }: { where: { dedupKey: string } }) =>
+          refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
+        ),
+      },
       $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
     },
   } as unknown as PrismaService;
@@ -199,9 +205,34 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
 
     const res = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
 
-    // El 2do intento chocó contra el UNIQUE (P2002) → devolvió el refund existente, sin crear uno nuevo.
+    // El 2do intento chocó contra el UNIQUE (P2002) → devolvió el refund existente (mismo pago y monto), sin
+    // crear uno nuevo.
     expect(res.refundId).toBe('refund-existente');
     expect(refunds).toHaveLength(1);
+  });
+
+  it('mismo key pero OTRO monto (operador editó el form tras un timeout) → CONFLICTO, NO éxito falso', async () => {
+    const { prisma, txRefundCreate } = makePrisma(capturedPayment({ amountCents: 4500 }));
+    // El primer submit (monto 1000) ya commiteó server-side con el key K.
+    await txRefundCreate({
+      data: {
+        id: 'refund-de-1000',
+        paymentId: 'pay-1',
+        amountCents: 1000,
+        requestedBy: 'op-1',
+        approvedBy: 'op-1',
+        dedupKey: deriveAdminRefundDedupKey('KEY-A'),
+        status: 'COMPLETED',
+        reason: 'ajuste',
+      },
+    } as never);
+    const svc = buildService(prisma);
+
+    // El operador edita el monto a 500 y reenvía con el MISMO key: NO debe devolver el refund de 1000 como
+    // éxito (sería un sub-reembolso enmascarado) → conflicto explícito.
+    await expect(svc.refund('trip-1', 500, 'ajuste', operator, 'KEY-A')).rejects.toThrow(
+      /otra operación/,
+    );
   });
 
   it('keys DISTINTOS → refunds DISTINTOS (dos parciales legítimos no se colapsan)', async () => {

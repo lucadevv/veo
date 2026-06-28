@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import { solesToCents } from '@veo/utils/money';
 import { useRefund } from '@/lib/api/queries';
@@ -32,20 +32,23 @@ export function RefundDialog() {
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // Idempotency-Key ESTABLE por sesión de diálogo (no per-click): si el operador reintenta tras un error de red
-  // ambiguo (el server pudo haber commiteado), el MISMO key dedupea server-side → NUNCA doble-reembolso. Se
-  // re-acuña al abrir el diálogo (cada apertura = una intención de reembolso nueva).
+  // Idempotency-Key ligado a la IDENTIDAD de la operación (tripId, monto, motivo), NO a la sesión del diálogo:
+  // se re-acuña cuando CUALQUIERA cambia. Por qué importa: si el operador reembolsa el trip A, ve un error de
+  // red ambiguo (el server pudo haber commiteado) y SIN cerrar el diálogo edita el tripId/monto y reenvía, eso
+  // es OTRA operación → key nuevo → NO se dedupea al refund de A (que server-side devolvería un refund ajeno
+  // como éxito falso → el nuevo viaje nunca se reembolsa). Si reintenta SIN cambiar nada → mismo key → dedup.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   const amount = Number(soles);
   const valid =
     tripId.trim().length > 0 && amount > 0 && reason.trim().length >= REASON_MIN_LENGTH;
 
+  useEffect(() => {
+    setIdempotencyKey(crypto.randomUUID());
+  }, [tripId, soles, reason]);
+
   function handleOpenChange(next: boolean) {
-    if (next) {
-      setIdempotencyKey(crypto.randomUUID()); // key fresco por apertura
-      setError(null);
-    }
+    if (next) setError(null);
     setOpen(next);
   }
 
