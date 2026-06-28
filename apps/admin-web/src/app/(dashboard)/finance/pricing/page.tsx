@@ -91,7 +91,7 @@ export default function PricingPage() {
           <BaseFarePanel config={baseFareQuery.data} />
         )}
 
-        {/* F2.7 · comisión por modo (on-demand configurable + carpooling 0 legal-gated; carga independiente). */}
+        {/* F2.7 · comisión por modo (on-demand + service fee carpooling, ambas editables; carga independiente). */}
         {commissionQuery.isError ? (
           <ErrorState onRetry={() => void commissionQuery.refetch()} />
         ) : commissionQuery.isLoading || !commissionQuery.data ? (

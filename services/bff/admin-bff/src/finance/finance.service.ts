@@ -15,7 +15,7 @@ import type {
   ReplaceCostPerKmDto,
 } from './dto/finance.dto';
 
-/** Vista de la comisión por modo (F2.7): tasa ON-DEMAND configurable (bps) + carpooling 0 (legal-gated) + version. */
+/** Vista de la comisión por modo (F2.7 · ADR-017 §1.6): tasa ON-DEMAND + service fee CARPOOLING (ambas bps, editables) + version. */
 export interface CommissionView {
   /** Comisión ON-DEMAND en basis points Int (0..10000; 2000 = 20%) — descontada al conductor. */
   onDemandRateBps: number;

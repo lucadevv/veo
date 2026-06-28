@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from './client';
+import { FILTER_ALL } from '@/lib/filters';
 import {
   analyticsOverview,
   auditChainVerification,
@@ -100,7 +101,7 @@ export interface TripFilters {
 function cleanQuery(params: Record<string, string | number | undefined>) {
   const out: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== '' && v !== 'ALL') out[k] = v;
+    if (v !== undefined && v !== '' && v !== FILTER_ALL) out[k] = v;
   }
   return out;
 }

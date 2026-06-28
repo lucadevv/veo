@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTrips, type TripFilters } from '@/lib/api/queries';
 import type { TripStatus, TripSummary } from '@/lib/api/schemas';
 import { dateTime, money } from '@/lib/formatters';
+import { FILTER_ALL } from '@/lib/filters';
 import { PageHeader } from '@/components/layout/page-header';
 import { Lock } from 'lucide-react';
 import { DataTable } from '@/components/ui/table';
@@ -88,7 +89,7 @@ function TripsInner() {
   const setParam = useCallback(
     (key: string, value: string | null) => {
       const next = new URLSearchParams(params.toString());
-      if (value && value !== 'ALL') next.set(key, value);
+      if (value && value !== FILTER_ALL) next.set(key, value);
       else next.delete(key);
       router.replace(`/ops/trips?${next.toString()}`);
     },

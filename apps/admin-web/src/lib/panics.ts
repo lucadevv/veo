@@ -1,11 +1,12 @@
 import { PanicStatus } from '@veo/shared-types';
+import { FILTER_ALL } from '@/lib/filters';
 
 /**
  * Sentinel "sin filtro" del tab "Todos" — NO es un estado de dominio. `cleanQuery` lo elimina de la
  * query (mismo patrón que los filtros de viajes), así el server recibe el param ausente y devuelve
- * TODOS los pánicos. Mantenerlo como constante evita re-tipear el string suelto en cada uso.
+ * TODOS los pánicos. Deriva del sentinel GENÉRICO `FILTER_ALL` (fuente única) para no divergir.
  */
-export const PANIC_FILTER_ALL = 'ALL' as const;
+export const PANIC_FILTER_ALL = FILTER_ALL;
 
 export type PanicTab = PanicStatus | typeof PANIC_FILTER_ALL;
 
