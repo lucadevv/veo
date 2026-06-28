@@ -288,6 +288,35 @@ export class VehicleModelsService {
   }
 
   /**
+   * REABRE un modelo APROBADO para corregir su ficha técnica mal cargada (F2): transición
+   * APPROVED → PENDING_REVIEW (única válida desde APPROVED). El modelo vuelve a la cola de revisión y el
+   * operador lo re-aprueba con la ficha corregida pasando por el MISMO formulario. CAS por `status: APPROVED`
+   * en el WHERE: solo un operador gana en concurrencia (count===1); reabrir algo no-APROBADO → 409 (distingue
+   * NotFound vs Conflict). NO borra la ficha vigente A PROPÓSITO: mientras se corrige, los vehículos del
+   * modelo siguen clasificando con el dato viejo (el menor mal) en vez de quedar sin ficha de golpe; la
+   * corrección la re-aprueba el operador. `verifiedBy` se limpia (ya no está verificado). No notifica al
+   * conductor: reabrir no es un veredicto (verdictForStatus(PENDING_REVIEW) = null).
+   */
+  async reopen(id: string): Promise<VehicleModelReviewView> {
+    const updated = await this.prisma.write.$transaction(async (tx) => {
+      const res = await tx.vehicleModelSpec.updateMany({
+        where: { id, status: VehicleModelStatus.APPROVED },
+        data: { status: VehicleModelStatus.PENDING_REVIEW, verifiedBy: null },
+      });
+      if (res.count === 0) {
+        const spec = await tx.vehicleModelSpec.findUnique({ where: { id } });
+        if (!spec) throw new NotFoundError('Modelo de vehículo no encontrado', { id });
+        throw new ConflictError('Solo se puede reabrir un modelo APROBADO', {
+          id,
+          status: spec.status,
+        });
+      }
+      return tx.vehicleModelSpec.findUniqueOrThrow({ where: { id } });
+    });
+    return toReviewView(updated);
+  }
+
+  /**
    * Aplica una transición desde PENDING_REVIEW de forma ATÓMICA (CAS): el `updateMany` con
    * `status: PENDING_REVIEW` en el WHERE garantiza que solo gana UN operador en concurrencia (count===1);
    * si otro ya resolvió el modelo (o no existe), count===0 y se distingue NotFound vs Conflict.

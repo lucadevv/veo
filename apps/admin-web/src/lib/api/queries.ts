@@ -555,8 +555,9 @@ export function useModelReview(status: string) {
 }
 
 /**
- * Aprobar/rechazar una solicitud de modelo. La UI habla approve/reject; el bff traduce al endpoint
- * (POST /fleet/vehicle-models/:id/approve|reject) y el fleet-service revalida + audita.
+ * Aprobar/rechazar/reabrir una solicitud de modelo. La UI habla approve/reject/reopen; el bff traduce al
+ * endpoint (POST /fleet/vehicle-models/:id/approve|reject|reopen) y el fleet-service revalida + audita.
+ * `reopen` (F2) devuelve un modelo APROBADO a PENDING_REVIEW para corregir su ficha mal cargada.
  */
 export function useModelReviewAction() {
   const qc = useQueryClient();
@@ -564,21 +565,24 @@ export function useModelReviewAction() {
     mutationFn: (
       input:
         | ({ id: string; decision: 'approve' } & ApproveVehicleModelRequest)
-        | { id: string; decision: 'reject' },
-    ) =>
-      input.decision === 'approve'
-        ? apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
-            body: {
-              segment: input.segment,
-              energySource: input.energySource,
-              efficiency: input.efficiency,
-              ...(input.seats !== undefined ? { seats: input.seats } : {}),
-            },
-            schema: vehicleModelReviewView,
-          })
-        : apiClient().post(`/fleet/vehicle-models/${input.id}/reject`, {
-            schema: vehicleModelReviewView,
-          }),
+        | { id: string; decision: 'reject' }
+        | { id: string; decision: 'reopen' },
+    ) => {
+      if (input.decision === 'approve') {
+        return apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
+          body: {
+            segment: input.segment,
+            energySource: input.energySource,
+            efficiency: input.efficiency,
+            ...(input.seats !== undefined ? { seats: input.seats } : {}),
+          },
+          schema: vehicleModelReviewView,
+        });
+      }
+      return apiClient().post(`/fleet/vehicle-models/${input.id}/${input.decision}`, {
+        schema: vehicleModelReviewView,
+      });
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
     },

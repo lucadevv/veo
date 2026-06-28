@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { AlertTriangle } from 'lucide-react';
 import {
@@ -21,6 +22,7 @@ import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
+import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
 import { ErrorState } from '@/components/ui/states';
@@ -297,8 +299,10 @@ export default function FleetPage() {
   const vehicles = useVehicles();
   const inspections = useInspections();
   const expiring = useExpiringDocuments();
-  // Cola de modelos solicitados por conductores, a curar/aprobar (B5-2.c).
-  const models = useModelReview('PENDING_REVIEW');
+  // Cola de modelos por conductores (B5-2.c). El operador alterna entre los PENDING_REVIEW (a curar) y los
+  // APPROVED (para REABRIR y corregir una ficha mal cargada · F2). El status es server-side (filtro de la cola).
+  const [modelStatus, setModelStatus] = useState<'PENDING_REVIEW' | 'APPROVED'>('PENDING_REVIEW');
+  const models = useModelReview(modelStatus);
 
   return (
     <div className="flex h-full flex-col">
@@ -372,17 +376,43 @@ export default function FleetPage() {
           </TabsContent>
 
           <TabsContent value="models">
+            <div className="flex gap-1 pb-3">
+              <Button
+                size="sm"
+                variant={modelStatus === 'PENDING_REVIEW' ? 'primary' : 'ghost'}
+                onClick={() => setModelStatus('PENDING_REVIEW')}
+              >
+                Por revisar
+              </Button>
+              <Button
+                size="sm"
+                variant={modelStatus === 'APPROVED' ? 'primary' : 'ghost'}
+                onClick={() => setModelStatus('APPROVED')}
+              >
+                Aprobados
+              </Button>
+            </div>
             {models.isError ? (
               <ErrorState onRetry={() => void models.refetch()} />
             ) : (
               <>
                 <DataTable
-                  caption="Modelos solicitados por revisar"
+                  caption={
+                    modelStatus === 'PENDING_REVIEW'
+                      ? 'Modelos solicitados por revisar'
+                      : 'Modelos aprobados (reabrí para corregir la ficha)'
+                  }
                   columns={modelColumns}
                   data={models.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={models.isLoading}
-                  emptyTitle="Sin modelos pendientes"
-                  emptyDescription="Cuando un conductor solicite un modelo que no está en el catálogo, aparecerá acá."
+                  emptyTitle={
+                    modelStatus === 'PENDING_REVIEW' ? 'Sin modelos pendientes' : 'Sin modelos aprobados'
+                  }
+                  emptyDescription={
+                    modelStatus === 'PENDING_REVIEW'
+                      ? 'Cuando un conductor solicite un modelo que no está en el catálogo, aparecerá acá.'
+                      : 'Los modelos aprobados aparecen acá; podés reabrirlos para corregir su ficha técnica.'
+                  }
                 />
                 <LoadMore
                   hasNextPage={!!models.hasNextPage}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, RotateCcw, X } from 'lucide-react';
 import { useModelReviewAction } from '@/lib/api/queries';
 import type { ApproveVehicleModelRequest, VehicleModelReviewView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
@@ -62,7 +62,47 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
   });
 
   // `model.status` es el enum tipado del contrato; el literal se chequea contra el union (typo = error TS).
-  if (!can(user, 'fleet:review') || model.status !== 'PENDING_REVIEW') {
+  if (!can(user, 'fleet:review')) {
+    return <span className="text-xs text-ink-subtle">—</span>;
+  }
+
+  // F2 · un modelo YA APROBADO puede REABRIRSE para corregir su ficha mal cargada (segment/energía/eficiencia):
+  // vuelve a PENDING_REVIEW y se re-aprueba por el MISMO formulario. Mientras tanto sigue clasificando con el
+  // dato viejo (el menor mal, no queda sin ficha de golpe). Reabrir es un CAS server-side (409 si otro ya lo
+  // resolvió) y queda auditado.
+  if (model.status === 'APPROVED') {
+    return (
+      <ConfirmDialog
+        trigger={
+          <Button size="sm" variant="secondary">
+            <RotateCcw className="size-4" aria-hidden />
+            Reabrir
+          </Button>
+        }
+        title="Reabrir modelo para corregir"
+        description="El modelo volverá a la cola de revisión para corregir su ficha técnica. Mientras tanto sigue clasificando con los datos actuales. La acción queda auditada."
+        confirmLabel="Reabrir"
+        onConfirm={async () => {
+          try {
+            await action.mutateAsync({ id: model.id, decision: 'reopen' });
+            toast({
+              tone: 'success',
+              title: 'Modelo reabierto',
+              description: 'Corregí la ficha técnica y volvé a aprobarlo.',
+            });
+          } catch (e) {
+            toast({
+              tone: 'danger',
+              title: 'No se pudo reabrir',
+              description: e instanceof Error ? e.message : undefined,
+            });
+          }
+        }}
+      />
+    );
+  }
+
+  if (model.status !== 'PENDING_REVIEW') {
     return <span className="text-xs text-ink-subtle">—</span>;
   }
 

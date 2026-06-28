@@ -263,6 +263,20 @@ export class FleetService {
     return model;
   }
 
+  /** Reabre un modelo APROBADO para corregir su ficha → fleet PUT /vehicle-models/:id/reopen + audit (F2). */
+  async reopenModel(identity: AuthenticatedUser, id: string): Promise<VehicleModelReviewView> {
+    const model = await this.rest.put<VehicleModelReviewView>(`/vehicle-models/${id}/reopen`, {
+      identity,
+      body: {},
+    });
+    await this.audit.record(identity, {
+      action: 'vehicle_model.reopen',
+      resourceType: 'vehicle_model',
+      resourceId: id,
+    });
+    return model;
+  }
+
   /** Rechaza una solicitud → fleet PUT /vehicle-models/:id/reject + audit. */
   async rejectModel(identity: AuthenticatedUser, id: string): Promise<VehicleModelReviewView> {
     const model = await this.rest.put<VehicleModelReviewView>(`/vehicle-models/${id}/reject`, {

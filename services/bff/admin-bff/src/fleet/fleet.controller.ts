@@ -163,4 +163,16 @@ export class FleetController {
   ): Promise<VehicleModelReviewView> {
     return this.fleet.rejectModel(user, id);
   }
+
+  @Post('vehicle-models/:id/reopen')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reabre un modelo APROBADO para corregir su ficha técnica (APPROVED→PENDING_REVIEW)',
+  })
+  reopenModel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<VehicleModelReviewView> {
+    return this.fleet.reopenModel(user, id);
+  }
 }

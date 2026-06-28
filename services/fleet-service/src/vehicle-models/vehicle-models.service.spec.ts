@@ -432,3 +432,38 @@ describe('VehicleModelsService.approve/reject · B5-2.c state machine', () => {
     await expect(service.reject('r1', 'admin-9')).rejects.toBeInstanceOf(ConflictError);
   });
 });
+
+describe('VehicleModelsService.reopen · F2 corregir la ficha de un modelo aprobado', () => {
+  it('APPROVED→PENDING_REVIEW: limpia verifiedBy y CONSERVA la ficha (sigue clasificando con el dato viejo)', async () => {
+    const { service, captured } = makeReviewService([
+      row({
+        id: 'a1',
+        status: VehicleModelStatus.APPROVED,
+        segment: VehicleSegment.PREMIUM,
+        energySource: EnergySource.DIESEL,
+        efficiency: 12,
+        verifiedBy: 'admin-1',
+      }),
+    ]);
+    const view = await service.reopen('a1');
+    expect(captured.update!.status).toBe(VehicleModelStatus.PENDING_REVIEW);
+    expect(captured.update!.verifiedBy).toBeNull();
+    // NO toca la ficha: el update solo cambia status+verifiedBy (no borra segment/energía/eficiencia de golpe).
+    expect(captured.update).not.toHaveProperty('segment');
+    expect(captured.update).not.toHaveProperty('energySource');
+    expect(captured.update).not.toHaveProperty('efficiency');
+    expect(view.status).toBe(VehicleModelStatus.PENDING_REVIEW);
+  });
+
+  it('reopen de algo NO aprobado (PENDING_REVIEW) → Conflict (CAS: solo reabre APPROVED)', async () => {
+    const { service } = makeReviewService([
+      row({ id: 'p1', status: VehicleModelStatus.PENDING_REVIEW }),
+    ]);
+    await expect(service.reopen('p1')).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('reopen de un id inexistente → NotFound', async () => {
+    const { service } = makeReviewService([]);
+    await expect(service.reopen('nope')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
