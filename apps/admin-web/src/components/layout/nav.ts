@@ -77,7 +77,7 @@ export const NAV: NavGroup[] = [
       },
       {
         href: '/finance/pricing',
-        label: 'Modo de pricing',
+        label: 'Precios y tarifas',
         icon: Coins,
         permission: 'pricing:view',
       },

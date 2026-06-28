@@ -86,9 +86,9 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
 
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Banknote className="size-4" aria-hidden /> Tarifa base
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         El banderazo (tarifa fija de arranque), el costo por kilómetro y el costo por minuto. Son los
         componentes base de la fórmula de tarifa (precio fijo y sugerido de puja). El cambio es global,

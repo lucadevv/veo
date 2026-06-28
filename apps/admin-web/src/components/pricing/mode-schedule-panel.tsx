@@ -54,7 +54,7 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
   return (
     <div className="flex flex-col gap-6 pt-4">
       <section>
-        <h2 className="text-sm font-medium text-ink-muted">Modo por defecto</h2>
+        <h3 className="text-sm font-medium text-ink-muted">Modo por defecto</h3>
         <p className="mt-1 text-sm text-ink-subtle">
           Se aplica a todo viaje nuevo que no caiga dentro de una franja horaria definida.
         </p>
@@ -120,7 +120,7 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
       </section>
 
       <section>
-        <h2 className="text-sm font-medium text-ink-muted">Franjas horarias</h2>
+        <h3 className="text-sm font-medium text-ink-muted">Franjas horarias</h3>
         {schedule.rules.length === 0 ? (
           <p className="mt-1 text-sm text-ink-subtle">
             Sin franjas: rige siempre el modo por defecto. El editor de franjas por horario llega

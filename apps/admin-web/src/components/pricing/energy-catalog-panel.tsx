@@ -88,14 +88,14 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
 
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Zap className="size-4" aria-hidden /> Precios de energía
         {config.active ? (
           <Badge tone="success">Activo</Badge>
         ) : (
           <Badge tone="neutral">Vista previa</Badge>
         )}
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         {config.active
           ? 'Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). El sistema deriva el recargo por km de cada servicio según su rendimiento y lo aplica a la tarifa. El cambio es global y queda auditado.'

@@ -87,9 +87,9 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
 
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Percent className="size-4" aria-hidden /> Comisión por modo
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         Dos modelos distintos. La comisión <strong>on-demand</strong> se <strong>descuenta al
         conductor</strong> (el pasajero paga la tarifa, el conductor recibe la tarifa menos la comisión). El{' '}

@@ -97,9 +97,9 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
 
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Gavel className="size-4" aria-hidden /> Piso de la puja (por oferta)
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         El mínimo que un pasajero puede ofertar en modo PUJA. Definí un piso por defecto y,
         opcionalmente, un piso distinto por oferta (ej. moto más bajo que confort). Dejá una oferta

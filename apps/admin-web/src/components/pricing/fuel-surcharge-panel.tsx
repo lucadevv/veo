@@ -75,14 +75,14 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
 
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Fuel className="size-4" aria-hidden /> Recargo de combustible
         {config.active ? (
           <Badge tone="success">Activo</Badge>
         ) : (
           <Badge tone="neutral">Reemplazado</Badge>
         )}
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         {config.active
           ? 'Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.'

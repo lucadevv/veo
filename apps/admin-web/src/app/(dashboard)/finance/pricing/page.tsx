@@ -22,6 +22,7 @@ import { CommissionPanel } from '@/components/pricing/commission-panel';
 import { CostPerKmPanel } from '@/components/pricing/cost-per-km-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
 import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
+import { PricingSection } from '@/components/pricing/pricing-section';
 
 /**
  * Modo de pricing global (PUJA↔FIJO · ADR 011). Vive bajo Finanzas: es decisión comercial/financiera.
@@ -41,8 +42,8 @@ export default function PricingPage() {
     return (
       <div className="flex h-full flex-col">
         <PageHeader
-          title="Modo de pricing"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Pricing' }]}
+          title="Precios y tarifas"
+          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios' }]}
         />
         <EmptyState
           className="flex-1"
@@ -57,75 +58,99 @@ export default function PricingPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Modo de pricing"
-        description="Elige cómo se fija la tarifa de los viajes: puja del pasajero o precio fijo calculado."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Pricing' }]}
+        title="Precios y tarifas"
+        description="Configurá cómo se calcula y se cobra cada viaje: modo, componentes de la tarifa on-demand, costo del carpooling y comisión."
+        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {query.isError ? (
-          <ErrorState onRetry={() => void query.refetch()} />
-        ) : query.isLoading || !query.data ? (
-          <div className="grid gap-3 pt-4 sm:grid-cols-2">
-            <Skeleton className="h-28" />
-            <Skeleton className="h-28" />
-          </div>
-        ) : (
-          <ModeSchedulePanel schedule={query.data} />
-        )}
+        {/* CARRIL on-demand · cómo se fija el precio del viaje inmediato (modo + piso de puja). */}
+        <PricingSection
+          title="Modo de tarifa · on-demand"
+          hint="Cómo se fija el precio del viaje inmediato: puja del pasajero o precio fijo calculado, y el piso de la puja."
+        >
+          {query.isError ? (
+            <ErrorState onRetry={() => void query.refetch()} />
+          ) : query.isLoading || !query.data ? (
+            <div className="grid gap-3 pt-4 sm:grid-cols-2">
+              <Skeleton className="h-28" />
+              <Skeleton className="h-28" />
+            </div>
+          ) : (
+            <ModeSchedulePanel schedule={query.data} />
+          )}
 
-        {/* B3 · recargo de combustible (mismo gate pricing:view; carga independiente del schedule). */}
-        {fuelQuery.isError ? (
-          <ErrorState onRetry={() => void fuelQuery.refetch()} />
-        ) : fuelQuery.isLoading || !fuelQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <FuelSurchargePanel config={fuelQuery.data} />
-        )}
+          {/* ADR 010 §9.3 · piso de la PUJA per-oferta. */}
+          {bidFloorQuery.isError ? (
+            <ErrorState onRetry={() => void bidFloorQuery.refetch()} />
+          ) : bidFloorQuery.isLoading || !bidFloorQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <BidFloorPanel config={bidFloorQuery.data} />
+          )}
+        </PricingSection>
 
-        {/* F2.4 · tarifa base (banderazo + per-km + per-min; mismo gate pricing:view; carga independiente). */}
-        {baseFareQuery.isError ? (
-          <ErrorState onRetry={() => void baseFareQuery.refetch()} />
-        ) : baseFareQuery.isLoading || !baseFareQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <BaseFarePanel config={baseFareQuery.data} />
-        )}
+        {/* CARRIL on-demand · las piezas que arman la tarifa (base + recargo de combustible + energía). */}
+        <PricingSection
+          title="Componentes de la tarifa · on-demand"
+          hint="Las piezas que arman el precio fijo y el sugerido de la puja: tarifa base, recargo de combustible y el modelo de energía."
+        >
+          {/* F2.4 · tarifa base (banderazo + per-km + per-min). */}
+          {baseFareQuery.isError ? (
+            <ErrorState onRetry={() => void baseFareQuery.refetch()} />
+          ) : baseFareQuery.isLoading || !baseFareQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <BaseFarePanel config={baseFareQuery.data} />
+          )}
 
-        {/* F2.7 · comisión por modo (on-demand + service fee carpooling, ambas editables; carga independiente). */}
-        {commissionQuery.isError ? (
-          <ErrorState onRetry={() => void commissionQuery.refetch()} />
-        ) : commissionQuery.isLoading || !commissionQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <CommissionPanel config={commissionQuery.data} />
-        )}
+          {/* B3/B4 · recargo de combustible (modelo de energía LIVE mientras el flip esté OFF). */}
+          {fuelQuery.isError ? (
+            <ErrorState onRetry={() => void fuelQuery.refetch()} />
+          ) : fuelQuery.isLoading || !fuelQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <FuelSurchargePanel config={fuelQuery.data} />
+          )}
 
-        {/* F2.5 · costo/km del carpooling (costo de operación DIRECTO del admin, per-país; escudo legal). */}
-        {costPerKmQuery.isError ? (
-          <ErrorState onRetry={() => void costPerKmQuery.refetch()} />
-        ) : costPerKmQuery.isLoading || !costPerKmQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <CostPerKmPanel config={costPerKmQuery.data} />
-        )}
+          {/* B5 · precios de energía multi-fuente (vista previa hasta el flip). */}
+          {energyQuery.isError ? (
+            <ErrorState onRetry={() => void energyQuery.refetch()} />
+          ) : energyQuery.isLoading || !energyQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <EnergyCatalogPanel config={energyQuery.data} />
+          )}
+        </PricingSection>
 
-        {/* B5 · precios de energía multi-fuente (mismo gate pricing:view; carga independiente). */}
-        {energyQuery.isError ? (
-          <ErrorState onRetry={() => void energyQuery.refetch()} />
-        ) : energyQuery.isLoading || !energyQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <EnergyCatalogPanel config={energyQuery.data} />
-        )}
+        {/* CARRIL carpooling · el costo/km que limita el cost-sharing (escudo legal anti-lucro). */}
+        <PricingSection
+          title="Carpooling · programado"
+          hint="El costo de operación por km que limita el precio del cost-sharing (escudo legal anti-lucro). Se fija por país."
+        >
+          {/* F2.5 · costo/km del carpooling (costo de operación DIRECTO del admin, per-país). */}
+          {costPerKmQuery.isError ? (
+            <ErrorState onRetry={() => void costPerKmQuery.refetch()} />
+          ) : costPerKmQuery.isLoading || !costPerKmQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <CostPerKmPanel config={costPerKmQuery.data} />
+          )}
+        </PricingSection>
 
-        {/* ADR 010 §9.3 · piso de la PUJA per-oferta (mismo gate pricing:view; carga independiente). */}
-        {bidFloorQuery.isError ? (
-          <ErrorState onRetry={() => void bidFloorQuery.refetch()} />
-        ) : bidFloorQuery.isLoading || !bidFloorQuery.data ? (
-          <Skeleton className="mt-6 h-28" />
-        ) : (
-          <BidFloorPanel config={bidFloorQuery.data} />
-        )}
+        {/* AMBOS modos · cómo gana la plataforma en cada carril (descuento on-demand vs service fee carpooling). */}
+        <PricingSection
+          title="Comisión · ambos modos"
+          hint="Cómo gana la plataforma en cada carril: descuento al conductor en on-demand, service fee al pasajero en carpooling."
+        >
+          {/* F2.7 · comisión por modo (on-demand + service fee carpooling, ambas editables). */}
+          {commissionQuery.isError ? (
+            <ErrorState onRetry={() => void commissionQuery.refetch()} />
+          ) : commissionQuery.isLoading || !commissionQuery.data ? (
+            <Skeleton className="mt-6 h-28" />
+          ) : (
+            <CommissionPanel config={commissionQuery.data} />
+          )}
+        </PricingSection>
       </div>
     </div>
   );

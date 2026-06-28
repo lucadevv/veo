@@ -123,9 +123,9 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
   const canManage = can(useSession(), 'finance:manage');
   return (
     <section className="pt-6">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
         <Route className="size-4" aria-hidden /> Costo de operación por km (carpooling)
-      </h2>
+      </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         El costo real de operar el vehículo por km (combustible + desgaste). Limita el precio del carpooling
         (cost-sharing, no lucro): el asiento no puede pasar de <strong>(distancia × costo/km + peaje) ÷ asientos</strong>.
