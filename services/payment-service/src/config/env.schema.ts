@@ -46,8 +46,11 @@ export const envSchema = z.object({
   PAYOUT_STEPUP_CENTS: z.coerce.number().int().min(0).default(500_000),
   /// Ventana para solicitar reembolso (BR-P06). Default 7 días.
   REFUND_WINDOW_DAYS: z.coerce.number().int().min(0).default(7),
-  /// Monto sobre el cual un reembolso requiere aprobación L2 (BR-P06). Default S/30 = 3000 céntimos.
-  REFUND_L2_THRESHOLD_CENTS: z.coerce.number().int().min(0).default(3000),
+  /// Monto sobre el cual un reembolso exige AUTORIDAD ELEVADA (BR-P06 · dual-control). Bajo el modelo finanzas-only
+  /// (refund = FINANCE/ADMIN/SUPERADMIN), un reembolso > este umbral lo puede emitir SOLO ADMIN o SUPERADMIN; un
+  /// FINANCE queda topado acá. Recalibrado a S/300 = 30000 céntimos (antes S/30, calibrado para el tier SUPPORT_L1
+  /// ya retirado). Nombre del env conservado por compat de config. Tuneable por entorno.
+  REFUND_L2_THRESHOLD_CENTS: z.coerce.number().int().min(0).default(30000),
   /// Ventana del BACKSTOP de idempotencia del refund admin (minutos): dos reembolsos del MISMO (paymentId,
   /// céntimos) dentro de esta ventana se tratan como la MISMA operación (devuelve el existente), independiente
   /// del Idempotency-Key del cliente. Cierra el residual del nonce de browser divergente (storage bloqueado,

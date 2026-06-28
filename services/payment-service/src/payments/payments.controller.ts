@@ -257,8 +257,8 @@ export class PaymentsController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Reembolso de un viaje (BR-P06 · finance:refund). Ventana 7 días; >S/30 requiere autoridad de finanzas. ' +
-      'Idempotente: backstop server-side por ventana sobre (pago, monto); forceNew habilita un 2do parcial idéntico',
+      'Reembolso de un viaje (BR-P06 · finance:refund). Ventana 7 días; montos altos (>umbral) requieren ADMIN o ' +
+      'SUPERADMIN (dual-control). Idempotente: backstop por ventana sobre (pago, monto); forceNew habilita un 2do parcial idéntico',
   })
   refund(
     @Param('tripId') tripId: string,

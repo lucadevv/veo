@@ -175,7 +175,7 @@ export class PaymentsService {
   private readonly retryBaseMs: number;
   private readonly defaultMethod: PaymentMethod;
   private readonly refundWindowDays: number;
-  private readonly refundL2ThresholdCents: number;
+  private readonly refundHighValueThresholdCents: number;
   private readonly refundIdempotencyWindowMs: number;
   private readonly cancellationDriverShare: number;
 
@@ -205,7 +205,7 @@ export class PaymentsService {
     this.retryBaseMs = config.getOrThrow<number>('PAYMENT_RETRY_BASE_MS');
     this.defaultMethod = config.getOrThrow<PaymentMethod>('DEFAULT_PAYMENT_METHOD');
     this.refundWindowDays = config.getOrThrow<number>('REFUND_WINDOW_DAYS');
-    this.refundL2ThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
+    this.refundHighValueThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
     this.refundIdempotencyWindowMs =
       config.getOrThrow<number>('REFUND_IDEMPOTENCY_WINDOW_MINUTES') * 60_000;
     this.cancellationDriverShare = config.getOrThrow<number>('CANCELLATION_DRIVER_SHARE');
@@ -1195,16 +1195,18 @@ export class PaymentsService {
       );
     }
 
-    // Gate de monto alto (BR-P06): >S/30 requiere un rol con autoridad de finanzas. FINANCE es el rol money-OUT
-    // canónico (decisión del dueño: refund = acción de finanzas) y satisface el gate; ADMIN/SUPERADMIN también.
-    const needsL2 = amountCents > this.refundL2ThresholdCents;
+    // Gate de monto alto (BR-P06 · DUAL-CONTROL, decisión del dueño): un reembolso sobre el umbral exige autoridad
+    // ELEVADA (ADMIN/SUPERADMIN); un FINANCE queda topado al umbral. Restaura el control por monto bajo el modelo
+    // finanzas-only — antes el tier era SUPPORT_L1(≤umbral)/L2(arriba), ya retirado. La rama es REACHABLE: un
+    // FINANCE refundando alto sin elevación → bloqueado. Compensa con step-up MFA + audit + tope por saldo.
+    const needsElevatedAuthority = amountCents > this.refundHighValueThresholdCents;
     const roles = operator.roles ?? [];
-    const hasL2 =
-      roles.includes(AdminRole.FINANCE) ||
-      roles.includes(AdminRole.ADMIN) ||
-      roles.includes(AdminRole.SUPERADMIN);
-    if (needsL2 && !hasL2) {
-      throw new ForbiddenError('Un reembolso mayor a S/30 requiere un operador con autoridad de finanzas');
+    const hasElevatedAuthority =
+      roles.includes(AdminRole.ADMIN) || roles.includes(AdminRole.SUPERADMIN);
+    if (needsElevatedAuthority && !hasElevatedAuthority) {
+      throw new ForbiddenError(
+        'Un reembolso de monto alto requiere un operador ADMIN o SUPERADMIN',
+      );
     }
 
     const newRefundedCents = payment.refundedCents + amountCents;

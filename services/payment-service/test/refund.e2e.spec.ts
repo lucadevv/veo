@@ -58,17 +58,16 @@ const noAffiliation = {
 const noPromos = {
   redeemPromo: async () => ({ discountCents: 0 }),
 } as unknown as PromotionsService;
-/** Operador de FINANZAS (autoridad money-OUT · decisión del dueño: refund = acción de finanzas): puede
- *  refundar cualquier monto, incl. >S/30. El nombre `L2` es legacy del gate de monto alto. */
+/** Operador de FINANZAS (autoridad money-OUT · refund = acción de finanzas): refunda hasta el umbral de monto
+ *  alto; por ENCIMA exige elevación (ADMIN/SUPERADMIN). El nombre `L2` es legacy del gate de monto alto. */
 const L2: AuthenticatedUser = {
   userId: 'op-L2',
   roles: [AdminRole.FINANCE],
 } as unknown as AuthenticatedUser;
-/** Operador SIN autoridad de finanzas (SUPPORT_L1): a nivel servicio el gate de monto alto lo deja refundar
- *  ≤S/30 pero NO los montos altos (>S/30, gate BR-P06). En prod el @Roles del controller ni lo deja entrar. */
-const L1: AuthenticatedUser = {
-  userId: 'op-L1',
-  roles: [AdminRole.SUPPORT_L1],
+/** Operador ELEVADO (ADMIN): autoridad para reembolsos de monto alto (>umbral, dual-control BR-P06). */
+const ELEVATED: AuthenticatedUser = {
+  userId: 'op-admin',
+  roles: [AdminRole.ADMIN],
 } as unknown as AuthenticatedUser;
 
 function makeConfig(): ConfigService {
@@ -586,31 +585,32 @@ describe('PaymentsService · FIX 1 · UNIQUE PARCIAL del dedupKey (Postgres real
 /**
  * F3c FIX 3 · BLINDAJE de regresión del REFUND ADMIN (BR-P06). El refactor extrajo `executeRefundClaim` y
  * reshapeó `RefundClaim` (operator → {requestedBy, approvedBy, dedupKey}); este spec VERIFICA (no asume) que el
- * camino admin CONSERVA sus gates: gate de monto alto (>S/30 exige autoridad de finanzas), ventana de 7 días, RBAC — y que el
+ * camino admin CONSERVA sus gates: gate de monto alto (>umbral exige autoridad ELEVADA ADMIN/SUPERADMIN · dual-control), ventana de 7 días, RBAC — y que el
  * system-initiated NO los tiene (diferencia DELIBERADA: refund OBLIGATORIO, sin discrecionalidad que limitar).
  */
 describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión BR-P06)', () => {
-  it('gate monto alto: operador SIN autoridad de finanzas refundando >S/30 → ForbiddenError, sin tocar el proveedor', async () => {
+  it('gate monto alto: FINANCE refundando >umbral SIN ser ADMIN/SUPERADMIN → ForbiddenError, sin tocar el proveedor', async () => {
     const { service, calls } = makeService(async () => ({ status: 'ACCEPTED' }));
-    const { id, tripId } = await seedCaptured({ amountCents: 5000 }); // S/50, > umbral S/30
+    const { id, tripId } = await seedCaptured({ amountCents: 5000 }); // S/50, > umbral (3000)
 
-    await expect(service.refund(tripId, 4000, 'x', L1)).rejects.toBeInstanceOf(ForbiddenError);
+    // FINANCE puede reembolsar, pero un monto ALTO (>umbral) exige autoridad elevada → bloqueado (dual-control).
+    await expect(service.refund(tripId, 4000, 'x', L2)).rejects.toBeInstanceOf(ForbiddenError);
     expect(calls).toHaveLength(0); // NO se intentó el reverso
     expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('CAPTURED');
     expect(await prisma.refund.findMany({})).toHaveLength(0);
   });
 
-  it('gate monto alto: operador CON autoridad de finanzas (FINANCE) refundando >S/30 → procede', async () => {
+  it('gate monto alto: operador ELEVADO (ADMIN) refundando >umbral → procede', async () => {
     const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
     const { tripId } = await seedCaptured({ amountCents: 5000 });
-    const res = await service.refund(tripId, 4000, 'x', L2);
+    const res = await service.refund(tripId, 4000, 'x', ELEVATED);
     expect(res.status).toBe('COMPLETED');
   });
 
-  it('gate monto alto: operador sin autoridad de finanzas refundando ≤S/30 → procede (el monto bajo NO exige finanzas)', async () => {
+  it('gate monto alto: FINANCE refundando ≤umbral → procede (el monto bajo NO exige elevación)', async () => {
     const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev' }));
     const { tripId } = await seedCaptured({ amountCents: 5000 });
-    const res = await service.refund(tripId, 3000, 'x', L1); // exactamente S/30, no supera el umbral
+    const res = await service.refund(tripId, 3000, 'x', L2); // exactamente el umbral, no lo supera
     expect(res.status).toBe('COMPLETED');
   });
 
