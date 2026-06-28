@@ -235,6 +235,27 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     );
   });
 
+  it('mismo key, mismo monto, OTRO motivo → CONFLICTO (identidad de valor completa: pago+monto+motivo)', async () => {
+    const { prisma, txRefundCreate } = makePrisma(capturedPayment({ amountCents: 4500 }));
+    await txRefundCreate({
+      data: {
+        id: 'refund-motivo-A',
+        paymentId: 'pay-1',
+        amountCents: 1000,
+        requestedBy: 'op-1',
+        approvedBy: 'op-1',
+        dedupKey: deriveAdminRefundDedupKey('KEY-A'),
+        status: 'COMPLETED',
+        reason: 'motivo A',
+      },
+    } as never);
+    const svc = buildService(prisma);
+
+    await expect(svc.refund('trip-1', 1000, 'motivo B', operator, 'KEY-A')).rejects.toThrow(
+      /otra operación/,
+    );
+  });
+
   it('keys DISTINTOS → refunds DISTINTOS (dos parciales legítimos no se colapsan)', async () => {
     const { prisma, refunds } = makePrisma(capturedPayment({ amountCents: 4500 }));
     const svc = buildService(prisma);

@@ -1211,10 +1211,15 @@ export class PaymentsService {
           where: { dedupKey: deriveAdminRefundDedupKey(idempotencyKey) },
           orderBy: { createdAt: 'desc' },
         });
-        // El key debe identificar UNA operación: solo devolvemos el existente si es de ESTE pago y monto. Un key
-        // reusado para OTRA operación (el operador editó tripId/monto tras un timeout y reenvió con el mismo key)
-        // NO debe devolver un refund ajeno como éxito falso (el nuevo viaje nunca se reembolsaría) → conflicto.
-        if (existing && existing.paymentId === payment.id && existing.amountCents === amountCents) {
+        // El key debe identificar UNA operación: solo devolvemos el existente si es de ESTE pago, monto Y motivo
+        // (la identidad de valor que el cliente liga al key). Un key reusado para OTRA operación NO debe devolver
+        // un refund ajeno como éxito falso (la otra operación nunca se reembolsaría) → conflicto explícito.
+        if (
+          existing &&
+          existing.paymentId === payment.id &&
+          existing.amountCents === amountCents &&
+          existing.reason === reason
+        ) {
           this.logger.log(
             `Refund admin idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo el refund existente`,
           );

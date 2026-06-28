@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import { solesToCents } from '@veo/utils/money';
 import { useRefund } from '@/lib/api/queries';
@@ -32,35 +32,46 @@ export function RefundDialog() {
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // Idempotency-Key ligado a la IDENTIDAD de la operación (tripId, monto, motivo), NO a la sesión del diálogo:
-  // se re-acuña cuando CUALQUIERA cambia. Por qué importa: si el operador reembolsa el trip A, ve un error de
-  // red ambiguo (el server pudo haber commiteado) y SIN cerrar el diálogo edita el tripId/monto y reenvía, eso
-  // es OTRA operación → key nuevo → NO se dedupea al refund de A (que server-side devolvería un refund ajeno
-  // como éxito falso → el nuevo viaje nunca se reembolsa). Si reintenta SIN cambiar nada → mismo key → dedup.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  // Idempotency-Key ligado a la IDENTIDAD DE VALOR de la operación (tripId + céntimos + motivo), cacheado por
+  // firma. NO se deriva del valor (dos reembolsos parciales LEGÍTIMOS idénticos NO deben colapsar — BR-P06) ni
+  // se re-acuña por evento de edición (retipear '500'→'500' o '500'→'500.00' = misma operación → debe dedupear).
+  // Reglas: misma firma → MISMO key (un reintento tras error de red dedupea server-side, no doble-paga). Firma
+  // distinta → key NUEVO (otra operación). Se RESETEA en éxito y al abrir → dos operaciones idénticas en
+  // sesiones distintas SÍ obtienen keys distintos (ambas se cobran, intencional).
+  const attemptRef = useRef<{ sig: string; key: string } | null>(null);
 
   const amount = Number(soles);
   const valid =
     tripId.trim().length > 0 && amount > 0 && reason.trim().length >= REASON_MIN_LENGTH;
 
-  useEffect(() => {
-    setIdempotencyKey(crypto.randomUUID());
-  }, [tripId, soles, reason]);
+  /** Key idempotente de ESTE intento: estable mientras la firma de valor no cambie; fresco si cambió. */
+  function operationKey(amountCents: number): string {
+    const sig = `${tripId.trim()}|${amountCents}|${reason.trim()}`;
+    if (!attemptRef.current || attemptRef.current.sig !== sig) {
+      attemptRef.current = { sig, key: crypto.randomUUID() };
+    }
+    return attemptRef.current.key;
+  }
 
   function handleOpenChange(next: boolean) {
-    if (next) setError(null);
+    if (next) {
+      setError(null);
+      attemptRef.current = null; // diálogo nuevo = operación nueva (aunque repita valores)
+    }
     setOpen(next);
   }
 
   async function submit() {
     setError(null);
+    const amountCents = solesToCents(amount);
     try {
       await refund.mutateAsync({
         tripId: tripId.trim(),
-        amountCents: solesToCents(amount),
+        amountCents,
         reason: reason.trim(),
-        idempotencyKey,
+        idempotencyKey: operationKey(amountCents),
       });
+      attemptRef.current = null; // éxito: la próxima operación (aunque repita valores) arranca con key fresco
       toast({ tone: 'success', title: 'Reembolso emitido' });
       setOpen(false);
       setTripId('');
@@ -117,11 +128,9 @@ export function RefundDialog() {
               <Button
                 variant="primary"
                 loading={refund.isPending}
-                // `!valid || isPending`: `disabled` es un booleano DEFINIDO, así que el `disabled ?? loading`
-                // del Button no caería a `loading` solo — hay que OR-ear el pending acá para que el botón NO
-                // siga clickeable durante el request (si no, un doble-click dispara dos submits). Y deshabilitado
-                // bloquea también la apertura del step-up (DialogTrigger respeta disabled).
-                disabled={!valid || refund.isPending}
+                // El Button auto-deshabilita en `loading` (`disabled || loading`), así que acá solo gateamos por
+                // `!valid`. Deshabilitado bloquea también la apertura del step-up (DialogTrigger respeta disabled).
+                disabled={!valid}
               >
                 Emitir reembolso
               </Button>
