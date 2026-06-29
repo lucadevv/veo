@@ -25,8 +25,10 @@ import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 import { PricingSection } from '@/components/pricing/pricing-section';
 
 /**
- * Modo de pricing global (PUJA↔FIJO · ADR 011). Vive bajo Finanzas: es decisión comercial/financiera.
- * Gate de presentación con `pricing:view`; el admin-bff (RolesGuard) y trip-service re-autorizan server-side.
+ * Precios y tarifas — config financiera de AMBOS carriles, agrupada por sección (PricingSection):
+ * Modo de tarifa (PUJA↔FIJO + piso de puja · ADR 011) · Componentes on-demand (tarifa base, recargo de
+ * combustible B4, precios de energía B5) · Carpooling (costo/km del cost-sharing) · Comisión (ambos modos).
+ * Gate de presentación con `pricing:view`; el admin-bff (RolesGuard) y los servicios re-autorizan server-side.
  */
 export default function PricingPage() {
   const user = useSession();
