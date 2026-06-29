@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import { VehicleDocStatus } from '../generated/prisma';
 import {
   isVehicleYearEligible,
   aggregateVehicleDocStatus,
   deriveVehicleReviewStatus,
+  hasRequiredVehicleDocsOperable,
   pickActiveVehicle,
   VehicleReviewStatus,
 } from './vehicle-rules';
@@ -104,12 +106,78 @@ describe('aggregateVehicleDocStatus', () => {
   });
 });
 
-describe('deriveVehicleReviewStatus (onboarding self-service)', () => {
-  it('vehículo inactivo → PENDING_REVIEW', () => {
-    expect(deriveVehicleReviewStatus({ active: false })).toBe(VehicleReviewStatus.PENDING_REVIEW);
+describe('hasRequiredVehicleDocsOperable (SOAT+ITV presentes+aprobados+vigentes)', () => {
+  const doc = (type: FleetDocumentType, status: FleetDocumentStatus) => ({ type, status });
+
+  it('SOAT VALID + ITV VALID → true (ambos requeridos operables)', () => {
+    expect(
+      hasRequiredVehicleDocsOperable([
+        doc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
+        doc(FleetDocumentType.ITV, FleetDocumentStatus.VALID),
+      ]),
+    ).toBe(true);
   });
 
-  it('vehículo activo → ACTIVE', () => {
-    expect(deriveVehicleReviewStatus({ active: true })).toBe(VehicleReviewStatus.ACTIVE);
+  it('ambos EXPIRING_SOON → true (no vencidos sigue siendo operable)', () => {
+    expect(
+      hasRequiredVehicleDocsOperable([
+        doc(FleetDocumentType.SOAT, FleetDocumentStatus.EXPIRING_SOON),
+        doc(FleetDocumentType.ITV, FleetDocumentStatus.EXPIRING_SOON),
+      ]),
+    ).toBe(true);
+  });
+
+  it('SOAT VALID + ITV AUSENTE → false (falta un tipo requerido)', () => {
+    expect(
+      hasRequiredVehicleDocsOperable([doc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID)]),
+    ).toBe(false);
+  });
+
+  it('SOAT VALID + ITV PENDING_REVIEW (sin aprobar) → false', () => {
+    expect(
+      hasRequiredVehicleDocsOperable([
+        doc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
+        doc(FleetDocumentType.ITV, FleetDocumentStatus.PENDING_REVIEW),
+      ]),
+    ).toBe(false);
+  });
+
+  it('SOAT VALID + ITV EXPIRED (vencido) → false', () => {
+    expect(
+      hasRequiredVehicleDocsOperable([
+        doc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
+        doc(FleetDocumentType.ITV, FleetDocumentStatus.EXPIRED),
+      ]),
+    ).toBe(false);
+  });
+
+  it('sin documentos → false (un vehículo sin SOAT/ITV no puede operar)', () => {
+    expect(hasRequiredVehicleDocsOperable([])).toBe(false);
+  });
+});
+
+describe('deriveVehicleReviewStatus (operabilidad derivada de señales reales)', () => {
+  it('docs operables + ficha linkeada → ACTIVE (operable)', () => {
+    expect(
+      deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: 'spec-1' }),
+    ).toBe(VehicleReviewStatus.ACTIVE);
+  });
+
+  it('docs NO operables → PENDING_REVIEW aunque tenga ficha', () => {
+    expect(
+      deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: 'spec-1' }),
+    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
+  });
+
+  it('SIN ficha linkeada (modelSpecId null) → PENDING_REVIEW aunque los docs estén operables', () => {
+    expect(
+      deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: null }),
+    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
+  });
+
+  it('ni docs operables ni ficha → PENDING_REVIEW', () => {
+    expect(
+      deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: null }),
+    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
   });
 });

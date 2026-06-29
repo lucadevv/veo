@@ -82,6 +82,8 @@ function makeService(opts: { spec?: ReturnType<typeof specRow> | null; match?: V
           .mockImplementation(() => Promise.resolve(created.data ? [created.data] : [])),
       },
       vehicleModelSpec: { findFirst },
+      // Docs del vehículo (ownerType=VEHICLE) para docsOperable. Vacío: alta nueva sin SOAT/ITV aún.
+      fleetDocument: { findMany: vi.fn().mockResolvedValue([]) },
     },
     write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
   };
@@ -199,6 +201,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
           findMany: vi.fn().mockResolvedValue([]),
         },
         vehicleModelSpec: { findFirst: vi.fn().mockResolvedValue(null) },
+        fleetDocument: { findMany: vi.fn().mockResolvedValue([]) },
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
@@ -275,6 +278,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
           findMany: vi.fn().mockResolvedValue([]),
         },
         vehicleModelSpec: { findFirst: vi.fn().mockResolvedValue(null) },
+        fleetDocument: { findMany: vi.fn().mockResolvedValue([]) },
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
@@ -461,6 +465,7 @@ function makeIdempotentService(existingPlate: Vehicle | null) {
         findMany: findManyAfter,
       },
       vehicleModelSpec: { findFirst: vi.fn().mockResolvedValue(null) },
+      fleetDocument: { findMany: vi.fn().mockResolvedValue([]) },
     },
     write: {
       $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)),

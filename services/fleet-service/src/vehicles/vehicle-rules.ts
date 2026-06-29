@@ -1,9 +1,9 @@
 /**
  * Reglas de dominio puras del vehículo (BR-D04). Funciones puras, sin I/O.
  */
-import { FleetDocumentType } from '@veo/shared-types';
+import { FleetDocumentType, FleetDocumentStatus } from '@veo/shared-types';
 import { VehicleDocStatus } from '../generated/prisma';
-import type { ExpiryStatus } from '../documents/document-rules';
+import { isDocumentValid, type ExpiryStatus } from '../documents/document-rules';
 
 /** BR-D04: el vehículo debe ser del año mínimo en adelante (por defecto 2017). */
 export function isVehicleYearEligible(year: number, minYear = 2017): boolean {
@@ -11,9 +11,8 @@ export function isVehicleYearEligible(year: number, minYear = 2017): boolean {
 }
 
 /**
- * Estado de revisión del vehículo derivado de `active`. El alta self-service del conductor
- * entra como `active=false` (pendiente de verificación del operador). No persiste columna nueva:
- * se deriva de los campos existentes para mantener una única fuente de verdad.
+ * Estado de revisión / OPERABILIDAD del vehículo. Una única fuente de verdad DERIVADA de señales reales
+ * (no de un flag estático que nunca se flipea).
  */
 export const VehicleReviewStatus = {
   PENDING_REVIEW: 'PENDING_REVIEW',
@@ -21,9 +20,42 @@ export const VehicleReviewStatus = {
 } as const;
 export type VehicleReviewStatus = (typeof VehicleReviewStatus)[keyof typeof VehicleReviewStatus];
 
-/** Deriva el estado de revisión: ACTIVE si el vehículo está activo, PENDING_REVIEW si no. */
-export function deriveVehicleReviewStatus(vehicle: { active: boolean }): VehicleReviewStatus {
-  return vehicle.active ? VehicleReviewStatus.ACTIVE : VehicleReviewStatus.PENDING_REVIEW;
+/**
+ * ¿El vehículo tiene TODOS sus documentos REQUERIDOS (SOAT + ITV) presentes, aprobados y vigentes? Pura.
+ *
+ * Esta es la señal REAL de "el operador verificó el vehículo": cada tipo requerido debe existir con un estado
+ * OPERABLE (`isDocumentValid`: VALID/EXPIRING_SOON — aprobado y no vencido). Un documento PENDING_REVIEW (sin
+ * revisar), REJECTED o EXPIRED, o un tipo AUSENTE, hacen al vehículo NO operable. OJO: `Vehicle.docStatus`
+ * (agregado) NO sirve para esto — nace VALID por default y solo refleja VENCIMIENTO, así que un vehículo SIN
+ * documentos da docStatus=VALID (un vehículo sin SOAT/ITV NO puede operar — seguro obligatorio + ITV legales).
+ */
+export function hasRequiredVehicleDocsOperable(
+  docs: readonly { type: FleetDocumentType; status: FleetDocumentStatus }[],
+): boolean {
+  return VEHICLE_REQUIRED_DOCUMENT_TYPES.every((required) =>
+    docs.some((d) => d.type === required && isDocumentValid(d.status)),
+  );
+}
+
+/**
+ * Deriva la OPERABILIDAD del vehículo de señales REALES: ACTIVE cuando sus documentos requeridos están
+ * presentes+aprobados+vigentes (`docsOperable`, ver `hasRequiredVehicleDocsOperable`) Y tiene su ficha técnica
+ * linkeada (`modelSpecId != null`); si no, PENDING_REVIEW.
+ *
+ * Por qué DERIVADO y no un flag `active` stored: el alta del conductor nacía `active=false` ("pendiente de
+ * verificación del operador") y NINGÚN workflow lo flipeaba a true → el gate de carpool bloqueaba a TODO
+ * conductor onboardeado. Pero derivar de `docStatus` era un OVER-UNBLOCK: ese agregado solo mide vencimiento y
+ * nace VALID, así que un vehículo SIN SOAT/ITV daba ACTIVE. La señal correcta es la presencia+aprobación REAL
+ * de los docs (la "verificación del operador" = doc-review que aprueba cada doc) + la ficha linkeada. Función
+ * pura: el caller trae los docs (mismo riel que `validCertificationsOf`) y computa `docsOperable`.
+ */
+export function deriveVehicleReviewStatus(input: {
+  docsOperable: boolean;
+  modelSpecId: string | null;
+}): VehicleReviewStatus {
+  return input.docsOperable && input.modelSpecId !== null
+    ? VehicleReviewStatus.ACTIVE
+    : VehicleReviewStatus.PENDING_REVIEW;
 }
 
 /** Campos que deciden cuál es el vehículo ACTIVO (operado) del conductor. */

@@ -19,6 +19,7 @@ import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
   deriveVehicleReviewStatus,
+  hasRequiredVehicleDocsOperable,
   isVehicleYearEligible,
   pickActiveVehicle,
 } from './vehicle-rules';
@@ -247,6 +248,45 @@ export class VehiclesService {
     });
   }
 
+  /**
+   * ¿Tiene ESTE vehículo sus documentos REQUERIDOS (SOAT+ITV) presentes+aprobados+vigentes? Señal REAL de
+   * operabilidad documental: los docs del vehículo son FleetDocument ownerType=VEHICLE, ownerId=vehicle.id (NO
+   * ownerType=DRIVER — esos son las certificaciones de OPERADOR del conductor, otra cosa). Un vehículo recién
+   * registrado (sin docs) da `false` → PENDING_REVIEW, que es CORRECTO (no puede operar sin seguro+ITV).
+   */
+  private async vehicleDocsOperable(vehicleId: string): Promise<boolean> {
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: vehicleId },
+    });
+    return hasRequiredVehicleDocsOperable(docs);
+  }
+
+  /**
+   * Operabilidad documental (SOAT+ITV) de una TANDA de vehículos, BATCHED en UNA query (anti-N+1): los docs
+   * requeridos viven en FleetDocument ownerType=VEHICLE, ownerId ∈ vehicleIds. Devuelve un mapa
+   * vehicleId→docsOperable (false para un vehículo sin docs requeridos operables). Espeja el batch de
+   * `enrichWithSpec`/`purgeForDriver` — NO se consulta por vehículo en un loop.
+   */
+  private async vehicleDocsOperableMap(
+    vehicleIds: readonly string[],
+  ): Promise<Map<string, boolean>> {
+    const operable = new Map<string, boolean>();
+    if (vehicleIds.length === 0) return operable;
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: [...vehicleIds] } },
+    });
+    const byOwner = new Map<string, typeof docs>();
+    for (const d of docs) {
+      const list = byOwner.get(d.ownerId);
+      if (list) list.push(d);
+      else byOwner.set(d.ownerId, [d]);
+    }
+    for (const vehicleId of vehicleIds) {
+      operable.set(vehicleId, hasRequiredVehicleDocsOperable(byOwner.get(vehicleId) ?? []));
+    }
+    return operable;
+  }
+
   async getById(id: string): Promise<VehicleListItem> {
     const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundError('Vehículo no encontrado', { id });
@@ -409,7 +449,10 @@ export class VehiclesService {
     // resolvemos sobre la flota completa del conductor para no mentir el `isActive` de la respuesta.
     const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
     const active = pickActiveVehicle(all);
-    return toDriverVehicleResponse(vehicle, active?.id === vehicle.id);
+    // Operabilidad documental REAL del vehículo recién dado de alta (sin SOAT/ITV operables → PENDING_REVIEW,
+    // que es CORRECTO: un alta nace sin docs aprobados, no puede operar hasta que el operador los apruebe).
+    const docsOperable = await this.vehicleDocsOperable(vehicle.id);
+    return toDriverVehicleResponse(vehicle, active?.id === vehicle.id, docsOperable);
   }
 
   /**
@@ -449,7 +492,8 @@ export class VehiclesService {
 
     const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
     const active = pickActiveVehicle(all);
-    return toDriverVehicleResponse(updated, active?.id === updated.id);
+    const docsOperable = await this.vehicleDocsOperable(updated.id);
+    return toDriverVehicleResponse(updated, active?.id === updated.id, docsOperable);
   }
 
   /**
@@ -592,7 +636,11 @@ export class VehiclesService {
       orderBy: { createdAt: 'desc' },
     });
     const active = pickActiveVehicle(vehicles);
-    return vehicles.map((v) => toDriverVehicleResponse(v, v.id === active?.id));
+    // ANTI-N+1: los docs requeridos de TODA la flota del conductor en UNA query, agrupados por vehicleId.
+    const operableById = await this.vehicleDocsOperableMap(vehicles.map((v) => v.id));
+    return vehicles.map((v) =>
+      toDriverVehicleResponse(v, v.id === active?.id, operableById.get(v.id) ?? false),
+    );
   }
 
   /**
@@ -611,8 +659,15 @@ export class VehiclesService {
       where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
     });
     const certifications = validCertificationsOf(docs);
+    // Operabilidad documental del vehículo OPERADO: sus docs requeridos (SOAT+ITV) son ownerType=VEHICLE,
+    // ownerId=active.id (NO los certs DRIVER de arriba). Si NO está operable, NO se crashea: el `status`
+    // deriva a PENDING_REVIEW correctamente y el driver-bff/dispatch sellan seats/segment solo cuando opera.
+    const vehicleDocs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: active.id },
+    });
+    const docsOperable = hasRequiredVehicleDocsOperable(vehicleDocs);
     const base: DriverVehicleResponse = {
-      ...toDriverVehicleResponse(active, true),
+      ...toDriverVehicleResponse(active, true, docsOperable),
       certifications,
     };
     // B5-3 · enriquece SOLO el vehículo activo con seats/segment del modelSpec elegido, para que el
@@ -646,12 +701,21 @@ export class VehiclesService {
       where: { id: vehicleId },
       data: { selectedAt: new Date() },
     });
-    return toDriverVehicleResponse(updated, true);
+    const docsOperable = await this.vehicleDocsOperable(updated.id);
+    return toDriverVehicleResponse(updated, true, docsOperable);
   }
 }
 
-/** Proyecta un Vehicle al shape de respuesta self-service con el estado de revisión derivado. */
-function toDriverVehicleResponse(vehicle: Vehicle, isActive: boolean): DriverVehicleResponse {
+/**
+ * Proyecta un Vehicle al shape de respuesta self-service con el estado de revisión DERIVADO de señales reales.
+ * `docsOperable` (¿tiene SOAT+ITV presentes+aprobados+vigentes?) lo precomputa el caller desde los docs del
+ * vehículo (ownerType=VEHICLE) — junto con `modelSpecId != null` decide ACTIVE vs PENDING_REVIEW.
+ */
+function toDriverVehicleResponse(
+  vehicle: Vehicle,
+  isActive: boolean,
+  docsOperable: boolean,
+): DriverVehicleResponse {
   return {
     id: vehicle.id,
     plate: vehicle.plate,
@@ -660,7 +724,7 @@ function toDriverVehicleResponse(vehicle: Vehicle, isActive: boolean): DriverVeh
     year: vehicle.year,
     vehicleType: vehicle.vehicleType,
     docStatus: vehicle.docStatus,
-    status: deriveVehicleReviewStatus(vehicle),
+    status: deriveVehicleReviewStatus({ docsOperable, modelSpecId: vehicle.modelSpecId }),
     isActive,
   };
 }

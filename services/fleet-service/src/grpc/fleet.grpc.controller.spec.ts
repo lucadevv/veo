@@ -41,6 +41,7 @@ function vehicle(
     docStatus: string;
     selectedAt: Date | null;
     createdAt: Date;
+    modelSpecId: string | null;
   }> = {},
 ): Record<string, unknown> {
   return {
@@ -55,7 +56,17 @@ function vehicle(
     active: true,
     selectedAt: overrides.selectedAt ?? null,
     createdAt: overrides.createdAt ?? new Date('2026-01-01T00:00:00.000Z'),
+    modelSpecId: overrides.modelSpecId ?? null,
   };
+}
+
+/** Documento de vehículo (ownerType=VEHICLE) para alimentar el cómputo de docsOperable (SOAT+ITV). */
+function vehicleDoc(
+  ownerId: string,
+  type: string,
+  status: string,
+): Record<string, unknown> {
+  return { ownerType: 'VEHICLE', ownerId, type, status };
 }
 
 /** Inspection mínima (passed + nextDueAt) — la última del vehículo operado. */
@@ -66,13 +77,19 @@ function inspection(passed: boolean, nextDueAt: string): Record<string, unknown>
 function makeController(opts: {
   vehicles?: unknown[];
   latestInspection?: unknown;
+  vehicleDocs?: unknown[];
 }): FleetGrpcController {
   const prisma = {
     read: {
-      vehicle: { findMany: vi.fn(() => Promise.resolve(opts.vehicles ?? [])) },
+      vehicle: {
+        findMany: vi.fn(() => Promise.resolve(opts.vehicles ?? [])),
+        findUnique: vi.fn(() => Promise.resolve((opts.vehicles ?? [])[0] ?? null)),
+      },
       inspection: {
         findFirst: vi.fn(() => Promise.resolve(opts.latestInspection ?? null)),
       },
+      // Docs requeridos del vehículo (ownerType=VEHICLE) para el cómputo de docsOperable (SOAT+ITV).
+      fleetDocument: { findMany: vi.fn(() => Promise.resolve(opts.vehicleDocs ?? [])) },
     },
   } as unknown as PrismaService;
   const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
@@ -206,5 +223,109 @@ describe('FleetGrpcController.getDriverActiveVehicle (FUENTE ÚNICA del vehícul
     await expect(
       ctrl.getDriverActiveVehicle({ id: 'u1' }, new Metadata()),
     ).rejects.toBeDefined();
+  });
+});
+
+/**
+ * Operabilidad money-safety: el reply (`active`/`status`) deriva de los docs REQUERIDOS del vehículo
+ * (SOAT+ITV ownerType=VEHICLE, presentes+aprobados+vigentes) Y la ficha linkeada (modelSpecId). Un vehículo
+ * SIN esos docs NUNCA debe derivar a ACTIVE — ese es el punto de la corrección.
+ */
+describe('FleetGrpcController · operabilidad derivada de los docs del vehículo (SOAT+ITV)', () => {
+  it('GetDriverActiveVehicle: SOAT+ITV VALID + ficha → active=true, status=ACTIVE', async () => {
+    const ctrl = makeController({
+      vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
+      vehicleDocs: [
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'VALID'),
+      ],
+    });
+    const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
+    expect(out.found).toBe(true);
+    expect(out.active).toBe(true);
+    expect(out.status).toBe('ACTIVE');
+  });
+
+  it('GetDriverActiveVehicle: SIN docs requeridos → active=false, status=PENDING_REVIEW (aunque tenga ficha)', async () => {
+    const ctrl = makeController({
+      vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
+      vehicleDocs: [],
+    });
+    const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
+    expect(out.found).toBe(true);
+    expect(out.active).toBe(false);
+    expect(out.status).toBe('PENDING_REVIEW');
+  });
+
+  it('GetDriverActiveVehicle: SOAT VALID pero ITV EXPIRED → active=false (no opera con ITV vencida)', async () => {
+    const ctrl = makeController({
+      vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
+      vehicleDocs: [
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'EXPIRED'),
+      ],
+    });
+    const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
+    expect(out.active).toBe(false);
+    expect(out.status).toBe('PENDING_REVIEW');
+  });
+
+  it('GetDriverActiveVehicle: SOAT+ITV VALID pero SIN ficha (modelSpecId null) → active=false', async () => {
+    const ctrl = makeController({
+      vehicles: [vehicle({ id: 'veh-1', modelSpecId: null })],
+      vehicleDocs: [
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'VALID'),
+      ],
+    });
+    const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
+    expect(out.active).toBe(false);
+    expect(out.status).toBe('PENDING_REVIEW');
+  });
+
+  it('GetVehicle: SOAT+ITV VALID + ficha → active=true, status=ACTIVE', async () => {
+    const ctrl = makeController({
+      vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
+      vehicleDocs: [
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'VALID'),
+      ],
+    });
+    const out = await ctrl.getVehicle({ id: 'veh-1' }, signedMeta());
+    expect(out.found).toBe(true);
+    expect(out.active).toBe(true);
+    expect(out.status).toBe('ACTIVE');
+  });
+
+  it('GetDriverVehicles: batchea los docs y deriva la operabilidad por vehículo (anti-N+1)', async () => {
+    // veh-1 operable (SOAT+ITV VALID + ficha) ; veh-2 sin docs → PENDING_REVIEW. UNA sola query de docs.
+    const docsFindMany = vi.fn(() =>
+      Promise.resolve([
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'VALID'),
+      ]),
+    );
+    const vehicles = [
+      vehicle({ id: 'veh-1', plate: 'AAA-111', modelSpecId: 'spec-1' }),
+      vehicle({ id: 'veh-2', plate: 'BBB-222', modelSpecId: 'spec-2' }),
+    ];
+    const prisma = {
+      read: {
+        vehicle: { findMany: vi.fn(() => Promise.resolve(vehicles)) },
+        fleetDocument: { findMany: docsFindMany },
+      },
+    } as unknown as PrismaService;
+    const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
+    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+
+    const out = await ctrl.getDriverVehicles({ id: 'u1' }, signedMeta());
+    // UNA sola query de docs para toda la flota (no una por vehículo).
+    expect(docsFindMany).toHaveBeenCalledTimes(1);
+    const v1 = out.vehicles.find((v) => v.id === 'veh-1');
+    const v2 = out.vehicles.find((v) => v.id === 'veh-2');
+    expect(v1?.active).toBe(true);
+    expect(v1?.status).toBe('ACTIVE');
+    expect(v2?.active).toBe(false);
+    expect(v2?.status).toBe('PENDING_REVIEW');
   });
 });

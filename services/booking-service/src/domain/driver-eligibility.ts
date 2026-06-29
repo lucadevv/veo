@@ -26,11 +26,12 @@ export type BackgroundCheckCleared = typeof BACKGROUND_CHECK_CLEARED;
  * Valor "vehículo operable" del eje VehicleReply.status (estado de revisión derivado).
  *
  * FUENTE VERIFICADA: `services/fleet-service/src/vehicles/vehicle-rules.ts` const `VehicleReviewStatus`
- * (PENDING_REVIEW | ACTIVE), derivado de `active` por `deriveVehicleReviewStatus` (active===true ⇒ ACTIVE).
- * Es lo que fleet pone en `VehicleReply.status` (ver `toVehicleReply` en fleet.grpc.controller.ts). No
- * existe enum VehicleStatus tipado en @veo/shared-types (verificado), por eso se fija la constante local.
- * NOTA: en el wire `status==='ACTIVE'` ⟺ `active===true` (misma señal derivada); el gate exige AMBAS por
- * defensa en profundidad (ADR-014 §8).
+ * (PENDING_REVIEW | ACTIVE). `deriveVehicleReviewStatus` lo deriva de SEÑALES REALES: docs requeridos del
+ * vehículo (SOAT+ITV) presentes+aprobados+vigentes (`hasRequiredVehicleDocsOperable`) Y ficha linkeada
+ * (`modelSpecId != null`). Es lo que fleet pone en `VehicleReply.status` (ver `toVehicleReply` en
+ * fleet.grpc.controller.ts). No existe enum VehicleStatus tipado en @veo/shared-types (verificado), por eso se
+ * fija la constante local. NOTA: en el wire `status==='ACTIVE'` ⟺ `active===true` (fleet deriva AMBOS de la
+ * misma señal de operabilidad); el gate exige ambos por defensa en profundidad (ADR-014 §8).
  */
 export const VEHICLE_STATUS_OPERABLE = 'ACTIVE' as const;
 export type VehicleStatusOperable = typeof VEHICLE_STATUS_OPERABLE;

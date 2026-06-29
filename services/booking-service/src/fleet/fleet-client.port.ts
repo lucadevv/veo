@@ -17,7 +17,8 @@ export const FLEET_CLIENT = Symbol('FLEET_CLIENT');
 /** Vista de un vehículo del conductor según fleet-service (lectura síncrona por gRPC). */
 export interface FleetVehicle {
   id: string;
-  /** Estado de los documentos: PENDING_REVIEW | VALID | EXPIRING_SOON | EXPIRED | REJECTED. */
+  /** Estado documental AGREGADO del vehículo (eje de VENCIMIENTO, enum VehicleDocStatus): VALID | EXPIRING_SOON
+   *  | EXPIRED. (PENDING_REVIEW/REJECTED son del enum per-documento FleetDocumentStatus, no del agregado.) */
   docStatus: string;
   /** El conductor lo tiene activo (operable). */
   active: boolean;

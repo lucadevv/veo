@@ -9,7 +9,12 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
-import { deriveVehicleReviewStatus, pickActiveVehicle } from '../vehicles/vehicle-rules';
+import {
+  deriveVehicleReviewStatus,
+  hasRequiredVehicleDocsOperable,
+  pickActiveVehicle,
+  VehicleReviewStatus,
+} from '../vehicles/vehicle-rules';
 import {
   inspectionInvalidReason,
   isInspectionCurrent,
@@ -99,8 +104,17 @@ const EMPTY_VEHICLE: VehicleReply = {
   status: '',
 };
 
-/** Mapea un Vehicle de Prisma al reply gRPC (found=true). */
-function toVehicleReply(v: Vehicle): VehicleReply {
+/**
+ * Mapea un Vehicle de Prisma al reply gRPC (found=true). `docsOperable` lo PRECOMPUTA el handler desde los
+ * documentos REQUERIDOS del vehículo (SOAT+ITV presentes+aprobados+vigentes, ownerType=VEHICLE) — no se deriva
+ * acá porque cargarlos es I/O y los handlers de lista los batchean (anti-N+1).
+ */
+function toVehicleReply(v: Vehicle, docsOperable: boolean): VehicleReply {
+  // Operabilidad DERIVADA de señales reales (docs requeridos SOAT+ITV operables + ficha linkeada), no del flag
+  // `active` stored que nunca se flipeaba. `active` y `status` del reply reflejan la MISMA señal derivada — el
+  // gate de carpool (que chequea ambos por defensa en profundidad) queda coherente y deja de bloquear por un
+  // flag muerto, SIN sobre-desbloquear (un vehículo sin SOAT/ITV operables jamás deriva a ACTIVE).
+  const reviewStatus = deriveVehicleReviewStatus({ docsOperable, modelSpecId: v.modelSpecId });
   return {
     id: v.id,
     plate: v.plate,
@@ -110,9 +124,9 @@ function toVehicleReply(v: Vehicle): VehicleReply {
     color: v.color,
     vehicleType: v.vehicleType,
     docStatus: v.docStatus,
-    active: v.active,
+    active: reviewStatus === VehicleReviewStatus.ACTIVE,
     found: true,
-    status: deriveVehicleReviewStatus(v),
+    status: reviewStatus,
   };
 }
 
@@ -140,12 +154,39 @@ export class FleetGrpcController {
     }
   }
 
+  /**
+   * Operabilidad documental (SOAT+ITV) de un set de vehículos, BATCHED en UNA query (anti-N+1): los docs
+   * REQUERIDOS del vehículo son FleetDocument ownerType=VEHICLE, ownerId=vehicle.id (NO ownerType=DRIVER —
+   * esos son las certificaciones de operador del conductor, otra cosa). Devuelve un mapa vehicleId→docsOperable
+   * (false para un vehículo sin docs requeridos operables). Espeja el batch de `purgeForDriver`/`enrichWithSpec`.
+   */
+  private async vehicleDocsOperableMap(
+    vehicleIds: readonly string[],
+  ): Promise<Map<string, boolean>> {
+    const operable = new Map<string, boolean>();
+    if (vehicleIds.length === 0) return operable;
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: [...vehicleIds] } },
+    });
+    const byOwner = new Map<string, typeof docs>();
+    for (const d of docs) {
+      const list = byOwner.get(d.ownerId);
+      if (list) list.push(d);
+      else byOwner.set(d.ownerId, [d]);
+    }
+    for (const vehicleId of vehicleIds) {
+      operable.set(vehicleId, hasRequiredVehicleDocsOperable(byOwner.get(vehicleId) ?? []));
+    }
+    return operable;
+  }
+
   @GrpcMethod('FleetService', 'GetVehicle')
   async getVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
     const v = await this.prisma.read.vehicle.findUnique({ where: { id } });
     if (!v) return EMPTY_VEHICLE;
-    return toVehicleReply(v);
+    const operableById = await this.vehicleDocsOperableMap([v.id]);
+    return toVehicleReply(v, operableById.get(v.id) ?? false);
   }
 
   /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
@@ -159,7 +200,12 @@ export class FleetGrpcController {
       where: { driverId: id },
       orderBy: { createdAt: 'desc' },
     });
-    return { driverId: id, vehicles: vehicles.map(toVehicleReply) };
+    // ANTI-N+1: los docs de TODOS los vehículos en UNA query, agrupados por vehicleId (no una por vehículo).
+    const operableById = await this.vehicleDocsOperableMap(vehicles.map((v) => v.id));
+    return {
+      driverId: id,
+      vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
+    };
   }
 
   /**
@@ -177,7 +223,9 @@ export class FleetGrpcController {
     this.requireIdentity(metadata);
     const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
     const active = pickActiveVehicle(vehicles);
-    return active ? toVehicleReply(active) : EMPTY_VEHICLE;
+    if (!active) return EMPTY_VEHICLE;
+    const operableById = await this.vehicleDocsOperableMap([active.id]);
+    return toVehicleReply(active, operableById.get(active.id) ?? false);
   }
 
   @GrpcMethod('FleetService', 'GetDriverDocuments')
