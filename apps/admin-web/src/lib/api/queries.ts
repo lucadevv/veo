@@ -72,6 +72,7 @@ export const qk = {
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
   vehicles: ['vehicles'] as const,
+  vehicle: (id: string) => ['vehicle', id] as const,
   inspections: ['inspections'] as const,
   expiring: ['fleet-expiring'] as const,
   documents: (status: string) => ['fleet-documents', status] as const,
@@ -470,6 +471,16 @@ export function useVehicles() {
         query: cleanQuery({ cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** Detalle de UN vehículo, ENRIQUECIDO con la ficha del modelSpec (misma forma que la fila de la lista). */
+export function useVehicle(id: string) {
+  return useQuery({
+    queryKey: qk.vehicle(id),
+    enabled: id.length > 0,
+    queryFn: ({ signal }) =>
+      apiClient().get(`/fleet/vehicles/${id}`, { schema: vehicleView, signal }),
   });
 }
 

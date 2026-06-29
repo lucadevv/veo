@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { ColumnDef } from '@tanstack/react-table';
 import { AlertTriangle } from 'lucide-react';
 import {
@@ -18,6 +19,7 @@ import type {
   VehicleView,
 } from '@/lib/api/schemas';
 import { date, dateTime } from '@/lib/formatters';
+import { segmentLabel, energyLabel } from '@/lib/fleet-labels';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -77,16 +79,6 @@ const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
 // Labels de la ficha técnica — ESPEJO EXACTO del formulario de aprobación de modelos
 // (components/fleet/model-review-actions.tsx) para que el admin vea la MISMA terminología que eligió al
 // aprobar. Son labels de presentación: el valor de dominio (el enum) viaja crudo y se mapea acá para mostrar.
-const SEGMENT_LABELS: Record<string, string> = {
-  ECONOMY: 'Económico',
-  MID: 'Intermedio',
-  PREMIUM: 'Premium',
-};
-const ENERGY_LABELS: Record<string, string> = {
-  GASOLINE_90: 'Gasolina 90',
-  DIESEL: 'Diésel',
-  ELECTRIC: 'Eléctrico',
-};
 
 const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
   {
@@ -133,8 +125,8 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
         );
       }
       const top = [
-        segment ? (SEGMENT_LABELS[segment] ?? segment) : null,
-        energySource ? (ENERGY_LABELS[energySource] ?? energySource) : null,
+        segment ? segmentLabel(segment) : null,
+        energySource ? energyLabel(energySource) : null,
       ]
         .filter(Boolean)
         .join(' · ');
@@ -303,6 +295,7 @@ const modelColumns: ColumnDef<VehicleModelReviewView, unknown>[] = [
 ];
 
 export default function FleetPage() {
+  const router = useRouter();
   const user = useSession();
   const canManage = can(user, 'fleet:manage');
   // El estado de "por revisar" en el dominio de flota es PENDING_REVIEW (no 'PENDING', que es de
@@ -377,6 +370,7 @@ export default function FleetPage() {
                   loading={vehicles.isLoading}
                   emptyTitle="Sin vehículos"
                   emptyDescription="No hay vehículos registrados en la flota todavía."
+                  onRowClick={(v) => router.push(`/fleet/${v.id}`)}
                 />
                 <LoadMore
                   hasNextPage={!!vehicles.hasNextPage}
