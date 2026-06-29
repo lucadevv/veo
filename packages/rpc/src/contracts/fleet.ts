@@ -27,6 +27,15 @@ export interface DriverVehiclesReply {
   vehicles: VehicleReply[];
 }
 
+/**
+ * fleet.GetVehiclesByIds / mensaje VehiclesReply. Lote 3b: lectura BATCH de vehículos por id (anti-N+1) para
+ * el filtro de operabilidad de la BÚSQUEDA de carpooling. Trae un VehicleReply por cada id ENCONTRADO
+ * (found=true); los ids inexistentes se omiten (el caller trata "ausente del map" como no-operable).
+ */
+export interface VehiclesReply {
+  vehicles: VehicleReply[];
+}
+
 /** Imagen de un documento (sub-lote 3A · múltiples imágenes). `side` = FRONT|BACK|SINGLE (string del enum). */
 export interface DocumentImageReply {
   s3Key: string;

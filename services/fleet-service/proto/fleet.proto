@@ -6,6 +6,10 @@ package veo.fleet.v1;
 // mTLS en producción (FOUNDATION §10). Kafka cubre lo asíncrono; gRPC lo síncrono de lectura.
 service FleetService {
   rpc GetVehicle (GetByIdRequest) returns (VehicleReply);
+  // Lee VARIOS vehículos por id en UNA llamada (anti-N+1). Lo usa la BÚSQUEDA de carpooling (booking) para
+  // filtrar las ofertas cuyo vehículo dejó de ser operable (docs SOAT/ITV vencidos) sin N llamadas GetVehicle.
+  // El reply trae un VehicleReply por cada id ENCONTRADO (found=true); los ids inexistentes se omiten.
+  rpc GetVehiclesByIds (GetByIdsRequest) returns (VehiclesReply);
   rpc GetDriverVehicles (GetByIdRequest) returns (DriverVehiclesReply);
   // Vehículo OPERADO del conductor (selector AUTORITATIVO único: pickActiveVehicle — selectedAt más
   // reciente con docs vigentes). `id` = User.id (Vehicle.driver_id). found=false si no tiene ninguno
@@ -20,6 +24,14 @@ service FleetService {
 
 message GetByIdRequest {
   string id = 1;
+}
+
+message GetByIdsRequest {
+  repeated string ids = 1;
+}
+
+message VehiclesReply {
+  repeated VehicleReply vehicles = 1;
 }
 
 message VehicleReply {

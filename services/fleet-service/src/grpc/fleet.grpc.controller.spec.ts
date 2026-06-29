@@ -79,18 +79,21 @@ function makeController(opts: {
   latestInspection?: unknown;
   vehicleDocs?: unknown[];
 }): FleetGrpcController {
-  const prisma = {
-    read: {
-      vehicle: {
-        findMany: vi.fn(() => Promise.resolve(opts.vehicles ?? [])),
-        findUnique: vi.fn(() => Promise.resolve((opts.vehicles ?? [])[0] ?? null)),
-      },
-      inspection: {
-        findFirst: vi.fn(() => Promise.resolve(opts.latestInspection ?? null)),
-      },
-      // Docs requeridos del vehículo (ownerType=VEHICLE) para el cómputo de docsOperable (SOAT+ITV).
-      fleetDocument: { findMany: vi.fn(() => Promise.resolve(opts.vehicleDocs ?? [])) },
+  const makeClient = () => ({
+    vehicle: {
+      findMany: vi.fn(() => Promise.resolve(opts.vehicles ?? [])),
+      findUnique: vi.fn(() => Promise.resolve((opts.vehicles ?? [])[0] ?? null)),
     },
+    inspection: {
+      findFirst: vi.fn(() => Promise.resolve(opts.latestInspection ?? null)),
+    },
+    // Docs requeridos del vehículo (ownerType=VEHICLE) para el cómputo de docsOperable (SOAT+ITV).
+    fleetDocument: { findMany: vi.fn(() => Promise.resolve(opts.vehicleDocs ?? [])) },
+  });
+  // `write` = PRIMARY (lo usa el gate de dinero GetVehicle), `read` = RÉPLICA (display/batch). Mismos stubs.
+  const prisma = {
+    read: makeClient(),
+    write: makeClient(),
   } as unknown as PrismaService;
   const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
   return new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
@@ -327,5 +330,56 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
     expect(v1?.status).toBe('ACTIVE');
     expect(v2?.active).toBe(false);
     expect(v2?.status).toBe('PENDING_REVIEW');
+  });
+
+  it('GetVehiclesByIds (Lote 3b): batch por ids, deriva operabilidad por vehículo, UNA query de docs (anti-N+1)', async () => {
+    // veh-1 operable (SOAT+ITV VALID + ficha) ; veh-2 sin docs → PENDING_REVIEW. UNA sola query de docs batched.
+    const docsFindMany = vi.fn(() =>
+      Promise.resolve([
+        vehicleDoc('veh-1', 'SOAT', 'VALID'),
+        vehicleDoc('veh-1', 'ITV', 'VALID'),
+      ]),
+    );
+    const vehiclesFindMany = vi.fn(() =>
+      Promise.resolve([
+        vehicle({ id: 'veh-1', plate: 'AAA-111', modelSpecId: 'spec-1' }),
+        vehicle({ id: 'veh-2', plate: 'BBB-222', modelSpecId: 'spec-2' }),
+      ]),
+    );
+    const prisma = {
+      read: {
+        vehicle: { findMany: vehiclesFindMany },
+        fleetDocument: { findMany: docsFindMany },
+      },
+    } as unknown as PrismaService;
+    const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
+    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+
+    const out = await ctrl.getVehiclesByIds({ ids: ['veh-1', 'veh-2', 'veh-1'] }, signedMeta());
+    // UNA query de vehículos + UNA de docs (anti-N+1), pese a los 3 ids (deduplica).
+    expect(vehiclesFindMany).toHaveBeenCalledTimes(1);
+    expect(docsFindMany).toHaveBeenCalledTimes(1);
+    const v1 = out.vehicles.find((v) => v.id === 'veh-1');
+    const v2 = out.vehicles.find((v) => v.id === 'veh-2');
+    expect(v1?.active).toBe(true);
+    expect(v1?.status).toBe('ACTIVE');
+    expect(v2?.active).toBe(false);
+    expect(v2?.status).toBe('PENDING_REVIEW');
+  });
+
+  it('GetVehiclesByIds (Lote 3b): ids vacío → reply vacío sin tocar la DB', async () => {
+    const vehiclesFindMany = vi.fn(() => Promise.resolve([]));
+    const prisma = {
+      read: {
+        vehicle: { findMany: vehiclesFindMany },
+        fleetDocument: { findMany: vi.fn(() => Promise.resolve([])) },
+      },
+    } as unknown as PrismaService;
+    const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
+    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+
+    const out = await ctrl.getVehiclesByIds({ ids: [] }, signedMeta());
+    expect(out.vehicles).toEqual([]);
+    expect(vehiclesFindMany).not.toHaveBeenCalled();
   });
 });

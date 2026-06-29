@@ -157,11 +157,11 @@ export class BookingsService {
    * que el vehículo de la oferta SIGUE operable — su operabilidad es DERIVADA (docs SOAT/ITV + ficha linkeada,
    * ver fleet `deriveVehicleReviewStatus`) y FLIPEA después de publicar; el gate de publish (`assertVehicleUsable`)
    * es one-shot, así que la RESERVA (el momento del compromiso del asiento) debe re-evaluarlo. Predicado ÚNICO
-   * `isVehicleOperable` (MISMO criterio que publish/detalle — la búsqueda aún no, Lote 3b — fuente única, imposible que diverjan).
+   * `isVehicleOperable` (MISMO criterio que publish/detalle/búsqueda — fuente única, imposible que diverjan).
    *
    * FAIL-CLOSED (contraste deliberado con el gate de DEUDA, que es fail-OPEN): la operabilidad es un eje
    * legal/seguridad (seguro SOAT + ITV obligatorios) y NO es recuperable como la deuda (que el charge re-valida).
-   * Por eso, si fleet no responde, NO se reserva → ExternalServiceError (503 retryable: no pudimos verificar,
+   * Por eso, si fleet no responde, NO se reserva → ExternalServiceError (502 reintentable: no pudimos verificar,
    * reintentá), espejando el fail-closed del gate del conductor. Vehículo encontrado pero NO operable → la oferta
    * dejó de ser reservable → ConflictError (409, mismo trato que una oferta en estado no-reservable).
    */
@@ -173,7 +173,7 @@ export class BookingsService {
    * conductor se SUSPENDIÓ / perdió KYC / antecedentes entre la visibilidad y la reserva.
    *
    * FAIL-CLOSED + semántica PASSENGER-FACING (simétrica con `assertVehicleOperable`): conductor no elegible → la
-   * oferta dejó de ser reservable → ConflictError (409). identity caída → ExternalServiceError (503 retryable):
+   * oferta dejó de ser reservable → ConflictError (409). identity caída → ExternalServiceError (502 reintentable):
    * no comprometemos un asiento contra un conductor cuya elegibilidad no pudimos verificar. (Distinto de
    * `assertDriverActive`, que es el gate DRIVER-FACING de approve/reject y lanza ForbiddenError sobre la suspensión.)
    */
@@ -442,7 +442,7 @@ export class BookingsService {
     //    dejaba cobrar a un conductor con KYC/antecedentes revocados (la ALTA del re-gate).
     //  · VEHÍCULO: operabilidad (`isVehicleOperable`): docs SOAT/ITV pueden VENCER entre reservar y aprobar.
     // Ambos ANTES de los DOS caminos de charge (re-ejecución APROBADO + happy-path) → cubren la re-ejecución.
-    // fail-closed (identity/fleet caída → 403/503): no se cobra contra un match que no pudimos verificar.
+    // fail-closed (identity/fleet caída → 403/502): no se cobra contra un match que no pudimos verificar.
     await this.assertDriverEligibleToCharge(driverId);
     await this.assertVehicleOperable(trip.vehicleId);
 

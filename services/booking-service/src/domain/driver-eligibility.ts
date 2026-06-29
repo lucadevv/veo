@@ -88,8 +88,8 @@ export function isDriverEligible(driver: DriverEligibilityView): boolean {
 /**
  * Sub-vista de OPERABILIDAD del vehículo: los ejes de fleet que deciden si el vehículo de una oferta puede
  * seguir operando. Es EXACTAMENTE el conjunto que el gate de publish (`assertVehicleUsable`) evalúa, extraído
- * acá como FUENTE ÚNICA y REUSADO en PUBLISH, DETALLE y RESERVA (la BÚSQUEDA aún NO lo aplica — Lote 3b, ver
- * nota en `isVehicleOperable`): la operabilidad del vehículo es DERIVADA (docs SOAT+ITV reales + ficha linkeada,
+ * acá como FUENTE ÚNICA y REUSADO en PUBLISH, DETALLE, RESERVA y BÚSQUEDA (esta última best-effort, ver nota en
+ * `isVehicleOperable`): la operabilidad del vehículo es DERIVADA (docs SOAT+ITV reales + ficha linkeada,
  * ver fleet `deriveVehicleReviewStatus`) y por eso FLIPEA — un vehículo cuyos docs VENCEN o son revocados
  * DESPUÉS de publicar deja de ser operable. El gate de publish es one-shot, así que las superficies que
  * ofrecen/comprometen la reserva DEBEN re-evaluar la operabilidad sobre el dato FRESCO de fleet.
@@ -108,8 +108,8 @@ export interface VehicleOperabilityView {
 }
 
 /**
- * Predicado ÚNICO de operabilidad del vehículo (UNA SOLA FUENTE DE VERDAD para publish/detalle/reserva; la
- * BÚSQUEDA aún no lo aplica — ver nota abajo). Evalúa los ejes de "este vehículo puede operar la oferta":
+ * Predicado ÚNICO de operabilidad del vehículo (UNA SOLA FUENTE DE VERDAD para publish/detalle/reserva/búsqueda).
+ * Evalúa los ejes de "este vehículo puede operar la oferta":
  *   found===true ∧ active===true ∧ status===ACTIVE ∧ docStatus≠EXPIRED
  *
  * Es el MISMO criterio que `assertVehicleUsable` (publish) — ese gate LO LLAMA en vez de tener su propia lista
@@ -123,11 +123,11 @@ export interface VehicleOperabilityView {
  * con `docStatus !== EXPIRED`) y de la propia derivación de fleet (`status=ACTIVE` admite EXPIRING_SOON vía
  * `hasRequiredVehicleDocsOperable`). Ahora los tres ejes son coherentes: status≠EXPIRED ⟺ active ⟺ docStatus≠EXPIRED.
  *
- * COBERTURA HONESTA (Lote 3a vs 3b): hoy se aplica en publish (`assertVehicleUsable`), detalle (`getDetail`,
- * fail-closed) y reserva (`assertVehicleOperable`). La BÚSQUEDA (`enrichWithDrivers`) todavía NO filtra por
- * operabilidad del vehículo — requiere un batch `GetVehiclesByIds` en el proto de fleet (anti-N+1), que es el
- * Lote 3b. Mientras tanto una oferta con vehículo no-operable puede aparecer como card en la búsqueda, pero
- * NO es reservable: abrir su detalle da 404 y reservarla da 409 (el hueco de bookability ya está cerrado).
+ * COBERTURA (Lote 3a + 3b): se aplica en publish (`assertVehicleUsable`), detalle (`getDetail`, fail-closed),
+ * reserva (`assertVehicleOperable`, fail-closed) y BÚSQUEDA (`enrichWithDrivers`, BEST-EFFORT vía el batch
+ * `GetVehiclesByIds` anti-N+1). La búsqueda es best-effort a propósito (el vehículo NO se muestra en la card y
+ * el gate AUTORITATIVO es detalle/reserva, ambos fail-closed): si fleet no responde, la búsqueda no filtra por
+ * vehículo en vez de vaciar la página por un outage. Detalle/reserva sí son fail-closed (seguridad > UX).
  *
  * CERO strings mágicos: compara contra la constante tipada local VEHICLE_STATUS_OPERABLE (no hay enum
  * VehicleStatus en @veo/shared-types) y el enum TIPADO FleetDocumentStatus.EXPIRED.

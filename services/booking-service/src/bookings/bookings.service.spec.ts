@@ -87,7 +87,9 @@ function makeFleet(
 ): FleetClient {
   const getVehicle = vi.fn(typeof vehicle === 'function' ? vehicle : async () => vehicle);
   const getDriverVehicles = vi.fn(async () => []);
-  return { getVehicle, getDriverVehicles };
+  // getVehiclesOperability solo lo usa la BÚSQUEDA (published-trips), no las rutas de bookings: stub vacío.
+  const getVehiclesOperability = vi.fn(async () => new Map<string, FleetVehicleView>());
+  return { getVehicle, getDriverVehicles, getVehiclesOperability };
 }
 
 /**

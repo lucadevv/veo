@@ -13,6 +13,7 @@ import {
   createGrpcClient,
   type DriverVehiclesReply,
   type VehicleReply,
+  type VehiclesReply,
   type GrpcServiceClient,
 } from '@veo/rpc';
 import type { FleetClient, FleetVehicle, FleetVehicleView } from './fleet-client.port';
@@ -58,17 +59,41 @@ export class GrpcFleetClient implements FleetClient {
     // responde, la llamada LANZA y el caller no ofrece/reserva el vehículo (espeja el gate del conductor).
     const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
     const reply = await this.client.call<VehicleReply>('GetVehicle', { id: vehicleId }, meta);
-    return {
-      id: reply.id,
-      make: reply.make,
-      model: reply.model,
-      color: reply.color,
-      plate: reply.plate,
-      vehicleType: reply.vehicleType,
-      found: reply.found,
-      active: reply.active,
-      status: reply.status,
-      docStatus: reply.docStatus,
-    };
+    return toVehicleView(reply);
   }
+
+  async getVehiclesOperability(
+    vehicleIds: readonly string[],
+  ): Promise<Map<string, FleetVehicleView>> {
+    const byId = new Map<string, FleetVehicleView>();
+    if (vehicleIds.length === 0) return byId;
+    // BÚSQUEDA (Lote 3b): UNA llamada batch para TODOS los vehículos de la página (anti-N+1). El reply trae
+    // solo los ENCONTRADOS; un id ausente del map = no operable para el caller. LANZA si fleet no responde.
+    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
+    const reply = await this.client.call<VehiclesReply>(
+      'GetVehiclesByIds',
+      { ids: [...vehicleIds] },
+      meta,
+    );
+    for (const v of reply.vehicles ?? []) {
+      if (v.found) byId.set(v.id, toVehicleView(v));
+    }
+    return byId;
+  }
+}
+
+/** Mapea un VehicleReply del wire a la vista de booking (display + operabilidad). */
+function toVehicleView(reply: VehicleReply): FleetVehicleView {
+  return {
+    id: reply.id,
+    make: reply.make,
+    model: reply.model,
+    color: reply.color,
+    plate: reply.plate,
+    vehicleType: reply.vehicleType,
+    found: reply.found,
+    active: reply.active,
+    status: reply.status,
+    docStatus: reply.docStatus,
+  };
 }

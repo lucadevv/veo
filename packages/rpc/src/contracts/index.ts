@@ -20,6 +20,7 @@ export type { TrustedContact, TrustedContactsReply } from './share.js';
 export type {
   VehicleReply,
   DriverVehiclesReply,
+  VehiclesReply,
   DocumentImageReply,
   FleetDocumentReply,
   DriverDocumentsReply,

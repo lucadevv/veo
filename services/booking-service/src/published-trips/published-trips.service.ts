@@ -21,11 +21,12 @@
  *  - El tope de cost-sharing por distancia (precioBase ≤ tope) es F1b.
  *  - El fan-out de Refund a las reservas activas al cancelar es F3.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
+  ExternalServiceError,
   isUuid,
   uuidv7,
   toH3,
@@ -74,6 +75,7 @@ import {
   FLEET_CLIENT,
   type FleetClient,
   type FleetVehicle,
+  type FleetVehicleView,
   type PublicVehicle,
 } from '../fleet/fleet-client.port';
 import type { CreatePublishedTripDto } from './dto/create-published-trip.dto';
@@ -151,6 +153,8 @@ export interface PublishedTripDetail {
 
 @Injectable()
 export class PublishedTripsService {
+  private readonly logger = new Logger(PublishedTripsService.name);
+
   constructor(
     private readonly repo: PublishedTripsRepository,
     @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
@@ -329,7 +333,7 @@ export class PublishedTripsService {
    *
    * OPERABILIDAD DEL VEHÍCULO (Lote 3): el vehículo TAMBIÉN es un gate AUTORITATIVO fail-closed (ya no
    * best-effort de display). Su operabilidad es DERIVADA (docs SOAT/ITV + ficha) y FLIPEA tras publicar, así
-   * que se re-evalúa con el predicado ÚNICO `isVehicleOperable` (mismo criterio que publish/reserva; la búsqueda aún no, Lote 3b):
+   * que se re-evalúa con el predicado ÚNICO `isVehicleOperable` (mismo criterio que publish/reserva/búsqueda):
    * vehículo no operable, no encontrado, o fleet caída → 404 (no ofrecemos un viaje cuyo vehículo no podemos
    * validar). El display público (modelo/placa/color) se deriva de la MISMA llamada (no hay segundo round-trip).
    */
@@ -346,7 +350,8 @@ export class PublishedTripsService {
     }
 
     // FIX 3 — gate de elegibilidad del conductor (AUTORITATIVO, fail-closed): leemos identity y exigimos que el
-    // conductor siga elegible. found=false / identity caída / no elegible → no ofrecemos el viaje (404).
+    // conductor siga elegible. No elegible / found=false → 404 (verificado-malo). identity CAÍDA → 502 reintentable
+    // (transporte transitorio, no "viaje inexistente"). En ambos casos NO se ofrece como reservable.
     let eligibleDriver: PublicDriverDisplay;
     try {
       const d = await this.identity.getDriver(trip.driverId);
@@ -358,18 +363,23 @@ export class PublishedTripsService {
       }
       eligibleDriver = { id: trip.driverId, name: d.name, averageRating: d.averageRating };
     } catch (err) {
-      // Un NotFoundError (no elegible) se propaga tal cual; cualquier otro fallo (identity caída) → fail-closed
-      // a 404: no ofrecemos como reservable un viaje cuya elegibilidad de conductor no pudimos verificar.
+      // VERIFICADO-MALO (no elegible) → 404 definitivo, se propaga tal cual. Pero un fallo de TRANSPORTE (identity
+      // caída) NO es "viaje inexistente" → ExternalServiceError (502 reintentable), la MISMA semántica que la reserva
+      // (assertOfferDriverEligible): el outage es transitorio, el cliente debe reintentar, no abandonar. Antes esto
+      // colapsaba a 404 y le decía al pasajero "el viaje no existe" durante un blip de identity (incoherencia).
       if (err instanceof NotFoundError) throw err;
-      throw new NotFoundError('Viaje publicado no encontrado', { id });
+      throw new ExternalServiceError(
+        'No se pudo verificar la elegibilidad del conductor de la oferta (identity no disponible)',
+        { id },
+      );
     }
 
     // Vehículo: GATE de OPERABILIDAD (AUTORITATIVO, fail-closed · Lote 3). Una oferta cuyo vehículo dejó de ser
     // operable DESPUÉS de publicar (docs SOAT/ITV vencidos/revocados, ficha desvinculada) NO debe ofrecerse como
     // reservable → 404 (degradación honesta, NO la mostramos como disponible). Espeja el gate del conductor:
-    // el predicado ÚNICO `isVehicleOperable` decide (mismo criterio que publish/reserva; la búsqueda aún no, Lote 3b). Una sola
-    // llamada gRPC trae display + operabilidad; si fleet no responde → fail-closed 404 (no ofrecemos un viaje
-    // cuyo vehículo no pudimos verificar). El display público (modelo/placa/color) se deriva de la MISMA vista.
+    // el predicado ÚNICO `isVehicleOperable` decide (mismo criterio que publish/reserva/búsqueda). Una sola
+    // llamada gRPC trae display + operabilidad; no operable → 404 (verificado-malo); si fleet no responde → 502
+    // reintentable (transporte transitorio). El display público (modelo/placa/color) se deriva de la MISMA vista.
     let vehicle: PublicVehicle;
     try {
       const v = await this.fleet.getVehicle(trip.vehicleId);
@@ -386,9 +396,14 @@ export class PublishedTripsService {
         found: true,
       };
     } catch (err) {
-      // NotFoundError (no operable) se propaga; cualquier otro fallo (fleet caída) → fail-closed a 404.
+      // VERIFICADO-MALO (no operable) → 404 definitivo. Fallo de TRANSPORTE (fleet caída) → ExternalServiceError
+      // (502 reintentable), MISMA semántica que la reserva (assertVehicleOperable): outage transitorio, reintentá,
+      // no es "viaje inexistente". Coherencia passenger-facing entre detalle y reserva ante el mismo outage de fleet.
       if (err instanceof NotFoundError) throw err;
-      throw new NotFoundError('Viaje publicado no encontrado', { id });
+      throw new ExternalServiceError(
+        'No se pudo verificar el vehículo de la oferta (fleet no disponible)',
+        { id },
+      );
     }
 
     return { trip: toPublishedTripPublicView(trip), driver: eligibleDriver, vehicle };
@@ -483,12 +498,21 @@ export class PublishedTripsService {
    * `isDriverEligible` que el detalle y el publish (fuente única): conductor en el batch y NO elegible → su oferta
    * se DESCARTA de la página.
    *
-   * FIX 3·F2 — FAIL-CLOSED (seguridad > disponibilidad, CONSISTENTE con el detalle): si el batch FALLA (identity
-   * caída) NO podemos verificar la elegibilidad de NINGÚN conductor de la página → NO incluimos viajes no-verificables.
-   * Antes esto era fail-OPEN (los viajes viajaban con driver null), lo que dejaba pasar un conductor potencialmente
-   * suspendido. El TRADE-OFF es deliberado: ante identity caída la búsqueda devuelve VACÍO (mejor no mostrar que
-   * mostrar un viaje no-verificable) — el MISMO criterio que el detalle, que es fail-closed (404). Un conductor
-   * presente en el reply pero NO elegible, o AUSENTE del reply (no resoluble), también se descarta.
+   * BEST-EFFORT FAIL-OPEN (búsqueda = DISPLAY, no compromiso de dinero): la BÚSQUEDA solo MUESTRA cards; no mueve
+   * plata ni autoriza nada. Por eso la distinción NO es fail-open vs fail-closed plano sino VERIFICADO-MALO vs
+   * NO-VERIFICABLE: (a) si el batch RESPONDE y el conductor/vehículo está presente-pero-no-elegible o AUSENTE del
+   * reply (no resoluble) → es VERIFICADO-MALO y se DESCARTA (no contaminamos la página con ofertas que sabemos malas);
+   * (b) si el batch CAE (identity/fleet inaccesible) → es NO-VERIFICABLE para TODA la página → degradamos honesto en
+   * vez de vaciar el catálogo (driver null / sin filtro de vehículo). El dinero queda gateado AGUAS ABAJO fail-closed:
+   * el detalle (404) y la reserva (409/502) re-validan conductor+vehículo con el MISMO predicado, así que una card
+   * "vieja" se caza al tocar — el costo de mostrarla es un papercut de UX, no un hueco de plata. La alternativa
+   * (fail-closed) apagaría el browse anónimo de alto volumen ante cualquier blip transitorio de fleet/identity (sin
+   * retry/circuit-breaker), un blast-radius de marketplace-entero desproporcionado para un camino que solo muestra.
+   *
+   * FILTRO DE OPERABILIDAD DEL VEHÍCULO (Lote 3b): además del conductor, se descarta la oferta cuyo VEHÍCULO
+   * VERIFICADO dejó de ser operable (docs SOAT/ITV vencidos, ficha desvinculada) — UNA sola llamada batch
+   * `getVehiclesOperability` (GetVehiclesByIds) con los vehicleId ÚNICOS (anti-N+1), predicado ÚNICO
+   * `isVehicleOperable` (mismo criterio que detalle/reserva). Best-effort igual que el conductor (ver arriba).
    *
    * Mapea cada viaje superviviente a su VISTA PÚBLICA (FIX 1 · sin dedupKey/driverId/vehicleId/H3).
    */
@@ -496,27 +520,56 @@ export class PublishedTripsService {
     if (trips.length === 0) return [];
 
     const uniqueDriverIds = [...new Set(trips.map((t) => t.driverId))];
-    let byId: Map<string, PublicDriver>;
+    // `null` = NO-VERIFICABLE (identity caída): no podemos chequear elegibilidad → no filtramos por conductor y la
+    // card viaja con driver degradado (driver null). Un Map vacío sería VERIFICADO-sin-resultados (descartaría todo).
+    let byId: Map<string, PublicDriver> | null = null;
     try {
       // UNA llamada para TODOS los conductores de la página (anti-N+1).
       const drivers = await this.identityBatch.getDriversByIds(uniqueDriverIds);
       byId = new Map(drivers.map((d) => [d.id, d]));
-    } catch {
-      // FAIL-CLOSED (FIX 3·F2): identity caída → no podemos verificar elegibilidad → NO mostramos viajes
-      // no-verificables. La página devuelve vacío (mismo criterio de seguridad que el detalle). Mejor una
-      // búsqueda vacía que una oferta de un conductor que pudo haber sido suspendido y no pudimos chequear.
-      return [];
+    } catch (err) {
+      // BEST-EFFORT (display): identity caída → degradamos honesto (cards sin enriquecer), NO vaciamos el catálogo.
+      // El dinero lo gatea la reserva (re-valida elegibilidad fail-closed); mostrar una card no autoriza nada.
+      this.logger.warn({
+        msg: 'Enriquecimiento del conductor DEGRADADO en la búsqueda (identity inaccesible): cards sin driver; el gate autoritativo es la reserva (409/502)',
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // `null` = NO-VERIFICABLE (fleet caída): no filtramos por vehículo. El gate real es detalle (404) / reserva (409).
+    let vehiclesById: Map<string, FleetVehicleView> | null = null;
+    try {
+      const uniqueVehicleIds = [...new Set(trips.map((t) => t.vehicleId))];
+      vehiclesById = await this.fleet.getVehiclesOperability(uniqueVehicleIds);
+    } catch (err) {
+      this.logger.warn({
+        msg: 'Filtro de operabilidad del vehículo DEGRADADO en la búsqueda (fleet inaccesible): no se filtra por vehículo; el gate autoritativo es el detalle (404) / reserva (409)',
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return trips.flatMap((trip) => {
-      const driver = byId.get(trip.driverId) ?? null;
-      // Conductor ausente del reply (no resoluble) o NO elegible (predicado ÚNICO, todos los ejes) → se DESCARTA.
-      if (driver === null || !isDriverEligible(driver)) {
-        return [];
+      // CONDUCTOR: si pudimos verificar (byId !== null), descartamos el ausente (no resoluble) o no-elegible
+      // (VERIFICADO-MALO). Si identity cayó (byId null), no filtramos y la card viaja con driver degradado (null).
+      let driverView: PublicDriverDisplay | null = null;
+      if (byId !== null) {
+        const driver = byId.get(trip.driverId) ?? null;
+        if (driver === null || !isDriverEligible(driver)) {
+          return [];
+        }
+        driverView = { id: driver.id, name: driver.name, averageRating: driver.averageRating };
+      }
+      // VEHÍCULO: si pudimos verificar (vehiclesById !== null), descartamos el ausente o no-operable (VERIFICADO-MALO).
+      // Si fleet cayó (null), no filtramos. Mismo predicado ÚNICO `isVehicleOperable` que detalle/reserva.
+      if (vehiclesById !== null) {
+        const vehicle = vehiclesById.get(trip.vehicleId);
+        if (!vehicle || !isVehicleOperable(vehicle)) {
+          return [];
+        }
       }
       const view: SearchResultItem = {
         trip: toPublishedTripPublicView(trip),
-        driver: { id: driver.id, name: driver.name, averageRating: driver.averageRating },
+        driver: driverView,
       };
       return [view];
     });
@@ -791,7 +844,7 @@ export class PublishedTripsService {
       });
     }
 
-    // Vigencia: la DECISIÓN la toma el predicado ÚNICO `isVehicleOperable` (el MISMO que usan detalle/reserva (la búsqueda aún no, Lote 3b)/
+    // Vigencia: la DECISIÓN la toma el predicado ÚNICO `isVehicleOperable` (el MISMO que usan detalle/reserva/búsqueda/
     // reserva — fuente única, imposible que diverjan). `FleetVehicle` satisface `VehicleOperabilityView` (found
     // implícito: lo acabamos de encontrar en la lista del conductor). Si pasa, no hay nada que reportar.
     if (isVehicleOperable({ found: true, ...vehicle })) return;

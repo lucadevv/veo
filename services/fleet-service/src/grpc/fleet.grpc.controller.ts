@@ -27,6 +27,10 @@ interface GetByIdRequest {
   id: string;
 }
 
+interface GetByIdsRequest {
+  ids: string[];
+}
+
 interface VehicleReply {
   id: string;
   plate: string;
@@ -45,6 +49,10 @@ interface VehicleReply {
 
 interface DriverVehiclesReply {
   driverId: string;
+  vehicles: VehicleReply[];
+}
+
+interface VehiclesReply {
   vehicles: VehicleReply[];
 }
 
@@ -159,13 +167,19 @@ export class FleetGrpcController {
    * REQUERIDOS del vehículo son FleetDocument ownerType=VEHICLE, ownerId=vehicle.id (NO ownerType=DRIVER —
    * esos son las certificaciones de operador del conductor, otra cosa). Devuelve un mapa vehicleId→docsOperable
    * (false para un vehículo sin docs requeridos operables). Espeja el batch de `purgeForDriver`/`enrichWithSpec`.
+   *
+   * El `db` lo ELIGE el caller según freshness: el gate de DINERO (GetVehicle, que alimenta reserve/approve del
+   * carpooling) pasa el PRIMARY (`prisma.write`) — un doc REVOCADO por el admin debe verse al instante, no tras
+   * el lag de réplica (read-write §: nunca leer de réplica en un flujo crítico). Los caminos de display/refinamiento
+   * (batch de búsqueda, rehidratación) pasan la RÉPLICA (`prisma.read`).
    */
   private async vehicleDocsOperableMap(
+    db: PrismaService['read'],
     vehicleIds: readonly string[],
   ): Promise<Map<string, boolean>> {
     const operable = new Map<string, boolean>();
     if (vehicleIds.length === 0) return operable;
-    const docs = await this.prisma.read.fleetDocument.findMany({
+    const docs = await db.fleetDocument.findMany({
       where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: [...vehicleIds] } },
     });
     const byOwner = new Map<string, typeof docs>();
@@ -180,13 +194,45 @@ export class FleetGrpcController {
     return operable;
   }
 
+  /**
+   * Vehículo por id — GATE DE DINERO. Lo consume el carpooling (booking) en `getDetail` (fail-closed),
+   * `reserve` (INSTANT_BOOKING cobra al instante) y `approve` (REVISION cobra al aprobar): los tres son
+   * AUTORITATIVOS sobre operabilidad, así que leen del PRIMARY (`prisma.write`), NO de la réplica — un doc
+   * REVOCADO por el admin (write a primary) debe verse en el mismo instante, sin la ventana de lag de la
+   * réplica eventualmente consistente (read-write §: nunca leer de réplica en un flujo crítico).
+   */
   @GrpcMethod('FleetService', 'GetVehicle')
   async getVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
-    const v = await this.prisma.read.vehicle.findUnique({ where: { id } });
+    const v = await this.prisma.write.vehicle.findUnique({ where: { id } });
     if (!v) return EMPTY_VEHICLE;
-    const operableById = await this.vehicleDocsOperableMap([v.id]);
+    const operableById = await this.vehicleDocsOperableMap(this.prisma.write, [v.id]);
     return toVehicleReply(v, operableById.get(v.id) ?? false);
+  }
+
+  /**
+   * Lote 3b — lectura BATCH de vehículos por id (anti-N+1). La consume la BÚSQUEDA de carpooling (booking) para
+   * filtrar las ofertas cuyo vehículo dejó de ser operable. Trae un VehicleReply por cada id ENCONTRADO; los ids
+   * inexistentes se OMITEN (el caller trata "ausente del map" como no-operable). DOS queries fijas (vehicles +
+   * docs batched), nunca N. El `status`/`active` derivados son la MISMA señal que GetVehicle (toVehicleReply).
+   */
+  @GrpcMethod('FleetService', 'GetVehiclesByIds')
+  async getVehiclesByIds(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<VehiclesReply> {
+    this.requireIdentity(metadata);
+    const uniqueIds = [...new Set(ids ?? [])];
+    if (uniqueIds.length === 0) return { vehicles: [] };
+    const vehicles = await this.prisma.read.vehicle.findMany({
+      where: { id: { in: uniqueIds } },
+    });
+    // ANTI-N+1: los docs de TODOS los vehículos en UNA query (la 2da), agrupados por vehicleId.
+    // Réplica: la búsqueda es un REFINAMIENTO best-effort de display, no el gate autoritativo (ese es GetVehicle).
+    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, vehicles.map((v) => v.id));
+    return {
+      vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
+    };
   }
 
   /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
@@ -201,7 +247,7 @@ export class FleetGrpcController {
       orderBy: { createdAt: 'desc' },
     });
     // ANTI-N+1: los docs de TODOS los vehículos en UNA query, agrupados por vehicleId (no una por vehículo).
-    const operableById = await this.vehicleDocsOperableMap(vehicles.map((v) => v.id));
+    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, vehicles.map((v) => v.id));
     return {
       driverId: id,
       vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
@@ -224,7 +270,7 @@ export class FleetGrpcController {
     const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
     const active = pickActiveVehicle(vehicles);
     if (!active) return EMPTY_VEHICLE;
-    const operableById = await this.vehicleDocsOperableMap([active.id]);
+    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, [active.id]);
     return toVehicleReply(active, operableById.get(active.id) ?? false);
   }
 

@@ -83,5 +83,15 @@ export interface FleetClient {
    * (no se ofrece/reserva un vehículo cuya operabilidad no se pudo verificar; espeja el gate del conductor).
    */
   getVehicle(vehicleId: string): Promise<FleetVehicleView>;
+
+  /**
+   * Lee VARIOS vehículos por id en UNA llamada (anti-N+1 · Lote 3b). La usa la BÚSQUEDA para filtrar las ofertas
+   * cuyo vehículo dejó de ser operable. Devuelve un Map vehicleId→vista SOLO de los ENCONTRADOS; un id ausente
+   * del map = no encontrado en fleet = el caller lo trata como NO operable (VERIFICADO-MALO, se descarta). LANZA
+   * ante fallo de transporte — el caller (búsqueda) decide la política: es BEST-EFFORT (fleet caída → NO-VERIFICABLE
+   * → no filtra por vehículo, la card viaja degradada), IGUAL que el enriquecimiento del conductor. El gate de dinero
+   * real es detalle (404) y reserva (409/502), ambos fail-closed: la búsqueda solo MUESTRA, no autoriza.
+   */
+  getVehiclesOperability(vehicleIds: readonly string[]): Promise<Map<string, FleetVehicleView>>;
 }
 

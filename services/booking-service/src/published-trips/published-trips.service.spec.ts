@@ -137,12 +137,24 @@ function makeIdentity(driver: IdentityDriver | (() => Promise<IdentityDriver>)):
 function makeFleet(
   vehicles: FleetVehicle[] | (() => Promise<FleetVehicle[]>),
   vehicle: FleetVehicleView | (() => Promise<FleetVehicleView>) = makeVehicleView(),
+  // Lote 3b: operabilidad batch para el filtro de la búsqueda. Por default TODOS los vehículos pedidos son
+  // OPERABLES (los tests de búsqueda existentes esperan que sus ofertas se devuelvan). Override: un Map fijo
+  // (qué vehículos son operables) o una función que LANZA (fleet caída → best-effort, no filtra por vehículo).
+  operability?:
+    | Map<string, FleetVehicleView>
+    | ((ids: readonly string[]) => Promise<Map<string, FleetVehicleView>>),
 ): FleetClient {
   const getDriverVehicles = vi.fn(
     typeof vehicles === 'function' ? vehicles : async () => vehicles,
   );
   const getVehicle = vi.fn(typeof vehicle === 'function' ? vehicle : async () => vehicle);
-  return { getDriverVehicles, getVehicle };
+  const getVehiclesOperability = vi.fn(
+    typeof operability === 'function'
+      ? operability
+      : async (ids: readonly string[]) =>
+          operability ?? new Map(ids.map((id) => [id, makeVehicleView({ id })])),
+  );
+  return { getDriverVehicles, getVehicle, getVehiclesOperability };
 }
 
 /**
@@ -1084,7 +1096,7 @@ describe('PublishedTripsService · BÚSQUEDA · enriquecimiento ANTI-N+1', () =>
     expect(page.items.map((i) => i.driver?.id)).toEqual([dA, dB, dA]);
   });
 
-  it('FIX 3·F2 FAIL-CLOSED: si identity (batch) cae, NO devuelve viajes no-verificables (página vacía, no driver null)', async () => {
+  it('SEARCH best-effort: si identity (batch) cae, la oferta VIAJA con driver degradado (null), no vacía la página', async () => {
     const { repo, searchByRoute } = makeRepo();
     (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow({ id: 't1' })]);
     const { client } = makeIdentityBatch(async () => {
@@ -1094,9 +1106,11 @@ describe('PublishedTripsService · BÚSQUEDA · enriquecimiento ANTI-N+1', () =>
 
     const page = await service.search(makeSearchDto());
 
-    // Seguridad > disponibilidad (consistente con el detalle, que es fail-closed 404): si no podemos verificar
-    // la elegibilidad del conductor, NO mostramos el viaje. Antes esto devolvía 1 item con driver null (fail-open).
-    expect(page.items).toHaveLength(0);
+    // BEST-EFFORT (display, no compromiso de dinero): identity caída = NO-VERIFICABLE → no filtramos por conductor
+    // y la card viaja con driver null (degradación honesta). El gate de dinero es la reserva (re-valida elegibilidad
+    // fail-closed). Mejor un browse vivo con cards degradadas que apagar el catálogo entero por un blip de identity.
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.driver).toBeNull();
   });
 
   it('no llama al batch si no hubo resultados (lista vacía)', async () => {
@@ -1141,7 +1155,7 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
     await expect(service.getDetail('missing')).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('FIX 3 fail-closed: identity caída (no podemos validar elegibilidad del conductor) → 404 (no se ofrece)', async () => {
+  it('FIX 3 fail-closed: identity CAÍDA (transporte) → 502 reintentable (ExternalServiceError), no 404 "no existe"', async () => {
     const { repo, findById } = makeRepo();
     findById.mockResolvedValueOnce({
       id: 'trip-2',
@@ -1154,11 +1168,13 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
       throw new Error('identity caída');
     });
     const service = makeService({ repo, identity });
-    // Elegibilidad es un GATE de seguridad: si no podemos verificarla, NO ofrecemos el viaje como reservable.
-    await expect(service.getDetail('trip-2')).rejects.toBeInstanceOf(NotFoundError);
+    // Elegibilidad es un GATE de seguridad: si no podemos verificarla, NO ofrecemos el viaje. PERO un fallo de
+    // TRANSPORTE (identity caída) es transitorio → 502 reintentable, MISMA semántica que la reserva, no 404
+    // "viaje inexistente" (que le diría al pasajero que abandone). Verificado-malo (no elegible) sí es 404 (otro test).
+    await expect(service.getDetail('trip-2')).rejects.toBeInstanceOf(ExternalServiceError);
   });
 
-  it('Lote 3 fail-closed: fleet caída (no podemos validar operabilidad del vehículo) → 404 (no se ofrece)', async () => {
+  it('Lote 3 fail-closed: fleet CAÍDA (transporte) → 502 reintentable (ExternalServiceError), no 404 "no existe"', async () => {
     const { repo, findById } = makeRepo();
     findById.mockResolvedValueOnce({
       id: 'trip-3',
@@ -1172,8 +1188,9 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
     });
     const service = makeService({ repo, fleet }); // identity elegible por default
     // La operabilidad del vehículo es un GATE de seguridad/legal (SOAT+ITV): si no podemos verificarla, NO
-    // ofrecemos el viaje como reservable (espeja el gate del conductor — ya no degrada a vehicle null).
-    await expect(service.getDetail('trip-3')).rejects.toBeInstanceOf(NotFoundError);
+    // ofrecemos el viaje. PERO fleet CAÍDA es transporte transitorio → 502 reintentable (misma semántica que la
+    // reserva, coherencia passenger-facing), no 404 definitivo. Verificado-malo (no operable) sí es 404 (otro test).
+    await expect(service.getDetail('trip-3')).rejects.toBeInstanceOf(ExternalServiceError);
   });
 
   it.each([
@@ -1282,6 +1299,37 @@ describe('PublishedTripsService · FIX 1 · view PÚBLICO sin dedupKey/internos 
     expect(driver).not.toHaveProperty('kycStatus');
     expect(driver).not.toHaveProperty('suspendedAt');
     expect(driver).not.toHaveProperty('currentStatus');
+  });
+
+  it('SEARCH Lote 3b: oferta con vehículo NO operable (docs vencidos) → se DESCARTA de la página', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeRawTrip()]);
+    // fleet responde, pero el vehículo de la oferta tiene docs VENCIDOS → no operable → la card no se muestra.
+    const fleet = makeFleet(
+      [],
+      makeVehicleView(),
+      new Map([[VEHICLE_ID, makeVehicleView({ docStatus: FleetDocumentStatus.EXPIRED })]]),
+    );
+    const service = makeService({ repo, fleet }); // conductor elegible por default
+
+    const page = await service.search(makeSearchDto());
+    // El conductor es elegible, pero el vehículo no opera → la oferta NO aparece en la búsqueda.
+    expect(page.items).toHaveLength(0);
+  });
+
+  it('SEARCH Lote 3b best-effort: fleet CAÍDA → la oferta igual se devuelve (no filtra por vehículo; gate real es detalle/reserva)', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeRawTrip()]);
+    // fleet no responde para el filtro batch = NO-VERIFICABLE → no filtramos por vehículo (degradación honesta). El
+    // conductor sí se verificó OK, así que la oferta viaja; el dinero lo gatea el detalle (404) / reserva (409/502),
+    // ambos fail-closed. La búsqueda solo MUESTRA: una card no-reservable es un papercut de UX, no un hueco de plata.
+    const fleet = makeFleet([], makeVehicleView(), async () => {
+      throw new Error('fleet caída');
+    });
+    const service = makeService({ repo, fleet });
+
+    const page = await service.search(makeSearchDto());
+    expect(page.items).toHaveLength(1);
   });
 
   it('DETALLE: el trip NO contiene dedupKey/driverId/vehicleId/originH3/destH3', async () => {
