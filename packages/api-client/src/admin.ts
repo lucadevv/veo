@@ -753,9 +753,10 @@ export const vehicleView = z.object({
   color: z.string().nullable(),
   status: z.string(),
   driverId: z.string().nullable(),
-  // Ficha técnica que decide el MATCH vehículo↔config (eligibilidad de oferta + pricing de energía). El
-  // tipo/categoría viven en el Vehicle; segment/energySource/efficiency/seats vienen del modelSpec elegido.
-  // Null = vehículo legacy sin modelSpec o categoría no leída (degradación honesta — el panel lo muestra "—").
+  // Ficha técnica del MATCH vehículo↔config. El dispatch gatea la eligibilidad de oferta con segment + seats
+  // (+ el `year` de arriba); energySource/efficiency se MUESTRAN pero NO deciden match ni pricing (el precio de
+  // energía sale de la clase de la oferta · ADR-017 dec.2). Tipo/categoría viven en el Vehicle; el resto del
+  // modelSpec elegido. Null = vehículo legacy sin modelSpec o categoría no leída (degradación honesta → "—").
   vehicleType: z.string().nullable(),
   mtcCategory: z.string().nullable(),
   segment: z.string().nullable(),

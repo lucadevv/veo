@@ -105,18 +105,30 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
     ),
   },
   {
-    // F1 · LA FICHA DEL MATCH: segmento/energía/asientos deciden a qué oferta (Confort/XL/Premium) es elegible
-    // el vehículo y su pricing de energía. Si falta (vehículo sin modelSpec) el dispatch lo deja pasar igual
-    // (fail-open) → lo marcamos "Sin ficha" para que el admin VEA el eslabón que no cierra.
+    // F1 · LA FICHA DEL MATCH. El dispatch decide la eligibilidad de oferta (Confort/XL/Premium) con
+    // segmento + asientos + el AÑO del vehículo — exactamente lo que driver-pool exige para NO caer en
+    // fail-open (`seats || segment || vehicleYear`). La energía NO entra al match ni al pricing del vehículo:
+    // el precio de energía sale de la CLASE de la oferta (ADR-017 dec.2 · referenceEnergySource/Efficiency),
+    // no del `energySource` real (ese delta es margen privado del conductor). Si falta CUALQUIERA de esos 3
+    // el dispatch deja pasar igual (fail-open) → marcamos "Ficha incompleta" con el detalle de qué falta, para
+    // que el admin VEA el eslabón que no cierra. `energySource` se MUESTRA como info, pero NO gatilla la alerta.
     id: 'spec',
     header: 'Ficha técnica',
     cell: ({ row }) => {
-      const { segment, energySource, seats, mtcCategory } = row.original;
-      if (!segment && !energySource) {
+      const { segment, energySource, seats, year, mtcCategory } = row.original;
+      const faltan = [
+        !segment ? 'segmento' : null,
+        !seats ? 'asientos' : null,
+        !year ? 'año' : null,
+      ].filter((x): x is string => x !== null);
+      if (faltan.length > 0) {
         return (
-          <span className="inline-flex items-center gap-1 text-xs text-warn">
+          <span
+            className="inline-flex items-center gap-1 text-xs text-warn"
+            title={`El dispatch hace fail-open: falta ${faltan.join(', ')}`}
+          >
             <AlertTriangle className="size-3.5" aria-hidden />
-            Sin ficha
+            Ficha incompleta
           </span>
         );
       }

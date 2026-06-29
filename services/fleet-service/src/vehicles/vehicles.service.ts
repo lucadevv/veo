@@ -81,10 +81,13 @@ interface ModelSnapshot {
 
 /**
  * Vehículo de la lista admin ENRIQUECIDO con la ficha técnica del modelSpec elegido
- * (segment/energySource/efficiency/seats). Esos campos deciden la eligibilidad de oferta (dispatch) y el
- * pricing de energía, pero viven en `VehicleModelSpec` (referencia BLANDA, sin FK), no en `Vehicle` — sin
- * proyectarlos el panel de Flota es CIEGO al eslabón vehículo↔config (F1). `mtcCategory`/`vehicleType` ya
- * viven en `Vehicle`. Vehículo legacy sin `modelSpecId` (o spec borrado) → nulls (degradación honesta).
+ * (segment/energySource/efficiency/seats). De esos, el DISPATCH solo usa `segment` y `seats` (+ el `year` del
+ * propio Vehicle) para la eligibilidad de oferta; `energySource`/`efficiency` NO deciden match NI pricing — el
+ * precio de energía sale de la CLASE de la oferta (referenceEnergySource/Efficiency · ADR-017 dec.2), no del
+ * vehículo real (ese delta es el margen PRIVADO del conductor). Se proyectan igual para que el panel MUESTRE la
+ * ficha completa y el operador VEA el eslabón vehículo↔config (F1). La ficha vive en `VehicleModelSpec`
+ * (referencia BLANDA, sin FK), no en `Vehicle`; `mtcCategory`/`vehicleType`/`year` sí viven en `Vehicle`.
+ * Vehículo legacy sin `modelSpecId` (o spec borrado) → nulls (degradación honesta).
  */
 export type VehicleListItem = Vehicle & {
   segment: string | null;
