@@ -524,7 +524,7 @@ describe('PublishedTripsService · validación de VEHÍCULO anti-IDOR (F1a)', ()
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 
-  it('vehículo propio pero docs NO VALID → 400, no publica', async () => {
+  it('vehículo propio pero docs VENCIDOS (EXPIRED) → 400, no publica', async () => {
     const { repo, createWithEventIdempotent } = makeRepo();
     const service = makeService({
       repo,
@@ -532,6 +532,17 @@ describe('PublishedTripsService · validación de VEHÍCULO anti-IDOR (F1a)', ()
     });
     await expect(service.publish(DRIVER_ID, makeDto())).rejects.toBeInstanceOf(ValidationError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
+  });
+
+  it('vehículo con docs EXPIRING_SOON (vigente hoy) → publica OK (unificado con on-demand · decisión del dueño)', async () => {
+    const { repo, createWithEventIdempotent } = makeRepo();
+    const service = makeService({
+      repo,
+      fleet: makeFleet([makeVehicle({ docStatus: FleetDocumentStatus.EXPIRING_SOON })]),
+    });
+    // EXPIRING_SOON ya NO frena el publish del carpooling: solo EXPIRED bloquea.
+    await service.publish(DRIVER_ID, makeDto());
+    expect(createWithEventIdempotent).toHaveBeenCalledOnce();
   });
 
   it('fleet caído (la llamada lanza) → FALLA-CERRADO con 403, no publica', async () => {

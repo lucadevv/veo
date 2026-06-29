@@ -805,8 +805,9 @@ export class PublishedTripsService {
         status: vehicle.status,
       });
     }
-    // Única causa restante (el predicado dio false y las anteriores pasaron): docs no vigentes.
-    throw new ValidationError('Los documentos del vehículo no están vigentes', {
+    // Única causa restante (el predicado dio false y las anteriores pasaron): docs VENCIDOS (EXPIRED).
+    // EXPIRING_SOON ya no frena (decisión del dueño: vigente hoy opera, unificado con on-demand).
+    throw new ValidationError('Los documentos del vehículo están vencidos', {
       vehicleId,
       docStatus: vehicle.docStatus,
     });

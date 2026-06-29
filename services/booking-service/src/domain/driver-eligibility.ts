@@ -103,19 +103,25 @@ export interface VehicleOperabilityView {
   active: boolean;
   /** Estado de revisión derivado (VehicleReply.status); distinto de ACTIVE → no operable. */
   status: string;
-  /** Estado documental AGREGADO (VehicleDocStatus de vencimiento); distinto de VALID → no operable. */
+  /** Estado documental AGREGADO (VehicleDocStatus de vencimiento); EXPIRED (vencido) → no operable. */
   docStatus: string;
 }
 
 /**
  * Predicado ÚNICO de operabilidad del vehículo (UNA SOLA FUENTE DE VERDAD para publish/detalle/reserva; la
  * BÚSQUEDA aún no lo aplica — ver nota abajo). Evalúa los ejes de "este vehículo puede operar la oferta":
- *   found===true ∧ active===true ∧ status===ACTIVE ∧ docStatus===VALID
+ *   found===true ∧ active===true ∧ status===ACTIVE ∧ docStatus≠EXPIRED
  *
  * Es el MISMO criterio que `assertVehicleUsable` (publish) — ese gate LO LLAMA en vez de tener su propia lista
  * de condiciones (que podría divergir). Hacerlo el predicado compartido cierra de RAÍZ la asimetría: un vehículo
  * cuyos docs vencieron DESPUÉS de publicar ya NO pasa el filtro de detalle/reserva (antes solo lo frenaba el
  * publish, one-shot → ofertas con vehículo no-operable seguían reservables).
+ *
+ * EXPIRING_SOON OPERA (decisión del dueño 2026-06-29 · UNIFICACIÓN con on-demand): un doc por vencer pero
+ * VIGENTE HOY (EXPIRING_SOON) SÍ puede operar — solo el VENCIDO (EXPIRED) bloquea. Antes el carpooling exigía
+ * docStatus===VALID estricto (rechazaba EXPIRING_SOON), divergiendo del on-demand (`pickActiveVehicle`, que opera
+ * con `docStatus !== EXPIRED`) y de la propia derivación de fleet (`status=ACTIVE` admite EXPIRING_SOON vía
+ * `hasRequiredVehicleDocsOperable`). Ahora los tres ejes son coherentes: status≠EXPIRED ⟺ active ⟺ docStatus≠EXPIRED.
  *
  * COBERTURA HONESTA (Lote 3a vs 3b): hoy se aplica en publish (`assertVehicleUsable`), detalle (`getDetail`,
  * fail-closed) y reserva (`assertVehicleOperable`). La BÚSQUEDA (`enrichWithDrivers`) todavía NO filtra por
@@ -124,13 +130,14 @@ export interface VehicleOperabilityView {
  * NO es reservable: abrir su detalle da 404 y reservarla da 409 (el hueco de bookability ya está cerrado).
  *
  * CERO strings mágicos: compara contra la constante tipada local VEHICLE_STATUS_OPERABLE (no hay enum
- * VehicleStatus en @veo/shared-types) y el enum TIPADO FleetDocumentStatus.VALID.
+ * VehicleStatus en @veo/shared-types) y el enum TIPADO FleetDocumentStatus.EXPIRED.
  */
 export function isVehicleOperable(vehicle: VehicleOperabilityView): boolean {
   if (!vehicle.found) return false;
   if (!vehicle.active) return false;
   if (vehicle.status !== VEHICLE_STATUS_OPERABLE) return false;
-  if (vehicle.docStatus !== FleetDocumentStatus.VALID) return false;
+  // EXPIRING_SOON (vigente HOY, por vencer) SÍ opera; solo EXPIRED (vencido) bloquea — unificado con on-demand.
+  if (vehicle.docStatus === FleetDocumentStatus.EXPIRED) return false;
   return true;
 }
 

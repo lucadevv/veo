@@ -497,6 +497,16 @@ describe('BookingsService · gate de operabilidad del vehículo al reservar (Lot
     // El gate consultó fleet con el vehicleId del PublishedTrip server-truth (nunca un valor del body).
     expect(fleet.getVehicle).toHaveBeenCalledWith('00000000-0000-0000-0000-0000000000v1');
   });
+
+  it('EXPIRING_SOON (vigente hoy, por vencer) → reserva OK (unificado con on-demand · decisión del dueño)', async () => {
+    const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
+    const fleet = makeFleet(makeVehicleView({ docStatus: FleetDocumentStatus.EXPIRING_SOON }));
+    const service = makeService(repo, undefined, undefined, undefined, fleet);
+
+    await service.reserve(PASSENGER_ID, makeDto());
+    // EXPIRING_SOON ya NO frena el carpooling: solo EXPIRED (vencido) bloquea.
+    expect(createWithEventIdempotent).toHaveBeenCalledOnce();
+  });
 });
 
 /**
