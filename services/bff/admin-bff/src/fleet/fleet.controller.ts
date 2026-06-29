@@ -58,8 +58,8 @@ export class FleetController {
   }
 
   @Get('vehicles/:id')
-  @ApiOperation({ summary: 'Detalle de un vehículo' })
-  getVehicle(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<unknown> {
+  @ApiOperation({ summary: 'Detalle de un vehículo (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)' })
+  getVehicle(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<VehicleView> {
     return this.fleet.getVehicle(user, id);
   }
 

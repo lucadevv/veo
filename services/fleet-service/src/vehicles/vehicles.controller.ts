@@ -44,8 +44,8 @@ export class VehiclesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obtener un vehículo por id' })
-  getById(@Param('id') id: string): Promise<Vehicle> {
+  @ApiOperation({ summary: 'Obtener un vehículo por id (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)' })
+  getById(@Param('id') id: string): Promise<VehicleListItem> {
     return this.vehicles.getById(id);
   }
 

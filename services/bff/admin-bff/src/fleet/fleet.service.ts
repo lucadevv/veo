@@ -91,8 +91,11 @@ export class FleetService {
     return v;
   }
 
-  getVehicle(identity: AuthenticatedUser, id: string): Promise<Vehicle> {
-    return this.rest.get<Vehicle>(`/vehicles/${id}`, { identity });
+  /** Detalle de UN vehículo. Proxy a fleet-service + proyección a vehicleView del contrato — la MISMA forma
+   * que devuelve la lista (antes devolvía el Vehicle crudo, así el detalle era ciego a la ficha del match). */
+  async getVehicle(identity: AuthenticatedUser, id: string): Promise<VehicleView> {
+    const v = await this.rest.get<Vehicle>(`/vehicles/${id}`, { identity });
+    return toVehicleView(v);
   }
 
   /** Lista paginada de la flota (admin). Proxy a fleet-service + proyección a vehicleView del contrato. */

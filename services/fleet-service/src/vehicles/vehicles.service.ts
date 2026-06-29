@@ -222,10 +222,38 @@ export class VehiclesService {
     });
   }
 
-  async getById(id: string): Promise<Vehicle> {
+  /**
+   * Enriquece una tanda de vehículos con la ficha técnica de su modelSpec (segment/energySource/efficiency/
+   * seats), BATCHED en UNA query (anti-N+1). Fuente ÚNICA que comparten `list()` y `getById()`: así el panel
+   * VE exactamente la misma ficha en la lista y en el detalle (sin esto el detalle devolvía MENOS que la lista).
+   */
+  private async enrichWithSpec(vehicles: Vehicle[]): Promise<VehicleListItem[]> {
+    const specIds = [
+      ...new Set(vehicles.map((v) => v.modelSpecId).filter((id): id is string => id !== null)),
+    ];
+    const specs = specIds.length
+      ? await this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
+      : [];
+    const specById = new Map(specs.map((s) => [s.id, s] as const));
+    return vehicles.map((v) => {
+      const spec = v.modelSpecId ? specById.get(v.modelSpecId) : undefined;
+      return {
+        ...v,
+        segment: spec?.segment ?? null,
+        energySource: spec?.energySource ?? null,
+        efficiency: spec?.efficiency ?? null,
+        seats: spec?.seats ?? null,
+      };
+    });
+  }
+
+  async getById(id: string): Promise<VehicleListItem> {
     const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new NotFoundError('Vehículo no encontrado', { id });
-    return vehicle;
+    // enrichWithSpec mapea 1:1; con un único input hay un único output. El fallback a ficha-nula nunca se
+    // alcanza en la práctica, pero es la misma degradación honesta de un vehículo legacy sin modelSpec.
+    const [enriched] = await this.enrichWithSpec([vehicle]);
+    return enriched ?? { ...vehicle, segment: null, energySource: null, efficiency: null, seats: null };
   }
 
   /**
@@ -248,26 +276,10 @@ export class VehiclesService {
       orderBy: { id: 'desc' },
       take: limit + 1,
     });
-    // Enriquecimiento BATCHED (anti-N+1): traemos los modelSpec de TODA la página en UNA query y los
-    // mapeamos a cada vehículo. La ficha técnica (segment/energySource/efficiency/seats) vive en el
-    // modelSpec, no en Vehicle; sin esto el panel de Flota no puede VERIFICAR el match vehículo↔config (F1).
-    const specIds = [
-      ...new Set(rows.map((r) => r.modelSpecId).filter((id): id is string => id !== null)),
-    ];
-    const specs = specIds.length
-      ? await this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
-      : [];
-    const specById = new Map(specs.map((s) => [s.id, s] as const));
-    const enriched: VehicleListItem[] = rows.map((v) => {
-      const spec = v.modelSpecId ? specById.get(v.modelSpecId) : undefined;
-      return {
-        ...v,
-        segment: spec?.segment ?? null,
-        energySource: spec?.energySource ?? null,
-        efficiency: spec?.efficiency ?? null,
-        seats: spec?.seats ?? null,
-      };
-    });
+    // Enriquecimiento BATCHED (anti-N+1) vía la fuente compartida con getById(): la ficha técnica
+    // (segment/energySource/efficiency/seats) vive en el modelSpec, no en Vehicle; sin esto el panel de
+    // Flota no puede VERIFICAR el match vehículo↔config (F1), y el detalle mostraría menos que la lista.
+    const enriched = await this.enrichWithSpec(rows);
     return toPage(enriched, limit);
   }
 
