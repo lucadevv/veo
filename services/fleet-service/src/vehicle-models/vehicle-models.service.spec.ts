@@ -14,6 +14,7 @@ import {
   type VehicleModelSpec,
 } from '../generated/prisma';
 import { VehicleModelsService } from './vehicle-models.service';
+import { normalizeModelTerm } from './vehicle-model-normalize';
 
 /** Config doble: solo expone el umbral del fuzzy-match (LOTE 3). */
 const fakeConfig = { getOrThrow: () => 0.45 } as never;
@@ -139,12 +140,35 @@ describe('VehicleModelsService.getById', () => {
   });
 });
 
+/** Vehículo mínimo para el re-link: solo los campos que `relinkPendingVehicles` lee. */
+type VehicleRow = {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  vehicleType: VehicleType;
+  modelSpecId: string | null;
+};
+function vrow(over: Partial<VehicleRow> = {}): VehicleRow {
+  return {
+    id: 'veh-1',
+    make: 'Toyota',
+    model: 'Yaris',
+    year: 2020,
+    vehicleType: VehicleType.CAR,
+    modelSpecId: null,
+    ...over,
+  };
+}
+
 /**
  * Mock con store en memoria para el flujo de solicitud/revisión (B5-2.c): findFirst (dedup
  * case-insensitive), create, updateMany (CAS por id+status) y findUnique (relectura post-CAS).
+ * `vehicles`: store de vehículos para el HEAL del re-link al aprobar (tx.vehicle.findMany/updateMany).
  */
-function makeReviewService(rows: VehicleModelSpec[]) {
+function makeReviewService(rows: VehicleModelSpec[], vehicles: VehicleRow[] = []) {
   const store = [...rows];
+  const vehicleStore = vehicles.map((v) => ({ ...v }));
   const captured: { create?: Record<string, unknown>; update?: Record<string, unknown> } = {};
 
   const findFirst = vi.fn().mockImplementation(({ where }: { where: Record<string, any> }) => {
@@ -209,9 +233,45 @@ function makeReviewService(rows: VehicleModelSpec[]) {
   // mismos dobles que el cliente fuera de la tx → un solo store en memoria, sin divergencia de estado).
   // `findUnique` dentro de la tx: el branch CAS-fail de transition() la usa para distinguir NotFound vs
   // Conflict (re-lee la fila tras un updateMany count 0).
+  // tx.$executeRaw del re-link (HEAL al aprobar): UN UPDATE bounded-por-DB que linkea + snapshotea make/model
+  // curados. El doble replica el predicado del UPDATE sobre el store: model_spec_id IS NULL (idempotente, no
+  // pisa los ya linkeados) + vehicleType + año en [from,to] + canon normalizado (normalizeModelTerm espeja la
+  // expr SQL). Los valores bindeados llegan en orden: [specId, specMake, specModel, vehicleType, yearFrom,
+  // yearTo, specMakeNorm, specModelNorm]. Devuelve el count de filas afectadas (como Prisma.$executeRaw).
+  const executeRaw = vi
+    .fn()
+    .mockImplementation((_sql: TemplateStringsArray, ...v: unknown[]) => {
+      const [specId, specMake, specModel, vehicleType, yearFrom, yearTo, makeNorm, modelNorm] = v as [
+        string,
+        string,
+        string,
+        VehicleType,
+        number,
+        number,
+        string,
+        string,
+      ];
+      let count = 0;
+      vehicleStore.forEach((veh, i) => {
+        if (
+          veh.modelSpecId === null &&
+          veh.vehicleType === vehicleType &&
+          veh.year >= yearFrom &&
+          veh.year <= yearTo &&
+          normalizeModelTerm(veh.make) === makeNorm &&
+          normalizeModelTerm(veh.model) === modelNorm
+        ) {
+          vehicleStore[i] = { ...veh, modelSpecId: specId, make: specMake, model: specModel };
+          count++;
+        }
+      });
+      return Promise.resolve(count);
+    });
+
   const writeClient = {
     vehicleModelSpec: { create, updateMany, findUnique, findUniqueOrThrow },
     outboxEvent: { create: outboxCreate },
+    $executeRaw: executeRaw,
   };
   const prisma = {
     read: { vehicleModelSpec: { findFirst, findUnique } },
@@ -221,7 +281,7 @@ function makeReviewService(rows: VehicleModelSpec[]) {
     },
   };
   const service = new VehicleModelsService(prisma as never, fakeConfig);
-  return { service, captured, create, updateMany };
+  return { service, captured, create, updateMany, vehicleStore };
 }
 
 const reqInput = {
@@ -430,6 +490,77 @@ describe('VehicleModelsService.approve/reject · B5-2.c state machine', () => {
   it('reject de algo ya resuelto → Conflict', async () => {
     const { service } = makeReviewService([row({ id: 'r1', status: VehicleModelStatus.REJECTED })]);
     await expect(service.reject('r1', 'admin-9')).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe('VehicleModelsService.approve · HEAL re-link del eslabón vehículo↔config', () => {
+  /** Spec PENDING del KTM (nacido del freetext OCR del vehículo), listo para aprobar. */
+  function pendingKtm() {
+    return row({
+      id: 'spec-ktm',
+      make: 'KTM',
+      model: 'RC 200',
+      yearFrom: 2021,
+      yearTo: 2021,
+      vehicleType: VehicleType.MOTO,
+      status: VehicleModelStatus.PENDING_REVIEW,
+      segment: null,
+      energySource: null,
+      efficiency: null,
+    });
+  }
+  const approveDto = {
+    segment: VehicleSegment.ECONOMY,
+    energySource: EnergySource.GASOLINE_90,
+    efficiency: 30,
+    seats: 2,
+  };
+
+  it('al APROBAR linkea el vehículo que esperaba (freetext OCR, modelSpecId=null) → hereda la ficha + snapshotea make/model curados', async () => {
+    // El vehículo se registró a texto libre en minúsculas/espaciado distinto: el canon normalizado debe igualar.
+    const { service, vehicleStore } = makeReviewService(
+      [pendingKtm()],
+      [vrow({ id: 'v1', make: 'ktm', model: 'rc 200', year: 2021, vehicleType: VehicleType.MOTO })],
+    );
+    await service.approve('spec-ktm', 'admin-9', approveDto);
+    const v1 = vehicleStore.find((v) => v.id === 'v1')!;
+    expect(v1.modelSpecId).toBe('spec-ktm');
+    // Snapshot server-authoritative: el casing crudo del OCR ('ktm'/'rc 200') se reemplaza por el canon curado.
+    expect(v1.make).toBe('KTM');
+    expect(v1.model).toBe('RC 200');
+  });
+
+  it('NO sobre-linkea: distinto modelo, tipo o año fuera de rango quedan intactos (modelSpecId=null)', async () => {
+    const { service, vehicleStore } = makeReviewService(
+      [pendingKtm()],
+      [
+        vrow({ id: 'otroModelo', make: 'KTM', model: 'Duke 200', year: 2021, vehicleType: VehicleType.MOTO }),
+        vrow({ id: 'otroTipo', make: 'KTM', model: 'RC 200', year: 2021, vehicleType: VehicleType.CAR }),
+        vrow({ id: 'otroAnio', make: 'KTM', model: 'RC 200', year: 2019, vehicleType: VehicleType.MOTO }),
+      ],
+    );
+    await service.approve('spec-ktm', 'admin-9', approveDto);
+    for (const id of ['otroModelo', 'otroTipo', 'otroAnio']) {
+      expect(vehicleStore.find((v) => v.id === id)!.modelSpecId).toBeNull();
+    }
+  });
+
+  it('RECHAZAR no linkea nada (el heal es solo de la aprobación)', async () => {
+    const { service, vehicleStore } = makeReviewService(
+      [pendingKtm()],
+      [vrow({ id: 'v1', make: 'KTM', model: 'RC 200', year: 2021, vehicleType: VehicleType.MOTO })],
+    );
+    await service.reject('spec-ktm', 'admin-9');
+    expect(vehicleStore.find((v) => v.id === 'v1')!.modelSpecId).toBeNull();
+  });
+
+  it('idempotente: un vehículo YA linkeado a otro modelo no se pisa', async () => {
+    const { service, vehicleStore } = makeReviewService(
+      [pendingKtm()],
+      [vrow({ id: 'yaLinkeado', make: 'KTM', model: 'RC 200', year: 2021, vehicleType: VehicleType.MOTO, modelSpecId: 'spec-viejo' })],
+    );
+    await service.approve('spec-ktm', 'admin-9', approveDto);
+    expect(vehicleStore.find((v) => v.id === 'yaLinkeado')!.modelSpecId).toBe('spec-viejo');
   });
 });
 

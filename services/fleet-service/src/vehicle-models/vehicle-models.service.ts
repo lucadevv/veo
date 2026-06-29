@@ -6,7 +6,7 @@
  * Esta fase entrega solo LECTURA del catálogo APROBADO: el alta de modelos nuevos (PENDING_REVIEW) y la
  * aprobación por el operador son B5-2.c. La elección por el conductor (Vehicle.modelSpecId) es B5-2.b.
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { uuidv7, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
@@ -48,6 +48,7 @@ interface FuzzyMatchRow {
 
 @Injectable()
 export class VehicleModelsService {
+  private readonly logger = new Logger(VehicleModelsService.name);
   private readonly matchThreshold: number;
 
   constructor(
@@ -342,6 +343,19 @@ export class VehicleModelsService {
 
       const row = await tx.vehicleModelSpec.findUniqueOrThrow({ where: { id } });
 
+      // HEAL del eslabón vehículo↔config: al APROBAR, re-linkeamos los vehículos que se registraron a texto
+      // libre (OCR) y quedaron esperando este modelo (modelSpecId=null). Sin esto, aprobar el modelo NO cerraba
+      // la cadena de match: el vehículo quedaba sin ficha y su ping iba sin seats/segment → fail-open en
+      // dispatch. ATÓMICO con la aprobación (misma tx; fleet es dueño de ambas tablas). Solo en APPROVED.
+      if (row.status === VehicleModelStatus.APPROVED) {
+        const relinked = await this.relinkPendingVehicles(tx, row);
+        if (relinked > 0) {
+          this.logger.log(
+            `Modelo aprobado ${row.id} (${row.make} ${row.model}): re-linkeados ${relinked} vehículo(s) que esperaban su ficha`,
+          );
+        }
+      }
+
       // El operador resolvió la solicitud (APPROVED/REJECTED): el conductor que la pidió debe enterarse
       // del veredicto. El `verdict` se deriva del status FINAL ya tipado (`VehicleModelStatus`, no string
       // suelto); otros estados no notifican (no son un veredicto). Si `requestedBy` falta (filas viejas
@@ -372,6 +386,49 @@ export class VehicleModelsService {
       return row;
     });
     return toReviewView(updated);
+  }
+
+  /**
+   * Re-linkea los vehículos que esperaban este modelo recién APROBADO. Un vehículo registrado a TEXTO LIBRE
+   * (OCR) que no logró fuzzy-match nace con `modelSpecId=null` y encola su modelo para revisión
+   * (`enqueueOcrModel`, que copia su PROPIO make/model/vehicleType/year). Cuando el operador aprueba ese
+   * modelo, este método cierra el eslabón: linkea esos vehículos al spec así heredan la ficha (seats/segment)
+   * que el ping necesita para ser elegible en dispatch — sin esto quedaban sin ficha PARA SIEMPRE. Además
+   * SNAPSHOTEA make/model curados del spec (server-authoritative, igual que el fuzzy-match del alta en
+   * `resolveModelSnapshot`): dos vehículos del mismo modelo se muestran idénticos, no con el casing crudo del OCR.
+   *
+   * Un solo UPDATE BOUNDED-POR-LA-DB (NO carga vehículos a RAM ni filtra en JS — el set `modelSpecId IS NULL`
+   * crece sin límite con altas freetext legacy y OCR rechazados): el predicado del canon normalizado se evalúa
+   * en SQL con la MISMA expresión IMMUTABLE de las columnas generadas make_norm/model_norm (migración
+   * 20260620140000) — `normalizeModelTerm` la espeja para el lado spec. Match DETERMINISTA (no fuzzy, a
+   * diferencia del alta): mismo canon make+model + mismo `vehicleType` + año en [yearFrom, yearTo] linkea
+   * EXACTAMENTE a los que esperaban, sin sobre-linkear. El `model_spec_id IS NULL` del WHERE lo hace idempotente
+   * (no re-toca ni pisa vehículos ya linkeados) y cierra la carrera con un alta concurrente bajo READ COMMITTED.
+   * Devuelve cuántos linkeó. La cadena `translate(...)` de plegado de tildes es literal estático (no inyectable);
+   * los valores del spec viajan como parámetros bindeados.
+   */
+  private async relinkPendingVehicles(
+    tx: Prisma.TransactionClient,
+    spec: VehicleModelSpec,
+  ): Promise<number> {
+    // Canon del lado spec (espeja la columna generada); el lado vehículo se normaliza en SQL con la misma expr.
+    const specMakeNorm = normalizeModelTerm(spec.make);
+    const specModelNorm = normalizeModelTerm(spec.model);
+    return tx.$executeRaw`
+      UPDATE "fleet"."vehicles"
+      SET "model_spec_id" = ${spec.id}::uuid,
+          "make" = ${spec.make},
+          "model" = ${spec.model}
+      WHERE "model_spec_id" IS NULL
+        AND "vehicle_type" = ${spec.vehicleType}::"fleet"."VehicleType"
+        AND "year" BETWEEN ${spec.yearFrom} AND ${spec.yearTo}
+        AND upper(regexp_replace(trim(translate("make",
+              'áéíóúàèìòùäëïöüâêîôûñçÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÑÇ',
+              'aeiouaeiouaeiouaeiouncAEIOUAEIOUAEIOUAEIOUNC')), '\s+', ' ', 'g')) = ${specMakeNorm}
+        AND upper(regexp_replace(trim(translate("model",
+              'áéíóúàèìòùäëïöüâêîôûñçÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÑÇ',
+              'aeiouaeiouaeiouaeiouncAEIOUAEIOUAEIOUAEIOUNC')), '\s+', ' ', 'g')) = ${specModelNorm}
+    `;
   }
 }
 
