@@ -16,48 +16,9 @@ import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
 import { CostCapModule } from '../cost-cap/cost-cap.module';
 import { BookingsModule } from '../bookings/bookings.module';
-import { IDENTITY_CLIENT } from '../identity/identity-client.port';
-import { GrpcIdentityClient } from '../identity/grpc-identity-client';
-import { IDENTITY_BATCH_CLIENT } from '../identity/identity-batch-client.port';
-import { GrpcIdentityBatchClient } from '../identity/grpc-identity-batch-client';
-import { FLEET_CLIENT } from '../fleet/fleet-client.port';
-import { GrpcFleetClient } from '../fleet/grpc-fleet-client';
+import { IdentityModule } from '../identity/identity.module';
+import { FleetModule } from '../fleet/fleet.module';
 import type { Env } from '../config/env.schema';
-
-const identityClientProvider: Provider = {
-  provide: IDENTITY_CLIENT,
-  inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>) =>
-    new GrpcIdentityClient(
-      config.getOrThrow<string>('IDENTITY_GRPC_URL'),
-      config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
-    ),
-};
-
-const fleetClientProvider: Provider = {
-  provide: FLEET_CLIENT,
-  inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>) =>
-    new GrpcFleetClient(
-      config.getOrThrow<string>('FLEET_GRPC_URL'),
-      config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
-    ),
-};
-
-/**
- * Cliente gRPC BATCH a identity (F2): GetDriversByIds para enriquecer la BÚSQUEDA sin N+1. Misma URL/secret
- * que el cliente single, distinta responsabilidad (lectura batch de campos públicos). Construido como
- * provider local (mismo patrón que los demás clientes gRPC del módulo).
- */
-const identityBatchClientProvider: Provider = {
-  provide: IDENTITY_BATCH_CLIENT,
-  inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>) =>
-    new GrpcIdentityBatchClient(
-      config.getOrThrow<string>('IDENTITY_GRPC_URL'),
-      config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
-    ),
-};
 
 /**
  * Config de la BÚSQUEDA geo H3 (F2): k del anillo base + k expandido (si la base da 0). Desde env
@@ -76,15 +37,10 @@ const searchH3ConfigProvider: Provider = {
   // BookingsModule exporta BookingsService (lo consume el handler GET /:id/bookings del controller, F3b).
   // CostCapModule exporta CostCapService (el gate F1b del tope de cost-sharing; ahora módulo propio para que
   // BookingsModule también lo consuma sin cerrar un ciclo published-trips ↔ bookings).
-  imports: [CostCapModule, BookingsModule],
-  providers: [
-    PublishedTripsService,
-    PublishedTripsRepository,
-    identityClientProvider,
-    identityBatchClientProvider,
-    fleetClientProvider,
-    searchH3ConfigProvider,
-  ],
+  // IdentityModule provee IDENTITY_CLIENT + IDENTITY_BATCH_CLIENT (gates del conductor en publish + búsqueda).
+  // FleetModule provee FLEET_CLIENT. Ambos son proveedores ÚNICOS (antes duplicados inline en cada módulo).
+  imports: [CostCapModule, BookingsModule, FleetModule, IdentityModule],
+  providers: [PublishedTripsService, PublishedTripsRepository, searchH3ConfigProvider],
   controllers: [PublishedTripsController],
   exports: [PublishedTripsService],
 })

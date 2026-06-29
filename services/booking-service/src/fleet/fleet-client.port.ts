@@ -43,6 +43,30 @@ export interface PublicVehicle {
   found: boolean;
 }
 
+/**
+ * Vista de un vehículo por id que une los campos PÚBLICOS de display (modelo/placa/color) con los ejes de
+ * OPERABILIDAD (`active`/`status`/`docStatus`) — exactamente lo que `VehicleReply` ya trae por el wire. La
+ * consume el DETALLE y la RESERVA: el display alimenta la cara pública de la oferta y los ejes de operabilidad
+ * alimentan el GATE fail-closed (`isVehicleOperable`, fuente única con el publish). Es un superconjunto de
+ * `PublicVehicle` (display) y de `VehicleOperabilityView` (operabilidad) — ambos se derivan de ella sin re-pedir
+ * a fleet (UNA sola llamada gRPC cubre display + gate). `found=false` si fleet no encontró el vehículo.
+ */
+export interface FleetVehicleView {
+  id: string;
+  make: string;
+  model: string;
+  color: string;
+  plate: string;
+  vehicleType: string;
+  found: boolean;
+  /** Eje de operabilidad: el conductor lo tiene activo. */
+  active: boolean;
+  /** Eje de operabilidad: estado de revisión derivado (VehicleReply.status): ACTIVE | PENDING_REVIEW. */
+  status: string;
+  /** Eje de operabilidad: estado documental AGREGADO (VehicleDocStatus): VALID | EXPIRING_SOON | EXPIRED. */
+  docStatus: string;
+}
+
 export interface FleetClient {
   /**
    * Lista los vehículos registrados por el conductor (id = driverId; fleet indexa por el sujeto de la
@@ -52,9 +76,12 @@ export interface FleetClient {
   getDriverVehicles(driverId: string): Promise<FleetVehicle[]>;
 
   /**
-   * Lee UN vehículo por su id (datos PÚBLICOS: modelo/placa/color) para enriquecer el detalle de un viaje
-   * (F2). `null` si fleet no responde o no lo encuentra — el detalle degrada honesto (vehículo no resuelto),
-   * no se cuelga.
+   * Lee UN vehículo por su id (display PÚBLICO + ejes de OPERABILIDAD) para el DETALLE y la RESERVA. El detalle
+   * lo usa para DOS cosas en UNA sola llamada: enriquecer la cara pública (modelo/placa/color) Y gatear la
+   * operabilidad fail-closed (`isVehicleOperable`). La vista trae `found=false` si fleet no encontró el vehículo.
+   * POLÍTICA fail-closed: LANZA ante fallo de transporte de fleet — el caller traduce a "oferta no ofertable"
+   * (no se ofrece/reserva un vehículo cuya operabilidad no se pudo verificar; espeja el gate del conductor).
    */
-  getVehicle(vehicleId: string): Promise<PublicVehicle | null>;
+  getVehicle(vehicleId: string): Promise<FleetVehicleView>;
 }
+

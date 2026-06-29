@@ -15,7 +15,7 @@ import {
   type VehicleReply,
   type GrpcServiceClient,
 } from '@veo/rpc';
-import type { FleetClient, FleetVehicle, PublicVehicle } from './fleet-client.port';
+import type { FleetClient, FleetVehicle, FleetVehicleView } from './fleet-client.port';
 
 /**
  * Audiencia de RIEL de esta llamada: es de SISTEMA (validación de vehículo al publicar, sin usuario
@@ -51,12 +51,13 @@ export class GrpcFleetClient implements FleetClient {
     }));
   }
 
-  async getVehicle(vehicleId: string): Promise<PublicVehicle | null> {
-    // Enriquecimiento del DETALLE (F2): datos PÚBLICOS del vehículo (modelo/placa/color). Degradación
-    // HONESTA — si fleet no responde, devolvemos null y el detalle se arma sin el vehículo (no se cuelga).
+  async getVehicle(vehicleId: string): Promise<FleetVehicleView> {
+    // DETALLE + RESERVA (F2 · Lote 3): UNA sola llamada que trae display PÚBLICO (modelo/placa/color) Y los
+    // ejes de OPERABILIDAD (active/status/docStatus). El caller deriva la vista pública del display y GATEA la
+    // operabilidad fail-closed (`isVehicleOperable`, fuente única con el publish). fail-closed: si fleet no
+    // responde, la llamada LANZA y el caller no ofrece/reserva el vehículo (espeja el gate del conductor).
     const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
     const reply = await this.client.call<VehicleReply>('GetVehicle', { id: vehicleId }, meta);
-    if (!reply.found) return null;
     return {
       id: reply.id,
       make: reply.make,
@@ -65,6 +66,9 @@ export class GrpcFleetClient implements FleetClient {
       plate: reply.plate,
       vehicleType: reply.vehicleType,
       found: reply.found,
+      active: reply.active,
+      status: reply.status,
+      docStatus: reply.docStatus,
     };
   }
 }

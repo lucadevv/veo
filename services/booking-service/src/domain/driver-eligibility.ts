@@ -8,7 +8,7 @@
  * conductor, status de revisión del vehículo) se define la constante local con el valor REAL verificado
  * en el código fuente del servicio dueño — comentada con su fuente.
  */
-import { DriverStatus, KycStatus } from '@veo/shared-types';
+import { DriverStatus, KycStatus, FleetDocumentStatus } from '@veo/shared-types';
 
 /**
  * Valor "antecedentes aprobados" del eje Driver.backgroundCheckStatus.
@@ -82,6 +82,55 @@ export function isDriverEligible(driver: DriverEligibilityView): boolean {
   if (driver.currentStatus === DriverStatus.SUSPENDED) return false;
   if (driver.kycStatus !== KycStatus.VERIFIED) return false;
   if (driver.backgroundCheckStatus !== BACKGROUND_CHECK_CLEARED) return false;
+  return true;
+}
+
+/**
+ * Sub-vista de OPERABILIDAD del vehículo: los ejes de fleet que deciden si el vehículo de una oferta puede
+ * seguir operando. Es EXACTAMENTE el conjunto que el gate de publish (`assertVehicleUsable`) evalúa, extraído
+ * acá como FUENTE ÚNICA y REUSADO en PUBLISH, DETALLE y RESERVA (la BÚSQUEDA aún NO lo aplica — Lote 3b, ver
+ * nota en `isVehicleOperable`): la operabilidad del vehículo es DERIVADA (docs SOAT+ITV reales + ficha linkeada,
+ * ver fleet `deriveVehicleReviewStatus`) y por eso FLIPEA — un vehículo cuyos docs VENCEN o son revocados
+ * DESPUÉS de publicar deja de ser operable. El gate de publish es one-shot, así que las superficies que
+ * ofrecen/comprometen la reserva DEBEN re-evaluar la operabilidad sobre el dato FRESCO de fleet.
+ *
+ * `found` distingue "fleet no conoce este vehículo" (no operable) de uno existente pero no apto.
+ */
+export interface VehicleOperabilityView {
+  /** ¿fleet encontró el vehículo? false → no operable (no resolvible). */
+  found: boolean;
+  /** El conductor lo tiene activo (operable). false → no operable. */
+  active: boolean;
+  /** Estado de revisión derivado (VehicleReply.status); distinto de ACTIVE → no operable. */
+  status: string;
+  /** Estado documental AGREGADO (VehicleDocStatus de vencimiento); distinto de VALID → no operable. */
+  docStatus: string;
+}
+
+/**
+ * Predicado ÚNICO de operabilidad del vehículo (UNA SOLA FUENTE DE VERDAD para publish/detalle/reserva; la
+ * BÚSQUEDA aún no lo aplica — ver nota abajo). Evalúa los ejes de "este vehículo puede operar la oferta":
+ *   found===true ∧ active===true ∧ status===ACTIVE ∧ docStatus===VALID
+ *
+ * Es el MISMO criterio que `assertVehicleUsable` (publish) — ese gate LO LLAMA en vez de tener su propia lista
+ * de condiciones (que podría divergir). Hacerlo el predicado compartido cierra de RAÍZ la asimetría: un vehículo
+ * cuyos docs vencieron DESPUÉS de publicar ya NO pasa el filtro de detalle/reserva (antes solo lo frenaba el
+ * publish, one-shot → ofertas con vehículo no-operable seguían reservables).
+ *
+ * COBERTURA HONESTA (Lote 3a vs 3b): hoy se aplica en publish (`assertVehicleUsable`), detalle (`getDetail`,
+ * fail-closed) y reserva (`assertVehicleOperable`). La BÚSQUEDA (`enrichWithDrivers`) todavía NO filtra por
+ * operabilidad del vehículo — requiere un batch `GetVehiclesByIds` en el proto de fleet (anti-N+1), que es el
+ * Lote 3b. Mientras tanto una oferta con vehículo no-operable puede aparecer como card en la búsqueda, pero
+ * NO es reservable: abrir su detalle da 404 y reservarla da 409 (el hueco de bookability ya está cerrado).
+ *
+ * CERO strings mágicos: compara contra la constante tipada local VEHICLE_STATUS_OPERABLE (no hay enum
+ * VehicleStatus en @veo/shared-types) y el enum TIPADO FleetDocumentStatus.VALID.
+ */
+export function isVehicleOperable(vehicle: VehicleOperabilityView): boolean {
+  if (!vehicle.found) return false;
+  if (!vehicle.active) return false;
+  if (vehicle.status !== VEHICLE_STATUS_OPERABLE) return false;
+  if (vehicle.docStatus !== FleetDocumentStatus.VALID) return false;
   return true;
 }
 

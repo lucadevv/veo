@@ -45,6 +45,7 @@ import {
   BACKGROUND_CHECK_CLEARED,
   VEHICLE_STATUS_OPERABLE,
   isDriverEligible,
+  isVehicleOperable,
 } from '../domain/driver-eligibility';
 import {
   toPublishedTripPublicView,
@@ -325,7 +326,12 @@ export class PublishedTripsService {
    * NO debe ofrecerse como reservable → NotFoundError (no la mostramos como disponible). La lectura de identity
    * es AUTORITATIVA acá (no best-effort): a diferencia del enriquecimiento de display, la elegibilidad es un
    * gate de seguridad — si identity no responde, FALLA-CERRADO (no ofrecemos un viaje que no podemos validar).
-   * El vehículo SÍ es best-effort (degradación honesta: dato de display, no de seguridad).
+   *
+   * OPERABILIDAD DEL VEHÍCULO (Lote 3): el vehículo TAMBIÉN es un gate AUTORITATIVO fail-closed (ya no
+   * best-effort de display). Su operabilidad es DERIVADA (docs SOAT/ITV + ficha) y FLIPEA tras publicar, así
+   * que se re-evalúa con el predicado ÚNICO `isVehicleOperable` (mismo criterio que publish/reserva; la búsqueda aún no, Lote 3b):
+   * vehículo no operable, no encontrado, o fleet caída → 404 (no ofrecemos un viaje cuyo vehículo no podemos
+   * validar). El display público (modelo/placa/color) se deriva de la MISMA llamada (no hay segundo round-trip).
    */
   async getDetail(id: string): Promise<PublishedTripDetail> {
     const trip = await this.getById(id);
@@ -358,8 +364,32 @@ export class PublishedTripsService {
       throw new NotFoundError('Viaje publicado no encontrado', { id });
     }
 
-    // Vehículo: BEST-EFFORT (dato de display, no de seguridad). Si fleet no responde → null, el detalle igual viaja.
-    const vehicle = await this.fleet.getVehicle(trip.vehicleId).catch(() => null);
+    // Vehículo: GATE de OPERABILIDAD (AUTORITATIVO, fail-closed · Lote 3). Una oferta cuyo vehículo dejó de ser
+    // operable DESPUÉS de publicar (docs SOAT/ITV vencidos/revocados, ficha desvinculada) NO debe ofrecerse como
+    // reservable → 404 (degradación honesta, NO la mostramos como disponible). Espeja el gate del conductor:
+    // el predicado ÚNICO `isVehicleOperable` decide (mismo criterio que publish/reserva; la búsqueda aún no, Lote 3b). Una sola
+    // llamada gRPC trae display + operabilidad; si fleet no responde → fail-closed 404 (no ofrecemos un viaje
+    // cuyo vehículo no pudimos verificar). El display público (modelo/placa/color) se deriva de la MISMA vista.
+    let vehicle: PublicVehicle;
+    try {
+      const v = await this.fleet.getVehicle(trip.vehicleId);
+      if (!isVehicleOperable(v)) {
+        throw new NotFoundError('Viaje publicado no encontrado', { id });
+      }
+      vehicle = {
+        id: v.id,
+        make: v.make,
+        model: v.model,
+        color: v.color,
+        plate: v.plate,
+        vehicleType: v.vehicleType,
+        found: true,
+      };
+    } catch (err) {
+      // NotFoundError (no operable) se propaga; cualquier otro fallo (fleet caída) → fail-closed a 404.
+      if (err instanceof NotFoundError) throw err;
+      throw new NotFoundError('Viaje publicado no encontrado', { id });
+    }
 
     return { trip: toPublishedTripPublicView(trip), driver: eligibleDriver, vehicle };
   }
@@ -761,7 +791,11 @@ export class PublishedTripsService {
       });
     }
 
-    // Vigencia: el vehículo propio debe estar activo + status operable + docs VALID (defensa en profundidad).
+    // Vigencia: la DECISIÓN la toma el predicado ÚNICO `isVehicleOperable` (el MISMO que usan detalle/reserva (la búsqueda aún no, Lote 3b)/
+    // reserva — fuente única, imposible que diverjan). `FleetVehicle` satisface `VehicleOperabilityView` (found
+    // implícito: lo acabamos de encontrar en la lista del conductor). Si pasa, no hay nada que reportar.
+    if (isVehicleOperable({ found: true, ...vehicle })) return;
+    // No operable: desglosamos la PRIMERA causa para un mensaje claro (mismo ORDEN que el predicado).
     if (!vehicle.active) {
       throw new ValidationError('El vehículo no está activo', { vehicleId });
     }
@@ -771,12 +805,11 @@ export class PublishedTripsService {
         status: vehicle.status,
       });
     }
-    if (vehicle.docStatus !== FleetDocumentStatus.VALID) {
-      throw new ValidationError('Los documentos del vehículo no están vigentes', {
-        vehicleId,
-        docStatus: vehicle.docStatus,
-      });
-    }
+    // Única causa restante (el predicado dio false y las anteriores pasaron): docs no vigentes.
+    throw new ValidationError('Los documentos del vehículo no están vigentes', {
+      vehicleId,
+      docStatus: vehicle.docStatus,
+    });
   }
 
   /**

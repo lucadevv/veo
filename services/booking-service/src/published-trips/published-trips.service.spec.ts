@@ -19,7 +19,7 @@ import type {
 } from './published-trips.repository';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
 import type { IdentityBatchClient, PublicDriver } from '../identity/identity-batch-client.port';
-import type { FleetClient, FleetVehicle, PublicVehicle } from '../fleet/fleet-client.port';
+import type { FleetClient, FleetVehicle, FleetVehicleView } from '../fleet/fleet-client.port';
 import { BACKGROUND_CHECK_CLEARED, VEHICLE_STATUS_OPERABLE } from '../domain/driver-eligibility';
 import { CANCELABLE_STATES } from '../domain/published-trip-state';
 import type { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
@@ -136,7 +136,7 @@ function makeIdentity(driver: IdentityDriver | (() => Promise<IdentityDriver>)):
 
 function makeFleet(
   vehicles: FleetVehicle[] | (() => Promise<FleetVehicle[]>),
-  vehicle: PublicVehicle | null | (() => Promise<PublicVehicle | null>) = null,
+  vehicle: FleetVehicleView | (() => Promise<FleetVehicleView>) = makeVehicleView(),
 ): FleetClient {
   const getDriverVehicles = vi.fn(
     typeof vehicles === 'function' ? vehicles : async () => vehicles,
@@ -145,8 +145,12 @@ function makeFleet(
   return { getDriverVehicles, getVehicle };
 }
 
-/** PublicVehicle fake (detalle F2) con valores razonables; override por test. */
-function makePublicVehicle(over: Partial<PublicVehicle> = {}): PublicVehicle {
+/**
+ * FleetVehicleView fake (detalle F2 · Lote 3) — display + ejes de OPERABILIDAD. Por default OPERABLE (found +
+ * active + status ACTIVE + docs VALID): el detalle pasa el gate y devuelve la cara pública. Los tests del gate
+ * sobrescriben el eje que prueban (found:false / active:false / status / docStatus).
+ */
+function makeVehicleView(over: Partial<FleetVehicleView> = {}): FleetVehicleView {
   return {
     id: VEHICLE_ID,
     make: 'Toyota',
@@ -155,6 +159,9 @@ function makePublicVehicle(over: Partial<PublicVehicle> = {}): PublicVehicle {
     plate: 'ABC-123',
     vehicleType: 'CAR',
     found: true,
+    active: true,
+    status: VEHICLE_STATUS_OPERABLE,
+    docStatus: FleetDocumentStatus.VALID,
     ...over,
   };
 }
@@ -1105,7 +1112,7 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
       fechaHoraSalida: new Date(Date.now() + 90_000_000), // futura (FIX 4)
     });
     const identity = makeIdentity(makeDriver({ name: 'Ana Pérez', averageRating: 4.9 }));
-    const fleet = makeFleet([makeVehicle()], makePublicVehicle({ model: 'Corolla', plate: 'XYZ-789' }));
+    const fleet = makeFleet([makeVehicle()], makeVehicleView({ model: 'Corolla', plate: 'XYZ-789' }));
     const service = makeService({ repo, identity, fleet });
 
     const detail = await service.getDetail('trip-1');
@@ -1140,7 +1147,7 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
     await expect(service.getDetail('trip-2')).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('degradación HONESTA del VEHÍCULO: fleet caída → detalle se devuelve con vehicle null (driver elegible OK)', async () => {
+  it('Lote 3 fail-closed: fleet caída (no podemos validar operabilidad del vehículo) → 404 (no se ofrece)', async () => {
     const { repo, findById } = makeRepo();
     findById.mockResolvedValueOnce({
       id: 'trip-3',
@@ -1153,10 +1160,49 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
       throw new Error('fleet caída');
     });
     const service = makeService({ repo, fleet }); // identity elegible por default
-    const detail = await service.getDetail('trip-3');
-    expect(detail.trip.id).toBe('trip-3');
-    expect(detail.driver).not.toBeNull(); // el conductor (dato de seguridad) sí se resolvió
-    expect(detail.vehicle).toBeNull(); // el vehículo (dato de display) degradó honesto
+    // La operabilidad del vehículo es un GATE de seguridad/legal (SOAT+ITV): si no podemos verificarla, NO
+    // ofrecemos el viaje como reservable (espeja el gate del conductor — ya no degrada a vehicle null).
+    await expect(service.getDetail('trip-3')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it.each([
+    ['no encontrado en fleet', { found: false }],
+    ['inactivo', { active: false }],
+    ['revisión pendiente (status)', { status: 'PENDING_REVIEW' }],
+    ['docs vencidos (docStatus)', { docStatus: FleetDocumentStatus.EXPIRED }],
+  ])(
+    'Lote 3 gate de operabilidad: vehículo %s → 404 (oferta no ofertable, aunque el conductor sea elegible)',
+    async (_caso, over) => {
+      const { repo, findById } = makeRepo();
+      findById.mockResolvedValueOnce({
+        id: 'trip-op',
+        driverId: DRIVER_ID,
+        vehicleId: VEHICLE_ID,
+        estado: PublishedTripState.PUBLICADO,
+        fechaHoraSalida: new Date(Date.now() + 90_000_000),
+      });
+      const fleet = makeFleet([], makeVehicleView(over));
+      const service = makeService({ repo, fleet }); // identity elegible por default
+      await expect(service.getDetail('trip-op')).rejects.toBeInstanceOf(NotFoundError);
+    },
+  );
+
+  it('Lote 3: vehículo OPERABLE → detalle se devuelve con la cara pública del vehículo (display)', async () => {
+    const { repo, findById } = makeRepo();
+    findById.mockResolvedValueOnce({
+      id: 'trip-ok',
+      driverId: DRIVER_ID,
+      vehicleId: VEHICLE_ID,
+      estado: PublishedTripState.PUBLICADO,
+      fechaHoraSalida: new Date(Date.now() + 90_000_000),
+    });
+    const fleet = makeFleet([], makeVehicleView({ model: 'Corolla', plate: 'XYZ-789' }));
+    const service = makeService({ repo, fleet });
+    const detail = await service.getDetail('trip-ok');
+    expect(detail.driver).not.toBeNull();
+    expect(detail.vehicle?.model).toBe('Corolla');
+    expect(detail.vehicle?.plate).toBe('XYZ-789');
+    expect(detail.vehicle?.found).toBe(true);
   });
 });
 
@@ -1230,7 +1276,7 @@ describe('PublishedTripsService · FIX 1 · view PÚBLICO sin dedupKey/internos 
   it('DETALLE: el trip NO contiene dedupKey/driverId/vehicleId/originH3/destH3', async () => {
     const { repo, findById } = makeRepo();
     findById.mockResolvedValueOnce(makeRawTrip());
-    const fleet = makeFleet([makeVehicle()], makePublicVehicle());
+    const fleet = makeFleet([makeVehicle()], makeVehicleView());
     const service = makeService({ repo, fleet });
 
     const detail = await service.getDetail('t-pub');
@@ -1443,7 +1489,7 @@ describe('PublishedTripsService · FIX 4 · detalle solo viajes searchable + fut
       estado: PublishedTripState.PARCIALMENTE_RESERVADO,
       fechaHoraSalida: new Date(Date.now() + 90_000_000),
     });
-    const fleet = makeFleet([makeVehicle()], makePublicVehicle());
+    const fleet = makeFleet([makeVehicle()], makeVehicleView());
     const service = makeService({ repo, fleet });
     const detail = await service.getDetail('x');
     expect(detail.trip.id).toBe('x');

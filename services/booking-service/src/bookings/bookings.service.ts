@@ -77,11 +77,12 @@ import {
   PassengerHasDebtError,
   isSyncDeclineStatus,
 } from '../domain/payment-charge';
-import { isDriverActive } from '../domain/driver-eligibility';
+import { isDriverActive, isDriverEligible, isVehicleOperable } from '../domain/driver-eligibility';
 import { BookingEventType } from '../events/booking-events';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/payment/payment-gateway.port';
 import { CostCapService } from '../cost-cap/cost-cap.service';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
+import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
 import { BookingsRepository, type CreateBookingData } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 import type { ListTripBookingsPageDto } from './dto/list-trip-bookings-page.dto';
@@ -105,6 +106,7 @@ export class BookingsService {
     @Inject(PAYMENT_GATEWAY) private readonly payment: PaymentGateway,
     @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
     private readonly costCap: CostCapService,
+    @Inject(FLEET_CLIENT) private readonly fleet: FleetClient,
   ) {}
 
   /**
@@ -151,6 +153,68 @@ export class BookingsService {
   }
 
   /**
+   * Gate de OPERABILIDAD del vehículo AL RESERVAR (Lote 3 · ADR-014 §8). Re-valida contra fleet (server-truth)
+   * que el vehículo de la oferta SIGUE operable — su operabilidad es DERIVADA (docs SOAT/ITV + ficha linkeada,
+   * ver fleet `deriveVehicleReviewStatus`) y FLIPEA después de publicar; el gate de publish (`assertVehicleUsable`)
+   * es one-shot, así que la RESERVA (el momento del compromiso del asiento) debe re-evaluarlo. Predicado ÚNICO
+   * `isVehicleOperable` (MISMO criterio que publish/detalle — la búsqueda aún no, Lote 3b — fuente única, imposible que diverjan).
+   *
+   * FAIL-CLOSED (contraste deliberado con el gate de DEUDA, que es fail-OPEN): la operabilidad es un eje
+   * legal/seguridad (seguro SOAT + ITV obligatorios) y NO es recuperable como la deuda (que el charge re-valida).
+   * Por eso, si fleet no responde, NO se reserva → ExternalServiceError (503 retryable: no pudimos verificar,
+   * reintentá), espejando el fail-closed del gate del conductor. Vehículo encontrado pero NO operable → la oferta
+   * dejó de ser reservable → ConflictError (409, mismo trato que una oferta en estado no-reservable).
+   */
+  /**
+   * Gate de ELEGIBILIDAD del conductor de la oferta AL RESERVAR (Lote 3 · ADR-014 §8). Re-valida contra identity
+   * que el conductor de la oferta SIGUE elegible — con el predicado ÚNICO `isDriverEligible` (el MISMO que el
+   * detalle y la búsqueda usan para decidir si la oferta es VISIBLE). Una reserva POR ID saltea ese filtro de
+   * visibilidad, así que sin este gate un pasajero podría reservar (y en INSTANT, COBRAR) una oferta cuyo
+   * conductor se SUSPENDIÓ / perdió KYC / antecedentes entre la visibilidad y la reserva.
+   *
+   * FAIL-CLOSED + semántica PASSENGER-FACING (simétrica con `assertVehicleOperable`): conductor no elegible → la
+   * oferta dejó de ser reservable → ConflictError (409). identity caída → ExternalServiceError (503 retryable):
+   * no comprometemos un asiento contra un conductor cuya elegibilidad no pudimos verificar. (Distinto de
+   * `assertDriverActive`, que es el gate DRIVER-FACING de approve/reject y lanza ForbiddenError sobre la suspensión.)
+   */
+  private async assertOfferDriverEligible(driverId: string): Promise<void> {
+    let driver;
+    try {
+      driver = await this.identity.getDriver(driverId);
+    } catch (err) {
+      // fail-closed: identity caída / timeout → no se reserva sin verificar la elegibilidad del conductor.
+      throw new ExternalServiceError(
+        'No se pudo verificar al conductor de la oferta (identity no disponible)',
+        { driverId, cause: err instanceof Error ? err.message : String(err) },
+      );
+    }
+    if (isDriverEligible(driver)) return;
+    // No elegible (no encontrado / suspendido / KYC no verificado / antecedentes no aprobados): oferta no reservable.
+    throw new ConflictError('El viaje no está disponible para reservar (conductor no elegible)', {
+      driverId,
+    });
+  }
+
+  private async assertVehicleOperable(vehicleId: string): Promise<void> {
+    let vehicle;
+    try {
+      vehicle = await this.fleet.getVehicle(vehicleId);
+    } catch (err) {
+      // fail-closed: fleet caída / timeout → no se reserva sin verificar la operabilidad del vehículo.
+      throw new ExternalServiceError(
+        'No se pudo verificar el vehículo de la oferta (fleet no disponible)',
+        { vehicleId, cause: err instanceof Error ? err.message : String(err) },
+      );
+    }
+    if (isVehicleOperable(vehicle)) return;
+    // No operable (no encontrado / inactivo / revisión pendiente / docs no vigentes): la oferta ya no puede
+    // comprometerse. Mensaje NEUTRO de actor — el gate lo comparten reserve (pasajero) y approve (conductor).
+    throw new ConflictError('El vehículo de la oferta no está operable', {
+      vehicleId,
+    });
+  }
+
+  /**
    * Reserva un asiento. `passengerId` viene de la identidad firmada del pasajero (server-truth, NO del
    * body): anti-IDOR por construcción. `idempotencyKey` es el header `Idempotency-Key` del cliente (UUID por
    * intento de submit): la idempotencia de REQUEST se ancla en ÉL, no en `passenger × trip` (sin lockout).
@@ -185,6 +249,17 @@ export class BookingsService {
         disponibles: trip.asientosDisponibles,
       });
     }
+
+    // GATE DEL MATCH AL RESERVAR (Lote 3 · ADR-014 §8) — re-valida el MATCH COMPLETO (conductor + vehículo) en
+    // el momento del compromiso del asiento. El gate de publish/visibilidad (detalle/búsqueda) es one-shot, y
+    // una reserva POR ID saltea el filtro de visibilidad: entre que la oferta se hizo visible y el pasajero
+    // reserva, el conductor pudo SUSPENDERSE / perder KYC y el vehículo pudo perder SOAT/ITV. Ambos ejes se
+    // re-validan acá con los MISMOS predicados ÚNICOS que detalle/búsqueda (isDriverEligible / isVehicleOperable).
+    // CRÍTICO en INSTANT_BOOKING: la reserva nace APROBADA y dispara el CHARGE de inmediato (abajo) — sin este
+    // gate se cobraría a un conductor suspendido / en un vehículo no operable. FAIL-CLOSED (contraste con el gate
+    // de deuda, fail-open): elegibilidad/operabilidad son legal/seguridad y NO recuperables como la deuda.
+    await this.assertOfferDriverEligible(trip.driverId);
+    await this.assertVehicleOperable(trip.vehicleId);
 
     // GATE DE DEUDA (ADR-014 §5.2 paso 1 · §5.4): un pasajero con deuda pendiente (DEBT derivado de payment)
     // NO puede reservar. Va DESPUÉS de los chequeos locales baratos (existe/disponible/cupo) — no consultamos
@@ -355,7 +430,21 @@ export class BookingsService {
    * PENDIENTE_APROBACION en el where atómico → ConflictError (la 1ª aprobación ya ganó).
    */
   async approve(bookingId: string, driverId: string): Promise<Booking> {
-    const booking = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+    const { booking, trip } = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+
+    // GATE DEL MATCH EN EL MOMENTO DEL CHARGE (Lote 3 · cierre de la asimetría que cazó el gate adversarial). En
+    // REVISION_CADA_SOLICITUD el COMPROMISO DE DINERO ocurre ACÁ (approve → triggerCharge), NO en reserve(); los
+    // gates de reserve son one-shot y el match puede ROMPERSE entre reservar y aprobar. Se re-valida el match
+    // COMPLETO, SIMÉTRICO con reserve (ambas superficies de compromiso re-validan conductor + vehículo):
+    //  · CONDUCTOR: elegibilidad FULL (`isDriverEligible`: suspensión + KYC + antecedentes), NO solo suspensión.
+    //    Verificado contra identity: kycStatus y backgroundCheckStatus PUEDEN flipear a REJECTED en un conductor
+    //    NO suspendido (kyc-status-machine + background-check CLEARED→REJECTED), así que chequear solo suspensión
+    //    dejaba cobrar a un conductor con KYC/antecedentes revocados (la ALTA del re-gate).
+    //  · VEHÍCULO: operabilidad (`isVehicleOperable`): docs SOAT/ITV pueden VENCER entre reservar y aprobar.
+    // Ambos ANTES de los DOS caminos de charge (re-ejecución APROBADO + happy-path) → cubren la re-ejecución.
+    // fail-closed (identity/fleet caída → 403/503): no se cobra contra un match que no pudimos verificar.
+    await this.assertDriverEligibleToCharge(driverId);
+    await this.assertVehicleOperable(trip.vehicleId);
 
     // RE-EJECUCIÓN: si el booking YA está APROBADO (un approve previo aprobó pero el charge falló), NO se
     // re-emite booking.approved — se va directo a re-disparar el charge (idempotente por dedupKey). Esto vuelve
@@ -418,7 +507,12 @@ export class BookingsService {
    * → 0 filas → ConflictError, sin re-emitir el evento.
    */
   async reject(bookingId: string, driverId: string): Promise<Booking> {
-    const booking = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+    // reject NO mueve plata (terminal sin charge): gate de ownership + SUSPENSIÓN sobreviniente del conductor
+    // (laxo, `assertDriverActive`) — NO re-valida operabilidad del vehículo ni elegibilidad FULL (KYC/antecedentes):
+    // rechazar es declinar trabajo, no operar, y un conductor con docs/antecedentes flipeados igual puede limpiar
+    // su cola. El criterio FULL solo aplica donde se COMPROMETE dinero (reserve/approve).
+    const { booking } = await this.assertDriverOwnsBookingTrip(bookingId, driverId);
+    await this.assertDriverActive(driverId);
 
     // LA REGLA, NO EL IF: validar contra el estado REAL del agregado (FIX 6: `booking.estado`, NO el literal
     // hardcodeado). Si el booking ya no es rechazable (APROBADO/COBRO_PENDIENTE/terminal), la máquina lanza
@@ -715,16 +809,21 @@ export class BookingsService {
   }
 
   /**
-   * Gate server-side del driver-rail (capa 2/3) para approve/reject (ADR-014 §8 · §10). DOS ejes:
-   *  1. DUEÑO del PublishedTrip de la reserva (server-truth): lee el Booking desde el PRIMARY (estado fresco),
-   *     resuelve su PublishedTrip y exige `trip.driverId === driverId`. Booking inexistente, o de un viaje
-   *     ajeno → NotFoundError (anti-IDOR: el conductor no-dueño no distingue "no existe" de "no es tuyo").
-   *  2. Conductor ACTIVO/no-suspendido (gRPC GetDriver, fail-closed): un conductor suspendido ENTRE publicar y
-   *     aprobar no puede operar sus ofertas vivas → 403. Si identity no responde → 403 (fail-closed, espeja el
-   *     gate de publish). Predicado ÚNICO `isDriverActive` (cero strings mágicos, enum DriverStatus.SUSPENDED).
-   * Devuelve el Booking (leído del PRIMARY) para que el caller opere sin re-leerlo.
+   * Gate de OWNERSHIP del driver-rail (capa 2/3) para approve/reject (ADR-014 §8 · §10): DUEÑO del PublishedTrip
+   * de la reserva (server-truth). Lee el Booking desde el PRIMARY (estado fresco), resuelve su PublishedTrip y
+   * exige `trip.driverId === driverId`. Booking inexistente, o de un viaje ajeno → NotFoundError (anti-IDOR: el
+   * conductor no-dueño no distingue "no existe" de "no es tuyo"). Devuelve el Booking + el PublishedTrip resuelto
+   * para que el caller opere sin re-leerlos (approve necesita `trip.vehicleId` para re-validar la operabilidad).
+   *
+   * SOLO ownership: la re-validación del CONDUCTOR la hace CADA caller según su riesgo — approve (mueve plata)
+   * exige elegibilidad FULL (`assertDriverEligibleToCharge`); reject (no mueve plata) solo suspensión sobreviniente
+   * (`assertDriverActive`). Mezclar ambos acá forzaría a reject a un criterio que no necesita, o a approve a uno
+   * insuficiente (la asimetría de elegibilidad que cazó el gate adversarial).
    */
-  private async assertDriverOwnsBookingTrip(bookingId: string, driverId: string): Promise<Booking> {
+  private async assertDriverOwnsBookingTrip(
+    bookingId: string,
+    driverId: string,
+  ): Promise<{ booking: Booking; trip: { vehicleId: string } }> {
     // Read CRÍTICO desde el PRIMARY: la decisión (estado + ownership) no puede apoyarse en una réplica stale.
     const booking = await this.repo.findByIdFromPrimary(bookingId);
     if (!booking) {
@@ -736,9 +835,7 @@ export class BookingsService {
       // No-dueño → 404 (anti-IDOR, NO 403: no se filtra la existencia de una reserva de un viaje ajeno).
       throw new NotFoundError('Reserva no encontrada', { id: bookingId });
     }
-    // Conductor activo/no-suspendido (fail-closed): suspensión sobreviniente entre publicar y aprobar → 403.
-    await this.assertDriverActive(driverId);
-    return booking;
+    return { booking, trip };
   }
 
   /**
@@ -767,6 +864,40 @@ export class BookingsService {
       driverId,
       suspendedAt: driver.suspendedAt,
       currentStatus: driver.currentStatus,
+    });
+  }
+
+  /**
+   * Gate de ELEGIBILIDAD FULL del conductor en el MOMENTO DEL CHARGE (approve · Lote 3 · cierre del re-gate).
+   * Re-valida contra identity (server-truth) que el conductor sigue PLENAMENTE elegible para COBRAR — con el
+   * predicado ÚNICO `isDriverEligible` (found + no-suspendido + KYC VERIFIED + antecedentes CLEARED), el MISMO
+   * que el publish y el gate de reserva (`assertOfferDriverEligible`). MÁS ESTRICTO que `assertDriverActive`
+   * (suspensión-only) a propósito: kycStatus/backgroundCheckStatus PUEDEN flipear a REJECTED en un conductor NO
+   * suspendido (verificado en identity: kyc-status-machine + background-check CLEARED→REJECTED), y approve mueve
+   * plata — chequear solo suspensión dejaba cobrar a un conductor con KYC/antecedentes revocados (la ALTA del
+   * re-gate). DRIVER-FACING (es el conductor quien aprueba): ForbiddenError (403), no ConflictError. FAIL-CLOSED:
+   * identity caída → 403 (nunca un conductor no elegible cobrando por un error de red; espeja publish/approve).
+   */
+  private async assertDriverEligibleToCharge(driverId: string): Promise<void> {
+    let driver;
+    try {
+      driver = await this.identity.getDriver(driverId);
+    } catch (err) {
+      // fail-closed: identity caída / timeout → no se cobra sin verificar la elegibilidad plena del conductor.
+      throw new ForbiddenError('No se pudo verificar la elegibilidad del conductor (identity no disponible)', {
+        driverId,
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (isDriverEligible(driver)) return;
+    // No elegible: un único 403 con los ejes diagnósticos (suspensión / KYC / antecedentes) para el conductor/soporte.
+    throw new ForbiddenError('Conductor no elegible para cobrar (suspensión / KYC / antecedentes)', {
+      driverId,
+      found: driver.found,
+      currentStatus: driver.currentStatus,
+      suspendedAt: driver.suspendedAt,
+      kycStatus: driver.kycStatus,
+      backgroundCheckStatus: driver.backgroundCheckStatus,
     });
   }
 
