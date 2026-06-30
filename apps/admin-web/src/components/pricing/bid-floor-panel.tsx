@@ -67,6 +67,17 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const anyOverrideInvalid = overrides.some((o) => !o.valid);
   const invalid = defaultInvalid || anyOverrideInvalid;
 
+  // dirty = ¿cambió algo respecto de lo persistido (default o algún override)? Sin esto el Guardar quedaba
+  // habilitado SIN cambios — inconsistente con los demás paneles y permitía un save no-op (step-up + auditoría).
+  const initialOverrideCents = (id: string): number | null =>
+    config.overrides.find((ov) => ov.zone === GLOBAL_ZONE && ov.offeringId === id)?.floorCents ?? null;
+  const overridesDirty = PUJA_OFFERINGS.some((o) => {
+    const raw = overrideSoles[o.id]?.trim() ?? '';
+    const current = raw === '' ? null : Math.round(Number(raw) * 100);
+    return current !== initialOverrideCents(o.id);
+  });
+  const dirty = defaultCents !== config.defaultFloorCents || overridesDirty;
+
   async function save() {
     try {
       await replace.mutateAsync({
@@ -159,7 +170,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
         </div>
 
         {canManage ? (
-          invalid || replace.isPending ? (
+          !dirty || invalid || replace.isPending ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>

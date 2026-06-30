@@ -5,7 +5,6 @@ import { Check, X } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { CatalogOffering, CatalogOverride, CatalogView, PricingMode } from '@/lib/api/schemas';
 import { offeringLabel, withOverride } from '@/lib/catalog';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -116,11 +115,6 @@ export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
           </p>
         ) : null}
       </section>
-
-      <p className="text-xs text-ink-subtle">
-        Versión {catalog.version}
-        {catalog.updatedAt ? ` · actualizado ${dateTime(catalog.updatedAt)}` : ' · sin cambios aún'}
-      </p>
     </div>
   );
 }
