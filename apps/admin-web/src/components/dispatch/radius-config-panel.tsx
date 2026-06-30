@@ -161,7 +161,11 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
 
       <p className="text-xs text-ink-subtle">
         Versión {config.version}
-        {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
+        {/* version 0 = config por defecto nunca editada: el backend manda `updatedAt` epoch (no null), así que
+            NO se puede confiar en la truthiness de updatedAt — gateamos por version (igual que cost-per-km). */}
+        {config.version > 0
+          ? ` · actualizado ${dateTime(config.updatedAt)}`
+          : ' · valor por defecto (sin editar)'}
       </p>
     </div>
   );

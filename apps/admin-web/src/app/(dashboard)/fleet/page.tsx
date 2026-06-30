@@ -192,16 +192,10 @@ const inspectionColumns: ColumnDef<InspectionView, unknown>[] = [
       <span className="font-mono text-xs">{row.original.vehicleId.slice(0, 8)}</span>
     ),
   },
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
-  },
-  {
-    accessorKey: 'scheduledAt',
-    header: 'Programada',
-    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.scheduledAt)}</span>,
-  },
+  // OJO: fleet-service solo registra inspecciones YA realizadas (no agenda) → `status` siempre COMPLETED y
+  // `scheduledAt` siempre null (toInspectionView en admin-bff). Las columnas "Estado"/"Programada" eran
+  // sintéticas (muertas) y sugerían un sub-estado que el dominio no tiene → se omiten. La fila ES una
+  // inspección hecha; lo que importa es CUÁNDO (Realizada), QUIÉN (Inspector) y el RESULTADO.
   {
     accessorKey: 'inspectedAt',
     header: 'Realizada',
@@ -210,7 +204,12 @@ const inspectionColumns: ColumnDef<InspectionView, unknown>[] = [
   {
     accessorKey: 'inspector',
     header: 'Inspector',
-    cell: ({ row }) => <span className="text-ink-muted">{row.original.inspector ?? '—'}</span>,
+    cell: ({ row }) =>
+      row.original.inspector ? (
+        <span className="font-mono text-xs">{row.original.inspector.slice(0, 8)}</span>
+      ) : (
+        <span className="text-ink-subtle">—</span>
+      ),
   },
   {
     accessorKey: 'result',
