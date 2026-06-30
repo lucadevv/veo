@@ -16,7 +16,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  AudienceGuard,
+  Audiences,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { DispatchService } from './dispatch.service';
 import { SurgeService } from './surge.service';
 import { requireDriverId } from './require-driver-id';
@@ -34,6 +41,10 @@ export class DispatchController {
 
   @Post('offers/:matchId/accept')
   @HttpCode(200)
+  // Acota el RIEL a driver-rail (defensa en profundidad · simetría con OfferBoardController de PUJA): el
+  // backstop de audiencia, ADEMÁS del requireDriverId del handler. Cierra la asimetría que el audit marcó.
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @ApiOperation({ summary: 'El conductor acepta la oferta (publica dispatch.match_found)' })
   accept(
     @Param('matchId', ParseUUIDPipe) matchId: string,
@@ -45,6 +56,8 @@ export class DispatchController {
 
   @Post('offers/:matchId/reject')
   @HttpCode(200)
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @ApiOperation({ summary: 'El conductor rechaza la oferta (se ofrece al siguiente candidato)' })
   reject(
     @Param('matchId', ParseUUIDPipe) matchId: string,
@@ -54,6 +67,8 @@ export class DispatchController {
   }
 
   @Get('offers/:matchId')
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @ApiOperation({ summary: 'Lee el estado de un match' })
   getMatch(
     @Param('matchId', ParseUUIDPipe) matchId: string,
