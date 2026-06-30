@@ -24,9 +24,13 @@ function baseOptions(opts: SetOpts) {
   };
 }
 
-// Duraciones por defecto (el bff es la autoridad real de expiración del JWT).
-const ACCESS_MAX_AGE = 60 * 15; // 15 min
-const REFRESH_MAX_AGE = 60 * 60 * 24 * 7; // 7 días
+// maxAge de las cookies de sesión. DEBEN ser >= el TTL del JWT correspondiente (identity-service:
+// JWT_ACCESS_TTL / JWT_REFRESH_TTL), si no la COOKIE capa la sesión por debajo del token y se cae antes
+// de tiempo (bug histórico: cookie access 15m mientras el JWT vivía 8h → refresh forzado cada 15m; cookie
+// refresh 7d mientras el JWT vivía 30-90d → logout al 7º día). Ahora alineadas al TTL del JWT (access 8h /
+// refresh 30d) y OVERRIDEABLES por env para que un deploy con otro JWT_*_TTL ajuste sin tocar código.
+const ACCESS_MAX_AGE = Number(process.env.ADMIN_ACCESS_COOKIE_MAX_AGE) || 60 * 60 * 8; // 8h
+const REFRESH_MAX_AGE = Number(process.env.ADMIN_REFRESH_COOKIE_MAX_AGE) || 60 * 60 * 24 * 30; // 30 días
 
 export async function setAccessCookie(token: string): Promise<void> {
   (await cookies()).set(ACCESS_COOKIE, token, baseOptions({ maxAgeSeconds: ACCESS_MAX_AGE }));
