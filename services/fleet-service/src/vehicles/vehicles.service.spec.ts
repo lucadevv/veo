@@ -571,8 +571,12 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
     docs: { type: string; status: string }[] = [],
   ) {
     const prisma = {
-      read: {
+      // read-your-writes: el vehículo activo (selectedAt) se LEE del primario (`write`), igual que el
+      // source — ver getActiveVehicle / ADR-017 §5(d) vector 4. Lo no-crítico queda en `read`.
+      write: {
         vehicle: { findMany: vi.fn().mockResolvedValue(vehicles) },
+      },
+      read: {
         vehicleModelSpec: { findUnique: vi.fn().mockResolvedValue(spec) },
         fleetDocument: { findMany: vi.fn().mockResolvedValue(docs) },
       },

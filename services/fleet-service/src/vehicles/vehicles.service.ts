@@ -685,7 +685,14 @@ export class VehiclesService {
    * operable. Lo usa el driver-bff para sellar el tipo en el ping (sin confiar en lo que declara la app).
    */
   async getActiveVehicle(driverId: string): Promise<DriverVehicleResponse | null> {
-    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    // READ-YOUR-WRITES (primario, NO réplica): `pickActiveVehicle` decide el activo por `selectedAt`,
+    // el MISMO campo que escribe `setActiveVehicle` en `prisma.write`. Leerlo de `read` (réplica) expone
+    // el swap al lag → un cambio de vehículo recién hecho no se vería, reabriendo el TOCTOU aguas arriba
+    // en el driver-bff (ADR-017 §5(d) vector 4 / landmine de réplica). Por eso este read va al primario,
+    // según la advertencia del wrapper read-write.ts: "NUNCA leer de `read` un registro que se acaba de
+    // escribir en un flujo crítico; usar `write`". Las lecturas no-críticas de abajo (certs, docs del
+    // vehículo, catálogo de specs) quedan en `read`: no las toca el swap.
+    const vehicles = await this.prisma.write.vehicle.findMany({ where: { driverId } });
     const active = pickActiveVehicle(vehicles);
     if (!active) return null;
     // B5-3.2 · certificaciones de operador VIGENTES del conductor (del MISMO driverId; ownerType DRIVER).
