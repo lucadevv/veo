@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, use } from 'react';
+import { Archive } from 'lucide-react';
+import { ApiError } from '@veo/api-client';
 import { useTrip } from '@/lib/api/queries';
 import type { TripDetail } from '@/lib/api/schemas';
 import { dateTime, duration, money } from '@/lib/formatters';
@@ -8,7 +10,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState } from '@/components/ui/states';
 import { TripStatusBadge } from '@/components/trips/status-badge';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 
@@ -38,7 +40,20 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
           <Skeleton className="h-80" />
         </div>
       ) : query.isError ? (
-        <ErrorState onRetry={() => void query.refetch()} className="m-6" />
+        // DEGRADACIÓN HONESTA: el detalle lee el dueño autoritativo (trip-service vía gRPC), pero la LISTA sale
+        // de una proyección (read-model) que puede retener viajes ya purgados. Un 404 NO es "error de servidor"
+        // — es "el viaje ya no existe". Lo distinguimos del 5xx real: 404 → estado "no disponible" sin reintentar
+        // (purgado no vuelve); cualquier otro error → ErrorState con reintento.
+        query.error instanceof ApiError && query.error.status === 404 ? (
+          <EmptyState
+            className="m-6"
+            icon={<Archive className="size-6" aria-hidden />}
+            title="Viaje no disponible"
+            description="Este viaje ya no está en el sistema. Si lo viste en el listado, puede tardar unos minutos en desaparecer."
+          />
+        ) : (
+          <ErrorState onRetry={() => void query.refetch()} className="m-6" />
+        )
       ) : trip ? (
         <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-2 lg:p-6">
           <div className="grid gap-4">
