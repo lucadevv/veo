@@ -15,6 +15,7 @@ export { InternalRestClient } from './internal-rest.js';
 export type { InternalRestOptions, InternalRequest } from './internal-rest.js';
 export { DownstreamError, normalizeError } from './error.js';
 export type { ApiErrorLike } from './error.js';
+export { isPermanentGrpcError } from './grpc-poison.js';
 export {
   BffExceptionsFilter,
   UPSTREAM_UNAVAILABLE_CODE,
