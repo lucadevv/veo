@@ -277,7 +277,7 @@ migrate_all() {
     )"; then
       # prisma dice "X migrations applied" o "No pending migrations to apply".
       local summary
-      summary="$(printf '%s' "$out" | rg -No 'No pending migrations.*|[0-9]+ migration[s]? .*applied|Applying migration.*' | tail -1)"
+      summary="$(printf '%s' "$out" | grep -Eo 'No pending migrations.*|[0-9]+ migration[s]? .*applied|Applying migration.*' | tail -1)"
       green "OK ${summary:+— $summary}"
       ((ok++))
     else
@@ -286,6 +286,37 @@ migrate_all() {
     fi
   done
   printf '  %s%d ok · %d con error%s\n' "$C_DIM" "$ok" "$fail" "$C_RESET"
+}
+
+# ── 4-bis. DRIFT de migraciones (verificación read-only, RÁPIDA) ──────────────
+# La RED para el caso que mordió a payment: se crean migraciones nuevas y se hace
+# 'restart <svc>' individual (que NO migra) → la DB queda ATRÁS sin que nadie
+# avise. El boot full (up/dev) sí aplica via migrate_all; esto DETECTA el drift
+# cuando NO hubo boot full. Compara los dirs de prisma/migrations contra las filas
+# YA aplicadas en <schema>._prisma_migrations (consulta directa al contenedor
+# postgres — NO usa 'npx prisma migrate status', que tarda ~2s/servicio y haría
+# lento el tablero). Emite "svc|pendientes" por servicio atrasado (stdout vacío =
+# todo al día). Si la DB/tabla no se puede leer, NO inventa drift (degradación
+# honesta): omite ese servicio en silencio.
+migrate_drift() {
+  local pgc="" l
+  for l in "${INFRA[@]}"; do [[ "$l" == postgres\|* ]] && pgc="$(printf '%s' "$l" | cut -d'|' -f2)"; done
+  [[ -n "$pgc" ]] || pgc="veo-postgres"
+  local line svc port dir kind health ndir schema napp
+  for line in "${SERVICES[@]}"; do
+    IFS='|' read -r svc port dir kind health <<<"$line"
+    [[ "$kind" == "node" && -d "$ROOT_DIR/$dir/prisma/migrations" ]] || continue
+    ndir="$(find "$ROOT_DIR/$dir/prisma/migrations" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    # schema del DATABASE_URL. OJO: con grep/sed POSIX, NO rg — rg vive en homebrew y NO está en el
+    # PATH del bash del shebang (#!/usr/bin/env bash, no-login) → adentro de veo.sh 'rg' = command-not-found
+    # silencioso. (El migrate_all de arriba arrastra el mismo latente, pero ahí su rg es solo cosmético.)
+    schema="$(grep -m1 '^DATABASE_URL=' "$ROOT_DIR/$dir/env/${APP_ENV:-development}.env" 2>/dev/null | sed -n 's/.*[?&]schema=\([A-Za-z0-9_]*\).*/\1/p')"
+    [[ -n "$schema" ]] || continue
+    napp="$(docker exec "$pgc" psql -U veo -d veo -At -c \
+      "SELECT count(*) FROM \"$schema\"._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;" 2>/dev/null)"
+    [[ "$napp" =~ ^[0-9]+$ ]] || continue
+    (( ndir > napp )) && printf '%s|%d\n' "$svc" "$(( ndir - napp ))"
+  done
 }
 
 # ── 5. BOOT UNIFORME ──────────────────────────────────────────────────────────
@@ -716,6 +747,19 @@ cmd_status() {
   local color="$C_GREEN"; (( up < total )) && color="$C_YEL"; (( up == 0 )) && color="$C_RED"
   printf '  %s%b%d/%d servicios arriba%b\n' "" "$color$C_BOLD" "$up" "$total" "$C_RESET"
   printf '  %slogs: %s/<svc>.log · pids: %s/<svc>.pid%s\n' "$C_DIM" "${LOGS_DIR#"$ROOT_DIR"/}" "${PIDS_DIR#"$ROOT_DIR"/}" "$C_RESET"
+
+  # ── Drift de migraciones: la DB de un servicio quedó ATRÁS de su prisma/migrations
+  # (típico tras 'restart <svc>' sin un boot full que migre). Es la red de payment.
+  local drift; drift="$(migrate_drift)"
+  if [[ -z "$drift" ]]; then
+    printf '  %s✅ migraciones%s   todos los servicios al día con su prisma/migrations\n' "$C_GREEN" "$C_RESET"
+  else
+    printf '  %b⚠️  DRIFT de migraciones%b — la DB está ATRÁS; corré %bveo.sh migrate%b:\n' "$C_YEL$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+    local s n
+    while IFS='|' read -r s n; do
+      [[ -n "$s" ]] && printf '     %s· %-14s %s migración(es) sin aplicar%s\n' "$C_YEL" "$s" "$n" "$C_RESET"
+    done <<< "$drift"
+  fi
 }
 
 # ── SUBCOMANDO: logs ──────────────────────────────────────────────────────────
