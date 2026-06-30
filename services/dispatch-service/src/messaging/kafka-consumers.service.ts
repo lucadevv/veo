@@ -76,6 +76,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // frena fail-closed; esto cierra la MEMBRESÍA (no ofertarle a un suspendido que sigue pingeando GPS).
       'driver.suspended': (env) => this.onDriverSuspended(env),
       'driver.reactivated': (env) => this.onDriverReactivated(env),
+      // SUSPENSIÓN por el eje FLEET (doc/ITV vencido): MISMA exclusión del pool que el eje disciplinario.
+      // El sujeto llega por clave DUAL (driverId de perfil XOR userId=User.id de la vía ITV) → el service
+      // resuelve a Driver.id. Cierra la under-exclusion del eje doc/ITV (Lote 2b). Suscribe el topic `fleet`.
+      'fleet.driver_suspended': (env) => this.onFleetDriverSuspended(env),
+      'fleet.driver_reactivated': (env) => this.onFleetDriverReactivated(env),
       'rating.created': (env) => this.onRating(env),
       'driver.flagged': (env) => this.onDriverFlagged(env),
       'trip.completed': (env) => this.onTripCompleted(env),
@@ -274,6 +279,25 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
   private async onDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.reactivated'].parse(env.payload);
     await this.suspensionService.onReactivated(p.driverId);
+  }
+
+  /**
+   * SUSPENSIÓN por el eje FLEET (doc/ITV): el conductor sale del pool. El sujeto viaja por clave dual
+   * (XOR driverId|userId, ver `fleetDriverSuspended`); el service resuelve a Driver.id (User.id → perfil
+   * por gRPC en la vía ITV). Un fallo de identity es transitorio ⇒ relanza ⇒ kafkajs reintenta.
+   */
+  private async onFleetDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['fleet.driver_suspended'].parse(env.payload);
+    await this.suspensionService.onFleetSuspended({ driverId: p.driverId, userId: p.userId });
+  }
+
+  /**
+   * REACTIVACIÓN por el eje FLEET (doc/ITV regularizado): reincorpora HOLDS-AWARE (solo si no sobrevive otro
+   * hold). Misma resolución de clave dual. La carrera con el consumer de identity la acota el TTL de auto-cura.
+   */
+  private async onFleetDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['fleet.driver_reactivated'].parse(env.payload);
+    await this.suspensionService.onFleetReactivated({ driverId: p.driverId, userId: p.userId });
   }
 
   private async onRating(env: EventEnvelope<unknown>): Promise<void> {

@@ -26,4 +26,10 @@ export interface IdentityDriver {
 export interface IdentityClient {
   /** Lee el conductor por su id. `found=false` si no existe (identity nunca lanza cross-servicio). */
   getDriver(driverId: string): Promise<IdentityDriver>;
+  /**
+   * Lee el conductor por su **User.id** (identity resuelve User.id → perfil Driver). `found=false` si no
+   * existe. Lo usa la exclusión por suspensión del eje FLEET: el evento de la vía ITV llega keyeado por
+   * User.id (= `Vehicle.driverId`), no por id de perfil — identity es el dueño del mapeo (no lo duplicamos).
+   */
+  getDriverByUser(userId: string): Promise<IdentityDriver>;
 }

@@ -20,7 +20,9 @@ function identityFake(driver: Partial<IdentityDriver> & { found?: boolean }): Id
     found: true,
     ...driver,
   };
-  return { getDriver: async () => full };
+  // getDriverByUser resuelve al MISMO driver (el fake no distingue id de perfil vs User.id: el contrato
+  // que importa es que devuelve el perfil con su suspendedAt/found).
+  return { getDriver: async () => full, getDriverByUser: async () => full };
 }
 
 describe('DriverSuspensionService', () => {
@@ -72,11 +74,59 @@ describe('DriverSuspensionService', () => {
       getDriver: async () => {
         throw new Error('UNAVAILABLE');
       },
+      getDriverByUser: async () => {
+        throw new Error('UNAVAILABLE');
+      },
     };
     const svc = new DriverSuspensionService(registry, failing);
     await registry.exclude(DRIVER);
     await expect(svc.onReactivated(DRIVER)).rejects.toThrow('UNAVAILABLE');
     // Permanece excluido: el reintento lo re-procesará cuando identity vuelva (el accept fail-closed es el backstop).
+    expect(await registry.isExcluded(DRIVER)).toBe(true);
+  });
+});
+
+describe('DriverSuspensionService · eje FLEET (doc/ITV) con clave dual', () => {
+  let registry: InMemoryExclusionRegistry;
+  beforeEach(() => {
+    registry = new InMemoryExclusionRegistry();
+  });
+
+  it('[vía DOCUMENTO] onFleetSuspended con driverId de perfil → excluye directo (sin resolver)', async () => {
+    const svc = new DriverSuspensionService(registry, identityFake({}));
+    await svc.onFleetSuspended({ driverId: DRIVER });
+    expect(await registry.isExcluded(DRIVER)).toBe(true);
+  });
+
+  it('[vía ITV] onFleetSuspended con userId → resuelve User.id→Driver.id y excluye el PERFIL', async () => {
+    // El fake resuelve getDriverByUser → full.id = DRIVER (el id de perfil). La exclusión cae en Driver.id,
+    // NO en el User.id crudo (el landmine de key-space que el gate marcó).
+    const svc = new DriverSuspensionService(registry, identityFake({ id: DRIVER, found: true }));
+    await svc.onFleetSuspended({ userId: 'user-1' });
+    expect(await registry.isExcluded(DRIVER)).toBe(true);
+    expect(await registry.isExcluded('user-1')).toBe(false); // NO se excluyó la key cruda
+  });
+
+  it('[vía ITV] onFleetSuspended con userId de un conductor inexistente (found=false) → no-op', async () => {
+    const svc = new DriverSuspensionService(registry, identityFake({ found: false }));
+    await svc.onFleetSuspended({ userId: 'fantasma' });
+    expect(await registry.filter([DRIVER, 'fantasma'])).toEqual([DRIVER, 'fantasma']); // nada excluido
+  });
+
+  it('[vía ITV] onFleetReactivated con userId, suspendedAt=null → resuelve y reincorpora', async () => {
+    const svc = new DriverSuspensionService(registry, identityFake({ suspendedAt: null }));
+    await registry.exclude(DRIVER);
+    await svc.onFleetReactivated({ userId: 'user-1' });
+    expect(await registry.isExcluded(DRIVER)).toBe(false);
+  });
+
+  it('[HOLDS-AWARE] onFleetReactivated pero sobrevive OTRO hold (suspendedAt!=null) → PERMANECE excluido', async () => {
+    const svc = new DriverSuspensionService(
+      registry,
+      identityFake({ suspendedAt: new Date().toISOString() }),
+    );
+    await registry.exclude(DRIVER);
+    await svc.onFleetReactivated({ driverId: DRIVER });
     expect(await registry.isExcluded(DRIVER)).toBe(true);
   });
 });

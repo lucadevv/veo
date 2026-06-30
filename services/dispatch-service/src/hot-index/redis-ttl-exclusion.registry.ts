@@ -1,13 +1,12 @@
 /**
  * Exclusión por SUSPENSIÓN sobre Redis con TTL de AUTO-CURA (una key por conductor con EXPIRE, NO un SET).
  *
- * Por qué TTL y no un SET pegajoso (como el de pánico). La ENTRADA al set es SIEMPRE una suspensión
- * DISCIPLINARIA (el único emisor de `driver.suspended`; las suspensiones fleet doc/ITV NO lo emiten, ver
- * DriverSuspensionService). El stuck-exclusion aparece en el caso MULTI-HOLD: (1) disciplinaria → excluido;
- * (2) el operador la levanta → `driver.reactivated`, pero sobrevive un hold doc/ITV → onReactivated re-valida
- * y MANTIENE excluido (correcto); (3) el conductor regulariza ese doc/ITV por su cuenta → la vía fleet-auto
- * quita el ÚLTIMO hold (`suspendedAt=null`, ACTIVO) pero NO emite `driver.reactivated`
- * (identity.reactivateByFleet solo quita el hold — "reactivar solo levanta la suspensión"). Sin TTL ese
+ * Por qué TTL y no un SET pegajoso (como el de pánico). Al set entran DOS ejes: el DISCIPLINARIO
+ * (`driver.suspended`) y el FLEET doc/ITV (`fleet.driver_suspended`, Lote 2b). La des-exclusión por evento
+ * es PRONTA en ambos (onReactivated/onFleetReactivated holds-aware), pero puede no llegar/llegar tarde:
+ * (a) CARRERA del eje fleet — dispatch e identity consumen el MISMO `fleet.driver_reactivated` en paralelo,
+ * así dispatch puede re-validar `suspendedAt` antes de que identity confirme el quite del hold y leer estado
+ * viejo → MANTIENE excluido a un conductor que ya quedó ACTIVO; (b) pérdida dura del evento. Sin TTL ese
  * conductor —ya activo— quedaría excluido para SIEMPRE → shadow-ban silencioso, recuperable solo con cirugía
  * manual en Redis. Eso es OVER-exclusion, y el accept-gate fail-closed NO la rescata: cubre el inverso (el
  * suspendido que se cuela = UNDER-exclusion).

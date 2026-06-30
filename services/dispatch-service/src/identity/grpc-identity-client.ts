@@ -28,12 +28,27 @@ export class GrpcIdentityClient implements IdentityClient {
   }
 
   async getDriver(driverId: string): Promise<IdentityDriver> {
-    // Re-validación de elegibilidad: llamada de SISTEMA (no del usuario final). identity exige la
-    // identidad interna firmada en la metadata; firmamos una identidad anónima de tipo 'driver'
-    // (sin sesión real) con audiencia `service-rail` — la verificación HMAC + aud fail-closed pasa
-    // sin reusar la identidad del pasajero original.
-    const meta = grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
-    const reply = await this.client.call<DriverReply>('GetDriver', { id: driverId }, meta);
+    const reply = await this.client.call<DriverReply>('GetDriver', { id: driverId }, this.meta());
+    return this.toDriver(reply);
+  }
+
+  async getDriverByUser(userId: string): Promise<IdentityDriver> {
+    // Resuelve User.id → perfil Driver (mismo DriverReply que GetDriver). Lo usa la exclusión por
+    // suspensión del eje FLEET en la vía ITV, donde el evento viaja keyeado por User.id (= Vehicle.driverId).
+    const reply = await this.client.call<DriverReply>('GetDriverByUser', { id: userId }, this.meta());
+    return this.toDriver(reply);
+  }
+
+  /**
+   * Metadata de SISTEMA (no del usuario final). identity exige la identidad interna firmada; firmamos una
+   * identidad anónima de tipo 'driver' (sin sesión real) con audiencia `service-rail` — la verificación
+   * HMAC + aud fail-closed pasa sin reusar la identidad del pasajero original.
+   */
+  private meta(): ReturnType<typeof grpcIdentityMetadata> {
+    return grpcIdentityMetadata(anonymousIdentity('driver'), this.secret, SERVICE_RAIL);
+  }
+
+  private toDriver(reply: DriverReply): IdentityDriver {
     return {
       id: reply.id,
       userId: reply.userId,

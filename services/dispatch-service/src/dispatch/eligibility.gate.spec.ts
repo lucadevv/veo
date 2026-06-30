@@ -30,7 +30,7 @@ function identityFake(driver: Partial<IdentityDriver> & { found?: boolean }): Id
     found: true,
     ...driver,
   };
-  return { getDriver: async () => full };
+  return { getDriver: async () => full, getDriverByUser: async () => full };
 }
 
 async function gateWith(opts: {
@@ -66,6 +66,12 @@ function spyIdentity(initial?: Partial<IdentityDriver> & { found?: boolean }): {
     calls: 0,
     client: {
       getDriver: async (): Promise<IdentityDriver> => {
+        state.calls += 1;
+        if (failing) throw new Error('UNAVAILABLE');
+        return current;
+      },
+      // El gate no usa getDriverByUser; lo espejamos para cumplir el contrato del puerto.
+      getDriverByUser: async (): Promise<IdentityDriver> => {
         state.calls += 1;
         if (failing) throw new Error('UNAVAILABLE');
         return current;
@@ -138,6 +144,9 @@ describe('EligibilityGate (cierre #9)', () => {
   it('identity caído (gRPC lanza) → 403 falla-cerrado', async () => {
     const broken: IdentityClient = {
       getDriver: async () => {
+        throw new Error('UNAVAILABLE');
+      },
+      getDriverByUser: async () => {
         throw new Error('UNAVAILABLE');
       },
     };

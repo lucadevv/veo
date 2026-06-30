@@ -30,10 +30,19 @@ function build(): {
   svc: KafkaConsumersService;
   onSuspended: ReturnType<typeof vi.fn>;
   onReactivated: ReturnType<typeof vi.fn>;
+  onFleetSuspended: ReturnType<typeof vi.fn>;
+  onFleetReactivated: ReturnType<typeof vi.fn>;
 } {
   const onSuspended = vi.fn(async () => {});
   const onReactivated = vi.fn(async () => {});
-  const suspensionService = { onSuspended, onReactivated } as unknown as DriverSuspensionService;
+  const onFleetSuspended = vi.fn(async () => {});
+  const onFleetReactivated = vi.fn(async () => {});
+  const suspensionService = {
+    onSuspended,
+    onReactivated,
+    onFleetSuspended,
+    onFleetReactivated,
+  } as unknown as DriverSuspensionService;
   const noop = {} as never;
   const svc = new KafkaConsumersService(
     config,
@@ -45,7 +54,7 @@ function build(): {
     noop, // offerBoard
     { recordDemand: async () => {} } as never, // heatmap
   );
-  return { svc, onSuspended, onReactivated };
+  return { svc, onSuspended, onReactivated, onFleetSuspended, onFleetReactivated };
 }
 
 describe('KafkaConsumersService · wiring de suspensión', () => {
@@ -72,6 +81,42 @@ describe('KafkaConsumersService · wiring de suspensión', () => {
     });
     await handlers.get('driver.reactivated')?.(env);
     expect(onReactivated).toHaveBeenCalledWith(DRIVER_ID);
+    await svc.onModuleDestroy();
+  });
+
+  it('[eje FLEET · vía DOCUMENTO] fleet.driver_suspended con driverId → onFleetSuspended({driverId})', async () => {
+    const { svc, onFleetSuspended } = build();
+    await svc.onModuleInit();
+    const env = createEnvelope({
+      eventType: 'fleet.driver_suspended',
+      producer: 'fleet-service',
+      payload: {
+        driverId: DRIVER_ID,
+        reason: 'document_expired',
+        documentType: 'SOAT',
+        suspendedAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('fleet.driver_suspended')?.(env);
+    expect(onFleetSuspended).toHaveBeenCalledWith({ driverId: DRIVER_ID, userId: undefined });
+    await svc.onModuleDestroy();
+  });
+
+  it('[eje FLEET · vía ITV] fleet.driver_reactivated con userId → onFleetReactivated({userId})', async () => {
+    const { svc, onFleetReactivated } = build();
+    await svc.onModuleInit();
+    const USER_ID = '018f9a3e-1c2b-7d4e-8a1f-bbbbbbbbbbbb';
+    const env = createEnvelope({
+      eventType: 'fleet.driver_reactivated',
+      producer: 'fleet-service',
+      payload: {
+        userId: USER_ID,
+        reason: 'inspection_renewed',
+        reactivatedAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('fleet.driver_reactivated')?.(env);
+    expect(onFleetReactivated).toHaveBeenCalledWith({ driverId: undefined, userId: USER_ID });
     await svc.onModuleDestroy();
   });
 });
