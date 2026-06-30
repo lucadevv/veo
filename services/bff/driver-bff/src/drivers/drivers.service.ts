@@ -25,6 +25,7 @@ import type {
 } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
+import { ActiveVehicleTypeResolver } from '../realtime/active-vehicle-type.resolver';
 import type {
   AggregateReply,
   DriverDocumentsReply,
@@ -98,6 +99,7 @@ export class DriversService {
   constructor(
     private readonly grpc: GrpcGateway,
     private readonly rest: RestGateway,
+    private readonly activeVehicleType: ActiveVehicleTypeResolver,
     config: ConfigService<Env, true>,
   ) {
     this.documentsBucket = config.getOrThrow<string>('S3_BUCKET_DOCUMENTS');
@@ -226,6 +228,11 @@ export class DriversService {
         identity,
         body: { vehicleId },
       });
+    // ADR-017 §5(d) d.2: cerrar la ventana stale del ping. El resolver del tipo/attrs del vehículo activo
+    // cachea por userId con TTL corto; sin esta invalidación el swap recién se reflejaría en el ping al
+    // vencer el TTL. Se invalida SOLO en éxito (si el PATCH lanza, este código no corre). Es una operación
+    // local sincrónica e idempotente (Map.delete), no un I/O best-effort: no puede fallar ni romper el swap.
+    this.activeVehicleType.invalidate(identity.userId);
     return buildDriverVehicleFromRest(updated);
   }
 

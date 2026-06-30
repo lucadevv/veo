@@ -35,7 +35,13 @@ function makeService(opts: { driverFound?: boolean } = {}) {
       key === 'S3_BUCKET_DOCUMENTS' ? 'veo-documents-dev' : 300,
     ),
   };
-  const service = new DriversService(grpc as never, rest as never, config as never);
+  const activeVehicleType = { invalidate: vi.fn(), resolve: vi.fn() };
+  const service = new DriversService(
+    grpc as never,
+    rest as never,
+    activeVehicleType as never,
+    config as never,
+  );
   return { service, grpc, post };
 }
 
