@@ -61,7 +61,7 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios y tarifas"
-        description="Configurá cómo se calcula y se cobra cada viaje: modo, componentes de la tarifa on-demand, costo del carpooling y comisión."
+        description="Configurá cómo se calcula y se cobra cada viaje: modo, componentes on-demand, costo del carpooling y comisión. Todos los cambios son globales, se aplican al instante y quedan auditados."
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
@@ -94,7 +94,7 @@ export default function PricingPage() {
         {/* CARRIL on-demand · las piezas que arman la tarifa (base + recargo de combustible + energía). */}
         <PricingSection
           title="Componentes de la tarifa · on-demand"
-          hint="Las piezas que arman el precio fijo y el sugerido de la puja: tarifa base, recargo de combustible y el modelo de energía."
+          hint="Las piezas que arman el precio fijo y el sugerido de la puja: la tarifa base y el modelo de energía."
         >
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). */}
           {baseFareQuery.isError ? (

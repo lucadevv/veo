@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { BaseFareView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceBaseFare } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -90,9 +89,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
         <Banknote className="size-4" aria-hidden /> Tarifa base
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
-        El banderazo (tarifa fija de arranque), el costo por kilómetro y el costo por minuto. Son los
-        componentes base de la fórmula de tarifa (precio fijo y sugerido de puja). El cambio es global,
-        inmediato y queda auditado.
+        Los tres componentes base de la fórmula de tarifa (precio fijo y sugerido de puja).
       </p>
 
       <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
@@ -172,11 +169,6 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
           Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar la tarifa base.
         </p>
       ) : null}
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
-      </p>
     </section>
   );
 }

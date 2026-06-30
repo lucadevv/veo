@@ -5,7 +5,6 @@ import type { LucideIcon } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { ModeScheduleView, PricingMode } from '@/lib/api/schemas';
 import { formatDayMask, formatWindow, modeDescription, modeLabel } from '@/lib/pricing';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceSchedule } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -143,13 +142,6 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
           </ul>
         )}
       </section>
-
-      <p className="text-xs text-ink-subtle">
-        Versión {schedule.version}
-        {schedule.updatedAt
-          ? ` · actualizado ${dateTime(schedule.updatedAt)}`
-          : ' · sin cambios aún'}
-      </p>
     </div>
   );
 }

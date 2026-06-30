@@ -1,10 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, Fuel } from 'lucide-react';
+import { Fuel } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { FuelSurchargeView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceFuelSurcharge } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -163,30 +162,13 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
           Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el combustible.
         </p>
       ) : null}
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
-      </p>
     </>
   );
 
-  // REEMPLAZADO → colapsado y muteado: no compite con el modelo activo ni confunde con un form que no aplica.
-  if (!config.active) {
-    return (
-      <details className="group pt-6">
-        <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-ink-muted [&::-webkit-details-marker]:hidden">
-          <Fuel className="size-4" aria-hidden /> Recargo de combustible
-          <Badge tone="neutral">Modelo anterior · reemplazado</Badge>
-          <ChevronDown
-            className="ml-auto size-4 text-ink-subtle transition-transform group-open:rotate-180"
-            aria-hidden
-          />
-        </summary>
-        <div className="opacity-70">{body}</div>
-      </details>
-    );
-  }
+  // REEMPLAZADO → NO se renderiza. Un modelo que no afecta la tarifa es config muerta: mostrar un editor
+  // inerte (aunque sea colapsado) confunde al operador. El backend conserva el valor; si el flip revierte
+  // (energía → combustible), `active` vuelve a true y el panel reaparece solo. La UI muestra SOLO lo vivo.
+  if (!config.active) return null;
 
   // ACTIVO → panel pleno.
   return (

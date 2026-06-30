@@ -14,7 +14,7 @@ export function modeLabel(mode: PricingMode): string {
 /** Descripción de una línea para cada modo (qué implica comercialmente). */
 export function modeDescription(mode: PricingMode): string {
   return isPujaMode(mode)
-    ? 'El pasajero propone su tarifa y los conductores la aceptan o contraofertan (estilo inDrive).'
+    ? 'El pasajero propone su tarifa y los conductores la aceptan o contraofertan.'
     : 'VEO calcula la tarifa (base + distancia + tiempo). El pasajero no negocia.';
 }
 

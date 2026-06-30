@@ -5,7 +5,6 @@ import { Gavel } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import { OFFERING_LIST, PricingMode, GLOBAL_ZONE } from '@veo/shared-types';
 import type { BidFloorView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { offeringLabel } from '@/lib/catalog';
 import { useReplaceBidFloor } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
@@ -102,8 +101,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         El mínimo que un pasajero puede ofertar en modo PUJA. Definí un piso por defecto y,
-        opcionalmente, un piso distinto por oferta (ej. moto más bajo que confort). Dejá una oferta
-        vacía para que use el default. El cambio es inmediato, server-side y queda auditado.
+        opcionalmente, uno distinto por oferta (ej. moto más bajo que confort).
       </p>
 
       <div className="mt-4 max-w-2xl space-y-3">
@@ -185,13 +183,6 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
           Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el piso de la puja.
         </p>
       ) : null}
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.updatedAt && config.version > 0
-          ? ` · actualizado ${dateTime(config.updatedAt)}`
-          : ' · sin cambios aún'}
-      </p>
     </section>
   );
 }

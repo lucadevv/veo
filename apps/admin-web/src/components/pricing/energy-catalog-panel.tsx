@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Zap } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { EnergyCatalogView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceEnergyCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -98,8 +97,8 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
         {config.active
-          ? 'Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). El sistema deriva el recargo por km de cada servicio según su rendimiento y lo aplica a la tarifa. El cambio es global y queda auditado.'
-          : 'Un precio por tipo de energía (lo que ves en el grifo o la tarifa de kWh). Este modelo todavía no afecta la tarifa: el recargo activo es el de combustible. Lo que edites acá queda guardado para cuando se active el modelo de energía.'}
+          ? 'Un precio por tipo de energía (grifo o kWh). El sistema deriva el recargo por km de cada servicio según su rendimiento.'
+          : 'Un precio por tipo de energía (grifo o kWh). Todavía no afecta la tarifa: lo que edites queda guardado para cuando se active el modelo de energía.'}
       </p>
 
       <div className="mt-4 flex max-w-2xl flex-wrap items-start gap-3">
@@ -148,11 +147,6 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
           Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar los precios de energía.
         </p>
       ) : null}
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
-      </p>
     </section>
   );
 }

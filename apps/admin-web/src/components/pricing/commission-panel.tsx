@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Percent } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { CommissionView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceCommission } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -91,11 +90,9 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
         <Percent className="size-4" aria-hidden /> Comisión por modo
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
-        Dos modelos distintos. La comisión <strong>on-demand</strong> se <strong>descuenta al
-        conductor</strong> (el pasajero paga la tarifa, el conductor recibe la tarifa menos la comisión). El{' '}
-        <strong>service fee de carpooling</strong> se <strong>suma al pasajero</strong> (cost-sharing): el
-        conductor cobra el 100% de su contribución y el fee es del pasajero, aparte. El cambio es global,
-        inmediato y queda auditado.
+        Dos modelos distintos. <strong>On-demand</strong>: la comisión se <strong>descuenta al conductor</strong>{' '}
+        (el pasajero paga la tarifa, el conductor recibe la tarifa menos la comisión). <strong>Carpooling</strong>:
+        el <strong>service fee se suma al pasajero</strong>, el conductor cobra el 100% de su contribución.
       </p>
 
       <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
@@ -158,11 +155,6 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
           Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar la comisión.
         </p>
       ) : null}
-
-      <p className="mt-3 text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
-      </p>
     </section>
   );
 }

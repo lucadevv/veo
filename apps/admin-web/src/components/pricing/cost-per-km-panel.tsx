@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Route } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { CostPerKmConfigView, CostPerKmListView } from '@/lib/api/schemas';
-import { dateTime } from '@/lib/formatters';
 import { useReplaceCostPerKm } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
@@ -106,11 +105,6 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
           />
         )
       ) : null}
-
-      <p className="w-full text-xs text-ink-subtle">
-        Versión {config.version}
-        {config.version > 0 ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · valor por defecto (sin editar)'}
-      </p>
     </div>
   );
 }
@@ -130,9 +124,9 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
         <Route className="size-4" aria-hidden /> Costo de operación por km (carpooling)
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
-        El costo real de operar el vehículo por km (combustible + desgaste). Limita el precio del carpooling
-        (cost-sharing, no lucro): el asiento no puede pasar de <strong>(distancia × costo/km + peaje) ÷ asientos</strong>.
-        El peaje lo declara el conductor por viaje. El cambio es por país, inmediato y queda auditado.
+        El costo real de operar el vehículo por km (combustible + desgaste). Limita el precio del carpooling:
+        el asiento no puede pasar de <strong>(distancia × costo/km + peaje) ÷ asientos</strong>. El peaje lo
+        declara el conductor por viaje.
       </p>
 
       <div className="mt-4 grid max-w-3xl gap-5 sm:grid-cols-2">
