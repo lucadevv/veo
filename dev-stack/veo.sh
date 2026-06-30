@@ -22,8 +22,8 @@
 #                      → tablero. Idempotente: lo ya arriba no se duplica.
 #   dev                Como `up` pero los servicios arrancan en WATCH (nest start
 #                      --watch / uvicorn --reload): editás el SRC de un servicio y
-#                      recompila + reinicia SOLO. Infra en docker; web/apps las
-#                      compilás vos aparte. Libs @veo/* y tracking(Go) → restart manual.
+#                      recompila + reinicia SOLO. Infra en docker; admin-web en WATCH (next dev/HMR);
+#                      apps RN aparte. Libs @veo/* y tracking(Go) → restart manual.
 #   down [--infra]     Apagado LIMPIO y robusto en capas (pidfiles → puertos →
 #                      pkill por patrón). Con --infra además baja los contenedores.
 #   status             El TABLERO: una fila por servicio (puerto, health, pid,
@@ -77,7 +77,8 @@ hdr()   { printf '\n%s== %s ==%s\n' "$C_BOLD$C_BLUE" "$*" "$C_RESET"; }
 #   svc          → nombre lógico (== nombre de log/pidfile, para ser uniforme).
 #   port         → puerto HTTP del servicio (regla de puertos del dueño).
 #   dir          → ruta relativa a ROOT_DIR del paquete del servicio.
-#   kind         → node | python | go  (define cómo se buildea/arranca).
+#   kind         → node | python | go | web  (define cómo se buildea/arranca).
+#                  web = Next.js (admin-web): dev→`next dev` (HMR), up→`next start` (buildeado).
 #   health-path  → ruta de health (todos exponen /health fuera del prefijo).
 # OJO: el public-bff se registra como "bff" porque ASÍ lo nombran los boot
 # scripts existentes en logs/.pids — mantenemos ese nombre para no fragmentar.
@@ -101,6 +102,10 @@ SERVICES=(
   "bff|4001|services/bff/public-bff|node|/health/live"
   "driver-bff|4002|services/bff/driver-bff|node|/health"
   "admin-bff|4003|services/bff/admin-bff|node|/health"
+  # admin-web (Next.js) — única superficie WEB que veo.sh ahora gestiona como un servicio más.
+  # Puerto 5001 (el 5000 lo ocupa ControlCenter de macOS). health = "/" → la home redirige al login
+  # (307), que el probe/tablero tratan como VIVO (igual criterio que el 401 auth-gated del admin-bff).
+  "admin-web|5001|apps/admin-web|web|/"
 )
 
 # Infra docker: "<label>|<container>|<port>".
@@ -154,7 +159,7 @@ health_probe() {
     [[ -z "$p" ]] && continue
     code="$(health_code "${base}${p}")"
     case "$code" in
-      2*|401|403) printf '%s' "$code"; return 0 ;;  # vivo (o auth-gated) → cortamos.
+      2*|3[0-9][0-9]|401|403) printf '%s' "$code"; return 0 ;;  # vivo: 2xx, redirect 3xx (admin-web "/" → /login), o auth-gated → cortamos.
     esac
     [[ "$code" != "000" ]] && last="$code"  # guardamos el último código real (no 000).
   done
@@ -336,6 +341,7 @@ boot_all() {
 
   boot_biometric
   boot_tracking
+  boot_admin_web   # web (Next.js): dev→next dev (HMR) · up→next start (buildeado). Distingue por VEO_WATCH.
 }
 
 # tracking: Go, NO nest. Corre 'go run ./cmd/server' (puerto :3004 vía
@@ -433,6 +439,70 @@ boot_biometric() {
   fi
 }
 
+# admin-web: Next.js, NO nest. Misma PLOMERÍA que biometric/tracking (pid → .pids, log → logs,
+# idempotente por puerto, reporte-no-mudo si muere al boot); SOLO cambia el COMANDO de arranque.
+#   dev (VEO_WATCH=1): `next dev` → HMR NATIVO de Next (observa su propio src). NO usa el VEO_WATCH de
+#                      nest — es solo el flag con el que distinguimos watch-vs-buildeado, igual que biometric.
+#   up  (buildeado):   `next start` sobre la build de producción. `next start` SIN build previo aborta
+#                      ("Could not find a production build") ⇒ si falta .next/BUILD_ID, buildeamos UNA vez
+#                      (coste amortizado: los `up` siguientes reusan la build). Decisión up=start / dev=dev:
+#                      respeta la semántica del script (up=buildeado, como `node dist/main`) sin pagar un
+#                      `next build` (lento) en CADA ignición.
+# ENVFILE: lo lee next.config (process.env.ENVFILE ?? 'env/development.env'). Le pasamos el MISMO valor
+# que el package.json (dev→development.env, start→production.env) — lo respetamos, no lo pisamos.
+# El puerto sale del MAPA (SERVICES), única fuente — no del -p hardcodeado del package.json.
+boot_admin_web() {
+  local line; line="$(svc_line admin-web)" || return 0
+  local svc port dir kind health
+  IFS='|' read -r svc port dir kind health <<<"$line"
+  local svc_dir="$ROOT_DIR/$dir" logf="$LOGS_DIR/$svc.log" pidf="$PIDS_DIR/$svc.pid"
+
+  if port_in_use "$port"; then
+    blue "  · admin-web ya corre en :$port (pid $(pid_on_port "$port")) — idempotente, no duplico"
+    [[ -f "$pidf" ]] || pid_on_port "$port" > "$pidf"
+    return 0
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    yel "  · admin-web: falta pnpm en PATH — no se levanta (instalá pnpm / corepack enable)"
+    return 0
+  fi
+
+  if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+    # WATCH (dev): next dev → HMR nativo. ENVFILE=env/development.env (== package.json `dev`).
+    blue "  ▶ admin-web (next dev :$port · HMR nativo) → log: $logf"
+    (
+      cd "$svc_dir" || exit 1
+      exec env ENVFILE="env/development.env" pnpm exec next dev -p "$port"
+    ) >"$logf" 2>&1 &
+    echo $! > "$pidf"
+  else
+    # UP (buildeado): si no hay build de producción, la construimos UNA vez (next start la exige).
+    if [[ ! -f "$svc_dir/.next/BUILD_ID" ]]; then
+      blue "  · admin-web: sin build de producción (.next/BUILD_ID) → 'next build' (1ª vez, puede tardar) …"
+      (
+        cd "$svc_dir" || exit 1
+        env ENVFILE="env/production.env" pnpm exec next build
+      ) >"$logf" 2>&1 || yel "  · admin-web: 'next build' devolvió error (revisá $logf) — intento 'next start' igual"
+    fi
+    # next start sobre la build. ENVFILE=env/production.env (== package.json `start`).
+    blue "  ▶ admin-web (next start :$port · buildeado) → log: $logf"
+    (
+      cd "$svc_dir" || exit 1
+      exec env ENVFILE="env/production.env" pnpm exec next start -p "$port"
+    ) >>"$logf" 2>&1 &
+    echo $! > "$pidf"
+  fi
+  log "pid $(cat "$pidf")"
+  # Reporte NO-mudo (espejo de biometric/tracking): si el proceso ya murió y el :$port no bindeó,
+  # mostramos el motivo del log (puerto tomado, env faltante, build corrupta). next dev sigue VIVO
+  # mientras compila ⇒ el kill -0 no da falso-muerto.
+  sleep 2
+  if ! kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null && ! port_in_use "$port"; then
+    red "  · admin-web: el proceso terminó al arrancar — motivo (de $logf):"
+    tail -5 "$logf" | sed 's/^/      /'
+  fi
+}
+
 # Tras el boot, garantizamos que CADA servicio arriba tenga su pidfile (el
 # registro es lo que permite un `down` limpio mañana).
 reconcile_pids() {
@@ -451,9 +521,10 @@ reconcile_pids() {
 # boot-extra ya esperan a sus nest; los rezagados son biometric (carga modelos ONNX) y tracking (go
 # compila la 1ª vez con `go run`). Loop con timeout ~60s; cortamos en cuanto cada uno da health vivo.
 wait_native_health() {
-  hdr "ESTABILIZACIÓN (servicios lentos: biometric/tracking)"
+  hdr "ESTABILIZACIÓN (servicios lentos: biometric/tracking/admin-web)"
   local timeout=60 line svc port dir kind health i code
-  for svc in biometric tracking; do
+  # admin-web incluido: next dev compila on-demand en el 1er hit (lento la 1ª vez) → esperarlo evita un ❌ falso en el tablero.
+  for svc in biometric tracking admin-web; do
     line="$(svc_line "$svc")" || continue
     IFS='|' read -r svc port dir kind health <<<"$line"
     # Si ni siquiera abrió el puerto, no hay nada que esperar (su boot ya reportó el motivo).
@@ -466,7 +537,7 @@ wait_native_health() {
     while (( i < timeout )); do
       code="$(health_probe "http://localhost:$port" "$health")"
       case "$code" in
-        2*|401|403) green "OK ($code)"; break ;;
+        2*|3[0-9][0-9]|401|403) green "OK ($code)"; break ;;  # 3xx: admin-web "/" → /login (307) = vivo (mismo criterio que health_probe/status).
       esac
       printf '.'; sleep 1; ((i++))
     done
@@ -538,6 +609,13 @@ cmd_down() {
   pkill -f "go run ./cmd/server" 2>/dev/null && log "  pkill 'go run ./cmd/server' (tracking padre)" || true
   pkill -f "tracking-service" 2>/dev/null && log "  pkill 'tracking-service'" || true
   pkill -f "exe/server" 2>/dev/null && log "  pkill 'exe/server' (binario go run de tracking)" || true
+  # admin-web (Next.js): `next dev/start` (PADRE `pnpm exec` + `node …next dev -p 5001` manager) spawnea un
+  # WORKER hijo (`next-server`) que BINDEA el :5001. El worker ya lo cazó el kill por puerto (b) — admin-web
+  # está en SERVICES con :5001. Acá rematamos manager+padre por patrón SCOPEADO AL PUERTO (ambos llevan
+  # `-p 5001` en su cmdline). NUNCA un `next dev`/`next-server` PELADO: mataría el Next de OTRO proyecto de la
+  # flota (ej. take_photo:3137) — pisar otro proyecto en silencio es justo lo que la regla de puertos prohíbe.
+  pkill -f "next dev -p 5001" 2>/dev/null && log "  pkill 'next dev -p 5001' (admin-web)" || true
+  pkill -f "next start -p 5001" 2>/dev/null && log "  pkill 'next start -p 5001' (admin-web)" || true
 
   # Infra: SOLO con --infra.
   if (( kill_infra )); then
@@ -706,6 +784,7 @@ cmd_status() {
       hcode="$(health_probe "http://localhost:$port" "$health")"
       case "$hcode" in
         200|204) hicon="✅"; hcolor="$C_GREEN"; hlabel="200 OK"; ((up++)) ;;
+        3[0-9][0-9]) hicon="✅"; hcolor="$C_GREEN"; hlabel="$hcode redirect"; ((up++)) ;;  # admin-web "/" → /login (307): vivo.
         401|403) hicon="⚠️"; hcolor="$C_YEL";   hlabel="$hcode auth-gated"; ((up++)) ;;  # admin-bff: vivo, no down.
         000)     hicon="⚠️"; hcolor="$C_YEL";   hlabel="puerto up, sin health" ;;
         *)       hicon="❌"; hcolor="$C_RED";   hlabel="HTTP $hcode" ;;
@@ -1031,6 +1110,7 @@ cmd_restart() {
       esac ;;
     python) boot_biometric ;;
     go) boot_tracking ;;
+    web) boot_admin_web ;;   # admin-web: el (re)build de Next vive DENTRO de boot_admin_web (no en el paso 2, que es solo node).
   esac
   reconcile_pids
   echo
@@ -1057,7 +1137,7 @@ build_libs() {
 # ── SUBCOMANDO: dev (WATCH — todo en vivo) ────────────────────────────────────
 # Igual que `up`, pero los servicios arrancan en WATCH (nest start --watch / uvicorn --reload):
 # editás el SRC de un servicio → recompila y reinicia SOLO, sin tocar nada. La INFRA sigue en docker.
-# La WEB (admin-web) y las APPS RN las compilás vos aparte — veo.sh no las toca.
+# admin-web ahora SÍ la gestiona veo.sh (next dev → HMR nativo de Next). Las APPS RN las compilás vos aparte.
 # LÍMITE HONESTO (libs): los servicios importan @veo/* desde su DIST → un cambio en una lib NO se
 # propaga solo (nest observa el src del servicio, no node_modules). tracking (Go) tampoco tiene watch.
 # ⇒ tocaste una lib o tracking → `veo.sh restart <svc>` (o `veo.sh dev` de nuevo, que rebuildea libs).
@@ -1074,7 +1154,7 @@ cmd_dev() {
   cmd_status
   printf '\n%s%s✓ WATCH activo:%s editá el SRC de cualquier servicio → recompila y reinicia solo.\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
   yel " Cambiaste una LIB @veo/* o tracking (Go) → 'veo.sh restart <svc>' (o 'veo.sh dev' de nuevo)."
-  yel " Web (admin-web) y apps RN: las compilás vos aparte — veo.sh no las toca."
+  yel " admin-web: gestionada por veo.sh (next dev/HMR). Apps RN: las compilás vos aparte."
   blue " 📲 OTP en vivo (driver/pasajero · SMS sandbox + email): corré  'veo.sh otp -f'  en otra terminal."
 }
 
