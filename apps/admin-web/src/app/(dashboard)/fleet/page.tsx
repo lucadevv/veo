@@ -169,8 +169,13 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
     cell: ({ row }) => <span className="text-ink-muted">{row.original.color ?? '—'}</span>,
   },
   {
+    // `status` ES `v.docStatus` (admin-bff fleet.service.ts:324): la VIGENCIA de los papeles del vehículo
+    // (SOAT/ITV) — VALID="Vigente" · EXPIRING="Por vencer" · EXPIRED="Vencido". NO es el veredicto de
+    // operabilidad (esa es la columna de al lado). Es un INSUMO del veredicto + el aviso temprano: un vehículo
+    // `Operable` con docs "Por vencer" hay que renovarlo antes de que flipee. Header "Estado" (genérico) lo hacía
+    // ver como duplicado de Operabilidad → "Documentos" deja claro que es la vigencia de papeles.
     accessorKey: 'status',
-    header: 'Estado',
+    header: 'Documentos',
     cell: ({ row }) => <StatusPill status={row.original.status} />,
   },
   {
