@@ -13,9 +13,10 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
-import { OPERABLE_VEHICLE_CLASSES, mapMtcCategoryToVehicleType } from '@veo/shared-types';
+import { mapMtcCategoryToVehicleType } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
+import { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
   deriveVehicleReviewStatus,
@@ -115,21 +116,26 @@ export class VehiclesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly vehicleModels: VehicleModelsService,
+    private readonly operableClasses: OperableVehicleClassesProvider,
     config: ConfigService<Env, true>,
   ) {
     this.minYear = config.getOrThrow<number>('VEHICLE_MIN_YEAR');
   }
 
   /**
-   * Gate server-side: la clase de vehículo debe ser OPERABLE hoy (catálogo `OPERABLE_VEHICLE_CLASSES`,
-   * fuente única). Mientras la mototaxi esté diferida, MOTO se rechaza acá AUNQUE el cliente lo mande —
-   * la UI no autoriza, el backend sí. Cuando se habilite la oferta MOTO, el set crece y deja de bloquear.
+   * Gate server-side: la clase de vehículo debe ser OPERABLE hoy según el catálogo EFECTIVO del admin
+   * (base ⟕ overlay runtime), resuelto por `OperableVehicleClassesProvider` — NO la constante estática.
+   * Mientras la mototaxi esté diferida (sin oferta MOTO habilitada), MOTO se rechaza acá AUNQUE el cliente
+   * lo mande — la UI no autoriza, el backend sí. Cuando el admin habilite la oferta MOTO por overlay, el set
+   * crece y el gate deja de bloquear, en sincronía con el quote/createTrip (ya overlay-aware). Degradación
+   * honesta: si trip-service no responde, el provider cae al default estático (conservador) y el gate sigue.
    */
-  private assertOperableVehicleType(vehicleType: VehicleType): void {
-    if (!(OPERABLE_VEHICLE_CLASSES as readonly string[]).includes(vehicleType)) {
+  private async assertOperableVehicleType(vehicleType: VehicleType): Promise<void> {
+    const operable = await this.operableClasses.get();
+    if (!(operable as readonly string[]).includes(vehicleType)) {
       throw new ValidationError('Por ahora solo se registran autos; la mototaxi llega más adelante', {
         vehicleType,
-        operable: OPERABLE_VEHICLE_CLASSES,
+        operable,
       });
     }
   }
@@ -151,8 +157,9 @@ export class VehiclesService {
     // APPROVED (server-authoritative) — la MISMA resolución que el alta del conductor (fuente única, sin
     // texto libre divergente); si no, cae al texto libre legacy (scripts/seeds). Resuelto ANTES del create.
     const snapshot = await this.resolveModelSnapshot(input);
-    // "Solo autos" (Ola 1): valida la clase YA resuelta (cubre un spec MOTO del catálogo o un MOTO libre).
-    this.assertOperableVehicleType(snapshot.vehicleType);
+    // "Solo autos" (Ola 1): valida la clase YA resuelta (cubre un spec MOTO del catálogo o un MOTO libre)
+    // contra el catálogo EFECTIVO del admin (overlay-aware). await: el gate ahora hace I/O (lectura cacheada).
+    await this.assertOperableVehicleType(snapshot.vehicleType);
 
     const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
     if (existing) throw new ConflictError('Ya existe un vehículo con esa placa', { plate });

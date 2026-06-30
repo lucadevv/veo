@@ -20,7 +20,17 @@ import {
   type Vehicle,
 } from '../generated/prisma';
 import { VehiclesService } from './vehicles.service';
+import type { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import type { VehicleModelsService, VehicleModelMatch } from '../vehicle-models/vehicle-models.service';
+
+/**
+ * Doble del provider de clases operables (gate overlay-aware). Por defecto solo CAR (el catálogo de
+ * código de hoy): las suites existentes de registerForDriver/list/getById no tocan el gate y quedan
+ * verdes. Las suites del gate (más abajo) construyen su propio doble con MOTO habilitada o que tira.
+ */
+const OPERABLE_CAR_ONLY = {
+  get: vi.fn().mockResolvedValue([VehicleType.CAR]),
+} as unknown as OperableVehicleClassesProvider;
 
 function specRow(over: Record<string, unknown> = {}) {
   return {
@@ -93,7 +103,7 @@ function makeService(opts: { spec?: ReturnType<typeof specRow> | null; match?: V
   };
   const config = { getOrThrow: () => 2017 };
   const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({ match: opts.match });
-  const service = new VehiclesService(prisma as never, double, config as never);
+  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, config as never);
   return { service, created, findFirst, txCreate, findBestApprovedMatch, requestModel };
 }
 
@@ -209,7 +219,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
 
     // no debe lanzar: el ConflictError de dedup se traga, el vehículo se crea con freetext
     await expect(
@@ -244,7 +254,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
         vehicle: { update: vi.fn(), findUnique: vi.fn().mockResolvedValue(foreign) },
       },
     };
-    const service = new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
 
     await expect(
       service.registerForDriver('driver-1', { ...baseBody, make: 'Marca Rara XYZ', model: 'Inexistente' }),
@@ -286,7 +296,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
     // silencia el logger.error esperado (no contamina el output del test)
     const errSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
@@ -378,7 +388,7 @@ function makeCreateService(opts: { spec?: ReturnType<typeof specRow> | null } = 
   };
   // Alta ADMIN: no pasa contexto fuzzy → el doble de VehicleModelsService no se ejerce (carga deliberada).
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never);
+  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
   return { service, created, findFirst, writeCreate };
 }
 
@@ -477,7 +487,7 @@ function makeIdempotentService(existingPlate: Vehicle | null) {
     },
   };
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never);
+  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
   return { service, txCreate, outboxCreate, update };
 }
 
@@ -583,7 +593,7 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
     };
     const { double } = makeVehicleModelsDouble();
     return {
-      service: new VehiclesService(prisma as never, double, { getOrThrow: () => 2017 } as never),
+      service: new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never),
       prisma,
     };
   }
@@ -658,7 +668,7 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
     };
     const config = { getOrThrow: () => 2017 };
     const { double } = makeVehicleModelsDouble();
-    const service = new VehiclesService(prisma as never, double, config as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, config as never);
     return { service, specFindMany, docsFindMany };
   }
 
@@ -777,5 +787,71 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
     const page = await service.list({});
     expect(page.items[0]?.operable).toBe(false);
     expect(page.items[0]?.operabilityReason).toBe('NO_SPEC');
+  });
+});
+
+/**
+ * VehiclesService.create · gate de operabilidad por CLASE overlay-aware (alta del operador). Lo crítico:
+ * la clase se valida contra el catálogo EFECTIVO del admin (vía OperableVehicleClassesProvider) y NO contra
+ * la constante estática. MOTO se ACEPTA cuando el provider la reporta operable (el admin habilitó la oferta
+ * por overlay) y se RECHAZA cuando no. En degradación el provider ya cae al estático (su propia suite lo cubre).
+ */
+describe('VehiclesService.create · gate operabilidad por clase (overlay-aware)', () => {
+  function makeCreateService(operableGet: () => Promise<readonly VehicleType[]>) {
+    const created: { data?: Record<string, unknown> } = {};
+    const prisma = {
+      read: { vehicle: { findUnique: vi.fn().mockResolvedValue(null) } },
+      write: {
+        vehicle: {
+          create: vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+            created.data = data;
+            return Promise.resolve({
+              ...data,
+              id: 'veh-created',
+              createdAt: new Date('2026-06-16T00:00:00Z'),
+            } as unknown as Vehicle);
+          }),
+        },
+      },
+    };
+    const { double } = makeVehicleModelsDouble();
+    const operableClasses = { get: vi.fn(operableGet) } as unknown as OperableVehicleClassesProvider;
+    const service = new VehiclesService(
+      prisma as never,
+      double,
+      operableClasses,
+      { getOrThrow: () => 2017 } as never,
+    );
+    return { service, created };
+  }
+
+  const motoBody = {
+    plate: 'XYZ-789',
+    year: 2022,
+    color: 'Rojo',
+    make: 'Honda',
+    model: 'Wave',
+    vehicleType: SharedVehicleType.MOTO,
+  };
+
+  it('ACEPTA MOTO cuando el catálogo efectivo la reporta operable (admin habilitó la oferta por overlay)', async () => {
+    const { service, created } = makeCreateService(async () => [VehicleType.CAR, VehicleType.MOTO]);
+    const vehicle = await service.create(motoBody);
+    expect(vehicle.id).toBe('veh-created');
+    expect(created.data?.vehicleType).toBe(SharedVehicleType.MOTO);
+  });
+
+  it('RECHAZA MOTO (ValidationError) cuando el catálogo efectivo solo tiene CAR operable', async () => {
+    const { service, created } = makeCreateService(async () => [VehicleType.CAR]);
+    await expect(service.create(motoBody)).rejects.toBeInstanceOf(ValidationError);
+    // no se creó nada: el gate cortó antes del write.
+    expect(created.data).toBeUndefined();
+  });
+
+  it('ACEPTA CAR siempre (clase operable hoy)', async () => {
+    const { service, created } = makeCreateService(async () => [VehicleType.CAR]);
+    const vehicle = await service.create({ ...motoBody, vehicleType: SharedVehicleType.CAR, model: 'Civic' });
+    expect(vehicle.id).toBe('veh-created');
+    expect(created.data?.vehicleType).toBe(SharedVehicleType.CAR);
   });
 });

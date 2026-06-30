@@ -7,8 +7,11 @@ import {
   OFFERING_LIST,
   OFFERINGS,
   OfferingId,
+  operableVehicleClasses,
+  OPERABLE_VEHICLE_CLASSES,
   resolveCatalog,
   resolveOfferingModeWithPin,
+  VehicleClass,
   type OfferingCatalogOverlay,
   type OfferingSpec,
   type VehicleEligibilityAttrs,
@@ -346,5 +349,50 @@ describe('verticales especiales (B5-4 · codeadas pero OCULTAS)', () => {
       maxAgeYears: 5,
     });
     expect(premium.pricing).toEqual({ multiplier: 1.8, minFareCents: 800 });
+  });
+});
+
+describe('operableVehicleClasses (helper puro · gate de operabilidad overlay-aware)', () => {
+  it('una oferta MOTO enabled → MOTO entra en el set operable', () => {
+    const classes = operableVehicleClasses([
+      { enabled: true, vehicleClass: VehicleClass.CAR },
+      { enabled: true, vehicleClass: VehicleClass.MOTO },
+    ]);
+    expect(classes).toContain(VehicleClass.MOTO);
+    expect(classes).toContain(VehicleClass.CAR);
+  });
+
+  it('solo CAR enabled (MOTO apagada) → [CAR]', () => {
+    const classes = operableVehicleClasses([
+      { enabled: true, vehicleClass: VehicleClass.CAR },
+      { enabled: false, vehicleClass: VehicleClass.MOTO },
+    ]);
+    expect(classes).toEqual([VehicleClass.CAR]);
+  });
+
+  it('lista vacía → [] (ninguna clase operable)', () => {
+    expect(operableVehicleClasses([])).toEqual([]);
+  });
+
+  it('ninguna oferta enabled → [] aunque haya ofertas de ambas clases', () => {
+    const classes = operableVehicleClasses([
+      { enabled: false, vehicleClass: VehicleClass.CAR },
+      { enabled: false, vehicleClass: VehicleClass.MOTO },
+    ]);
+    expect(classes).toEqual([]);
+  });
+
+  it('ordena por el enum VehicleClass (CAR antes que MOTO), sin importar el orden de entrada', () => {
+    const classes = operableVehicleClasses([
+      { enabled: true, vehicleClass: VehicleClass.MOTO },
+      { enabled: true, vehicleClass: VehicleClass.CAR },
+    ]);
+    expect(classes).toEqual([VehicleClass.CAR, VehicleClass.MOTO]);
+  });
+
+  it('DRY: el default estático OPERABLE_VEHICLE_CLASSES = operableVehicleClasses(resolveCatalog(null)) = [CAR] hoy', () => {
+    // Invariante de no-regresión: refactorizar el IIFE al helper NO cambia el valor (MOTO sigue diferida).
+    expect(OPERABLE_VEHICLE_CLASSES).toEqual([VehicleClass.CAR]);
+    expect([...OPERABLE_VEHICLE_CLASSES]).toEqual(operableVehicleClasses(resolveCatalog(null)));
   });
 });

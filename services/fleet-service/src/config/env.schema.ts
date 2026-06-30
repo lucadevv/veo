@@ -31,6 +31,14 @@ export const envSchema = z.object({
   // Secreto compartido para verificar la identidad interna propagada por el BFF
   INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
+  // trip-service: base REST interna. fleet la consume para leer el catálogo EFECTIVO del admin
+  // (GET /internal/catalog, base ⟕ overlay) en el gate de operabilidad por clase del alta. Llamada
+  // SERVICE-TO-SERVICE (sin usuario): se firma con audiencia `service-rail` reusando INTERNAL_IDENTITY_SECRET.
+  TRIP_URL: requiredInProd('http://localhost:3002/api/v1'),
+  // Timeout de las llamadas REST internas salientes (mismo default que los BFFs). El gate degrada
+  // honesto si vence (cae al default estático OPERABLE_VEHICLE_CLASSES), nunca crashea el alta.
+  REST_TIMEOUT_MS: z.coerce.number().default(8000),
+
   // BR-I04: umbral (días) para marcar EXPIRING_SOON y los hitos de alerta previos al vencimiento.
   EXPIRY_WARNING_DAYS: z.coerce.number().default(30),
   EXPIRY_ALERT_MILESTONES: z.string().default('30,15,7,1'),

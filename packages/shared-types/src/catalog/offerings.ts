@@ -291,17 +291,32 @@ export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS).s
 );
 
 /**
- * Clases de vehículo OPERABLES = aquellas con AL MENOS una oferta habilitada por defecto
- * (`defaultEnabled`). Es la FUENTE ÚNICA de "qué se puede registrar/operar": el catálogo. Hoy, con
- * VEO_MOTO y VEO_MECHANIC en `defaultEnabled:false`, el resultado es `[CAR]` → "solo autos". Cuando se
- * habilite la mototaxi (Ola 2B, `defaultEnabled:true`), MOTO reaparece SOLA acá — y con ella el selector
- * del alta y la validación de fleet — sin tocar otro archivo. El orden sale del enum `VehicleClass`.
+ * Helper PURO: las clases de vehículo con AL MENOS una oferta `enabled` en la lista dada, ordenadas por
+ * el enum `VehicleClass` (mismo criterio/orden que el default estático de abajo). FUENTE ÚNICA del cómputo
+ * "qué clase es operable": la consumen TANTO el default ESTÁTICO de código (`OPERABLE_VEHICLE_CLASSES`,
+ * aplicado a `resolveCatalog(null)` = todas las ofertas con `enabled = defaultEnabled`) COMO el gate
+ * overlay-aware del alta de fleet (aplicado al catálogo EFECTIVO del admin, base ⟕ overlay). Pura y
+ * unit-testeable (sin I/O ni catálogo hardcodeado): recibe las ofertas ya resueltas y deriva el set.
  */
-// DEUDA: OPERABLE_VEHICLE_CLASSES deriva del default ESTÁTICO del catálogo, no del overlay runtime del admin · techo: si el admin habilita una oferta MOTO por overlay, el alta del conductor la seguiría bloqueando · gatillo: cuando el alta deba respetar overlays del admin → mover esta verdad a un endpoint overlay-aware (fleet/bff)
-export const OPERABLE_VEHICLE_CLASSES: readonly VehicleClass[] = (() => {
-  const enabled = new Set(OFFERING_LIST.filter((o) => o.defaultEnabled).map((o) => o.vehicleClass));
+export function operableVehicleClasses(
+  offerings: ReadonlyArray<{ enabled: boolean; vehicleClass: VehicleClass }>,
+): VehicleClass[] {
+  const enabled = new Set(offerings.filter((o) => o.enabled).map((o) => o.vehicleClass));
   return Object.values(VehicleClass).filter((c) => enabled.has(c));
-})();
+}
+
+/**
+ * Clases de vehículo OPERABLES por DEFAULT de código = aquellas con AL MENOS una oferta habilitada por
+ * defecto (`defaultEnabled`). Es el fallback CONSERVADOR de "qué se puede registrar/operar" cuando el
+ * catálogo EFECTIVO del admin no está disponible (degradación honesta de fleet). Hoy, con VEO_MOTO y
+ * VEO_MECHANIC en `defaultEnabled:false`, el resultado es `[CAR]` → "solo autos". Se deriva con el MISMO
+ * helper que el gate overlay-aware (DRY), aplicado a `resolveCatalog(null)` (que resuelve cada oferta con
+ * `enabled = defaultEnabled`, sin overlay): UNA sola definición de "operable", dos fuentes (estática /
+ * efectiva). El orden sale del enum `VehicleClass`.
+ */
+export const OPERABLE_VEHICLE_CLASSES: readonly VehicleClass[] = operableVehicleClasses(
+  resolveCatalog(null),
+);
 
 /** Clase de vehículo por DEFECTO del alta = la primera operable (hoy `CAR`). */
 export const DEFAULT_VEHICLE_CLASS: VehicleClass = OPERABLE_VEHICLE_CLASSES[0] ?? VehicleClass.CAR;
