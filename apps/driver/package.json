@@ -14,6 +14,8 @@
     "ios:preview": "ENVFILE=env/preview.env react-native run-ios --list-devices",
     "start": "react-native start",
     "dev": "react-native start --reset-cache",
+    "xcode": "open ios/VEODriver.xcworkspace",
+    "logs:ios": "xcrun simctl spawn booted log stream --level=debug --style=compact --predicate 'processImagePath CONTAINS \"VEODriver\"'",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",

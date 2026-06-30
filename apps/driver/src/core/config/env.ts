@@ -127,6 +127,12 @@ const envSchema = z.object({
   MAP_STYLE_URL: optionalUrl,
   /** Correo del canal de soporte al conductor (resuelto desde config, no hardcodeado en la UI). */
   SUPPORT_EMAIL: z.string().email(),
+  /**
+   * FCM/push ON/OFF. `false` en dev (sin credenciales APNs ni el entitlement `aps-environment`):
+   * registrar push en iOS sin ese entitlement es un CRASH NATIVO que el try/catch de JS NO atrapa.
+   * Con `false` el push se saltea (degradación honesta). `true` SOLO con Firebase + APNs configurados.
+   */
+  FIREBASE_ENABLED: z.boolean(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -139,6 +145,8 @@ function loadEnv(): AppEnv {
     MAPBOX_ACCESS_TOKEN: Config.MAPBOX_ACCESS_TOKEN ?? '',
     MAP_STYLE_URL: resolveBackendUrl(Config.MAP_STYLE_URL, devDefaults.mapStyleUrl),
     SUPPORT_EMAIL: Config.SUPPORT_EMAIL || DEFAULT_SUPPORT_EMAIL,
+    // react-native-config entrega strings → 'true' es el ÚNICO valor que habilita el push. Ausente/'' → false.
+    FIREBASE_ENABLED: Config.FIREBASE_ENABLED === 'true',
   };
 
   const parsed = envSchema.safeParse(raw);

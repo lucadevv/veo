@@ -2,18 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>ClashDisplay-Bold.otf</string>
-		<string>ClashDisplay-Semibold.otf</string>
-		<string>ClashDisplay-Medium.otf</string>
-		<string>ClashDisplay-Regular.otf</string>
-		<string>Outfit-Regular.ttf</string>
-		<string>Outfit-Medium.ttf</string>
-		<string>Outfit-SemiBold.ttf</string>
-		<string>Outfit-Bold.ttf</string>
-		<string>Fraunces72pt-SemiBold.ttf</string>
-	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>es</string>
 	<key>CFBundleDisplayName</key>
@@ -45,8 +33,6 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>VEO usa la cámara para la verificación facial al iniciar turno, para la grabación de seguridad durante el viaje y para fotografiar tus documentos del registro.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>VEO accede a tus fotos para que puedas adjuntar imágenes de tus documentos del registro.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>VEO usa Face ID para verificar tu identidad de forma segura al iniciar el turno.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
@@ -57,8 +43,24 @@
 	<string>VEO usa tu ubicación durante el turno para asignarte viajes cercanos y compartir tu posición con el pasajero.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VEO usa el micrófono para la comunicación de audio y el monitoreo de seguridad durante el viaje.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>VEO usa los sensores de movimiento para mejorar la precisión del seguimiento GPS y optimizar la batería durante tus viajes.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>VEO accede a tus fotos para que puedas adjuntar imágenes de tus documentos del registro.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>ClashDisplay-Bold.otf</string>
+		<string>ClashDisplay-Semibold.otf</string>
+		<string>ClashDisplay-Medium.otf</string>
+		<string>ClashDisplay-Regular.otf</string>
+		<string>Outfit-Regular.ttf</string>
+		<string>Outfit-Medium.ttf</string>
+		<string>Outfit-SemiBold.ttf</string>
+		<string>Outfit-Bold.ttf</string>
+		<string>Fraunces72pt-SemiBold.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

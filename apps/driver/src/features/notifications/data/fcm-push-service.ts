@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { env } from '../../../core/config/env';
 import type {
   DevicePlatform,
   OnPushDataMessage,
@@ -35,6 +36,12 @@ interface MessagingModule {
  * está configurado, devuelve `null` sin romper el arranque (modo dev sandbox/log).
  */
 function loadMessaging(): MessagingModule | null {
+  // GATE: sin FIREBASE_ENABLED no se toca el SDK nativo. En iOS, requestPermission()/getToken() disparan
+  // el registro APNs, y SIN el entitlement `aps-environment` eso es un CRASH NATIVO (no atrapable por el
+  // try/catch de JS). En dev no hay APNs → push OFF y la app degrada por el path NOOP de `start()`.
+  if (!env.FIREBASE_ENABLED) {
+    return null;
+  }
   try {
     // require lazy/opcional: el módulo nativo puede no estar presente (degradación honesta). Va dentro
     // del try/catch a propósito; un import estático tiraría al CARGAR el módulo si el nativo falta.
