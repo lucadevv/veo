@@ -24,20 +24,19 @@ export class VehiclesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar la flota (paginado cursor). Filtros: docStatus, active' })
+  @ApiOperation({ summary: 'Listar la flota (paginado cursor). Filtro: docStatus' })
   @ApiQuery({ name: 'docStatus', required: false, enum: VehicleDocStatus })
-  @ApiQuery({ name: 'active', required: false, type: Boolean })
   @ApiQuery({ name: 'cursor', required: false })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   list(
     @Query('docStatus') docStatus?: VehicleDocStatus,
-    @Query('active') active?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ): Promise<Page<VehicleListItem>> {
+    // El filtro `active` se ELIMINÓ (Lote 4): era la columna stored muerta. La operabilidad real va DERIVADA
+    // en cada ítem (`operable`); para filtrar por estado se usa `docStatus`.
     return this.vehicles.list({
       docStatus,
-      active: active === undefined ? undefined : active === 'true',
       cursor,
       limit: limit ? Number(limit) : undefined,
     });

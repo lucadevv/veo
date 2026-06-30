@@ -11,6 +11,7 @@ import {
   tripSummary,
   driverSummary,
   fleetDocumentStatus,
+  vehicleOperabilityReason,
   documentSide,
 } from './types.js';
 import { pricingMode } from './mobile.js';
@@ -752,6 +753,12 @@ export const vehicleView = z.object({
   year: z.number().int().nullable(),
   color: z.string().nullable(),
   status: z.string(),
+  // Operabilidad DERIVADA (Lote 4): el MISMO veredicto que gatea el match (docs SOAT/ITV operables Y ficha
+  // linkeada Y docStatus !== EXPIRED) — la fuente que consume el gRPC (booking/dispatch). El panel la muestra como
+  // OPERABLE/NO OPERABLE; `operabilityReason` da el PORQUÉ (DOCS/NO_SPEC, server-side · null si opera) — la UI lo
+  // ETIQUETA, no re-deriva la regla (mata el magic string que antes recomponía el motivo desde docStatus).
+  operable: z.boolean(),
+  operabilityReason: vehicleOperabilityReason.nullable(),
   driverId: z.string().nullable(),
   // Ficha técnica del MATCH vehículo↔config. El dispatch gatea la eligibilidad de oferta con segment + seats
   // (+ el `year` de arriba); energySource/efficiency se MUESTRAN pero NO deciden match ni pricing (el precio de

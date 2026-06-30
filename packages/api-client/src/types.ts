@@ -176,6 +176,14 @@ export const fleetDocumentStatus = z.enum([
 ]);
 
 /**
+ * MOTIVO por el que un vehículo NO opera (Lote 4). Espeja `VehicleOperabilityReason` de @veo/shared-types
+ * (fuente de verdad cross-service) y `deriveVehicleOperability` de fleet-service. DOCS = docs SOAT/ITV no
+ * operables o vencidos; NO_SPEC = falta la ficha (modelSpec). Tiparlo (no `z.string()`) ata el label del panel
+ * al set real — comparar contra un literal fuera de él es error de compilación, no un magic string mudo.
+ */
+export const vehicleOperabilityReason = z.enum(['DOCS', 'NO_SPEC']);
+
+/**
  * Sub-lote 3A · cara/lado de una IMAGEN de documento (múltiples imágenes por documento). Espeja el enum
  * `DocumentSide` de fleet-service (Prisma) y @veo/shared-types. SINGLE = una sola cara/foto; FRONT/BACK =
  * anverso/reverso (DNI). Definido acá (base compartida) para que admin.ts y mobile.ts lo reusen sin colisión.

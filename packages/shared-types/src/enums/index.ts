@@ -427,6 +427,21 @@ export const FleetDocumentStatus = {
 export type FleetDocumentStatus = (typeof FleetDocumentStatus)[keyof typeof FleetDocumentStatus];
 
 /**
+ * MOTIVO por el que un vehículo NO opera — fuente de verdad TIPADA cross-service para que el panel admin
+ * diga el PORQUÉ sin magic strings. La operabilidad es DERIVADA (`deriveVehicleOperability` en fleet-service,
+ * espejo del gate de booking); cuando es false, este enum dice qué falta:
+ *  - DOCS: los documentos requeridos (SOAT + ITV) no están operables, o el agregado documental venció (EXPIRED).
+ *  - NO_SPEC: falta la ficha técnica (modelSpec sin linkear) → el dispatch no puede matchear segmento/asientos.
+ * Prioridad DOCS (eje legal/seguridad) antes que NO_SPEC. `null` ⟺ el vehículo SÍ opera.
+ */
+export const VehicleOperabilityReason = {
+  DOCS: 'DOCS',
+  NO_SPEC: 'NO_SPEC',
+} as const;
+export type VehicleOperabilityReason =
+  (typeof VehicleOperabilityReason)[keyof typeof VehicleOperabilityReason];
+
+/**
  * CAUSA de un hold de suspensión del conductor (modelo de HOLDS · `DriverSuspensionHold`). Espejo TIPADO
  * del enum Prisma `SuspensionCause` de identity-service (los valores DEBEN coincidir 1:1 con la columna
  * `cause`). Discrimina QUÉ vía de reactivación corresponde — fuente de verdad para que backend Y panel

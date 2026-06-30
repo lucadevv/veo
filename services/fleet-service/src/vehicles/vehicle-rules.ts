@@ -1,9 +1,17 @@
 /**
  * Reglas de dominio puras del vehículo (BR-D04). Funciones puras, sin I/O.
  */
-import { FleetDocumentType, FleetDocumentStatus } from '@veo/shared-types';
+import {
+  FleetDocumentType,
+  FleetDocumentStatus,
+  VehicleOperabilityReason,
+} from '@veo/shared-types';
 import { VehicleDocStatus } from '../generated/prisma';
 import { isDocumentValid, type ExpiryStatus } from '../documents/document-rules';
+
+// Re-export del enum cross-service (fuente de verdad en @veo/shared-types) para los consumidores de fleet-service.
+// El binding importado trae valor + tipo (const+type merged), así que `export { }` re-exporta ambos.
+export { VehicleOperabilityReason };
 
 /** BR-D04: el vehículo debe ser del año mínimo en adelante (por defecto 2017). */
 export function isVehicleYearEligible(year: number, minYear = 2017): boolean {
@@ -56,6 +64,29 @@ export function deriveVehicleReviewStatus(input: {
   return input.docsOperable && input.modelSpecId !== null
     ? VehicleReviewStatus.ACTIVE
     : VehicleReviewStatus.PENDING_REVIEW;
+}
+
+/**
+ * VEREDICTO DE OPERABILIDAD del vehículo + el MOTIVO — la FUENTE ÚNICA que el panel admin MUESTRA para
+ * coincidir EXACTAMENTE con el gate que aplica el carpooling/dispatch (`isVehicleOperable` de booking).
+ *
+ * Espeja ese gate al pie de la letra: `deriveVehicleReviewStatus===ACTIVE` (docs SOAT/ITV operables Y ficha
+ * linkeada) Y ADEMÁS `docStatus !== EXPIRED`. Ese segundo eje (vencimiento agregado) es la defensa-en-profundidad
+ * que booking aplica sobre el reply gRPC; sin él, el panel SOBRE-REPORTABA operabilidad (mostraba operable un
+ * vehículo que booking rechaza por vencimiento) — exactamente el desajuste panel↔backend que el Lote 4 cierra.
+ * Solo puede hacer el veredicto MÁS conservador, nunca sobre-desbloquear.
+ */
+export function deriveVehicleOperability(input: {
+  docsOperable: boolean;
+  modelSpecId: string | null;
+  docStatus: VehicleDocStatus;
+}): { operable: boolean; reason: VehicleOperabilityReason | null } {
+  const docsOk = input.docsOperable && input.docStatus !== VehicleDocStatus.EXPIRED;
+  if (!docsOk) return { operable: false, reason: VehicleOperabilityReason.DOCS };
+  if (input.modelSpecId === null) {
+    return { operable: false, reason: VehicleOperabilityReason.NO_SPEC };
+  }
+  return { operable: true, reason: null };
 }
 
 /** Campos que deciden cuál es el vehículo ACTIVO (operado) del conductor. */

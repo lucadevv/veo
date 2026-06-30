@@ -19,6 +19,8 @@ import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
 import {
   deriveVehicleReviewStatus,
+  deriveVehicleOperability,
+  VehicleOperabilityReason,
   hasRequiredVehicleDocsOperable,
   isVehicleYearEligible,
   pickActiveVehicle,
@@ -95,6 +97,14 @@ export type VehicleListItem = Vehicle & {
   energySource: string | null;
   efficiency: number | null;
   seats: number | null;
+  /**
+   * VEREDICTO DE OPERABILIDAD + MOTIVO, computados server-side por `deriveVehicleOperability` (FUENTE ÚNICA que
+   * espeja EXACTO el gate de booking/dispatch: docs SOAT/ITV operables Y ficha linkeada Y docStatus !== EXPIRED).
+   * El panel admin los MUESTRA tal cual (la UI refleja, no re-deriva) para coincidir con el backend, en vez del
+   * flag `active` stored (DEPRECADO: se setea al alta y nada lo mantiene). `operabilityReason` es null si opera.
+   */
+  operable: boolean;
+  operabilityReason: VehicleOperabilityReason | null;
 };
 
 @Injectable()
@@ -232,18 +242,31 @@ export class VehiclesService {
     const specIds = [
       ...new Set(vehicles.map((v) => v.modelSpecId).filter((id): id is string => id !== null)),
     ];
-    const specs = specIds.length
-      ? await this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
-      : [];
+    // Las DOS lecturas (specs por modelSpecId · docs operables por vehicleId) son INDEPENDIENTES → en PARALELO
+    // (Promise.all), no en serie: la latencia de cada list()/getById() es el MÁXIMO de ambas, no su suma.
+    const [specs, operableById] = await Promise.all([
+      specIds.length
+        ? this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
+        : Promise.resolve([]),
+      this.vehicleDocsOperableMap(vehicles.map((v) => v.id)),
+    ]);
     const specById = new Map(specs.map((s) => [s.id, s] as const));
     return vehicles.map((v) => {
       const spec = v.modelSpecId ? specById.get(v.modelSpecId) : undefined;
+      // Veredicto + motivo DERIVADOS por la FUENTE ÚNICA (espeja el gate de booking, incl. docStatus !== EXPIRED).
+      const { operable, reason } = deriveVehicleOperability({
+        docsOperable: operableById.get(v.id) ?? false,
+        modelSpecId: v.modelSpecId,
+        docStatus: v.docStatus,
+      });
       return {
         ...v,
         segment: spec?.segment ?? null,
         energySource: spec?.energySource ?? null,
         efficiency: spec?.efficiency ?? null,
         seats: spec?.seats ?? null,
+        operable,
+        operabilityReason: reason,
       };
     });
   }
@@ -293,23 +316,36 @@ export class VehiclesService {
     // enrichWithSpec mapea 1:1; con un único input hay un único output. El fallback a ficha-nula nunca se
     // alcanza en la práctica, pero es la misma degradación honesta de un vehículo legacy sin modelSpec.
     const [enriched] = await this.enrichWithSpec([vehicle]);
-    return enriched ?? { ...vehicle, segment: null, energySource: null, efficiency: null, seats: null };
+    return (
+      enriched ?? {
+        ...vehicle,
+        segment: null,
+        energySource: null,
+        efficiency: null,
+        seats: null,
+        operable: false,
+        operabilityReason: VehicleOperabilityReason.DOCS,
+      }
+    );
   }
 
   /**
-   * Lista paginada de la flota para el operador (admin). Filtros opcionales por estado documental y
-   * actividad. Paginación cursor por id (uuidv7 ⇒ orden temporal estable, sin offset costoso).
+   * Lista paginada de la flota para el operador (admin). Filtro opcional por estado documental.
+   * Paginación cursor por id (uuidv7 ⇒ orden temporal estable, sin offset costoso).
+   *
+   * El filtro stored `active` quedó DEPRECADO (Lote 4): la columna `Vehicle.active` se setea al alta y NADA
+   * la mantiene (el sweeper no la flipea), así que filtrar por ella mentía. La operabilidad REAL es DERIVADA
+   * (`operable` en cada ítem, mismo veredicto que el gRPC). Para filtrar por operabilidad se usa `docStatus`
+   * (estado documental, sí mantenido) — no la columna muerta.
    */
   async list(opts: {
     docStatus?: VehicleDocStatus;
-    active?: boolean;
     cursor?: string;
     limit?: number;
   }): Promise<Page<VehicleListItem>> {
     const limit = clampLimit(opts.limit);
     const where: Prisma.VehicleWhereInput = {};
     if (opts.docStatus) where.docStatus = opts.docStatus;
-    if (opts.active !== undefined) where.active = opts.active;
     if (opts.cursor) where.id = { lt: opts.cursor };
     const rows = await this.prisma.read.vehicle.findMany({
       where,

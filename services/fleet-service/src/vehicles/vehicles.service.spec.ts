@@ -7,7 +7,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { ConflictError, ValidationError } from '@veo/utils';
-import { VehicleType as SharedVehicleType } from '@veo/shared-types';
+import {
+  VehicleType as SharedVehicleType,
+  FleetDocumentType,
+  FleetDocumentStatus,
+} from '@veo/shared-types';
 import {
   VehicleDocStatus,
   VehicleModelSource,
@@ -636,18 +640,22 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
   function listService(
     vehicles: Array<Record<string, unknown>>,
     specs: Array<Record<string, unknown>>,
+    vehicleDocs: Array<Record<string, unknown>> = [],
   ) {
     const specFindMany = vi.fn().mockResolvedValue(specs);
+    const docsFindMany = vi.fn().mockResolvedValue(vehicleDocs);
     const prisma = {
       read: {
         vehicle: { findMany: vi.fn().mockResolvedValue(vehicles) },
         vehicleModelSpec: { findMany: specFindMany },
+        // Operabilidad derivada (Lote 4): enrichWithSpec batchea los docs requeridos del vehículo.
+        fleetDocument: { findMany: docsFindMany },
       },
     };
     const config = { getOrThrow: () => 2017 };
     const { double } = makeVehicleModelsDouble();
     const service = new VehiclesService(prisma as never, double, config as never);
-    return { service, specFindMany };
+    return { service, specFindMany, docsFindMany };
   }
 
   const veh = (over: Record<string, unknown> = {}) => ({
@@ -710,5 +718,60 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
       efficiency: null,
       seats: null,
     });
+  });
+
+  // Lote 4 — operabilidad DERIVADA (el panel debe coincidir con el backend gRPC, NO con el flag `active` stored).
+  const operableDocs = (vehicleId: string) => [
+    { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.VALID, ownerId: vehicleId },
+    { type: FleetDocumentType.ITV, status: FleetDocumentStatus.VALID, ownerId: vehicleId },
+  ];
+
+  const spec = { id: 'spec-1', segment: 'NORMAL', energySource: 'GASOLINE', efficiency: 14, seats: 4 };
+
+  it('operable=true SOLO si docs SOAT/ITV operables Y ficha Y docStatus!=EXPIRED (mismo veredicto que booking)', async () => {
+    const { service } = listService(
+      [veh({ id: 'veh-ok', modelSpecId: 'spec-1', active: false, docStatus: VehicleDocStatus.VALID })],
+      [spec],
+      operableDocs('veh-ok'),
+    );
+    const page = await service.list({});
+    // active stored era false, pero la operabilidad DERIVADA es true → el panel ve la verdad; sin motivo.
+    expect(page.items[0]?.operable).toBe(true);
+    expect(page.items[0]?.operabilityReason).toBeNull();
+  });
+
+  it('operable=false (motivo DOCS) si faltan los docs requeridos, aunque tenga ficha', async () => {
+    const { service } = listService(
+      [veh({ id: 'veh-nodocs', modelSpecId: 'spec-1', active: true })], // active=true stored: mentiría
+      [spec],
+      [], // sin SOAT/ITV operables
+    );
+    const page = await service.list({});
+    expect(page.items[0]?.operable).toBe(false);
+    expect(page.items[0]?.operabilityReason).toBe('DOCS');
+  });
+
+  it('operable=false (motivo DOCS) si docStatus===EXPIRED, aunque los docs-row y la ficha estén OK (eje vencimiento, espeja booking)', async () => {
+    // Este es el eje que el panel ANTES ignoraba (sobre-reportaba): docs-row operables + ficha, pero el agregado
+    // docStatus venció → booking lo rechaza. El veredicto del panel ahora lo incluye → coincide con el backend.
+    const { service } = listService(
+      [veh({ id: 'veh-exp', modelSpecId: 'spec-1', docStatus: VehicleDocStatus.EXPIRED })],
+      [spec],
+      operableDocs('veh-exp'),
+    );
+    const page = await service.list({});
+    expect(page.items[0]?.operable).toBe(false);
+    expect(page.items[0]?.operabilityReason).toBe('DOCS');
+  });
+
+  it('operable=false (motivo NO_SPEC) si NO tiene ficha, aunque los docs estén operables', async () => {
+    const { service } = listService(
+      [veh({ id: 'veh-nospec', modelSpecId: null, active: true })],
+      [],
+      operableDocs('veh-nospec'),
+    );
+    const page = await service.list({});
+    expect(page.items[0]?.operable).toBe(false);
+    expect(page.items[0]?.operabilityReason).toBe('NO_SPEC');
   });
 });

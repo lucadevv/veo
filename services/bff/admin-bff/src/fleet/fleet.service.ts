@@ -5,6 +5,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
+import { VehicleOperabilityReason } from '@veo/shared-types';
 import type {
   ExpiringDocumentView,
   FleetDocumentView,
@@ -44,6 +45,12 @@ interface Vehicle {
   color: string;
   docStatus: string;
   active: boolean;
+  // Operabilidad DERIVADA (Lote 4): el MISMO veredicto que gatea el match (docs SOAT/ITV operables Y ficha
+  // linkeada Y docStatus !== EXPIRED). El panel la MUESTRA en vez del flag `active` stored (DEPRECADO, nada lo
+  // mantiene). `operabilityReason` dice el PORQUÉ cuando no opera (DOCS/NO_SPEC), null si opera. Opcional por
+  // compat: un fleet-service viejo no los envía → degradamos a no-operable + motivo DOCS (dirección segura).
+  operable?: boolean;
+  operabilityReason?: VehicleOperabilityReason | null;
   driverId: string | null;
   // Ficha técnica del MATCH (fleet-service la enriquece desde el modelSpec; ver VehicleListItem). Opcional/nullable
   // por compat: un fleet-service viejo no la envía → el panel degrada a "—" (nunca rompe).
@@ -315,6 +322,13 @@ function toVehicleView(v: Vehicle): VehicleView {
     year: v.year,
     color: v.color,
     status: v.docStatus,
+    // Veredicto de operabilidad + motivo (Lote 4): el panel los MUESTRA para coincidir con el backend del match.
+    // Un fleet-service viejo que no los envía → no-operable + motivo DOCS (degradación segura, no sobre-reporta).
+    operable: v.operable ?? false,
+    operabilityReason:
+      v.operable === undefined
+        ? VehicleOperabilityReason.DOCS
+        : (v.operabilityReason ?? null),
     driverId: v.driverId ?? null,
     // Ficha técnica del match (degradación honesta: un fleet-service que aún no la envía → null → "—" en el panel).
     vehicleType: v.vehicleType ?? null,

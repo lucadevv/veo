@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
+import { Badge } from '@/components/ui/badge';
 import { ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -41,6 +42,14 @@ import {
 const OWNER_LABEL: Record<'DRIVER' | 'VEHICLE', string> = {
   DRIVER: 'Conductor',
   VEHICLE: 'Vehículo',
+};
+
+// Etiqueta en español del MOTIVO de no-operabilidad (server-side, enum `vehicleOperabilityReason` del contrato).
+// La UI solo ROTULA el veredicto del servidor — NO re-deriva la regla desde docStatus (eso era un magic string y
+// divergía del veredicto real). DOCS = docs SOAT/ITV no vigentes; NO_SPEC = falta la ficha del match.
+const OPERABILITY_REASON_LABEL: Record<'DOCS' | 'NO_SPEC', string> = {
+  DOCS: 'docs no vigentes',
+  NO_SPEC: 'sin ficha',
 };
 
 const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
@@ -95,6 +104,29 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
         {row.original.year ? ` (${row.original.year})` : ''}
       </span>
     ),
+  },
+  {
+    // VEREDICTO DE OPERABILIDAD (Lote 4) — la pregunta que el operador realmente hace: "¿este vehículo PUEDE
+    // recibir viajes?". Lo decide el SERVIDOR (`operable`, el MISMO veredicto que gatea el match: docs SOAT/ITV
+    // operables Y ficha linkeada Y docStatus !== EXPIRED) — la UI solo lo REFLEJA. El "por qué" también viene del
+    // servidor (`operabilityReason`, computado en la MISMA función que el veredicto) y la UI solo lo ROTULA →
+    // cero divergencia, cero magic string (la UI NO re-deriva la regla desde docStatus/segment).
+    // Reemplaza el flag `active` stored (DEPRECADO: se seteaba al alta y nada lo mantenía → el panel mentía).
+    id: 'operability',
+    header: 'Operabilidad',
+    cell: ({ row }) => {
+      if (row.original.operable) return <Badge tone="success">Operable</Badge>;
+      // El MOTIVO viene tipado del servidor (mismo cómputo que el veredicto) → cero divergencia, cero magic string.
+      const motivo = row.original.operabilityReason
+        ? OPERABILITY_REASON_LABEL[row.original.operabilityReason]
+        : null;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <Badge tone="danger">No operable</Badge>
+          {motivo && <span className="text-xs text-ink-muted">{motivo}</span>}
+        </div>
+      );
+    },
   },
   {
     // F1 · LA FICHA DEL MATCH. El dispatch decide la eligibilidad de oferta (Confort/XL/Premium) con
