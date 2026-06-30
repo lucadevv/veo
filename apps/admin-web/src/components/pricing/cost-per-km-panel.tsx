@@ -7,6 +7,7 @@ import type { CostPerKmConfigView, CostPerKmListView } from '@/lib/api/schemas';
 import { useReplaceCostPerKm } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,16 +21,6 @@ const MAX_CENTS = 10_000;
 /** Etiqueta legible del país. */
 const PAIS_LABEL: Record<string, string> = { PE: 'Perú (PEN)', EC: 'Ecuador (USD→PEN ref.)' };
 
-/** céntimos Int → soles para mostrar (150 → "1.50"). */
-function centsToSoles(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
-
-/** soles (string del input) → céntimos Int (dinero SIEMPRE Int, nunca float persistido). Vacío = 0. */
-function solesToCents(soles: string): number {
-  return soles.trim() === '' ? 0 : Math.round(Number(soles) * 100);
-}
-
 /** Fila editable de UN país (cada país versiona su tarifa por separado · CAS independiente). */
 function CountryRow({ config }: { config: CostPerKmConfigView }) {
   const user = useSession();
@@ -37,9 +28,9 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
   const { toast } = useToast();
   const replace = useReplaceCostPerKm();
 
-  const [soles, setSoles] = useState<string>(centsToSoles(config.costPerKmCents));
+  const [soles, setSoles] = useState<string>(formatSolesInput(config.costPerKmCents));
 
-  const cents = solesToCents(soles);
+  const cents = parseSolesInput(soles);
   const invalid = !Number.isInteger(cents) || cents < MIN_CENTS || cents > MAX_CENTS;
   const dirty = cents !== config.costPerKmCents;
 
@@ -51,7 +42,7 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
         costPerKmCents: cents,
         expectedVersion: config.version,
       });
-      toast({ tone: 'success', title: `Costo/km ${config.pais}: S/${centsToSoles(cents)}` });
+      toast({ tone: 'success', title: `Costo/km ${config.pais}: S/${formatSolesInput(cents)}` });
     } catch (err) {
       // 409 = otro admin cambió el config mientras editabas. El hook re-sincroniza (onSettled) → el panel
       // muestra el valor vigente; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
@@ -69,8 +60,8 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
     <div className="flex flex-wrap items-end gap-3">
       <Field
         label={`${PAIS_LABEL[config.pais] ?? config.pais} — S/ por km`}
-        hint={`Actual: S/${centsToSoles(config.costPerKmCents)}/km`}
-        error={invalid ? `Entre S/${centsToSoles(MIN_CENTS)} y S/${centsToSoles(MAX_CENTS)}` : undefined}
+        hint={`Actual: S/${formatSolesInput(config.costPerKmCents)}/km`}
+        error={invalid ? `Entre S/${formatSolesInput(MIN_CENTS)} y S/${formatSolesInput(MAX_CENTS)}` : undefined}
       >
         <Input
           type="number"
@@ -79,8 +70,8 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
           // (`:invalid`) para valores legítimos como 1.50/0.50 — no caen en la grilla 0.01+0.10·n. El costo/km
           // es dinero en céntimos: 0.01 es la granularidad natural y alinea min↔step (sin falso `invalid`).
           step="0.01"
-          min={centsToSoles(MIN_CENTS)}
-          max={centsToSoles(MAX_CENTS)}
+          min={formatSolesInput(MIN_CENTS)}
+          max={formatSolesInput(MAX_CENTS)}
           value={soles}
           onChange={(e) => setSoles(e.target.value)}
           disabled={!canManage}

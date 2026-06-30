@@ -7,6 +7,7 @@ import type { FuelSurchargeView } from '@/lib/api/schemas';
 import { useReplaceFuelSurcharge } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,11 +39,11 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const replace = useReplaceFuelSurcharge();
 
   const [priceSoles, setPriceSoles] = useState<string>(
-    (config.fuelPricePerLiterCents / 100).toFixed(2),
+    formatSolesInput(config.fuelPricePerLiterCents),
   );
   const [kmPerLiter, setKmPerLiter] = useState<string>(String(config.kmPerLiter));
 
-  const priceCents = priceSoles.trim() === '' ? 0 : Math.round(Number(priceSoles) * 100);
+  const priceCents = parseSolesInput(priceSoles);
   const km = kmPerLiter.trim() === '' ? 0 : Math.round(Number(kmPerLiter));
   const priceInvalid =
     !Number.isFinite(priceCents) || priceCents < 0 || priceCents > MAX_SOLES_PER_LITER * 100;
@@ -63,7 +64,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
       });
       toast({
         tone: 'success',
-        title: `Combustible: S/${(priceCents / 100).toFixed(2)}/L ÷ ${km} km/L → recargo S/${(derivedPerKmCents / 100).toFixed(2)}/km`,
+        title: `Combustible: S/${formatSolesInput(priceCents)}/L ÷ ${km} km/L → recargo S/${formatSolesInput(derivedPerKmCents)}/km`,
       });
     } catch (err) {
       // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
@@ -91,7 +92,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
       <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">
         <Field
           label="Precio del combustible (S/ por litro)"
-          hint={`Actual: S/${(config.fuelPricePerLiterCents / 100).toFixed(2)}`}
+          hint={`Actual: S/${formatSolesInput(config.fuelPricePerLiterCents)}`}
           error={priceInvalid ? `Entre 0 y ${MAX_SOLES_PER_LITER}` : undefined}
         >
           <Input
@@ -148,12 +149,12 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
       <p className="mt-3 text-sm text-ink">
         Recargo derivado:{' '}
         <span className="font-medium text-accent">
-          S/{(derivedPerKmCents / 100).toFixed(2)} por km
+          S/{formatSolesInput(derivedPerKmCents)} por km
         </span>{' '}
         <span className="text-ink-subtle">
           {config.active
-            ? `(vigente: S/${(config.perKmCents / 100).toFixed(2)}/km)`
-            : `(guardado: S/${(config.perKmCents / 100).toFixed(2)}/km · sin efecto hoy)`}
+            ? `(vigente: S/${formatSolesInput(config.perKmCents)}/km)`
+            : `(guardado: S/${formatSolesInput(config.perKmCents)}/km · sin efecto hoy)`}
         </span>
       </p>
 

@@ -7,6 +7,7 @@ import type { BaseFareView } from '@/lib/api/schemas';
 import { useReplaceBaseFare } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,11 +18,6 @@ import { StepUpDialog } from '@/components/security/step-up-dialog';
 const MAX_BASE_FARE_SOLES = 200;
 const MAX_PER_KM_SOLES = 50;
 const MAX_PER_MIN_SOLES = 20;
-
-/** Convierte un input en soles a céntimos Int (dinero SIEMPRE Int, nunca float). Vacío = 0. */
-function solesToCents(soles: string): number {
-  return soles.trim() === '' ? 0 : Math.round(Number(soles) * 100);
-}
 
 /**
  * Tarifa base (F2.4). El admin edita los tres componentes base de la fórmula de tarifa — banderazo (tarifa
@@ -36,13 +32,13 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
   const { toast } = useToast();
   const replace = useReplaceBaseFare();
 
-  const [baseSoles, setBaseSoles] = useState<string>((config.baseFareCents / 100).toFixed(2));
-  const [perKmSoles, setPerKmSoles] = useState<string>((config.perKmCents / 100).toFixed(2));
-  const [perMinSoles, setPerMinSoles] = useState<string>((config.perMinCents / 100).toFixed(2));
+  const [baseSoles, setBaseSoles] = useState<string>(formatSolesInput(config.baseFareCents));
+  const [perKmSoles, setPerKmSoles] = useState<string>(formatSolesInput(config.perKmCents));
+  const [perMinSoles, setPerMinSoles] = useState<string>(formatSolesInput(config.perMinCents));
 
-  const baseCents = solesToCents(baseSoles);
-  const perKmCents = solesToCents(perKmSoles);
-  const perMinCents = solesToCents(perMinSoles);
+  const baseCents = parseSolesInput(baseSoles);
+  const perKmCents = parseSolesInput(perKmSoles);
+  const perMinCents = parseSolesInput(perMinSoles);
 
   const baseInvalid =
     !Number.isFinite(baseCents) || baseCents < 0 || baseCents > MAX_BASE_FARE_SOLES * 100;
@@ -68,7 +64,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
       });
       toast({
         tone: 'success',
-        title: `Tarifa base: S/${(baseCents / 100).toFixed(2)} + S/${(perKmCents / 100).toFixed(2)}/km + S/${(perMinCents / 100).toFixed(2)}/min`,
+        title: `Tarifa base: S/${formatSolesInput(baseCents)} + S/${formatSolesInput(perKmCents)}/km + S/${formatSolesInput(perMinCents)}/min`,
       });
     } catch (err) {
       // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
@@ -95,7 +91,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
       <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
         <Field
           label="Banderazo (S/)"
-          hint={`Actual: S/${(config.baseFareCents / 100).toFixed(2)}`}
+          hint={`Actual: S/${formatSolesInput(config.baseFareCents)}`}
           error={baseInvalid ? `Entre 0 y ${MAX_BASE_FARE_SOLES}` : undefined}
         >
           <Input
@@ -112,7 +108,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
 
         <Field
           label="Por kilómetro (S/)"
-          hint={`Actual: S/${(config.perKmCents / 100).toFixed(2)}`}
+          hint={`Actual: S/${formatSolesInput(config.perKmCents)}`}
           error={perKmInvalid ? `Entre 0 y ${MAX_PER_KM_SOLES}` : undefined}
         >
           <Input
@@ -129,7 +125,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
 
         <Field
           label="Por minuto (S/)"
-          hint={`Actual: S/${(config.perMinCents / 100).toFixed(2)}`}
+          hint={`Actual: S/${formatSolesInput(config.perMinCents)}`}
           error={perMinInvalid ? `Entre 0 y ${MAX_PER_MIN_SOLES}` : undefined}
         >
           <Input

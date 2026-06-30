@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import { Gavel } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
+import { solesToCents } from '@veo/utils/money';
 import { OFFERING_LIST, PricingMode, GLOBAL_ZONE } from '@veo/shared-types';
 import type { BidFloorView } from '@/lib/api/schemas';
 import { offeringLabel } from '@/lib/catalog';
 import { useReplaceBidFloor } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,11 +22,6 @@ const MAX_SOLES = 1000;
 
 /** Las ofertas a las que aplica el piso: solo las que PERMITEN PUJA (las FIXED-only no pujan). */
 const PUJA_OFFERINGS = OFFERING_LIST.filter((o) => o.allowedModes.includes(PricingMode.PUJA));
-
-/** Céntimos → soles string (para el input); '' si es null/0 sin override. */
-function centsToSoles(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
 
 /**
  * Piso de la PUJA per-oferta (ADR 010 §9.3). El admin fija un piso por DEFECTO (céntimos PEN) + overrides
@@ -40,14 +37,14 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const replace = useReplaceBidFloor();
 
   // Piso por defecto (soles) + overrides por oferta (soles; '' = sin override → usa el default).
-  const [defaultSoles, setDefaultSoles] = useState<string>(centsToSoles(config.defaultFloorCents));
+  const [defaultSoles, setDefaultSoles] = useState<string>(formatSolesInput(config.defaultFloorCents));
   const initialOverrides: Record<string, string> = {};
   for (const ov of config.overrides) {
-    if (ov.zone === GLOBAL_ZONE) initialOverrides[ov.offeringId] = centsToSoles(ov.floorCents);
+    if (ov.zone === GLOBAL_ZONE) initialOverrides[ov.offeringId] = formatSolesInput(ov.floorCents);
   }
   const [overrideSoles, setOverrideSoles] = useState<Record<string, string>>(initialOverrides);
 
-  const defaultCents = defaultSoles.trim() === '' ? 0 : Math.round(Number(defaultSoles) * 100);
+  const defaultCents = parseSolesInput(defaultSoles);
   const defaultInvalid =
     !Number.isFinite(defaultCents) || defaultCents < 1 || defaultCents > MAX_SOLES * 100;
 
@@ -55,7 +52,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const overrides = PUJA_OFFERINGS.flatMap((o) => {
     const raw = overrideSoles[o.id]?.trim() ?? '';
     if (raw === '') return [];
-    const cents = Math.round(Number(raw) * 100);
+    const cents = solesToCents(Number(raw));
     return [
       {
         offeringId: o.id,
@@ -73,7 +70,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
     config.overrides.find((ov) => ov.zone === GLOBAL_ZONE && ov.offeringId === id)?.floorCents ?? null;
   const overridesDirty = PUJA_OFFERINGS.some((o) => {
     const raw = overrideSoles[o.id]?.trim() ?? '';
-    const current = raw === '' ? null : Math.round(Number(raw) * 100);
+    const current = raw === '' ? null : solesToCents(Number(raw));
     return current !== initialOverrideCents(o.id);
   });
   const dirty = defaultCents !== config.defaultFloorCents || overridesDirty;
@@ -92,7 +89,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
       });
       toast({
         tone: 'success',
-        title: `Piso de puja guardado: default S/${centsToSoles(defaultCents)} · ${overrides.length} override(s) por oferta`,
+        title: `Piso de puja guardado: default S/${formatSolesInput(defaultCents)} · ${overrides.length} override(s) por oferta`,
       });
     } catch (err) {
       const conflict = err instanceof ApiError && err.status === 409;
@@ -118,7 +115,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
       <div className="mt-4 max-w-2xl space-y-3">
         <Field
           label="Piso por defecto (S/)"
-          hint={`Actual: S/${centsToSoles(config.defaultFloorCents)}`}
+          hint={`Actual: S/${formatSolesInput(config.defaultFloorCents)}`}
           error={defaultInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
         >
           <Input
@@ -140,7 +137,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
           <div className="mt-2 grid gap-2">
             {PUJA_OFFERINGS.map((o) => {
               const val = overrideSoles[o.id] ?? '';
-              const cents = val.trim() === '' ? 0 : Math.round(Number(val) * 100);
+              const cents = parseSolesInput(val);
               const rowInvalid =
                 val.trim() !== '' &&
                 (!Number.isFinite(cents) || cents < 1 || cents > MAX_SOLES * 100);
@@ -156,7 +153,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
                     step="0.50"
                     min="1"
                     max={MAX_SOLES}
-                    placeholder={`default S/${centsToSoles(defaultCents || config.defaultFloorCents)}`}
+                    placeholder={`default S/${formatSolesInput(defaultCents || config.defaultFloorCents)}`}
                     value={val}
                     onChange={(e) =>
                       setOverrideSoles((prev) => ({ ...prev, [o.id]: e.target.value }))

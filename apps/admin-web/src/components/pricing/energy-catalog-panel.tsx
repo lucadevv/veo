@@ -7,6 +7,7 @@ import type { EnergyCatalogView } from '@/lib/api/schemas';
 import { useReplaceEnergyCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,13 +52,10 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
 
   // Estado editable: precio en SOLES por tipo. Arranca de lo persistido (0 = sin configurar todavía).
   const [prices, setPrices] = useState<Record<string, string>>(() =>
-    Object.fromEntries(ENERGY_TYPES.map((t) => [t.id, (persistedCents(t.id) / 100).toFixed(2)])),
+    Object.fromEntries(ENERGY_TYPES.map((t) => [t.id, formatSolesInput(persistedCents(t.id))])),
   );
 
-  const centsOf = (id: string): number => {
-    const raw = prices[id]?.trim();
-    return raw === '' || raw === undefined ? 0 : Math.round(Number(raw) * 100);
-  };
+  const centsOf = (id: string): number => parseSolesInput(prices[id] ?? '');
   const invalidOf = (id: string): boolean => {
     const c = centsOf(id);
     return !Number.isFinite(c) || c < 0 || c > MAX_PER_UNIT * 100;
@@ -106,7 +104,7 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
           <Field
             key={t.id}
             label={`${t.label} (${UNIT_LABEL[t.unit] ?? t.unit})`}
-            hint={t.note ?? `Actual: S/${(persistedCents(t.id) / 100).toFixed(2)}`}
+            hint={t.note ?? `Actual: S/${formatSolesInput(persistedCents(t.id))}`}
             error={invalidOf(t.id) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
           >
             <Input

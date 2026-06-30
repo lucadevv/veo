@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
+import { solesToCents } from '@veo/utils/money';
 import type { CatalogOffering, CatalogOverride, CatalogView, PricingMode } from '@/lib/api/schemas';
 import { offeringLabel, withOverride } from '@/lib/catalog';
 import { useReplaceCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { formatSolesInput } from '@/lib/money';
 import { useToast } from '@/components/ui/toast';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { Button } from '@/components/ui/button';
@@ -138,13 +140,13 @@ function OfferingRow({
   const [mode, setMode] = useState<string>(override?.mode ?? AUTO);
   const [multiplier, setMultiplier] = useState<string>(override?.multiplier?.toString() ?? '');
   const [minFareSoles, setMinFareSoles] = useState<string>(
-    override?.minFareCents != null ? (override.minFareCents / 100).toFixed(2) : '',
+    override?.minFareCents != null ? formatSolesInput(override.minFareCents) : '',
   );
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
   const minFareCents =
-    minFareSoles.trim() === '' ? undefined : Math.round(Number(minFareSoles) * 100);
+    minFareSoles.trim() === '' ? undefined : solesToCents(Number(minFareSoles));
   // Tope de cordura del multiplicador: corta el dedazo ×100 ANTES de mandar (el BFF y trip-service re-validan
   // server-side con MULTIPLIER_MAX=10 autoritativo). 0 < x ≤ 10.
   const multInvalid =
@@ -175,7 +177,7 @@ function OfferingRow({
           <span className="font-medium text-ink">{offeringLabel(offering.id)}</span>
           <span className="text-xs text-ink-subtle">
             {offering.vehicleClass} · efectivo ×{offering.pricing.multiplier} · mín S/
-            {(offering.pricing.minFareCents / 100).toFixed(2)}
+            {formatSolesInput(offering.pricing.minFareCents)}
             {offering.modePin ? ` · modo ${MODE_LABEL[offering.modePin]}` : ' · modo automático'}
           </span>
         </div>
@@ -260,7 +262,7 @@ function OfferingRow({
               inputMode="decimal"
               step="0.50"
               min="0"
-              placeholder={(offering.pricing.minFareCents / 100).toFixed(2)}
+              placeholder={formatSolesInput(offering.pricing.minFareCents)}
               value={minFareSoles}
               onChange={(e) => setMinFareSoles(e.target.value)}
             />
