@@ -76,7 +76,10 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
         <Input
           type="number"
           inputMode="decimal"
-          step="0.10"
+          // step de 1 céntimo: el piso es S/0.01 (min), así que con step=0.10 el browser marcaba stepMismatch
+          // (`:invalid`) para valores legítimos como 1.50/0.50 — no caen en la grilla 0.01+0.10·n. El costo/km
+          // es dinero en céntimos: 0.01 es la granularidad natural y alinea min↔step (sin falso `invalid`).
+          step="0.01"
           min={centsToSoles(MIN_CENTS)}
           max={centsToSoles(MAX_CENTS)}
           value={soles}
