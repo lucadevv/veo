@@ -23,6 +23,7 @@ import {
 import { FLEET_CLIENT, type FleetClient } from '../fleet/fleet-client.port';
 import { IDENTITY_CLIENT, type IdentityClient } from '../identity/identity-client.port';
 import { MatchingService } from './matching.service';
+import { EligibilityGate } from './eligibility.gate';
 
 export interface MatchView {
   id: string;
@@ -47,6 +48,7 @@ export class DispatchService {
     @Inject(FLEET_CLIENT) private readonly fleet: FleetClient,
     @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
     private readonly matching: MatchingService,
+    private readonly eligibility: EligibilityGate,
   ) {}
 
   /**
@@ -78,6 +80,13 @@ export class DispatchService {
     // Ownership-check (anti-IDOR #9): un conductor que conoce el matchId de OTRO recibe 404 (NO 403:
     // no filtramos existencia). El driverId viene de la identidad FIRMADA, no del cliente.
     if (pre?.driverId !== driverId) throw new NotFoundError('Oferta no encontrada');
+    // ASIMETRÍA FIXED↔PUJA (ALTA del gate wvv7pn1z0): re-validamos que el conductor esté ACTIVO
+    // (online + !suspendido) contra identity, IGUAL que el accept de PUJA (offer-board:499). El path
+    // FIXED confiaba SOLO en la presencia GPS del hot-index (stale): un conductor suspendido que seguía
+    // pingeando recibía y aceptaba ofertas. `fresh=true`: decisión de plata, sin cache (un recién-
+    // suspendido no se cuela por un snapshot stale). Falla-cerrado: identity caído ⇒ 403. Va ANTES del
+    // resolveVehicleId para no pegarle a fleet por un conductor inelegible.
+    await this.eligibility.assertActiveDriver(driverId, true);
     const vehicleId = await this.resolveVehicleId(pre.driverId);
 
     const view = await this.prisma.write.$transaction(async (tx) => {

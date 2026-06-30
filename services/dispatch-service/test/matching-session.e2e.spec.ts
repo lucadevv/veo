@@ -20,6 +20,7 @@ import { VehicleType, OfferingId, FleetDocumentType } from '@veo/shared-types';
 import { PrismaClient, DispatchOutcome, DispatchSessionStatus } from '../src/generated/prisma';
 import { MatchingService } from '../src/dispatch/matching.service';
 import { DispatchService } from '../src/dispatch/dispatch.service';
+import { EligibilityGate } from '../src/dispatch/eligibility.gate';
 import type { DispatchOffer } from '../src/dispatch/offer-delivery.port';
 import { MatchingSessionStore } from '../src/dispatch/matching-session.store';
 import { DriverPool } from '../src/dispatch/driver-pool';
@@ -110,7 +111,19 @@ beforeAll(async () => {
       found: true,
     }),
   };
-  dispatch = new DispatchService(prismaService, hotIndex, exclusion, fleet, identity, matching);
+  // EligibilityGate REAL (igual que producción): el accept de FIXED re-valida estado contra identity.
+  // El fake de identity de arriba devuelve AVAILABLE/!suspendido ⇒ el gate PASA en el camino feliz; los
+  // casos de suspensión se cubren en el unit (dispatch.service.spec / eligibility.gate.spec). TTL 0 = sin cache.
+  const eligibility = new EligibilityGate(identity as never, hotIndex, 0);
+  dispatch = new DispatchService(
+    prismaService,
+    hotIndex,
+    exclusion,
+    fleet,
+    identity,
+    matching,
+    eligibility,
+  );
 }, 180_000);
 
 afterAll(async () => {

@@ -404,3 +404,49 @@ describe('EligibilityGate · H11 — cota del cache in-proc (lazy-evict de venci
     expect(cacheSize(gate)).toBeGreaterThan(9_000); // sigue cacheando: no se vació
   });
 });
+
+// assertActiveDriver — el gate de ESTADO que reusa el accept de FIXED (cierra la asimetría con PUJA).
+// No mira vehículo/tier: solo existe + online + !suspendido contra identity, fail-closed.
+describe('EligibilityGate.assertActiveDriver (gate de estado del accept FIXED)', () => {
+  it('AVAILABLE + !suspendido → OK (no lanza), SIN mirar el hot-index (no seedea vehículo)', async () => {
+    const gate = await gateWith({ identity: identityFake({}), seedVehicle: null });
+    await expect(gate.assertActiveDriver(DRIVER)).resolves.toBeUndefined();
+  });
+
+  it('suspendido → 403', async () => {
+    const gate = await gateWith({
+      identity: identityFake({ suspendedAt: new Date().toISOString() }),
+      seedVehicle: null,
+    });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('no online (ON_TRIP) → 403 (la presencia GPS no basta)', async () => {
+    const gate = await gateWith({ identity: identityFake({ currentStatus: 'ON_TRIP' }), seedVehicle: null });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('desconocido en identity (found=false) → 403', async () => {
+    const gate = await gateWith({ identity: identityFake({ found: false }), seedVehicle: null });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('identity caído → 403 (falla-cerrado, nunca un suspendido colándose por error de red)', async () => {
+    const spy = spyIdentity();
+    spy.fail();
+    const gate = new EligibilityGate(spy.client, new InMemoryHotIndex(), 0);
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('fresh=true BYPASEA el cache: una suspensión en caliente se caza al instante (decisión de plata)', async () => {
+    const spy = spyIdentity();
+    const gate = new EligibilityGate(spy.client, new InMemoryHotIndex(), 60_000); // TTL largo
+    // 1ra: elegible, cachea el snapshot bueno.
+    await expect(gate.assertActiveDriver(DRIVER, false)).resolves.toBeUndefined();
+    // El conductor se SUSPENDE en identity mientras el cache sigue caliente.
+    spy.set({ suspendedAt: new Date().toISOString() });
+    // Con cache (fresh=false) NO lo vería (snapshot stale) — pero el accept usa fresh=true:
+    await expectForbidden(gate.assertActiveDriver(DRIVER, true));
+    expect(spy.calls).toBe(2); // pegó a identity de nuevo pese al cache caliente
+  });
+});

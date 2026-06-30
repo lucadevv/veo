@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DispatchOutcome } from '@veo/shared-types';
+import { ForbiddenError } from '@veo/utils';
 import { DispatchService } from './dispatch.service';
 
 const MATCH = '00000000-0000-0000-0000-000000000001';
@@ -34,6 +35,7 @@ function makeService(
   opts: {
     row?: ReturnType<typeof matchRow> | null;
     claimCount?: number;
+    suspended?: boolean;
   } = {},
 ) {
   const row = opts.row === undefined ? matchRow() : opts.row;
@@ -65,6 +67,15 @@ function makeService(
     markMatched: vi.fn(async () => undefined),
     offerNext: vi.fn(async () => undefined),
   };
+  // Gate de elegibilidad (simetría con PUJA): por default ELEGIBLE; con `suspended` lanza 403 como
+  // lo haría EligibilityGate.assertActiveDriver al leer suspendedAt!=null en identity (fail-closed).
+  const eligibility = {
+    assertActiveDriver: vi.fn(async (driverId: string) => {
+      if (opts.suspended) {
+        throw new ForbiddenError('Conductor no elegible: suspendido', { driverId });
+      }
+    }),
+  };
 
   const service = new DispatchService(
     prisma as never,
@@ -73,8 +84,9 @@ function makeService(
     fleet,
     identity as never,
     matching as never,
+    eligibility as never,
   );
-  return { service, findUnique, updateMany };
+  return { service, findUnique, updateMany, eligibility };
 }
 
 describe('DispatchService (dispatch-service) — ownership-check anti-IDOR #9', () => {
@@ -108,6 +120,21 @@ describe('DispatchService (dispatch-service) — ownership-check anti-IDOR #9', 
       // El dueño PASA el ownership-check (404 no aplica) pero el CAS no matchea OFFERED → count 0 → 409.
       const { service } = makeService({ claimCount: 0 });
       await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({ httpStatus: 409 });
+    });
+
+    it('conductor SUSPENDIDO (gate de identidad) → 403 y NO toca el CAS (cierra la asimetría con PUJA)', async () => {
+      // El dueño PASA el ownership-check, pero el gate de elegibilidad lo frena ANTES del CAS: un
+      // suspendido que sigue pingeando GPS ya no acepta viajes FIXED (era el hueco del audit wvv7pn1z0).
+      const { service, updateMany } = makeService({ suspended: true });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({ httpStatus: 403 });
+      expect(updateMany).not.toHaveBeenCalled();
+    });
+
+    it('el accept re-valida elegibilidad con fresh=true ANTES del CAS (decisión de plata, simetría PUJA)', async () => {
+      const { service, eligibility } = makeService();
+      await service.accept(MATCH, OWNER);
+      // fresh=true: bypasea el cache del gate (un recién-suspendido no se cuela por snapshot stale).
+      expect(eligibility.assertActiveDriver).toHaveBeenCalledWith(OWNER, true);
     });
   });
 

@@ -99,21 +99,8 @@ export class EligibilityGate {
     measureTier = false,
   ): Promise<void> {
     // Capa 3: estado autoritativo en identity (NO el hot-index). Falla-cerrado ante error de red.
-    const snapshot = await this.identitySnapshot(driverId, fresh);
-    if (!snapshot.found) {
-      throw new ForbiddenError('Conductor no elegible: desconocido en identity', { driverId });
-    }
-    const online = snapshot.currentStatus === ELIGIBLE_STATUS;
-    const suspended = snapshot.suspendedAt !== null;
-
-    if (suspended) {
-      throw new ForbiddenError('Conductor no elegible: suspendido', { driverId });
-    }
-    if (!online) {
-      throw new ForbiddenError('Conductor no elegible: no está online/AVAILABLE (turno inactivo)', {
-        driverId,
-      });
-    }
+    // FUENTE ÚNICA de la regla online/!suspendido (la reusa el accept de FIXED · assertActiveDriver).
+    await this.assertActiveDriver(driverId, fresh);
 
     // Vehículo activo: lo proyecta el hot-index desde driver.location_updated. La presencia GPS no
     // autoriza por sí sola (las dos validaciones de arriba ya corrieron), pero sí aporta el tipo.
@@ -203,6 +190,33 @@ export class EligibilityGate {
           }
         }
       }
+    }
+  }
+
+  /**
+   * FIXED (cierra la asimetría con PUJA · ALTA del gate wvv7pn1z0): re-valida que el conductor esté
+   * ACTIVO contra identity — existe + online (AVAILABLE) + NO suspendido. Es la FUENTE ÚNICA de la
+   * regla online/!suspendido: la usa el accept de FIXED (`DispatchService.accept`) y la reusa
+   * `assertEligibleToOffer` (PUJA) antes de chequear vehículo/tier.
+   *
+   * El path FIXED (matching→pool→accept) confiaba SOLO en la presencia GPS del hot-index (stale): un
+   * conductor suspendido que seguía pingeando recibía y aceptaba ofertas FIXED. Este gate cierra el eje
+   * de ESTADO (suspensión/turno); no re-chequea vehículo/tier (la oferta FIXED ya matcheó el tipo al
+   * ofertar). `fresh=true` en el accept (decisión de plata, sin cache, como el accept de PUJA). Falla-
+   * cerrado: identity caído ⇒ ForbiddenError (403), nunca un suspendido colándose por un error de red.
+   */
+  async assertActiveDriver(driverId: string, fresh = false): Promise<void> {
+    const snapshot = await this.identitySnapshot(driverId, fresh);
+    if (!snapshot.found) {
+      throw new ForbiddenError('Conductor no elegible: desconocido en identity', { driverId });
+    }
+    if (snapshot.suspendedAt !== null) {
+      throw new ForbiddenError('Conductor no elegible: suspendido', { driverId });
+    }
+    if (snapshot.currentStatus !== ELIGIBLE_STATUS) {
+      throw new ForbiddenError('Conductor no elegible: no está online/AVAILABLE (turno inactivo)', {
+        driverId,
+      });
     }
   }
 
