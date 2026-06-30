@@ -111,6 +111,16 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
   },
 ];
 
+// El vacío por tab: el filtro de esta pantalla es el ESTADO (los tabs), NO un período — antes la copy decía
+// "para el período seleccionado", un filtro que no existe acá. Cada tab dice exactamente qué está vacío.
+const EMPTY_BY_TAB: Record<string, string> = {
+  PENDING: 'No hay liquidaciones pendientes de pago.',
+  HELD: 'No hay liquidaciones retenidas.',
+  FAILED: 'No hay liquidaciones fallidas.',
+  PROCESSED: 'No hay liquidaciones procesadas.',
+  ALL: 'Todavía no se generó ninguna liquidación.',
+};
+
 export default function FinancePage() {
   const user = useSession();
   const [tab, setTab] = useState('PENDING');
@@ -163,7 +173,7 @@ export default function FinancePage() {
                   data={query.data?.pages.flatMap((p) => p.items) ?? []}
                   loading={query.isLoading}
                   emptyTitle="Sin liquidaciones"
-                  emptyDescription="No hay liquidaciones para el período seleccionado."
+                  emptyDescription={EMPTY_BY_TAB[tab] ?? 'No hay liquidaciones para mostrar.'}
                 />
                 <LoadMore
                   hasNextPage={!!query.hasNextPage}
