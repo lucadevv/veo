@@ -11,14 +11,16 @@ import { InMemoryHotIndex } from './in-memory-hot-index';
 const P = { lat: -12.05, lon: -77.04 };
 
 describe('InMemoryHotIndex · paridad anti-clobber con Redis', () => {
-  it('un ping SIN attrs PRESERVA los seats/segment/año previos (mismo vehicleType)', async () => {
+  it('[d.1] un ping SIN attrs y con el MISMO vehicleId PRESERVA los seats/segment/año previos', async () => {
     const idx = new InMemoryHotIndex();
     await idx.upsertLocation('d', P, VehicleClass.CAR, {
+      vehicleId: 'veh-1',
       seats: 7,
       segment: VehicleSegment.PREMIUM,
       vehicleYear: 2023,
     });
-    await idx.upsertLocation('d', P, VehicleClass.CAR); // ping degradado sin attrs
+    // Ping degradado sin attrs (catálogo sin attrs / hipo de fleet que igual devuelve la identidad): MISMO id.
+    await idx.upsertLocation('d', P, VehicleClass.CAR, { vehicleId: 'veh-1' });
     const loc = await idx.getLocation('d');
     expect(loc?.seats).toBe(7);
     expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
@@ -108,18 +110,37 @@ describe('InMemoryHotIndex · paridad anti-clobber con Redis', () => {
     expect(loc?.vehicleYear).toBe(2023);
   });
 
-  it('[compat] ping legacy SIN vehicleId cae al guard por vehicleType (comportamiento previo, inocuo fail-open)', async () => {
+  it('[d.1] ping degradado SIN vehicleId (fleet 204/outage) NO arrastra los attrs previos — cero stale, sin fallback por clase', async () => {
     const idx = new InMemoryHotIndex();
-    // Sin vehicleId en ningún ping (app vieja / fleet 204 sin vehículo activo): el carry usa el fallback por clase.
+    // Ping bueno con identidad + attrs. Luego fleet 204/outage: el ping degrada SIN id y SIN attrs (van juntos).
+    await idx.upsertLocation('d', P, VehicleClass.CAR, {
+      vehicleId: 'veh-1',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    await idx.upsertLocation('d', P, VehicleClass.CAR); // sin id ⇒ no se puede confirmar identidad ⇒ no carry
+    const loc = await idx.getLocation('d');
+    // Sin identidad NO hay carry: el conductor degrada honesto (el viejo fallback por clase era el landmine d.1).
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('[d.1] ping CON vehicleId pero prev legacy SIN id NO arrastra (no se confirma identidad → self-heal)', async () => {
+    const idx = new InMemoryHotIndex();
+    // prev legacy: loc indexada sin vehicleId (datos viejos en reposo) pero con attrs.
     await idx.upsertLocation('d', P, VehicleClass.CAR, {
       seats: 7,
       segment: VehicleSegment.PREMIUM,
       vehicleYear: 2023,
     });
-    await idx.upsertLocation('d', P, VehicleClass.CAR);
+    // Ping nuevo trae identidad pero sin attrs: prev.vehicleId (undefined) !== 'veh-1' ⇒ no carry.
+    await idx.upsertLocation('d', P, VehicleClass.CAR, { vehicleId: 'veh-1' });
     const loc = await idx.getLocation('d');
-    // Misma clase, sin identidad para distinguir ⇒ preserva (igual que antes del flip · self-heal al próximo ping).
-    expect(loc?.seats).toBe(7);
-    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleId).toBe('veh-1');
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
   });
 });

@@ -192,20 +192,37 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   // ── ANTI-CLOBBER · un ping sin attrs NO debe borrar los attrs buenos del hot-index ──
   const E = { lat: -12.3, lon: -77.2 }; // celda AISLADA para los tests de clobber
 
-  it('anti-clobber · un ping SIN attrs (fleet 204/outage) PRESERVA los seats/segment/año previos (mismo vehicleType)', async () => {
-    // Ping bueno: el conductor opera un XL premium 2023.
+  it('anti-clobber · un ping SIN attrs PERO con el MISMO vehicleId PRESERVA los seats/segment/año previos (Redis real)', async () => {
+    // Ping bueno: el conductor opera un XL premium 2023 (id "veh-keep").
     await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR, {
+      vehicleId: 'veh-keep',
       seats: 7,
       segment: VehicleSegment.PREMIUM,
       vehicleYear: 2023,
     });
-    // Ping degradado: fleet no resolvió (sin attrs), pero la clase sigue siendo la misma.
-    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR);
+    // Ping degradado: el catálogo no aporta attrs (o un hipo de fleet) pero la IDENTIDAD del vehículo se sella igual.
+    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR, { vehicleId: 'veh-keep' });
     const loc = await hotIndex.getLocation('clb-keep');
-    // Los attrs de tier SOBREVIVEN: el gate de tier no se auto-desarma por un ping sin attrs.
+    // Mismo vehículo (id idéntico) ⇒ los attrs de tier SOBREVIVEN: el gate de tier no se auto-desarma.
     expect(loc?.seats).toBe(7);
     expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
     expect(loc?.vehicleYear).toBe(2023);
+  });
+
+  it('[d.1] anti-clobber · un ping SIN attrs y SIN vehicleId (fleet 204/outage) NO arrastra attrs previos (cero stale, sin fallback por clase)', async () => {
+    await hotIndex.upsertLocation('clb-noid', E, VehicleClass.CAR, {
+      vehicleId: 'veh-noid',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // fleet 204/outage: el ping degrada SIN id y SIN attrs (van juntos por la misma rama del resolver).
+    await hotIndex.upsertLocation('clb-noid', E, VehicleClass.CAR);
+    const loc = await hotIndex.getLocation('clb-noid');
+    // Sin identidad NO hay carry: degradación honesta (el viejo fallback por vehicleType era el landmine d.1).
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
   });
 
   it('anti-clobber · un ping CON attrs nuevos SÍ pisa los previos (cambio de vehículo real, no se arrastra)', async () => {

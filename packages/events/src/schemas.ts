@@ -627,7 +627,9 @@ export const driverLocationUpdated = z.object({
   /// carry anti-clobber del hot-index: preservar attrs ausentes solo si el ping previo es el MISMO vehículo
   /// (vehicleType NO distingue dos autos de la misma clase — un XL y un económico son ambos CAR). El bff lo
   /// sella server-authoritative igual que los attrs. Opcional por compat (pings legacy / fleet 204 sin vehículo
-  /// activo) ⇒ el carry cae al guard por vehicleType (comportamiento previo). Prerequisito del flip a fail-closed.
+  /// activo) ⇒ SIN vehicleId NO hay carry (el fallback por vehicleType fue ELIMINADO en el lote d.1: el carry
+  /// es estricto por vehicleId). Degradación honesta: cero stale (no se preservan attrs de otro vehículo) a
+  /// cambio de no rellenar el hueco. Prerequisito del flip a fail-closed.
   vehicleId: z.string().optional(),
   /// B5-3 · atributos de eligibilidad del vehículo activo (del modelSpec elegido + el año del vehículo).
   /// dispatch los proyecta en el hot-index para filtrar por oferta (confort=segment≥MID, xl=6 asientos)

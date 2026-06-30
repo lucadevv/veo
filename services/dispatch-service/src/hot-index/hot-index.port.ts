@@ -28,9 +28,11 @@ export const SUSPENSION_REGISTRY = Symbol('SUSPENSION_REGISTRY');
 export interface DriverVehicleAttrs {
   /**
    * IDENTIDAD del vehículo activo (no es un attr de eligibilidad: NO filtra el matching). dispatch la usa como
-   * KEY del carry anti-clobber: preservar attrs ausentes solo si el ping previo es el MISMO vehículo. vehicleType
-   * (VehicleClass) no alcanza — un XL 7-asientos y un económico 5-asientos son ambos CAR. Opcional por compat
-   * (pings legacy / fleet 204 sin vehículo activo) ⇒ el carry cae al guard por vehicleType (comportamiento previo).
+   * KEY ÚNICA del carry anti-clobber: preservar attrs ausentes SOLO si el ping previo es el MISMO vehículo
+   * (mismo vehicleId). vehicleType (VehicleClass) no alcanza — un XL 7-asientos y un económico 5-asientos son
+   * ambos CAR. Opcional: si el ping no lo trae (fleet 204/outage ⇒ tampoco trae attrs) NO hay carry — el
+   * conductor degrada honesto (cero stale, self-heal al próximo ping). Sin fallback por vehicleType (landmine
+   * d.1 · ADR-017 §5(d)).
    */
   vehicleId?: string;
   seats?: number;

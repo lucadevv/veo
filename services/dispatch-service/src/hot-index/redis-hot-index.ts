@@ -71,26 +71,29 @@ export class RedisHotIndex implements HotIndex {
     // el merge DENTRO del LUA (leer la loc viva en el script y mergear los attrs ausentes). Gate `wkege7nth` (BAJA).
     const prev = await this.getLocation(driverId);
     const oldCell = prev?.h3 ?? h3;
-    // ANTI-CLOBBER del gate de tier (B5-3). Los attrs del modelSpec viajan en el ping, pero un ping
-    // puede llegar SIN ellos (fleet 204 / outage / modelo legacy sin attrs en catálogo). Si solo
-    // escribiéramos lo que trae el ping, ese ping sin attrs SOBREESCRIBIRÍA (SET total del LUA) los
-    // seats/segment/año BUENOS que ya estaban en el hot-index → el gate de tier se auto-desarma aunque
-    // la flota esté desplegada con attrs. Por eso, cuando el ping omite un attr de tier, lo PRESERVAMOS
-    // del ping previo — pero SOLO si es el MISMO vehicleType (un cambio de clase trae otro vehículo con
-    // attrs distintos: no se arrastran). Un ping que SÍ trae el attr lo pisa (cambio de vehículo real).
+    // ANTI-CLOBBER del gate de tier (B5-3), llaveado ESTRICTO por la IDENTIDAD del vehículo (vehicleId).
+    // Los attrs del modelSpec (seats/segment/año) viajan en el ping, pero un ping puede llegar SIN ellos
+    // (modelo sin attrs en catálogo, o fleet 204/outage). Si solo escribiéramos lo que trae el ping, ese ping
+    // degradado SOBREESCRIBIRÍA (SET total del LUA) los attrs BUENOS ya indexados → el gate de tier se
+    // auto-desarmaría aunque la flota esté desplegada con attrs. Por eso, cuando el ping omite un attr, lo
+    // PRESERVAMOS del ping previo — pero SOLO si es EL MISMO VEHÍCULO, probado por vehicleId. Un ping que SÍ
+    // trae el attr lo pisa (re-resolución del modelo del mismo vehículo).
     //
-    // IDENTIDAD del carry (cerró el prerequisito del flip a fail-closed · gate wkrozhaf6): el carry se llavea
-    // por vehicleId — la IDENTIDAD del vehículo activo, no su clase. vehicleType (VehicleClass) NO distingue dos
-    // vehículos de la MISMA clase (un van XL 7-asientos y un económico 5-asientos son ambos VehicleClass.CAR):
-    // bajo fail-closed un swap intra-clase + un ping degradado sin attrs haría que el económico HEREDE los attrs
-    // STALE del XL y PASE el gate estricto. Con vehicleId, un swap de vehículo (id distinto) NO arrastra attrs
-    // del anterior → el ping degradado degrada honesto (sin attrs ⇒ el pool decide por su política), no miente.
-    // FALLBACK por compat: si el ping no trae vehicleId (legacy / fleet 204 sin vehículo activo), se cae al guard
-    // por vehicleType — el comportamiento previo, inocuo bajo fail-open. Espejado en in-memory (paridad).
-    const sameVehicle =
-      attrs?.vehicleId !== undefined
-        ? prev?.vehicleId === attrs.vehicleId
-        : prev?.vehicleType === vehicleType;
+    // POR QUÉ vehicleId y NO vehicleType (gate wkrozhaf6): vehicleType (VehicleClass) es la CLASE, no la
+    // identidad — un van XL 7-asientos y un económico 5-asientos son AMBOS VehicleClass.CAR. Un guard por clase
+    // NO distingue un swap intra-clase (CAR→CAR distinto): bajo fail-closed haría que el económico HEREDE los
+    // attrs STALE del XL y PASE el gate estricto. El carry por identidad lo cierra: id distinto ⇒ no es el mismo
+    // vehículo ⇒ no se arrastra (el swap degrada honesto, sin attrs ⇒ el pool decide por su política, no miente).
+    //
+    // SIN FALLBACK por vehicleType (landmine d.1 · ADR-017 §5(d)): si el ping NO trae vehicleId, NO hay carry.
+    // El viejo fallback `prev.vehicleType === vehicleType` era el landmine — afirmaba "mismo vehículo" sin poder
+    // probarlo. No existe el caso "app legacy": el vehicleId lo sella el driver-bff SERVER-AUTHORITATIVE desde
+    // fleet (no el cliente), y es ausente IFF los attrs también lo son (MISMA rama del resolver: fleet 204/outage
+    // ⇒ ni id ni attrs). Por eso "sin vehicleId" ⇒ el ping tampoco trae attrs ⇒ el único efecto del fallback
+    // sería arrastrar attrs STALE de un vehículo que NO podemos confirmar. Soltarlo da CERO stale: el conductor
+    // degrada honesto (self-heal al próximo ping que reselle la identidad). El anti-clobber SOUND (mismo
+    // vehicleId, ping sin attrs porque el catálogo no los aporta) SOBREVIVE intacto. Espejado en in-memory.
+    const sameVehicle = attrs?.vehicleId !== undefined && prev?.vehicleId === attrs.vehicleId;
     const carry = sameVehicle ? prev : undefined;
     const seats = attrs?.seats ?? carry?.seats;
     const segment = attrs?.segment ?? carry?.segment;

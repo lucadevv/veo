@@ -23,17 +23,13 @@ export class InMemoryHotIndex implements HotIndex {
     attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
     // Paridad de contrato con RedisHotIndex.upsertLocation: el anti-clobber de attrs de tier. Un ping que
-    // OMITE los attrs preserva los del ping previo SOLO si es el mismo vehicleType (las certs NO se
-    // preservan: fail-closed). Antes el fake clobbeaba (replace total) mientras Redis preservaba → el doble
-    // mentía sobre el "mismo contrato" y los tests unitarios ejercían el comportamiento VIEJO. Ver el
-    // comentario canónico en redis-hot-index.ts para el razonamiento completo.
+    // OMITE los attrs preserva los del ping previo SOLO si es EL MISMO VEHÍCULO probado por vehicleId (las
+    // certs NO se preservan: fail-closed). Ver el comentario canónico en redis-hot-index.ts.
     const prev = this.locations.get(driverId);
-    // Paridad con redis-hot-index: el carry se llavea por vehicleId (IDENTIDAD), con fallback a vehicleType
-    // cuando el ping no lo trae (legacy). Ver el comentario canónico en redis-hot-index.ts para el razonamiento.
-    const sameVehicle =
-      attrs?.vehicleId !== undefined
-        ? prev?.vehicleId === attrs.vehicleId
-        : prev?.vehicleType === vehicleType;
+    // Paridad con redis-hot-index: el carry se llavea ESTRICTO por vehicleId (IDENTIDAD), SIN fallback por
+    // vehicleType (landmine d.1 · ADR-017 §5(d)). Sin vehicleId no hay carry: cero stale. Razonamiento completo
+    // en el comentario canónico de redis-hot-index.ts.
+    const sameVehicle = attrs?.vehicleId !== undefined && prev?.vehicleId === attrs.vehicleId;
     const carry = sameVehicle ? prev : undefined;
     const seats = attrs?.seats ?? carry?.seats;
     const segment = attrs?.segment ?? carry?.segment;
