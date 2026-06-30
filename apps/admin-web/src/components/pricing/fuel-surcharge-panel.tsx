@@ -144,14 +144,19 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         ) : null}
       </div>
 
-      {/* Preview en vivo del recargo derivado (lo que se suma por km, antes del multiplier de cada oferta). */}
+      {/* Preview en vivo del recargo derivado (lo que se suma por km, antes del multiplier de cada oferta). El
+          valor PERSISTIDO se etiqueta según el estado: "vigente" SOLO si el recargo está activo. Si fue
+          REEMPLAZADO por el modelo de energía, "guardado · sin efecto" — no mentir que está en efecto
+          (espeja la honestidad del panel de energía en su estado "Vista previa"). */}
       <p className="mt-3 text-sm text-ink">
         Recargo derivado:{' '}
         <span className="font-medium text-accent">
           S/{(derivedPerKmCents / 100).toFixed(2)} por km
         </span>{' '}
         <span className="text-ink-subtle">
-          (vigente: S/{(config.perKmCents / 100).toFixed(2)}/km)
+          {config.active
+            ? `(vigente: S/${(config.perKmCents / 100).toFixed(2)}/km)`
+            : `(guardado: S/${(config.perKmCents / 100).toFixed(2)}/km · sin efecto hoy)`}
         </span>
       </p>
 
