@@ -2,14 +2,12 @@
 
 import { useState } from 'react';
 import { Gavel } from 'lucide-react';
-import { solesToCents } from '@veo/utils/money';
-import { OFFERING_LIST, PricingMode, GLOBAL_ZONE } from '@veo/shared-types';
 import type { BidFloorView } from '@/lib/api/schemas';
-import { offeringLabel } from '@/lib/catalog';
 import { useReplaceBidFloor } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
+import { bidFloorDefaultReplace } from '@/lib/bid-floor';
 import { useConfigSave } from '@/lib/use-config-save';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -18,15 +16,14 @@ import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 /** Techo de cordura (espejo del DTO server-side BID_FLOOR_MAX_CENTS, defensa en profundidad UI). S/1000. */
 const MAX_SOLES = 1000;
 
-/** Las ofertas a las que aplica el piso: solo las que PERMITEN PUJA (las FIXED-only no pujan). */
-const PUJA_OFFERINGS = OFFERING_LIST.filter((o) => o.allowedModes.includes(PricingMode.PUJA));
-
 /**
- * Piso de la PUJA per-oferta (ADR 010 §9.3). El admin fija un piso por DEFECTO (céntimos PEN) + overrides
- * POR OFERTA (ej. moto S/3 < confort S/9). El piso es el mínimo que un pasajero puede ofertar en modo PUJA;
- * trip-service lo aplica como gate AUTORITATIVO en createTrip/rebid y el quote lo MUESTRA por oferta — el
- * MISMO resolver (consistencia por construcción). Per-zona queda zone-ready (hoy zona única GLOBAL).
- * Server-driven: la UI solo refleja `pricing:manage`; admin-bff + trip-service re-autorizan (step-up MFA).
+ * Piso por DEFECTO de la PUJA (ADR 010 §9.3). Este panel edita SOLO el piso global por defecto: el mínimo que un
+ * pasajero puede ofertar en modo PUJA cuando la oferta no tiene un piso propio. Los pisos POR OFERTA (ej. moto
+ * más bajo que confort) se editan en "Tarifas por oferta" (A1) — acá se PRESERVAN intactos (el `PUT` es
+ * wholesale, así que se remandan tal cual con `bidFloorDefaultReplace`). trip-service aplica el piso como gate
+ * AUTORITATIVO en createTrip/rebid y el quote lo MUESTRA por oferta (el MISMO resolver). Per-zona queda
+ * zone-ready (hoy zona única GLOBAL). Server-driven: la UI solo refleja `pricing:manage`; admin-bff +
+ * trip-service re-autorizan (step-up MFA).
  */
 export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const user = useSession();
@@ -36,77 +33,40 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
     mutation: replace,
     conflictNoun: 'el piso',
     error: 'No se pudo guardar el piso',
-    success: (p) =>
-      `Piso de puja guardado: default S/${formatSolesInput(p.defaultFloorCents)} · ${p.overrides.length} override(s) por oferta`,
+    success: (p) => `Piso por defecto guardado: S/${formatSolesInput(p.defaultFloorCents)}`,
   });
 
-  // Piso por defecto (soles) + overrides por oferta (soles; '' = sin override → usa el default).
+  // Piso por defecto (soles). Los overrides por oferta NO se editan acá — viven en "Tarifas por oferta".
   const [defaultSoles, setDefaultSoles] = useState<string>(formatSolesInput(config.defaultFloorCents));
-  const initialOverrides: Record<string, string> = {};
-  for (const ov of config.overrides) {
-    if (ov.zone === GLOBAL_ZONE) initialOverrides[ov.offeringId] = formatSolesInput(ov.floorCents);
-  }
-  const [overrideSoles, setOverrideSoles] = useState<Record<string, string>>(initialOverrides);
 
   const defaultCents = parseSolesInput(defaultSoles);
-  const defaultInvalid =
+  const invalid =
     !Number.isFinite(defaultCents) || defaultCents < 1 || defaultCents > MAX_SOLES * 100;
 
-  // Overrides EFECTIVOS: las filas con valor numérico válido > 0 (vacío = sin override → cae al default).
-  const overrides = PUJA_OFFERINGS.flatMap((o) => {
-    const raw = overrideSoles[o.id]?.trim() ?? '';
-    if (raw === '') return [];
-    const cents = solesToCents(Number(raw));
-    return [
-      {
-        offeringId: o.id,
-        cents,
-        valid: Number.isFinite(cents) && cents >= 1 && cents <= MAX_SOLES * 100,
-      },
-    ];
-  });
-  const anyOverrideInvalid = overrides.some((o) => !o.valid);
-  const invalid = defaultInvalid || anyOverrideInvalid;
+  // dirty = ¿cambió el default respecto de lo persistido? Sin esto el Guardar quedaba habilitado SIN cambios
+  // (save no-op con step-up + auditoría). Solo compara el default: los overrides no se tocan en este panel.
+  const dirty = defaultCents !== config.defaultFloorCents;
 
-  // dirty = ¿cambió algo respecto de lo persistido (default o algún override)? Sin esto el Guardar quedaba
-  // habilitado SIN cambios — inconsistente con los demás paneles y permitía un save no-op (step-up + auditoría).
-  const initialOverrideCents = (id: string): number | null =>
-    config.overrides.find((ov) => ov.zone === GLOBAL_ZONE && ov.offeringId === id)?.floorCents ?? null;
-  const overridesDirty = PUJA_OFFERINGS.some((o) => {
-    const raw = overrideSoles[o.id]?.trim() ?? '';
-    const current = raw === '' ? null : solesToCents(Number(raw));
-    return current !== initialOverrideCents(o.id);
-  });
-  const dirty = defaultCents !== config.defaultFloorCents || overridesDirty;
-
+  // El PUT es wholesale: se remandan los overrides por oferta TAL CUAL (config.overrides) para no borrarlos.
   // expectedVersion = la que cargamos (CAS): si otro admin la movió, el server responde 409 y useConfigSave
   // muestra el toast de conflicto (el onSettled de la mutation re-sincroniza los valores vigentes).
-  const onSave = () =>
-    save({
-      defaultFloorCents: defaultCents,
-      overrides: overrides.map((o) => ({
-        zone: GLOBAL_ZONE,
-        offeringId: o.offeringId,
-        floorCents: o.cents,
-      })),
-      expectedVersion: config.version,
-    });
+  const onSave = () => save(bidFloorDefaultReplace(config, defaultCents));
 
   return (
     <section className="pt-6">
       <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Gavel className="size-4" aria-hidden /> Piso de la puja (por oferta)
+        <Gavel className="size-4" aria-hidden /> Piso de la puja por defecto
       </h3>
       <p className="mt-1 text-sm text-ink-subtle">
-        El mínimo que un pasajero puede ofertar en modo PUJA. Definí un piso por defecto y,
-        opcionalmente, uno distinto por oferta (ej. moto más bajo que confort).
+        El mínimo que un pasajero puede ofertar en PUJA, por defecto. El piso por oferta (ej. moto
+        más bajo) se configura en Tarifas por oferta.
       </p>
 
       <div className="mt-4 max-w-2xl space-y-3">
         <Field
           label="Piso por defecto (S/)"
           hint={`Actual: S/${formatSolesInput(config.defaultFloorCents)}`}
-          error={defaultInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
+          error={invalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
         >
           <Input
             type="number"
@@ -119,42 +79,6 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
             disabled={!canManage}
           />
         </Field>
-
-        <div className="rounded-lg border border-line/60 p-3">
-          <p className="text-xs font-medium text-ink-muted">
-            Overrides por oferta (vacío = usa el default)
-          </p>
-          <div className="mt-2 grid gap-2">
-            {PUJA_OFFERINGS.map((o) => {
-              const val = overrideSoles[o.id] ?? '';
-              const cents = parseSolesInput(val);
-              const rowInvalid =
-                val.trim() !== '' &&
-                (!Number.isFinite(cents) || cents < 1 || cents > MAX_SOLES * 100);
-              return (
-                <Field
-                  key={o.id}
-                  label={offeringLabel(o.id)}
-                  error={rowInvalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
-                >
-                  <Input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.50"
-                    min="1"
-                    max={MAX_SOLES}
-                    placeholder={`default S/${formatSolesInput(defaultCents || config.defaultFloorCents)}`}
-                    value={val}
-                    onChange={(e) =>
-                      setOverrideSoles((prev) => ({ ...prev, [o.id]: e.target.value }))
-                    }
-                    disabled={!canManage}
-                  />
-                </Field>
-              );
-            })}
-          </div>
-        </div>
 
         <SaveAction
           canManage={canManage}

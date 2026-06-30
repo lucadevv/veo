@@ -1,5 +1,5 @@
 import { GLOBAL_ZONE } from '@veo/shared-types';
-import type { BidFloorOverride, BidFloorView } from '@/lib/api/schemas';
+import type { BidFloorOverride, BidFloorView, ReplaceBidFloorRequest } from '@/lib/api/schemas';
 
 /**
  * Helpers PUROS del piso de la PUJA para la pantalla "Tarifas por oferta" (A1). El piso vive en su PROPIO
@@ -49,6 +49,23 @@ export function withFloorOverride(
   const rest = base.filter((o) => !(o.zone === GLOBAL_ZONE && o.offeringId === offeringId));
   if (cents === null) return rest;
   return [...rest, { zone: GLOBAL_ZONE, offeringId, floorCents: cents }];
+}
+
+/**
+ * Body del `PUT /pricing/bid-floor` cuando SOLO cambia el piso por DEFECTO global (panel de Precios, A2). El PUT
+ * es wholesale, así que hay que REMANDAR los overrides por oferta TAL CUAL están persistidos: esos pisos por
+ * oferta se editan en "Tarifas por oferta" (A1) y perderlos sería borrar dinero. `expectedVersion` = el CAS del
+ * config cargado (si otro admin lo movió → 409). Espejo de la semántica preservadora de `withFloorOverride`.
+ */
+export function bidFloorDefaultReplace(
+  config: Pick<BidFloorView, 'overrides' | 'version'>,
+  defaultFloorCents: number,
+): ReplaceBidFloorRequest {
+  return {
+    defaultFloorCents,
+    overrides: config.overrides,
+    expectedVersion: config.version,
+  };
 }
 
 /**

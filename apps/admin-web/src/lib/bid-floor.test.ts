@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { GLOBAL_ZONE, OfferingId } from '@veo/shared-types';
 import type { BidFloorOverride, BidFloorView } from '@/lib/api/schemas';
 import {
+  bidFloorDefaultReplace,
   effectiveFloorCents,
   offeringFloorOverrideCents,
   pujaFloorExceedsFixedMin,
@@ -84,6 +85,37 @@ describe('withFloorOverride · upsert/quita preservando el resto', () => {
     const out = withFloorOverride(base, OfferingId.VEO_MOTO, 300);
     expect(out).toContainEqual(ov(OfferingId.VEO_MOTO, 500, 'LIMA_NORTE'));
     expect(out).toContainEqual(ov(OfferingId.VEO_MOTO, 300));
+  });
+});
+
+/**
+ * A2 — el panel de Precios edita SOLO el piso por defecto global. Como el `PUT` es wholesale, el body debe
+ * REMANDAR los overrides por oferta TAL CUAL están persistidos (se editan en "Tarifas por oferta"): perderlos
+ * sería borrar dinero. Este es el invariante que blinda el adelgazamiento del panel.
+ */
+describe('bidFloorDefaultReplace · cambia el default PRESERVANDO los overrides por oferta', () => {
+  it('arma el body con el nuevo default y los overrides INTACTOS', () => {
+    const config = view([ov(OfferingId.VEO_MOTO, 300), ov(OfferingId.VEO_CONFORT, 900)], 700);
+    const body = bidFloorDefaultReplace(config, 800);
+    expect(body).toEqual({
+      defaultFloorCents: 800,
+      overrides: [ov(OfferingId.VEO_MOTO, 300), ov(OfferingId.VEO_CONFORT, 900)],
+      expectedVersion: 1,
+    });
+  });
+
+  it('NO borra ningún override aunque el panel ya no los muestre (regresión de A2)', () => {
+    const overrides = [ov(OfferingId.VEO_MOTO, 300), ov(OfferingId.VEO_XL, 1200, 'LIMA_NORTE')];
+    const body = bidFloorDefaultReplace(view(overrides, 700), 500);
+    expect(body.overrides).toEqual(overrides);
+  });
+
+  it('remite expectedVersion = la versión cargada (CAS), no la reinventa', () => {
+    expect(bidFloorDefaultReplace({ overrides: [], version: 42 }, 600).expectedVersion).toBe(42);
+  });
+
+  it('preserva un set vacío de overrides sin inventar ninguno', () => {
+    expect(bidFloorDefaultReplace(view([], 700), 800).overrides).toEqual([]);
   });
 });
 
