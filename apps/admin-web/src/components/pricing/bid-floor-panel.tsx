@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { Gavel } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import { solesToCents } from '@veo/utils/money';
 import { OFFERING_LIST, PricingMode, GLOBAL_ZONE } from '@veo/shared-types';
 import type { BidFloorView } from '@/lib/api/schemas';
@@ -11,7 +10,7 @@ import { useReplaceBidFloor } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -33,8 +32,14 @@ const PUJA_OFFERINGS = OFFERING_LIST.filter((o) => o.allowedModes.includes(Prici
 export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const user = useSession();
   const canManage = can(user, 'pricing:manage');
-  const { toast } = useToast();
   const replace = useReplaceBidFloor();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'el piso',
+    error: 'No se pudo guardar el piso',
+    success: (p) =>
+      `Piso de puja guardado: default S/${formatSolesInput(p.defaultFloorCents)} · ${p.overrides.length} override(s) por oferta`,
+  });
 
   // Piso por defecto (soles) + overrides por oferta (soles; '' = sin override → usa el default).
   const [defaultSoles, setDefaultSoles] = useState<string>(formatSolesInput(config.defaultFloorCents));
@@ -75,32 +80,18 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   });
   const dirty = defaultCents !== config.defaultFloorCents || overridesDirty;
 
-  async function save() {
-    try {
-      await replace.mutateAsync({
-        defaultFloorCents: defaultCents,
-        // expectedVersion = la que cargamos (CAS): si otro admin la movió, el server responde 409.
-        overrides: overrides.map((o) => ({
-          zone: GLOBAL_ZONE,
-          offeringId: o.offeringId,
-          floorCents: o.cents,
-        })),
-        expectedVersion: config.version,
-      });
-      toast({
-        tone: 'success',
-        title: `Piso de puja guardado: default S/${formatSolesInput(defaultCents)} · ${overrides.length} override(s) por oferta`,
-      });
-    } catch (err) {
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'El piso lo cambió otro admin. Recargamos los valores vigentes — revisá y reintentá.'
-          : `No se pudo guardar el piso${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // expectedVersion = la que cargamos (CAS): si otro admin la movió, el server responde 409 y useConfigSave
+  // muestra el toast de conflicto (el onSettled de la mutation re-sincroniza los valores vigentes).
+  const onSave = () =>
+    save({
+      defaultFloorCents: defaultCents,
+      overrides: overrides.map((o) => ({
+        zone: GLOBAL_ZONE,
+        offeringId: o.offeringId,
+        floorCents: o.cents,
+      })),
+      expectedVersion: config.version,
+    });
 
   return (
     <section className="pt-6">
@@ -167,7 +158,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
         </div>
 
         {canManage ? (
-          !dirty || invalid || replace.isPending ? (
+          !dirty || invalid || saving ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>
@@ -180,7 +171,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
                   Guardar
                 </Button>
               }
-              onVerified={save}
+              onVerified={onSave}
             />
           )
         ) : null}

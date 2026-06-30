@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import { solesToCents } from '@veo/utils/money';
 import type { CatalogOffering, CatalogOverride, CatalogView, PricingMode } from '@/lib/api/schemas';
 import { offeringLabel, withOverride } from '@/lib/catalog';
@@ -10,7 +9,7 @@ import { useReplaceCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,31 +36,21 @@ const MULTIPLIER_MAX_UI = 10;
 export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
   const user = useSession();
   const canManage = can(user, 'catalog:manage');
-  const { toast } = useToast();
   const replace = useReplaceCatalog();
+  // El mensaje de éxito varía por acción (habilitar/deshabilitar vs precio/modo) → se pasa por-llamada como
+  // override de `save`. El copy de conflicto/error es canónico (parametrizado por el sustantivo "el catálogo").
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'el catálogo',
+    error: 'No se pudo guardar el catálogo',
+  });
 
   const overrideOf = (id: string): CatalogOverride | undefined =>
     catalog.overrides.find((o) => o.id === id);
 
-  async function commit(next: CatalogOverride, msg: string) {
-    try {
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409.
-      await replace.mutateAsync({
-        overrides: withOverride(catalog.overrides, next),
-        expectedVersion: catalog.version,
-      });
-      toast({ tone: 'success', title: msg });
-    } catch (err) {
-      // 409 = otro admin cambió el catálogo. El hook re-sincroniza (onSettled) → el panel muestra lo vigente.
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'El catálogo lo cambió otro admin. Recargamos lo vigente — revisá y reintentá.'
-          : `No se pudo guardar el catálogo${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409 (toast de conflicto).
+  const commit = (next: CatalogOverride, msg: string) =>
+    save({ overrides: withOverride(catalog.overrides, next), expectedVersion: catalog.version }, msg);
 
   async function setEnabled(id: string, enabled: boolean) {
     const ov = overrideOf(id); // preserva modo/precio al togglear
@@ -104,7 +93,7 @@ export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
               offering={o}
               override={overrideOf(o.id)}
               canManage={canManage}
-              pending={replace.isPending}
+              pending={saving}
               onSetEnabled={setEnabled}
               onSavePricing={savePricing}
             />

@@ -2,13 +2,12 @@
 
 import { useState } from 'react';
 import { Route } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { CostPerKmConfigView, CostPerKmListView } from '@/lib/api/schemas';
 import { useReplaceCostPerKm } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -25,8 +24,14 @@ const PAIS_LABEL: Record<string, string> = { PE: 'Perú (PEN)', EC: 'Ecuador (US
 function CountryRow({ config }: { config: CostPerKmConfigView }) {
   const user = useSession();
   const canManage = can(user, 'finance:manage');
-  const { toast } = useToast();
   const replace = useReplaceCostPerKm();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    // El sustantivo del conflicto lleva el país (cada país versiona su tarifa por separado · CAS independiente).
+    conflictNoun: `el costo/km de ${config.pais}`,
+    error: 'No se pudo guardar el costo/km',
+    success: (p) => `Costo/km ${p.pais}: S/${formatSolesInput(p.costPerKmCents)}`,
+  });
 
   const [soles, setSoles] = useState<string>(formatSolesInput(config.costPerKmCents));
 
@@ -34,27 +39,10 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
   const invalid = !Number.isInteger(cents) || cents < MIN_CENTS || cents > MAX_CENTS;
   const dirty = cents !== config.costPerKmCents;
 
-  async function save() {
-    try {
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409.
-      await replace.mutateAsync({
-        pais: config.pais,
-        costPerKmCents: cents,
-        expectedVersion: config.version,
-      });
-      toast({ tone: 'success', title: `Costo/km ${config.pais}: S/${formatSolesInput(cents)}` });
-    } catch (err) {
-      // 409 = otro admin cambió el config mientras editabas. El hook re-sincroniza (onSettled) → el panel
-      // muestra el valor vigente; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? `El costo/km de ${config.pais} lo cambió otro admin. Recargamos el valor vigente — revisá y reintentá.`
-          : `No se pudo guardar el costo/km${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409 y
+  // useConfigSave muestra el toast de conflicto (el onSettled de la mutation re-sincroniza el valor vigente).
+  const onSave = () =>
+    save({ pais: config.pais, costPerKmCents: cents, expectedVersion: config.version });
 
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -79,7 +67,7 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
       </Field>
 
       {canManage ? (
-        !dirty || invalid || replace.isPending ? (
+        !dirty || invalid || saving ? (
           <Button variant="primary" size="md" disabled>
             Guardar
           </Button>
@@ -92,7 +80,7 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
                 Guardar
               </Button>
             }
-            onVerified={save}
+            onVerified={onSave}
           />
         )
       ) : null}

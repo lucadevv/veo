@@ -2,13 +2,12 @@
 
 import { Check, Gavel, Tag } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { ModeScheduleView, PricingMode } from '@/lib/api/schemas';
 import { formatDayMask, formatWindow, modeDescription, modeLabel } from '@/lib/pricing';
 import { useReplaceSchedule } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 const MODES: readonly { value: PricingMode; icon: LucideIcon }[] = [
@@ -25,30 +24,18 @@ const MODES: readonly { value: PricingMode; icon: LucideIcon }[] = [
 export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) {
   const user = useSession();
   const canManage = can(user, 'pricing:manage');
-  const { toast } = useToast();
   const replace = useReplaceSchedule();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'el modo',
+    error: 'No se pudo cambiar el modo',
+    success: (p) => `Modo global cambiado a ${modeLabel(p.defaultMode)}`,
+  });
 
-  async function switchTo(mode: PricingMode) {
-    try {
-      // Reemplazo wholesale: cambia el default y CONSERVA las reglas vigentes (no las pisa).
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409.
-      await replace.mutateAsync({
-        defaultMode: mode,
-        rules: schedule.rules,
-        expectedVersion: schedule.version,
-      });
-      toast({ tone: 'success', title: `Modo global cambiado a ${modeLabel(mode)}` });
-    } catch (err) {
-      // 409 = otro admin cambió el schedule. El hook re-sincroniza (onSettled) → el panel muestra lo vigente.
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'El modo lo cambió otro admin. Recargamos lo vigente — revisá y reintentá.'
-          : `No se pudo cambiar el modo${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // Reemplazo wholesale: cambia el default y CONSERVA las reglas vigentes (no las pisa). expectedVersion = la
+  // que cargamos (CAS): si otro admin la movió → 409 y useConfigSave muestra el toast de conflicto (onSettled re-sincroniza).
+  const switchTo = (mode: PricingMode) =>
+    save({ defaultMode: mode, rules: schedule.rules, expectedVersion: schedule.version });
 
   return (
     <div className="flex flex-col gap-6 pt-4">
@@ -98,7 +85,7 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
               <StepUpDialog
                 key={value}
                 trigger={
-                  <button type="button" className="text-left" disabled={replace.isPending}>
+                  <button type="button" className="text-left" disabled={saving}>
                     {card}
                   </button>
                 }

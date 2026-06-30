@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { Percent } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { CommissionView } from '@/lib/api/schemas';
 import { useReplaceCommission } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -40,8 +39,14 @@ function bpsToPercentLabel(bps: number): string {
 export function CommissionPanel({ config }: { config: CommissionView }) {
   const user = useSession();
   const canManage = can(user, 'finance:manage');
-  const { toast } = useToast();
   const replace = useReplaceCommission();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'la comisión',
+    error: 'No se pudo guardar la comisión',
+    success: (p) =>
+      `Comisión actualizada · on-demand ${bpsToPercentLabel(p.onDemandRateBps)}% · carpooling ${bpsToPercentLabel(p.carpoolingFeeBps)}%`,
+  });
 
   const [onDemandPct, setOnDemandPct] = useState<string>(bpsToPercentLabel(config.onDemandRateBps));
   const [carpoolingPct, setCarpoolingPct] = useState<string>(
@@ -58,31 +63,14 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
   const dirty =
     onDemandBps !== config.onDemandRateBps || carpoolingBps !== config.carpoolingFeeBps;
 
-  async function save() {
-    try {
-      // Full-replace: se mandan AMBAS tasas. expectedVersion = la que cargamos (optimistic locking): si otro
-      // admin la movió, el server responde 409.
-      await replace.mutateAsync({
-        onDemandRateBps: onDemandBps,
-        carpoolingFeeBps: carpoolingBps,
-        expectedVersion: config.version,
-      });
-      toast({
-        tone: 'success',
-        title: `Comisión actualizada · on-demand ${bpsToPercentLabel(onDemandBps)}% · carpooling ${bpsToPercentLabel(carpoolingBps)}%`,
-      });
-    } catch (err) {
-      // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
-      // muestra los valores vigentes; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'La comisión la cambió otro admin. Recargamos el valor vigente — revisá y reintentá.'
-          : `No se pudo guardar la comisión${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // Full-replace: se mandan AMBAS tasas. expectedVersion = la que cargamos (optimistic locking): si otro admin
+  // la movió, el server responde 409 y useConfigSave muestra el toast de conflicto (el onSettled re-sincroniza).
+  const onSave = () =>
+    save({
+      onDemandRateBps: onDemandBps,
+      carpoolingFeeBps: carpoolingBps,
+      expectedVersion: config.version,
+    });
 
   return (
     <section className="pt-6">
@@ -131,7 +119,7 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
         </Field>
 
         {canManage ? (
-          !dirty || invalid || replace.isPending ? (
+          !dirty || invalid || saving ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>
@@ -144,7 +132,7 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
                   Guardar
                 </Button>
               }
-              onVerified={save}
+              onVerified={onSave}
             />
           )
         ) : null}

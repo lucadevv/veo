@@ -2,13 +2,12 @@
 
 import { useState } from 'react';
 import { Zap } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { EnergyCatalogView } from '@/lib/api/schemas';
 import { useReplaceEnergyCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -43,8 +42,13 @@ const ENERGY_TYPES = [
 export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   const user = useSession();
   const canManage = can(user, 'pricing:manage');
-  const { toast } = useToast();
   const replace = useReplaceEnergyCatalog();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    success: 'Precios de energía actualizados',
+    conflictNoun: 'los precios de energía',
+    error: 'No se pudieron guardar los precios',
+  });
 
   /** Precio vigente (céntimos) de un tipo, leído del catálogo persistido (0 si aún no se configuró). */
   const persistedCents = (id: string): number =>
@@ -64,24 +68,12 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
   const anyInvalid = ENERGY_TYPES.some((t) => invalidOf(t.id));
   const dirty = ENERGY_TYPES.some((t) => centsOf(t.id) !== persistedCents(t.id));
 
-  async function save() {
-    try {
-      await replace.mutateAsync({
-        // Persistimos los 3 tipos (sourceId + precio); el server revalida el enum y el techo.
-        sources: ENERGY_TYPES.map((t) => ({ sourceId: t.id, pricePerUnitCents: centsOf(t.id) })),
-        expectedVersion: config.version,
-      });
-      toast({ tone: 'success', title: 'Precios de energía actualizados' });
-    } catch (err) {
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'Los precios de energía los cambió otro admin. Recargamos lo vigente — revisá y reintentá.'
-          : `No se pudieron guardar los precios${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // Persistimos los 3 tipos (sourceId + precio); el server revalida el enum y el techo. expectedVersion = CAS.
+  const onSave = () =>
+    save({
+      sources: ENERGY_TYPES.map((t) => ({ sourceId: t.id, pricePerUnitCents: centsOf(t.id) })),
+      expectedVersion: config.version,
+    });
 
   return (
     <section className="pt-6">
@@ -121,7 +113,7 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
         ))}
 
         {canManage ? (
-          !dirty || anyInvalid || replace.isPending ? (
+          !dirty || anyInvalid || saving ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>
@@ -134,7 +126,7 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
                   Guardar
                 </Button>
               }
-              onVerified={save}
+              onVerified={onSave}
             />
           )
         ) : null}

@@ -2,13 +2,12 @@
 
 import { useState } from 'react';
 import { Banknote } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { BaseFareView } from '@/lib/api/schemas';
 import { useReplaceBaseFare } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -29,8 +28,14 @@ const MAX_PER_MIN_SOLES = 20;
 export function BaseFarePanel({ config }: { config: BaseFareView }) {
   const user = useSession();
   const canManage = can(user, 'pricing:manage');
-  const { toast } = useToast();
   const replace = useReplaceBaseFare();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'la tarifa base',
+    error: 'No se pudo guardar la tarifa base',
+    success: (p) =>
+      `Tarifa base: S/${formatSolesInput(p.baseFareCents)} + S/${formatSolesInput(p.perKmCents)}/km + S/${formatSolesInput(p.perMinCents)}/min`,
+  });
 
   const [baseSoles, setBaseSoles] = useState<string>(formatSolesInput(config.baseFareCents));
   const [perKmSoles, setPerKmSoles] = useState<string>(formatSolesInput(config.perKmCents));
@@ -53,31 +58,10 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
     perKmCents !== config.perKmCents ||
     perMinCents !== config.perMinCents;
 
-  async function save() {
-    try {
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409.
-      await replace.mutateAsync({
-        baseFareCents: baseCents,
-        perKmCents,
-        perMinCents,
-        expectedVersion: config.version,
-      });
-      toast({
-        tone: 'success',
-        title: `Tarifa base: S/${formatSolesInput(baseCents)} + S/${formatSolesInput(perKmCents)}/km + S/${formatSolesInput(perMinCents)}/min`,
-      });
-    } catch (err) {
-      // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
-      // muestra los valores vigentes; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'La tarifa base la cambió otro admin. Recargamos los valores vigentes — revisá y reintentá.'
-          : `No se pudo guardar la tarifa base${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409 y
+  // useConfigSave muestra el toast de conflicto. El onSettled de la mutation (queries.ts) re-sincroniza.
+  const onSave = () =>
+    save({ baseFareCents: baseCents, perKmCents, perMinCents, expectedVersion: config.version });
 
   return (
     <section className="pt-6">
@@ -141,7 +125,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
         </Field>
 
         {canManage ? (
-          !dirty || invalid || replace.isPending ? (
+          !dirty || invalid || saving ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>
@@ -154,7 +138,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
                   Guardar
                 </Button>
               }
-              onVerified={save}
+              onVerified={onSave}
             />
           )
         ) : null}

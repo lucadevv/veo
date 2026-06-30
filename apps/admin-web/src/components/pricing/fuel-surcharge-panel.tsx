@@ -2,13 +2,12 @@
 
 import { useState } from 'react';
 import { Fuel } from 'lucide-react';
-import { ApiError } from '@veo/api-client';
 import type { FuelSurchargeView } from '@/lib/api/schemas';
 import { useReplaceFuelSurcharge } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
-import { useToast } from '@/components/ui/toast';
+import { useConfigSave } from '@/lib/use-config-save';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -35,8 +34,16 @@ const MAX_KM_PER_LITER = 200;
 export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const user = useSession();
   const canManage = can(user, 'pricing:manage');
-  const { toast } = useToast();
   const replace = useReplaceFuelSurcharge();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'el combustible',
+    error: 'No se pudo guardar el combustible',
+    success: (p) => {
+      const derived = p.kmPerLiter > 0 ? Math.round(p.fuelPricePerLiterCents / p.kmPerLiter) : 0;
+      return `Combustible: S/${formatSolesInput(p.fuelPricePerLiterCents)}/L ÷ ${p.kmPerLiter} km/L → recargo S/${formatSolesInput(derived)}/km`;
+    },
+  });
 
   const [priceSoles, setPriceSoles] = useState<string>(
     formatSolesInput(config.fuelPricePerLiterCents),
@@ -54,30 +61,10 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const derivedPerKmCents = km > 0 ? Math.round(priceCents / km) : 0;
   const dirty = priceCents !== config.fuelPricePerLiterCents || km !== config.kmPerLiter;
 
-  async function save() {
-    try {
-      // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409.
-      await replace.mutateAsync({
-        fuelPricePerLiterCents: priceCents,
-        kmPerLiter: km,
-        expectedVersion: config.version,
-      });
-      toast({
-        tone: 'success',
-        title: `Combustible: S/${formatSolesInput(priceCents)}/L ÷ ${km} km/L → recargo S/${formatSolesInput(derivedPerKmCents)}/km`,
-      });
-    } catch (err) {
-      // 409 = otro admin cambió el config mientras editabas. El hook ya re-sincroniza (onSettled) → el panel
-      // muestra los valores vigentes; pedimos revisar y reintentar (NO se pisó nada: degradación honesta).
-      const conflict = err instanceof ApiError && err.status === 409;
-      toast({
-        tone: conflict ? 'info' : 'danger',
-        title: conflict
-          ? 'El combustible lo cambió otro admin. Recargamos los valores vigentes — revisá y reintentá.'
-          : `No se pudo guardar el combustible${err instanceof Error ? `: ${err.message}` : ''}`,
-      });
-    }
-  }
+  // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409 y
+  // useConfigSave muestra el toast de conflicto (el onSettled de la mutation re-sincroniza los valores vigentes).
+  const onSave = () =>
+    save({ fuelPricePerLiterCents: priceCents, kmPerLiter: km, expectedVersion: config.version });
 
   // Cuerpo editable (descripción + inputs + preview + versión). El MISMO para ambos estados — la descripción
   // y la etiqueta del derivado ya se ramifican por `config.active`.
@@ -125,7 +112,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         </Field>
 
         {canManage ? (
-          !dirty || invalid || replace.isPending ? (
+          !dirty || invalid || saving ? (
             <Button variant="primary" size="md" disabled>
               Guardar
             </Button>
@@ -138,7 +125,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
                   Guardar
                 </Button>
               }
-              onVerified={save}
+              onVerified={onSave}
             />
           )
         ) : null}
