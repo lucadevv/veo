@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Fuel } from 'lucide-react';
+import { ChevronDown, Fuel } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { FuelSurchargeView } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
@@ -25,6 +25,12 @@ const MAX_KM_PER_LITER = 200;
  * rendimiento, lo suma a la tarifa por km (FIXED + sugerido de PUJA) y lo escala por oferta. Server-driven:
  * el quote/create del pasajero lo reflejan al instante. La UI solo refleja `pricing:manage`; el admin-bff +
  * trip-service re-autorizan. Precio en SOLES/litro (se persiste en céntimos); rendimiento en km/litro entero.
+ *
+ * UX — DOS modelos, UNO activo: el recargo de combustible (B4) y el modelo de energía (B5) son mutuamente
+ * excluyentes (el flip lo decide la config del sistema, NO este panel). Cuando B5 reemplazó a B4, este panel
+ * NO se muestra como un formulario activo (confunde: editable pero sin efecto, y el operador no puede
+ * re-activarlo desde acá) → se COLAPSA en un acordeón muteado "modelo anterior". El modelo ACTIVO es el único
+ * prominente. (El estado "Vista previa" del panel de energía es distinto: forward-config legítimo, sí editable.)
  */
 export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const user = useSession();
@@ -73,20 +79,14 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
     }
   }
 
-  return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Fuel className="size-4" aria-hidden /> Recargo de combustible
-        {config.active ? (
-          <Badge tone="success">Activo</Badge>
-        ) : (
-          <Badge tone="neutral">Reemplazado</Badge>
-        )}
-      </h3>
+  // Cuerpo editable (descripción + inputs + preview + versión). El MISMO para ambos estados — la descripción
+  // y la etiqueta del derivado ya se ramifican por `config.active`.
+  const body = (
+    <>
       <p className="mt-1 text-sm text-ink-subtle">
         {config.active
           ? 'Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.'
-          : 'Ingresá el precio del combustible y el rendimiento del vehículo de referencia. Hoy este recargo está reemplazado por el modelo de precios de energía: lo que edites acá no afecta la tarifa mientras el modelo de energía esté activo.'}
+          : 'Reemplazado por el modelo de precios de energía: lo que edites acá NO afecta la tarifa mientras el modelo de energía esté activo. El cambio de modelo lo decide la configuración del sistema, no este panel.'}
       </p>
 
       <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">
@@ -144,10 +144,8 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         ) : null}
       </div>
 
-      {/* Preview en vivo del recargo derivado (lo que se suma por km, antes del multiplier de cada oferta). El
-          valor PERSISTIDO se etiqueta según el estado: "vigente" SOLO si el recargo está activo. Si fue
-          REEMPLAZADO por el modelo de energía, "guardado · sin efecto" — no mentir que está en efecto
-          (espeja la honestidad del panel de energía en su estado "Vista previa"). */}
+      {/* Preview del recargo derivado. El valor PERSISTIDO se etiqueta según el estado: "vigente" SOLO si el
+          recargo está activo; si fue reemplazado, "guardado · sin efecto" (no mentir que está en efecto). */}
       <p className="mt-3 text-sm text-ink">
         Recargo derivado:{' '}
         <span className="font-medium text-accent">
@@ -170,6 +168,34 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         Versión {config.version}
         {config.updatedAt ? ` · actualizado ${dateTime(config.updatedAt)}` : ' · sin cambios aún'}
       </p>
+    </>
+  );
+
+  // REEMPLAZADO → colapsado y muteado: no compite con el modelo activo ni confunde con un form que no aplica.
+  if (!config.active) {
+    return (
+      <details className="group pt-6">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-ink-muted [&::-webkit-details-marker]:hidden">
+          <Fuel className="size-4" aria-hidden /> Recargo de combustible
+          <Badge tone="neutral">Modelo anterior · reemplazado</Badge>
+          <ChevronDown
+            className="ml-auto size-4 text-ink-subtle transition-transform group-open:rotate-180"
+            aria-hidden
+          />
+        </summary>
+        <div className="opacity-70">{body}</div>
+      </details>
+    );
+  }
+
+  // ACTIVO → panel pleno.
+  return (
+    <section className="pt-6">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
+        <Fuel className="size-4" aria-hidden /> Recargo de combustible
+        <Badge tone="success">Activo</Badge>
+      </h3>
+      {body}
     </section>
   );
 }
