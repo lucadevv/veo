@@ -13,6 +13,7 @@ import {
   Truck,
   UserCog,
   Users,
+  UsersRound,
   Video,
 } from 'lucide-react';
 import type { Permission } from '@/lib/rbac';
@@ -77,7 +78,7 @@ export const NAV: NavGroup[] = [
       },
       {
         href: '/finance/pricing',
-        label: 'Precios y tarifas',
+        label: 'Precios on-demand',
         icon: Coins,
         permission: 'pricing:view',
       },
@@ -86,6 +87,12 @@ export const NAV: NavGroup[] = [
         label: 'Tarifas por oferta',
         icon: Tags,
         permission: 'catalog:view',
+      },
+      {
+        href: '/finance/carpooling',
+        label: 'Carpooling',
+        icon: UsersRound,
+        permission: 'pricing:view',
       },
     ],
   },

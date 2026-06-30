@@ -6,7 +6,6 @@ import {
   useFuelSurcharge,
   useBaseFare,
   useCommission,
-  useCostPerKm,
   useEnergyCatalog,
   useBidFloor,
 } from '@/lib/api/queries';
@@ -19,17 +18,17 @@ import { AsyncSection } from '@/components/config/async-section';
 import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
-import { CommissionPanel } from '@/components/pricing/commission-panel';
-import { CostPerKmPanel } from '@/components/pricing/cost-per-km-panel';
+import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
 import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 import { PricingSection } from '@/components/pricing/pricing-section';
 
 /**
- * Precios y tarifas — config financiera de AMBOS carriles, agrupada por sección (PricingSection):
- * Modo de tarifa (PUJA↔FIJO + piso de puja · ADR 011) · Componentes on-demand (tarifa base, recargo de
- * combustible B4, precios de energía B5) · Carpooling (costo/km del cost-sharing) · Comisión (ambos modos).
- * Gate de presentación con `pricing:view`; el admin-bff (RolesGuard) y los servicios re-autorizan server-side.
+ * Precios on-demand — config financiera del carril TAXI (viaje inmediato), agrupada por sección (PricingSection):
+ * Modo de tarifa (PUJA↔FIJO + piso de puja · ADR 011) · Componentes (tarifa base, recargo de combustible B4,
+ * precios de energía B5) · Comisión al conductor. El carril CARPOOLING (cost-sharing) vive en su propia pantalla
+ * (Finanzas › Carpooling): no comparte fórmula con on-demand. Gate de presentación con `pricing:view`; el
+ * admin-bff (RolesGuard) y los servicios re-autorizan server-side.
  */
 export default function PricingPage() {
   const user = useSession();
@@ -37,7 +36,6 @@ export default function PricingPage() {
   const fuelQuery = useFuelSurcharge();
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
-  const costPerKmQuery = useCostPerKm();
   const energyQuery = useEnergyCatalog();
   const bidFloorQuery = useBidFloor();
 
@@ -45,8 +43,8 @@ export default function PricingPage() {
     return (
       <div className="flex h-full flex-col">
         <PageHeader
-          title="Precios y tarifas"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios' }]}
+          title="Precios on-demand"
+          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
         />
         <EmptyState
           className="flex-1"
@@ -61,9 +59,9 @@ export default function PricingPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Precios y tarifas"
-        description="Configurá cómo se calcula y se cobra cada viaje: modo, componentes on-demand, costo del carpooling y comisión. Todos los cambios son globales, se aplican al instante y quedan auditados."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios' }]}
+        title="Precios on-demand"
+        description="Configurá cómo se calcula y se cobra el viaje inmediato: modo, componentes de la tarifa y comisión al conductor. Todos los cambios son globales, se aplican al instante y quedan auditados."
+        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* CARRIL on-demand · cómo se fija el precio del viaje inmediato (modo + piso de puja). */}
@@ -110,25 +108,14 @@ export default function PricingPage() {
           </AsyncSection>
         </PricingSection>
 
-        {/* CARRIL carpooling · el costo/km que limita el cost-sharing (escudo legal anti-lucro). */}
+        {/* on-demand · cómo gana la plataforma en el viaje inmediato (descuento al conductor). */}
         <PricingSection
-          title="Carpooling · programado"
-          hint="El costo de operación por km que limita el precio del cost-sharing (escudo legal anti-lucro). Se fija por país."
+          title="Comisión · on-demand"
+          hint="Cómo gana la plataforma en el viaje inmediato: la comisión que se descuenta al conductor. El service fee del carpooling se configura en Finanzas › Carpooling."
         >
-          {/* F2.5 · costo/km del carpooling (costo de operación DIRECTO del admin, per-país). */}
-          <AsyncSection query={costPerKmQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
-            {(data) => <CostPerKmPanel config={data} />}
-          </AsyncSection>
-        </PricingSection>
-
-        {/* AMBOS modos · cómo gana la plataforma en cada carril (descuento on-demand vs service fee carpooling). */}
-        <PricingSection
-          title="Comisión · ambos modos"
-          hint="Cómo gana la plataforma en cada carril: descuento al conductor en on-demand, service fee al pasajero en carpooling."
-        >
-          {/* F2.7 · comisión por modo (on-demand + service fee carpooling, ambas editables). */}
+          {/* F2.7 · comisión on-demand (preserva el service fee del carpooling en el mismo config · CAS). */}
           <AsyncSection query={commissionQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
-            {(data) => <CommissionPanel config={data} />}
+            {(data) => <OnDemandCommissionPanel config={data} />}
           </AsyncSection>
         </PricingSection>
       </div>
