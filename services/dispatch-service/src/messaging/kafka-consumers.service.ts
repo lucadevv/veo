@@ -210,6 +210,8 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // B5-3 · attrs de eligibilidad (opcionales): si el ping los trae, dispatch los proyecta en el hot
     // index para filtrar por oferta (confort/xl). Un ping sin ellos no restringe (degradación segura).
     await this.dispatch.ingestLocation(p.driverId, p.point, p.vehicleType ?? VehicleClass.CAR, {
+      // Identidad del vehículo activo: key del carry anti-clobber (no vehicleType). Opcional (legacy/204).
+      vehicleId: p.vehicleId,
       seats: p.seats,
       segment: p.segment,
       vehicleYear: p.vehicleYear,

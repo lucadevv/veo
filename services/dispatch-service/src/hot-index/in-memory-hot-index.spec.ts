@@ -68,23 +68,57 @@ describe('InMemoryHotIndex · paridad anti-clobber con Redis', () => {
     expect(loc?.certifications).toBeUndefined();
   });
 
-  // RESIDUAL CONOCIDO (gate adversarial wkrozhaf6, ALTA refutada a "inerte hoy / landmine del flip"): el
-  // carry se llavea por vehicleType, que NO distingue un swap DENTRO de la misma clase. Este test DOCUMENTA
-  // el comportamiento actual (no es el deseado bajo fail-closed): hoy es inocuo (gate fail-open + el resolver
-  // pisa el carry en ≤20s). PREREQUISITO DEL FLIP: keyear por vehicleId. Si alguien cierra ese hueco, este
-  // test debe cambiar (el económico NO debería heredar seats=7 del XL).
-  it('[residual documentado] swap intra-clase SIN attrs arrastra attrs stale (a corregir antes del flip)', async () => {
+  // IDENTIDAD DEL CARRY (cierra el prerequisito del flip · gate wkrozhaf6): el carry se llavea por vehicleId.
+  // Tres casos cubren la nueva semántica: el FIX (swap intra-clase con id distinto no arrastra), la IDENTIDAD
+  // que preserva (mismo id + ping degradado sí preserva), y el FALLBACK de compat (ping sin id → guard por clase).
+
+  it('[fix] swap intra-clase CON vehicleId distinto NO arrastra attrs stale (aunque el ping llegue degradado)', async () => {
     const idx = new InMemoryHotIndex();
-    // Vehículo A: van XL premium.
+    // Vehículo A: van XL premium (id "veh-xl").
+    await idx.upsertLocation('d', P, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Swap a vehículo B (económico, misma clase CAR, id "veh-eco") cuyo ping llega degradado SIN attrs de tier
+    // pero SÍ con su identidad (el bff la sella server-authoritative aunque fleet no devuelva la ficha completa).
+    await idx.upsertLocation('d', P, VehicleClass.CAR, { vehicleId: 'veh-eco' });
+    const loc = await idx.getLocation('d');
+    // El id cambió ⇒ NO es el mismo vehículo ⇒ no hay carry: los attrs del XL NO se heredan (degradación honesta).
+    expect(loc?.vehicleId).toBe('veh-eco');
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('[identidad] mismo vehicleId + ping degradado SÍ preserva los attrs (el anti-clobber sigue, ahora por id)', async () => {
+    const idx = new InMemoryHotIndex();
+    await idx.upsertLocation('d', P, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Mismo vehículo (id "veh-xl"), ping sin attrs (fleet 204 transitorio): se preservan los del ping previo.
+    await idx.upsertLocation('d', P, VehicleClass.CAR, { vehicleId: 'veh-xl' });
+    const loc = await idx.getLocation('d');
+    expect(loc?.seats).toBe(7);
+    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleYear).toBe(2023);
+  });
+
+  it('[compat] ping legacy SIN vehicleId cae al guard por vehicleType (comportamiento previo, inocuo fail-open)', async () => {
+    const idx = new InMemoryHotIndex();
+    // Sin vehicleId en ningún ping (app vieja / fleet 204 sin vehículo activo): el carry usa el fallback por clase.
     await idx.upsertLocation('d', P, VehicleClass.CAR, {
       seats: 7,
       segment: VehicleSegment.PREMIUM,
       vehicleYear: 2023,
     });
-    // Swap a vehículo B (económico, misma clase CAR) cuyo ping llega degradado SIN attrs (fleet 204/outage).
     await idx.upsertLocation('d', P, VehicleClass.CAR);
     const loc = await idx.getLocation('d');
-    // Comportamiento ACTUAL: hereda los attrs del XL (el guard por clase no detecta el swap).
+    // Misma clase, sin identidad para distinguir ⇒ preserva (igual que antes del flip · self-heal al próximo ping).
     expect(loc?.seats).toBe(7);
     expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
   });

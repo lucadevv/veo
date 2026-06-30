@@ -19,6 +19,13 @@ export const EXCLUSION_REGISTRY = Symbol('EXCLUSION_REGISTRY');
  * Todos OPCIONALES: un ping legacy (productor sin desplegar) no los trae y el pool degrada a "elegible".
  */
 export interface DriverVehicleAttrs {
+  /**
+   * IDENTIDAD del vehículo activo (no es un attr de eligibilidad: NO filtra el matching). dispatch la usa como
+   * KEY del carry anti-clobber: preservar attrs ausentes solo si el ping previo es el MISMO vehículo. vehicleType
+   * (VehicleClass) no alcanza — un XL 7-asientos y un económico 5-asientos son ambos CAR. Opcional por compat
+   * (pings legacy / fleet 204 sin vehículo activo) ⇒ el carry cae al guard por vehicleType (comportamiento previo).
+   */
+  vehicleId?: string;
   seats?: number;
   segment?: VehicleSegment;
   vehicleYear?: number;

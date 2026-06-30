@@ -105,6 +105,8 @@ export class DriverGateway implements OnGatewayConnection {
     const published = await this.locationPublisher.publishDriverLocation(driverId, {
       ...parsed.data,
       vehicleType: activeVehicle.vehicleType,
+      // Identidad del vehículo activo: key del carry anti-clobber en dispatch (no vehicleType).
+      vehicleId: activeVehicle.vehicleId,
       // B5-3 · attrs de eligibilidad (si el modelo activo los aporta); el publisher los sella en el ping.
       seats: activeVehicle.seats,
       segment: activeVehicle.segment,

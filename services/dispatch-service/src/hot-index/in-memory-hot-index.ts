@@ -28,7 +28,13 @@ export class InMemoryHotIndex implements HotIndex {
     // mentía sobre el "mismo contrato" y los tests unitarios ejercían el comportamiento VIEJO. Ver el
     // comentario canónico en redis-hot-index.ts para el razonamiento completo.
     const prev = this.locations.get(driverId);
-    const carry = prev?.vehicleType === vehicleType ? prev : undefined;
+    // Paridad con redis-hot-index: el carry se llavea por vehicleId (IDENTIDAD), con fallback a vehicleType
+    // cuando el ping no lo trae (legacy). Ver el comentario canónico en redis-hot-index.ts para el razonamiento.
+    const sameVehicle =
+      attrs?.vehicleId !== undefined
+        ? prev?.vehicleId === attrs.vehicleId
+        : prev?.vehicleType === vehicleType;
+    const carry = sameVehicle ? prev : undefined;
     const seats = attrs?.seats ?? carry?.seats;
     const segment = attrs?.segment ?? carry?.segment;
     const vehicleYear = attrs?.vehicleYear ?? carry?.vehicleYear;
@@ -38,6 +44,8 @@ export class InMemoryHotIndex implements HotIndex {
       lon: point.lon,
       h3: toH3(point, DISPATCH_H3_RESOLUTION),
       vehicleType,
+      // IDENTIDAD estricta del ping (no se arrastra del carry); key del carry anti-clobber (Lote 2).
+      ...(attrs?.vehicleId !== undefined ? { vehicleId: attrs.vehicleId } : {}),
       ...(seats !== undefined ? { seats } : {}),
       ...(segment !== undefined ? { segment } : {}),
       ...(vehicleYear !== undefined ? { vehicleYear } : {}),
@@ -63,6 +71,7 @@ export class InMemoryHotIndex implements HotIndex {
       lon,
       h3,
       vehicleType,
+      ...(attrs?.vehicleId !== undefined ? { vehicleId: attrs.vehicleId } : {}),
       ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
       ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
       ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),

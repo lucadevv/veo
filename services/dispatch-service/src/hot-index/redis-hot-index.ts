@@ -79,16 +79,19 @@ export class RedisHotIndex implements HotIndex {
     // del ping previo — pero SOLO si es el MISMO vehicleType (un cambio de clase trae otro vehículo con
     // attrs distintos: no se arrastran). Un ping que SÍ trae el attr lo pisa (cambio de vehículo real).
     //
-    // ⚠ PREREQUISITO DEL FLIP A FAIL-CLOSED (Lote 3) — el guard es por vehicleType (VehicleClass), que NO
-    // distingue dos vehículos de la MISMA clase (un van XL 7-asientos y un económico 5-asientos son ambos
-    // VehicleClass.CAR; DriverVehicleAttrs no porta vehicleId). HOY es inocuo: el gate corre fail-OPEN (los
-    // attrs ausentes NO restringen) y el resolver server-authoritative pisa el carry en ≤20s. PERO bajo
-    // fail-closed un swap intra-clase + un ping degradado sin attrs haría que el económico HEREDE los attrs
-    // STALE del XL y PASE el gate estricto (en vez de ser denegado por ausencia), invisible a la prevalencia.
-    // ANTES de flipear: keyear el carry por IDENTIDAD de vehículo (vehicleId/modelSpecId en el ping firehose)
-    // o NO arrastrar attrs bajo semántica fail-closed. Gate adversarial wkrozhaf6 (ALTA, refutada a "inerte
-    // hoy / landmine del flip"). Espejado en in-memory-hot-index.ts (paridad de contrato).
-    const carry = prev?.vehicleType === vehicleType ? prev : undefined;
+    // IDENTIDAD del carry (cerró el prerequisito del flip a fail-closed · gate wkrozhaf6): el carry se llavea
+    // por vehicleId — la IDENTIDAD del vehículo activo, no su clase. vehicleType (VehicleClass) NO distingue dos
+    // vehículos de la MISMA clase (un van XL 7-asientos y un económico 5-asientos son ambos VehicleClass.CAR):
+    // bajo fail-closed un swap intra-clase + un ping degradado sin attrs haría que el económico HEREDE los attrs
+    // STALE del XL y PASE el gate estricto. Con vehicleId, un swap de vehículo (id distinto) NO arrastra attrs
+    // del anterior → el ping degradado degrada honesto (sin attrs ⇒ el pool decide por su política), no miente.
+    // FALLBACK por compat: si el ping no trae vehicleId (legacy / fleet 204 sin vehículo activo), se cae al guard
+    // por vehicleType — el comportamiento previo, inocuo bajo fail-open. Espejado en in-memory (paridad).
+    const sameVehicle =
+      attrs?.vehicleId !== undefined
+        ? prev?.vehicleId === attrs.vehicleId
+        : prev?.vehicleType === vehicleType;
+    const carry = sameVehicle ? prev : undefined;
     const seats = attrs?.seats ?? carry?.seats;
     const segment = attrs?.segment ?? carry?.segment;
     const vehicleYear = attrs?.vehicleYear ?? carry?.vehicleYear;
@@ -98,6 +101,9 @@ export class RedisHotIndex implements HotIndex {
       lon: point.lon,
       h3,
       vehicleType,
+      // IDENTIDAD del vehículo activo: se persiste ESTRICTA del ping (NO se arrastra del carry — afirmar una
+      // identidad que el ping no confirma sería falsearla). Es la key del carry anti-clobber (ver `sameVehicle`).
+      ...(attrs?.vehicleId !== undefined ? { vehicleId: attrs.vehicleId } : {}),
       // Solo se incluyen las claves PRESENTES (preservadas o del ping) — un attr ausente no escribe
       // undefined que ensucie el JSON; si nunca hubo valor, el pool degrada a "elegible" (fail-open).
       ...(seats !== undefined ? { seats } : {}),

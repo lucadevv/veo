@@ -18,6 +18,8 @@ import { RestGateway } from '../infra/rest.gateway';
 
 /** Subconjunto del response de fleet (`/drivers/vehicles/active`) que necesitamos para el ping. */
 interface ActiveVehicleReply {
+  /** Id del vehículo activo (DriverVehicleResponse.id) — se sella en el ping como key del carry de dispatch. */
+  id?: string;
   vehicleType: VehicleClass;
   year?: number;
   seats?: number;
@@ -28,6 +30,8 @@ interface ActiveVehicleReply {
 /** Vehículo activo resuelto: tipo (siempre) + attrs de eligibilidad (si el modelo del catálogo los aporta). */
 export interface ResolvedActiveVehicle {
   vehicleType: VehicleClass;
+  /** Identidad del vehículo activo: dispatch keysea el carry anti-clobber por ESTO, no por vehicleType. */
+  vehicleId?: string;
   seats?: number;
   segment?: VehicleSegment;
   vehicleYear?: number;
@@ -62,6 +66,7 @@ export class ActiveVehicleTypeResolver {
       const value: ResolvedActiveVehicle = active
         ? {
             vehicleType: active.vehicleType,
+            vehicleId: active.id,
             seats: active.seats,
             segment: active.segment,
             vehicleYear: active.year,

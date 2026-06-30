@@ -219,4 +219,50 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     const loc = await hotIndex.getLocation('clb-cert');
     expect(loc?.certifications).toBeUndefined();
   });
+
+  // ── IDENTIDAD DEL CARRY · el carry se llavea por vehicleId sobre Redis REAL (round-trip por el LUA + fix) ──
+
+  it('vehicleId sobrevive el round-trip por Redis real (LUA MOVE + JSON)', async () => {
+    await hotIndex.upsertLocation('vid-rt', E, VehicleClass.CAR, {
+      vehicleId: 'veh-rt',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    const loc = await hotIndex.getLocation('vid-rt');
+    expect(loc?.vehicleId).toBe('veh-rt');
+  });
+
+  it('identidad · swap intra-clase con vehicleId DISTINTO NO arrastra attrs stale (aunque el ping llegue degradado)', async () => {
+    // Vehículo A: van XL premium (id "veh-xl").
+    await hotIndex.upsertLocation('vid-swap', E, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Swap a vehículo B (económico, MISMA clase CAR, id "veh-eco") con ping degradado SIN attrs de tier.
+    await hotIndex.upsertLocation('vid-swap', E, VehicleClass.CAR, { vehicleId: 'veh-eco' });
+    const loc = await hotIndex.getLocation('vid-swap');
+    // El id cambió ⇒ no es el mismo vehículo ⇒ los attrs del XL NO se heredan (degradación honesta, no stale).
+    expect(loc?.vehicleId).toBe('veh-eco');
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('identidad · mismo vehicleId + ping degradado SÍ preserva los attrs (anti-clobber por identidad)', async () => {
+    await hotIndex.upsertLocation('vid-keep', E, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Mismo vehículo (id "veh-xl"), ping sin attrs (fleet 204 transitorio): se preservan los previos.
+    await hotIndex.upsertLocation('vid-keep', E, VehicleClass.CAR, { vehicleId: 'veh-xl' });
+    const loc = await hotIndex.getLocation('vid-keep');
+    expect(loc?.seats).toBe(7);
+    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleYear).toBe(2023);
+  });
 });

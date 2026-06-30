@@ -23,6 +23,8 @@ import type { Env } from '../config/env.schema';
  */
 type SealedLocationReport = DriverLocationReport & {
   vehicleType: VehicleClass;
+  /** Identidad del vehículo activo (key del carry anti-clobber de dispatch). Opcional: legacy/fleet 204. */
+  vehicleId?: string;
   seats?: number;
   segment?: VehicleSegment;
   vehicleYear?: number;
@@ -69,6 +71,8 @@ export class LocationPublisherService implements OnModuleInit, OnModuleDestroy {
         heading: report.heading ?? null,
         // Clase de vehículo activa del conductor, sellada por el gateway. dispatch filtra el matching.
         vehicleType: report.vehicleType,
+        // Identidad del vehículo activo: dispatch la usa como key del carry anti-clobber (no vehicleType).
+        vehicleId: report.vehicleId,
         // B5-3 · attrs de eligibilidad del vehículo activo (del modelSpec). Opcionales: dispatch los usa
         // para filtrar por oferta; si faltan (legacy), degrada a "elegible".
         seats: report.seats,
