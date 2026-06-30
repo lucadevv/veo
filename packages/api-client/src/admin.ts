@@ -662,10 +662,18 @@ export const catalogOffering = z.object({
   labelKey: z.string(),
   icon: z.string(),
   vehicleClass: z.enum(['CAR', 'MOTO']),
+  // EJE 1 (B5) · la VERTICAL del servicio: RIDE (las ofertas de viaje) vs verticales especiales
+  // (AMBULANCE/TOW/MECHANIC, flujo propio, solo FIXED). El panel agrupa por esto (CALIDAD/CAPACIDAD vs
+  // SERVICIOS ESPECIALES). Literal desacoplado de shared-types, igual que `vehicleClass`.
+  serviceType: z.enum(['RIDE', 'AMBULANCE', 'TOW', 'MECHANIC']),
   sortOrder: z.number().int(),
   enabled: z.boolean(),
   allowedModes: z.array(pricingMode),
   pricing: offeringPricing,
+  // EJE de CAPACIDAD (B5-3): `minSeats` distingue una oferta por TAMAÑO (VEO XL = 6 asientos) de las de
+  // CALIDAD/confort. Es lo único que el panel necesita del bloque `requires` para separar los dos ejes; el
+  // resto de requisitos (segmento/antigüedad/certs) son del matching, no del agrupado de la UI.
+  requires: z.object({ minSeats: z.number().int().positive().optional() }).optional(),
   modePin: pricingMode.optional(),
 });
 export type CatalogOffering = z.infer<typeof catalogOffering>;

@@ -31,6 +31,11 @@ export function errorMessage(prefix: string, err: unknown): string {
  *  - 409 (ApiError.status === 409) → toast `info` con el copy canónico de conflicto
  *  - cualquier otro error → toast `danger` con `errorPrefix` + el message
  * NO re-lanza: la re-sincronización (refetch) ya la hace el `onSettled` de la mutation en queries.ts.
+ *
+ * DEVUELVE `true` si el write tuvo éxito, `false` si fue conflicto (409) o cualquier otro error. Esto deja
+ * que un caller con DOS writes secuenciales (catálogo + piso de puja en "Tarifas por oferta") haga
+ * short-circuit: si el primero falla, NO dispara el segundo sobre un estado parcial. El toast no cambia;
+ * el boolean es señal adicional para el caller (los call-sites que lo ignoran siguen compilando).
  */
 export async function runConfigSave<TPayload>(args: {
   mutateAsync: (payload: TPayload) => Promise<unknown>;
@@ -39,16 +44,18 @@ export async function runConfigSave<TPayload>(args: {
   successTitle: string;
   conflictNoun: string;
   errorPrefix: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { mutateAsync, toast, payload, successTitle, conflictNoun, errorPrefix } = args;
   try {
     await mutateAsync(payload);
     toast({ tone: 'success', title: successTitle });
+    return true;
   } catch (err) {
     const conflict = err instanceof ApiError && err.status === 409;
     toast({
       tone: conflict ? 'info' : 'danger',
       title: conflict ? conflictMessage(conflictNoun) : errorMessage(errorPrefix, err),
     });
+    return false;
   }
 }

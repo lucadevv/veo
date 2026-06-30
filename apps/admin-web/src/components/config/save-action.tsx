@@ -13,8 +13,9 @@ interface SaveActionProps {
   invalid: boolean;
   /** ¿Mutación en vuelo? Guardando → Guardar deshabilitado. */
   saving: boolean;
-  /** Acción a ejecutar tras el step-up (la mutación CAS del panel). */
-  onSave: () => Promise<void> | void;
+  /** Acción a ejecutar tras el step-up (la mutación CAS del panel). El valor que resuelva se ignora (algunos
+   *  `save` ahora devuelven `boolean` para short-circuit del caller) → se acepta cualquier Promise. */
+  onSave: () => void | Promise<unknown>;
   /** Título del diálogo de step-up. */
   title: string;
   /** Descripción del diálogo de step-up. */

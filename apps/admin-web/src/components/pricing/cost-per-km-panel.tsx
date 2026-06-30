@@ -98,11 +98,18 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
         declara el conductor por viaje.
       </p>
 
-      <div className="mt-4 grid max-w-3xl gap-5 sm:grid-cols-2">
-        {config.configs.map((c) => (
-          <CountryRow key={c.pais} config={c} />
-        ))}
-      </div>
+      {config.configs.length === 0 ? (
+        <p className="mt-4 text-sm text-ink-subtle">
+          Sin costos de operación configurados todavía. Definí el costo por km por país para activar el
+          techo anti-lucro del carpooling.
+        </p>
+      ) : (
+        <div className="mt-4 grid max-w-3xl gap-5 sm:grid-cols-2">
+          {config.configs.map((c) => (
+            <CountryRow key={c.pais} config={c} />
+          ))}
+        </div>
+      )}
 
       <ReadOnlyNote canManage={canManage} noun="el costo/km" className="mt-3" />
     </section>

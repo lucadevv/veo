@@ -47,6 +47,13 @@ export default function CatalogPage() {
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Tarifas por oferta' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
+        {/*
+          DESACOPLE de carriles: la LISTA de ofertas (catálogo: enable/disable, modo, multiplicador, tarifa
+          mínima) depende SOLO de `catalogQuery`. El piso de la PUJA es OTRA config (endpoint + CAS propios):
+          si `/pricing/bid-floor` falla o carga, NO debe tumbar la lista entera — solo degrada su columna.
+          Por eso el bidFloor entra como POSIBLEMENTE undefined (loading o error) y CatalogPanel degrada esa
+          columna con "no disponible / reintentá", manteniendo operativo todo lo demás.
+        */}
         <AsyncSection
           query={catalogQuery}
           skeleton={
@@ -58,18 +65,11 @@ export default function CatalogPage() {
           }
         >
           {(catalog) => (
-            <AsyncSection
-              query={bidFloorQuery}
-              skeleton={
-                <div className="grid gap-3 pt-4">
-                  <Skeleton className="h-14" />
-                  <Skeleton className="h-14" />
-                  <Skeleton className="h-14" />
-                </div>
-              }
-            >
-              {(bidFloor) => <CatalogPanel catalog={catalog} bidFloor={bidFloor} />}
-            </AsyncSection>
+            <CatalogPanel
+              catalog={catalog}
+              bidFloor={bidFloorQuery.data}
+              onRetryBidFloor={() => void bidFloorQuery.refetch()}
+            />
           )}
         </AsyncSection>
       </div>

@@ -28,8 +28,12 @@ export interface UseConfigSaveOptions<TPayload> {
 }
 
 export interface UseConfigSaveResult<TPayload> {
-  /** Ejecuta `mutateAsync(payload)` + el toast (success | 409→info | error→danger). `successOverride` pisa el `success` configurado (catálogo). */
-  save: (payload: TPayload, successOverride?: string) => Promise<void>;
+  /**
+   * Ejecuta `mutateAsync(payload)` + el toast (success | 409→info | error→danger). `successOverride` pisa el
+   * `success` configurado (catálogo). Resuelve a `true` si el write tuvo éxito, `false` si fue 409/error — así
+   * un caller con dos writes secuenciales (catálogo + piso de puja) hace short-circuit sin tocar el toast.
+   */
+  save: (payload: TPayload, successOverride?: string) => Promise<boolean>;
   /** `mutation.isPending` — para deshabilitar el botón Guardar. */
   saving: boolean;
 }
@@ -47,7 +51,7 @@ export function useConfigSave<TPayload>(
   const { toast } = useToast();
   const { mutation, success, conflictNoun, error } = options;
 
-  const save = (payload: TPayload, successOverride?: string): Promise<void> => {
+  const save = (payload: TPayload, successOverride?: string): Promise<boolean> => {
     const successTitle =
       successOverride ?? (typeof success === 'function' ? success(payload) : (success ?? ''));
     return runConfigSave({

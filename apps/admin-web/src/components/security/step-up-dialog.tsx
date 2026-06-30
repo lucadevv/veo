@@ -21,8 +21,9 @@ interface StepUpDialogProps {
   trigger: React.ReactNode;
   title?: string;
   description?: string;
-  /** Se ejecuta tras verificar el TOTP (MFA fresco). */
-  onVerified: () => Promise<void> | void;
+  /** Se ejecuta tras verificar el TOTP (MFA fresco). El valor que resuelva se ignora (algunos `save` devuelven
+   *  `boolean` para que el caller haga short-circuit) → se acepta cualquier Promise. */
+  onVerified: () => void | Promise<unknown>;
 }
 
 /**
