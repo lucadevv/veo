@@ -8,11 +8,10 @@ import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Badge } from '@/components/ui/badge';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 
 /** Techo de cordura (espejo del DTO server-side): S/100 por unidad. */
 const MAX_PER_UNIT = 100;
@@ -112,31 +111,18 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
           </Field>
         ))}
 
-        {canManage ? (
-          !dirty || anyInvalid || saving ? (
-            <Button variant="primary" size="md" disabled>
-              Guardar
-            </Button>
-          ) : (
-            <StepUpDialog
-              title="Confirmar cambio de precios de energía"
-              description="Esta acción cambia el pricing global y queda auditada."
-              trigger={
-                <Button variant="primary" size="md">
-                  Guardar
-                </Button>
-              }
-              onVerified={onSave}
-            />
-          )
-        ) : null}
+        <SaveAction
+          canManage={canManage}
+          dirty={dirty}
+          invalid={anyInvalid}
+          saving={saving}
+          onSave={onSave}
+          title="Confirmar cambio de precios de energía"
+          description="Esta acción cambia el pricing global y queda auditada."
+        />
       </div>
 
-      {!canManage ? (
-        <p className="mt-2 text-xs text-ink-subtle">
-          Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar los precios de energía.
-        </p>
-      ) : null}
+      <ReadOnlyNote canManage={canManage} noun="los precios de energía" className="mt-2" />
     </section>
   );
 }

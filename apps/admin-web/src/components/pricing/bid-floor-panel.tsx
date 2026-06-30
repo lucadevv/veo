@@ -11,10 +11,9 @@ import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 
 /** Techo de cordura (espejo del DTO server-side BID_FLOOR_MAX_CENTS, defensa en profundidad UI). S/1000. */
 const MAX_SOLES = 1000;
@@ -157,31 +156,18 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
           </div>
         </div>
 
-        {canManage ? (
-          !dirty || invalid || saving ? (
-            <Button variant="primary" size="md" disabled>
-              Guardar
-            </Button>
-          ) : (
-            <StepUpDialog
-              title="Confirmar cambio del piso de la puja"
-              description="Esta acción cambia el pricing (piso mínimo de oferta) y queda auditada."
-              trigger={
-                <Button variant="primary" size="md">
-                  Guardar
-                </Button>
-              }
-              onVerified={onSave}
-            />
-          )
-        ) : null}
+        <SaveAction
+          canManage={canManage}
+          dirty={dirty}
+          invalid={invalid}
+          saving={saving}
+          onSave={onSave}
+          title="Confirmar cambio del piso de la puja"
+          description="Esta acción cambia el pricing (piso mínimo de oferta) y queda auditada."
+        />
       </div>
 
-      {!canManage ? (
-        <p className="mt-2 text-xs text-ink-subtle">
-          Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el piso de la puja.
-        </p>
-      ) : null}
+      <ReadOnlyNote canManage={canManage} noun="el piso de la puja" className="mt-2" />
     </section>
   );
 }

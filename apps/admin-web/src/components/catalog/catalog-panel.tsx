@@ -11,6 +11,7 @@ import { useSession } from '@/lib/session-context';
 import { formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -100,11 +101,7 @@ export function CatalogPanel({ catalog }: { catalog: CatalogView }) {
           ))}
         </ul>
 
-        {!canManage ? (
-          <p className="mt-3 text-xs text-ink-subtle">
-            Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el catálogo.
-          </p>
-        ) : null}
+        <ReadOnlyNote canManage={canManage} noun="el catálogo" className="mt-3" />
       </section>
     </div>
   );
@@ -257,22 +254,16 @@ function OfferingRow({
             />
           </Field>
 
-          {!dirty || multInvalid || minFareInvalid || pending ? (
-            <Button variant="primary" size="sm" disabled>
-              Guardar
-            </Button>
-          ) : (
-            <StepUpDialog
-              title={`Guardar precio de ${offeringLabel(offering.id)}`}
-              description="Esta acción cambia el catálogo global y queda auditada."
-              trigger={
-                <Button variant="primary" size="sm">
-                  Guardar
-                </Button>
-              }
-              onVerified={save}
-            />
-          )}
+          <SaveAction
+            canManage={canManage}
+            dirty={dirty}
+            invalid={multInvalid || minFareInvalid}
+            saving={pending}
+            onSave={save}
+            title={`Guardar precio de ${offeringLabel(offering.id)}`}
+            description="Esta acción cambia el catálogo global y queda auditada."
+            size="sm"
+          />
         </div>
       ) : null}
     </li>

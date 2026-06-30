@@ -8,10 +8,9 @@ import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 
 /** Tope de cordura del costo/km (espejo del DTO server-side, defensa en profundidad UI): S/0.01 .. S/100/km. */
 const MIN_CENTS = 1;
@@ -66,24 +65,15 @@ function CountryRow({ config }: { config: CostPerKmConfigView }) {
         />
       </Field>
 
-      {canManage ? (
-        !dirty || invalid || saving ? (
-          <Button variant="primary" size="md" disabled>
-            Guardar
-          </Button>
-        ) : (
-          <StepUpDialog
-            title={`Confirmar costo/km de ${config.pais}`}
-            description="Esta acción cambia el costo de operación por km que limita el precio del carpooling (escudo legal anti-lucro) y queda auditada."
-            trigger={
-              <Button variant="primary" size="md">
-                Guardar
-              </Button>
-            }
-            onVerified={onSave}
-          />
-        )
-      ) : null}
+      <SaveAction
+        canManage={canManage}
+        dirty={dirty}
+        invalid={invalid}
+        saving={saving}
+        onSave={onSave}
+        title={`Confirmar costo/km de ${config.pais}`}
+        description="Esta acción cambia el costo de operación por km que limita el precio del carpooling (escudo legal anti-lucro) y queda auditada."
+      />
     </div>
   );
 }
@@ -114,11 +104,7 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
         ))}
       </div>
 
-      {!canManage ? (
-        <p className="mt-3 text-xs text-ink-subtle">
-          Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el costo/km.
-        </p>
-      ) : null}
+      <ReadOnlyNote canManage={canManage} noun="el costo/km" className="mt-3" />
     </section>
   );
 }

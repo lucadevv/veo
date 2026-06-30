@@ -7,10 +7,9 @@ import { useReplaceCommission } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 
 /** Tope de cordura (espejo del DTO server-side, defensa en profundidad UI). La comisión no puede pasar de 100%. */
 const MAX_RATE_PCT = 100;
@@ -118,31 +117,18 @@ export function CommissionPanel({ config }: { config: CommissionView }) {
           />
         </Field>
 
-        {canManage ? (
-          !dirty || invalid || saving ? (
-            <Button variant="primary" size="md" disabled>
-              Guardar
-            </Button>
-          ) : (
-            <StepUpDialog
-              title="Confirmar cambio de comisión"
-              description="Esta acción cambia las comisiones globales (on-demand y carpooling) y queda auditada."
-              trigger={
-                <Button variant="primary" size="md">
-                  Guardar
-                </Button>
-              }
-              onVerified={onSave}
-            />
-          )
-        ) : null}
+        <SaveAction
+          canManage={canManage}
+          dirty={dirty}
+          invalid={invalid}
+          saving={saving}
+          onSave={onSave}
+          title="Confirmar cambio de comisión"
+          description="Esta acción cambia las comisiones globales (on-demand y carpooling) y queda auditada."
+        />
       </div>
 
-      {!canManage ? (
-        <p className="mt-3 text-xs text-ink-subtle">
-          Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar la comisión.
-        </p>
-      ) : null}
+      <ReadOnlyNote canManage={canManage} noun="la comisión" className="mt-3" />
     </section>
   );
 }

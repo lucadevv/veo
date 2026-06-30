@@ -8,11 +8,10 @@ import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Badge } from '@/components/ui/badge';
-import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 
 /** Techos de cordura (espejo del DTO server-side, defensa en profundidad UI). */
 const MAX_SOLES_PER_LITER = 100;
@@ -111,24 +110,15 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
           />
         </Field>
 
-        {canManage ? (
-          !dirty || invalid || saving ? (
-            <Button variant="primary" size="md" disabled>
-              Guardar
-            </Button>
-          ) : (
-            <StepUpDialog
-              title="Confirmar cambio de recargo de combustible"
-              description="Esta acción cambia el pricing global y queda auditada."
-              trigger={
-                <Button variant="primary" size="md">
-                  Guardar
-                </Button>
-              }
-              onVerified={onSave}
-            />
-          )
-        ) : null}
+        <SaveAction
+          canManage={canManage}
+          dirty={dirty}
+          invalid={invalid}
+          saving={saving}
+          onSave={onSave}
+          title="Confirmar cambio de recargo de combustible"
+          description="Esta acción cambia el pricing global y queda auditada."
+        />
       </div>
 
       {/* Preview del recargo derivado. El valor PERSISTIDO se etiqueta según el estado: "vigente" SOLO si el
@@ -145,11 +135,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         </span>
       </p>
 
-      {!canManage ? (
-        <p className="mt-2 text-xs text-ink-subtle">
-          Solo lectura: necesitas el rol FINANCE o ADMIN para cambiar el combustible.
-        </p>
-      ) : null}
+      <ReadOnlyNote canManage={canManage} noun="el combustible" className="mt-2" />
     </>
   );
 
