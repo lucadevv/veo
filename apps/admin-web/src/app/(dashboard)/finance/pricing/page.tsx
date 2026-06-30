@@ -13,8 +13,9 @@ import {
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AsyncSection } from '@/components/config/async-section';
 import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
@@ -70,25 +71,22 @@ export default function PricingPage() {
           title="Modo de tarifa · on-demand"
           hint="Cómo se fija el precio del viaje inmediato: puja del pasajero o precio fijo calculado, y el piso de la puja."
         >
-          {query.isError ? (
-            <ErrorState onRetry={() => void query.refetch()} />
-          ) : query.isLoading || !query.data ? (
-            <div className="grid gap-3 pt-4 sm:grid-cols-2">
-              <Skeleton className="h-28" />
-              <Skeleton className="h-28" />
-            </div>
-          ) : (
-            <ModeSchedulePanel schedule={query.data} />
-          )}
+          <AsyncSection
+            query={query}
+            skeleton={
+              <div className="grid gap-3 pt-4 sm:grid-cols-2">
+                <Skeleton className="h-28" />
+                <Skeleton className="h-28" />
+              </div>
+            }
+          >
+            {(data) => <ModeSchedulePanel schedule={data} />}
+          </AsyncSection>
 
           {/* ADR 010 §9.3 · piso de la PUJA per-oferta. */}
-          {bidFloorQuery.isError ? (
-            <ErrorState onRetry={() => void bidFloorQuery.refetch()} />
-          ) : bidFloorQuery.isLoading || !bidFloorQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <BidFloorPanel config={bidFloorQuery.data} />
-          )}
+          <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <BidFloorPanel config={data} />}
+          </AsyncSection>
         </PricingSection>
 
         {/* CARRIL on-demand · las piezas que arman la tarifa (base + recargo de combustible + energía). */}
@@ -97,31 +95,19 @@ export default function PricingPage() {
           hint="Las piezas que arman el precio fijo y el sugerido de la puja: la tarifa base y el modelo de energía."
         >
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). */}
-          {baseFareQuery.isError ? (
-            <ErrorState onRetry={() => void baseFareQuery.refetch()} />
-          ) : baseFareQuery.isLoading || !baseFareQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <BaseFarePanel config={baseFareQuery.data} />
-          )}
+          <AsyncSection query={baseFareQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <BaseFarePanel config={data} />}
+          </AsyncSection>
 
           {/* B3/B4 · recargo de combustible (modelo de energía LIVE mientras el flip esté OFF). */}
-          {fuelQuery.isError ? (
-            <ErrorState onRetry={() => void fuelQuery.refetch()} />
-          ) : fuelQuery.isLoading || !fuelQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <FuelSurchargePanel config={fuelQuery.data} />
-          )}
+          <AsyncSection query={fuelQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <FuelSurchargePanel config={data} />}
+          </AsyncSection>
 
           {/* B5 · precios de energía multi-fuente (vista previa hasta el flip). */}
-          {energyQuery.isError ? (
-            <ErrorState onRetry={() => void energyQuery.refetch()} />
-          ) : energyQuery.isLoading || !energyQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <EnergyCatalogPanel config={energyQuery.data} />
-          )}
+          <AsyncSection query={energyQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <EnergyCatalogPanel config={data} />}
+          </AsyncSection>
         </PricingSection>
 
         {/* CARRIL carpooling · el costo/km que limita el cost-sharing (escudo legal anti-lucro). */}
@@ -130,13 +116,9 @@ export default function PricingPage() {
           hint="El costo de operación por km que limita el precio del cost-sharing (escudo legal anti-lucro). Se fija por país."
         >
           {/* F2.5 · costo/km del carpooling (costo de operación DIRECTO del admin, per-país). */}
-          {costPerKmQuery.isError ? (
-            <ErrorState onRetry={() => void costPerKmQuery.refetch()} />
-          ) : costPerKmQuery.isLoading || !costPerKmQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <CostPerKmPanel config={costPerKmQuery.data} />
-          )}
+          <AsyncSection query={costPerKmQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <CostPerKmPanel config={data} />}
+          </AsyncSection>
         </PricingSection>
 
         {/* AMBOS modos · cómo gana la plataforma en cada carril (descuento on-demand vs service fee carpooling). */}
@@ -145,13 +127,9 @@ export default function PricingPage() {
           hint="Cómo gana la plataforma en cada carril: descuento al conductor en on-demand, service fee al pasajero en carpooling."
         >
           {/* F2.7 · comisión por modo (on-demand + service fee carpooling, ambas editables). */}
-          {commissionQuery.isError ? (
-            <ErrorState onRetry={() => void commissionQuery.refetch()} />
-          ) : commissionQuery.isLoading || !commissionQuery.data ? (
-            <Skeleton className="mt-6 h-28" />
-          ) : (
-            <CommissionPanel config={commissionQuery.data} />
-          )}
+          <AsyncSection query={commissionQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+            {(data) => <CommissionPanel config={data} />}
+          </AsyncSection>
         </PricingSection>
       </div>
     </div>

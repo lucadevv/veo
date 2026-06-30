@@ -5,8 +5,9 @@ import { useCatalog } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AsyncSection } from '@/components/config/async-section';
 import { CatalogPanel } from '@/components/catalog/catalog-panel';
 
 /**
@@ -43,17 +44,18 @@ export default function CatalogPage() {
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Catálogo' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {query.isError ? (
-          <ErrorState onRetry={() => void query.refetch()} />
-        ) : query.isLoading || !query.data ? (
-          <div className="grid gap-3 pt-4">
-            <Skeleton className="h-14" />
-            <Skeleton className="h-14" />
-            <Skeleton className="h-14" />
-          </div>
-        ) : (
-          <CatalogPanel catalog={query.data} />
-        )}
+        <AsyncSection
+          query={query}
+          skeleton={
+            <div className="grid gap-3 pt-4">
+              <Skeleton className="h-14" />
+              <Skeleton className="h-14" />
+              <Skeleton className="h-14" />
+            </div>
+          }
+        >
+          {(data) => <CatalogPanel catalog={data} />}
+        </AsyncSection>
       </div>
     </div>
   );
