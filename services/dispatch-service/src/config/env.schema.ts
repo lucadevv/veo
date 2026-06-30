@@ -116,6 +116,15 @@ export const envSchema = z
     /// Nº de cancelaciones en la ventana que DISPARA la auto-suspensión. Al cruzar exactamente este umbral
     /// (count pasa de THRESHOLD-1 → THRESHOLD) dispatch emite `driver.excessive_cancellations` UNA vez. Default 5.
     CANCELLATION_THRESHOLD: z.coerce.number().int().positive().default(5),
+
+    // ── Exclusión por SUSPENSIÓN del pool de matching (RedisTtlExclusionRegistry) ──
+    /// TTL (s) de AUTO-CURA de la exclusión por suspensión. La exclusión es una OPTIMIZACIÓN (no ofertarle
+    /// al suspendido); la AUTORIDAD de seguridad es el accept-gate fail-closed. El TTL acota la ventana de
+    /// OVER-exclusion: si la señal de reactivación nunca llega (p.ej. la vía fleet-auto doc/ITV NO emite
+    /// `driver.reactivated`), la exclusión EXPIRA y el conductor re-entra al pool en vez de quedar pegado
+    /// para siempre. Re-suspender refresca el TTL. Default 1h (corto = auto-cura rápida del lado peligroso;
+    /// el caso normal limpia al instante por evento). Subir cuando Lote 2b consuma los eventos fleet.
+    SUSPENSION_EXCLUSION_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
   })
   .superRefine((env, ctx) => {
     // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.

@@ -33,6 +33,7 @@ import { DispatchService } from '../dispatch/dispatch.service';
 import { MatchingService } from '../dispatch/matching.service';
 import { SurgeService } from '../dispatch/surge.service';
 import { DriverProjectionService } from '../dispatch/driver-projection.service';
+import { DriverSuspensionService } from '../dispatch/driver-suspension.service';
 import { OfferBoardService } from '../dispatch/offer-board.service';
 import { HeatmapService } from '../heatmap/heatmap.service';
 import type { Env } from '../config/env.schema';
@@ -49,6 +50,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     private readonly matching: MatchingService,
     private readonly surge: SurgeService,
     private readonly projection: DriverProjectionService,
+    private readonly suspensionService: DriverSuspensionService,
     private readonly offerBoard: OfferBoardService,
     private readonly heatmap: HeatmapService,
   ) {
@@ -70,6 +72,10 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       'trip.reassigning': (env) => this.onReassigning(env),
       'driver.location_updated': (env) => this.onDriverLocation(env),
       'panic.triggered': (env) => this.onPanic(env),
+      // SUSPENSIÓN (eje disciplinario): el conductor sale/entra del pool de matching. El `accept` ya lo
+      // frena fail-closed; esto cierra la MEMBRESÍA (no ofertarle a un suspendido que sigue pingeando GPS).
+      'driver.suspended': (env) => this.onDriverSuspended(env),
+      'driver.reactivated': (env) => this.onDriverReactivated(env),
       'rating.created': (env) => this.onRating(env),
       'driver.flagged': (env) => this.onDriverFlagged(env),
       'trip.completed': (env) => this.onTripCompleted(env),
@@ -247,6 +253,27 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       }
       throw err;
     }
+  }
+
+  /**
+   * SUSPENSIÓN (eje disciplinario · `driver.suspended` trae `driverId` de PERFIL directo): saca al
+   * conductor del pool de matching para no ofertarle (el `accept` ya lo frena fail-closed). El `driverId`
+   * viaja como member de un SET de Redis (NO toca columna `@db.Uuid`), así que no hay veneno de tipo; un
+   * fallo de Redis es transitorio ⇒ relanza ⇒ kafkajs reintenta. Idempotente (SADD repetido = no-op).
+   */
+  private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['driver.suspended'].parse(env.payload);
+    await this.suspensionService.onSuspended(p.driverId);
+  }
+
+  /**
+   * REACTIVACIÓN (eje disciplinario): re-valida la suspensión autoritativa en identity (HOLDS-AWARE) y
+   * reincorpora al pool SOLO si el conductor quedó sin holds. Un error de red gRPC es transitorio ⇒
+   * relanza ⇒ kafkajs re-entrega y la reactivación se re-procesa cuando identity vuelve.
+   */
+  private async onDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['driver.reactivated'].parse(env.payload);
+    await this.suspensionService.onReactivated(p.driverId);
   }
 
   private async onRating(env: EventEnvelope<unknown>): Promise<void> {

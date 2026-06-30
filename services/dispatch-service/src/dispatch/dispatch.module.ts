@@ -11,6 +11,7 @@ import { MatchingSessionStore } from './matching-session.store';
 import { NearbyDriversService } from './nearby-drivers.service';
 import { SurgeService } from './surge.service';
 import { DriverProjectionService } from './driver-projection.service';
+import { DriverSuspensionService } from './driver-suspension.service';
 import { scorerProvider } from './scorer.provider';
 import { OFFER_DELIVERY } from './offer-delivery.port';
 import { RealtimeOfferDelivery } from './realtime-offer-delivery';
@@ -91,6 +92,7 @@ const radiusConfigCacheTtlProvider: Provider = {
     fleetClientProvider,
     eligibilityCacheTtlProvider,
     DriverProjectionService,
+    DriverSuspensionService,
     SurgeService,
     DriverPool,
     MatchingSessionStore,
@@ -114,6 +116,7 @@ const radiusConfigCacheTtlProvider: Provider = {
     NearbyDriversService,
     SurgeService,
     DriverProjectionService,
+    DriverSuspensionService,
     OfferBoardService,
     EligibilityGate,
     DispatchRadiusConfigService,

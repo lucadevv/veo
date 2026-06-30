@@ -21,12 +21,14 @@ const CELL = 'cell-1';
 const cells = [CELL];
 
 let hotIndex: InMemoryHotIndex;
+let suspension: InMemoryExclusionRegistry;
 let pool: DriverPool;
 
 beforeEach(() => {
   vi.clearAllMocks();
   hotIndex = new InMemoryHotIndex();
-  pool = new DriverPool(hotIndex, new InMemoryExclusionRegistry());
+  suspension = new InMemoryExclusionRegistry();
+  pool = new DriverPool(hotIndex, new InMemoryExclusionRegistry(), suspension);
 });
 
 const ids = (locs: { driverId: string }[]) => locs.map((l) => l.driverId).sort();
@@ -205,5 +207,23 @@ describe('DriverPool.eligible · B5-3.2 certificaciones (FAIL-CLOSED, opuesto a 
         }),
       ),
     ).toEqual(['a']);
+  });
+});
+
+describe('DriverPool.eligible · exclusión por SUSPENSIÓN del conductor', () => {
+  it('un conductor SUSPENDIDO (en el set de suspensión) NO es elegible aunque siga pingeando GPS', async () => {
+    await hotIndex.seed('activo', -12, -77, CELL, VehicleType.CAR);
+    await hotIndex.seed('suspendido', -12, -77, CELL, VehicleType.CAR);
+    // El suspendido sigue VIVO en el hot-index (su app pinguea), pero está excluido del pool.
+    await suspension.exclude('suspendido');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual(['activo']);
+  });
+
+  it('al reincorporarse (clear), el conductor vuelve a ser elegible', async () => {
+    await hotIndex.seed('d', -12, -77, CELL, VehicleType.CAR);
+    await suspension.exclude('d');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual([]);
+    await suspension.clear('d');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual(['d']);
   });
 });

@@ -12,7 +12,14 @@ import type { LatLon } from '@veo/utils';
 import type { FleetDocumentType, VehicleClass, VehicleSegment } from '@veo/shared-types';
 
 export const HOT_INDEX = Symbol('HOT_INDEX');
+/** Exclusión por PÁNICO (BR-T06): se limpia por resolución del incidente. */
 export const EXCLUSION_REGISTRY = Symbol('EXCLUSION_REGISTRY');
+/**
+ * Exclusión por SUSPENSIÓN del conductor (ciclo de vida DISTINTO al de pánico: se limpia por
+ * REACTIVACIÓN holds-aware, NO por-incidente). Misma interfaz `ExclusionRegistry`, otro SET de Redis.
+ * El pool filtra por AMBOS; un conductor suspendido NO recibe ofertas FIXED aunque siga pingeando GPS.
+ */
+export const SUSPENSION_REGISTRY = Symbol('SUSPENSION_REGISTRY');
 
 /**
  * B5-3 · atributos de eligibilidad del vehículo activo (del modelSpec elegido + el año del vehículo).

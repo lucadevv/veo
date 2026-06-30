@@ -16,6 +16,7 @@ import {
 import {
   HOT_INDEX,
   EXCLUSION_REGISTRY,
+  SUSPENSION_REGISTRY,
   type HotIndex,
   type ExclusionRegistry,
   type DriverLocation,
@@ -32,6 +33,7 @@ export class DriverPool {
   constructor(
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     @Inject(EXCLUSION_REGISTRY) private readonly exclusion: ExclusionRegistry,
+    @Inject(SUSPENSION_REGISTRY) private readonly suspension: ExclusionRegistry,
   ) {}
 
   /**
@@ -52,7 +54,11 @@ export class DriverPool {
     );
     const exclude = opts.exclude;
     const fresh = exclude ? byType.filter((l) => !exclude.has(l.driverId)) : byType;
-    const allowed = new Set(await this.exclusion.filter(fresh.map((l) => l.driverId)));
+    // Dos exclusiones de ciclo de vida distinto, AMBAS sacan del pool: pánico (BR-T06) y suspensión del
+    // conductor. Un suspendido que sigue pingeando GPS permanece en el hot-index pero NO debe recibir
+    // ofertas FIXED — el accept ya lo frena (EligibilityGate, fail-closed), esto evita ofertarle de gusto.
+    const notPanicked = await this.exclusion.filter(fresh.map((l) => l.driverId));
+    const allowed = new Set(await this.suspension.filter(notPanicked));
     return fresh.filter((l) => allowed.has(l.driverId));
   }
 

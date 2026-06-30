@@ -51,7 +51,7 @@ beforeAll(async () => {
 
   hotIndex = new InMemoryHotIndex();
   const exclusion = new InMemoryExclusionRegistry();
-  const driverPool = new DriverPool(hotIndex, exclusion);
+  const driverPool = new DriverPool(hotIndex, exclusion, new InMemoryExclusionRegistry());
   const sessions = new MatchingSessionStore(prismaService);
   const scorer = new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 });
   const projection = {
@@ -498,7 +498,7 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
     } as Partial<Env> as Env);
     const tightMatching = new MatchingService(
       { read: prisma, write: prisma } as unknown as PrismaService,
-      new DriverPool(hotIndex, new InMemoryExclusionRegistry()),
+      new DriverPool(hotIndex, new InMemoryExclusionRegistry(), new InMemoryExclusionRegistry()),
       new MatchingSessionStore({ read: prisma, write: prisma } as unknown as PrismaService),
       new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 }),
       {

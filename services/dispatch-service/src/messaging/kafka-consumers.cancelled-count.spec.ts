@@ -70,6 +70,7 @@ function build() {
     matching,
     { recordDemand: async () => {} } as never, // surge
     projection,
+    {} as never, // suspensionService
     offerBoard,
     { recordDemand: async () => {} } as never, // heatmap
   );

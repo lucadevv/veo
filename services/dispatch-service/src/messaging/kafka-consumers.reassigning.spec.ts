@@ -75,6 +75,7 @@ function build(opts?: { countThrows?: Error }) {
     noop, // matching
     { recordDemand: async () => {} } as never, // surge
     projection,
+    noop, // suspensionService
     offerBoard,
     { recordDemand: async () => {} } as never, // heatmap
   );

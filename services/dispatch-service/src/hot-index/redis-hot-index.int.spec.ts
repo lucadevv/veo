@@ -12,6 +12,7 @@ import { toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
 import { VehicleClass, VehicleSegment, FleetDocumentType } from '@veo/shared-types';
 import { RedisHotIndex } from './redis-hot-index';
 import { RedisExclusionRegistry } from './redis-exclusion.registry';
+import { RedisTtlExclusionRegistry } from './redis-ttl-exclusion.registry';
 import { DriverPool } from '../dispatch/driver-pool';
 
 const A = { lat: -12.0464, lon: -77.0428 };
@@ -69,6 +70,37 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     expect(await exclusion.isExcluded('d9')).toBe(false);
   });
 
+  // ── Exclusión por SUSPENSIÓN con TTL de AUTO-CURA (RedisTtlExclusionRegistry) sobre Redis real ──
+
+  it('exclusión por suspensión: excluye, filtra y limpia (paridad de contrato con el de pánico)', async () => {
+    const suspension = new RedisTtlExclusionRegistry(redis, 3_600, 'test:susp:contract');
+    await suspension.exclude('s1');
+    expect(await suspension.isExcluded('s1')).toBe(true);
+    expect(await suspension.filter(['s1', 's2'])).toEqual(['s2']);
+    await suspension.clear('s1');
+    expect(await suspension.isExcluded('s1')).toBe(false);
+  });
+
+  it('AUTO-CURA: si la reactivación nunca llega, la exclusión EXPIRA sola y el conductor re-entra al pool', async () => {
+    // TTL de 1s: el modo de falla seguro es re-admitir (over-exclusion acotada), no quedar pegado.
+    const suspension = new RedisTtlExclusionRegistry(redis, 1, 'test:susp:ttl');
+    await suspension.exclude('stuck');
+    expect(await suspension.isExcluded('stuck')).toBe(true); // excluido ahora
+    // Esperamos a que Redis expire la key (sin ningún clear() explícito: nadie limpió).
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(await suspension.isExcluded('stuck')).toBe(false); // AUTO-CURADO: re-entra al pool
+    expect(await suspension.filter(['stuck', 'other'])).toEqual(['stuck', 'other']); // ninguno excluido
+  });
+
+  it('re-excluir REFRESCA el TTL (renueva la ventana en cada re-entrega del evento)', async () => {
+    const suspension = new RedisTtlExclusionRegistry(redis, 2, 'test:susp:refresh');
+    await suspension.exclude('refresh');
+    await new Promise((r) => setTimeout(r, 1_000)); // ~mitad de la ventana
+    await suspension.exclude('refresh'); // re-suspensión → TTL vuelve a 2s
+    await new Promise((r) => setTimeout(r, 1_200)); // pasó el TTL ORIGINAL pero no el refrescado
+    expect(await suspension.isExcluded('refresh')).toBe(true); // sigue excluido gracias al refresh
+  });
+
   // ── B5-3 · eligibilidad por oferta sobre Redis REAL (round-trip de attrs + filtro del pool) ──
 
   it('B5-3 · los attrs de eligibilidad (seats/segment/year) sobreviven el round-trip por Redis real', async () => {
@@ -86,7 +118,7 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3 · DriverPool.eligible filtra por el `requires` de la oferta sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion);
+    const pool = new DriverPool(hotIndex, exclusion, new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'));
     const cellC = toH3(C, DISPATCH_H3_RESOLUTION);
     // Celda C aislada: solo estos 3 (con attrs completos, así el filtro NO degrada a "elegible").
     await hotIndex.upsertLocation('c-mid', C, VehicleClass.CAR, {
@@ -135,7 +167,7 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3.2 · DriverPool gatea las verticales FAIL-CLOSED sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion);
+    const pool = new DriverPool(hotIndex, exclusion, new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'));
     const cellD = toH3(D, DISPATCH_H3_RESOLUTION);
     // Celda D aislada: uno con la cert de ambulancia, uno con otra cert, uno sin certs.
     await hotIndex.upsertLocation('d-amb', D, VehicleClass.CAR, {

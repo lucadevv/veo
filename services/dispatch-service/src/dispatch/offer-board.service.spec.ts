@@ -470,7 +470,7 @@ function makeService(opts: {
 }): OfferBoardService {
   const config = new ConfigService<Env, true>({ DISPATCH_MAX_K_RING: 2 } as Partial<Env> as Env);
   const gate = opts.gate as unknown as EligibilityGate;
-  const driverPool = new DriverPool(opts.hotIndex, opts.exclusion);
+  const driverPool = new DriverPool(opts.hotIndex, opts.exclusion, new InMemoryExclusionRegistry());
   // Fake de la config de radios: el broadcast/listOpenBidsNear leen `matchKRing` en runtime. Devuelve 2
   // para preservar el k-ring que estos tests asertan (neighbors(cell, 2)). `nearbyKRing` no aplica acá.
   const radiusConfig = {
