@@ -184,33 +184,18 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // compartido, así que guardamos el borde igual que onTripCancelled — un id no-UUID es veneno → log ERROR +
     // saltar (el board ya quedó re-abierto).
     if (p.driverId) {
-      if (!isUuid(p.tripId)) {
-        this.logger.error(
-          `POISON trip.reassigning: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); ` +
-            'no se cuenta para la ventana de cancelaciones',
-        );
-        domainEventsTotal.inc({ event: 'trip.reassigning', result: BusinessEventResult.REJECTED });
-        return;
-      }
-      try {
-        await this.projection.registerCancellationInWindow(
-          p.driverId,
-          p.tripId,
-          new Date(env.occurredAt),
-        );
-      } catch (err) {
-        // Error permanente de datos → saltar el conteo (el reopen del board ya ocurrió arriba, el pasajero no
-        // queda abandonado). Lo transitorio se relanza para que Kafka reintente AMBOS (reopen idempotente).
-        if (isPermanentDataError(err)) {
-          this.logger.error(
-            `POISON trip.reassigning: error permanente de datos al contar cancelación de ` +
-              `${p.driverId} (trip ${p.tripId}, eventId=${env.eventId}); descartado: ${String(err)}`,
-          );
-          domainEventsTotal.inc({ event: 'trip.reassigning', result: BusinessEventResult.REJECTED });
-        } else {
-          throw err;
-        }
-      }
+      if (this.isPoisonNonUuid('trip.reassigning', env.eventId, p.tripId)) return;
+      // Error permanente de datos → saltar el conteo (el reopen del board ya ocurrió arriba, el pasajero no
+      // queda abandonado). Lo transitorio se relanza para que Kafka reintente AMBOS (reopen idempotente).
+      const driverId = p.driverId;
+      await this.withPoisonGuard(
+        'trip.reassigning',
+        env.eventId,
+        isPermanentDataError,
+        () =>
+          this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
+        `driver=${driverId}, trip=${p.tripId}`,
+      );
     }
   }
 
@@ -234,31 +219,22 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
 
   private async onPanic(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['panic.triggered'].parse(env.payload);
-    // HARDENING: `tripId` toca la columna `@db.Uuid` (excludeDriverForPanic → findFirst). Un id
-    // malformado envenenaría el topic `panic` (crash-loop). Pánico es safety-critical: si el id es
-    // veneno, logueamos en ERROR (alta visibilidad para operación) y saltamos — NO podemos bloquear
-    // la partición de pánico de todos los demás viajes por un evento corrupto.
-    if (!isUuid(p.tripId)) {
-      this.logger.error(
-        `POISON panic.triggered: tripId no-UUID "${String(p.tripId)}" (panicId=${p.panicId}, eventId=${env.eventId}); descartado sin reintento`,
-      );
-      domainEventsTotal.inc({ event: 'panic.triggered', result: BusinessEventResult.REJECTED });
+    // HARDENING: `tripId` toca la columna `@db.Uuid` (excludeDriverForPanic → findFirst). Un id malformado
+    // envenenaría el topic `panic` (crash-loop). Pánico es safety-critical: si el id es veneno, log ERROR +
+    // saltar — NO podemos bloquear la partición de pánico de todos los demás viajes por un evento corrupto.
+    if (this.isPoisonNonUuid('panic.triggered', env.eventId, p.tripId, `panicId=${p.panicId}`))
       return;
-    }
-    try {
-      const driverId = await this.dispatch.excludeDriverForPanic(p.tripId);
-      if (driverId)
-        this.logger.warn(`pánico en trip ${p.tripId}: conductor ${driverId} excluido del pool`);
-    } catch (err) {
-      if (isPermanentDataError(err)) {
-        this.logger.error(
-          `POISON panic.triggered: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
-        );
-        domainEventsTotal.inc({ event: 'panic.triggered', result: BusinessEventResult.REJECTED });
-        return;
-      }
-      throw err;
-    }
+    await this.withPoisonGuard(
+      'panic.triggered',
+      env.eventId,
+      isPermanentDataError,
+      async () => {
+        const driverId = await this.dispatch.excludeDriverForPanic(p.tripId);
+        if (driverId)
+          this.logger.warn(`pánico en trip ${p.tripId}: conductor ${driverId} excluido del pool`);
+      },
+      `trip=${p.tripId}, panicId=${p.panicId}`,
+    );
   }
 
   /**
@@ -280,30 +256,34 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    */
   private async onDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.reactivated'].parse(env.payload);
-    await this.withGrpcPoisonGuard('driver.reactivated', env.eventId, () =>
+    await this.withPoisonGuard('driver.reactivated', env.eventId, isPermanentGrpcError, () =>
       this.suspensionService.onReactivated(p.driverId),
     );
   }
 
   /**
-   * Guarda de POISON para handlers que llaman gRPC a identity: un error gRPC PERMANENTE (PERMISSION_DENIED,
-   * INVALID_ARGUMENT… — config/contrato, reintentar da SIEMPRE el mismo error) se DESCARTA (log ERROR + el
-   * offset avanza) en vez de relanzar → evita el crash-loop / head-of-line block de la partición. Lo
-   * TRANSITORIO (identity caído/lento: UNAVAILABLE/DEADLINE) se RELANZA para que kafkajs reintente. El evento
-   * descartado tiene backstop: el TTL de auto-cura reincorpora al activo y el accept-gate fail-closed 403ea al
-   * suspendido. Espeja el patrón de `onTripCompleted` (isPermanentDataError) para el carril gRPC.
+   * Guarda de POISON para un handler cuya dependencia puede fallar PERMANENTE (config/contrato/datos) o
+   * TRANSITORIO (red/carga/DB caída). Un error PERMANENTE (según `isPermanent`) se DESCARTA (log ERROR +
+   * métrica REJECTED + el offset avanza) en vez de relanzar → evita el crash-loop / head-of-line block de la
+   * partición; lo TRANSITORIO se RELANZA para que kafkajs reintente. `isPermanent` es la clasificación del
+   * carril: `isPermanentGrpcError` (gRPC) o `isPermanentDataError` (Prisma). Backstop del evento descartado:
+   * depende del handler (TTL de auto-cura + accept-gate en suspensión; idempotencia del board en cancelaciones).
+   * `detail` (opcional) suma contexto forense directo al log (ej. `trip=...`) — el eventId siempre recupera
+   * el payload completo, pero en paths sensibles conviene tenerlo a la vista sin un nivel de indirección.
    */
-  private async withGrpcPoisonGuard(
+  private async withPoisonGuard(
     eventType: string,
     eventId: string,
+    isPermanent: (err: unknown) => boolean,
     fn: () => Promise<void>,
+    detail?: string,
   ): Promise<void> {
     try {
       await fn();
     } catch (err) {
-      if (isPermanentGrpcError(err)) {
+      if (isPermanent(err)) {
         this.logger.error(
-          `POISON ${eventType}: error gRPC permanente (eventId=${eventId}); descartado sin reintento: ${String(err)}`,
+          `POISON ${eventType}: error permanente (${this.poisonCtx(eventId, detail)}); descartado sin reintento: ${String(err)}`,
         );
         domainEventsTotal.inc({ event: eventType, result: BusinessEventResult.REJECTED });
         return;
@@ -313,13 +293,33 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
   }
 
   /**
+   * Pre-check de POISON para un id que toca una columna `@db.Uuid`: un id malformado crashearía la query
+   * (Prisma P2023) → relanzar → crash-loop de la partición. Si el id NO es UUID, lo loguea (ERROR + métrica
+   * REJECTED) y devuelve `true` → el caller DEBE `return` para saltar el evento (el offset avanza). UUID
+   * válido ⇒ `false`. `detail` opcional = contexto forense extra (ej. `panicId=...` en el path de pánico).
+   */
+  private isPoisonNonUuid(eventType: string, eventId: string, id: string, detail?: string): boolean {
+    if (isUuid(id)) return false;
+    this.logger.error(
+      `POISON ${eventType}: id no-UUID "${String(id)}" (${this.poisonCtx(eventId, detail)}); descartado sin reintento`,
+    );
+    domainEventsTotal.inc({ event: eventType, result: BusinessEventResult.REJECTED });
+    return true;
+  }
+
+  /** Contexto de un log POISON: `eventId=...` + el `detail` forense del handler (panicId/trip/driver) si lo hay. */
+  private poisonCtx(eventId: string, detail?: string): string {
+    return detail ? `eventId=${eventId}, ${detail}` : `eventId=${eventId}`;
+  }
+
+  /**
    * SUSPENSIÓN por el eje FLEET (doc/ITV): el conductor sale del pool. El sujeto viaja por clave dual
    * (XOR driverId|userId, ver `fleetDriverSuspended`); el service resuelve a Driver.id (User.id → perfil
    * por gRPC en la vía ITV). Error gRPC transitorio ⇒ relanza (kafkajs reintenta); permanente ⇒ poison guard.
    */
   private async onFleetDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['fleet.driver_suspended'].parse(env.payload);
-    await this.withGrpcPoisonGuard('fleet.driver_suspended', env.eventId, () =>
+    await this.withPoisonGuard('fleet.driver_suspended', env.eventId, isPermanentGrpcError, () =>
       this.suspensionService.onFleetSuspended({ driverId: p.driverId, userId: p.userId }),
     );
   }
@@ -330,7 +330,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    */
   private async onFleetDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['fleet.driver_reactivated'].parse(env.payload);
-    await this.withGrpcPoisonGuard('fleet.driver_reactivated', env.eventId, () =>
+    await this.withPoisonGuard('fleet.driver_reactivated', env.eventId, isPermanentGrpcError, () =>
       this.suspensionService.onFleetReactivated({ driverId: p.driverId, userId: p.userId }),
     );
   }
@@ -352,30 +352,21 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // `@db.Uuid`: un tripId malformado → P2023 → relanzar → crash-loop. Guardamos el borde: si el
     // id no es UUID, es veneno → log ERROR + RETURN (saltar, el offset avanza). Sin esto se bloquea
     // la partición y los viajes nuevos no abren board.
-    if (!isUuid(p.tripId)) {
-      this.logger.error(
-        `POISON trip.completed: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
-      );
-      domainEventsTotal.inc({ event: 'trip.completed', result: BusinessEventResult.REJECTED });
-      return;
-    }
-    try {
-      const driverId = await this.dispatch.driverForTrip(p.tripId);
-      if (!driverId) return;
-      await this.projection.onTripCompleted(driverId, new Date());
-      await this.dispatch.releaseDriver(driverId);
-    } catch (err) {
-      // Red de seguridad: cualquier OTRO error permanente de datos (P2009/P2000…) → saltar. Lo
-      // transitorio (DB caída, deadlock, timeout) se RELANZA para que Kafka reintente.
-      if (isPermanentDataError(err)) {
-        this.logger.error(
-          `POISON trip.completed: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
-        );
-        domainEventsTotal.inc({ event: 'trip.completed', result: BusinessEventResult.REJECTED });
-        return;
-      }
-      throw err;
-    }
+    if (this.isPoisonNonUuid('trip.completed', env.eventId, p.tripId)) return;
+    // Red de seguridad: un error permanente de datos (P2009/P2000…) → saltar; lo transitorio (DB caída,
+    // deadlock, timeout) se RELANZA para que Kafka reintente.
+    await this.withPoisonGuard(
+      'trip.completed',
+      env.eventId,
+      isPermanentDataError,
+      async () => {
+        const driverId = await this.dispatch.driverForTrip(p.tripId);
+        if (!driverId) return;
+        await this.projection.onTripCompleted(driverId, new Date());
+        await this.dispatch.releaseDriver(driverId);
+      },
+      `trip=${p.tripId}`,
+    );
   }
 
   private async onTripCancelled(env: EventEnvelope<unknown>): Promise<void> {
@@ -387,13 +378,7 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // HARDENING: cancelBoard opera sobre Redis (key string, tolera cualquier id) pero driverForTrip
     // toca la columna `@db.Uuid`. Guardamos el borde ANTES de tocar Prisma: un tripId no-UUID es
     // veneno → log ERROR + saltar (cancelBoard sobre un id basura es no-op inofensivo igualmente).
-    if (!isUuid(p.tripId)) {
-      this.logger.error(
-        `POISON trip.cancelled: tripId no-UUID "${String(p.tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
-      );
-      domainEventsTotal.inc({ event: 'trip.cancelled', result: BusinessEventResult.REJECTED });
-      return;
-    }
+    if (this.isPoisonNonUuid('trip.cancelled', env.eventId, p.tripId)) return;
     // CAPA 2 (anti-IDOR): cancelBoard ancla el ownership del board al pasajero SOLICITANTE en el camino
     // HTTP. ESTE camino NO es el cancel del pasajero: es la AUTORIDAD DEL VIAJE (trip.cancelled, evento de
     // dominio CONFIABLE de trip-service) — el trip YA murió por otra vía y el board debe morir SIEMPRE,
@@ -415,25 +400,17 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     if (!p.driverId) {
       return;
     }
-    try {
-      // Ventana ROLLING 24h (auto-suspensión por exceso) + contador LIFELONG (tasa de cancelación BR-T06, NUNCA
-      // se poda): AMBOS en registerCancellationInWindow, idempotentes por el natural key (driverId, tripId) → una
-      // re-entrega Kafka no infla ni la ventana ni la tasa. Emite `driver.excessive_cancellations` UNA vez al
-      // cruzar el umbral. `occurredAt` = momento REAL de la cancelación (del envelope), no el de consumo.
-      await this.projection.registerCancellationInWindow(
-        p.driverId,
-        p.tripId,
-        new Date(env.occurredAt),
-      );
-    } catch (err) {
-      if (isPermanentDataError(err)) {
-        this.logger.error(
-          `POISON trip.cancelled: error permanente de datos para trip ${p.tripId} (eventId=${env.eventId}); descartado: ${String(err)}`,
-        );
-        domainEventsTotal.inc({ event: 'trip.cancelled', result: BusinessEventResult.REJECTED });
-        return;
-      }
-      throw err;
-    }
+    // Ventana ROLLING 24h (auto-suspensión por exceso) + contador LIFELONG (tasa de cancelación BR-T06, NUNCA
+    // se poda): AMBOS en registerCancellationInWindow, idempotentes por el natural key (driverId, tripId) → una
+    // re-entrega Kafka no infla ni la ventana ni la tasa. Emite `driver.excessive_cancellations` UNA vez al
+    // cruzar el umbral. `occurredAt` = momento REAL de la cancelación (del envelope), no el de consumo.
+    const driverId = p.driverId;
+    await this.withPoisonGuard(
+      'trip.cancelled',
+      env.eventId,
+      isPermanentDataError,
+      () => this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
+      `driver=${driverId}, trip=${p.tripId}`,
+    );
   }
 }
