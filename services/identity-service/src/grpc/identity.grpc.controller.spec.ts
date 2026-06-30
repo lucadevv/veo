@@ -199,11 +199,22 @@ describe('IdentityGrpcController · scoping por RIEL (cross-rail / confused-depu
     }
   });
 
-  it('GetDriverByUser · driver-rail (riel PERMITIDO · SOLO driver-bff) pasa', async () => {
+  it('GetDriverByUser · driver-rail (riel PERMITIDO · driver-bff: su propio perfil) pasa', async () => {
     const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow }) });
     const reply = await ctrl.getDriverByUser(
       { id: 'u1' },
       signedMetaAs(InternalAudience.DRIVER_RAIL),
+    );
+    expect(reply.found).toBe(true);
+  });
+
+  it('GetDriverByUser · service-rail (PERMITIDO · dispatch resuelve User.id→Driver.id en la exclusión ITV) pasa', async () => {
+    // Regresión del audience mismatch de Lote 2b: dispatch firma service-rail; sin este riel la vía ITV
+    // del eje fleet caía PERMISSION_DENIED → exclusión inerte + crash-loop de la partición fleet.
+    const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow }) });
+    const reply = await ctrl.getDriverByUser(
+      { id: 'u1' },
+      signedMetaAs(InternalAudience.SERVICE_RAIL),
     );
     expect(reply.found).toBe(true);
   });

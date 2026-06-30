@@ -138,7 +138,14 @@ const GRPC_METHOD_AUDIENCES = {
     InternalAudience.ADMIN_RAIL,
     InternalAudience.SERVICE_RAIL,
   ],
-  GetDriverByUser: [InternalAudience.DRIVER_RAIL],
+  // DOS rieles, verificados contra los callers reales (mismo criterio que GetDriversByIds):
+  //  - DRIVER_RAIL (driver-bff): el conductor resuelve su PROPIO perfil desde el userId de su JWT (anti-IDOR).
+  //  - SERVICE_RAIL (dispatch · exclusión por suspensión del eje FLEET): la vía ITV emite el evento keyeado
+  //    por User.id; dispatch resuelve User.id → Driver.id para excluir del pool. El scoping driver-only era
+  //    correcto SOLO cuando el único caller era driver-bff; al cablearse dispatch (service-rail) la resolución
+  //    ITV caía PERMISSION_DENIED → exclusión inerte + crash-loop de la partición fleet. GetDriverByUser NO
+  //    emite PII sensible (toDriverReply sin includeSensitivePii, l.255) → seguro para un servicio interno.
+  GetDriverByUser: [InternalAudience.DRIVER_RAIL, InternalAudience.SERVICE_RAIL],
   // BATCH de conductores. DOS rieles, ambos verificados contra los callers reales:
   //  - ADMIN_RAIL (admin-bff `listDrivers`): nombre/teléfono por página de la lista del operador.
   //  - SERVICE_RAIL (booking-service · enriquecimiento de la BÚSQUEDA de carpooling F2): resuelve los
