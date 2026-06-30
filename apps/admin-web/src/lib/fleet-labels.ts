@@ -26,3 +26,19 @@ export function energyLabel(energySource: string | null | undefined): string {
   if (!energySource) return '—';
   return ENERGY_LABELS[energySource] ?? energySource;
 }
+
+/**
+ * OPERABILIDAD — el MOTIVO de no-operabilidad que computa el SERVIDOR (la MISMA función que gatea el match:
+ * docs SOAT/ITV vigentes Y ficha linkeada). `DOCS` = docs no vigentes; `NO_SPEC` = falta la ficha del match.
+ * La UI solo lo ROTULA (no decide). Fuente única para que la LISTA y el DETALLE digan lo mismo (disciplina:
+ * la UI refleja el veredicto del dueño, no lo re-deriva).
+ */
+export const OPERABILITY_REASON_LABELS: Record<'DOCS' | 'NO_SPEC', string> = {
+  DOCS: 'docs no vigentes',
+  NO_SPEC: 'sin ficha',
+};
+
+/** Rótulo del motivo de no-operabilidad (server). `null`/desconocido → "" (sin motivo legible). */
+export function operabilityReasonLabel(reason: 'DOCS' | 'NO_SPEC' | null | undefined): string {
+  return reason ? (OPERABILITY_REASON_LABELS[reason] ?? '') : '';
+}

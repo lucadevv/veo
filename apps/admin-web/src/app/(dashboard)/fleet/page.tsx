@@ -19,7 +19,7 @@ import type {
   VehicleView,
 } from '@/lib/api/schemas';
 import { date, dateTime } from '@/lib/formatters';
-import { segmentLabel, energyLabel } from '@/lib/fleet-labels';
+import { segmentLabel, energyLabel, operabilityReasonLabel } from '@/lib/fleet-labels';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -44,13 +44,6 @@ const OWNER_LABEL: Record<'DRIVER' | 'VEHICLE', string> = {
   VEHICLE: 'Vehículo',
 };
 
-// Etiqueta en español del MOTIVO de no-operabilidad (server-side, enum `vehicleOperabilityReason` del contrato).
-// La UI solo ROTULA el veredicto del servidor — NO re-deriva la regla desde docStatus (eso era un magic string y
-// divergía del veredicto real). DOCS = docs SOAT/ITV no vigentes; NO_SPEC = falta la ficha del match.
-const OPERABILITY_REASON_LABEL: Record<'DOCS' | 'NO_SPEC', string> = {
-  DOCS: 'docs no vigentes',
-  NO_SPEC: 'sin ficha',
-};
 
 const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
   {
@@ -117,9 +110,8 @@ const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
     cell: ({ row }) => {
       if (row.original.operable) return <Badge tone="success">Operable</Badge>;
       // El MOTIVO viene tipado del servidor (mismo cómputo que el veredicto) → cero divergencia, cero magic string.
-      const motivo = row.original.operabilityReason
-        ? OPERABILITY_REASON_LABEL[row.original.operabilityReason]
-        : null;
+      // Rótulo compartido con el DETALLE (fleet-labels) → la lista y /fleet/[id] dicen lo mismo.
+      const motivo = operabilityReasonLabel(row.original.operabilityReason) || null;
       return (
         <div className="flex flex-col gap-0.5">
           <Badge tone="danger">No operable</Badge>

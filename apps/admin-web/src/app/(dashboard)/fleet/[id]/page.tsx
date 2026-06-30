@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { AlertTriangle, Check, Circle, Lock } from 'lucide-react';
 import type { VehicleView } from '@/lib/api/schemas';
 import { useVehicle } from '@/lib/api/queries';
-import { segmentLabel, energyLabel } from '@/lib/fleet-labels';
+import { segmentLabel, energyLabel, operabilityReasonLabel } from '@/lib/fleet-labels';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatusPill } from '@/components/ui/status-pill';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 
@@ -151,10 +152,12 @@ function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
 }
 
 /**
- * APTITUD PARA EL DISPATCH: el verdadero valor de la pantalla. El dispatch deja pasar (fail-open) a un vehículo
- * al que le falte segmento, asientos o año (driver-pool: `seats || segment || vehicleYear`). Reflejamos ESOS
- * tres como chips, y si falta alguno explicamos la consecuencia (puede recibir ofertas para las que no califica)
- * y la remediación (completar la ficha del modelo). La energía NO entra: el dispatch la ignora.
+ * OPERABILIDAD + ficha del match. La pantalla LIDERA con el VEREDICTO AUTORITATIVO del servidor (`operable`,
+ * el MISMO que gatea el match: docs SOAT/ITV vigentes Y ficha linkeada) — la UI solo lo REFLEJA, NUNCA lo
+ * re-deriva. Antes el detalle inventaba "Listo para operar" SOLO desde la ficha → un vehículo con docs vencidos
+ * (No operable en la lista) se veía apto acá. Ahora el veredicto manda; debajo, el DESGLOSE de la ficha del
+ * tier (segmento/asientos/año) como INSUMO del veredicto (sin esos tres el dispatch deja pasar en fail-open).
+ * La energía NO entra: el dispatch la ignora.
  */
 function DispatchReadiness({ vehicle }: { vehicle: VehicleView }) {
   const checks: { label: string; ready: boolean }[] = [
@@ -163,16 +166,32 @@ function DispatchReadiness({ vehicle }: { vehicle: VehicleView }) {
     { label: 'Año', ready: !!vehicle.year },
   ];
   const faltan = checks.filter((c) => !c.ready).map((c) => c.label.toLowerCase());
-  const apto = faltan.length === 0;
+  const fichaCompleta = faltan.length === 0;
+  const motivo = operabilityReasonLabel(vehicle.operabilityReason);
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4 lg:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* VEREDICTO AUTORITATIVO del servidor (`operable`) — el MISMO que gatea el match. La UI solo lo REFLEJA. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {vehicle.operable ? (
+          <Badge tone="success">Operable</Badge>
+        ) : (
+          <Badge tone="danger">No operable{motivo ? ` · ${motivo}` : ''}</Badge>
+        )}
+        <span className="text-xs text-ink-muted">
+          {vehicle.operable
+            ? 'Veredicto del servidor: el vehículo puede recibir viajes.'
+            : 'Veredicto del servidor: NO puede recibir viajes hasta resolver el motivo.'}
+        </span>
+      </div>
+
+      {/* DESGLOSE de la ficha del tier — un INSUMO del veredicto, no el veredicto en sí. */}
+      <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">Aptitud para el match de ofertas</p>
+          <p className="text-sm font-semibold text-ink">Ficha para el match de ofertas</p>
           <p className="mt-0.5 text-xs text-ink-muted">
-            {apto
-              ? 'El vehículo tiene la ficha que el dispatch necesita para asignarlo a la oferta correcta.'
+            {fichaCompleta
+              ? 'Tiene la ficha que el dispatch necesita para asignarlo a la oferta correcta (segmento + asientos + año).'
               : 'El dispatch dejaría pasar este vehículo en fail-open: puede recibir ofertas para las que no califica.'}
           </p>
         </div>
@@ -183,12 +202,7 @@ function DispatchReadiness({ vehicle }: { vehicle: VehicleView }) {
         </div>
       </div>
 
-      {apto ? (
-        <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-success">
-          <Check className="size-3.5" aria-hidden />
-          Listo para operar en el match.
-        </p>
-      ) : (
+      {!fichaCompleta ? (
         <p className="mt-3 flex items-start gap-1.5 text-xs text-ink-muted">
           <Circle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
           <span>
@@ -196,7 +210,7 @@ function DispatchReadiness({ vehicle }: { vehicle: VehicleView }) {
             modelo en <span className="text-ink">Flota › Modelos</span> para cerrar el eslabón vehículo↔config.
           </span>
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
