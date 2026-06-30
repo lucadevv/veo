@@ -83,7 +83,7 @@ export const NAV: NavGroup[] = [
       },
       {
         href: '/finance/catalog',
-        label: 'Catálogo de ofertas',
+        label: 'Tarifas por oferta',
         icon: Tags,
         permission: 'catalog:view',
       },
