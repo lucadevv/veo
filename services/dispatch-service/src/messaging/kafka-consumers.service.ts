@@ -27,6 +27,7 @@ import {
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
+import { isPermanentGrpcError } from '@veo/rpc';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { VehicleClass } from '@veo/shared-types';
 import { DispatchService } from '../dispatch/dispatch.service';
@@ -273,22 +274,54 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
 
   /**
    * REACTIVACIÓN (eje disciplinario): re-valida la suspensión autoritativa en identity (HOLDS-AWARE) y
-   * reincorpora al pool SOLO si el conductor quedó sin holds. Un error de red gRPC es transitorio ⇒
-   * relanza ⇒ kafkajs re-entrega y la reactivación se re-procesa cuando identity vuelve.
+   * reincorpora al pool SOLO si el conductor quedó sin holds. Un error gRPC TRANSITORIO (identity caído/lento)
+   * relanza ⇒ kafkajs re-entrega; uno PERMANENTE (config/contrato) se SALTA (poison guard) en vez de
+   * crash-loopear la partición. El TTL de auto-cura + el accept-gate son el backstop del evento descartado.
    */
   private async onDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.reactivated'].parse(env.payload);
-    await this.suspensionService.onReactivated(p.driverId);
+    await this.withGrpcPoisonGuard('driver.reactivated', env.eventId, () =>
+      this.suspensionService.onReactivated(p.driverId),
+    );
+  }
+
+  /**
+   * Guarda de POISON para handlers que llaman gRPC a identity: un error gRPC PERMANENTE (PERMISSION_DENIED,
+   * INVALID_ARGUMENT… — config/contrato, reintentar da SIEMPRE el mismo error) se DESCARTA (log ERROR + el
+   * offset avanza) en vez de relanzar → evita el crash-loop / head-of-line block de la partición. Lo
+   * TRANSITORIO (identity caído/lento: UNAVAILABLE/DEADLINE) se RELANZA para que kafkajs reintente. El evento
+   * descartado tiene backstop: el TTL de auto-cura reincorpora al activo y el accept-gate fail-closed 403ea al
+   * suspendido. Espeja el patrón de `onTripCompleted` (isPermanentDataError) para el carril gRPC.
+   */
+  private async withGrpcPoisonGuard(
+    eventType: string,
+    eventId: string,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      if (isPermanentGrpcError(err)) {
+        this.logger.error(
+          `POISON ${eventType}: error gRPC permanente (eventId=${eventId}); descartado sin reintento: ${String(err)}`,
+        );
+        domainEventsTotal.inc({ event: eventType, result: BusinessEventResult.REJECTED });
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
    * SUSPENSIÓN por el eje FLEET (doc/ITV): el conductor sale del pool. El sujeto viaja por clave dual
    * (XOR driverId|userId, ver `fleetDriverSuspended`); el service resuelve a Driver.id (User.id → perfil
-   * por gRPC en la vía ITV). Un fallo de identity es transitorio ⇒ relanza ⇒ kafkajs reintenta.
+   * por gRPC en la vía ITV). Error gRPC transitorio ⇒ relanza (kafkajs reintenta); permanente ⇒ poison guard.
    */
   private async onFleetDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['fleet.driver_suspended'].parse(env.payload);
-    await this.suspensionService.onFleetSuspended({ driverId: p.driverId, userId: p.userId });
+    await this.withGrpcPoisonGuard('fleet.driver_suspended', env.eventId, () =>
+      this.suspensionService.onFleetSuspended({ driverId: p.driverId, userId: p.userId }),
+    );
   }
 
   /**
@@ -297,7 +330,9 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    */
   private async onFleetDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['fleet.driver_reactivated'].parse(env.payload);
-    await this.suspensionService.onFleetReactivated({ driverId: p.driverId, userId: p.userId });
+    await this.withGrpcPoisonGuard('fleet.driver_reactivated', env.eventId, () =>
+      this.suspensionService.onFleetReactivated({ driverId: p.driverId, userId: p.userId }),
+    );
   }
 
   private async onRating(env: EventEnvelope<unknown>): Promise<void> {
