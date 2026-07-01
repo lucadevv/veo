@@ -514,6 +514,8 @@ export interface DriverModelRequestView {
 export interface DriverProfileView {
   driverId: string;
   userId: string;
+  /** Nombre legal del conductor (onboarding). `null` si aún no se capturó. Su propio dato (saludo). */
+  fullName: string | null;
   phone: string;
   kycStatus: string;
   currentStatus: string;

@@ -328,6 +328,9 @@ export function buildDriverProfile(
   return {
     driverId: driver.id,
     userId: driver.userId,
+    // Nombre legal del onboarding (plaintext, NO cifrado — a diferencia del DNI). Misma fuente que el
+    // admin (`DriverReply.name` = `legalName`). Es el dato PROPIO del conductor (su saludo), no PII de terceros.
+    fullName: emptyToNull(driver.name),
     phone: user.found ? user.phone : '',
     kycStatus: user.found ? user.kycStatus : '',
     currentStatus: driver.currentStatus,

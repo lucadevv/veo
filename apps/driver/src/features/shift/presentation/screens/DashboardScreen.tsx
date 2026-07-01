@@ -29,6 +29,7 @@ import { formatPEN } from '../../../../shared/presentation/format';
 import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
+import { useProfile } from '../../../profile/presentation/hooks/useProfile';
 import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import {
@@ -78,7 +79,7 @@ function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   switch (status) {
     case 'AVAILABLE':
       return {
-        label: `${t('shift.status.available')} · Buscando viajes`,
+        label: t('shift.status.availableSearching'),
         tone: 'success',
         live: true,
       };
@@ -94,12 +95,31 @@ function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   }
 }
 
+/**
+ * Nombre de saludo a partir del nombre legal (onboarding). Lo presenta en Title Case: el OCR suele venir en
+ * MAYÚSCULAS y "Hola, CARRANZA" grita. `null` (sin nombre aún) → el saludo cae al rol genérico ("Conductor").
+ */
+function greetingName(fullName: string | null | undefined): string | null {
+  const name = fullName?.trim();
+  if (!name) {
+    return null;
+  }
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+}
+
 export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const shift = useShiftState();
   const earnings = useEarningsSummary();
+  // Nombre del conductor para el saludo (perfil server-authoritative). Mientras carga → cae al rol genérico.
+  const profile = useProfile();
+  const driverName = greetingName(profile.data?.fullName);
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -178,21 +198,22 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           },
         ]}
       >
-        <Avatar name="VEO" size="sm" online={online} />
+        <Avatar name={driverName ?? 'VEO'} size="sm" online={online} />
         <View style={styles.greetText}>
           <Text variant="footnote" color="inkSubtle">
             {t('shift.greetingHi')}
           </Text>
           <Text variant="subhead" numberOfLines={1}>
-            {t('shift.greetingRole')}
+            {driverName ?? t('shift.greetingRole')}
           </Text>
         </View>
       </PressableScale>
       <View style={styles.topRight}>
         <StatusPill label={pill.label} tone={pill.tone} live={pill.live} dot />
-        {/* Indicador del vehículo ACTIVO (server-authoritative): el conductor ve con qué vehículo está
-            operando, que es lo que el dispatch usa para ofrecerle viajes. Oculto si aún no hay activo. */}
-        {activeVehicle.data ? (
+        {/* Indicador del vehículo ACTIVO (server-authoritative): con qué vehículo opera, que es lo que el
+            dispatch usa para ofrecerle viajes. Solo EN TURNO: fuera de turno el vehículo no es relevante y
+            mostrarlo pegado a "Fuera de turno" leía raro ("Fuera de turno · Moto"). */}
+        {online && activeVehicle.data ? (
           <StatusPill
             label={vehicleTypeLabel(activeVehicle.data.vehicleType, t)}
             tone="accent"

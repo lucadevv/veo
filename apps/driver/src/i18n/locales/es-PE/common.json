@@ -395,6 +395,7 @@
     "status": {
       "offline": "Fuera de turno",
       "available": "En línea",
+      "availableSearching": "En línea · Buscando viajes",
       "onBreak": "En pausa",
       "onTrip": "En viaje",
       "suspended": "Cuenta suspendida",
@@ -415,7 +416,7 @@
     "endShift": "Finalizar turno",
     "pause": "Tomar pausa",
     "resume": "Reanudar turno",
-    "greetingHi": "Hola,",
+    "greetingHi": "Hola",
     "greetingRole": "Conductor",
     "connect": "Conéctate",
     "goOffline": "Desconectarse",
