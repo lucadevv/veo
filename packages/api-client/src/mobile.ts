@@ -2054,6 +2054,9 @@ export type DocumentUploadTicket = z.infer<typeof documentUploadTicket>;
 export const driverProfileView = z.object({
   driverId: z.string(),
   userId: z.string(),
+  /** Nombre legal del conductor (onboarding); `null` si no se capturó, ausente si el bff es viejo (backward-compat
+   *  en deploy rolling → el saludo degrada al rol genérico). Su propio dato — se usa en el saludo. */
+  fullName: z.string().nullable().optional(),
   phone: z.string(),
   kycStatus: z.string(),
   currentStatus: z.string(),
@@ -2842,6 +2845,12 @@ export interface DriverServerToClient {
    * responde (acepta/rechaza) antes de `expiresAt`. No usa el sobre genérico: shape tipada y validada.
    */
   'waypoint:proposed': (msg: WaypointProposedMsg) => void;
+  /**
+   * SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo (login más nuevo) → ESTA sesión
+   * quedó superada. El gateway `/driver` lo emite y desconecta el socket; la app cierra la sesión local y
+   * vuelve al login con el aviso "sesión cerrada en otro dispositivo". Sin payload (es una señal).
+   */
+  'session:superseded': () => void;
 }
 
 export interface DriverClientToServer {

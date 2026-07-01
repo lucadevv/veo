@@ -51,6 +51,12 @@ export interface DriverRealtimeHandlers {
    * conexión porque al montar las queries ya cargan fresco (evita el doble fetch del caso feliz).
    */
   onResync(): void;
+  /**
+   * SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo (login más nuevo) → esta sesión
+   * quedó superada. La presentación cierra la sesión local y vuelve al login. No se reconecta: el server ya
+   * rechaza esta sesión (su `sid` es más viejo), así que no hay guerra de reconexión.
+   */
+  onSessionSuperseded(): void;
 }
 
 /**
@@ -167,6 +173,15 @@ export function useDriverRealtime(
         // Degradar sin tumbar la app.
       }
     };
+    // SINGLE ACTIVE SESSION: el server avisa que esta sesión quedó superada por un login más nuevo en otro
+    // device → la presentación cierra la sesión local. Sin payload; se envuelve en try/catch como los demás.
+    const onSessionSuperseded = () => {
+      try {
+        handlersRef.current.onSessionSuperseded();
+      } catch {
+        // Degradar sin tumbar la app.
+      }
+    };
 
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
@@ -176,6 +191,7 @@ export function useDriverRealtime(
     s.on('waypoint:proposed', onWaypointProposed);
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
+    s.on('session:superseded', onSessionSuperseded);
     s.connect();
     setSocket(s);
 
@@ -188,6 +204,7 @@ export function useDriverRealtime(
       s.off('waypoint:proposed', onWaypointProposed);
       s.off('connect', onConnect);
       s.off('disconnect', onDisconnect);
+      s.off('session:superseded', onSessionSuperseded);
       s.disconnect();
       setSocket(null);
       // Al desmontar/deshabilitar, el indicador ya no debe quedar "conectado" de un socket muerto.

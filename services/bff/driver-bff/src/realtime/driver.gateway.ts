@@ -16,6 +16,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
   type OnGatewayConnection,
+  type OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
@@ -45,13 +46,29 @@ interface DriverSocketData {
   identity?: AuthenticatedUser;
 }
 
+/** Evento server→cliente que avisa al device SUPERADO (otra sesión más nueva ganó) para que se deslogue. */
+const SESSION_SUPERSEDED_EVENT = 'session:superseded';
+
+/** Delay (ms) entre el aviso `session:superseded` y el cierre del transporte: `disconnect(true)` descarta la
+ *  cola de salida, así garantizamos que el paquete de aviso SALGA antes de cortar el socket del device viejo. */
+const SUPERSEDE_FLUSH_MS = 200;
+
 @Injectable()
 @WebSocketGateway({ namespace: '/driver', cors: { origin: true, credentials: true } })
-export class DriverGateway implements OnGatewayConnection {
+export class DriverGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   private server?: Server;
 
   private readonly logger: Logger;
+
+  /**
+   * SINGLE ACTIVE SESSION: socket ACTIVO por conductor (`driverId → { socketId, sid }`). El `sid` es el id de
+   * sesión (uuidv7, time-ordered) del JWT → "el más nuevo gana" es decidible sin coordinación y SIN guerra de
+   * reconexión. En memoria = por réplica (dev/1-réplica OK). DEUDA multi-réplica: el kick INMEDIATO cross-réplica
+   * necesita Redis pub/sub; la correctitud cross-réplica ya la da el revoke en el login (identity, Lote 1) — el
+   * device viejo se desloguea al vencer su access token / fallar el refresh.
+   */
+  private readonly activeByDriver = new Map<string, { socket: Socket; sid: string }>();
 
   constructor(
     @Inject(JWT_SERVICE) private readonly jwt: JwtService,
@@ -66,17 +83,54 @@ export class DriverGateway implements OnGatewayConnection {
 
   async handleConnection(client: Socket): Promise<void> {
     try {
-      const identity = await this.authenticate(client);
+      const { user: identity, sid } = await this.authenticate(client);
       const driverId = await this.resolveDriverId(identity);
+
+      // SINGLE ACTIVE SESSION (gate DURO en tiempo real). El `sid` es uuidv7 (time-ordered):
+      //  · sesión VIEJA (sid < activo) intentando conectar → device superado (su access token aún vive) → rechazar.
+      //  · sesión NUEVA (sid > activo) → desplaza: echamos el socket viejo y le avisamos para que se deslogue.
+      //  · misma sesión reconectando (sid ==) → solo se actualiza el socketId abajo (no hay a quién echar).
+      const active = this.activeByDriver.get(driverId);
+      if (active && sid < active.sid) {
+        // Sesión VIEJA (sid menor) intentando (re)conectar tras una más nueva → device superado: avisar+cerrar.
+        this.supersede(client);
+        return;
+      }
+      if (active && sid > active.sid) {
+        // Llegó una sesión MÁS NUEVA (otro device) → echamos al socket viejo (guardado por referencia).
+        this.supersede(active.socket);
+      }
+
       await client.join(roomForDriver(driverId));
       const data = client.data as DriverSocketData;
       data.driverId = driverId;
       data.identity = identity;
+      this.activeByDriver.set(driverId, { socket: client, sid });
       this.logger.info({ driverId, sid: client.id }, 'ws conductor conectado');
     } catch (err) {
       this.logger.warn({ err, sid: client.id }, 'handshake ws rechazado');
       client.disconnect(true);
     }
+  }
+
+  /** Limpia el registro de sesión activa al desconectar — SOLO si el que se va es el ACTIVO (un socket ya
+   *  desplazado no debe borrar al nuevo dueño). */
+  handleDisconnect(client: Socket): void {
+    const { driverId } = client.data as DriverSocketData;
+    if (driverId && this.activeByDriver.get(driverId)?.socket.id === client.id) {
+      this.activeByDriver.delete(driverId);
+    }
+  }
+
+  /**
+   * Avisa al device SUPERADO (`session:superseded`) y cierra su socket. El cierre va con un pequeño delay:
+   * `disconnect(true)` descarta la cola de salida de socket.io, así el paquete de aviso SALE antes de cortar
+   * el transporte (la app del device viejo lo usa para deslogar con un mensaje claro). Si el socket ya se
+   * fue antes del timer, `disconnect` es un no-op seguro.
+   */
+  private supersede(socket: Socket): void {
+    socket.emit(SESSION_SUPERSEDED_EVENT);
+    setTimeout(() => socket.disconnect(true), SUPERSEDE_FLUSH_MS);
   }
 
   /**
@@ -91,7 +145,15 @@ export class DriverGateway implements OnGatewayConnection {
     const { driverId, identity } = client.data as DriverSocketData;
     if (!driverId || !identity) return { ok: false, error: 'unauthenticated' };
     const parsed = driverLocationReport.safeParse(body);
-    if (!parsed.success) return { ok: false, error: 'invalid_report' };
+    if (!parsed.success) {
+      // Observabilidad (regla #6): un reporte inválido no debe morir en silencio. Deja ver POR QUÉ se
+      // rechaza el ping (campo/tipo) sin depender de los logs del cliente RN.
+      this.logger.warn(
+        { driverId, issues: parsed.error.issues },
+        'location report inválido (ping descartado)',
+      );
+      return { ok: false, error: 'invalid_report' };
+    }
     // SERVER-AUTHORITATIVE: la clase de vehículo la decide el vehículo ACTIVO del conductor en fleet, NO
     // lo que declara el cliente en el ping (que era spoofeable). Sobreescribimos `vehicleType` con el
     // resuelto; si fleet no responde, el resolver cae al valor del ping (degradación honesta).
@@ -123,13 +185,14 @@ export class DriverGateway implements OnGatewayConnection {
     this.server.to(roomForDriver(driverId)).emit(event, payload);
   }
 
-  private async authenticate(client: Socket): Promise<AuthenticatedUser> {
+  private async authenticate(client: Socket): Promise<{ user: AuthenticatedUser; sid: string }> {
     const token = this.extractToken(client);
     if (!token) throw new Error('falta el token de acceso');
     const claims = await this.jwt.verifyAccess(token);
     const user = toAuthenticatedUser(claims);
     if (user.type !== 'driver') throw new Error('el socket /driver es exclusivo de conductores');
-    return user;
+    // `sid` = id de sesión (uuidv7) del JWT: gobierna el single-active-session del handshake.
+    return { user, sid: claims.sid };
   }
 
   private extractToken(client: Socket): string | undefined {

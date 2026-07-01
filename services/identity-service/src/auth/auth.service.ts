@@ -58,7 +58,16 @@ export class AuthService {
       });
     });
 
-    return this.tokenIssuer.issue(user.id, this.subjectType(user.type), {
+    const subject = this.subjectType(user.type);
+    // SINGLE ACTIVE SESSION para el CONDUCTOR (el último login gana): revocamos las sesiones previas ANTES de
+    // emitir la nueva. Seguridad — el diferenciador biométrico POR TURNO se rompe si el MISMO login publica GPS
+    // y recibe ofertas desde 2 teléfonos a la vez (dispatch/admin lo veían saltando entre 2 posiciones). El
+    // pasajero conserva multi-device (no publica GPS continuo → menos disruptivo); el admin ya es single-session
+    // (email-auth). El gate DURO en tiempo real (kickear el socket viejo) lo aplica el gateway `/driver`.
+    if (subject === 'driver') {
+      await this.sessions.revokeAllForUser(user.id);
+    }
+    return this.tokenIssuer.issue(user.id, subject, {
       id: user.id,
       phone: user.phone,
       type: user.type,

@@ -57,6 +57,7 @@ function makeHandlers(overrides: Partial<DriverRealtimeHandlers> = {}): DriverRe
     onWaypointProposed: jest.fn(),
     onConnectionChange: jest.fn(),
     onResync: jest.fn(),
+    onSessionSuperseded: jest.fn(),
     ...overrides,
   };
 }

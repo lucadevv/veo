@@ -6,6 +6,7 @@ import {
   navigateToTripActive,
 } from '../../../navigation/navigationRef';
 import { useDi } from '../../../core/di/useDi';
+import { useSessionStore } from '../../../core/session/sessionStore';
 import { SHIFT_STATE_QUERY_KEY } from '../../shift/presentation/hooks/useShift';
 import { useShiftState } from '../../shift/presentation/hooks/useShift';
 import { isOnShift } from '../../shift/domain';
@@ -160,6 +161,13 @@ export const RealtimeManager = (): null => {
       queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });
       queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
+    },
+    // SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo → cerramos la sesión local.
+    // `expireSession` (no `logout`): la sesión remota YA la revocó el login nuevo (identity); acá solo
+    // limpiamos el estado local y volvemos al login. No re-suscribimos el socket (el server rechaza este
+    // `sid` viejo, así que no hay guerra de reconexión).
+    onSessionSuperseded: () => {
+      useSessionStore.getState().expireSession();
     },
   });
 
