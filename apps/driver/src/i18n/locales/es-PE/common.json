@@ -594,6 +594,7 @@
   },
   "earnings": {
     "title": "Ganancias",
+    "subtitle": "Tu neto, comisiones y liquidaciones",
     "tabSummary": "Resumen",
     "tabBreakdown": "Desglose",
     "netTotal": "Neto total",
@@ -621,6 +622,7 @@
   },
   "profile": {
     "title": "Mi perfil",
+    "subtitle": "Verificación, documentos y ajustes",
     "phone": "Teléfono",
     "rating": "Calificación",
     "ratingValue": "{{value}} ★",

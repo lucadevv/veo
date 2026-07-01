@@ -116,14 +116,13 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       ) : (
         <View style={[styles.section, { gap: theme.spacing.lg }]}>
-          {/* Aviso crítico para operar: documentos por vencer/vencidos/rechazados. */}
-          <Appear>
-            {attentionCount > 0 ? (
+          {/* Status by exception: banner SOLO si hay algo que atender (por vencer/vencido/rechazado). Si todo
+              está al día NO gritamos "todo válido" con un banner verde (era el slop AI que el dueño rechazó). */}
+          {attentionCount > 0 ? (
+            <Appear>
               <Banner tone="warn" title={t('documents.attention', { count: attentionCount })} />
-            ) : (
-              <Banner tone="success" title={t('documents.allValid')} />
-            )}
-          </Appear>
+            </Appear>
+          ) : null}
 
           {data.length === 0 ? (
             <View

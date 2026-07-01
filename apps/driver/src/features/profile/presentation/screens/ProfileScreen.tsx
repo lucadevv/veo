@@ -20,6 +20,7 @@ import { DriverStatus } from '@veo/shared-types';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { formatPersonName } from '../../../../shared/presentation/format';
 import {
   IconClock,
   IconDocument,
@@ -32,7 +33,8 @@ import { useLogout, useProfile } from '../hooks/useProfile';
 import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
 import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
 import { ProfileLinkRow } from '../components/ProfileLinkRow';
-import { Appear } from '../components/motion';
+import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 
 /**
  * `Cuenta` es una tab del navegador inferior, pero sus enlaces secundarios viven en el stack raíz
@@ -52,14 +54,8 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
-    <SafeScreen
-      scroll
-      header={
-        <View style={styles.header}>
-          <Text variant="title1">Cuenta</Text>
-        </View>
-      }
-    >
+    <SafeScreen scroll>
+      <ScreenHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
       {isLoading ? (
         <View style={styles.section}>
           <Skeleton height={96} radius={theme.radii.lg} />
@@ -74,37 +70,41 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
         />
       ) : (
         <View style={styles.section}>
-          {/* Identidad premium: avatar grande, teléfono y chip de rating con datos reales. */}
-          <Appear>
+          {/* Identidad premium: avatar grande, NOMBRE (no el teléfono — coherente con el saludo del Inicio)
+              y chip de rating con datos reales. */}
+          <Reveal delay={40}>
             <ProfileIdentityCard
-              name={data.phone}
+              name={formatPersonName(data.fullName) ?? data.phone}
+              verified={data.kycStatus === KYC_VERIFIED}
               online={data.currentStatus === DriverStatus.AVAILABLE}
               ratingValue={data.averageRating.toFixed(1)}
               ratingMeta={
                 data.rating ? t('profile.ratingCount', { count: data.rating.count30d }) : undefined
               }
             />
-          </Appear>
+          </Reveal>
 
           {/* Aviso de cumplimiento según el CICLO DE VIDA real de la documentación:
               faltan por subir (warn) → enviados, en revisión (info) → todos aprobados (success). */}
-          <Appear delay={50}>
-            {data.compliance.missing.length > 0 ? (
+          {/* Status by exception: si TODO está aprobado no gritamos "al día" con un banner verde (era slop
+              AI); mostramos banner SOLO cuando hay algo que atender (faltan docs → warn, en revisión → info). */}
+          {data.compliance.missing.length > 0 ? (
+            <Reveal delay={80}>
               <Banner
                 tone="warn"
                 title={t('profile.complianceMissing', {
                   items: data.compliance.missing.join(', '),
                 })}
               />
-            ) : data.compliance.allApproved ? (
-              <Banner tone="success" title={t('profile.complianceOk')} />
-            ) : (
+            </Reveal>
+          ) : !data.compliance.allApproved ? (
+            <Reveal delay={80}>
               <Banner tone="info" title={t('profile.complianceInReview')} />
-            )}
-          </Appear>
+            </Reveal>
+          ) : null}
 
           {/* Estados de verificación (KYC / antecedentes / estado actual) con StatusPill real. */}
-          <Appear delay={100}>
+          <Reveal delay={120}>
             <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.kyc')}
             </Text>
@@ -142,10 +142,10 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 }
               />
             </Card>
-          </Appear>
+          </Reveal>
 
           {/* Documentos como lista. */}
-          <Appear delay={150}>
+          <Reveal delay={160}>
             <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.documentsTitle')}
             </Text>
@@ -171,10 +171,10 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 ))
               )}
             </Card>
-          </Appear>
+          </Reveal>
 
           {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
-          <Appear delay={200}>
+          <Reveal delay={200}>
             <Card padding="sm">
               <ProfileLinkRow
                 icon={<IconDocument size={20} color={theme.colors.accent} />}
@@ -212,9 +212,9 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 onPress={() => navigation.navigate('Support')}
               />
             </Card>
-          </Appear>
+          </Reveal>
 
-          <Appear delay={250}>
+          <Reveal delay={240}>
             <Button
               label={t('profile.logout')}
               variant="danger"
@@ -222,7 +222,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
               loading={logout.isPending}
               onPress={() => setConfirmOpen(true)}
             />
-          </Appear>
+          </Reveal>
         </View>
       )}
 
@@ -257,7 +257,6 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 8, paddingBottom: 4 },
   section: { gap: 16, paddingTop: 8 },
   sectionLabel: { marginBottom: 8 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },

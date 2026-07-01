@@ -25,7 +25,7 @@ import type { MainTabParamList, RootStackParamList } from '../../../../navigatio
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { IconFlame, IconPower } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatPEN } from '../../../../shared/presentation/format';
+import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
@@ -78,9 +78,11 @@ function vehicleTypeLabel(type: VehicleType, t: TFunction): string {
 function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   switch (status) {
     case 'AVAILABLE':
+      // En línea / buscando viajes: es el estado VIVO por excelencia → acento azul pulsante (NO verde:
+      // el verde-"todo ok" era el reflejo AI que el dueño rechazó). El azul es el único color interactivo.
       return {
         label: t('shift.status.availableSearching'),
-        tone: 'success',
+        tone: 'accent',
         live: true,
       };
     case 'ASSIGNED':
@@ -95,22 +97,6 @@ function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
   }
 }
 
-/**
- * Nombre de saludo a partir del nombre legal (onboarding). Lo presenta en Title Case: el OCR suele venir en
- * MAYÚSCULAS y "Hola, CARRANZA" grita. `null` (sin nombre aún) → el saludo cae al rol genérico ("Conductor").
- */
-function greetingName(fullName: string | null | undefined): string | null {
-  const name = fullName?.trim();
-  if (!name) {
-    return null;
-  }
-  return name
-    .toLowerCase()
-    .split(/\s+/)
-    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
-    .join(' ');
-}
-
 export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -119,7 +105,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const earnings = useEarningsSummary();
   // Nombre del conductor para el saludo (perfil server-authoritative). Mientras carga → cae al rol genérico.
   const profile = useProfile();
-  const driverName = greetingName(profile.data?.fullName);
+  const driverName = formatPersonName(profile.data?.fullName);
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -265,7 +251,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         <Text variant="footnote" color="inkMuted">
           {t('shift.netTotal')}
         </Text>
-        <Text variant="title3" tabular>
+        <Text variant="title3" color="success" tabular>
           {formatPEN(earnings.data.totalNetCents ?? 0)}
         </Text>
       </Appear>
@@ -273,7 +259,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         <Text variant="footnote" color="inkMuted">
           {t('shift.pendingNet')}
         </Text>
-        <Text variant="title3" color="warn" tabular>
+        <Text variant="title3" color="inkMuted" tabular>
           {formatPEN(earnings.data.pendingNetCents ?? 0)}
         </Text>
       </Appear>
@@ -343,7 +329,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           ) : null}
           <View style={styles.onlineHead}>
             <Pulse active={status === 'AVAILABLE'} style={styles.liveDotWrap}>
-              <View style={[styles.liveDot, { backgroundColor: theme.colors.success }]} />
+              <View style={[styles.liveDot, { backgroundColor: theme.colors.accent }]} />
             </Pulse>
             <Text variant="headline">{t('shift.readyForTrips')}</Text>
           </View>

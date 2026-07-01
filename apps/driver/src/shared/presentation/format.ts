@@ -44,3 +44,21 @@ export function secondsToMinutes(seconds: number): number {
 export function metersToKm(meters: number): string {
   return (meters / 1000).toFixed(1);
 }
+
+/**
+ * Presenta un nombre propio en Title Case. El OCR del onboarding suele venir en MAYÚSCULAS
+ * ("CARRANZA LUIS IVAN" grita); esto lo suaviza a "Carranza Luis Ivan". Fuente ÚNICA para el saludo del
+ * Inicio y la identidad de la Cuenta (coherencia — antes cada pantalla lo resolvía distinto). `null`/vacío
+ * → `null` (el consumidor decide el fallback: rol genérico en el saludo, teléfono en la identidad).
+ */
+export function formatPersonName(fullName: string | null | undefined): string | null {
+  const name = fullName?.trim();
+  if (!name) {
+    return null;
+  }
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+}

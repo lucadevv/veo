@@ -10,7 +10,8 @@ import { EarningsHeroCard } from '../components/EarningsHeroCard';
 import { PayoutRow } from '../components/PayoutRow';
 import { BreakdownCard } from '../components/BreakdownCard';
 import { SegmentedTabs } from '../components/SegmentedTabs';
-import { Appear } from '../components/motion';
+import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 import { useEarningsBreakdown, useEarningsSummary } from '../hooks/useEarnings';
 
 // ── Mapeo de estado de payout → tono/etiqueta. `status` es el enum TIPADO del contrato
@@ -47,17 +48,6 @@ function payoutLabel(status: PayoutStatusValue, t: TFunction): string {
   }
 }
 
-/** Encabezado simple de la pestaña Ganancias (sin retroceso: es un tab, no una pila). */
-function EarningsHeader({ title }: { title: string }): React.JSX.Element {
-  return (
-    <View style={styles.header}>
-      <Text variant="title1" numberOfLines={1}>
-        {title}
-      </Text>
-    </View>
-  );
-}
-
 type EarningsTab = 'summary' | 'breakdown';
 
 /** Sección "Resumen": hero del neto total + lista de liquidaciones (comportamiento previo intacto). */
@@ -92,9 +82,9 @@ function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
   return (
     <View style={[styles.section, { gap: theme.spacing.xl }]}>
       {/* Tarjeta hero con el neto total y las estadísticas reales del summary. */}
-      <Appear>
+      <Reveal>
         <EarningsHeroCard summary={data} t={t} />
-      </Appear>
+      </Reveal>
 
       <View style={[styles.payoutsBlock, { gap: theme.spacing.sm }]}>
         <Text variant="headline">{t('earnings.payoutsTitle')}</Text>
@@ -128,7 +118,7 @@ function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
             ]}
           >
             {data.payouts.map((payout: DriverPayoutView, index: number) => (
-              <Appear key={payout.id} delay={index * 60} distance={8}>
+              <Reveal key={payout.id} delay={index * 60} distance={8}>
                 <PayoutRow
                   amountLabel={formatPEN(payout.amountCents)}
                   periodLabel={t('earnings.payoutPeriod', {
@@ -139,7 +129,7 @@ function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
                   statusTone={payoutTone(payout.status)}
                   showDivider={index > 0}
                 />
-              </Appear>
+              </Reveal>
             ))}
           </View>
         )}
@@ -177,12 +167,12 @@ function BreakdownSection({ t }: { t: TFunction }): React.JSX.Element {
 
   return (
     <View style={[styles.section, { gap: theme.spacing.xl }]}>
-      <Appear>
+      <Reveal>
         <BreakdownCard periodLabel={t('earnings.periodToday')} breakdown={data.today} t={t} />
-      </Appear>
-      <Appear delay={90}>
+      </Reveal>
+      <Reveal delay={90}>
         <BreakdownCard periodLabel={t('earnings.periodWeek')} breakdown={data.week} t={t} />
-      </Appear>
+      </Reveal>
     </View>
   );
 }
@@ -193,7 +183,8 @@ export const EarningsScreen = (): React.JSX.Element => {
   const [tab, setTab] = useState<EarningsTab>('summary');
 
   return (
-    <SafeScreen scroll header={<EarningsHeader title={t('earnings.title')} />}>
+    <SafeScreen scroll>
+      <ScreenHero title={t('earnings.title')} subtitle={t('earnings.subtitle')} />
       <View style={[styles.tabsWrap, { marginBottom: theme.spacing.lg }]}>
         <SegmentedTabs
           value={tab}
@@ -211,7 +202,6 @@ export const EarningsScreen = (): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 8, paddingBottom: 12 },
   tabsWrap: { paddingTop: 4 },
   section: { paddingTop: 4 },
   payoutsBlock: { alignSelf: 'stretch' },
