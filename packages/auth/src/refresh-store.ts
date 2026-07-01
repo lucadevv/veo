@@ -154,6 +154,20 @@ export class RedisRefreshTokenStore {
     return revoked;
   }
 
+  /**
+   * BACKSTOP DURABLE de revocación (outbox): resella `revoked:before:{userId}` a un timestamp EXPLÍCITO y
+   * MONOTÓNICO (ver `SessionRevocationStore.sealRevokedBefore`). A diferencia de `revokeAllForUser` (fast-path),
+   * NO toca el índice de sesiones ni borra records de refresh: el sello epoch es la ÚNICA pieza correctness-critical
+   * del revoke (los records de refresh se reapan por TTL), y el backstop solo cierra la ventana en que el fast-path
+   * no llegó a sellar (crash). PROPAGA el error de Redis a propósito → el consumer Kafka que lo invoca reintenta.
+   *
+   * @returns `true` si elevó el sello; `false` si ya había uno ≥ (o si la revocación no está cableada — el mismo
+   *          fail-safe que `revokeAllForUser`, que también hace `this.revocation?`).
+   */
+  async resealRevokedBefore(userId: string, atEpochSeconds: number): Promise<boolean> {
+    return (await this.revocation?.sealRevokedBefore(userId, atEpochSeconds)) ?? false;
+  }
+
   async isValid(sessionId: string): Promise<boolean> {
     return (await this.redis.exists(this.key(sessionId))) === 1;
   }

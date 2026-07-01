@@ -234,6 +234,16 @@ function fakeRedis() {
     async exists(k: string) {
       return kv.has(k) || sets.has(k) ? 1 : 0;
     },
+    // EVAL emula la ÚNICA operación con script del store: el sello MONOTÓNICO de `revoked:before`
+    // (`sealRevokedBefore`). Replica la semántica del Lua (set solo si el nuevo ts es mayor que el actual);
+    // la atomicidad real la garantiza Redis en prod. `keys[0]` es la key; argv=[atSeconds, ttl].
+    async eval(_script: string, _numKeys: number, key: string, atStr: string, _ttl: string) {
+      const at = Number(atStr);
+      const cur = kv.get(key);
+      if (cur != null && Number(cur) >= at) return 0;
+      kv.set(key, atStr);
+      return 1;
+    },
     // Pipeline: acumula las ops y las aplica en exec reusando las mismas impls (mismo shape que ioredis).
     multi() {
       const ops: (() => Promise<unknown>)[] = [];
@@ -407,5 +417,67 @@ describe('SessionRevocationStore (denylist de revocación server-side)', () => {
     expect(await rev.isRevoked({ sub: 'u9', sid: 'any', iat: nowSec - 2 })).toBe(
       'sessions-superseded',
     );
+  });
+});
+
+describe('SessionRevocationStore.sealRevokedBefore (backstop durable del outbox)', () => {
+  const T = 1_800_000_000; // epoch seg arbitrario y estable (no `now()`) → sellos deterministas.
+
+  it('sella al timestamp EXPLÍCITO del evento: revoca tokens con iat < at, deja pasar iat ≥ at (strict <)', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    const raised = await rev.sealRevokedBefore('u1', T);
+    expect(raised).toBe(true); // primera vez: eleva el sello
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T - 1 })).toBe('sessions-superseded');
+    // Token acuñado EN el mismo segundo del sello sobrevive (strict `<`): no rompe el re-login legítimo.
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T })).toBeNull();
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T + 1 })).toBeNull();
+  });
+
+  it('KEY-SPACE por userId: el sello de u1 NO afecta a u2', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    await rev.sealRevokedBefore('u1', T);
+    expect(await rev.isRevoked({ sub: 'u2', sid: 's', iat: T - 1 })).toBeNull();
+  });
+
+  it('IDEMPOTENTE + DETERMINISTA: reprocesar el MISMO evento converge al MISMO sello (no-op la 2da vez)', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    expect(await rev.sealRevokedBefore('u1', T)).toBe(true); // 1ª: eleva
+    expect(await rev.sealRevokedBefore('u1', T)).toBe(false); // 2ª: ya hay sello ≥ → no-op
+    // El efecto observable es idéntico tras reprocesar (revoca < T, respeta ≥ T).
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T - 1 })).toBe('sessions-superseded');
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T })).toBeNull();
+  });
+
+  it('MONOTÓNICO: un sello MENOR (evento viejo reprocesado fuera de orden) NO rebaja el sello mayor', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    await rev.sealRevokedBefore('u1', T); // suspensión posterior (T2)
+    expect(await rev.sealRevokedBefore('u1', T - 100)).toBe(false); // evento anterior (T1<T2): no rebaja
+    // Un token acuñado en (T1, T2) sigue REVOCADO — no revive (sin la regresión de seguridad del SET pelado).
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: T - 50 })).toBe('sessions-superseded');
+  });
+
+  it('COMPONE con el fast-path: si revokeAllForUser ya selló now() ≥ suspendedAt, el backstop es no-op', async () => {
+    const fake = fakeRedis();
+    const rev = new SessionRevocationStore(fake as any);
+    const store = new RedisRefreshTokenStore(fake as any, 100, rev);
+    await store.revokeAllForUser('u1'); // fast-path sella now()
+    const suspendedAtSec = Math.floor(Date.now() / 1000) - 5; // suspendedAt del evento, anterior a now()
+    expect(await rev.sealRevokedBefore('u1', suspendedAtSec)).toBe(false); // no rebaja el sello del fast-path
+  });
+
+  it('integración: RedisRefreshTokenStore.resealRevokedBefore delega y sella (backstop cuando el fast-path faltó)', async () => {
+    const fake = fakeRedis();
+    const rev = new SessionRevocationStore(fake as any);
+    const store = new RedisRefreshTokenStore(fake as any, 100, rev);
+    // Simula el CRASH: el fast-path NUNCA selló → el backstop lo cierra al llegar el evento.
+    expect(await store.resealRevokedBefore('u9', T)).toBe(true);
+    expect(await rev.isRevoked({ sub: 'u9', sid: 'any', iat: T - 1 })).toBe('sessions-superseded');
+    // Reproceso del backstop: no-op (idempotente).
+    expect(await store.resealRevokedBefore('u9', T)).toBe(false);
+  });
+
+  it('sin revocación cableada (revocation ausente): resealRevokedBefore es un no-op seguro (false)', async () => {
+    const store = new RedisRefreshTokenStore(fakeRedis() as any, 100); // sin SessionRevocationStore
+    expect(await store.resealRevokedBefore('u9', T)).toBe(false);
   });
 });

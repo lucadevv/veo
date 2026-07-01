@@ -383,3 +383,96 @@ describe('DriverSuspensionConsumer · driver.excessive_cancellations → AUTO-su
     ).rejects.toThrow('db down');
   });
 });
+
+/**
+ * Envelope de un `driver.suspended` (lo emite el PROPIO identity por outbox al suspender disciplinariamente;
+ * topicForEvent → topic 'driver', el mismo del consumer). Es el BACKSTOP durable del revoke de sesión.
+ */
+function selfSuspendedEnvelope(payload: unknown): EventEnvelope<unknown> {
+  return {
+    eventId: 'e5',
+    eventType: 'driver.suspended',
+    producer: 'identity-service',
+    occurredAt: new Date().toISOString(),
+    payload,
+  } as EventEnvelope<unknown>;
+}
+
+const selfSuspended = {
+  driverId: 'd1',
+  reason: 'Suspensión disciplinaria del operador',
+  suspendedAt: '2026-06-30T12:00:00.000Z',
+  userId: 'user-1',
+};
+
+describe('DriverSuspensionConsumer · driver.suspended → BACKSTOP durable del reseal de revocación', () => {
+  beforeEach(() => {
+    captured.byEvent = {};
+  });
+
+  it('resella por userId del PAYLOAD, con el suspendedAt del EVENTO (Date), NO con driverId ni now()', async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'reconciled' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended));
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledTimes(1);
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledWith(
+      'd1',
+      'user-1',
+      new Date('2026-06-30T12:00:00.000Z'),
+    );
+  });
+
+  it('evento SIN userId (en vuelo pre-deploy) → pasa undefined; el servicio resuelve driverId→userId', async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'reconciled' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    const { userId: _omit, ...noUserId } = selfSuspended;
+    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(noUserId));
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledWith('d1', undefined, expect.any(Date));
+  });
+
+  it('IDEMPOTENTE: reentrega del mismo evento (outcome duplicate) no rompe ni duplica efecto', async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'duplicate' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended));
+    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended));
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledTimes(2);
+    expect(drivers.resealSuspensionRevocation).toHaveBeenNthCalledWith(2, 'd1', 'user-1', expect.any(Date));
+  });
+
+  it("outcome 'skipped' (sin userId resoluble): no rompe (no-op observable)", async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'skipped' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended)),
+    ).resolves.toBeUndefined();
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledTimes(1);
+  });
+
+  it('descarta payload inválido (sin driverId) sin resellar', async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'reconciled' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope({ reason: 'x', suspendedAt: selfSuspended.suspendedAt }));
+    expect(drivers.resealSuspensionRevocation).not.toHaveBeenCalled();
+  });
+
+  it('descarta suspendedAt no parseable sin resellar', async () => {
+    const drivers = { resealSuspensionRevocation: vi.fn(async () => 'reconciled' as const) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.suspended']?.(
+      selfSuspendedEnvelope({ ...selfSuspended, suspendedAt: 'no-es-fecha' }),
+    );
+    expect(drivers.resealSuspensionRevocation).not.toHaveBeenCalled();
+  });
+
+  it('propaga el error de Redis para que Kafka reintente (el reseal es idempotente/monotónico)', async () => {
+    const drivers = {
+      resealSuspensionRevocation: vi.fn(async () => {
+        throw new Error('redis down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended)),
+    ).rejects.toThrow('redis down');
+  });
+});

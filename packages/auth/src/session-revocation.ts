@@ -72,6 +72,26 @@ const KEY_PREFIX = 'veo:revoked:';
 const revokedSessionKey = (sid: string): string => `${KEY_PREFIX}sid:${sid}`;
 const revokedBeforeKey = (userId: string): string => `${KEY_PREFIX}before:${userId}`;
 
+/**
+ * Sello MONOTÓNICO atómico de `revoked:before:{userId}`: fija el timestamp SOLO si el nuevo es MAYOR que
+ * el actual (o si no hay actual). Un único EVAL → atómico entre réplicas (sin race read-then-set). Devuelve
+ * 1 si ELEVÓ el sello, 0 si fue no-op (ya había uno ≥). Refresca el TTL solo cuando eleva (la entrada ≥ ya
+ * porta su propio TTL vigente). Es la primitiva del backstop del outbox: reprocesar el evento `driver.suspended`
+ * converge SIEMPRE a `sello = max(existente, at)` — idempotente y determinista, sin importar orden ni reintentos.
+ */
+const SEAL_REVOKED_BEFORE_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local at = tonumber(ARGV[1])
+if cur then
+  local curNum = tonumber(cur)
+  if curNum and curNum >= at then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return 1
+`;
+
 /** Subset mínimo de logger (compatible con `@veo/observability` y NestJS Logger). No acopla a un framework. */
 export interface RevocationLogger {
   warn(obj: unknown, msg?: string): void;
@@ -113,6 +133,36 @@ export class SessionRevocationStore {
     } catch (err) {
       this.logger?.warn({ err, userId }, 'session-revocation: fallo al escribir revoked-before');
     }
+  }
+
+  /**
+   * ESCRITURA DURABLE — sella `revoked:before:{userId}` a un timestamp EXPLÍCITO (epoch en SEGUNDOS, mismo
+   * dominio que el claim `iat`) de forma MONOTÓNICA (solo SUBE): el sello final es `max(existente, atSeconds)`.
+   * Es el BACKSTOP del outbox: al reprocesar el evento `driver.suspended` produce el MISMO efecto observable
+   * (idempotente + determinista), sin depender del orden ni del nº de reintregas.
+   *
+   * Por qué MONOTÓNICO y no un SET pelado: dos suspensiones del MISMO user (T1 < T2) reprocesadas FUERA DE
+   * ORDEN con un SET incondicional BAJARÍAN el sello de T2 a T1 → los tokens acuñados en [T1, T2) revivirían
+   * (regresión de seguridad). `max()` nunca reduce la ventana revocada. También COMPONE con el fast-path
+   * (`revokeAllForUser` sella `now() ≥ suspendedAt`): el backstop ve `now() ≥ at` → no-op, no rebaja el sello.
+   *
+   * A DIFERENCIA de `revokeAllForUser`/`revokeSession` (best-effort, fail-OPEN para no romper el logout/la
+   * suspensión ante un blip de Redis), este método PROPAGA el error: su llamador es un consumer Kafka que DEBE
+   * reintentar (durabilidad del backstop), no degradar. La decisión de tragar/relanzar vive en el llamador.
+   *
+   * @param userId  User.id (claim `sub`).
+   * @param atEpochSeconds  instante del sello en SEGUNDOS (floored, mismo dominio que `iat`).
+   * @returns `true` si esta llamada elevó el sello; `false` si ya había uno ≥ (no-op idempotente).
+   */
+  async sealRevokedBefore(userId: string, atEpochSeconds: number): Promise<boolean> {
+    const raised = await this.redis.eval(
+      SEAL_REVOKED_BEFORE_LUA,
+      1,
+      revokedBeforeKey(userId),
+      String(atEpochSeconds),
+      String(this.ttlSeconds),
+    );
+    return Number(raised) === 1;
   }
 
   /**

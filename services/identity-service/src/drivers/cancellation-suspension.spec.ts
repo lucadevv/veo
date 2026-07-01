@@ -172,8 +172,11 @@ function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; drive
 
 const redis = {} as never;
 const bio = {} as never;
-/** Stub del RedisRefreshTokenStore (Lote 1b): suspendByCancellations llama revokeAllForUser post-commit. */
-const sessions = { revokeAllForUser: async () => 0 } as never;
+/**
+ * Stub del RedisRefreshTokenStore (Lote 1b + backstop durable): suspendByCancellations llama revokeAllForUser
+ * (fast-path, gateado) y resealRevokedBefore (backstop durable, INCONDICIONAL) post-commit.
+ */
+const sessions = { revokeAllForUser: async () => 0, resealRevokedBefore: async () => true } as never;
 function svc(prisma: ReturnType<typeof makePrisma>): DriversService {
   return new DriversService(prisma.prisma as never, redis, bio, sessions, config);
 }

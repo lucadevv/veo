@@ -66,6 +66,14 @@ export const driverSuspended = z.object({
   driverId: z.string(),
   reason: z.string(),
   suspendedAt: z.string(),
+  /// `userId` (User.id = claim `sub`) del conductor suspendido. OPTIONAL por evolución COMPATIBLE del
+  /// contrato: los eventos en vuelo ANTES de este cambio no lo llevan; identity (único productor) SIEMPRE
+  /// lo popula desde ahora (lo tiene en el momento de emitir). Lo consume EXCLUSIVAMENTE el BACKSTOP durable
+  /// de revocación de identity (consumer de su propio `driver.suspended`), que resella `revoked:before:{userId}`
+  /// al `suspendedAt` del evento por si el revoke post-commit best-effort no corrió (crash entre COMMIT y sello
+  /// en Redis). Los demás consumers (driver-bff/dispatch/admin-bff/audit) keyean por `driverId`: para ellos un
+  /// campo optional extra es no-op (no lo leen; audit proyecta por allowlist). Es PII-neutral (un id opaco).
+  userId: z.string().optional(),
 });
 /// El conductor RECHAZADO corrigió sus datos y REENVIÓ a revisión (BR-I01). identity-service lo emite por
 /// OUTBOX en la MISMA tx que lleva backgroundCheckStatus REJECTED→PENDING + KYC REJECTED→PENDING y limpia el

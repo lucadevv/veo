@@ -19,10 +19,11 @@ const config = new ConfigService<Env, true>({
   EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
 });
 /**
- * Stub del RedisRefreshTokenStore (Lote 1b): la suspensión llama `revokeAllForUser` para matar la sesión/
- * socket vivos. Default no-op; los tests que ASERTAN el revoke usan su propio spy (vi.fn).
+ * Stub del RedisRefreshTokenStore (Lote 1b + backstop durable): la suspensión llama `revokeAllForUser` (fast-path)
+ * y las 4 vías event-driven llaman `resealRevokedBefore` (backstop durable, incondicional). Default no-op; los
+ * tests que ASERTAN el revoke/reseal usan su propio spy (vi.fn).
  */
-const sessions = { revokeAllForUser: async () => 0 } as never;
+const sessions = { revokeAllForUser: async () => 0, resealRevokedBefore: async () => true } as never;
 const futureLicense = new Date(Date.now() + 1_000_000_000);
 const okDriver = {
   id: 'd1',
@@ -1258,6 +1259,100 @@ describe('DriversService.suspendByRating · AUTO-suspensión por RATING bajo (ho
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     expect(await svc.suspendByRating('d1', 'rating bajo')).toBe(true);
     expect(holds).toHaveLength(2);
+  });
+});
+
+describe('DriversService · BACKSTOP durable del revoke en las 4 vías EVENT-DRIVEN (des-gateado de created)', () => {
+  // El sub-espacio del fix: cada vía event-driven (fleet doc/ITV, rating, cancelaciones) debe RESELLAR
+  // `revoked:before:{userId}` INCONDICIONALMENTE (aún con created=false), al `suspendedAt` DERIVADO (no now()),
+  // para que la REDELIVERY del evento gatillador cierre la crash-window si el fast-path best-effort no corrió.
+  const epoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
+  const spy = () => ({ revokeAllForUser: vi.fn(async () => 0), resealRevokedBefore: vi.fn(async () => true) });
+
+  it('suspendByFleet (created=true): resella por userId al epoch del suspendedAt + fast-path (revoke)', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'u-doc' });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await svc.suspendByFleet('d1', new Date('2026-06-04T10:00:00.000Z'), 'SOAT');
+    // El filo userId ⟂ Driver.id: resella por el `sub` (userId), NUNCA por el id de perfil 'd1'.
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith('u-doc', epoch('2026-06-04T10:00:00.000Z'));
+    expect(s.revokeAllForUser).toHaveBeenCalledTimes(1); // transición nueva → fast-path también
+  });
+
+  it('suspendByFleet REDELIVERY (created=false): RESELLA IGUAL (cierra crash-window) al createdAt ORIGINAL, sin fast-path', async () => {
+    const { prisma } = makeHoldPrisma({
+      userId: 'u-doc',
+      initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
+    });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await svc.suspendByFleet('d1', new Date('2026-06-04T10:00:00.000Z'), 'SOAT'); // created=false (ya existe)
+    // DETERMINISMO: resella al momento ORIGINAL (createdAt preservado), NO al `at` de la reentrega ni a now().
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith('u-doc', epoch('2026-06-01T00:00:00.000Z'));
+    // El fast-path SÍ se saltea (gateado en created) — es justo el hueco que el reseal incondicional cubre.
+    expect(s.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('suspendByFleetForUser (ITV): resella por el userId (sub) directo', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'user-1' });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await svc.suspendByFleetForUser('user-1', new Date('2026-06-23T03:00:00.000Z'));
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith('user-1', epoch('2026-06-23T03:00:00.000Z'));
+  });
+
+  it('suspendByFleetForUser sin perfil: NO resella (no hay a quién revocar)', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'user-1', driverExists: false });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    expect(await svc.suspendByFleetForUser('user-1', new Date())).toBe(false);
+    expect(s.resealRevokedBefore).not.toHaveBeenCalled();
+    expect(s.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('suspendByRating REDELIVERY (created=false): RESELLA IGUAL por userId (crash-window cerrada)', async () => {
+    const { prisma } = makeHoldPrisma({
+      userId: 'u-rat',
+      initialHolds: [hold('RATING_LOW', '', '2026-06-01T00:00:00.000Z')],
+    });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await svc.suspendByRating('d1', 'rating bajo');
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith('u-rat', epoch('2026-06-01T00:00:00.000Z'));
+    expect(s.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('suspendByCancellations (created=true): resella por userId al epoch del suspendedAt derivado', async () => {
+    const { prisma, deriveSuspendedAt } = makeHoldPrisma({ userId: 'u-can' });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await svc.suspendByCancellations('d1', 'exceso de cancelaciones');
+    // El createdAt del hold de cancelaciones es now() del stub → tomamos el suspendedAt derivado real.
+    const at = deriveSuspendedAt();
+    expect(at).not.toBeNull();
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith('u-can', Math.floor((at as Date).getTime() / 1000));
+  });
+
+  it('suspendByRating sin perfil (purgado): NO resella (anti poison-pill, nada que revocar)', async () => {
+    const { prisma } = makeHoldPrisma({ driverExists: false });
+    const s = spy();
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    expect(await svc.suspendByRating('ghost', 'rating bajo')).toBe(false);
+    expect(s.resealRevokedBefore).not.toHaveBeenCalled();
+  });
+
+  it('propaga el error de Redis del reseal → el consumer relanza y Kafka reintenta (durabilidad)', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'u-doc' });
+    const s = {
+      revokeAllForUser: vi.fn(async () => 0),
+      resealRevokedBefore: vi.fn(async () => {
+        throw new Error('redis down');
+      }),
+    };
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
+    await expect(svc.suspendByFleet('d1', new Date('2026-06-04T10:00:00.000Z'), 'SOAT')).rejects.toThrow(
+      'redis down',
+    );
   });
 });
 

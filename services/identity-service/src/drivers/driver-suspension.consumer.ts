@@ -27,12 +27,14 @@ import {
   fleetDriverReactivated,
   driverFlagged,
   driverExcessiveCancellations,
+  driverSuspended,
   FLAG_REASON,
   type EventEnvelope,
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { DriversService } from './drivers.service';
+import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
+import { DriversService, type SuspensionResealOutcome } from './drivers.service';
 import type { Env } from '../config/env.schema';
 
 /** eventType en el wire que emite fleet-service (ver services/fleet-service/src/events/fleet-events.ts). */
@@ -51,6 +53,27 @@ const DRIVER_FLAGGED = 'driver.flagged';
  * que driver.flagged/suspended/reactivated → este consumer ya está suscrito a 'driver', solo agrega el handler.
  */
 const DRIVER_EXCESSIVE_CANCELLATIONS = 'driver.excessive_cancellations';
+/**
+ * eventType que emite el PROPIO identity por OUTBOX al suspender disciplinariamente a un conductor (`suspend()`).
+ * `topicForEvent` lo mapea al topic 'driver' (el MISMO al que este consumer ya está suscrito por driver.flagged/
+ * excessive_cancellations) → self-consume sin abrir topic ni groupId nuevo. Es el BACKSTOP DURABLE del revoke:
+ * el relay entrega el evento at-least-once, y este handler resella `revoked:before:{userId}` si el post-commit
+ * best-effort de `suspend()` no llegó a correr (crash entre COMMIT y sello en Redis → token vivo ≤15m).
+ * Distinto de `DRIVER_SUSPENDED` ('fleet.driver_suspended', suspensión AUTOMÁTICA de fleet, otra vía/otro topic).
+ */
+const DRIVER_SUSPENDED_SELF = 'driver.suspended';
+
+/**
+ * Mapea el desenlace de dominio del reseal a su label de negocio de `domain_events_total` (cero strings mágicos;
+ * el `satisfies` garantiza cobertura exhaustiva de `SuspensionResealOutcome`). Disjunto del `result` de transporte
+ * (CONSUMED) que el base emite encima. RECONCILED = el backstop cerró la ventana; DUPLICATE = fast-path ya selló;
+ * SKIPPED = sin userId resoluble.
+ */
+const RESEAL_RESULT = {
+  reconciled: BusinessEventResult.RECONCILED,
+  duplicate: BusinessEventResult.DUPLICATE,
+  skipped: BusinessEventResult.SKIPPED,
+} as const satisfies Record<SuspensionResealOutcome, string>;
 
 /**
  * Razón del flag de rating que identity DISCRIMINA: el VALOR canónico es `FLAG_REASON` del CONTRATO `@veo/events`
@@ -88,11 +111,12 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
       [DRIVER_REACTIVATED]: (env) => this.onDriverReactivated(env),
       [DRIVER_FLAGGED]: (env) => this.onDriverFlagged(env),
       [DRIVER_EXCESSIVE_CANCELLATIONS]: (env) => this.onDriverExcessiveCancellations(env),
+      [DRIVER_SUSPENDED_SELF]: (env) => this.onDriverSuspendedReseal(env),
     };
   }
 
   protected override subscriptionLog(): string {
-    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED}, ${DRIVER_EXCESSIVE_CANCELLATIONS})`;
+    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED}, ${DRIVER_EXCESSIVE_CANCELLATIONS}, ${DRIVER_SUSPENDED_SELF})`;
   }
 
   private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
@@ -239,6 +263,54 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
         `Falló la auto-suspensión por cancelaciones del conductor ${driverId}`,
       );
       throw err; // que Kafka reintente; suspendByCancellations es idempotente.
+    }
+  }
+
+  /**
+   * BACKSTOP DURABLE de la revocación de sesión (crash-window MEDIA). identity emite `driver.suspended` por
+   * OUTBOX en la MISMA tx que la suspensión disciplinaria (`suspend()`) y mata la sesión/socket en un post-commit
+   * best-effort. Si identity CRASHEA entre el COMMIT y ese sello en Redis, el denylist `revoked:before:{userId}`
+   * queda SIN sellar → el access token vivo del conductor pasa el guard HTTP hasta vencer (≤15m). Este handler,
+   * alimentado por la entrega at-least-once del relay, RESELLA idempotentemente cuando el evento llega:
+   *  - Camino feliz (sin crash): el fast-path ya selló `now() ≥ suspendedAt` → el reseal es no-op ('duplicate').
+   *  - Crash: el reseal ELEVA el sello al `suspendedAt` del evento ('reconciled') → cierra la ventana.
+   * El sello es al `suspendedAt` del EVENTO (no `now()`) y MONOTÓNICO → reprocesar converge al MISMO sello
+   * (idempotente + determinista). Un error transitorio de Redis se RELANZA para que Kafka reintente (durabilidad).
+   */
+  private async onDriverSuspendedReseal(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverSuspended.safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`${DRIVER_SUSPENDED_SELF} con payload inválido; descartado`);
+      return;
+    }
+    const { driverId, userId, suspendedAt } = parsed.data;
+    const at = new Date(suspendedAt);
+    if (Number.isNaN(at.getTime())) {
+      this.logger.warn(
+        `${DRIVER_SUSPENDED_SELF} con suspendedAt inválido (${suspendedAt}); descartado`,
+      );
+      return;
+    }
+    try {
+      const outcome: SuspensionResealOutcome = await this.drivers.resealSuspensionRevocation(
+        driverId,
+        userId,
+        at,
+      );
+      domainEventsTotal.inc({ event: DRIVER_SUSPENDED_SELF, result: RESEAL_RESULT[outcome] });
+      if (outcome === 'reconciled') {
+        // El fast-path NO había sellado → el backstop cerró la crash-window. Señal de que hubo un crash
+        // (o el post-commit falló) entre el COMMIT de la suspensión y el revoke: worth un WARN para Ops.
+        this.logger.warn(
+          `Backstop: resellé revoked-before del conductor ${driverId} (el revoke post-commit no había corrido)`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        { err },
+        `Falló el reseal de revocación (backstop) del conductor ${driverId}`,
+      );
+      throw err; // que Kafka reintente; el reseal es idempotente y monotónico (no corrompe al reprocesar).
     }
   }
 }

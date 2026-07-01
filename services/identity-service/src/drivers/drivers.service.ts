@@ -39,6 +39,15 @@ import { driverStatusMachine, type SelfServiceDriverStatus } from '../domain/dri
 import { kycStatusMachine } from '../domain/kyc-status';
 import type { Env } from '../config/env.schema';
 
+/**
+ * Desenlace de negocio del BACKSTOP durable de revocación (`resealSuspensionRevocation`). Es dominio, NO una
+ * label de métrica: el consumer lo mapea a `BusinessEventResult` en su borde (separación de responsabilidades).
+ *  - `'reconciled'` — el reseal ELEVÓ el sello: el fast-path post-commit no había corrido (cerró la crash-window).
+ *  - `'duplicate'`  — ya había un sello ≥ (camino feliz: el fast-path ya selló). No-op idempotente.
+ *  - `'skipped'`    — no hay `userId` resoluble (driver purgado / evento viejo sin userId y sin perfil): nada que revocar.
+ */
+export type SuspensionResealOutcome = 'reconciled' | 'duplicate' | 'skipped';
+
 const MAX_BIO_FAILS = 3;
 const BIO_LOCK_TTL_SECONDS = 3600; // 1h (BR-I02)
 /**
@@ -641,6 +650,70 @@ export class DriversService {
     }
   }
 
+  /**
+   * BACKSTOP DURABLE del fast-path de revocación (crash-window MEDIA, confirmado por gate). Lo invoca el
+   * consumer de `driver.suspended` (entrega at-least-once del outbox relay). El fast-path (`revokeDriverSessions`
+   * post-commit) es best-effort: si identity CRASHEA entre el COMMIT de la suspensión y el sello en Redis, el
+   * denylist `revoked:before:{userId}` NUNCA se sella → el access token vivo del conductor pasa el guard HTTP
+   * hasta vencer (≤15m). Este reseal cierra ESA ventana cuando el relay entrega el evento.
+   *
+   * DETERMINISMO/IDEMPOTENCIA: sella al `suspendedAt` del EVENTO (no `now()`), de forma MONOTÓNICA (solo sube,
+   * ver `SessionRevocationStore.sealRevokedBefore`). Reprocesar el mismo evento converge SIEMPRE al mismo sello.
+   * En el camino feliz (sin crash) el fast-path ya selló `now() ≥ suspendedAt` → este backstop es un no-op
+   * ('duplicate'): NO duplica efecto, solo reconcilia cuando el fast-path faltó ('reconciled').
+   *
+   * KEY-SPACE (el filo userId ⟂ Driver.id): resella por `userId` (claim `sub`), NO por `driverId` de perfil.
+   * Lo toma del payload (identity lo popula desde este cambio); para un evento en vuelo PRE-deploy sin `userId`,
+   * cae al mapeo local `driverId → Driver.userId` (identity es el dueño). Sin driver (purgado por erasure) o sin
+   * userId resoluble → 'skipped' (no hay a quién revocar). PROPAGA el error de Redis → el consumer reintenta.
+   *
+   * @returns `'reconciled'` (elevó el sello: el fast-path no había corrido) · `'duplicate'` (ya había un sello ≥,
+   *          camino feliz) · `'skipped'` (sin userId resoluble).
+   */
+  async resealSuspensionRevocation(
+    driverId: string,
+    payloadUserId: string | undefined,
+    suspendedAt: Date,
+  ): Promise<SuspensionResealOutcome> {
+    const userId =
+      payloadUserId ??
+      (
+        await this.prisma.read.driver.findUnique({
+          where: { id: driverId },
+          select: { userId: true },
+        })
+      )?.userId;
+    if (!userId) return 'skipped';
+    const atSeconds = Math.floor(suspendedAt.getTime() / 1000);
+    const raised = await this.sessions.resealRevokedBefore(userId, atSeconds);
+    return raised ? 'reconciled' : 'duplicate';
+  }
+
+  /**
+   * ENFORCEMENT EN VIVO + BACKSTOP DURABLE de una suspensión EVENT-DRIVEN (fleet documento/ITV, rating,
+   * cancelaciones), post-commit. Une las DOS mitades del enforcement de las 4 vías gemelas de `suspend*`:
+   *  - FAST-PATH (best-effort, SOLO en la TRANSICIÓN NUEVA `created`): `revokeDriverSessions` mata la sesión/
+   *    socket vivos al instante (borra records de refresh + sella now()). Fail-OPEN ante un blip de Redis.
+   *  - BACKSTOP DURABLE (INCONDICIONAL, des-gateado de `created`): resella `revoked:before:{userId}` al
+   *    `suspendedAt` DERIVADO de la suspensión (NO now()), monotónico e idempotente. PROPAGA el error de Redis.
+   *
+   * POR QUÉ des-gateado (cierra la crash-window de estas 4 vías, que NO emiten `driver.suspended` — su backstop
+   * NO es el consumer de ese evento sino la REDELIVERY del evento GATILLADOR): el fast-path se saltea en una
+   * reentrega (el hold ya existe → `created=false`), que es EXACTAMENTE el estado tras un crash entre el COMMIT
+   * y el revoke best-effort. Al resellar SIEMPRE, la redelivery de fleet.driver_suspended/driver.flagged/
+   * driver.excessive_cancellations —que el consumer ya reintenta por at-least-once— cierra la ventana sin evento
+   * nuevo ni cambio de schema. Como el reseal es monotónico, en el camino feliz compone con el fast-path
+   * (now() ≥ suspendedAt → no-op) y su error propagado hace que el consumer relance → Kafka reintenta el reseal.
+   */
+  private async enforceEventDrivenSuspension(
+    userId: string,
+    suspendedAt: Date,
+    created: boolean,
+  ): Promise<void> {
+    if (created) await this.revokeDriverSessions(userId);
+    await this.sessions.resealRevokedBefore(userId, Math.floor(suspendedAt.getTime() / 1000));
+  }
+
   async suspend(driverId: string, reason: string): Promise<void> {
     const { created, userId } = await this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
@@ -661,6 +734,9 @@ export class DriversService {
           driverId: driver.id,
           reason,
           suspendedAt: suspendedAt.toISOString(),
+          // `userId` para el BACKSTOP durable del revoke (crash-window): el consumer de este propio evento
+          // resella `revoked:before:{userId}` si el post-commit best-effort de abajo no llegó a correr.
+          userId: driver.userId,
         },
       });
       await tx.outboxEvent.create({
@@ -1052,7 +1128,7 @@ export class DriversService {
         select: { id: true, userId: true },
       });
       if (!driver) return null; // evento antes del onboarding: no-op silencioso (coherente con el viejo CAS).
-      const { created } = await this.addHoldAt(
+      const { created, suspendedAt: at } = await this.addHoldAt(
         tx,
         driverId,
         SuspensionCause.DOCUMENT_EXPIRED,
@@ -1060,11 +1136,13 @@ export class DriversService {
         `Documento crítico vencido (${documentType})`,
         suspendedAt,
       );
-      return { created, userId: driver.userId };
+      return { created, userId: driver.userId, suspendedAt: at };
     });
     if (!result) return false;
-    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
-    if (result.created) await this.revokeDriverSessions(result.userId);
+    // POST-COMMIT: fast-path (gateado en created) + BACKSTOP durable (INCONDICIONAL) → cierra la crash-window
+    // en la redelivery de fleet.driver_suspended (created=false, pero el reseal corre igual). Determinista por
+    // el `suspendedAt` derivado (createdAt del hold preservado en conflicto).
+    await this.enforceEventDrivenSuspension(result.userId, result.suspendedAt, result.created);
     return result.created;
   }
 
@@ -1082,11 +1160,11 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op.
    */
   async suspendByFleetForUser(userId: string, suspendedAt: Date): Promise<boolean> {
-    const created = await this.prisma.write.$transaction(async (tx) => {
+    const result = await this.prisma.write.$transaction(async (tx) => {
       // Resolución User.id → Driver.id (identity es el dueño del mapeo). Sin perfil → no-op (evento prematuro).
       const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
-      if (!driver) return false;
-      const { created } = await this.addHoldAt(
+      if (!driver) return null; // no-op silencioso: sin perfil no hay suspensión (ni sesión a revocar).
+      const { created, suspendedAt: at } = await this.addHoldAt(
         tx,
         driver.id,
         SuspensionCause.INSPECTION_EXPIRED,
@@ -1094,11 +1172,13 @@ export class DriversService {
         'Inspección técnica (ITV) vencida',
         suspendedAt,
       );
-      return created;
+      return { created, suspendedAt: at };
     });
-    // POST-COMMIT (Lote 1b): el `userId` ya es el sub (esta vía viene keyeada por User.id) → revoke directo.
-    if (created) await this.revokeDriverSessions(userId);
-    return created;
+    if (!result) return false;
+    // POST-COMMIT: el `userId` YA es el sub (vía keyeada por User.id) → directo. Fast-path (gateado) + BACKSTOP
+    // durable (incondicional): la redelivery del fleet.driver_suspended por ITV cierra la crash-window.
+    await this.enforceEventDrivenSuspension(userId, result.suspendedAt, result.created);
+    return result.created;
   }
 
   /**
@@ -1129,18 +1209,19 @@ export class DriversService {
         select: { id: true, userId: true },
       });
       if (!driver) return null; // flag antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
-      const { created } = await this.addHold(
+      const { created, suspendedAt: at } = await this.addHold(
         tx,
         driverId,
         SuspensionCause.RATING_LOW,
         '',
         reason,
       );
-      return { created, userId: driver.userId };
+      return { created, userId: driver.userId, suspendedAt: at };
     });
     if (!result) return false;
-    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
-    if (result.created) await this.revokeDriverSessions(result.userId);
+    // POST-COMMIT: fast-path (gateado en created) + BACKSTOP durable (INCONDICIONAL) → la redelivery del
+    // driver.flagged cierra la crash-window. Determinista por el `suspendedAt` derivado (createdAt frozen).
+    await this.enforceEventDrivenSuspension(result.userId, result.suspendedAt, result.created);
     return result.created;
   }
 
@@ -1174,7 +1255,7 @@ export class DriversService {
       });
       if (!driver) return null; // evento antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
       const expiresAt = new Date(Date.now() + this.cancellationCooldownMs);
-      const { created } = await this.addHold(
+      const { created, suspendedAt: at } = await this.addHold(
         tx,
         driverId,
         SuspensionCause.EXCESSIVE_CANCELLATIONS,
@@ -1182,11 +1263,12 @@ export class DriversService {
         reason,
         expiresAt,
       );
-      return { created, userId: driver.userId };
+      return { created, userId: driver.userId, suspendedAt: at };
     });
     if (!result) return false;
-    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
-    if (result.created) await this.revokeDriverSessions(result.userId);
+    // POST-COMMIT: fast-path (gateado en created) + BACKSTOP durable (INCONDICIONAL) → la redelivery del
+    // driver.excessive_cancellations cierra la crash-window. Determinista por el `suspendedAt` derivado.
+    await this.enforceEventDrivenSuspension(result.userId, result.suspendedAt, result.created);
     return result.created;
   }
 
