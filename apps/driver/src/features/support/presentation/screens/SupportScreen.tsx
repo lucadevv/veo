@@ -12,7 +12,7 @@ import { useCreateTicket, useTickets } from '../hooks/useSupport';
 import { FaqAccordion } from '../components/FaqAccordion';
 import { TicketRow } from '../components/TicketRow';
 import { ReportProblemSheet } from '../components/ReportProblemSheet';
-import { Appear } from '../components/motion';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Support'>;
 
@@ -40,7 +40,7 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
     <SafeScreen scroll header={<TopBar title={t('support.title')} onBack={navigation.goBack} />}>
       <View style={[styles.body, { gap: theme.spacing.xl, paddingBottom: theme.spacing['3xl'] }]}>
         {/* Hero: invitación a reportar un problema. */}
-        <Appear
+        <Reveal
           style={[
             styles.hero,
             {
@@ -74,18 +74,18 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
             fullWidth
             onPress={() => setFormOpen(true)}
           />
-        </Appear>
+        </Reveal>
 
         {/* FAQ estático. */}
-        <Appear style={styles.section} delay={60}>
+        <Reveal style={styles.section} delay={60}>
           <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
             {t('support.faqTitle')}
           </Text>
           <FaqAccordion />
-        </Appear>
+        </Reveal>
 
         {/* Mis tickets. */}
-        <Appear style={styles.section} delay={120}>
+        <Reveal style={styles.section} delay={120}>
           <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
             {t('support.myTickets')}
           </Text>
@@ -127,13 +127,13 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
               ]}
             >
               {tickets.data.map((ticket, index) => (
-                <Appear key={ticket.id} delay={index * 50} distance={8}>
+                <Reveal key={ticket.id} delay={index * 50} distance={8}>
                   <TicketRow ticket={ticket} showDivider={index > 0} />
-                </Appear>
+                </Reveal>
               ))}
             </View>
           )}
-        </Appear>
+        </Reveal>
       </View>
 
       <ReportProblemSheet

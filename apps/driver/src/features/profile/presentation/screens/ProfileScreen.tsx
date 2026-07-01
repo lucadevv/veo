@@ -161,11 +161,11 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                     title={enumLabel(t, 'profile.docType', doc.type)}
                     subtitle={enumLabel(t, 'profile.docStatus', doc.status)}
                     trailing={
-                      <StatusPill
-                        label={doc.ok ? t('profile.documentValid') : t('profile.documentInvalid')}
-                        tone={doc.ok ? 'success' : 'danger'}
-                        dot
-                      />
+                      // Status by exception: un doc VÁLIDO ya lo dice su subtítulo ("Verificado") — no
+                      // repetimos con un badge (evita el checklist de 5 pills). Solo el problema grita.
+                      doc.ok ? null : (
+                        <StatusPill label={t('profile.documentInvalid')} tone="danger" dot />
+                      )
                     }
                   />
                 ))
@@ -177,37 +177,37 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           <Reveal delay={200}>
             <Card padding="sm">
               <ProfileLinkRow
-                icon={<IconDocument size={20} color={theme.colors.accent} />}
+                icon={<IconDocument size={20} color={theme.colors.inkMuted} />}
                 label={t('documents.title')}
                 onPress={() => navigation.navigate('Documents')}
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconShield size={20} color={theme.colors.accent} />}
+                icon={<IconShield size={20} color={theme.colors.inkMuted} />}
                 label={t('shift.enrollAction')}
                 onPress={() => navigation.navigate('BiometricEnroll')}
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconReceipt size={20} color={theme.colors.accent} />}
+                icon={<IconReceipt size={20} color={theme.colors.inkMuted} />}
                 label={t('earnings.title')}
                 onPress={() => navigation.navigate('Ganancias')}
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconGift size={20} color={theme.colors.accent} />}
+                icon={<IconGift size={20} color={theme.colors.inkMuted} />}
                 label={t('ops.incentives.title')}
                 onPress={() => navigation.navigate('Incentives')}
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconClock size={20} color={theme.colors.accent} />}
+                icon={<IconClock size={20} color={theme.colors.inkMuted} />}
                 label={t('trips.historyTitle')}
                 onPress={() => navigation.navigate('Viajes')}
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconLifebuoy size={20} color={theme.colors.accent} />}
+                icon={<IconLifebuoy size={20} color={theme.colors.inkMuted} />}
                 label={t('support.title')}
                 onPress={() => navigation.navigate('Support')}
               />

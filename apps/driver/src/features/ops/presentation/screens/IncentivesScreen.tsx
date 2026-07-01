@@ -9,7 +9,7 @@ import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { useIncentives } from '../hooks/useOps';
 import { IncentiveCard } from '../components/IncentiveCard';
-import { Appear } from '../components/motion';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Incentives'>;
 
@@ -67,9 +67,9 @@ export const IncentivesScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('ops.incentives.activeCount', { count: data.length })}
         </Text>
         {data.map((incentive, index) => (
-          <Appear key={incentive.id} delay={index * 70}>
+          <Reveal key={incentive.id} delay={index * 70}>
             <IncentiveCard incentive={incentive} />
-          </Appear>
+          </Reveal>
         ))}
       </View>
     </SafeScreen>
