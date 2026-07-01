@@ -16,7 +16,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createRedisClient, type Redis } from '@veo/redis';
 import { createGrpcClient, InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
-import { INTERNAL_IDENTITY_AUDIENCE, type InternalAudience } from '@veo/auth';
+import {
+  INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
+  type InternalAudience,
+} from '@veo/auth';
+import { createLogger } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 import {
   REDIS,
@@ -116,9 +121,22 @@ const internalAudienceProvider: Provider = {
   useValue: 'admin-rail' satisfies InternalAudience,
 };
 
+/**
+ * Denylist de revocación (lado LECTURA en el BFF). Comparte el MISMO Redis que identity (cross-instancia):
+ * identity ESCRIBE al revocar (reset anti-takeover del operador, single-session), el admin-bff LEE en el
+ * guard HTTP. Sin TTL de escritura (el BFF nunca escribe): solo `assertNotRevoked`. Espeja driver-bff.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis): SessionRevocationStore =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
 const providers: Provider[] = [
   redisProvider,
   internalAudienceProvider,
+  sessionRevocationProvider,
   grpcProvider(GRPC_IDENTITY, 'identity', 'IDENTITY_GRPC_URL'),
   grpcProvider(GRPC_TRIP, 'trip', 'TRIP_GRPC_URL'),
   grpcProvider(GRPC_PANIC, 'panic', 'PANIC_GRPC_URL'),

@@ -12,10 +12,13 @@ import {
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
   INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
   generateDevKeyPairPem,
   type JwtKeys,
   type InternalAudience,
 } from '@veo/auth';
+import { createLogger } from '@veo/observability';
+import { type Redis } from '@veo/redis';
 import { type MapsMode } from '@veo/maps';
 import { createGrpcClient, InternalRestClient, type ServiceName } from '@veo/rpc';
 import { REDIS, redisProvider } from './redis';
@@ -90,6 +93,18 @@ const internalSecretProvider: Provider = {
 const internalAudienceProvider: Provider = {
   provide: INTERNAL_IDENTITY_AUDIENCE,
   useValue: 'public-rail' satisfies InternalAudience,
+};
+
+/**
+ * Denylist de revocación (lado LECTURA en el BFF). Comparte el MISMO Redis que identity (cross-instancia):
+ * identity ESCRIBE al revocar (logout del pasajero, reuse detection), el public-bff LEE en el guard HTTP.
+ * Sin TTL de escritura (el BFF nunca escribe): solo `assertNotRevoked`. Espeja driver-bff.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis): SessionRevocationStore =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
 };
 
 /** Crea el provider de un cliente gRPC para un servicio, leyendo su URL de la config. */
@@ -175,6 +190,7 @@ const tokens = [
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
   INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
   MAPS,
   LIVEKIT,
   GRPC_IDENTITY,
@@ -206,6 +222,7 @@ const tokens = [
     { provide: JWT_SERVICE, useExisting: JwtService },
     internalSecretProvider,
     internalAudienceProvider,
+    sessionRevocationProvider,
     mapsProvider,
     livekitProvider,
     ...grpcProviders,

@@ -6,6 +6,7 @@ import {
   EXPECTED_SUBJECT_TYPE,
   JwtAuthGuard,
   RolesGuard,
+  SessionRevocationGuard,
   StepUpMfaGuard,
   type SubjectType,
 } from '@veo/auth';
@@ -52,8 +53,15 @@ import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
     // admin-bff SOLO acepta tokens de tipo 'admin' (el JwtAuthGuard rechaza pasajero/conductor aunque
     // la firma/audiencia sean válidas) — no depende solo del RBAC. Defensa en profundidad.
     { provide: EXPECTED_SUBJECT_TYPE, useValue: 'admin' satisfies SubjectType },
-    // Orden de guards globales: Jwt (adjunta user) → RateLimit → Roles → StepUpMfa.
+    // Orden de guards globales: Jwt (adjunta user) → SessionRevocation → RateLimit → Roles → StepUpMfa.
+    // SessionRevocationGuard va JUSTO tras el Jwt (necesita req.user ya poblado) y ANTES del RateLimit:
+    // un token revocado (reset anti-takeover del operador, single-session) se rechaza sin consumir cuota
+    // de rate-limit ni evaluar RBAC/MFA. Lee el denylist en Redis (enforcement server-side de la
+    // revocación, porque el access token es stateless y su firma sigue válida hasta 15m). Idempotente
+    // (solo lee) y fail-open ante Redis caído. Respeta @Public vía la ausencia de req.user. Espeja
+    // driver-bff (Jwt → DriverType → SessionRevocation).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: SessionRevocationGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: StepUpMfaGuard },
