@@ -55,12 +55,28 @@ interface DriverSocketData {
   identity?: AuthenticatedUser;
 }
 
+/** Payload del anuncio inter-servidor {@link DRIVER_SUPERSEDE_EVENT}. */
+interface SupersedeBroadcast {
+  driverId: string;
+  /** `sid` (uuidv7, time-ordered) de la sesión GANADORA. Un pod echa su socket local SOLO si el sid del
+   *  suyo es lexicográficamente MENOR (más viejo) que éste. */
+  sid: string;
+}
+
 /** Evento server→cliente que avisa al device SUPERADO (otra sesión más nueva ganó) para que se deslogue. */
 const SESSION_SUPERSEDED_EVENT = 'session:superseded';
 
 /** Evento server→cliente que avisa al conductor SUSPENDIDO (un operador lo suspendió mid-turno) para que
  *  cierre sesión. Espejo de {@link SESSION_SUPERSEDED_EVENT}: se emite ANTES de cerrar el socket vivo. */
 const SESSION_SUSPENDED_EVENT = 'session:suspended';
+
+/**
+ * Evento INTER-SERVIDOR (no cliente↔servidor): viaja server↔server por el canal Redis del redis-adapter
+ * (`serverSideEmit`). Anuncia a los OTROS pods que una sesión más nueva ganó para un conductor, para que
+ * echen su socket VIEJO del mismo conductor (single-session cross-nodo, Lote 4). El supersede LOCAL
+ * (mismo pod) lo resuelve el fast-path del Map; esto cubre los sockets que viven en otras réplicas.
+ */
+const DRIVER_SUPERSEDE_EVENT = 'driver:supersede';
 
 /** Delay (ms) entre el aviso `session:superseded` y el cierre del transporte: `disconnect(true)` descarta la
  *  cola de salida, así garantizamos que el paquete de aviso SALGA antes de cortar el socket del device viejo. */
@@ -79,9 +95,11 @@ export class DriverGateway
   /**
    * SINGLE ACTIVE SESSION: socket ACTIVO por conductor (`driverId → { socketId, sid }`). El `sid` es el id de
    * sesión (uuidv7, time-ordered) del JWT → "el más nuevo gana" es decidible sin coordinación y SIN guerra de
-   * reconexión. En memoria = por réplica (dev/1-réplica OK). DEUDA multi-réplica: el kick INMEDIATO cross-réplica
-   * necesita Redis pub/sub; la correctitud cross-réplica ya la da el revoke en el login (identity, Lote 1) — el
-   * device viejo se desloguea al vencer su access token / fallar el refresh.
+   * reconexión. El Map es LOCAL por-réplica (fast-path del mismo pod). El kick INMEDIATO CROSS-réplica lo
+   * cubre el broadcast inter-servidor {@link DRIVER_SUPERSEDE_EVENT} (Lote 4, redis-adapter): al aceptar una
+   * sesión nueva, este pod anuncia el `sid` ganador y los otros pods echan su socket viejo del mismo conductor.
+   * (La correctitud de "rechazar la reconexión vieja" ya la da el denylist de revocación del login — identity,
+   * Lote 1: el device viejo se desloguea al vencer su access token / fallar el refresh.)
    */
   private readonly activeByDriver = new Map<string, { socket: Socket; sid: string }>();
 
@@ -119,6 +137,13 @@ export class DriverGateway
         (err: unknown) => next(err instanceof Error ? err : new Error('handshake rechazado')),
       );
     });
+
+    // SINGLE-SESSION CROSS-NODO (Lote 4): recibe el anuncio inter-servidor de que otra réplica aceptó una
+    // sesión más nueva para un conductor. `serverSideEmit` NO hace loopback al emisor → sólo llega acá desde
+    // OTROS pods, propagado por el redis-adapter. Registrado en el MISMO namespace donde se emite.
+    namespace.on(DRIVER_SUPERSEDE_EVENT, (payload: SupersedeBroadcast) =>
+      this.onSupersedeBroadcast(payload),
+    );
   }
 
   /**
@@ -176,6 +201,10 @@ export class DriverGateway
       data.driverId = driverId;
       data.identity = identity;
       this.activeByDriver.set(driverId, { socket: client, sid });
+      // CROSS-NODO: avisamos a los OTROS pods que esta sesión (`sid`) ganó, para que echen cualquier socket
+      // más viejo del mismo conductor conectado allá. El supersede LOCAL (arriba) ya cubrió este pod, y
+      // `serverSideEmit` no hace loopback al emisor → sin auto-echo. No-op inerte en 1-réplica.
+      this.broadcastSupersede(driverId, sid);
       this.logger.info({ driverId, sid: client.id }, 'ws conductor conectado');
     } catch (err) {
       this.logger.warn({ err, sid: client.id }, 'handshake ws rechazado');
@@ -201,6 +230,32 @@ export class DriverGateway
   }
 
   /**
+   * Anuncia a los OTROS pods (inter-servidor, propagado por el redis-adapter) que la sesión `sid` ganó para
+   * `driverId`. Sin server aún (arranque) → no-op. En 1-réplica es inerte (nadie lo recibe).
+   */
+  private broadcastSupersede(driverId: string, sid: string): void {
+    this.server?.serverSideEmit(DRIVER_SUPERSEDE_EVENT, {
+      driverId,
+      sid,
+    } satisfies SupersedeBroadcast);
+  }
+
+  /**
+   * Handler del anuncio inter-servidor {@link DRIVER_SUPERSEDE_EVENT}: otro pod aceptó una sesión más nueva
+   * para `driverId`. Este pod echa su socket LOCAL sólo si el `sid` del suyo es más VIEJO (uuidv7 lexicográfico
+   * MENOR) que el ganador. Idempotente: sin socket local para ese conductor, o con uno igual/más nuevo → no-op
+   * silencioso (recibir un supersede de un driver que este pod no tiene NO es error, no crashea).
+   */
+  private onSupersedeBroadcast({ driverId, sid }: SupersedeBroadcast): void {
+    const local = this.activeByDriver.get(driverId);
+    if (!local || local.sid >= sid) return;
+    this.logger.info({ driverId }, 'ws sesión superada en otra réplica: echando socket local viejo');
+    this.kickSocket(local.socket, SESSION_SUPERSEDED_EVENT);
+    // Sin sesión nueva local que sobreescriba el Map (el ganador vive en otro pod) → lo limpiamos acá.
+    this.activeByDriver.delete(driverId);
+  }
+
+  /**
    * Cierre PROACTIVO del socket VIVO de un conductor SUSPENDIDO. Lo invoca el consumer de `driver.suspended`:
    * sin esto la sesión ya conectada seguía viva ≤15m (hasta vencer el access token), emitiendo GPS a Kafka +
    * presencia fantasma en el mapa /ops + recibiendo pushes en su sala `driver:{driverId}`.
@@ -211,15 +266,37 @@ export class DriverGateway
    * Coinciden → NO hay traducción userId↔driverId acá. (La vía `fleet.driver_suspended` por ITV, keyeada por
    * `userId`, es otra clase y queda fuera de este lote.)
    *
-   * Idempotente: sin sesión activa (ya cerrada / doble evento / conductor offline) → no-op silencioso.
-   * @returns `true` si había una sesión activa que se echó; `false` si no había a quién cerrar.
+   * CROSS-NODO (Lote 4): el socket del conductor puede vivir en CUALQUIER pod, así que el Map local ya no
+   * basta. Operamos sobre la sala vía el redis-adapter: `emit` (aviso) + `disconnectSockets` (cierre) llegan
+   * a todas las réplicas. Idempotente: sin sockets en el cluster (offline / doble evento) → no-op silencioso.
+   *
+   * MÉTRICA (decisión honesta): contamos con `fetchSockets()` CROSS-NODO (round-trip vía el adapter) los
+   * sockets del conductor que existen en cualquier pod ANTES de cerrarlos — así el consumer conserva la
+   * semántica EMITTED (>0 sockets echados) / NO_DRIVER (0) sin mentir. Si `fetchSockets` falla (Redis del
+   * adapter degradado) devolvemos -1 = "conteo indeterminado" → el consumer lo cuenta DELIVERY_FAILED, PERO
+   * igual emitimos el cierre best-effort (alcanza al menos los sockets locales). NO inventamos un conteo.
+   *
+   * @returns nº de sockets del conductor en el cluster que se echaron (>=0), o -1 si el conteo es indeterminado.
    */
-  disconnectSuspendedDriver(driverId: string): boolean {
-    const active = this.activeByDriver.get(driverId);
-    if (!active) return false;
-    this.logger.info({ driverId }, 'ws conductor suspendido: forzando cierre de sesión en vivo');
-    this.kickSocket(active.socket, SESSION_SUSPENDED_EVENT);
-    return true;
+  async disconnectSuspendedDriver(driverId: string): Promise<number> {
+    if (!this.server) return 0;
+    const room = roomForDriver(driverId);
+    const target = this.server.in(room);
+    let count: number;
+    try {
+      count = (await target.fetchSockets()).length;
+    } catch (err) {
+      // Adapter degradado (Redis caído): no podemos contar cross-nodo. Seguimos con el cierre best-effort.
+      this.logger.warn({ err, driverId }, 'ws suspensión: fetchSockets falló (adapter degradado)');
+      count = -1;
+    }
+    if (count === 0) return 0; // nadie a quién cerrar en NINGÚN pod → no-op honesto.
+    this.logger.info({ driverId, count }, 'ws conductor suspendido: cierre de sesión cross-nodo');
+    // Avisar (session:suspended) a la sala en CUALQUIER pod y cerrar el transporte tras el flush: el delay
+    // garantiza que el paquete de aviso salga antes del cierre (igual que {@link kickSocket} local).
+    target.emit(SESSION_SUSPENDED_EVENT);
+    setTimeout(() => target.disconnectSockets(true), SUPERSEDE_FLUSH_MS);
+    return count;
   }
 
   /**

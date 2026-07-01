@@ -14,6 +14,9 @@ import { LoggingInterceptor, createLogger, initDefaultMetrics } from '@veo/obser
 import { parseTrustedProxy } from '@veo/utils';
 import { AppModule } from './app.module';
 import { PublicExceptionFilter } from './common/public-exception.filter';
+import { REDIS } from './infra/redis';
+import { RedisIoAdapter } from './realtime/redis-io.adapter';
+import type { Redis } from '@veo/redis';
 import type { Env } from './config/env.schema';
 
 function parseCors(origins: string): boolean | string[] {
@@ -60,6 +63,12 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(new LoggingInterceptor('driver-bff'));
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'metrics'] });
   app.enableShutdownHooks();
+
+  // MULTI-RÉPLICA (Lote 4): el gateway `/driver` usa el redis-adapter para que el fan-out a la sala, el
+  // single-session y el force-disconnect por suspensión crucen los pods. Debe montarse ANTES de `listen()`
+  // (Nest crea el server socket.io recién al escuchar). Reusa el cliente REDIS del contexto (que el adapter
+  // DUPLICA para los canales pub/sub). Si Redis está caído, el adapter degrada a entrega local — no bloquea.
+  app.useWebSocketAdapter(new RedisIoAdapter(app, app.get<Redis>(REDIS)));
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('driver-bff')

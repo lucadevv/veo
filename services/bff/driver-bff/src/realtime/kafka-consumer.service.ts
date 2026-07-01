@@ -109,15 +109,21 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
    * userId↔driverId acá; el gateway resuelve el socket por esa clave. La entrega es idempotente: un driverId
    * sin sesión activa (conductor offline / doble evento) es un no-op → se cuenta NO_DRIVER, no error.
    */
-  private handleDriverSuspended(envelope: EventEnvelope<unknown>): Promise<void> {
+  private async handleDriverSuspended(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = driverSuspended.safeParse(envelope.payload);
-    if (!parsed.success) return Promise.resolve();
-    const kicked = this.gateway.disconnectSuspendedDriver(parsed.data.driverId);
-    domainEventsTotal.inc({
-      event: 'driver.suspended',
-      result: kicked ? BusinessEventResult.EMITTED : BusinessEventResult.NO_DRIVER,
-    });
-    return Promise.resolve();
+    if (!parsed.success) return;
+    // Cross-nodo (Lote 4): `disconnectSuspendedDriver` echa el socket en CUALQUIER réplica y devuelve el nº de
+    // sockets del conductor que existían en el cluster: >0 → EMITTED (se cerró al menos uno), 0 → NO_DRIVER
+    // (offline / doble evento), -1 → conteo indeterminado por adapter degradado → DELIVERY_FAILED (best-effort
+    // ya se emitió el cierre). El conteo NO se inventa: sale de `fetchSockets` cross-nodo.
+    const kicked = await this.gateway.disconnectSuspendedDriver(parsed.data.driverId);
+    const result =
+      kicked > 0
+        ? BusinessEventResult.EMITTED
+        : kicked === 0
+          ? BusinessEventResult.NO_DRIVER
+          : BusinessEventResult.DELIVERY_FAILED;
+    domainEventsTotal.inc({ event: 'driver.suspended', result });
   }
 
   /** Valida el payload, resuelve el conductor y emite a su sala. */
