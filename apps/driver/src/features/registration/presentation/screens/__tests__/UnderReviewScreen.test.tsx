@@ -11,6 +11,13 @@ import { REGISTRATION_GATE_QUERY_KEY } from '../../hooks/useRegistrationGate';
 import type { RegistrationGate } from '../../hooks/useRegistrationGate';
 import { useRegistrationStore } from '../../state/registrationStore';
 import { env } from '../../../../../core/config/env';
+import { initSecureStorage } from '../../../../../core/storage/mmkv';
+
+// El almacén seguro se abre ASÍNCRONO con la clave del Keystore (como en el boot real). La pantalla
+// arrastra sessionStore/gate, que tocan `secureStore`; sin init lanzaría SecureStoreNotInitializedError.
+beforeAll(async () => {
+  await initSecureStorage();
+});
 
 // Override controlable del gate para el caso de error de refresco: por defecto `null` ⇒ se usa el hook
 // REAL (los tests de invariante de seguridad re-consultan el gate de verdad). Cuando un test setea un

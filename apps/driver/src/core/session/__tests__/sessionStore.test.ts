@@ -1,7 +1,14 @@
 import type { MobileSessionUser } from '@veo/api-client';
-import { prefsStore } from '../../storage/mmkv';
+import { initSecureStorage, prefsStore } from '../../storage/mmkv';
 import { useSessionStore } from '../sessionStore';
 import { useRegistrationStore } from '../../../features/registration/presentation/state/registrationStore';
+
+// El almacén seguro se abre de forma ASÍNCRONA con la clave del Keystore (como en el boot real:
+// index.js dispara initSecureStorage y App lo espera antes de tocar tokens). Sin esto, cualquier
+// método de `secureStore` (que sessionStore usa en clear/expire) lanza SecureStoreNotInitializedError.
+beforeAll(async () => {
+  await initSecureStorage();
+});
 
 /** Clave MMKV donde el wizard de alta persiste su progreso (espeja `registrationStore`). */
 const REGISTRATION_PREF_KEY = 'pref.registration.v1';

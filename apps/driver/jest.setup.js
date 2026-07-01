@@ -110,13 +110,20 @@ jest.mock(
 // `VeoBiometricFrameGrabber.capturePhoto()`. Ya nadie en `src` importa vision-camera/face-detector/nitro,
 // así que sus mocks (y sus entradas en transformIgnorePatterns) se eliminaron.
 
-// react-native-keychain: almacén seguro nativo no disponible en Jest.
+// react-native-keychain: almacén seguro nativo no disponible en Jest. Incluye las constantes que
+// `secure-encryption-key` usa al persistir la clave del almacén seguro (AFTER_FIRST_UNLOCK +
+// AES_GCM_NO_AUTH); sin ellas `setGenericPassword` lanzaría y el almacén seguro caería al fallback
+// en memoria en cualquier test que arranque `initSecureStorage()`.
 jest.mock('react-native-keychain', () => ({
   getSupportedBiometryType: jest.fn().mockResolvedValue(null),
-  setGenericPassword: jest.fn().mockResolvedValue(false),
+  setGenericPassword: jest.fn().mockResolvedValue({ service: 'test' }),
   getGenericPassword: jest.fn().mockResolvedValue(false),
   hasGenericPassword: jest.fn().mockResolvedValue(false),
   resetGenericPassword: jest.fn().mockResolvedValue(true),
   ACCESS_CONTROL: { BIOMETRY_CURRENT_SET: 'BiometryCurrentSet' },
-  ACCESSIBLE: { WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'AccessibleWhenPasscodeSetThisDeviceOnly' },
+  ACCESSIBLE: {
+    WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: 'AccessibleWhenPasscodeSetThisDeviceOnly',
+    AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock',
+  },
+  STORAGE_TYPE: { AES_GCM_NO_AUTH: 'KeystoreAESGCM_NoAuth' },
 }));

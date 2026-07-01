@@ -1,4 +1,5 @@
 import * as Keychain from 'react-native-keychain';
+import type { Configuration } from 'react-native-mmkv';
 
 /**
  * Derivación de la `encryptionKey` del almacén MMKV seguro desde el almacén seguro del SO
@@ -7,27 +8,26 @@ import * as Keychain from 'react-native-keychain';
  *
  * ── Por qué ──────────────────────────────────────────────────────────────────────────
  * Una clave embebida viaja en el binario y es extraíble por ingeniería inversa; cualquiera
- * con el .aab podría descifrar el almacén MMKV. La clave real se genera aleatoriamente en
+ * con el .aab podría descifrar el almacén MMKV. La clave real se genera aleatoriamente en el
  * primer arranque y se persiste en hardware seguro (Keystore): NO vive en el bundle.
  *
- * ── Arranque sync vs async (decisión) ────────────────────────────────────────────────
- * `MMKV({ encryptionKey })` es SÍNCRONO al cargar el módulo y los consumidores
- * (`secureStore`/`prefsStore`) se importan síncronos; Keychain es async. Para NO cambiar la
- * firma pública de `KeyValueStore` ni obligar a editar archivos de otros agentes:
+ * ── Apertura DIRECTA con la clave del Keystore (decisión) ─────────────────────────────
+ * El patrón anterior "abrir con una clave de ARRANQUE temporal + `recrypt(keystoreKey)`" tenía
+ * un bug FATAL de pérdida de sesión en cada cold-start: en el 2º arranque el archivo en disco
+ * está cifrado con la clave del Keystore, pero MMKV lo abría con la de ARRANQUE → no descifra →
+ * `recrypt` (que asume que la clave actual descifra) re-keyaba desde una vista VACÍA → BORRABA
+ * toda la sesión. Un conductor perdía la sesión en cada reinicio.
  *
- *   1. El almacén seguro se crea síncronamente con una clave de ARRANQUE temporal
- *      (`BOOTSTRAP_ENCRYPTION_KEY`). Esto solo cifra datos en el primerísimo instante,
- *      antes de que nadie haya leído/escrito tokens reales.
- *   2. En el bootstrap de la app (`index.js`) se llama `initSecureStorage()` (async) ANTES de
- *      leer tokens. Recupera (o genera y guarda) la clave fuerte del Keystore y RE-CIFRA el
- *      almacén con `MMKV.recrypt(key)`. A partir de ahí el almacén usa la clave del Keystore.
- *
- * `recrypt` migra los datos existentes en sitio, así que es seguro aunque ya hubiera datos
- * de un arranque previo cifrados con la misma clave del Keystore (idempotente).
+ * La cura de raíz es NO abrir nunca con una clave de arranque: se recupera/genera la clave del
+ * Keystore (async) y se abre el almacén UNA vez con ELLA. Abrir MMKV con la clave correcta LEE
+ * los datos existentes tal cual (comportamiento normal de MMKV). Sin `recrypt`, sin clave de
+ * arranque. La orquestación (crear la instancia lazy) vive en `./mmkv.ts`, que posee el holder.
  *
  * ── Fallback ─────────────────────────────────────────────────────────────────────────
- * Si el Keystore falla (caso raro), NO se crashea el arranque: se mantiene la clave de
- * arranque y se loguea un WARN explícito. Es una degradación controlada y documentada.
+ * Si el Keystore falla (device recién encendido/no desbloqueado → suele ser TRANSITORIO), se
+ * reintenta unas pocas veces. Si aun así falla, NO se crashea el arranque: `mmkv.ts` degrada a
+ * un almacén EN MEMORIA (efímero) y esta función deja que el error suba para que decida el
+ * fallback. Es una degradación honesta y documentada.
  */
 
 /** Servicio (namespace) de la clave de cifrado MMKV en el Keychain/Keystore. */
@@ -36,25 +36,83 @@ const SECURE_KEY_SERVICE = 'pe.veo.driver.mmkv.encryption-key';
 const SECURE_KEY_ACCOUNT = 'mmkv-secure-encryption-key';
 
 /**
- * Clave de ARRANQUE temporal: solo cifra el almacén en el instante previo a `initSecureStorage()`.
- * NO es la clave de seguridad real (esa vive en el Keystore). Se exporta para que `mmkv.ts`
- * construya la instancia síncrona con ella.
+ * Algoritmo de cifrado del almacén seguro.
+ *
+ * DOCS react-native-mmkv 4.3.1 (`src/specs/MMKVFactory.nitro.ts`, campo `encryptionKey`):
+ *   "Encryption keys can have a maximum length of 16 bytes with AES-128 encryption and 32 bytes
+ *    with AES-256 encryption." — `encryptionType` default = `'AES-128'`.
+ *
+ * Con el default AES-128 MMKV solo consume los primeros 16 BYTES de la clave. El código previo
+ * generaba 32 bytes en HEX (64 chars) sin declarar `encryptionType` → MMKV leía 16 chars hex =
+ * 8 bytes de entropía real (64 bits). Optamos por AES-256 (32 bytes de clave) para usar el slot
+ * completo. Tipo derivado de la config pública (sin string mágico ni `EncryptionType` — que el
+ * paquete no reexporta).
  */
-export const BOOTSTRAP_ENCRYPTION_KEY = 'veo-driver-bootstrap-v1';
+type EncryptionType = NonNullable<Configuration['encryptionType']>;
+export const SECURE_ENCRYPTION_TYPE: EncryptionType = 'AES-256';
 
-/** Longitud de la clave generada: 32 bytes → 64 caracteres hex. */
-const KEY_BYTES = 32;
+/**
+ * Longitud de la clave en CHARS. La clave es ASCII (base64), así que 1 char = 1 byte UTF-8 al
+ * cruzar el puente Nitro → 32 chars llenan EXACTAMENTE el slot de 32 bytes de AES-256.
+ */
+const SECURE_KEY_LENGTH = 32;
 
-function bytesToHex(bytes: Uint8Array): string {
+/**
+ * Bytes CSPRNG a generar antes de codificar. 24 bytes → base64 → exactamente 32 chars (24 % 3 === 0,
+ * sin padding). Eso mete 192 bits de entropía en los 32 bytes de clave (base64 = 6 bits/char).
+ *
+ * Por qué NO hex: hex acarrea 4 bits/char → 32 chars = 128 bits, "desperdicia" la mitad del slot.
+ * 256 bits reales exigirían bytes 0x80–0xFF, que UTF-8 EXPANDE a 2 bytes al cruzar el puente (y el
+ * 0x00 podría truncar) → cambiaría la longitud efectiva de la clave. base64 es ASCII puro y estable:
+ * 192 bits es fuerte y determinista. `SECURE_KEY_RANDOM_BYTES * 4 / 3 === SECURE_KEY_LENGTH`.
+ */
+const SECURE_KEY_RANDOM_BYTES = 24;
+
+/** Alfabeto base64 estándar (todo ASCII de 1 byte → estable al cruzar Nitro). */
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Reintentos de acceso al Keystore ante fallos transitorios (device recién encendido/no desbloqueado). */
+const KEYSTORE_MAX_ATTEMPTS = 3;
+/** Backoff base entre reintentos (crece linealmente por intento). Corto: el arranque no debe colgarse. */
+const KEYSTORE_RETRY_BACKOFF_MS = 20;
+
+/** Error tipado: el Keystore no estuvo disponible tras agotar los reintentos. */
+export class KeystoreUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super('No se pudo acceder al Keystore para la clave de cifrado del almacén seguro.');
+    this.name = 'KeystoreUnavailableError';
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Codifica bytes a base64 (implementación propia, sin depender de `btoa`, que Hermes no garantiza).
+ * Para `SECURE_KEY_RANDOM_BYTES` (múltiplo de 3) la salida no lleva padding.
+ */
+function base64Encode(bytes: Uint8Array): string {
   let out = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    out += (bytes[i] ?? 0).toString(16).padStart(2, '0');
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1] ?? 0;
+    const b2 = bytes[i + 2] ?? 0;
+    out += BASE64_ALPHABET[b0 >> 2];
+    out += BASE64_ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)];
+    out += BASE64_ALPHABET[((b1 & 0x0f) << 2) | (b2 >> 6)];
+    out += BASE64_ALPHABET[b2 & 0x3f];
   }
   return out;
 }
 
 /**
- * Genera `KEY_BYTES` bytes aleatorios.
+ * Genera `SECURE_KEY_RANDOM_BYTES` bytes aleatorios.
  *
  * Fuente preferida: `global.crypto.getRandomValues` (CSPRNG), provisto por
  * `react-native-get-random-values` (instalado e importado PRIMERO en `index.js`). Si por algún
@@ -64,13 +122,13 @@ function bytesToHex(bytes: Uint8Array): string {
  * NOTA(seguridad): el fallback NO es criptográficamente fuerte y, con el polyfill instalado, NO
  * debería ejecutarse nunca. La clave se genera UNA sola vez y luego vive en hardware seguro.
  */
-function generateRandomKeyHex(): string {
-  const bytes = new Uint8Array(KEY_BYTES);
+function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
 
   const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
   if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
     cryptoObj.getRandomValues(bytes);
-    return bytesToHex(bytes);
+    return bytes;
   }
 
   // Fallback NO-CSPRNG (documentado). Mezcla tiempo de alta resolución + Math.random().
@@ -93,23 +151,25 @@ function generateRandomKeyHex(): string {
     seed >>>= 0;
     bytes[i] = (seed ^ Math.floor(Math.random() * 256)) & 0xff;
   }
-  return bytesToHex(bytes);
+  return bytes;
 }
 
 /**
- * Recupera la clave de cifrado del Keychain/Keystore; si no existe (primer arranque),
- * genera una nueva, la persiste y la devuelve. Lanza si el Keystore falla, para que el
- * llamador (initSecureStorage) decida el fallback.
+ * Genera una clave de cifrado nueva: 32 chars base64 (ASCII) que llenan el slot de 32 bytes de
+ * AES-256 con 192 bits de entropía. Ver notas de `SECURE_KEY_RANDOM_BYTES`/`SECURE_ENCRYPTION_TYPE`.
  */
-async function getOrCreateEncryptionKey(): Promise<string> {
-  const existing = await Keychain.getGenericPassword({
-    service: SECURE_KEY_SERVICE,
-  });
-  if (existing && existing.password) {
-    return existing.password;
-  }
+function generateEncryptionKey(): string {
+  return base64Encode(randomBytes(SECURE_KEY_RANDOM_BYTES));
+}
 
-  const key = generateRandomKeyHex();
+/** Lee la clave existente del Keychain/Keystore; `null` si no hay (primer arranque). Puede lanzar. */
+async function readExistingKey(): Promise<string | null> {
+  const existing = await Keychain.getGenericPassword({ service: SECURE_KEY_SERVICE });
+  return existing && existing.password ? existing.password : null;
+}
+
+/** Persiste una clave recién generada en el Keychain/Keystore. Puede lanzar. */
+async function persistKey(key: string): Promise<void> {
   await Keychain.setGenericPassword(SECURE_KEY_ACCOUNT, key, {
     service: SECURE_KEY_SERVICE,
     // Debe poder leerse al arrancar tras el primer desbloqueo del día y solo en este device.
@@ -117,33 +177,41 @@ async function getOrCreateEncryptionKey(): Promise<string> {
     // Android: clave en Keystore por hardware, sin biometría (el arranque no puede pedirla).
     storage: Keychain.STORAGE_TYPE.AES_GCM_NO_AUTH,
   });
-  return key;
 }
 
 /**
- * Inicializa el almacén seguro con la clave derivada del Keychain/Keystore.
+ * Recupera la clave de cifrado del Keychain/Keystore; si no existe (primer arranque), genera una
+ * nueva, la persiste y la devuelve.
  *
- * Debe llamarse en el bootstrap ANTES de leer tokens (p. ej. antes de `hydrate()` de la
- * sesión). Recupera/genera la clave fuerte y re-cifra el almacén MMKV con `recrypt`.
- *
- * @param recrypt callback que aplica `MMKV.recrypt(key)` sobre la instancia segura real.
- *                Se inyecta desde `mmkv.ts` (que posee la instancia) para no exponerla aquí.
- * @returns `true` si la clave del Keystore quedó activa; `false` si se degradó al fallback.
+ * Reintenta ante fallos TRANSITORIOS del Keystore (device recién encendido/no desbloqueado):
+ * hasta `KEYSTORE_MAX_ATTEMPTS` con backoff lineal. Si se agotan, lanza `KeystoreUnavailableError`
+ * para que el llamador (`mmkv.ts`) degrade al almacén efímero en memoria — nunca crashea el arranque.
  */
-export async function initSecureStorage(recrypt: (key: string) => void): Promise<boolean> {
-  try {
-    const key = await getOrCreateEncryptionKey();
-    recrypt(key);
-    return true;
-  } catch (error) {
-    // FALLBACK controlado: no crasheamos el arranque. El almacén sigue cifrado con la clave
-    // de arranque (no ideal, pero funcional). Se loguea para visibilidad/telemetría.
-
-    console.warn(
-      '[secure-encryption-key] Keystore falló; el almacén seguro mantiene la clave de ' +
-        'ARRANQUE (fallback degradado). Error:',
-      error,
-    );
-    return false;
+export async function getOrCreateEncryptionKey(): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= KEYSTORE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const existing = await readExistingKey();
+      if (existing) {
+        return existing;
+      }
+      const key = generateEncryptionKey();
+      await persistKey(key);
+      return key;
+    } catch (error) {
+      lastError = error;
+      if (attempt < KEYSTORE_MAX_ATTEMPTS) {
+        await delay(KEYSTORE_RETRY_BACKOFF_MS * attempt);
+      }
+    }
   }
+  throw new KeystoreUnavailableError(lastError);
 }
+
+/** Constantes exportadas para pruebas/consumidores (evita literales mágicos en asserts). */
+export const SECURE_ENCRYPTION_KEY_META = {
+  keyLength: SECURE_KEY_LENGTH,
+  service: SECURE_KEY_SERVICE,
+  account: SECURE_KEY_ACCOUNT,
+  maxAttempts: KEYSTORE_MAX_ATTEMPTS,
+} as const;
