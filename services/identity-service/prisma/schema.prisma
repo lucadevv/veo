@@ -22,6 +22,7 @@ enum UserType {
 }
 
 enum KycStatus {
+  UNVERIFIED
   PENDING
   VERIFIED
   REJECTED
@@ -147,7 +148,12 @@ model User {
   /// al pedir viaje. String (validado contra el enum PaymentMethod de @veo/shared-types en el borde DTO,
   /// no enum de DB para no acoplar el schema). Nullable = nunca lo eligió → la app cae a su default local.
   defaultPaymentMethod String? @map("default_payment_method")
-  kycStatus KycStatus  @default(PENDING) @map("kyc_status")
+  /// Estado inicial = UNVERIFIED (ADR-018): un usuario recién onboardeado NO arrancó ningún KYC. El
+  /// pasajero se auto-verifica opcionalmente (liveness → VERIFIED, badge de confianza), NO es muro
+  /// pre-viaje. PENDING queda SOLO para un futuro verify asíncrono (hoy el verify es síncrono): ningún
+  /// usuario NACE ahí. El conductor también nace UNVERIFIED y su KYC pasa a VERIFIED por la vía biométrica
+  /// (autoVerifyKycIfComplete / approve), desacoplada de backgroundCheckStatus — UNVERIFIED→VERIFIED es legal.
+  kycStatus KycStatus  @default(UNVERIFIED) @map("kyc_status")
   /// Embedding facial de referencia (ArcFace, 512-d) capturado al verificar KYC del pasajero.
   /// Vacío = pasajero NO verificado biométricamente.
   faceEmbedding Float[] @default([]) @map("face_embedding")

@@ -61,7 +61,10 @@ export class KycService {
    * para calcular el embedding; luego se corre verify contra ese mismo embedding (self-match en una
    * sola pasada: el pasajero no tiene enrolamiento previo). Por eso NO exigimos matchPassed —
    * el match es trivialmente self vs self; lo determinante es livenessPassed + score >= mínimo.
-   * Si pasa → kycStatus VERIFIED + outbox user.kyc_verified. Si no → queda PENDING (sin evento).
+   * Si pasa → kycStatus VERIFIED + outbox user.kyc_verified. Si no → NO se persiste nada: el kycStatus
+   * queda en su estado actual (típicamente UNVERIFIED, el estado inicial post ADR-018) y se devuelve
+   * REJECTED al caller sin escribir DB. El liveness del pasajero es OPCIONAL (badge de confianza), no
+   * un muro pre-viaje (ADR-018): un fallo no bloquea pedir.
    */
   async verify(userId: string, input: KycVerifyInput): Promise<KycVerifyResult> {
     const passenger = await this.loadPassenger(userId);
@@ -87,8 +90,9 @@ export class KycService {
     const verificationId = uuidv7();
 
     if (passed) {
-      // Cubre la re-verificación idempotente (VERIFIED → VERIFIED) y falla cerrado ante un
-      // kycStatus legacy fuera del enum; PENDING nunca se "des-decide" (lo garantiza la tabla).
+      // Valida la transición contra la máquina de estados: UNVERIFIED/PENDING/REJECTED/EXPIRED → VERIFIED
+      // es legal (cubre la re-verificación tras un rechazo o caducidad); falla cerrado ante un kycStatus
+      // legacy fuera del enum. Una verificación VIGENTE no se "des-decide" sola (lo garantiza la tabla).
       kycStatusMachine.assertTransition(passenger.kycStatus, KycStatus.VERIFIED);
       const verifiedAt = new Date();
       await this.prisma.write.$transaction(async (tx) => {
@@ -120,7 +124,9 @@ export class KycService {
       return { status: KycStatus.VERIFIED, verificationId };
     }
 
-    // Fallo de liveness: no cambiamos kycStatus (queda PENDING) ni emitimos verified.
+    // Fallo de liveness: NO persistimos nada (el kycStatus queda en su estado actual, típicamente
+    // UNVERIFIED) ni emitimos verified. Devolvemos REJECTED al caller como resultado del intento; el
+    // pasajero puede reintentar cuando quiera (el liveness es opcional, no gatea pedir — ADR-018).
     return { status: KycStatus.REJECTED, verificationId, reason: 'liveness_failed' };
   }
 }

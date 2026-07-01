@@ -13,14 +13,13 @@ import {
   type AuthenticatedUser,
   type InternalAudience,
 } from '@veo/auth';
-import { DomainError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
+import { ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import {
   canAccessLiveCabin,
   normalizeTripStatus,
   type TripVideoGrant,
   type WaypointProposalView,
 } from '@veo/api-client';
-import { KycStatus } from '@veo/shared-types';
 import {
   GRPC_FLEET,
   GRPC_IDENTITY,
@@ -43,7 +42,6 @@ import type {
   PaymentReply,
   TripReply,
   TripStateReply,
-  UserReply,
   VehicleReply,
 } from '../infra/grpc-types';
 import { DebtPendingError, type PaymentView } from '../payments/dto/payments.dto';
@@ -70,22 +68,6 @@ import {
   type TripResource,
 } from './dto/trip.dto';
 import { type OfferView, type OffersResponse } from './dto/offers.dto';
-
-/**
- * El pasajero debe tener la identidad verificada (liveness/KYC) antes de pedir su primer viaje.
- * Gate server-side (la UI nunca autoriza, solo refleja): si `kycStatus ≠ VERIFIED` → 403 KYC_REQUIRED
- * y la app deriva a la verificación facial. Una vez VERIFIED no se vuelve a pedir (salvo EXPIRED).
- */
-export class KycRequiredError extends DomainError {
-  readonly code = 'KYC_REQUIRED';
-  readonly httpStatus = 403;
-  constructor() {
-    super('Verificá tu identidad para pedir tu primer viaje.');
-  }
-}
-
-/** TTL del cache del KYC verificado (positivo). Corto: acota la ventana de un eventual EXPIRED. */
-const KYC_VERIFIED_CACHE_TTL_SECONDS = 300;
 
 /** TTL del cache del resultado SIN deuda (positivo del gate de deuda). Corto: acota una deuda recién creada. */
 const NO_DEBT_CACHE_TTL_SECONDS = 60;
@@ -115,18 +97,14 @@ export class TripsService {
     dto: CreateTripDto,
     idempotencyKey?: string,
   ): Promise<TripResource> {
-    // Gate de seguridad (diferenciador VEO): exige verificación facial antes del primer viaje.
-    // Server-side (la app solo refleja). Cacheado para no pegarle a identity en cada pedido; el
-    // servicio de registro (trip-service) lo RE-exige vía el `kycVerified` firmado (defensa en profundidad).
-    await this.assertKycVerified(user);
+    // ADR-018: el KYC del pasajero dejó de ser un muro pre-viaje. Un pasajero UNVERIFIED PUEDE pedir; la
+    // verificación es OPCIONAL (badge de confianza), se ofrece desde Perfil, no gatea la creación del viaje.
     // Gate de deuda (BR-P02): un pasajero con un cobro en DEBT NO puede pedir un viaje nuevo (decisión
-    // de producto: la deuda bloquea TODO pedido). Server-side, tras el KYC. 403 DEBT_PENDING con el
-    // detalle para el banner. Cacheado SOLO el resultado sin deuda (positivo).
+    // de producto: la deuda bloquea TODO pedido). Server-side. 403 DEBT_PENDING con el detalle para el
+    // banner. Cacheado SOLO el resultado sin deuda (positivo).
     await this.assertNoDebt(user);
     return this.tripRest.post<TripResource>('/trips', {
-      // Defensa en profundidad: propagamos el KYC verificado FIRMADO por HMAC; trip-service (servicio
-      // de registro) lo EXIGE para crear el viaje, así el gate no depende solo de este BFF.
-      identity: { ...user, kycVerified: true },
+      identity: user,
       idempotencyKey: idempotencyKey ?? uuidv7(),
       body: {
         passengerId: user.userId,
@@ -150,33 +128,6 @@ export class TripsService {
         specialRequests: dto.specialRequests,
       },
     });
-  }
-
-  /**
-   * Exige que el pasajero esté VERIFIED. Cachea SOLO el positivo (estado terminal salvo EXPIRED) en
-   * Redis con TTL corto, para no consultar identity en CADA pedido (hot-path). El negativo NUNCA se
-   * cachea: un pasajero recién verificado debe poder viajar al instante. Si Redis está caído, se
-   * IGNORA el cache y se consulta la fuente autoritativa (identity) — nunca hace bypass.
-   */
-  private async assertKycVerified(user: AuthenticatedUser): Promise<void> {
-    const cacheKey = `kyc:verified:${user.userId}`;
-    try {
-      if ((await this.redis.get(cacheKey)) === '1') {
-        return;
-      }
-    } catch {
-      // Redis no disponible: caemos a la verificación autoritativa (no bypass).
-    }
-    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
-    const me = await this.identityGrpc.call<UserReply>('GetUser', { id: user.userId }, meta);
-    if (me.kycStatus !== KycStatus.VERIFIED) {
-      throw new KycRequiredError();
-    }
-    try {
-      await this.redis.set(cacheKey, '1', 'EX', KYC_VERIFIED_CACHE_TTL_SECONDS);
-    } catch {
-      // best-effort: si no se pudo cachear, el próximo pedido reconsulta.
-    }
   }
 
   /**

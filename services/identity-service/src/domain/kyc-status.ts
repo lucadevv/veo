@@ -6,6 +6,11 @@
  *    operador es el eje SEPARADO `backgroundCheckStatus` (CLEARED en approve()); la elegibilidad operativa
  *    exige AMBOS. NO_MATCH no auto-verifica → el operador decide al aprobar (approve setea VERIFIED idempotente).
  *
+ *  - UNVERIFIED → VERIFIED | REJECTED: ESTADO INICIAL (ADR-018) — un usuario recién onboardeado no
+ *    arrancó ningún KYC. El pasajero pasa el liveness OPCIONAL → VERIFIED (badge de confianza, NO muro
+ *    pre-viaje); el conductor pasa el binding biométrico → VERIFIED. Un intento fallido → REJECTED. NO
+ *    va a PENDING: PENDING queda para un futuro verify asíncrono (hoy inexistente); nadie NACE ahí ni
+ *    "reenvía a revisión" sin haber sido rechazado antes (resubmit es SOLO REJECTED→PENDING).
  *  - PENDING → VERIFIED | REJECTED: resultado de la verificación (biométrica u operador).
  *  - VERIFIED → EXPIRED | REJECTED: la verificación caduca o se revoca.
  *  - REJECTED → VERIFIED: re-verificación exitosa (el rechazo NO es terminal: el pasajero puede
@@ -20,6 +25,7 @@ import { createStateMachine, type StateMachine } from './state-machine';
 
 /** Tabla de transiciones válidas del KYC. */
 export const KYC_STATUS_TRANSITIONS: Readonly<Record<KycStatus, readonly KycStatus[]>> = {
+  [KycStatus.UNVERIFIED]: [KycStatus.VERIFIED, KycStatus.REJECTED],
   [KycStatus.PENDING]: [KycStatus.VERIFIED, KycStatus.REJECTED],
   [KycStatus.VERIFIED]: [KycStatus.EXPIRED, KycStatus.REJECTED],
   [KycStatus.REJECTED]: [KycStatus.VERIFIED, KycStatus.PENDING],
