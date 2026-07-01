@@ -15,6 +15,8 @@ import type { EarningsRepository } from '../../features/earnings/domain';
 import { HttpEarningsRepository } from '../../features/earnings/data';
 import type { CarpoolRepository } from '../../features/carpool/domain';
 import { HttpCarpoolRepository } from '../../features/carpool/data';
+import type { MapsRepository } from '../../features/maps/domain';
+import { HttpMapsRepository } from '../../features/maps/data';
 import type { ProfileRepository } from '../../features/profile/domain';
 import { HttpProfileRepository } from '../../features/profile/data';
 import type {
@@ -49,6 +51,7 @@ export interface AppRepositories {
   bidding: BiddingRepository;
   earnings: EarningsRepository;
   carpool: CarpoolRepository;
+  maps: MapsRepository;
   profile: ProfileRepository;
   documents: DocumentsRepository;
   registration: RegistrationRepository;
@@ -100,6 +103,7 @@ function buildContainer(): AppContainer {
     bidding: new HttpBiddingRepository(httpClient),
     earnings: new HttpEarningsRepository(httpClient),
     carpool: new HttpCarpoolRepository(httpClient),
+    maps: new HttpMapsRepository(httpClient),
     profile: new HttpProfileRepository(httpClient),
     documents: new HttpDocumentsRepository(httpClient),
     registration: new HttpRegistrationRepository(httpClient),
