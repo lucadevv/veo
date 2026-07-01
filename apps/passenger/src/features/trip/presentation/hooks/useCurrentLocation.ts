@@ -67,6 +67,12 @@ export function useCurrentLocation(): CurrentLocation {
       setStatus(next);
       if (resolved) {
         setPoint(resolved);
+      } else if (next === 'denied' || next === 'servicesOff') {
+        // Pérdida DEFINITIVA de permiso/servicios mid-sesión: el punto anterior ya no es verdad →
+        // limpiarlo para que el mapa no muestre un dot FANTASMA en la posición vieja (honestidad: no
+        // inventar coordenadas). En `error` (fix transitorio fallido) conservamos el last-known: es una
+        // pérdida temporal de señal, y limpiar parpadearía el mapa en cada re-intento de foreground.
+        setPoint(null);
       }
     };
 
