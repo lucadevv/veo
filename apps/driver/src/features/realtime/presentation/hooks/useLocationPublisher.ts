@@ -44,6 +44,16 @@ export function useLocationPublisher(socket: DriverSocket | null, enabled: boole
     // Última muestra real conocida; el heartbeat la reusa (con ts fresco) cuando el GPS deja de emitir.
     let last: LocationSample | null = null;
 
+    // ¿El GPS sigue VIVO (servicios del SO + permiso)? Un conductor QUIETO con GPS ok debe seguir
+    // presente vía heartbeat; pero si revoca el permiso o apaga la ubicación mid-turno, el heartbeat NO
+    // debe re-publicar: emitir la última posición con ts fresco haría que dispatch/ops lo vean "vivo y
+    // quieto" en una posición FANTASMA y le sigan ofreciendo viajes. Sin señal viva → dejamos expirar su
+    // `driver:loc` (sale del pool, que es lo correcto: ya no se lo puede ubicar). No usamos la edad de
+    // `last` como señal: un conductor legítimamente quieto también tiene un `last` que envejece — el
+    // único indicador fiable de "GPS muerto" vs "quieto" es la DISPONIBILIDAD. Arranca en `true`: el
+    // heartbeat igual no emite hasta tener un `last` real (que solo existe si el GPS emitió alguna vez).
+    let gpsLive = true;
+
     const publish = (sample: LocationSample): void => {
       const report: DriverLocationReport = {
         lat: sample.lat,
@@ -62,10 +72,17 @@ export function useLocationPublisher(socket: DriverSocket | null, enabled: boole
       publish(sample);
     });
 
+    // El SO avisa cuando cambia la disponibilidad (permiso revocado / servicios apagados). El heartbeat
+    // lee este flag para NO emitir presencia fantasma cuando el GPS ya no está vivo.
+    const unsubscribeAvailability = source.onAvailabilityChange((availability) => {
+      gpsLive = availability.servicesEnabled && availability.permissionGranted;
+    });
+
     // Heartbeat de presencia: el conductor SIGUE ahí (solo que quieto) → re-publicamos su última
-    // ubicación con timestamp ACTUAL para refrescar su `driver:loc` en el dispatch antes del TTL.
+    // ubicación con timestamp ACTUAL para refrescar su `driver:loc` en el dispatch antes del TTL. SOLO si
+    // el GPS sigue vivo (`gpsLive`): sin señal, dejamos expirar la presencia en vez de mentir posición.
     const heartbeat = setInterval(() => {
-      if (last) {
+      if (last && gpsLive) {
         publish({ ...last, ts: new Date().toISOString() });
       }
     }, HEARTBEAT_MS);
@@ -73,6 +90,7 @@ export function useLocationPublisher(socket: DriverSocket | null, enabled: boole
     return () => {
       clearInterval(heartbeat);
       unsubscribe();
+      unsubscribeAvailability();
     };
   }, [socket, enabled, source]);
 }
