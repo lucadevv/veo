@@ -11,4 +11,5 @@ export {
   useUpdateTrip,
 } from './hooks/useCarpool';
 export { CarpoolScreen } from './screens/CarpoolScreen';
-export { CarpoolPublishScreen, CarpoolTripBookingsScreen } from './screens/CarpoolPlaceholders';
+export { CarpoolPublishScreen } from './screens/CarpoolPublishScreen';
+export { CarpoolTripBookingsScreen } from './screens/CarpoolPlaceholders';

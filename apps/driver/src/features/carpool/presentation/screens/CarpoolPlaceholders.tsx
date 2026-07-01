@@ -40,19 +40,6 @@ function ComingSoon({
   );
 }
 
-export const CarpoolPublishScreen = ({
-  navigation,
-}: NativeStackScreenProps<RootStackParamList, 'CarpoolPublish'>): React.JSX.Element => {
-  const { t } = useTranslation();
-  return (
-    <ComingSoon
-      title={t('carpool.publishTitle')}
-      body={t('carpool.comingSoonBody')}
-      onBack={navigation.goBack}
-    />
-  );
-};
-
 export const CarpoolTripBookingsScreen = ({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'CarpoolTripBookings'>): React.JSX.Element => {
