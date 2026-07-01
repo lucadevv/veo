@@ -169,6 +169,12 @@ export const RealtimeManager = (): null => {
     onSessionSuperseded: () => {
       useSessionStore.getState().expireSession();
     },
+    // ENFORCEMENT DE REVOCACIÓN: el gateway rechazó el handshake porque la sesión está revocada (logout
+    // remoto, suspensión, o superada). Mismo destino que `superseded`: `expireSession` limpia el estado
+    // local y vuelve al login. La revocación server-side ya la aplicó identity (el refresh también fallará).
+    onSessionRevoked: () => {
+      useSessionStore.getState().expireSession();
+    },
   });
 
   useLocationPublisher(socket, onShift);

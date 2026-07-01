@@ -5,12 +5,14 @@
  */
 export * from './jwt.js';
 export * from './refresh-store.js';
+export * from './session-revocation.js';
 export * from './internal-identity.js';
 export * from './ownership.js';
 export * from './totp.js';
 export * from './decorators.js';
 export * from './tokens.js';
 export * from './guards/jwt-auth.guard.js';
+export * from './guards/session-revocation.guard.js';
 export * from './guards/internal-identity.guard.js';
 export * from './guards/roles.guard.js';
 export * from './guards/audience.guard.js';

@@ -172,8 +172,10 @@ function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; drive
 
 const redis = {} as never;
 const bio = {} as never;
+/** Stub del RedisRefreshTokenStore (Lote 1b): suspendByCancellations llama revokeAllForUser post-commit. */
+const sessions = { revokeAllForUser: async () => 0 } as never;
 function svc(prisma: ReturnType<typeof makePrisma>): DriversService {
-  return new DriversService(prisma.prisma as never, redis, bio, config);
+  return new DriversService(prisma.prisma as never, redis, bio, sessions, config);
 }
 
 function temporalHold(driverId: string, expiresAt: Date, createdAt = new Date('2026-06-23T00:00:00Z')): Hold {

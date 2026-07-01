@@ -17,16 +17,25 @@ import {
   WebSocketServer,
   type OnGatewayConnection,
   type OnGatewayDisconnect,
+  type OnGatewayInit,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Server, Socket, type Namespace } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import {
   JWT_SERVICE,
+  SessionRevocationStore,
+  SessionRevokedError,
   toAuthenticatedUser,
   type JwtService,
   type AuthenticatedUser,
+  type AccessTokenClaims,
 } from '@veo/auth';
-import { driverLocationReport, type DriverLocationAck } from '@veo/api-client';
+import {
+  driverLocationReport,
+  DRIVER_NAMESPACE,
+  HANDSHAKE_SESSION_REVOKED,
+  type DriverLocationAck,
+} from '@veo/api-client';
 import { VehicleClass } from '@veo/shared-types';
 import { createLogger, type Logger } from '@veo/observability';
 import { GrpcGateway } from '../infra/grpc.gateway';
@@ -55,7 +64,9 @@ const SUPERSEDE_FLUSH_MS = 200;
 
 @Injectable()
 @WebSocketGateway({ namespace: '/driver', cors: { origin: true, credentials: true } })
-export class DriverGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class DriverGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   private server?: Server;
 
@@ -75,10 +86,60 @@ export class DriverGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly grpc: GrpcGateway,
     private readonly locationPublisher: LocationPublisherService,
     private readonly activeVehicleType: ActiveVehicleTypeResolver,
+    private readonly revocation: SessionRevocationStore,
     config: ConfigService<Env, true>,
   ) {
     this.logger = createLogger('driver-bff-ws');
     void config;
+  }
+
+  /**
+   * Registra el middleware de REVOCACIÓN en el namespace `/driver`. Corre en el handshake, ANTES de
+   * `handleConnection`: si la sesión está revocada (denylist en Redis), rechaza con `next(Error)` cuyo
+   * `message` es {@link HANDSHAKE_SESSION_REVOKED} → el cliente recibe `connect_error` con ese motivo y se
+   * desloguea. Un token ausente/inválido NO se rechaza acá (lo maneja `handleConnection` como antes): este
+   * middreware SOLO enforcea la revocación (mantiene el comportamiento previo para el resto de rechazos).
+   */
+  afterInit(server: Server): void {
+    // NestJS puede pasar el Server RAÍZ o el Namespace `/driver` ya resuelto según la versión del adapter.
+    // Normalizamos al Namespace `/driver`: si el objeto tiene `.of`, es el Server raíz → resolvemos el
+    // namespace; si no, ya ES el namespace. Así el middleware queda SIEMPRE en `/driver` (no en `/`).
+    const asServer = server as Server & { of?: Server['of'] };
+    const namespace: Namespace =
+      typeof asServer.of === 'function'
+        ? asServer.of(DRIVER_NAMESPACE)
+        : (server as unknown as Namespace);
+    namespace.use((socket, next) => {
+      void this.assertHandshakeNotRevoked(socket as Socket).then(
+        () => next(),
+        (err: unknown) => next(err instanceof Error ? err : new Error('handshake rechazado')),
+      );
+    });
+  }
+
+  /**
+   * Enforcement de revocación en el handshake. Lanza `Error(HANDSHAKE_SESSION_REVOKED)` SOLO si el denylist
+   * confirma la revocación. Token ausente/inválido → resuelve sin rechazar (lo decide `handleConnection`).
+   * Cualquier otro fallo (p. ej. Redis) → `assertNotRevoked` ya hace fail-open, no rechaza.
+   */
+  private async assertHandshakeNotRevoked(client: Socket): Promise<void> {
+    const token = this.extractToken(client);
+    if (!token) return;
+    let claims: AccessTokenClaims;
+    try {
+      claims = await this.jwt.verifyAccess(token);
+    } catch {
+      return; // token inválido/expirado: no es revocación → handleConnection lo rechaza (disconnect).
+    }
+    try {
+      await this.revocation.assertNotRevoked({ sub: claims.sub, sid: claims.sid, iat: claims.iat });
+    } catch (err) {
+      if (err instanceof SessionRevokedError) {
+        this.logger.info({ sid: claims.sid }, 'ws handshake rechazado: sesión revocada');
+        throw new Error(HANDSHAKE_SESSION_REVOKED);
+      }
+      // No debería ocurrir (assertNotRevoked es fail-open), pero por robustez no tumbamos el handshake.
+    }
   }
 
   async handleConnection(client: Socket): Promise<void> {

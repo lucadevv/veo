@@ -13,6 +13,7 @@ import { ForbiddenError, signHmac } from '@veo/utils';
 import { enrollTotp, verifyTotp, isMfaFresh } from './totp.js';
 import { authenticator } from 'otplib';
 import { RedisRefreshTokenStore, RefreshError } from './refresh-store.js';
+import { SessionRevocationStore } from './session-revocation.js';
 
 let keys: JwtKeys;
 
@@ -216,5 +217,97 @@ describe('RedisRefreshTokenStore (rotación + reuse detection)', () => {
     const { sessionId } = await store.createSession('u2');
     await store.revoke(sessionId);
     expect(await store.isValid(sessionId)).toBe(false);
+  });
+});
+
+describe('SessionRevocationStore (denylist de revocación server-side)', () => {
+  // Fake que soporta lo que usa el denylist: set (con EX) y mget. Comparte Map con el refresh-store.
+  function fakeRedis() {
+    const store = new Map<string, string>();
+    return {
+      store,
+      async set(k: string, v: string) {
+        store.set(k, v);
+        return 'OK';
+      },
+      async mget(...ks: string[]) {
+        return ks.map((k) => store.get(k) ?? null);
+      },
+      async get(k: string) {
+        return store.get(k) ?? null;
+      },
+      async del(...ks: string[]) {
+        let n = 0;
+        for (const k of ks) if (store.delete(k)) n++;
+        return n;
+      },
+      async exists(k: string) {
+        return store.has(k) ? 1 : 0;
+      },
+      // Minimal: revokeAllForUser barre las sesiones con este stream antes de sellar revoked-before.
+      scanStream({ match }: { match: string }) {
+        const prefix = match.replace(/\*$/, '');
+        const keys = [...store.keys()].filter((k) => k.startsWith(prefix));
+        return (async function* () {
+          yield keys;
+        })();
+      },
+    };
+  }
+
+  it('per-sid: revokeSession → el token de ese sid queda revocado', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    expect(await rev.isRevoked({ sub: 'u1', sid: 'sess-1', iat: 100 })).toBeNull();
+    await rev.revokeSession('sess-1');
+    expect(await rev.isRevoked({ sub: 'u1', sid: 'sess-1', iat: 100 })).toBe('session-revoked');
+  });
+
+  it('revoked-before: rechaza tokens con iat ANTERIOR, deja pasar el iat posterior (strict <)', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    await rev.revokeAllForUser('u1');
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Token VIEJO (emitido antes del revoke) → superado.
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: nowSec - 2 })).toBe('sessions-superseded');
+    // Token NUEVO (emitido después del revoke, iat mayor) → pasa. Esto es el login single-session.
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: nowSec + 2 })).toBeNull();
+    // Otro user no se ve afectado por el revoke de u1.
+    expect(await rev.isRevoked({ sub: 'u2', sid: 's', iat: nowSec - 2 })).toBeNull();
+  });
+
+  it('sin iat: el eje revoked-before no aplica (no evaluable) → no revoca', async () => {
+    const rev = new SessionRevocationStore(fakeRedis() as any);
+    await rev.revokeAllForUser('u1');
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's' })).toBeNull();
+  });
+
+  it('fail-OPEN: si Redis lanza en el check, degrada a NO-revocado (no tumba el riel)', async () => {
+    const brokenRedis = {
+      async mget() {
+        throw new Error('redis down');
+      },
+    };
+    const rev = new SessionRevocationStore(brokenRedis as any);
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: 1 })).toBeNull();
+  });
+
+  it('integración: RedisRefreshTokenStore.revoke sella el denylist por-sid', async () => {
+    const fake = fakeRedis();
+    const rev = new SessionRevocationStore(fake as any);
+    const store = new RedisRefreshTokenStore(fake as any, 100, rev);
+    const { sessionId } = await store.createSession('u9');
+    await store.revoke(sessionId);
+    expect(await rev.isRevoked({ sub: 'u9', sid: sessionId, iat: 123 })).toBe('session-revoked');
+  });
+
+  it('integración: RedisRefreshTokenStore.revokeAllForUser sella revoked-before', async () => {
+    const fake = fakeRedis();
+    const rev = new SessionRevocationStore(fake as any);
+    const store = new RedisRefreshTokenStore(fake as any, 100, rev);
+    await store.createSession('u9');
+    await store.revokeAllForUser('u9');
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(await rev.isRevoked({ sub: 'u9', sid: 'any', iat: nowSec - 2 })).toBe(
+      'sessions-superseded',
+    );
   });
 });

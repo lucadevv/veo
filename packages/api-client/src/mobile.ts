@@ -3085,3 +3085,11 @@ export interface DriverHandshakeAuth {
 }
 
 export const DRIVER_NAMESPACE = '/driver';
+
+/**
+ * Motivo EXPLÍCITO que el gateway `/driver` pone en el `Error` con que rechaza el handshake cuando la
+ * sesión está revocada (middleware del namespace → `connect_error` con `err.message === este valor`).
+ * Fuente ÚNICA compartida server↔app: el server lo emite, la app SOLO se desloguea ante ESTE motivo
+ * (un `connect_error` transitorio de transporte —timeout, red— NO desloguea; reconecta). Cero strings mágicos.
+ */
+export const HANDSHAKE_SESSION_REVOKED = 'session-revoked' as const;

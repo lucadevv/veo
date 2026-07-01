@@ -7,6 +7,7 @@
  */
 import type { Redis } from 'ioredis';
 import { uuidv7 } from '@veo/utils';
+import type { SessionRevocationStore } from './session-revocation.js';
 
 export interface SessionRecord {
   userId: string;
@@ -25,6 +26,13 @@ export class RedisRefreshTokenStore {
     private readonly redis: Redis,
     /** TTL de la sesión en segundos (= refresh TTL, ej. 30d) */
     private readonly ttlSeconds: number,
+    /**
+     * Denylist de revocación (enforcement server-side del access token, stateless). Al borrar la sesión
+     * del refresh-store, se sella la entrada del denylist para que el access token de esa sesión (aún con
+     * firma válida hasta 15m) se rechace al instante en los BFFs. OPCIONAL solo para poder testear la
+     * rotación en aislamiento; en producción SIEMPRE se cablea (identity CoreModule).
+     */
+    private readonly revocation?: SessionRevocationStore,
     private readonly prefix = 'veo:session:',
   ) {}
 
@@ -61,9 +69,11 @@ export class RedisRefreshTokenStore {
     return { sessionId, newJti };
   }
 
-  /** Revoca una sesión (logout, suspensión). Idempotente. */
+  /** Revoca una sesión (logout, suspensión). Idempotente. Sella el denylist por-sid (enforcement stateless). */
   async revoke(sessionId: string): Promise<void> {
     await this.redis.del(this.key(sessionId));
+    // Mata el access token de esta sesión al instante (no espera a su exp de 15m).
+    await this.revocation?.revokeSession(sessionId);
   }
 
   /** Revoca todas las sesiones de un usuario. Requiere índice secundario. */
@@ -80,6 +90,10 @@ export class RedisRefreshTokenStore {
       });
       if (toDelete.length > 0) revoked += await this.redis.del(...toDelete);
     }
+    // Sella `revoked:before:{userId} = now`: mata TODAS las sesiones emitidas antes de ahora de un golpe
+    // (el token NUEVO, emitido después, pasa por su `iat` mayor). Cubre el race del scan (una sesión
+    // creada durante el barrido) sin depender de haberla enumerado.
+    await this.revocation?.revokeAllForUser(userId);
     return revoked;
   }
 

@@ -6,6 +6,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { createEnvelope } from '@veo/events';
+import { RedisRefreshTokenStore } from '@veo/auth';
 import {
   ConflictError,
   ForbiddenError,
@@ -160,6 +161,12 @@ export class DriversService {
     private readonly prisma: PrismaService,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(BIOMETRIC_PROVIDER) private readonly biometric: BiometricProvider,
+    /**
+     * Refresh/session store (Lote 1b) — mismo singleton que emite y ROTA las sesiones (CoreModule @Global).
+     * Se usa SOLO para `revokeAllForUser` al suspender: sella el denylist `revoked:before:{userId}` en Redis
+     * → el guard HTTP + el handshake del socket rechazan al instante el access token del conductor suspendido.
+     */
+    private readonly sessions: RedisRefreshTokenStore,
     config: ConfigService<Env, true>,
   ) {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
@@ -602,8 +609,40 @@ export class DriversService {
    * NO toca holds de documento/ITV: si el conductor también tenía un DOCUMENT_EXPIRED, ese hold sigue (la
    * suspensión es el conjunto). Levantar ESTE hold disciplinario va por reactivate() (que NO toca los otros).
    */
+  /**
+   * Lote 1b — ENFORCEMENT EN VIVO de la suspensión: mata AL INSTANTE la sesión/socket del conductor
+   * suspendido en vez de esperar a que venza su access token (≤15m). `revokeAllForUser` sella
+   * `revoked:before:{userId}` en Redis → en el próximo check el guard HTTP + el handshake del socket
+   * rechazan el token viejo (SessionRevocationStore). Sin esto la suspensión era INERTE en tiempo real:
+   * `Driver.suspendedAt` bloqueaba el PRÓXIMO turno, pero la sesión ya abierta seguía viva hasta 15m.
+   *
+   * OJO userId ⟂ Driver.id: `revokeAllForUser` espera el `userId` (claim `sub`), NO el id de perfil Driver
+   * (el mismo filo que ya mordió en fleet). Cada caller resuelve el `Driver.userId` y pasa ESE.
+   *
+   * BEST-EFFORT (fail-open, coherente con la degradación documentada del denylist): si Redis no responde,
+   * se registra y se degrada al baseline (el token expira solo en ≤15m). NUNCA se aborta la suspensión ya
+   * commiteada ni se propaga el error — en las vías Kafka eso dispararía un reintento que, por idempotencia
+   * del hold, sería no-op (created=false) y NO reintentaría el revoke igual, así que degradar es lo correcto.
+   *
+   * ALCANCE (flag para el dueño): `revokeAllForUser` revoca TODAS las sesiones del `userId`, incluida una
+   * eventual sesión de PASAJERO si el mismo humano es conductor Y pasajero. Es DELIBERADO y consistente con
+   * el single-session que `auth.service.login` ya aplica en cada login de conductor (mismo user-level revoke).
+   * La suspensión es una acción de compliance/safety sobre el HUMANO. Preservar la sesión pasajera exigiría
+   * un revoke por-`sid` SOLO de las sesiones de subject 'driver' — hoy imposible sin guardar el `subject` en
+   * el SessionRecord (solo persiste `userId`); es un cambio de modelo mayor, fuera de este fix.
+   */
+  private async revokeDriverSessions(userId: string): Promise<void> {
+    try {
+      await this.sessions.revokeAllForUser(userId);
+    } catch (err) {
+      this.logger.warn(
+        `Lote 1b: fallo al revocar sesiones del conductor suspendido (userId=${userId}); degrada al baseline ≤15m — ${String(err)}`,
+      );
+    }
+  }
+
   async suspend(driverId: string, reason: string): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    const { created, userId } = await this.prisma.write.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
       if (!driver) throw new NotFoundError('Conductor no encontrado');
       const { created, suspendedAt } = await this.addHold(
@@ -614,7 +653,7 @@ export class DriversService {
         reason,
       );
       // Idempotente: el hold DISCIPLINARY ya existía → no es una suspensión nueva, no se re-emite el evento.
-      if (!created) return;
+      if (!created) return { created, userId: driver.userId };
       const envelope = createEnvelope({
         eventType: 'driver.suspended',
         producer: 'identity-service',
@@ -631,7 +670,11 @@ export class DriversService {
           envelope: envelope as unknown as Prisma.InputJsonValue,
         },
       });
+      return { created, userId: driver.userId };
     });
+    // POST-COMMIT (Lote 1b): solo en una TRANSICIÓN NUEVA a suspendido (created) matamos la sesión/socket vivos.
+    // Fuera de la tx: es un side-effect en Redis, no en la DB, y su falla NO debe revertir la suspensión.
+    if (created) await this.revokeDriverSessions(userId);
   }
 
   /**
@@ -1002,9 +1045,13 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByFleet(driverId: string, suspendedAt: Date, documentType: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
-      if (!driver) return false; // evento antes del onboarding: no-op silencioso (coherente con el viejo CAS).
+    const result = await this.prisma.write.$transaction(async (tx) => {
+      // `userId` (además del id) para el revoke de sesión post-commit (Lote 1b): revokeAllForUser espera el sub.
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        select: { id: true, userId: true },
+      });
+      if (!driver) return null; // evento antes del onboarding: no-op silencioso (coherente con el viejo CAS).
       const { created } = await this.addHoldAt(
         tx,
         driverId,
@@ -1013,8 +1060,12 @@ export class DriversService {
         `Documento crítico vencido (${documentType})`,
         suspendedAt,
       );
-      return created;
+      return { created, userId: driver.userId };
     });
+    if (!result) return false;
+    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
+    if (result.created) await this.revokeDriverSessions(result.userId);
+    return result.created;
   }
 
   /**
@@ -1031,7 +1082,7 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op.
    */
   async suspendByFleetForUser(userId: string, suspendedAt: Date): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
+    const created = await this.prisma.write.$transaction(async (tx) => {
       // Resolución User.id → Driver.id (identity es el dueño del mapeo). Sin perfil → no-op (evento prematuro).
       const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
       if (!driver) return false;
@@ -1045,6 +1096,9 @@ export class DriversService {
       );
       return created;
     });
+    // POST-COMMIT (Lote 1b): el `userId` ya es el sub (esta vía viene keyeada por User.id) → revoke directo.
+    if (created) await this.revokeDriverSessions(userId);
+    return created;
   }
 
   /**
@@ -1069,9 +1123,12 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByRating(driverId: string, reason: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
-      if (!driver) return false; // flag antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
+    const result = await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        select: { id: true, userId: true },
+      });
+      if (!driver) return null; // flag antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
       const { created } = await this.addHold(
         tx,
         driverId,
@@ -1079,8 +1136,12 @@ export class DriversService {
         '',
         reason,
       );
-      return created;
+      return { created, userId: driver.userId };
     });
+    if (!result) return false;
+    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
+    if (result.created) await this.revokeDriverSessions(result.userId);
+    return result.created;
   }
 
   /**
@@ -1106,9 +1167,12 @@ export class DriversService {
    * @returns `true` si esta llamada creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByCancellations(driverId: string, reason: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
-      if (!driver) return false; // evento antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
+    const result = await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        select: { id: true, userId: true },
+      });
+      if (!driver) return null; // evento antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
       const expiresAt = new Date(Date.now() + this.cancellationCooldownMs);
       const { created } = await this.addHold(
         tx,
@@ -1118,8 +1182,12 @@ export class DriversService {
         reason,
         expiresAt,
       );
-      return created;
+      return { created, userId: driver.userId };
     });
+    if (!result) return false;
+    // POST-COMMIT (Lote 1b): en una TRANSICIÓN NUEVA a suspendido, mata la sesión/socket vivos del conductor.
+    if (result.created) await this.revokeDriverSessions(result.userId);
+    return result.created;
   }
 
   /**

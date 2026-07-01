@@ -10,6 +10,7 @@ import { CLOCK, SystemClock } from '@veo/utils';
 import {
   JwtService,
   RedisRefreshTokenStore,
+  SessionRevocationStore,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
   INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
@@ -21,6 +22,7 @@ import {
   type JwtKeys,
   type InternalAudience,
 } from '@veo/auth';
+import { createLogger } from '@veo/observability';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
@@ -54,11 +56,31 @@ const jwtProvider: Provider = {
     new JwtService(await resolveJwtKeys(config)),
 };
 
+/**
+ * Denylist de revocación (enforcement server-side del access token stateless). identity ESCRIBE acá cuando
+ * revoca (single-session del conductor, logout, suspensión); los BFFs LEEN en el camino de auth. Comparte
+ * el MISMO Redis que el refresh-store → cross-instancia por diseño.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis) =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
 const refreshStoreProvider: Provider = {
   provide: RedisRefreshTokenStore,
-  inject: [REDIS, ConfigService],
-  useFactory: (redis: Redis, config: ConfigService<Env, true>) =>
-    new RedisRefreshTokenStore(redis, config.getOrThrow<number>('REFRESH_TTL_SECONDS')),
+  inject: [REDIS, ConfigService, SessionRevocationStore],
+  useFactory: (
+    redis: Redis,
+    config: ConfigService<Env, true>,
+    revocation: SessionRevocationStore,
+  ) =>
+    new RedisRefreshTokenStore(
+      redis,
+      config.getOrThrow<number>('REFRESH_TTL_SECONDS'),
+      revocation,
+    ),
 };
 
 const internalSecretProvider: Provider = {
@@ -86,6 +108,7 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
     redisProvider,
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
+    sessionRevocationProvider,
     refreshStoreProvider,
     internalSecretProvider,
     { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },

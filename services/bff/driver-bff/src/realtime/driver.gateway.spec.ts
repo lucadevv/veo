@@ -35,14 +35,20 @@ function makeGateway(opts: {
     ),
   };
   const config = { getOrThrow: () => '' };
+  // Denylist de revocación: por defecto NO revocado (assertNotRevoked resuelve). Su enforcement en el
+  // handshake corre en el middleware (afterInit), no en handleConnection; acá solo satisface el constructor.
+  const revocation = {
+    assertNotRevoked: vi.fn(() => Promise.resolve()),
+  };
   const gateway = new DriverGateway(
     jwt as never,
     grpc as never,
     publisher as never,
     activeVehicleType as never,
+    revocation as never,
     config as never,
   );
-  return { gateway, grpc, publisher, activeVehicleType };
+  return { gateway, grpc, publisher, activeVehicleType, revocation };
 }
 
 function fakeSocket(token?: string) {

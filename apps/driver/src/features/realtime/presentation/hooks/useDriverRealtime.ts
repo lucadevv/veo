@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type {
-  ChatMessage,
-  DispatchMatchPayload,
-  DispatchOfferedPayload,
-  DriverEventEnvelope,
-  TipAddedPayload,
-  WaypointProposedMsg,
+import {
+  HANDSHAKE_SESSION_REVOKED,
+  type ChatMessage,
+  type DispatchMatchPayload,
+  type DispatchOfferedPayload,
+  type DriverEventEnvelope,
+  type TipAddedPayload,
+  type WaypointProposedMsg,
 } from '@veo/api-client';
 import { useDi } from '../../../../core/di/useDi';
 import type { DriverSocket } from '../../../../core/realtime/socket';
@@ -57,6 +58,13 @@ export interface DriverRealtimeHandlers {
    * rechaza esta sesión (su `sid` es más viejo), así que no hay guerra de reconexión.
    */
   onSessionSuperseded(): void;
+  /**
+   * ENFORCEMENT DE REVOCACIÓN: el servidor RECHAZÓ el handshake porque la sesión está revocada (logout
+   * remoto, suspensión, o superada por un login nuevo) → el access token, aunque su firma siga válida,
+   * ya no sirve. La presentación cierra la sesión local y vuelve al login. Se dispara SOLO ante el
+   * `connect_error` con el motivo explícito del server; un error de transporte transitorio NO lo dispara.
+   */
+  onSessionRevoked(): void;
 }
 
 /**
@@ -182,6 +190,19 @@ export function useDriverRealtime(
         // Degradar sin tumbar la app.
       }
     };
+    // ENFORCEMENT DE REVOCACIÓN: `connect_error` se dispara TANTO por rechazos del server (middleware del
+    // handshake) COMO por fallos de transporte (server caído, red, timeout). Distinguimos por el MOTIVO
+    // explícito: solo el `HANDSHAKE_SESSION_REVOKED` que pone el gateway significa "sesión muerta, deslogueá".
+    // Cualquier otro `connect_error` es transitorio → NO desloguea (socket.io reintenta reconectar solo).
+    const onConnectError = (err: Error) => {
+      try {
+        if (err?.message === HANDSHAKE_SESSION_REVOKED) {
+          handlersRef.current.onSessionRevoked();
+        }
+      } catch {
+        // Degradar sin tumbar la app.
+      }
+    };
 
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
@@ -191,6 +212,7 @@ export function useDriverRealtime(
     s.on('waypoint:proposed', onWaypointProposed);
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
+    s.on('connect_error', onConnectError);
     s.on('session:superseded', onSessionSuperseded);
     s.connect();
     setSocket(s);
@@ -204,6 +226,7 @@ export function useDriverRealtime(
       s.off('waypoint:proposed', onWaypointProposed);
       s.off('connect', onConnect);
       s.off('disconnect', onDisconnect);
+      s.off('connect_error', onConnectError);
       s.off('session:superseded', onSessionSuperseded);
       s.disconnect();
       setSocket(null);
