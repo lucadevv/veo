@@ -17,9 +17,31 @@
   },
   "nav": {
     "home": "Inicio",
+    "carpool": "Compartir",
     "earnings": "Ganancias",
     "trips": "Viajes",
     "account": "Cuenta"
+  },
+  "carpool": {
+    "title": "Compartir",
+    "subtitle": "Publicá viajes y elegí a tus pasajeros",
+    "emptyTitle": "Todavía no publicaste viajes",
+    "emptyBody": "Publicá un viaje programado y recibí reservas de pasajeros que van a tu misma ruta.",
+    "publishCta": "Publicar un viaje",
+    "seatsLabel": "{{disponibles}} de {{total}} asientos",
+    "requestsLabel": "{{count}} solicitudes",
+    "publishTitle": "Publicar un viaje",
+    "requestsTitle": "Solicitudes",
+    "comingSoonBody": "Lo estamos construyendo. Muy pronto vas a poder hacerlo desde acá.",
+    "state": {
+      "BORRADOR": "Borrador",
+      "PUBLICADO": "Publicado",
+      "PARCIALMENTE_RESERVADO": "Parcial",
+      "LLENO": "Lleno",
+      "EN_RUTA": "En ruta",
+      "COMPLETADO": "Completado",
+      "CANCELADO": "Cancelado"
+    }
   },
   "errors": {
     "generic": "Algo salió mal",

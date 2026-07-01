@@ -64,6 +64,36 @@ export function IconTrips(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Compartir / Carpooling: dos personas (viaje compartido, marketplace programado). */
+export function IconCarpool(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={8.5} cy={7} r={3.5} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M2 20v-1.5A4.5 4.5 0 0 1 6.5 14h4A4.5 4.5 0 0 1 15 18.5V20"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M15.5 3.6a3.5 3.5 0 0 1 0 6.8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M18 14.2A4.5 4.5 0 0 1 21 18.5V20"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Cuenta: persona. */
 export function IconAccount(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

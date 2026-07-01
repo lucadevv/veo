@@ -39,9 +39,20 @@ import { DocumentsScreen } from '../features/documents/presentation';
 import { IncentivesScreen } from '../features/ops/presentation';
 import { SupportScreen } from '../features/support/presentation';
 import { ChatScreen } from '../features/chat/presentation';
+import {
+  CarpoolPublishScreen,
+  CarpoolScreen,
+  CarpoolTripBookingsScreen,
+} from '../features/carpool/presentation';
 import { RealtimeManager } from '../features/realtime/presentation';
 import { PushManager } from '../features/notifications/presentation';
-import { IconAccount, IconEarnings, IconMap, IconTrips } from '../shared/presentation/icons';
+import {
+  IconAccount,
+  IconCarpool,
+  IconEarnings,
+  IconMap,
+  IconTrips,
+} from '../shared/presentation/icons';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -85,6 +96,8 @@ function MainTabs(): React.JSX.Element {
           switch (route.name) {
             case 'Inicio':
               return <IconMap size={size} color={color} strokeWidth={sw} />;
+            case 'Compartir':
+              return <IconCarpool size={size} color={color} strokeWidth={sw} />;
             case 'Ganancias':
               return <IconEarnings size={size} color={color} strokeWidth={sw} />;
             case 'Viajes':
@@ -103,6 +116,11 @@ function MainTabs(): React.JSX.Element {
         name="Inicio"
         component={DashboardScreen}
         options={{ tabBarLabel: t('nav.home') }}
+      />
+      <Tab.Screen
+        name="Compartir"
+        component={CarpoolScreen}
+        options={{ tabBarLabel: t('nav.carpool') }}
       />
       <Tab.Screen
         name="Ganancias"
@@ -243,6 +261,16 @@ export const RootNavigator = (): React.JSX.Element => {
         <Stack.Screen
           name="Chat"
           component={ChatScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="CarpoolPublish"
+          component={CarpoolPublishScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="CarpoolTripBookings"
+          component={CarpoolTripBookingsScreen}
           options={{ animation: 'slide_from_right' }}
         />
       </Stack.Navigator>

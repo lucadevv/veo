@@ -1,11 +1,13 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
 /**
- * Tabs principales del conductor (bottom tab bar "Midnight Motion").
- * Inicio = mapa + turno; Ganancias = finanzas; Viajes = historial; Cuenta = perfil.
+ * Tabs principales del conductor (bottom tab bar). Híbrido: DOS modos de ganar first-class —
+ * Inicio = on-demand (mapa + turno, tiempo real); Compartir = carpooling (publicar viaje programado +
+ * gestionar reservas, marketplace). Ganancias = finanzas; Viajes = historial; Cuenta = perfil.
  */
 export type MainTabParamList = {
   Inicio: undefined;
+  Compartir: undefined;
   Ganancias: undefined;
   Viajes: undefined;
   Cuenta: undefined;
@@ -41,6 +43,10 @@ export type RootStackParamList = {
   /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
   Bids: undefined;
   Chat: { tripId: string };
+  /** Carpooling: publicar un viaje compartido (ruta + fecha + asientos + precio con tope anti-lucro). */
+  CarpoolPublish: undefined;
+  /** Carpooling: gestionar las solicitudes de un viaje publicado (aprobar/rechazar). */
+  CarpoolTripBookings: { tripId: string };
 };
 
 /**

@@ -13,6 +13,8 @@ import type { BiddingRepository } from '../../features/bidding/domain';
 import { HttpBiddingRepository } from '../../features/bidding/data';
 import type { EarningsRepository } from '../../features/earnings/domain';
 import { HttpEarningsRepository } from '../../features/earnings/data';
+import type { CarpoolRepository } from '../../features/carpool/domain';
+import { HttpCarpoolRepository } from '../../features/carpool/data';
 import type { ProfileRepository } from '../../features/profile/domain';
 import { HttpProfileRepository } from '../../features/profile/data';
 import type {
@@ -46,6 +48,7 @@ export interface AppRepositories {
   trips: TripsRepository;
   bidding: BiddingRepository;
   earnings: EarningsRepository;
+  carpool: CarpoolRepository;
   profile: ProfileRepository;
   documents: DocumentsRepository;
   registration: RegistrationRepository;
@@ -96,6 +99,7 @@ function buildContainer(): AppContainer {
     trips: new HttpTripsRepository(httpClient),
     bidding: new HttpBiddingRepository(httpClient),
     earnings: new HttpEarningsRepository(httpClient),
+    carpool: new HttpCarpoolRepository(httpClient),
     profile: new HttpProfileRepository(httpClient),
     documents: new HttpDocumentsRepository(httpClient),
     registration: new HttpRegistrationRepository(httpClient),
