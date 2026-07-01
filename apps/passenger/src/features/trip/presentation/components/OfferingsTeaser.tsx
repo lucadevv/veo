@@ -70,7 +70,7 @@ export function OfferingsTeaser(): React.JSX.Element | null {
       <Text variant="caption" color="inkSubtle">
         {t('home.servicesTitle')}
       </Text>
-      <View style={[styles.grid, {gap: theme.spacing.sm}]}>
+      <View style={[styles.grid, {rowGap: theme.spacing.sm}]}>
         {items.map(offering => {
           const glyph = offeringGlyph({icon: offering.icon});
           return (
@@ -111,8 +111,11 @@ export function OfferingsTeaser(): React.JSX.Element | null {
 }
 
 const styles = StyleSheet.create({
-  // Fila de iguales: cada celda toma su fracción del ancho (escala sola al crecer el catálogo).
-  grid: {flexDirection: 'row'},
-  cell: {flex: 1, borderWidth: 1, alignItems: 'center'},
+  // MOSAICO 2 columnas (estilo GridView.count(crossAxisCount:2) de Flutter): wrap + space-between reparte
+  // el hueco horizontal entre las 2 celdas de la fila; `rowGap` (inline) separa las filas. Antes era UNA
+  // fila con `flex:1` → con 8 ofertas cada celda quedaba diminuta. Escala solo: N ofertas → ⌈N/2⌉ filas.
+  grid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between'},
+  // 48% × 2 = 96%: entran 2 por fila y el space-between pone el gap; la 3ª envuelve a la fila siguiente.
+  cell: {width: '48%', borderWidth: 1, alignItems: 'center'},
   label: {textAlign: 'center'},
 });
