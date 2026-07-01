@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   EVENT_SCHEMAS,
   chatMessageSent,
+  driverSuspended,
   tripWaypointProposed,
   type EventEnvelope,
   type EventHandler,
@@ -90,11 +91,33 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     // por `driverId` enriquecido o por `tripId`→gRPC) y lo emite como `payment:tip` para que la app lo
     // celebre. Suscribe automáticamente el topic `payment` (topicForEvent).
     record['payment.tip_added'] = (env) => this.handleEvent(env, 'payment:tip');
+    // FIX seguridad ALTA · suspensión en vivo: un operador suspendió al conductor → cerrar su socket YA
+    // (no esperar a que venza el access token, ≤15m). Handler dedicado: no va a una sala, fuerza el cierre.
+    record['driver.suspended'] = (env) => this.handleDriverSuspended(env);
     return record;
   }
 
   protected override subscriptionLog(): string {
-    return 'consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment)';
+    return 'consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment, driver)';
+  }
+
+  /**
+   * SUSPENSIÓN EN VIVO (cierre proactivo del socket): identity emite `driver.suspended` al suspender a un
+   * conductor. Sin esto la sesión de socket YA abierta seguía viva ≤15m (hasta vencer el access token),
+   * emitiendo GPS a Kafka + presencia fantasma en /ops + recibiendo pushes. El evento trae el `driverId` de
+   * PERFIL (misma clave del Map `activeByDriver` del gateway, fijada en el handshake) → NO hay traducción
+   * userId↔driverId acá; el gateway resuelve el socket por esa clave. La entrega es idempotente: un driverId
+   * sin sesión activa (conductor offline / doble evento) es un no-op → se cuenta NO_DRIVER, no error.
+   */
+  private handleDriverSuspended(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverSuspended.safeParse(envelope.payload);
+    if (!parsed.success) return Promise.resolve();
+    const kicked = this.gateway.disconnectSuspendedDriver(parsed.data.driverId);
+    domainEventsTotal.inc({
+      event: 'driver.suspended',
+      result: kicked ? BusinessEventResult.EMITTED : BusinessEventResult.NO_DRIVER,
+    });
+    return Promise.resolve();
   }
 
   /** Valida el payload, resuelve el conductor y emite a su sala. */

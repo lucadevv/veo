@@ -3072,6 +3072,14 @@ export interface DriverServerToClient {
    * vuelve al login con el aviso "sesión cerrada en otro dispositivo". Sin payload (es una señal).
    */
   'session:superseded': () => void;
+  /**
+   * SUSPENSIÓN EN VIVO: un operador suspendió al conductor mid-turno (identity emite `driver.suspended` →
+   * el driver-bff fuerza el cierre del socket). El gateway `/driver` lo emite y desconecta el socket; la
+   * app cierra la sesión local y vuelve al login con el aviso "cuenta suspendida". Sin payload (es una
+   * señal, igual que `session:superseded`). Cierra la ventana ≤15m en la que la sesión abierta seguía viva
+   * (emitiendo GPS + presencia fantasma en /ops + recibiendo pushes) hasta vencer el access token.
+   */
+  'session:suspended': () => void;
 }
 
 export interface DriverClientToServer {

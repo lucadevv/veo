@@ -58,6 +58,10 @@ interface DriverSocketData {
 /** Evento server→cliente que avisa al device SUPERADO (otra sesión más nueva ganó) para que se deslogue. */
 const SESSION_SUPERSEDED_EVENT = 'session:superseded';
 
+/** Evento server→cliente que avisa al conductor SUSPENDIDO (un operador lo suspendió mid-turno) para que
+ *  cierre sesión. Espejo de {@link SESSION_SUPERSEDED_EVENT}: se emite ANTES de cerrar el socket vivo. */
+const SESSION_SUSPENDED_EVENT = 'session:suspended';
+
 /** Delay (ms) entre el aviso `session:superseded` y el cierre del transporte: `disconnect(true)` descarta la
  *  cola de salida, así garantizamos que el paquete de aviso SALGA antes de cortar el socket del device viejo. */
 const SUPERSEDE_FLUSH_MS = 200;
@@ -145,7 +149,12 @@ export class DriverGateway
   async handleConnection(client: Socket): Promise<void> {
     try {
       const { user: identity, sid } = await this.authenticate(client);
-      const driverId = await this.resolveDriverId(identity);
+      const { driverId, suspended } = await this.resolveDriver(identity);
+      // GATE DE SUSPENSIÓN EN EL HANDSHAKE (cierra el residual del RE-LOGIN): el force-disconnect por
+      // `driver.suspended` mata la sesión YA abierta, pero un conductor suspendido que RE-LOGUEA obtiene un
+      // `sid` NUEVO que no está en el denylist → sin este gate volvería a abrir el socket. `suspended` sale
+      // de la MISMA lectura gRPC que resuelve el driverId (costo cero extra). Fail-closed en el handshake.
+      if (suspended) throw new Error('conductor suspendido: sesión de socket denegada');
 
       // SINGLE ACTIVE SESSION (gate DURO en tiempo real). El `sid` es uuidv7 (time-ordered):
       //  · sesión VIEJA (sid < activo) intentando conectar → device superado (su access token aún vive) → rechazar.
@@ -184,13 +193,43 @@ export class DriverGateway
   }
 
   /**
-   * Avisa al device SUPERADO (`session:superseded`) y cierra su socket. El cierre va con un pequeño delay:
-   * `disconnect(true)` descarta la cola de salida de socket.io, así el paquete de aviso SALE antes de cortar
-   * el transporte (la app del device viejo lo usa para deslogar con un mensaje claro). Si el socket ya se
-   * fue antes del timer, `disconnect` es un no-op seguro.
+   * Avisa al device SUPERADO (`session:superseded`) y cierra su socket. Delega el patrón avisar→cerrar en
+   * {@link kickSocket}.
    */
   private supersede(socket: Socket): void {
-    socket.emit(SESSION_SUPERSEDED_EVENT);
+    this.kickSocket(socket, SESSION_SUPERSEDED_EVENT);
+  }
+
+  /**
+   * Cierre PROACTIVO del socket VIVO de un conductor SUSPENDIDO. Lo invoca el consumer de `driver.suspended`:
+   * sin esto la sesión ya conectada seguía viva ≤15m (hasta vencer el access token), emitiendo GPS a Kafka +
+   * presencia fantasma en el mapa /ops + recibiendo pushes en su sala `driver:{driverId}`.
+   *
+   * KEY-SPACE (hazard marcado por el gate): el Map `activeByDriver` está keyeado por el id de PERFIL Driver
+   * (lo resuelve el handshake vía `resolveDriver` → identity.GetDriverByUser → `driver.id`), y el evento
+   * `driver.suspended` trae ESE MISMO `driverId` de perfil (identity lo emite con el CAS de `Driver.suspendedAt`).
+   * Coinciden → NO hay traducción userId↔driverId acá. (La vía `fleet.driver_suspended` por ITV, keyeada por
+   * `userId`, es otra clase y queda fuera de este lote.)
+   *
+   * Idempotente: sin sesión activa (ya cerrada / doble evento / conductor offline) → no-op silencioso.
+   * @returns `true` si había una sesión activa que se echó; `false` si no había a quién cerrar.
+   */
+  disconnectSuspendedDriver(driverId: string): boolean {
+    const active = this.activeByDriver.get(driverId);
+    if (!active) return false;
+    this.logger.info({ driverId }, 'ws conductor suspendido: forzando cierre de sesión en vivo');
+    this.kickSocket(active.socket, SESSION_SUSPENDED_EVENT);
+    return true;
+  }
+
+  /**
+   * Patrón avisar→cerrar de un socket: emite `event` (la señal de por qué se cierra) y cierra el transporte
+   * tras un pequeño delay. `disconnect(true)` descarta la cola de salida de socket.io, así el paquete de aviso
+   * SALE antes de cortar (la app lo usa para deslogar con un mensaje claro). Si el socket ya se fue antes del
+   * timer, `disconnect` es un no-op seguro.
+   */
+  private kickSocket(socket: Socket, event: string): void {
+    socket.emit(event);
     setTimeout(() => socket.disconnect(true), SUPERSEDE_FLUSH_MS);
   }
 
@@ -264,7 +303,15 @@ export class DriverGateway
     return undefined;
   }
 
-  private async resolveDriverId(identity: AuthenticatedUser): Promise<string> {
+  /**
+   * Resuelve el perfil del conductor a partir de la identidad autenticada (identity.GetDriverByUser).
+   * Devuelve el id de PERFIL Driver (clave de la sala y del Map `activeByDriver`) y si está SUSPENDIDO.
+   * `suspendedAt` viaja como "" cuando NO está suspendido y como ISO-8601 cuando sí → `Boolean(...)` lo
+   * normaliza (una sola lectura gRPC alimenta la sala Y el gate de suspensión del handshake).
+   */
+  private async resolveDriver(
+    identity: AuthenticatedUser,
+  ): Promise<{ driverId: string; suspended: boolean }> {
     const driver = await this.grpc.call<DriverReply>(
       'identity',
       'GetDriverByUser',
@@ -272,6 +319,6 @@ export class DriverGateway
       identity,
     );
     if (!driver.found) throw new Error('no existe perfil de conductor para el usuario');
-    return driver.id;
+    return { driverId: driver.id, suspended: Boolean(driver.suspendedAt) };
   }
 }

@@ -7,6 +7,7 @@ function makeGateway(opts: {
   verify?: () => Promise<{ sub: string; typ: string; roles: never[]; sid: string }>;
   driverFound?: boolean;
   driverId?: string;
+  suspendedAt?: string;
   publish?: ReturnType<typeof vi.fn>;
 }) {
   const jwt = {
@@ -20,6 +21,8 @@ function makeGateway(opts: {
         id: opts.driverId ?? 'drv-9',
         userId: 'usr-1',
         found: opts.driverFound ?? true,
+        // "" = NO suspendido (proto3 default); ISO = suspendido. El gate del handshake usa Boolean(...).
+        suspendedAt: opts.suspendedAt ?? '',
       }),
     ),
   };
@@ -94,6 +97,36 @@ describe('DriverGateway', () => {
     const socket = fakeSocket('tok');
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rechaza (disconnect) a un conductor SUSPENDIDO en el handshake (gate del re-login)', async () => {
+    const { gateway } = makeGateway({ driverId: 'drv-42', suspendedAt: '2026-07-01T00:00:00.000Z' });
+    const socket = fakeSocket('Bearer abc.def.ghi');
+    await gateway.handleConnection(socket as never);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(socket.data.driverId).toBeUndefined();
+  });
+
+  it('disconnectSuspendedDriver echa el socket vivo del conductor (aviso + cierre)', async () => {
+    vi.useFakeTimers();
+    const { gateway } = makeGateway({ driverId: 'drv-42' });
+    const socket = fakeSocket('Bearer abc.def.ghi');
+    (socket as unknown as { emit: ReturnType<typeof vi.fn> }).emit = vi.fn();
+    await gateway.handleConnection(socket as never);
+    const kicked = gateway.disconnectSuspendedDriver('drv-42');
+    expect(kicked).toBe(true);
+    expect((socket as unknown as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith(
+      'session:suspended',
+    );
+    vi.runAllTimers();
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    vi.useRealTimers();
+  });
+
+  it('disconnectSuspendedDriver es no-op idempotente si no hay sesión activa', () => {
+    const { gateway } = makeGateway({});
+    expect(gateway.disconnectSuspendedDriver('drv-inexistente')).toBe(false);
   });
 
   it('emitToDriver publica en la sala correcta del servidor', () => {
