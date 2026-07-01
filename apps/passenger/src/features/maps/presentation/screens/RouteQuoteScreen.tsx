@@ -309,8 +309,10 @@ export function RouteQuoteScreen(): React.JSX.Element {
       navigation.navigate('TripActive', {tripId: trip.id});
     },
     onError: error => {
-      // Gate de seguridad server-side: si el BFF exige verificación facial (403 KYC_REQUIRED), la UI
-      // REFLEJA derivando a la verificación. Tras verificar, el pasajero vuelve y reintenta el pedido.
+      // Residual defensivo (ADR-018): el muro pre-viaje se retiró — el BFF ya NO devuelve 403 KYC_REQUIRED
+      // al crear un viaje, así que esta rama es hoy inalcanzable. Se conserva como reflejo del contrato en
+      // esta pantalla LEGACY (solo flujo programado): si el server reintrodujera el gate, la UI ya deriva a
+      // la verificación sin cambiar código. No es un gate proactivo (la verificación es opcional, desde Perfil).
       if (isKycRequiredError(error)) {
         navigation.navigate('KycCamera');
       }

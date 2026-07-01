@@ -509,7 +509,6 @@ export function RequestFlowScreen(): React.JSX.Element {
     live,
     tripDetail: tripDetailQuery.data ?? null,
     addStop,
-    kycStatus: profileQuery.data?.kycStatus ?? null,
     requestAgainToken: debtGate.requestAgainToken,
     onTripCreated,
     onScheduled,

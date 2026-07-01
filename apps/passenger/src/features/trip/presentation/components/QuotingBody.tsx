@@ -51,8 +51,6 @@ import {initialBidCents, stepBidCents} from '../../../../shared/utils/bid';
 import {uuidv4} from '../../../../shared/utils/uuid';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
 import {buildCreateTripInput} from '../../domain/buildCreateTripInput';
-import {mapKycStatus} from '../../../kyc/domain/entities';
-import {KycGate} from './KycGate';
 import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
 import {
   offeringDisplayName,
@@ -76,14 +74,12 @@ export interface QuotingBodyProps {
   onTripCreated: (trip: TripResource) => void;
   /** Viaje PROGRAMADO creado (no entra a dispatch ahora). */
   onScheduled: () => void;
-  /** El BFF exige verificación facial (403 KYC) — la pantalla deriva al KYC. */
-  onKycRequired: () => void;
   /**
-   * Estado de verificación facial del pasajero (`kycStatus` de `GET /users/me`, ya cacheado en el Home).
-   * Si NO está `approved`, el sheet muestra un GATE contextual ("verificá antes de pedir") en vez del
-   * botón Confirmar — proactivo, no la emboscada del 403. El gate REAL sigue siendo server-side.
+   * Defensa server-side residual (ADR-018): si el BFF alguna vez devolviera 403 KYC_REQUIRED, la pantalla
+   * deriva a la verificación. El muro pre-viaje se retiró (el pasajero `unverified` YA puede pedir); esto
+   * queda solo como reflejo del contrato, no como gate proactivo.
    */
-  kycStatus?: string | null;
+  onKycRequired: () => void;
   /**
    * El BFF bloqueó crear porque el pasajero tiene una DEUDA pendiente (403 `DEBT_PENDING`). En vez de un
    * error genérico, la pantalla abre el `DebtSheet` para saldar y volver a pedir. El gate es server-side
@@ -120,7 +116,6 @@ export function QuotingBody({
   onActiveTripExists,
   onRouteChange,
   requestAgainToken,
-  kycStatus,
 }: QuotingBodyProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
@@ -157,11 +152,6 @@ export function QuotingBody({
   const yapeAutoActive = useIsYapeAutoActive();
 
   const ready = Boolean(origin && destination);
-
-  // Verificación facial (KYC): si NO está aprobada, mostramos el GATE contextual en vez del Confirmar.
-  // El estado viene del perfil ya cacheado en el Home; KycCamera invalida ['profile'] al aprobar → al
-  // volver, el gate desaparece solo. 'approved' = puede pedir; resto (unverified/pending/rejected) = gate.
-  const kycApproved = mapKycStatus(kycStatus) === 'approved';
 
   const setWaypoints = useMemo<RoutePlace[]>(
     () => waypoints.filter(isWaypointSet),
@@ -631,7 +621,7 @@ export function QuotingBody({
 
       {/* Método de pago PARA ESTE VIAJE (antes del CTA): refleja la selección actual y abre el selector.
           La elección viaja al conductor en la puja y define el cobro automático al completar. */}
-      {ready && kycApproved ? (
+      {ready ? (
         <PaymentMethodRow
           method={tripPaymentMethod}
           onPress={() => setPaymentSheetOpen(true)}
@@ -640,20 +630,16 @@ export function QuotingBody({
         />
       ) : null}
 
-      {ready && !kycApproved ? (
-        // Gate de verificación CONTEXTUAL (mejor UX): el pasajero ve su ruta/precio y, en vez de confirmar
-        // y comerse un 403, hace el paso único de seguridad ANTES. El 403 sigue como defensa (server-side).
-        <KycGate status={mapKycStatus(kycStatus)} onVerify={onKycRequired} />
-      ) : (
-        <Button
-          label={confirmLabel}
-          variant="primary"
-          fullWidth
-          loading={createMutation.isPending}
-          disabled={!canConfirm}
-          onPress={() => createMutation.mutate()}
-        />
-      )}
+      {/* CTA de pedido (ADR-018): sin muro de KYC. El pasajero `unverified` pide directo; el botón sigue
+          gateado solo por `canConfirm` (ruta lista + oferta/puja válida). */}
+      <Button
+        label={confirmLabel}
+        variant="primary"
+        fullWidth
+        loading={createMutation.isPending}
+        disabled={!canConfirm}
+        onPress={() => createMutation.mutate()}
+      />
 
       <PaymentMethodSheet
         visible={paymentSheetOpen}

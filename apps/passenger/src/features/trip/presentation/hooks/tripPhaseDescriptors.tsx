@@ -55,7 +55,6 @@ export interface RequestFlowContext {
   /** Controlador de la PARADA negociada mid-trip (Lote C3). */
   addStop: WaypointProposalController;
   // ── Cotización (fase quoting) ──
-  kycStatus: string | null;
   requestAgainToken: number;
   onTripCreated: (trip: TripResource) => void;
   onScheduled: () => void;
@@ -131,7 +130,6 @@ export function QuotingPhaseBody({ctx}: SlotProps): React.JSX.Element {
       onActiveTripExists={ctx.onActiveTripExists}
       onRouteChange={ctx.onRouteChange}
       requestAgainToken={ctx.requestAgainToken}
-      kycStatus={ctx.kycStatus}
     />
   );
 }

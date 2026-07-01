@@ -26,6 +26,11 @@ export type KycStatus =
  */
 export function mapKycStatus(raw: string | null | undefined): KycStatus {
   switch ((raw ?? '').trim().toLowerCase()) {
+    // Estado inicial CANÓNICO del pasajero (ADR-018: nace `UNVERIFIED`, no `PENDING`). Explícito para que
+    // "no arrancó" sea un caso nombrado, no un accidente del `default`. El lower-case cubre `UNVERIFIED`.
+    case 'unverified':
+    case 'unknown':
+      return 'unverified';
     case 'approved':
     case 'verified':
     case 'passed':
