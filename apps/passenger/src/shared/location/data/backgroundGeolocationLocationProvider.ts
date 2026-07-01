@@ -81,7 +81,10 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
         // pero ruidoso). Registramos listeners PERSISTENTES que CONSUMEN el evento → siempre hay ≥1
         // listener, sin warning. NO arrancan el tracking (eso lo hace `start()` en watchPosition).
         BackgroundGeolocation.onLocation(location => {
-          this.lastKnown = this.toGeoPoint(location);
+          const point = this.toGeoPoint(location);
+          if (point) {
+            this.lastKnown = point;
+          }
         });
         // `providerchange` es el evento del SO cuando el usuario prende/apaga el GPS o cambia el
         // permiso desde Ajustes. Lo propagamos a los suscriptores → la app se RECUPERA sola sin poll.
@@ -93,9 +96,22 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
     return this.readyOnce;
   }
 
-  /** Convierte la `Location` del SDK al `GeoPoint` del dominio. */
-  private toGeoPoint(location: Location): GeoPoint {
-    return {lat: location.coords.latitude, lon: location.coords.longitude};
+  /**
+   * Convierte la `Location` del SDK al `GeoPoint` del dominio. DEFENSIVO: el SDK puede emitir una
+   * muestra SIN `coords` (estado transitorio, evento de error, o el simulador sin fix) → antes reventaba
+   * con "Cannot read property 'latitude' of undefined". Devuelve `null` ante coords ausentes o no
+   * finitas; cada llamador decide (rechazar el fix puntual, o descartar la muestra en el stream).
+   */
+  private toGeoPoint(location: Location): GeoPoint | null {
+    const coords = location?.coords;
+    if (
+      !coords ||
+      !Number.isFinite(coords.latitude) ||
+      !Number.isFinite(coords.longitude)
+    ) {
+      return null;
+    }
+    return {lat: coords.latitude, lon: coords.longitude};
   }
 
   /**
@@ -145,7 +161,13 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
       maximumAge: 5000,
       desiredAccuracy: DesiredAccuracy.High,
     });
-    return this.toGeoPoint(location);
+    const point = this.toGeoPoint(location);
+    if (!point) {
+      // Fix sin coordenadas válidas: rechazamos para que el hook degrade a `error` (reintentable),
+      // en vez de propagar un GeoPoint inventado. Nunca inventamos coordenadas.
+      throw new Error('getCurrentPosition: el SDK devolvió un fix sin coordenadas válidas');
+    }
+    return point;
   }
 
   async getAvailability(): Promise<LocationAvailability> {
@@ -187,7 +209,10 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
         return;
       }
       subscription = BackgroundGeolocation.onLocation(location => {
-        onChange(this.toGeoPoint(location));
+        const point = this.toGeoPoint(location);
+        if (point) {
+          onChange(point);
+        }
       });
       // Entrega inmediata del último fix conocido (si lo hay) para no esperar al primer evento.
       if (this.lastKnown) {
