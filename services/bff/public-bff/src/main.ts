@@ -56,10 +56,12 @@ async function bootstrap(): Promise<void> {
     credentials: true,
   });
 
-  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
-  app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
-  );
+  // whitelist SIN forbidNonWhitelisted (conforma a driver-bff): esta es una BFF CLIENT-FACING y el
+  // contrato @veo/api-client envía campos TOP-LEVEL que la BFF debe DESCARTAR, no rechazar — p.ej. el
+  // `type` del OTP, que el DTO fija server-side a passenger (RequestOtpDto documenta "se descarta por el
+  // whitelist"). Con forbidNonWhitelisted:true ese `type` daba 400 y ROMPÍA el login OTP del pasajero.
+  // whitelist recorta lo no-declarado; el fail-loud de contrato estricto queda para los servicios INTERNOS.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new PublicExceptionFilter(createLogger('public-bff')));
   app.useGlobalInterceptors(new LoggingInterceptor('public-bff'));
   // /api/v1 para la API; health y metrics quedan fuera del prefijo.
