@@ -195,10 +195,13 @@ export class PublishedTripsService {
       });
     }
 
-    // GATE 1 — elegibilidad del conductor (server-truth contra identity). Fail-closed.
-    await this.assertDriverEligible(driverId);
-    // GATE 2 — pertenencia + vigencia del vehículo (anti-IDOR contra el driverId server-truth). Fail-closed.
-    await this.assertVehicleUsable(driverId, dto.vehicleId);
+    // GATE 1 — elegibilidad del conductor (server-truth contra identity). Fail-closed. Devuelve el driver
+    // (con su userId) para el GATE 2: FLEET INDEXA LOS VEHÍCULOS POR EL userId (sujeto de la identidad, el
+    // MISMO key que usa el on-demand), NO por el Driver.id. Pasarle el Driver.id daba "vehículo ajeno" (403)
+    // aunque el vehículo fuera del conductor — el hazard userId(vehículos) vs Driver.id(perfil).
+    const driver = await this.assertDriverEligible(driverId);
+    // GATE 2 — pertenencia + vigencia del vehículo (anti-IDOR contra el userId server-truth). Fail-closed.
+    await this.assertVehicleUsable(driver.userId, dto.vehicleId);
 
     // LA REGLA, NO EL IF: validar BORRADOR→PUBLICADO por la máquina tipada antes de cualquier escritura.
     publishedTripMachine.assertTransition(PublishedTripState.BORRADOR, PublishedTripState.PUBLICADO);
@@ -771,7 +774,7 @@ export class PublishedTripsService {
    * false, este gate desglosa la PRIMERA causa SOLO para dar un mensaje claro — pero el criterio de corte es
    * idéntico por construcción: publish, search y detail no pueden divergir porque comparten el predicado.
    */
-  private async assertDriverEligible(driverId: string): Promise<void> {
+  private async assertDriverEligible(driverId: string): Promise<IdentityDriver> {
     let driver: IdentityDriver;
     try {
       driver = await this.identity.getDriver(driverId);
@@ -782,8 +785,9 @@ export class PublishedTripsService {
         cause: err instanceof Error ? err.message : String(err),
       });
     }
-    // DECISIÓN: la toma el predicado ÚNICO (todos los ejes, incl. antecedentes). Si pasa, no hay nada que reportar.
-    if (isDriverEligible(driver)) return;
+    // DECISIÓN: la toma el predicado ÚNICO (todos los ejes, incl. antecedentes). Si pasa, devolvemos el driver
+    // (con su userId) para el GATE del vehículo — fleet indexa por userId, no por Driver.id.
+    if (isDriverEligible(driver)) return driver;
     // No elegible: desglosamos la PRIMERA causa para un 403 con mensaje claro (mismo ORDEN que el predicado).
     if (!driver.found) {
       throw new ForbiddenError('Conductor no encontrado para publicar', { driverId });
@@ -822,24 +826,25 @@ export class PublishedTripsService {
    * Vehículo propio pero NO vigente (inactivo / status no operable / docs no VALID) → ValidationError con
    * la causa (no es un ataque, es un estado inválido del recurso propio).
    */
-  private async assertVehicleUsable(driverId: string, vehicleId: string): Promise<void> {
+  private async assertVehicleUsable(ownerUserId: string, vehicleId: string): Promise<void> {
     let vehicles: FleetVehicle[];
     try {
-      vehicles = await this.fleet.getDriverVehicles(driverId);
+      // fleet indexa por el userId (sujeto de la identidad), NO por el Driver.id — de ahí `ownerUserId`.
+      vehicles = await this.fleet.getDriverVehicles(ownerUserId);
     } catch (err) {
       // fail-closed: fleet caída / timeout → no se publica sin validar el vehículo.
       throw new ForbiddenError('No se pudo verificar el vehículo del conductor (fleet no disponible)', {
-        driverId,
+        ownerUserId,
         vehicleId,
         cause: err instanceof Error ? err.message : String(err),
       });
     }
 
-    // ANTI-IDOR: la PERTENENCIA se valida contra el driverId server-truth, no contra el valor del cliente.
+    // ANTI-IDOR: la PERTENENCIA se valida contra el userId server-truth (el key de fleet), no contra el cliente.
     const vehicle = vehicles.find((v) => v.id === vehicleId);
     if (!vehicle) {
       throw new ForbiddenError('El vehículo no pertenece al conductor (no puede publicar con un vehículo ajeno)', {
-        driverId,
+        ownerUserId,
         vehicleId,
       });
     }
