@@ -73,7 +73,7 @@ export function StatusPill({
       style={[
         styles.pill,
         {
-          backgroundColor: hexAlpha(toneColor, theme.scheme === 'dark' ? 0.2 : 0.14),
+          backgroundColor: hexAlpha(toneColor, theme.scheme === 'dark' ? 0.13 : 0.1),
           borderRadius: theme.radii.pill,
         },
         style,
@@ -84,7 +84,7 @@ export function StatusPill({
           style={[styles.dot, { backgroundColor: toneColor }, live ? dotStyle : null]}
         />
       ) : null}
-      <Text variant="label" color={toneToColor[tone]} numberOfLines={1}>
+      <Text variant="caption" color={toneToColor[tone]} numberOfLines={1}>
         {label}
       </Text>
     </View>

@@ -118,9 +118,12 @@ const passengerColors: ThemeColors = {
   accent: '#2D7FF9',
   accentHover: '#5598FB',
   onAccent: '#FFFFFF',
-  safe: '#34D399',
+  // POSITIVO: jade profundo #17C08A, NO el mint común #34D399 (Tailwind emerald, se ve en toda app "hecha
+  // por AI"). Jade = más sofisticado, combina con el azul acento, y aparece SOLO en momentos positivos
+  // (propina, verificación sutil), nunca como checklist. onSafe #04160D oscuro sobre jade ≈ 8:1 (AA).
+  safe: '#17C08A',
   onSafe: '#04160D',
-  success: '#34D399',
+  success: '#17C08A',
   onSuccess: '#04160D',
   warn: '#F2AF48',
   onWarn: '#201301',
@@ -165,9 +168,12 @@ const driverColors: ThemeColors = {
   accent: '#2D7FF9',
   accentHover: '#5598FB',
   onAccent: '#FFFFFF',
-  safe: '#34D399',
+  // POSITIVO: jade profundo #17C08A, NO el mint común #34D399 (Tailwind emerald, se ve en toda app "hecha
+  // por AI"). Jade = más sofisticado, combina con el azul acento, y aparece SOLO en momentos positivos
+  // (propina, verificación sutil), nunca como checklist. onSafe #04160D oscuro sobre jade ≈ 8:1 (AA).
+  safe: '#17C08A',
   onSafe: '#04160D',
-  success: '#34D399',
+  success: '#17C08A',
   onSuccess: '#04160D',
   warn: '#F2AF48',
   onWarn: '#201301',
