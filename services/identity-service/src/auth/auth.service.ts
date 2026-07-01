@@ -189,6 +189,26 @@ export class AuthService {
     }
   }
 
+  /**
+   * Cierra la sesión en TODOS los dispositivos (ADR-012 §2). Espejo EXACTO de `logout` salvo el alcance:
+   * en vez de `revoke(claims.sid)` (una sesión) llama `revokeAllForUser(claims.sub)`, que borra TODAS las
+   * sesiones del user Y sella el denylist epoch `revoked:before:{userId}` → mata al instante los access
+   * tokens vivos de todas ellas (no espera a su exp de 15m). Decisión: refreshToken-based como `logout`
+   * (poseer un refresh válido = sesión activa = derecho a cerrar todas); NO exige un guard de access token.
+   * Devuelve el `userId` (el `sub`) SOLO cuando el token era válido, para que el caller que lo necesite
+   * (admin-bff: auditoría WORM) arme el actor. Idempotente: token inválido → { ok: true } sin userId.
+   */
+  async logoutAll(refreshToken: string): Promise<{ ok: true; userId?: string }> {
+    try {
+      const claims = await this.jwt.verifyRefresh(refreshToken);
+      await this.sessions.revokeAllForUser(claims.sub);
+      return { ok: true, userId: claims.sub };
+    } catch {
+      // logout-all idempotente: token inválido = ya no hay sesiones que revocar (ni que auditar)
+      return { ok: true };
+    }
+  }
+
   private subjectType(type: UserType): SubjectType {
     return type === 'DRIVER' ? 'driver' : 'passenger';
   }

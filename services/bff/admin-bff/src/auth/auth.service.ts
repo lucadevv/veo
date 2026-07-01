@@ -96,6 +96,27 @@ export class AuthService {
     return { ok: true };
   }
 
+  /**
+   * Cierra la sesión del operador en TODOS los dispositivos (ADR-012 §2). Espejo de `logout` salvo el
+   * endpoint (`/auth/logout-all`, que revoca TODAS las sesiones + sella el denylist epoch) y el `action`
+   * auditado (`auth.logout-all`, honesto: es un evento distinto). Mismo actor mínimo desde `userId` y
+   * misma auditoría fail-OPEN (recordSession).
+   */
+  async logoutAll(dto: LogoutDto): Promise<{ ok: true }> {
+    const res = await this.identityAuth.post<{ ok: true; userId?: string }>('/auth/logout-all', dto);
+    if (res.userId) {
+      const actor: AuthenticatedUser = {
+        userId: res.userId,
+        type: 'admin',
+        roles: [],
+        sessionId: '',
+        email: '',
+      };
+      await this.recordSession(actor, 'auth.logout-all', res.userId);
+    }
+    return { ok: true };
+  }
+
   /** Step-up TOTP: requiere Bearer válido; identity re-emite un access con mfaAt fresco. */
   async stepUp(identity: AuthenticatedUser, totp: string): Promise<{ accessToken: string }> {
     const res = await this.identityRest.post<{ accessToken: string }>('/admin/step-up', {

@@ -140,4 +140,11 @@ export class AuthService {
       body: dto,
     });
   }
+
+  logoutAll(dto: LogoutDto): Promise<{ ok: true }> {
+    return this.identity.post<{ ok: true }>('/auth/logout-all', {
+      identity: ANONYMOUS_IDENTITY,
+      body: dto,
+    });
+  }
 }

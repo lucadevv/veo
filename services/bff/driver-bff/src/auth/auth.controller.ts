@@ -90,4 +90,14 @@ export class AuthController {
   logout(@Body() dto: LogoutDto): Promise<{ ok: true }> {
     return this.auth.logout(dto.refreshToken);
   }
+
+  @Public()
+  @Post('logout-all')
+  @HttpCode(200)
+  // Anti-abuso de revocación global POR MÉTODO: 30 cada 10min por IP (mismo criterio que logout).
+  @RateLimit({ max: LOGOUT_MAX, windowMs: TEN_MIN_MS, by: ['ip'] })
+  @ApiOperation({ summary: 'Cerrar sesión en todos los dispositivos' })
+  logoutAll(@Body() dto: LogoutDto): Promise<{ ok: true }> {
+    return this.auth.logoutAll(dto.refreshToken);
+  }
 }

@@ -102,6 +102,15 @@ export class AuthController {
     return this.auth.logout(dto);
   }
 
+  @Public()
+  @Post('logout-all')
+  @HttpCode(200)
+  @SkipRateLimit()
+  @ApiOperation({ summary: 'Cerrar sesión en todos los dispositivos' })
+  logoutAll(@Body() dto: LogoutDto): Promise<{ ok: true }> {
+    return this.auth.logoutAll(dto);
+  }
+
   @Get('session')
   @ApiOperation({ summary: 'Valida el Bearer y devuelve el usuario de sesión' })
   session(@CurrentUser() user: AuthenticatedUser): SessionUser {

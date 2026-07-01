@@ -189,6 +189,16 @@ export class AuthController {
     return this.auth.logout(dto);
   }
 
+  @Public()
+  @Post('logout-all')
+  @HttpCode(200)
+  // Anti-abuso de revocación global: 30/10min por IP (mismo criterio que logout).
+  @RateLimit({ max: LOGOUT_MAX, windowMs: TEN_MIN, by: ['ip'] })
+  @ApiOperation({ summary: 'Cerrar sesión en todos los dispositivos' })
+  logoutAll(@Body() dto: LogoutDto): Promise<{ ok: true }> {
+    return this.auth.logoutAll(dto);
+  }
+
   /**
    * Devuelve el secreto HMAC COMPARTIDO de pánico (modelo actual del servicio, no per-user) y la
    * versión del mensaje canónico. Requiere JWT de pasajero (no es @Public). El cliente firma con
