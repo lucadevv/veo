@@ -177,28 +177,91 @@ describe('TOTP step-up', () => {
   });
 });
 
-describe('RedisRefreshTokenStore (rotación + reuse detection)', () => {
-  function fakeRedis() {
-    const store = new Map<string, string>();
-    return {
-      async set(k: string, v: string) {
-        store.set(k, v);
-        return 'OK';
-      },
-      async get(k: string) {
-        return store.get(k) ?? null;
-      },
-      async del(...ks: string[]) {
-        let n = 0;
-        for (const k of ks) if (store.delete(k)) n++;
-        return n;
-      },
-      async exists(k: string) {
-        return store.has(k) ? 1 : 0;
-      },
-    };
-  }
+/**
+ * Fake Redis compartido por refresh-store + session-revocation. Soporta las primitivas que ambos usan:
+ * strings (set/get/del/exists/mget), SETs (sadd/smembers/srem), expire (no-op) y `multi()` (pipeline que
+ * acumula y aplica en exec, mismo shape que ioredis). Los SETs viven en su propio Map disjunto de los
+ * strings; `del` los cubre a ambos (una key nunca es string Y set a la vez → cuenta una sola vez).
+ */
+function fakeRedis() {
+  const kv = new Map<string, string>();
+  const sets = new Map<string, Set<string>>();
+  const set = async (k: string, v: string): Promise<'OK'> => {
+    kv.set(k, v);
+    return 'OK';
+  };
+  const sadd = async (k: string, ...members: string[]): Promise<number> => {
+    let s = sets.get(k);
+    if (!s) {
+      s = new Set<string>();
+      sets.set(k, s);
+    }
+    let added = 0;
+    for (const m of members)
+      if (!s.has(m)) {
+        s.add(m);
+        added++;
+      }
+    return added;
+  };
+  const expire = async (_k: string, _ttl: number): Promise<number> => 1;
+  return {
+    set,
+    sadd,
+    expire,
+    async get(k: string) {
+      return kv.get(k) ?? null;
+    },
+    async mget(...ks: string[]) {
+      return ks.map((k) => kv.get(k) ?? null);
+    },
+    async smembers(k: string) {
+      return [...(sets.get(k) ?? [])];
+    },
+    async srem(k: string, ...members: string[]) {
+      const s = sets.get(k);
+      if (!s) return 0;
+      let removed = 0;
+      for (const m of members) if (s.delete(m)) removed++;
+      if (s.size === 0) sets.delete(k);
+      return removed;
+    },
+    async del(...ks: string[]) {
+      let n = 0;
+      for (const k of ks) if (kv.delete(k) || sets.delete(k)) n++;
+      return n;
+    },
+    async exists(k: string) {
+      return kv.has(k) || sets.has(k) ? 1 : 0;
+    },
+    // Pipeline: acumula las ops y las aplica en exec reusando las mismas impls (mismo shape que ioredis).
+    multi() {
+      const ops: (() => Promise<unknown>)[] = [];
+      const chain = {
+        set(k: string, v: string, ..._rest: unknown[]) {
+          ops.push(() => set(k, v));
+          return chain;
+        },
+        sadd(k: string, ...members: string[]) {
+          ops.push(() => sadd(k, ...members));
+          return chain;
+        },
+        expire(k: string, ttl: number) {
+          ops.push(() => expire(k, ttl));
+          return chain;
+        },
+        async exec() {
+          const out: [Error | null, unknown][] = [];
+          for (const op of ops) out.push([null, await op()]);
+          return out;
+        },
+      };
+      return chain;
+    },
+  };
+}
 
+describe('RedisRefreshTokenStore (rotación + reuse detection)', () => {
   it('rota el refresh y detecta reuse de un token viejo', async () => {
     const store = new RedisRefreshTokenStore(fakeRedis() as any, 2_592_000);
     const { sessionId, newJti } = await store.createSession('u1');
@@ -220,40 +283,75 @@ describe('RedisRefreshTokenStore (rotación + reuse detection)', () => {
   });
 });
 
+describe('RedisRefreshTokenStore — índice secundario veo:user-sessions:{userId}', () => {
+  const userIndexKey = (userId: string) => `veo:user-sessions:${userId}`;
+
+  it('createSession indexa el sid en el SET del user (SADD)', async () => {
+    const fake = fakeRedis();
+    const store = new RedisRefreshTokenStore(fake as any, 100);
+    const { sessionId } = await store.createSession('u1');
+    expect(await fake.smembers(userIndexKey('u1'))).toEqual([sessionId]);
+  });
+
+  it('revokeAllForUser enumera SOLO las sesiones de ese user (no toca otros), cuenta y limpia el índice', async () => {
+    const fake = fakeRedis();
+    const store = new RedisRefreshTokenStore(fake as any, 100);
+    const { sessionId: a1 } = await store.createSession('u1');
+    const { sessionId: a2 } = await store.createSession('u1');
+    const { sessionId: b1 } = await store.createSession('u2');
+
+    const revoked = await store.revokeAllForUser('u1');
+
+    // Cuenta = nº de records de u1 borrados (contrato preservado).
+    expect(revoked).toBe(2);
+    // Las sesiones de u1 murieron...
+    expect(await store.isValid(a1)).toBe(false);
+    expect(await store.isValid(a2)).toBe(false);
+    // ...pero la del OTRO user sigue viva (enumeración acotada al índice de u1, no scan global).
+    expect(await store.isValid(b1)).toBe(true);
+    // El índice de u1 quedó limpio; el de u2 intacto.
+    expect(await fake.smembers(userIndexKey('u1'))).toEqual([]);
+    expect(await fake.smembers(userIndexKey('u2'))).toEqual([b1]);
+  });
+
+  it('revoke (una sesión) hace SREM del índice para mantenerlo consistente', async () => {
+    const fake = fakeRedis();
+    const store = new RedisRefreshTokenStore(fake as any, 100);
+    const { sessionId: a1 } = await store.createSession('u1');
+    const { sessionId: a2 } = await store.createSession('u1');
+
+    await store.revoke(a1);
+
+    // El sid revocado salió del índice; el otro permanece.
+    expect(await fake.smembers(userIndexKey('u1'))).toEqual([a2]);
+  });
+
+  it('tolera un sid STALE en el índice (sesión ya vencida por TTL): no infla el contador', async () => {
+    const fake = fakeRedis();
+    const store = new RedisRefreshTokenStore(fake as any, 100);
+    const { sessionId: a1 } = await store.createSession('u1');
+    await store.createSession('u1'); // a2: sigue viva, se borra en revokeAllForUser
+
+    // Simula que la sesión a1 venció por TTL pero su sid quedó en el índice (staleness benigna).
+    await fake.del(`veo:session:${a1}`);
+
+    const revoked = await store.revokeAllForUser('u1');
+
+    // Solo a2 existía realmente → count = 1 (del de la key inexistente de a1 es no-op).
+    expect(revoked).toBe(1);
+    expect(await fake.smembers(userIndexKey('u1'))).toEqual([]);
+  });
+
+  it('pre-deploy / índice vacío: no revienta y devuelve 0 (las viejas se reapan por TTL + sello epoch)', async () => {
+    const fake = fakeRedis();
+    const store = new RedisRefreshTokenStore(fake as any, 100);
+    const revoked = await store.revokeAllForUser('sin-indice');
+    expect(revoked).toBe(0);
+  });
+});
+
 describe('SessionRevocationStore (denylist de revocación server-side)', () => {
-  // Fake que soporta lo que usa el denylist: set (con EX) y mget. Comparte Map con el refresh-store.
-  function fakeRedis() {
-    const store = new Map<string, string>();
-    return {
-      store,
-      async set(k: string, v: string) {
-        store.set(k, v);
-        return 'OK';
-      },
-      async mget(...ks: string[]) {
-        return ks.map((k) => store.get(k) ?? null);
-      },
-      async get(k: string) {
-        return store.get(k) ?? null;
-      },
-      async del(...ks: string[]) {
-        let n = 0;
-        for (const k of ks) if (store.delete(k)) n++;
-        return n;
-      },
-      async exists(k: string) {
-        return store.has(k) ? 1 : 0;
-      },
-      // Minimal: revokeAllForUser barre las sesiones con este stream antes de sellar revoked-before.
-      scanStream({ match }: { match: string }) {
-        const prefix = match.replace(/\*$/, '');
-        const keys = [...store.keys()].filter((k) => k.startsWith(prefix));
-        return (async function* () {
-          yield keys;
-        })();
-      },
-    };
-  }
+  // Usa el `fakeRedis()` compartido (soporta set/mget/del + SETs para el índice del refresh-store).
 
   it('per-sid: revokeSession → el token de ese sid queda revocado', async () => {
     const rev = new SessionRevocationStore(fakeRedis() as any);
