@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { deletedPlaceholder, enqueueOutbox } from '@veo/database';
 import { createEnvelope } from '@veo/events';
+import { RedisRefreshTokenStore } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -22,6 +23,9 @@ export class DeletionSweeper {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
+    // Singleton global (CoreModule): la misma instancia que usa auth.service. Se usa para revocar TODAS
+    // las sesiones de la cuenta borrada (revokeAllForUser) al aplicar el tombstone.
+    private readonly sessions: RedisRefreshTokenStore,
   ) {
     this.graceDays = config.getOrThrow<number>('DELETION_GRACE_DAYS');
   }
@@ -101,5 +105,28 @@ export class DeletionSweeper {
       });
       await enqueueOutbox(tx, envelope, userId);
     });
+
+    // Revoca TODAS las sesiones de la cuenta borrada (ADR-012 §2: revoke en borrado de cuenta).
+    // POST-COMMIT y best-effort a propósito:
+    //  - Redis NO es transaccional con Postgres: hacerlo DENTRO de la tx interactiva la mantendría abierta
+    //    durante el RTT a Redis (riesgo de timeout) y, si la tx luego revierte, habríamos revocado sesiones
+    //    de una cuenta cuyo tombstone no se aplicó.
+    //  - `revokeAllForUser` sella el denylist epoch `revoked:before:{userId}` → mata los access tokens vivos
+    //    al instante (no solo el refresh). Es lo que da valor por encima de `deletedAt`, que ya bloquea el
+    //    refresh en `reissueUserAccess` (rechaza `user.deletedAt`).
+    //  - fail-OPEN: si Redis no responde, NO revertimos el tombstone (la anonimización de PII, lo legalmente
+    //    crítico de BR-S06, ya se commiteó). Logueamos a ERROR. Residual acotado: los access tokens vivos
+    //    expiran en ≤ ACCESS_TTL (15m) y el refresh ya quedó bloqueado por `deletedAt`. El camino DURABLE
+    //    (consumer de `user.deleted` → `resealRevokedBefore`, el backstop diseñado para esto) se difiere:
+    //    exige cablear un consumer y el residual de 15m es aceptable para una cuenta ya anonimizada.
+    try {
+      await this.sessions.revokeAllForUser(userId);
+    } catch (err) {
+      this.logger.error(
+        `revoke best-effort de sesiones falló para la cuenta tombstoneada ${userId} (Redis caído?): ` +
+          `los access tokens vivos expiran en ≤15m; el refresh ya está bloqueado por deletedAt`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 }
