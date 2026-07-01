@@ -20,7 +20,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
  * Inicio de turno con verificación biométrica obligatoria (regla #1 de CLAUDE.md).
  * La captura/liveness por cámara es nativa (frame-grabber): aquí se construye la UI del flujo y, al
  * obtener el `sessionRef`, se llama al backend. Si el conductor no está enrolado, se le redirige a
- * registrar su rostro. El layout premium (escudo + halo cian) vive en `BiometricGate`.
+ * registrar su rostro. El layout premium (hero editorial + cara EN VIVO en círculo, mismo lenguaje que el
+ * KYC del alta) vive en `BiometricGate`, que orquesta el handoff de cámara antes de la captura de liveness.
  */
 export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
