@@ -22,7 +22,7 @@ export default function OpsPage() {
   const trips = useTrips({ status: 'ALL' });
 
   const markers = useMemo<MapMarker[]>(() => {
-    const driverMarkers: MapMarker[] = Object.values(drivers).map((d) => ({
+    const driverMarkers: MapMarker[] = Object.values(drivers).map(({ msg: d }) => ({
       id: `driver-${d.driverId}`,
       lon: d.point.lon,
       lat: d.point.lat,
