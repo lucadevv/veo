@@ -17,15 +17,24 @@ const BUSY_PREFIX = 'driver:busy:';
 const AVAIL_PREFIX = 'h3:available:';
 /// Margen amplio para el flag de ocupado; se limpia explícitamente al completar/cancelar el viaje.
 const BUSY_TTL_SECONDS = 7_200;
-/// Tamaño de página del SCAN para contar locs vivas: lotes grandes ⇒ menos round-trips, sin bloquear Redis.
-const ONLINE_SCAN_COUNT = 1_000;
+/**
+ * ÍNDICE DE PRESENCIA (ZSET) para el KPI "conductores en línea": member = driverId, score = epoch(ms) del
+ * último ping. `countOnline` = ZCOUNT dentro de la ventana TTL → O(log n), en vez del viejo `SCAN MATCH
+ * driver:loc:*` que barría TODO el keyspace por llamada (y el admin lo repollea cada 15s × dashboard).
+ * `driver:loc:{id}` sigue siendo la FUENTE de la posición (con su TTL); este ZSET es SOLO el índice para
+ * contar/listar presencia rápido. Consistencia: si `driver:loc:{id}` expira pero el ZSET aún no se podó, el
+ * score viejo cae FUERA de la ventana → ZCOUNT lo excluye igual (el borde de la ventana === el TTL de la loc).
+ */
+const ONLINE_ZSET_KEY = 'drivers:online';
 
 /**
- * KEYS[1]=set celda vieja, KEYS[2]=set celda nueva, KEYS[3]=loc, KEYS[4]=busy
- * ARGV[1]=driverId, ARGV[2]=locJson, ARGV[3]=ttl(s)
+ * KEYS[1]=set celda vieja, KEYS[2]=set celda nueva, KEYS[3]=loc, KEYS[4]=busy, KEYS[5]=zset presencia
+ * ARGV[1]=driverId, ARGV[2]=locJson, ARGV[3]=ttl(s), ARGV[4]=now(ms) (score de presencia = loc.updatedAt)
  * Devuelve 1 si quedó en el pool disponible, 0 si está ocupado (solo refresca loc).
+ * El ZADD al índice de presencia va SIEMPRE (disponible O ocupado: ambos están EN LÍNEA).
  */
 const MOVE_SCRIPT = `
+redis.call('ZADD', KEYS[5], ARGV[4], ARGV[1])
 local busy = redis.call('EXISTS', KEYS[4])
 if KEYS[1] ~= KEYS[2] then
   redis.call('SREM', KEYS[1], ARGV[1])
@@ -64,9 +73,11 @@ export class RedisHotIndex implements HotIndex {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
     // RMW best-effort: leemos `prev` FUERA del LUA y mergeamos los attrs en Node (abajo). Es seguro porque
     // los pings de UN conductor se SERIALIZAN aguas arriba: el firehose se particiona por driverId
-    // (location-publisher emite con key=driverId) y el consumer corre con partitionsConsumedConcurrently=1
-    // → no hay dos upsert del mismo driver concurrentes. Si ese invariante NO-local cambiara (otro productor
-    // sin esa key, o concurrencia >1, o un caller no-Kafka), la lectura podría quedar stale y un ping pisaría
+    // (location-publisher emite con key=driverId) → un mismo conductor cae SIEMPRE en la misma partición, y
+    // kafkajs procesa CADA partición SERIAL aunque el consumer suba partitionsConsumedConcurrently>1 (Lote 3:
+    // solo corren en paralelo particiones DISTINTAS = conductores DISTINTOS) → no hay dos upsert del mismo
+    // driver concurrentes. Si ese invariante NO-local cambiara (otro productor sin esa key, un caller no-Kafka,
+    // o un particionado que NO fuera por driverId), la lectura podría quedar stale y un ping pisaría
     // un attr recién llegado — transitorio (fail-open + self-heal al próximo ping), pero ahí habría que mover
     // el merge DENTRO del LUA (leer la loc viva en el script y mergear los attrs ausentes). Gate `wkege7nth` (BAJA).
     const prev = await this.getLocation(driverId);
@@ -121,14 +132,17 @@ export class RedisHotIndex implements HotIndex {
     };
     await this.redis.eval(
       MOVE_SCRIPT,
-      4,
+      5,
       this.availKey(oldCell),
       this.availKey(h3),
       this.locKey(driverId),
       this.busyKey(driverId),
+      ONLINE_ZSET_KEY,
       driverId,
       JSON.stringify(loc),
       String(this.locTtlSeconds),
+      // score de presencia = el MISMO timestamp de la loc → el borde de la ventana de countOnline === el TTL.
+      String(loc.updatedAt),
     );
     return loc;
   }
@@ -155,6 +169,9 @@ export class RedisHotIndex implements HotIndex {
     if (loc) pipeline.srem(this.availKey(loc.h3), driverId);
     pipeline.del(this.locKey(driverId));
     pipeline.del(this.busyKey(driverId));
+    // Sale del ÍNDICE DE PRESENCIA (fin de turno / offline): sin esto seguiría contando como "en línea"
+    // hasta que su score caiga fuera de la ventana TTL. Espeja el `locations.delete()` de InMemoryHotIndex.
+    pipeline.zrem(ONLINE_ZSET_KEY, driverId);
     await pipeline.exec();
   }
 
@@ -212,24 +229,18 @@ export class RedisHotIndex implements HotIndex {
   }
 
   async countOnline(): Promise<number> {
-    // Conteo por SCAN (cursor, NO `KEYS`/`DBSIZE`): KEYS bloquea el hilo único de Redis en O(N) sobre
-    // TODO el keyspace; SCAN itera en lotes de `ONLINE_SCAN_COUNT` sin bloquear. Contamos las claves
-    // `driver:loc:*` —presencia = "en línea"— en vez de unir los N SETs por celda (esos son solo los
-    // disponibles y dejarían fuera a los ocupados, que siguen online). Un solo barrido, sin N+1.
-    let cursor = '0';
-    let count = 0;
-    do {
-      const [next, keys] = await this.redis.scan(
-        cursor,
-        'MATCH',
-        `${LOC_PREFIX}*`,
-        'COUNT',
-        ONLINE_SCAN_COUNT,
-      );
-      cursor = next;
-      count += keys.length;
-    } while (cursor !== '0');
-    return count;
+    // O(log n) sobre el ÍNDICE DE PRESENCIA (ZSET `drivers:online`), NO un SCAN del keyspace: el viejo
+    // `SCAN MATCH driver:loc:*` era O(keyspace) por llamada (miles de claves loc+busy+h3) y el admin lo
+    // repollea cada 15s × dashboard → M barridos completos. Contamos los que pingaron DENTRO de la ventana
+    // TTL (presencia viva = "en línea", disponible U ocupado — un conductor en viaje sigue online).
+    const cutoff = Date.now() - this.locTtlSeconds * 1_000;
+    // Poda OPORTUNISTA de los muertos (score <= cutoff): acota la memoria del ZSET sin depender de un cron.
+    // La lectura NO depende de esto —el ZCOUNT ya excluye los viejos por ventana—, solo evita el crecimiento
+    // ilimitado por conductores que se fueron offline sin un `remove()` explícito (TTL vencido, no fin de turno).
+    await this.redis.zremrangebyscore(ONLINE_ZSET_KEY, '-inf', cutoff);
+    // Cuenta los vivos: score ESTRICTAMENTE mayor que cutoff (borde exclusivo). Espeja el TTL de la loc:
+    // updatedAt > now - TTL  ⟺  la loc aún no expiró (SET ... 'EX' locTtlSeconds con score = updatedAt).
+    return this.redis.zcount(ONLINE_ZSET_KEY, `(${cutoff}`, '+inf');
   }
 
   /**

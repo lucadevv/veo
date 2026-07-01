@@ -84,6 +84,14 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # ESCALA (Lote 3 · firehose GPS): particiones por defecto de los topics AUTO-creados (num.partitions).
+      # El topic `driver-location` (key=driverId) se reparte en 12 particiones → el consumer de dispatch las
+      # procesa en paralelo (KAFKA_CONSUMER_CONCURRENCY / partitionsConsumedConcurrently). 12 = múltiplo
+      # alto-divisible (2,3,4,6,12): permite escalar instancias de dispatch sin re-particionar. Un mismo driver
+      # cae SIEMPRE en la misma partición (keyed) → la serialización per-driver del hot-index se preserva.
+      # OJO: aplica a TODOS los topics auto-creados; subir particiones de un topic YA existente RE-HASHEA las
+      # keys (reorder transitorio) — el firehose es idempotente/self-heal, lo tolera (ver STATUS/ADR).
+      KAFKA_NUM_PARTITIONS: 12
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1

@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { BID_MAX_CENTS, requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
+import { DRIVER_LOC_TTL_SECONDS_DEFAULT } from '@veo/shared-types';
 import { MAPS_MODES } from '@veo/maps';
 import { outboxEnvSchema } from '@veo/database';
 
@@ -24,6 +25,13 @@ export const envSchema = z
 
     // Kafka (outbox relay + consumidores)
     KAFKA_BROKERS: requiredInProd('localhost:9094'),
+    /// ESCALA (firehose GPS): Nº de particiones que el consumer procesa EN PARALELO (kafkajs
+    /// `partitionsConsumedConcurrently`). El topic `driver-location` está keyed por driverId → un mismo
+    /// conductor cae SIEMPRE en la misma partición y se procesa SERIAL (invariante RMW del hot-index
+    /// intacto); solo corren en paralelo conductores de particiones DISTINTAS. Default 12 = alineado con
+    /// `KAFKA_NUM_PARTITIONS` del broker (dev-stack/preview compose): con 1 instancia de dispatch todas las
+    /// particiones le tocan a este consumer, así que 12 lo paraleliza 12×. Debe ser <= particiones del topic.
+    KAFKA_CONSUMER_CONCURRENCY: z.coerce.number().int().positive().default(12),
 
     // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
     // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
@@ -56,7 +64,8 @@ export const envSchema = z
 
     // ── Hot index ──
     /// TTL del registro de ubicación de un conductor; si no pinguea, deja de ser candidato (BR-T06).
-    DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(60),
+    /// Default = FUENTE ÚNICA compartida con admin-web (poda de markers stale del mapa /ops).
+    DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(DRIVER_LOC_TTL_SECONDS_DEFAULT),
 
     // ── Algoritmo de matching (BR-T06) ──
     /// Milisegundos de espera de respuesta del conductor por oferta antes de marcarla TIMEOUT y avanzar.

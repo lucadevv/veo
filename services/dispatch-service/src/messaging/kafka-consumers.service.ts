@@ -59,6 +59,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       clientId: KAFKA_CLIENT_ID,
       brokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
       groupId: GROUP_ID,
+      // ESCALA (Lote 3 · firehose GPS): procesa varias particiones EN PARALELO. `driver-location` está keyed
+      // por driverId → un mismo conductor cae SIEMPRE en la misma partición y kafkajs la procesa SERIAL (el
+      // RMW per-driver del hot-index queda intacto); solo corren en paralelo conductores de particiones
+      // DISTINTAS. Los demás topics de este group también son per-key (per-aggregate) → su orden se preserva.
+      partitionsConsumedConcurrently: config.getOrThrow<number>('KAFKA_CONSUMER_CONCURRENCY'),
     });
   }
 

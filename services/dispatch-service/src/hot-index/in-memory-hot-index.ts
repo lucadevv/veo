@@ -117,6 +117,10 @@ export class InMemoryHotIndex implements HotIndex {
 
   async countOnline(): Promise<number> {
     // Mismo contrato que RedisHotIndex.countOnline: presencia de loc = "en línea" (disponible u ocupado).
+    // Redis lo sirve con un ÍNDICE de presencia (ZSET `drivers:online`, O(log n) + ventana TTL); acá el
+    // `Map` de ubicaciones ES ese índice (upsert→set, remove→delete lo mantienen), así que su `size` es el
+    // equivalente fiel. No hay expiración por tiempo en este doble (los tests siembran y cuentan al toque),
+    // por eso no se filtra por ventana — la MEMBRESÍA es la misma verdad que el ZSET modela en Redis.
     return this.locations.size;
   }
 }

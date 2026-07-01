@@ -79,13 +79,38 @@ export class KafkaEventProducer {
 
 export type EventHandler = (envelope: EventEnvelope<unknown>) => Promise<void>;
 
+/**
+ * Opciones de un KafkaEventConsumer.
+ *
+ * `partitionsConsumedConcurrently` es OPCIONAL y POR-CONSUMER (no un global mágico): default 1 → cada
+ * consumer que NO la sube conserva el comportamiento histórico (una partición a la vez, orden estricto).
+ * Subirla paraleliza SOLO particiones DISTINTAS — kafkajs sigue procesando CADA partición SERIAL —, así
+ * que la serialización per-KEY (per-aggregate) se PRESERVA: un mismo key cae siempre en la misma partición
+ * y sus mensajes se procesan en orden. La sube el consumer del firehose de GPS (dispatch, key=driverId)
+ * para escalar a 1000 conductores concurrentes SIN romper el RMW per-driver del hot-index.
+ */
+export interface KafkaEventConsumerOptions {
+  partitionsConsumedConcurrently?: number;
+}
+
+/** Normaliza la concurrencia a un entero >= 1 (default 1). Tolera undefined / '' / valores inválidos. */
+function normalizePartitionConcurrency(value: number | undefined): number {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
 export class KafkaEventConsumer {
   private readonly consumer: Consumer;
   private readonly handlers = new Map<string, EventHandler>();
   private readonly topics = new Set<string>();
+  /** Nº de particiones procesadas EN PARALELO (default 1 = orden estricto por partición). */
+  private readonly partitionsConsumedConcurrently: number;
 
-  constructor(kafka: Kafka, groupId: string) {
+  constructor(kafka: Kafka, groupId: string, options?: KafkaEventConsumerOptions) {
     this.consumer = kafka.consumer({ groupId, sessionTimeout: 30_000 });
+    this.partitionsConsumedConcurrently = normalizePartitionConcurrency(
+      options?.partitionsConsumedConcurrently,
+    );
   }
 
   /** Registra un handler para un eventType y se suscribe a su topic. */
@@ -101,6 +126,9 @@ export class KafkaEventConsumer {
       await this.consumer.subscribe({ topic, fromBeginning });
     }
     await this.consumer.run({
+      // ESCALA: procesa hasta N particiones EN PARALELO (default 1). Solo paraleliza particiones
+      // DISTINTAS; cada partición sigue serial → el orden per-KEY se preserva (ver KafkaEventConsumerOptions).
+      partitionsConsumedConcurrently: this.partitionsConsumedConcurrently,
       eachMessage: async ({ topic, partition, message }) => {
         if (!message.value) return;
         // POISON-SAFE PARSE (incidente dev 2026-06 · ver poison.ts): un `value` NO-JSON (truncado, binario,

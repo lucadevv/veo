@@ -143,4 +143,21 @@ describe('InMemoryHotIndex · paridad anti-clobber con Redis', () => {
     expect(loc?.segment).toBeUndefined();
     expect(loc?.vehicleYear).toBeUndefined();
   });
+
+  // countOnline (paridad con RedisHotIndex): presencia viva = "en línea". upsert suma, remove resta, y un
+  // conductor OCUPADO sigue online (el ping lo mantiene en el índice). En Redis esto lo sirve el ZSET
+  // `drivers:online` con ventana TTL; acá el `Map` de ubicaciones es ese índice (mismo contrato observable).
+  it('[countOnline] cuenta la presencia: upsert suma, ocupado sigue online, remove resta', async () => {
+    const idx = new InMemoryHotIndex();
+    expect(await idx.countOnline()).toBe(0);
+    await idx.upsertLocation('a', P, VehicleClass.CAR);
+    await idx.upsertLocation('b', { lat: -12.09, lon: -77.05 }, VehicleClass.CAR);
+    expect(await idx.countOnline()).toBe(2);
+    // Ocupado (en viaje) SIGUE en línea — no se descuenta.
+    await idx.markBusy('a');
+    expect(await idx.countOnline()).toBe(2);
+    // Fin de turno / offline: sale del conteo.
+    await idx.remove('b');
+    expect(await idx.countOnline()).toBe(1);
+  });
 });

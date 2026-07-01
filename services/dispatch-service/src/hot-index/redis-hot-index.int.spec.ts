@@ -314,4 +314,44 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
     expect(loc?.vehicleYear).toBe(2023);
   });
+
+  // ── countOnline: KPI O(log n) sobre el ÍNDICE de presencia (ZSET drivers:online), NO SCAN del keyspace ──
+  // Aislados en una DB lógica de Redis propia (db 3/4) para no contaminar el conteo con los drivers que los
+  // otros casos ya sembraron en db 0 (que NO se puede flushear a mitad del archivo).
+
+  it('countOnline cuenta la presencia viva (disponible U ocupado) y honra remove()', async () => {
+    const iso = new Redis({ host: container.getHost(), port: container.getMappedPort(6379), db: 3 });
+    try {
+      const hi = new RedisHotIndex(iso, 60);
+      expect(await hi.countOnline()).toBe(0);
+      await hi.upsertLocation('on1', A, VehicleClass.CAR);
+      await hi.upsertLocation('on2', B, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(2);
+      // OCUPADO sigue EN LÍNEA: el ping durante el viaje lo mantiene en el índice de presencia (ZADD en el LUA).
+      await hi.markBusy('on1');
+      await hi.upsertLocation('on1', A, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(2);
+      // remove() lo saca del ZSET (fin de turno) → deja de contar.
+      await hi.remove('on2');
+      expect(await hi.countOnline()).toBe(1);
+    } finally {
+      await iso.quit();
+    }
+  });
+
+  it('countOnline EXCLUYE y PODA las presencias fuera de la ventana TTL', async () => {
+    const iso = new Redis({ host: container.getHost(), port: container.getMappedPort(6379), db: 4 });
+    try {
+      const hi = new RedisHotIndex(iso, 1); // TTL de 1s = ventana de presencia de 1s
+      await hi.upsertLocation('ttl1', A, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(1);
+      // Pasado el TTL, el score cae fuera de la ventana → ZCOUNT lo excluye (la loc además ya expiró en Redis).
+      await new Promise((r) => setTimeout(r, 1_300));
+      expect(await hi.countOnline()).toBe(0);
+      // La poda oportunista de countOnline lo REMOVIÓ del ZSET (no solo lo excluyó por ventana) → memoria acotada.
+      expect(await iso.zcard('drivers:online')).toBe(0);
+    } finally {
+      await iso.quit();
+    }
+  });
 });
