@@ -2670,6 +2670,227 @@ export type SupportTicket = z.infer<typeof supportTicket>;
 export const supportTicketList = z.array(supportTicket);
 export type SupportTicketList = z.infer<typeof supportTicketList>;
 
+/* ═══════════════════════ CARPOOLING · CONDUCTOR (driver-bff → booking-service) ═══════════════════════ */
+
+/*
+ * Marketplace de carpooling PROGRAMADO (ADR-014). El CONDUCTOR publica una oferta (PublishedTrip), lista las
+ * suyas, la edita/cancela, ve las solicitudes entrantes (Booking) y las aprueba/rechaza. Todo pasa por el
+ * driver-bff (`/api/v1/carpool/*`), que resuelve el driverId server-side (anti-IDOR) y proxya a booking-service.
+ * El `driverId`/`passengerId` NUNCA viajan en el body: los deriva el servidor de la identidad firmada.
+ * Montos SIEMPRE en céntimos PEN (enteros). Geo en grados decimales. Fechas ISO-8601 string.
+ */
+
+/**
+ * Modo de RESERVA de la oferta (ADR-014 §3 · enum Prisma `ModoReserva`). Sin string mágico: la app compara
+ * contra `carpoolModoReserva.enum.*`.
+ *  - INSTANT_BOOKING: la reserva nace APROBADA (el pasajero confirma sin esperar al conductor).
+ *  - REVISION_CADA_SOLICITUD: el conductor aprueba/rechaza CADA solicitud antes del cobro.
+ */
+export const carpoolModoReserva = z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']);
+export type CarpoolModoReserva = z.infer<typeof carpoolModoReserva>;
+
+/**
+ * Modo de PRICING de la oferta (ADR-014 §3 · enum Prisma `PricingMode`). Hoy SOLO FIJO; PUJA queda fuera de
+ * este ADR (F6). Se expone como enum de un valor para que la app no hardcodee el literal.
+ */
+export const carpoolPricingMode = z.enum(['FIJO']);
+export type CarpoolPricingMode = z.infer<typeof carpoolPricingMode>;
+
+/**
+ * Estado del PublishedTrip (la OFERTA) — ADR-014 §3/§4.1 · enum Prisma `PublishedTripState`. La app pinta la
+ * card según el estado (borrador/publicado/parcial/lleno/en_ruta/completado/cancelado).
+ */
+export const publishedTripState = z.enum([
+  'BORRADOR',
+  'PUBLICADO',
+  'PARCIALMENTE_RESERVADO',
+  'LLENO',
+  'EN_RUTA',
+  'COMPLETADO',
+  'CANCELADO',
+]);
+export type PublishedTripState = z.infer<typeof publishedTripState>;
+
+/**
+ * Estado del Booking (la SOLICITUD/RESERVA del pasajero) — ADR-014 §3/§4.2 · enum Prisma `BookingState`.
+ * COBRO_PENDIENTE = aprobado pero el dinero aún no capturó (CHARGE async en vuelo).
+ */
+export const bookingState = z.enum([
+  'SOLICITADO',
+  'PENDIENTE_APROBACION',
+  'APROBADO',
+  'COBRO_PENDIENTE',
+  'RECHAZADO',
+  'EXPIRADO',
+  'CONFIRMADO',
+  'EN_RUTA',
+  'COMPLETADO',
+  'CANCELADO',
+]);
+export type BookingState = z.infer<typeof bookingState>;
+
+/**
+ * Una parada intermedia de la ruta (ADR-014 §2.1). `orden` ≥ 1 (el 0 es el origen, reservado). Dos stopovers
+ * no pueden compartir `orden` (se pisarían) — el borde lo revalida el servidor.
+ */
+export const carpoolStopover = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  orden: z.number().int().min(1),
+});
+export type CarpoolStopover = z.infer<typeof carpoolStopover>;
+
+/** Precio de un tramo de la ruta (ADR-014 §2.1). Dinero en céntimos PEN (Int). */
+export const carpoolTramoPrecio = z.object({
+  desdeOrden: z.number().int().min(0),
+  hastaOrden: z.number().int().min(0),
+  precioCentimos: z.number().int().min(0),
+});
+export type CarpoolTramoPrecio = z.infer<typeof carpoolTramoPrecio>;
+
+/** Techo de cordura del peaje declarado (céntimos PEN) — espeja `MAX_TOLLS_CENTS` de booking-service. */
+export const CARPOOL_MAX_TOLLS_CENTS = 50000;
+
+/**
+ * POST /carpool/trips → body (publicar una oferta · ADR-014 §2.1 · CreatePublishedTripDto). El `driverId` NO
+ * va acá: lo deriva el driver-bff de la identidad firmada (server-truth). Se puede mandar `Idempotency-Key`
+ * (header) para deduplicar el submit. Montos en céntimos PEN.
+ */
+export const publishTripRequest = z.object({
+  /** Vehículo con el que se publica (ref a fleet por id). */
+  vehicleId: z.string().uuid(),
+  origenLat: z.number().min(-90).max(90),
+  origenLon: z.number().min(-180).max(180),
+  destinoLat: z.number().min(-90).max(90),
+  destinoLon: z.number().min(-180).max(180),
+  /** Paradas intermedias (opcional, ≤20). `orden` único ≥1; el servidor revalida contigüidad. */
+  stopovers: z.array(carpoolStopover).max(20).optional(),
+  /** Salida PROGRAMADA en el FUTURO (ISO-8601). La validación temporal fina la hace el servidor. */
+  fechaHoraSalida: z.string().datetime(),
+  /** Asientos ofrecidos (1..8). */
+  asientosTotales: z.number().int().min(1).max(8),
+  /** Precio del asiento full-route en céntimos PEN (Int). */
+  precioBase: z.number().int().min(0),
+  /** Pricing por tramo (opcional, ≤40) — F1 en la UI; el servidor lo acepta desde F0. */
+  precioPorTramo: z.array(carpoolTramoPrecio).max(40).optional(),
+  /** Peaje del viaje en céntimos PEN (Int). Se SUMA al costo y se divide entre asientos en el tope. */
+  tollsCents: z.number().int().min(0).max(CARPOOL_MAX_TOLLS_CENTS).optional(),
+  modoReserva: carpoolModoReserva,
+  /** Reglas del viaje (equipaje, mascotas, etc.), ≤1000 chars. */
+  reglas: z.string().max(1000).optional(),
+});
+export type PublishTripRequest = z.infer<typeof publishTripRequest>;
+
+/**
+ * PATCH /carpool/trips/:id → body (editar una oferta · ADR-014 §8 F1a · UpdatePublishedTripDto). Patch PARCIAL:
+ * TODOS los campos opcionales, el conductor edita solo lo que cambia. NO editable: `vehicleId` (re-publicar con
+ * otro vehículo es otra oferta), país/moneda/pricingMode. Editable SOLO mientras la oferta está PUBLICADO (lo
+ * impone el servidor contra la máquina de estados). El `driverId`/`id` NO van en el body.
+ */
+export const updateTripRequest = z.object({
+  origenLat: z.number().min(-90).max(90).optional(),
+  origenLon: z.number().min(-180).max(180).optional(),
+  destinoLat: z.number().min(-90).max(90).optional(),
+  destinoLon: z.number().min(-180).max(180).optional(),
+  stopovers: z.array(carpoolStopover).max(20).optional(),
+  fechaHoraSalida: z.string().datetime().optional(),
+  asientosTotales: z.number().int().min(1).max(8).optional(),
+  precioBase: z.number().int().min(0).optional(),
+  precioPorTramo: z.array(carpoolTramoPrecio).max(40).optional(),
+  tollsCents: z.number().int().min(0).max(CARPOOL_MAX_TOLLS_CENTS).optional(),
+  modoReserva: carpoolModoReserva.optional(),
+  reglas: z.string().max(1000).optional(),
+});
+export type UpdateTripRequest = z.infer<typeof updateTripRequest>;
+
+/**
+ * La OFERTA del conductor tal como el servidor la devuelve (PublishedTrip serializado · ADR-014 §2.1). La
+ * devuelven POST /carpool/trips (creada), PATCH /carpool/trips/:id (editada), POST /carpool/trips/:id/cancel
+ * (cancelada) y cada item de GET /carpool/trips (mine). `asientosDisponibles` decrementa al CONFIRMAR una
+ * reserva (nace == asientosTotales). Los campos H3 son internos del índice geo (pueden venir null).
+ */
+export const publishedTripView = z.object({
+  id: z.string().uuid(),
+  driverId: z.string().uuid(),
+  vehicleId: z.string().uuid(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  originH3: z.string().nullable(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  destH3: z.string().nullable(),
+  stopovers: z.array(carpoolStopover),
+  /** ISO-8601 (salida programada). */
+  fechaHoraSalida: z.string(),
+  asientosTotales: z.number().int(),
+  /** Asientos aún libres (decrementa al CONFIRMAR · §6). */
+  asientosDisponibles: z.number().int(),
+  pricingMode: carpoolPricingMode,
+  precioBase: z.number().int(),
+  precioPorTramo: z.array(carpoolTramoPrecio),
+  tollsCents: z.number().int(),
+  modoReserva: carpoolModoReserva,
+  reglas: z.string().nullable(),
+  pais: z.string(),
+  moneda: z.string(),
+  estado: publishedTripState,
+  /** ISO-8601. */
+  createdAt: z.string(),
+  /** ISO-8601. */
+  updatedAt: z.string(),
+});
+export type PublishedTripView = z.infer<typeof publishedTripView>;
+
+/**
+ * GET /carpool/trips (mine) → página de las ofertas del conductor. BARE ARRAY paginado por KEYSET: el cliente
+ * pasa `?limit=&cursor=` y, para la siguiente página, usa el `id` del ÚLTIMO item como `cursor` (no hay
+ * envelope con nextCursor; se agotó cuando la página vuelve más corta que `limit`). Scoped server-truth al
+ * conductor autenticado (anti-IDOR).
+ */
+export const publishedTripList = z.array(publishedTripView);
+export type PublishedTripList = z.infer<typeof publishedTripList>;
+
+/**
+ * La SOLICITUD (reserva) entrante que el conductor VE sobre uno de sus viajes (Booking serializado · ADR-014
+ * §2.2). La devuelven cada item de GET /carpool/trips/:id/bookings y POST /carpool/bookings/:id/{approve,reject}
+ * (la reserva tras la transición). `precioAcordado` = precioBase + specialRequest (céntimos PEN). `specialRequest`
+ * = top-up en céntimos (null si no hubo). `paymentId` se setea al disparar el CHARGE.
+ */
+export const bookingRequestView = z.object({
+  id: z.string().uuid(),
+  publishedTripId: z.string().uuid(),
+  passengerId: z.string().uuid(),
+  asientos: z.number().int(),
+  pickupLat: z.number(),
+  pickupLon: z.number(),
+  dropoffLat: z.number(),
+  dropoffLon: z.number(),
+  /** Céntimos PEN = precioBase + specialRequest. */
+  precioAcordado: z.number().int(),
+  /** Mensaje de presentación del pasajero (null si no puso). */
+  mensajeIntro: z.string().nullable(),
+  /** Top-up en céntimos sobre la base por solicitud especial (null si no hubo). */
+  specialRequest: z.number().int().nullable(),
+  /** Método de pago que ELIGIÓ el pasajero al reservar. */
+  paymentMethod: mobilePaymentMethod,
+  /** Se setea al disparar el CHARGE (null antes). */
+  paymentId: z.string().uuid().nullable(),
+  estado: bookingState,
+  /** ISO-8601. */
+  createdAt: z.string(),
+  /** ISO-8601. */
+  updatedAt: z.string(),
+});
+export type BookingRequestView = z.infer<typeof bookingRequestView>;
+
+/**
+ * GET /carpool/trips/:id/bookings (tripBookings) → página de las solicitudes de un viaje PROPIO. BARE ARRAY
+ * paginado por KEYSET (mismo patrón que `mine`: `?limit=&cursor=`, el cursor de la próxima página es el `id`
+ * del último item). Ownership server-truth: viaje ajeno/inexistente → 404 (anti-IDOR, no filtra existencia).
+ */
+export const bookingRequestList = z.array(bookingRequestView);
+export type BookingRequestList = z.infer<typeof bookingRequestList>;
+
 /* ═══════════════════════ SOCKET.IO MÓVIL ═══════════════════════ */
 
 /** ETA del conductor hacia el siguiente hito (recojo o destino), en segundos. */

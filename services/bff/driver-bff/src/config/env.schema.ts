@@ -73,6 +73,9 @@ export const envSchema = z
     MEDIA_URL: requiredInProd('http://localhost:3007', { url: true }),
     // chat-service (Ola 2A): historial + persistencia de mensajes del viaje.
     CHAT_URL: requiredInProd('http://localhost:3014', { url: true }),
+    // booking-service (ADR-014 · carpooling PROGRAMADO): publicar/listar/editar/cancelar ofertas + ver y
+    // aprobar/rechazar solicitudes entrantes. REST fijo 3016 (ADR-014 §12).
+    BOOKING_SERVICE_URL: requiredInProd('http://localhost:3016', { url: true }),
 
     // Bucket S3/MinIO PRIVADO de documentos de flota (PII). Debe coincidir con media-service
     // (S3_BUCKET_DOCUMENTS). El driver-bff lo pasa explícito al presign-put de media.
