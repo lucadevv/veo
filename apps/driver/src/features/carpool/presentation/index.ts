@@ -12,4 +12,4 @@ export {
 } from './hooks/useCarpool';
 export { CarpoolScreen } from './screens/CarpoolScreen';
 export { CarpoolPublishScreen } from './screens/CarpoolPublishScreen';
-export { CarpoolTripBookingsScreen } from './screens/CarpoolPlaceholders';
+export { CarpoolTripBookingsScreen } from './screens/CarpoolTripBookingsScreen';

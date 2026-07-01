@@ -60,6 +60,24 @@
       "EN_RUTA": "En ruta",
       "COMPLETADO": "Completado",
       "CANCELADO": "Cancelado"
+    },
+    "seatsRequested": "{{count}} asiento(s)",
+    "agreedPrice": "Precio acordado",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "noRequestsTitle": "Sin solicitudes todavía",
+    "noRequestsBody": "Cuando un pasajero reserve tu viaje, su solicitud aparece acá para que la apruebes o rechaces.",
+    "bookingState": {
+      "SOLICITADO": "Solicitado",
+      "PENDIENTE_APROBACION": "Pendiente",
+      "APROBADO": "Aprobado",
+      "COBRO_PENDIENTE": "Cobrando",
+      "CONFIRMADO": "Confirmado",
+      "RECHAZADO": "Rechazado",
+      "EXPIRADO": "Expirado",
+      "CANCELADO": "Cancelado",
+      "EN_RUTA": "En ruta",
+      "COMPLETADO": "Completado"
     }
   },
   "errors": {
