@@ -195,6 +195,39 @@ class BiometricPipeline:
             return None
         return self._anti_spoof.classify(image_bgr, detection)
 
+    def _passive_liveness(
+        self,
+        action: ChallengeAction,
+        signals: Sequence[FrameSignals],
+        frames_bgr: Sequence[NDArrayU8],
+    ) -> LivenessResult:
+        """Prueba de vida PASIVA del gate de turno: corre el PAD (MiniFASNet) sobre el MEJOR frame con un
+        rostro claro, en vez del reto geométrico (sonreír/girar). Es el MISMO motor que el enroll del
+        registro (`classify_liveness`). Sin PAD cargado → degradación HONESTA: no bloquea el turno (el match
+        ArcFace sigue gateando la identidad); el estado degradado es visible en /health/ready."""
+        valid_idxs = [i for i, s in enumerate(signals) if s.face_count == 1]
+        if not valid_idxs:
+            return LivenessResult(
+                passed=False, action=action, reason="sin rostro claro para la prueba de vida"
+            )
+        best_idx = max(valid_idxs, key=lambda i: self._frame_quality(frames_bgr[i], signals[i]))
+        count, detection = self.best_detection(frames_bgr[best_idx])
+        if count != 1 or detection is None:
+            return LivenessResult(
+                passed=False, action=action, reason="no se aisló un rostro claro para la prueba de vida"
+            )
+        verdict = self.classify_liveness(frames_bgr[best_idx], detection)
+        if verdict is None:
+            return LivenessResult(
+                passed=True, action=action, reason="prueba de vida pasiva no disponible (degradado)"
+            )
+        return LivenessResult(
+            passed=verdict.live,
+            action=action,
+            reason="ok" if verdict.live else "posible suplantación (foto o pantalla)",
+            detail={"spoof_score": verdict.score},
+        )
+
     def verify(
         self,
         *,
@@ -230,7 +263,14 @@ class BiometricPipeline:
             return PipelineOutput(decision=decision, liveness=liveness, faces_in_primary_frame=0)
 
         signals = self.extract_signals(frames_bgr)
-        liveness = evaluate_liveness(action, signals, self._thresholds)
+        # Gate de turno: liveness PASIVO (PAD single-frame) por default — decisión del dueño, coherente con el
+        # enroll del registro — o ACTIVO (reto geométrico) según `verify_liveness_mode`. El binding/match de
+        # abajo (embed + consistencia intra-secuencia + coseno) NO cambia entre modos.
+        liveness = (
+            self._passive_liveness(action, signals, frames_bgr)
+            if self._settings.verify_liveness_mode == "passive"
+            else evaluate_liveness(action, signals, self._thresholds)
+        )
 
         # Frames con un único rostro claro (hasta max_match_frames para acotar el costo de inferencia).
         valid_idxs = [i for i, s in enumerate(signals) if s.face_count == 1][

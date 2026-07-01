@@ -107,6 +107,14 @@ class Settings(BaseSettings):
     # DEUDA (acotada): el índice (1) y el preprocessing (0-255) quedaron VERIFICADOS contra el modelo real; resta
     # afinar `spoof_threshold` (0.60 heurístico) con un set etiquetado real/impreso/pantalla de la población real.
 
+    # --- Liveness del GATE DE TURNO (/v1/verify): pasivo (PAD single-frame) vs activo (reto de acción) ---
+    # Decisión del dueño (2026-07-01): el turno usa liveness PASIVO — el MISMO PAD (MiniFASNet) que el enroll
+    # del registro, corrido sobre el MEJOR frame capturado — en vez del reto geométrico (sonreír/girar 18°).
+    # Coherente con la dirección "KYC pasivo sin lag": el conductor NO ejecuta un gesto guiado (el app nunca lo
+    # guiaba → el reto activo rechazaba a conductores reales); el anti-spoof lo da el PAD y la identidad el match
+    # ArcFace. "active" mantiene el reto geométrico. Config por VEO_BIO_VERIFY_LIVENESS_MODE.
+    verify_liveness_mode: Literal["active", "passive"] = "passive"
+
     # --- Liveness activo (por reto) ---
     challenge_ttl_seconds: int = 60
     # Store de retos: vacío ⇒ in-memory (una réplica, dev). Con URL Redis ⇒ store distribuido
