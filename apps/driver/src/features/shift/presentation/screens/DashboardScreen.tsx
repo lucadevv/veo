@@ -109,6 +109,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore((s) => s.activeTripId);
+  // Salud del socket `/driver`: si está caído, el conductor NO publica GPS → el dispatch/admin dejan de verlo.
+  const connected = useDispatchStore((s) => s.connected);
   const lastTip = useTipStore((s) => s.lastTip);
   const clearTip = useTipStore((s) => s.clearTip);
   const activeVehicle = useActiveVehicle();
@@ -139,7 +141,14 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const status = shift.data?.status ?? 'UNKNOWN';
   const online = isOnShift(status);
-  const pill = shiftPill(status, t);
+  // El pill NO puede MENTIR: si el conductor está EN LÍNEA pero el socket `/driver` está caído (túnel, zona
+  // muerta, sesión revocada en otro device), dejó de publicar GPS y el dispatch/admin YA no lo ven. Mostrar
+  // "Reconectando…" (neutral, sin pulso) en vez de "En línea" evita que crea que está visible cuando no lo está
+  // — el mismo criterio honesto que ya usa TripActiveScreen durante el viaje.
+  const pill: ShiftPill =
+    online && !connected
+      ? { label: t('shift.status.reconnecting'), tone: 'neutral', live: false }
+      : shiftPill(status, t);
 
   // Disponibilidad del GPS (servicios del SO + permiso). Si el conductor está EN TURNO pero apagó la
   // ubicación o no dio permiso, NO emite su posición y el dispatch no lo ve, aunque la UI lo muestre

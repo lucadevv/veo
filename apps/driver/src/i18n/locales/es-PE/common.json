@@ -458,6 +458,7 @@
       "onBreak": "En pausa",
       "onTrip": "En viaje",
       "suspended": "Cuenta suspendida",
+      "reconnecting": "Reconectando…",
       "unknown": "Desconocido"
     },
     "suspendedTitle": "Tu cuenta está suspendida",
