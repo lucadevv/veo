@@ -149,9 +149,11 @@ export function OtpField({
           onChangeText={onChangeText}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
+          // Teclado del SO en modo numérico: da los dígitos + BORRAR (backspace), que es lo que el usuario
+          // necesita para corregir un dígito mal tecleado. NO usamos `textContentType`/`autoComplete` de OTP
+          // a propósito: disparaban la barra de autofill del SO con códigos SMS recientes ("otros códigos"
+          // que confunden). Entrada + corrección con el teclado nativo, sin sugerencias de código.
           keyboardType="number-pad"
-          autoComplete="sms-otp"
-          textContentType="oneTimeCode"
           maxLength={length}
           autoFocus
           caretHidden

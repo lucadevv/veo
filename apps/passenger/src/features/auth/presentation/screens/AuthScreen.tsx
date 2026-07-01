@@ -25,7 +25,6 @@ import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmar
 import {isValidPhone, useAuthFlow} from '../hooks/useAuthFlow';
 import {type OAuthErrorKind, useOAuthFlow} from '../hooks/useOAuthFlow';
 import {OtpField} from '../components/OtpField';
-import {OtpKeypad} from '../components/OtpKeypad';
 import {OtpHelpSheet} from '../components/OtpHelpSheet';
 import {EmailAuthScreen} from './EmailAuthScreen';
 import {
@@ -228,13 +227,6 @@ export function AuthScreen(): React.JSX.Element {
       // El error ya queda clasificado en `oauth.appleError` (Banner). La cancelación no pinta nada.
     }
   }, [oauth]);
-
-  // El teclado propio del OTP escribe el MISMO `code` que el OtpField (que conserva el autofill SMS):
-  // ambos convergen en este setter, recortando a la longitud del OTP.
-  const appendDigit = useCallback((digit: string) => {
-    setComingSoon(null);
-    setCode(prev => (prev + digit).slice(0, OTP_LENGTH));
-  }, []);
 
   const motifWidth = useMemo(() => Math.min(width * 0.5, 220), [width]);
 
@@ -544,12 +536,6 @@ export function AuthScreen(): React.JSX.Element {
         accessibilityLabel={t('auth.otpLabel')}
       />
 
-      {/* Teclado numérico propio (diseño). Coexiste con el autofill SMS del OtpField: ambos
-          escriben el mismo `code` (el OtpField vía teclado del SO/autofill, este vía appendDigit). */}
-      <View style={styles.keypad}>
-        <OtpKeypad onPress={appendDigit} />
-      </View>
-
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel={t('auth.otpHelpTrigger')}
@@ -654,7 +640,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     alignItems: 'flex-start',
   },
-  keypad: {marginTop: 18},
   helpTrigger: {
     alignSelf: 'center',
     paddingVertical: spacing.md,
