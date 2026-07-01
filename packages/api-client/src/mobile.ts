@@ -2354,6 +2354,14 @@ export const driverTripView = z.object({
   paymentMethod: z.string(),
   childMode: z.boolean(),
   penaltyCents: z.number().int(),
+  /**
+   * ADR-018 §1(3) · badge de confianza: el conductor VE si el pasajero está VERIFICADO al recibir la
+   * oferta (`GET /trips/:id` lo enriquece). Booleano puro — cero PII del pasajero. `.optional()` porque
+   * las respuestas passthrough de las transiciones (accept/arriving/…) vienen crudas del trip-service y
+   * NO traen el flag: ahí llega `undefined` y la UI lo trata como "no verificado" (ausencia = estado
+   * neutro, sin etiqueta de "no verificado", estilo BlaBlaCar). El badge solo aparece cuando es `true`.
+   */
+  passengerVerified: z.boolean().optional(),
 });
 export type DriverTripView = z.infer<typeof driverTripView>;
 

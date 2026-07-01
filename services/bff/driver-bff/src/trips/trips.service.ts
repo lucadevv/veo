@@ -15,10 +15,11 @@ import {
 } from '@veo/api-client';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { LatLon, MapsClient } from '@veo/maps';
+import { KycStatus } from '@veo/shared-types';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import { MAPS } from '../infra/maps.client';
-import type { DriverReply, TripReply, TripStateReply } from '../common/grpc-replies';
+import type { DriverReply, TripReply, TripStateReply, UserReply } from '../common/grpc-replies';
 import type {
   AcceptTripDto,
   ArrivingTripDto,
@@ -56,7 +57,7 @@ function toTripStatus(raw: string): TripStatus {
   return normalized;
 }
 
-export function toTripView(trip: TripReply): TripView {
+export function toTripView(trip: TripReply, passengerVerified: boolean): TripView {
   return {
     id: trip.id,
     passengerId: trip.passengerId,
@@ -70,6 +71,7 @@ export function toTripView(trip: TripReply): TripView {
     paymentMethod: trip.paymentMethod,
     childMode: trip.childMode,
     penaltyCents: trip.penaltyCents,
+    passengerVerified,
   };
 }
 
@@ -97,7 +99,10 @@ export class TripsService {
     if (!driver.found || trip.driverId !== driver.id) {
       throw new NotFoundError('Viaje no encontrado');
     }
-    return toTripView(trip);
+    // ADR-018 §1(3) · badge de confianza: enriquece la oferta con el estado VERIFIED del pasajero (lazy,
+    // al leer la oferta — NO en la creación del viaje). Booleano puro, sin PII.
+    const passengerVerified = await this.resolvePassengerVerified(trip.passengerId, identity);
+    return toTripView(trip, passengerVerified);
   }
 
   /**
@@ -119,7 +124,24 @@ export class TripsService {
       { driverId: driver.id },
       identity,
     );
-    return trip.found ? toTripView(trip) : null;
+    if (!trip.found) return null;
+    const passengerVerified = await this.resolvePassengerVerified(trip.passengerId, identity);
+    return toTripView(trip, passengerVerified);
+  }
+
+  /**
+   * ADR-018 §1(3) · resuelve el badge de confianza: `true` sii el pasajero está KYC-VERIFIED. Lee identity
+   * (GetUser → kycStatus) y devuelve SOLO el booleano — cero PII cruza al conductor. Degradación honesta:
+   * si identity no responde (o el usuario no existe), `false` (la oferta se sirve igual, nunca rompe).
+   */
+  private async resolvePassengerVerified(
+    passengerId: string,
+    identity: AuthenticatedUser,
+  ): Promise<boolean> {
+    const user = await this.grpc
+      .call<UserReply>('identity', 'GetUser', { id: passengerId }, identity)
+      .catch(() => null);
+    return user?.found === true && user.kycStatus === KycStatus.VERIFIED;
   }
 
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {

@@ -535,6 +535,7 @@
   "trips": {
     "incomingTitle": "Viaje entrante",
     "scheduledBadge": "Reservado",
+    "passengerVerified": "Pasajero verificado",
     "incomingExpires": "Vence en {{seconds}} s",
     "incomingExpired": "La oferta venció",
     "incomingDismiss": "Volver al inicio",

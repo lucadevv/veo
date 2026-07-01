@@ -178,6 +178,11 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
             {t('trips.incomingTitle')}
           </Text>
           {scheduled ? <StatusPill label={t('trips.scheduledBadge')} tone="brand" dot /> : null}
+          {/* ADR-018 §1(3) · badge de confianza: se muestra SOLO si el pasajero está verificado. Su
+              ausencia es el estado neutro (no hay etiqueta de "no verificado"), estilo BlaBlaCar. */}
+          {trip.data?.passengerVerified ? (
+            <StatusPill label={t('trips.passengerVerified')} tone="success" dot />
+          ) : null}
         </View>
 
         <ScrollView
