@@ -247,9 +247,8 @@ export const common = {
 
   /** Completar perfil tras verificar el OTP (usuario nuevo / sin perfil). */
   profileSetup: {
-    title: 'Cuéntanos quién eres',
-    subtitle:
-      'Tu nombre es lo único que necesitamos: tu conductor sabrá a quién recoger.',
+    title: 'Completa tu perfil',
+    subtitle: 'Así el conductor sabe a quién está recogiendo',
     photoAction: 'Agregar foto de perfil',
     photoSheetTitle: 'Foto de perfil',
     photoFromCamera: 'Tomar foto',
@@ -266,15 +265,14 @@ export const common = {
     photoUploadRetry: 'Reintentar',
     nameLabel: 'Nombre completo',
     namePlaceholder: 'Ej.: María Fernanda Ríos',
-    emailLabel: 'Correo (opcional)',
+    emailLabel: 'Correo',
     emailPlaceholder: 'tucorreo@ejemplo.com',
     /** "Porqué en una línea" del campo opcional (pedido del dueño): qué gana el usuario si lo carga. */
     emailNote: 'Para enviarte tus recibos y avisos importantes.',
     /** Microcopy de la fila de correo de solo lectura: el correo ya vino de la cuenta (Apple/Google).
      *  Genérico elegante a propósito: la data del perfil no expone el proveedor. */
     emailFromAccount: 'Lo tomamos de tu cuenta',
-    privacyNote:
-      'Tus datos están protegidos y solo los usamos para que viajes mejor.',
+    privacyNote: 'Solo el conductor ve tu nombre',
     submit: 'Empezar a viajar',
     invalidName:
       'Necesitamos tu nombre para que tu conductor sepa a quién recoger (2 a 80 caracteres).',
