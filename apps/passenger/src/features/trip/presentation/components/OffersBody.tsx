@@ -8,7 +8,7 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ActivityIndicator, StyleSheet, View} from 'react-native';
 import {
@@ -23,18 +23,16 @@ import {
 import {IconStarFilled} from './icons';
 
 /**
- * F1/F2 · Ventana de búsqueda (default ratificado §9 = 60s, usado SÓLO de fallback). El countdown es
- * VISUAL/HONESTO: NO decide la fase. La fase `noOffers` la activa SOLO el backend cuando el trip pasa a
- * EXPIRED (el sweeper de dispatch marca el board y trip-service emite `trip.expired` → socket
- * `trip:update`/poll REST → resolveTripPhase). Cuando el countdown llega a 0, NO mostramos un botón roto
- * ni nos adelantamos al server (ese fue el bug del reloj local): mostramos un spinner honesto ("esto está
- * tardando…") y ESPERAMOS la verdad del backend (el siguiente poll trae EXPIRED/GONE).
+ * ADR-021 Fase J (J1) · Ventana de búsqueda AUTORITATIVA, sin número inventado. El countdown es
+ * VISUAL/HONESTO: NO decide la fase (la fase `noOffers` la activa SOLO el backend al EXPIRAR el board →
+ * trip.expired → resolveTripPhase). Cuando llega a 0 NO mostramos botón roto: spinner honesto + esperamos.
  *
- * F2 · AUTORITATIVO: cuando el board ya nos dio `expiresAt` (epoch ms), el countdown se deriva de ESE
- * vencimiento, no del reloj local — así no adivina ni se desincroniza del server. El fallback al estimado
- * local (60s desde el montaje) sólo aplica mientras el board todavía no llegó.
+ * CLAVE (J1 — mató el bug de los "3 tiempos"): el countdown se deriva ÚNICAMENTE de `board.expiresAt`
+ * (epoch ms, autoritativo del server). Ya NO hay fallback local de 60s: en PUJA el board manda; en FIXED
+ * (o mientras el board todavía no llegó) NO hay UN deadline honesto que mostrar (las ofertas son
+ * secuenciales), así que `hasWindow=false` → la UI muestra "Buscando conductor…" INDETERMINADO, sin número
+ * y sin el salto que se veía cuando el reloj local (arrancado en otro instante) era reemplazado por el real.
  */
-const SEARCH_WINDOW_SECONDS = 60;
 
 /** mm:ss para el countdown visual (clamp a 0, nunca negativo). */
 function formatCountdown(secondsLeft: number): string {
@@ -45,43 +43,33 @@ function formatCountdown(secondsLeft: number): string {
 }
 
 /**
- * Countdown de la ventana de búsqueda. F2: si llega `expiresAt` (epoch ms del board), el restante se
- * deriva de ESE vencimiento autoritativo; si no (board aún no llegó), cae al estimado local de 60s desde
- * el montaje. Tickea cada segundo hasta 0. Es UI pura: el caller lo usa solo para el copy. Devuelve los
- * segundos restantes (>= 0) y si la ventana ya se agotó visualmente.
+ * Countdown de la ventana de búsqueda, derivado SOLO del `board.expiresAt` autoritativo (epoch ms).
+ * `hasWindow=false` cuando NO hay board (FIXED, o aún no llegó) → el caller muestra el estado indeterminado
+ * en vez de un número inventado. Tickea cada segundo hasta 0. UI pura: el caller lo usa solo para el copy.
  */
 function useSearchCountdown(
   active: boolean,
   expiresAt: number | null,
-): {secondsLeft: number; elapsed: boolean} {
-  // Ancla del fallback local: el instante de montaje en fase searching, sembrado una sola vez. Sólo se
-  // usa mientras el board todavía no entregó su `expiresAt` autoritativo.
-  const startRef = useRef<number | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(SEARCH_WINDOW_SECONDS);
+): {secondsLeft: number; elapsed: boolean; hasWindow: boolean} {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const hasWindow = expiresAt != null;
 
   useEffect(() => {
-    if (!active) {
-      startRef.current = null;
-      setSecondsLeft(SEARCH_WINDOW_SECONDS);
+    if (!active || expiresAt == null) {
+      setSecondsLeft(0);
       return;
     }
-    startRef.current ??= Date.now();
     const tick = (): void => {
-      const remainingMs =
-        expiresAt != null
-          ? // AUTORITATIVO: cuánto falta para el vencimiento real del board.
-            expiresAt - Date.now()
-          : // FALLBACK local: 60s desde el montaje (sólo hasta que el board entregue su expiresAt).
-            SEARCH_WINDOW_SECONDS * 1000 -
-            (Date.now() - (startRef.current as number));
-      setSecondsLeft(Math.max(0, remainingMs / 1000));
+      // AUTORITATIVO y ÚNICO: cuánto falta para el vencimiento REAL del board. Sin fallback local.
+      setSecondsLeft(Math.max(0, (expiresAt - Date.now()) / 1000));
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [active, expiresAt]);
 
-  return {secondsLeft, elapsed: secondsLeft <= 0};
+  // `elapsed` solo tiene sentido cuando HAY ventana; sin board nunca está "agotado", está indeterminado.
+  return {secondsLeft, elapsed: hasWindow && secondsLeft <= 0, hasWindow};
 }
 
 export interface OffersBodyProps {
@@ -130,7 +118,10 @@ export function OffersBody({
   // expirado, sin error/carga). No decide la fase: cuando el backend confirma EXPIRED, el screen pasa
   // a `noOffers` y desmonta este cuerpo.
   const searching = !isError && !isLoading && !expired && offers.length === 0;
-  const {secondsLeft, elapsed} = useSearchCountdown(searching, expiresAt);
+  const {secondsLeft, elapsed, hasWindow} = useSearchCountdown(
+    searching,
+    expiresAt,
+  );
 
   const body = isError ? (
     <ErrorState onRetry={onRetry} />
@@ -142,9 +133,21 @@ export function OffersBody({
         title={t('offers.noneTitle')}
         subtitle={t('offers.noneBody')}
       />
+    ) : !hasWindow ? (
+      // J1 · SIN board autoritativo (FIXED, o el board aún no llegó): estado INDETERMINADO, sin número
+      // inventado. En FIXED las ofertas son secuenciales → no hay UN deadline honesto que mostrarle al
+      // pasajero; mostramos "Buscando conductor…" con spinner. Cuando el board PUJA llegue con su
+      // `expiresAt`, recién ahí aparece el countdown real (sin el salto del viejo reloj local de 60s).
+      <View style={styles.takingLong}>
+        <ActivityIndicator color={theme.colors.accent} />
+        <EmptyState
+          title={t('offers.searchingTitle')}
+          subtitle={t('offers.waitingBody')}
+        />
+      </View>
     ) : elapsed ? (
       // Countdown agotado pero el backend aún no confirmó EXPIRED: spinner HONESTO, sin botón roto.
-      // Esperamos la verdad del server (el sweeper expira a los 60s + margen) → luego fase noOffers.
+      // Esperamos la verdad del server (el sweeper expira el board + margen) → luego fase noOffers.
       <View style={styles.takingLong}>
         <ActivityIndicator color={theme.colors.accent} />
         <EmptyState

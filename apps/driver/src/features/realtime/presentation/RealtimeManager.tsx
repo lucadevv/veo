@@ -36,6 +36,7 @@ export const RealtimeManager = (): null => {
   const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
   const clearOffer = useDispatchStore((s) => s.clearOffer);
   const clearPendingBid = useDispatchStore((s) => s.clearPendingBid);
+  const setPujaRebidNotice = useDispatchStore((s) => s.setPujaRebidNotice);
   const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
   const setConnected = useDispatchStore((s) => s.setConnected);
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -107,7 +108,16 @@ export const RealtimeManager = (): null => {
         // entrante" FANTASMA en el store + en el back-stack: el conductor volvía a esa pantalla, tapeaba
         // Aceptar sobre un match ya superado → 404 "la oferta venció / viaje no encontrado". Limpiamos la
         // oferta FIXED colgada al pasar el viaje a modo puja.
+        // J4 · si el MISMO viaje estaba como oferta FIXED ("Viaje entrante") y ahora re-abre como PUJA,
+        // avisamos "nueva ronda · ahora es puja" (BidsScreen lo muestra) para que el conductor entienda que
+        // es el mismo viaje con otra mecánica, no una oferta random. `getState()` lee el valor actual sin
+        // suscribir. Va ANTES del clearOffer (que borra el incomingOffer que estamos comparando).
+        const flippedFromFixed =
+          useDispatchStore.getState().incomingOffer?.tripId === payload.tripId;
         clearOffer();
+        if (flippedFromFixed) {
+          setPujaRebidNotice(payload.tripId);
+        }
         queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
         if (!activeTripId) {
           navigateToBids();

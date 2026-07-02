@@ -31,6 +31,13 @@ export interface DispatchState {
    * Estado de sesión en vivo (no server-cacheable): la verdad del outcome llega por el socket.
    */
   pendingBidTripIds: string[];
+  /**
+   * ADR-021 Fase J (J4) — tripId de un viaje que ACABA de saltar de FIXED → PUJA (el conductor lo tenía
+   * como "Viaje entrante" y ahora re-abrió como puja: schedule flip / rebid). BidsScreen muestra un aviso
+   * "Nueva ronda · ahora es puja" para que entienda que es el MISMO viaje con otra mecánica, no una oferta
+   * random nueva. Se limpia al verlo (auto-dismiss) o al tapear una puja. `null` = sin aviso.
+   */
+  pujaRebidNotice: string | null;
   setIncomingOffer(offer: IncomingOffer | null): void;
   setActiveTripId(tripId: string | null): void;
   setConnected(connected: boolean): void;
@@ -40,6 +47,8 @@ export interface DispatchState {
   addPendingBid(tripId: string): void;
   /** 2b — quita el pendiente al resolverse la puja (ganó → onMatch, o perdió → bid:closed). */
   clearPendingBid(tripId: string): void;
+  /** J4 — fija/limpia el aviso "nueva ronda · ahora es puja" (tripId que saltó FIXED→PUJA, o null). */
+  setPujaRebidNotice(tripId: string | null): void;
 }
 
 export const useDispatchStore = create<DispatchState>((set) => ({
@@ -47,6 +56,7 @@ export const useDispatchStore = create<DispatchState>((set) => ({
   activeTripId: null,
   connected: false,
   pendingBidTripIds: [],
+  pujaRebidNotice: null,
   setIncomingOffer: (offer) => set({ incomingOffer: offer }),
   setActiveTripId: (tripId) => set({ activeTripId: tripId }),
   setConnected: (connected) => set({ connected }),
@@ -59,4 +69,5 @@ export const useDispatchStore = create<DispatchState>((set) => ({
     ),
   clearPendingBid: (tripId) =>
     set((s) => ({ pendingBidTripIds: s.pendingBidTripIds.filter((id) => id !== tripId) })),
+  setPujaRebidNotice: (tripId) => set({ pujaRebidNotice: tripId }),
 }));

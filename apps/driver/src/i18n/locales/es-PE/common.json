@@ -618,6 +618,8 @@
       "pendingPill": "Enviada",
       "empty": "No hay pujas cerca de ti ahora.",
       "emptyHint": "Te avisamos apenas llegue una.",
+      "rebidNoticeTitle": "Nueva ronda · ahora es puja",
+      "rebidNoticeBody": "Este viaje volvió a abrirse como puja. Proponé tu precio.",
       "offline": "Ponete en turno para ver y ofertar pujas.",
       "goOnline": "Ir a Inicio",
       "open": "Ofertar",

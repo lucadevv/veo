@@ -8,7 +8,7 @@ import { CountdownRing } from '../../../trips/presentation/components/CountdownR
 import { BID_MAX_CENTS, type OpenBid } from '../../domain';
 import { useAcceptBid, useCounterBid } from '../hooks/useBids';
 import { isBidGoneError } from '../bid-errors';
-import { useCountdownMs } from '../hooks/useCountdownMs';
+import { useCountdownMs } from '../../../../shared/presentation/hooks/useCountdownMs';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 
 interface Props {

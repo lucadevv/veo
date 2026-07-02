@@ -5,7 +5,7 @@ import { Card, StatusPill, Text, useTheme } from '@veo/ui-kit';
 import { formatPEN } from '../../../../shared/presentation/format';
 import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import type { OpenBid } from '../../domain';
-import { useCountdownMs } from '../hooks/useCountdownMs';
+import { useCountdownMs } from '../../../../shared/presentation/hooks/useCountdownMs';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 
 interface Props {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,10 @@ import {
   useTheme,
 } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
+import {
+  useCountdownMs,
+  toEpochMs,
+} from '../../../../shared/presentation/hooks/useCountdownMs';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
@@ -27,23 +31,6 @@ import { CountdownRing } from '../components/CountdownRing';
 import { Appear, Pulse } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripIncoming'>;
-
-/** Segundos restantes hasta `expiresAt` (>= 0). */
-function useCountdown(expiresAt: string | undefined): number {
-  const target = useMemo(() => (expiresAt ? new Date(expiresAt).getTime() : 0), [expiresAt]);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!target) {
-      return;
-    }
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [target]);
-  if (!target) {
-    return 0;
-  }
-  return Math.max(0, Math.ceil((target - now) / 1000));
-}
 
 /**
  * Oferta entrante (Midnight Motion): mapa de fondo atenuado + sheet inferior prominente con anillo
@@ -81,7 +68,8 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
   // Reserva (viaje programado): se muestra un badge "Reservado". Si el evento no trajo la marca,
   // `scheduled` queda en falsy y no se renderiza nada (degrada con gracia).
   const scheduled = offerForMatch?.scheduled === true;
-  const secondsLeft = useCountdown(expiresAt);
+  // J2 · hook canónico único; el push FIXED trae `expiresAt` como ISO → epoch en el borde (toEpochMs).
+  const secondsLeft = useCountdownMs(toEpochMs(expiresAt));
   const expired = Boolean(expiresAt) && secondsLeft <= 0;
 
   // Fracción real del anillo: el mayor valor observado del countdown hace de denominador (la ventana
@@ -162,8 +150,10 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
           },
         ]}
       >
-        <View style={[styles.grabber, { backgroundColor: theme.colors.borderStrong }]} />
-
+        {/* J3 · SIN grabber falso: la oferta FIXED es un TAKEOVER full-screen (oferta directa, estilo Uber),
+            NO un bottom-sheet arrastrable. El grabber decorativo implicaba draggability inexistente y hacía
+            que la 1ra oferta pareciera el mismo sheet que la PUJA (CounterOfferSheet, ese SÍ es draggable).
+            El handle real vive solo donde hay gesto real; acá el panel es fijo. */}
         <View style={styles.ringWrap}>
           {/* Anillo de atención cian: ping radar mientras la oferta sigue vigente. */}
           <View style={styles.ringPulseWrap} pointerEvents="none">
@@ -330,7 +320,6 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFill },
   topBar: { position: 'absolute', left: 20, right: 20, alignItems: 'center' },
   sheet: { paddingHorizontal: 20, paddingTop: 10, maxHeight: '64%' },
-  grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 8 },
   ringWrap: { alignItems: 'center', gap: 8, marginTop: 4 },
   ringPulseWrap: {
     position: 'absolute',
