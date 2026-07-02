@@ -36,18 +36,28 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
 
 1. **Panic detection vive en native module**, no en JS. Funciona en background. Latencia objetivo de fan-out backend < 3s (validado por synthetic monitoring).
 2. **UI del pánico debe ser INVISIBLE.** Sin botón visible (configurable). Solo secuencia oculta 3× volume. Excepción: usuarios pueden activar botón visible alternativo en settings.
-3. **Cámara en vivo NO requiere consentimiento adicional por trip** — se aceptó al onboarding. Pero la app DEBE mostrar el indicador "REC" visible.
+3. **Cámara en vivo NO requiere consentimiento adicional por trip** — se aceptó al ingreso (Auth). Pero la app DEBE mostrar el indicador "REC" visible.
 4. **Modo niño**: el código NUNCA se muestra en la app del conductor. Se valida hash en backend.
 5. **i18n es-PE primero.** Si se agrega es-ES o en-US después, mantener Lima/Perú como default.
 6. **Performance crítica**: Map debe correr a 60fps. Reanimated 3 obligatorio para gestures. Evitar re-renders innecesarios en pantallas de viaje.
 7. **Persistencia con MMKV**, no AsyncStorage (3-5x más rápido). AsyncStorage solo para data efímera.
 
+## Flujo de diseño — MCP Pencil + verificación en simulador (OBLIGATORIO)
+
+La **fuente de verdad visual** es `design/veo.pen` (repo del plano). Al migrar/construir CUALQUIER pantalla de UI, este ciclo NO es opcional:
+
+1. **Leé el frame del `.pen` FRESCO con el MCP `pencil`** (`get_screenshot` + `batch_get`) — el `.pen` es multiplayer y cambia; NUNCA de memoria. Buscá TODAS las frames del flujo por nombre (`batch_get` con `patterns`): un flujo puede tener `P/X`, `P/X-2`, `P/X-3` (ej. onboarding = 3 frames).
+2. **Construí CONFORMANDO al `.pen`** (layout, orden, componentes, tokens). Los `.pen` están cifrados: solo se leen por el MCP `pencil`, jamás con Read/grep.
+3. **Verificá en el simulador con `mobile-mcp`/`metro-mcp` y COMPARÁ LADO A LADO**: screenshot del sim vs `get_screenshot` del `.pen`. **"Se ve fiel" NO alcanza** — enumerá las diferencias REALES (posición, orden, visible/oculto, apilado-vs-lado-a-lado, botón/label) y corregí en loop hasta que calce. (Este paso me lo salté una vez y entregué Auth con Google/Apple apilados en vez de lado a lado + OTP oculto — no repetir.)
+4. **Copy en TUTEO peruano** aunque el `.pen` esté en voseo (`src/i18n/locales/es-PE/voseoGuard.test.ts` rompe el build ante voseo). El `.pen` manda en DISEÑO, no en dialecto.
+5. **Assets del `.pen`**: copialos OPTIMIZADOS (resize a resolución de device + JPG, ~100-200KB), no los PNG crudos. Si tienen barra de estado/menú del celular, recortá el chrome (solo contenido) con ImageMagick.
+
 ## Pantallas críticas (priorizadas)
 
 | Pantalla                    | Fase  | Notas                                                                                    |
 | --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
-| Onboarding                  | F1    | Consentimientos Ley 29733 explícitos                                                     |
-| Auth (phone + OTP)          | F1    | OTP a 6 dígitos vía notification-service propio (SMS soberano por SMPP)                  |
+| Onboarding                  | F1    | Carrusel marketing 3 slides (design/veo.pen). Los consents Ley 29733 viven en Auth       |
+| Auth (phone + OTP)          | F1    | OTP 6 díg (SMS SMPP) + los 3 consentimientos Ley 29733 INLINE (design/veo.pen P/Auth)    |
 | KycCamera                   | F1-F2 | Captura facial nativa → biometric-service propio (ONNX self-hosted), sin SDK de terceros |
 | Home (mapa + request)       | F1    | MapLibre GL + tiles OSM self-hosted (tileserver-gl)                                      |
 | TripActive (cámara + share) | F2    | WebRTC viewer + botón compartir familia                                                  |
