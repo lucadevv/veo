@@ -41,3 +41,43 @@ export class ReplaceCommissionDto {
   @Min(0)
   expectedVersion!: number;
 }
+
+/**
+ * P-B (ADR-022) · DTO del PUT que EDITA el fee del PSP (ProntoPaga) por MÉTODO digital, en basis points Int
+ * (0..10000). El dueño carga la tarifa REAL del convenio acá (arranca en 0 = degradación honesta). CAS por `version`.
+ * CASH no tiene fee (no pasa por el PSP) → no hay campo.
+ */
+export class ReplacePspFeeDto {
+  @ApiProperty({ description: 'Fee PSP de YAPE en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @IsInt()
+  @Min(0)
+  @Max(BPS_DENOMINATOR)
+  yapeFeeBps!: number;
+
+  @ApiProperty({ description: 'Fee PSP de PLIN en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @IsInt()
+  @Min(0)
+  @Max(BPS_DENOMINATOR)
+  plinFeeBps!: number;
+
+  @ApiProperty({ description: 'Fee PSP de TARJETA en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @IsInt()
+  @Min(0)
+  @Max(BPS_DENOMINATOR)
+  cardFeeBps!: number;
+
+  @ApiProperty({
+    description: 'Fee PSP de PAGOEFECTIVO en bps (0..10000). Int.',
+    minimum: 0,
+    maximum: BPS_DENOMINATOR,
+  })
+  @IsInt()
+  @Min(0)
+  @Max(BPS_DENOMINATOR)
+  pagoefectivoFeeBps!: number;
+
+  @ApiProperty({ description: 'Optimistic locking (CAS): la `version` vigente. 409 si otro admin la movió.', minimum: 0 })
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}

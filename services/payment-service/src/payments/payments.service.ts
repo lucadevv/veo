@@ -516,7 +516,12 @@ export class PaymentsService {
       // PENDING→CAPTURED emite payment.captured y colecta la penalidad. La perdedora ve count=0 →
       // devuelve el pago ya capturado SIN duplicar el evento (espeja el guard de collectPenaltyInTx).
       const { count } = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
+        // CAS incluye DEBT además de PENDING: un cobro que cayó a DEBT (declive/reintentos agotados) y LUEGO el PSP
+        // confirma (webhook CONFIRMED tardío) DEBE capturar — antes el CAS solo matcheaba PENDING → count=0, el pago
+        // quedaba en DEBT PESE a que el PSP cobró (dinero capturado, VEO en DEBT), y el caller retornaba "CAPTURED"
+        // en falso. DEBT→CAPTURED es transición válida (payment.policy). El guard idempotente (status===CAPTURED) ya
+        // corta antes en el caller; acá el CAS serializa PENDING|DEBT → CAPTURED (una sola captura gana).
+        where: { id: payment.id, status: { in: ['PENDING', 'DEBT'] } },
         data: {
           status: 'CAPTURED',
           externalRef,

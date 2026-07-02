@@ -24,7 +24,7 @@ import {
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { CommissionService } from './commission.service';
-import { ReplaceCommissionDto } from './dto/commission.dto';
+import { ReplaceCommissionDto, ReplacePspFeeDto } from './dto/commission.dto';
 import type { PersistedCommission } from './commission.repository';
 
 /** Vista del endpoint: ambas tasas configurables (on-demand + carpooling fee) en bps + version. */
@@ -58,5 +58,26 @@ export class CommissionController {
   })
   async replaceCommission(@Body() dto: ReplaceCommissionDto): Promise<CommissionView> {
     return this.commission.replace(dto.onDemandRateBps, dto.carpoolingFeeBps, dto.expectedVersion);
+  }
+
+  @Put('psp-fee')
+  @HttpCode(200)
+  @UseGuards(StepUpMfaGuard)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'P-B · EDITA el fee del PSP (ProntoPaga) por método (yape/plin/card/pagoefectivo, bps). El dueño carga la ' +
+      'tarifa del convenio acá. finance:manage + step-up MFA. CAS por version.',
+  })
+  async replacePspFees(@Body() dto: ReplacePspFeeDto): Promise<CommissionView> {
+    return this.commission.replacePspFees(
+      {
+        yapeFeeBps: dto.yapeFeeBps,
+        plinFeeBps: dto.plinFeeBps,
+        cardFeeBps: dto.cardFeeBps,
+        pagoefectivoFeeBps: dto.pagoefectivoFeeBps,
+      },
+      dto.expectedVersion,
+    );
   }
 }

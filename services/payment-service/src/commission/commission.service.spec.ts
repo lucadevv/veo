@@ -40,23 +40,24 @@ class FakeRepo implements CommissionRepository {
       commissionConfig: {
         updateMany: (args) => {
           if (this.config?.version === args.where.version) {
+            // MERGE (no replace): así cubre tanto el PUT de comisión (onDemand/carpooling) como el de fee PSP
+            // (yape/plin/card/pagoefectivo) — cada uno actualiza SUS campos preservando los otros.
             this.config = {
-              onDemandRateBps: args.data.onDemandRateBps as number,
-              carpoolingFeeBps: args.data.carpoolingFeeBps as number,
+              ...this.config,
+              ...args.data,
               version: args.data.version as number,
               updatedAt: new Date(0).toISOString(),
-            };
+            } as PersistedCommission;
             return Promise.resolve({ count: 1 });
           }
           return Promise.resolve({ count: 0 });
         },
         create: (args) => {
           this.config = {
-            onDemandRateBps: args.data.onDemandRateBps as number,
-            carpoolingFeeBps: args.data.carpoolingFeeBps as number,
+            ...args.data,
             version: args.data.version as number,
             updatedAt: new Date(0).toISOString(),
-          };
+          } as PersistedCommission;
           return Promise.resolve({ version: this.config.version, updatedAt: new Date(0) });
         },
         findUnique: () =>
@@ -160,5 +161,51 @@ describe('CommissionService (F2.7 · comisión por modo · dos tasas)', () => {
     await expect(service.replace(-1, 0, 0)).rejects.toThrow(ConflictError);
     await expect(service.replace(2000, 10_001, 0)).rejects.toThrow(ConflictError); // carpooling fuera de rango
     await expect(service.replace(2000, -1, 0)).rejects.toThrow(ConflictError);
+  });
+
+  // ── P-B (ADR-022) · fee del PSP por método (editable) ─────────────────────────────────
+  it('resolvePspFeeBps: por método desde la config; CASH → 0 (no pasa por el PSP)', async () => {
+    const service = new CommissionService(
+      new FakeRepo(row({ yapeFeeBps: 200, plinFeeBps: 150, cardFeeBps: 350, pagoefectivoFeeBps: 400 })),
+      fakeConfig(0.2),
+      0,
+    );
+    expect(await service.resolvePspFeeBps('YAPE')).toBe(200);
+    expect(await service.resolvePspFeeBps('CARD')).toBe(350);
+    expect(await service.resolvePspFeeBps('CASH')).toBe(0);
+  });
+
+  it('resolvePspFeeBps: sin fees seteados (config vieja / degradada) → 0 (degradación honesta)', async () => {
+    const service = new CommissionService(new FakeRepo(row({})), fakeConfig(0.2), 0);
+    expect(await service.resolvePspFeeBps('YAPE')).toBe(0);
+  });
+
+  it('replacePspFees (CAS ok): setea los 4 fees + bumpea version, PRESERVANDO las comisiones', async () => {
+    const repo = new FakeRepo(row({ onDemandRateBps: 2000, carpoolingFeeBps: 500, version: 3 }));
+    const service = new CommissionService(repo, fakeConfig(0.2), 0);
+    const out = await service.replacePspFees(
+      { yapeFeeBps: 200, plinFeeBps: 150, cardFeeBps: 350, pagoefectivoFeeBps: 400 },
+      3,
+    );
+    expect(out.version).toBe(4);
+    expect(out.yapeFeeBps).toBe(200);
+    expect(out.cardFeeBps).toBe(350);
+    expect(out.onDemandRateBps).toBe(2000); // comisión preservada (no la pisa el PUT de fee PSP)
+    expect(out.carpoolingFeeBps).toBe(500);
+    expect(await service.resolvePspFeeBps('PLIN')).toBe(150); // el cambio se ve de inmediato
+  });
+
+  it('replacePspFees (version STALE) → ConflictError (CAS, sin lost update)', async () => {
+    const service = new CommissionService(new FakeRepo(row({ version: 5 })), fakeConfig(0.2), 0);
+    await expect(
+      service.replacePspFees({ yapeFeeBps: 100, plinFeeBps: 100, cardFeeBps: 100, pagoefectivoFeeBps: 100 }, 2),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('replacePspFees rechaza un fee fuera de [0,10000] bps', async () => {
+    const service = new CommissionService(new FakeRepo(row({ version: 1 })), fakeConfig(0.2), 0);
+    await expect(
+      service.replacePspFees({ yapeFeeBps: 10_001, plinFeeBps: 0, cardFeeBps: 0, pagoefectivoFeeBps: 0 }, 1),
+    ).rejects.toThrow();
   });
 });

@@ -230,9 +230,12 @@ export class ReconciliationService {
         method: { in: ['YAPE', 'PLIN'] },
         capturedAt: { gte: start, lt: end },
       },
-      select: { amountCents: true },
+      select: { amountCents: true, netSettledCents: true },
     });
-    const dbTotalCents = captured.reduce((sum, p) => sum + p.amountCents, 0);
+    // P-B (ADR-022) · el lado DB de la conciliación es el NETO que la plataforma espera en el banco
+    // (`netSettledCents` = bruto − fee del PSP), NO el bruto — el banco recibe el neto, no lo cobrado. Antes se
+    // comparaba el bruto contra el extracto → divergía por el fee acumulado. Legacy (netSettled NULL) cae al bruto.
+    const dbTotalCents = captured.reduce((sum, p) => sum + (p.netSettledCents ?? p.amountCents), 0);
 
     const statement = await this.gateway.getStatement(start, end);
     const statementTotalCents = statement.reduce((sum, e) => sum + e.amountCents, 0);

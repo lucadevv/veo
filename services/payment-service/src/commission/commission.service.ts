@@ -24,6 +24,7 @@ import {
   ChargeMode,
   resolveCommissionBps,
   resolvePspFeeBps as policyResolvePspFeeBps,
+  type PspFeeRatesBps,
 } from '../payments/payment.policy';
 import type { PaymentMethod } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
@@ -198,6 +199,71 @@ export class CommissionService {
       carpoolingFeeBps,
       version: result.version,
       updatedAt: result.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * P-B (ADR-022) · PUT que EDITA el fee del PSP por método (yape/plin/card/pagoefectivo), en bps Int. El dueño
+   * carga la tarifa REAL del convenio acá (arranca en 0). Full-replace de los 4 fees con CAS optimista sobre
+   * `version` (dos PUT concurrentes NO bumpean desde la misma versión). Invalida el cache LOCAL; la propagación
+   * cross-réplica cae al TTL del cache (10s) — aceptable para un cambio de config (no es el hot-path del cobro,
+   * que ya persistió su fee en la captura). NO emite outbox (a diferencia de `replace`): el fee ya no cambia
+   * cobros pasados (están persistidos), y el TTL cubre los futuros dentro de 10s.
+   */
+  async replacePspFees(rates: PspFeeRatesBps, expectedVersion: number): Promise<PersistedCommission> {
+    assertBps(rates.yapeFeeBps, 'el fee PSP de Yape');
+    assertBps(rates.plinFeeBps, 'el fee PSP de Plin');
+    assertBps(rates.cardFeeBps, 'el fee PSP de tarjeta');
+    assertBps(rates.pagoefectivoFeeBps, 'el fee PSP de PagoEfectivo');
+    const nextVersion = expectedVersion + 1;
+    const data = {
+      yapeFeeBps: rates.yapeFeeBps,
+      plinFeeBps: rates.plinFeeBps,
+      cardFeeBps: rates.cardFeeBps,
+      pagoefectivoFeeBps: rates.pagoefectivoFeeBps,
+      version: nextVersion,
+    };
+    // Base del retorno LEÍDA ANTES del write (read-your-writes): el retorno se construye del snapshot vigente +
+    // los fees nuevos, NO re-leyendo la RÉPLICA post-write (que puede lagear el commit del primary y devolver stale).
+    const current = await this.getConfig();
+
+    await this.repo.runInTx(async (tx) => {
+      const updated = await tx.commissionConfig.updateMany({
+        where: { id: COMMISSION_SINGLETON_ID, version: expectedVersion },
+        data,
+      });
+      if (updated.count === 1) return;
+      if (expectedVersion === 0) {
+        const existing = await tx.commissionConfig.findUnique({
+          where: { id: COMMISSION_SINGLETON_ID },
+        });
+        if (existing) {
+          throw new ConflictError(
+            `la config ya fue inicializada (v${existing.version}); recargá y reintentá`,
+          );
+        }
+        // Primer write sin fila (DB fresca/tests): crear con los fees PSP + los defaults de comisión.
+        await tx.commissionConfig.create({
+          data: { id: COMMISSION_SINGLETON_ID, onDemandRateBps: this.envFallbackBps, carpoolingFeeBps: 0, ...data },
+        });
+        return;
+      }
+      throw new ConflictError(`la config cambió (esperabas v${expectedVersion}); recargá y reintentá`);
+    });
+
+    this.invalidateCache();
+    this.logger.log(
+      `fee PSP REEMPLAZADO → version ${nextVersion} (yape ${rates.yapeFeeBps}, plin ${rates.plinFeeBps}, ` +
+        `card ${rates.cardFeeBps}, pagoefectivo ${rates.pagoefectivoFeeBps} bps); cache local invalidado`,
+    );
+    // Retorno read-your-writes: el snapshot previo + los fees nuevos + la nueva version (NO re-lee la réplica).
+    return {
+      ...current,
+      yapeFeeBps: rates.yapeFeeBps,
+      plinFeeBps: rates.plinFeeBps,
+      cardFeeBps: rates.cardFeeBps,
+      pagoefectivoFeeBps: rates.pagoefectivoFeeBps,
+      version: nextVersion,
     };
   }
 

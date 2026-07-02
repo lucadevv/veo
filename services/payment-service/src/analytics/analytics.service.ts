@@ -17,7 +17,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, PaymentStatus } from '../generated/prisma';
+import { Prisma, PaymentMethod, PaymentStatus } from '../generated/prisma';
 
 /** Punto de la serie horaria de revenue. `bucket` = hora truncada en ISO UTC (toStartOfHour). */
 export interface RevenueHourBucket {
@@ -26,8 +26,10 @@ export interface RevenueHourBucket {
 }
 
 export interface RevenueAnalytics {
-  /** Suma en céntimos de la recaudación CAPTURADA hoy (desde medianoche America/Lima). */
+  /** P-B · "Money-in REAL" hoy: Σ `netSettledCents` (neto del fee PSP), NO el bruto (desde medianoche Lima). */
   revenueTodayCents: number;
+  /** P-B · Margen REAL de la plataforma hoy = Σ comisión − Σ fee PSP (lo que retiene neto del costo del PSP). */
+  platformMarginTodayCents: number;
   /** Revenue por hora de las últimas 24h, bucket por hora UTC, orden ascendente. */
   revenuePerHour: RevenueHourBucket[];
 }
@@ -53,28 +55,56 @@ export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async revenue(now: Date = new Date()): Promise<RevenueAnalytics> {
-    const [revenueTodayCents, revenuePerHour] = await Promise.all([
+    const [revenueTodayCents, platformMarginTodayCents, revenuePerHour] = await Promise.all([
       this.revenueToday(now),
+      this.platformMarginToday(now),
       this.revenuePerHour(now),
     ]);
-    return { revenueTodayCents, revenuePerHour };
+    return { revenueTodayCents, platformMarginTodayCents, revenuePerHour };
   }
 
   /**
-   * P-B (ADR-022) · "Money-in REAL" del día: suma del NETO que llega al banco (`netSettledCents` = bruto − fee del
-   * PSP), NO el bruto — el bruto inflaba el KPI por el fee de ProntoPaga que la plataforma nunca recibe. Cobros
-   * legacy pre-P-B tienen `netSettledCents` NULL → SUM los ignora (undercount transitorio; envejecen fuera de "hoy").
+   * P-B (ADR-022) · Margen REAL de la plataforma hoy realizado en el BANCO = Σ comisión − Σ fee PSP − Σ descuento
+   * − Σ crédito. La comisión es el corte de la plataforma; el fee PSP es el costo del proveedor; promo (`discountCents`)
+   * y crédito de referido (`creditCents`) los ABSORBE la plataforma (salen de su comisión). EXCLUYE CASH: la comisión
+   * cash el conductor la debe (DriverDebt) y se recauda vía netting, no llega al banco hoy. Legacy (pspFee NULL) → 0.
+   */
+  private async platformMarginToday(now: Date): Promise<number> {
+    const since = limaMidnightUtc(now);
+    const agg = await this.prisma.read.payment.aggregate({
+      _sum: { commissionCents: true, pspFeeCents: true, discountCents: true, creditCents: true },
+      where: {
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        method: { not: PaymentMethod.CASH },
+        capturedAt: { gte: since },
+      },
+    });
+    return (
+      (agg._sum.commissionCents ?? 0) -
+      (agg._sum.pspFeeCents ?? 0) -
+      (agg._sum.discountCents ?? 0) -
+      (agg._sum.creditCents ?? 0)
+    );
+  }
+
+  /**
+   * P-B (ADR-022) · "Money-in REAL" del día = la plata NETA que llega al BANCO de la plataforma. DOS ajustes clave
+   * (gate): (1) EXCLUYE CASH — el efectivo lo cobra el conductor EN MANO, nunca llega al banco de VEO (la comisión
+   * cash se recauda aparte vía DriverDebt+netting). (2) usa `netSettledCents` (= bruto − fee PSP), no el bruto. Suma
+   * también los PARTIALLY_REFUNDED (su neto SÍ llegó) y RESTA lo reembolsado (money-out). Legacy (netSettled NULL) →
+   * SUM lo ignora (undercount transitorio). Es lo que de verdad entró al banco, no lo cobrado.
    */
   private async revenueToday(now: Date): Promise<number> {
     const since = limaMidnightUtc(now);
     const agg = await this.prisma.read.payment.aggregate({
-      _sum: { netSettledCents: true },
+      _sum: { netSettledCents: true, refundedCents: true },
       where: {
-        status: PaymentStatus.CAPTURED,
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        method: { not: PaymentMethod.CASH },
         capturedAt: { gte: since },
       },
     });
-    return agg._sum.netSettledCents ?? 0;
+    return (agg._sum.netSettledCents ?? 0) - (agg._sum.refundedCents ?? 0);
   }
 
   /**
@@ -84,11 +114,15 @@ export class AnalyticsService {
   private async revenuePerHour(now: Date): Promise<RevenueHourBucket[]> {
     const since = new Date(now.getTime() - HOURS_24_MS);
     const rows = await this.prisma.read.$queryRaw<{ bucket: Date; revenue_cents: bigint }[]>(
+      // P-B · net-aware + EXCLUYE CASH, coherente con revenueToday (antes sumaba el BRUTO amount_cents → dos
+      // definiciones de "revenue" en el MISMO dashboard). Suma el NETO que llega al banco (net_settled_cents) de
+      // los cobros DIGITALES capturados por hora. Legacy (net_settled NULL) → SUM lo ignora.
       Prisma.sql`
-        SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC') AS bucket,
-               SUM("amount_cents")::bigint                          AS revenue_cents
+        SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC')  AS bucket,
+               COALESCE(SUM("net_settled_cents"), 0)::bigint         AS revenue_cents
         FROM "payment"."payments"
         WHERE "status" = ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus"
+          AND "method" <> ${PaymentMethod.CASH}::"payment"."PaymentMethod"
           AND "captured_at" >= ${since}
         GROUP BY bucket
         ORDER BY bucket ASC
